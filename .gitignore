@@ -1,0 +1,21 @@
+# Binaries
+m31a
+*.exe
+*.test
+
+# Build artifacts
+coverage.out
+/dist/
+/.goreleaser-dist/
+
+# Session data (runtime, not development)
+/.m31a/
+
+# Editor files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Vendor
+/vendor/
