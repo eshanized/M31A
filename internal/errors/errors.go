@@ -1,0 +1,21 @@
+package errors
+
+import "errors"
+
+var (
+	ErrProviderUnreachable   = errors.New("provider unreachable")
+	ErrRateLimited           = errors.New("rate limited")
+	ErrInvalidKey            = errors.New("invalid API key")
+	ErrContextExceeded       = errors.New("context window exceeded")
+	ErrModelNotFound         = errors.New("model not found")
+	ErrSessionCorrupted      = errors.New("session data corrupted")
+	ErrNoBinaryContent       = errors.New("binary content not displayable")
+	ErrFileTooLarge          = errors.New("file exceeds 5MB limit")
+	ErrCircularDependency    = errors.New("circular dependency in task graph")
+	ErrBisectFailed          = errors.New("git bisect failed to identify regression")
+	ErrPermissionDenied      = errors.New("permission denied")
+	ErrToolExecution         = errors.New("tool execution failed")
+	ErrTaskFailed            = errors.New("task failed")
+	ErrPhaseTransition       = errors.New("invalid phase transition")
+	ErrCheckpointNotFound    = errors.New("checkpoint not found")
+)
