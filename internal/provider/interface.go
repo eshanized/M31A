@@ -30,9 +30,4 @@ type ToolDefinition struct {
 	Parameters  string `json:"parameters"`
 }
 
-type ProviderRegistry struct {
-	Active    func() string
-	SetActive func(name string) error
-	Get       func(name string) (LLMProvider, error)
-	List      func() []string
-}
+
