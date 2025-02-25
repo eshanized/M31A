@@ -1,7 +1,7 @@
 # M31A — Current State
 
 ## Active Phase
-Phase 2 — Tool System (Bash, FileRead, FileWrite, Glob, Grep)
+Phase 2 — TUI Foundation
 
 ## Status
 Planned
@@ -11,7 +11,7 @@ Planned
 - Phase 1 — Provider Abstraction Layer
 
 ## Next Phase
-Phase 2 — Tool System
+Phase 3 — Message Rendering Pipeline
 
 ## Key Decisions Made
 - Sequential task execution in V1 (no concurrency)
