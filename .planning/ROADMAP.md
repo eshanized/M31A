@@ -231,51 +231,26 @@ Build the full LLM gateway layer. Everything else depends on it working correctl
 **Complexity:** 8/10  
 **Milestone:** Bubble Tea app launches; REPL screen renders; model badge live
 
-### Goals
+### Goal
 
 Build the shell of the TUI — the application skeleton, routing between screens, theme system, and the main REPL view.
 
-### Tasks
+**Plans:** 5 plans in 3 waves
 
-**P2.1 — Bubble Tea application skeleton**
-- `internal/tui/app.go`: top-level `AppState` struct, `Init()`, `Update()`, `View()` implementing `tea.Model`
-- Screen routing: `activeScreen` enum — `ScreenREPL`, `ScreenPlan`, `ScreenExecute`, `ScreenVerify`, `ScreenShip`, `ScreenModelSelector`, `ScreenSettings`, `ScreenResume`, `ScreenFirstRun`, `ScreenPermission`
-- Message bus: `tea.Cmd` / `tea.Msg` types for all cross-component events (stream delta, tool result, phase transition, fallback event, health update)
-- 60fps frame budget: `View()` must return in < 16ms; heavy operations cached
-
-**P2.2 — Theme system (`internal/tui/theme/`)**
-- `Theme` struct containing all named Lipgloss `Style` values from spec §9.1
-- Dark palette: `Background #0D0D0D`, `Surface #1A1A1A`, `Brand #D77757`, `Thinking #8AB4F8`, `Success #81C995`, `Error #F28B82`, `Warning #FDD663`
-- Light palette: all counterparts as specified
-- `auto` mode: detect terminal background via `termenv`
-- `ThemeManager.Cycle()` for `/theme` command (dark → light → auto)
-- All styles defined once in `theme/` — no raw hex strings in rendering code
-
-**P2.3 — REPL screen (`internal/tui/repl.go`)**
-- **Header** (1 line): brand, model badge `[OR]`/`[ZEN]` with color-coded fg, context bar `used/total`, connection status
-- **Message area** (flex): `bubbles/viewport` for scrollable history; user vs. assistant distinction; auto-scroll to bottom
-- **Input area** (3-6 lines): `bubbles/textarea` with placeholder, character count
-- **Status bar** (1 line): current operation, timestamp
-- **Spinner**: `bubbles/spinner` using `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` cycle at 10fps
-
-**P2.4 — Health check ticker**
-- Background goroutine: poll active provider every 60s
-- Adaptive: increase to 120s on rate-limit headers; stop on 401
-- Emit `HealthUpdateMsg{Status, Latency}` to TUI update loop
-- Non-blocking: never interrupt active streaming
-
-**P2.5 — First-run screen (`internal/tui/firstrun.go`)**
-- Shown when no config file and no stored keys exist
-- Provider selection: [1] OpenRouter, [2] Zen, [3] Both, [4] Skip
-- Key input + immediate validation via health check
-- OS keychain storage prompt
-- On skip: load REPL with "No API key configured" banner
+Plans:
+- [ ] 02-01-PLAN.md — Theme + Types Foundation (Wave 1)
+- [ ] 02-02-PLAN.md — Layout Components + Health Ticker (Wave 2)
+- [ ] 02-03-PLAN.md — REPL Screen (Wave 2)
+- [ ] 02-04-PLAN.md — First Run Setup Screen (Wave 2)
+- [ ] 02-05-PLAN.md — App State + Screen Routing (Wave 3)
 
 ### Deliverables
 
-- `m31a` binary launches, renders REPL screen, accepts input
-- Theme cycles with `/theme`; connection badge updates live
-- First-run screen completes setup and transitions to REPL
+- `internal/tui/` package with tea.Model app, screen routing, theme system, REPL, first-run, header, statusbar, health ticker
+- All components compile and pass `go test -race ./internal/tui/...`
+- Binary continues to print version and exit (no wiring into main.go)
+
+
 
 ---
 
