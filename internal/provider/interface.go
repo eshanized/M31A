@@ -10,7 +10,7 @@ type LLMProvider interface {
 	Name() string
 	FetchModels(ctx context.Context) ([]types.ModelInfo, error)
 	ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error)
-	EstimateCost(usage types.Usage) float64
+	EstimateCost(modelID string, usage types.Usage) float64
 	HealthCheck(ctx context.Context) types.HealthStatus
 	GetModel(id string) (*types.ModelInfo, error)
 }
