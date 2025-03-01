@@ -174,11 +174,125 @@ func TestFetchModels_StaleFallback(t *testing.T) {
 	}
 }
 
-func TestEstimateCost(t *testing.T) {
+func TestEstimateCost_UnknownModel(t *testing.T) {
 	c, _ := New("test-key")
-	cost := c.EstimateCost(types.Usage{PromptTokens: 100, CompletionTokens: 50})
+	cost := c.EstimateCost("nonexistent/model", types.Usage{PromptTokens: 100, CompletionTokens: 50})
 	if cost != 0 {
-		t.Fatalf("expected 0, got %f", cost)
+		t.Fatalf("expected 0 for unknown model, got %f", cost)
+	}
+}
+
+func TestEstimateCost_KnownModel(t *testing.T) {
+	c, _ := New("test-key")
+
+	// Manually populate cache with a model that has pricing data
+	c.cache.Set([]types.ModelInfo{
+		{
+			ID:   "test/model",
+			Name: "Test Model",
+			Pricing: types.Pricing{
+				InputPerMToken:  1.0,  // $1 per million input tokens
+				OutputPerMToken: 2.0,  // $2 per million output tokens
+			},
+		},
+	})
+
+	// 1000 prompt tokens + 500 completion tokens
+	cost := c.EstimateCost("test/model", types.Usage{PromptTokens: 1000, CompletionTokens: 500})
+	expected := (1000.0/1_000_000)*1.0 + (500.0/1_000_000)*2.0
+	if cost != expected {
+		t.Fatalf("expected %f, got %f", expected, cost)
+	}
+}
+
+func TestFetchModels_CacheHit(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/models" {
+			resp := map[string][]map[string]any{
+				"data": {
+					{
+						"id":              "test/model",
+						"name":            "Test Model",
+						"context_length":  float64(4096),
+						"top_provider":    "Test",
+						"pricing":         map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
+						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+					},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	// First call populates cache
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("first fetch should succeed: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 1 API call, got %d", callCount)
+	}
+
+	// Second call should use cache
+	models, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("cached fetch should not error: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 0 additional API calls on cache hit, got %d", callCount)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model from cache, got %d", len(models))
+	}
+}
+
+func TestFetchModels_CacheExpired(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/models" {
+			resp := map[string][]map[string]any{
+				"data": {
+					{
+						"id":              "test/model",
+						"name":            "Test Model",
+						"context_length":  float64(4096),
+						"top_provider":    "Test",
+						"pricing":         map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
+						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+					},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	// First call populates cache
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("first fetch should succeed: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 1 API call, got %d", callCount)
+	}
+
+	// Second call should use cache (not expired yet)
+	_, err = c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("cached fetch should succeed: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected no API call on cache hit, got %d", callCount)
 	}
 }
 
