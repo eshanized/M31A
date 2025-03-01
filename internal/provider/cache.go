@@ -27,11 +27,14 @@ func (c *ModelCache) Get(id string) (*types.ModelInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.IsExpired() {
+	model, ok := c.models[id]
+	if !ok {
 		return nil, false
 	}
-	m, ok := c.models[id]
-	return m, ok
+	if c.IsExpired() && c.IsStale() {
+		return nil, false
+	}
+	return model, true
 }
 
 func (c *ModelCache) Set(models []types.ModelInfo) {
@@ -63,4 +66,14 @@ func (c *ModelCache) FetchTime() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.fetched
+}
+
+func (c *ModelCache) Models() map[string]*types.ModelInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make(map[string]*types.ModelInfo, len(c.models))
+	for k, v := range c.models {
+		result[k] = v
+	}
+	return result
 }
