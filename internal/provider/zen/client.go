@@ -62,6 +62,10 @@ type zenModel struct {
 }
 
 func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
+	if !c.cache.IsExpired() && c.cache.Len() > 0 {
+		return c.cachedModels(), nil
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
 		return c.staleFallback()
@@ -201,8 +205,13 @@ func (c *Client) makeIterator(sse *provider.SSEParser, modelID string) *types.St
 	}
 }
 
-func (c *Client) EstimateCost(usage types.Usage) float64 {
-	return 0
+func (c *Client) EstimateCost(modelID string, usage types.Usage) float64 {
+	model, ok := c.cache.Get(modelID)
+	if !ok {
+		return 0
+	}
+	return (float64(usage.PromptTokens)/1_000_000)*model.Pricing.InputPerMToken +
+		(float64(usage.CompletionTokens)/1_000_000)*model.Pricing.OutputPerMToken
 }
 
 func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
@@ -241,6 +250,15 @@ func (c *Client) GetModel(id string) (*types.ModelInfo, error) {
 		return nil, m31errors.ErrModelNotFound
 	}
 	return m, nil
+}
+
+func (c *Client) cachedModels() []types.ModelInfo {
+	all := c.cache.Models()
+	models := make([]types.ModelInfo, 0, len(all))
+	for _, m := range all {
+		models = append(models, *m)
+	}
+	return models
 }
 
 func (c *Client) setCommonHeaders(req *http.Request) {
