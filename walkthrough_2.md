@@ -3,7 +3,7 @@
 ## Completed Plans
 
 ### Plan 01 — Theme System & Shared Types (Wave 1)
-- [x] `internal/tui/types.go`: `Screen` enum (ScreenREPL, ScreenFirstRun, ScreenHelp, ScreenExit), `AppMsg` with generic payload, `HealthUpdateMsg`, `HealthCheckTickMsg`, `ProviderSwitchMsg`, `ErrorMsg`
+- [x] `internal/tui/types.go`: `Screen` enum (ScreenFirstRun, ScreenREPL, ScreenModelSelector, ScreenSettings, ScreenResume, ScreenPermission), `AppMsg` with generic payload, `HealthUpdateMsg`, `HealthCheckTickMsg`, `ProviderSwitchMsg`, `ErrorMsg`
 - [x] `internal/tui/theme/theme.go`: `Theme` struct with 12 color fields + 18 lipgloss styles, Dark/Light/Auto/Default palettes, `Manager` with `Current()`, `Set()`, `Cycle(auto→light→dark)`
 - [x] Color parity across palettes (same tool labels map to different hex values)
 - [x] `internal/tui/theme/theme_test.go` — 8 tests (manager init, dark/light specific colors, auto fallback, cycle, tool label keys, Default)
@@ -24,13 +24,13 @@
 
 ### Plan 04 — First-Run Wizard (Wave 2)
 - [x] `internal/tui/firstrun.go`: `FirstRunModel` — 6-state wizard: Welcome→ProviderSelect→KeyInput→Validating→KeychainPrompt→Complete, masked API key input, provider toggle (OpenRouter/Zen via Enter key), emits `AppMsg{ScreenREPL}` on completion
-- [x] Skip flow: pressing `ctrl+w` at Welcome jumps to Complete → REPL
+- [x] Skip flow: no `ctrl+w` handler exists — only `enter`/`space` and global `ctrl+c` are handled
 - [x] `internal/tui/firstrun_test.go` — 23 tests (state transitions, provider selection, key input masking, validation states, keychain prompt, skip flow, view rendering)
 
 ### Plan 05 — AppState & Screen Routing (Wave 3)
-- [x] `internal/tui/app.go`: `AppState` — full `tea.Model` implementation, screen routing (FirstRun → REPL), health lifecycle (60s tick, provider health check on tick), full-view composition (header + body + statusbar), error state display, terminal-too-small guard (80×24 threshold)
+- [x] `internal/tui/app.go`: `AppState` — full `tea.Model` implementation, screen routing (FirstRun → REPL), health lifecycle (60s tick, provider health check on tick), full-view composition (header + body + statusbar), error state display, terminal-too-small guard (40×10 threshold)
 - [x] `NewApp` accepting `AppConfig` with theme manager reference
-- [x] `calculateNextInterval` — exponential backoff with jitter (60s base, 5 min max, uniform)
+- [x] `calculateNextInterval` — two-state interval: 60s normal, 120s on rate-limit/offline
 - [x] `internal/tui/app_test.go` — 20 tests (init, new app, ctrl+c quit, first-run→REPL transition, health tick reschedule, terminal-too-small, error state, view composition)
 - [x] Binary not wired — prints version and exits (no main.go changes)
 - [x] All state mutations through `Update()` only — no goroutine mutations
