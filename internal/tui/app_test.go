@@ -227,7 +227,7 @@ func (m *mockProvider) ChatCompletionStream(ctx context.Context, req provider.Ch
 	return nil, nil
 }
 
-func (m *mockProvider) EstimateCost(usage types.Usage) float64 {
+func (m *mockProvider) EstimateCost(modelID string, usage types.Usage) float64 {
 	return 0
 }
 
