@@ -17,15 +17,15 @@ func TestRenderHeader_ContainsBrand(t *testing.T) {
 
 func TestRenderHeader_ProviderBadge(t *testing.T) {
 	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{}, 0, 0, 120)
-	if !strings.Contains(result, "[OP]") {
-		t.Errorf("Header should contain '[OP]', got %q", result)
+	if !strings.Contains(result, "[OR]") {
+		t.Errorf("Header should contain '[OR]', got %q", result)
 	}
 }
 
 func TestRenderHeader_ZenBadge(t *testing.T) {
 	result := RenderHeader(theme.Dark(), "zen", nil, types.HealthStatus{}, 0, 0, 120)
-	if !strings.Contains(result, "[ZE]") {
-		t.Errorf("Header should contain '[ZE]', got %q", result)
+	if !strings.Contains(result, "[ZEN]") {
+		t.Errorf("Header should contain '[ZEN]', got %q", result)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestRenderHeader_EmptyProvider(t *testing.T) {
 
 func TestRenderHeader_NilModel(t *testing.T) {
 	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{}, 0, 0, 120)
-	if !strings.Contains(result, "[OP]") {
+	if !strings.Contains(result, "[OR]") {
 		t.Errorf("Nil model should still show badge, got %q", result)
 	}
 }
