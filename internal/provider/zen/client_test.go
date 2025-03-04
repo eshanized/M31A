@@ -94,6 +94,50 @@ func TestFetchModels_PopulatesCache(t *testing.T) {
 	}
 }
 
+func TestFetchModels_CacheHit(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/models" {
+			resp := []map[string]any{
+				{
+					"id":              "test/model",
+					"name":            "Test Model",
+					"context_length":  float64(4096),
+					"pricing_prompt":  0.000001,
+					"pricing_completion": 0.000002,
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	// First call populates cache
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("first fetch should succeed: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 1 API call, got %d", callCount)
+	}
+
+	// Second call should use cache
+	models, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("cached fetch should not error: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 0 additional API calls on cache hit, got %d", callCount)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model from cache, got %d", len(models))
+	}
+}
+
 func TestChatCompletionStream_ContentOnly(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/chat/completions" {
@@ -133,11 +177,34 @@ func TestChatCompletionStream_ContentOnly(t *testing.T) {
 	}
 }
 
-func TestEstimateCost(t *testing.T) {
+func TestEstimateCost_UnknownModel(t *testing.T) {
 	c, _ := New("test-key")
-	cost := c.EstimateCost(types.Usage{PromptTokens: 100, CompletionTokens: 50})
+	cost := c.EstimateCost("nonexistent/model", types.Usage{PromptTokens: 100, CompletionTokens: 50})
 	if cost != 0 {
-		t.Fatalf("expected 0, got %f", cost)
+		t.Fatalf("expected 0 for unknown model, got %f", cost)
+	}
+}
+
+func TestEstimateCost_KnownModel(t *testing.T) {
+	c, _ := New("test-key")
+
+	// Manually populate cache with a model that has pricing data
+	c.cache.Set([]types.ModelInfo{
+		{
+			ID:   "test/model",
+			Name: "Test Model",
+			Pricing: types.Pricing{
+				InputPerMToken:  0.5,  // $0.5 per million input tokens
+				OutputPerMToken: 1.5,  // $1.5 per million output tokens
+			},
+		},
+	})
+
+	// 2000 prompt tokens + 1000 completion tokens
+	cost := c.EstimateCost("test/model", types.Usage{PromptTokens: 2000, CompletionTokens: 1000})
+	expected := (2000.0/1_000_000)*0.5 + (1000.0/1_000_000)*1.5
+	if cost != expected {
+		t.Fatalf("expected %f, got %f", expected, cost)
 	}
 }
 
