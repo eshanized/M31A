@@ -20,16 +20,19 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 		badgeStyle = t.ModelBadge.Foreground(t.TextSecondary)
 		badgeText = "[  ]"
 	} else {
-		prefix := strings.ToUpper(provider[:2])
-		switch {
-		case strings.HasPrefix(strings.ToLower(provider), "openrouter"):
+		var badge string
+		switch provider {
+		case "openrouter":
 			badgeStyle = t.ModelBadge.Foreground(t.Warning)
-		case strings.HasPrefix(strings.ToLower(provider), "zen"):
+			badge = "OR"
+		case "zen":
 			badgeStyle = t.ModelBadge.Foreground(t.Thinking)
+			badge = "ZEN"
 		default:
 			badgeStyle = t.ModelBadge.Foreground(t.TextSecondary)
+			badge = strings.ToUpper(provider[:min(len(provider), 3)])
 		}
-		badgeText = "[" + prefix + "]"
+		badgeText = "[" + badge + "]"
 	}
 	badge := badgeStyle.Render(badgeText)
 
