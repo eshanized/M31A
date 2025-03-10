@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -29,6 +31,17 @@ type ReplModel struct {
 	lastStatus   string
 	width        int
 	height       int
+
+	msgRenderer    *components.MessageRenderer
+	streamCancel   context.CancelFunc
+
+	currentMessage    *types.Message
+	streamSegments    []types.MessageSegment
+	streamContent     strings.Builder
+	thinkingStartAt   time.Time
+	activeSegmentType string
+	thinkingBlocks    map[int]*components.ThinkingBlock
+	toolCards         map[int]*components.ToolCard
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -47,6 +60,11 @@ func NewReplModel(t theme.Theme) ReplModel {
 	s.Spinner = spinner.Dot
 	s.Style = t.Spinner
 
+	renderer, err := components.NewMessageRenderer(t)
+	if err != nil {
+		renderer = nil
+	}
+
 	return ReplModel{
 		theme:        t,
 		viewport:     vp,
@@ -54,6 +72,7 @@ func NewReplModel(t theme.Theme) ReplModel {
 		spinner:      s,
 		inputHistory: make([]string, 0),
 		historyPos:   -1,
+		msgRenderer:  renderer,
 	}
 }
 
@@ -71,8 +90,44 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.viewport.Height = vpHeight
 		m.textarea.SetWidth(msg.Width)
 		m.textarea.SetHeight(inputHeight)
+		if m.msgRenderer != nil {
+			m.msgRenderer, _ = components.NewMessageRenderer(m.theme)
+		}
+
+	case StreamMsg:
+		return m.handleStreamMsg(msg)
+
+	case StreamDoneMsg:
+		return m.handleStreamDoneMsg(msg)
+
+	case StreamErrorMsg:
+		return m.handleStreamErrorMsg(msg)
+
+	case TickMsg:
+		if m.streaming {
+			m.renderMessages()
+			m.viewport.GotoBottom()
+		}
+		return m.streamTickCmds()
 
 	case tea.KeyMsg:
+		if m.streaming {
+			switch msg.String() {
+			case "ctrl+c":
+				if m.streamCancel != nil {
+					m.streamCancel()
+				}
+				m.streaming = false
+				m.thinking = false
+				m.textarea.Focus()
+				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, true
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+		}
+
 		switch msg.String() {
 		case "enter":
 			input := strings.TrimSpace(m.textarea.Value())
@@ -156,8 +211,120 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	return cmds, false
 }
 
+func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
+	chunk := msg.Chunk
+	if chunk == nil {
+		return nil, false
+	}
+
+	m.streaming = true
+
+	switch chunk.Type {
+	case "content":
+		m.activeSegmentType = "content"
+		m.thinking = false
+		m.streamContent.WriteString(chunk.Delta)
+	case "thinking":
+		if m.activeSegmentType == "content" && m.streamContent.Len() > 0 {
+			m.streamSegments = append(m.streamSegments, types.MessageSegment{
+				Type:    "content",
+				Content: m.streamContent.String(),
+				Visible: true,
+			})
+			m.streamContent.Reset()
+		}
+		m.activeSegmentType = "thinking"
+		m.thinking = true
+		m.thinkingStartAt = time.Now()
+
+		if chunk.Delta != "" {
+			m.streamContent.WriteString(chunk.Delta)
+		}
+	case "done":
+	}
+
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	return nil, false
+}
+
+func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
+	if m.streamContent.Len() > 0 {
+		m.streamSegments = append(m.streamSegments, types.MessageSegment{
+			Type:    "content",
+			Content: m.streamContent.String(),
+			Visible: true,
+		})
+		m.streamContent.Reset()
+	}
+
+	msg.Message.Segments = m.streamSegments
+	if msg.Message.ToolCalls == nil || len(msg.Message.ToolCalls) == 0 {
+		msg.Message.ToolCalls = m.getToolCallsFromSegments()
+	}
+
+	m.messages = append(m.messages, msg.Message)
+
+	m.streaming = false
+	m.thinking = false
+	m.activeSegmentType = ""
+	m.streamSegments = nil
+	m.thinkingBlocks = nil
+	m.toolCards = nil
+	m.textarea.Focus()
+
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	var cmds []tea.Cmd
+	return cmds, true
+}
+
+func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
+	errMsg := types.Message{
+		Role:    "assistant",
+		Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
+		Segments: []types.MessageSegment{{
+			Type:    "content",
+			Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
+			Visible: true,
+		}},
+		CreatedAt: time.Now(),
+	}
+	m.messages = append(m.messages, errMsg)
+
+	m.streaming = false
+	m.thinking = false
+	m.activeSegmentType = ""
+	m.streamSegments = nil
+	m.streamContent.Reset()
+	m.thinkingBlocks = nil
+	m.toolCards = nil
+	m.textarea.Focus()
+
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	var cmds []tea.Cmd
+	return cmds, true
+}
+
+func (m *ReplModel) streamTickCmds() ([]tea.Cmd, bool) {
+	var cmds []tea.Cmd
+	cmds = append(cmds, StreamTickCmd())
+	return cmds, false
+}
+
+func (m *ReplModel) getToolCallsFromSegments() []types.ToolCall {
+	return nil
+}
+
 func (m *ReplModel) SetTheme(t theme.Theme) {
 	m.theme = t
+	if m.msgRenderer != nil {
+		m.msgRenderer, _ = components.NewMessageRenderer(t)
+	}
 }
 
 func (m *ReplModel) SetStreaming(v bool) {
@@ -176,16 +343,66 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 
 func (m *ReplModel) renderMessages() {
 	var b strings.Builder
+
 	for _, msg := range m.messages {
-		role := msg.Role
-		if role == "user" {
-			role = "You"
-		} else if role == "assistant" {
-			role = "Assistant"
+		if m.msgRenderer != nil {
+			rendered := m.msgRenderer.RenderMessage(msg, m.width)
+			b.WriteString(rendered)
+			b.WriteString("\n")
+		} else {
+			role := msg.Role
+			if role == "user" {
+				role = "You"
+			} else if role == "assistant" {
+				role = "Assistant"
+			}
+			b.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 		}
-		b.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 	}
+
+	if m.streaming {
+		b.WriteString(m.renderStreamingContent())
+	}
+
 	m.viewport.SetContent(b.String())
+}
+
+func (m *ReplModel) renderStreamingContent() string {
+	if m.msgRenderer == nil {
+		content := m.streamContent.String()
+		if content != "" {
+			return fmt.Sprintf("Assistant: %s\n", content)
+		}
+		return "Assistant: ...\n"
+	}
+
+	var segments []types.MessageSegment
+	segments = append(segments, m.streamSegments...)
+
+	if m.streamContent.Len() > 0 {
+		partial := m.streamContent.String()
+		if m.activeSegmentType == "thinking" {
+			segments = append(segments, types.MessageSegment{
+				Type:       "thinking",
+				Content:    partial,
+				Visible:    true,
+			})
+		} else {
+			segments = append(segments, types.MessageSegment{
+				Type:    "content",
+				Content: partial,
+				Visible: true,
+			})
+		}
+	}
+
+	msg := types.Message{
+		Role:     "assistant",
+		Content:  m.streamContent.String(),
+		Segments: segments,
+	}
+
+	return m.msgRenderer.RenderMessage(msg, m.width)
 }
 
 func (m *ReplModel) View() string {
