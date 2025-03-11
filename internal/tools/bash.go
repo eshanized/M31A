@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -70,26 +68,16 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
-	var stdout io.ReadCloser
+	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
-	var err error
-
-	stdout, err = cmd.StdoutPipe()
-	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("stdout pipe failed: %w", err)
-	}
+	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		return types.ToolResult{}, m31errors.ErrToolExecution
 	}
 
-	var output strings.Builder
-	var mu sync.Mutex
-	truncated := false
-	done := make(chan struct{})
-
-	// Kill escalation goroutine
+	// Signal forwarding on cancellation
 	var killOnce sync.Once
 	go func() {
 		select {
@@ -102,7 +90,6 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					}
 					syscall.Kill(pgid, syscall.SIGINT)
 				})
-				// SIGKILL escalation after 5s grace
 				time.AfterFunc(5*time.Second, func() {
 					killOnce.Do(func() {
 						pgid := cmd.Process.Pid
@@ -113,56 +100,26 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					})
 				})
 			}
-		case <-done:
-		}
-	}()
-
-	// Read stdout
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				mu.Lock()
-				if output.Len()+n > types.BashOutputLimit {
-					toWrite := n
-					if output.Len()+toWrite > types.BashOutputLimit {
-						toWrite = types.BashOutputLimit - output.Len()
-						truncated = true
-					}
-					if toWrite > 0 {
-						output.Write(buf[:toWrite])
-					}
-					mu.Unlock()
-				} else {
-					output.Write(buf[:n])
-					mu.Unlock()
-				}
-			}
-			if err != nil {
-				return
-			}
+		case <-time.After(time.Minute):
+			// goroutine cleanup after command finishes
 		}
 	}()
 
 	waitErr := cmd.Wait()
-	close(done)
-	stdout.Close()
-	wg.Wait()
 
-	mu.Lock()
-	outStr := output.String()
-	mu.Unlock()
-
-	// Append stderr (non-PTY mode)
+	outStr := stdoutBuf.String()
 	if stderrBuf.Len() > 0 {
 		if outStr != "" {
 			outStr += "\n"
 		}
 		outStr += stderrBuf.String()
+	}
+
+	// Cap output
+	truncated := false
+	if len(outStr) > types.BashOutputLimit {
+		outStr = outStr[:types.BashOutputLimit]
+		truncated = true
 	}
 
 	// Binary detection
@@ -208,7 +165,6 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 				Error:      "context cancelled",
 			}, nil
 		}
-		// Non-zero exit
 		return types.ToolResult{
 			Output:     outStr,
 			DurationMs: elapsed,

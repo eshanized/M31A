@@ -3,12 +3,16 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -33,10 +37,16 @@ type AppState struct {
 	replModel        *ReplModel
 	apiKey           string
 	configPath       string
+	prevScreen       Screen
+	permissionModal  *components.PermissionModal
+	dispatcher       *tools.Dispatcher
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
 	tm := theme.NewManager(theme.ModeDark)
+
+	cwd, _ := os.Getwd()
+	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
 
 	app := &AppState{
 		version:      version,
@@ -45,6 +55,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		configPath:   configPath,
 		themeManager: tm,
 		healthStatus: types.HealthStatus{Status: "unknown"},
+		dispatcher:   tools.DefaultDispatcher(cwd, backupDir),
 	}
 
 	if apiKey == "" {
@@ -61,6 +72,13 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	if registry != nil {
 		app.activeProvider = registry.Active()
 	}
+
+	// Permission listener goroutine
+	go func() {
+		for req := range app.dispatcher.RequestCh() {
+			app.Update(PermissionRequestMsg{Request: req})
+		}
+	}()
 
 	return app
 }
@@ -87,6 +105,24 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.screen == ScreenPermission && m.permissionModal != nil {
+			var resp tools.PermissionResponse
+			switch msg.String() {
+			case "y", "Y":
+				resp = m.permissionModal.Allow()
+			case "a", "A":
+				resp = m.permissionModal.AllowAlways()
+			case "n", "N":
+				resp = m.permissionModal.Deny()
+			case "e", "E":
+				return m, tea.Quit
+			default:
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return PermissionResponseMsg{Response: resp}
+			}
+		}
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -131,6 +167,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ErrorMsg:
 		m.currentOperation = fmt.Sprintf("Error: %v", msg.Err)
+		return m, nil
+
+	case PermissionRequestMsg:
+		m.prevScreen = m.screen
+		m.screen = ScreenPermission
+		t := m.themeManager.Current()
+		pm := components.NewPermissionModal(msg.Request, t, 5*time.Minute)
+		m.permissionModal = pm
+		return m, nil
+
+	case PermissionResponseMsg:
+		m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
+		m.screen = m.prevScreen
+		m.permissionModal = nil
 		return m, nil
 	}
 
@@ -191,6 +241,12 @@ func (m *AppState) View() string {
 			return m.firstRunModel.View()
 		}
 		return "Loading..."
+
+	case ScreenPermission:
+		if m.permissionModal != nil {
+			return m.permissionModal.Render(m.width, m.height)
+		}
+		return "Permission screen error"
 
 	case ScreenREPL:
 		if m.replModel == nil {

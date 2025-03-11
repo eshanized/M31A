@@ -1,17 +1,20 @@
 # M31A — Current State
 
 ## Active Phase
-Phase 2 — TUI Foundation
+Phase 4 — Tool System
 
 ## Status
-Planned
+Complete
 
 ## Completed Phases
 - Phase 0 — Foundation & Documentation
 - Phase 1 — Provider Abstraction Layer
+- Phase 2 — TUI Foundation
+- Phase 3 — Message Rendering Pipeline
+- Phase 4 — Tool System
 
 ## Next Phase
-Phase 3 — Message Rendering Pipeline
+Phase 5 — Session State & Configuration
 
 ## Key Decisions Made
 - Sequential task execution in V1 (no concurrency)

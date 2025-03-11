@@ -1,6 +1,10 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"github.com/eshanized/M31A/internal/tools"
+)
 
 type Screen int
 
@@ -37,4 +41,12 @@ type ProviderSwitchMsg struct {
 
 type ErrorMsg struct {
 	Err error
+}
+
+type PermissionRequestMsg struct {
+	Request tools.PermissionRequest
+}
+
+type PermissionResponseMsg struct {
+	Response tools.PermissionResponse
 }

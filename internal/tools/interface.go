@@ -18,8 +18,6 @@ type PermissionResponse struct {
 	Remember bool `json:"remember"`
 }
 
-type Dispatcher struct {
-	Register func(name string, tool types.Tool)
-	Execute  func(ctx context.Context, call types.ToolCall) (types.ToolResult, error)
-	List     func() []string
+type PermissionGate interface {
+	RequestPermission(ctx context.Context, req PermissionRequest) (PermissionResponse, error)
 }
