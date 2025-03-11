@@ -1,0 +1,234 @@
+package tools
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/errors"
+)
+
+func TestFileWrite_SimpleWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	content := "hello world"
+	result, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "test.txt",
+			"content": content,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Wrote") {
+		t.Errorf("expected success message, got: %s", result.Output)
+	}
+
+	// Verify written content
+	read, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != content {
+		t.Errorf("expected %q, got %q", content, string(read))
+	}
+}
+
+func TestFileWrite_OverwriteWithBackup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	// First write
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "file.txt",
+			"content": "version 1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second write (overwrite)
+	_, err = fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "file.txt",
+			"content": "version 2",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify final content
+	read, err := os.ReadFile(filepath.Join(dir, "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != "version 2" {
+		t.Errorf("expected 'version 2', got %q", string(read))
+	}
+
+	// Verify backup exists
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one backup file")
+	}
+	backupContent, err := os.ReadFile(filepath.Join(backupDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backupContent) != "version 1" {
+		t.Errorf("expected backup to contain 'version 1', got %q", string(backupContent))
+	}
+}
+
+func TestFileWrite_CreateDirs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "nested/deep/dir/file.txt",
+			"content": "deep content",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify file exists in nested directory
+	read, err := os.ReadFile(filepath.Join(dir, "nested", "deep", "dir", "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != "deep content" {
+		t.Errorf("expected 'deep content', got %q", string(read))
+	}
+}
+
+func TestFileWrite_PathOutsideWorkDir(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "/etc/evil.txt",
+			"content": "malicious",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for path outside workDir")
+	}
+	if !strings.Contains(err.Error(), "outside working directory") {
+		t.Errorf("expected 'outside working directory', got: %v", err)
+	}
+}
+
+func TestFileWrite_Atomicty(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "atomic.txt",
+			"content": "atomic content",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify no temp files remain
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".m31a_tmp_") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestFileWrite_BinaryContent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "binary.bin",
+			"content": "hello\x00world",
+		},
+	})
+	if err != m31errors.ErrNoBinaryContent {
+		t.Errorf("expected ErrNoBinaryContent, got: %v", err)
+	}
+}
+
+func TestFileWrite_MissingPathParam(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"content": "test",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing path param")
+	}
+	if !strings.Contains(err.Error(), "missing parameter: path") {
+		t.Errorf("expected 'missing parameter: path', got: %v", err)
+	}
+}
+
+func TestFileWrite_MissingContentParam(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path": "test.txt",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing content param")
+	}
+	if !strings.Contains(err.Error(), "missing parameter: content") {
+		t.Errorf("expected 'missing parameter: content', got: %v", err)
+	}
+}

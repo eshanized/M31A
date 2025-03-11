@@ -1,0 +1,175 @@
+package tools
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/errors"
+)
+
+type FileWrite struct {
+	workDir   string
+	backupDir string
+}
+
+func NewFileWrite(workDir, backupDir string) *FileWrite {
+	return &FileWrite{workDir: workDir, backupDir: backupDir}
+}
+
+func (t *FileWrite) Name() string {
+	return "FileWrite"
+}
+
+func (t *FileWrite) Description() string {
+	return "Write content to a file atomically with backup and path safety."
+}
+
+func (t *FileWrite) RiskLevel() types.RiskLevel {
+	return types.RiskDestructive
+}
+
+func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+	pathRaw, ok := input.Params["path"]
+	if !ok {
+		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
+	}
+	path, ok := pathRaw.(string)
+	if !ok {
+		return types.ToolResult{}, fmt.Errorf("parameter path must be a string")
+	}
+
+	contentRaw, ok := input.Params["content"]
+	if !ok {
+		return types.ToolResult{}, fmt.Errorf("missing parameter: content")
+	}
+	content, ok := contentRaw.(string)
+	if !ok {
+		return types.ToolResult{}, fmt.Errorf("parameter content must be a string")
+	}
+
+	createDirs := true
+	if cdRaw, ok := input.Params["create_dirs"]; ok {
+		if cdBool, ok := cdRaw.(bool); ok {
+			createDirs = cdBool
+		}
+	}
+
+	// Binary content check
+	contentBytes := []byte(content)
+	for _, b := range contentBytes {
+		if b == 0 {
+			return types.ToolResult{}, m31errors.ErrNoBinaryContent
+		}
+	}
+
+	// Resolve target path relative to workDir
+	joined := path
+	if !filepath.IsAbs(path) {
+		joined = filepath.Join(t.workDir, path)
+	}
+	targetPath, err := filepath.Abs(joined)
+	if err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+	}
+
+	// Path safety check
+	if existing, err := os.Stat(targetPath); err == nil && !existing.IsDir() {
+		// File exists — resolve symlinks and verify
+		resolved, err := filepath.EvalSymlinks(targetPath)
+		if err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+		}
+		workDirPrefix := t.workDir
+		if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
+			workDirPrefix += string(filepath.Separator)
+		}
+		if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
+			return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+		}
+		targetPath = resolved
+	} else {
+		// File doesn't exist — verify the directory portion is within workDir
+		dir := filepath.Dir(targetPath)
+		workDirPrefix := t.workDir
+		if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
+			workDirPrefix += string(filepath.Separator)
+		}
+		if dir != t.workDir && !strings.HasPrefix(dir, workDirPrefix) {
+			return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+		}
+	}
+
+	// Backup existing file
+	if _, err := os.Stat(targetPath); err == nil {
+		relPath, _ := filepath.Rel(t.workDir, targetPath)
+		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
+		backupName := fmt.Sprintf("%s.%s", sanitized, time.Now().Format("20060102T150405"))
+		backupPath := filepath.Join(t.backupDir, backupName)
+
+		if err := os.MkdirAll(t.backupDir, 0755); err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
+		}
+
+		input, err := os.ReadFile(targetPath)
+		if err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot read original for backup: %w", err)
+		}
+		if err := os.WriteFile(backupPath, input, 0644); err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot write backup: %w", err)
+		}
+	}
+
+	// Create parent directories
+	if createDirs {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot create directories: %w", err)
+		}
+	}
+
+	// Temp file creation
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot generate temp name: %w", err)
+	}
+	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
+
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return types.ToolResult{}, m31errors.ErrPermissionDenied
+	}
+
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(contentBytes); err != nil {
+		return types.ToolResult{}, fmt.Errorf("write failed: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("fsync failed: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("close failed: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		return types.ToolResult{}, fmt.Errorf("rename failed: %w", err)
+	}
+
+	cleanup = false
+
+	return types.ToolResult{
+		Output: fmt.Sprintf("Wrote %d bytes to %s", len(contentBytes), path),
+	}, nil
+}
