@@ -34,99 +34,99 @@ type TickMsg struct {
 }
 
 func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) tea.Cmd {
-	return func() tea.Msg {
-		ch := make(chan tea.Msg, 100)
+	streamCh := make(chan tea.Msg, 100)
 
-		go func() {
-			defer close(ch)
+	go func() {
+		defer close(streamCh)
 
-			iterator, err := p.ChatCompletionStream(ctx, req)
-			if err != nil {
-				ch <- StreamErrorMsg{Err: err, ModelID: req.Model}
-				return
-			}
-			defer iterator.Close()
+		iterator, err := p.ChatCompletionStream(ctx, req)
+		if err != nil {
+			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
+			return
+		}
+		defer iterator.Close()
 
-			var segments []types.MessageSegment
-			var activeContent strings.Builder
-			var lastUsage *types.Usage
+		var segments []types.MessageSegment
+		var activeContent strings.Builder
+		var lastUsage *types.Usage
 
-			for {
-				chunk, err := iterator.Next()
-				if err == io.EOF {
-					if activeContent.Len() > 0 {
-						segments = append(segments, types.MessageSegment{
-							Type:    "content",
-							Content: activeContent.String(),
-							Visible: true,
-						})
-					}
-
-					var fullContent strings.Builder
-					for _, seg := range segments {
-						if seg.Type == "content" {
-							fullContent.WriteString(seg.Content)
-						}
-					}
-
-					msg := types.Message{
-						Role:     "assistant",
-						Content:  fullContent.String(),
-						Segments: segments,
-						Usage:    lastUsage,
-					}
-
-					ch <- StreamDoneMsg{
-						Message:   msg,
-						Usage:     lastUsage,
-						ModelID:   req.Model,
-						SessionID: sessionID,
-					}
-					return
-				}
-				if err != nil {
-					ch <- StreamErrorMsg{Err: err, ModelID: req.Model}
-					return
-				}
-				if chunk == nil {
-					continue
+		for {
+			chunk, err := iterator.Next()
+			if err == io.EOF {
+				if activeContent.Len() > 0 {
+					segments = append(segments, types.MessageSegment{
+						Type:    "content",
+						Content: activeContent.String(),
+						Visible: true,
+					})
 				}
 
-				select {
-				case ch <- StreamMsg{
-					Chunk:     chunk,
+				var fullContent strings.Builder
+				for _, seg := range segments {
+					if seg.Type == "content" {
+						fullContent.WriteString(seg.Content)
+					}
+				}
+
+				msg := types.Message{
+					Role:     "assistant",
+					Content:  fullContent.String(),
+					Segments: segments,
+					Usage:    lastUsage,
+				}
+
+				streamCh <- StreamDoneMsg{
+					Message:   msg,
+					Usage:     lastUsage,
 					ModelID:   req.Model,
 					SessionID: sessionID,
-				}:
-				case <-ctx.Done():
-					return
 				}
-
-				switch chunk.Type {
-				case "content":
-					activeContent.WriteString(chunk.Delta)
-				case "thinking":
-					if activeContent.Len() > 0 {
-						segments = append(segments, types.MessageSegment{
-							Type:    "content",
-							Content: activeContent.String(),
-							Visible: true,
-						})
-						activeContent.Reset()
-					}
-					segments = append(segments, types.MessageSegment{
-						Type:       "thinking",
-						Content:    chunk.Delta,
-						DurationMs: chunk.ThinkingDuration,
-						Visible:    true,
-					})
-				case "done":
-					lastUsage = &types.Usage{}
-				}
+				return
 			}
-		}()
+			if err != nil {
+				streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
+				return
+			}
+			if chunk == nil {
+				continue
+			}
 
-		return ch
+			select {
+			case streamCh <- StreamMsg{
+				Chunk:     chunk,
+				ModelID:   req.Model,
+				SessionID: sessionID,
+			}:
+			case <-ctx.Done():
+				return
+			}
+
+			switch chunk.Type {
+			case "content":
+				activeContent.WriteString(chunk.Delta)
+			case "thinking":
+				if activeContent.Len() > 0 {
+					segments = append(segments, types.MessageSegment{
+						Type:    "content",
+						Content: activeContent.String(),
+						Visible: true,
+					})
+					activeContent.Reset()
+				}
+				segments = append(segments, types.MessageSegment{
+					Type:       "thinking",
+					Content:    chunk.Delta,
+					DurationMs: chunk.ThinkingDuration,
+					Visible:    true,
+				})
+			case "done":
+				lastUsage = &types.Usage{}
+			}
+		}
+	}()
+
+	return func() tea.Msg {
+		return <-streamCh
 	}
 }
 

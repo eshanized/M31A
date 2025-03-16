@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -76,25 +75,24 @@ func TestStartStreamCmd_ContentOnly(t *testing.T) {
 		t.Fatal("expected non-nil cmd")
 	}
 
-	msg := cmd()
-	if msg == nil {
-		t.Fatal("expected non-nil msg")
-	}
-
-	ch, ok := msg.(chan tea.Msg)
-	if !ok {
-		t.Fatalf("expected chan tea.Msg, got %T", msg)
-	}
-
+	// Collect all messages from the cmd
 	var streamMsgCount int
 	var doneMsgCount int
 
-	for m := range ch {
-		switch m.(type) {
+	for {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		switch msg.(type) {
 		case StreamMsg:
 			streamMsgCount++
 		case StreamDoneMsg:
 			doneMsgCount++
+			return // StreamDoneMsg is the last message
+		case StreamErrorMsg:
+			t.Error("unexpected StreamErrorMsg")
+			return
 		}
 	}
 
@@ -122,24 +120,24 @@ func TestStartStreamCmd_WithThinking(t *testing.T) {
 	}
 
 	cmd := StartStreamCmd(context.Background(), p, req, "session-1")
-	msg := cmd()
-
-	ch, ok := msg.(chan tea.Msg)
-	if !ok {
-		t.Fatalf("expected chan tea.Msg, got %T", msg)
-	}
 
 	var streamMsgCount int
 	var doneMsgCount int
 
-	for m := range ch {
-		switch m.(type) {
+	for {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		switch msg.(type) {
 		case StreamMsg:
 			streamMsgCount++
 		case StreamDoneMsg:
 			doneMsgCount++
+			return
 		case StreamErrorMsg:
 			t.Error("unexpected StreamErrorMsg")
+			return
 		}
 	}
 
@@ -164,22 +162,14 @@ func TestStartStreamCmd_WithContextExceeded(t *testing.T) {
 	}
 
 	cmd := StartStreamCmd(context.Background(), p, req, "session-2")
+
 	msg := cmd()
-
-	ch, ok := msg.(chan tea.Msg)
-	if !ok {
-		t.Fatalf("expected chan tea.Msg, got %T", msg)
+	if msg == nil {
+		t.Fatal("expected non-nil msg")
 	}
 
-	hasError := false
-	for m := range ch {
-		if _, ok := m.(StreamErrorMsg); ok {
-			hasError = true
-		}
-	}
-
-	if !hasError {
-		t.Error("expected StreamErrorMsg for context exceeded")
+	if _, ok := msg.(StreamErrorMsg); !ok {
+		t.Errorf("expected StreamErrorMsg for context exceeded, got %T", msg)
 	}
 }
 
@@ -199,20 +189,22 @@ func TestStartStreamCmd_ContextCancellation(t *testing.T) {
 	}
 
 	cmd := StartStreamCmd(ctx, p, req, "session-3")
-	msg := cmd()
-
-	ch, ok := msg.(chan tea.Msg)
-	if !ok {
-		t.Fatalf("expected chan tea.Msg, got %T", msg)
-	}
 
 	count := 0
-	for m := range ch {
+	for {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
 		count++
 		if count == 2 {
 			cancel()
 		}
-		_ = m
+		// Check if we got a StreamDoneMsg or StreamErrorMsg (terminal messages)
+		switch msg.(type) {
+		case StreamDoneMsg, StreamErrorMsg:
+			return
+		}
 	}
 
 	if count < 2 {
