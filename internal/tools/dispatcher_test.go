@@ -81,8 +81,9 @@ func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := d.Execute(context.Background(), types.ToolCall{
-			ID:   "call1",
-			Name: "bash",
+			ID:    "call1",
+			Name:  "bash",
+			Input: []byte(`{"name": "bash", "params": {"command": "echo hello"}}`),
 		})
 		errCh <- err
 	}()
@@ -90,6 +91,10 @@ func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 	req := <-d.RequestCh()
 	if req.ToolName != "bash" {
 		t.Errorf("expected request for 'bash', got %q", req.ToolName)
+	}
+	t.Logf("DEBUG: req.Command = %q (len=%d)", req.Command, len(req.Command))
+	if req.Command != "echo hello" {
+		t.Errorf("expected Command 'echo hello', got %q", req.Command)
 	}
 	d.ApprovePermission(true, false)
 

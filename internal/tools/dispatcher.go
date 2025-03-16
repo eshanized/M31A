@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +66,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		if !remembered || !allowed {
 			req := PermissionRequest{
 				ToolName:    call.Name,
+				Command:     extractCommandString(call.Name, call.Input),
 				RiskLevel:   risk,
 				TimeoutSecs: 300,
 			}
@@ -130,6 +132,54 @@ func (d *Dispatcher) GetTool(name string) (types.Tool, bool) {
 	defer d.mu.RUnlock()
 	t, ok := d.tools[name]
 	return t, ok
+}
+
+// extractCommandString extracts a human-readable command string from tool input
+// for display in the permission prompt.
+func extractCommandString(toolName string, input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+
+	// Normalize tool name to canonical form (first char uppercase)
+	if len(toolName) > 0 {
+		toolName = strings.ToUpper(toolName[:1]) + toolName[1:]
+	}
+
+	// Try unmarshaling as ToolInput first (has Name and Params)
+	var toolInput struct {
+		Name   string         `json:"name"`
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(input, &toolInput); err == nil && len(toolInput.Params) > 0 {
+		switch toolName {
+		case "Bash":
+			if cmd, ok := toolInput.Params["command"].(string); ok {
+				return cmd
+			}
+		case "FileWrite":
+			if path, ok := toolInput.Params["path"].(string); ok {
+				return fmt.Sprintf("write %s", path)
+			}
+		}
+	}
+
+	// Fallback: try as raw map
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err == nil {
+		switch toolName {
+		case "Bash":
+			if cmd, ok := params["command"].(string); ok {
+				return cmd
+			}
+		case "FileWrite":
+			if path, ok := params["path"].(string); ok {
+				return fmt.Sprintf("write %s", path)
+			}
+		}
+	}
+
+	return string(input)
 }
 
 func (d *Dispatcher) RequestCh() chan PermissionRequest {
