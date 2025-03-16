@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewMessageRenderer_DarkTheme(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error creating dark renderer: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestNewMessageRenderer_DarkTheme(t *testing.T) {
 }
 
 func TestNewMessageRenderer_LightTheme(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Light())
+	r, err := NewMessageRenderer(theme.Light(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error creating light renderer: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestNewMessageRenderer_LightTheme(t *testing.T) {
 }
 
 func TestRenderMessage_UserMessage(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRenderMessage_UserMessage(t *testing.T) {
 }
 
 func TestRenderMessage_UserMessageRightAligned(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRenderMessage_UserMessageRightAligned(t *testing.T) {
 }
 
 func TestRenderMessage_AssistantMessage(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRenderMessage_AssistantMessage(t *testing.T) {
 }
 
 func TestRenderMessage_AssistantWithThinking(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestRenderMessage_AssistantWithThinking(t *testing.T) {
 }
 
 func TestRenderMessage_MultipleSegments(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRenderMessage_MultipleSegments(t *testing.T) {
 }
 
 func TestRenderMessage_TruncatesWidth(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestRenderMessage_TruncatesWidth(t *testing.T) {
 }
 
 func TestRenderContentSegment_GlamourMarkdown(t *testing.T) {
-	r, err := NewMessageRenderer(theme.Dark())
+	r, err := NewMessageRenderer(theme.Dark(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

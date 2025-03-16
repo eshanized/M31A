@@ -60,7 +60,7 @@ func NewReplModel(t theme.Theme) ReplModel {
 	s.Spinner = spinner.Dot
 	s.Style = t.Spinner
 
-	renderer, err := components.NewMessageRenderer(t)
+	renderer, err := components.NewMessageRenderer(t, 80)
 	if err != nil {
 		renderer = nil
 	}
@@ -91,7 +91,7 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.textarea.SetWidth(msg.Width)
 		m.textarea.SetHeight(inputHeight)
 		if m.msgRenderer != nil {
-			m.msgRenderer, _ = components.NewMessageRenderer(m.theme)
+			m.msgRenderer.SetWidth(msg.Width - 4)
 		}
 
 	case StreamMsg:
@@ -323,7 +323,7 @@ func (m *ReplModel) getToolCallsFromSegments() []types.ToolCall {
 func (m *ReplModel) SetTheme(t theme.Theme) {
 	m.theme = t
 	if m.msgRenderer != nil {
-		m.msgRenderer, _ = components.NewMessageRenderer(t)
+		m.msgRenderer, _ = components.NewMessageRenderer(t, m.width-4)
 	}
 }
 

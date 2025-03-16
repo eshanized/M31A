@@ -10,31 +10,43 @@ import (
 type MessageRenderer struct {
 	theme    theme.Theme
 	renderer *glamour.TermRenderer
+	width    int
 }
 
-func NewMessageRenderer(t theme.Theme) (*MessageRenderer, error) {
-	var r *glamour.TermRenderer
-	var err error
-
-	if t.Mode == theme.ModeLight {
-		r, err = glamour.NewTermRenderer(
-			glamour.WithStandardStyle("light"),
-			glamour.WithWordWrap(78),
-		)
-	} else {
-		r, err = glamour.NewTermRenderer(
-			glamour.WithStandardStyle("dark"),
-			glamour.WithWordWrap(78),
-		)
+func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
+	mr := &MessageRenderer{
+		theme: t,
+		width: width,
 	}
-	if err != nil {
+	if err := mr.createGlamourRenderer(); err != nil {
 		return nil, err
 	}
+	return mr, nil
+}
 
-	return &MessageRenderer{
-		theme:    t,
-		renderer: r,
-	}, nil
+func (r *MessageRenderer) createGlamourRenderer() error {
+	style := "dark"
+	if r.theme.Mode == theme.ModeLight {
+		style = "light"
+	}
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle(style),
+		glamour.WithWordWrap(r.width),
+	)
+	if err != nil {
+		return err
+	}
+	r.renderer = renderer
+	return nil
+}
+
+func (r *MessageRenderer) SetWidth(width int) error {
+	if width == r.width {
+		return nil
+	}
+	r.width = width
+	r.renderer.Close()
+	return r.createGlamourRenderer()
 }
 
 func (r *MessageRenderer) RenderMessage(msg types.Message, width int) string {
@@ -106,8 +118,6 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		return ""
 	}
 
-	updateWidth(width - 4)
-
 	rendered, err := r.renderer.Render(content)
 	if err != nil {
 		return lipgloss.NewStyle().
@@ -122,8 +132,3 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		Render(rendered)
 }
 
-func updateWidth(width int) {
-	// The glamour renderer is created once with a fixed word wrap width.
-	// For dynamic width, we'd need to recreate the renderer.
-	// In V1, we accept the fixed width trade-off.
-}
