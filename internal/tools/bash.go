@@ -1,11 +1,12 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -68,10 +69,15 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
-	var stdoutBuf bytes.Buffer
-	var stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	// Use limited writers that cap output at BashOutputLimit
+	stdoutLimit := &limitWriter{limit: types.BashOutputLimit}
+	stderrLimit := &limitWriter{limit: types.BashOutputLimit}
+
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+
+	cmd.Stdout = io.MultiWriter(stdoutW, stdoutLimit)
+	cmd.Stderr = io.MultiWriter(stderrW, stderrLimit)
 
 	if err := cmd.Start(); err != nil {
 		return types.ToolResult{}, m31errors.ErrToolExecution
@@ -105,40 +111,50 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}()
 
-	waitErr := cmd.Wait()
+	// Close write ends when command finishes
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		stdoutW.Close()
+		stderrW.Close()
+	}()
 
-	outStr := stdoutBuf.String()
-	if stderrBuf.Len() > 0 {
-		if outStr != "" {
-			outStr += "\n"
+	// Read from both pipes concurrently
+	var outMu sync.Mutex
+	var outStr strings.Builder
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		io.Copy(&outStr, stdoutR)
+	}()
+
+	go func() {
+		defer wg.Done()
+		var stderrBuf strings.Builder
+		io.Copy(&stderrBuf, stderrR)
+		if stderrBuf.Len() > 0 {
+			outMu.Lock()
+			defer outMu.Unlock()
+			if outStr.Len() > 0 {
+				outStr.WriteString("\n")
+			}
+			outStr.WriteString(stderrBuf.String())
 		}
-		outStr += stderrBuf.String()
-	}
+	}()
 
-	// Cap output
-	truncated := false
-	if len(outStr) > types.BashOutputLimit {
-		outStr = outStr[:types.BashOutputLimit]
-		truncated = true
-	}
+	wg.Wait()
+
+	output := outStr.String()
+
+	// Check if output was truncated
+	truncated := stdoutLimit.written >= types.BashOutputLimit || stderrLimit.written >= types.BashOutputLimit
 
 	// Binary detection
-	if len(outStr) > 0 {
-		firstBytes := []byte(outStr)
-		checkLen := 512
-		if len(firstBytes) > checkLen {
-			firstBytes = firstBytes[:checkLen]
-		}
-		isBinary := false
-		for _, b := range firstBytes {
-			if b == 0 {
-				isBinary = true
-				break
-			}
-		}
-		if isBinary {
-			outStr = fmt.Sprintf("[binary output, %d bytes]", len(outStr))
-		}
+	if isBinary(output) {
+		output = fmt.Sprintf("[binary output, %d bytes]", len(output))
 	}
 
 	elapsed := time.Since(start).Milliseconds()
@@ -151,7 +167,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return types.ToolResult{
-				Output:     outStr,
+				Output:     output,
 				DurationMs: elapsed,
 				Truncated:  truncated,
 				Error:      fmt.Sprintf("timeout after %ds", timeoutSec),
@@ -159,14 +175,14 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 		if ctx.Err() == context.Canceled {
 			return types.ToolResult{
-				Output:     outStr,
+				Output:     output,
 				DurationMs: elapsed,
 				Truncated:  truncated,
 				Error:      "context cancelled",
 			}, nil
 		}
 		return types.ToolResult{
-			Output:     outStr,
+			Output:     output,
 			DurationMs: elapsed,
 			Truncated:  truncated,
 			Error:      fmt.Sprintf("exit code %d", exitCode),
@@ -174,8 +190,44 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	return types.ToolResult{
-		Output:     outStr,
+		Output:     output,
 		DurationMs: elapsed,
 		Truncated:  truncated,
 	}, nil
+}
+
+// limitWriter writes up to limit bytes and then silently drops further writes.
+type limitWriter struct {
+	limit int
+	written int
+}
+
+func (lw *limitWriter) Write(p []byte) (int, error) {
+	remaining := lw.limit - lw.written
+	if remaining <= 0 {
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	n := len(p)
+	lw.written += n
+	return n, nil
+}
+
+// isBinary checks if a string contains null bytes (binary content).
+func isBinary(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	checkLen := len(s)
+	if checkLen > 512 {
+		checkLen = 512
+	}
+	for i := 0; i < checkLen; i++ {
+		if s[i] == 0 {
+			return true
+		}
+	}
+	return false
 }
