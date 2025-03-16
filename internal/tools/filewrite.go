@@ -36,6 +36,8 @@ func (t *FileWrite) RiskLevel() types.RiskLevel {
 }
 
 func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+	start := time.Now()
+
 	pathRaw, ok := input.Params["path"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
@@ -169,7 +171,10 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	cleanup = false
 
+	elapsed := time.Since(start).Milliseconds()
+
 	return types.ToolResult{
-		Output: fmt.Sprintf("Wrote %d bytes to %s", len(contentBytes), path),
+		Output:     fmt.Sprintf("Wrote %d bytes to %s", len(contentBytes), path),
+		DurationMs: elapsed,
 	}, nil
 }
