@@ -53,7 +53,15 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	searchPath := t.workDir
 	if pathRaw, ok := input.Params["path"]; ok {
 		if pathStr, ok := pathRaw.(string); ok {
-			searchPath = pathStr
+			joined := pathStr
+			if !filepath.IsAbs(pathStr) {
+				joined = filepath.Join(t.workDir, pathStr)
+			}
+			resolved, err := filepath.EvalSymlinks(joined)
+			if err != nil {
+				return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+			}
+			searchPath = resolved
 		}
 	}
 

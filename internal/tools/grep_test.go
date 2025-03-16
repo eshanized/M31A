@@ -131,3 +131,25 @@ func TestGrep_MissingPatternParam(t *testing.T) {
 		t.Error("expected error for missing pattern param")
 	}
 }
+
+func TestGrep_RelativePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0755)
+	os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("package main\nfunc main() {}\n"), 0644)
+
+	g := NewGrep(dir)
+	result, err := g.Execute(context.Background(), types.ToolInput{
+		Name: "Grep",
+		Params: map[string]any{
+			"pattern": "main",
+			"path":    "src/pkg",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "main.go") {
+		t.Errorf("expected main.go in results with relative path, got: %s", result.Output)
+	}
+}
