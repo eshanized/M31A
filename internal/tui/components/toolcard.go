@@ -1,6 +1,7 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -73,20 +74,36 @@ func formatToolInput(name string, input []byte) string {
 		return ""
 	}
 	raw := string(input)
-	switch name {
-	case "Bash":
-		return raw
-	case "FileRead":
-		return raw
-	case "FileWrite":
-		return raw
-	case "Glob":
-		return raw
-	case "Grep":
-		return raw
-	default:
+
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
 		return raw
 	}
+
+	switch name {
+	case "Bash":
+		if cmd, ok := params["command"].(string); ok {
+			return "$ " + cmd
+		}
+	case "FileRead":
+		if path, ok := params["path"].(string); ok {
+			return "reading " + path
+		}
+	case "FileWrite":
+		if path, ok := params["path"].(string); ok {
+			return "writing " + path
+		}
+	case "Glob":
+		if pattern, ok := params["pattern"].(string); ok {
+			return "glob " + pattern
+		}
+	case "Grep":
+		if pattern, ok := params["pattern"].(string); ok {
+			return "grep " + pattern
+		}
+	}
+
+	return raw
 }
 
 func isBinaryContent(s string) bool {
