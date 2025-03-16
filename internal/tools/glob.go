@@ -53,10 +53,13 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	var matches []string
+	var err error
 	if useRG {
-		matches = t.globWithRG(pattern)
+		matches, err = t.globWithRG(pattern)
+		if err != nil {
+			return types.ToolResult{}, fmt.Errorf("invalid glob pattern: %w", err)
+		}
 	} else {
-		var err error
 		matches, err = t.globWithDoublestar(pattern)
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("invalid glob pattern: %w", err)
@@ -79,7 +82,8 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-50s %10s %s\n", "path", "size", "modified")
 	for _, m := range matches {
-		fi, err := os.Stat(m)
+		fullPath := filepath.Join(t.workDir, m)
+		fi, err := os.Stat(fullPath)
 		if err != nil {
 			continue
 		}
@@ -97,20 +101,21 @@ func (t *Glob) globWithDoublestar(pattern string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := make([]string, 0, len(matches))
-	for _, m := range matches {
-		result = append(result, filepath.Join(t.workDir, m))
-	}
-	return result, nil
+	// Return paths relative to workDir for consistency
+	return matches, nil
 }
 
-func (t *Glob) globWithRG(pattern string) []string {
+func (t *Glob) globWithRG(pattern string) ([]string, error) {
 	cmd := exec.Command("rg", "--files", "--glob", pattern)
 	cmd.Dir = t.workDir
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	return lines
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		return nil, nil
+	}
+	// rg returns paths relative to working directory already
+	return lines, nil
 }
