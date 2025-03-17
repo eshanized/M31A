@@ -358,49 +358,26 @@ Build the visual rendering layer that makes M31A look premium.
 
 **Duration:** 2 weeks (starts Week 10, overlaps Phase 4 tail)  
 **Complexity:** 5/10  
-**Milestone:** Sessions persist, resume, and are correctly reconstructed from disk
+**Milestone:** Sessions persist, resume, and are correctly reconstructed from disk  
+**Plans:** 5 plans in 3 waves
 
-### Tasks
+### Plans
 
-**P5.1 — Config system (`internal/config/`)**
-- Parse `~/.m31a/config.toml` using `BurntSushi/toml`
-- Env var override layer; resolution order: env var → OS keychain → config file
-- Defaults for all fields; missing config file triggers first-run flow
+| Plan | Wave | Objective | Files | Requirements |
+|------|------|-----------|-------|--------------|
+| `05-01` | 1 | OS keychain integration — `pkg/keychain/` with Linux/macOS/Windows backends, unified Keychain interface, tests | `pkg/keychain/` | P5.2 |
+| `05-02` | 1 | Session lifecycle — `pkg/session/` Manager, Session CRUD, atomic writes, archive, tests | `pkg/session/` | P5.3 |
+| `05-03` | 2 | File-based state persistence (PROJECT.md, TASKS.md, STATE.md writers/parsers) + checkpoint system | `pkg/session/` | P5.4, P5.5 |
+| `05-04` | 2 | Config loader (BurntSushi/toml + env resolution) + token estimator (tiktoken-go + fallback) | `internal/config/loader.go`, `internal/tokens/` | P5.1, P5.7 |
+| `05-05` | 3 | Settings screen (tabbed config editor) + Resume screen (bubbles/list session browser) + AppState wiring | `internal/tui/settings.go`, `internal/tui/resume.go`, `internal/tui/types.go`, `internal/tui/app.go` | P5.6 |
 
-**P5.2 — OS keychain integration (`pkg/keychain/`)**
-- Compile-tag separated implementations:
-  - `keychain_linux.go`: freedesktop Secret Service via `godbus/dbus`; fallback to `pass` CLI
-  - `keychain_darwin.go`: macOS Keychain Services via `keyring` package (CGO-less)
-  - `keychain_windows.go`: Windows Credential Manager via `go-wincred`
-- Unified interface: `Get()`, `Set()`, `Delete()`
-- CLI subcommands: `m31a keychain setup`, `m31a keychain rotate <provider>`, `m31a keychain remove <provider>`
+### Wave Structure
 
-**P5.3 — Session lifecycle (`pkg/session/`)**
-- `Session.New()`: generate 8-char ID via `crypto/rand`; create session directory
-- `Session.Save()`: atomic writes to `session.json` and `messages.json`
-- `Session.Load(id)`: parse all session files; reconstruct state
-- `Session.Archive()`: move to `archived/` post-Ship
-
-**P5.4 — File-based state persistence**
-- `planning/PROJECT.md` writer/parser: goal, project type, framework, discuss Q&A
-- `planning/TASKS.md` writer/parser: Markdown table with ID, action, description, deps, status, files
-- `planning/STATE.md` writer/parser: current phase, progress, last action, timestamp
-- All writes atomic (temp file + rename); parse tolerates extra whitespace
-
-**P5.5 — Checkpoint system**
-- Snapshot `AppState` to `checkpoint.json` before each phase transition
-- Only last 2 checkpoints retained
-- `/undo` reads checkpoint and restores previous phase
-
-**P5.6 — Resume browser screen (`internal/tui/resume.go`)**
-- On startup: scan sessions directory; sort by last-modified
-- Render session list with metadata; corrupted session detection with `[!]` badge
-- Keys: `Enter` = resume, `N` = new session, `D` = delete with confirmation
-
-**P5.7 — Token estimation + calibration**
-- Client-side: `tiktoken-go` for GPT/Claude; `len(runes) / 4 * 1.3` fallback
-- Server calibration: extract `usage` from final SSE chunk; EMA correction (alpha=0.3)
-- Context warning: banner at `contextUsed / contextTotal > threshold` (default 80%)
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1 | 05-01, 05-02 | yes, yes |
+| 2 | 05-03, 05-04 | yes, yes |
+| 3 | 05-05 | no (checkpoint for visual verification) |
 
 ### Deliverables
 
