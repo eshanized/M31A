@@ -1,0 +1,291 @@
+package session
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/eshanized/M31A/internal/types"
+)
+
+// ---------------------------------------------------------------------------
+// PROJECT.md — goal, project type, framework, Q&A
+// ---------------------------------------------------------------------------
+
+// SaveProject writes ProjectState to planning/PROJECT.md for the given session.
+func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) error {
+	var b strings.Builder
+
+	b.WriteString("# Project\n\n")
+	b.WriteString(fmt.Sprintf("**Goal:** %s\n", project.Goal))
+	b.WriteString(fmt.Sprintf("**Type:** %s\n", project.ProjectType))
+	b.WriteString(fmt.Sprintf("**Framework:** %s\n", project.Framework))
+
+	if len(project.Answers) > 0 {
+		b.WriteString("\n## Questions\n\n")
+		// Sort keys for deterministic output
+		keys := make([]string, 0, len(project.Answers))
+		for k := range project.Answers {
+			keys = append(keys, k)
+		}
+		for _, k := range keys {
+			b.WriteString(fmt.Sprintf("- **Q:** %s → **A:** %s\n", k, project.Answers[k]))
+		}
+	}
+
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+
+	path := filepath.Join(planningDir, "PROJECT.md")
+	return m.atomicWrite(path, []byte(b.String()))
+}
+
+// LoadProject reads and parses planning/PROJECT.md for the given session.
+// Returns nil without error if the file does not exist (graceful degradation).
+func (m *Manager) LoadProject(sessionID string) (*types.ProjectState, error) {
+	path := filepath.Join(m.planningDirPath(sessionID), "PROJECT.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cannot read PROJECT.md: %w", err)
+	}
+
+	project := &types.ProjectState{
+		Answers: make(map[string]string),
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|---") {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "**Goal:**"):
+			project.Goal = strings.TrimSpace(line[len("**Goal:**"):])
+		case strings.HasPrefix(line, "**Type:**"):
+			project.ProjectType = strings.TrimSpace(line[len("**Type:**"):])
+		case strings.HasPrefix(line, "**Framework:**"):
+			project.Framework = strings.TrimSpace(line[len("**Framework:**"):])
+		case strings.HasPrefix(line, "- **Q:**"):
+			rest := strings.TrimPrefix(line, "- **Q:**")
+			parts := strings.SplitN(rest, "→", 2)
+			if len(parts) == 2 {
+				q := strings.TrimSpace(parts[0])
+				aStr := strings.TrimSpace(parts[1])
+				aStr = strings.TrimPrefix(aStr, "**A:**")
+				a := strings.TrimSpace(aStr)
+				project.Answers[q] = a
+			}
+		}
+	}
+
+	return project, nil
+}
+
+// ---------------------------------------------------------------------------
+// TASKS.md — markdown table
+// ---------------------------------------------------------------------------
+
+// SaveTasks writes a slice of Tasks to planning/TASKS.md as a markdown table.
+func (m *Manager) SaveTasks(sessionID string, tasks []types.Task) error {
+	var b strings.Builder
+
+	b.WriteString("# Tasks\n\n")
+	b.WriteString("| ID | Action | Description | Deps | Status | Files |\n")
+	b.WriteString("|----|--------|-------------|------|--------|-------|\n")
+
+	for _, task := range tasks {
+		deps := "-"
+		if len(task.Dependencies) > 0 {
+			depStrs := make([]string, len(task.Dependencies))
+			for i, d := range task.Dependencies {
+				depStrs[i] = fmt.Sprintf("%d", d)
+			}
+			deps = strings.Join(depStrs, ", ")
+		}
+
+		files := "-"
+		if len(task.Files) > 0 {
+			files = strings.Join(task.Files, ", ")
+		}
+
+		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s | %s |\n",
+			task.ID, task.Action, task.Description, deps, string(task.Status), files))
+	}
+
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+
+	path := filepath.Join(planningDir, "TASKS.md")
+	return m.atomicWrite(path, []byte(b.String()))
+}
+
+// LoadTasks reads and parses planning/TASKS.md for the given session.
+// Returns an empty slice without error if the file does not exist.
+func (m *Manager) LoadTasks(sessionID string) ([]types.Task, error) {
+	path := filepath.Join(m.planningDirPath(sessionID), "TASKS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []types.Task{}, nil
+		}
+		return nil, fmt.Errorf("cannot read TASKS.md: %w", err)
+	}
+
+	var tasks []types.Task
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|---") {
+			continue
+		}
+
+		// Skip the header row
+		if strings.HasPrefix(line, "| ID |") {
+			continue
+		}
+
+		// Must be a table row
+		if !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
+			continue
+		}
+
+		cells := parseTableRow(line)
+		if len(cells) < 6 {
+			continue
+		}
+
+		var id int
+		if _, err := fmt.Sscan(cells[0], &id); err != nil {
+			continue
+		}
+
+		task := types.Task{
+			ID:           id,
+			Action:       cells[1],
+			Description:  cells[2],
+			Dependencies: parseDeps(cells[3]),
+			Status:       types.TaskStatus(cells[4]),
+			Files:        parseFileList(cells[5]),
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
+}
+
+// parseTableRow splits a markdown table row into its cell values.
+func parseTableRow(line string) []string {
+	// line has leading and trailing |
+	inner := line[1 : len(line)-1]
+	parts := strings.Split(inner, "|")
+	cells := make([]string, len(parts))
+	for i, p := range parts {
+		cells[i] = strings.TrimSpace(p)
+	}
+	return cells
+}
+
+// parseDeps converts a comma-separated dependency string to []int.
+func parseDeps(s string) []int {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	deps := make([]int, 0, len(parts))
+	for _, p := range parts {
+		var d int
+		if _, err := fmt.Sscan(strings.TrimSpace(p), &d); err == nil {
+			deps = append(deps, d)
+		}
+	}
+	return deps
+}
+
+// parseFileList converts a comma-separated file list to []string.
+func parseFileList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	files := make([]string, len(parts))
+	for i, p := range parts {
+		files[i] = strings.TrimSpace(p)
+	}
+	return files
+}
+
+// ---------------------------------------------------------------------------
+// STATE.md — phase, progress, last action, timestamp
+// ---------------------------------------------------------------------------
+
+// SaveState writes workflow state to planning/STATE.md for the given session.
+func (m *Manager) SaveState(sessionID string, phase types.WorkflowPhase, progress, lastAction string) error {
+	var b strings.Builder
+
+	b.WriteString("# State\n\n")
+	b.WriteString(fmt.Sprintf("**Phase:** %s\n", string(phase)))
+	b.WriteString(fmt.Sprintf("**Progress:** %s\n", progress))
+	b.WriteString(fmt.Sprintf("**Last Action:** %s\n", lastAction))
+	b.WriteString(fmt.Sprintf("**Timestamp:** %s\n", time.Now().Format(time.RFC3339)))
+
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+
+	path := filepath.Join(planningDir, "STATE.md")
+	return m.atomicWrite(path, []byte(b.String()))
+}
+
+// LoadState reads and parses planning/STATE.md for the given session.
+// Returns empty/default values without error if the file does not exist.
+func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progress, lastAction string, timestamp time.Time, err error) {
+	path := filepath.Join(m.planningDirPath(sessionID), "STATE.md")
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return types.PhaseIdle, "", "", time.Time{}, nil
+		}
+		return types.PhaseIdle, "", "", time.Time{}, fmt.Errorf("cannot read STATE.md: %w", readErr)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "**Phase:**"):
+			phase = types.WorkflowPhase(strings.TrimSpace(line[len("**Phase:**"):]))
+		case strings.HasPrefix(line, "**Progress:**"):
+			progress = strings.TrimSpace(line[len("**Progress:**"):])
+		case strings.HasPrefix(line, "**Last Action:**"):
+			lastAction = strings.TrimSpace(line[len("**Last Action:**"):])
+		case strings.HasPrefix(line, "**Timestamp:**"):
+			ts := strings.TrimSpace(line[len("**Timestamp:**"):])
+			timestamp, _ = time.Parse(time.RFC3339, ts)
+		}
+	}
+
+	if phase == "" {
+		phase = types.PhaseIdle
+	}
+
+	return
+}
