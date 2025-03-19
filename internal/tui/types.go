@@ -19,6 +19,7 @@ const (
 
 type AppMsg struct {
 	Screen    Screen
+	SessionID string   // populated by resume screen on selection
 	Health    *HealthUpdateMsg
 	Provider  *ProviderSwitchMsg
 	InitError error

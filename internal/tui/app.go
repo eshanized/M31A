@@ -10,11 +10,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/keychain"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 type AppState struct {
@@ -35,6 +38,11 @@ type AppState struct {
 	themeManager     *theme.Manager
 	firstRunModel    *FirstRunModel
 	replModel        *ReplModel
+	settingsModel    *SettingsModel
+	resumeModel      *ResumeModel
+	sessionManager   *session.Manager
+	keychain         keychain.Keychain
+	config           *config.Config
 	apiKey           string
 	configPath       string
 	prevScreen       Screen
@@ -48,15 +56,51 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	cwd, _ := os.Getwd()
 	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
 
-	app := &AppState{
-		version:      version,
-		registry:     registry,
-		apiKey:       apiKey,
-		configPath:   configPath,
-		themeManager: tm,
-		healthStatus: types.HealthStatus{Status: "unknown"},
-		dispatcher:   tools.DefaultDispatcher(cwd, backupDir),
+	// Initialize config
+	cfg, _ := config.Load(configPath)
+	if cfg == nil {
+		cfg = config.DefaultConfig()
 	}
+
+	// Initialize keychain (may be nil — keychain may be unavailable)
+	kc, _ := keychain.New()
+
+	// Resolve API keys via env var → keychain → config file
+	if apiKey == "" {
+		// If no explicit apiKey, try resolving from config resolution
+		if kc != nil {
+			cfg.ResolveAPIKeys(kc)
+		}
+		apiKey = cfg.Provider.OpenRouter.APIKey
+		if apiKey == "" {
+			apiKey = cfg.Provider.Zen.APIKey
+		}
+	}
+
+	// Initialize session manager
+	sessionBaseDir := filepath.Join(filepath.Dir(configPath), "sessions")
+	sessionMgr := session.NewManager(sessionBaseDir)
+
+	app := &AppState{
+		version:        version,
+		registry:       registry,
+		apiKey:         apiKey,
+		configPath:     configPath,
+		themeManager:   tm,
+		healthStatus:   types.HealthStatus{Status: "unknown"},
+		dispatcher:     tools.DefaultDispatcher(cwd, backupDir),
+		config:         cfg,
+		keychain:       kc,
+		sessionManager: sessionMgr,
+	}
+
+	// Initialize settings model
+	sm := NewSettingsModel(cfg, tm.Current(), kc)
+	app.settingsModel = sm
+
+	// Initialize resume model
+	rm := NewResumeModel(tm.Current(), sessionMgr)
+	app.resumeModel = rm
 
 	if apiKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath)
@@ -125,6 +169,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		if m.screen == ScreenREPL {
+			switch msg.String() {
+			case "/settings":
+				m.screen = ScreenSettings
+				return m, nil
+			case "/resume":
+				if m.resumeModel != nil {
+					m.resumeModel.Refresh()
+				}
+				m.screen = ScreenResume
+				return m, nil
+			}
 		}
 
 	case HealthCheckTickMsg:
@@ -221,6 +278,30 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case ScreenSettings:
+		if m.settingsModel == nil {
+			return m, nil
+		}
+		cmds, appMsg := m.settingsModel.Update(msg)
+		if appMsg != nil {
+			m.screen = appMsg.Screen
+		}
+		return m, tea.Batch(cmds...)
+
+	case ScreenResume:
+		if m.resumeModel == nil {
+			return m, nil
+		}
+		cmds, appMsg := m.resumeModel.Update(msg)
+		if appMsg != nil {
+			m.screen = appMsg.Screen
+			if appMsg.SessionID != "" {
+				// SessionID will be used by the load handler
+				m.currentOperation = fmt.Sprintf("Loading session %s...", appMsg.SessionID)
+			}
+		}
+		return m, tea.Batch(cmds...)
+
 	default:
 		return m, nil
 	}
@@ -279,6 +360,18 @@ func (m *AppState) View() string {
 			body,
 			status,
 		)
+
+	case ScreenSettings:
+		if m.settingsModel != nil {
+			return m.settingsModel.View()
+		}
+		return "Loading..."
+
+	case ScreenResume:
+		if m.resumeModel != nil {
+			return m.resumeModel.View()
+		}
+		return "Loading..."
 
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
