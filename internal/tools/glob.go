@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/eshanized/M31A/internal/types"
@@ -34,6 +35,8 @@ func (t *Glob) RiskLevel() types.RiskLevel {
 }
 
 func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+	start := time.Now()
+
 	patternRaw, ok := input.Params["pattern"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: pattern")
@@ -93,7 +96,11 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		fmt.Fprintf(&b, "[... %d more files]", len(matches)-maxResults)
 	}
 
-	return types.ToolResult{Output: b.String()}, nil
+	return types.ToolResult{
+		Output:     b.String(),
+		DurationMs: time.Since(start).Milliseconds(),
+		Truncated:  truncated,
+	}, nil
 }
 
 func (t *Glob) globWithDoublestar(pattern string) ([]string, error) {
