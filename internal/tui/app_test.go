@@ -62,11 +62,11 @@ func TestApp_Init_ReturnsCmd(t *testing.T) {
 	}
 }
 
-func TestApp_Init_NoKey_ReturnsNil(t *testing.T) {
+func TestApp_Init_AlwaysReturnsPermissionListener(t *testing.T) {
 	app := NewApp("test", nil, "", "/tmp/config")
 	cmd := app.Init()
-	if cmd != nil {
-		t.Error("Init() without key should return nil")
+	if cmd == nil {
+		t.Error("Init() should always return non-nil cmd (permission listener)")
 	}
 }
 
@@ -178,11 +178,11 @@ func TestApp_AppMsgWithProvider(t *testing.T) {
 	}
 }
 
-func TestApp_InitFirstRunNoHealth(t *testing.T) {
+func TestApp_InitFirstRunReturnsPermissionListener(t *testing.T) {
 	app := NewApp("test", nil, "", "/tmp/config")
 	cmd := app.Init()
-	if cmd != nil {
-		t.Error("First-run Init should return nil")
+	if cmd == nil {
+		t.Error("First-run Init should return permission listener cmd")
 	}
 }
 
