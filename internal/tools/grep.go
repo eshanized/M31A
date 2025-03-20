@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/eshanized/M31A/internal/types"
@@ -41,6 +42,8 @@ func (t *Grep) RiskLevel() types.RiskLevel {
 }
 
 func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+	start := time.Now()
+
 	patternRaw, ok := input.Params["pattern"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: pattern")
@@ -79,10 +82,16 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
+	var result types.ToolResult
+	var err error
 	if t.hasRg {
-		return t.grepWithRG(pattern, searchPath, globFilter, maxResults)
+		result, err = t.grepWithRG(pattern, searchPath, globFilter, maxResults)
+	} else {
+		result, err = t.grepPureGo(pattern, searchPath, globFilter, maxResults)
 	}
-	return t.grepPureGo(pattern, searchPath, globFilter, maxResults)
+
+	result.DurationMs = time.Since(start).Milliseconds()
+	return result, err
 }
 
 type rgMatch struct {
