@@ -117,21 +117,24 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		app.activeProvider = registry.Active()
 	}
 
-	// Permission listener goroutine
-	go func() {
-		for req := range app.dispatcher.RequestCh() {
-			app.Update(PermissionRequestMsg{Request: req})
-		}
-	}()
-
 	return app
 }
 
 func (m *AppState) Init() tea.Cmd {
+	cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 	if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
-		return HealthCheckTicker(context.Background(), m.registry, m.activeProvider, types.HealthCheckInterval)
+		cmds = append(cmds, HealthCheckTicker(context.Background(), m.registry, m.activeProvider, types.HealthCheckInterval))
 	}
-	return nil
+	return tea.Batch(cmds...)
+}
+
+// permissionListenerCmd returns a tea.Cmd that watches the dispatcher's
+// permission request channel and feeds requests into the Bubble Tea event loop.
+func permissionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
+	return func() tea.Msg {
+		req := <-dispatcher.RequestCh()
+		return PermissionRequestMsg{Request: req}
+	}
 }
 
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -238,7 +241,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
 		m.screen = m.prevScreen
 		m.permissionModal = nil
-		return m, nil
+		return m, permissionListenerCmd(m.dispatcher)
 	}
 
 	switch m.screen {
@@ -265,6 +268,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenREPL:
@@ -276,6 +280,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastActivity = time.Now()
 			m.currentOperation = "Ready"
 		}
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenSettings:
@@ -286,6 +291,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if appMsg != nil {
 			m.screen = appMsg.Screen
 		}
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenResume:
@@ -300,6 +306,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentOperation = fmt.Sprintf("Loading session %s...", appMsg.SessionID)
 			}
 		}
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	default:
