@@ -91,7 +91,9 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.textarea.SetWidth(msg.Width)
 		m.textarea.SetHeight(inputHeight)
 		if m.msgRenderer != nil {
-			m.msgRenderer.SetWidth(msg.Width - 4)
+			if err := m.msgRenderer.SetWidth(msg.Width - 4); err != nil {
+				m.lastStatus = fmt.Sprintf("Renderer resize failed: %v", err)
+			}
 		}
 
 	case StreamMsg:
@@ -323,7 +325,10 @@ func (m *ReplModel) getToolCallsFromSegments() []types.ToolCall {
 func (m *ReplModel) SetTheme(t theme.Theme) {
 	m.theme = t
 	if m.msgRenderer != nil {
-		m.msgRenderer, _ = components.NewMessageRenderer(t, m.width-4)
+		newRenderer, err := components.NewMessageRenderer(t, m.width-4)
+		if err == nil {
+			m.msgRenderer = newRenderer
+		}
 	}
 }
 
