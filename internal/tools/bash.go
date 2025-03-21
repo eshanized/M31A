@@ -119,7 +119,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		stderrW.Close()
 	}()
 
-	// Read from both pipes concurrently
+	// Read from both pipes concurrently with per-stream buffers
 	var outMu sync.Mutex
 	var outStr strings.Builder
 
@@ -128,21 +128,25 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	go func() {
 		defer wg.Done()
-		io.Copy(&outStr, stdoutR)
+		var stdoutBuf strings.Builder
+		io.Copy(&stdoutBuf, stdoutR)
+		outMu.Lock()
+		outStr.WriteString(stdoutBuf.String())
+		outMu.Unlock()
 	}()
 
 	go func() {
 		defer wg.Done()
 		var stderrBuf strings.Builder
 		io.Copy(&stderrBuf, stderrR)
+		outMu.Lock()
 		if stderrBuf.Len() > 0 {
-			outMu.Lock()
-			defer outMu.Unlock()
 			if outStr.Len() > 0 {
 				outStr.WriteString("\n")
 			}
 			outStr.WriteString(stderrBuf.String())
 		}
+		outMu.Unlock()
 	}()
 
 	wg.Wait()
