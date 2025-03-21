@@ -655,27 +655,31 @@ func (e *Estimator) Estimate(text string) int {
 | A4 | `os.Rename()` is atomic on same-filesystem for Linux/macOS | Common Pitfalls | HIGH — documented POSIX behavior; cross-filesystem EXDEV case handled by temp file in same dir |
 | A5 | Existing 319 tests will still pass after Phase 5 | All sections | MEDIUM — no existing files modified except adding `internal/tui/settings.go` and `internal/tui/resume.go`; theme and types unchanged |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should we use `zalando/go-keyring` or direct CLI?**
+1. **Should we use `zalando/go-keyring` or direct CLI?** (RESOLVED)
    - What we know: `go-keyring`'s API is `Get(service, user string)` — incompatible with our `Get(service string)`. On macOS it wraps `/usr/bin/security` CLI. On Linux it wraps `godbus/dbus`.
    - Recommendation: Implement directly. macOS: shell to `/usr/bin/security` (10 lines of code). Linux: use `godbus/dbus/v5` directly for full control over service names.
+   - Resolution: Direct CLI approach implemented in 05-01-PLAN.md Tasks 1-3. macOS uses `/usr/bin/security` with `find-generic-password`/`add-generic-password`/`delete-generic-password` subcommands. Linux uses `godbus/dbus/v5` D-Bus Secret Service with `pass` CLI fallback.
    - Confidence: HIGH
 
-2. **D-Bus Secret Service wrapper code complexity?**
+2. **D-Bus Secret Service wrapper code complexity?** (RESOLVED)
    - What we know: The Secret Service D-Bus API involves opening sessions, creating items with attributes, unlocking collections.
    - What's unclear: Exact D-Bus method signatures for `SearchItems` and `GetSecret`.
    - Recommendation: Reference the `zalando/go-keyring` secret_service subpackage for D-Bus call patterns, or implement a minimal wrapper around the 3-4 D-Bus calls needed.
-   - Confidence: MEDIUM
-
-3. **tiktoken-go: which import path?**
-   - What we know: Two modules exist — `github.com/pkoukk/tiktoken-go` (original, referenced in AGENTS.md) and `github.com/tiktoken-go/tokenizer` (newer fork).
-   - Recommendation: Use `github.com/pkoukk/tiktoken-go` as specified in AGENTS.md. The API uses `tiktoken.EncodingForModel(modelName)`.
+   - Resolution: Confirmed D-Bus method signatures from `zalando/go-keyring` secret_service.go: `OpenSession` (method `org.freedesktop.Secret.Service.OpenSession`), `SearchItems` (method `org.freedesktop.Secret.Service.SearchItems`, returns `[]dbus.ObjectPath`), `GetSecret` (method `org.freedesktop.Secret.Item.GetSecret`, returns `Secret struct`). Linux implementation will use these exact signatures. The `pass` CLI fallback (`exec.Command("pass", "show", serviceName)`) handles environments without D-Bus.
    - Confidence: HIGH
 
-4. **Should `AppMsg` get a `SessionID` field?**
+3. **tiktoken-go: which import path?** (RESOLVED)
+   - What we know: Two modules exist — `github.com/pkoukk/tiktoken-go` (original, referenced in AGENTS.md) and `github.com/tiktoken-go/tokenizer` (newer fork).
+   - Recommendation: Use `github.com/pkoukk/tiktoken-go` as specified in AGENTS.md. The API uses `tiktoken.EncodingForModel(modelName)`.
+   - Resolution: AGENTS.md confirmed `pkoukk/tiktoken-go` is canonical. Plan 05-04 Task 2 uses this import path.
+   - Confidence: HIGH
+
+4. **Should `AppMsg` get a `SessionID` field?** (RESOLVED)
    - What we know: Resume screen needs to signal which session to load. Current `AppMsg` struct has `Screen`, `Health`, `Provider`, `InitError` fields.
    - Recommendation: Add `SessionID string` field to `AppMsg` struct in `internal/tui/types.go`. This is a minimal, backwards-compatible change.
+   - Resolution: Plan 05-05 Task 1 adds `SessionID string` field to AppMsg. The field is optional (zero-value empty string when not set by resume screen).
    - Confidence: HIGH
 
 ## Environment Availability
