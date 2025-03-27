@@ -15,6 +15,10 @@ const (
 	ScreenSettings
 	ScreenResume
 	ScreenPermission
+	ScreenPlan
+	ScreenExecute
+	ScreenVerify
+	ScreenShip
 )
 
 type AppMsg struct {
