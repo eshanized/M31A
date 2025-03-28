@@ -1,106 +1,511 @@
-// Package ledger provides cross-session learning ledger storage.
-// After each Ship phase, session outcomes are appended to the ledger
-// file at ~/.m31a/LEDGER.md for context injection in future sessions.
+// Package ledger implements a cross-session learning ledger that records
+// every shipped session's metadata to a persistent markdown file
+// (~/.m31a/LEDGER.md). The ledger supports append, filtered queries,
+// aggregate statistics, and automatic truncation.
 package ledger
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
+
+	"github.com/eshanized/M31A/internal/types"
 )
 
-// Entry represents a single completed session in the ledger.
-type Entry struct {
-	SessionID   string
-	Model       string
-	Provider    string
-	ProjectType string
-	TaskCount   int
-	TotalCost   float64
-	Duration    string
-	StartedAt   time.Time
+// LedgerEntry represents a single session record stored in the ledger.
+type LedgerEntry struct {
+	SessionID       string    `json:"session_id"`
+	Timestamp       time.Time `json:"timestamp"`
+	Model           string    `json:"model"`
+	Provider        string    `json:"provider"`
+	ProjectType     string    `json:"project_type"`
+	GoalKeywords    []string  `json:"goal_keywords,omitempty"`
+	Framework       string    `json:"framework,omitempty"`
+	TaskCount       int       `json:"task_count"`
+	FailedTasks     int       `json:"failed_tasks"`
+	SkippedTasks    int       `json:"skipped_tasks"`
+	CostEstimate    float64   `json:"cost_estimate"`
+	DurationMinutes int       `json:"duration_minutes"`
+	CommitCount     int       `json:"commit_count"`
 }
 
-// Ledger manages the cross-session learning history.
+// Ledger manages persistent session records in a markdown file.
 type Ledger struct {
-	entries []Entry
+	mu      sync.RWMutex
+	path    string
+	entries []LedgerEntry
 }
 
-// New creates a new Ledger with empty entries.
-func New() *Ledger {
-	return &Ledger{
-		entries: make([]Entry, 0),
+// LedgerStats holds aggregate statistics computed from all ledger entries.
+type LedgerStats struct {
+	TotalSessions      int            `json:"total_sessions"`
+	AvgTaskCount       float64        `json:"avg_task_count"`
+	AvgCost            float64        `json:"avg_cost"`
+	AvgDurationMinutes float64        `json:"avg_duration_minutes"`
+	TotalFailedTasks   int            `json:"total_failed_tasks"`
+	TopFailures        []string       `json:"top_failures,omitempty"`
+	TopFrameworks      []string       `json:"top_frameworks,omitempty"`
+	ByProjectType      map[string]int `json:"by_project_type"`
+}
+
+// New creates a Ledger for the given file path. If the file already exists,
+// it parses existing entries into memory. The directory is created if needed.
+func New(filePath string) *Ledger {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return &Ledger{path: filePath}
 	}
+
+	l := &Ledger{
+		path:    filePath,
+		entries: make([]LedgerEntry, 0),
+	}
+
+	if _, err := os.Stat(filePath); err == nil {
+		l.parseFile()
+	}
+
+	return l
 }
 
-// Append adds an entry to the in-memory ledger.
-// V1 stub: stores in memory only. Full implementation persists to
-// ~/.m31a/LEDGER.md and enforces max_entries pruning.
-func (l *Ledger) Append(entry Entry) {
+// stopWords are filtered from goal keyword extraction.
+var stopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "and": true, "or": true,
+	"but": true, "in": true, "on": true, "at": true, "to": true,
+	"for": true, "of": true, "with": true, "is": true, "are": true,
+	"it": true, "as": true, "by": true, "be": true, "this": true,
+	"that": true, "from": true, "was": true, "were": true, "been": true,
+}
+
+// splitKeywords splits a goal string into individual words, filtering stop words.
+func splitKeywords(goal string) []string {
+	words := strings.Fields(goal)
+	var keywords []string
+	for _, w := range words {
+		w = strings.Trim(strings.ToLower(w), ".,!?;:'\"")
+		if w != "" && !stopWords[w] {
+			keywords = append(keywords, w)
+		}
+	}
+	return keywords
+}
+
+// NewEntry constructs a LedgerEntry from a Session and summary data.
+func NewEntry(session types.Session, taskCount, failedTasks, skippedTasks, commitCount int, costEstimate float64) LedgerEntry {
+	entry := LedgerEntry{
+		SessionID:       session.ID,
+		Timestamp:       time.Now(),
+		Model:           session.Model,
+		Provider:        session.Provider,
+		TaskCount:       taskCount,
+		FailedTasks:     failedTasks,
+		SkippedTasks:    skippedTasks,
+		CostEstimate:    costEstimate,
+		DurationMinutes: int(time.Since(session.StartedAt).Minutes()),
+		CommitCount:     commitCount,
+	}
+	if session.Project != nil {
+		entry.ProjectType = session.Project.ProjectType
+		entry.Framework = session.Project.Framework
+		entry.GoalKeywords = splitKeywords(session.Project.Goal)
+	}
+	return entry
+}
+
+// Append adds an entry to the ledger, deduplicating by SessionID.
+// If the file doesn't exist, it creates it with a markdown table header.
+// Existing entries are not overwritten (same SessionID is silently skipped).
+func (l *Ledger) Append(entry LedgerEntry) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Dedup by SessionID
+	for _, e := range l.entries {
+		if e.SessionID == entry.SessionID {
+			return nil
+		}
+	}
+
 	l.entries = append(l.entries, entry)
-}
 
-// Entries returns all ledger entries, most recent first.
-func (l *Ledger) Entries() ([]Entry, error) {
-	if len(l.entries) == 0 {
-		return nil, nil
-	}
-	sorted := make([]Entry, len(l.entries))
-	copy(sorted, l.entries)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].StartedAt.After(sorted[j].StartedAt)
-	})
-	return sorted, nil
-}
-
-// EntriesFiltered returns entries filtered by project type and limited to
-// the specified count. Tags filtering is reserved for V1.1.
-func (l *Ledger) EntriesFiltered(projectType string, tags []string, limit int) ([]Entry, error) {
-	all, err := l.Entries()
+	// Append to file
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("open ledger for append: %w", err)
+	}
+	defer f.Close()
+
+	// Check if file is empty — write header if new
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat ledger: %w", err)
+	}
+	if fi.Size() == 0 {
+		if _, err := fmt.Fprintln(f, "# Cross-Session Learning Ledger"); err != nil {
+			return fmt.Errorf("write title: %w", err)
+		}
+		if _, err := fmt.Fprintln(f, ""); err != nil {
+			return fmt.Errorf("write blank line: %w", err)
+		}
+		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Cost | Duration |"); err != nil {
+			return fmt.Errorf("write column header: %w", err)
+		}
+		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|"); err != nil {
+			return fmt.Errorf("write separator: %w", err)
+		}
 	}
 
-	var filtered []Entry
-	for _, e := range all {
-		if projectType != "" && e.ProjectType != projectType {
+	line := formatEntry(entry)
+	if _, err := fmt.Fprintln(f, line); err != nil {
+		return fmt.Errorf("append entry: %w", err)
+	}
+
+	return nil
+}
+
+// formatEntry serializes a LedgerEntry to a markdown table row.
+func formatEntry(entry LedgerEntry) string {
+	timestamp := entry.Timestamp.Format(time.RFC3339)
+	return fmt.Sprintf(
+		"| %s | %s | %s | %s | %d | %d | %.2f | %d |",
+		entry.SessionID,
+		timestamp,
+		entry.Model,
+		entry.ProjectType,
+		entry.TaskCount,
+		entry.FailedTasks,
+		entry.CostEstimate,
+		entry.DurationMinutes,
+	)
+}
+
+// Entries returns a copy of all entries sorted newest-first by Timestamp.
+func (l *Ledger) Entries() []LedgerEntry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	result := make([]LedgerEntry, len(l.entries))
+	copy(result, l.entries)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp.After(result[j].Timestamp)
+	})
+	return result
+}
+
+// EntriesFiltered returns entries matching the given filters, sorted newest-first.
+//
+//   - projectType: exact match, case-insensitive. If empty, skip this filter.
+//   - keywords: an entry passes if ANY keyword matches in GoalKeywords
+//     (substring match, case-insensitive).
+//   - maxResults: maximum entries to return. If <= 0, defaults to 5.
+func (l *Ledger) EntriesFiltered(projectType string, keywords []string, maxResults int) []LedgerEntry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if maxResults <= 0 {
+		maxResults = 5
+	}
+
+	var filtered []LedgerEntry
+	for _, e := range l.entries {
+		// Filter by project type
+		if projectType != "" && !strings.EqualFold(e.ProjectType, projectType) {
 			continue
 		}
+
+		// Filter by keywords
+		if len(keywords) > 0 {
+			if !matchesAnyKeyword(e.GoalKeywords, keywords) {
+				continue
+			}
+		}
+
 		filtered = append(filtered, e)
 	}
 
-	if limit > 0 && len(filtered) > limit {
-		filtered = filtered[:limit]
+	// Sort newest-first
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].Timestamp.After(filtered[j].Timestamp)
+	})
+
+	// Limit
+	if len(filtered) > maxResults {
+		filtered = filtered[:maxResults]
 	}
 
-	return filtered, nil
+	return filtered
 }
 
-// Stats returns aggregate statistics over all ledger entries.
-// V1 stub: returns a formatted message when no entries exist.
-func (l *Ledger) Stats() string {
-	if len(l.entries) == 0 {
-		return "Ledger stats not available (no completed sessions)"
-	}
-
-	var totalCost float64
-	taskCounts := make([]int, 0, len(l.entries))
-	for _, e := range l.entries {
-		totalCost += e.TotalCost
-		taskCounts = append(taskCounts, e.TaskCount)
-	}
-
-	avgTasks := 0
-	if len(taskCounts) > 0 {
-		sum := 0
-		for _, c := range taskCounts {
-			sum += c
+// matchesAnyKeyword checks if any of the entry's GoalKeywords contains
+// any of the query keywords (substring match, case-insensitive).
+func matchesAnyKeyword(entryKeywords, queryKeywords []string) bool {
+	for _, qk := range queryKeywords {
+		qkLower := strings.ToLower(qk)
+		for _, ek := range entryKeywords {
+			if strings.Contains(strings.ToLower(ek), qkLower) {
+				return true
+			}
 		}
-		avgTasks = sum / len(taskCounts)
+	}
+	return false
+}
+
+// Stats computes aggregate statistics from all entries.
+// Returns zero-valued stats for an empty ledger (never panics).
+func (l *Ledger) Stats() LedgerStats {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	stats := LedgerStats{
+		TotalSessions: len(l.entries),
+		ByProjectType: make(map[string]int),
 	}
 
-	return fmt.Sprintf(
-		"Sessions: %d | Avg tasks: %d | Total cost: $%.4f | Avg cost/session: $%.4f",
-		len(l.entries), avgTasks, totalCost, totalCost/float64(len(l.entries)),
-	)
+	if len(l.entries) == 0 {
+		return stats
+	}
+
+	var totalTasks, totalDuration int
+	var totalCost float64
+	failureCounts := make(map[string]int)
+	frameworkCounts := make(map[string]int)
+
+	for _, e := range l.entries {
+		totalTasks += e.TaskCount
+		totalDuration += e.DurationMinutes
+		totalCost += e.CostEstimate
+		stats.TotalFailedTasks += e.FailedTasks
+		stats.ByProjectType[e.ProjectType]++
+
+		if e.FailedTasks > 0 && e.ProjectType != "" {
+			failureCounts[e.ProjectType]++
+		}
+		if e.Framework != "" {
+			frameworkCounts[e.Framework]++
+		}
+	}
+
+	count := float64(len(l.entries))
+	stats.AvgTaskCount = float64(totalTasks) / count
+	stats.AvgCost = totalCost / count
+	stats.AvgDurationMinutes = float64(totalDuration) / count
+
+	// Top failures (by project type with most failed tasks)
+	stats.TopFailures = topN(failureCounts, 5)
+
+	// Top frameworks
+	stats.TopFrameworks = topN(frameworkCounts, 5)
+
+	return stats
+}
+
+// topN returns the top N keys from a frequency map, sorted by count descending.
+func topN(counts map[string]int, n int) []string {
+	type kv struct {
+		key   string
+		count int
+	}
+	var sorted []kv
+	for k, v := range counts {
+		sorted = append(sorted, kv{k, v})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].count > sorted[j].count
+	})
+	if len(sorted) > n {
+		sorted = sorted[:n]
+	}
+	result := make([]string, len(sorted))
+	for i, kv := range sorted {
+		result[i] = kv.key
+	}
+	return result
+}
+
+// Truncate removes the oldest entries, keeping only the newest maxEntries.
+// If maxEntries <= 0, defaults to 100. If the current count is already
+// within the limit, no action is taken.
+func (l *Ledger) Truncate(maxEntries int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if maxEntries <= 0 {
+		maxEntries = 100
+	}
+
+	if len(l.entries) <= maxEntries {
+		return nil
+	}
+
+	// Sort newest-first and keep top maxEntries
+	sorted := make([]LedgerEntry, len(l.entries))
+	copy(sorted, l.entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Timestamp.After(sorted[j].Timestamp)
+	})
+	l.entries = sorted[:maxEntries]
+
+	// Rewrite the entire file
+	return l.rewriteFile()
+}
+
+// rewriteFile writes all in-memory entries to the ledger file atomically.
+func (l *Ledger) rewriteFile() error {
+	tmpPath := l.path + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+
+	writeLines := func() error {
+		if _, err := fmt.Fprintln(f, "# Cross-Session Learning Ledger"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(f, ""); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Cost | Duration |"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|"); err != nil {
+			return err
+		}
+		for _, entry := range l.entries {
+			if _, err := fmt.Fprintln(f, formatEntry(entry)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := writeLines(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write ledger: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync ledger: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close ledger: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, l.path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename ledger: %w", err)
+	}
+
+	return nil
+}
+
+// parseFile reads the ledger file and populates the entries slice.
+func (l *Ledger) parseFile() error {
+	l.entries = make([]LedgerEntry, 0)
+
+	f, err := os.Open(l.path)
+	if err != nil {
+		return fmt.Errorf("open ledger for parse: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|--") {
+			continue
+		}
+		if strings.HasPrefix(line, "|") && strings.Contains(line, "Session ID") {
+			continue // skip header row
+		}
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+
+		entry, err := parseEntry(line)
+		if err != nil {
+			// Skip malformed lines gracefully
+			continue
+		}
+		l.entries = append(l.entries, entry)
+	}
+
+	return scanner.Err()
+}
+
+// Reload re-reads the ledger file from disk, re-populating the entries slice.
+// Useful if the file was modified externally.
+func (l *Ledger) Reload() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.parseFile()
+}
+
+// parseEntry parses a single markdown table row into a LedgerEntry.
+// Expected format: | SessionID | Timestamp | Model | ProjectType | TaskCount | FailedTasks | Cost | Duration |
+func parseEntry(line string) (LedgerEntry, error) {
+	line = strings.TrimSpace(line)
+	// Remove leading and trailing pipes
+	if strings.HasPrefix(line, "|") {
+		line = line[1:]
+	}
+	if strings.HasSuffix(line, "|") {
+		line = line[:len(line)-1]
+	}
+
+	parts := strings.Split(line, "|")
+	// After stripping leading/trailing pipes, we collect non-empty fields.
+	var fields []string
+	for _, p := range parts {
+		f := strings.TrimSpace(p)
+		if f != "" {
+			fields = append(fields, f)
+		}
+	}
+
+	if len(fields) < 8 {
+		return LedgerEntry{}, fmt.Errorf("expected 8 fields, got %d: %s", len(fields), line)
+	}
+
+	timestamp, err := time.Parse(time.RFC3339, fields[1])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse timestamp %q: %w", fields[1], err)
+	}
+
+	taskCount := parseInt(fields[4])
+	failedTasks := parseInt(fields[5])
+	cost := parseFloat(fields[6])
+	duration := parseInt(fields[7])
+
+	return LedgerEntry{
+		SessionID:       fields[0],
+		Timestamp:       timestamp,
+		Model:           fields[2],
+		ProjectType:     fields[3],
+		TaskCount:       taskCount,
+		FailedTasks:     failedTasks,
+		CostEstimate:    cost,
+		DurationMinutes: duration,
+	}, nil
+}
+
+// parseInt parses an integer from a string, returning 0 on failure.
+func parseInt(s string) int {
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
+}
+
+// parseFloat parses a float64 from a string, returning 0.0 on failure.
+func parseFloat(s string) float64 {
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
 }
