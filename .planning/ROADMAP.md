@@ -541,6 +541,20 @@ This is the largest and most complex phase. Build and test each phase in order.
 - `/rollback` correctly creates backup branch and updates task statuses
 - Ledger file grows after each Ship and injects context on subsequent Initialize phases
 
+**Plans:** 8 plans
+
+```
+Plans:
+- [ ] 07-01-PLAN.md — Slash Command System (commands.go, 16+ handlers, tests)
+- [ ] 07-02-PLAN.md — Commit Rollback Chain (rollback.go, 3 reset modes, tests)
+- [ ] 07-03-PLAN.md — Cost-Aware Model Arbitrage (arbitrage.go, scorer, tests)
+- [ ] 07-04-PLAN.md — AutoDream Context Consolidation (autodream.go, pause/resume, tests)
+- [ ] 07-05-PLAN.md — Cross-Session Learning Ledger (ledger.go, stats, filtering, tests)
+- [ ] 07-06-PLAN.md — Gap Fixes (FallbackEvent wiring, T key toggle, cache ticker)
+- [ ] 07-07-PLAN.md — Model Selector UI (full-screen overlay, search, provider filter)
+- [ ] 07-08-PLAN.md — Settings Screen (6 tabs, inline editing, masked API keys, tests)
+```
+
 ---
 
 ## Phase 8 — Polish, Testing & v1.0 Release
