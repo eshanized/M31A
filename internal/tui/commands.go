@@ -324,11 +324,11 @@ func handleCompress(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "AutoDream not available."}
 	}
 
-	result, err := ctx.AutoDream.Consolidate()
-	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Consolidation failed: %v", err)}
+	result := ctx.AutoDream.Consolidate()
+	if result.Error != "" {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Consolidation failed: %s", result.Error)}
 	}
-	return CommandResult{Success: true, Message: result}
+	return CommandResult{Success: true, Message: result.Summary}
 }
 
 // handleLedger shows session history from the learning ledger.

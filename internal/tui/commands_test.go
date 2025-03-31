@@ -69,7 +69,7 @@ func newTestContext(t *testing.T) (CommandContext, string) {
 		Git:            g,
 		Ledger:         ledger.New(filepath.Join(dir, "ledger.md")),
 		Rollback:       rollback.New(g),
-		AutoDream:      autodream.New(),
+		AutoDream:      autodream.New(nil),
 	}
 
 	return ctx, dir
@@ -453,7 +453,7 @@ func TestCompressCommand(t *testing.T) {
 
 	t.Run("with autodream", func(t *testing.T) {
 		ctx := CommandContext{
-			AutoDream: autodream.New(),
+			AutoDream: autodream.New(nil),
 		}
 		result, found := r.Execute("/compress", ctx)
 		if !found {

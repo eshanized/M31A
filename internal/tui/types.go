@@ -22,11 +22,14 @@ const (
 )
 
 type AppMsg struct {
-	Screen    Screen
-	SessionID string   // populated by resume screen on selection
-	Health    *HealthUpdateMsg
-	Provider  *ProviderSwitchMsg
-	InitError error
+	Screen         Screen
+	SessionID      string   // populated by resume screen on selection
+	Health         *HealthUpdateMsg
+	Provider       *ProviderSwitchMsg
+	FallbackEvent  *FallbackEventMsg    // provider fallback notification
+	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
+	RefreshCache   *RefreshCacheMsg     // trigger model cache refresh
+	InitError      error
 }
 
 type HealthUpdateMsg struct {
@@ -54,4 +57,21 @@ type PermissionRequestMsg struct {
 
 type PermissionResponseMsg struct {
 	Response tools.PermissionResponse
+}
+
+// FallbackEventMsg carries provider fallback information to the TUI.
+type FallbackEventMsg struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason"`
+}
+
+// ThinkingToggleMsg signals that the user wants to toggle thinking block visibility.
+type ThinkingToggleMsg struct {
+	// empty — the handler toggles all blocks
+}
+
+// RefreshCacheMsg triggers a model cache refresh for the given provider.
+type RefreshCacheMsg struct {
+	ProviderName string `json:"provider_name"`
 }
