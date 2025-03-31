@@ -73,10 +73,10 @@ completed: 2026-05-28
 
 Each task was committed atomically:
 
-1. **Task 1: Implement Scorer, complexity analysis, and token estimation** - `6760ca6` (feat)
+1. **Task 1: Implement Scorer, complexity analysis, and token estimation** - absorbed into `5836c30` (amended from prior commit after initial `6760ca6`)
 2. **Task 2: Write tests for all arbitrage functions** - `883bfb6` (test)
 
-**Plan metadata:** Pending (following SUMMARY commit)
+**Plan metadata:** `e337240` (docs: complete model arbitrage plan)
 
 ## Files Created/Modified
 
