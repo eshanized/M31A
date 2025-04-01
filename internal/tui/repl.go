@@ -42,6 +42,9 @@ type ReplModel struct {
 	activeSegmentType string
 	thinkingBlocks    map[int]*components.ThinkingBlock
 	toolCards         map[int]*components.ToolCard
+
+	fallbackBanner    string    // current fallback banner text, empty = no banner
+	fallbackBannerAt  time.Time // when the banner appeared (for 15s auto-dismiss)
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -77,6 +80,11 @@ func NewReplModel(t theme.Theme) ReplModel {
 }
 
 func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
+	// Check if fallback banner has expired
+	if m.fallbackBanner != "" && time.Now().After(m.fallbackBannerAt) {
+		m.fallbackBanner = ""
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -132,6 +140,12 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 		switch msg.String() {
 		case "enter":
+			// Dismiss fallback banner on user input
+			if m.fallbackBanner != "" {
+				m.fallbackBanner = ""
+				m.renderMessages()
+			}
+
 			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				var cmds []tea.Cmd
@@ -188,11 +202,54 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			var cmds []tea.Cmd
 			return cmds, false
 
+		case "t", "T":
+			// Toggle thinking blocks — only if textarea is empty (user isn't typing)
+			if m.textarea.Value() == "" {
+				return []tea.Cmd{func() tea.Msg {
+					return ThinkingToggleMsg{}
+				}}, false
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+
+		case "x":
+			// Dismiss fallback banner
+			if m.fallbackBanner != "" {
+				m.fallbackBanner = ""
+				m.renderMessages()
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+
 		case "esc":
+			// Dismiss fallback banner on escape
+			if m.fallbackBanner != "" {
+				m.fallbackBanner = ""
+				m.renderMessages()
+			}
 			m.textarea.Reset()
 			var cmds []tea.Cmd
 			return cmds, false
 		}
+
+	// Dismiss fallback banner on any key press when textarea has content
+	if m.fallbackBanner != "" && m.textarea.Value() != "" {
+		m.fallbackBanner = ""
+		m.renderMessages()
+	}
+
+	case FallbackEventMsg:
+		m.fallbackBanner = fmt.Sprintf("Provider switched: %s → %s (%s)", msg.From, msg.To, msg.Reason)
+		m.fallbackBannerAt = time.Now().Add(15 * time.Second)
+		m.renderMessages()
+		var cmds []tea.Cmd
+		return cmds, false
+
+	case ThinkingToggleMsg:
+		m.toggleAllThinkingBlocks()
+		m.renderMessages()
+		var cmds []tea.Cmd
+		return cmds, false
 
 	case spinner.TickMsg:
 		var spCmd tea.Cmd
@@ -418,6 +475,23 @@ func (m *ReplModel) View() string {
 	viewportStr := m.viewport.View()
 	inputStr := m.textarea.View()
 
+	// Render fallback banner if active
+	if m.fallbackBanner != "" && time.Now().Before(m.fallbackBannerAt) {
+		bannerStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("#FDD663")).
+			Foreground(lipgloss.Color("#000000")).
+			Padding(0, 1).
+			Bold(true).
+			Width(m.width)
+		banner := bannerStyle.Render("⚠ " + m.fallbackBanner)
+		return lipgloss.JoinVertical(
+			lipgloss.Top,
+			banner,
+			viewportStr,
+			inputStr,
+		)
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Top,
 		viewportStr,
@@ -448,4 +522,35 @@ func (m *ReplModel) GetStatusText() string {
 		return m.lastStatus
 	}
 	return ""
+}
+
+func (m *ReplModel) toggleAllThinkingBlocks() {
+	if len(m.thinkingBlocks) == 0 {
+		return
+	}
+
+	// Determine current state: all expanded, all collapsed, or mixed
+	allExpanded := true
+	allCollapsed := true
+	for _, block := range m.thinkingBlocks {
+		if block.IsExpanded() {
+			allCollapsed = false
+		} else {
+			allExpanded = false
+		}
+	}
+
+	// If all expanded → collapse all. If all hidden → expand all. Mixed → collapse all.
+	collapse := allExpanded || (!allExpanded && !allCollapsed)
+	for _, block := range m.thinkingBlocks {
+		if collapse {
+			if block.IsExpanded() {
+				block.Toggle()
+			}
+		} else {
+			if !block.IsExpanded() {
+				block.Toggle()
+			}
+		}
+	}
 }

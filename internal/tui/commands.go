@@ -150,6 +150,8 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("phase", handlePhase, "Show or transition to phase")
 	r.Register("config", handleConfig, "Show or set config value")
 	r.Register("models", handleModels, "List all cached models")
+	r.Register("fallback", handleFallback, "Switch to alternative provider / show fallback status")
+	r.Register("fallback", handleFallback, "Switch to alternative provider / show fallback status")
 
 	return r
 }
@@ -370,24 +372,6 @@ func handleLedger(args []string, ctx CommandContext) CommandResult {
 	return formatLedgerEntries(entries, "Recent sessions")
 }
 
-func formatLedgerEntries(entries []ledger.LedgerEntry, title string) CommandResult {
-	if len(entries) == 0 {
-		return CommandResult{Success: true, Message: fmt.Sprintf("%s: none", title)}
-	}
-
-	if len(entries) > 5 {
-		entries = entries[:5]
-	}
-
-	var b strings.Builder
-	b.WriteString(title + ":\n")
-	for i, e := range entries {
-		b.WriteString(fmt.Sprintf("  %d. %s | %s/%s | %d msgs | %s\n",
-			i+1, e.SessionID, e.Provider, e.Model, e.TaskCount, e.Timestamp.Format("Jan 02 15:04")))
-	}
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
-}
-
 // handleRollback shows the commit chain or performs a rollback.
 // Subcommands:
 //
@@ -444,6 +428,59 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: result.Message}
 }
 
+// handleFallback shows the active provider and available alternatives, or
+// switches to a specified provider.
+func handleFallback(args []string, ctx CommandContext) CommandResult {
+	if ctx.Registry == nil {
+		return CommandResult{Success: false, Message: "Provider registry not available."}
+	}
+
+	active := ctx.Registry.Active()
+	providers := ctx.Registry.List()
+
+	if len(args) == 0 {
+		if active == "" {
+			return CommandResult{Success: false, Message: "No active provider. Available: " + strings.Join(providers, ", ")}
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Active provider: %s\n", active))
+		b.WriteString(fmt.Sprintf("Available: %s\n", strings.Join(providers, ", ")))
+		if len(providers) > 1 {
+			b.WriteString("Use /fallback <provider_name> to switch.")
+		}
+		return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+	}
+
+	target := args[0]
+	if target == active {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Already using provider %q.", target)}
+	}
+
+	// Validate target is a registered provider
+	valid := false
+	for _, p := range providers {
+		if p == target {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Provider %q not found. Available: %s", target, strings.Join(providers, ", ")),
+		}
+	}
+
+	if err := ctx.Registry.SetActive(target); err != nil {
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Cannot switch to provider %q: %v.", target, err),
+		}
+	}
+
+	return CommandResult{Success: true, Message: fmt.Sprintf("Switched from %s to %s. Use /status to confirm.", active, target)}
+}
+
 func formatCommitChain(commits []git.CommitInfo) CommandResult {
 	if len(commits) == 0 {
 		return CommandResult{Success: true, Message: "No commits in this repository."}
@@ -463,6 +500,24 @@ func formatCommitChain(commits []git.CommitInfo) CommandResult {
 			shortHash = c.Hash
 		}
 		b.WriteString(fmt.Sprintf("  %s %s%s\n", shortHash, c.Message, marker))
+	}
+	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+}
+
+func formatLedgerEntries(entries []ledger.LedgerEntry, title string) CommandResult {
+	if len(entries) == 0 {
+		return CommandResult{Success: true, Message: fmt.Sprintf("%s: none", title)}
+	}
+
+	if len(entries) > 5 {
+		entries = entries[:5]
+	}
+
+	var b strings.Builder
+	b.WriteString(title + ":\n")
+	for i, e := range entries {
+		b.WriteString(fmt.Sprintf("  %d. %s | %s/%s | %d msgs | %s\n",
+			i+1, e.SessionID, e.Provider, e.Model, e.TaskCount, e.Timestamp.Format("Jan 02 15:04")))
 	}
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
