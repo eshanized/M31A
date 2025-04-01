@@ -124,6 +124,7 @@ func (m *AppState) Init() tea.Cmd {
 	cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 	if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
 		cmds = append(cmds, HealthCheckTicker(context.Background(), m.registry, m.activeProvider, types.HealthCheckInterval))
+		cmds = append(cmds, CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
 	}
 	return tea.Batch(cmds...)
 }
@@ -205,6 +206,28 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastActivity = time.Now()
 		return m, NextHealthTick(calculateNextInterval(result))
 
+	case RefreshCacheMsg:
+		if m.registry == nil || m.activeProvider == "" {
+			return m, NextCacheRefreshTick(provider.DefaultCacheRefreshInterval)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		providerName := msg.ProviderName
+		if providerName == "" {
+			providerName = m.activeProvider
+		}
+
+		errMsg, nextCmd := handleCacheRefresh(ctx, m.registry, providerName)
+		if errMsg != "" {
+			m.currentOperation = errMsg
+		} else {
+			m.currentOperation = ""
+			m.lastActivity = time.Now()
+		}
+		return m, nextCmd
+
 	case AppMsg:
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
@@ -261,6 +284,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					types.HealthCheckInterval,
 				)
 				cmds = append(cmds, healthCmd)
+				cmds = append(cmds,
+					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
 			}
 			if appMsg.Health != nil {
 				m.healthStatus = types.HealthStatus{
