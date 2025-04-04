@@ -48,6 +48,7 @@ type AppState struct {
 	prevScreen       Screen
 	permissionModal  *components.PermissionModal
 	dispatcher       *tools.Dispatcher
+	modelSelector    ModelSelector
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -101,6 +102,11 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	// Initialize resume model
 	rm := NewResumeModel(tm.Current(), sessionMgr)
 	app.resumeModel = rm
+
+	// Initialize model selector (uses registry)
+	if registry != nil {
+		app.modelSelector = NewModelSelector(registry)
+	}
 
 	if apiKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath)
@@ -185,6 +191,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.screen = ScreenResume
 				return m, nil
+			case "/models":
+				if m.registry != nil {
+					m.prevScreen = m.screen
+					m.modelSelector = NewModelSelector(m.registry)
+					m.screen = ScreenModelSelector
+					return m, m.modelSelector.Init()
+				}
 			}
 		}
 
@@ -229,10 +242,27 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nextCmd
 
 	case AppMsg:
+		// Handle ModelSelected first — it may be set without a Screen field
+		if msg.ModelSelected != nil {
+			if m.registry != nil {
+				_ = m.registry.SetActive(msg.ModelSelected.Provider)
+			}
+			m.activeProvider = msg.ModelSelected.Provider
+			m.activeModel = &msg.ModelSelected.Model
+			m.screen = m.prevScreen
+			return m, nil
+		}
+
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
 			m.replModel = &rp
 			m.initialized = true
+		}
+		if msg.Screen == ScreenModelSelector {
+			m.prevScreen = m.screen
+			m.modelSelector = NewModelSelector(m.registry)
+			m.screen = ScreenModelSelector
+			return m, m.modelSelector.Init()
 		}
 		m.screen = msg.Screen
 		if msg.Health != nil {
@@ -334,6 +364,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
+	case ScreenModelSelector:
+		// Intercept Esc to navigate back (two-step: first Esc blurs search, second Esc exits)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && !m.modelSelector.searchFocused && keyMsg.String() == "esc" {
+			m.screen = m.prevScreen
+			return m, nil
+		}
+		updated, cmd := m.modelSelector.Update(msg)
+		m.modelSelector = updated.(ModelSelector)
+		cmds := []tea.Cmd{cmd}
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		return m, tea.Batch(cmds...)
+
 	default:
 		return m, nil
 	}
@@ -404,6 +446,9 @@ func (m *AppState) View() string {
 			return m.resumeModel.View()
 		}
 		return "Loading..."
+
+	case ScreenModelSelector:
+		return m.modelSelector.View()
 
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
