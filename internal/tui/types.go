@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 type Screen int
@@ -29,6 +30,7 @@ type AppMsg struct {
 	FallbackEvent  *FallbackEventMsg    // provider fallback notification
 	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
 	RefreshCache   *RefreshCacheMsg     // trigger model cache refresh
+	ModelSelected  *ModelSelectedMsg    // model selection result
 	InitError      error
 }
 
@@ -74,4 +76,10 @@ type ThinkingToggleMsg struct {
 // RefreshCacheMsg triggers a model cache refresh for the given provider.
 type RefreshCacheMsg struct {
 	ProviderName string `json:"provider_name"`
+}
+
+// ModelSelectedMsg carries the model selection result back to AppState.
+type ModelSelectedMsg struct {
+	Model    types.ModelInfo
+	Provider string
 }
