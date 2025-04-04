@@ -83,3 +83,6 @@ type ModelSelectedMsg struct {
 	Model    types.ModelInfo
 	Provider string
 }
+
+// SettingsSavedMsg is emitted when the settings screen saves the config successfully.
+type SettingsSavedMsg struct{}

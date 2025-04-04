@@ -17,6 +17,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
+	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -45,6 +46,7 @@ type AppState struct {
 	config           *config.Config
 	apiKey           string
 	configPath       string
+	ledger           *ledger.Ledger
 	prevScreen       Screen
 	permissionModal  *components.PermissionModal
 	dispatcher       *tools.Dispatcher
@@ -95,9 +97,14 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		sessionManager: sessionMgr,
 	}
 
-	// Initialize settings model
-	sm := NewSettingsModel(cfg, tm.Current(), kc)
-	app.settingsModel = sm
+	// Initialize ledger for settings stats display
+	ledgerPath := filepath.Join(filepath.Dir(configPath), "LEDGER.md")
+	ledgerInstance := ledger.New(ledgerPath)
+	app.ledger = ledgerInstance
+
+	// Initialize settings model (6 tabs, inline editing)
+	sm := NewSettingsModel(cfg, configPath, tm.Current(), ledgerInstance)
+	app.settingsModel = &sm
 
 	// Initialize resume model
 	rm := NewResumeModel(tm.Current(), sessionMgr)
@@ -342,10 +349,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.settingsModel == nil {
 			return m, nil
 		}
-		cmds, appMsg := m.settingsModel.Update(msg)
-		if appMsg != nil {
-			m.screen = appMsg.Screen
-		}
+		var cmd tea.Cmd
+		(*m.settingsModel), cmd = m.settingsModel.Update(msg)
+		cmds := []tea.Cmd{cmd}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
