@@ -232,6 +232,7 @@ func (r *Rollback) stashIfDirty() (bool, error) {
 
 // countCommitsBetween counts the number of commits between two hashes.
 // startHash is the older commit, endHash the newer one.
+// Log returns newest first, so endHash (newer) has a smaller index.
 func (r *Rollback) countCommitsBetween(startHash, endHash string) (int, error) {
 	if startHash == endHash {
 		return 0, nil
@@ -263,8 +264,6 @@ func (r *Rollback) countCommitsBetween(startHash, endHash string) (int, error) {
 		return startIdx - endIdx, nil
 	}
 
-	// If startHash is not actually older than endHash, or same commit
-	// (already handled above), return 0.
 	return 0, nil
 }
 

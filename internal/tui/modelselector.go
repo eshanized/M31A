@@ -243,9 +243,6 @@ func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "esc":
-			return m, nil
-
 		case "ctrl+c":
 			return m, tea.Quit
 

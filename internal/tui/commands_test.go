@@ -452,8 +452,15 @@ func TestCompressCommand(t *testing.T) {
 	r := DefaultCommands()
 
 	t.Run("with autodream", func(t *testing.T) {
+		msgs := make([]types.Message, 8)
+		for i := range msgs {
+			msgs[i] = types.Message{
+				Role:    "user",
+				Content: "Message content for testing purposes.",
+			}
+		}
 		ctx := CommandContext{
-			AutoDream: autodream.New(nil),
+			AutoDream: autodream.New(msgs),
 		}
 		result, found := r.Execute("/compress", ctx)
 		if !found {
