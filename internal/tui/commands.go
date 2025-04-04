@@ -151,7 +151,6 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("config", handleConfig, "Show or set config value")
 	r.Register("models", handleModels, "List all cached models")
 	r.Register("fallback", handleFallback, "Switch to alternative provider / show fallback status")
-	r.Register("fallback", handleFallback, "Switch to alternative provider / show fallback status")
 
 	return r
 }
