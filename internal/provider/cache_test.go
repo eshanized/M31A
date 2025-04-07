@@ -64,3 +64,144 @@ func TestModelCache_Get_EmptyCache(t *testing.T) {
 		t.Fatal("expected false for empty cache")
 	}
 }
+
+func TestModelCache_Get_Set(t *testing.T) {
+	c := NewModelCache(5 * time.Minute)
+
+	models := []types.ModelInfo{
+		{ID: "test/model-1", Name: "Model 1", ContextLength: 8192},
+		{ID: "test/model-2", Name: "Model 2", ContextLength: 16384},
+	}
+	c.Set(models)
+
+	m, ok := c.Get("test/model-1")
+	if !ok {
+		t.Fatal("expected to find model-1")
+	}
+	if m.Name != "Model 1" {
+		t.Errorf("expected Model 1, got %s", m.Name)
+	}
+	if m.ContextLength != 8192 {
+		t.Errorf("expected 8192, got %d", m.ContextLength)
+	}
+
+	m2, ok := c.Get("test/model-2")
+	if !ok {
+		t.Fatal("expected to find model-2")
+	}
+	if m2.Name != "Model 2" {
+		t.Errorf("expected Model 2, got %s", m2.Name)
+	}
+}
+
+func TestModelCache_Get_Missing(t *testing.T) {
+	c := NewModelCache(5 * time.Minute)
+	c.Set([]types.ModelInfo{{ID: "exists/model"}})
+
+	_, ok := c.Get("missing/model")
+	if ok {
+		t.Fatal("expected false for missing model")
+	}
+}
+
+func TestModelCache_IsExpired(t *testing.T) {
+	c := NewModelCache(10 * time.Millisecond)
+	c.Set([]types.ModelInfo{{ID: "test/model"}})
+
+	if c.IsExpired() {
+		t.Error("should not be expired immediately after set")
+	}
+
+	// Wait for TTL to expire
+	time.Sleep(20 * time.Millisecond)
+	if !c.IsExpired() {
+		t.Error("should be expired after TTL")
+	}
+}
+
+func TestModelCache_IsStale(t *testing.T) {
+	c := NewModelCache(5 * time.Minute)
+	c.Set([]types.ModelInfo{{ID: "test/model"}})
+
+	if c.IsStale() {
+		t.Error("should not be stale immediately after set")
+	}
+
+	// Manually backdate to just before stale TTL
+	c.fetched = time.Now().Add(-23 * time.Hour)
+	if c.IsStale() {
+		t.Error("should not be stale before 24h")
+	}
+
+	// Backdate beyond stale TTL
+	c.fetched = time.Now().Add(-25 * time.Hour)
+	if !c.IsStale() {
+		t.Error("should be stale after 24h")
+	}
+}
+
+func TestModelCache_Len(t *testing.T) {
+	c := NewModelCache(5 * time.Minute)
+	if c.Len() != 0 {
+		t.Errorf("expected 0, got %d", c.Len())
+	}
+
+	c.Set([]types.ModelInfo{
+		{ID: "a"}, {ID: "b"}, {ID: "c"},
+	})
+	if c.Len() != 3 {
+		t.Errorf("expected 3, got %d", c.Len())
+	}
+}
+
+func TestModelCache_RefreshTicker_Interval(t *testing.T) {
+	ticker := NewModelCacheRefreshTicker(50 * time.Millisecond)
+	if ticker.Interval() != 50*time.Millisecond {
+		t.Errorf("expected 50ms interval, got %v", ticker.Interval())
+	}
+	ticker.Stop()
+}
+
+func TestModelCache_RefreshTicker_DefaultInterval(t *testing.T) {
+	ticker := NewModelCacheRefreshTicker(0)
+	if ticker.Interval() != DefaultCacheRefreshInterval {
+		t.Errorf("expected default interval %v, got %v", DefaultCacheRefreshInterval, ticker.Interval())
+	}
+	ticker.Stop()
+}
+
+func TestModelCache_RefreshTicker_Tick(t *testing.T) {
+	ticker := NewModelCacheRefreshTicker(20 * time.Millisecond)
+	ch := ticker.Tick()
+
+	select {
+	case <-ch:
+		// Got a tick — good
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected a tick within 100ms")
+	}
+
+	ticker.Stop()
+}
+
+func TestModelCache_RefreshTicker_Stop(t *testing.T) {
+	ticker := NewModelCacheRefreshTicker(10 * time.Millisecond)
+	ch := ticker.Tick()
+
+	// Consume first tick
+	<-ch
+
+	ticker.Stop()
+
+	// Channel should be closed after stop
+	_, ok := <-ch
+	if ok {
+		t.Fatal("expected channel to be closed after Stop")
+	}
+}
+
+func TestModelCache_RefreshTicker_StopBeforeStart(t *testing.T) {
+	ticker := NewModelCacheRefreshTicker(5 * time.Minute)
+	// Should not panic
+	ticker.Stop()
+}
