@@ -21,6 +21,12 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
+type FallbackNotification struct {
+	Event     FallbackEventMsg
+	Dismissed bool
+	ShownAt   time.Time
+}
+
 type AppState struct {
 	screen           Screen
 	version          string
@@ -50,7 +56,8 @@ type AppState struct {
 	prevScreen       Screen
 	permissionModal  *components.PermissionModal
 	dispatcher       *tools.Dispatcher
-	modelSelector    ModelSelector
+	modelSelector      ModelSelector
+	fallbackNotification *FallbackNotification
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -166,6 +173,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.fallbackNotification != nil && !m.fallbackNotification.Dismissed && msg.String() == "x" {
+			m.fallbackNotification.Dismissed = true
+			return m, nil
+		}
 		if m.screen == ScreenPermission && m.permissionModal != nil {
 			var resp tools.PermissionResponse
 			switch msg.String() {
@@ -282,6 +293,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.InitError != nil {
 			m.currentOperation = fmt.Sprintf("Error: %v", msg.InitError)
+		}
+		return m, nil
+
+	case FallbackEventMsg:
+		m.activeProvider = msg.To
+		m.fallbackNotification = &FallbackNotification{
+			Event:     msg,
+			Dismissed: false,
+			ShownAt:   time.Now(),
 		}
 		return m, nil
 
