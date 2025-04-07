@@ -1,6 +1,7 @@
 package components
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -138,5 +139,56 @@ func TestThinkingBlock_LiveDuration(t *testing.T) {
 	dur := tb.Duration()
 	if dur == "0.0s" {
 		t.Errorf("expected non-zero live duration, got %q", dur)
+	}
+}
+
+func TestThinkingBlock_Header_Collapsed(t *testing.T) {
+	seg := types.MessageSegment{
+		Type:    "thinking",
+		Content: "content",
+	}
+	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	header := tb.Header(80)
+	if !strings.Contains(header, "▼") {
+		t.Error("expected '▼' in collapsed header")
+	}
+}
+
+func TestThinkingBlock_Header_Expanded(t *testing.T) {
+	seg := types.MessageSegment{
+		Type:    "thinking",
+		Content: "content",
+	}
+	tb := NewThinkingBlock(seg, theme.Dark(), true)
+	header := tb.Header(80)
+	if !strings.Contains(header, "▲") {
+		t.Error("expected '▲' in expanded header")
+	}
+}
+
+func TestThinkingBlock_AfterToggle(t *testing.T) {
+	seg := types.MessageSegment{
+		Type:    "thinking",
+		Content: "content",
+	}
+	tb := NewThinkingBlock(seg, theme.Dark(), false)
+
+	// Initially collapsed
+	if tb.IsExpanded() {
+		t.Error("expected initially collapsed")
+	}
+	headerBefore := tb.Header(80)
+	if !strings.Contains(headerBefore, "▼") {
+		t.Error("expected '▼' before toggle")
+	}
+
+	// Toggle to expanded
+	tb.Toggle()
+	if !tb.IsExpanded() {
+		t.Error("expected expanded after toggle")
+	}
+	headerAfter := tb.Header(80)
+	if !strings.Contains(headerAfter, "▲") {
+		t.Error("expected '▲' after toggle")
 	}
 }
