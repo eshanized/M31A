@@ -132,8 +132,8 @@ func TestEngine_ContextPruning(t *testing.T) {
 	if messages[0].Role != "system" {
 		t.Errorf("Expected system message first, got %s", messages[0].Role)
 	}
-	if messages[0].Content != systemPrompt {
-		t.Error("Expected system prompt content")
+	if !strings.Contains(messages[0].Content, "M31A") {
+		t.Error("Expected system prompt to contain M31A identity")
 	}
 }
 
@@ -390,5 +390,97 @@ func TestEngine_HasTestFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main"), 0644)
 	if !hasTestFiles(dir, []string{"main.go"}) {
 		t.Error("Expected test files found")
+	}
+}
+
+func TestPromptRegistry_LoadPrompts(t *testing.T) {
+	registry, err := LoadPrompts()
+	if err != nil {
+		t.Fatalf("LoadPrompts failed: %v", err)
+	}
+	if registry.Base == "" {
+		t.Error("Base prompt is empty")
+	}
+	if !strings.Contains(registry.Base, "M31A") {
+		t.Error("Base prompt missing M31A identity")
+	}
+	if registry.ToolUse == "" {
+		t.Error("ToolUse prompt is empty")
+	}
+	if registry.PlanFormat == "" {
+		t.Error("PlanFormat prompt is empty")
+	}
+	if registry.ExecuteTask == "" {
+		t.Error("ExecuteTask prompt is empty")
+	}
+	if registry.Discuss == "" {
+		t.Error("Discuss prompt is empty")
+	}
+	if registry.SelfHeal == "" {
+		t.Error("SelfHeal prompt is empty")
+	}
+	if registry.VerifyChecklist == "" {
+		t.Error("VerifyChecklist prompt is empty")
+	}
+}
+
+func TestEngine_BuildSystemPrompt(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Base only
+	baseOnly := engine.buildSystemPrompt()
+	if !strings.Contains(baseOnly, "M31A") {
+		t.Error("Base-only prompt missing M31A identity")
+	}
+
+	// Base + one extra
+	withExtra := engine.buildSystemPrompt("extra content")
+	if !strings.Contains(withExtra, "extra content") {
+		t.Error("Extra content not included")
+	}
+	if !strings.Contains(withExtra, "M31A") {
+		t.Error("Base missing when extras added")
+	}
+
+	// Base + multiple extras, with empty string
+	withMultiple := engine.buildSystemPrompt("first", "second", "")
+	if !strings.Contains(withMultiple, "first") {
+		t.Error("First extra not included")
+	}
+	if !strings.Contains(withMultiple, "second") {
+		t.Error("Second extra not included")
+	}
+	if strings.Contains(withMultiple, "\n\n---\n\n---\n\n") {
+		t.Error("Empty extra produced double separator")
+	}
+}
+
+func TestEngine_PhasePromptComposition(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Discuss: base + discuss
+	discussMsgs := engine.buildDiscussContext("test goal")
+	if len(discussMsgs) == 0 || discussMsgs[0].Role != "system" {
+		t.Fatal("Expected system message first")
+	}
+	sysContent := discussMsgs[0].Content
+	if !strings.Contains(sysContent, "M31A") {
+		t.Error("Discuss system prompt missing base identity")
+	}
+	if !strings.Contains(sysContent, "clarifying questions") {
+		t.Error("Discuss system prompt missing discuss instructions")
+	}
+
+	// Plan: base + tool-use + plan-format
+	planMsgs := engine.buildPlanContext("test goal", nil)
+	if len(planMsgs) == 0 || planMsgs[0].Role != "system" {
+		t.Fatal("Expected system message first")
+	}
+	sysContent = planMsgs[0].Content
+	if !strings.Contains(sysContent, "Bash") {
+		t.Error("Plan system prompt missing tool-use instructions")
+	}
+	if !strings.Contains(sysContent, "JSON array") {
+		t.Error("Plan system prompt missing plan format instructions")
 	}
 }
