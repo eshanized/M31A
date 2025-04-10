@@ -94,7 +94,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 // buildPlanContext creates messages for the plan phase.
 func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat)})
 
 	// Load PROJECT.md
 	project, _ := e.sessionMgr.LoadProject(e.sessionID)
