@@ -140,7 +140,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 // buildExecuteContext creates messages for task execution.
 func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask)})
 
 	// Task summary
 	taskSummary := formatTaskSummary(tasks)
@@ -168,7 +168,7 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 	start := time.Now()
 
 	messages := []m31types.Message{
-		{Role: "system", Content: systemPrompt},
+		{Role: "system", Content: e.buildSystemPrompt(e.prompts.SelfHeal)},
 		{Role: "user", Content: fmt.Sprintf("Task %d failed: %s\n\nCurrent file state:\n%s\n\nFix the issue and use tools to apply the fix.",
 			task.ID, failure, e.readTaskFiles(task.Files))},
 	}
