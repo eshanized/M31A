@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,10 +22,41 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
-const systemPrompt = `You are M31A, a terminal AI coding assistant. You help users build software through
-a structured six-phase workflow. You write clean, correct Go code. You use tools
-(Bash, FileRead, FileWrite, Glob, Grep) to interact with the filesystem and shell.
-You think before acting — use reasoning to plan your approach.`
+//go:embed prompts/*.md
+var promptFS embed.FS
+
+// PromptRegistry holds all loaded prompt templates.
+type PromptRegistry struct {
+	Base            string
+	ToolUse         string
+	PlanFormat      string
+	ExecuteTask     string
+	Discuss         string
+	SelfHeal        string
+	VerifyChecklist string
+}
+
+// LoadPrompts reads all embedded prompt files and returns a registry.
+func LoadPrompts() (*PromptRegistry, error) {
+	r := &PromptRegistry{}
+	files := map[string]*string{
+		"prompts/base.md":            &r.Base,
+		"prompts/tool-use.md":        &r.ToolUse,
+		"prompts/plan-format.md":     &r.PlanFormat,
+		"prompts/execute-task.md":    &r.ExecuteTask,
+		"prompts/discuss-questions.md": &r.Discuss,
+		"prompts/self-heal.md":       &r.SelfHeal,
+		"prompts/verify-checklist.md": &r.VerifyChecklist,
+	}
+	for path, ptr := range files {
+		data, err := promptFS.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("load prompt %s: %w", path, err)
+		}
+		*ptr = strings.TrimSpace(string(data))
+	}
+	return r, nil
+}
 
 // Engine orchestrates the six-phase workflow.
 type Engine struct {
@@ -38,6 +70,7 @@ type Engine struct {
 	dispatcher  *tools.Dispatcher
 	tokens      *tokens.Estimator
 	sessionMgr  *session.Manager
+	prompts     *PromptRegistry
 	logger      *slog.Logger
 	startTime   time.Time
 }
@@ -56,6 +89,11 @@ type PhaseResult struct {
 func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLMProvider, modelID string,
 	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager) *Engine {
 
+	prompts, err := LoadPrompts()
+	if err != nil {
+		panic(fmt.Sprintf("failed to load prompts: %v", err))
+	}
+
 	return &Engine{
 		sessionID:   sessionID,
 		workDir:     workDir,
@@ -66,6 +104,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		dispatcher:  dispatcher,
 		tokens:      tokenEst,
 		sessionMgr:  sessionMgr,
+		prompts:     prompts,
 		logger:      slog.Default(),
 		startTime:   time.Now(),
 	}
@@ -137,6 +176,17 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 		})
 	}
 	return defs
+}
+
+// buildSystemPrompt composes the system prompt from base + optional extras.
+func (e *Engine) buildSystemPrompt(extra ...string) string {
+	parts := []string{e.prompts.Base}
+	for _, p := range extra {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // consumeStream reads all chunks from the iterator and returns the concatenated content.
