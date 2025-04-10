@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,14 @@ import (
 var Version = "dev"
 
 func main() {
+	// Parse CLI flags
+	versionFlag := flag.Bool("version", false, "Print version and exit")
+	flag.Parse()
+	if *versionFlag {
+		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		os.Exit(0)
+	}
+
 	logger, cleanup, err := log.NewLogger(Version)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
