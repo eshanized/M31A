@@ -52,7 +52,7 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 // buildDiscussContext creates the message list for the discuss phase.
 func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.Discuss)})
 
 	// Load MEMORY.md if exists
 	sessionDir := filepath.Dir(e.planningDir)
