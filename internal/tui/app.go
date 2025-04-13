@@ -283,11 +283,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.modelSelector.Init()
 		}
 		m.screen = msg.Screen
-		if msg.Health != nil {
-			m.healthStatus = types.HealthStatus{
-				Status: msg.Health.Status,
-			}
-		}
 		if msg.Provider != nil {
 			m.activeProvider = msg.Provider.Provider
 		}
@@ -333,6 +328,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if appMsg != nil {
 			m.screen = appMsg.Screen
 			if appMsg.Screen == ScreenREPL && m.replModel == nil {
+				// Save API key to keychain if requested
+				if appMsg.SaveKeychain && m.keychain != nil && m.firstRunModel.APIKey() != "" {
+					for _, provider := range m.firstRunModel.SelectedProviders() {
+						key := m.firstRunModel.APIKey()
+						service := fmt.Sprintf("m31a/%s", provider)
+						m.keychain.Set(service, key)
+					}
+				}
 				rp := NewReplModel(m.themeManager.Current())
 				m.replModel = &rp
 				m.initialized = true
@@ -343,11 +346,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, healthCmd)
 				cmds = append(cmds,
 					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
-			}
-			if appMsg.Health != nil {
-				m.healthStatus = types.HealthStatus{
-					Status: appMsg.Health.Status,
-				}
 			}
 		}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
@@ -400,6 +398,27 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelSelector = updated.(ModelSelector)
 		cmds := []tea.Cmd{cmd}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		return m, tea.Batch(cmds...)
+
+	case ScreenPlan:
+		// Plan screen is managed by the workflow engine; TUI just renders
+		// Any key handling is done within the PlanModel if wired
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		return m, tea.Batch(cmds...)
+
+	case ScreenExecute:
+		// Execute screen is managed by the workflow engine; TUI just renders
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		return m, tea.Batch(cmds...)
+
+	case ScreenVerify:
+		// Verify screen is managed by the workflow engine; TUI just renders
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		return m, tea.Batch(cmds...)
+
+	case ScreenShip:
+		// Ship screen is managed by the workflow engine; TUI just renders
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	default:
@@ -475,6 +494,22 @@ func (m *AppState) View() string {
 
 	case ScreenModelSelector:
 		return m.modelSelector.View()
+
+	case ScreenPlan:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Plan screen — driven by workflow engine")
+
+	case ScreenExecute:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Execute screen — driven by workflow engine")
+
+	case ScreenVerify:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Verify screen — driven by workflow engine")
+
+	case ScreenShip:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Ship screen — driven by workflow engine")
 
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
