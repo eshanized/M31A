@@ -294,7 +294,9 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 		}
 		m.activeSegmentType = "thinking"
 		m.thinking = true
-		m.thinkingStartAt = time.Now()
+		if m.thinkingStartAt.IsZero() {
+			m.thinkingStartAt = time.Now()
+		}
 
 		if chunk.Delta != "" {
 			m.streamContent.WriteString(chunk.Delta)
@@ -445,9 +447,10 @@ func (m *ReplModel) renderStreamingContent() string {
 		partial := m.streamContent.String()
 		if m.activeSegmentType == "thinking" {
 			segments = append(segments, types.MessageSegment{
-				Type:       "thinking",
-				Content:    partial,
-				Visible:    true,
+				Type:      "thinking",
+				Content:   partial,
+				Visible:   true,
+				StartedAt: m.thinkingStartAt,
 			})
 		} else {
 			segments = append(segments, types.MessageSegment{

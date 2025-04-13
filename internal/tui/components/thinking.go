@@ -18,11 +18,15 @@ type ThinkingBlock struct {
 }
 
 func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool) *ThinkingBlock {
+	startedAt := segment.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
 	return &ThinkingBlock{
 		segment:   segment,
 		theme:     t,
 		expanded:  expanded,
-		startedAt: time.Now(),
+		startedAt: startedAt,
 	}
 }
 
