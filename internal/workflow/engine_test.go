@@ -44,6 +44,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 
 	engine := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
 		&mockProvider{}, "test-model", dispatcher, est, mgr)
+	engine.git = g
 
 	cleanup := func() {}
 	return engine, cleanup
