@@ -213,10 +213,10 @@ func (m *FirstRunModel) updateKeychainPrompt(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		switch msg.String() {
 		case "y", "Y", "enter":
 			m.state = FirstRunComplete
-			return nil, &AppMsg{Screen: ScreenREPL}
+			return nil, &AppMsg{Screen: ScreenREPL, SaveKeychain: true}
 		case "n", "N":
 			m.state = FirstRunComplete
-			return nil, &AppMsg{Screen: ScreenREPL}
+			return nil, &AppMsg{Screen: ScreenREPL, SaveKeychain: false}
 		}
 	}
 	return nil, nil
