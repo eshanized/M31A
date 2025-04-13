@@ -72,10 +72,11 @@ type ModelInfo struct {
 }
 
 type MessageSegment struct {
-	Type       string `json:"type"`
-	Content    string `json:"content"`
-	DurationMs int64  `json:"duration_ms"`
-	Visible    bool   `json:"visible"`
+	Type       string    `json:"type"`
+	Content    string    `json:"content"`
+	DurationMs int64     `json:"duration_ms"`
+	Visible    bool      `json:"visible"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
 }
 
 type ToolCall struct {

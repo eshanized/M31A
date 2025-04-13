@@ -25,7 +25,7 @@ const (
 type AppMsg struct {
 	Screen         Screen
 	SessionID      string   // populated by resume screen on selection
-	Health         *HealthUpdateMsg
+	SaveKeychain   bool     // save API key to system keychain
 	Provider       *ProviderSwitchMsg
 	FallbackEvent  *FallbackEventMsg    // provider fallback notification
 	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
