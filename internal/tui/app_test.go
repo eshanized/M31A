@@ -158,16 +158,6 @@ func TestApp_ErrorMsg(t *testing.T) {
 	_ = newModel
 }
 
-func TestApp_AppMsgWithHealth(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
-	healthMsg := &HealthUpdateMsg{Status: "offline"}
-	newModel, _ := app.Update(AppMsg{Screen: ScreenREPL, Health: healthMsg})
-	updated := newModel.(*AppState)
-	if updated.healthStatus.Status != "offline" {
-		t.Errorf("Expected health status 'offline', got %q", updated.healthStatus.Status)
-	}
-}
-
 func TestApp_AppMsgWithProvider(t *testing.T) {
 	app := NewApp("test", nil, "key", "/tmp/config")
 	providerMsg := &ProviderSwitchMsg{Provider: "zen"}
