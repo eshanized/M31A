@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -57,17 +54,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-c", command)
-	}
+	cmd := newShellCmd(ctx, command)
 	cmd.Dir = t.workDir
 
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	setupProcessGroup(cmd)
 
 	// Use limited writers that cap output at BashOutputLimit
 	stdoutLimit := &limitWriter{limit: types.BashOutputLimit}
@@ -90,19 +80,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		case <-ctx.Done():
 			if cmd.Process != nil {
 				killOnce.Do(func() {
-					pgid := cmd.Process.Pid
-					if runtime.GOOS != "windows" {
-						pgid = -cmd.Process.Pid
-					}
-					syscall.Kill(pgid, syscall.SIGINT)
+					processKill(cmd.Process.Pid, sigInt)
 				})
 				time.AfterFunc(5*time.Second, func() {
 					killOnce.Do(func() {
-						pgid := cmd.Process.Pid
-						if runtime.GOOS != "windows" {
-							pgid = -cmd.Process.Pid
-						}
-						syscall.Kill(pgid, syscall.SIGKILL)
+						processKill(cmd.Process.Pid, sigKill)
 					})
 				})
 			}
