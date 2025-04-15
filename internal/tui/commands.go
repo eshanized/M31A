@@ -11,6 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
@@ -46,6 +47,7 @@ type CommandContext struct {
 	Ledger         *ledger.Ledger
 	Rollback       *rollback.Rollback
 	AutoDream      *autodream.Consolidator
+	WorkflowEngine *workflow.Engine
 }
 
 // CommandRegistry holds a map of registered command handlers and their
@@ -563,6 +565,20 @@ func handleGoal(args []string, ctx CommandContext) CommandResult {
 	}
 
 	goal := strings.Join(args, " ")
+
+	// Persist goal to session
+	if ctx.SessionManager != nil && ctx.SessionID != "" {
+		s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
+		if err == nil {
+			if s.Project == nil {
+				s.Project = &types.ProjectState{Goal: goal}
+			} else {
+				s.Project.Goal = goal
+			}
+			ctx.SessionManager.SaveProject(ctx.SessionID, s.Project)
+		}
+	}
+
 	return CommandResult{Success: true, Message: fmt.Sprintf("Goal set: %s", goal)}
 }
 
@@ -587,6 +603,10 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 	phaseName := args[0]
 	for _, p := range validPhases {
 		if string(p) == phaseName {
+			// Persist phase transition to session
+			if ctx.SessionManager != nil && ctx.SessionID != "" {
+				ctx.SessionManager.SaveState(ctx.SessionID, p, "manual transition", "user requested /phase "+phaseName)
+			}
 			return CommandResult{Success: true, Message: fmt.Sprintf("Phase transition to %s.", phaseName)}
 		}
 	}
