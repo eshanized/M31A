@@ -26,7 +26,6 @@ type AppMsg struct {
 	Screen         Screen
 	SessionID      string   // populated by resume screen on selection
 	SaveKeychain   bool     // save API key to system keychain
-	Provider       *ProviderSwitchMsg
 	FallbackEvent  *FallbackEventMsg    // provider fallback notification
 	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
 	RefreshCache   *RefreshCacheMsg     // trigger model cache refresh
@@ -34,19 +33,8 @@ type AppMsg struct {
 	InitError      error
 }
 
-type HealthUpdateMsg struct {
-	Status    string
-	LatencyMs int64
-	Provider  string
-	Error     string
-}
-
 type HealthCheckTickMsg struct {
 	Time time.Time
-}
-
-type ProviderSwitchMsg struct {
-	Provider string
 }
 
 type ErrorMsg struct {
@@ -86,3 +74,31 @@ type ModelSelectedMsg struct {
 
 // SettingsSavedMsg is emitted when the settings screen saves the config successfully.
 type SettingsSavedMsg struct{}
+
+// PhaseResultMsg carries the result of a workflow phase execution from the
+// engine goroutine to the TUI update loop.
+type PhaseResultMsg struct {
+	Phase    types.WorkflowPhase
+	Tasks    []types.Task
+	Messages []types.Message
+	Success  bool
+	Error    string
+}
+
+// PlanReadyMsg is emitted when the plan phase completes successfully with valid tasks.
+type PlanReadyMsg struct {
+	Tasks        []types.Task
+	CostEstimate string
+	TimeEstimate string
+}
+
+// TaskStartMsg is emitted when a task begins execution.
+type TaskStartMsg struct {
+	Task types.Task
+}
+
+// TaskUpdateMsg is emitted when a task status changes during execution.
+type TaskUpdateMsg struct {
+	Task   types.Task
+	Status string
+}
