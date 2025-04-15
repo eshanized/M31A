@@ -50,15 +50,15 @@ func (c *Client) userAgent() string {
 }
 
 type zenModel struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	Description   string  `json:"description"`
-	ContextLength int64   `json:"context_length"`
-	MaxContext    int64   `json:"max_context"`
-	PricingPrompt float64 `json:"pricing_prompt"`
-	PricingComp   float64 `json:"pricing_completion"`
-	PromptPrice   float64 `json:"prompt_price"`
-	CompPrice     float64 `json:"completion_price"`
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+type zenModelsResp struct {
+	Object string     `json:"object"`
+	Data   []zenModel `json:"data"`
 }
 
 func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
@@ -82,35 +82,21 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		return c.staleFallback()
 	}
 
-	var apiResp []zenModel
+	var apiResp zenModelsResp
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return c.staleFallback()
 	}
 
-	models := make([]types.ModelInfo, 0, len(apiResp))
-	for _, m := range apiResp {
-		ctxLen := m.ContextLength
-		if ctxLen == 0 {
-			ctxLen = m.MaxContext
-		}
-
-		promptPrice := m.PricingPrompt
-		if promptPrice == 0 {
-			promptPrice = m.PromptPrice
-		}
-		compPrice := m.PricingComp
-		if compPrice == 0 {
-			compPrice = m.CompPrice
-		}
-
+	models := make([]types.ModelInfo, 0, len(apiResp.Data))
+	for _, m := range apiResp.Data {
 		info := types.ModelInfo{
 			ID:            m.ID,
-			Name:          m.Name,
-			Description:   m.Description,
-			ContextLength: ctxLen,
+			Name:          m.ID,
+			Description:   m.OwnedBy,
+			ContextLength: 128_000,
 			Pricing: types.Pricing{
-				InputPerMToken:  promptPrice * 1_000_000,
-				OutputPerMToken: compPrice * 1_000_000,
+				InputPerMToken:  0,
+				OutputPerMToken: 0,
 			},
 			TopProvider: "zen",
 		}
@@ -123,7 +109,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 
 func (c *Client) staleFallback() ([]types.ModelInfo, error) {
 	if !c.cache.IsStale() && c.cache.Len() > 0 {
-		return nil, nil
+		return c.cachedModels(), nil
 	}
 	return nil, m31errors.ErrProviderUnreachable
 }
@@ -171,6 +157,10 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		case http.StatusTooManyRequests:
 			return nil, m31errors.ErrRateLimited
 		case http.StatusUnauthorized:
+			// Check if it's a credits/billing issue vs actual invalid key
+			if strings.Contains(bodyStr, "CreditsError") || strings.Contains(bodyStr, "payment") || strings.Contains(bodyStr, "billing") || strings.Contains(bodyStr, "credit") {
+				return nil, fmt.Errorf("no credits: %s", bodyStr)
+			}
 			return nil, m31errors.ErrInvalidKey
 		case http.StatusServiceUnavailable:
 			return nil, m31errors.ErrProviderUnreachable
@@ -235,12 +225,12 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	}
 
 	switch {
-	case latency < 200:
+	case latency < 2000:
 		return types.HealthStatus{Status: "live", LatencyMs: latency}
-	case latency < 500:
+	case latency < 5000:
 		return types.HealthStatus{Status: "slow", LatencyMs: latency}
 	default:
-		return types.HealthStatus{Status: "offline", LatencyMs: latency}
+		return types.HealthStatus{Status: "degraded", LatencyMs: latency}
 	}
 }
 

@@ -38,7 +38,7 @@ func TestHealthCheck_Live(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`[{"id":"test/model","name":"Test"}]`))
+			w.Write([]byte(`{"object":"list","data":[{"id":"test/model"}]}`))
 		}
 	}))
 	defer ts.Close()
@@ -55,13 +55,12 @@ func TestHealthCheck_Live(t *testing.T) {
 func TestFetchModels_PopulatesCache(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
-			resp := []map[string]any{
-				{
-					"id":              "deepseek/deepseek-r1",
-					"name":            "DeepSeek R1",
-					"context_length":  float64(65536),
-					"pricing_prompt":  0.00000055,
-					"pricing_completion": 0.00000219,
+			resp := map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{
+						"id": "deepseek/deepseek-r1",
+					},
 				},
 			}
 			json.NewEncoder(w).Encode(resp)
@@ -89,8 +88,8 @@ func TestFetchModels_PopulatesCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected to find model in cache: %v", err)
 	}
-	if cached.ContextLength != 65536 {
-		t.Fatalf("expected context length 65536, got %d", cached.ContextLength)
+	if cached.ContextLength != 128000 {
+		t.Fatalf("expected context length 128000, got %d", cached.ContextLength)
 	}
 }
 
@@ -99,13 +98,12 @@ func TestFetchModels_CacheHit(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		if r.URL.Path == "/models" {
-			resp := []map[string]any{
-				{
-					"id":              "test/model",
-					"name":            "Test Model",
-					"context_length":  float64(4096),
-					"pricing_prompt":  0.000001,
-					"pricing_completion": 0.000002,
+			resp := map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{
+						"id": "test/model",
+					},
 				},
 			}
 			json.NewEncoder(w).Encode(resp)
