@@ -64,6 +64,18 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 			if err != nil {
 				return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
 			}
+			// Containment check: ensure resolved path is within workDir
+			absWork, err := filepath.Abs(t.workDir)
+			if err != nil {
+				return types.ToolResult{}, fmt.Errorf("cannot resolve workdir: %w", err)
+			}
+			absResolved, err := filepath.Abs(resolved)
+			if err != nil {
+				return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+			}
+			if !strings.HasPrefix(absResolved+string(os.PathSeparator), absWork+string(os.PathSeparator)) && absResolved != absWork {
+				return types.ToolResult{}, fmt.Errorf("path escapes work directory")
+			}
 			searchPath = resolved
 		}
 	}
