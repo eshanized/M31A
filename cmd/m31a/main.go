@@ -22,7 +22,24 @@ var Version = "dev"
 func main() {
 	// Parse CLI flags
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	helpFlag := flag.Bool("help", false, "Show usage information")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "M31A — Terminal AI Coding Agent\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: m31a [flags]\n\n")
+		fmt.Fprintf(os.Stderr, "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nEnvironment Variables:\n")
+		fmt.Fprintf(os.Stderr, "  M31A_CONFIG       Config file path (default: ~/.m31a/config.toml)\n")
+		fmt.Fprintf(os.Stderr, "  OPENROUTER_API_KEY  OpenRouter API key\n")
+		fmt.Fprintf(os.Stderr, "  ZEN_API_KEY         Zen API key\n")
+		fmt.Fprintf(os.Stderr, "  M31A_LOG_FORMAT     Log format: json, text (default: json)\n")
+		fmt.Fprintf(os.Stderr, "  M31A_LOG_LEVEL      Log level: debug, info, warn, error (default: info)\n")
+	}
 	flag.Parse()
+	if *helpFlag {
+		flag.Usage()
+		os.Exit(0)
+	}
 	if *versionFlag {
 		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 		os.Exit(0)
