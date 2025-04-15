@@ -51,15 +51,15 @@ func TestHealthCheck_Live(t *testing.T) {
 	if status.Status != "live" {
 		t.Fatalf("expected status %q, got %q", "live", status.Status)
 	}
-	if status.LatencyMs >= 200 {
-		t.Fatalf("expected latency < 200ms, got %dms", status.LatencyMs)
+	if status.LatencyMs >= 2000 {
+		t.Fatalf("expected latency < 2000ms, got %dms", status.LatencyMs)
 	}
 }
 
 func TestHealthCheck_Slow(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/key" {
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(2500 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 		}

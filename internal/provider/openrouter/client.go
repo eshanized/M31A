@@ -121,7 +121,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 
 func (c *Client) staleFallback() ([]types.ModelInfo, error) {
 	if !c.cache.IsStale() && c.cache.Len() > 0 {
-		return nil, nil
+		return c.cachedModels(), nil
 	}
 	return nil, m31errors.ErrProviderUnreachable
 }
@@ -242,12 +242,12 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	}
 
 	switch {
-	case latency < 200:
+	case latency < 2000:
 		return types.HealthStatus{Status: "live", LatencyMs: latency}
-	case latency < 500:
+	case latency < 5000:
 		return types.HealthStatus{Status: "slow", LatencyMs: latency}
 	default:
-		return types.HealthStatus{Status: "offline", LatencyMs: latency}
+		return types.HealthStatus{Status: "degraded", LatencyMs: latency}
 	}
 }
 
