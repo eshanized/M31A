@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -45,6 +46,12 @@ type ReplModel struct {
 
 	fallbackBanner    string    // current fallback banner text, empty = no banner
 	fallbackBannerAt  time.Time // when the banner appeared (for 15s auto-dismiss)
+
+	// Provider access for LLM calls
+	registry       *provider.Registry
+	activeProvider string
+	activeModel    *types.ModelInfo
+	sessionID      string
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -68,7 +75,7 @@ func NewReplModel(t theme.Theme) ReplModel {
 		renderer = nil
 	}
 
-	return ReplModel{
+	m := ReplModel{
 		theme:        t,
 		viewport:     vp,
 		textarea:     ta,
@@ -77,6 +84,55 @@ func NewReplModel(t theme.Theme) ReplModel {
 		historyPos:   -1,
 		msgRenderer:  renderer,
 	}
+
+	// Set welcome message in viewport
+	m.viewport.SetContent(m.renderWelcome())
+
+	return m
+}
+
+func (m *ReplModel) renderWelcome() string {
+	var sb strings.Builder
+
+	title := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true).
+		Render("Welcome to M31A")
+	sb.WriteString(title)
+	sb.WriteString("\n\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render("Your terminal AI coding assistant."))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(m.theme.TextPrimary).
+		Bold(true).
+		Render("Getting started:"))
+	sb.WriteString("\n")
+
+	commands := []string{
+		"/workflow <goal>   Start a full coding workflow",
+		"/phase initialize   Run initialize phase",
+		"/models             Browse available models",
+		"/settings           Open settings",
+		"/status             Show current session info",
+		"/help               List all commands",
+	}
+	for _, cmd := range commands {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Render("  " + cmd))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render("Or just type your question and press Enter."))
+
+	return sb.String()
 }
 
 func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
@@ -102,6 +158,10 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			if err := m.msgRenderer.SetWidth(msg.Width - 4); err != nil {
 				m.lastStatus = fmt.Sprintf("Renderer resize failed: %v", err)
 			}
+		}
+		// Show welcome message if no messages yet
+		if len(m.messages) == 0 {
+			m.viewport.SetContent(m.renderWelcome())
 		}
 
 	case StreamMsg:
@@ -163,6 +223,33 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			m.renderMessages()
 			m.viewport.GotoBottom()
 			m.textarea.Reset()
+
+			// Start streaming LLM response
+			if m.registry != nil && m.activeProvider != "" {
+				p := m.registry.ActiveProvider()
+				if p != nil {
+					modelID := ""
+					if m.activeModel != nil {
+						modelID = m.activeModel.ID
+					}
+					ctx, cancel := context.WithCancel(context.Background())
+					m.streamCancel = cancel
+					m.streaming = true
+					m.thinking = false
+					m.thinkingStartAt = time.Time{}
+					m.activeSegmentType = ""
+					m.streamContent.Reset()
+					m.streamSegments = nil
+
+					req := provider.ChatRequest{
+						Model:    modelID,
+						Messages: m.messages,
+						Stream:   true,
+					}
+					cmd := StartStreamCmd(ctx, p, req, m.sessionID)
+					return []tea.Cmd{cmd}, true
+				}
+			}
 
 			var cmds []tea.Cmd
 			return cmds, true
@@ -280,6 +367,14 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 
 	switch chunk.Type {
 	case "content":
+		if m.activeSegmentType == "thinking" && m.streamContent.Len() > 0 {
+			m.streamSegments = append(m.streamSegments, types.MessageSegment{
+				Type:    "thinking",
+				Content: m.streamContent.String(),
+				Visible: true,
+			})
+			m.streamContent.Reset()
+		}
 		m.activeSegmentType = "content"
 		m.thinking = false
 		m.streamContent.WriteString(chunk.Delta)
@@ -389,6 +484,13 @@ func (m *ReplModel) SetTheme(t theme.Theme) {
 			m.msgRenderer = newRenderer
 		}
 	}
+}
+
+func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string) {
+	m.registry = registry
+	m.activeProvider = activeProvider
+	m.activeModel = model
+	m.sessionID = sessionID
 }
 
 func (m *ReplModel) SetStreaming(v bool) {
