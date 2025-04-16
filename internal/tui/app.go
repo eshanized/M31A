@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,11 +12,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
+	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
@@ -58,6 +63,16 @@ type AppState struct {
 	dispatcher       *tools.Dispatcher
 	modelSelector      ModelSelector
 	fallbackNotification *FallbackNotification
+	cmdRegistry        *CommandRegistry
+	planModel          *PlanModel
+	executeModel       *ExecuteModel
+	verifyModel        *VerifyModel
+	shipModel          *ShipModel
+	workflowEngine     *workflow.Engine
+	workflowGoal       string
+	workflowRunning    bool
+	currentPhase       types.WorkflowPhase
+	discussQuestions   []string
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -122,22 +137,112 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		app.modelSelector = NewModelSelector(registry)
 	}
 
-	if apiKey == "" {
-		fr := NewFirstRunModel(tm.Current(), configPath)
-		app.screen = ScreenFirstRun
-		app.firstRunModel = &fr
-	} else {
-		rp := NewReplModel(tm.Current())
-		app.screen = ScreenREPL
-		app.replModel = &rp
-		app.healthStatus = types.HealthStatus{Status: "live"}
-	}
+	// Initialize command registry
+	app.cmdRegistry = DefaultCommands()
 
 	if registry != nil {
 		app.activeProvider = registry.Active()
 	}
 
+	app.initWorkflowEngine()
+
+	if apiKey == "" {
+		fr := NewFirstRunModel(tm.Current(), configPath)
+		app.screen = ScreenFirstRun
+		app.firstRunModel = &fr
+	} else if registry == nil || registry.ActiveProvider() == nil {
+		// No providers available — offline mode
+		rp := NewReplModel(tm.Current())
+		app.screen = ScreenREPL
+		app.replModel = &rp
+		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "")
+		app.healthStatus = types.HealthStatus{
+			Status: "offline",
+			Error:  "No providers available — offline mode. History is readable but no new messages.",
+		}
+		app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
+	} else {
+		rp := NewReplModel(tm.Current())
+		app.screen = ScreenREPL
+		app.replModel = &rp
+		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "")
+		app.healthStatus = types.HealthStatus{Status: "live"}
+	}
+
 	return app
+}
+
+func (m *AppState) initWorkflowEngine() {
+	if m.registry == nil || m.activeProvider == "" || m.sessionManager == nil {
+		return
+	}
+	p := m.registry.ActiveProvider()
+	if p == nil {
+		return
+	}
+
+	modelID := ""
+	if m.activeModel != nil {
+		modelID = m.activeModel.ID
+	}
+	if modelID == "" && m.config != nil {
+		modelID = m.config.Model.Default
+	}
+	if modelID == "" {
+		return
+	}
+
+	// Create a session for the workflow
+	s, err := m.sessionManager.NewSession(modelID, m.activeProvider)
+	if err != nil {
+		m.currentOperation = fmt.Sprintf("Workflow engine init failed: %v", err)
+		return
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = os.TempDir()
+	}
+	backupDir := filepath.Join(filepath.Dir(m.configPath), "backups")
+	sessionBaseDir := filepath.Join(filepath.Dir(m.configPath), "sessions")
+	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
+
+	g := git.New(cwd)
+
+	est := tokens.NewEstimator(modelID)
+
+	eng := workflow.NewEngine(s.ID, cwd, backupDir, planningDir,
+		p, modelID, m.dispatcher, est, m.sessionManager)
+	eng.SetGit(g)
+	m.workflowEngine = eng
+}
+
+// RunPhaseCmd returns a tea.Cmd that executes the given workflow phase in a
+// goroutine and emits a PhaseResultMsg on completion.
+func RunPhaseCmd(eng *workflow.Engine, phase types.WorkflowPhase, goal string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		result, err := eng.RunPhase(ctx, phase, goal)
+		if err != nil {
+			return PhaseResultMsg{
+				Phase: phase,
+				Error: err.Error(),
+			}
+		}
+		if result == nil {
+			return PhaseResultMsg{
+				Phase: phase,
+				Error: "nil result",
+			}
+		}
+		return PhaseResultMsg{
+			Phase:    phase,
+			Tasks:    result.Tasks,
+			Messages: result.Messages,
+			Success:  result.Success,
+			Error:    result.Error,
+		}
+	}
 }
 
 func (m *AppState) Init() tea.Cmd {
@@ -196,9 +301,29 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.String() == "ctrl+c" {
+			// If streaming, cancel stream and stay in app
+			if m.screen == ScreenREPL && m.replModel != nil && m.replModel.streaming {
+				if m.replModel.streamCancel != nil {
+					m.replModel.streamCancel()
+				}
+				m.replModel.streaming = false
+				m.replModel.thinking = false
+				m.currentOperation = "Streaming cancelled. Press Ctrl+C again to exit."
+				return m, nil
+			}
+			// Graceful shutdown: save session state before quitting
+			if m.sessionManager != nil && m.workflowEngine != nil {
+				sessionID := m.workflowEngine.SessionID()
+				if sess, err := m.sessionManager.LoadSession(sessionID); err == nil && sess != nil {
+					if err := m.sessionManager.SaveSession(sess); err != nil {
+						m.currentOperation = "Saving session failed: " + err.Error()
+					}
+				}
+			}
 			return m, tea.Quit
 		}
 		if m.screen == ScreenREPL {
+			// Handle TUI-specific commands first
 			switch msg.String() {
 			case "/settings":
 				m.screen = ScreenSettings
@@ -217,6 +342,85 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.modelSelector.Init()
 				}
 			}
+
+			// Intercept /phase to start workflow engine phases
+			if strings.HasPrefix(msg.String(), "/phase ") && m.workflowEngine != nil {
+				parts := strings.Fields(msg.String())
+				if len(parts) >= 2 {
+					phaseName := parts[1]
+					goal := ""
+					if len(parts) > 2 {
+						goal = strings.Join(parts[2:], " ")
+					}
+					var phase types.WorkflowPhase
+					switch phaseName {
+					case "initialize":
+						phase = types.PhaseInitialize
+					case "discuss":
+						phase = types.PhaseDiscuss
+					case "plan":
+						phase = types.PhasePlan
+					case "execute":
+						phase = types.PhaseExecute
+					case "verify":
+						phase = types.PhaseVerify
+					case "ship":
+						phase = types.PhaseShip
+					default:
+						return m, nil
+					}
+					m.workflowGoal = goal
+					m.workflowRunning = true
+					m.currentPhase = phase
+					return m, RunPhaseCmd(m.workflowEngine, phase, goal)
+				}
+			}
+
+			// Intercept /workflow to start the full workflow chain
+			if strings.HasPrefix(msg.String(), "/workflow ") && m.workflowEngine != nil {
+				goal := strings.TrimPrefix(msg.String(), "/workflow ")
+				if goal == "" {
+					m.currentOperation = "Usage: /workflow <your goal>"
+					return m, nil
+				}
+				m.workflowGoal = goal
+				m.workflowRunning = true
+				m.currentPhase = types.PhaseInitialize
+				m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
+				return m, RunPhaseCmd(m.workflowEngine, types.PhaseInitialize, goal)
+			}
+
+			// Try command registry for all other slash commands
+			if strings.HasPrefix(msg.String(), "/") {
+				sessionID := ""
+				if m.workflowEngine != nil {
+					sessionID = m.workflowEngine.SessionID()
+				}
+				ctx := CommandContext{
+					Registry:        m.registry,
+					SessionManager:  m.sessionManager,
+					Config:          m.config,
+					Dispatcher:      m.dispatcher,
+					Ledger:          m.ledger,
+					WorkflowEngine:  m.workflowEngine,
+					SessionID:       sessionID,
+				}
+				result, handled := m.cmdRegistry.Execute(msg.String(), ctx)
+				if handled {
+					m.currentOperation = result.Message
+					if result.Screen != nil {
+						m.screen = *result.Screen
+						if *result.Screen == ScreenFirstRun {
+							m.replModel = nil
+						}
+						return m, nil
+					}
+					if strings.HasPrefix(result.Message, "Goodbye") {
+						return m, tea.Quit
+					}
+					return m, nil
+				}
+			}
 		}
 
 	case HealthCheckTickMsg:
@@ -225,14 +429,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
 		p := m.registry.ActiveProvider()
 		if p == nil {
+			cancel()
 			return m, NextHealthTick(types.HealthCheckInterval)
 		}
 
 		result := p.HealthCheck(ctx)
+		cancel()
 		m.healthStatus = result
 		m.lastActivity = time.Now()
 		return m, NextHealthTick(calculateNextInterval(result))
@@ -243,7 +447,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 
 		providerName := msg.ProviderName
 		if providerName == "" {
@@ -251,6 +454,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		errMsg, nextCmd := handleCacheRefresh(ctx, m.registry, providerName)
+		cancel()
 		if errMsg != "" {
 			m.currentOperation = errMsg
 		} else {
@@ -274,6 +478,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
 			m.replModel = &rp
+			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "")
 			m.initialized = true
 		}
 		if msg.Screen == ScreenModelSelector {
@@ -283,9 +488,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.modelSelector.Init()
 		}
 		m.screen = msg.Screen
-		if msg.Provider != nil {
-			m.activeProvider = msg.Provider.Provider
-		}
 		if msg.InitError != nil {
 			m.currentOperation = fmt.Sprintf("Error: %v", msg.InitError)
 		}
@@ -304,6 +506,45 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentOperation = fmt.Sprintf("Error: %v", msg.Err)
 		return m, nil
 
+	case StreamErrorMsg:
+		// Check if this is a rate-limit or unavailable error that should trigger fallback
+		if m.registry != nil && m.activeProvider != "" && m.config != nil && m.config.Provider.AutoFallback {
+			reason := ""
+			if errors.Is(msg.Err, m31errors.ErrRateLimited) {
+				reason = "rate_limited"
+			} else if errors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
+				reason = "unavailable"
+			} else {
+				// Fallback string matching for unwrapped provider errors
+				errStr := msg.Err.Error()
+				if strings.Contains(errStr, "429") || strings.Contains(strings.ToLower(errStr), "rate limit") {
+					reason = "rate_limited"
+				} else if strings.Contains(errStr, "503") || strings.Contains(strings.ToLower(errStr), "unavailable") {
+					reason = "unavailable"
+				}
+			}
+			if reason != "" {
+				_, event, err := provider.FindFallbackProvider(m.registry, m.activeProvider)
+				if err == nil && event != nil {
+					m.activeProvider = event.To
+					if m.replModel != nil {
+						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID)
+						m.replModel.Update(msg)
+					}
+					return m, tea.Batch(
+						func() tea.Msg {
+							return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
+						},
+					)
+				}
+			}
+		}
+		// Pass the error through to the REPL model for display
+		if m.replModel != nil {
+			m.replModel.Update(msg)
+		}
+		return m, nil
+
 	case PermissionRequestMsg:
 		m.prevScreen = m.screen
 		m.screen = ScreenPermission
@@ -317,6 +558,113 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = m.prevScreen
 		m.permissionModal = nil
 		return m, permissionListenerCmd(m.dispatcher)
+
+	case PhaseResultMsg:
+		if msg.Error != "" {
+			m.currentOperation = fmt.Sprintf("Phase %s failed: %s", msg.Phase, msg.Error)
+			m.workflowRunning = false
+			return m, nil
+		}
+		if !msg.Success {
+			m.currentOperation = fmt.Sprintf("Phase %s completed unsuccessfully", msg.Phase)
+			m.workflowRunning = false
+			return m, nil
+		}
+		m.currentOperation = fmt.Sprintf("Phase %s completed", msg.Phase)
+
+		switch msg.Phase {
+		case types.PhaseInitialize:
+			// Auto-advance to Discuss
+			m.currentPhase = types.PhaseDiscuss
+			return m, RunPhaseCmd(m.workflowEngine, types.PhaseDiscuss, m.workflowGoal)
+
+		case types.PhaseDiscuss:
+			// Extract questions and transition to Discuss screen for Q&A
+			m.currentPhase = types.PhaseDiscuss
+			m.discussQuestions = make([]string, 0, len(msg.Messages))
+			for _, msg2 := range msg.Messages {
+				if msg2.Role == "assistant" {
+					m.discussQuestions = append(m.discussQuestions, msg2.Content)
+				}
+			}
+			// For V1, we auto-advance to Plan with saved answers
+			// The discuss answers are already saved to PROJECT.md by the engine
+			m.currentPhase = types.PhasePlan
+			return m, RunPhaseCmd(m.workflowEngine, types.PhasePlan, m.workflowGoal)
+
+		case types.PhasePlan:
+			if len(msg.Tasks) > 0 && m.planModel == nil {
+				t := m.themeManager.Current()
+				modelID := ""
+				if m.activeModel != nil {
+					modelID = m.activeModel.ID
+				}
+				providerName := m.activeProvider
+				pm := NewPlanModel(msg.Tasks, t, modelID, providerName, 0, "")
+				m.planModel = pm
+			}
+			// Auto-advance to Execute
+			m.currentPhase = types.PhaseExecute
+			return m, RunPhaseCmd(m.workflowEngine, types.PhaseExecute, m.workflowGoal)
+
+		case types.PhaseExecute:
+			t := m.themeManager.Current()
+			m.executeModel = NewExecuteModel(msg.Tasks, t)
+			m.screen = ScreenExecute
+			// Run the actual execute phase via engine (tool dispatch, git commits)
+			m.currentPhase = types.PhaseVerify
+			return m, RunPhaseCmd(m.workflowEngine, types.PhaseExecute, m.workflowGoal)
+
+		case types.PhaseVerify:
+			t := m.themeManager.Current()
+			results := make(map[int]workflow.VerificationResult)
+			m.verifyModel = NewVerifyModel(msg.Tasks, results, t)
+			m.screen = ScreenVerify
+			// Run the actual verify phase via engine
+			m.currentPhase = types.PhaseShip
+			return m, RunPhaseCmd(m.workflowEngine, types.PhaseVerify, m.workflowGoal)
+
+		case types.PhaseShip:
+			t := m.themeManager.Current()
+			summary := ShipSummary{
+				SessionID: m.workflowEngine.SessionID(),
+			}
+			if m.executeModel != nil {
+				done, total, failed, skipped := 0, len(msg.Tasks), 0, 0
+				for _, task := range msg.Tasks {
+					switch task.Status {
+					case types.StatusDone:
+						done++
+					case types.StatusFailed:
+						failed++
+					case types.StatusSkipped:
+						skipped++
+					}
+				}
+				summary.TaskDone = done
+				summary.TaskTotal = total
+				summary.TaskFailed = failed
+				summary.TaskSkipped = skipped
+			}
+			m.shipModel = NewShipModel(summary, t)
+			m.screen = ScreenShip
+			m.workflowRunning = false
+			return m, nil
+
+		default:
+			return m, nil
+		}
+
+	case SettingsSavedMsg:
+		// Restart health check and cache refresh tickers after settings change
+		m.currentOperation = "Settings saved"
+		if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
+			m.lastActivity = time.Now()
+		}
+		return m, tea.Batch(
+			NextHealthTick(types.HealthCheckInterval),
+			NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
+		)
 	}
 
 	switch m.screen {
@@ -338,6 +686,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				rp := NewReplModel(m.themeManager.Current())
 				m.replModel = &rp
+				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "")
 				m.initialized = true
 				healthCmd := HealthCheckTicker(
 					context.Background(), m.registry, m.activeProvider,
@@ -401,23 +750,49 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenPlan:
-		// Plan screen is managed by the workflow engine; TUI just renders
-		// Any key handling is done within the PlanModel if wired
+		if m.planModel != nil {
+			cmds, appMsg := m.planModel.Update(msg)
+			if appMsg != nil {
+				m.screen = appMsg.Screen
+			}
+			_ = cmds
+		}
 		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenExecute:
-		// Execute screen is managed by the workflow engine; TUI just renders
+		if m.executeModel != nil {
+			cmds, appMsg := m.executeModel.Update(msg)
+			if appMsg != nil {
+				m.screen = appMsg.Screen
+			}
+			_ = cmds
+		}
 		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenVerify:
-		// Verify screen is managed by the workflow engine; TUI just renders
+		if m.verifyModel != nil {
+			cmds, appMsg := m.verifyModel.Update(msg)
+			if appMsg != nil {
+				m.screen = appMsg.Screen
+			}
+			_ = cmds
+		}
 		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenShip:
-		// Ship screen is managed by the workflow engine; TUI just renders
+		if m.shipModel != nil {
+			cmds, appMsg := m.shipModel.Update(msg)
+			if appMsg != nil {
+				m.screen = appMsg.Screen
+				if appMsg.Screen == ScreenFirstRun {
+					m.replModel = nil
+				}
+			}
+			_ = cmds
+		}
 		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
@@ -496,18 +871,30 @@ func (m *AppState) View() string {
 		return m.modelSelector.View()
 
 	case ScreenPlan:
+		if m.planModel != nil {
+			return m.planModel.View()
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Plan screen — driven by workflow engine")
 
 	case ScreenExecute:
+		if m.executeModel != nil {
+			return m.executeModel.View()
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Execute screen — driven by workflow engine")
 
 	case ScreenVerify:
+		if m.verifyModel != nil {
+			return m.verifyModel.View()
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Verify screen — driven by workflow engine")
 
 	case ScreenShip:
+		if m.shipModel != nil {
+			return m.shipModel.View()
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Ship screen — driven by workflow engine")
 
