@@ -60,29 +60,33 @@ func LoadPrompts() (*PromptRegistry, error) {
 
 // Engine orchestrates the six-phase workflow.
 type Engine struct {
-	sessionID   string
-	workDir     string
-	backupDir   string
-	planningDir string
-	provider    provider.LLMProvider
-	modelID     string
-	git         *git.Git
-	dispatcher  *tools.Dispatcher
-	tokens      *tokens.Estimator
-	sessionMgr  *session.Manager
-	prompts     *PromptRegistry
-	logger      *slog.Logger
-	startTime   time.Time
+	sessionID        string
+	workDir          string
+	backupDir        string
+	planningDir      string
+	provider         provider.LLMProvider
+	modelID          string
+	git              *git.Git
+	dispatcher       *tools.Dispatcher
+	tokens           *tokens.Estimator
+	sessionMgr       *session.Manager
+	prompts          *PromptRegistry
+	logger           *slog.Logger
+	startTime        time.Time
+	sessionStartHash string
+	discussState     DiscussState
 }
 
 // PhaseResult holds the outcome of a workflow phase.
 type PhaseResult struct {
-	Phase      m31types.WorkflowPhase
-	Success    bool
-	Messages   []m31types.Message
-	Tasks      []m31types.Task
-	Error      string
-	DurationMs int64
+	Phase               m31types.WorkflowPhase
+	Success             bool
+	Messages            []m31types.Message
+	Tasks               []m31types.Task
+	Error               string
+	DurationMs          int64
+	NeedsAnswers        bool
+	RequiresManualInput bool
 }
 
 // NewEngine creates a workflow engine.
@@ -158,6 +162,78 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 		return fmt.Errorf("save state: %w", err)
 	}
 
+	return nil
+}
+
+// SetGit sets the git instance on the engine.
+// Required before running any phase that uses git operations.
+func (e *Engine) SetGit(g *git.Git) {
+	e.git = g
+	if h, err := g.HeadHash(); err == nil {
+		e.sessionStartHash = h
+	}
+}
+
+// SessionID returns the current session ID.
+func (e *Engine) SessionID() string {
+	return e.sessionID
+}
+
+// DiscussState holds the questions and collected answers for the discuss phase.
+type DiscussState struct {
+	Questions []string
+	Answers   map[int]string
+}
+
+// SubmitDiscussAnswer records an answer for a discuss question.
+func (e *Engine) SubmitDiscussAnswer(index int, answer string) error {
+	if e.discussState.Questions == nil {
+		return fmt.Errorf("no discuss questions to answer")
+	}
+	if index < 0 || index >= len(e.discussState.Questions) {
+		return fmt.Errorf("invalid question index: %d", index)
+	}
+	if e.discussState.Answers == nil {
+		e.discussState.Answers = make(map[int]string)
+	}
+	e.discussState.Answers[index] = answer
+	return nil
+}
+
+// SkipDiscuss fills default (empty) answers and saves.
+func (e *Engine) SkipDiscuss() error {
+	if e.discussState.Questions == nil {
+		return nil
+	}
+	if e.discussState.Answers == nil {
+		e.discussState.Answers = make(map[int]string)
+	}
+	for i := range e.discussState.Questions {
+		if _, ok := e.discussState.Answers[i]; !ok {
+			e.discussState.Answers[i] = ""
+		}
+	}
+	return e.FinalizeDiscuss()
+}
+
+func (e *Engine) FinalizeDiscuss() error {
+	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	var questions, answers []string
+	for i, q := range e.discussState.Questions {
+		questions = append(questions, q)
+		a := ""
+		if ans, ok := e.discussState.Answers[i]; ok {
+			a = ans
+		}
+		answers = append(answers, a)
+	}
+	if err := e.saveDiscussAnswers(project, questions, answers); err != nil {
+		return fmt.Errorf("save discuss answers: %w", err)
+	}
+	// Auto-transition to Plan
+	if err := e.Transition(context.Background(), m31types.PhaseDiscuss, m31types.PhasePlan); err != nil {
+		e.logger.Warn("failed to transition to plan", "error", err)
+	}
 	return nil
 }
 
@@ -420,11 +496,138 @@ func parseQuestions(content string) []string {
 }
 
 // parseToolCalls extracts tool calls from response content.
-// Simplified - real implementation would parse from structured response.
+// Looks for JSON objects with a "name" or "tool" field inside code blocks or inline.
 func parseToolCalls(content string) []m31types.ToolCall {
-	// In a real implementation, this would parse tool calls from the LLM response.
-	// For V1, we use a simplified approach where tool calls are embedded in content.
-	return nil
+	var calls []m31types.ToolCall
+
+	// Pattern 1: JSON in code blocks ```<any lang> {...} ```
+	blockRe := regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
+	for _, match := range blockRe.FindAllStringSubmatch(content, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		if tc := parseSingleToolCall(match[1]); tc != nil {
+			calls = append(calls, *tc)
+		}
+	}
+
+	// Pattern 2: Try to find standalone JSON objects with tool call fields
+	if len(calls) == 0 {
+		// Look for objects with "name" field
+		objRe := regexp.MustCompile(`\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}`)
+		for _, match := range objRe.FindAllStringSubmatch(content, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			// Try to parse the full object
+			jsonStart := strings.Index(content, match[0])
+			if jsonStart == -1 {
+				continue
+			}
+			// Find the matching JSON object
+			obj := extractJSONObject(content[jsonStart:])
+			if obj == "" {
+				continue
+			}
+			if tc := parseSingleToolCall(obj); tc != nil {
+				calls = append(calls, *tc)
+			}
+		}
+	}
+
+	return calls
+}
+
+// toolCallJSON represents a tool call in JSON format.
+type toolCallJSON struct {
+	Name  string          `json:"name"`
+	Tool  string          `json:"tool"`
+	Input json.RawMessage `json:"input"`
+}
+
+func parseSingleToolCall(jsonStr string) *m31types.ToolCall {
+	var tc toolCallJSON
+	if err := json.Unmarshal([]byte(jsonStr), &tc); err != nil {
+		return nil
+	}
+
+	name := tc.Name
+	if name == "" {
+		name = tc.Tool
+	}
+	if name == "" {
+		return nil
+	}
+
+	// Normalize tool names to match registered tool names
+	name = normalizeToolName(name)
+
+	input := tc.Input
+	if input == nil {
+		input = json.RawMessage("{}")
+	}
+
+	return &m31types.ToolCall{
+		ID:    fmt.Sprintf("call_%s_%d", name, time.Now().UnixNano()),
+		Name:  name,
+		Input: input,
+	}
+}
+
+// normalizeToolName maps common LLM tool names to registered tool names.
+func normalizeToolName(name string) string {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "bash", "shell", "exec", "run":
+		return "Bash"
+	case "fileread", "read_file", "read", "cat":
+		return "FileRead"
+	case "filewrite", "write_file", "write", "save":
+		return "FileWrite"
+	case "glob", "find_files", "find":
+		return "Glob"
+	case "grep", "search", "search_files":
+		return "Grep"
+	default:
+		return name
+	}
+}
+
+// extractJSONObject finds and returns the first complete JSON object starting
+// at the beginning of the string.
+func extractJSONObject(s string) string {
+	if !strings.HasPrefix(strings.TrimSpace(s), "{") {
+		return ""
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			if inString {
+				escaped = true
+			}
+		case '"':
+			inString = !inString
+		case '{':
+			if !inString {
+				depth++
+			}
+		case '}':
+			if !inString {
+				depth--
+				if depth == 0 {
+					return s[:i+1]
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // readTaskFiles reads the content of files for a task.
