@@ -158,13 +158,17 @@ func TestApp_ErrorMsg(t *testing.T) {
 	_ = newModel
 }
 
-func TestApp_AppMsgWithProvider(t *testing.T) {
+func TestApp_AppMsgWithFallbackEvent(t *testing.T) {
 	app := NewApp("test", nil, "key", "/tmp/config")
-	providerMsg := &ProviderSwitchMsg{Provider: "zen"}
-	newModel, _ := app.Update(AppMsg{Screen: ScreenREPL, Provider: providerMsg})
+	newModel, _ := app.Update(AppMsg{Screen: ScreenREPL})
 	updated := newModel.(*AppState)
-	if updated.activeProvider != "zen" {
-		t.Errorf("Expected activeProvider 'zen', got %q", updated.activeProvider)
+
+	// Simulate fallback event
+	fallbackMsg := FallbackEventMsg{From: "openrouter", To: "zen", Reason: "rate_limited"}
+	updated2, _ := updated.Update(fallbackMsg)
+	updated3 := updated2.(*AppState)
+	if updated3.activeProvider != "zen" {
+		t.Errorf("Expected activeProvider 'zen', got %q", updated3.activeProvider)
 	}
 }
 
