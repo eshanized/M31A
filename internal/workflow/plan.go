@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,17 +18,21 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 
 	var tasks []m31types.Task
 	var lastErr error
+	var rawResponse string
+	var valErrs []string
 
 	// Retry loop for invalid task lists
 	for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
-		// 1. Build context
-		messages := e.buildPlanContext(goal, tasks)
+		// 1. Build context with error feedback on retries
+		messages := e.buildPlanContext(goal, tasks, valErrs, rawResponse)
 
 		// 2. Stream LLM
 		content, err := e.streamLLM(ctx, messages, false)
 		if err != nil {
 			lastErr = err
 			e.logger.Warn("LLM error in plan phase", "attempt", attempt, "error", err)
+			valErrs = []string{err.Error()}
+			rawResponse = ""
 			continue
 		}
 
@@ -35,14 +41,17 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		if err != nil {
 			lastErr = fmt.Errorf("parse error: %w", err)
 			e.logger.Warn("task parse error", "attempt", attempt, "error", err)
+			valErrs = []string{lastErr.Error()}
+			rawResponse = content
 			continue
 		}
 
 		// 4. Validate
-		valErrs := validateTasks(parsed)
+		valErrs = validateTasks(parsed)
 		if len(valErrs) > 0 {
 			lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
 			e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
+			rawResponse = content
 			continue
 		}
 
@@ -53,9 +62,10 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	if len(tasks) == 0 {
 		e.logger.Error("failed to generate valid task list after retries", "retries", m31types.MaxPlanRetries)
 		return &PhaseResult{
-			Phase:   m31types.PhasePlan,
-			Success: false,
-			Error:   lastErr.Error(),
+			Phase:               m31types.PhasePlan,
+			Success:             false,
+			Error:               lastErr.Error(),
+			RequiresManualInput: true,
 		}, lastErr
 	}
 
@@ -92,7 +102,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 }
 
 // buildPlanContext creates messages for the plan phase.
-func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task) []m31types.Message {
+func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
 	var messages []m31types.Message
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat)})
 
@@ -107,6 +117,13 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task) []
 
 	// Build context
 	ctx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s\n\n", goal, projectType, framework)
+
+	// Load MEMORY.md if exists
+	sessionDir := filepath.Dir(e.planningDir)
+	memPath := filepath.Join(sessionDir, "MEMORY.md")
+	if mem, err := os.ReadFile(memPath); err == nil {
+		ctx += "## Cross-Session Memory\n" + string(mem) + "\n\n"
+	}
 
 	// Add file schema
 	fileSchema := listCwdFiles(e.workDir)
@@ -123,9 +140,20 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task) []
 		ctx += "\n"
 	}
 
-	// Add previous attempt errors if any
+	// Add previous attempt errors and raw response if any
 	if len(existingTasks) > 0 {
-		ctx += "Previous task list had errors. Please fix and return corrected JSON.\n\n"
+		ctx += "## Previous Attempt Failed\n"
+		if len(validationErrors) > 0 {
+			ctx += "Errors:\n"
+			for _, e := range validationErrors {
+				ctx += "- " + e + "\n"
+			}
+			ctx += "\n"
+		}
+		if rawResponse != "" {
+			ctx += "Previous LLM response (truncated):\n" + rawResponse[:min(len(rawResponse), 2000)] + "\n\n"
+		}
+		ctx += "Please fix the issues above and return a corrected JSON task array.\n\n"
 	}
 
 	ctx += "Generate a task list to accomplish the goal. Return a JSON array of tasks. Each task must have: id (int), action (string: Add/Modify/Delete/Create), description (string), dependencies (array of int, empty if none), files (array of string), acceptance_criteria (array of string). Do not include any text outside the JSON array."

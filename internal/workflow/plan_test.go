@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,7 +108,7 @@ func TestEngine_RunPlan_FailsOnValidationErrors(t *testing.T) {
 func TestEngine_BuildPlanContext(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
-	messages := engine.buildPlanContext("Build a tool", nil)
+	messages := engine.buildPlanContext("Build a tool", nil, nil, "")
 	if len(messages) == 0 {
 		t.Fatal("Expected non-empty messages")
 	}
@@ -139,7 +141,7 @@ func TestEngine_BuildPlanContext_IncludesProjectAnswers(t *testing.T) {
 	}
 	engine.sessionMgr.SaveProject(engine.sessionID, project)
 
-	messages := engine.buildPlanContext("Test", nil)
+	messages := engine.buildPlanContext("Test", nil, nil, "")
 
 	found := false
 	for _, m := range messages {
@@ -157,17 +159,25 @@ func TestEngine_BuildPlanContext_IncludesPreviousErrors(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
 	existingTasks := []m31types.Task{{ID: 1, Action: "Create", Description: "test"}}
-	messages := engine.buildPlanContext("Test", existingTasks)
+	valErrs := []string{"task 1: missing description"}
+	raw := `[{"id":1,"action":"Create"}]`
+	messages := engine.buildPlanContext("Test", existingTasks, valErrs, raw)
 
 	found := false
 	for _, m := range messages {
-		if m.Role == "user" && strings.Contains(m.Content, "Previous task list had errors") {
+		if m.Role == "user" && strings.Contains(m.Content, "Previous Attempt Failed") {
 			found = true
 			break
 		}
 	}
 	if !found {
 		t.Error("Previous errors not included in plan context")
+	}
+	if !strings.Contains(messages[len(messages)-1].Content, "missing description") {
+		t.Error("Validation error not included in context")
+	}
+	if !strings.Contains(messages[len(messages)-1].Content, "Previous LLM response") {
+		t.Error("Raw response not included in context")
 	}
 }
 
@@ -193,5 +203,85 @@ func TestEngine_Plan_SavesTasks(t *testing.T) {
 	}
 	if len(loadedTasks) != 1 {
 		t.Errorf("Expected 1 task saved, got %d", len(loadedTasks))
+	}
+}
+
+func TestEngine_RunPlan_RetryWithErrorFeedback(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	mp := engine.provider.(*mockProvider)
+	// First call: invalid JSON (missing description), second call: valid JSON
+	mp.multiResponses = []string{
+		`[{"id":1,"action":"Create","dependencies":[],"files":[],"acceptance_criteria":[]}]`,
+		`[{"id":1,"action":"Create","description":"Fixed task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`,
+	}
+
+	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	if err != nil {
+		t.Fatalf("Plan failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("Plan should succeed after retry")
+	}
+	if mp.callCount != 2 {
+		t.Errorf("Expected 2 LLM calls (invalid + retry), got %d", mp.callCount)
+	}
+	if len(result.Tasks) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(result.Tasks))
+	}
+	if result.Tasks[0].Description != "Fixed task" {
+		t.Errorf("Expected 'Fixed task', got %q", result.Tasks[0].Description)
+	}
+}
+
+func TestEngine_RunPlan_ManualFallback(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	// Always return invalid JSON — should fail after MaxPlanRetries
+	mp := engine.provider.(*mockProvider)
+	mp.response = "not json at all"
+
+	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	if err == nil {
+		t.Fatal("Expected error after 3 retries")
+	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	if !result.RequiresManualInput {
+		t.Error("Expected RequiresManualInput to be true after 3 failed retries")
+	}
+}
+
+func TestEngine_BuildPlanContext_IncludesMemory(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Create MEMORY.md in session dir
+	sessionDir := filepath.Dir(engine.planningDir)
+	os.MkdirAll(sessionDir, 0755)
+	memPath := filepath.Join(sessionDir, "MEMORY.md")
+	os.WriteFile(memPath, []byte("User prefers Go for backend"), 0644)
+
+	messages := engine.buildPlanContext("Test", nil, nil, "")
+
+	found := false
+	for _, m := range messages {
+		if m.Role == "user" && strings.Contains(m.Content, "Cross-Session Memory") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Memory not included in plan context")
 	}
 }
