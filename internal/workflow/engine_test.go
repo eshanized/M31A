@@ -52,8 +52,10 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 
 // Mock provider for testing
 type mockProvider struct {
-	response string
-	err      error
+	response       string
+	err            error
+	callCount      int
+	multiResponses []string // if set, returns responses[callCount] per call
 }
 
 func (m *mockProvider) Name() string                                       { return "mock" }
@@ -61,7 +63,14 @@ func (m *mockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, e
 	return nil, nil
 }
 func (m *mockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
+	m.callCount++
 	content := m.response
+	if len(m.multiResponses) > 0 {
+		idx := m.callCount - 1
+		if idx < len(m.multiResponses) {
+			content = m.multiResponses[idx]
+		}
+	}
 	if content == "" {
 		content = "OK"
 	}
@@ -473,7 +482,7 @@ func TestEngine_PhasePromptComposition(t *testing.T) {
 	}
 
 	// Plan: base + tool-use + plan-format
-	planMsgs := engine.buildPlanContext("test goal", nil)
+	planMsgs := engine.buildPlanContext("test goal", nil, nil, "")
 	if len(planMsgs) == 0 || planMsgs[0].Role != "system" {
 		t.Fatal("Expected system message first")
 	}
