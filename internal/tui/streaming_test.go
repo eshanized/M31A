@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -234,5 +236,238 @@ func TestTickMsg_Time(t *testing.T) {
 	msg := TickMsg{Time: now}
 	if msg.Time != now {
 		t.Error("TickMsg time mismatch")
+	}
+}
+
+// --- ReplModel streaming handler tests ---
+
+func TestReplModel_HandleStreamMsg(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+
+	// Send content chunks
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "content", Delta: "Hello "},
+	})
+	if !m.streaming {
+		t.Error("expected streaming=true after StreamMsg")
+	}
+	if m.streamContent.String() != "Hello " {
+		t.Errorf("streamContent = %q, want %q", m.streamContent.String(), "Hello ")
+	}
+
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "content", Delta: "World"},
+	})
+	expected := "Hello World"
+	if m.streamContent.String() != expected {
+		t.Errorf("after second chunk, streamContent = %q, want %q", m.streamContent.String(), expected)
+	}
+
+	// Send a thinking chunk mid-stream
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "thinking", Delta: "thinking step"},
+	})
+	if !m.thinking {
+		t.Error("expected thinking=true after thinking chunk")
+	}
+	if len(m.streamSegments) != 1 {
+		t.Fatalf("expected 1 segment after thinking transition, got %d", len(m.streamSegments))
+	}
+	if m.streamSegments[0].Type != "content" {
+		t.Errorf("segment type = %q, want %q", m.streamSegments[0].Type, "content")
+	}
+	// streamContent should now contain the thinking text (reset after segment flush)
+	if m.streamContent.String() != "thinking step" {
+		t.Errorf("after thinking chunk, streamContent = %q, want %q", m.streamContent.String(), "thinking step")
+	}
+}
+
+func TestReplModel_HandleStreamDoneMsg(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.streaming = true
+	m.streamContent.WriteString("Hello World")
+	m.activeSegmentType = "content"
+
+	// Create a proper StreamDoneMsg
+	doneMsg := StreamDoneMsg{
+		Message: types.Message{
+			Role:      "assistant",
+			Content:   "Hello World",
+			CreatedAt: time.Now(),
+		},
+		ModelID:   "test-model",
+		SessionID: "test-session",
+	}
+
+	cmds, sent := m.Update(doneMsg)
+	if !sent {
+		t.Error("expected sent=true after StreamDoneMsg")
+	}
+	if m.streaming {
+		t.Error("expected streaming=false after StreamDoneMsg")
+	}
+	if m.thinking {
+		t.Error("expected thinking=false after StreamDoneMsg")
+	}
+	if m.streamContent.Len() != 0 {
+		t.Error("expected streamContent cleared after StreamDoneMsg")
+	}
+	if m.streamSegments != nil {
+		t.Error("expected streamSegments nil after StreamDoneMsg")
+	}
+	if len(m.messages) != 1 {
+		t.Fatalf("expected 1 finalized message, got %d", len(m.messages))
+	}
+	if m.messages[0].Role != "assistant" {
+		t.Errorf("message role = %q, want %q", m.messages[0].Role, "assistant")
+	}
+	if m.messages[0].Content != "Hello World" {
+		t.Errorf("message content = %q, want %q", m.messages[0].Content, "Hello World")
+	}
+	_ = cmds
+}
+
+func TestReplModel_HandleStreamDoneMsg_WithSegments(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.streaming = true
+	m.streamContent.WriteString("Final answer")
+	m.streamSegments = []types.MessageSegment{
+		{Type: "thinking", Content: "step 1", Visible: true},
+	}
+	m.activeSegmentType = "content"
+
+	doneMsg := StreamDoneMsg{
+		Message: types.Message{
+			Role:    "assistant",
+			Content: "Final answer",
+		},
+	}
+
+	m.Update(doneMsg)
+
+	if len(m.messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(m.messages))
+	}
+	msg := m.messages[0]
+	if len(msg.Segments) != 2 {
+		t.Fatalf("expected 2 segments (thinking + content), got %d", len(msg.Segments))
+	}
+	if msg.Segments[0].Type != "thinking" {
+		t.Errorf("segment[0].Type = %q, want %q", msg.Segments[0].Type, "thinking")
+	}
+	if msg.Segments[1].Type != "content" {
+		t.Errorf("segment[1].Type = %q, want %q", msg.Segments[1].Type, "content")
+	}
+}
+
+func TestReplModel_HandleStreamErrorMsg(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.streaming = true
+	m.thinking = true
+	m.streamContent.WriteString("partial content")
+
+	errMsg := StreamErrorMsg{
+		Err:     io.ErrUnexpectedEOF,
+		ModelID: "test-model",
+	}
+
+	cmds, sent := m.Update(errMsg)
+	if !sent {
+		t.Error("expected sent=true after StreamErrorMsg")
+	}
+	if m.streaming {
+		t.Error("expected streaming=false after StreamErrorMsg")
+	}
+	if m.thinking {
+		t.Error("expected thinking=false after StreamErrorMsg")
+	}
+	if m.streamContent.Len() != 0 {
+		t.Error("expected streamContent cleared after StreamErrorMsg")
+	}
+	if len(m.messages) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(m.messages))
+	}
+	if m.messages[0].Role != "assistant" {
+		t.Errorf("message role = %q, want %q", m.messages[0].Role, "assistant")
+	}
+	if !strings.Contains(m.messages[0].Content, "unexpected EOF") {
+		t.Errorf("error message content = %q, want it to contain 'unexpected EOF'", m.messages[0].Content)
+	}
+	_ = cmds
+}
+
+func TestReplModel_StreamTickMsg(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.streaming = true
+
+	cmds, _ := m.Update(TickMsg{Time: time.Now()})
+	if len(cmds) == 0 {
+		t.Error("expected at least one cmd returned from TickMsg during streaming")
+	}
+	// The tick cmd should be StreamTickCmd which produces another TickMsg
+	msg := cmds[0]()
+	if _, ok := msg.(TickMsg); !ok {
+		t.Errorf("expected TickMsg from stream tick cmd, got %T", msg)
+	}
+}
+
+func TestReplModel_StreamMsg_ThinkingTransitions(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+
+	// Send content chunk first (establishes content baseline)
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "content", Delta: "Some reasoning"},
+	})
+	if m.activeSegmentType != "content" {
+		t.Errorf("activeSegmentType = %q, want %q", m.activeSegmentType, "content")
+	}
+
+	// Send thinking chunk (content→thinking transition: content flushed to segments)
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "thinking", Delta: "deeper thinking"},
+	})
+	if !m.thinking {
+		t.Error("expected thinking=true after thinking chunk")
+	}
+	if m.activeSegmentType != "thinking" {
+		t.Errorf("activeSegmentType = %q, want %q", m.activeSegmentType, "thinking")
+	}
+	if len(m.streamSegments) != 1 {
+		t.Fatalf("expected 1 saved segment (content flushed), got %d", len(m.streamSegments))
+	}
+	if m.streamSegments[0].Type != "content" {
+		t.Errorf("saved segment type = %q, want 'content'", m.streamSegments[0].Type)
+	}
+	if m.streamSegments[0].Content != "Some reasoning" {
+		t.Errorf("saved segment content = %q, want %q", m.streamSegments[0].Content, "Some reasoning")
+	}
+
+	// Send another content chunk (thinking→content transition: thinking flushed to segments)
+	m.Update(StreamMsg{
+		Chunk: &types.StreamChunk{Type: "content", Delta: "Final answer"},
+	})
+	if m.thinking {
+		t.Error("expected thinking=false after content follows thinking")
+	}
+	if m.activeSegmentType != "content" {
+		t.Errorf("activeSegmentType = %q, want %q", m.activeSegmentType, "content")
+	}
+	// streamSegments should be 2: content flushed on content→thinking, thinking flushed on thinking→content
+	if len(m.streamSegments) != 2 {
+		t.Fatalf("expected 2 segments (both transitions flush), got %d", len(m.streamSegments))
+	}
+	if m.streamSegments[0].Type != "content" {
+		t.Errorf("segment 0 type = %q, want 'content'", m.streamSegments[0].Type)
+	}
+	if m.streamSegments[1].Type != "thinking" {
+		t.Errorf("segment 1 type = %q, want 'thinking'", m.streamSegments[1].Type)
+	}
+	if m.streamSegments[1].Content != "deeper thinking" {
+		t.Errorf("segment 1 content = %q, want %q", m.streamSegments[1].Content, "deeper thinking")
+	}
+	// streamContent has new content after flush
+	expected := "Final answer"
+	if m.streamContent.String() != expected {
+		t.Errorf("streamContent = %q, want %q", m.streamContent.String(), expected)
 	}
 }
