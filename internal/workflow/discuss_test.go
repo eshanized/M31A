@@ -192,3 +192,66 @@ func TestDiscussResult(t *testing.T) {
 		t.Errorf("Expected 2 answers, got %d", len(result.Answers))
 	}
 }
+
+func TestEngine_SubmitDiscussAnswer(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Set up discuss state
+	engine.discussState = DiscussState{
+		Questions: []string{"What framework?", "What language?"},
+	}
+
+	if err := engine.SubmitDiscussAnswer(0, "Gin"); err != nil {
+		t.Fatalf("SubmitDiscussAnswer failed: %v", err)
+	}
+	if err := engine.SubmitDiscussAnswer(1, "Go"); err != nil {
+		t.Fatalf("SubmitDiscussAnswer failed: %v", err)
+	}
+
+	if engine.discussState.Answers[0] != "Gin" {
+		t.Errorf("Expected answer 'Gin', got %q", engine.discussState.Answers[0])
+	}
+}
+
+func TestEngine_SubmitDiscussAnswer_InvalidIndex(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+	engine.discussState = DiscussState{Questions: []string{"Q1"}}
+
+	if err := engine.SubmitDiscussAnswer(5, "A"); err == nil {
+		t.Error("Expected error for invalid index")
+	}
+	if err := engine.SubmitDiscussAnswer(-1, "A"); err == nil {
+		t.Error("Expected error for negative index")
+	}
+}
+
+func TestEngine_SubmitDiscussAnswer_NoQuestions(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	if err := engine.SubmitDiscussAnswer(0, "A"); err == nil {
+		t.Error("Expected error when no questions set")
+	}
+}
+
+func TestEngine_SkipDiscuss(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	engine.discussState = DiscussState{
+		Questions: []string{"Q1", "Q2"},
+	}
+
+	if err := engine.SkipDiscuss(); err != nil {
+		t.Fatalf("SkipDiscuss failed: %v", err)
+	}
+
+	// Verify answers saved with defaults
+	project, err := engine.sessionMgr.LoadProject(engine.sessionID)
+	if err != nil || project == nil {
+		t.Fatal("PROJECT.md should exist after skip")
+	}
+}

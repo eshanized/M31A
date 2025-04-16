@@ -39,11 +39,17 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 
 	e.logger.Info("parsed questions", "count", len(questions))
 
-	// 4. Return with questions — TUI handles Q&A collection
+	// Store questions in engine state for answer collection
+	e.discussState = DiscussState{
+		Questions: questions,
+	}
+
+	// Return with questions — TUI handles Q&A collection, then calls SubmitDiscussAnswer/SkipDiscuss
 	result := &PhaseResult{
-		Phase:    m31types.PhaseDiscuss,
-		Success:  true,
-		Messages: []m31types.Message{msg},
+		Phase:        m31types.PhaseDiscuss,
+		Success:      true,
+		Messages:     []m31types.Message{msg},
+		NeedsAnswers: len(questions) > 0,
 	}
 
 	return result, nil
