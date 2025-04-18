@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
@@ -37,14 +38,16 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	total, done, failed, skipped := runner.Summary()
 
 	// 2. Final git commit
-	e.git.Commit(fmt.Sprintf("chore(ship): complete session %s", e.sessionID))
+	if err := e.git.Commit(fmt.Sprintf("chore: ship %s", e.sessionID)); err != nil {
+		return nil, fmt.Errorf("ship commit: %w", err)
+	}
 
 	// 3. Build summary
 	duration := time.Since(e.startTime)
 
 	commits, _ := e.git.Log(true, e.startTime.Format(time.RFC3339))
 
-	_ = ShipSummary{
+	summary := ShipSummary{
 		TaskDone:    done,
 		TaskTotal:   total,
 		TaskFailed:  failed,
@@ -54,27 +57,49 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		SessionID:   e.sessionID,
 	}
 
+	e.logger.Info("session shipped",
+		"session_id", summary.SessionID,
+		"tasks", fmt.Sprintf("%d/%d done", summary.TaskDone, summary.TaskTotal),
+		"failed", summary.TaskFailed,
+		"skipped", summary.TaskSkipped,
+		"commits", len(summary.Commits),
+		"duration", summary.Duration,
+	)
+
 	// 4. Update ledger
-	e.appendLedgerEntry(e.modelID, e.provider.Name(), goal, done, total, duration)
+	if err := e.appendLedgerEntry(e.modelID, e.provider.Name(), goal, done, total, duration); err != nil {
+		e.logger.Warn("ledger update failed", "error", err)
+	}
 
 	// 5. Archive session
-	e.sessionMgr.ArchiveSession(e.sessionID)
+	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
+		e.logger.Warn("archive session failed", "error", err)
+	}
 
 	// 6. Write final STATE.md
-	e.sessionMgr.SaveState(e.sessionID, m31types.PhaseShip, "complete", "session shipped")
+	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseShip, "complete", "session shipped"); err != nil {
+		e.logger.Warn("save state failed", "error", err)
+	}
 
 	// 7. Save checkpoint
-	e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
+	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseShip,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		e.logger.Warn("save checkpoint failed", "error", err)
+	}
 
 	e.logger.Info("ship phase complete", "duration", duration, "tasks", fmt.Sprintf("%d/%d", done, total))
 
-	return &PhaseResult{
+	result := &PhaseResult{
 		Phase:   m31types.PhaseShip,
 		Success: true,
-	}, nil
+	}
+	if failed > 0 {
+		result.Error = fmt.Sprintf("%d tasks failed", failed)
+		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
+	}
+	return result, nil
 }
 
 // BuildSummary creates a ShipSummary from the current session state.
