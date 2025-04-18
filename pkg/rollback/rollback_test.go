@@ -496,6 +496,631 @@ func TestChain_NonHeadEntriesHaveDiff(t *testing.T) {
 	}
 }
 
+// TestSoftReset_InvalidHash verifies SoftReset returns an error for non-existent commits.
+func TestSoftReset_InvalidHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	_, err := r.SoftReset("deadbeef1234567890abcdef1234567890abcdef")
+	if err == nil {
+		t.Fatal("Expected error for invalid hash in SoftReset")
+	}
+	if !strings.Contains(err.Error(), "soft reset") {
+		t.Errorf("Expected error to contain 'soft reset', got: %v", err)
+	}
+}
+
+// TestHardReset_InvalidHash verifies HardReset returns an error for non-existent commits.
+func TestHardReset_InvalidHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	_, err := r.HardReset("deadbeef1234567890abcdef1234567890abcdef")
+	if err == nil {
+		t.Fatal("Expected error for invalid hash in HardReset")
+	}
+	if !strings.Contains(err.Error(), "hard reset") {
+		t.Errorf("Expected error to contain 'hard reset', got: %v", err)
+	}
+}
+
+// TestSafeReset_InvalidHash verifies SafeReset returns an error for non-existent commits.
+func TestSafeReset_InvalidHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	_, err := r.SafeReset("deadbeef1234567890abcdef1234567890abcdef")
+	if err == nil {
+		t.Fatal("Expected error for invalid hash in SafeReset")
+	}
+	if !strings.Contains(err.Error(), "safe reset") {
+		t.Errorf("Expected error to contain 'safe reset', got: %v", err)
+	}
+}
+
+// TestSoftReset_CurrentHead verifies SoftReset to current HEAD works cleanly (no stash).
+func TestSoftReset_CurrentHead(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 1)
+
+	r := New(g)
+	head, _ := g.HeadHash()
+
+	result, err := r.SoftReset(head)
+	if err != nil {
+		t.Fatalf("SoftReset to current HEAD failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("Expected SoftReset success=true")
+	}
+	if result.ChangesStashed {
+		t.Error("Expected ChangesStashed=false when tree is clean")
+	}
+	if result.PreviousHead != result.NewHead {
+		t.Errorf("Expected PreviousHead == NewHead for no-op reset, got %s != %s",
+			result.PreviousHead, result.NewHead)
+	}
+}
+
+// TestSafeReset_Clean verifies SafeReset without dirty changes succeeds (no stash pop).
+func TestSafeReset_Clean(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	hash0 := entries[len(entries)-1].CommitInfo.Hash
+
+	result, err := r.SafeReset(hash0)
+	if err != nil {
+		t.Fatalf("SafeReset failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("Expected SafeReset success=true")
+	}
+	if result.ChangesStashed {
+		t.Error("Expected ChangesStashed=false when tree is clean")
+	}
+
+	newHead, _ := g.HeadHash()
+	if newHead != hash0 {
+		t.Errorf("Expected HEAD at %s, got %s", hash0, newHead)
+	}
+}
+
+// TestHasUncommittedChanges_Staged verifies detection of staged (but uncommitted) changes.
+func TestHasUncommittedChanges_Staged(t *testing.T) {
+	r, g := setupRollback(t)
+	createCommits(g, 1)
+
+	// Create and stage a new file without committing
+	f := filepath.Join(g.WorkDir(), "staged.txt")
+	if err := os.WriteFile(f, []byte("staged content"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := g.Add("staged.txt"); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	dirty, err := r.HasUncommittedChanges()
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges failed: %v", err)
+	}
+	if !dirty {
+		t.Error("Expected HasUncommittedChanges=true with staged file")
+	}
+}
+
+// TestHasUncommittedChanges_Deleted verifies detection of deleted tracked files.
+func TestHasUncommittedChanges_Deleted(t *testing.T) {
+	r, g := setupRollback(t)
+	createCommits(g, 1)
+
+	// Delete a tracked file (git rm for tracked deletion)
+	f := filepath.Join(g.WorkDir(), "f0.txt")
+	if err := os.Remove(f); err != nil {
+		t.Fatalf("Remove failed: %v", err)
+	}
+
+	dirty, err := r.HasUncommittedChanges()
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges failed: %v", err)
+	}
+	if !dirty {
+		t.Error("Expected HasUncommittedChanges=true with deleted file")
+	}
+}
+
+// TestCountCommitsBetween_SameHash verifies countCommitsBetween returns 0 for identical hashes.
+func TestCountCommitsBetween_SameHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	head, _ := g.HeadHash()
+
+	// SoftReset to HEAD, then check the message has "0 commits undone"
+	result, err := r.SoftReset(head)
+	if err != nil {
+		t.Fatalf("SoftReset failed: %v", err)
+	}
+	if !strings.Contains(result.Message, "0 commits undone") {
+		t.Errorf("Expected '0 commits undone' in message for same-hash reset, got: %s", result.Message)
+	}
+}
+
+// TestBuildResult_ShortHash verifies buildResult truncates hashes to 7 chars in message.
+func TestBuildResult_ShortHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 5)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	firstHash := entries[len(entries)-1].CommitInfo.Hash
+
+	result, err := r.SoftReset(firstHash)
+	if err != nil {
+		t.Fatalf("SoftReset failed: %v", err)
+	}
+
+	// Short hashes are 7 chars
+	if strings.Contains(result.Message, result.PreviousHead) {
+		// If the full hash is in the message, that's a bug
+		t.Error("Expected message to contain short hash, not full hash")
+	}
+	// Message should contain 7-char short hashes
+	parts := strings.Split(result.Message, " ")
+	for _, part := range parts {
+		if len(part) == 7 && strings.Trim(part, "0123456789abcdef") == "" {
+			return // Found a short hash
+		}
+	}
+	t.Logf("Message: %s (checking for 7-char short hashes)", result.Message)
+}
+
+// TestHardReset_WithUncommitted verifies HardReset stashes changes before reset.
+func TestHardReset_WithUncommitted(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	hash0 := entries[len(entries)-1].CommitInfo.Hash
+
+	// Modify a tracked file
+	f := filepath.Join(g.WorkDir(), "f0.txt")
+	if err := os.WriteFile(f, []byte("dirty content"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	result, err := r.HardReset(hash0)
+	if err != nil {
+		t.Fatalf("HardReset with uncommitted changes failed: %v", err)
+	}
+	if !result.ChangesStashed {
+		t.Error("Expected ChangesStashed=true when resetting with uncommitted changes")
+	}
+	if !result.Success {
+		t.Fatal("Expected HardReset success=true")
+	}
+
+	newHead, _ := g.HeadHash()
+	if newHead != hash0 {
+		t.Errorf("Expected HEAD at %s, got %s", hash0, newHead)
+	}
+}
+
+// TestSafeReset_MessagePreserved verifies SafeReset message includes "preserved".
+func TestSafeReset_MessagePreserved(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	hash0 := entries[len(entries)-1].CommitInfo.Hash
+
+	// Make it dirty so stashing occurs
+	f := filepath.Join(g.WorkDir(), "f0.txt")
+	if err := os.WriteFile(f, []byte("modified"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	result, err := r.SafeReset(hash0)
+	if err != nil {
+		t.Fatalf("SafeReset failed: %v", err)
+	}
+	if !result.ChangesStashed {
+		t.Error("Expected ChangesStashed=true")
+	}
+	if !strings.Contains(result.Message, "preserved") {
+		t.Errorf("Expected message to contain 'preserved', got: %s", result.Message)
+	}
+}
+
+// TestSoftReset_WithUncommitted_MessageStashed verifies SoftReset message includes "stashed".
+func TestSoftReset_WithUncommitted_MessageStashed(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	hash0 := entries[len(entries)-1].CommitInfo.Hash
+
+	f := filepath.Join(g.WorkDir(), "f0.txt")
+	if err := os.WriteFile(f, []byte("dirty"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	result, err := r.SoftReset(hash0)
+	if err != nil {
+		t.Fatalf("SoftReset failed: %v", err)
+	}
+	if !strings.Contains(result.Message, "stashed") {
+		t.Errorf("Expected message to contain 'stashed', got: %s", result.Message)
+	}
+}
+
+// TestChain_LimitExceedsCommits verifies Chain caps limit to available commits.
+func TestChain_LimitExceedsCommits(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, err := r.Chain(100) // More than available
+	if err != nil {
+		t.Fatalf("Chain failed: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("Expected 3 entries (capped to available), got %d", len(entries))
+	}
+}
+
+// TestRollbackEntry_IsCurrentFlag verifies IsCurrent is correctly set across entries.
+func TestRollbackEntry_IsCurrentFlag(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 5)
+
+	r := New(g)
+	entries, err := r.Chain(10)
+	if err != nil {
+		t.Fatalf("Chain failed: %v", err)
+	}
+
+	currentCount := 0
+	for _, e := range entries {
+		if e.IsCurrent {
+			currentCount++
+		}
+	}
+	if currentCount != 1 {
+		t.Errorf("Expected exactly 1 IsCurrent=true entry, got %d", currentCount)
+	}
+}
+
+// TestCountCommitsBetween_DifferentHashes directly tests countCommitsBetween with
+// two different reachable hashes to cover the endIdx < startIdx path.
+func TestCountCommitsBetween_DifferentHashes(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 5)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+
+	// Pick two reachable commits: oldest and newest (both in the log since no reset)
+	oldestHash := entries[len(entries)-1].CommitInfo.Hash // commit 0
+	newestHash := entries[0].CommitInfo.Hash               // commit 4 (HEAD)
+
+	// countCommitsBetween(oldest, newest): oldest is startHash, newest is endHash
+	// Log is newest first: [commit4, commit3, commit2, commit1, commit0]
+	// So endHash (commit4) is at index 0, startHash (commit0) is at index 4
+	// endIdx < startIdx: 0 < 4, so should return 4 - 0 = 4
+	count, err := r.countCommitsBetween(oldestHash, newestHash)
+	if err != nil {
+		t.Fatalf("countCommitsBetween failed: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("Expected 4 commits between oldest and newest, got %d", count)
+	}
+}
+
+// TestCountCommitsBetween_ReverseOrder tests countCommitsBetween when startHash
+// appears before endHash in the log (should return 0).
+func TestCountCommitsBetween_ReverseOrder(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 5)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+
+	// newestHash is at a smaller index than olderHash in the log
+	// If we call countCommitsBetween(newest, oldest), then:
+	// startHash = newest (index 0), endHash = oldest (index 4)
+	// endIdx (4) > startIdx (0), so returns 0
+	newestHash := entries[0].CommitInfo.Hash
+	oldestHash := entries[len(entries)-1].CommitInfo.Hash
+
+	count, err := r.countCommitsBetween(newestHash, oldestHash)
+	if err != nil {
+		t.Fatalf("countCommitsBetween failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 commits (reverse order), got %d", count)
+	}
+}
+
+// TestCountCommitsBetween_InvalidHash verifies countCommitsBetween returns
+// ErrInvalidHash when one of the hashes is not in the repository.
+func TestCountCommitsBetween_InvalidHash(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	validHash := entries[0].CommitInfo.Hash
+
+	_, err := r.countCommitsBetween(validHash, "nonexistent123")
+	if err == nil {
+		t.Fatal("Expected error for invalid hash in countCommitsBetween")
+	}
+	if err != ErrInvalidHash {
+		t.Errorf("Expected ErrInvalidHash, got: %v", err)
+	}
+
+	// Also test with invalid startHash
+	_, err = r.countCommitsBetween("nonexistent456", validHash)
+	if err != ErrInvalidHash {
+		t.Errorf("Expected ErrInvalidHash for invalid startHash, got: %v", err)
+	}
+}
+
+// TestCountCommitsBetween_AdjacentCommits tests counting between adjacent commits.
+func TestCountCommitsBetween_AdjacentCommits(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+
+	// commit1 and commit0 are adjacent
+	commit1Hash := entries[1].CommitInfo.Hash
+	commit0Hash := entries[2].CommitInfo.Hash
+
+	// countCommitsBetween(commit0, commit1): startHash=commit0 (index 2), endHash=commit1 (index 1)
+	// endIdx (1) < startIdx (2), so return 2 - 1 = 1
+	count, err := r.countCommitsBetween(commit0Hash, commit1Hash)
+	if err != nil {
+		t.Fatalf("countCommitsBetween failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 commit between adjacent commits, got %d", count)
+	}
+}
+
+// TestBuildResult_Directly tests buildResult directly with stashed=true to cover
+// the stash message branch.
+func TestBuildResult_Directly(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	head, _ := g.HeadHash()
+
+	// Test with stashed=true and different stash words
+	for _, stashWord := range []string{"stashed", "preserved"} {
+		result := r.buildResult(head, head, true, stashWord)
+		if !result.Success {
+			t.Errorf("Expected success=true for %s", stashWord)
+		}
+		if !result.ChangesStashed {
+			t.Errorf("Expected ChangesStashed=true for %s", stashWord)
+		}
+		if !strings.Contains(result.Message, stashWord) {
+			t.Errorf("Expected message to contain %q for stashed=true, got: %s", stashWord, result.Message)
+		}
+	}
+
+	// Test with stashed=false (no stash message should appear)
+	result := r.buildResult(head, head, false, "stashed")
+	if result.ChangesStashed {
+		t.Error("Expected ChangesStashed=false")
+	}
+	if strings.Contains(result.Message, "Changes") {
+		t.Errorf("Expected no stash message when stashed=false, got: %s", result.Message)
+	}
+}
+
+// TestBuildResult_ShortHashTruncation verifies buildResult truncates hashes > 7 chars.
+func TestBuildResult_ShortHashTruncation(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	head, _ := g.HeadHash()
+
+	result := r.buildResult(head, head, false, "")
+
+	// Full hash should NOT appear in message
+	if strings.Contains(result.Message, head) {
+		t.Errorf("Full hash should not appear in message: %s", result.Message)
+	}
+	// But 7-char short hash should
+	shortHash := head[:7]
+	if !strings.Contains(result.Message, shortHash) {
+		t.Errorf("Expected short hash %q in message: %s", shortHash, result.Message)
+	}
+}
+
+// TestStashIfDirty_CleanTree verifies stashIfDirty returns false when tree is clean.
+func TestStashIfDirty_CleanTree(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	stashed, err := r.stashIfDirty()
+	if err != nil {
+		t.Fatalf("stashIfDirty failed: %v", err)
+	}
+	if stashed {
+		t.Error("Expected stashed=false on clean tree")
+	}
+}
+
+// TestStashIfDirty_DirtyTree verifies stashIfDirty stashes changes on dirty tree.
+func TestStashIfDirty_DirtyTree(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	f := filepath.Join(g.WorkDir(), "f0.txt")
+	if err := os.WriteFile(f, []byte("modified"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	stashed, err := r.stashIfDirty()
+	if err != nil {
+		t.Fatalf("stashIfDirty failed: %v", err)
+	}
+	if !stashed {
+		t.Error("Expected stashed=true on dirty tree")
+	}
+}
+
+// TestRollbackResult_AllFields verifies all RollbackResult fields are populated correctly.
+func TestRollbackResult_AllFields(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	hash0 := entries[len(entries)-1].CommitInfo.Hash
+
+	result, err := r.SoftReset(hash0)
+	if err != nil {
+		t.Fatalf("SoftReset failed: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("Expected Success=true")
+	}
+	if result.PreviousHead == "" {
+		t.Error("Expected non-empty PreviousHead")
+	}
+	if result.NewHead == "" {
+		t.Error("Expected non-empty NewHead")
+	}
+	if result.Message == "" {
+		t.Error("Expected non-empty Message")
+	}
+}
+
+// TestErrorPaths_InvalidWorkDir verifies error handling when git operations fail
+// due to an invalid working directory.
+func TestErrorPaths_InvalidWorkDir(t *testing.T) {
+	// Create a Rollback backed by a non-existent directory
+	g := git.New("/nonexistent/path/for/testing")
+	r := New(g)
+
+	t.Run("Chain fails", func(t *testing.T) {
+		_, err := r.Chain(10)
+		if err == nil {
+			t.Fatal("Expected error for Chain with invalid workdir")
+		}
+	})
+
+	t.Run("CurrentHead fails", func(t *testing.T) {
+		_, err := r.CurrentHead()
+		if err == nil {
+			t.Fatal("Expected error for CurrentHead with invalid workdir")
+		}
+	})
+
+	t.Run("Preview fails", func(t *testing.T) {
+		_, err := r.Preview("abc123")
+		if err == nil {
+			t.Fatal("Expected error for Preview with invalid workdir")
+		}
+	})
+
+	t.Run("SoftReset fails", func(t *testing.T) {
+		_, err := r.SoftReset("abc123")
+		if err == nil {
+			t.Fatal("Expected error for SoftReset with invalid workdir")
+		}
+	})
+
+	t.Run("HardReset fails", func(t *testing.T) {
+		_, err := r.HardReset("abc123")
+		if err == nil {
+			t.Fatal("Expected error for HardReset with invalid workdir")
+		}
+	})
+
+	t.Run("SafeReset fails", func(t *testing.T) {
+		_, err := r.SafeReset("abc123")
+		if err == nil {
+			t.Fatal("Expected error for SafeReset with invalid workdir")
+		}
+	})
+
+	t.Run("HasUncommittedChanges fails", func(t *testing.T) {
+		_, err := r.HasUncommittedChanges()
+		if err == nil {
+			t.Fatal("Expected error for HasUncommittedChanges with invalid workdir")
+		}
+	})
+
+	t.Run("stashIfDirty fails", func(t *testing.T) {
+		_, err := r.stashIfDirty()
+		if err == nil {
+			t.Fatal("Expected error for stashIfDirty with invalid workdir")
+		}
+	})
+
+	t.Run("countCommitsBetween fails", func(t *testing.T) {
+		_, err := r.countCommitsBetween("abc", "def")
+		if err == nil {
+			t.Fatal("Expected error for countCommitsBetween with invalid workdir")
+		}
+	})
+}
+
+// TestErrorPaths_DestroyedRepo verifies error handling when a valid repo is
+// corrupted mid-operation (simulates git failures).
+func TestErrorPaths_DestroyedRepo(t *testing.T) {
+	r, g := setupRollback(t)
+	createCommits(g, 2)
+
+	// Delete .git to corrupt the repo
+	workDir := g.WorkDir()
+	if err := os.RemoveAll(filepath.Join(workDir, ".git")); err != nil {
+		t.Fatalf("Failed to remove .git: %v", err)
+	}
+
+	t.Run("Chain fails after corruption", func(t *testing.T) {
+		_, err := r.Chain(10)
+		if err == nil {
+			t.Fatal("Expected error for Chain after repo corruption")
+		}
+	})
+
+	t.Run("HasUncommittedChanges fails after corruption", func(t *testing.T) {
+		_, err := r.HasUncommittedChanges()
+		if err == nil {
+			t.Fatal("Expected error for HasUncommittedChanges after repo corruption")
+		}
+	})
+
+	t.Run("stashIfDirty fails after corruption", func(t *testing.T) {
+		_, err := r.stashIfDirty()
+		if err == nil {
+			t.Fatal("Expected error for stashIfDirty after repo corruption")
+		}
+	})
+}
+
 // contains reports whether substr is within s.
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
