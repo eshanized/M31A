@@ -23,10 +23,12 @@ type ExecuteFunc func(ctx context.Context, task types.Task) TaskResult
 
 // Runner schedules and executes tasks with dependency resolution.
 type Runner struct {
-	tasks    []types.Task
-	status   map[int]types.TaskStatus
-	results  map[int]TaskResult
-	idToIdx  map[int]int
+	tasks       []types.Task
+	status      map[int]types.TaskStatus
+	results     map[int]TaskResult
+	idToIdx     map[int]int
+	OnTaskStart  func(task types.Task)
+	OnTaskUpdate func(task types.Task, status string)
 }
 
 // New creates a Runner for the given tasks.
@@ -166,6 +168,9 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 
 		// Execute the task
 		r.status[task.ID] = types.StatusRunning
+		if r.OnTaskStart != nil {
+			r.OnTaskStart(task)
+		}
 
 		var result TaskResult
 		if fn != nil {
@@ -180,12 +185,18 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 
 		if result.Success {
 			r.status[task.ID] = types.StatusDone
+			if r.OnTaskUpdate != nil {
+				r.OnTaskUpdate(task, "done")
+			}
 			if result.CommitHash != "" {
 				// Update task's commit hash
 				r.tasks[idx].CommitHash = result.CommitHash
 			}
 		} else {
 			r.status[task.ID] = types.StatusFailed
+			if r.OnTaskUpdate != nil {
+				r.OnTaskUpdate(task, "failed")
+			}
 		}
 	}
 
