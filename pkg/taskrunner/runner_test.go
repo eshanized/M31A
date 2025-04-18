@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -406,5 +407,271 @@ func TestRunner_ComplexDAG(t *testing.T) {
 	total, done, _, _ := r.Summary()
 	if total != 6 || done != 6 {
 		t.Errorf("Expected 6/6 done, got %d/%d", done, total)
+	}
+}
+
+func TestRunner_Tasks(t *testing.T) {
+	tasks := []types.Task{
+		newTask(1, "task 1", nil),
+		newTask(2, "task 2", nil),
+	}
+	r := New(tasks)
+
+	// Initially statuses should be pending
+	returned := r.Tasks()
+	if len(returned) != 2 {
+		t.Fatalf("Expected 2 tasks, got %d", len(returned))
+	}
+	if returned[0].Status != types.StatusPending {
+		t.Errorf("Task 1: expected StatusPending, got %s", returned[0].Status)
+	}
+
+	// Execute tasks
+	groups, _ := r.Schedule()
+	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+		return TaskResult{Success: true}
+	})
+
+	// After execution, statuses should be done
+	returned = r.Tasks()
+	if returned[0].Status != types.StatusDone {
+		t.Errorf("Task 1: expected StatusDone, got %s", returned[0].Status)
+	}
+	if returned[1].Status != types.StatusDone {
+		t.Errorf("Task 2: expected StatusDone, got %s", returned[1].Status)
+	}
+}
+
+func TestRunner_NewWithExistingStatus(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialStatus types.TaskStatus
+		expected      types.TaskStatus
+	}{
+		{"empty status defaults to pending", "", types.StatusPending},
+		{"preserves running", types.StatusRunning, types.StatusRunning},
+		{"preserves done", types.StatusDone, types.StatusDone},
+		{"preserves failed", types.StatusFailed, types.StatusFailed},
+		{"preserves skipped", types.StatusSkipped, types.StatusSkipped},
+		{"preserves unrecoverable", types.StatusUnrecoverable, types.StatusUnrecoverable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := types.Task{
+				ID:          1,
+				Description: "test",
+				Action:      "Create",
+				Status:      tt.initialStatus,
+			}
+			r := New([]types.Task{task})
+			if r.Status(1) != tt.expected {
+				t.Errorf("Expected %s, got %s", tt.expected, r.Status(1))
+			}
+		})
+	}
+}
+
+func TestRunner_ExecuteGroupNilFn(t *testing.T) {
+	tasks := []types.Task{newTask(1, "task 1", nil)}
+	r := New(tasks)
+
+	groups, err := r.Schedule()
+	if err != nil {
+		t.Fatalf("Schedule failed: %v", err)
+	}
+
+	// Execute with nil function — should succeed with default TaskResult
+	if err := r.ExecuteGroup(groups[0], nil); err != nil {
+		t.Fatalf("ExecuteGroup with nil fn should not error: %v", err)
+	}
+
+	if r.Status(1) != types.StatusDone {
+		t.Errorf("Task should be done after nil fn execution, got %s", r.Status(1))
+	}
+}
+
+func TestRunner_ExecuteGroupTerminalStates(t *testing.T) {
+	tests := []struct {
+		name   string
+		status types.TaskStatus
+	}{
+		{"skipped", types.StatusSkipped},
+		{"failed", types.StatusFailed},
+		{"unrecoverable", types.StatusUnrecoverable},
+		{"done", types.StatusDone},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := []types.Task{newTask(1, "task 1", nil)}
+			r := New(tasks)
+			r.status[1] = tt.status
+
+			groups, _ := r.Schedule()
+			called := false
+			execFn := func(ctx context.Context, task types.Task) TaskResult {
+				called = true
+				return TaskResult{Success: true}
+			}
+
+			if err := r.ExecuteGroup(groups[0], execFn); err != nil {
+				t.Fatalf("ExecuteGroup should not error: %v", err)
+			}
+
+			if called {
+				t.Error("Execute function should not be called for terminal state tasks")
+			}
+			if r.Status(1) != tt.status {
+				t.Errorf("Status should remain %s, got %s", tt.status, r.Status(1))
+			}
+		})
+	}
+}
+
+func TestRunner_ExecuteGroupTaskNotFound(t *testing.T) {
+	tasks := []types.Task{newTask(1, "task 1", nil)}
+	r := New(tasks)
+
+	// Try to execute a task ID that doesn't exist
+	group := []int{999}
+	err := r.ExecuteGroup(group, nil)
+	if err == nil {
+		t.Fatal("Expected error for non-existent task ID")
+	}
+	if err.Error() == "" {
+		t.Error("Expected non-empty error message")
+	}
+}
+
+func TestRunner_ExecuteGroupDependencyNotDone(t *testing.T) {
+	tasks := []types.Task{
+		newTask(1, "task 1", nil),
+		newTask(2, "task 2", []int{1}),
+	}
+	r := New(tasks)
+
+	groups, _ := r.Schedule()
+
+	// Execute group 0 but leave task 1 in pending (by using nil fn won't work — nil fn succeeds)
+	// Instead, manually set task 1 to pending after scheduling
+	r.status[1] = types.StatusPending
+
+	// Execute group 1 — task 2 should skip because dep 1 is not done
+	if err := r.ExecuteGroup(groups[1], nil); err != nil {
+		t.Fatalf("ExecuteGroup should not error: %v", err)
+	}
+
+	if r.Status(2) != types.StatusSkipped {
+		t.Errorf("Task 2: expected StatusSkipped, got %s", r.Status(2))
+	}
+	results := r.Results()
+	if results[2].Error == "" {
+		t.Error("Expected error message about dependency not completed")
+	}
+}
+
+func TestRunner_ExecuteGroupUnrecoverableDependency(t *testing.T) {
+	tasks := []types.Task{
+		newTask(1, "task 1", nil),
+		newTask(2, "task 2", []int{1}),
+	}
+	r := New(tasks)
+
+	groups, _ := r.Schedule()
+
+	// Mark task 1 as unrecoverable
+	r.status[1] = types.StatusUnrecoverable
+
+	// Execute group 1 — task 2 should skip
+	if err := r.ExecuteGroup(groups[1], nil); err != nil {
+		t.Fatalf("ExecuteGroup should not error: %v", err)
+	}
+
+	if r.Status(2) != types.StatusSkipped {
+		t.Errorf("Task 2: expected StatusSkipped due to unrecoverable dependency, got %s", r.Status(2))
+	}
+}
+
+func TestRunner_ResultsReturnsCopy(t *testing.T) {
+	tasks := []types.Task{newTask(1, "task 1", nil)}
+	r := New(tasks)
+
+	groups, _ := r.Schedule()
+	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+		return TaskResult{Success: true, Output: "hello"}
+	})
+
+	results1 := r.Results()
+	// Modify the returned map directly
+	results1[1] = TaskResult{Success: true, Output: "modified"}
+
+	results2 := r.Results()
+	if results2[1].Output == "modified" {
+		t.Error("Results() should return a copy, but map modifications leaked through")
+	}
+	if results2[1].Output != "hello" {
+		t.Errorf("Expected output 'hello', got %q", results2[1].Output)
+	}
+}
+
+func TestRunner_Callbacks(t *testing.T) {
+	tasks := []types.Task{
+		newTask(1, "task 1", nil),
+		newTask(2, "task 2", []int{1}),
+	}
+	r := New(tasks)
+
+	var started []int
+	var updates []string
+
+	r.OnTaskStart = func(task types.Task) {
+		started = append(started, task.ID)
+	}
+	r.OnTaskUpdate = func(task types.Task, status string) {
+		updates = append(updates, fmt.Sprintf("%d:%s", task.ID, status))
+	}
+
+	groups, err := r.Schedule()
+	if err != nil {
+		t.Fatalf("Schedule failed: %v", err)
+	}
+
+	execFn := func(ctx context.Context, task types.Task) TaskResult {
+		return TaskResult{Success: true}
+	}
+
+	for _, group := range groups {
+		if err := r.ExecuteGroup(group, execFn); err != nil {
+			t.Fatalf("ExecuteGroup failed: %v", err)
+		}
+	}
+
+	if len(started) != 2 {
+		t.Errorf("Expected 2 task starts, got %d", len(started))
+	}
+	if started[0] != 1 || started[1] != 2 {
+		t.Errorf("Expected starts [1, 2], got %v", started)
+	}
+	if len(updates) != 2 {
+		t.Errorf("Expected 2 updates, got %d", len(updates))
+	}
+	if updates[0] != "1:done" || updates[1] != "2:done" {
+		t.Errorf("Expected updates [1:done, 2:done], got %v", updates)
+	}
+}
+
+func TestRunner_CallbacksNotCalledWhenNil(t *testing.T) {
+	tasks := []types.Task{newTask(1, "task 1", nil)}
+	r := New(tasks)
+
+	// No callbacks set — should not panic
+	groups, _ := r.Schedule()
+	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+		return TaskResult{Success: true}
+	})
+
+	if r.Status(1) != types.StatusDone {
+		t.Errorf("Task should be done, got %s", r.Status(1))
 	}
 }
