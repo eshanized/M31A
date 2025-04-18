@@ -3,8 +3,10 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/pkg/bisect"
 	"github.com/eshanized/M31A/pkg/session"
 	m31types "github.com/eshanized/M31A/internal/types"
@@ -47,20 +49,42 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			tasks[i].Status = m31types.StatusUnrecoverable
 			e.logger.Warn("task unrecoverable", "id", task.ID)
 
-			// Trigger bisect
-			sessionStart, err := e.sessionMgr.LoadSession(e.sessionID)
-			if err == nil && sessionStart != nil {
-				headHash, _ := e.git.HeadHash()
-				b := bisect.New(e.workDir, e.logger)
-				// Bisect with a check function that runs verification
-				checkFn := func() bool {
-					vr := e.verifyTask(task)
-					return vr.FilesExist && vr.SyntaxOK && vr.TestsOK
-				}
-				bisectResult, err := b.Run(sessionStart.ID, headHash, checkFn)
-				if err == nil && bisectResult != nil {
-					e.logger.Info("bisect found offending commit",
-						"commit", bisectResult.OffendingCommit.ShortHash)
+			// Trigger bisect — use the commit before session started as 'good'
+			headHash, _ := e.git.HeadHash()
+			goodHash := e.sessionStartHash
+			if goodHash == "" {
+				// Fallback: use HEAD~50 if sessionStartHash not captured
+				goodHash = "HEAD~50"
+			}
+			b := bisect.New(e.workDir, e.logger)
+			checkFn := func() bool {
+				vr := e.verifyTask(task)
+				return vr.FilesExist && vr.SyntaxOK && vr.TestsOK
+			}
+			bisectResult, err := b.Run(goodHash, headHash, checkFn)
+			if err == nil && bisectResult != nil {
+				e.logger.Info("bisect found offending commit",
+					"commit", bisectResult.OffendingCommit.ShortHash)
+
+				// Targeted heal using bisect context
+				failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",
+					bisectResult.OffendingCommit.ShortHash, bisectResult.Diff, result.Errors)
+				healResult := e.healTask(ctx, task, failure)
+				tasks[i].HealsAttempted++
+
+				if healResult.Success {
+					// Re-verify
+					newResult := e.verifyTask(task)
+					if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+						tasks[i].Status = m31types.StatusDone
+						e.logger.Info("task healed after bisect", "id", task.ID)
+					} else {
+						e.logger.Warn("post-bisect heal did not fix task", "id", task.ID)
+						tasks[i].Status = m31types.StatusUnrecoverable
+					}
+				} else {
+					e.logger.Warn("post-bisect heal failed", "id", task.ID, "error", healResult.Error)
+					tasks[i].Status = m31types.StatusUnrecoverable
 				}
 			}
 			continue
@@ -88,31 +112,43 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 	}
 
 	// 3. Save updated TASKS.md
-	e.sessionMgr.SaveTasks(e.sessionID, tasks)
+	if err := e.sessionMgr.SaveTasks(e.sessionID, tasks); err != nil {
+		e.logger.Warn("save tasks failed", "error", err)
+	}
 
 	// 4. Save checkpoint
-	e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
+	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseVerify,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		e.logger.Warn("save checkpoint failed", "error", err)
+	}
 
 	// 5. Write STATE.md
-	e.sessionMgr.SaveState(e.sessionID, m31types.PhaseVerify, "verification complete", "verify done")
+	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseVerify, "verification complete", "verify done"); err != nil {
+		e.logger.Warn("save state failed", "error", err)
+	}
 
 	// 6. Check if all passed or skipped
 	allOK := true
+	var failedTasks []string
 	for _, task := range tasks {
 		if task.Status == m31types.StatusFailed || task.Status == m31types.StatusUnrecoverable {
 			allOK = false
-			break
+			failedTasks = append(failedTasks, fmt.Sprintf("task %d: %s", task.ID, task.Status))
 		}
 	}
 
 	e.logger.Info("verify phase complete", "all_ok", allOK)
 
-	return &PhaseResult{
+	result := &PhaseResult{
 		Phase:   m31types.PhaseVerify,
 		Success: allOK,
 		Tasks:   tasks,
-	}, nil
+	}
+	if !allOK && len(failedTasks) > 0 {
+		result.Error = strings.Join(failedTasks, "; ")
+		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
+	}
+	return result, nil
 }

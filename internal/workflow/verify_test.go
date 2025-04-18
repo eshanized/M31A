@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -171,5 +173,35 @@ func TestEngine_RunVerify_SkipsPendingTasks(t *testing.T) {
 	}
 	if !result.Success {
 		t.Error("Expected verify to succeed when only pending tasks")
+	}
+}
+
+func TestEngine_SessionStartHash(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	// setupTestEngine creates a git repo and calls SetGit
+	// which should capture the HEAD hash (even if no commits yet, it should be empty)
+	// After first commit, sessionStartHash should be set
+	engine.git.Commit("initial commit")
+
+	// Create a new engine to test hash capture
+	dir := engine.workDir
+	sessionBaseDir := engine.planningDir
+	sessionBaseDir = sessionBaseDir[:len(sessionBaseDir)-len("/planning")]
+	mgr := engine.sessionMgr
+
+	s, err := mgr.NewSession("test-model", "test-provider")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	planningDir := engine.planningDir
+	eng := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
+		&mockProvider{}, "test-model", tools.NewDispatcher(), tokens.NewEstimator("test-model"), mgr)
+	eng.SetGit(engine.git)
+
+	if eng.sessionStartHash == "" {
+		t.Error("Expected sessionStartHash to be captured after SetGit with commits")
 	}
 }
