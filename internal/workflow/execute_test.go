@@ -176,3 +176,30 @@ func TestEngine_HealTask_LLMError(t *testing.T) {
 		t.Error("Expected heal to fail when LLM errors")
 	}
 }
+
+func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	task := m31types.Task{
+		ID:          1,
+		Action:      "Create",
+		Description: "Create main.go",
+		Dependencies: []int{},
+		Files:       []string{"main.go"},
+	}
+	allTasks := []m31types.Task{task}
+
+	// Set LLM to always error — verify heal attempts are made
+	mp := engine.provider.(*mockProvider)
+	mp.response = "Done"
+	mp.err = context.Canceled
+
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	// With constant LLM error, heal attempts should exhaust and fail
+	if result.Success {
+		t.Error("Expected task to fail when LLM consistently errors")
+	}
+	if result.Error == "" {
+		t.Error("Expected error message on failure")
+	}
+}

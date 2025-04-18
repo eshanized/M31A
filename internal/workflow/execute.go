@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
 	m31types "github.com/eshanized/M31A/internal/types"
@@ -38,101 +39,139 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	}
 
 	// 4. Execute each group sequentially
+	var execErrors []string
 	for _, group := range groups {
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
 			return e.executeTaskWithTools(ctx, task, tasks)
 		}
 
 		if err := runner.ExecuteGroup(group, execFn); err != nil {
+			execErrors = append(execErrors, fmt.Sprintf("group %v: %v", group, err))
 			e.logger.Error("execute group failed", "error", err)
 		}
 
 		// Update TASKS.md and STATE.md after each group
 		updatedTasks := runner.Tasks()
-		e.sessionMgr.SaveTasks(e.sessionID, updatedTasks)
-		e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
-			fmt.Sprintf("executing tasks"), "group complete")
+		if err := e.sessionMgr.SaveTasks(e.sessionID, updatedTasks); err != nil {
+			e.logger.Warn("save tasks failed", "error", err)
+		}
+		if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
+			"executing tasks", "group complete"); err != nil {
+			e.logger.Warn("save state failed", "error", err)
+		}
 	}
 
 	// 5. Save checkpoint
-	e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
+	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseExecute,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		e.logger.Warn("save checkpoint failed", "error", err)
+	}
 
 	// 6. Final state
 	updatedTasks := runner.Tasks()
-	e.sessionMgr.SaveTasks(e.sessionID, updatedTasks)
+	if err := e.sessionMgr.SaveTasks(e.sessionID, updatedTasks); err != nil {
+		e.logger.Warn("save tasks failed", "error", err)
+	}
 
 	total, done, failed, skipped := runner.Summary()
 	allDone := done+skipped == total
 
 	e.logger.Info("execute phase complete", "total", total, "done", done, "failed", failed, "skipped", skipped)
 
-	return &PhaseResult{
+	result := &PhaseResult{
 		Phase:   m31types.PhaseExecute,
 		Success: allDone,
 		Tasks:   updatedTasks,
-	}, nil
+	}
+	if len(execErrors) > 0 {
+		result.Error = strings.Join(execErrors, "; ")
+		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
+	}
+	return result, nil
 }
 
 // executeTaskWithTools runs a single task with tool dispatch and self-heal.
 func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, allTasks []m31types.Task) taskrunner.TaskResult {
 	start := time.Now()
 
-	// Build context
-	messages := e.buildExecuteContext(task, allTasks)
+	for task.HealsAttempted <= m31types.MaxHealAttempts {
+		// Build context
+		messages := e.buildExecuteContext(task, allTasks)
 
-	// Stream LLM
-	content, err := e.streamLLM(ctx, messages, true)
-	if err != nil {
-		return taskrunner.TaskResult{Success: false, Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}
-	}
-
-	// Parse tool calls
-	toolCalls := parseToolCalls(content)
-
-	// Dispatch tool calls
-	for _, tc := range toolCalls {
-		result, err := e.dispatcher.Execute(ctx, tc)
+		// Stream LLM
+		content, err := e.streamLLM(ctx, messages, true)
 		if err != nil {
-			return taskrunner.TaskResult{
-				Success:    false,
-				Error:      fmt.Sprintf("tool %s: %v", tc.Name, err),
-				DurationMs: time.Since(start).Milliseconds(),
+			if task.HealsAttempted > 0 {
+				return taskrunner.TaskResult{Success: false, Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}
+			}
+			// First failure — attempt self-heal
+			task.HealsAttempted++
+			continue
+		}
+
+		// Parse tool calls
+		toolCalls := parseToolCalls(content)
+
+		// Dispatch tool calls
+		toolErr := false
+		for _, tc := range toolCalls {
+			result, err := e.dispatcher.Execute(ctx, tc)
+			if err != nil {
+				toolErr = true
+				if task.HealsAttempted >= m31types.MaxHealAttempts {
+					return taskrunner.TaskResult{
+						Success:    false,
+						Error:      fmt.Sprintf("tool %s: %v", tc.Name, err),
+						DurationMs: time.Since(start).Milliseconds(),
+					}
+				}
+				// Attempt heal
+				task.HealsAttempted++
+				break
+			}
+
+			// Feed tool result back
+			messages = append(messages, m31types.Message{
+				Role:      "assistant",
+				Content:   content,
+				ToolCalls: []m31types.ToolCall{tc},
+			})
+			messages = append(messages, m31types.Message{
+				Role:    "tool",
+				Content: result.Output,
+			})
+		}
+
+		if toolErr {
+			continue
+		}
+
+		// Commit changes
+		var commitHash string
+		if len(task.Files) > 0 {
+			if err := e.git.AddAll(); err != nil {
+				e.logger.Warn("git add failed", "task", task.ID, "error", err)
+			}
+			if err := e.git.Commit(fmt.Sprintf("feat: %s", task.Description)); err != nil {
+				e.logger.Warn("commit failed", "task", task.ID, "error", err)
+			} else {
+				commitHash, _ = e.git.HeadHash()
 			}
 		}
 
-		// Feed tool result back
-		messages = append(messages, m31types.Message{
-			Role:    "assistant",
-			Content: content,
-			ToolCalls: []m31types.ToolCall{tc},
-		})
-		messages = append(messages, m31types.Message{
-			Role:    "tool",
-			Content: result.Output,
-		})
-	}
-
-	// Commit changes
-	var commitHash string
-	if len(task.Files) > 0 {
-		hash, err := e.git.CommitWithFiles(
-			fmt.Sprintf("feat(task %d): %s", task.ID, task.Description),
-			task.Files...,
-		)
-		if err != nil {
-			e.logger.Warn("commit failed", "task", task.ID, "error", err)
-		} else {
-			commitHash = hash
+		return taskrunner.TaskResult{
+			Success:    true,
+			Output:     content,
+			CommitHash: commitHash,
+			DurationMs: time.Since(start).Milliseconds(),
 		}
 	}
 
 	return taskrunner.TaskResult{
-		Success:    true,
-		Output:     content,
-		CommitHash: commitHash,
+		Success:    false,
+		Error:      fmt.Sprintf("max heal attempts exceeded (%d)", m31types.MaxHealAttempts),
 		DurationMs: time.Since(start).Milliseconds(),
 	}
 }
@@ -142,11 +181,19 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) 
 	var messages []m31types.Message
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask)})
 
-	// Task summary
+	// Load PROJECT.md for project context
+	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	projectCtx := ""
+	if project != nil {
+		projectCtx = fmt.Sprintf("## Project Context\nGoal: %s\nType: %s\nFramework: %s\n\n",
+			project.Goal, project.ProjectType, project.Framework)
+	}
+
+	// Task list
 	taskSummary := formatTaskSummary(tasks)
 	messages = append(messages, m31types.Message{
 		Role:    "user",
-		Content: "Task list:\n" + taskSummary,
+		Content: projectCtx + "Task list:\n" + taskSummary,
 	})
 
 	// Current task spec
@@ -194,11 +241,14 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 	// Commit fix
 	var commitHash string
 	if len(task.Files) > 0 {
-		hash, _ := e.git.CommitWithFiles(
-			fmt.Sprintf("fix(task %d): %s", task.ID, task.Description),
-			task.Files...,
-		)
-		commitHash = hash
+		if err := e.git.AddAll(); err != nil {
+			e.logger.Warn("git add failed during heal", "task", task.ID, "error", err)
+		}
+		if err := e.git.Commit(fmt.Sprintf("fix: %s", task.Description)); err != nil {
+			e.logger.Warn("heal commit failed", "task", task.ID, "error", err)
+		} else {
+			commitHash, _ = e.git.HeadHash()
+		}
 	}
 
 	return taskrunner.TaskResult{
