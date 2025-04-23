@@ -33,12 +33,8 @@ type TickMsg struct {
 	Time time.Time
 }
 
-func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) tea.Cmd {
-	streamCh := make(chan tea.Msg, 100)
-
+func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string, streamCh chan tea.Msg) tea.Cmd {
 	go func() {
-		defer close(streamCh)
-
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
 			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
@@ -125,8 +121,15 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 		}
 	}()
 
+	// Return a cmd that reads from the shared stream channel.
+	// handleStreamMsg will return a new cmd after each StreamMsg to continue reading.
 	return func() tea.Msg {
-		return <-streamCh
+		select {
+		case msg := <-streamCh:
+			return msg
+		case <-ctx.Done():
+			return StreamErrorMsg{Err: ctx.Err()}
+		}
 	}
 }
 

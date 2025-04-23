@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -72,7 +73,8 @@ func TestStartStreamCmd_ContentOnly(t *testing.T) {
 		},
 	}
 
-	cmd := StartStreamCmd(context.Background(), p, req, "test-session")
+	streamCh := make(chan tea.Msg, 100)
+	cmd := StartStreamCmd(context.Background(), p, req, "test-session", streamCh)
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd")
 	}
@@ -121,7 +123,8 @@ func TestStartStreamCmd_WithThinking(t *testing.T) {
 		},
 	}
 
-	cmd := StartStreamCmd(context.Background(), p, req, "session-1")
+	streamCh := make(chan tea.Msg, 100)
+	cmd := StartStreamCmd(context.Background(), p, req, "session-1", streamCh)
 
 	var streamMsgCount int
 	var doneMsgCount int
@@ -163,7 +166,8 @@ func TestStartStreamCmd_WithContextExceeded(t *testing.T) {
 		Model: "test-model",
 	}
 
-	cmd := StartStreamCmd(context.Background(), p, req, "session-2")
+	streamCh := make(chan tea.Msg, 100)
+	cmd := StartStreamCmd(context.Background(), p, req, "session-2", streamCh)
 
 	msg := cmd()
 	if msg == nil {
@@ -190,7 +194,8 @@ func TestStartStreamCmd_ContextCancellation(t *testing.T) {
 		Model: "test-model",
 	}
 
-	cmd := StartStreamCmd(ctx, p, req, "session-3")
+	streamCh := make(chan tea.Msg, 100)
+	cmd := StartStreamCmd(ctx, p, req, "session-3", streamCh)
 
 	count := 0
 	for {

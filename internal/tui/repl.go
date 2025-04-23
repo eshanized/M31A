@@ -2,19 +2,22 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 type ReplModel struct {
@@ -33,8 +36,8 @@ type ReplModel struct {
 	width        int
 	height       int
 
-	msgRenderer    *components.MessageRenderer
-	streamCancel   context.CancelFunc
+	msgRenderer  *components.MessageRenderer
+	streamCancel context.CancelFunc
 
 	currentMessage    *types.Message
 	streamSegments    []types.MessageSegment
@@ -44,14 +47,20 @@ type ReplModel struct {
 	thinkingBlocks    map[int]*components.ThinkingBlock
 	toolCards         map[int]*components.ToolCard
 
-	fallbackBanner    string    // current fallback banner text, empty = no banner
-	fallbackBannerAt  time.Time // when the banner appeared (for 15s auto-dismiss)
+	fallbackBanner   string    // current fallback banner text, empty = no banner
+	fallbackBannerAt time.Time // when the banner appeared (for 15s auto-dismiss)
 
 	// Provider access for LLM calls
 	registry       *provider.Registry
 	activeProvider string
 	activeModel    *types.ModelInfo
 	sessionID      string
+
+	// Config access for arbitrage settings
+	cfg *config.Config
+
+	// Streaming channel — created when a stream starts, read by handleStreamMsg
+	streamCh chan tea.Msg
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -76,13 +85,15 @@ func NewReplModel(t theme.Theme) ReplModel {
 	}
 
 	m := ReplModel{
-		theme:        t,
-		viewport:     vp,
-		textarea:     ta,
-		spinner:      s,
-		inputHistory: make([]string, 0),
-		historyPos:   -1,
-		msgRenderer:  renderer,
+		theme:          t,
+		viewport:       vp,
+		textarea:       ta,
+		spinner:        s,
+		inputHistory:   make([]string, 0),
+		historyPos:     -1,
+		msgRenderer:    renderer,
+		thinkingBlocks: make(map[int]*components.ThinkingBlock),
+		toolCards:      make(map[int]*components.ToolCard),
 	}
 
 	// Set welcome message in viewport
@@ -232,6 +243,27 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 					if m.activeModel != nil {
 						modelID = m.activeModel.ID
 					}
+
+					// Auto-arbitrage: if enabled, check if a cheaper model can handle this task
+					if m.cfg != nil && m.cfg.Model.AutoArbitrage && m.activeModel != nil {
+						allModels, err := p.FetchModels(context.Background())
+						if err == nil && len(allModels) > 0 {
+							task := types.Task{
+								Description: input,
+								Files:       []string{},
+							}
+							rec, err := arbitrage.Recommend(allModels, task, m.cfg.Model.ArbitrageThreshold)
+							if err == nil && rec != nil {
+								// If the recommended model differs from current and is cheaper, switch
+								currentCost := m.activeModel.Pricing.OutputPerMToken
+								if rec.RecommendedModel.ModelID != modelID && rec.RecommendedModel.OutputCost < currentCost {
+									// Switch to recommended model for this request
+									modelID = rec.RecommendedModel.ModelID
+								}
+							}
+						}
+					}
+
 					ctx, cancel := context.WithCancel(context.Background())
 					m.streamCancel = cancel
 					m.streaming = true
@@ -246,7 +278,8 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 						Messages: m.messages,
 						Stream:   true,
 					}
-					cmd := StartStreamCmd(ctx, p, req, m.sessionID)
+					m.streamCh = make(chan tea.Msg, 100)
+					cmd := StartStreamCmd(ctx, p, req, m.sessionID, m.streamCh)
 					return []tea.Cmd{cmd}, true
 				}
 			}
@@ -319,11 +352,11 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			return cmds, false
 		}
 
-	// Dismiss fallback banner on any key press when textarea has content
-	if m.fallbackBanner != "" && m.textarea.Value() != "" {
-		m.fallbackBanner = ""
-		m.renderMessages()
-	}
+		// Dismiss fallback banner on any key press when textarea has content
+		if m.fallbackBanner != "" && m.textarea.Value() != "" {
+			m.fallbackBanner = ""
+			m.renderMessages()
+		}
 
 	case FallbackEventMsg:
 		m.fallbackBanner = fmt.Sprintf("Provider switched: %s → %s (%s)", msg.From, msg.To, msg.Reason)
@@ -402,7 +435,15 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	m.renderMessages()
 	m.viewport.GotoBottom()
 
-	return nil, false
+	// Continuation: schedule next read from stream channel
+	nextCmd := func() tea.Msg {
+		select {
+		case msg := <-m.streamCh:
+			return msg
+		}
+	}
+
+	return []tea.Cmd{nextCmd}, false
 }
 
 func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
@@ -422,12 +463,26 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 
 	m.messages = append(m.messages, msg.Message)
 
+	// Populate thinking blocks from finalized segments
+	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
+	for i, seg := range m.streamSegments {
+		if seg.Type == "thinking" {
+			tb := components.NewThinkingBlock(seg, m.theme, false)
+			m.thinkingBlocks[i] = tb
+		}
+	}
+
+	// Populate tool cards from tool calls
+	m.toolCards = make(map[int]*components.ToolCard)
+	for i, tc := range msg.Message.ToolCalls {
+		card := components.NewToolCard(tc, nil, components.ToolRunning, m.theme)
+		m.toolCards[i] = card
+	}
+
 	m.streaming = false
 	m.thinking = false
 	m.activeSegmentType = ""
 	m.streamSegments = nil
-	m.thinkingBlocks = nil
-	m.toolCards = nil
 	m.textarea.Focus()
 
 	m.renderMessages()
@@ -455,8 +510,8 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
 	m.activeSegmentType = ""
 	m.streamSegments = nil
 	m.streamContent.Reset()
-	m.thinkingBlocks = nil
-	m.toolCards = nil
+	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
+	m.toolCards = make(map[int]*components.ToolCard)
 	m.textarea.Focus()
 
 	m.renderMessages()
@@ -473,7 +528,16 @@ func (m *ReplModel) streamTickCmds() ([]tea.Cmd, bool) {
 }
 
 func (m *ReplModel) getToolCallsFromSegments() []types.ToolCall {
-	return nil
+	var toolCalls []types.ToolCall
+	for _, seg := range m.streamSegments {
+		if seg.Type == "tool_use" && seg.Content != "" {
+			var tc types.ToolCall
+			if err := json.Unmarshal([]byte(seg.Content), &tc); err == nil {
+				toolCalls = append(toolCalls, tc)
+			}
+		}
+	}
+	return toolCalls
 }
 
 func (m *ReplModel) SetTheme(t theme.Theme) {
@@ -486,11 +550,12 @@ func (m *ReplModel) SetTheme(t theme.Theme) {
 	}
 }
 
-func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string) {
+func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) {
 	m.registry = registry
 	m.activeProvider = activeProvider
 	m.activeModel = model
 	m.sessionID = sessionID
+	m.cfg = cfg
 }
 
 func (m *ReplModel) SetStreaming(v bool) {
@@ -580,8 +645,9 @@ func (m *ReplModel) View() string {
 	viewportStr := m.viewport.View()
 	inputStr := m.textarea.View()
 
-	// Render fallback banner if active
-	if m.fallbackBanner != "" && time.Now().Before(m.fallbackBannerAt) {
+	// Render fallback banner if active. Expiry is checked atomically in
+	// Update() above, so View() only needs to test whether the banner is set.
+	if m.fallbackBanner != "" {
 		bannerStyle := lipgloss.NewStyle().
 			Background(lipgloss.Color("#FDD663")).
 			Foreground(lipgloss.Color("#000000")).
