@@ -30,7 +30,6 @@ type AppMsg struct {
 	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
 	RefreshCache   *RefreshCacheMsg     // trigger model cache refresh
 	ModelSelected  *ModelSelectedMsg    // model selection result
-	InitError      error
 }
 
 type HealthCheckTickMsg struct {
@@ -85,20 +84,10 @@ type PhaseResultMsg struct {
 	Error    string
 }
 
-// PlanReadyMsg is emitted when the plan phase completes successfully with valid tasks.
+// PlanReadyMsg is emitted from RunPhaseCmd when the plan phase completes
+// successfully with valid tasks.
 type PlanReadyMsg struct {
 	Tasks        []types.Task
 	CostEstimate string
 	TimeEstimate string
-}
-
-// TaskStartMsg is emitted when a task begins execution.
-type TaskStartMsg struct {
-	Task types.Task
-}
-
-// TaskUpdateMsg is emitted when a task status changes during execution.
-type TaskUpdateMsg struct {
-	Task   types.Task
-	Status string
 }

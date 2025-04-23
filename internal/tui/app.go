@@ -21,6 +21,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
@@ -73,6 +74,8 @@ type AppState struct {
 	workflowRunning    bool
 	currentPhase       types.WorkflowPhase
 	discussQuestions   []string
+	autoDream          *autodream.Consolidator
+	msgChan            chan tea.Msg // channel for workflow-emitted messages
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -146,6 +149,10 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	app.initWorkflowEngine()
 
+	// Initialize AutoDream consolidator with empty messages; will be
+	// synced whenever a user message is submitted.
+	app.autoDream = autodream.New(nil)
+
 	if apiKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath)
 		app.screen = ScreenFirstRun
@@ -155,7 +162,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		rp := NewReplModel(tm.Current())
 		app.screen = ScreenREPL
 		app.replModel = &rp
-		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "")
+		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
 		app.healthStatus = types.HealthStatus{
 			Status: "offline",
 			Error:  "No providers available — offline mode. History is readable but no new messages.",
@@ -165,7 +172,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		rp := NewReplModel(tm.Current())
 		app.screen = ScreenREPL
 		app.replModel = &rp
-		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "")
+		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
 		app.healthStatus = types.HealthStatus{Status: "live"}
 	}
 
@@ -218,23 +225,39 @@ func (m *AppState) initWorkflowEngine() {
 }
 
 // RunPhaseCmd returns a tea.Cmd that executes the given workflow phase in a
-// goroutine and emits a PhaseResultMsg on completion.
-func RunPhaseCmd(eng *workflow.Engine, phase types.WorkflowPhase, goal string) tea.Cmd {
-	return func() tea.Msg {
+// goroutine and emits a PhaseResultMsg on completion. It also sets up a
+// MsgEmitter on the engine so that TaskStartMsg and TaskUpdateMsg are emitted
+// during execution and PlanReadyMsg when the plan phase completes.
+func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd {
+	msgCh := make(chan tea.Msg, 32)
+	app.msgChan = msgCh
+
+	eng := app.workflowEngine
+	eng.SetMsgEmitter(&channelEmitter{ch: msgCh})
+
+	// Phase runner: executes the phase, emits PlanReadyMsg if applicable, then closes the channel.
+	runner := func() tea.Msg {
 		ctx := context.Background()
 		result, err := eng.RunPhase(ctx, phase, goal)
 		if err != nil {
-			return PhaseResultMsg{
-				Phase: phase,
-				Error: err.Error(),
-			}
+			close(msgCh)
+			return PhaseResultMsg{Phase: phase, Error: err.Error()}
 		}
 		if result == nil {
-			return PhaseResultMsg{
-				Phase: phase,
-				Error: "nil result",
+			close(msgCh)
+			return PhaseResultMsg{Phase: phase, Error: "nil result"}
+		}
+
+		// Emit PlanReadyMsg when the plan phase completes successfully.
+		if phase == types.PhasePlan && result.Success && len(result.Tasks) > 0 {
+			msgCh <- PlanReadyMsg{
+				Tasks:        result.Tasks,
+				CostEstimate: fmt.Sprintf("%d tasks", len(result.Tasks)),
+				TimeEstimate: "",
 			}
 		}
+
+		close(msgCh)
 		return PhaseResultMsg{
 			Phase:    phase,
 			Tasks:    result.Tasks,
@@ -242,6 +265,39 @@ func RunPhaseCmd(eng *workflow.Engine, phase types.WorkflowPhase, goal string) t
 			Success:  result.Success,
 			Error:    result.Error,
 		}
+	}
+
+	// Return a batch: the runner executes the phase, the drainer reads emitted messages.
+	return tea.Batch(runner, workflowMsgDrainer(app))
+}
+
+// workflowMsgDrainer returns a tea.Cmd that reads one message from the
+// workflow message channel. After returning a message, the Update handler
+// should re-schedule the drainer to continue reading.
+func workflowMsgDrainer(app *AppState) tea.Cmd {
+	return func() tea.Msg {
+		if app.msgChan == nil {
+			return nil
+		}
+		msg, ok := <-app.msgChan
+		if !ok {
+			app.msgChan = nil
+			return nil
+		}
+		return msg
+	}
+}
+
+// channelEmitter implements workflow.MsgEmitter by sending messages into a channel.
+type channelEmitter struct {
+	ch chan tea.Msg
+}
+
+func (ce *channelEmitter) Emit(msg tea.Msg) {
+	select {
+	case ce.ch <- msg:
+	default:
+		// Channel full — drop the message to avoid blocking the engine.
 	}
 }
 
@@ -372,7 +428,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.workflowGoal = goal
 					m.workflowRunning = true
 					m.currentPhase = phase
-					return m, RunPhaseCmd(m.workflowEngine, phase, goal)
+					return m, RunPhaseCmd(m, phase, goal)
 				}
 			}
 
@@ -387,11 +443,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.workflowRunning = true
 				m.currentPhase = types.PhaseInitialize
 				m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
-				return m, RunPhaseCmd(m.workflowEngine, types.PhaseInitialize, goal)
+				return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
 			}
 
 			// Try command registry for all other slash commands
 			if strings.HasPrefix(msg.String(), "/") {
+				// Sync current messages to the consolidator so /compress sees
+				// the latest context.
+				if m.autoDream != nil && m.replModel != nil {
+					m.autoDream.SetMessages(m.replModel.Messages())
+				}
+
 				sessionID := ""
 				if m.workflowEngine != nil {
 					sessionID = m.workflowEngine.SessionID()
@@ -404,6 +466,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Ledger:          m.ledger,
 					WorkflowEngine:  m.workflowEngine,
 					SessionID:       sessionID,
+					AutoDream:       m.autoDream,
 				}
 				result, handled := m.cmdRegistry.Execute(msg.String(), ctx)
 				if handled {
@@ -478,7 +541,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
 			m.replModel = &rp
-			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "")
+			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
 			m.initialized = true
 		}
 		if msg.Screen == ScreenModelSelector {
@@ -488,9 +551,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.modelSelector.Init()
 		}
 		m.screen = msg.Screen
-		if msg.InitError != nil {
-			m.currentOperation = fmt.Sprintf("Error: %v", msg.InitError)
-		}
 		return m, nil
 
 	case FallbackEventMsg:
@@ -528,7 +588,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && event != nil {
 					m.activeProvider = event.To
 					if m.replModel != nil {
-						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID)
+						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
 						m.replModel.Update(msg)
 					}
 					return m, tea.Batch(
@@ -559,6 +619,41 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.permissionModal = nil
 		return m, permissionListenerCmd(m.dispatcher)
 
+	case PlanReadyMsg:
+		// Plan phase completed with valid tasks — update the plan screen.
+		if len(msg.Tasks) > 0 && m.planModel == nil {
+			t := m.themeManager.Current()
+			modelID := ""
+			if m.activeModel != nil {
+				modelID = m.activeModel.ID
+			}
+			pm := NewPlanModel(msg.Tasks, t, modelID, m.activeProvider, 0, msg.CostEstimate)
+			m.planModel = pm
+		}
+		m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
+		return m, workflowMsgDrainer(m)
+
+	case workflow.TaskStartMsg:
+		// A task has begun execution — update the execute model.
+		m.currentOperation = fmt.Sprintf("Running task %d: %s", msg.Task.ID, msg.Task.Action)
+		if m.executeModel != nil {
+			m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
+		}
+		return m, workflowMsgDrainer(m)
+
+	case workflow.TaskUpdateMsg:
+		// A task status changed — update the execute model.
+		m.currentOperation = fmt.Sprintf("Task %d: %s", msg.Task.ID, msg.Status)
+		if m.executeModel != nil {
+			switch msg.Status {
+			case "done":
+				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusDone)
+			case "failed":
+				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusFailed)
+			}
+		}
+		return m, workflowMsgDrainer(m)
+
 	case PhaseResultMsg:
 		if msg.Error != "" {
 			m.currentOperation = fmt.Sprintf("Phase %s failed: %s", msg.Phase, msg.Error)
@@ -576,7 +671,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case types.PhaseInitialize:
 			// Auto-advance to Discuss
 			m.currentPhase = types.PhaseDiscuss
-			return m, RunPhaseCmd(m.workflowEngine, types.PhaseDiscuss, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
 
 		case types.PhaseDiscuss:
 			// Extract questions and transition to Discuss screen for Q&A
@@ -590,7 +685,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// For V1, we auto-advance to Plan with saved answers
 			// The discuss answers are already saved to PROJECT.md by the engine
 			m.currentPhase = types.PhasePlan
-			return m, RunPhaseCmd(m.workflowEngine, types.PhasePlan, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 
 		case types.PhasePlan:
 			if len(msg.Tasks) > 0 && m.planModel == nil {
@@ -605,7 +700,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Auto-advance to Execute
 			m.currentPhase = types.PhaseExecute
-			return m, RunPhaseCmd(m.workflowEngine, types.PhaseExecute, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 
 		case types.PhaseExecute:
 			t := m.themeManager.Current()
@@ -613,7 +708,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenExecute
 			// Run the actual execute phase via engine (tool dispatch, git commits)
 			m.currentPhase = types.PhaseVerify
-			return m, RunPhaseCmd(m.workflowEngine, types.PhaseExecute, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 
 		case types.PhaseVerify:
 			t := m.themeManager.Current()
@@ -622,7 +717,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenVerify
 			// Run the actual verify phase via engine
 			m.currentPhase = types.PhaseShip
-			return m, RunPhaseCmd(m.workflowEngine, types.PhaseVerify, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
 
 		case types.PhaseShip:
 			t := m.themeManager.Current()
@@ -656,8 +751,40 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case SettingsSavedMsg:
-		// Restart health check and cache refresh tickers after settings change
 		m.currentOperation = "Settings saved"
+		// Reload config into active components
+		if m.config != nil && m.settingsModel != nil {
+			m.settingsModel.SetConfig(m.config)
+		}
+
+		// If the default model or provider changed, update active provider/model
+		if m.config != nil && m.registry != nil {
+			cfgProvider := m.config.Provider.Default
+			if cfgProvider != "" && m.activeProvider != cfgProvider {
+				if err := m.registry.SetActive(cfgProvider); err == nil {
+					m.activeProvider = cfgProvider
+					m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
+				}
+			}
+
+			cfgModel := m.config.Model.Default
+			if cfgModel != "" && (m.activeModel == nil || m.activeModel.ID != cfgModel) {
+				if p := m.registry.ActiveProvider(); p != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if models, err := p.FetchModels(ctx); err == nil {
+						for _, mi := range models {
+							if mi.ID == cfgModel {
+								m.activeModel = &mi
+								m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
+								break
+							}
+						}
+					}
+					cancel()
+				}
+			}
+		}
+
 		if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
 			m.lastActivity = time.Now()
 		}
@@ -686,7 +813,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				rp := NewReplModel(m.themeManager.Current())
 				m.replModel = &rp
-				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "")
+				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
 				m.initialized = true
 				healthCmd := HealthCheckTicker(
 					context.Background(), m.registry, m.activeProvider,
@@ -730,8 +857,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if appMsg != nil {
 			m.screen = appMsg.Screen
 			if appMsg.SessionID != "" {
-				// SessionID will be used by the load handler
-				m.currentOperation = fmt.Sprintf("Loading session %s...", appMsg.SessionID)
+				// Load session data into the REPL model
+				if sess, err := m.sessionManager.LoadSession(appMsg.SessionID); err == nil && sess != nil {
+					if m.replModel == nil {
+						rp := NewReplModel(m.themeManager.Current())
+						m.replModel = &rp
+					}
+					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					for _, msg := range sess.Messages {
+						m.replModel.AddMessage(msg)
+					}
+					m.currentOperation = fmt.Sprintf("Session %s loaded", appMsg.SessionID)
+				} else {
+					m.currentOperation = fmt.Sprintf("Failed to load session %s", appMsg.SessionID)
+				}
 			}
 		}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
@@ -750,50 +889,50 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenPlan:
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		if m.planModel != nil {
-			cmds, appMsg := m.planModel.Update(msg)
+			subCmds, appMsg := m.planModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
 			}
-			_ = cmds
+			cmds = append(cmds, subCmds...)
 		}
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenExecute:
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		if m.executeModel != nil {
-			cmds, appMsg := m.executeModel.Update(msg)
+			subCmds, appMsg := m.executeModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
 			}
-			_ = cmds
+			cmds = append(cmds, subCmds...)
 		}
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenVerify:
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		if m.verifyModel != nil {
-			cmds, appMsg := m.verifyModel.Update(msg)
+			subCmds, appMsg := m.verifyModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
 			}
-			_ = cmds
+			cmds = append(cmds, subCmds...)
 		}
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	case ScreenShip:
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		if m.shipModel != nil {
-			cmds, appMsg := m.shipModel.Update(msg)
+			subCmds, appMsg := m.shipModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
 				if appMsg.Screen == ScreenFirstRun {
 					m.replModel = nil
 				}
 			}
-			_ = cmds
+			cmds = append(cmds, subCmds...)
 		}
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
 		return m, tea.Batch(cmds...)
 
 	default:
