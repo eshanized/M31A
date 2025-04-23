@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -132,10 +133,7 @@ func TestToolCard_AutoCollapse_BinaryContent(t *testing.T) {
 }
 
 func TestToolCard_AutoCollapse_TruncatedOutput(t *testing.T) {
-	hugeOutput := string(make([]byte, types.MaxToolOutputChars+100))
-	for i := range hugeOutput {
-		hugeOutput = hugeOutput[:i] + "x" + hugeOutput[i+1:]
-	}
+	hugeOutput := strings.Repeat("x", types.MaxToolOutputChars+100)
 	input := json.RawMessage(`"cat large"`)
 	call := types.ToolCall{ID: "11", Name: "Bash", Input: input}
 	result := &types.ToolResult{
