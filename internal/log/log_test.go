@@ -155,7 +155,8 @@ func TestRotateLogFiles_RenamesOldFile(t *testing.T) {
 
 	// Create a log file with yesterday's mod time
 	os.WriteFile(logFile, []byte("old log"), 0644)
-	yesterday := time.Now().Add(-24 * time.Hour)
+	now := time.Now()
+	yesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 12, 0, 0, 0, now.Location())
 	os.Chtimes(logFile, yesterday, yesterday)
 
 	err := rotateLogFiles(tmpDir, logFile)
@@ -164,7 +165,7 @@ func TestRotateLogFiles_RenamesOldFile(t *testing.T) {
 	}
 
 	// Original file should be renamed
-	yesterdayStr := yesterday.Format("2006-01-02")
+	yesterdayStr := yesterday.Truncate(24 * time.Hour).Format("2006-01-02")
 	rotatedName := logFile + "." + yesterdayStr
 	if _, err := os.Stat(rotatedName); os.IsNotExist(err) {
 		t.Fatal("Expected rotated log file to exist")
@@ -221,16 +222,5 @@ func TestResolveLogLevel(t *testing.T) {
 	level = resolveLogLevel()
 	if level.String() != "INFO" {
 		t.Errorf("Expected INFO, got %s", level.String())
-	}
-}
-
-func TestNoopWriter(t *testing.T) {
-	w := noopWriter{}
-	n, err := w.Write([]byte("test"))
-	if err != nil {
-		t.Fatalf("noopWriter.Write failed: %v", err)
-	}
-	if n != 4 {
-		t.Errorf("Expected 4 bytes written, got %d", n)
 	}
 }

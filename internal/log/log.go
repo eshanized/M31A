@@ -2,7 +2,6 @@ package log
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -65,11 +64,12 @@ func rotateLogFiles(logDir, logFile string) error {
 		return err
 	}
 
-	today := time.Now().Truncate(24 * time.Hour)
-	modTime := info.ModTime().Truncate(24 * time.Hour)
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	modDate := time.Date(info.ModTime().Year(), info.ModTime().Month(), info.ModTime().Day(), 0, 0, 0, 0, now.Location())
 
-	if modTime.Before(today) {
-		rotatedName := fmt.Sprintf("%s.%s", logFile, modTime.Format("2006-01-02"))
+	if modDate.Before(today) {
+		rotatedName := fmt.Sprintf("%s.%s", logFile, modDate.Format("2006-01-02"))
 		if err := os.Rename(logFile, rotatedName); err != nil {
 			return fmt.Errorf("cannot rotate log file: %w", err)
 		}
@@ -113,16 +113,16 @@ func removeOldRotatedFiles(logDir string) error {
 }
 
 func resolveLogLevel() slog.Level {
-	if os.Getenv("M31A_LOG_LEVEL") == "debug" {
+	switch strings.ToLower(os.Getenv("M31A_LOG_LEVEL")) {
+	case "debug":
 		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
-	return slog.LevelInfo
-}
-
-var _ io.Writer = (*noopWriter)(nil)
-
-type noopWriter struct{}
-
-func (n noopWriter) Write(p []byte) (int, error) {
-	return len(p), nil
 }
