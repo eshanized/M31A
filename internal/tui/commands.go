@@ -678,7 +678,6 @@ func formatConfig(cfg *config.Config) CommandResult {
 	b.WriteString(fmt.Sprintf("  ui.show_token_usage:    %v\n", cfg.UI.ShowTokenUsage))
 	b.WriteString(fmt.Sprintf("  ui.show_cost_estimate:  %v\n", cfg.UI.ShowCostEstimate))
 	b.WriteString(fmt.Sprintf("  permissions.mode:       %s\n", cfg.Permissions.DefaultMode))
-	b.WriteString(fmt.Sprintf("  features.autodream:     %v\n", cfg.Features.AutodreamEnabled))
 	b.WriteString(fmt.Sprintf("  ledger.enabled:         %v\n", cfg.Ledger.Enabled))
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }

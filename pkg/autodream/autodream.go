@@ -38,11 +38,29 @@ type Consolidator struct {
 
 // New creates a Consolidator that owns a defensive copy of the given messages.
 func New(messages []types.Message) *Consolidator {
-	cp := make([]types.Message, len(messages))
-	copy(cp, messages)
+	var cp []types.Message
+	if messages != nil {
+		cp = make([]types.Message, len(messages))
+		copy(cp, messages)
+	}
 	return &Consolidator{
 		messages: cp,
 	}
+}
+
+// SetMessages replaces the Consolidator's internal message list with a
+// defensive copy of the provided slice. This is the integration point for
+// callers (e.g. ReplModel) that own the authoritative message history.
+func (c *Consolidator) SetMessages(messages []types.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if messages == nil {
+		c.messages = nil
+		return
+	}
+	cp := make([]types.Message, len(messages))
+	copy(cp, messages)
+	c.messages = cp
 }
 
 // canConsolidateLocked checks whether consolidation is possible.
