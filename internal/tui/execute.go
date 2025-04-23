@@ -29,6 +29,16 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme) *ExecuteModel {
 	}
 }
 
+// UpdateTaskStatus updates the status of a task by ID.
+func (m *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
+	for i := range m.tasks {
+		if m.tasks[i].ID == taskID {
+			m.tasks[i].Status = status
+			break
+		}
+	}
+}
+
 func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
