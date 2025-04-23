@@ -32,6 +32,14 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	// 2. Create runner
 	runner := taskrunner.New(tasks)
 
+	// Wire task lifecycle callbacks to emit messages to the TUI.
+	runner.OnTaskStart = func(task m31types.Task) {
+		e.emit(TaskStartMsg{Task: task})
+	}
+	runner.OnTaskUpdate = func(task m31types.Task, status string) {
+		e.emit(TaskUpdateMsg{Task: task, Status: status})
+	}
+
 	// 3. Schedule
 	groups, err := runner.Schedule()
 	if err != nil {
@@ -103,11 +111,16 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		// Stream LLM
 		content, err := e.streamLLM(ctx, messages, true)
 		if err != nil {
-			if task.HealsAttempted > 0 {
-				return taskrunner.TaskResult{Success: false, Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}
+			failureReason := fmt.Sprintf("LLM stream failed: %v", err)
+			if task.HealsAttempted >= m31types.MaxHealAttempts {
+				return taskrunner.TaskResult{Success: false, Error: failureReason}
 			}
-			// First failure — attempt self-heal
 			task.HealsAttempted++
+			e.logger.Info("self-healing task after LLM failure", "task", task.ID, "attempt", task.HealsAttempted)
+			healResult := e.healTask(ctx, task, failureReason)
+			if !healResult.Success {
+				return healResult
+			}
 			continue
 		}
 
@@ -116,19 +129,14 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 
 		// Dispatch tool calls
 		toolErr := false
+		var toolErrMsg error
+		var toolErrName string
 		for _, tc := range toolCalls {
 			result, err := e.dispatcher.Execute(ctx, tc)
 			if err != nil {
 				toolErr = true
-				if task.HealsAttempted >= m31types.MaxHealAttempts {
-					return taskrunner.TaskResult{
-						Success:    false,
-						Error:      fmt.Sprintf("tool %s: %v", tc.Name, err),
-						DurationMs: time.Since(start).Milliseconds(),
-					}
-				}
-				// Attempt heal
-				task.HealsAttempted++
+				toolErrMsg = err
+				toolErrName = tc.Name
 				break
 			}
 
@@ -145,6 +153,19 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		}
 
 		if toolErr {
+			if task.HealsAttempted >= m31types.MaxHealAttempts {
+				return taskrunner.TaskResult{
+					Success: false,
+					Error:   fmt.Sprintf("tool %s: %v", toolErrName, toolErrMsg),
+				}
+			}
+			failureReason := fmt.Sprintf("tool %s failed: %v", toolErrName, toolErrMsg)
+			task.HealsAttempted++
+			e.logger.Info("self-healing task after tool failure", "task", task.ID, "attempt", task.HealsAttempted)
+			healResult := e.healTask(ctx, task, failureReason)
+			if !healResult.Success {
+				return healResult
+			}
 			continue
 		}
 
@@ -170,9 +191,8 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 	}
 
 	return taskrunner.TaskResult{
-		Success:    false,
-		Error:      fmt.Sprintf("max heal attempts exceeded (%d)", m31types.MaxHealAttempts),
-		DurationMs: time.Since(start).Milliseconds(),
+		Success: false,
+		Error:   fmt.Sprintf("max heal attempts exceeded (%d)", m31types.MaxHealAttempts),
 	}
 }
 
