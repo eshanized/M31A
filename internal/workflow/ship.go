@@ -3,10 +3,13 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
 	m31types "github.com/eshanized/M31A/internal/types"
@@ -67,8 +70,22 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	)
 
 	// 4. Update ledger
-	if err := e.appendLedgerEntry(e.modelID, e.provider.Name(), goal, done, total, duration); err != nil {
-		e.logger.Warn("ledger update failed", "error", err)
+	sess, err := e.sessionMgr.LoadSession(e.sessionID)
+	if err == nil {
+		home := os.Getenv("HOME")
+		if home == "" {
+			home = os.Getenv("USERPROFILE")
+		}
+		if home != "" {
+			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
+			l := ledger.New(ledgerPath)
+			entry := ledger.NewEntry(sess.Session, total, done, skipped, len(commits), 0)
+			if err := l.Append(entry); err != nil {
+				e.logger.Warn("ledger update failed", "error", err)
+			}
+		}
+	} else {
+		e.logger.Warn("ledger update skipped: cannot load session", "error", err)
 	}
 
 	// 5. Archive session
