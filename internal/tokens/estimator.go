@@ -52,7 +52,8 @@ func (e *Estimator) Estimate(text string) int {
 	} else {
 		// Fallback for unsupported models (Claude, etc.)
 		// Use rune count for multibyte character handling
-		estimated = int(float64(len([]rune(text))) / 4 * 1.3)
+		// Add 1 to prevent zero-count for short strings, then apply 1.3 safety margin
+		estimated = int((float64(len([]rune(text)))/4.0 + 1.0) * 1.3)
 	}
 
 	// Apply EMA calibration factor
