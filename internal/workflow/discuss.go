@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/eshanized/M31A/pkg/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -45,6 +42,10 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 	}
 
 	// Return with questions — TUI handles Q&A collection, then calls SubmitDiscussAnswer/SkipDiscuss
+	// NOTE: NeedsAnswers is intentionally set to true here. This blocks the workflow engine
+	// from advancing to the next phase until the TUI collects user answers. This is by design
+	// and requires TUI coordination: the engine yields control back to the TUI, which displays
+	// the questions, gathers responses, and signals the engine to resume via FinalizeDiscuss().
 	result := &PhaseResult{
 		Phase:        m31types.PhaseDiscuss,
 		Success:      true,
@@ -106,33 +107,4 @@ func (e *Engine) saveDiscussAnswers(project *m31types.ProjectState, questions, a
 	}
 
 	return e.sessionMgr.SaveProject(e.sessionID, project)
-}
-
-// transitionToPlan saves checkpoint and transitions to Plan phase.
-func (e *Engine) transitionToPlan() error {
-	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
-		Phase:     m31types.PhasePlan,
-		Timestamp: time.Now(),
-	}); err != nil {
-		return err
-	}
-
-	return e.sessionMgr.SaveState(e.sessionID, m31types.PhasePlan, "planning", "transition from discuss")
-}
-
-// DiscussResult holds the questions and any collected answers.
-type DiscussResult struct {
-	Questions []string
-	Answers   []string
-}
-
-// CollectAnswers simulates collecting answers to questions.
-// In the TUI, this would be done via user input.
-func CollectAnswers(questions []string, answerFn func(question string) string) []string {
-	var answers []string
-	for _, q := range questions {
-		a := answerFn(q)
-		answers = append(answers, strings.TrimSpace(a))
-	}
-	return answers
 }

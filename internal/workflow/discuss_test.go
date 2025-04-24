@@ -148,51 +148,6 @@ func TestEngine_SaveDiscussAnswers_WithExistingProject(t *testing.T) {
 	}
 }
 
-func TestEngine_TransitionToPlan(t *testing.T) {
-	engine, _ := setupTestEngine(t)
-
-	err := engine.transitionToPlan()
-	if err != nil {
-		t.Fatalf("transitionToPlan failed: %v", err)
-	}
-
-	phase, _, _, _, err := engine.sessionMgr.LoadState(engine.sessionID)
-	if err != nil {
-		t.Fatalf("LoadState failed: %v", err)
-	}
-	if phase != m31types.PhasePlan {
-		t.Errorf("Expected phase plan, got %s", phase)
-	}
-}
-
-func TestCollectAnswers(t *testing.T) {
-	questions := []string{"Q1", "Q2", "Q3"}
-	answers := CollectAnswers(questions, func(q string) string {
-		return "Answer to: " + q
-	})
-
-	if len(answers) != 3 {
-		t.Fatalf("Expected 3 answers, got %d", len(answers))
-	}
-	if answers[0] != "Answer to: Q1" {
-		t.Errorf("Expected 'Answer to: Q1', got %q", answers[0])
-	}
-}
-
-func TestDiscussResult(t *testing.T) {
-	result := &DiscussResult{
-		Questions: []string{"Q1", "Q2"},
-		Answers:   []string{"A1", "A2"},
-	}
-
-	if len(result.Questions) != 2 {
-		t.Errorf("Expected 2 questions, got %d", len(result.Questions))
-	}
-	if len(result.Answers) != 2 {
-		t.Errorf("Expected 2 answers, got %d", len(result.Answers))
-	}
-}
-
 func TestEngine_SubmitDiscussAnswer(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
