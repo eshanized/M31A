@@ -20,7 +20,25 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// MsgEmitter is a callback interface for emitting messages back to the TUI.
+type MsgEmitter interface {
+	Emit(msg tea.Msg)
+}
+
+// TaskStartMsg is emitted when a task begins execution.
+type TaskStartMsg struct {
+	Task m31types.Task
+}
+
+// TaskUpdateMsg is emitted when a task status changes during execution.
+type TaskUpdateMsg struct {
+	Task   m31types.Task
+	Status string
+}
 
 //go:embed prompts/*.md
 var promptFS embed.FS
@@ -75,6 +93,8 @@ type Engine struct {
 	startTime        time.Time
 	sessionStartHash string
 	discussState     DiscussState
+	execCommand      func(name string, args ...string) *exec.Cmd
+	msgEmitter       MsgEmitter
 }
 
 // PhaseResult holds the outcome of a workflow phase.
@@ -111,6 +131,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		prompts:     prompts,
 		logger:      slog.Default(),
 		startTime:   time.Now(),
+		execCommand: exec.Command,
 	}
 }
 
@@ -177,6 +198,18 @@ func (e *Engine) SetGit(g *git.Git) {
 // SessionID returns the current session ID.
 func (e *Engine) SessionID() string {
 	return e.sessionID
+}
+
+// SetMsgEmitter sets the callback for emitting messages back to the TUI.
+func (e *Engine) SetMsgEmitter(em MsgEmitter) {
+	e.msgEmitter = em
+}
+
+// emit sends a message to the TUI if an emitter is configured.
+func (e *Engine) emit(msg tea.Msg) {
+	if e.msgEmitter != nil {
+		e.msgEmitter.Emit(msg)
+	}
 }
 
 // DiscussState holds the questions and collected answers for the discuss phase.
@@ -711,51 +744,6 @@ func hasTestFiles(workDir string, files []string) bool {
 	return false
 }
 
-// appendLedgerEntry appends a session entry to the ledger file.
-func (e *Engine) appendLedgerEntry(modelID, providerName, goal string, done, total int, duration time.Duration) error {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = os.Getenv("USERPROFILE")
-	}
-	if home == "" {
-		return nil // Skip if no home directory
-	}
-
-	ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
-	if err := os.MkdirAll(filepath.Dir(ledgerPath), 0755); err != nil {
-		return err
-	}
-
-	entry := fmt.Sprintf("## Session %s — %s\n- Model: %s\n- Provider: %s\n- Tasks: %d/%d\n- Duration: %s\n- Goal: %s\n\n",
-		e.sessionID, time.Now().Format("2006-01-02"), modelID, providerName, done, total, duration, goal)
-
-	existing, _ := os.ReadFile(ledgerPath)
-	content := string(existing) + entry
-	return atomicWrite(ledgerPath, []byte(content))
-}
-
-// atomicWrite writes data to path atomically using temp file + rename.
-func atomicWrite(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmpFile, err := os.CreateTemp(dir, ".m31a_tmp_*")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	defer os.Remove(tmpPath)
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("write: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close: %w", err)
-	}
-
-	return os.Rename(tmpPath, path)
-}
-
 // VerificationResult holds the outcome of verifying a task.
 type VerificationResult struct {
 	TaskID     int
@@ -787,7 +775,7 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 		}
 	}
 	if hasGo {
-		cmd := execCommand("go", "build", "./...")
+		cmd := e.execCommand("go", "build", "./...")
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("go build failed: %s", string(out)))
@@ -797,7 +785,7 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 
 	// Test execution
 	if hasTestFiles(e.workDir, task.Files) {
-		cmd := execCommand("go", "test", "./...")
+		cmd := e.execCommand("go", "test", "./...")
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("go test failed: %s", string(out)))
@@ -806,9 +794,4 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 	}
 
 	return result
-}
-
-// execCommand creates a command for execution (allows wrapping for tests).
-func execCommand(name string, args ...string) *exec.Cmd {
-	return exec.Command(name, args...)
 }

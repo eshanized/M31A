@@ -143,6 +143,9 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	c.setCommonHeaders(httpReq)
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
+	// NOTE: HTTP-Referer and X-Title headers are intentionally omitted here.
+	// Unlike OpenRouter, the Zen gateway does not require or use these headers
+	// for rate limiting, analytics, or request routing.
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

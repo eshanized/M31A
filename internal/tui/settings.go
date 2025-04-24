@@ -128,10 +128,8 @@ func (m *SettingsModel) buildFields() {
 		f.original = f.value
 	}
 
-	// Features tab (4 fields)
+	// Features tab (2 fields)
 	m.fields[tabFeatures] = []*editableField{
-		{label: "AutoDream Enabled", value: fmtBool(m.config.Features.AutodreamEnabled), fieldType: "bool", key: "features.autodream_enabled"},
-		{label: "Subagent Enabled", value: fmtBool(m.config.Features.SubagentEnabled), fieldType: "bool", key: "features.subagent_enabled"},
 		{label: "Auto Backup", value: fmtBool(m.config.Features.AutoBackup), fieldType: "bool", key: "features.auto_backup"},
 		{label: "Resume On Startup", value: fmtBool(m.config.Features.ResumeOnStartup), fieldType: "bool", key: "features.resume_on_startup"},
 	}
@@ -367,10 +365,6 @@ func (m *SettingsModel) applyFieldValues() {
 					m.config.Permissions.TimeoutSeconds = v
 				}
 			// Features
-			case "features.autodream_enabled":
-				m.config.Features.AutodreamEnabled = f.value == "true"
-			case "features.subagent_enabled":
-				m.config.Features.SubagentEnabled = f.value == "true"
 			case "features.auto_backup":
 				m.config.Features.AutoBackup = f.value == "true"
 			case "features.resume_on_startup":
@@ -387,30 +381,6 @@ func (m *SettingsModel) applyFieldValues() {
 	}
 }
 
-// saveCmd returns a tea.Cmd that applies field values and saves the config atomically.
-func (m SettingsModel) saveCmd() tea.Cmd {
-	cfg := m.config
-	path := m.configPath
-
-	// Deep-copy field values to avoid race with subsequent edits
-	fieldSnapshots := make(map[settingsTab][]editableField)
-	for tab := tabGeneral; tab < tabCount; tab++ {
-		fields := m.fields[tab]
-		snap := make([]editableField, len(fields))
-		for i, f := range fields {
-			snap[i] = *f // shallow copy (strings are immutable, fine for values)
-		}
-		fieldSnapshots[tab] = snap
-	}
-
-	return func() tea.Msg {
-		applyFieldsToConfig(cfg, fieldSnapshots)
-		if err := cfg.Save(path); err != nil {
-			return ErrorMsg{Err: fmt.Errorf("save config: %w", err)}
-		}
-		return SettingsSavedMsg{}
-	}
-}
 
 // applyFieldsToConfig pushes the snapshot field values to the config struct.
 func applyFieldsToConfig(cfg *config.Config, snapshots map[settingsTab][]editableField) {
@@ -464,10 +434,6 @@ func applyFieldsToConfig(cfg *config.Config, snapshots map[settingsTab][]editabl
 					cfg.Permissions.TimeoutSeconds = v
 				}
 			// Features
-			case "features.autodream_enabled":
-				cfg.Features.AutodreamEnabled = f.value == "true"
-			case "features.subagent_enabled":
-				cfg.Features.SubagentEnabled = f.value == "true"
 			case "features.auto_backup":
 				cfg.Features.AutoBackup = f.value == "true"
 			case "features.resume_on_startup":
