@@ -26,6 +26,30 @@ func TestBash_SimpleCommand(t *testing.T) {
 	}
 }
 
+func TestBash_Name(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	if b.Name() != "Bash" {
+		t.Errorf("expected name 'Bash', got %s", b.Name())
+	}
+}
+
+func TestBash_Description(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	if b.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+}
+
+func TestBash_RiskLevel(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	if b.RiskLevel() != types.RiskDangerous {
+		t.Errorf("expected RiskDangerous, got %s", b.RiskLevel())
+	}
+}
+
 func TestBash_WithWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBash(dir)
@@ -191,5 +215,168 @@ func TestBash_MissingCommandParam(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing parameter: command") {
 		t.Errorf("expected missing parameter error, got: %v", err)
+	}
+}
+
+func TestLimitWriter_UnderLimit(t *testing.T) {
+	t.Parallel()
+	lw := &limitWriter{limit: 100}
+	n, err := lw.Write([]byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 bytes written, got %d", n)
+	}
+	if lw.written != 5 {
+		t.Errorf("expected written=5, got %d", lw.written)
+	}
+}
+
+func TestLimitWriter_AtLimit(t *testing.T) {
+	t.Parallel()
+	lw := &limitWriter{limit: 5}
+	n, err := lw.Write([]byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 bytes written, got %d", n)
+	}
+	if lw.written != 5 {
+		t.Errorf("expected written=5, got %d", lw.written)
+	}
+}
+
+func TestLimitWriter_OverLimit(t *testing.T) {
+	t.Parallel()
+	lw := &limitWriter{limit: 5}
+	n, err := lw.Write([]byte("hello world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 bytes written, got %d", n)
+	}
+	if lw.written != 5 {
+		t.Errorf("expected written=5, got %d", lw.written)
+	}
+
+	// Write again when limit reached
+	n, err = lw.Write([]byte("more"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Errorf("expected 4 bytes written (silently dropped), got %d", n)
+	}
+	if lw.written != 5 {
+		t.Errorf("expected written to stay at 5, got %d", lw.written)
+	}
+}
+
+func TestLimitWriter_ZeroLimit(t *testing.T) {
+	t.Parallel()
+	lw := &limitWriter{limit: 0}
+	n, err := lw.Write([]byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 bytes written (silently dropped), got %d", n)
+	}
+	if lw.written != 0 {
+		t.Errorf("expected written=0, got %d", lw.written)
+	}
+}
+
+func TestIsBinary_Empty(t *testing.T) {
+	t.Parallel()
+	if isBinary("") {
+		t.Error("expected empty string to not be binary")
+	}
+}
+
+func TestIsBinary_Text(t *testing.T) {
+	t.Parallel()
+	if isBinary("hello world") {
+		t.Error("expected text string to not be binary")
+	}
+}
+
+func TestIsBinary_WithNullByte(t *testing.T) {
+	t.Parallel()
+	if !isBinary("hello\x00world") {
+		t.Error("expected string with null byte to be binary")
+	}
+}
+
+func TestIsBinary_LongText(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 1000)
+	if isBinary(long) {
+		t.Error("expected long text string to not be binary")
+	}
+}
+
+func TestIsBinary_LongBinary(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 256) + "\x00" + strings.Repeat("x", 256)
+	if !isBinary(long) {
+		t.Error("expected long binary string to be binary")
+	}
+}
+
+func TestBash_CommandNotString(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	_, err := b.Execute(context.Background(), types.ToolInput{
+		Name: "Bash",
+		Params: map[string]any{
+			"command": 123, // not a string
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string command")
+	}
+	if !strings.Contains(err.Error(), "parameter command must be a string") {
+		t.Errorf("expected type error, got: %v", err)
+	}
+}
+
+func TestBash_CustomTimeout(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	result, err := b.Execute(context.Background(), types.ToolInput{
+		Name: "Bash",
+		Params: map[string]any{
+			"command": "echo done",
+			"timeout": float64(30),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "done") {
+		t.Errorf("expected 'done' in output, got: %s", result.Output)
+	}
+}
+
+func TestBash_InvalidTimeout(t *testing.T) {
+	t.Parallel()
+	b := NewBash(t.TempDir())
+	// Invalid timeout type should use default
+	result, err := b.Execute(context.Background(), types.ToolInput{
+		Name: "Bash",
+		Params: map[string]any{
+			"command": "echo done",
+			"timeout": "not_a_number",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "done") {
+		t.Errorf("expected 'done' in output, got: %s", result.Output)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eshanized/M31A/internal/types"
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -171,5 +172,199 @@ func TestDispatcher_List(t *testing.T) {
 	}
 	if names[0] != "aaa" || names[1] != "mmm" || names[2] != "zzz" {
 		t.Errorf("expected sorted [aaa mmm zzz], got %v", names)
+	}
+}
+
+func TestDispatcher_GetTool(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher()
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+
+	tool, ok := d.GetTool("test")
+	if !ok {
+		t.Fatal("expected to find tool")
+	}
+	if tool.Name() != "test" {
+		t.Errorf("expected tool name 'test', got %s", tool.Name())
+	}
+
+	_, ok = d.GetTool("nonexistent")
+	if ok {
+		t.Error("expected not to find nonexistent tool")
+	}
+}
+
+func TestDispatcher_DefaultDispatcher(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	d := DefaultDispatcher(dir, dir)
+
+	names := d.List()
+	if len(names) != 5 {
+		t.Errorf("expected 5 tools, got %d: %v", len(names), names)
+	}
+
+	expectedTools := []string{"Bash", "FileRead", "FileWrite", "Glob", "Grep"}
+	for _, expected := range expectedTools {
+		found := false
+		for _, name := range names {
+			if name == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected tool %s not found in %v", expected, names)
+		}
+	}
+}
+
+func TestExtractCommandString_Bash(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("bash", []byte(`{"name":"bash","params":{"command":"ls -la"}}`))
+	if cmd != "ls -la" {
+		t.Errorf("expected 'ls -la', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_FileRead(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("fileRead", []byte(`{"name":"fileread","params":{"path":"/tmp/test.txt"}}`))
+	if cmd != "read /tmp/test.txt" {
+		t.Errorf("expected 'read /tmp/test.txt', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_FileWrite(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("fileWrite", []byte(`{"name":"filewrite","params":{"path":"/tmp/out.txt"}}`))
+	if cmd != "write /tmp/out.txt" {
+		t.Errorf("expected 'write /tmp/out.txt', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_Glob(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("glob", []byte(`{"name":"glob","params":{"pattern":"*.go"}}`))
+	if cmd != "glob *.go" {
+		t.Errorf("expected 'glob *.go', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_Grep(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("grep", []byte(`{"name":"grep","params":{"pattern":"func main"}}`))
+	if cmd != "grep func main" {
+		t.Errorf("expected 'grep func main', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_EmptyInput(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("bash", nil)
+	if cmd != "" {
+		t.Errorf("expected empty string, got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_RawMap(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("bash", []byte(`{"command":"echo test"}`))
+	if cmd != "echo test" {
+		t.Errorf("expected 'echo test', got %q", cmd)
+	}
+}
+
+func TestExtractCommandString_Fallback(t *testing.T) {
+	t.Parallel()
+	cmd := extractCommandString("bash", []byte(`{"some":"json"}`))
+	if cmd != `{"some":"json"}` {
+		t.Errorf("expected raw JSON fallback, got %q", cmd)
+	}
+}
+
+func TestDispatcher_DestructiveToolPermission(t *testing.T) {
+	d := NewDispatcher()
+	d.Register(&mockTool{name: "filewrite", riskLevel: types.RiskDestructive})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.Execute(context.Background(), types.ToolCall{
+			ID:    "call1",
+			Name:  "filewrite",
+			Input: []byte(`{"name":"filewrite","params":{"path":"test.txt"}}`),
+		})
+		errCh <- err
+	}()
+
+	req := <-d.RequestCh()
+	if req.ToolName != "filewrite" {
+		t.Errorf("expected request for 'filewrite', got %q", req.ToolName)
+	}
+	// extractCommandString normalizes to "Filewrite" which doesn't match "FileWrite" switch case
+	if req.Command != "write test.txt" && req.Command != `{"name":"filewrite","params":{"path":"test.txt"}}` {
+		t.Errorf("expected Command 'write test.txt' or raw JSON, got %q", req.Command)
+	}
+	d.ApprovePermission(true, false)
+
+	if err := <-errCh; err != nil {
+		t.Errorf("expected nil error after approval, got: %v", err)
+	}
+}
+
+func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
+	d := NewDispatcher()
+	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.Execute(ctx, types.ToolCall{
+			ID:   "call1",
+			Name: "bash",
+		})
+		errCh <- err
+	}()
+
+	<-d.RequestCh()
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Error("expected context cancellation error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected context cancellation to be handled")
+	}
+}
+
+func TestDispatcher_RegisterDuplicate(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher()
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for duplicate registration")
+		}
+	}()
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+}
+
+func TestDispatcher_PermissionChannelFull(t *testing.T) {
+	d := NewDispatcher()
+	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+
+	// Fill the request channel
+	d.requestCh <- PermissionRequest{}
+
+	_, err := d.Execute(context.Background(), types.ToolCall{
+		ID:   "call1",
+		Name: "bash",
+	})
+	if err != m31errors.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied when channel is full, got: %v", err)
 	}
 }

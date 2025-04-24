@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
@@ -240,5 +241,464 @@ func TestChatCompletionStream_Headers(t *testing.T) {
 	}
 	if titleHeader != "" {
 		t.Fatalf("expected no X-Title header for Zen, got %q", titleHeader)
+	}
+}
+
+func TestFetchModels_StaleFallback(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/models" && callCount == 1 {
+			resp := map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{"id": "test/model"},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	// First call populates cache
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("first fetch should succeed: %v", err)
+	}
+
+	// Second fetch should return cached data via stale fallback
+	models, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("stale fallback should not error: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model from stale cache, got %d", len(models))
+	}
+	if models[0].ID != "test/model" {
+		t.Fatalf("expected model ID %q, got %q", "test/model", models[0].ID)
+	}
+}
+
+func TestFetchModels_StaleFallbackNoCache(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	// No cache, API fails - should return error
+	_, err := c.FetchModels(context.Background())
+	if err != m31errors.ErrProviderUnreachable {
+		t.Fatalf("expected ErrProviderUnreachable, got %v", err)
+	}
+}
+
+func TestFetchModels_NetworkError(t *testing.T) {
+	c, _ := New("test-key")
+	c.baseURL = "http://127.0.0.1:1" // unreachable port
+
+	_, err := c.FetchModels(context.Background())
+	if err != m31errors.ErrProviderUnreachable {
+		t.Fatalf("expected ErrProviderUnreachable on network error, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_RateLimited(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != m31errors.ErrRateLimited {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_Unauthorized(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid api key"}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != m31errors.ErrInvalidKey {
+		t.Fatalf("expected ErrInvalidKey, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_NoCredits(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"CreditsError: no credits remaining"}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for no credits")
+	}
+	if !strings.Contains(err.Error(), "no credits") {
+		t.Fatalf("expected 'no credits' error, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_PaymentError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"billing issue detected"}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for payment issue")
+	}
+	if !strings.Contains(err.Error(), "payment") && !strings.Contains(err.Error(), "billing") {
+		t.Fatalf("expected payment/billing error, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_ServiceUnavailable(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != m31errors.ErrProviderUnreachable {
+		t.Fatalf("expected ErrProviderUnreachable, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_ContextExceeded(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"context_length exceeded"}}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != m31errors.ErrContextExceeded {
+		t.Fatalf("expected ErrContextExceeded, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_ContextError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"context window exceeded"}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != m31errors.ErrContextExceeded {
+		t.Fatalf("expected ErrContextExceeded for context error, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_UnexpectedStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"bad gateway"}`))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for unexpected status")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Fatalf("expected error to contain status 502, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_NetworkError(t *testing.T) {
+	c, _ := New("test-key")
+	c.baseURL = "http://127.0.0.1:1" // unreachable port
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for network failure")
+	}
+	if !strings.Contains(err.Error(), "send request") {
+		t.Fatalf("expected 'send request' error, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_WithMaxTokens(t *testing.T) {
+	var requestBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &requestBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:     "test/model",
+		Messages:  []types.Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 1000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer it.Close()
+
+	if requestBody == nil {
+		t.Fatal("expected request body to be captured")
+	}
+	maxTokens, ok := requestBody["max_tokens"]
+	if !ok {
+		t.Fatal("expected max_tokens in request body")
+	}
+	if maxTokens != float64(1000) {
+		t.Fatalf("expected max_tokens 1000, got %v", maxTokens)
+	}
+}
+
+func TestChatCompletionStream_WithTools(t *testing.T) {
+	var requestBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &requestBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	tools := []provider.ToolDefinition{
+		{
+			Name:        "get_weather",
+			Description: "Get current weather",
+			Parameters:  "{}",
+		},
+	}
+
+	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+		Tools:    tools,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer it.Close()
+
+	if requestBody == nil {
+		t.Fatal("expected request body to be captured")
+	}
+	_, ok := requestBody["tools"]
+	if !ok {
+		t.Fatal("expected tools in request body")
+	}
+}
+
+func TestHealthCheck_Offline(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	status := c.HealthCheck(context.Background())
+	if status.Status != "offline" {
+		t.Fatalf("expected status %q, got %q", "offline", status.Status)
+	}
+	if status.LatencyMs < 0 {
+		t.Fatalf("expected non-negative latency, got %d", status.LatencyMs)
+	}
+}
+
+func TestHealthCheck_Slow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			time.Sleep(2500 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	status := c.HealthCheck(context.Background())
+	if status.Status != "slow" {
+		t.Fatalf("expected status %q, got %q", "slow", status.Status)
+	}
+	if status.LatencyMs < 2000 {
+		t.Fatalf("expected latency >= 2000ms for slow status, got %d", status.LatencyMs)
+	}
+}
+
+func TestHealthCheck_Degraded(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			time.Sleep(5500 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	status := c.HealthCheck(context.Background())
+	if status.Status != "degraded" {
+		t.Fatalf("expected status %q, got %q", "degraded", status.Status)
+	}
+	if status.LatencyMs < 5000 {
+		t.Fatalf("expected latency >= 5000ms for degraded status, got %d", status.LatencyMs)
+	}
+}
+
+func TestHealthCheck_NetworkError(t *testing.T) {
+	c, _ := New("test-key")
+	c.baseURL = "http://127.0.0.1:1" // unreachable port
+
+	status := c.HealthCheck(context.Background())
+	if status.Status != "offline" {
+		t.Fatalf("expected status %q, got %q", "offline", status.Status)
+	}
+	if status.Error == "" {
+		t.Fatal("expected error message for network failure")
+	}
+}
+
+func TestGetModel_NotFound(t *testing.T) {
+	c, _ := New("test-key")
+
+	_, err := c.GetModel("nonexistent/model")
+	if err != m31errors.ErrModelNotFound {
+		t.Fatalf("expected ErrModelNotFound, got %v", err)
+	}
+}
+
+func TestChatCompletionStream_WithThinking(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking...\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" response\"}}]}\n\ndata: [DONE]\n\n"))
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "deepseek/deepseek-r1",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer it.Close()
+
+	chunk, err := it.Next()
+	if err != nil {
+		t.Fatalf("expected chunk, got error: %v", err)
+	}
+	if chunk.Type != "thinking" {
+		t.Fatalf("expected first chunk type %q, got %q", "thinking", chunk.Type)
+	}
+}
+
+func TestChatCompletionStream_Done(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("data: [DONE]\n\n"))
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer it.Close()
+
+	_, err = it.Next()
+	if err != io.EOF {
+		t.Fatalf("expected EOF, got %v", err)
 	}
 }

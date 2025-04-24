@@ -232,3 +232,118 @@ func TestFileWrite_MissingContentParam(t *testing.T) {
 		t.Errorf("expected 'missing parameter: content', got: %v", err)
 	}
 }
+
+func TestFileWrite_Name(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fw := NewFileWrite(dir, dir)
+	if fw.Name() != "FileWrite" {
+		t.Errorf("expected name 'FileWrite', got %s", fw.Name())
+	}
+}
+
+func TestFileWrite_Description(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fw := NewFileWrite(dir, dir)
+	if fw.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+}
+
+func TestFileWrite_RiskLevel(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fw := NewFileWrite(dir, dir)
+	if fw.RiskLevel() != types.RiskDestructive {
+		t.Errorf("expected RiskDestructive, got %s", fw.RiskLevel())
+	}
+}
+
+func TestFileWrite_CreateDirsDisabled(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":        "nested/deep/dir/file.txt",
+			"content":     "deep content",
+			"create_dirs": false,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when create_dirs is false and dirs don't exist")
+	}
+}
+
+func TestFileWrite_AbsolutePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	content := "absolute path content"
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    filepath.Join(dir, "abs_test.txt"),
+			"content": content,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	read, err := os.ReadFile(filepath.Join(dir, "abs_test.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != content {
+		t.Errorf("expected %q, got %q", content, string(read))
+	}
+}
+
+func TestFileWrite_PathNotString(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    123, // not a string
+			"content": "test",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string path")
+	}
+	if !strings.Contains(err.Error(), "parameter path must be a string") {
+		t.Errorf("expected type error, got: %v", err)
+	}
+}
+
+func TestFileWrite_ContentNotString(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	_, err := fw.Execute(context.Background(), types.ToolInput{
+		Name: "FileWrite",
+		Params: map[string]any{
+			"path":    "test.txt",
+			"content": 123, // not a string
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string content")
+	}
+	if !strings.Contains(err.Error(), "parameter content must be a string") {
+		t.Errorf("expected type error, got: %v", err)
+	}
+}

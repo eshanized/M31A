@@ -174,3 +174,87 @@ func TestFileRead_MissingPathParam(t *testing.T) {
 		t.Errorf("expected missing parameter error, got: %v", err)
 	}
 }
+
+func TestFileRead_Name(t *testing.T) {
+	t.Parallel()
+	fr := NewFileRead(t.TempDir())
+	if fr.Name() != "FileRead" {
+		t.Errorf("expected name 'FileRead', got %s", fr.Name())
+	}
+}
+
+func TestFileRead_Description(t *testing.T) {
+	t.Parallel()
+	fr := NewFileRead(t.TempDir())
+	if fr.Description() == "" {
+		t.Error("expected non-empty description")
+	}
+}
+
+func TestFileRead_RiskLevel(t *testing.T) {
+	t.Parallel()
+	fr := NewFileRead(t.TempDir())
+	if fr.RiskLevel() != types.RiskSafe {
+		t.Errorf("expected RiskSafe, got %s", fr.RiskLevel())
+	}
+}
+
+func TestFileRead_AbsolutePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := "absolute path content"
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte(content), 0644)
+
+	fr := NewFileRead(dir)
+	// Use absolute path within workDir
+	result, err := fr.Execute(context.Background(), types.ToolInput{
+		Name: "FileRead",
+		Params: map[string]any{
+			"path": filepath.Join(dir, "test.txt"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != content {
+		t.Errorf("expected %q, got %q", content, result.Output)
+	}
+}
+
+func TestFileRead_WithLimit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := strings.Repeat("x", 1000)
+	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content), 0644)
+
+	fr := NewFileRead(dir)
+	// limit smaller than file size should reject with ErrFileTooLarge
+	_, err := fr.Execute(context.Background(), types.ToolInput{
+		Name: "FileRead",
+		Params: map[string]any{
+			"path":  "big.txt",
+			"limit": float64(500),
+		},
+	})
+	if err != m31errors.ErrFileTooLarge {
+		t.Errorf("expected ErrFileTooLarge, got: %v", err)
+	}
+}
+
+func TestFileRead_PathNotString(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fr := NewFileRead(dir)
+	_, err := fr.Execute(context.Background(), types.ToolInput{
+		Name: "FileRead",
+		Params: map[string]any{
+			"path": 123, // not a string
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string path")
+	}
+	if !strings.Contains(err.Error(), "parameter path must be a string") {
+		t.Errorf("expected type error, got: %v", err)
+	}
+}
