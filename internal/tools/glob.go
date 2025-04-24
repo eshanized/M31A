@@ -85,7 +85,10 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-50s %10s %s\n", "path", "size", "modified")
 	for _, m := range matches {
-		fullPath := filepath.Join(t.workDir, m)
+		fullPath := m
+		if !useRG {
+			fullPath = filepath.Join(t.workDir, m)
+		}
 		fi, err := os.Stat(fullPath)
 		if err != nil {
 			continue

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -113,17 +114,17 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 
 	choices, ok := getNestedField(raw, "choices")
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("missing 'choices' field in SSE payload")
 	}
 
 	choicesArr, ok := choices.([]any)
 	if !ok || len(choicesArr) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("empty or malformed 'choices' array in SSE payload")
 	}
 
 	firstChoice, ok := choicesArr[0].(map[string]any)
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("first choice in 'choices' array is not an object")
 	}
 
 	if finishReason, exists := firstChoice["finish_reason"]; exists && finishReason != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -100,7 +101,7 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 			c.Provider.OpenRouter.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
 			// Unexpected error — log and continue
-			fmt.Printf("keychain.Get(openrouter): %v\n", err)
+			slog.Warn("keychain error", "provider", "openrouter", "error", err)
 		}
 		// If keychain returns ErrKeyNotFound or ErrKeychainUnavailable,
 		// keep the value from config file (already loaded in c.Provider.OpenRouter.APIKey)
@@ -113,7 +114,7 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 		if k, err := kc.Get("zen"); err == nil {
 			c.Provider.Zen.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
-			fmt.Printf("keychain.Get(zen): %v\n", err)
+			slog.Warn("keychain error", "provider", "zen", "error", err)
 		}
 	}
 

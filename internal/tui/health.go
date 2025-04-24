@@ -6,9 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/types"
 )
-
-const HealthCheckInterval = 60 * time.Second
 
 func HealthCheckTicker(ctx context.Context, registry *provider.Registry,
 	activeProvider string, interval time.Duration) tea.Cmd {
@@ -18,7 +17,7 @@ func HealthCheckTicker(ctx context.Context, registry *provider.Registry,
 	}
 
 	if interval <= 0 {
-		interval = HealthCheckInterval
+		interval = types.HealthCheckInterval
 	}
 
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
@@ -28,7 +27,7 @@ func HealthCheckTicker(ctx context.Context, registry *provider.Registry,
 
 func NextHealthTick(interval time.Duration) tea.Cmd {
 	if interval <= 0 {
-		interval = HealthCheckInterval
+		interval = types.HealthCheckInterval
 	}
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return HealthCheckTickMsg{Time: t}
