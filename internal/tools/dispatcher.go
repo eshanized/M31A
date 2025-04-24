@@ -90,7 +90,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 			if resp.Remember {
 				d.mu.Lock()
-				d.permissions[call.Name] = true
+				d.permissions[call.Name] = resp.Allowed
 				d.mu.Unlock()
 			}
 		}
@@ -157,9 +157,21 @@ func extractCommandString(toolName string, input json.RawMessage) string {
 			if cmd, ok := toolInput.Params["command"].(string); ok {
 				return cmd
 			}
+		case "FileRead":
+			if path, ok := toolInput.Params["path"].(string); ok {
+				return fmt.Sprintf("read %s", path)
+			}
 		case "FileWrite":
 			if path, ok := toolInput.Params["path"].(string); ok {
 				return fmt.Sprintf("write %s", path)
+			}
+		case "Glob":
+			if pattern, ok := toolInput.Params["pattern"].(string); ok {
+				return fmt.Sprintf("glob %s", pattern)
+			}
+		case "Grep":
+			if pattern, ok := toolInput.Params["pattern"].(string); ok {
+				return fmt.Sprintf("grep %s", pattern)
 			}
 		}
 	}
@@ -172,9 +184,21 @@ func extractCommandString(toolName string, input json.RawMessage) string {
 			if cmd, ok := params["command"].(string); ok {
 				return cmd
 			}
+		case "FileRead":
+			if path, ok := params["path"].(string); ok {
+				return fmt.Sprintf("read %s", path)
+			}
 		case "FileWrite":
 			if path, ok := params["path"].(string); ok {
 				return fmt.Sprintf("write %s", path)
+			}
+		case "Glob":
+			if pattern, ok := params["pattern"].(string); ok {
+				return fmt.Sprintf("glob %s", pattern)
+			}
+		case "Grep":
+			if pattern, ok := params["pattern"].(string); ok {
+				return fmt.Sprintf("grep %s", pattern)
 			}
 		}
 	}

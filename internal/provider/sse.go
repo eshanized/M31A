@@ -37,8 +37,9 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 		lines = append(lines, line)
 	}
 
-	if err := p.scanner.Err(); err != nil {
-		return "", "", err
+	// Check for scanner errors immediately after the scan loop ends
+	if scanErr := p.scanner.Err(); scanErr != nil {
+		return "", "", scanErr
 	}
 
 	if len(lines) == 0 {

@@ -9,7 +9,6 @@ type Config struct {
 	Permissions PermissionsConfig `toml:"permissions"`
 	Features    FeaturesConfig    `toml:"features"`
 	Ledger      LedgerConfig      `toml:"ledger"`
-	Ghost       GhostConfig       `toml:"ghost"`
 }
 
 type ProviderConfig struct {
@@ -54,8 +53,6 @@ type PermissionRule struct {
 }
 
 type FeaturesConfig struct {
-	AutodreamEnabled bool `toml:"autodream_enabled"`
-	SubagentEnabled  bool `toml:"subagent_enabled"`
 	AutoBackup       bool `toml:"auto_backup"`
 	ResumeOnStartup  bool `toml:"resume_on_startup"`
 }
@@ -63,8 +60,4 @@ type FeaturesConfig struct {
 type LedgerConfig struct {
 	Enabled    bool `toml:"enabled"`
 	MaxEntries int  `toml:"max_entries"`
-}
-
-type GhostConfig struct {
-	Enabled bool `toml:"enabled"`
 }

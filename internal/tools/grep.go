@@ -210,20 +210,28 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
 
 		header := make([]byte, 512)
 		n, _ := f.Read(header)
+		isBinary := false
 		if n > 0 {
 			for _, b := range header[:n] {
 				if b == 0 {
-					return nil // skip binary
+					isBinary = true
+					break
 				}
 			}
 		}
+		f.Close()
+		if isBinary {
+			return nil
+		}
 
-		// Reset to beginning
-		f.Seek(0, 0)
+		// Re-open for scanning
+		f, err = os.Open(path)
+		if err != nil {
+			return nil
+		}
 
 		scanner := bufio.NewScanner(f)
 		lineNum := 0
