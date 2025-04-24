@@ -415,6 +415,56 @@ func TestChatCompletionStream_ContextExceeded(t *testing.T) {
 	}
 }
 
+func TestChatCompletionStream_ReasoningEnabled(t *testing.T) {
+	var requestBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			json.Unmarshal(bodyBytes, &requestBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking...\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"response\"}}]}\n\ndata: [DONE]\n\n"))
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key")
+	c.baseURL = ts.URL
+
+	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:            "openai/o3-mini",
+		Messages:         []types.Message{{Role: "user", Content: "hi"}},
+		ReasoningEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer it.Close()
+
+	// Verify the request body contains reasoning params
+	if requestBody == nil {
+		t.Fatal("expected request body to be captured")
+	}
+
+	// openai/o- models should have reasoning_effort param added
+	reasoningEffort, ok := requestBody["reasoning_effort"]
+	if !ok {
+		t.Fatalf("expected reasoning_effort param in request body when ReasoningEnabled is true, got keys: %v", requestBody)
+	}
+	if reasoningEffort != "medium" {
+		t.Fatalf("expected reasoning_effort to be %q, got %q", "medium", reasoningEffort)
+	}
+
+	// Verify the stream returns reasoning content first
+	chunk, err := it.Next()
+	if err != nil {
+		t.Fatalf("expected chunk, got error: %v", err)
+	}
+	if chunk.Type != "thinking" {
+		t.Fatalf("expected first chunk type %q, got %q", "thinking", chunk.Type)
+	}
+}
+
 func TestChatCompletionStream_Headers(t *testing.T) {
 	var authHeader, refererHeader, titleHeader, uaHeader string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
