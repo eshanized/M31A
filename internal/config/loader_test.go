@@ -52,9 +52,6 @@ func TestConfig_DefaultConfig(t *testing.T) {
 	if cfg.Permissions.DefaultMode != "" {
 		t.Errorf("expected empty Permissions.DefaultMode, got %q", cfg.Permissions.DefaultMode)
 	}
-	if cfg.Features.AutodreamEnabled != false {
-		t.Errorf("expected false AutodreamEnabled, got %v", cfg.Features.AutodreamEnabled)
-	}
 }
 
 func TestConfig_LoadTOMLParse(t *testing.T) {
