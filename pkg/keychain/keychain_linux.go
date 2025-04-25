@@ -276,8 +276,14 @@ func isDBusUnavailable(err error) bool {
 		return false
 	}
 	// dbus.ErrClosed is returned when the session bus is not running
+	if err == dbus.ErrClosed {
+		return true
+	}
 	// Also catch "connection refused" style errors
-	return true // Any D-Bus failure means fall back to pass
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "dbus")
 }
 
 // isPassUnavailable returns true if the pass CLI is not installed.
