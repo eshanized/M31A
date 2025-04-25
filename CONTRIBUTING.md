@@ -31,15 +31,31 @@ golangci-lint run ./...
 go vet ./...
 ```
 
+## Code Style
+
+- **Formatting**: All code must be `gofmt`-clean. Run `gofmt -w .` before committing.
+- **Imports**: Group standard library, third-party, and project imports with blank lines between groups. Use `goimports` for sorting.
+- **Naming**: Follow Go naming conventions. Package names are lowercase single words. Exported identifiers use MixedCaps.
+- **Error handling**: Return errors rather than panicking. Use `fmt.Errorf` with `%w` for wrapping.
+- **Comments**: Exported functions, types, and packages must have doc comments. Inline comments should explain *why*, not *what*.
+- **No emojis** in code or documentation.
+
 ## Architecture Rules
 
-M31A enforces strict package dependency rules. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph. Key rules:
+For the complete set of architecture rules, package layout, and absolute prohibitions, see [`AGENTS.md`](./AGENTS.md). Key highlights:
+
+- Only OpenRouter and Zen providers are supported — no direct Anthropic or OpenAI.
+- V1 tools are limited to: Bash, FileRead, FileWrite, Glob, Grep.
+- No CSS-style animations (Bubble Tea uses Unicode spinners and frame redraws).
+- API keys resolved in order: environment variable -> OS keychain -> config file. Never stored in plaintext.
+- No V1.1 features (ghost mode, PiP, subagents, deferred tools).
+- No telemetry, analytics, or phone-home behavior.
+
+M31A enforces strict package dependency rules. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph. Additional rules:
 
 - **Bubble Tea is single-threaded.** All state mutations go through `Update()` only. Never mutate `AppState` from a goroutine. Use `tea.Cmd` and `tea.Msg`.
 - **No CGO.** Binary must be static (`CGO_ENABLED=0`).
-- **No telemetry.** No analytics. No external calls except OpenRouter/Zen APIs.
 - **No hardcoded model lists.** Models discovered dynamically from provider APIs.
-- **V1 tools:** Bash, FileRead, FileWrite, Glob, Grep only.
 - **V1 task execution is SEQUENTIAL.** No concurrency.
 
 ## Adding a New Tool

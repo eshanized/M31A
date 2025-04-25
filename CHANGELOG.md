@@ -26,7 +26,7 @@ All notable changes to M31A are documented in this file.
 ### Technical
 
 - Static binary (`CGO_ENABLED=0`) for Linux, macOS, Windows
-- ~24,000 LOC Go with 50+ test files
+- ~14,900 LOC Go with 56 test files
 - Structured logging (slog) with rotation
 - No telemetry, no analytics, no phone-home
 - Cross-platform build verification (5 platforms)
