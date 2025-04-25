@@ -215,7 +215,7 @@ func TestSettings_InlineEditString(t *testing.T) {
 func TestSettings_InlineEditBool(t *testing.T) {
 	m := newTestSettingsModel()
 	m.activeTab = tabFeatures
-	m.focusedField = 0 // AutoDream Enabled
+	m.focusedField = 0 // Auto Backup
 
 	orig := m.fields[tabFeatures][0].value
 
@@ -346,7 +346,7 @@ func TestSettings_TabContent(t *testing.T) {
 		{tabProvider, []string{"Provider", "Default", "Fallback", "API Key"}},
 		{tabModel, []string{"Model", "Default Model", "Threshold", "Thinking", "Arbitrage"}},
 		{tabPermissions, []string{"Permissions", "Default Mode", "Timeout"}},
-		{tabFeatures, []string{"Features", "AutoDream", "Subagent", "Backup", "Resume"}},
+		{tabFeatures, []string{"Features", "Backup", "Resume"}},
 		{tabLedger, []string{"Ledger", "Enabled", "Max Entries", "Statistics"}},
 	}
 
@@ -444,4 +444,394 @@ func TestSettings_DeleteChar(t *testing.T) {
 
 	// Delete on empty should not crash
 	m = m.deleteChar() // no-op
+}
+
+// ---------------------------------------------------------------------------
+// Test applyFieldsToConfig
+// ---------------------------------------------------------------------------
+
+func TestApplyFieldsToConfig_GeneralTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabGeneral: {
+			{key: "ui.theme", value: "light", fieldType: "string"},
+			{key: "ui.compact_mode", value: "true", fieldType: "bool"},
+			{key: "ui.show_token_usage", value: "true", fieldType: "bool"},
+			{key: "ui.show_cost_estimate", value: "false", fieldType: "bool"},
+			{key: "ui.max_iterations", value: "100", fieldType: "int"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if cfg.UI.Theme != "light" {
+		t.Errorf("expected theme 'light', got %q", cfg.UI.Theme)
+	}
+	if !cfg.UI.CompactMode {
+		t.Error("expected CompactMode=true")
+	}
+	if !cfg.UI.ShowTokenUsage {
+		t.Error("expected ShowTokenUsage=true")
+	}
+	if cfg.UI.ShowCostEstimate {
+		t.Error("expected ShowCostEstimate=false")
+	}
+	if cfg.UI.MaxIterations != 100 {
+		t.Errorf("expected MaxIterations=100, got %d", cfg.UI.MaxIterations)
+	}
+}
+
+func TestApplyFieldsToConfig_ProviderTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabProvider: {
+			{key: "provider.default", value: "zen", fieldType: "string"},
+			{key: "provider.auto_fallback", value: "true", fieldType: "bool"},
+			{key: "provider.openrouter.api_key", value: "sk-or-test-key", fieldType: "string"},
+			{key: "provider.zen.api_key", value: "sk-zen-test-key", fieldType: "string"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if cfg.Provider.Default != "zen" {
+		t.Errorf("expected provider default 'zen', got %q", cfg.Provider.Default)
+	}
+	if !cfg.Provider.AutoFallback {
+		t.Error("expected AutoFallback=true")
+	}
+	if cfg.Provider.OpenRouter.APIKey != "sk-or-test-key" {
+		t.Errorf("expected OpenRouter API key, got %q", cfg.Provider.OpenRouter.APIKey)
+	}
+	if cfg.Provider.Zen.APIKey != "sk-zen-test-key" {
+		t.Errorf("expected Zen API key, got %q", cfg.Provider.Zen.APIKey)
+	}
+}
+
+func TestApplyFieldsToConfig_ModelTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabModel: {
+			{key: "model.default", value: "claude-3.5-sonnet", fieldType: "string"},
+			{key: "model.context_warning_threshold", value: "0.85", fieldType: "float"},
+			{key: "model.show_thinking_by_default", value: "true", fieldType: "bool"},
+			{key: "model.auto_collapse_tools", value: "true", fieldType: "bool"},
+			{key: "model.auto_arbitrage", value: "false", fieldType: "bool"},
+			{key: "model.arbitrage_threshold", value: "1.5", fieldType: "float"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if cfg.Model.Default != "claude-3.5-sonnet" {
+		t.Errorf("expected model default 'claude-3.5-sonnet', got %q", cfg.Model.Default)
+	}
+	if cfg.Model.ContextWarningThreshold != 0.85 {
+		t.Errorf("expected ContextWarningThreshold=0.85, got %f", cfg.Model.ContextWarningThreshold)
+	}
+	if !cfg.Model.ShowThinkingByDefault {
+		t.Error("expected ShowThinkingByDefault=true")
+	}
+	if !cfg.Model.AutoCollapseTools {
+		t.Error("expected AutoCollapseTools=true")
+	}
+	if cfg.Model.AutoArbitrage {
+		t.Error("expected AutoArbitrage=false")
+	}
+	if cfg.Model.ArbitrageThreshold != 1.5 {
+		t.Errorf("expected ArbitrageThreshold=1.5, got %f", cfg.Model.ArbitrageThreshold)
+	}
+}
+
+func TestApplyFieldsToConfig_PermissionsTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabPermissions: {
+			{key: "permissions.default_mode", value: "whitelist", fieldType: "string"},
+			{key: "permissions.timeout_seconds", value: "60", fieldType: "int"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if cfg.Permissions.DefaultMode != "whitelist" {
+		t.Errorf("expected DefaultMode 'whitelist', got %q", cfg.Permissions.DefaultMode)
+	}
+	if cfg.Permissions.TimeoutSeconds != 60 {
+		t.Errorf("expected TimeoutSeconds=60, got %d", cfg.Permissions.TimeoutSeconds)
+	}
+}
+
+func TestApplyFieldsToConfig_FeaturesTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabFeatures: {
+			{key: "features.auto_backup", value: "true", fieldType: "bool"},
+			{key: "features.resume_on_startup", value: "true", fieldType: "bool"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if !cfg.Features.AutoBackup {
+		t.Error("expected AutoBackup=true")
+	}
+	if !cfg.Features.ResumeOnStartup {
+		t.Error("expected ResumeOnStartup=true")
+	}
+}
+
+func TestApplyFieldsToConfig_LedgerTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabLedger: {
+			{key: "ledger.enabled", value: "false", fieldType: "bool"},
+			{key: "ledger.max_entries", value: "200", fieldType: "int"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	if cfg.Ledger.Enabled {
+		t.Error("expected Ledger.Enabled=false")
+	}
+	if cfg.Ledger.MaxEntries != 200 {
+		t.Errorf("expected MaxEntries=200, got %d", cfg.Ledger.MaxEntries)
+	}
+}
+
+func TestApplyFieldsToConfig_InvalidIntFloat(t *testing.T) {
+	cfg := config.DefaultConfig()
+	origMaxIter := cfg.UI.MaxIterations
+	origThreshold := cfg.Model.ArbitrageThreshold
+
+	fields := map[settingsTab][]editableField{
+		tabGeneral: {
+			{key: "ui.max_iterations", value: "not-a-number", fieldType: "int"},
+		},
+		tabModel: {
+			{key: "model.arbitrage_threshold", value: "not-a-number", fieldType: "float"},
+			{key: "model.context_warning_threshold", value: "not-a-number", fieldType: "float"},
+		},
+	}
+
+	applyFieldsToConfig(cfg, fields)
+
+	// Invalid values should leave originals unchanged
+	if cfg.UI.MaxIterations != origMaxIter {
+		t.Errorf("invalid int should not change MaxIterations, expected %d, got %d", origMaxIter, cfg.UI.MaxIterations)
+	}
+	if cfg.Model.ArbitrageThreshold != origThreshold {
+		t.Errorf("invalid float should not change ArbitrageThreshold, expected %f, got %f", origThreshold, cfg.Model.ArbitrageThreshold)
+	}
+}
+
+func TestApplyFieldsToConfig_EmptySnapshots(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{}
+
+	// Should not panic
+	applyFieldsToConfig(cfg, fields)
+}
+
+func TestApplyFieldsToConfig_UnknownKey(t *testing.T) {
+	cfg := config.DefaultConfig()
+	fields := map[settingsTab][]editableField{
+		tabGeneral: {
+			{key: "unknown.key", value: "value", fieldType: "string"},
+		},
+	}
+
+	// Should not panic, unknown keys are silently ignored
+	applyFieldsToConfig(cfg, fields)
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.SetConfig
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_SetConfig(t *testing.T) {
+	m := newTestSettingsModel()
+
+	// Create new config with different values
+	newCfg := config.DefaultConfig()
+	newCfg.UI.Theme = "nord"
+	newCfg.Model.Default = "gpt-4o-mini"
+
+	m.SetConfig(newCfg)
+
+	if m.config.UI.Theme != "nord" {
+		t.Errorf("expected theme 'nord' after SetConfig, got %q", m.config.UI.Theme)
+	}
+	if m.config.Model.Default != "gpt-4o-mini" {
+		t.Errorf("expected model 'gpt-4o-mini' after SetConfig, got %q", m.config.Model.Default)
+	}
+
+	// Verify fields were rebuilt
+	if len(m.fields) != int(tabCount) {
+		t.Errorf("expected %d tabs after SetConfig, got %d", tabCount, len(m.fields))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.SetTheme
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_SetTheme(t *testing.T) {
+	m := newTestSettingsModel()
+
+	// Verify initial theme
+	if m.theme.Mode != theme.ModeDark {
+		t.Errorf("expected initial theme ModeDark, got %d", m.theme.Mode)
+	}
+
+	// Set new theme (light theme)
+	newTheme := theme.Light()
+	m.SetTheme(newTheme)
+
+	if m.theme.Mode != theme.ModeLight {
+		t.Errorf("expected theme ModeLight after SetTheme, got %d", m.theme.Mode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.Update with SettingsSavedMsg
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_UpdateSettingsSavedMsg(t *testing.T) {
+	m := newTestSettingsModel()
+	m.dirty = true
+	m.statusMsg = "old status"
+
+	m, cmd := m.Update(SettingsSavedMsg{})
+
+	if cmd != nil {
+		t.Error("SettingsSavedMsg should not return a cmd")
+	}
+	if m.dirty {
+		t.Error("SettingsSavedMsg should set dirty=false")
+	}
+	if m.statusMsg != "Configuration saved successfully." {
+		t.Errorf("expected status message, got %q", m.statusMsg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.Update with ErrorMsg
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_UpdateErrorMsg(t *testing.T) {
+	m := newTestSettingsModel()
+
+	m, cmd := m.Update(ErrorMsg{Err: &testError{}})
+
+	if cmd != nil {
+		t.Error("ErrorMsg should not return a cmd")
+	}
+	if !strings.Contains(m.err, "Save error") {
+		t.Errorf("expected error message, got %q", m.err)
+	}
+	if !strings.Contains(m.err, "test error") {
+		t.Errorf("expected error details in message, got %q", m.err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.Update with arrow keys
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_UpdateArrowKeys(t *testing.T) {
+	m := newTestSettingsModel()
+	m.activeTab = tabGeneral
+	m.focusedField = 0
+
+	// Down arrow should increase focusedField
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.focusedField != 1 {
+		t.Errorf("expected focusedField=1 after down, got %d", m.focusedField)
+	}
+
+	// Up arrow should decrease focusedField
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.focusedField != 0 {
+		t.Errorf("expected focusedField=0 after up, got %d", m.focusedField)
+	}
+
+	// Up at 0 should stay at 0
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.focusedField != 0 {
+		t.Errorf("expected focusedField=0 after up at boundary, got %d", m.focusedField)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.Update with Ctrl+C
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_UpdateCtrlC(t *testing.T) {
+	m := newTestSettingsModel()
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl+C should return a cmd")
+	}
+	// The cmd should be tea.Quit
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg, got %T", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.Update with right/left while editing
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_UpdateTabWhileEditing(t *testing.T) {
+	m := newTestSettingsModel()
+	m.activeTab = tabGeneral
+	m.focusedField = 0
+	m = m.startEdit()
+
+	// Tab while editing should not change tab
+	origTab := m.activeTab
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.activeTab != origTab {
+		t.Errorf("tab should not change while editing, expected %d, got %d", origTab, m.activeTab)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test SettingsModel.renderFooter
+// ---------------------------------------------------------------------------
+
+func TestSettingsModel_RenderFooter(t *testing.T) {
+	m := newTestSettingsModel()
+	m.width = 80
+
+	// Footer should not be empty
+	footer := m.renderFooter()
+	if footer == "" {
+		t.Error("renderFooter should not return empty string")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test fmtBool
+// ---------------------------------------------------------------------------
+
+func TestFmtBool(t *testing.T) {
+	tests := []struct {
+		input    bool
+		expected string
+	}{
+		{true, "true"},
+		{false, "false"},
+	}
+
+	for _, tt := range tests {
+		got := fmtBool(tt.input)
+		if got != tt.expected {
+			t.Errorf("fmtBool(%v) = %q, expected %q", tt.input, got, tt.expected)
+		}
+	}
 }
