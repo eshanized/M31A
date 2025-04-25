@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -60,8 +61,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	setupProcessGroup(cmd)
 
 	// Use limited writers that cap output at BashOutputLimit
-	stdoutLimit := &limitWriter{limit: types.BashOutputLimit}
-	stderrLimit := &limitWriter{limit: types.BashOutputLimit}
+	stdoutLimit := &limitWriter{limit: int64(types.BashOutputLimit)}
+	stderrLimit := &limitWriter{limit: int64(types.BashOutputLimit)}
 
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
@@ -75,6 +76,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	// Signal forwarding on cancellation
 	var killOnce sync.Once
+	cmdDone := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -88,8 +90,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					})
 				})
 			}
-		case <-time.After(time.Minute):
-			// goroutine cleanup after command finishes
+		case <-cmdDone:
+			// Command finished — goroutine exits immediately
 		}
 	}()
 
@@ -99,6 +101,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		waitErr = cmd.Wait()
 		stdoutW.Close()
 		stderrW.Close()
+		close(cmdDone)
 	}()
 
 	// Read from both pipes concurrently with per-stream buffers
@@ -136,7 +139,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	output := outStr.String()
 
 	// Check if output was truncated
-	truncated := stdoutLimit.written >= types.BashOutputLimit || stderrLimit.written >= types.BashOutputLimit
+	truncated := atomic.LoadInt64(&stdoutLimit.written) >= types.BashOutputLimit || atomic.LoadInt64(&stderrLimit.written) >= types.BashOutputLimit
 
 	// Binary detection
 	if isBinary(output) {
@@ -184,20 +187,20 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 // limitWriter writes up to limit bytes and then silently drops further writes.
 type limitWriter struct {
-	limit int
-	written int
+	limit   int64
+	written int64
 }
 
 func (lw *limitWriter) Write(p []byte) (int, error) {
-	remaining := lw.limit - lw.written
+	remaining := atomic.LoadInt64(&lw.limit) - atomic.LoadInt64(&lw.written)
 	if remaining <= 0 {
 		return len(p), nil
 	}
-	if len(p) > remaining {
+	if int64(len(p)) > remaining {
 		p = p[:remaining]
 	}
 	n := len(p)
-	lw.written += n
+	atomic.AddInt64(&lw.written, int64(n))
 	return n, nil
 }
 
