@@ -81,38 +81,36 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
 	}
 
-	// Path safety check
-	if existing, err := os.Stat(targetPath); err == nil && !existing.IsDir() {
-		// File exists — resolve symlinks and verify
-		resolved, err := filepath.EvalSymlinks(targetPath)
+	// Path safety: verify resolved path is within workDir
+	resolved := targetPath
+	if _, err := os.Stat(targetPath); err == nil {
+		// File exists — resolve symlinks
+		resolved, err = filepath.EvalSymlinks(targetPath)
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
 		}
-		workDirPrefix := t.workDir
-		if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-			workDirPrefix += string(filepath.Separator)
-		}
-		if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-			return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
-		}
-		targetPath = resolved
-	} else {
-		// File doesn't exist — verify the directory portion is within workDir
-		dir := filepath.Dir(targetPath)
-		workDirPrefix := t.workDir
-		if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-			workDirPrefix += string(filepath.Separator)
-		}
-		if dir != t.workDir && !strings.HasPrefix(dir, workDirPrefix) {
-			return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
-		}
+	} else if !os.IsNotExist(err) {
+		return types.ToolResult{}, fmt.Errorf("cannot stat path: %w", err)
 	}
+
+	workDirPrefix := t.workDir
+	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
+		workDirPrefix += string(filepath.Separator)
+	}
+	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
+		return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+	}
+	targetPath = resolved
 
 	// Backup existing file
 	if _, err := os.Stat(targetPath); err == nil {
 		relPath, _ := filepath.Rel(t.workDir, targetPath)
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
-		backupName := fmt.Sprintf("%s.%s", sanitized, time.Now().Format("20060102T150405"))
+		randBytes := make([]byte, 4)
+		if _, err := rand.Read(randBytes); err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot generate backup name: %w", err)
+		}
+		backupName := fmt.Sprintf("%s.%s.%s", sanitized, time.Now().Format("20060102T150405.000"), hex.EncodeToString(randBytes))
 		backupPath := filepath.Join(t.backupDir, backupName)
 
 		if err := os.MkdirAll(t.backupDir, 0755); err != nil {
