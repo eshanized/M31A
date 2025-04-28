@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -176,14 +180,20 @@ func (m *FirstRunModel) updateKeyInput(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			m.apiKeyValue = input
 			m.state = FirstRunValidating
 			m.validating = true
-			return []tea.Cmd{
-				func() tea.Msg {
-					if len(input) < 10 {
-						return validationResultMsg{valid: false, err: "API key too short"}
-					}
-					return validationResultMsg{valid: true}
-				},
-			}, nil
+				return []tea.Cmd{
+					func() tea.Msg {
+						if len(input) < 10 {
+							return validationResultMsg{valid: false, err: "API key too short"}
+						}
+						// Validate key by making a test request
+						for _, provider := range m.providers {
+							if err := validateAPIKey(provider, input); err != nil {
+								return validationResultMsg{valid: false, err: fmt.Sprintf("%s: %v", provider, err)}
+							}
+						}
+						return validationResultMsg{valid: true}
+					},
+				}, nil
 		}
 	}
 
@@ -342,4 +352,49 @@ func (m *FirstRunModel) viewKeychainPrompt() string {
 func (m *FirstRunModel) viewComplete() string {
 	text := lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render("Setup complete! Launching M31A...")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, text)
+}
+
+// validateAPIKey makes a test HTTP request to verify the API key works.
+func validateAPIKey(provider, key string) error {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		},
+	}
+
+	var url string
+	switch provider {
+	case "openrouter":
+		url = "https://openrouter.ai/api/v1/auth/key"
+	case "zen":
+		url = "https://opencode.ai/zen/v1/models"
+	default:
+		return fmt.Errorf("unknown provider: %s", provider)
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("User-Agent", "M31A/dev")
+	if provider == "openrouter" {
+		req.Header.Set("HTTP-Referer", "https://github.com/eshanized/M31A")
+		req.Header.Set("X-Title", "M31A")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("invalid API key")
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+	return nil
 }
