@@ -2,9 +2,11 @@ package provider
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type SSEParser struct {
@@ -63,6 +65,31 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	return eventType, data, nil
 }
 
+func (p *SSEParser) NextWithContext(ctx context.Context) (eventType string, data string, err error) {
+	done := make(chan struct{})
+	var result struct {
+		eventType string
+		data      string
+		err       error
+	}
+
+	go func() {
+		result.eventType, result.data, result.err = p.Next()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return result.eventType, result.data, result.err
+	case <-ctx.Done():
+		p.resp.Body.Close()
+		return "", "", ctx.Err()
+	}
+}
+
 func (p *SSEParser) Close() error {
 	return p.resp.Body.Close()
 }
+
+// DefaultStreamTimeout is the maximum time to wait for a single SSE event.
+const DefaultStreamTimeout = 5 * time.Minute
