@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -268,6 +270,14 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 			e.logger.Warn("heal commit failed", "task", task.ID, "error", err)
 		} else {
 			commitHash, _ = e.git.HeadHash()
+		}
+	}
+
+	// Verify the fix was actually applied by re-checking task files
+	for _, f := range task.Files {
+		path := filepath.Join(e.workDir, f)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			e.logger.Warn("heal did not create expected file", "task", task.ID, "file", f)
 		}
 	}
 
