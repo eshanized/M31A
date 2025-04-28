@@ -197,14 +197,14 @@ func TestDispatcher_GetTool(t *testing.T) {
 func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d := DefaultDispatcher(dir, dir)
+	d := DefaultDispatcher(dir, dir, dir)
 
 	names := d.List()
-	if len(names) != 5 {
-		t.Errorf("expected 5 tools, got %d: %v", len(names), names)
+	if len(names) != 9 {
+		t.Errorf("expected 9 tools, got %d: %v", len(names), names)
 	}
 
-	expectedTools := []string{"Bash", "FileRead", "FileWrite", "Glob", "Grep"}
+	expectedTools := []string{"Bash", "FileRead", "FileWrite", "Edit", "TodoWrite", "WebFetch", "AskUserQuestion", "Glob", "Grep"}
 	for _, expected := range expectedTools {
 		found := false
 		for _, name := range names {
@@ -357,8 +357,10 @@ func TestDispatcher_PermissionChannelFull(t *testing.T) {
 	d := NewDispatcher()
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
-	// Fill the request channel
-	d.requestCh <- PermissionRequest{}
+	// Fill the request channel (buffer size is 8)
+	for i := 0; i < 8; i++ {
+		d.requestCh <- PermissionRequest{}
+	}
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
 		ID:   "call1",

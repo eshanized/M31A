@@ -14,19 +14,26 @@ import (
 )
 
 type Dispatcher struct {
-	mu          sync.RWMutex
-	tools       map[string]types.Tool
-	permissions map[string]bool
-	requestCh   chan PermissionRequest
-	responseCh  chan PermissionResponse
+	mu             sync.RWMutex
+	tools          map[string]types.Tool
+	permissions    map[string]bool
+	requestCh      chan PermissionRequest
+	responseCh     chan PermissionResponse
+	todoWrite      *TodoWrite
+	webFetch       *WebFetch
+	questionReqCh  chan QuestionRequest
+	questionRespCh chan QuestionResponse
+	askUser        *AskUserQuestion
 }
 
 func NewDispatcher() *Dispatcher {
 	return &Dispatcher{
-		tools:       make(map[string]types.Tool),
-		permissions: make(map[string]bool),
-		requestCh:   make(chan PermissionRequest, 1),
-		responseCh:  make(chan PermissionResponse),
+		tools:          make(map[string]types.Tool),
+		permissions:    make(map[string]bool),
+		requestCh:      make(chan PermissionRequest, 8),
+		responseCh:     make(chan PermissionResponse),
+		questionReqCh:  make(chan QuestionRequest, 4),
+		questionRespCh: make(chan QuestionResponse),
 	}
 }
 
@@ -173,6 +180,22 @@ func extractCommandString(toolName string, input json.RawMessage) string {
 			if pattern, ok := toolInput.Params["pattern"].(string); ok {
 				return fmt.Sprintf("grep %s", pattern)
 			}
+		case "Edit":
+			if path, ok := toolInput.Params["path"].(string); ok {
+				return fmt.Sprintf("edit %s", path)
+			}
+		case "WebFetch":
+			if u, ok := toolInput.Params["url"].(string); ok {
+				return u
+			}
+		case "TodoWrite":
+			if todos, ok := toolInput.Params["todos"].([]any); ok {
+				return fmt.Sprintf("todos: %d items", len(todos))
+			}
+		case "AskUserQuestion":
+			if q, ok := toolInput.Params["question"].(string); ok {
+				return q
+			}
 		}
 	}
 
@@ -200,6 +223,22 @@ func extractCommandString(toolName string, input json.RawMessage) string {
 			if pattern, ok := params["pattern"].(string); ok {
 				return fmt.Sprintf("grep %s", pattern)
 			}
+		case "Edit":
+			if path, ok := params["path"].(string); ok {
+				return fmt.Sprintf("edit %s", path)
+			}
+		case "WebFetch":
+			if u, ok := params["url"].(string); ok {
+				return u
+			}
+		case "TodoWrite":
+			if todos, ok := params["todos"].([]any); ok {
+				return fmt.Sprintf("todos: %d items", len(todos))
+			}
+		case "AskUserQuestion":
+			if q, ok := params["question"].(string); ok {
+				return q
+			}
 		}
 	}
 
@@ -210,11 +249,35 @@ func (d *Dispatcher) RequestCh() chan PermissionRequest {
 	return d.requestCh
 }
 
-func DefaultDispatcher(workDir, backupDir string) *Dispatcher {
+func (d *Dispatcher) QuestionRequestCh() chan QuestionRequest {
+	return d.questionReqCh
+}
+
+func (d *Dispatcher) QuestionResponseCh() chan QuestionResponse {
+	return d.questionRespCh
+}
+
+func (d *Dispatcher) SetSessionID(id string) {
+	if d.todoWrite != nil {
+		d.todoWrite.SetSessionID(id)
+	}
+}
+
+func DefaultDispatcher(workDir, backupDir, sessionsDir string) *Dispatcher {
 	d := NewDispatcher()
 	d.Register(NewBash(workDir))
 	d.Register(NewFileRead(workDir))
 	d.Register(NewFileWrite(workDir, backupDir))
+	d.Register(NewEdit(workDir, backupDir))
+	todo := NewTodoWrite(sessionsDir, "")
+	d.todoWrite = todo
+	d.Register(todo)
+	wf := NewWebFetch(sessionsDir)
+	d.webFetch = wf
+	d.Register(wf)
+	aq := NewAskUserQuestion(d.questionReqCh, d.questionRespCh)
+	d.askUser = aq
+	d.Register(aq)
 	d.Register(NewGlob(workDir))
 	d.Register(NewGrep(workDir))
 	return d
