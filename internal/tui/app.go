@@ -76,6 +76,8 @@ type AppState struct {
 	discussQuestions   []string
 	autoDream          *autodream.Consolidator
 	msgChan            chan tea.Msg // channel for workflow-emitted messages
+	workflowCtx        context.Context
+	workflowCancel     context.CancelFunc
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -116,7 +118,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		configPath:     configPath,
 		themeManager:   tm,
 		healthStatus:   types.HealthStatus{Status: "unknown"},
-		dispatcher:     tools.DefaultDispatcher(cwd, backupDir),
+		dispatcher:     tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir),
 		config:         cfg,
 		keychain:       kc,
 		sessionManager: sessionMgr,
@@ -128,7 +130,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	app.ledger = ledgerInstance
 
 	// Initialize settings model (6 tabs, inline editing)
-	sm := NewSettingsModel(cfg, configPath, tm.Current(), ledgerInstance)
+	sm := NewSettingsModel(cfg, configPath, tm.Current(), ledgerInstance, kc)
 	app.settingsModel = &sm
 
 	// Initialize resume model
@@ -206,6 +208,9 @@ func (m *AppState) initWorkflowEngine() {
 		return
 	}
 
+	// Wire session ID to tool dispatcher (e.g. TodoWrite)
+	m.dispatcher.SetSessionID(s.ID)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = os.TempDir()
@@ -218,8 +223,12 @@ func (m *AppState) initWorkflowEngine() {
 
 	est := tokens.NewEstimator(modelID)
 
-	eng := workflow.NewEngine(s.ID, cwd, backupDir, planningDir,
+	eng, err := workflow.NewEngine(s.ID, cwd, backupDir, planningDir,
 		p, modelID, m.dispatcher, est, m.sessionManager)
+	if err != nil {
+		m.currentOperation = fmt.Sprintf("Workflow engine init failed: %v", err)
+		return
+	}
 	eng.SetGit(g)
 	m.workflowEngine = eng
 }
@@ -229,16 +238,21 @@ func (m *AppState) initWorkflowEngine() {
 // MsgEmitter on the engine so that TaskStartMsg and TaskUpdateMsg are emitted
 // during execution and PlanReadyMsg when the plan phase completes.
 func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd {
-	msgCh := make(chan tea.Msg, 32)
+	msgCh := make(chan tea.Msg, 64)
 	app.msgChan = msgCh
+
+	// Create a cancellable context for this phase
+	ctx, cancel := context.WithCancel(context.Background())
+	app.workflowCtx = ctx
+	app.workflowCancel = cancel
 
 	eng := app.workflowEngine
 	eng.SetMsgEmitter(&channelEmitter{ch: msgCh})
 
 	// Phase runner: executes the phase, emits PlanReadyMsg if applicable, then closes the channel.
 	runner := func() tea.Msg {
-		ctx := context.Background()
 		result, err := eng.RunPhase(ctx, phase, goal)
+		cancel() // Ensure cleanup
 		if err != nil {
 			close(msgCh)
 			return PhaseResultMsg{Phase: phase, Error: err.Error()}
@@ -302,7 +316,7 @@ func (ce *channelEmitter) Emit(msg tea.Msg) {
 }
 
 func (m *AppState) Init() tea.Cmd {
-	cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+	cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
 	if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
 		cmds = append(cmds, HealthCheckTicker(context.Background(), m.registry, m.activeProvider, types.HealthCheckInterval))
 		cmds = append(cmds, CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
@@ -316,6 +330,21 @@ func permissionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
 	return func() tea.Msg {
 		req := <-dispatcher.RequestCh()
 		return PermissionRequestMsg{Request: req}
+	}
+}
+
+// questionListenerCmd returns a tea.Cmd that watches the dispatcher's
+// question request channel and feeds requests into the Bubble Tea event loop.
+func questionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
+	return func() tea.Msg {
+		req := <-dispatcher.QuestionRequestCh()
+		return QuestionRequestMsg{
+			Question:    req.Question,
+			Header:      req.Header,
+			Options:     req.Options,
+			AllowCustom: req.AllowCustom,
+			ResponseCh:  dispatcher.QuestionResponseCh(),
+		}
 	}
 }
 
@@ -357,6 +386,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.String() == "ctrl+c" {
+			// If workflow is running, cancel it
+			if m.workflowRunning && m.workflowCancel != nil {
+				m.workflowCancel()
+				m.currentOperation = "Workflow cancelled"
+				m.workflowRunning = false
+				return m, nil
+			}
 			// If streaming, cancel stream and stay in app
 			if m.screen == ScreenREPL && m.replModel != nil && m.replModel.streaming {
 				if m.replModel.streamCancel != nil {
@@ -491,6 +527,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, NextHealthTick(types.HealthCheckInterval)
 		}
 
+		// Skip health check if we're already in a rate-limited state
+		// to avoid making things worse
+		if m.healthStatus.Status == "offline" ||
+			strings.Contains(strings.ToLower(m.healthStatus.Error), "rate limit") ||
+			strings.Contains(m.healthStatus.Error, "429") {
+			return m, NextHealthTick(120 * time.Second)
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		p := m.registry.ActiveProvider()
 		if p == nil {
@@ -617,7 +661,23 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
 		m.screen = m.prevScreen
 		m.permissionModal = nil
-		return m, permissionListenerCmd(m.dispatcher)
+		return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+
+	case QuestionRequestMsg:
+		// Display question in REPL and wait for user answer
+		if m.replModel != nil {
+			m.replModel.ShowQuestion(msg)
+		}
+		return m, questionListenerCmd(m.dispatcher)
+
+	case QuestionResponseMsg:
+		// User answered — forward to the question tool via dispatcher
+		dresp := tools.QuestionResponse{Answer: msg.Answer}
+		select {
+		case m.dispatcher.QuestionResponseCh() <- dresp:
+		default:
+		}
+		return m, nil
 
 	case PlanReadyMsg:
 		// Plan phase completed with valid tasks — update the plan screen.
@@ -824,7 +884,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenREPL:
@@ -836,7 +896,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastActivity = time.Now()
 			m.currentOperation = "Ready"
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenSettings:
@@ -846,7 +906,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		(*m.settingsModel), cmd = m.settingsModel.Update(msg)
 		cmds := []tea.Cmd{cmd}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenResume:
@@ -873,7 +933,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenModelSelector:
@@ -885,11 +945,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := m.modelSelector.Update(msg)
 		m.modelSelector = updated.(ModelSelector)
 		cmds := []tea.Cmd{cmd}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenPlan:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
 		if m.planModel != nil {
 			subCmds, appMsg := m.planModel.Update(msg)
 			if appMsg != nil {
@@ -900,7 +960,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenExecute:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
 		if m.executeModel != nil {
 			subCmds, appMsg := m.executeModel.Update(msg)
 			if appMsg != nil {
@@ -911,7 +971,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenVerify:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
 		if m.verifyModel != nil {
 			subCmds, appMsg := m.verifyModel.Update(msg)
 			if appMsg != nil {
@@ -922,7 +982,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenShip:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
 		if m.shipModel != nil {
 			subCmds, appMsg := m.shipModel.Update(msg)
 			if appMsg != nil {
