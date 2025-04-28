@@ -42,7 +42,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 
 	est := tokens.NewEstimator("test-model")
 
-	engine := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
+	engine, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
 		&mockProvider{}, "test-model", dispatcher, est, mgr)
 	engine.git = g
 

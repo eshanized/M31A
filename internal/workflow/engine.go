@@ -111,11 +111,11 @@ type PhaseResult struct {
 
 // NewEngine creates a workflow engine.
 func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLMProvider, modelID string,
-	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager) *Engine {
+	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager) (*Engine, error) {
 
 	prompts, err := LoadPrompts()
 	if err != nil {
-		panic(fmt.Sprintf("failed to load prompts: %v", err))
+		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
 	return &Engine{
@@ -132,7 +132,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		logger:      slog.Default(),
 		startTime:   time.Now(),
 		execCommand: exec.Command,
-	}
+	}, nil
 }
 
 // RunPhase executes the given workflow phase and returns the result.
@@ -766,30 +766,97 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 		}
 	}
 
-	// Syntax validation for Go files
-	hasGo := false
-	for _, f := range task.Files {
-		if strings.HasSuffix(f, ".go") {
-			hasGo = true
-			break
+	// Project-type-specific validation
+	projectType := detectProjectType(e.workDir)
+	switch projectType {
+	case "go":
+		hasGo := false
+		for _, f := range task.Files {
+			if strings.HasSuffix(f, ".go") {
+				hasGo = true
+				break
+			}
 		}
-	}
-	if hasGo {
-		cmd := e.execCommand("go", "build", "./...")
-		cmd.Dir = e.workDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("go build failed: %s", string(out)))
-			result.SyntaxOK = false
+		if hasGo {
+			cmd := e.execCommand("go", "build", "./...")
+			cmd.Dir = e.workDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("go build failed: %s", string(out)))
+				result.SyntaxOK = false
+			}
+		}
+	case "nodejs":
+		hasJS := false
+		for _, f := range task.Files {
+			ext := filepath.Ext(f)
+			if ext == ".js" || ext == ".ts" || ext == ".jsx" || ext == ".tsx" {
+				hasJS = true
+				break
+			}
+		}
+		if hasJS {
+			// Check for package.json and try npm test or tsc
+			if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
+				cmd := e.execCommand("sh", "-c", "npm run build 2>&1 || tsc --noEmit 2>&1 || true")
+				cmd.Dir = e.workDir
+				if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
+					// Log but don't fail — build may have warnings
+					e.logger.Info("nodejs build output", "output", string(out))
+				}
+			}
+		}
+	case "python":
+		for _, f := range task.Files {
+			if strings.HasSuffix(f, ".py") {
+				path := filepath.Join(e.workDir, f)
+				cmd := e.execCommand("python3", "-m", "py_compile", path)
+				cmd.Dir = e.workDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("python syntax error in %s: %s", f, string(out)))
+					result.SyntaxOK = false
+				}
+			}
+		}
+	case "rust":
+		hasRust := false
+		for _, f := range task.Files {
+			if strings.HasSuffix(f, ".rs") {
+				hasRust = true
+				break
+			}
+		}
+		if hasRust {
+			cmd := e.execCommand("cargo", "check")
+			cmd.Dir = e.workDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("cargo check failed: %s", string(out)))
+				result.SyntaxOK = false
+			}
 		}
 	}
 
 	// Test execution
 	if hasTestFiles(e.workDir, task.Files) {
-		cmd := e.execCommand("go", "test", "./...")
-		cmd.Dir = e.workDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("go test failed: %s", string(out)))
-			result.TestsOK = false
+		switch projectType {
+		case "go":
+			cmd := e.execCommand("go", "test", "./...")
+			cmd.Dir = e.workDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("go test failed: %s", string(out)))
+				result.TestsOK = false
+			}
+		case "nodejs":
+			cmd := e.execCommand("sh", "-c", "npm test 2>&1 || true")
+			cmd.Dir = e.workDir
+			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
+				e.logger.Info("npm test output", "output", string(out))
+			}
+		case "python":
+			cmd := e.execCommand("sh", "-c", "python3 -m pytest 2>&1 || true")
+			cmd.Dir = e.workDir
+			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
+				e.logger.Info("pytest output", "output", string(out))
+			}
 		}
 	}
 

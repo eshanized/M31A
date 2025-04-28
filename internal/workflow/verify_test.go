@@ -197,7 +197,7 @@ func TestEngine_SessionStartHash(t *testing.T) {
 	}
 
 	planningDir := engine.planningDir
-	eng := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
+	eng, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
 		&mockProvider{}, "test-model", tools.NewDispatcher(), tokens.NewEstimator("test-model"), mgr)
 	eng.SetGit(engine.git)
 
