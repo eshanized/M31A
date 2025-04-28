@@ -29,15 +29,19 @@ type Runner struct {
 	idToIdx     map[int]int
 	OnTaskStart  func(task types.Task)
 	OnTaskUpdate func(task types.Task, status string)
+	// TaskTimeout is the per-task timeout. Zero means no timeout.
+	// Defaults to 30 minutes to match the Bash tool's default timeout.
+	TaskTimeout time.Duration
 }
 
 // New creates a Runner for the given tasks.
 func New(tasks []types.Task) *Runner {
 	r := &Runner{
-		tasks:   tasks,
-		status:  make(map[int]types.TaskStatus),
-		results: make(map[int]TaskResult),
-		idToIdx: make(map[int]int),
+		tasks:       tasks,
+		status:      make(map[int]types.TaskStatus),
+		results:     make(map[int]TaskResult),
+		idToIdx:     make(map[int]int),
+		TaskTimeout: 30 * time.Minute,
 	}
 	for i, t := range tasks {
 		r.idToIdx[t.ID] = i
@@ -174,7 +178,13 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 
 		var result TaskResult
 		if fn != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			var cancel context.CancelFunc
+			var ctx context.Context
+			if r.TaskTimeout > 0 {
+				ctx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
+			} else {
+				ctx, cancel = context.Background(), func() {}
+			}
 			result = fn(ctx, task)
 			cancel()
 		} else {
