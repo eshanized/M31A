@@ -12,7 +12,6 @@ var (
 	ErrNoBinaryContent       = errors.New("binary content not displayable")
 	ErrFileTooLarge          = errors.New("file exceeds 5MB limit")
 	ErrCircularDependency    = errors.New("circular dependency in task graph")
-	ErrBisectFailed          = errors.New("git bisect failed to identify regression")
 	ErrPermissionDenied      = errors.New("permission denied")
 	ErrToolExecution         = errors.New("tool execution failed")
 	ErrTaskFailed            = errors.New("task failed")
