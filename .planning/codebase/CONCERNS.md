@@ -128,7 +128,7 @@ last_mapped: 2026-05-30
 
 ## Known Issues
 
-- **No TODOs in codebase** — the codebase has been cleaned of all `TODO`/`FIXME` markers (verified via `rg`).
+- **No code TODOs/FIXMEs** — the codebase has no `TODO`/`FIXME`/`HACK`/`XXX` markers in code comments. The word "TODO" appears in `internal/tools/todo.go` but only as part of the TodoWrite tool's domain logic (it writes `TODO.md` files to the session directory).
 - **Recent fixes** (from git log):
   - File handle leak in permission modal (`d96c44f`)
   - Log rotation using calendar dates instead of `Truncate(24h)` (`a8baa45`)
