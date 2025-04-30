@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -137,7 +138,10 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 			continue
 		}
 
-		ts, _ := time.Parse(time.RFC3339, parts[4])
+		ts, err := time.Parse(time.RFC3339, parts[4])
+		if err != nil {
+			// Malformed timestamp — use zero time and continue
+		}
 
 		ci := CommitInfo{
 			Hash:      parts[0],
@@ -169,6 +173,107 @@ func (g *Git) DiffStaged() (string, error) {
 		return out, fmt.Errorf("git diff --cached: %w", err)
 	}
 	return out, nil
+}
+
+// FileStatus represents a single file's git status.
+type FileStatus struct {
+	Status     string // e.g. "M", "A", "D", "R", "C", "U", "?"
+	Path       string
+	OldPath    string // for renames
+	Additions  int
+	Deletions  int
+}
+
+// StatusPorcelain returns structured git status for the working directory.
+// Uses git status --porcelain (v1 format): "XY path" per line.
+func (g *Git) StatusPorcelain() ([]FileStatus, error) {
+	statusOut, err := g.run("status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+
+	// Get diff stats via --numstat
+	numstatOut, _ := g.run("diff", "--numstat", "HEAD")
+	numstatMap := make(map[string]struct{ add, del int })
+	for _, line := range strings.Split(strings.TrimSpace(numstatOut), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		add := 0
+		del := 0
+		fmt.Sscanf(parts[0], "%d", &add)
+		fmt.Sscanf(parts[1], "%d", &del)
+		numstatMap[parts[2]] = struct{ add, del int }{add, del}
+	}
+
+	var statuses []FileStatus
+	for _, line := range strings.Split(strings.TrimSpace(statusOut), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		// Format: "XY path" where XY are 2 chars, then space, then path
+		xy := line[:2]
+		path := strings.TrimSpace(line[3:])
+		// Remove quotes if present
+		if strings.HasPrefix(path, "\"") {
+			path, _ = strconv.Unquote(path)
+		}
+
+		fs := FileStatus{Path: path}
+
+		// Determine status from XY codes
+		x, y := xy[0], xy[1]
+		switch {
+		case x == 'A' && y == ' ':
+			fs.Status = "A"
+		case x == 'M' && y == ' ':
+			fs.Status = "M"
+		case x == 'D' && y == ' ':
+			fs.Status = "D"
+		case x == 'R' && y == ' ':
+			fs.Status = "R"
+		case x == 'C' && y == ' ':
+			fs.Status = "C"
+		case x == '?' && y == '?':
+			fs.Status = "?"
+		case y == 'M':
+			fs.Status = "M"
+		case y == 'D' && x != ' ':
+			fs.Status = "D"
+		case x == 'D' && y == ' ':
+			fs.Status = "D"
+		case y == 'A':
+			fs.Status = "A"
+		default:
+			fs.Status = string(y)
+			if fs.Status == " " {
+				fs.Status = string(x)
+			}
+		}
+
+		// Handle renames: "R old -> new"
+		if fs.Status == "R" && strings.Contains(path, " -> ") {
+			parts := strings.SplitN(path, " -> ", 2)
+			if len(parts) == 2 {
+				fs.OldPath = strings.TrimSpace(parts[0])
+				fs.Path = strings.TrimSpace(parts[1])
+			}
+		}
+
+		// Add diff stats
+		if stats, ok := numstatMap[fs.Path]; ok {
+			fs.Additions = stats.add
+			fs.Deletions = stats.del
+		}
+
+		statuses = append(statuses, fs)
+	}
+
+	return statuses, nil
 }
 
 // Status returns the git status output.
