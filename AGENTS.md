@@ -29,10 +29,12 @@ Clean: rm -f m31a
 - No CGO. Binary must be static (CGO_ENABLED=0).
 - No telemetry. No analytics. No external calls except to OpenRouter/Zen APIs.
 - API keys: resolved in order: env var -> OS keychain -> config file. Never plaintext.
-- V1 tools: Bash, FileRead, FileWrite, Glob, Grep ONLY.
-  Do NOT implement FileEdit, WebFetch, WebSearch, AgentTool, TaskTool,
-  AskUserQuestion, or GitTool in V1.
-- V1 task execution is SEQUENTIAL. Do not implement concurrency in V1.
+- V1 tools (core): Bash, FileRead, FileWrite, Glob, Grep.
+  Additional tools available: FileEdit, WebFetch, TodoWrite, AskUserQuestion.
+  AskUserQuestion is available for interactive sessions but MUST NOT be
+  used in automated task execution flows.
+- V1 task execution is SEQUENTIAL. The dispatcher handles permission
+  prompts synchronously. Do not implement concurrency beyond this.
 - No hardcoded model lists. Models discovered dynamically from provider APIs.
 
 ## Package Layout
@@ -43,10 +45,11 @@ internal/config/   -- config parsing, env vars, keychain resolution
 internal/provider/ -- LLMProvider interface + OpenRouter + Zen clients
 internal/tui/      -- Bubble Tea app, all screens
 internal/workflow/ -- six workflow phases
-internal/tools/    -- Bash, FileRead, FileWrite, Glob, Grep
+internal/tools/    -- Bash, FileRead, FileWrite, Glob, Grep + dispatcher
 internal/log/      -- structured logger (slog) with rotation
 internal/git/      -- git operations wrapper
 internal/types/    -- shared core types (Message, Task, ToolCall, etc.)
+internal/tokens/   -- token estimation for LLM cost tracking
 pkg/taskrunner/    -- dependency graph, topological sort, task lifecycle
 pkg/arbitrage/     -- complexity scoring, model cost comparison
 pkg/bisect/        -- git bisect wrapper
@@ -63,10 +66,10 @@ pkg/keychain/      -- OS-specific keychain (linux/darwin/windows)
 - DO NOT use CSS-style animations (Bubble Tea uses Unicode spinners + frame redraws)
 - DO NOT implement V1.1 features (ghost mode, PiP, subagents, deferred tools)
 - DO NOT store API keys in plaintext
-- DO NOT assume concurrent task execution in V1
 - DO NOT add telemetry or analytics
 - DO NOT hardcode model lists
-- DO NOT use the AskUserQuestion tool in V1
+- DO NOT use AskUserQuestion in automated task execution flows
+- DO NOT add new tools beyond the current set without explicit request
 
 ## File Paths That Always Matter
 
