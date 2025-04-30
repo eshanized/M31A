@@ -50,6 +50,9 @@ type ReplModel struct {
 	fallbackBanner   string    // current fallback banner text, empty = no banner
 	fallbackBannerAt time.Time // when the banner appeared (for 15s auto-dismiss)
 
+	// Active question from AskUserQuestion tool
+	activeQuestion   *QuestionRequestMsg
+
 	// Provider access for LLM calls
 	registry       *provider.Registry
 	activeProvider string
@@ -211,6 +214,16 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 		switch msg.String() {
 		case "enter":
+			// If a question is active, submit the answer
+			if m.activeQuestion != nil {
+				cmd := m.HandleQuestionInput()
+				var cmds []tea.Cmd
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return cmds, false
+			}
+
 			// Dismiss fallback banner on user input
 			if m.fallbackBanner != "" {
 				m.fallbackBanner = ""
@@ -725,3 +738,47 @@ func (m *ReplModel) toggleAllThinkingBlocks() {
 		}
 	}
 }
+
+// ShowQuestion displays a question from the AskUserQuestion tool inline in the REPL.
+func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
+	m.activeQuestion = &msg
+
+	// Add a system message showing the question
+	questionText := components.FormatQuestion(msg.Question, msg.Header, msg.Options, m.width, m.theme)
+	questionMsg := types.Message{
+		Role:      "system",
+		Content:   questionText,
+		CreatedAt: time.Now(),
+	}
+	m.messages = append(m.messages, questionMsg)
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	// Focus the textarea for user input
+	m.textarea.Focus()
+	m.textarea.SetPlaceholder("Type your answer and press Enter...")
+}
+
+// HandleQuestionInput processes user input when a question is active.
+// Returns a tea.Cmd that sends the answer back to the tool, or nil if no answer.
+func (m *ReplModel) HandleQuestionInput() tea.Cmd {
+	if m.activeQuestion == nil {
+		return nil
+	}
+
+	answer := strings.TrimSpace(m.textarea.Value())
+	if answer == "" {
+		return nil
+	}
+
+	m.textarea.Reset()
+	m.activeQuestion = nil
+	m.textarea.SetPlaceholder("Type a message, /command, or goal...")
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	return func() tea.Msg {
+		return QuestionResponseMsg{Answer: answer}
+	}
+}
+

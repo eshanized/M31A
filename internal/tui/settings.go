@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 )
 
@@ -61,10 +62,11 @@ type SettingsModel struct {
 	statusMsg    string
 	ledger       *ledger.Ledger
 	configPath   string
+	keychain     keychain.Keychain
 }
 
 // NewSettingsModel creates a SettingsModel with the given config, theme, and optional ledger.
-func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *ledger.Ledger) SettingsModel {
+func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *ledger.Ledger, kc keychain.Keychain) SettingsModel {
 	m := SettingsModel{
 		config:     cfg,
 		configPath: configPath,
@@ -72,6 +74,7 @@ func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *l
 		activeTab:  tabGeneral,
 		fields:     make(map[settingsTab][]*editableField),
 		ledger:     l,
+		keychain:   kc,
 	}
 	m.buildFields()
 	return m
@@ -531,6 +534,8 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 				m.err = fmt.Sprintf("Save failed: %v", err)
 				return m, nil
 			}
+			// Save API keys to keychain if available
+			m.saveAPIKeysToKeychain()
 			m.statusMsg = "Configuration saved successfully."
 			return m, func() tea.Msg {
 				return SettingsSavedMsg{}
@@ -855,9 +860,31 @@ func (m SettingsModel) sectionHeader(label string) string {
 func (m *SettingsModel) SetConfig(cfg *config.Config) {
 	m.config = cfg
 	m.buildFields()
+	// Re-mask API key fields after rebuild
+	for _, fields := range m.fields {
+		for _, f := range fields {
+			if f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key" {
+				f.masked = true
+			}
+		}
+	}
 }
 
 // SetTheme updates the theme reference (for in-app theme changes).
 func (m *SettingsModel) SetTheme(t theme.Theme) {
 	m.theme = t
+}
+
+// saveAPIKeysToKeychain persists API keys from the config to the OS keychain.
+// This ensures keys saved via settings override any stale keychain values on next load.
+func (m *SettingsModel) saveAPIKeysToKeychain() {
+	if m.keychain == nil {
+		return
+	}
+	if key := m.config.Provider.OpenRouter.APIKey; key != "" {
+		m.keychain.Set("openrouter", key)
+	}
+	if key := m.config.Provider.Zen.APIKey; key != "" {
+		m.keychain.Set("zen", key)
+	}
 }

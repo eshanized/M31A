@@ -91,3 +91,17 @@ type PlanReadyMsg struct {
 	CostEstimate string
 	TimeEstimate string
 }
+
+// QuestionRequestMsg is sent by the AskUserQuestion tool to request user input.
+type QuestionRequestMsg struct {
+	Question    string
+	Header      string
+	Options     []string
+	AllowCustom bool
+	ResponseCh  chan string
+}
+
+// QuestionResponseMsg carries the user's answer back to the question tool.
+type QuestionResponseMsg struct {
+	Answer string
+}

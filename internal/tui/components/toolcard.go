@@ -93,6 +93,38 @@ func formatToolInput(name string, input []byte) string {
 		if path, ok := params["path"].(string); ok {
 			return "writing " + path
 		}
+	case "Edit":
+		if path, ok := params["path"].(string); ok {
+			if startLine, ok := params["start_line"].(float64); ok {
+				if endLine, ok := params["end_line"].(float64); ok {
+					return fmt.Sprintf("editing %s lines %.0f-%0.f", path, startLine, endLine)
+				}
+			}
+			return "editing " + path
+		}
+	case "TodoWrite":
+		if todos, ok := params["todos"].([]any); ok {
+			pending, completed := 0, 0
+			for _, t := range todos {
+				if m, ok := t.(map[string]any); ok {
+					switch m["status"] {
+					case "completed":
+						completed++
+					case "pending", "in_progress":
+						pending++
+					}
+				}
+			}
+			return fmt.Sprintf("todos: %d pending, %d completed", pending, completed)
+		}
+	case "WebFetch":
+		if u, ok := params["url"].(string); ok {
+			return "fetch " + u
+		}
+	case "AskUserQuestion":
+		if q, ok := params["question"].(string); ok {
+			return "? " + q
+		}
 	case "Glob":
 		if pattern, ok := params["pattern"].(string); ok {
 			return "glob " + pattern
