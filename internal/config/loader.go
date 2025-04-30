@@ -57,11 +57,17 @@ func Load(path string) (*Config, error) {
 
 // Save writes the config to a TOML file atomically (temp file + rename).
 // If M31A_CONFIG env var is set, it is used as the path instead.
+// API keys are never persisted to the config file — they must be set via
+// environment variables or the OS keychain.
 func (c *Config) Save(path string) error {
 	// M31A_CONFIG env var overrides path
 	if envPath := os.Getenv("M31A_CONFIG"); envPath != "" {
 		path = envPath
 	}
+
+	// Don't persist API keys — they came from env vars or keychain
+	c.Provider.OpenRouter.APIKey = ""
+	c.Provider.Zen.APIKey = ""
 
 	data, err := toml.Marshal(c)
 	if err != nil {
