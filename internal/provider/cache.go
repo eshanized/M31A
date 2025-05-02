@@ -53,10 +53,14 @@ func (c *ModelCache) Set(models []types.ModelInfo) {
 }
 
 func (c *ModelCache) IsExpired() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return time.Since(c.fetched) > c.ttl
 }
 
 func (c *ModelCache) IsStale() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return time.Since(c.fetched) > c.staleTTL
 }
 
