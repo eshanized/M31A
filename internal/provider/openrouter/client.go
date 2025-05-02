@@ -19,6 +19,9 @@ import (
 
 var Version = "dev"
 
+// Compile-time interface check
+var _ provider.LLMProvider = (*Client)(nil)
+
 type Client struct {
 	apiKey     string
 	baseURL    string
@@ -204,6 +207,9 @@ func (c *Client) makeIterator(sse *provider.SSEParser, modelID string) *types.St
 					return nil, err
 				}
 				return chunk, nil
+			}
+			if data == "" {
+				return nil, nil
 			}
 			chunk, err := provider.ParseSSEChunk(data, modelID)
 			if err != nil {
