@@ -13,10 +13,6 @@ type FallbackEvent struct {
 	Reason string `json:"reason"`
 }
 
-func ShouldFallback(statusCode int) bool {
-	return statusCode == 429 || statusCode == 503
-}
-
 func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
 	names := registry.List()
 
@@ -31,7 +27,7 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		status := p.HealthCheck(ctx)
 		cancel()
 
