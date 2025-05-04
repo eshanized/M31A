@@ -82,6 +82,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 
 	// Path safety: verify resolved path is within workDir
+	// If file exists, resolve its symlinks; otherwise resolve the parent directory
 	resolved := targetPath
 	if _, err := os.Stat(targetPath); err == nil {
 		// File exists — resolve symlinks
@@ -91,6 +92,13 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		}
 	} else if !os.IsNotExist(err) {
 		return types.ToolResult{}, fmt.Errorf("cannot stat path: %w", err)
+	} else {
+		// File doesn't exist — resolve parent directory through symlinks
+		parentDir := filepath.Dir(targetPath)
+		if resolvedParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+			resolved = filepath.Join(resolvedParent, filepath.Base(targetPath))
+		}
+		// If parent also doesn't exist, we'll create it; use targetPath as-is
 	}
 
 	workDirPrefix := t.workDir
