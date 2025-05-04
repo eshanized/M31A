@@ -51,6 +51,9 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 			timeoutSec = int(customFloat)
 		}
 	}
+	if timeoutSec <= 0 {
+		timeoutSec = 1800
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
@@ -71,7 +74,17 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	cmd.Stderr = io.MultiWriter(stderrW, stderrLimit)
 
 	if err := cmd.Start(); err != nil {
-		return types.ToolResult{}, m31errors.ErrToolExecution
+		// Close pipe ends to unblock the goroutines that will read from them
+		stdoutW.Close()
+		stderrW.Close()
+		stdoutR.Close()
+		errRead, _ := io.ReadAll(stderrR)
+		stderrR.Close()
+		extra := ""
+		if len(errRead) > 0 {
+			extra = ": " + strings.TrimSpace(string(errRead))
+		}
+		return types.ToolResult{}, fmt.Errorf("%w%s", m31errors.ErrToolExecution, extra)
 	}
 
 	// Signal forwarding on cancellation
@@ -95,10 +108,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}()
 
-	// Close write ends when command finishes
-	var waitErr error
+	// Use error channel instead of shared variable to avoid data race
+	waitCh := make(chan error, 1)
 	go func() {
-		waitErr = cmd.Wait()
+		waitCh <- cmd.Wait()
 		stdoutW.Close()
 		stderrW.Close()
 		close(cmdDone)
@@ -137,6 +150,14 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	wg.Wait()
 
 	output := outStr.String()
+
+	// Read wait error from channel (avoids data race)
+	var waitErr error
+	select {
+	case waitErr = <-waitCh:
+	case <-time.After(30 * time.Second):
+		waitErr = fmt.Errorf("wait timeout")
+	}
 
 	// Check if output was truncated
 	truncated := atomic.LoadInt64(&stdoutLimit.written) >= types.BashOutputLimit || atomic.LoadInt64(&stderrLimit.written) >= types.BashOutputLimit
