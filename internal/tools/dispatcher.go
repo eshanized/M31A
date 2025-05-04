@@ -20,10 +20,8 @@ type Dispatcher struct {
 	requestCh      chan PermissionRequest
 	responseCh     chan PermissionResponse
 	todoWrite      *TodoWrite
-	webFetch       *WebFetch
 	questionReqCh  chan QuestionRequest
 	questionRespCh chan QuestionResponse
-	askUser        *AskUserQuestion
 }
 
 func NewDispatcher() *Dispatcher {
@@ -60,7 +58,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	var input types.ToolInput
 	if err := json.Unmarshal(call.Input, &input); err != nil {
-		input = types.ToolInput{Name: call.Name, Params: map[string]any{}}
+		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %w", call.Name, err)
 	}
 	input.Name = call.Name
 
@@ -121,6 +119,13 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 func (d *Dispatcher) ApprovePermission(allowed bool, remember bool) {
 	d.responseCh <- PermissionResponse{Allowed: allowed, Remember: remember}
+}
+
+// SetPermission sets a remembered permission directly (useful for tests).
+func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.permissions[toolName] = allowed
 }
 
 func (d *Dispatcher) List() []string {
@@ -272,12 +277,8 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string) *Dispatcher {
 	todo := NewTodoWrite(sessionsDir, "")
 	d.todoWrite = todo
 	d.Register(todo)
-	wf := NewWebFetch(sessionsDir)
-	d.webFetch = wf
-	d.Register(wf)
-	aq := NewAskUserQuestion(d.questionReqCh, d.questionRespCh)
-	d.askUser = aq
-	d.Register(aq)
+	d.Register(NewWebFetch(sessionsDir))
+	d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh))
 	d.Register(NewGlob(workDir))
 	d.Register(NewGrep(workDir))
 	return d
