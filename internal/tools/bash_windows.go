@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"os/exec"
+	"strconv"
 )
 
 func setupProcessGroup(cmd *exec.Cmd) {
@@ -20,7 +21,7 @@ const (
 func processKill(pid int, sig int) {
 	// On Windows, use taskkill to terminate the process
 	_ = sig // ignored on Windows
-	c := exec.Command("taskkill", "/F", "/PID", string(rune(pid)))
+	c := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
 	_ = c.Run()
 }
 
