@@ -20,6 +20,9 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Register(name string, p LLMProvider) {
+	if name == "" {
+		panic("provider name cannot be empty")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers[name] = p
