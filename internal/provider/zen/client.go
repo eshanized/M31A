@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -17,6 +18,9 @@ import (
 )
 
 var Version = "dev"
+
+// Compile-time interface check
+var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
 	apiKey     string
@@ -68,22 +72,26 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
+		log.Printf("[zen] failed to create models request: %v; falling back to cache", err)
 		return c.staleFallback()
 	}
 	c.setCommonHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Printf("[zen] failed to fetch models: %v; falling back to cache", err)
 		return c.staleFallback()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[zen] unexpected status %d fetching models; falling back to cache", resp.StatusCode)
 		return c.staleFallback()
 	}
 
 	var apiResp zenModelsResp
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		log.Printf("[zen] failed to decode models response: %v; falling back to cache", err)
 		return c.staleFallback()
 	}
 
@@ -99,6 +107,10 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				OutputPerMToken: 0,
 			},
 			TopProvider: "zen",
+			Capabilities: types.CapFlags{
+				Tools:     true,
+				Reasoning: false,
+			},
 		}
 		models = append(models, info)
 	}
@@ -185,6 +197,9 @@ func (c *Client) makeIterator(sse *provider.SSEParser, modelID string) *types.St
 			_, data, err := sse.Next()
 			if err != nil {
 				return nil, err
+			}
+			if data == "" {
+				return nil, nil
 			}
 			chunk, err := provider.ParseSSEChunk(data, modelID)
 			if err != nil {
