@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,8 @@ func GetReasoningConfig(modelID string) (ReasoningConfig, bool) {
 	for k := range reasoningParamMap {
 		keys = append(keys, k)
 	}
+	// Sort by length descending so longer prefixes match first
+	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
 
 	for _, prefix := range keys {
 		if strings.HasPrefix(modelID, prefix) {
