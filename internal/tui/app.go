@@ -24,6 +24,7 @@ import (
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -78,22 +79,40 @@ type AppState struct {
 	msgChan            chan tea.Msg // channel for workflow-emitted messages
 	workflowCtx        context.Context
 	workflowCancel     context.CancelFunc
+	git                *git.Git
+	rollback           *rollback.Rollback
+	healthCheckInFlight bool
+	sidebarModel       *SidebarModel
+	cmdPalette         *CommandPaletteModel
+	cmdPaletteOpen     bool
+	keyRegistry        *KeyRegistry
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
 	tm := theme.NewManager(theme.ModeDark)
 
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
 	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
 
 	// Initialize config
-	cfg, _ := config.Load(configPath)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		// Config may not exist yet — use defaults
+		cfg = config.DefaultConfig()
+	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 
 	// Initialize keychain (may be nil — keychain may be unavailable)
-	kc, _ := keychain.New()
+	kc, err := keychain.New()
+	if err != nil {
+		// Keychain unavailable — continue without it
+		kc = nil
+	}
 
 	// Resolve API keys via env var → keychain → config file
 	if apiKey == "" {
@@ -111,6 +130,10 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	sessionBaseDir := filepath.Join(filepath.Dir(configPath), "sessions")
 	sessionMgr := session.NewManager(sessionBaseDir)
 
+	// Initialize git operations and rollback
+	g := git.New(cwd)
+	rb := rollback.New(g)
+
 	app := &AppState{
 		version:        version,
 		registry:       registry,
@@ -122,6 +145,8 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		config:         cfg,
 		keychain:       kc,
 		sessionManager: sessionMgr,
+		git:            g,
+		rollback:       rb,
 	}
 
 	// Initialize ledger for settings stats display
@@ -145,8 +170,27 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	// Initialize command registry
 	app.cmdRegistry = DefaultCommands()
 
+	// Initialize sidebar model
+	app.sidebarModel = NewSidebarModel(g, tm.Current())
+
+	// Initialize command palette
+	app.cmdPalette = NewCommandPaletteModel()
+
+	// Initialize key registry
+	app.keyRegistry = NewKeyRegistry()
+	app.keyRegistry.RegisterDefaultBindings()
+
 	if registry != nil {
 		app.activeProvider = registry.Active()
+	}
+
+	// Auto-populate activeModel from provider cache using config default
+	if app.activeProvider != "" && registry != nil && app.config != nil && app.config.Model.Default != "" {
+		if p := registry.ActiveProvider(); p != nil {
+			if model, _ := p.GetModel(app.config.Model.Default); model != nil {
+				app.activeModel = model
+			}
+		}
 	}
 
 	app.initWorkflowEngine()
@@ -182,11 +226,21 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 }
 
 func (m *AppState) initWorkflowEngine() {
-	if m.registry == nil || m.activeProvider == "" || m.sessionManager == nil {
+	if m.registry == nil {
+		m.currentOperation = "Workflow engine init failed: no provider registry"
+		return
+	}
+	if m.activeProvider == "" {
+		m.currentOperation = "Workflow engine init failed: no active provider"
+		return
+	}
+	if m.sessionManager == nil {
+		m.currentOperation = "Workflow engine init failed: no session manager"
 		return
 	}
 	p := m.registry.ActiveProvider()
 	if p == nil {
+		m.currentOperation = "Workflow engine init failed: active provider is nil"
 		return
 	}
 
@@ -198,6 +252,7 @@ func (m *AppState) initWorkflowEngine() {
 		modelID = m.config.Model.Default
 	}
 	if modelID == "" {
+		m.currentOperation = "Workflow engine init failed: no model selected"
 		return
 	}
 
@@ -238,6 +293,14 @@ func (m *AppState) initWorkflowEngine() {
 // MsgEmitter on the engine so that TaskStartMsg and TaskUpdateMsg are emitted
 // during execution and PlanReadyMsg when the plan phase completes.
 func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd {
+	// Cancel any previous phase's context to stop lingering goroutines
+	if app.workflowCancel != nil {
+		app.workflowCancel()
+	}
+	// Don't close the old msgChan — a lingering goroutine may still be
+	// writing to it. Replace it; the old drainer sees nil and stops.
+	app.msgChan = nil
+
 	msgCh := make(chan tea.Msg, 64)
 	app.msgChan = msgCh
 
@@ -273,11 +336,14 @@ func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd 
 
 		close(msgCh)
 		return PhaseResultMsg{
-			Phase:    phase,
-			Tasks:    result.Tasks,
-			Messages: result.Messages,
-			Success:  result.Success,
-			Error:    result.Error,
+			Phase:               phase,
+			Tasks:               result.Tasks,
+			Messages:            result.Messages,
+			Success:             result.Success,
+			Error:               result.Error,
+			NeedsAnswers:        result.NeedsAnswers,
+			RequiresManualInput: result.RequiresManualInput,
+			DurationMs:          result.DurationMs,
 		}
 	}
 
@@ -360,9 +426,76 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.firstRunModel != nil {
 			m.firstRunModel.Update(msg)
 		}
+		if m.sidebarModel != nil {
+			m.sidebarModel.Update(msg)
+		}
+		return m, nil
+
+	case LeaderTimeoutMsg:
+		if m.keyRegistry != nil {
+			m.keyRegistry.DeactivateLeader()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
+		// Command palette: when open, route all keys to it
+		if m.cmdPaletteOpen && m.cmdPalette != nil {
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				m.cmdPalette.Close()
+				m.cmdPaletteOpen = false
+				return m, nil
+			case "enter":
+				if cmd := m.cmdPalette.SelectedCommand(); cmd != nil && cmd.Execute != nil {
+					execCmd := cmd.Execute()
+					m.cmdPalette.Close()
+					m.cmdPaletteOpen = false
+					return m, execCmd
+				}
+				// No command selected, just close
+				m.cmdPalette.Close()
+				m.cmdPaletteOpen = false
+				return m, nil
+			}
+			m.cmdPalette.Update(msg)
+			return m, nil
+		}
+
+		// Open command palette with ctrl+p
+		if msg.String() == "ctrl+p" {
+			if m.cmdPalette != nil && m.screen == ScreenREPL {
+				cmds := m.cmdRegistry.AllCommands()
+				// Add sidebar toggle command
+				cmds = append(cmds, CommandInfo{
+					Name:        "Toggle sidebar",
+					Description: "Show/hide the file status sidebar",
+					Slash:       "",
+					Execute: func() tea.Cmd {
+						if m.sidebarModel != nil {
+							m.sidebarModel.Toggle()
+						}
+						return nil
+					},
+				})
+				m.cmdPalette.SetCommands(cmds)
+				m.cmdPalette.Open()
+				m.cmdPaletteOpen = true
+				return m, nil
+			}
+		}
+
+		// Toggle sidebar with ctrl+b
+		if msg.String() == "ctrl+b" && m.screen == ScreenREPL {
+			if m.sidebarModel != nil {
+				m.sidebarModel.Toggle()
+				// Refresh git status when showing sidebar
+				if m.sidebarModel.IsVisible() {
+					return m, m.sidebarModel.refreshCmd()
+				}
+			}
+			return m, nil
+		}
+
 		if m.fallbackNotification != nil && !m.fallbackNotification.Dismissed && msg.String() == "x" {
 			m.fallbackNotification.Dismissed = true
 			return m, nil
@@ -503,6 +636,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					WorkflowEngine:  m.workflowEngine,
 					SessionID:       sessionID,
 					AutoDream:       m.autoDream,
+					Git:             m.git,
+					Rollback:        m.rollback,
 				}
 				result, handled := m.cmdRegistry.Execute(msg.String(), ctx)
 				if handled {
@@ -512,10 +647,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if *result.Screen == ScreenFirstRun {
 							m.replModel = nil
 						}
+						if result.Cmd != nil {
+							return m, tea.Batch(result.Cmd)
+						}
 						return m, nil
 					}
 					if strings.HasPrefix(result.Message, "Goodbye") {
 						return m, tea.Quit
+					}
+					if result.Cmd != nil {
+						return m, tea.Batch(result.Cmd)
 					}
 					return m, nil
 				}
@@ -523,6 +664,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case HealthCheckTickMsg:
+		if m.healthCheckInFlight {
+			return m, NextHealthTick(5 * time.Second)
+		}
 		if m.registry == nil || m.activeProvider == "" {
 			return m, NextHealthTick(types.HealthCheckInterval)
 		}
@@ -535,15 +679,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, NextHealthTick(120 * time.Second)
 		}
 
+		m.healthCheckInFlight = true
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		p := m.registry.ActiveProvider()
 		if p == nil {
 			cancel()
+			m.healthCheckInFlight = false
 			return m, NextHealthTick(types.HealthCheckInterval)
 		}
 
 		result := p.HealthCheck(ctx)
 		cancel()
+		m.healthCheckInFlight = false
 		m.healthStatus = result
 		m.lastActivity = time.Now()
 		return m, NextHealthTick(calculateNextInterval(result))
@@ -587,6 +734,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel = &rp
 			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
 			m.initialized = true
+			// Init sidebar
+			if m.sidebarModel == nil {
+				m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
+			}
+			if m.width > 120 {
+				m.sidebarModel.SetVisible(true)
+			}
 		}
 		if msg.Screen == ScreenModelSelector {
 			m.prevScreen = m.screen
@@ -655,13 +809,35 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t := m.themeManager.Current()
 		pm := components.NewPermissionModal(msg.Request, t, 5*time.Minute)
 		m.permissionModal = pm
-		return m, nil
+		return m, tea.Batch(
+			permissionListenerCmd(m.dispatcher),
+			questionListenerCmd(m.dispatcher),
+			tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
+				return PermissionTickMsg{}
+			}),
+		)
 
 	case PermissionResponseMsg:
 		m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
 		m.screen = m.prevScreen
 		m.permissionModal = nil
 		return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+
+	case PermissionTickMsg:
+		if m.screen == ScreenPermission && m.permissionModal != nil {
+			m.permissionModal.Tick()
+			if m.permissionModal.Remaining() <= 0 {
+				// Auto-deny on timeout
+				resp := m.permissionModal.Deny()
+				m.dispatcher.ApprovePermission(resp.Allowed, resp.Remember)
+				m.screen = m.prevScreen
+				m.permissionModal = nil
+				return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+			}
+		}
+		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
+			return PermissionTickMsg{}
+		})
 
 	case QuestionRequestMsg:
 		// Display question in REPL and wait for user answer
@@ -677,7 +853,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.dispatcher.QuestionResponseCh() <- dresp:
 		default:
 		}
-		return m, nil
+		return m, questionListenerCmd(m.dispatcher)
 
 	case PlanReadyMsg:
 		// Plan phase completed with valid tasks — update the plan screen.
@@ -734,16 +910,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
 
 		case types.PhaseDiscuss:
-			// Extract questions and transition to Discuss screen for Q&A
-			m.currentPhase = types.PhaseDiscuss
+			// Extract questions from the discuss phase result
 			m.discussQuestions = make([]string, 0, len(msg.Messages))
 			for _, msg2 := range msg.Messages {
 				if msg2.Role == "assistant" {
 					m.discussQuestions = append(m.discussQuestions, msg2.Content)
 				}
 			}
-			// For V1, we auto-advance to Plan with saved answers
-			// The discuss answers are already saved to PROJECT.md by the engine
+			if msg.NeedsAnswers {
+				// Show discuss screen and wait for user interaction
+				m.currentPhase = types.PhaseDiscuss
+				m.screen = ScreenREPL // Use REPL for Q&A interaction
+				return m, nil
+			}
+			// No questions — auto-advance to Plan
 			m.currentPhase = types.PhasePlan
 			return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 
@@ -766,18 +946,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t := m.themeManager.Current()
 			m.executeModel = NewExecuteModel(msg.Tasks, t)
 			m.screen = ScreenExecute
-			// Run the actual execute phase via engine (tool dispatch, git commits)
+			// Transition to Verify phase
 			m.currentPhase = types.PhaseVerify
-			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
 
 		case types.PhaseVerify:
 			t := m.themeManager.Current()
 			results := make(map[int]workflow.VerificationResult)
 			m.verifyModel = NewVerifyModel(msg.Tasks, results, t)
 			m.screen = ScreenVerify
-			// Run the actual verify phase via engine
+			// Transition to Ship phase
 			m.currentPhase = types.PhaseShip
-			return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
+			return m, RunPhaseCmd(m, types.PhaseShip, m.workflowGoal)
 
 		case types.PhaseShip:
 			t := m.themeManager.Current()
@@ -875,6 +1055,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.replModel = &rp
 				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
 				m.initialized = true
+				// Init sidebar
+				if m.sidebarModel == nil {
+					m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
+				}
+				// Auto-show sidebar on wide terminals
+				if m.width > 120 {
+					m.sidebarModel.SetVisible(true)
+				}
 				healthCmd := HealthCheckTicker(
 					context.Background(), m.registry, m.activeProvider,
 					types.HealthCheckInterval,
@@ -908,6 +1096,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{cmd}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		return m, tea.Batch(cmds...)
+
+	case ScreenPermission:
+		// Permission modal only handles key events; non-key messages are ignored
+		// but the modal remains visible
+		return m, nil
 
 	case ScreenResume:
 		if m.resumeModel == nil {
@@ -1039,20 +1232,49 @@ func (m *AppState) View() string {
 			m.width,
 		)
 
-		body := m.replModel.View()
-
 		operation := m.currentOperation
 		if m.replModel.streaming || m.replModel.thinking {
 			operation = m.replModel.GetStatusText()
 		}
-		status := RenderStatusBar(t, operation, m.lastActivity, m.width)
 
-		return lipgloss.JoinVertical(
+		var mainContent string
+		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+			sidebar := m.sidebarModel.View()
+			replView := m.replModel.View()
+			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, replView, sidebar)
+		} else {
+			mainContent = m.replModel.View()
+		}
+
+		var statusInfo *StatusBarInfo
+		if m.replModel.LastUsage() != nil && m.config != nil && m.config.UI.ShowCostEstimate {
+			usage := m.replModel.LastUsage()
+			cost := m.replModel.LastCost()
+			statusInfo = &StatusBarInfo{
+				PromptTokens: usage.PromptTokens,
+				TotalTokens:  usage.TotalTokens,
+				Cost:         cost,
+				ShowCost:     true,
+			}
+		} else {
+			statusInfo = &StatusBarInfo{}
+		}
+		// Add which-key / leader info
+		if m.keyRegistry != nil {
+			statusInfo.LeaderActive = m.keyRegistry.IsLeaderActive()
+			if !statusInfo.LeaderActive {
+				statusInfo.WhichKey = m.keyRegistry.RenderWhichKey(CtxREPL, t, m.width/2)
+			}
+		}
+		status := RenderStatusBar(t, operation, m.lastActivity, m.width, statusInfo)
+
+		base := lipgloss.JoinVertical(
 			lipgloss.Top,
 			header,
-			body,
+			mainContent,
 			status,
 		)
+		return m.renderWithPalette(base)
 
 	case ScreenSettings:
 		if m.settingsModel != nil {
@@ -1101,6 +1323,17 @@ func (m *AppState) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Unknown screen")
 	}
+}
+
+// renderWithPalette overlays the command palette on top of the base view when open.
+func (m *AppState) renderWithPalette(base string) string {
+	if m.cmdPaletteOpen && m.cmdPalette != nil {
+		palette := m.cmdPalette.View()
+		if palette != "" {
+			return base + "\n" + palette
+		}
+	}
+	return base
 }
 
 func calculateNextInterval(status types.HealthStatus) time.Duration {
