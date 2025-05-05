@@ -11,31 +11,41 @@ import (
 )
 
 type ThinkingBlock struct {
+	id        int
 	segment   types.MessageSegment
 	theme     theme.Theme
 	expanded  bool
+	focused   bool
 	startedAt time.Time
 }
 
-func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool) *ThinkingBlock {
+func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool, id int) *ThinkingBlock {
 	startedAt := segment.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
 	return &ThinkingBlock{
+		id:        id,
 		segment:   segment,
 		theme:     t,
 		expanded:  expanded,
+		focused:   false,
 		startedAt: startedAt,
 	}
 }
 
 func (b *ThinkingBlock) Render(width int) string {
 	header := b.Header(width)
+	style := b.theme.ThinkingBlock.Width(width)
+
+	// Add left border when focused for visual distinction
+	if b.focused {
+		style = style.Border(lipgloss.Border{Left: "│"}, true, false, true, false).
+			BorderForeground(b.theme.Thinking)
+	}
+
 	if !b.expanded {
-		return b.theme.ThinkingBlock.
-			Width(width).
-			Render(header)
+		return style.Render(header)
 	}
 
 	contentWidth := width - 6
@@ -49,21 +59,31 @@ func (b *ThinkingBlock) Render(width int) string {
 		Foreground(b.theme.Border).
 		Render(strings.Repeat("─", contentWidth))
 
-	return b.theme.ThinkingBlock.
-		Width(width).
-		Render(lipgloss.JoinVertical(lipgloss.Top,
-			header,
-			separator,
-			content,
-		))
+	return style.Render(lipgloss.JoinVertical(lipgloss.Top,
+		header,
+		separator,
+		content,
+	))
 }
 
 func (b *ThinkingBlock) Toggle() {
 	b.expanded = !b.expanded
 }
 
+func (b *ThinkingBlock) SetFocused(f bool) {
+	b.focused = f
+}
+
+func (b *ThinkingBlock) IsFocused() bool {
+	return b.focused
+}
+
 func (b *ThinkingBlock) IsExpanded() bool {
 	return b.expanded
+}
+
+func (b *ThinkingBlock) ID() int {
+	return b.id
 }
 
 func (b *ThinkingBlock) Duration() string {
@@ -87,9 +107,15 @@ func (b *ThinkingBlock) Duration() string {
 }
 
 func (b *ThinkingBlock) Header(width int) string {
-	toggle := "▼"
+	toggle := "+"
 	if b.expanded {
-		toggle = "▲"
+		toggle = "−"
+	}
+
+	// Focus indicator: bold toggle when focused
+	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+	if b.focused {
+		toggleStyle = toggleStyle.Bold(true)
 	}
 
 	label := fmt.Sprintf("[%s] Thinking (%s)", toggle, b.Duration())
@@ -102,8 +128,6 @@ func (b *ThinkingBlock) Header(width int) string {
 		label = label[:maxWidth] + "..."
 	}
 
-	toggleStyle := lipgloss.NewStyle().
-		Foreground(b.theme.Thinking)
 	durationStyle := lipgloss.NewStyle().
 		Foreground(b.theme.TextSecondary)
 
