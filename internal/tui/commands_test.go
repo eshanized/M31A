@@ -604,8 +604,8 @@ func TestResetCommand(t *testing.T) {
 func TestCommands_AllRegistered(t *testing.T) {
 	r := DefaultCommands()
 	names := r.List()
-	if len(names) != 17 {
-		t.Fatalf("expected exactly 17 commands, got %d: %v", len(names), names)
+	if len(names) != 28 {
+		t.Fatalf("expected exactly 28 commands, got %d: %v", len(names), names)
 	}
 
 	// Verify all expected commands are present
@@ -614,7 +614,9 @@ func TestCommands_AllRegistered(t *testing.T) {
 		"provider": false, "reset": false, "quit": false, "undo": false,
 		"compress": false, "ledger": false, "rollback": false, "sessions": false,
 		"goal": false, "phase": false, "config": false, "models": false,
-		"fallback": false,
+		"fallback": false, "tools": false, "workflow": false, "history": false,
+		"diff": false, "theme": false, "save": false, "key": false,
+		"log": false, "tokens": false, "health": false, "run": false,
 	}
 	hasExtra := false
 	for _, name := range names {
