@@ -52,6 +52,9 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("parameter pattern must be a string")
 	}
+	if len(pattern) > 1024 {
+		return types.ToolResult{}, fmt.Errorf("regex pattern too long (max 1024 chars)")
+	}
 
 	searchPath := t.workDir
 	if pathRaw, ok := input.Params["path"]; ok {
