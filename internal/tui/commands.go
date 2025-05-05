@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
@@ -31,6 +32,7 @@ type CommandResult struct {
 	Screen    *Screen
 	SessionID *string
 	Config    *config.Config
+	Cmd       func() tea.Msg // optional tea.Cmd to run after command
 }
 
 // CommandHandler is a function that handles a slash command.
@@ -91,6 +93,22 @@ func (r *CommandRegistry) List() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// AllCommands returns all registered commands as CommandInfo slices
+// suitable for populating the command palette.
+func (r *CommandRegistry) AllCommands() []CommandInfo {
+	names := r.List()
+	cmds := make([]CommandInfo, 0, len(names))
+	for _, name := range names {
+		desc := r.descriptions[name]
+		cmds = append(cmds, CommandInfo{
+			Name:        name,
+			Description: desc,
+			Slash:       "/" + name,
+		})
+	}
+	return cmds
 }
 
 // Execute parses input as a command, looks up the handler, and runs it.
@@ -213,7 +231,7 @@ func handleStatus(args []string, ctx CommandContext) CommandResult {
 		b.WriteString(fmt.Sprintf("  Provider:    %s\n", active))
 
 		if ap := ctx.Registry.ActiveProvider(); ap != nil {
-			models, err := ap.FetchModels(nil)
+			models, err := ap.FetchModels(context.Background())
 			if err == nil && len(models) > 0 {
 				// Show the first model as a representative
 				b.WriteString(fmt.Sprintf("  Models:      %d cached\n", len(models)))
@@ -308,6 +326,10 @@ func handleProvider(args []string, ctx CommandContext) CommandResult {
 
 // handleReset returns a result that transitions the TUI to the first-run screen.
 func handleReset(args []string, ctx CommandContext) CommandResult {
+	// Clear conversation history if available
+	if ctx.AutoDream != nil {
+		ctx.AutoDream.SetMessages(nil)
+	}
 	screen := ScreenFirstRun
 	return CommandResult{Success: true, Screen: &screen, Message: "Resetting to first-run..."}
 }
@@ -708,7 +730,7 @@ func handleModels(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "No active provider."}
 	}
 
-	models, err := ap.FetchModels(nil)
+	models, err := ap.FetchModels(context.Background())
 	if err != nil {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to fetch models: %v", err)}
 	}
@@ -905,7 +927,11 @@ func handleSave(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to save session: %v", err)}
 	}
 
-	return CommandResult{Success: true, Message: "Session saved successfully."}
+	return CommandResult{
+		Success: true,
+		Message: "Session saved successfully.",
+		Cmd:     func() tea.Msg { return SettingsSavedMsg{} },
+	}
 }
 
 // handleKey shows API key status and resolution source.
