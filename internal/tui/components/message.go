@@ -94,7 +94,7 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		case "content":
 			rendered = append(rendered, r.renderContentSegment(seg.Content, contentWidth))
 		case "thinking":
-			tb := NewThinkingBlock(seg, r.theme, false)
+			tb := NewThinkingBlock(seg, r.theme, false, 0)
 			rendered = append(rendered, tb.Render(contentWidth))
 		}
 	}
