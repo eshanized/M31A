@@ -12,18 +12,10 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-type WebFetch struct {
-	sessionDir string
-	client     *http.Client
-}
+type WebFetch struct{}
 
-func NewWebFetch(sessionDir string) *WebFetch {
-	return &WebFetch{
-		sessionDir: sessionDir,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-	}
+func NewWebFetch(_ string) *WebFetch {
+	return &WebFetch{}
 }
 
 func (t *WebFetch) Name() string {
@@ -89,7 +81,15 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
 	// Execute request
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	client := &http.Client{
+		Timeout: time.Duration(timeout) * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("request failed: %w", err)
