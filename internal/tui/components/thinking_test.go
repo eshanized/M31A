@@ -14,7 +14,7 @@ func TestNewThinkingBlock_DefaultState(t *testing.T) {
 		Type:    "thinking",
 		Content: "thinking content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	if tb == nil {
 		t.Fatal("expected non-nil ThinkingBlock")
 	}
@@ -28,7 +28,7 @@ func TestThinkingBlock_RenderCollapsed(t *testing.T) {
 		Type:    "thinking",
 		Content: "deep reasoning content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	result := tb.Render(80)
 	if result == "" {
 		t.Error("expected non-empty collapsed render")
@@ -40,7 +40,7 @@ func TestThinkingBlock_RenderExpanded(t *testing.T) {
 		Type:    "thinking",
 		Content: "expanded thinking content here",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true)
+	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
 	result := tb.Render(80)
 	if result == "" {
 		t.Error("expected non-empty expanded render")
@@ -52,7 +52,7 @@ func TestThinkingBlock_Toggle(t *testing.T) {
 		Type:    "thinking",
 		Content: "content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 
 	tb.Toggle()
 	if !tb.IsExpanded() {
@@ -71,7 +71,7 @@ func TestThinkingBlock_Duration_Under10s(t *testing.T) {
 		Content:    "test",
 		DurationMs: 1200,
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	dur := tb.Duration()
 	if dur != "1.2s" {
 		t.Errorf("expected 1.2s, got %q", dur)
@@ -84,7 +84,7 @@ func TestThinkingBlock_Duration_Over10s(t *testing.T) {
 		Content:    "test",
 		DurationMs: 12300,
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	dur := tb.Duration()
 	if dur != "12.3s" {
 		t.Errorf("expected 12.3s, got %q", dur)
@@ -97,7 +97,7 @@ func TestThinkingBlock_Duration_Over60s(t *testing.T) {
 		Content:    "test",
 		DurationMs: 83000,
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	dur := tb.Duration()
 	if dur != "1m 23s" {
 		t.Errorf("expected 1m 23s, got %q", dur)
@@ -109,7 +109,7 @@ func TestThinkingBlock_Header_TruncatesWide(t *testing.T) {
 		Type:    "thinking",
 		Content: "very long content that should be truncated in header",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true)
+	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
 	header := tb.Header(20)
 	if header == "" {
 		t.Error("expected non-empty header")
@@ -122,7 +122,7 @@ func TestThinkingBlock_FinalizedDuration(t *testing.T) {
 		Content:    "done thinking",
 		DurationMs: 5500,
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	dur := tb.Duration()
 	if dur != "5.5s" {
 		t.Errorf("expected 5.5s, got %q", dur)
@@ -134,7 +134,7 @@ func TestThinkingBlock_LiveDuration(t *testing.T) {
 		Type:    "thinking",
 		Content: "live thinking",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	time.Sleep(60 * time.Millisecond)
 	dur := tb.Duration()
 	if dur == "0.0s" {
@@ -147,10 +147,10 @@ func TestThinkingBlock_Header_Collapsed(t *testing.T) {
 		Type:    "thinking",
 		Content: "content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	header := tb.Header(80)
-	if !strings.Contains(header, "▼") {
-		t.Error("expected '▼' in collapsed header")
+	if !strings.Contains(header, "[+]") {
+		t.Error("expected '[+]' in collapsed header")
 	}
 }
 
@@ -159,10 +159,10 @@ func TestThinkingBlock_Header_Expanded(t *testing.T) {
 		Type:    "thinking",
 		Content: "content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true)
+	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
 	header := tb.Header(80)
-	if !strings.Contains(header, "▲") {
-		t.Error("expected '▲' in expanded header")
+	if !strings.Contains(header, "[−]") {
+		t.Error("expected '[−]' in expanded header")
 	}
 }
 
@@ -171,15 +171,15 @@ func TestThinkingBlock_AfterToggle(t *testing.T) {
 		Type:    "thinking",
 		Content: "content",
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false)
+	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 
 	// Initially collapsed
 	if tb.IsExpanded() {
 		t.Error("expected initially collapsed")
 	}
 	headerBefore := tb.Header(80)
-	if !strings.Contains(headerBefore, "▼") {
-		t.Error("expected '▼' before toggle")
+	if !strings.Contains(headerBefore, "[+]") {
+		t.Error("expected '[+]' before toggle")
 	}
 
 	// Toggle to expanded
@@ -188,7 +188,7 @@ func TestThinkingBlock_AfterToggle(t *testing.T) {
 		t.Error("expected expanded after toggle")
 	}
 	headerAfter := tb.Header(80)
-	if !strings.Contains(headerAfter, "▲") {
-		t.Error("expected '▲' after toggle")
+	if !strings.Contains(headerAfter, "[−]") {
+		t.Error("expected '[−]' after toggle")
 	}
 }
