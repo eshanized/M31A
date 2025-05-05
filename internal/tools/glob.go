@@ -71,6 +71,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	const maxResults = 1000
 	truncated := false
+	origCount := len(matches)
 	if len(matches) > maxResults {
 		matches = matches[:maxResults]
 		truncated = true
@@ -86,7 +87,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	fmt.Fprintf(&b, "%-50s %10s %s\n", "path", "size", "modified")
 	for _, m := range matches {
 		fullPath := m
-		if !useRG {
+		if !filepath.IsAbs(m) {
 			fullPath = filepath.Join(t.workDir, m)
 		}
 		fi, err := os.Stat(fullPath)
@@ -96,7 +97,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format("2006-01-02 15:04"))
 	}
 	if truncated {
-		fmt.Fprintf(&b, "[... %d more files]", len(matches)-maxResults)
+		fmt.Fprintf(&b, "[... %d more files]", origCount-maxResults)
 	}
 
 	return types.ToolResult{
