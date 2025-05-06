@@ -220,8 +220,10 @@ func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showDetail {
 				item := m.list.SelectedItem()
 				if item != nil {
-					mi := item.(ModelItem)
-					m.detailModel = &mi.Model
+					mi, ok := item.(ModelItem)
+					if ok {
+						m.detailModel = &mi.Model
+					}
 				}
 			} else {
 				m.detailModel = nil
@@ -233,7 +235,10 @@ func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if item == nil {
 				return m, nil
 			}
-			mi := item.(ModelItem)
+			mi, ok := item.(ModelItem)
+			if !ok {
+				return m, nil
+			}
 			return m, func() tea.Msg {
 				return AppMsg{
 					ModelSelected: &ModelSelectedMsg{
