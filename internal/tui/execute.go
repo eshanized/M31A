@@ -17,7 +17,6 @@ type ExecuteModel struct {
 	current  int
 	width    int
 	height   int
-	paused   bool
 	toolCard string
 }
 
@@ -56,10 +55,6 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			if m.current < len(m.tasks)-1 {
 				m.current++
 			}
-		case "p", "P":
-			m.paused = true
-		case "r", "R":
-			m.paused = false
 		case "s", "S":
 			// Skip current task
 			if m.current < len(m.tasks) {
