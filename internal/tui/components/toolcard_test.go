@@ -174,3 +174,62 @@ func TestToolCard_HeaderColors(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "ansi color codes stripped",
+			input: "\x1b[31mred text\x1b[0m",
+			want:  "red text",
+		},
+		{
+			name:  "ansi bold and color",
+			input: "\x1b[1;32mgreen bold\x1b[0m",
+			want:  "green bold",
+		},
+		{
+			name:  "null byte stripped",
+			input: "hello\x00world",
+			want:  "helloworld",
+		},
+		{
+			name:  "bell character stripped",
+			input: "alert\x07done",
+			want:  "alertdone",
+		},
+		{
+			name:  "clean input unchanged",
+			input: "normal text with no codes",
+			want:  "normal text with no codes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeOutput(tt.input)
+			if got != tt.want {
+				t.Errorf("Expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestToolCard_SanitizesOutput(t *testing.T) {
+	input := json.RawMessage(`"echo -e '\x1b[31mred\x1b[0m'"`)
+	call := types.ToolCall{ID: "san", Name: "Bash", Input: input}
+	result := &types.ToolResult{
+		ToolCallID: "san",
+		Output:     "\x1b[31mred text\x1b[0m",
+		DurationMs: 50,
+	}
+	tc := NewToolCard(call, result, ToolSuccess, theme.Dark())
+	rendered := tc.Render(80)
+	// The rendered output should not contain ANSI escape codes
+	if strings.Contains(rendered, "\x1b[") {
+		t.Error("rendered output contains ANSI escape codes after sanitization")
+	}
+}
