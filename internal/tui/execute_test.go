@@ -27,9 +27,6 @@ func TestExecuteModel_New(t *testing.T) {
 	if m.current != 0 {
 		t.Errorf("expected current 0, got %d", m.current)
 	}
-	if m.paused {
-		t.Error("expected paused to be false initially")
-	}
 }
 
 func TestExecuteModel_UpdateWindowSize(t *testing.T) {
@@ -97,25 +94,6 @@ func TestExecuteModel_UpdateNavigationBounds(t *testing.T) {
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if m.current != 0 {
 		t.Errorf("current should stay at 0, got %d", m.current)
-	}
-}
-
-func TestExecuteModel_UpdatePauseResume(t *testing.T) {
-	tasks := []types.Task{
-		{ID: 1, Description: "Task 1", Status: types.StatusRunning},
-	}
-	m := NewExecuteModel(tasks, theme.Dark())
-
-	// Pause
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	if !m.paused {
-		t.Error("expected paused to be true after 'p'")
-	}
-
-	// Resume
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	if m.paused {
-		t.Error("expected paused to be false after 'r'")
 	}
 }
 
