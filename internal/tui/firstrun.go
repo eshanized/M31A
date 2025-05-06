@@ -112,10 +112,10 @@ func (m *FirstRunModel) updateProviderSelect(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			if m.cursor > 0 {
 				m.cursor--
 			} else {
-				m.cursor = 3
+				m.cursor = 3 // last option index
 			}
 		case "down":
-			if m.cursor < 3 {
+			if m.cursor < 3 { // 4 options total
 				m.cursor++
 			} else {
 				m.cursor = 0
