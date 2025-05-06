@@ -64,6 +64,13 @@ type ReplModel struct {
 
 	// Streaming channel — created when a stream starts, read by handleStreamMsg
 	streamCh chan tea.Msg
+
+	// Last stream usage and cost (from StreamDoneMsg)
+	lastUsage *types.Usage
+	lastCost  float64
+
+	// Per-block thinking focus
+	thinkingFocusIndex int // -1 = no focus, otherwise index into thinkingBlocks
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -259,7 +266,9 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 					// Auto-arbitrage: if enabled, check if a cheaper model can handle this task
 					if m.cfg != nil && m.cfg.Model.AutoArbitrage && m.activeModel != nil {
-						allModels, err := p.FetchModels(context.Background())
+						fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 15*time.Second)
+						allModels, err := p.FetchModels(fetchCtx)
+						fetchCancel()
 						if err == nil && len(allModels) > 0 {
 							task := types.Task{
 								Description: input,
@@ -296,6 +305,21 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 					return []tea.Cmd{cmd}, true
 				}
 			}
+
+			// No provider configured — show helpful error
+			errMsg := types.Message{
+				Role:    "assistant",
+				Content: "No AI provider configured. Set up an API key via /config or restart M31A to run first-run setup.",
+				Segments: []types.MessageSegment{{
+					Type:    "content",
+					Content: "No AI provider configured. Set up an API key via /config or restart M31A to run first-run setup.",
+					Visible: true,
+				}},
+				CreatedAt: time.Now(),
+			}
+			m.messages = append(m.messages, errMsg)
+			m.renderMessages()
+			m.viewport.GotoBottom()
 
 			var cmds []tea.Cmd
 			return cmds, true
@@ -335,12 +359,46 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			var cmds []tea.Cmd
 			return cmds, false
 
-		case "t", "T":
-			// Toggle thinking blocks — only if textarea is empty (user isn't typing)
+		case "t":
+			// Toggle focused thinking block (or first collapsed if none focused)
+			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
+				m.toggleFocusedThinkingBlock()
+				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, false
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+
+		case "T":
+			// Toggle ALL thinking blocks (preserve existing behavior)
 			if m.textarea.Value() == "" {
-				return []tea.Cmd{func() tea.Msg {
-					return ThinkingToggleMsg{}
-				}}, false
+				m.toggleAllThinkingBlocks()
+				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, false
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+
+		case "tab":
+			// Cycle focus through thinking blocks
+			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
+				m.cycleThinkingFocus()
+				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, false
+			}
+			var cmds []tea.Cmd
+			return cmds, false
+
+		case "shift+tab":
+			// Cycle focus backwards through thinking blocks
+			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
+				m.cycleThinkingFocusBackward()
+				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, false
 			}
 			var cmds []tea.Cmd
 			return cmds, false
@@ -374,12 +432,6 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	case FallbackEventMsg:
 		m.fallbackBanner = fmt.Sprintf("Provider switched: %s → %s (%s)", msg.From, msg.To, msg.Reason)
 		m.fallbackBannerAt = time.Now().Add(15 * time.Second)
-		m.renderMessages()
-		var cmds []tea.Cmd
-		return cmds, false
-
-	case ThinkingToggleMsg:
-		m.toggleAllThinkingBlocks()
 		m.renderMessages()
 		var cmds []tea.Cmd
 		return cmds, false
@@ -480,7 +532,7 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
 	for i, seg := range m.streamSegments {
 		if seg.Type == "thinking" {
-			tb := components.NewThinkingBlock(seg, m.theme, false)
+			tb := components.NewThinkingBlock(seg, m.theme, false, i)
 			m.thinkingBlocks[i] = tb
 		}
 	}
@@ -497,6 +549,16 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	m.activeSegmentType = ""
 	m.streamSegments = nil
 	m.textarea.Focus()
+
+	// Capture usage and cost from stream
+	if msg.Usage != nil {
+		m.lastUsage = msg.Usage
+		if m.activeModel != nil {
+			p := m.activeModel.Pricing
+			m.lastCost = (p.InputPerMToken * float64(msg.Usage.PromptTokens) / 1e6) +
+				(p.OutputPerMToken * float64(msg.Usage.CompletionTokens) / 1e6)
+		}
+	}
 
 	m.renderMessages()
 	m.viewport.GotoBottom()
@@ -739,6 +801,118 @@ func (m *ReplModel) toggleAllThinkingBlocks() {
 	}
 }
 
+// toggleFocusedThinkingBlock toggles the focused block, or focuses the first collapsed one.
+func (m *ReplModel) toggleFocusedThinkingBlock() {
+	if len(m.thinkingBlocks) == 0 {
+		return
+	}
+
+	// Clear all focus first
+	for _, block := range m.thinkingBlocks {
+		block.SetFocused(false)
+	}
+
+	// If we have a valid focused block, toggle it
+	if m.thinkingFocusIndex >= 0 {
+		if block, ok := m.thinkingBlocks[m.thinkingFocusIndex]; ok {
+			block.Toggle()
+			block.SetFocused(true)
+			return
+		}
+	}
+
+	// No valid focus: find first collapsed block and focus+toggle it
+	for idx, block := range m.thinkingBlocks {
+		if !block.IsExpanded() {
+			block.Toggle()
+			block.SetFocused(true)
+			m.thinkingFocusIndex = idx
+			return
+		}
+	}
+
+	// All expanded: focus first one
+	for idx, block := range m.thinkingBlocks {
+		block.SetFocused(false)
+		if idx == 0 {
+			block.SetFocused(true)
+		}
+	}
+	m.thinkingFocusIndex = 0
+}
+
+// cycleThinkingFocus moves focus to the next thinking block.
+func (m *ReplModel) cycleThinkingFocus() {
+	if len(m.thinkingBlocks) == 0 {
+		return
+	}
+
+	// Clear current focus
+	for _, block := range m.thinkingBlocks {
+		block.SetFocused(false)
+	}
+
+	// Get sorted indices
+	indices := make([]int, 0, len(m.thinkingBlocks))
+	for id := range m.thinkingBlocks {
+		indices = append(indices, id)
+	}
+	// Simple sort
+	for i := 0; i < len(indices); i++ {
+		for j := i + 1; j < len(indices); j++ {
+			if indices[j] < indices[i] {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+
+	// Find next index after current focus
+	nextIdx := 0
+	for i, id := range indices {
+		if id == m.thinkingFocusIndex {
+			nextIdx = (i + 1) % len(indices)
+			break
+		}
+	}
+
+	m.thinkingFocusIndex = indices[nextIdx]
+	m.thinkingBlocks[m.thinkingFocusIndex].SetFocused(true)
+}
+
+// cycleThinkingFocusBackward moves focus to the previous thinking block.
+func (m *ReplModel) cycleThinkingFocusBackward() {
+	if len(m.thinkingBlocks) == 0 {
+		return
+	}
+
+	for _, block := range m.thinkingBlocks {
+		block.SetFocused(false)
+	}
+
+	indices := make([]int, 0, len(m.thinkingBlocks))
+	for id := range m.thinkingBlocks {
+		indices = append(indices, id)
+	}
+	for i := 0; i < len(indices); i++ {
+		for j := i + 1; j < len(indices); j++ {
+			if indices[j] < indices[i] {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+
+	prevIdx := len(indices) - 1
+	for i, id := range indices {
+		if id == m.thinkingFocusIndex {
+			prevIdx = (i - 1 + len(indices)) % len(indices)
+			break
+		}
+	}
+
+	m.thinkingFocusIndex = indices[prevIdx]
+	m.thinkingBlocks[m.thinkingFocusIndex].SetFocused(true)
+}
+
 // ShowQuestion displays a question from the AskUserQuestion tool inline in the REPL.
 func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 	m.activeQuestion = &msg
@@ -756,7 +930,7 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 
 	// Focus the textarea for user input
 	m.textarea.Focus()
-	m.textarea.SetPlaceholder("Type your answer and press Enter...")
+	m.textarea.Placeholder = "Type your answer and press Enter..."
 }
 
 // HandleQuestionInput processes user input when a question is active.
@@ -773,7 +947,7 @@ func (m *ReplModel) HandleQuestionInput() tea.Cmd {
 
 	m.textarea.Reset()
 	m.activeQuestion = nil
-	m.textarea.SetPlaceholder("Type a message, /command, or goal...")
+	m.textarea.Placeholder = "Type a message, /command, or goal..."
 	m.renderMessages()
 	m.viewport.GotoBottom()
 
@@ -782,3 +956,12 @@ func (m *ReplModel) HandleQuestionInput() tea.Cmd {
 	}
 }
 
+// LastUsage returns the usage from the last completed stream.
+func (m *ReplModel) LastUsage() *types.Usage {
+	return m.lastUsage
+}
+
+// LastCost returns the estimated cost of the last completed stream.
+func (m *ReplModel) LastCost() float64 {
+	return m.lastCost
+}
