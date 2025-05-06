@@ -39,8 +39,9 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 	var modelSegment string
 	if model != nil {
 		name := model.Name
-		if len(name) > 20 {
-			name = name[:20] + "..."
+		runes := []rune(name)
+		if len(runes) > 20 {
+			name = string(runes[:20]) + "..."
 		}
 		modelSegment = t.ModelBadge.Render(name)
 	}
@@ -93,7 +94,14 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 			result = lipgloss.JoinHorizontal(lipgloss.Left, segments...)
 		}
 		if lipgloss.Width(result) > width && width >= 20 {
-			result = result[:width-3] + "..."
+			runes := []rune(result)
+			maxLen := width - 6 // account for ANSI codes overhead
+			if maxLen < 10 {
+				maxLen = 10
+			}
+			if len(runes) > maxLen {
+				result = string(runes[:maxLen]) + "..."
+			}
 		} else if width < 20 {
 			result = "..."
 		}
