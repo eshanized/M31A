@@ -40,7 +40,23 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
 			return
 		}
-		defer iterator.Close()
+
+		// Ensure the iterator is closed on context cancellation to unblock
+		// any pending Next() call and release the HTTP response body.
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				iterator.Close()
+			case <-done:
+				// Stream completed normally
+			}
+		}()
+
+		defer func() {
+			iterator.Close()
+			close(done)
+		}()
 
 		var segments []types.MessageSegment
 		var activeContent strings.Builder
