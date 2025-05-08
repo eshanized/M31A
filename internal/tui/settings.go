@@ -282,17 +282,24 @@ func (m SettingsModel) insertChar(ch string) SettingsModel {
 	}
 	// Validate input for int/float fields
 	if f.fieldType == "int" {
-		if ch < "0" || ch > "9" {
-			if ch != "-" {
-				return m
-			}
+		// Allow digits and a single leading minus
+		if ch >= "0" && ch <= "9" {
+			// OK
+		} else if ch == "-" && f.value == "" {
+			// OK: leading minus
+		} else {
+			return m
 		}
 	}
 	if f.fieldType == "float" {
-		if ch < "0" || ch > "9" {
-			if ch != "." && ch != "-" {
-				return m
-			}
+		if ch >= "0" && ch <= "9" {
+			// OK
+		} else if ch == "." && !strings.Contains(f.value, ".") {
+			// OK: single decimal point
+		} else if ch == "-" && f.value == "" {
+			// OK: leading minus
+		} else {
+			return m
 		}
 	}
 	f.value += ch
