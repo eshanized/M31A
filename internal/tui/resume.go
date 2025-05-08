@@ -3,8 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -20,7 +22,7 @@ type sessionItem struct {
 
 func (i sessionItem) Title() string       { return i.title }
 func (i sessionItem) Description() string { return i.desc }
-func (i sessionItem) FilterValue() string { return i.title }
+func (i sessionItem) FilterValue() string { return i.title + " " + i.desc }
 
 // sessionInfoToItem converts a SessionInfo to a sessionItem for list display.
 func sessionInfoToItem(info session.SessionInfo) sessionItem {
@@ -55,6 +57,19 @@ func sessionInfoToItems(infos []session.SessionInfo) []list.Item {
 	return items
 }
 
+// SessionPreview holds the data shown in the preview pane.
+type SessionPreview struct {
+	ID            string
+	Model         string
+	Provider      string
+	StartedAt     time.Time
+	MessageCount  int
+	FirstMessage  string
+	WorkflowPhase string
+	ProjectGoal   string
+	Corrupted     bool
+}
+
 // ResumeModel provides a session browser using bubbles/list.
 // Initialized in NewApp and active when screen == ScreenResume.
 type ResumeModel struct {
@@ -67,6 +82,14 @@ type ResumeModel struct {
 	delTarget  string // session ID to delete
 	delItemID  string // session ID being deleted
 	errMsg     string
+
+	// Search
+	searchInput textinput.Model
+	searchQuery string
+	allSessions []session.SessionInfo // full unfiltered list
+
+	// Preview
+	preview *SessionPreview
 }
 
 // NewResumeModel creates a ResumeModel with the given theme and session manager.
@@ -99,10 +122,20 @@ func NewResumeModel(t theme.Theme, mgr *session.Manager) *ResumeModel {
 		Bold(true).
 		Padding(0, 1)
 
+	// Search input
+	ti := textinput.New()
+	ti.Placeholder = "Search sessions..."
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(t.Brand)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(t.TextPrimary)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
+	ti.CharLimit = 80
+	ti.Width = 40
+
 	rm := &ResumeModel{
-		list:    l,
-		manager: mgr,
-		theme:   t,
+		list:        l,
+		manager:     mgr,
+		theme:       t,
+		searchInput: ti,
 	}
 
 	// Initial population
@@ -119,17 +152,69 @@ func (m *ResumeModel) populateList() {
 		return
 	}
 	m.errMsg = ""
-	m.list.SetItems(sessionInfoToItems(sessions))
+	m.allSessions = sessions
+	m.applySearch()
+}
+
+// applySearch filters allSessions based on searchQuery and updates the list.
+func (m *ResumeModel) applySearch() {
+	query := strings.ToLower(strings.TrimSpace(m.searchQuery))
+	if query == "" {
+		m.list.SetItems(sessionInfoToItems(m.allSessions))
+		return
+	}
+
+	var filtered []session.SessionInfo
+	for _, s := range m.allSessions {
+		haystack := strings.ToLower(s.ID + " " + s.Model + " " + s.Provider)
+		if strings.Contains(haystack, query) {
+			filtered = append(filtered, s)
+		}
+	}
+	m.list.SetItems(sessionInfoToItems(filtered))
+}
+
+// loadPreview loads a session's first message for the preview pane.
+func (m *ResumeModel) loadPreview(sessionID string) {
+	sess, err := m.manager.LoadSession(sessionID)
+	if err != nil {
+		m.preview = &SessionPreview{
+			ID:        sessionID,
+			Corrupted: true,
+		}
+		return
+	}
+
+	firstMsg := ""
+	if len(sess.Messages) > 0 {
+		content := sess.Messages[0].Content
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		firstMsg = content
+	}
+
+	goal := ""
+	if sess.Project != nil {
+		goal = sess.Project.Goal
+	}
+
+	m.preview = &SessionPreview{
+		ID:            sess.ID,
+		Model:         sess.Model,
+		Provider:      sess.Provider,
+		StartedAt:     sess.StartedAt,
+		MessageCount:  sess.MessageCount,
+		FirstMessage:  firstMsg,
+		WorkflowPhase: string(sess.WorkflowPhase),
+		ProjectGoal:   goal,
+	}
 }
 
 // Refresh re-populates the session list from the manager.
 func (m *ResumeModel) Refresh() error {
-	sessions, err := m.manager.ListSessions()
-	if err != nil {
-		return err
-	}
-	m.list.SetItems(sessionInfoToItems(sessions))
-	m.errMsg = ""
+	m.populateList()
+	m.preview = nil
 	return nil
 }
 
@@ -139,7 +224,7 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		h, v := 4, 4 // margins
+		h, v := 4, 6 // margins (extra for search bar)
 		m.list.SetSize(msg.Width-h, msg.Height-v)
 
 	case tea.KeyMsg:
@@ -153,6 +238,7 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 				m.confirmDel = false
 				m.delTarget = ""
 				m.populateList()
+				m.preview = nil
 				return nil, nil
 			case "n", "N", "esc":
 				m.confirmDel = false
@@ -162,14 +248,42 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			return nil, nil
 		}
 
-		// Normal browsing mode
+		// If search input is focused
+		if m.searchInput.Focused() {
+			switch msg.String() {
+			case "enter":
+				// Deactivate search, focus list
+				m.searchInput.Blur()
+				return nil, nil
+			case "esc":
+				m.searchQuery = ""
+				m.searchInput.SetValue("")
+				m.applySearch()
+				m.searchInput.Blur()
+				return nil, nil
+			}
+			var cmd tea.Cmd
+			m.searchInput, cmd = m.searchInput.Update(msg)
+			m.searchQuery = m.searchInput.Value()
+			m.applySearch()
+			return []tea.Cmd{cmd}, nil
+		}
+
+		// Normal browsing mode (list focused)
 		switch msg.String() {
+		case "/":
+			// Focus search
+			m.searchInput.Focus()
+			return nil, nil
 		case "enter":
 			item := m.list.SelectedItem()
 			if item == nil {
 				return nil, nil
 			}
-			si := item.(sessionItem)
+			si, ok := item.(sessionItem)
+			if !ok {
+				return nil, nil
+			}
 			return nil, &AppMsg{Screen: ScreenREPL, SessionID: si.id}
 		case "n", "N":
 			return nil, &AppMsg{Screen: ScreenFirstRun}
@@ -178,12 +292,30 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			if item == nil {
 				return nil, nil
 			}
-			si := item.(sessionItem)
+			si, ok := item.(sessionItem)
+			if !ok {
+				return nil, nil
+			}
 			m.confirmDel = true
 			m.delTarget = si.id
 			return nil, nil
 		case "esc":
 			return nil, &AppMsg{Screen: ScreenREPL}
+		case "up", "down", "k", "j":
+			// Update list, then update preview
+			var cmd tea.Cmd
+			m.list, cmd = m.list.Update(msg)
+			// Update preview for selected item
+			if sel := m.list.SelectedItem(); sel != nil {
+				si, ok := sel.(sessionItem)
+				if !ok {
+					return []tea.Cmd{cmd}, nil
+				}
+				if m.preview == nil || m.preview.ID != si.id {
+					m.loadPreview(si.id)
+				}
+			}
+			return []tea.Cmd{cmd}, nil
 		}
 	}
 
@@ -202,15 +334,37 @@ func (m *ResumeModel) View() string {
 		return m.renderDeleteConfirmation()
 	}
 
-	return m.renderList()
+	return m.renderBrowser()
 }
 
-// renderList renders the session list with footer hints.
-func (m *ResumeModel) renderList() string {
+// renderBrowser renders the search bar + list + preview layout.
+func (m *ResumeModel) renderBrowser() string {
 	var parts []string
 
+	// Search bar
+	searchBar := m.renderSearchBar()
+	parts = append(parts, searchBar)
+
+	// Main area: list on left, preview on right (if width allows)
 	listView := m.list.View()
-	parts = append(parts, listView)
+
+	if m.width > 100 && m.preview != nil && !m.preview.Corrupted {
+		previewView := m.renderPreview(m.width/2 - 4)
+		listWidth := m.width/2 - 2
+		previewWidth := m.width/2 - 2
+
+		listStyled := lipgloss.NewStyle().
+			Width(listWidth).
+			Render(listView)
+		previewStyled := lipgloss.NewStyle().
+			Width(previewWidth).
+			Render(previewView)
+
+		mainContent := lipgloss.JoinHorizontal(lipgloss.Top, listStyled, previewStyled)
+		parts = append(parts, mainContent)
+	} else {
+		parts = append(parts, listView)
+	}
 
 	// Error message
 	if m.errMsg != "" {
@@ -220,10 +374,102 @@ func (m *ResumeModel) renderList() string {
 
 	// Footer hints
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary))
-	footer := footerStyle.Render("Enter: resume  |  N: new session  |  D: delete  |  Esc: back")
+	footer := footerStyle.Render("Enter: resume  |  /: search  |  N: new  |  D: delete  |  Esc: back")
 	parts = append(parts, "", footer)
 
 	return strings.Join(parts, "\n")
+}
+
+// renderSearchBar renders the search input with a label.
+func (m *ResumeModel) renderSearchBar() string {
+	label := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true).
+		Render("> ")
+
+	searchRow := lipgloss.JoinHorizontal(lipgloss.Center, label, m.searchInput.View())
+
+	style := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Padding(0, 1).
+		Width(m.width - 2)
+
+	return style.Render(searchRow)
+}
+
+// renderPreview renders the session preview pane.
+func (m *ResumeModel) renderPreview(width int) string {
+	if m.preview == nil || m.preview.Corrupted {
+		style := lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Italic(true).
+			Width(width).
+			Padding(1, 1)
+		return style.Render("Select a session to preview")
+	}
+
+	p := m.preview
+	var lines []string
+
+	// Header
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true).
+		Render(p.ID))
+
+	// Model info
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render(fmt.Sprintf("%s · %s", p.Model, p.Provider)))
+
+	// Stats
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render(fmt.Sprintf("%d messages · Started %s", p.MessageCount, p.StartedAt.Format("Jan 02 15:04"))))
+
+	if p.WorkflowPhase != "" {
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.theme.Brand).
+			Render("Phase: "+p.WorkflowPhase))
+	}
+
+	if p.ProjectGoal != "" {
+		goal := p.ProjectGoal
+		if len(goal) > 100 {
+			goal = goal[:100] + "..."
+		}
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.theme.TextPrimary).
+			Bold(true).
+			Render("Goal:"))
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Render(goal))
+	}
+
+	if p.FirstMessage != "" {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.theme.TextPrimary).
+			Bold(true).
+			Render("First message:"))
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Italic(true).
+			Render(p.FirstMessage))
+	}
+
+	// Border box
+	content := strings.Join(lines, "\n")
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.Border).
+		Padding(0, 1).
+		Width(width).
+		Height(16)
+
+	return boxStyle.Render(content)
 }
 
 // renderDeleteConfirmation renders the delete confirmation overlay.
