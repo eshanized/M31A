@@ -23,13 +23,10 @@ const (
 )
 
 type AppMsg struct {
-	Screen         Screen
-	SessionID      string   // populated by resume screen on selection
-	SaveKeychain   bool     // save API key to system keychain
-	FallbackEvent  *FallbackEventMsg    // provider fallback notification
-	ThinkingToggle *ThinkingToggleMsg   // toggle thinking block visibility
-	RefreshCache   *RefreshCacheMsg     // trigger model cache refresh
-	ModelSelected  *ModelSelectedMsg    // model selection result
+	Screen        Screen
+	SessionID     string         // populated by resume screen on selection
+	SaveKeychain  bool           // save API key to system keychain
+	ModelSelected *ModelSelectedMsg // model selection result
 }
 
 type HealthCheckTickMsg struct {
@@ -48,16 +45,15 @@ type PermissionResponseMsg struct {
 	Response tools.PermissionResponse
 }
 
+// PermissionTickMsg is emitted every 100ms while the permission modal is visible,
+// driving the countdown timer and triggering auto-deny on timeout.
+type PermissionTickMsg struct{}
+
 // FallbackEventMsg carries provider fallback information to the TUI.
 type FallbackEventMsg struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Reason string `json:"reason"`
-}
-
-// ThinkingToggleMsg signals that the user wants to toggle thinking block visibility.
-type ThinkingToggleMsg struct {
-	// empty — the handler toggles all blocks
 }
 
 // RefreshCacheMsg triggers a model cache refresh for the given provider.
@@ -77,11 +73,14 @@ type SettingsSavedMsg struct{}
 // PhaseResultMsg carries the result of a workflow phase execution from the
 // engine goroutine to the TUI update loop.
 type PhaseResultMsg struct {
-	Phase    types.WorkflowPhase
-	Tasks    []types.Task
-	Messages []types.Message
-	Success  bool
-	Error    string
+	Phase               types.WorkflowPhase
+	Tasks               []types.Task
+	Messages            []types.Message
+	Success             bool
+	Error               string
+	NeedsAnswers        bool
+	RequiresManualInput bool
+	DurationMs          int64
 }
 
 // PlanReadyMsg is emitted from RunPhaseCmd when the plan phase completes
@@ -98,7 +97,7 @@ type QuestionRequestMsg struct {
 	Header      string
 	Options     []string
 	AllowCustom bool
-	ResponseCh  chan string
+	ResponseCh  chan tools.QuestionResponse
 }
 
 // QuestionResponseMsg carries the user's answer back to the question tool.
