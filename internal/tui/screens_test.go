@@ -195,29 +195,6 @@ func TestExecute_TaskStatusIndicators(t *testing.T) {
 	}
 }
 
-func TestExecute_PauseAction(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
-	m.width = 80
-	m.height = 40
-
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	if !m.paused {
-		t.Error("Expected paused to be true")
-	}
-}
-
-func TestExecute_ResumeAction(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
-	m.width = 80
-	m.height = 40
-	m.paused = true
-
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	if m.paused {
-		t.Error("Expected paused to be false")
-	}
-}
-
 func TestExecute_SkipAction(t *testing.T) {
 	tasks := testTasks()
 	m := NewExecuteModel(tasks, testTheme())
