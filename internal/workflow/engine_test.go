@@ -37,8 +37,21 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
-	// Create dispatcher
+	// Create dispatcher with tools
 	dispatcher := tools.NewDispatcher()
+	dispatcher.Register(tools.NewBash(dir))
+	dispatcher.Register(tools.NewFileRead(dir))
+	dispatcher.Register(tools.NewFileWrite(dir, filepath.Join(dir, "backups")))
+	dispatcher.Register(tools.NewEdit(dir, filepath.Join(dir, "backups")))
+	dispatcher.Register(tools.NewGlob(dir))
+	dispatcher.Register(tools.NewGrep(dir))
+	// Pre-approve all tools for tests
+	dispatcher.SetPermission("Bash", true)
+	dispatcher.SetPermission("FileRead", true)
+	dispatcher.SetPermission("FileWrite", true)
+	dispatcher.SetPermission("FileEdit", true)
+	dispatcher.SetPermission("Glob", true)
+	dispatcher.SetPermission("Grep", true)
 
 	est := tokens.NewEstimator("test-model")
 
@@ -229,11 +242,73 @@ func TestEngine_ParseTasksFromJSON(t *testing.T) {
 	}
 }
 
+func TestEngine_ParseToolCalls_NestedObjects(t *testing.T) {
+	// Create a minimal engine for testing
+	eng := &Engine{}
+
+	// Tool call with nested input object — the old regex pattern 2 could not match this
+	content := `{"name":"Bash","input":{"command":"echo hello"}}`
+	calls := eng.parseToolCalls(content)
+	if len(calls) != 1 {
+		t.Fatalf("Expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "Bash" {
+		t.Errorf("Expected Bash, got %s", calls[0].Name)
+	}
+
+	// Tool call with deeply nested input
+	content2 := `Here is the call: {"name":"FileWrite","input":{"path":"test.go","content":"package main"}}`
+	calls2 := eng.parseToolCalls(content2)
+	if len(calls2) != 1 {
+		t.Fatalf("Expected 1 tool call from text, got %d", len(calls2))
+	}
+	if calls2[0].Name != "FileWrite" {
+		t.Errorf("Expected FileWrite, got %s", calls2[0].Name)
+	}
+
+	// No tool call — just text with braces
+	content3 := `some {random} text without a name`
+	calls3 := eng.parseToolCalls(content3)
+	if len(calls3) != 0 {
+		t.Errorf("Expected 0 tool calls, got %d", len(calls3))
+	}
+}
+
 func TestEngine_StripCodeBlocks(t *testing.T) {
-	input := "```json\n[{\"id\":1}]\n```"
-	got := stripCodeBlocks(input)
-	if !strings.Contains(got, "{\"id\":1}") {
-		t.Errorf("Expected JSON in output, got %q", got)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "json tag",
+			input: "```json\n[{\"id\":1}]\n```",
+			want:  "[{\"id\":1}]\n",
+		},
+		{
+			name:  "go tag",
+			input: "```go\nfunc main() {}\n```",
+			want:  "func main() {}\n",
+		},
+		{
+			name:  "python tag",
+			input: "```python\nprint('hi')\n```",
+			want:  "print('hi')\n",
+		},
+		{
+			name:  "no tag",
+			input: "```\nraw code\n```",
+			want:  "raw code\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripCodeBlocks(tt.input)
+			if got != tt.want {
+				t.Errorf("Expected %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 
@@ -246,6 +321,12 @@ func TestEngine_ExtractJSONArray(t *testing.T) {
 		{"direct", "[1,2,3]", "[1,2,3]"},
 		{"wrapped", "Here is the list:\n[1,2,3]\nDone", "[1,2,3]"},
 		{"empty", "", ""},
+		{"brackets in string value", `[{"text":"use [brackets] here"}]`, `[{"text":"use [brackets] here"}]`},
+		{"array after text", "Here are the tasks:\n[{\"id\":1}]\nDone", `[{"id":1}]`},
+		{"nested array", `[{"items":[1,2,3]}]`, `[{"items":[1,2,3]}]`},
+		{"escaped quotes", `[{"msg":"he said \"hi\""}]`, `[{"msg":"he said \"hi\""}]`},
+		{"no brackets", "hello world", ""},
+		{"unclosed array", "[1,2,3", ""},
 	}
 
 	for _, tt := range tests {
@@ -350,6 +431,22 @@ func TestEngine_ListCwdFiles(t *testing.T) {
 	}
 	if !strings.Contains(list, "sub/b.go") {
 		t.Errorf("Expected sub/b.go in file list, got %q", list)
+	}
+
+	// Files beyond depth 3 should not appear
+	os.MkdirAll(filepath.Join(dir, "d1", "d2", "d3"), 0755)
+	os.WriteFile(filepath.Join(dir, "d1", "d2", "d3", "deep.go"), []byte("deep"), 0644)
+	list = listCwdFiles(dir)
+	if strings.Contains(list, "deep.go") {
+		t.Errorf("Expected deep.go to be excluded (depth > 3), got %q", list)
+	}
+
+	// Files in node_modules should not appear
+	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "mod.go"), []byte("mod"), 0644)
+	list = listCwdFiles(dir)
+	if strings.Contains(list, "node_modules") {
+		t.Errorf("Expected node_modules to be excluded, got %q", list)
 	}
 }
 
