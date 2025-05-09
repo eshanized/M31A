@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/git"
@@ -95,6 +96,7 @@ type Engine struct {
 	discussState     DiscussState
 	execCommand      func(name string, args ...string) *exec.Cmd
 	msgEmitter       MsgEmitter
+	callCounter      int64
 }
 
 // PhaseResult holds the outcome of a workflow phase.
@@ -175,7 +177,7 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 		Timestamp: time.Now(),
 	}
 	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, cp); err != nil {
-		e.logger.Error("failed to save checkpoint", "error", err)
+		return fmt.Errorf("save checkpoint: %w", err)
 	}
 
 	// Write STATE.md
@@ -305,14 +307,14 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 
 	for {
 		chunk, err := iterator.Next()
+		if chunk != nil && chunk.Delta != "" {
+			sb.WriteString(chunk.Delta)
+		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return sb.String(), err
-		}
-		if chunk != nil {
-			sb.WriteString(chunk.Delta)
 		}
 	}
 	return sb.String(), nil
@@ -321,9 +323,10 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 // streamLLM sends a chat request and returns the full response content.
 func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
 	req := provider.ChatRequest{
-		Model:    e.modelID,
-		Messages: messages,
-		Stream:   false,
+		Model:            e.modelID,
+		Messages:         messages,
+		Stream:           false,
+		ReasoningEnabled: true,
 	}
 	if toolsEnabled {
 		req.Tools = e.buildToolDefinitions()
@@ -358,27 +361,63 @@ func parseTasksFromJSON(content string) ([]m31types.Task, error) {
 
 // stripCodeBlocks removes markdown code fences from content.
 func stripCodeBlocks(content string) string {
-	// Remove ```json ... ``` blocks
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*\n(.*?)```")
+	// Remove ```<any lang> ... ``` blocks
+	re := regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
 	return re.ReplaceAllString(content, "$1")
 }
 
 // extractJSONArray tries to find a JSON array in the content.
+// Uses bracket-depth tracking to correctly handle nested structures and
+// bracket characters in surrounding text.
 func extractJSONArray(content string) string {
 	content = strings.TrimSpace(content)
 
 	// If content starts with [, try to parse directly
 	if strings.HasPrefix(content, "[") {
-		return content
+		return extractArrayFrom(content)
 	}
 
-	// Find first [ and last ]
-	first := strings.Index(content, "[")
-	last := strings.LastIndex(content, "]")
-	if first >= 0 && last > first {
-		return content[first : last+1]
+	// Search for the first [ in content
+	idx := strings.Index(content, "[")
+	if idx < 0 {
+		return ""
 	}
+	return extractArrayFrom(content[idx:])
+}
 
+// extractArrayFrom finds the first complete JSON array in s using
+// bracket-depth tracking. It skips brackets inside strings and handles
+// escape characters. Returns "" if no complete array is found.
+func extractArrayFrom(s string) string {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			if inString {
+				escaped = true
+			}
+		case '"':
+			inString = !inString
+		case '[':
+			if !inString {
+				depth++
+			}
+		case ']':
+			if !inString {
+				depth--
+				if depth == 0 {
+					return s[:i+1]
+				}
+			}
+		}
+	}
 	return ""
 }
 
@@ -390,6 +429,7 @@ func validateTasks(tasks []m31types.Task) []string {
 	for _, t := range tasks {
 		if t.ID == 0 {
 			errs = append(errs, fmt.Sprintf("task: missing ID"))
+			continue
 		}
 		if idSet[t.ID] {
 			errs = append(errs, fmt.Sprintf("task %d: duplicate ID", t.ID))
@@ -427,7 +467,7 @@ func validateTasks(tasks []m31types.Task) []string {
 	return errs
 }
 
-// hasCycle detects circular dependencies using DFS.
+// hasCycle detects circular dependencies using iterative DFS with explicit stack.
 func hasCycle(tasks []m31types.Task) bool {
 	idSet := make(map[int]bool)
 	for _, t := range tasks {
@@ -442,30 +482,53 @@ func hasCycle(tasks []m31types.Task) bool {
 	visited := make(map[int]bool)
 	inStack := make(map[int]bool)
 
-	var dfs func(int) bool
-	dfs = func(id int) bool {
-		if inStack[id] {
-			return true
-		}
-		if visited[id] {
-			return false
-		}
-		visited[id] = true
-		inStack[id] = true
-
-		for _, dep := range adj[id] {
-			if dfs(dep) {
-				return true
-			}
-		}
-
-		inStack[id] = false
-		return false
-	}
-
 	for _, t := range tasks {
-		if dfs(t.ID) {
-			return true
+		if visited[t.ID] {
+			continue
+		}
+		// Iterative DFS using explicit stack
+		// Stack entries: (nodeID, depIndex, isNewNode)
+		type stackEntry struct {
+			id       int
+			depIdx   int
+			firstVisit bool
+		}
+		stack := []stackEntry{{id: t.ID, firstVisit: true}}
+
+		for len(stack) > 0 {
+			entry := &stack[len(stack)-1]
+
+			if entry.firstVisit {
+				entry.firstVisit = false
+				if inStack[entry.id] {
+					return true
+				}
+				if visited[entry.id] {
+					stack = stack[:len(stack)-1]
+					continue
+				}
+				visited[entry.id] = true
+				inStack[entry.id] = true
+			}
+
+			// Process next dependency
+			found := false
+			for entry.depIdx < len(adj[entry.id]) {
+				dep := adj[entry.id][entry.depIdx]
+				entry.depIdx++
+				if inStack[dep] {
+					return true
+				}
+				if !visited[dep] {
+					stack = append(stack, stackEntry{id: dep, firstVisit: true})
+					found = true
+					break
+				}
+			}
+			if !found {
+				inStack[entry.id] = false
+				stack = stack[:len(stack)-1]
+			}
 		}
 	}
 	return false
@@ -530,7 +593,7 @@ func parseQuestions(content string) []string {
 
 // parseToolCalls extracts tool calls from response content.
 // Looks for JSON objects with a "name" or "tool" field inside code blocks or inline.
-func parseToolCalls(content string) []m31types.ToolCall {
+func (e *Engine) parseToolCalls(content string) []m31types.ToolCall {
 	var calls []m31types.ToolCall
 
 	// Pattern 1: JSON in code blocks ```<any lang> {...} ```
@@ -539,36 +602,41 @@ func parseToolCalls(content string) []m31types.ToolCall {
 		if len(match) < 2 {
 			continue
 		}
-		if tc := parseSingleToolCall(match[1]); tc != nil {
+		if tc := parseSingleToolCall(match[1], e.nextCallID()); tc != nil {
 			calls = append(calls, *tc)
 		}
 	}
 
 	// Pattern 2: Try to find standalone JSON objects with tool call fields
 	if len(calls) == 0 {
-		// Look for objects with "name" field
-		objRe := regexp.MustCompile(`\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}`)
-		for _, match := range objRe.FindAllStringSubmatch(content, -1) {
-			if len(match) < 2 {
+		// Scan at each { position, use extractJSONObject for proper nesting
+		for i := 0; i < len(content); i++ {
+			if content[i] != '{' {
 				continue
 			}
-			// Try to parse the full object
-			jsonStart := strings.Index(content, match[0])
-			if jsonStart == -1 {
-				continue
-			}
-			// Find the matching JSON object
-			obj := extractJSONObject(content[jsonStart:])
+			obj := extractJSONObject(content[i:])
 			if obj == "" {
 				continue
 			}
-			if tc := parseSingleToolCall(obj); tc != nil {
+			// Quick pre-check: does this object have "name" or "tool" field?
+			if !strings.Contains(obj, `"name"`) && !strings.Contains(obj, `"tool"`) {
+				i += len(obj) - 1 // skip past this object
+				continue
+			}
+			if tc := parseSingleToolCall(obj, e.nextCallID()); tc != nil {
 				calls = append(calls, *tc)
+				i += len(obj) - 1 // skip past this object
+				continue
 			}
 		}
 	}
 
 	return calls
+}
+
+// nextCallID returns a monotonically increasing counter for tool call IDs.
+func (e *Engine) nextCallID() int64 {
+	return atomic.AddInt64(&e.callCounter, 1)
 }
 
 // toolCallJSON represents a tool call in JSON format.
@@ -578,7 +646,7 @@ type toolCallJSON struct {
 	Input json.RawMessage `json:"input"`
 }
 
-func parseSingleToolCall(jsonStr string) *m31types.ToolCall {
+func parseSingleToolCall(jsonStr string, callID int64) *m31types.ToolCall {
 	var tc toolCallJSON
 	if err := json.Unmarshal([]byte(jsonStr), &tc); err != nil {
 		return nil
@@ -601,7 +669,7 @@ func parseSingleToolCall(jsonStr string) *m31types.ToolCall {
 	}
 
 	return &m31types.ToolCall{
-		ID:    fmt.Sprintf("call_%s_%d", name, time.Now().UnixNano()),
+		ID:    fmt.Sprintf("call_%s_%d", name, callID),
 		Name:  name,
 		Input: input,
 	}
@@ -702,15 +770,41 @@ func formatTaskSummary(tasks []m31types.Task) string {
 	return sb.String()
 }
 
+var skipDirs = map[string]bool{
+	"node_modules": true, "vendor": true, ".next": true,
+	"dist": true, "build": true, "target": true,
+	".venv": true, "venv": true, "__pycache__": true,
+}
+
 // listCwdFiles returns a list of files in the working directory with sizes.
+// Limits depth to 3 levels and skips known heavy directories.
 func listCwdFiles(workDir string) string {
 	var sb strings.Builder
 	filepath.Walk(workDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			slog.Warn("walk error", "path", path, "error", err)
 			return nil
 		}
 		rel, _ := filepath.Rel(workDir, path)
+		if rel == "." {
+			return nil
+		}
+		// Skip heavy directories
+		if info.IsDir() && skipDirs[info.Name()] {
+			return filepath.SkipDir
+		}
+		// Depth limit: count path separators
+		depth := strings.Count(rel, string(filepath.Separator))
+		if depth >= 3 {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, ".m31a") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !info.IsDir() {
