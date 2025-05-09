@@ -114,12 +114,6 @@ type Tool interface {
 	Execute(ctx context.Context, input ToolInput) (ToolResult, error)
 }
 
-type FilePrediction struct {
-	Path           string `json:"path"`
-	Action         string `json:"action"`
-	EstimatedLines int    `json:"estimated_lines"`
-}
-
 type Task struct {
 	ID                 int              `json:"id"`
 	Description        string           `json:"description"`
@@ -129,7 +123,6 @@ type Task struct {
 	AcceptanceCriteria []string         `json:"acceptance_criteria"`
 	Status             TaskStatus       `json:"status"`
 	HealsAttempted     int              `json:"heals_attempted"`
-	PredictedFiles     []FilePrediction `json:"predicted_files,omitempty"`
 	CommitHash         string           `json:"commit_hash,omitempty"`
 }
 
