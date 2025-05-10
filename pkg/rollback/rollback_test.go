@@ -838,16 +838,13 @@ func TestCountCommitsBetween_ReverseOrder(t *testing.T) {
 	// newestHash is at a smaller index than olderHash in the log
 	// If we call countCommitsBetween(newest, oldest), then:
 	// startHash = newest (index 0), endHash = oldest (index 4)
-	// endIdx (4) > startIdx (0), so returns 0
+	// endIdx (4) > startIdx (0), so returns an error
 	newestHash := entries[0].CommitInfo.Hash
 	oldestHash := entries[len(entries)-1].CommitInfo.Hash
 
-	count, err := r.countCommitsBetween(newestHash, oldestHash)
-	if err != nil {
-		t.Fatalf("countCommitsBetween failed: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 commits (reverse order), got %d", count)
+	_, err := r.countCommitsBetween(newestHash, oldestHash)
+	if err == nil {
+		t.Fatal("countCommitsBetween(newest, oldest) should return an error for reverse order")
 	}
 }
 

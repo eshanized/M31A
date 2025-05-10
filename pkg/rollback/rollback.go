@@ -264,7 +264,7 @@ func (r *Rollback) countCommitsBetween(startHash, endHash string) (int, error) {
 		return startIdx - endIdx, nil
 	}
 
-	return 0, nil
+	return 0, fmt.Errorf("commits in unexpected order: %s should be older than %s", startHash, endHash)
 }
 
 // buildResult creates a RollbackResult with a user-friendly message.
