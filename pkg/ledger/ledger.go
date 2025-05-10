@@ -479,10 +479,22 @@ func parseEntry(line string) (LedgerEntry, error) {
 		return LedgerEntry{}, fmt.Errorf("parse timestamp %q: %w", fields[1], err)
 	}
 
-	taskCount := parseInt(fields[4])
-	failedTasks := parseInt(fields[5])
-	cost := parseFloat(fields[6])
-	duration := parseInt(fields[7])
+	taskCount, err := parseInt(fields[4])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse taskCount %q: %w", fields[4], err)
+	}
+	failedTasks, err := parseInt(fields[5])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse failedTasks %q: %w", fields[5], err)
+	}
+	cost, err := parseFloat(fields[6])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse cost %q: %w", fields[6], err)
+	}
+	duration, err := parseInt(fields[7])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse duration %q: %w", fields[7], err)
+	}
 
 	return LedgerEntry{
 		SessionID:       fields[0],
@@ -496,16 +508,20 @@ func parseEntry(line string) (LedgerEntry, error) {
 	}, nil
 }
 
-// parseInt parses an integer from a string, returning 0 on failure.
-func parseInt(s string) int {
+// parseInt parses an integer from a string, returning an error on failure.
+func parseInt(s string) (int, error) {
 	var n int
-	fmt.Sscanf(s, "%d", &n)
-	return n
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
-// parseFloat parses a float64 from a string, returning 0.0 on failure.
-func parseFloat(s string) float64 {
+// parseFloat parses a float64 from a string, returning an error on failure.
+func parseFloat(s string) (float64, error) {
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
-	return f
+	if _, err := fmt.Sscanf(s, "%f", &f); err != nil {
+		return 0, err
+	}
+	return f, nil
 }
