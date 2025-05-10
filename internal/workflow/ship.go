@@ -41,14 +41,19 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	total, done, failed, skipped := runner.Summary()
 
 	// 2. Final git commit
-	if err := e.git.Commit(fmt.Sprintf("chore: ship %s", e.sessionID)); err != nil {
-		return nil, fmt.Errorf("ship commit: %w", err)
+	if e.git != nil {
+		if err := e.git.Commit(fmt.Sprintf("chore: ship %s", e.sessionID)); err != nil {
+			return nil, fmt.Errorf("ship commit: %w", err)
+		}
 	}
 
 	// 3. Build summary
 	duration := time.Since(e.startTime)
 
-	commits, _ := e.git.Log(true, e.startTime.Format(time.RFC3339))
+	var commits []git.CommitInfo
+	if e.git != nil {
+		commits, _ = e.git.Log(true, e.startTime.Format(time.RFC3339))
+	}
 
 	summary := ShipSummary{
 		TaskDone:    done,
@@ -79,7 +84,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		if home != "" {
 			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
 			l := ledger.New(ledgerPath)
-			entry := ledger.NewEntry(sess.Session, total, done, skipped, len(commits), 0)
+			entry := ledger.NewEntry(sess.Session, total, failed, skipped, len(commits), 0)
 			if err := l.Append(entry); err != nil {
 				e.logger.Warn("ledger update failed", "error", err)
 			}
@@ -125,7 +130,10 @@ func (e *Engine) BuildSummary() ShipSummary {
 	runner := taskrunner.New(tasks)
 	total, done, failed, skipped := runner.Summary()
 
-	commits, _ := e.git.Log(true, e.startTime.Format(time.RFC3339))
+	var commits []git.CommitInfo
+	if e.git != nil {
+		commits, _ = e.git.Log(true, e.startTime.Format(time.RFC3339))
+	}
 
 	return ShipSummary{
 		TaskDone:    done,
