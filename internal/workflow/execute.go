@@ -127,7 +127,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		}
 
 		// Parse tool calls
-		toolCalls := parseToolCalls(content)
+		toolCalls := e.parseToolCalls(content)
 
 		// Dispatch tool calls
 		toolErr := false
@@ -248,7 +248,14 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 	}
 
 	// Dispatch tool calls for fix
-	toolCalls := parseToolCalls(content)
+	toolCalls := e.parseToolCalls(content)
+	if len(toolCalls) == 0 {
+		return taskrunner.TaskResult{
+			Success:    false,
+			Error:      "heal: no tool calls generated",
+			DurationMs: time.Since(start).Milliseconds(),
+		}
+	}
 	for _, tc := range toolCalls {
 		_, err := e.dispatcher.Execute(ctx, tc)
 		if err != nil {
