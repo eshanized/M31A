@@ -153,8 +153,9 @@ func TestEngine_HealTask(t *testing.T) {
 		Files:       []string{"main.go"},
 	}
 
+	// Provide a response that contains a valid tool call
 	mp := engine.provider.(*mockProvider)
-	mp.response = "Fixed the bug"
+	mp.response = `{"name":"FileWrite","input":{"path":"main.go","content":"package main"}}`
 
 	result := engine.healTask(context.Background(), task, "compilation error")
 	// Heal uses mock provider which returns content
