@@ -7,6 +7,7 @@ package autodream
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -171,7 +172,7 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 		}
 	}
 
-	c.messages = append([]types.Message{summaryMsg}, kept...)
+	c.messages = append(kept, summaryMsg)
 	c.totalConsolidations++
 	c.lastConsolidation = time.Now()
 
@@ -334,9 +335,14 @@ func (c *Consolidator) timeframeDescription(msgs []types.Message) string {
 	for _, msg := range msgs {
 		roleCount[msg.Role]++
 	}
-	parts := make([]string, 0, len(roleCount))
-	for role, count := range roleCount {
-		parts = append(parts, fmt.Sprintf("%d %s", count, role))
+	roles := make([]string, 0, len(roleCount))
+	for role := range roleCount {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	parts := make([]string, 0, len(roles))
+	for _, role := range roles {
+		parts = append(parts, fmt.Sprintf("%d %s", roleCount[role], role))
 	}
 	return fmt.Sprintf("%d messages (%s)", len(msgs), strings.Join(parts, ", "))
 }
