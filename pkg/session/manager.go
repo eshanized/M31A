@@ -48,7 +48,7 @@ func (m *Manager) atomicWrite(path string, data []byte) (err error) {
 		}
 	}()
 
-	tmpFile, err := os.Create(tmpPath)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
