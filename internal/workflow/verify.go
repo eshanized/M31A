@@ -99,9 +99,11 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			// Re-verify
 			newResult := e.verifyTask(task)
 			if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+				tasks[i].Status = m31types.StatusDone
 				e.logger.Info("task healed and verified", "id", task.ID)
 			} else {
 				e.logger.Warn("heal did not fix task", "id", task.ID)
+				tasks[i].Status = m31types.StatusFailed
 			}
 		} else {
 			e.logger.Warn("self-heal failed", "id", task.ID, "error", healResult.Error)
