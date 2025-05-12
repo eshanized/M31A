@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 		for k := range project.Answers {
 			keys = append(keys, k)
 		}
+		sort.Strings(keys)
 		for _, k := range keys {
 			b.WriteString(fmt.Sprintf("- **Q:** %s → **A:** %s\n", k, project.Answers[k]))
 		}
@@ -279,7 +281,11 @@ func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progre
 			lastAction = strings.TrimSpace(line[len("**Last Action:**"):])
 		case strings.HasPrefix(line, "**Timestamp:**"):
 			ts := strings.TrimSpace(line[len("**Timestamp:**"):])
-			timestamp, _ = time.Parse(time.RFC3339, ts)
+			var err error
+			timestamp, err = time.Parse(time.RFC3339, ts)
+			if err != nil {
+				// Malformed timestamp — use zero time and continue
+			}
 		}
 	}
 
