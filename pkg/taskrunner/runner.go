@@ -179,13 +179,13 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 		var result TaskResult
 		if fn != nil {
 			var cancel context.CancelFunc
-			var ctx context.Context
+			var taskCtx context.Context
 			if r.TaskTimeout > 0 {
-				ctx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
+				taskCtx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
 			} else {
-				ctx, cancel = context.Background(), func() {}
+				taskCtx, cancel = context.Background(), func() {}
 			}
-			result = fn(ctx, task)
+			result = fn(taskCtx, task)
 			cancel()
 		} else {
 			result = TaskResult{Success: true}
