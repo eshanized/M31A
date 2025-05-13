@@ -559,7 +559,7 @@ func TestApp_SettingsScreenTransition(t *testing.T) {
 	app := NewApp("test", nil, "key", "/tmp/config")
 	app.screen = ScreenREPL
 
-	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/settings")})
+	newModel, cmd := app.Update(SlashCommandMsg{Command: "/settings"})
 	updated := newModel.(*AppState)
 
 	if updated.screen != ScreenSettings {
@@ -588,7 +588,7 @@ func TestApp_ResumeScreenTransition(t *testing.T) {
 	app := NewApp("test", nil, "key", "/tmp/config")
 	app.screen = ScreenREPL
 
-	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/resume")})
+	newModel, cmd := app.Update(SlashCommandMsg{Command: "/resume"})
 	updated := newModel.(*AppState)
 
 	if updated.screen != ScreenResume {
@@ -607,7 +607,7 @@ func TestApp_ModelsScreenTransition(t *testing.T) {
 	app := NewApp("test", reg, "key", "/tmp/config")
 	app.screen = ScreenREPL
 
-	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
+	newModel, cmd := app.Update(SlashCommandMsg{Command: "/models"})
 	updated := newModel.(*AppState)
 
 	if updated.screen != ScreenModelSelector {

@@ -94,14 +94,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 			result = lipgloss.JoinHorizontal(lipgloss.Left, segments...)
 		}
 		if lipgloss.Width(result) > width && width >= 20 {
-			runes := []rune(result)
-			maxLen := width - 6 // account for ANSI codes overhead
-			if maxLen < 10 {
-				maxLen = 10
-			}
-			if len(runes) > maxLen {
-				result = string(runes[:maxLen]) + "..."
-			}
+			result = truncateWithANSI(result, width-3)
 		} else if width < 20 {
 			result = "..."
 		}
@@ -124,4 +117,41 @@ func removeModelSegment(segments []string) []string {
 		}
 	}
 	return segments
+}
+
+// truncateWithANSI truncates a string containing ANSI escape codes to a given
+// display width, appending ellipsis. It preserves ANSI codes up to the
+// truncation point and closes any open SGR sequences.
+func truncateWithANSI(s string, maxWidth int) string {
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+
+	var result strings.Builder
+	visible := 0
+	inEscape := false
+
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b == '\x1b' {
+			inEscape = true
+			result.WriteByte(b)
+			continue
+		}
+		if inEscape {
+			result.WriteByte(b)
+			if b == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		visible++
+		if visible > maxWidth {
+			break
+		}
+		result.WriteByte(b)
+	}
+
+	result.WriteString("\x1b[0m...")
+	return result.String()
 }

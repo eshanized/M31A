@@ -35,6 +35,7 @@ type ReplModel struct {
 	lastStatus   string
 	width        int
 	height       int
+	sidebarWidth int // width reserved for sidebar (0 if hidden)
 
 	msgRenderer  *components.MessageRenderer
 	streamCancel context.CancelFunc
@@ -64,6 +65,10 @@ type ReplModel struct {
 
 	// Streaming channel — created when a stream starts, read by handleStreamMsg
 	streamCh chan tea.Msg
+
+	// streamDone is closed when the stream goroutine exits (normal or cancelled).
+	// Used by the continuation cmd to detect stream termination.
+	streamDone chan struct{}
 
 	// Last stream usage and cost (from StreamDoneMsg)
 	lastUsage *types.Usage
@@ -167,16 +172,23 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.width = msg.Width
 		m.height = msg.Height
 		inputHeight := 3
-		vpHeight := msg.Height - 2 - inputHeight
+		// Account for header(1) + status bar(1) + textarea borders/padding(2)
+		// + viewport borders(2) = 6 total chrome lines
+		const chromeHeight = 6
+		vpHeight := msg.Height - chromeHeight - inputHeight
 		if vpHeight < 1 {
 			vpHeight = 1
 		}
-		m.viewport.Width = msg.Width
+		replWidth := msg.Width - m.sidebarWidth
+		if replWidth < 20 {
+			replWidth = 20
+		}
+		m.viewport.Width = replWidth
 		m.viewport.Height = vpHeight
-		m.textarea.SetWidth(msg.Width)
+		m.textarea.SetWidth(replWidth)
 		m.textarea.SetHeight(inputHeight)
 		if m.msgRenderer != nil {
-			if err := m.msgRenderer.SetWidth(msg.Width - 4); err != nil {
+			if err := m.msgRenderer.SetWidth(replWidth - 4); err != nil {
 				m.lastStatus = fmt.Sprintf("Renderer resize failed: %v", err)
 			}
 		}
@@ -245,6 +257,16 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			m.inputHistory = append(m.inputHistory, input)
 			m.historyPos = len(m.inputHistory)
 
+			// If input is a slash command, emit it for app-level handling
+			if strings.HasPrefix(input, "/") {
+				m.textarea.Reset()
+				var cmds []tea.Cmd
+				cmds = append(cmds, func() tea.Msg {
+					return SlashCommandMsg{Command: input}
+				})
+				return cmds, false
+			}
+
 			userMsg := types.Message{
 				Role:      "user",
 				Content:   input,
@@ -262,6 +284,23 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 					modelID := ""
 					if m.activeModel != nil {
 						modelID = m.activeModel.ID
+					} else {
+						// No model configured — show helpful error
+						errMsg := types.Message{
+							Role:    "assistant",
+							Content: "No model selected. Set one up via /settings or /model command.",
+							Segments: []types.MessageSegment{{
+								Type:    "content",
+								Content: "No model selected. Set one up via /settings or /model command.",
+								Visible: true,
+							}},
+							CreatedAt: time.Now(),
+						}
+						m.messages = append(m.messages, errMsg)
+						m.renderMessages()
+						m.viewport.GotoBottom()
+						var cmds []tea.Cmd
+						return cmds, true
 					}
 
 					// Auto-arbitrage: if enabled, check if a cheaper model can handle this task
@@ -301,7 +340,8 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 						Stream:   true,
 					}
 					m.streamCh = make(chan tea.Msg, 100)
-					cmd := StartStreamCmd(ctx, p, req, m.sessionID, m.streamCh)
+					m.streamDone = make(chan struct{})
+					cmd := StartStreamCmd(ctx, p, req, m.sessionID, m.streamCh, m.streamDone)
 					return []tea.Cmd{cmd}, true
 				}
 			}
@@ -500,11 +540,24 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	m.renderMessages()
 	m.viewport.GotoBottom()
 
-	// Continuation: schedule next read from stream channel
+	// Continuation: schedule next read from stream channel.
+	// Must also watch streamDone so the cmd exits when the stream
+	// goroutine terminates (normal completion or cancellation).
+	streamCh := m.streamCh
+	streamDone := m.streamDone
 	nextCmd := func() tea.Msg {
 		select {
-		case msg := <-m.streamCh:
+		case msg := <-streamCh:
 			return msg
+		case <-streamDone:
+			// Stream goroutine exited — drain any remaining messages from
+			// the channel, then return nil to stop the continuation chain.
+			select {
+			case msg := <-streamCh:
+				return msg
+			default:
+				return nil
+			}
 		}
 	}
 
@@ -623,6 +676,22 @@ func (m *ReplModel) SetTheme(t theme.Theme) {
 			m.msgRenderer = newRenderer
 		}
 	}
+}
+
+// SetSidebarWidth updates the reserved width for the sidebar and recalculates
+// the REPL's internal widths. Call this when the sidebar is shown/hidden.
+func (m *ReplModel) SetSidebarWidth(sw int) {
+	m.sidebarWidth = sw
+	// Recalculate layout with current window dimensions
+	replWidth := m.width - sw
+	if replWidth < 20 {
+		replWidth = 20
+	}
+	m.viewport.Width = replWidth
+	if m.msgRenderer != nil {
+		_ = m.msgRenderer.SetWidth(replWidth - 4)
+	}
+	m.textarea.SetWidth(replWidth)
 }
 
 func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) {

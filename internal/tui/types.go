@@ -104,3 +104,14 @@ type QuestionRequestMsg struct {
 type QuestionResponseMsg struct {
 	Answer string
 }
+
+// ThemeChangedMsg is emitted when the theme is switched at runtime.
+type ThemeChangedMsg struct {
+	Theme string // "dark" or "light"
+}
+
+// SlashCommandMsg is emitted by the REPL when the user enters a slash command.
+// It carries the raw command string for app-level processing.
+type SlashCommandMsg struct {
+	Command string
+}

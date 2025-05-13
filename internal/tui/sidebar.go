@@ -136,6 +136,11 @@ func (m *SidebarModel) IsVisible() bool {
 	return m.visible
 }
 
+// SetTheme updates the sidebar theme and triggers a re-render.
+func (m *SidebarModel) SetTheme(t theme.Theme) {
+	m.theme = t
+}
+
 // refreshCmd returns a tea.Cmd that fetches git status asynchronously.
 func (m *SidebarModel) refreshCmd() tea.Cmd {
 	return func() tea.Msg {

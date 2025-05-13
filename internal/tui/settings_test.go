@@ -437,22 +437,22 @@ func TestSettings_DeleteChar(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test applyFieldsToConfig
+// Test applyFieldValues (method version)
 // ---------------------------------------------------------------------------
 
 func TestApplyFieldsToConfig_GeneralTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabGeneral: {
-			{key: "ui.theme", value: "light", fieldType: "string"},
-			{key: "ui.compact_mode", value: "true", fieldType: "bool"},
-			{key: "ui.show_token_usage", value: "true", fieldType: "bool"},
-			{key: "ui.show_cost_estimate", value: "false", fieldType: "bool"},
-			{key: "ui.max_iterations", value: "100", fieldType: "int"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	// Modify fields manually to simulate edited fields
+	m.fields[tabGeneral] = []*editableField{
+		{key: "ui.theme", value: "light", fieldType: "string"},
+		{key: "ui.compact_mode", value: "true", fieldType: "bool"},
+		{key: "ui.show_token_usage", value: "true", fieldType: "bool"},
+		{key: "ui.show_cost_estimate", value: "false", fieldType: "bool"},
+		{key: "ui.max_iterations", value: "100", fieldType: "int"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if cfg.UI.Theme != "light" {
 		t.Errorf("expected theme 'light', got %q", cfg.UI.Theme)
@@ -473,16 +473,15 @@ func TestApplyFieldsToConfig_GeneralTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_ProviderTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabProvider: {
-			{key: "provider.default", value: "zen", fieldType: "string"},
-			{key: "provider.auto_fallback", value: "true", fieldType: "bool"},
-			{key: "provider.openrouter.api_key", value: "sk-test", fieldType: "string"},
-			{key: "provider.zen.api_key", value: "sk-zen", fieldType: "string"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabProvider] = []*editableField{
+		{key: "provider.default", value: "zen", fieldType: "string"},
+		{key: "provider.auto_fallback", value: "true", fieldType: "bool"},
+		{key: "provider.openrouter.api_key", value: "sk-test", fieldType: "string"},
+		{key: "provider.zen.api_key", value: "sk-zen", fieldType: "string"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if cfg.Provider.Default != "zen" {
 		t.Errorf("expected provider 'zen', got %q", cfg.Provider.Default)
@@ -500,18 +499,17 @@ func TestApplyFieldsToConfig_ProviderTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_ModelTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabModel: {
-			{key: "model.default", value: "gpt-4o", fieldType: "string"},
-			{key: "model.context_warning_threshold", value: "0.80", fieldType: "float"},
-			{key: "model.show_thinking_by_default", value: "true", fieldType: "bool"},
-			{key: "model.auto_collapse_tools", value: "true", fieldType: "bool"},
-			{key: "model.auto_arbitrage", value: "false", fieldType: "bool"},
-			{key: "model.arbitrage_threshold", value: "0.10", fieldType: "float"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabModel] = []*editableField{
+		{key: "model.default", value: "gpt-4o", fieldType: "string"},
+		{key: "model.context_warning_threshold", value: "0.80", fieldType: "float"},
+		{key: "model.show_thinking_by_default", value: "true", fieldType: "bool"},
+		{key: "model.auto_collapse_tools", value: "true", fieldType: "bool"},
+		{key: "model.auto_arbitrage", value: "false", fieldType: "bool"},
+		{key: "model.arbitrage_threshold", value: "0.10", fieldType: "float"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if cfg.Model.Default != "gpt-4o" {
 		t.Errorf("expected model 'gpt-4o', got %q", cfg.Model.Default)
@@ -535,14 +533,13 @@ func TestApplyFieldsToConfig_ModelTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_PermissionsTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabPermissions: {
-			{key: "permissions.default_mode", value: "auto", fieldType: "string"},
-			{key: "permissions.timeout_seconds", value: "60", fieldType: "int"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabPermissions] = []*editableField{
+		{key: "permissions.default_mode", value: "auto", fieldType: "string"},
+		{key: "permissions.timeout_seconds", value: "60", fieldType: "int"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if cfg.Permissions.DefaultMode != "auto" {
 		t.Errorf("expected default mode 'auto', got %q", cfg.Permissions.DefaultMode)
@@ -554,14 +551,13 @@ func TestApplyFieldsToConfig_PermissionsTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_FeaturesTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabFeatures: {
-			{key: "features.auto_backup", value: "true", fieldType: "bool"},
-			{key: "features.resume_on_startup", value: "true", fieldType: "bool"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabFeatures] = []*editableField{
+		{key: "features.auto_backup", value: "true", fieldType: "bool"},
+		{key: "features.resume_on_startup", value: "true", fieldType: "bool"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if !cfg.Features.AutoBackup {
 		t.Error("expected AutoBackup=true")
@@ -573,14 +569,13 @@ func TestApplyFieldsToConfig_FeaturesTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_LedgerTab(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabLedger: {
-			{key: "ledger.enabled", value: "true", fieldType: "bool"},
-			{key: "ledger.max_entries", value: "1000", fieldType: "int"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabLedger] = []*editableField{
+		{key: "ledger.enabled", value: "true", fieldType: "bool"},
+		{key: "ledger.max_entries", value: "1000", fieldType: "int"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
 	if !cfg.Ledger.Enabled {
 		t.Error("expected Ledger.Enabled=true")
@@ -592,41 +587,44 @@ func TestApplyFieldsToConfig_LedgerTab(t *testing.T) {
 
 func TestApplyFieldsToConfig_InvalidIntFloat(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabGeneral: {
-			{key: "ui.max_iterations", value: "invalid", fieldType: "int"},
-			{key: "model.context_warning_threshold", value: "invalid", fieldType: "float"},
-		},
+	defaultMaxIter := cfg.UI.MaxIterations
+	defaultThreshold := cfg.Model.ContextWarningThreshold
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabGeneral] = []*editableField{
+		{key: "ui.max_iterations", value: "invalid", fieldType: "int"},
+	}
+	m.fields[tabModel] = []*editableField{
+		{key: "model.context_warning_threshold", value: "invalid", fieldType: "float"},
 	}
 
 	// Should not panic, should keep defaults
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 
-	if cfg.UI.MaxIterations != 0 {
-		t.Errorf("expected MaxIterations=0 (default), got %d", cfg.UI.MaxIterations)
+	if cfg.UI.MaxIterations != defaultMaxIter {
+		t.Errorf("expected MaxIterations=%d (default), got %d", defaultMaxIter, cfg.UI.MaxIterations)
 	}
-	if cfg.Model.ContextWarningThreshold != 0 {
-		t.Errorf("expected threshold=0 (default), got %f", cfg.Model.ContextWarningThreshold)
+	if cfg.Model.ContextWarningThreshold != defaultThreshold {
+		t.Errorf("expected threshold=%f (default), got %f", defaultThreshold, cfg.Model.ContextWarningThreshold)
 	}
 }
 
-func TestApplyFieldsToConfig_EmptySnapshots(t *testing.T) {
+func TestApplyFieldsToConfig_EmptyFields(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{}
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields = make(map[settingsTab][]*editableField)
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 	// Should not panic
 }
 
 func TestApplyFieldsToConfig_UnknownKey(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fields := map[settingsTab][]editableField{
-		tabGeneral: {
-			{key: "unknown.key", value: "value", fieldType: "string"},
-		},
+	m := NewSettingsModel(cfg, "/tmp/test-config.toml", theme.Dark(), nil, nil)
+	m.fields[tabGeneral] = []*editableField{
+		{key: "unknown.key", value: "value", fieldType: "string"},
 	}
 
-	applyFieldsToConfig(cfg, fields)
+	m.applyFieldValues()
 	// Should not panic, unknown keys are ignored
 }
 

@@ -33,8 +33,9 @@ type TickMsg struct {
 	Time time.Time
 }
 
-func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string, streamCh chan tea.Msg) tea.Cmd {
+func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string, streamCh chan tea.Msg, streamDone chan struct{}) tea.Cmd {
 	go func() {
+		defer close(streamDone)
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
 			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}

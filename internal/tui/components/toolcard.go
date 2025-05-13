@@ -53,6 +53,7 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		truncated = result.Truncated
 		// Check for binary before sanitizing (SanitizeOutput strips null bytes)
 		if isBinaryContent(output) {
+			isBinary = true
 			output = "[binary content]"
 		} else {
 			output = SanitizeOutput(output)

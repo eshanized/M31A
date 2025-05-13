@@ -488,9 +488,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+b" && m.screen == ScreenREPL {
 			if m.sidebarModel != nil {
 				m.sidebarModel.Toggle()
-				// Refresh git status when showing sidebar
+				// Refresh git status and adjust REPL layout when sidebar state changes
 				if m.sidebarModel.IsVisible() {
+					if m.replModel != nil {
+						m.replModel.SetSidebarWidth(sidebarWidth)
+					}
 					return m, m.sidebarModel.refreshCmd()
+				} else {
+					if m.replModel != nil {
+						m.replModel.SetSidebarWidth(0)
+					}
 				}
 			}
 			return m, nil
@@ -547,121 +554,141 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if m.screen == ScreenREPL {
-			// Handle TUI-specific commands first
-			switch msg.String() {
-			case "/settings":
-				m.screen = ScreenSettings
-				return m, nil
-			case "/resume":
-				if m.resumeModel != nil {
-					m.resumeModel.Refresh()
-				}
-				m.screen = ScreenResume
-				return m, nil
-			case "/models":
-				if m.registry != nil {
-					m.prevScreen = m.screen
-					m.modelSelector = NewModelSelector(m.registry)
-					m.screen = ScreenModelSelector
-					return m, m.modelSelector.Init()
-				}
-			}
+	case SlashCommandMsg:
+		// Process slash commands from the REPL
+		if m.screen != ScreenREPL {
+			return m, nil
+		}
 
-			// Intercept /phase to start workflow engine phases
-			if strings.HasPrefix(msg.String(), "/phase ") && m.workflowEngine != nil {
-				parts := strings.Fields(msg.String())
-				if len(parts) >= 2 {
-					phaseName := parts[1]
-					goal := ""
-					if len(parts) > 2 {
-						goal = strings.Join(parts[2:], " ")
-					}
-					var phase types.WorkflowPhase
-					switch phaseName {
-					case "initialize":
-						phase = types.PhaseInitialize
-					case "discuss":
-						phase = types.PhaseDiscuss
-					case "plan":
-						phase = types.PhasePlan
-					case "execute":
-						phase = types.PhaseExecute
-					case "verify":
-						phase = types.PhaseVerify
-					case "ship":
-						phase = types.PhaseShip
-					default:
-						return m, nil
-					}
-					m.workflowGoal = goal
-					m.workflowRunning = true
-					m.currentPhase = phase
-					return m, RunPhaseCmd(m, phase, goal)
-				}
-			}
+		cmd := msg.Command
 
-			// Intercept /workflow to start the full workflow chain
-			if strings.HasPrefix(msg.String(), "/workflow ") && m.workflowEngine != nil {
-				goal := strings.TrimPrefix(msg.String(), "/workflow ")
-				if goal == "" {
-					m.currentOperation = "Usage: /workflow <your goal>"
+		// Handle TUI-specific commands first
+		switch cmd {
+		case "/settings":
+			m.screen = ScreenSettings
+			return m, nil
+		case "/resume":
+			if m.resumeModel != nil {
+				m.resumeModel.Refresh()
+			}
+			m.screen = ScreenResume
+			return m, nil
+		case "/models":
+			if m.registry != nil {
+				m.prevScreen = m.screen
+				m.modelSelector = NewModelSelector(m.registry)
+				m.screen = ScreenModelSelector
+				return m, m.modelSelector.Init()
+			}
+		}
+
+		// Intercept /phase to start workflow engine phases
+		if strings.HasPrefix(cmd, "/phase ") && m.workflowEngine != nil {
+			parts := strings.Fields(cmd)
+			if len(parts) >= 2 {
+				phaseName := parts[1]
+				goal := ""
+				if len(parts) > 2 {
+					goal = strings.Join(parts[2:], " ")
+				}
+				var phase types.WorkflowPhase
+				switch phaseName {
+				case "initialize":
+					phase = types.PhaseInitialize
+				case "discuss":
+					phase = types.PhaseDiscuss
+				case "plan":
+					phase = types.PhasePlan
+				case "execute":
+					phase = types.PhaseExecute
+				case "verify":
+					phase = types.PhaseVerify
+				case "ship":
+					phase = types.PhaseShip
+				default:
+					m.currentOperation = fmt.Sprintf("Unknown phase: %q", phaseName)
 					return m, nil
 				}
 				m.workflowGoal = goal
 				m.workflowRunning = true
-				m.currentPhase = types.PhaseInitialize
-				m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
-				return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
-			}
-
-			// Try command registry for all other slash commands
-			if strings.HasPrefix(msg.String(), "/") {
-				// Sync current messages to the consolidator so /compress sees
-				// the latest context.
-				if m.autoDream != nil && m.replModel != nil {
-					m.autoDream.SetMessages(m.replModel.Messages())
-				}
-
-				sessionID := ""
-				if m.workflowEngine != nil {
-					sessionID = m.workflowEngine.SessionID()
-				}
-				ctx := CommandContext{
-					Registry:        m.registry,
-					SessionManager:  m.sessionManager,
-					Config:          m.config,
-					Dispatcher:      m.dispatcher,
-					Ledger:          m.ledger,
-					WorkflowEngine:  m.workflowEngine,
-					SessionID:       sessionID,
-					AutoDream:       m.autoDream,
-					Git:             m.git,
-					Rollback:        m.rollback,
-				}
-				result, handled := m.cmdRegistry.Execute(msg.String(), ctx)
-				if handled {
-					m.currentOperation = result.Message
-					if result.Screen != nil {
-						m.screen = *result.Screen
-						if *result.Screen == ScreenFirstRun {
-							m.replModel = nil
-						}
-						if result.Cmd != nil {
-							return m, tea.Batch(result.Cmd)
-						}
-						return m, nil
-					}
-					if strings.HasPrefix(result.Message, "Goodbye") {
-						return m, tea.Quit
-					}
-					if result.Cmd != nil {
-						return m, tea.Batch(result.Cmd)
-					}
-					return m, nil
-				}
+				m.currentPhase = phase
+				return m, RunPhaseCmd(m, phase, goal)
 			}
 		}
+
+		// Intercept /workflow to start the full workflow chain
+		if strings.HasPrefix(cmd, "/workflow ") && m.workflowEngine != nil {
+			goal := strings.TrimPrefix(cmd, "/workflow ")
+			if goal == "" {
+				m.currentOperation = "Usage: /workflow <your goal>"
+				return m, nil
+			}
+			m.workflowGoal = goal
+			m.workflowRunning = true
+			m.currentPhase = types.PhaseInitialize
+			m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
+			return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
+		}
+
+		// Try command registry for all other slash commands
+		if m.autoDream != nil && m.replModel != nil {
+			m.autoDream.SetMessages(m.replModel.Messages())
+		}
+
+		sessionID := ""
+		if m.workflowEngine != nil {
+			sessionID = m.workflowEngine.SessionID()
+		}
+		ctx := CommandContext{
+			Registry:       m.registry,
+			SessionManager: m.sessionManager,
+			Config:         m.config,
+			ConfigPath:     m.configPath,
+			Dispatcher:     m.dispatcher,
+			Ledger:         m.ledger,
+			WorkflowEngine: m.workflowEngine,
+			SessionID:      sessionID,
+			AutoDream:      m.autoDream,
+			Git:            m.git,
+			Rollback:       m.rollback,
+		}
+		result, handled := m.cmdRegistry.Execute(cmd, ctx)
+		if handled {
+			m.currentOperation = result.Message
+			if result.Screen != nil {
+				m.screen = *result.Screen
+				if *result.Screen == ScreenFirstRun {
+					m.replModel = nil
+				}
+				if result.Cmd != nil {
+					return m, tea.Batch(result.Cmd)
+				}
+				return m, nil
+			}
+			if strings.HasPrefix(result.Message, "Goodbye") {
+				return m, tea.Quit
+			}
+			if result.Cmd != nil {
+				return m, tea.Batch(result.Cmd)
+			}
+			return m, nil
+		}
+
+		// Unknown command — show as error in REPL
+		if m.replModel != nil {
+			errMsg := types.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd),
+				Segments: []types.MessageSegment{{
+					Type:    "content",
+					Content: fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd),
+					Visible: true,
+				}},
+				CreatedAt: time.Now(),
+			}
+			m.replModel.AddMessage(errMsg)
+		}
+		return m, nil
 
 	case HealthCheckTickMsg:
 		if m.healthCheckInFlight {
@@ -738,9 +765,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sidebarModel == nil {
 				m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
 			}
-			if m.width > 120 {
-				m.sidebarModel.SetVisible(true)
+			// Size the REPL immediately with current window dimensions
+			if m.width > 0 && m.height > 0 {
+				m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 			}
+			// Don't auto-show sidebar until git status is loaded
 		}
 		if msg.Screen == ScreenModelSelector {
 			m.prevScreen = m.screen
@@ -1032,6 +1061,36 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			NextHealthTick(types.HealthCheckInterval),
 			NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
 		)
+
+	case SidebarRefreshMsg:
+		if m.sidebarModel != nil {
+			m.sidebarModel.Update(msg)
+			// Auto-show sidebar on wide terminals now that status is loaded
+			if m.width > 120 && m.replModel != nil {
+				m.sidebarModel.SetVisible(true)
+				m.replModel.SetSidebarWidth(sidebarWidth)
+			}
+		}
+		return m, nil
+
+	case ThemeChangedMsg:
+		switch msg.Theme {
+		case "dark":
+			m.themeManager = theme.NewManager(theme.ModeDark)
+		case "light":
+			m.themeManager = theme.NewManager(theme.ModeLight)
+		}
+		t := m.themeManager.Current()
+		if m.replModel != nil {
+			m.replModel.SetTheme(t)
+		}
+		if m.sidebarModel != nil {
+			m.sidebarModel.SetTheme(t)
+		}
+		if m.settingsModel != nil {
+			m.settingsModel.SetTheme(t)
+		}
+		return m, nil
 	}
 
 	switch m.screen {
@@ -1053,16 +1112,28 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				rp := NewReplModel(m.themeManager.Current())
 				m.replModel = &rp
-				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
+
+				// Create a session so that /status, /save, etc. work
+				sessionID := ""
+				if m.sessionManager != nil && m.activeModel != nil && m.activeProvider != "" {
+					s, err := m.sessionManager.NewSession(m.activeModel.ID, m.activeProvider)
+					if err == nil {
+						sessionID = s.ID
+						m.dispatcher.SetSessionID(s.ID)
+					}
+				}
+
+				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 				m.initialized = true
 				// Init sidebar
 				if m.sidebarModel == nil {
 					m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
 				}
-				// Auto-show sidebar on wide terminals
-				if m.width > 120 {
-					m.sidebarModel.SetVisible(true)
+				// Size the REPL immediately with current window dimensions
+				if m.width > 0 && m.height > 0 {
+					m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 				}
+				// Don't auto-show sidebar until git status is loaded
 				healthCmd := HealthCheckTicker(
 					context.Background(), m.registry, m.activeProvider,
 					types.HealthCheckInterval,

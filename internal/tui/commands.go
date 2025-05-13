@@ -48,6 +48,7 @@ type CommandContext struct {
 	SessionManager *session.Manager
 	SessionID      string
 	Config         *config.Config
+	ConfigPath     string
 	Dispatcher     *tools.Dispatcher
 	Git            *git.Git
 	Ledger         *ledger.Ledger
@@ -672,25 +673,32 @@ func handleConfig(args []string, ctx CommandContext) CommandResult {
 		switch key {
 		case "ui.theme":
 			ctx.Config.UI.Theme = value
-			return CommandResult{Success: true, Message: fmt.Sprintf("ui.theme set to %q", value)}
+			ctx.Config.Save(ctx.ConfigPath)
+			return CommandResult{Success: true, Message: fmt.Sprintf("ui.theme set to %q", value), Cmd: func() tea.Msg {
+				return ThemeChangedMsg{Theme: value}
+			}}
 		case "model.default":
 			ctx.Config.Model.Default = value
+			ctx.Config.Save(ctx.ConfigPath)
 			return CommandResult{Success: true, Message: fmt.Sprintf("model.default set to %q", value)}
 		case "ui.compact_mode":
 			if v, err := strconv.ParseBool(value); err == nil {
 				ctx.Config.UI.CompactMode = v
+				ctx.Config.Save(ctx.ConfigPath)
 				return CommandResult{Success: true, Message: fmt.Sprintf("ui.compact_mode set to %v", v)}
 			}
 			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
 		case "ui.show_token_usage":
 			if v, err := strconv.ParseBool(value); err == nil {
 				ctx.Config.UI.ShowTokenUsage = v
+				ctx.Config.Save(ctx.ConfigPath)
 				return CommandResult{Success: true, Message: fmt.Sprintf("ui.show_token_usage set to %v", v)}
 			}
 			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
 		case "provider.auto_fallback":
 			if v, err := strconv.ParseBool(value); err == nil {
 				ctx.Config.Provider.AutoFallback = v
+				ctx.Config.Save(ctx.ConfigPath)
 				return CommandResult{Success: true, Message: fmt.Sprintf("provider.auto_fallback set to %v", v)}
 			}
 			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
@@ -911,7 +919,10 @@ func handleTheme(args []string, ctx CommandContext) CommandResult {
 	switch args[0] {
 	case "dark", "light":
 		ctx.Config.UI.Theme = args[0]
-		return CommandResult{Success: true, Message: fmt.Sprintf("Theme switched to %s. Restart required for full effect.", args[0])}
+		ctx.Config.Save(ctx.ConfigPath)
+		return CommandResult{Success: true, Message: fmt.Sprintf("Theme switched to %s.", args[0]), Cmd: func() tea.Msg {
+			return ThemeChangedMsg{Theme: args[0]}
+		}}
 	default:
 		return CommandResult{Success: false, Message: "Invalid theme. Use 'dark' or 'light'."}
 	}
@@ -1075,7 +1086,8 @@ func handleHealth(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
-// handleRun executes a shell command directly.
+// handleRun executes a shell command via the dispatcher, which handles
+// permission prompts for dangerous tools like Bash.
 func handleRun(args []string, ctx CommandContext) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{Success: false, Message: "Usage: /run <command>"}
@@ -1087,18 +1099,15 @@ func handleRun(args []string, ctx CommandContext) CommandResult {
 
 	cmd := strings.Join(args, " ")
 
-	// Execute via Bash tool
-	bash, ok := ctx.Dispatcher.GetTool("Bash")
-	if !ok {
-		return CommandResult{Success: false, Message: "Bash tool not available."}
+	// Execute via the dispatcher — this routes through the permission
+	// system for dangerous tools (Bash is RiskDangerous).
+	inputBytes := []byte(fmt.Sprintf(`{"name":"Bash","params":{"command":%q}}`, cmd))
+	toolCall := types.ToolCall{
+		Name:  "Bash",
+		Input: inputBytes,
 	}
 
-	input := types.ToolInput{
-		Name:   "Bash",
-		Params: map[string]any{"command": cmd},
-	}
-
-	result, err := bash.Execute(context.Background(), input)
+	result, err := ctx.Dispatcher.Execute(context.Background(), toolCall)
 	if err != nil {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Command failed: %v", err)}
 	}

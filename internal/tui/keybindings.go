@@ -194,12 +194,12 @@ func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, t theme.Theme, maxWidth int
 
 	result := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 	if lipgloss.Width(result) > maxWidth {
-		// Truncate
+		// Truncate safely without breaking UTF-8 or ANSI sequences
 		maxLen := maxWidth - 3
 		if maxLen < 10 {
 			return ""
 		}
-		result = result[:maxLen] + "..."
+		result = truncateWithANSI(result, maxLen) + "..."
 	}
 	return result
 }

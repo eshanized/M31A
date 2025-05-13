@@ -74,7 +74,8 @@ func TestStartStreamCmd_ContentOnly(t *testing.T) {
 	}
 
 	streamCh := make(chan tea.Msg, 100)
-	cmd := StartStreamCmd(context.Background(), p, req, "test-session", streamCh)
+	streamDone := make(chan struct{})
+	cmd := StartStreamCmd(context.Background(), p, req, "test-session", streamCh, streamDone)
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd")
 	}
@@ -124,7 +125,8 @@ func TestStartStreamCmd_WithThinking(t *testing.T) {
 	}
 
 	streamCh := make(chan tea.Msg, 100)
-	cmd := StartStreamCmd(context.Background(), p, req, "session-1", streamCh)
+	streamDone := make(chan struct{})
+	cmd := StartStreamCmd(context.Background(), p, req, "session-1", streamCh, streamDone)
 
 	var streamMsgCount int
 	var doneMsgCount int
@@ -167,7 +169,8 @@ func TestStartStreamCmd_WithContextExceeded(t *testing.T) {
 	}
 
 	streamCh := make(chan tea.Msg, 100)
-	cmd := StartStreamCmd(context.Background(), p, req, "session-2", streamCh)
+	streamDone := make(chan struct{})
+	cmd := StartStreamCmd(context.Background(), p, req, "session-2", streamCh, streamDone)
 
 	msg := cmd()
 	if msg == nil {
@@ -195,7 +198,8 @@ func TestStartStreamCmd_ContextCancellation(t *testing.T) {
 	}
 
 	streamCh := make(chan tea.Msg, 100)
-	cmd := StartStreamCmd(ctx, p, req, "session-3", streamCh)
+	streamDone := make(chan struct{})
+	cmd := StartStreamCmd(ctx, p, req, "session-3", streamCh, streamDone)
 
 	count := 0
 	for {
