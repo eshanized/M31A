@@ -1,6 +1,8 @@
 package components
 
 import (
+	"encoding/json"
+
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
@@ -25,12 +27,12 @@ func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 }
 
 func (r *MessageRenderer) createGlamourRenderer() error {
-	style := "dark"
+	style := glamour.WithStylePath("dark")
 	if r.theme.Mode == theme.ModeLight {
-		style = "light"
+		style = glamour.WithStylePath("light")
 	}
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(style),
+		style,
 		glamour.WithWordWrap(r.width),
 	)
 	if err != nil {
@@ -60,26 +62,29 @@ func (r *MessageRenderer) RenderMessage(msg types.Message, width int) string {
 	}
 }
 
+// renderUserMessage uses OpenCode-style left-bordered block instead of rounded bubble.
 func (r *MessageRenderer) renderUserMessage(content string, width int) string {
-	maxWidth := int(float64(width) * 0.7)
-	if maxWidth < 20 {
-		maxWidth = 20
-	}
-	if maxWidth > width-4 {
-		maxWidth = width - 4
+	contentWidth := width - 4 // account for paddingLeft=2 paddingRight=2
+	if contentWidth < 20 {
+		contentWidth = 20
 	}
 
-	bubble := r.theme.UserBubble.
-		Width(maxWidth).
-		MaxWidth(maxWidth).
-		Render(content)
+	borderStyle := lipgloss.NewStyle().
+		Border(theme.SplitBorder, true, false, false, false).
+		BorderForeground(r.theme.Border).
+		Background(r.theme.BackgroundPanel).
+		Padding(1, 2).
+		MaxWidth(contentWidth).
+		Width(contentWidth)
+
+	bubble := borderStyle.Render(content)
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Align(lipgloss.Right).
 		Render(bubble)
 }
 
+// renderAssistantMessage renders assistant content with left indentation.
 func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) string {
 	contentWidth := width - 4
 
@@ -96,15 +101,18 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		case "thinking":
 			tb := NewThinkingBlock(seg, r.theme, false, 0)
 			rendered = append(rendered, tb.Render(contentWidth))
+		case "tool_use":
+			// Parse tool call from segment JSON
+			var tc types.ToolCall
+			if err := json.Unmarshal([]byte(seg.Content), &tc); err == nil {
+				card := NewToolCard(tc, nil, ToolRunning, r.theme)
+				rendered = append(rendered, card.Render(contentWidth))
+			}
 		}
 	}
 
 	if len(msg.ToolCalls) > 0 {
 		for _, tc := range msg.ToolCalls {
-			tcName := tc.Name
-			if tcName == "" {
-				tcName = "Tool"
-			}
 			card := NewToolCard(tc, nil, ToolRunning, r.theme)
 			rendered = append(rendered, card.Render(contentWidth))
 		}
@@ -121,14 +129,14 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 	rendered, err := r.renderer.Render(content)
 	if err != nil {
 		return lipgloss.NewStyle().
-			Foreground(r.theme.TextPrimary).
+			Foreground(r.theme.Text).
 			Width(width).
+			PaddingLeft(3).
 			Render(content)
 	}
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Padding(0, 1).
+		PaddingLeft(3).
 		Render(rendered)
 }
-
