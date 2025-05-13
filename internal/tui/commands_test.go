@@ -604,8 +604,8 @@ func TestResetCommand(t *testing.T) {
 func TestCommands_AllRegistered(t *testing.T) {
 	r := DefaultCommands()
 	names := r.List()
-	if len(names) != 28 {
-		t.Fatalf("expected exactly 28 commands, got %d: %v", len(names), names)
+	if len(names) != 27 {
+		t.Fatalf("expected exactly 27 commands, got %d: %v", len(names), names)
 	}
 
 	// Verify all expected commands are present
@@ -616,7 +616,7 @@ func TestCommands_AllRegistered(t *testing.T) {
 		"goal": false, "phase": false, "config": false, "models": false,
 		"fallback": false, "tools": false, "workflow": false, "history": false,
 		"diff": false, "theme": false, "save": false, "key": false,
-		"log": false, "tokens": false, "health": false, "run": false,
+		"log": false, "tokens": false, "health": false,
 	}
 	hasExtra := false
 	for _, name := range names {
@@ -757,12 +757,14 @@ func TestPhaseCommand(t *testing.T) {
 	})
 
 	t.Run("valid phase", func(t *testing.T) {
+		// /phase with args is handled by app.go for workflow execution.
+		// The registry handler returns a guidance message.
 		result, _ := r.Execute("/phase execute", CommandContext{})
-		if !result.Success {
-			t.Fatalf("expected success, got: %s", result.Message)
+		if result.Success {
+			t.Fatalf("expected guidance message from registry handler, got success: %s", result.Message)
 		}
-		if !strings.Contains(result.Message, "execute") {
-			t.Errorf("expected phase name in message, got: %s", result.Message)
+		if !strings.Contains(result.Message, "/phase <name>") {
+			t.Errorf("expected guidance message, got: %s", result.Message)
 		}
 	})
 
@@ -771,8 +773,8 @@ func TestPhaseCommand(t *testing.T) {
 		if result.Success {
 			t.Error("expected failure for invalid phase")
 		}
-		if !strings.Contains(result.Message, "Invalid phase") {
-			t.Errorf("expected 'Invalid phase' message, got: %s", result.Message)
+		if !strings.Contains(result.Message, "/phase <name>") {
+			t.Errorf("expected guidance message, got: %s", result.Message)
 		}
 	})
 }
@@ -1133,26 +1135,28 @@ func TestGoalCommand_WithSession(t *testing.T) {
 func TestPhaseCommand_WithSession(t *testing.T) {
 	r := DefaultCommands()
 
-	t.Run("set phase persists to session", func(t *testing.T) {
+	t.Run("show current phase", func(t *testing.T) {
 		ctx, dir := newTestContext(t)
 		defer cleanupTestContext(dir)
 
-		result, _ := r.Execute("/phase plan", ctx)
+		result, _ := r.Execute("/phase", ctx)
 		if !result.Success {
 			t.Fatalf("expected success, got: %s", result.Message)
 		}
-		if !strings.Contains(result.Message, "plan") {
-			t.Errorf("expected 'plan' in message, got: %s", result.Message)
+		if !strings.Contains(result.Message, "Current phase") {
+			t.Errorf("expected 'Current phase' in message, got: %s", result.Message)
 		}
 	})
 
-	t.Run("all valid phases", func(t *testing.T) {
-		phases := []string{"idle", "initialize", "discuss", "plan", "execute", "verify", "ship"}
-		for _, phase := range phases {
-			result, _ := r.Execute("/phase "+phase, CommandContext{})
-			if !result.Success {
-				t.Errorf("expected success for phase %q, got: %s", phase, result.Message)
-			}
+	t.Run("phase with args returns guidance", func(t *testing.T) {
+		// /phase with args is handled by app.go for workflow execution.
+		// The registry handler returns a guidance message.
+		result, _ := r.Execute("/phase plan", CommandContext{})
+		if result.Success {
+			t.Fatalf("expected guidance message, got success: %s", result.Message)
+		}
+		if !strings.Contains(result.Message, "/phase <name>") {
+			t.Errorf("expected guidance message, got: %s", result.Message)
 		}
 	})
 }

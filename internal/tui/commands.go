@@ -186,7 +186,6 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("log", handleLog, "Show recent log entries")
 	r.Register("tokens", handleTokens, "Estimate token count for text")
 	r.Register("health", handleHealth, "Show system health status")
-	r.Register("run", handleRun, "Execute a shell command directly")
 
 	return r
 }
@@ -620,39 +619,27 @@ func handleGoal(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: fmt.Sprintf("Goal set: %s", goal)}
 }
 
-// handlePhase shows or transitions the current workflow phase.
+// handlePhase shows the current workflow phase.
+// Note: /phase <name> with args is intercepted by app.go to start actual
+// workflow execution; this handler only handles /phase (no args).
 func handlePhase(args []string, ctx CommandContext) CommandResult {
-	validPhases := []types.WorkflowPhase{
-		types.PhaseIdle, types.PhaseInitialize, types.PhaseDiscuss,
-		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseShip,
-	}
-
-	if len(args) == 0 {
-		// Show current phase
-		if ctx.SessionManager != nil && ctx.SessionID != "" {
-			s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-			if err == nil {
-				return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", s.WorkflowPhase)}
-			}
-		}
-		return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", types.PhaseIdle)}
-	}
-
-	phaseName := args[0]
-	for _, p := range validPhases {
-		if string(p) == phaseName {
-			// Persist phase transition to session
-			if ctx.SessionManager != nil && ctx.SessionID != "" {
-				ctx.SessionManager.SaveState(ctx.SessionID, p, "manual transition", "user requested /phase "+phaseName)
-			}
-			return CommandResult{Success: true, Message: fmt.Sprintf("Phase transition to %s.", phaseName)}
+	if len(args) > 0 {
+		// Phase with args is handled by app.go for workflow execution.
+		// This path should not be reached when app.go intercepts correctly.
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Use /phase <name> to start a workflow phase. Valid phases: idle, initialize, discuss, plan, execute, verify, ship"),
 		}
 	}
 
-	return CommandResult{
-		Success: false,
-		Message: fmt.Sprintf("Invalid phase %q. Valid phases: idle, initialize, discuss, plan, execute, verify, ship", phaseName),
+	// Show current phase
+	if ctx.SessionManager != nil && ctx.SessionID != "" {
+		s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
+		if err == nil {
+			return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", s.WorkflowPhase)}
+		}
 	}
+	return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", types.PhaseIdle)}
 }
 
 // handleConfig displays or modifies configuration values.
@@ -700,6 +687,34 @@ func handleConfig(args []string, ctx CommandContext) CommandResult {
 				ctx.Config.Provider.AutoFallback = v
 				ctx.Config.Save(ctx.ConfigPath)
 				return CommandResult{Success: true, Message: fmt.Sprintf("provider.auto_fallback set to %v", v)}
+			}
+			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
+		case "ledger.enabled":
+			if v, err := strconv.ParseBool(value); err == nil {
+				ctx.Config.Ledger.Enabled = v
+				ctx.Config.Save(ctx.ConfigPath)
+				return CommandResult{Success: true, Message: fmt.Sprintf("ledger.enabled set to %v", v)}
+			}
+			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
+		case "permissions.mode":
+			if value == "prompt" || value == "allow" || value == "deny" {
+				ctx.Config.Permissions.DefaultMode = value
+				ctx.Config.Save(ctx.ConfigPath)
+				return CommandResult{Success: true, Message: fmt.Sprintf("permissions.mode set to %q", value)}
+			}
+			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid value: %q. Use \"prompt\", \"allow\", or \"deny\"", value)}
+		case "ui.show_cost_estimate":
+			if v, err := strconv.ParseBool(value); err == nil {
+				ctx.Config.UI.ShowCostEstimate = v
+				ctx.Config.Save(ctx.ConfigPath)
+				return CommandResult{Success: true, Message: fmt.Sprintf("ui.show_cost_estimate set to %v", v)}
+			}
+			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
+		case "model.auto_arbitrage":
+			if v, err := strconv.ParseBool(value); err == nil {
+				ctx.Config.Model.AutoArbitrage = v
+				ctx.Config.Save(ctx.ConfigPath)
+				return CommandResult{Success: true, Message: fmt.Sprintf("model.auto_arbitrage set to %v", v)}
 			}
 			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
 		default:
@@ -1086,36 +1101,3 @@ func handleHealth(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
-// handleRun executes a shell command via the dispatcher, which handles
-// permission prompts for dangerous tools like Bash.
-func handleRun(args []string, ctx CommandContext) CommandResult {
-	if len(args) == 0 {
-		return CommandResult{Success: false, Message: "Usage: /run <command>"}
-	}
-
-	if ctx.Dispatcher == nil {
-		return CommandResult{Success: false, Message: "Dispatcher not available."}
-	}
-
-	cmd := strings.Join(args, " ")
-
-	// Execute via the dispatcher — this routes through the permission
-	// system for dangerous tools (Bash is RiskDangerous).
-	inputBytes := []byte(fmt.Sprintf(`{"name":"Bash","params":{"command":%q}}`, cmd))
-	toolCall := types.ToolCall{
-		Name:  "Bash",
-		Input: inputBytes,
-	}
-
-	result, err := ctx.Dispatcher.Execute(context.Background(), toolCall)
-	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Command failed: %v", err)}
-	}
-
-	output := result.Output
-	if len(output) > 4096 {
-		output = output[:4096] + "\n\n... [output truncated]"
-	}
-
-	return CommandResult{Success: true, Message: fmt.Sprintf("$ %s\n%s", cmd, output)}
-}
