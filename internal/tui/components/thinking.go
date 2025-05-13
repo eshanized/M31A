@@ -35,22 +35,26 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 }
 
 func (b *ThinkingBlock) Render(width int) string {
-	header := b.Header(width)
-	style := b.theme.ThinkingBlock.Width(width)
+	contentWidth := width - 4 // account for paddingLeft=2 paddingRight=2
 
-	// Add left border when focused for visual distinction
-	if b.focused {
-		style = style.Border(lipgloss.Border{Left: "│"}, true, false, true, false).
-			BorderForeground(b.theme.Thinking)
-	}
+	header := b.Header(contentWidth)
 
 	if !b.expanded {
+		// Collapsed: single-line with left border, muted text
+		style := lipgloss.NewStyle().
+			Border(theme.SplitBorder, true, false, false, false).
+			BorderForeground(b.theme.BorderSubtle).
+			Background(b.theme.BackgroundPanel).
+			Padding(0, 2).
+			Foreground(b.theme.TextMuted).
+			Width(width)
 		return style.Render(header)
 	}
 
-	contentWidth := width - 6
+	// Expanded: left-bordered block with content
 	content := lipgloss.NewStyle().
-		Foreground(b.theme.TextSecondary).
+		Foreground(b.theme.TextMuted).
+		Italic(true).
 		Width(contentWidth).
 		Padding(0, 1).
 		Render(b.segment.Content)
@@ -59,11 +63,22 @@ func (b *ThinkingBlock) Render(width int) string {
 		Foreground(b.theme.Border).
 		Render(strings.Repeat("─", contentWidth))
 
-	return style.Render(lipgloss.JoinVertical(lipgloss.Top,
-		header,
-		separator,
-		content,
-	))
+	blockContent := lipgloss.JoinVertical(lipgloss.Top, header, separator, content)
+
+	borderColor := b.theme.BorderSubtle
+	if b.focused {
+		borderColor = b.theme.Thinking
+	}
+
+	style := lipgloss.NewStyle().
+		Border(theme.SplitBorder, true, false, false, false).
+		BorderForeground(borderColor).
+		Background(b.theme.BackgroundPanel).
+		Padding(0, 2).
+		MarginTop(1).
+		Width(width)
+
+	return style.Render(blockContent)
 }
 
 func (b *ThinkingBlock) Toggle() {
@@ -112,7 +127,6 @@ func (b *ThinkingBlock) Header(width int) string {
 		toggle = "−"
 	}
 
-	// Focus indicator: bold toggle when focused
 	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
 	if b.focused {
 		toggleStyle = toggleStyle.Bold(true)
@@ -128,17 +142,13 @@ func (b *ThinkingBlock) Header(width int) string {
 		label = label[:maxWidth] + "..."
 	}
 
-	durationStyle := lipgloss.NewStyle().
-		Foreground(b.theme.TextSecondary)
-
-	// Split label into parts around the duration for styling
 	beforeDur := fmt.Sprintf("[%s] Thinking (", toggle)
 	afterDur := ")"
 	durStr := b.Duration()
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		toggleStyle.Render(beforeDur),
-		durationStyle.Render(durStr),
+		lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(durStr),
 		toggleStyle.Render(afterDur),
 	)
 }
