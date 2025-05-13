@@ -41,6 +41,11 @@ type KeyBinding struct {
 // LeaderTimeoutMsg is emitted when the leader key timeout fires.
 type LeaderTimeoutMsg struct{}
 
+// KeyActionMsg is emitted by keybinding actions for app-level handling.
+type KeyActionMsg struct {
+	Action string // "toggle_sidebar", "open_settings", "new_session", "session_list", "cycle_model", "toggle_theme"
+}
+
 // KeyRegistry manages keybindings with context-aware dispatch and leader key support.
 type KeyRegistry struct {
 	bindings map[KeyContext][]KeyBinding
@@ -87,12 +92,18 @@ func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
 		chordKey := r.leaderKey + " " + key
 		for _, b := range r.bindings[ctx] {
 			if b.Key == chordKey {
+				if b.Action == nil {
+					return true, nil
+				}
 				return true, b.Action()
 			}
 		}
 		// Also check global context for chords
 		for _, b := range r.bindings[CtxGlobal] {
 			if b.Key == chordKey {
+				if b.Action == nil {
+					return true, nil
+				}
 				return true, b.Action()
 			}
 		}
@@ -110,11 +121,17 @@ func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
 	// Normal key handling: check context bindings first, then global
 	for _, b := range r.bindings[ctx] {
 		if b.Key == key {
+			if b.Action == nil {
+				return true, nil
+			}
 			return true, b.Action()
 		}
 	}
 	for _, b := range r.bindings[CtxGlobal] {
 		if b.Key == key {
+			if b.Action == nil {
+				return true, nil
+			}
 			return true, b.Action()
 		}
 	}
@@ -195,11 +212,11 @@ func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, t theme.Theme, maxWidth int
 	result := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 	if lipgloss.Width(result) > maxWidth {
 		// Truncate safely without breaking UTF-8 or ANSI sequences
-		maxLen := maxWidth - 3
-		if maxLen < 10 {
+		truncateWidth := maxWidth - 3
+		if truncateWidth < 10 {
 			return ""
 		}
-		result = truncateWithANSI(result, maxLen) + "..."
+		result = truncateWithANSI(result, truncateWidth) + "..."
 	}
 	return result
 }
@@ -218,14 +235,26 @@ func (r *KeyRegistry) RenderLeaderPrompt(t theme.Theme) string {
 // RegisterDefaultBindings populates the registry with standard M31A keybindings.
 func (r *KeyRegistry) RegisterDefaultBindings() {
 	// Global bindings
-	r.Register(CtxGlobal, "ctrl+p", "command palette", nil) // action set dynamically in app.go
-	r.Register(CtxGlobal, "ctrl+b", "toggle sidebar", nil)  // action set dynamically
-	r.Register(CtxGlobal, "ctrl+x b", "toggle sidebar", nil)
-	r.Register(CtxGlobal, "ctrl+x s", "settings", nil)
-	r.Register(CtxGlobal, "ctrl+x n", "new session", nil)
-	r.Register(CtxGlobal, "ctrl+x l", "session list", nil)
-	r.Register(CtxGlobal, "ctrl+x m", "cycle model", nil)
-	r.Register(CtxGlobal, "ctrl+x t", "toggle theme", nil)
+	r.Register(CtxGlobal, "ctrl+p", "command palette", nil) // handled directly in app.go
+	r.Register(CtxGlobal, "ctrl+b", "toggle sidebar", nil)  // handled directly in app.go
+	r.Register(CtxGlobal, "ctrl+x b", "toggle sidebar", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "toggle_sidebar"} }
+	})
+	r.Register(CtxGlobal, "ctrl+x s", "settings", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "open_settings"} }
+	})
+	r.Register(CtxGlobal, "ctrl+x n", "new session", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "new_session"} }
+	})
+	r.Register(CtxGlobal, "ctrl+x l", "session list", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "session_list"} }
+	})
+	r.Register(CtxGlobal, "ctrl+x m", "cycle model", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "cycle_model"} }
+	})
+	r.Register(CtxGlobal, "ctrl+x t", "toggle theme", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "toggle_theme"} }
+	})
 
 	// REPL bindings
 	r.Register(CtxREPL, "t", "toggle thinking (focused)", nil)
