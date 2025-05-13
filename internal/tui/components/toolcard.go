@@ -22,6 +22,18 @@ func SanitizeOutput(s string) string {
 	return s
 }
 
+// ToolIcons maps tool names to icon characters for inline rendering.
+var ToolIcons = map[string]string{
+	"Bash":      "$",
+	"Edit":      "\u2190",
+	"FileRead":  "\u2192",
+	"FileWrite": "\u2190",
+	"Glob":      "\u2731",
+	"Grep":      "\u2731",
+	"TodoWrite": "\u2699",
+	"Question":  "?",
+}
+
 type ToolState int
 
 const (
@@ -44,14 +56,13 @@ type ToolCard struct {
 
 func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState, t theme.Theme) *ToolCard {
 	renderer := RendererForTool(call.Name, t)
-	input := renderer.RenderInput(call, 0) // width doesn't matter for input extraction
+	input := renderer.RenderInput(call, 0)
 	output := ""
 	truncated := false
 	isBinary := false
 	if result != nil {
 		output = result.Output
 		truncated = result.Truncated
-		// Check for binary before sanitizing (SanitizeOutput strips null bytes)
 		if isBinaryContent(output) {
 			isBinary = true
 			output = "[binary content]"
@@ -61,14 +72,14 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 	}
 
 	tc := &ToolCard{
-		toolName:   call.Name,
-		input:      input,
-		output:     output,
-		state:      state,
-		truncated:  truncated,
-		theme:      t,
-		collapsed:  isBinary,
-		renderer:   renderer,
+		toolName:  call.Name,
+		input:     input,
+		output:    output,
+		state:     state,
+		truncated: truncated,
+		theme:     t,
+		collapsed: isBinary,
+		renderer:  renderer,
 	}
 	if result != nil {
 		tc.durationMs = result.DurationMs
@@ -110,20 +121,73 @@ func (c *ToolCard) Render(width int) string {
 		cardWidth = 20
 	}
 
-	header := c.renderer.RenderHeader(cardWidth)
+	// Collapsed or running without output: render inline single-line
+	if c.collapsed || (c.output == "" && c.state == ToolRunning) {
+		return c.renderInline(cardWidth)
+	}
+
+	// Expanded with output: render as left-bordered block
+	return c.renderBlock(cardWidth)
+}
+
+// renderInline renders a tool as a single-line inline element with paddingLeft=3.
+func (c *ToolCard) renderInline(width int) string {
+	icon := ToolIcons[c.toolName]
+	if icon == "" {
+		icon = "\u2022"
+	}
+
+	var desc string
+	switch c.state {
+	case ToolRunning:
+		desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("running...")
+	case ToolSuccess:
+		if c.truncated {
+			desc = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("completed (truncated)")
+		} else {
+			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("completed")
+		}
+	case ToolError:
+		desc = lipgloss.NewStyle().Foreground(c.theme.Error).Render("failed")
+	}
+
+	parts := []string{
+		lipgloss.NewStyle().Foreground(c.theme.Text).Render(icon),
+		lipgloss.NewStyle().Foreground(c.theme.Text).Render(c.toolName),
+	}
+	if c.input != "" {
+		short := c.input
+		if len(short) > 60 {
+			short = short[:57] + "..."
+		}
+		short = strings.ReplaceAll(short, "\n", " ")
+		parts = append(parts, lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short))
+	}
+	parts = append(parts, desc)
+
+	line := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+
+	return lipgloss.NewStyle().
+		PaddingLeft(3).
+		Width(width).
+		Render(line)
+}
+
+// renderBlock renders a tool as a left-bordered block with background.
+func (c *ToolCard) renderBlock(width int) string {
+	header := c.renderer.RenderHeader(width)
 
 	var contentParts []string
 	contentParts = append(contentParts, header)
 
 	if c.input != "" {
 		inputStyle := lipgloss.NewStyle().
-			Foreground(c.theme.TextPrimary).
-			Width(cardWidth).
-			Padding(0, 1)
+			Foreground(c.theme.Text).
+			Width(width).
+			PaddingLeft(2)
 		contentParts = append(contentParts, inputStyle.Render(c.input))
 	}
 
-	// Build a synthetic result for the renderer
 	var result *types.ToolResult
 	if c.output != "" || c.state != ToolRunning {
 		result = &types.ToolResult{
@@ -132,16 +196,22 @@ func (c *ToolCard) Render(width int) string {
 		}
 	}
 
-	outputBlock := c.renderer.RenderOutput(result, c.state, c.durationMs, c.truncated, c.collapsed, cardWidth)
+	outputBlock := c.renderer.RenderOutput(result, c.state, c.durationMs, c.truncated, c.collapsed, width)
 	if outputBlock != "" {
 		contentParts = append(contentParts, outputBlock)
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
 
-	return c.theme.ToolCard.
-		Width(cardWidth + 4).
-		Render(content)
+	blockStyle := lipgloss.NewStyle().
+		Border(theme.SplitBorder, true, false, false, false).
+		BorderForeground(c.theme.Border).
+		Background(c.theme.BackgroundPanel).
+		Padding(1, 2).
+		MarginTop(1).
+		Width(width + 4)
+
+	return blockStyle.Render(content)
 }
 
 func (c *ToolCard) Toggle() {
@@ -151,4 +221,3 @@ func (c *ToolCard) Toggle() {
 func (c *ToolCard) IsCollapsed() bool {
 	return c.collapsed
 }
-
