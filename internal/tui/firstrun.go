@@ -109,13 +109,19 @@ func (m *FirstRunModel) updateProviderSelect(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up":
+			if len(m.providers) == 0 {
+				return nil, nil
+			}
 			if m.cursor > 0 {
 				m.cursor--
 			} else {
-				m.cursor = 3 // last option index
+				m.cursor = len(m.providers) - 1
 			}
 		case "down":
-			if m.cursor < 3 { // 4 options total
+			if len(m.providers) == 0 {
+				return nil, nil
+			}
+			if m.cursor < len(m.providers)-1 {
 				m.cursor++
 			} else {
 				m.cursor = 0

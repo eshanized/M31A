@@ -305,6 +305,7 @@ func TestFirstRun_ProviderSelectWithEnter(t *testing.T) {
 func TestFirstRun_ProviderSelectUpDown(t *testing.T) {
 	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
 	m.state = FirstRunProviderSelect
+	m.providers = []string{"openrouter", "zen", "other1", "other2"}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	if m.cursor != 3 {
