@@ -437,6 +437,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case KeyActionMsg:
+		return m.handleKeyAction(msg)
+
 	case tea.KeyMsg:
 		// Command palette: when open, route all keys to it
 		if m.cmdPaletteOpen && m.cmdPalette != nil {
@@ -459,6 +462,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.cmdPalette.Update(msg)
 			return m, nil
+		}
+
+		// Leader key chord dispatch via KeyRegistry
+		if m.keyRegistry != nil && m.screen == ScreenREPL {
+			ctx := currentKeyContext(m.screen)
+			if handled, cmd := m.keyRegistry.Handle(msg.String(), ctx); handled {
+				if cmd != nil {
+					return m, cmd
+				}
+				// Key was consumed (e.g. leader activation), fall through
+			}
 		}
 
 		// Open command palette with ctrl+p
@@ -759,12 +773,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
 			m.replModel = &rp
-			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
 			m.initialized = true
 			// Init sidebar
 			if m.sidebarModel == nil {
 				m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
 			}
+			// Create a session so that /status, /save, etc. work
+			sessionID := ""
+			if m.sessionManager != nil && m.activeModel != nil && m.activeProvider != "" {
+				s, err := m.sessionManager.NewSession(m.activeModel.ID, m.activeProvider)
+				if err == nil {
+					sessionID = s.ID
+					m.dispatcher.SetSessionID(s.ID)
+				}
+			}
+			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 			// Size the REPL immediately with current window dimensions
 			if m.width > 0 && m.height > 0 {
 				m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -1291,22 +1314,9 @@ func (m *AppState) View() string {
 			return "Loading..."
 		}
 
-		t := m.themeManager.Current()
-
-		header := RenderHeader(
-			t,
-			m.activeProvider,
-			m.activeModel,
-			m.healthStatus,
-			m.contextUsed,
-			m.contextTotal,
-			m.width,
-		)
-
-		operation := m.currentOperation
-		if m.replModel.streaming || m.replModel.thinking {
-			operation = m.replModel.GetStatusText()
-		}
+		// Update REPL model with current app state for View() rendering
+		m.replModel.SetKeyRegistry(m.keyRegistry)
+		m.replModel.SetLastActivity(m.lastActivity)
 
 		var mainContent string
 		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
@@ -1317,35 +1327,7 @@ func (m *AppState) View() string {
 			mainContent = m.replModel.View()
 		}
 
-		var statusInfo *StatusBarInfo
-		if m.replModel.LastUsage() != nil && m.config != nil && m.config.UI.ShowCostEstimate {
-			usage := m.replModel.LastUsage()
-			cost := m.replModel.LastCost()
-			statusInfo = &StatusBarInfo{
-				PromptTokens: usage.PromptTokens,
-				TotalTokens:  usage.TotalTokens,
-				Cost:         cost,
-				ShowCost:     true,
-			}
-		} else {
-			statusInfo = &StatusBarInfo{}
-		}
-		// Add which-key / leader info
-		if m.keyRegistry != nil {
-			statusInfo.LeaderActive = m.keyRegistry.IsLeaderActive()
-			if !statusInfo.LeaderActive {
-				statusInfo.WhichKey = m.keyRegistry.RenderWhichKey(CtxREPL, t, m.width/2)
-			}
-		}
-		status := RenderStatusBar(t, operation, m.lastActivity, m.width, statusInfo)
-
-		base := lipgloss.JoinVertical(
-			lipgloss.Top,
-			header,
-			mainContent,
-			status,
-		)
-		return m.renderWithPalette(base)
+		return m.renderWithPalette(mainContent)
 
 	case ScreenSettings:
 		if m.settingsModel != nil {
@@ -1397,11 +1379,12 @@ func (m *AppState) View() string {
 }
 
 // renderWithPalette overlays the command palette on top of the base view when open.
+// Deprecated: palette rendering now handled by REPL model.
 func (m *AppState) renderWithPalette(base string) string {
 	if m.cmdPaletteOpen && m.cmdPalette != nil {
 		palette := m.cmdPalette.View()
 		if palette != "" {
-			return base + "\n" + palette
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, palette)
 		}
 	}
 	return base
@@ -1417,4 +1400,71 @@ func calculateNextInterval(status types.HealthStatus) time.Duration {
 		return 120 * time.Second
 	}
 	return types.HealthCheckInterval
+}
+
+func currentKeyContext(screen Screen) KeyContext {
+	switch screen {
+	case ScreenREPL:
+		return CtxREPL
+	case ScreenSettings:
+		return CtxSettings
+	case ScreenModelSelector:
+		return CtxModelSel
+	case ScreenResume:
+		return CtxResume
+	case ScreenFirstRun:
+		return CtxFirstRun
+	default:
+		return CtxGlobal
+	}
+}
+
+func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
+	switch msg.Action {
+	case "toggle_sidebar":
+		if m.sidebarModel != nil {
+			m.sidebarModel.Toggle()
+			if m.sidebarModel.IsVisible() {
+				if m.replModel != nil {
+					m.replModel.SetSidebarWidth(sidebarWidth)
+				}
+				return m, m.sidebarModel.refreshCmd()
+			}
+			if m.replModel != nil {
+				m.replModel.SetSidebarWidth(0)
+			}
+		}
+	case "open_settings":
+		m.screen = ScreenSettings
+	case "new_session":
+		m.screen = ScreenFirstRun
+		m.replModel = nil
+	case "session_list":
+		if m.resumeModel != nil {
+			m.resumeModel.Refresh()
+		}
+		m.screen = ScreenResume
+	case "cycle_model":
+		if m.registry != nil {
+			m.prevScreen = m.screen
+			m.modelSelector = NewModelSelector(m.registry)
+			m.screen = ScreenModelSelector
+			return m, m.modelSelector.Init()
+		}
+	case "toggle_theme":
+		if m.themeManager != nil {
+			m.themeManager.Cycle()
+			t := m.themeManager.Current()
+			if m.replModel != nil {
+				m.replModel.SetTheme(t)
+			}
+			if m.sidebarModel != nil {
+				m.sidebarModel.SetTheme(t)
+			}
+			if m.settingsModel != nil {
+				m.settingsModel.SetTheme(t)
+			}
+		}
+	}
+	return m, nil
 }
