@@ -32,8 +32,9 @@ func TestDispatcher_RegisterAndExecute(t *testing.T) {
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
-		ID:   "call1",
-		Name: "test",
+		ID:    "call1",
+		Name:  "test",
+		Input: []byte(`{}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -67,8 +68,9 @@ func TestDispatcher_SafeToolNoPermission(t *testing.T) {
 	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
-		ID:   "call1",
-		Name: "safe",
+		ID:    "call1",
+		Name:  "safe",
+		Input: []byte(`{}`),
 	})
 	if err != nil {
 		t.Errorf("safe tool should execute without permission, got: %v", err)
@@ -113,6 +115,7 @@ func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 		_, err := d.Execute(context.Background(), types.ToolCall{
 			ID:   "call1",
 			Name: "bash",
+			Input: []byte(`{}`),
 		})
 		errCh <- err
 	}()
@@ -133,8 +136,9 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 	errCh1 := make(chan error, 1)
 	go func() {
 		_, err := d.Execute(context.Background(), types.ToolCall{
-			ID:   "call1",
-			Name: "bash",
+			ID:    "call1",
+			Name:  "bash",
+			Input: []byte(`{}`),
 		})
 		errCh1 <- err
 	}()
@@ -148,8 +152,9 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 
 	// Second call — should not ask for permission
 	result, err := d.Execute(context.Background(), types.ToolCall{
-		ID:   "call2",
-		Name: "bash",
+		ID:    "call2",
+		Name:  "bash",
+		Input: []byte(`{}`),
 	})
 	if err != nil {
 		t.Errorf("remembered call should not need permission, got: %v", err)
@@ -321,8 +326,9 @@ func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := d.Execute(ctx, types.ToolCall{
-			ID:   "call1",
-			Name: "bash",
+			ID:    "call1",
+			Name:  "bash",
+			Input: []byte(`{}`),
 		})
 		errCh <- err
 	}()
@@ -363,8 +369,9 @@ func TestDispatcher_PermissionChannelFull(t *testing.T) {
 	}
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
-		ID:   "call1",
-		Name: "bash",
+		ID:    "call1",
+		Name:  "bash",
+		Input: []byte(`{}`),
 	})
 	if err != m31errors.ErrPermissionDenied {
 		t.Errorf("expected ErrPermissionDenied when channel is full, got: %v", err)
