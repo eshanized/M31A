@@ -39,6 +39,7 @@ type ReplModel struct {
 
 	msgRenderer  *components.MessageRenderer
 	streamCancel context.CancelFunc
+	streamCtx    context.Context // current stream context, watched by continuation cmd
 
 	currentMessage    *types.Message
 	streamSegments    []types.MessageSegment
@@ -76,6 +77,10 @@ type ReplModel struct {
 
 	// Per-block thinking focus
 	thinkingFocusIndex int // -1 = no focus, otherwise index into thinkingBlocks
+
+	// References for View() rendering
+	keyRegistry   *KeyRegistry
+	lastActivity  time.Time
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -118,47 +123,43 @@ func NewReplModel(t theme.Theme) ReplModel {
 }
 
 func (m *ReplModel) renderWelcome() string {
-	var sb strings.Builder
+	if m.width == 0 || m.height == 0 {
+		return "Welcome to M31A"
+	}
 
 	title := lipgloss.NewStyle().
 		Foreground(m.theme.Brand).
 		Bold(true).
-		Render("Welcome to M31A")
-	sb.WriteString(title)
-	sb.WriteString("\n\n")
+		Render("M31A")
 
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("Your terminal AI coding assistant."))
-	sb.WriteString("\n\n")
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextPrimary).
-		Bold(true).
-		Render("Getting started:"))
-	sb.WriteString("\n")
+	subtitle := lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render("Your terminal AI coding assistant.")
 
 	commands := []string{
+		"Type your question or goal",
 		"/workflow <goal>   Start a full coding workflow",
-		"/phase initialize   Run initialize phase",
 		"/models             Browse available models",
 		"/settings           Open settings",
-		"/status             Show current session info",
 		"/help               List all commands",
 	}
+	var cmdLines []string
 	for _, cmd := range commands {
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(m.theme.TextSecondary).
-			Render("  " + cmd))
-		sb.WriteString("\n")
+		cmdLines = append(cmdLines, lipgloss.NewStyle().
+			Foreground(m.theme.TextMuted).
+			Render("  "+cmd))
 	}
 
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("Or just type your question and press Enter."))
+	content := lipgloss.JoinVertical(lipgloss.Top,
+		title,
+		"",
+		subtitle,
+		"",
+		lipgloss.NewStyle().Foreground(m.theme.Text).Bold(true).Render("Getting started:"),
+		strings.Join(cmdLines, "\n"),
+	)
 
-	return sb.String()
+	return lipgloss.Place(m.width, m.viewport.Height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
@@ -173,8 +174,8 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.height = msg.Height
 		inputHeight := 3
 		// Account for header(1) + status bar(1) + textarea borders/padding(2)
-		// + viewport borders(2) = 6 total chrome lines
-		const chromeHeight = 6
+		// + viewport borders(2) + thinking indicator(1) + streaming status(1) = 8 total chrome lines
+		const chromeHeight = 8
 		vpHeight := msg.Height - chromeHeight - inputHeight
 		if vpHeight < 1 {
 			vpHeight = 1
@@ -327,6 +328,7 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 					ctx, cancel := context.WithCancel(context.Background())
 					m.streamCancel = cancel
+					m.streamCtx = ctx
 					m.streaming = true
 					m.thinking = false
 					m.thinkingStartAt = time.Time{}
@@ -545,6 +547,7 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	// goroutine terminates (normal completion or cancellation).
 	streamCh := m.streamCh
 	streamDone := m.streamDone
+	streamCtx := m.streamCtx
 	nextCmd := func() tea.Msg {
 		select {
 		case msg := <-streamCh:
@@ -558,6 +561,9 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 			default:
 				return nil
 			}
+		case <-streamCtx.Done():
+			// Context cancelled (e.g. user pressed Ctrl+C) — stop continuation.
+			return nil
 		}
 	}
 
@@ -702,6 +708,14 @@ func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider stri
 	m.cfg = cfg
 }
 
+func (m *ReplModel) SetKeyRegistry(kr *KeyRegistry) {
+	m.keyRegistry = kr
+}
+
+func (m *ReplModel) SetLastActivity(t time.Time) {
+	m.lastActivity = t
+}
+
 func (m *ReplModel) SetStreaming(v bool) {
 	m.streaming = v
 }
@@ -789,29 +803,84 @@ func (m *ReplModel) View() string {
 	viewportStr := m.viewport.View()
 	inputStr := m.textarea.View()
 
-	// Render fallback banner if active. Expiry is checked atomically in
-	// Update() above, so View() only needs to test whether the banner is set.
+	// Render prompt metadata row: agent · model · provider
+	var agentName, modelName, providerName string
+	if m.activeModel != nil {
+		modelName = m.activeModel.Name
+	}
+	if m.activeProvider != "" {
+		providerName = m.activeProvider
+	}
+	metadataRow := RenderPromptMetadata(agentName, modelName, providerName, m.theme, m.width-m.sidebarWidth)
+
+	// Determine border highlight color
+	borderColor := m.theme.Border
+	if m.streaming {
+		borderColor = m.theme.Brand
+	} else if m.thinking {
+		borderColor = m.theme.Thinking
+	}
+
+	// Build the input container: textarea + metadata
+	inputContainer := lipgloss.JoinVertical(lipgloss.Top, inputStr, metadataRow)
+
+	// Apply left border + background to the container
+	borderStyle := lipgloss.NewStyle().
+		Border(theme.SplitBorder, true, false, false, false).
+		BorderForeground(borderColor).
+		Background(m.theme.BackgroundElement).
+		Padding(0, 2, 0, 2)
+	borderedInput := borderStyle.Render(inputContainer)
+
+	// Bottom border continuation line
+	bottomBorder := RenderPromptBottomBorder(borderColor, m.width-m.sidebarWidth)
+
+	// Status bar below the prompt
+	var statusInfo *StatusBarInfo
+	if m.lastUsage != nil && m.cfg != nil && m.cfg.UI.ShowCostEstimate {
+		statusInfo = &StatusBarInfo{
+			PromptTokens: m.lastUsage.PromptTokens,
+			TotalTokens:  m.lastUsage.TotalTokens,
+			Cost:         m.lastCost,
+			ShowCost:     true,
+		}
+	} else {
+		statusInfo = &StatusBarInfo{}
+	}
+	if m.keyRegistry != nil {
+		statusInfo.LeaderActive = m.keyRegistry.IsLeaderActive()
+		if !statusInfo.LeaderActive {
+			statusInfo.WhichKey = m.keyRegistry.RenderWhichKey(CtxREPL, m.theme, (m.width-m.sidebarWidth)/2)
+		}
+	}
+	statusInfo.IsStreaming = m.streaming
+	statusInfo.IsThinking = m.thinking
+	statusInfo.KeyboardHints = []string{"ctrl+p commands", "ctrl+b sidebar"}
+
+	status := RenderStatusBar(m.theme, m.GetStatusText(), m.lastActivity, m.width-m.sidebarWidth, statusInfo)
+
+	// Assemble the REPL content
+	var contentParts []string
+	contentParts = append(contentParts, viewportStr)
+	contentParts = append(contentParts, borderedInput)
+	contentParts = append(contentParts, bottomBorder)
+	contentParts = append(contentParts, status)
+
+	replContent := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
+
+	// Render fallback banner if active
 	if m.fallbackBanner != "" {
 		bannerStyle := lipgloss.NewStyle().
 			Background(lipgloss.Color("#FDD663")).
 			Foreground(lipgloss.Color("#000000")).
 			Padding(0, 1).
 			Bold(true).
-			Width(m.width)
-		banner := bannerStyle.Render("⚠ " + m.fallbackBanner)
-		return lipgloss.JoinVertical(
-			lipgloss.Top,
-			banner,
-			viewportStr,
-			inputStr,
-		)
+			Width(m.width - m.sidebarWidth)
+		banner := bannerStyle.Render("[!] " + m.fallbackBanner)
+		replContent = lipgloss.JoinVertical(lipgloss.Top, banner, replContent)
 	}
 
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		viewportStr,
-		inputStr,
-	)
+	return replContent
 }
 
 func (m *ReplModel) InputValue() string {
