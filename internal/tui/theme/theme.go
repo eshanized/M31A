@@ -10,6 +10,19 @@ const (
 	ModeAuto
 )
 
+// SplitBorder is a left-only border using the heavy vertical character (┃).
+// Matches OpenCode's SplitBorder pattern for messages and tool blocks.
+var SplitBorder = lipgloss.Border{
+	Top:         "",
+	Bottom:      "",
+	Left:        "\u2503",
+	Right:       "",
+	TopLeft:     "",
+	TopRight:    "",
+	BottomLeft:  "",
+	BottomRight: "",
+}
+
 type Theme struct {
 	Mode             Mode
 	Background       lipgloss.Color
@@ -43,6 +56,23 @@ type Theme struct {
 	ProgressBar      lipgloss.Style
 	Modal            lipgloss.Style
 	ModalTitle       lipgloss.Style
+	// OpenCode-aligned tokens
+	BackgroundPanel lipgloss.Color // message block backgrounds (alias: Surface)
+	BackgroundElement lipgloss.Color // prompt/input background (alias: SurfaceElevated)
+	Text            lipgloss.Color // primary text (alias: TextPrimary)
+	TextMuted       lipgloss.Color // muted text (alias: TextSecondary)
+	BorderActive   lipgloss.Color
+	BorderSubtle   lipgloss.Color
+	Primary        lipgloss.Color
+	Secondary      lipgloss.Color
+	Accent         lipgloss.Color
+	Info           lipgloss.Color
+	ThinkingOpacity float64
+	DiffAdded      lipgloss.Color
+	DiffRemoved    lipgloss.Color
+	DiffAddedBg    lipgloss.Color
+	DiffRemovedBg  lipgloss.Color
+	DiffContextBg  lipgloss.Color
 }
 
 func Dark() Theme {
@@ -61,6 +91,23 @@ func Dark() Theme {
 		Warning:         lipgloss.Color("#FDD663"),
 		CodeBG:          lipgloss.Color("#2D2D2D"),
 		ToolLabel:       make(map[string]lipgloss.Style),
+		// OpenCode-aligned tokens
+		BackgroundPanel:   lipgloss.Color("#1A1A1A"),
+		BackgroundElement: lipgloss.Color("#242424"),
+		Text:              lipgloss.Color("#E8EAED"),
+		TextMuted:         lipgloss.Color("#9AA0A6"),
+		BorderActive:      lipgloss.Color("#484848"),
+		BorderSubtle:      lipgloss.Color("#3C3C3C"),
+		Primary:           lipgloss.Color("#D77757"),
+		Secondary:         lipgloss.Color("#8AB4F8"),
+		Accent:            lipgloss.Color("#8AB4F8"),
+		Info:              lipgloss.Color("#8AB4F8"),
+		ThinkingOpacity:   0.6,
+		DiffAdded:         lipgloss.Color("#81C995"),
+		DiffRemoved:       lipgloss.Color("#F28B82"),
+		DiffAddedBg:       lipgloss.Color("#81C99520"),
+		DiffRemovedBg:     lipgloss.Color("#F28B8220"),
+		DiffContextBg:     lipgloss.Color("#242424"),
 	}
 	t.Header = lipgloss.NewStyle().
 		Background(lipgloss.Color(t.Brand)).
@@ -187,6 +234,23 @@ func Light() Theme {
 		Warning:         lipgloss.Color("#F9AB00"),
 		CodeBG:          lipgloss.Color("#F1F3F4"),
 		ToolLabel:       make(map[string]lipgloss.Style),
+		// OpenCode-aligned tokens
+		BackgroundPanel:   lipgloss.Color("#F8F9FA"),
+		BackgroundElement: lipgloss.Color("#FFFFFF"),
+		Text:              lipgloss.Color("#1F1F1F"),
+		TextMuted:         lipgloss.Color("#5F6368"),
+		BorderActive:      lipgloss.Color("#C0C0C0"),
+		BorderSubtle:      lipgloss.Color("#E8E8E8"),
+		Primary:           lipgloss.Color("#C45C3A"),
+		Secondary:         lipgloss.Color("#1967D2"),
+		Accent:            lipgloss.Color("#1967D2"),
+		Info:              lipgloss.Color("#1967D2"),
+		ThinkingOpacity:   0.6,
+		DiffAdded:         lipgloss.Color("#1E8E3E"),
+		DiffRemoved:       lipgloss.Color("#D93025"),
+		DiffAddedBg:       lipgloss.Color("#1E8E3E20"),
+		DiffRemovedBg:     lipgloss.Color("#D9302520"),
+		DiffContextBg:     lipgloss.Color("#F8F9FA"),
 	}
 	t.Header = lipgloss.NewStyle().
 		Background(lipgloss.Color(t.Brand)).
