@@ -15,7 +15,7 @@
 | **Estimated V1 Duration** | 21 weeks (1 senior Go developer) |
 | **Estimated V1 Duration (2-person team)** | 14-15 weeks (Phases 1/2 and 4/5 parallelized) |
 | **Estimated V1.1 Duration** | 6 weeks additional (week 27 total) |
-| **Total Phases** | 10 (9 for V1, 1 for V1.1) |
+| **Total Phases** | 12 (9 for V1, 2 for V1.1+, 1 for adaptations) |
 | **Total Packages** | ~23 (internal + public) |
 | **TUI Screens** | 10+ |
 | **Core Tools** | 5 (V1) + 7 deferred (V1.1) |
@@ -697,6 +697,78 @@ Architecture:
 
 ---
 
+## Phase 10 — Provider & Message Layer Adaptations
+
+**Duration:** 1.5 weeks  
+**Complexity:** 5/10  
+**Milestone:** Provider connection status, slash command routing, session initialization from context
+
+### Goals
+
+Adapt the provider and message layers with OpenCode-compatible enhancements: connection status display, slash command /fork routing infrastructure, and session initialization from command context.
+
+### Tasks
+
+**P10.1 — Provider connection status**
+- Display connection status (connected/reconnecting/disconnected) in REPL header
+- Provider health check integration with status indicator
+- Auto-reconnect banner when provider connection drops
+
+**P10.2 — Slash command routing for session management**
+- `/fork` command infrastructure (routed to Phase 11 implementation)
+- Command parsing updates for session-switching commands
+- CommandResult.SessionID plumbing for session transition
+
+**P10.3 — Session initialization from context**
+- CommandContext.SessionID field population during session creation
+- Session ID propagation through message lifecycle
+
+### Deliverables
+
+- Provider connection status visible in TUI header
+- Slash command routing supports session-switching commands
+- Session ID flows through command context correctly
+
+---
+
+## Phase 11 — Session & Config Adaptations
+
+**Duration:** 1.5 weeks  
+**Complexity:** 6/10  
+**Milestone:** Session forking creates child sessions; multi-layer config with project-level override; permission rules use glob matching
+
+### Goals
+
+Implement three OpenCode adaptations: session branching for exploration workflows, multi-layer configuration for per-project settings, and permission ruleset completion for declarative tool gating.
+
+### Requirements
+
+- **P11-ADAPT-02** — Session forking: ParentID/ChildrenIDs on session, ForkSession, /fork command, sibling navigation via /prev/next
+- **P11-ADAPT-10** — Multi-layer configuration: project-level m31a.toml, schema validation, ${VAR} substitution, walk-up discovery (max 3 levels)
+- **P11-ADAPT-09** — Permission ruleset completion: glob matching of PermissionRule.Pattern against tool params, per-agent profiles, allow/deny/ask actions
+
+### Plans
+
+- [ ] 11-01-PLAN.md — Session Forking (Wave 1)
+- [ ] 11-02-PLAN.md — Multi-Layer Configuration (Wave 2)
+- [ ] 11-03-PLAN.md — Permission Ruleset Completion (Wave 2)
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1 | 11-01 | yes |
+| 2 | 11-02, 11-03 | yes, yes |
+
+### Deliverables
+
+- `/fork`, `/prev`, `/next` commands for session branching
+- Config loaded from three layers (global → env → project) with validation
+- Permission rules match against tool inputs via doublestar glob patterns
+- All adaptations pass `go test -race -count=1 -cover ./...`
+
+---
+
 ## Deferred to Future (V1.2+)
 
 | Feature | Reason for Deferral | Notes |
@@ -827,3 +899,5 @@ cmd/m31a/
 |------|--------|
 | 2026-05-26 | Initial roadmap created from V1 specification |
 | 2026-05-26 | Merged Claude roadmap improvements: complexity scores, LOC estimates, milestone versions, team multipliers, package dependency graph |
+| 2026-06-01 | Added Phase 10 (Provider & Message Layer Adaptations) and Phase 11 (Session & Config Adaptations) from OpenCode adaptation report |
+| 2026-06-01 | Phase 11 planned: 3 plans (Session Forking, Multi-Layer Config, Permission Ruleset Completion) |
