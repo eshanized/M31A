@@ -663,14 +663,187 @@ Architecture:
 
 ---
 
-## Deferred to Future (V1.2+)
+## Phase 10 — Provider & Message Layer Adaptations
+
+**Duration:** 2 weeks  
+**Complexity:** 7/10  
+**Milestone:** Structured tool calls from provider responses; session undo restores conversation state; auto-compaction triggers at threshold  
+**Source:** `rush/opencode_adaptation_report.md` (items 1, 3, 4)
+**Depends on:** Phase 7 (Signature Features)
+
+### Adaptations
+
+1. **Structured Tool Call Handling** (adoption #4) — Replace regex-based JSON extraction from streaming text with native provider API tool call handling. Update `StreamChunk` to carry structured tool call events. Update SSE parser to extract `tool_use` blocks from Anthropic/OpenAI response formats. Remove fragile `parseToolCalls()`, `extractJSONObject()`, `stripCodeBlocks()` from engine.go.
+
+2. **Session Undo/Revert** (adoption #3) — Complete the partial `/undo` implementation. `/undo` currently only *displays* checkpoint info but does NOT restore conversation state. Add message-level revert with `reverted_to` field on messages. Add `/redo` for revert undo.
+
+3. **Context Compaction Auto-Trigger** (adoption #1) — Context compaction already exists in `pkg/autodream/` but has no auto-trigger in the workflow engine. Add automatic consolidation when context exceeds 60% threshold. Add `/compact` alias alongside existing `/compress`.
+
+### Plans
+
+```
+Plans:
+- [x] 10-01-PLAN.md — Structured Tool Call Handling (Wave 1)
+- [x] 10-02-PLAN.md — Session Undo/Revert Completion (Wave 1)
+- [x] 10-03-PLAN.md — Context Compaction Auto-Trigger (Wave 2)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 10-01, 10-02 | yes, yes |
+| 2    | 10-03 | yes |
+
+### Deliverables
+
+- Provider SSE parser extracts native `tool_use` blocks instead of regex JSON
+- `StreamChunk` carries typed tool call events
+- `/undo` restores conversation state from checkpoints; `/redo` restores
+- Auto-compaction triggers in workflow engine at 60% threshold
+- All existing tests pass; new tests for structured tool calls, undo/redo, auto-compact
+
+---
+
+## Phase 11 — Session & Config Adaptations
+
+**Duration:** 2 weeks  
+**Complexity:** 6/10  
+**Milestone:** Session forking creates child sessions; multi-layer config with project-level override; permission rules use glob matching  
+**Source:** `rush/opencode_adaptation_report.md` (items 2, 9, 10)
+**Depends on:** Phase 10
+
+### Adaptations
+
+1. **Session Forking** (adoption #2) — Add `ParentID` to session struct. Add `ForkSession()` to session Manager that copies message history and creates new session directory with parent reference. Add `/fork`, `/prev`, `/next` commands for sibling navigation.
+
+2. **Multi-Layer Configuration** (adoption #10) — Add project-level config (`m31a.toml` in project root) with env var override layer. Add config schema validation with clear error messages for malformed values. Variable substitution (`${VAR}`) support.
+
+3. **Permission Ruleset Completion** (adoption #9) — Config struct already has `PermissionRule` with `Pattern` field but it's never used in dispatch logic. Add glob pattern matching in the dispatcher's permission check against file paths. Add per-agent permission profiles.
+
+### Plans
+
+```
+Plans:
+- [ ] 11-01-PLAN.md — Session Forking (Wave 1)
+- [ ] 11-02-PLAN.md — Multi-Layer Configuration (Wave 2)
+- [ ] 11-03-PLAN.md — Permission Ruleset Completion (Wave 2)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 11-01 | yes |
+| 2    | 11-02, 11-03 | yes, yes |
+
+### Deliverables
+
+- `Session.ParentID` field populated on fork; `/fork` creates child session
+- `/prev`, `/next` navigate sibling sessions
+- `m31a.toml` in project root overrides `~/.m31a/config.toml` fields
+- Malformed config produces clear validation errors
+- Dispatcher matches file paths against `PermissionRule.Pattern` globs
+- Per-agent permission profiles in config
+
+---
+
+## Phase 12 — UX & Editor Experience Adaptations
+
+**Duration:** 2.5 weeks  
+**Complexity:** 6/10  
+**Milestone:** Model variants and favorites persist; shell mode bypasses LLM; prompt history persists with frecency; diff viewer renders styled output; `@file` syntax includes file content  
+**Source:** `rush/opencode_adaptation_report.md` (items 8, 11, 12, 13, 14)
+**Depends on:** Phase 10
+
+### Adaptations
+
+1. **Model Variants & Favorites** (adoption #8) — Add `Variant` field to `ModelInfo`. Add recent model list (up to 10) and favorites list persisted to `~/.m31a/recent_models.json`. Add `Ctrl+M` / `Ctrl+Shift+M` keyboard cycling through recent models. Per-agent model assignments.
+
+2. **Shell Mode** (adoption #12) — In REPL, detect `!` prefix and execute commands directly via Bash tool without LLM involvement. Bypasses the entire tool-use loop for quick commands.
+
+3. **Prompt History with Frecency Ranking** (adoption #11) — Persist prompts to `~/.m31a/prompt_history.json`. Add frecency scoring (frequency + recency). Arrow-up/down navigates persistent history with frecency-based ordering.
+
+4. **Diff Viewing Enhancement** (adoption #13) — Create dedicated diff viewer screen with syntax highlighting using lipgloss/glamour. Split/unified diff format selection. Interactive scrolling for long diffs.
+
+5. **Editor Context Auto-Include** (adoption #14) — Add `@filepath` syntax in REPL that auto-includes file contents in the next LLM prompt. File content injection before sending chat request.
+
+### Plans
+
+```
+Plans:
+- [ ] 12-01-PLAN.md — Model Variants & Favorites System (Wave 1)
+- [ ] 12-02-PLAN.md — Shell Mode (Wave 1)
+- [ ] 12-03-PLAN.md — Prompt History with Frecency (Wave 2)
+- [ ] 12-04-PLAN.md — Diff Viewer Screen (Wave 2)
+- [ ] 12-05-PLAN.md — Editor Context Auto-Include (Wave 2)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 12-01, 12-02 | yes, yes |
+| 2    | 12-03, 12-04, 12-05 | yes, yes, yes |
+
+### Deliverables
+
+- `ModelInfo.Variant` field; recent/favorite model lists persist to disk
+- `Ctrl+M` cycles through recent models inline
+- `!command` executes directly without LLM involvement
+- Prompt history persists across sessions; frecency-ranked
+- `/diff` renders interactive styled diff view
+- `@filepath` in REPL includes file content in next prompt
+
+---
+
+## Phase 13 — Infrastructure & Sharing Adaptations
+
+**Duration:** 1.5 weeks  
+**Complexity:** 5/10  
+**Milestone:** Session export produces shareable markdown; pub/sub decouples internal events  
+**Source:** `rush/opencode_adaptation_report.md` (items 15, 16)
+**Depends on:** Phase 12
+
+### Adaptations
+
+1. **Session Sharing/Export** (adoption #15) — Export session history to markdown or HTML for sharing. `pkg/session/export.go` with format options. `/export` command writes to file or stdout.
+
+2. **Bus/PubSub Event System** (adoption #16) — Introduce a lightweight pub/sub system for internal events (session changes, tool executions, phase transitions). Decouples the TUI message handling from direct channel references.
+
+### Plans
+
+**Plans:** 2 plans
+
+```
+Plans:
+- [x] 13-01-PLAN.md — Session Sharing/Export (Wave 1)
+- [x] 13-02-PLAN.md — Bus/PubSub Event System (Wave 1)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 13-01, 13-02 | yes, yes |
+
+### Deliverables
+
+- `/export` command writes session as markdown/html to stdout or file
+- `internal/bus/bus.go` with typed event channels and wildcard subscriptions
+- Existing message patterns transition to bus where appropriate
+
+---
+
+## Deferred to Future (V2.0+)
 
 | Feature | Reason for Deferral | Notes |
 |---------|-------------------|-------|
+| **MCP Integration** | Explicitly excluded from this wave | Adaptation report item #5 — add in follow-up |
+| **Plugin/Extensibility System** | Explicitly excluded from this wave | Adaptation report item #6 — add in follow-up |
 | **Vision support** | No terminal UX for image input/output | `CapFlags.Vision` field exists but unused |
 | **Voice interaction** | Terminal not suited for audio | Could explore TTS/STT integration later |
 | **Multi-modal outputs** | Terminal cannot render images/video | ASCII art previews possible |
-| **Plugin system** | Adds complexity to core | Consider after V1.1 stabilization |
 | **Team collaboration** | Requires server component | Out of scope for CLI-only tool |
 
 ---
@@ -685,11 +858,17 @@ Phase 0 (Foundation)
         → Phase 6 (Workflow Engine)
           → Phase 7 (Signature Features)
             → Phase 8 (Polish & Release)
+            → Phase 9 (V1.1 Ghost/PiP/Subagents)
+            → Phase 10 (Provider & Message Layer Adaptations)
+              → Phase 11 (Session & Config Adaptations)
+                → Phase 12 (UX & Editor Experience)
+                  → Phase 13 (Infrastructure & Sharing)
 ```
 
 **Parallel tracks:**
 - Phase 4 (Tool System) runs parallel to Phase 5 (State & Config)
-- Phase 8 (Background Systems) starts once Phase 6 is 50% complete
+- Phase 8 starts once Phase 6 is 50% complete
+- Phase 10 and Phase 11 share no file conflicts and could run in parallel with a 2-person team
 
 ---
 
@@ -740,6 +919,8 @@ cmd/m31a/
 | `internal/workflow/` | State machine, phase orchestration, context pruning | 6 | ~500 |
 | `internal/workflow/phases/` | Individual phase implementations | 6, 7 | ~2,300 |
 | `internal/autodream/` | Context consolidation engine | 7 | ~400 |
+| `internal/bus/` | Lightweight pub/sub event bus | 13 | ~250 |
+| `internal/mcp/` | MCP client support | deferred | ~600 |
 
 ### Public Packages (`pkg/`)
 
@@ -793,3 +974,4 @@ cmd/m31a/
 |------|--------|
 | 2026-05-26 | Initial roadmap created from V1 specification |
 | 2026-05-26 | Merged Claude roadmap improvements: complexity scores, LOC estimates, milestone versions, team multipliers, package dependency graph |
+| 2026-06-01 | Added Phase 10-13 for OpenCode adaptation adoption (items 1-4, 7-16 excluding MCP and Plugin System) |
