@@ -19,6 +19,7 @@ func NewSession(id, model, provider string) *Session {
 	return &Session{
 		Session: types.Session{
 			ID:            id,
+			ChildrenIDs:   make([]string, 0),
 			Model:         model,
 			Provider:      provider,
 			StartedAt:     time.Now(),

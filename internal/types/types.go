@@ -136,6 +136,8 @@ type ProjectState struct {
 
 type Session struct {
 	ID            string        `json:"id"`
+	ParentID      string        `json:"parent_id,omitempty"`
+	ChildrenIDs   []string      `json:"children_ids,omitempty"`
 	Model         string        `json:"model"`
 	Provider      string        `json:"provider"`
 	StartedAt     time.Time     `json:"started_at"`
