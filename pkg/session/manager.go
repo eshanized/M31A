@@ -266,6 +266,141 @@ func (m *Manager) ArchiveSession(id string) error {
 	return os.Rename(m.basePathFor(id), filepath.Join(archiveDir, id))
 }
 
+// ForkSession creates a child session from an existing parent session,
+// copying the parent's messages and linking parent/child via ParentID/ChildrenIDs.
+func (m *Manager) ForkSession(parentID string) (*Session, error) {
+	// Load parent session
+	parent, err := m.LoadSession(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load parent session %q: %w", parentID, err)
+	}
+
+	// Generate unique ID (retry on collision)
+	var newID string
+	for i := 0; i < 10; i++ {
+		gid, err := generateID()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(m.basePathFor(gid)); os.IsNotExist(err) {
+			newID = gid
+			break
+		}
+	}
+	if newID == "" {
+		return nil, fmt.Errorf("failed to generate unique session ID after 10 attempts")
+	}
+
+	// Create new session directory
+	if err := m.ensureDir(m.basePathFor(newID)); err != nil {
+		return nil, fmt.Errorf("cannot create session directory: %w", err)
+	}
+
+	// Build new session from parent
+	newSession := NewSession(newID, parent.Model, parent.Provider)
+	newSession.ParentID = parentID
+
+	// Deep copy messages
+	newSession.Messages = append([]types.Message{}, parent.Messages...)
+	newSession.MessageCount = len(newSession.Messages)
+
+	// Deep copy project state if present
+	if parent.Project != nil {
+		projData, err := json.Marshal(parent.Project)
+		if err != nil {
+			return nil, fmt.Errorf("cannot marshal parent project: %w", err)
+		}
+		var projCopy types.ProjectState
+		if err := json.Unmarshal(projData, &projCopy); err != nil {
+			return nil, fmt.Errorf("cannot unmarshal parent project: %w", err)
+		}
+		newSession.Project = &projCopy
+	}
+
+	// Add newID to parent ChildrenIDs if not already present
+	found := false
+	for _, cid := range parent.ChildrenIDs {
+		if cid == newID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		parent.ChildrenIDs = append(parent.ChildrenIDs, newID)
+	}
+
+	// Save both sessions atomically
+	if err := m.SaveSession(newSession); err != nil {
+		return nil, fmt.Errorf("cannot save child session: %w", err)
+	}
+	if err := m.SaveSession(parent); err != nil {
+		return nil, fmt.Errorf("cannot save parent session: %w", err)
+	}
+
+	return newSession, nil
+}
+
+// SiblingSessions returns all child sessions of the parent (siblings of the
+// given session including itself), plus the index of the given session within
+// that list. Returns (nil, -1, nil) for root sessions (no parent).
+func (m *Manager) SiblingSessions(sessionID string) ([]SessionInfo, int, error) {
+	current, err := m.LoadSession(sessionID)
+	if err != nil {
+		return nil, -1, fmt.Errorf("cannot load session %q: %w", sessionID, err)
+	}
+
+	// Root sessions have no siblings
+	if current.ParentID == "" {
+		return nil, -1, nil
+	}
+
+	// ListChildren returns all children of the parent
+	children, err := m.ListChildren(current.ParentID)
+	if err != nil {
+		return nil, -1, err
+	}
+
+	// Find index of sessionID in children list
+	idx := -1
+	for i, si := range children {
+		if si.ID == sessionID {
+			idx = i
+			break
+		}
+	}
+
+	return children, idx, nil
+}
+
+// ListChildren returns SessionInfo for all child sessions of the given parent session.
+// Corrupt or deleted children are silently skipped.
+func (m *Manager) ListChildren(parentID string) ([]SessionInfo, error) {
+	parent, err := m.LoadSession(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load parent session %q: %w", parentID, err)
+	}
+
+	var children []SessionInfo
+	for _, cid := range parent.ChildrenIDs {
+		child, err := m.LoadSession(cid)
+		if err != nil {
+			// Skip corrupt/deleted children gracefully
+			continue
+		}
+		children = append(children, SessionInfo{
+			ID:           child.ID,
+			ParentID:     child.ParentID,
+			ChildrenIDs:  child.ChildrenIDs,
+			Model:        child.Model,
+			Provider:     child.Provider,
+			StartedAt:    child.StartedAt,
+			MessageCount: child.MessageCount,
+		})
+	}
+
+	return children, nil
+}
+
 // SaveSession writes session.json and messages.json to disk atomically.
 func (m *Manager) SaveSession(s *Session) error {
 	// Save session metadata
