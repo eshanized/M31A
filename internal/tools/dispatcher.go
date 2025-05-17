@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -22,17 +24,38 @@ type Dispatcher struct {
 	todoWrite      *TodoWrite
 	questionReqCh  chan QuestionRequest
 	questionRespCh chan QuestionResponse
+	// Permission rule system
+	rules         []config.PermissionRule                  // active rules
+	originalRules []config.PermissionRule                  // preserved for "default" agent reset
+	agents        map[string]config.PermissionsAgentConfig // per-agent profiles
+	activeAgent   string                                   // "default" = built-in rules
 }
 
-func NewDispatcher() *Dispatcher {
-	return &Dispatcher{
+func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
+	d := &Dispatcher{
 		tools:          make(map[string]types.Tool),
 		permissions:    make(map[string]bool),
 		requestCh:      make(chan PermissionRequest, 8),
 		responseCh:     make(chan PermissionResponse),
 		questionReqCh:  make(chan QuestionRequest, 4),
 		questionRespCh: make(chan QuestionResponse),
+		rules:          []config.PermissionRule{},
+		originalRules:  []config.PermissionRule{},
+		agents:         make(map[string]config.PermissionsAgentConfig),
+		activeAgent:    "default",
 	}
+	if cfg != nil {
+		if cfg.Rules != nil {
+			d.rules = make([]config.PermissionRule, len(cfg.Rules))
+			copy(d.rules, cfg.Rules)
+			d.originalRules = make([]config.PermissionRule, len(cfg.Rules))
+			copy(d.originalRules, cfg.Rules)
+		}
+		if cfg.Agents != nil {
+			d.agents = cfg.Agents
+		}
+	}
+	return d
 }
 
 func (d *Dispatcher) Register(tool types.Tool) {
@@ -62,13 +85,21 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	}
 	input.Name = call.Name
 
-	risk := tool.RiskLevel()
-	if risk == types.RiskDangerous || risk == types.RiskDestructive {
-		d.mu.RLock()
-		allowed, remembered := d.permissions[call.Name]
-		d.mu.RUnlock()
+	// Step 1: Check permission rules (allow/deny/ask)
+	d.mu.RLock()
+	allowedByRule, pctx, ruleErr := d.checkPermission(call.Name, input)
+	d.mu.RUnlock()
 
-		if !remembered || !allowed {
+	if ruleErr != nil {
+		// Rule denied execution
+		return types.ToolResult{Error: ruleErr.Error()}, nil
+	}
+
+	risk := tool.RiskLevel()
+
+	if !allowedByRule {
+		// Check if a rule triggered "ask" — must prompt user even for safe tools
+		if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
 			req := PermissionRequest{
 				ToolName:    call.Name,
 				Command:     extractCommandString(call.Name, call.Input),
@@ -98,6 +129,46 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 				d.permissions[call.Name] = resp.Allowed
 				d.mu.Unlock()
 			}
+		} else {
+			// No matching rule — fall through to RiskLevel default behavior
+			if risk == types.RiskDangerous || risk == types.RiskDestructive {
+				d.mu.RLock()
+				allowed, remembered := d.permissions[call.Name]
+				d.mu.RUnlock()
+
+				if !remembered || !allowed {
+					req := PermissionRequest{
+						ToolName:    call.Name,
+						Command:     extractCommandString(call.Name, call.Input),
+						RiskLevel:   risk,
+						TimeoutSecs: 300,
+					}
+
+					select {
+					case d.requestCh <- req:
+					default:
+						return types.ToolResult{}, m31errors.ErrPermissionDenied
+					}
+
+					var resp PermissionResponse
+					select {
+					case resp = <-d.responseCh:
+					case <-ctx.Done():
+						return types.ToolResult{}, ctx.Err()
+					}
+
+					if !resp.Allowed {
+						return types.ToolResult{}, m31errors.ErrPermissionDenied
+					}
+
+					if resp.Remember {
+						d.mu.Lock()
+						d.permissions[call.Name] = resp.Allowed
+						d.mu.Unlock()
+					}
+				}
+			}
+			// RiskSafe and RiskMedium tools execute without permission (existing behavior)
 		}
 	}
 
@@ -144,6 +215,116 @@ func (d *Dispatcher) GetTool(name string) (types.Tool, bool) {
 	defer d.mu.RUnlock()
 	t, ok := d.tools[name]
 	return t, ok
+}
+
+// SelectAgent switches the dispatcher to use a named agent's permission profile.
+// The "default" agent restores the global rules from the initial config.
+// Returns an error if the agent name is unknown.
+func (d *Dispatcher) SelectAgent(agent string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if agent == "default" {
+		d.activeAgent = "default"
+		// Restore original global rules
+		d.rules = make([]config.PermissionRule, len(d.originalRules))
+		copy(d.rules, d.originalRules)
+		return nil
+	}
+
+	profile, ok := d.agents[agent]
+	if !ok {
+		return fmt.Errorf("unknown agent profile: %s", agent)
+	}
+
+	d.activeAgent = agent
+	d.rules = make([]config.PermissionRule, len(profile.Rules))
+	copy(d.rules, profile.Rules)
+	return nil
+}
+
+// checkPermission evaluates rules against tool name and input params.
+// Returns allowed=true if the tool is permitted, false if blocked or needs ask.
+// When err is non-nil (ErrPermissionDenied), the tool is denied immediately.
+// When err is nil and allowed=false, the caller must check PermissionContext
+// to determine if "ask" was triggered or no rule matched (fall through to RiskLevel).
+func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bool, *PermissionContext, error) {
+	// Step 1: Check rules first (rules take priority)
+	for _, rule := range d.rules {
+		// Tool filter: if rule.Tool is set, only match that tool name
+		if rule.Tool != "" && !matchToolName(rule.Tool, toolName) {
+			continue
+		}
+
+		// Pattern filter: if rule.Pattern is set, check if it matches
+		// any string value in ToolInput.Params
+		if rule.Pattern != "" {
+			matched := matchAnyParamValue(rule.Pattern, input.Params)
+			if !matched {
+				continue
+			}
+		}
+
+		// Rule matched
+		pctx := &PermissionContext{
+			RuleTool:    rule.Tool,
+			RulePattern: rule.Pattern,
+			RuleAction:  rule.Action,
+			Source:      "rule",
+		}
+
+		switch rule.Action {
+		case "allow":
+			return true, pctx, nil
+		case "deny":
+			return false, pctx, m31errors.ErrPermissionDenied
+		case "ask":
+			return false, pctx, nil // nil error means "ask the user"
+		}
+	}
+
+	// Step 2: No rule matched — use agent default action if applicable
+	if d.activeAgent != "default" {
+		if profile, ok := d.agents[d.activeAgent]; ok && profile.DefaultAction != "" {
+			switch profile.DefaultAction {
+			case "allow":
+				return true, &PermissionContext{Source: "agent_default"}, nil
+			case "deny":
+				return false, &PermissionContext{Source: "agent_default"}, m31errors.ErrPermissionDenied
+			}
+		}
+	}
+
+	// Step 3: No matching rule — fall through to RiskLevel default behavior
+	return false, &PermissionContext{Source: "risk_level"}, nil
+}
+
+// matchToolName checks if a tool name matches the given glob pattern.
+func matchToolName(pattern, name string) bool {
+	if pattern == name || pattern == "*" {
+		return true
+	}
+	matched, _ := doublestar.Match(pattern, name)
+	return matched
+}
+
+// matchAnyParamValue checks if the given glob pattern matches any string
+// value in the params map.
+func matchAnyParamValue(pattern string, params map[string]any) bool {
+	for _, v := range params {
+		str, ok := v.(string)
+		if !ok {
+			continue
+		}
+		matched, err := doublestar.Match(pattern, str)
+		if err != nil {
+			continue
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // extractCommandString extracts a human-readable command string from tool input
@@ -269,7 +450,7 @@ func (d *Dispatcher) SetSessionID(id string) {
 }
 
 func DefaultDispatcher(workDir, backupDir, sessionsDir string) *Dispatcher {
-	d := NewDispatcher()
+	d := NewDispatcher(nil)
 	d.Register(NewBash(workDir))
 	d.Register(NewFileRead(workDir))
 	d.Register(NewFileWrite(workDir, backupDir))

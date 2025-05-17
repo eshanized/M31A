@@ -38,7 +38,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
 	// Create dispatcher with tools
-	dispatcher := tools.NewDispatcher()
+	dispatcher := tools.NewDispatcher(nil)
 	dispatcher.Register(tools.NewBash(dir))
 	dispatcher.Register(tools.NewFileRead(dir))
 	dispatcher.Register(tools.NewFileWrite(dir, filepath.Join(dir, "backups")))

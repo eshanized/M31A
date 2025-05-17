@@ -78,7 +78,7 @@ func TestFullWorkflow(t *testing.T) {
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
 	// Create dispatcher
-	dispatcher := tools.NewDispatcher()
+	dispatcher := tools.NewDispatcher(nil)
 
 	// Create mock provider with responses for each phase
 	// Call 0: Discuss — questions
