@@ -186,6 +186,9 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("log", handleLog, "Show recent log entries")
 	r.Register("tokens", handleTokens, "Estimate token count for text")
 	r.Register("health", handleHealth, "Show system health status")
+	r.Register("fork", handleFork, "Fork current session into a new child session")
+	r.Register("prev", handlePrev, "Switch to previous sibling session")
+	r.Register("next", handleNext, "Switch to next sibling session")
 
 	return r
 }
@@ -773,6 +776,95 @@ func handleModels(args []string, ctx CommandContext) CommandResult {
 			m.ID, m.ContextLength, m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken))
 	}
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+}
+
+// handleFork creates a child session copying the current session's messages.
+func handleFork(args []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{
+			Success: false,
+			Message: "No active session. Use /fork from within an active session.",
+		}
+	}
+
+	child, err := ctx.SessionManager.ForkSession(ctx.SessionID)
+	if err != nil {
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Fork failed: %v", err),
+		}
+	}
+
+	newID := child.ID
+	return CommandResult{
+		Success:   true,
+		SessionID: &newID,
+		Message:   fmt.Sprintf("Session forked: %s (child of %s). Use /prev or /next to navigate siblings.", newID, ctx.SessionID),
+	}
+}
+
+// handlePrev switches to the previous sibling session in the fork tree.
+func handlePrev(args []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{
+			Success: false,
+			Message: "No active session.",
+		}
+	}
+
+	siblings, idx, err := ctx.SessionManager.SiblingSessions(ctx.SessionID)
+	if err != nil {
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Sibling lookup failed: %v", err),
+		}
+	}
+
+	if len(siblings) == 0 || idx <= 0 {
+		return CommandResult{
+			Success: false,
+			Message: "Already at first sibling.",
+		}
+	}
+
+	prevID := siblings[idx-1].ID
+	return CommandResult{
+		Success:   true,
+		SessionID: &prevID,
+		Message:   fmt.Sprintf("Switched to sibling: %s", prevID),
+	}
+}
+
+// handleNext switches to the next sibling session in the fork tree.
+func handleNext(args []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{
+			Success: false,
+			Message: "No active session.",
+		}
+	}
+
+	siblings, idx, err := ctx.SessionManager.SiblingSessions(ctx.SessionID)
+	if err != nil {
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Sibling lookup failed: %v", err),
+		}
+	}
+
+	if idx < 0 || idx >= len(siblings)-1 {
+		return CommandResult{
+			Success: false,
+			Message: "Already at last sibling.",
+		}
+	}
+
+	nextID := siblings[idx+1].ID
+	return CommandResult{
+		Success:   true,
+		SessionID: &nextID,
+		Message:   fmt.Sprintf("Switched to sibling: %s", nextID),
+	}
 }
 
 // ---------------------------------------------------------------------------

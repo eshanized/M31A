@@ -891,6 +891,13 @@ func (m *ReplModel) Messages() []types.Message {
 	return m.messages
 }
 
+// ClearMessages removes all messages from the REPL model and re-renders the viewport.
+func (m *ReplModel) ClearMessages() {
+	m.messages = nil
+	m.renderMessages()
+	m.viewport.GotoBottom()
+}
+
 func (m *ReplModel) SpinnerTick() tea.Cmd {
 	return m.spinner.Tick
 }

@@ -604,8 +604,8 @@ func TestResetCommand(t *testing.T) {
 func TestCommands_AllRegistered(t *testing.T) {
 	r := DefaultCommands()
 	names := r.List()
-	if len(names) != 27 {
-		t.Fatalf("expected exactly 27 commands, got %d: %v", len(names), names)
+	if len(names) != 30 {
+		t.Fatalf("expected exactly 30 commands, got %d: %v", len(names), names)
 	}
 
 	// Verify all expected commands are present
@@ -617,6 +617,7 @@ func TestCommands_AllRegistered(t *testing.T) {
 		"fallback": false, "tools": false, "workflow": false, "history": false,
 		"diff": false, "theme": false, "save": false, "key": false,
 		"log": false, "tokens": false, "health": false,
+		"fork": false, "prev": false, "next": false,
 	}
 	hasExtra := false
 	for _, name := range names {
@@ -1398,6 +1399,148 @@ func TestHandleSessions_WithEmptySessions(t *testing.T) {
 // ---------------------------------------------------------------------------
 // TestHandleFallback_SwitchFailure
 // ---------------------------------------------------------------------------
+
+func TestHandleFork_NoSession(t *testing.T) {
+	r := DefaultCommands()
+	result, _ := r.Execute("/fork", CommandContext{SessionManager: nil, SessionID: ""})
+	if result.Success {
+		t.Fatal("Expected fork to fail with no active session")
+	}
+	if !strings.Contains(result.Message, "No active session") {
+		t.Errorf("Expected 'No active session', got: %s", result.Message)
+	}
+}
+
+func TestHandleFork_Success(t *testing.T) {
+	r := DefaultCommands()
+
+	// Mock session manager that supports ForkSession
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	parentID := parent.ID
+	result, _ := r.Execute("/fork", CommandContext{
+		SessionManager: mgr,
+		SessionID:      parentID,
+	})
+	if !result.Success {
+		t.Fatalf("Expected fork to succeed, got: %s", result.Message)
+	}
+	if result.SessionID == nil {
+		t.Fatal("Expected SessionID in result")
+	}
+	if *result.SessionID == parentID {
+		t.Fatal("SessionID should be child ID, not parent ID")
+	}
+	if !strings.Contains(result.Message, "Session forked") {
+		t.Errorf("Expected 'Session forked', got: %s", result.Message)
+	}
+}
+
+func TestHandlePrev_NoSession(t *testing.T) {
+	r := DefaultCommands()
+	result, _ := r.Execute("/prev", CommandContext{SessionManager: nil, SessionID: ""})
+	if result.Success {
+		t.Fatal("Expected prev to fail with no active session")
+	}
+}
+
+func TestHandlePrev_AtFirstSibling(t *testing.T) {
+	r := DefaultCommands()
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Root session: no parent, no prev
+	result, _ := r.Execute("/prev", CommandContext{SessionManager: mgr, SessionID: parent.ID})
+	if result.Success {
+		t.Fatal("Expected prev to fail for root session")
+	}
+}
+
+func TestHandlePrev_Navigation(t *testing.T) {
+	r := DefaultCommands()
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	child1, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 1 failed: %v", err)
+	}
+	child2, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 2 failed: %v", err)
+	}
+
+	// From child2, prev should switch to child1
+	result, _ := r.Execute("/prev", CommandContext{SessionManager: mgr, SessionID: child2.ID})
+	if !result.Success {
+		t.Fatalf("Expected prev to succeed, got: %s", result.Message)
+	}
+	if result.SessionID == nil || *result.SessionID != child1.ID {
+		t.Errorf("Expected prev to switch to %s, got %v", child1.ID, result.SessionID)
+	}
+}
+
+func TestHandleNext_AtLastSibling(t *testing.T) {
+	r := DefaultCommands()
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Root session: no parent, no next
+	result, _ := r.Execute("/next", CommandContext{SessionManager: mgr, SessionID: parent.ID})
+	if result.Success {
+		t.Fatal("Expected next to fail for root session")
+	}
+}
+
+func TestHandleNext_Navigation(t *testing.T) {
+	r := DefaultCommands()
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	child1, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 1 failed: %v", err)
+	}
+	child2, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 2 failed: %v", err)
+	}
+
+	// From child1, next should switch to child2
+	result, _ := r.Execute("/next", CommandContext{SessionManager: mgr, SessionID: child1.ID})
+	if !result.Success {
+		t.Fatalf("Expected next to succeed, got: %s", result.Message)
+	}
+	if result.SessionID == nil || *result.SessionID != child2.ID {
+		t.Errorf("Expected next to switch to %s, got %v", child2.ID, result.SessionID)
+	}
+}
 
 func TestHandleFallback_SwitchFailure(t *testing.T) {
 	r := DefaultCommands()

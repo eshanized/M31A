@@ -566,6 +566,370 @@ func TestSession_LoadSessionAfterArchive(t *testing.T) {
 	}
 }
 
+func TestSession_ForkSession(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	// Create parent session with messages
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	parent.Messages = append(parent.Messages,
+		types.Message{Role: "user", Content: "Hello"},
+		types.Message{Role: "assistant", Content: "Hi there"},
+	)
+	parent.MessageCount = len(parent.Messages)
+	if err := mgr.SaveSession(parent); err != nil {
+		t.Fatalf("SaveSession parent failed: %v", err)
+	}
+
+	// Fork the session
+	child, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("ForkSession failed: %v", err)
+	}
+
+	// Verify child properties
+	if child.ID == "" {
+		t.Fatal("Expected non-empty child session ID")
+	}
+	if child.ID == parent.ID {
+		t.Fatal("Child ID should differ from parent ID")
+	}
+	if child.ParentID != parent.ID {
+		t.Errorf("Expected child ParentID %s, got %s", parent.ID, child.ParentID)
+	}
+	if child.Model != parent.Model {
+		t.Errorf("Expected model %s, got %s", parent.Model, child.Model)
+	}
+	if child.Provider != parent.Provider {
+		t.Errorf("Expected provider %s, got %s", parent.Provider, child.Provider)
+	}
+
+	// Verify messages were copied
+	if len(child.Messages) != 2 {
+		t.Fatalf("Expected 2 messages in child, got %d", len(child.Messages))
+	}
+	if child.Messages[0].Content != "Hello" {
+		t.Errorf("Expected first message 'Hello', got %q", child.Messages[0].Content)
+	}
+	if child.Messages[1].Content != "Hi there" {
+		t.Errorf("Expected second message 'Hi there', got %q", child.Messages[1].Content)
+	}
+	if child.MessageCount != 2 {
+		t.Errorf("Expected MessageCount 2, got %d", child.MessageCount)
+	}
+
+	// Verify parent was updated with child ID
+	parentReloaded, err := mgr.LoadSession(parent.ID)
+	if err != nil {
+		t.Fatalf("LoadSession parent after fork failed: %v", err)
+	}
+	if len(parentReloaded.ChildrenIDs) != 1 {
+		t.Fatalf("Expected parent to have 1 child, got %d", len(parentReloaded.ChildrenIDs))
+	}
+	if parentReloaded.ChildrenIDs[0] != child.ID {
+		t.Errorf("Expected parent child ID %s, got %s", child.ID, parentReloaded.ChildrenIDs[0])
+	}
+
+	// Verify child exists and is loadable
+	childLoaded, err := mgr.LoadSession(child.ID)
+	if err != nil {
+		t.Fatalf("Failed to load child session: %v", err)
+	}
+	if childLoaded.ParentID != parent.ID {
+		t.Errorf("Expected loaded child ParentID %s, got %s", parent.ID, childLoaded.ParentID)
+	}
+
+	// Verify childrenIDs list doesn't grow on duplicate fork
+	child2, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Second ForkSession failed: %v", err)
+	}
+	_ = child2
+	parentReloaded2, err := mgr.LoadSession(parent.ID)
+	if err != nil {
+		t.Fatalf("LoadSession parent after second fork failed: %v", err)
+	}
+	if len(parentReloaded2.ChildrenIDs) != 2 {
+		t.Errorf("Expected parent to have 2 children, got %d", len(parentReloaded2.ChildrenIDs))
+	}
+}
+
+func TestSession_ForkSessionFromForkedChild(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	parent.Messages = append(parent.Messages,
+		types.Message{Role: "user", Content: "Hello"},
+	)
+	parent.MessageCount = 1
+	if err := mgr.SaveSession(parent); err != nil {
+		t.Fatalf("SaveSession parent failed: %v", err)
+	}
+
+	child, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("ForkSession from parent failed: %v", err)
+	}
+
+	// Fork from the child to create a grandchild
+	grandchild, err := mgr.ForkSession(child.ID)
+	if err != nil {
+		t.Fatalf("ForkSession from child failed: %v", err)
+	}
+
+	if grandchild.ParentID != child.ID {
+		t.Errorf("Expected grandchild ParentID %s, got %s", child.ID, grandchild.ParentID)
+	}
+	if len(grandchild.Messages) != 1 {
+		t.Errorf("Expected 1 message in grandchild, got %d", len(grandchild.Messages))
+	}
+
+	// Child should be updated with grandchild in ChildrenIDs
+	childReloaded, err := mgr.LoadSession(child.ID)
+	if err != nil {
+		t.Fatalf("LoadSession child after grandchild fork failed: %v", err)
+	}
+	if len(childReloaded.ChildrenIDs) != 1 || childReloaded.ChildrenIDs[0] != grandchild.ID {
+		t.Errorf("Expected child to have 1 child (%s), got %v", grandchild.ID, childReloaded.ChildrenIDs)
+	}
+}
+
+func TestSession_ListChildren(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// No children initially
+	children, err := mgr.ListChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ListChildren on empty parent failed: %v", err)
+	}
+	if len(children) != 0 {
+		t.Errorf("Expected 0 children initially, got %d", len(children))
+	}
+
+	// Fork 3 children
+	child1, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 1 failed: %v", err)
+	}
+	child2, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 2 failed: %v", err)
+	}
+	child3, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 3 failed: %v", err)
+	}
+
+	// List children
+	children, err = mgr.ListChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ListChildren failed: %v", err)
+	}
+	if len(children) != 3 {
+		t.Fatalf("Expected 3 children, got %d", len(children))
+	}
+
+	// Verify all children are present
+	childIDs := map[string]bool{child1.ID: true, child2.ID: true, child3.ID: true}
+	for _, c := range children {
+		if !childIDs[c.ID] {
+			t.Errorf("Unexpected child %s in list", c.ID)
+		}
+		delete(childIDs, c.ID)
+	}
+	if len(childIDs) > 0 {
+		t.Errorf("Missing children in list: %v", childIDs)
+	}
+
+	// Verify session info fields are populated
+	for _, c := range children {
+		if c.ParentID != parent.ID {
+			t.Errorf("Expected child ParentID %s, got %s", parent.ID, c.ParentID)
+		}
+		if c.Model != parent.Model {
+			t.Errorf("Expected model %s, got %s", parent.Model, c.Model)
+		}
+	}
+}
+
+func TestSession_ListChildrenCorruptSkipped(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Fork a child
+	child, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("ForkSession failed: %v", err)
+	}
+
+	// Manually add a corrupt child to parent
+	parentReloaded, err := mgr.LoadSession(parent.ID)
+	if err != nil {
+		t.Fatalf("LoadSession parent failed: %v", err)
+	}
+	parentReloaded.ChildrenIDs = append(parentReloaded.ChildrenIDs, "baddead")
+	if err := mgr.SaveSession(parentReloaded); err != nil {
+		t.Fatalf("SaveSession with corrupt child ref failed: %v", err)
+	}
+
+	// Create corrupt session directory so load fails gracefully
+	corruptDir := filepath.Join(dir, "baddead")
+	if err := os.MkdirAll(corruptDir, 0755); err != nil {
+		t.Fatalf("Failed to create corrupt dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(corruptDir, "session.json"), []byte("{corrupt"), 0644); err != nil {
+		t.Fatalf("Failed to write corrupt session.json: %v", err)
+	}
+
+	// ListChildren should skip corrupt child and return only valid one
+	children, err := mgr.ListChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ListChildren failed: %v", err)
+	}
+	if len(children) != 1 {
+		t.Fatalf("Expected 1 valid child, got %d", len(children))
+	}
+	if children[0].ID != child.ID {
+		t.Errorf("Expected child %s, got %s", child.ID, children[0].ID)
+	}
+}
+
+func TestSession_SiblingSessions(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	// Root session has no siblings
+	_, idx, err := mgr.SiblingSessions(parent.ID)
+	if err != nil {
+		t.Fatalf("SiblingSessions on root failed: %v", err)
+	}
+	if idx != -1 {
+		t.Errorf("Expected idx -1 for root session, got %d", idx)
+	}
+
+	// Fork 3 children
+	child1, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 1 failed: %v", err)
+	}
+	child2, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 2 failed: %v", err)
+	}
+	child3, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("Fork 3 failed: %v", err)
+	}
+
+	// Check siblings from child2: should have all 3 children including itself
+	siblings, idx, err := mgr.SiblingSessions(child2.ID)
+	if err != nil {
+		t.Fatalf("SiblingSessions failed: %v", err)
+	}
+	if len(siblings) != 3 {
+		t.Fatalf("Expected 3 siblings, got %d", len(siblings))
+	}
+	if idx != 1 {
+		t.Errorf("Expected child2 at index 1, got %d", idx)
+	}
+
+	// Check child1 at index 0
+	siblings, idx, err = mgr.SiblingSessions(child1.ID)
+	if err != nil {
+		t.Fatalf("SiblingSessions child1 failed: %v", err)
+	}
+	if idx != 0 {
+		t.Errorf("Expected child1 at index 0, got %d", idx)
+	}
+
+	// Check child3 at index 2
+	siblings, idx, err = mgr.SiblingSessions(child3.ID)
+	if err != nil {
+		t.Fatalf("SiblingSessions child3 failed: %v", err)
+	}
+	if idx != 2 {
+		t.Errorf("Expected child3 at index 2, got %d", idx)
+	}
+}
+
+func TestSession_ForkSessionNotFound(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	_, err := mgr.ForkSession("nonexistent")
+	if err == nil {
+		t.Fatal("Expected ForkSession to fail with nonexistent parent")
+	}
+}
+
+func TestSession_ForkSessionPreservesProject(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	parent, err := mgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	parent.Messages = []types.Message{{Role: "user", Content: "hi"}}
+	parent.MessageCount = 1
+
+	// Set project state
+	proj := &types.ProjectState{
+		Goal:        "Test goal",
+		ProjectType: "go",
+		Framework:   "none",
+		Answers:     map[string]string{"lang": "go"},
+	}
+	parent.Project = proj
+	if err := mgr.SaveSession(parent); err != nil {
+		t.Fatalf("SaveSession failed: %v", err)
+	}
+
+	child, err := mgr.ForkSession(parent.ID)
+	if err != nil {
+		t.Fatalf("ForkSession failed: %v", err)
+	}
+
+	if child.Project == nil {
+		t.Fatal("Expected child to have project state copied")
+	}
+	if child.Project.Goal != "Test goal" {
+		t.Errorf("Expected goal 'Test goal', got %q", child.Project.Goal)
+	}
+	if child.Project.Answers["lang"] != "go" {
+		t.Errorf("Expected answer lang=go, got %q", child.Project.Answers["lang"])
+	}
+
+	// Verify deep copy: modifying parent's project should not affect child
+	parent.Project.Goal = "Changed"
+	if child.Project.Goal == "Changed" {
+		t.Error("Project was not deep-copied; modifying parent affected child")
+	}
+}
+
 func TestSession_MarshalSessionJSON(t *testing.T) {
 	s := NewSession("abcdef12", "gpt-4o", "openrouter")
 	s.Messages = []types.Message{

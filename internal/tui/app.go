@@ -669,6 +669,28 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		result, handled := m.cmdRegistry.Execute(cmd, ctx)
 		if handled {
 			m.currentOperation = result.Message
+
+			// Session switching: /fork, /prev, /next set SessionID to transition
+			if result.SessionID != nil && *result.SessionID != sessionID {
+				if sess, err := m.sessionManager.LoadSession(*result.SessionID); err == nil && sess != nil {
+					if m.replModel == nil {
+						rp := NewReplModel(m.themeManager.Current())
+						m.replModel = &rp
+					}
+					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					// Replace messages with the loaded session's messages
+					m.replModel.ClearMessages()
+					for _, msg := range sess.Messages {
+						m.replModel.AddMessage(msg)
+					}
+					m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
+				}
+				if result.Cmd != nil {
+					return m, tea.Batch(result.Cmd)
+				}
+				return m, nil
+			}
+
 			if result.Screen != nil {
 				m.screen = *result.Screen
 				if *result.Screen == ScreenFirstRun {
