@@ -40,9 +40,10 @@ type UIConfig struct {
 }
 
 type PermissionsConfig struct {
-	DefaultMode    string           `toml:"default_mode"`
-	TimeoutSeconds int              `toml:"timeout_seconds"`
-	Rules          []PermissionRule `toml:"rules"`
+	DefaultMode    string                            `toml:"default_mode"`
+	TimeoutSeconds int                               `toml:"timeout_seconds"`
+	Rules          []PermissionRule                  `toml:"rules"`
+	Agents         map[string]PermissionsAgentConfig `toml:"agents,omitempty"`
 }
 
 type PermissionRule struct {
@@ -50,6 +51,14 @@ type PermissionRule struct {
 	Pattern   string          `toml:"pattern"`
 	RiskLevel types.RiskLevel `toml:"risk_level"`
 	Action    string          `toml:"action"`
+}
+
+// PermissionsAgentConfig defines per-agent permission profiles.
+// Each agent (e.g., "build", "plan", "default") can have its own
+// default action and ruleset.
+type PermissionsAgentConfig struct {
+	DefaultAction string           `toml:"default_action"`
+	Rules         []PermissionRule `toml:"rules"`
 }
 
 type FeaturesConfig struct {

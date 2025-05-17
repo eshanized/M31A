@@ -8,10 +8,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/eshanized/M31A/pkg/keychain"
 )
+
+// ErrValidation is returned when config validation fails.
+var ErrValidation = errors.New("config validation")
 
 // DefaultConfig returns a Config with zero-valued fields.
 // Missing config file causes Load to return DefaultConfig without error.
@@ -73,13 +78,13 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Step 6: Validation — added in Task 2
-	// if err := validateConfig(cfg); err != nil {
-	//     return nil, fmt.Errorf("config validation: %w", err)
-	// }
+	// Step 6: Validation
+	if err := validateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
 
-	// Step 7: Variable substitution — added in Task 2
-	// applyVarSubstitution(cfg)
+	// Step 7: Variable substitution
+	applyVarSubstitution(cfg)
 
 	return cfg, nil
 }
@@ -167,7 +172,14 @@ func mergeConfig(base, overlay *Config) {
 	if len(overlay.Permissions.Rules) > 0 {
 		base.Permissions.Rules = overlay.Permissions.Rules
 	}
-	// Agents merge added in Task 2 (permissions agent profiles)
+	if len(overlay.Permissions.Agents) > 0 {
+		if base.Permissions.Agents == nil {
+			base.Permissions.Agents = make(map[string]PermissionsAgentConfig)
+		}
+		for k, v := range overlay.Permissions.Agents {
+			base.Permissions.Agents[k] = v
+		}
+	}
 
 	// Features section
 	if overlay.Features.AutoBackup {
@@ -184,6 +196,151 @@ func mergeConfig(base, overlay *Config) {
 	if overlay.Ledger.MaxEntries != 0 {
 		base.Ledger.MaxEntries = overlay.Ledger.MaxEntries
 	}
+}
+
+// ValidationError describes a single field-level config validation failure.
+type ValidationError struct {
+	Field        string
+	ExpectedType string
+	ActualValue  string
+}
+
+func (e ValidationError) Error() string {
+	return fmt.Sprintf("config: field %q expected %s, got %q", e.Field, e.ExpectedType, e.ActualValue)
+}
+
+// validateConfig checks all known Config fields for type/range correctness.
+// Collects all errors and returns them as a joined error.
+func validateConfig(cfg *Config) error {
+	var errs []error
+
+	// Provider
+	if cfg.Provider.AutoFallback && cfg.Provider.Default == "" {
+		errs = append(errs, ValidationError{
+			Field:        "provider.default",
+			ExpectedType: "non-empty string (when auto_fallback is true)",
+			ActualValue:  "",
+		})
+	}
+
+	// Model
+	if cfg.Model.ContextWarningThreshold < 0 || cfg.Model.ContextWarningThreshold > 1 {
+		errs = append(errs, ValidationError{
+			Field:        "model.context_warning_threshold",
+			ExpectedType: "float64 between 0 and 1",
+			ActualValue:  fmt.Sprintf("%v", cfg.Model.ContextWarningThreshold),
+		})
+	}
+	if cfg.Model.ArbitrageThreshold < 0 || cfg.Model.ArbitrageThreshold > 1 {
+		errs = append(errs, ValidationError{
+			Field:        "model.arbitrage_threshold",
+			ExpectedType: "float64 between 0 and 1",
+			ActualValue:  fmt.Sprintf("%v", cfg.Model.ArbitrageThreshold),
+		})
+	}
+
+	// UI
+	if cfg.UI.Theme != "" && cfg.UI.Theme != "dark" && cfg.UI.Theme != "light" && cfg.UI.Theme != "auto" {
+		errs = append(errs, ValidationError{
+			Field:        "ui.theme",
+			ExpectedType: "\"dark\", \"light\", or \"auto\"",
+			ActualValue:  cfg.UI.Theme,
+		})
+	}
+	if cfg.UI.MaxIterations < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "ui.max_iterations",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.UI.MaxIterations),
+		})
+	}
+
+	// Permissions
+	if cfg.Permissions.DefaultMode != "" &&
+		cfg.Permissions.DefaultMode != "prompt" &&
+		cfg.Permissions.DefaultMode != "allow" &&
+		cfg.Permissions.DefaultMode != "deny" {
+		errs = append(errs, ValidationError{
+			Field:        "permissions.default_mode",
+			ExpectedType: "\"prompt\", \"allow\", or \"deny\"",
+			ActualValue:  cfg.Permissions.DefaultMode,
+		})
+	}
+	if cfg.Permissions.TimeoutSeconds < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "permissions.timeout_seconds",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Permissions.TimeoutSeconds),
+		})
+	}
+
+	// Rules validation
+	for i, rule := range cfg.Permissions.Rules {
+		if rule.Tool == "" {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("permissions.rules[%d].tool", i),
+				ExpectedType: "non-empty string",
+				ActualValue:  "",
+			})
+		}
+		if rule.Action != "" &&
+			rule.Action != "allow" && rule.Action != "deny" && rule.Action != "ask" {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("permissions.rules[%d].action", i),
+				ExpectedType: "\"allow\", \"deny\", or \"ask\"",
+				ActualValue:  rule.Action,
+			})
+		}
+	}
+
+	// Ledger
+	if cfg.Ledger.MaxEntries < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "ledger.max_entries",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Ledger.MaxEntries),
+		})
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %v", ErrValidation, errs)
+	}
+	return nil
+}
+
+var varRe = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// applyVarSubstitution walks all string fields in cfg and replaces ${VAR}
+// patterns with their corresponding environment variable values.
+func applyVarSubstitution(cfg *Config) {
+	cfg.Provider.Default = substituteVars(cfg.Provider.Default)
+	cfg.Provider.OpenRouter.APIKey = substituteVars(cfg.Provider.OpenRouter.APIKey)
+	cfg.Provider.Zen.APIKey = substituteVars(cfg.Provider.Zen.APIKey)
+	cfg.Model.Default = substituteVars(cfg.Model.Default)
+	cfg.UI.Theme = substituteVars(cfg.UI.Theme)
+	cfg.Permissions.DefaultMode = substituteVars(cfg.Permissions.DefaultMode)
+
+	for i := range cfg.Permissions.Rules {
+		cfg.Permissions.Rules[i].Tool = substituteVars(cfg.Permissions.Rules[i].Tool)
+		cfg.Permissions.Rules[i].Pattern = substituteVars(cfg.Permissions.Rules[i].Pattern)
+		cfg.Permissions.Rules[i].Action = substituteVars(cfg.Permissions.Rules[i].Action)
+	}
+}
+
+// substituteVars replaces ${VAR} patterns in s with the value of the
+// environment variable VAR. If the variable is not set, the original ${VAR}
+// pattern is preserved as-is.
+func substituteVars(s string) string {
+	if s == "" || !strings.Contains(s, "${") {
+		return s
+	}
+	return varRe.ReplaceAllStringFunc(s, func(match string) string {
+		name := match[2 : len(match)-1]
+		if val, ok := os.LookupEnv(name); ok {
+			return val
+		}
+		return match
+	})
 }
 
 // Save writes the config to a TOML file atomically (temp file + rename).
