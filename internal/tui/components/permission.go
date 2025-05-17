@@ -27,6 +27,13 @@ func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout 
 	}
 }
 
+// Clear resets the modal to its inactive state, clearing rule context.
+func (m *PermissionModal) Clear() {
+	m.responded = false
+	m.response = tools.PermissionResponse{}
+	m.elapsed = 0
+}
+
 func (m *PermissionModal) Render(width, height int) string {
 	modalWidth := 60
 	if width < modalWidth+4 {
@@ -75,6 +82,15 @@ func (m *PermissionModal) Render(width, height int) string {
 		Foreground(m.theme.Warning).
 		Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(m.Remaining())))
 
+	// Rule context section (displayed when a permission rule matched)
+	var ruleInfo string
+	if m.request.RuleTool != "" || m.request.RulePattern != "" {
+		ruleInfo = lipgloss.NewStyle().Faint(true).Render(
+			fmt.Sprintf("  Matched rule: tool=%q pattern=%q action=%q",
+				m.request.RuleTool, m.request.RulePattern, m.request.RuleAction),
+		)
+	}
+
 	modalContent := lipgloss.JoinVertical(lipgloss.Top,
 		titleLine,
 		"",
@@ -84,6 +100,16 @@ func (m *PermissionModal) Render(width, height int) string {
 		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render("Command:"),
 		cmdBox,
 		"",
+	)
+	if ruleInfo != "" {
+		modalContent = lipgloss.JoinVertical(lipgloss.Top,
+			modalContent,
+			ruleInfo,
+			"",
+		)
+	}
+	modalContent = lipgloss.JoinVertical(lipgloss.Top,
+		modalContent,
 		keys,
 		"",
 		countdown,

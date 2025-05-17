@@ -11,6 +11,10 @@ type PermissionRequest struct {
 	Command     string          `json:"command"`
 	RiskLevel   types.RiskLevel `json:"risk_level"`
 	TimeoutSecs int             `json:"timeout_secs"`
+	// Rule context (populated when a permission rule matched)
+	RuleTool    string `json:"rule_tool,omitempty"`
+	RulePattern string `json:"rule_pattern,omitempty"`
+	RuleAction  string `json:"rule_action,omitempty"`
 }
 
 type PermissionResponse struct {

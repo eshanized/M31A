@@ -105,6 +105,9 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 				Command:     extractCommandString(call.Name, call.Input),
 				RiskLevel:   risk,
 				TimeoutSecs: 300,
+				RuleTool:    pctx.RuleTool,
+				RulePattern: pctx.RulePattern,
+				RuleAction:  pctx.RuleAction,
 			}
 
 			select {
