@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 07 complete
-last_updated: "2026-05-28T07:09:18.833Z"
+status: Phase 11 Plan 01 complete — Session Forking
+last_updated: "2026-06-01T00:00:17.000Z"
 progress:
-  total_phases: 5
+  total_phases: 9
   completed_phases: 4
-  total_plans: 29
-  completed_plans: 26
-  percent: 80
+  total_plans: 42
+  completed_plans: 28
+  percent: 44
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 7 — Signature Features
+Phase 11 — Session & Config Adaptations (Plan 01: Session Forking)
 
 ## Status
 
-Phase 7 complete — all 8 plans delivered, all tests pass
+Phase 11 Plan 01 complete — Session forking with /fork, /prev, /next commands implemented and tested
 
 ## Completed Phases
 
@@ -35,20 +35,32 @@ Phase 7 complete — all 8 plans delivered, all tests pass
 
 ## Completed Plans (Phase 7)
 
-- 07-01: Slash Command System — 16 command handlers, ParseCommand, CommandRegistry
-- 07-02: Commit Rollback Chain — Chain, SoftReset, HardReset, SafeReset, Preview
-- 07-03: Cost-Aware Model Arbitrage — Scorer, CostEstimate, Recommend
-- 07-04: AutoDream Context Consolidation — Consolidator with preservation rules, Pause/Resume, Stats
-- 07-05: Cross-Session Learning Ledger — Append, EntriesFiltered, Stats, Truncate
-- 07-06: Gap Fixes — FallbackEvent/T key/CacheRefresh wiring, /fallback command
-- 07-07: Model Selector UI — full-screen overlay, fuzzy search, detail pane, cost display
-- 07-08: Settings Screen Updates — 6 tabs, inline editing, API key masking, ledger stats
+- 07-01: Slash Command System
+- 07-02: Commit Rollback Chain
+- 07-03: Cost-Aware Model Arbitrage
+- 07-04: AutoDream Context Consolidation
+- 07-05: Cross-Session Learning Ledger
+- 07-06: Gap Fixes
+- 07-07: Model Selector UI
+- 07-08: Settings Screen Updates
 
-## Next Phase
+## Completed Plans (Phase 11)
 
-Release preparation (Phase 8 — Polish & Testing)
+- 11-01: Session Forking — ParentID/ChildrenIDs, ForkSession, /fork /prev /next commands
+
+## Next Plan
+
+Phase 11 — Plan 02 (Multi-Layer Configuration)
 
 ## Key Decisions Made
+
+### Phase 11 Decisions
+
+- SiblingSessions includes the current session in its return list for consistent index-based prev/next navigation
+- ForkSession uses retry loop (max 10) for ID collision avoidance
+- Corrupt children are silently skipped in ListChildren for resilience
+- Session switching clears REPL messages and reloads from the loaded session
+- Deep copy on fork: parent messages and project state are copied via marshal/unmarshal to prevent aliasing bugs
 
 ### Phase 7 Decisions
 
