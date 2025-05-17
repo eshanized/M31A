@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 type mockTool struct {
@@ -357,6 +359,461 @@ func TestDispatcher_RegisterDuplicate(t *testing.T) {
 		}
 	}()
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+}
+
+// ---------------------------------------------------------------------------
+// Permission ruleset matching tests
+// ---------------------------------------------------------------------------
+
+func TestMatchToolName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		pattern string
+		tool    string
+		want    bool
+	}{
+		{"exact match", "Bash", "Bash", true},
+		{"wildcard", "*", "Bash", true},
+		{"glob prefix", "B*", "Bash", true},
+		{"glob file prefix", "File*", "FileRead", true},
+		{"no match", "Bash", "FileRead", false},
+		{"doublestar pattern", "**", "Anything", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchToolName(tt.pattern, tt.tool)
+			if got != tt.want {
+				t.Errorf("matchToolName(%q, %q) = %v, want %v", tt.pattern, tt.tool, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchAnyParamValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("glob pattern matches nested path", func(t *testing.T) {
+		params := map[string]any{"path": "src/main.go"}
+		if !matchAnyParamValue("**/*.go", params) {
+			t.Error("expected **/*.go to match src/main.go")
+		}
+	})
+
+	t.Run("glob pattern matches flat path", func(t *testing.T) {
+		params := map[string]any{"path": "main.go"}
+		if !matchAnyParamValue("**/*.go", params) {
+			t.Error("expected **/*.go to match main.go")
+		}
+	})
+
+	t.Run("glob without doublestar does not match nested path", func(t *testing.T) {
+		params := map[string]any{"path": "src/main.go"}
+		if matchAnyParamValue("*.go", params) {
+			t.Error("expected *.go to NOT match src/main.go")
+		}
+	})
+
+	t.Run("secret key pattern matches deep path", func(t *testing.T) {
+		params := map[string]any{"path": "/home/user/secret.key"}
+		if !matchAnyParamValue("**/secret*", params) {
+			t.Error("expected **/secret* to match /home/user/secret.key")
+		}
+	})
+
+	t.Run("no string params returns false", func(t *testing.T) {
+		params := map[string]any{"count": 42, "flag": true, "ratio": 3.14}
+		if matchAnyParamValue("**", params) {
+			t.Error("expected no match when no string params exist")
+		}
+	})
+}
+
+func TestMatchAnyParamValue_NonStringValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mixed types with matching string value", func(t *testing.T) {
+		params := map[string]any{
+			"count":   42,
+			"enabled": true,
+			"path":    "src/main.go",
+		}
+		if !matchAnyParamValue("**/*.go", params) {
+			t.Error("expected match when one param is a string path")
+		}
+	})
+
+	t.Run("mixed types with no matching string", func(t *testing.T) {
+		params := map[string]any{
+			"count":   42,
+			"enabled": true,
+			"ratio":   3.14,
+		}
+		if matchAnyParamValue("**/*.go", params) {
+			t.Error("expected no match when no string values")
+		}
+	})
+
+	t.Run("nil values do not cause panic", func(t *testing.T) {
+		params := map[string]any{
+			"path": nil,
+			"cmd":  "echo hello",
+		}
+		if !matchAnyParamValue("**echo**", params) {
+			t.Error("expected match on string param despite nil value")
+		}
+	})
+
+	t.Run("all non-string types do not panic", func(t *testing.T) {
+		params := map[string]any{
+			"int":    42,
+			"bool":   false,
+			"float":  3.14,
+			"nested": []string{"a", "b"},
+		}
+		// Should not panic, should return false
+		if matchAnyParamValue("**", params) {
+			t.Error("expected no match with all non-string types")
+		}
+	})
+}
+
+func TestCheckPermission_RuleAllow(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"path": "src/main.go"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected allowed=true")
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.RuleAction != "allow" {
+		t.Errorf("expected RuleAction 'allow', got %q", pctx.RuleAction)
+	}
+	if pctx.Source != "rule" {
+		t.Errorf("expected Source 'rule', got %q", pctx.Source)
+	}
+}
+
+func TestCheckPermission_RuleDeny(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**/*.go", Action: "deny"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"path": "src/main.go"},
+	})
+	if err != m31errors.ErrPermissionDenied {
+		t.Fatalf("expected ErrPermissionDenied, got: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected allowed=false")
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.RuleAction != "deny" {
+		t.Errorf("expected RuleAction 'deny', got %q", pctx.RuleAction)
+	}
+}
+
+func TestCheckPermission_RuleAsk(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**/*.go", Action: "ask"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"path": "src/main.go"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error (ask action), got: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected allowed=false for ask action")
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.RuleAction != "ask" {
+		t.Errorf("expected RuleAction 'ask', got %q", pctx.RuleAction)
+	}
+	if pctx.Source != "rule" {
+		t.Errorf("expected Source 'rule', got %q", pctx.Source)
+	}
+}
+
+func TestCheckPermission_NoMatchFallthrough(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "*.py", Action: "allow"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	// .go file should not match *.py pattern
+	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"path": "main.go"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for fallthrough, got: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected allowed=false when no rule matches")
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.Source != "risk_level" {
+		t.Errorf("expected Source 'risk_level', got %q", pctx.Source)
+	}
+}
+
+func TestCheckPermission_ToolFilter(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Grep", Pattern: "**", Action: "allow"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	// Bash is not Grep — tool filter prevents match
+	_, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "echo test"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for non-matching tool filter, got: %v", err)
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.Source != "risk_level" {
+		t.Errorf("expected Source 'risk_level' when tool filter prevents match, got %q", pctx.Source)
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PermissionContext")
+	}
+	if pctx.Source != "risk_level" {
+		t.Errorf("expected Source 'risk_level' when tool filter prevents match, got %q", pctx.Source)
+	}
+}
+
+func TestCheckPermission_MultipleRulesFirstWins(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**/secret*", Action: "deny"},
+			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	t.Run("secret key denied by first rule", func(t *testing.T) {
+		allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"path": "src/secret.key"},
+		})
+		if err != m31errors.ErrPermissionDenied {
+			t.Fatalf("expected ErrPermissionDenied, got: %v", err)
+		}
+		if allowed {
+			t.Fatal("expected allowed=false for secret key")
+		}
+		if pctx.RuleAction != "deny" {
+			t.Errorf("expected RuleAction 'deny', got %q", pctx.RuleAction)
+		}
+	})
+
+	t.Run("go file allowed by second rule", func(t *testing.T) {
+		allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"path": "src/main.go"},
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if !allowed {
+			t.Fatal("expected allowed=true for go file")
+		}
+		if pctx.RuleAction != "allow" {
+			t.Errorf("expected RuleAction 'allow', got %q", pctx.RuleAction)
+		}
+	})
+}
+
+func TestSelectAgent(t *testing.T) {
+	d := NewDispatcher(&config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**/*.py", Action: "allow"},
+		},
+		Agents: map[string]config.PermissionsAgentConfig{
+			"build": {
+				Rules: []config.PermissionRule{
+					{Tool: "Bash", Pattern: "**", Action: "allow"},
+				},
+			},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	t.Run("select build agent succeeds", func(t *testing.T) {
+		err := d.SelectAgent("build")
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("build agent allows all bash commands", func(t *testing.T) {
+		allowed, _, err := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"command": "rm -rf /"},
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if !allowed {
+			t.Fatal("expected allowed=true for build agent")
+		}
+	})
+
+	t.Run("select unknown agent returns error", func(t *testing.T) {
+		err := d.SelectAgent("unknown")
+		if err == nil {
+			t.Fatal("expected error for unknown agent")
+		}
+	})
+
+	t.Run("select default agent resets to global rules", func(t *testing.T) {
+		err := d.SelectAgent("default")
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		// After reset to default, *.py rule should apply (not **)
+		allowed, _, err := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"command": "rm -rf /"},
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if allowed {
+			t.Fatal("expected allowed=false after reset to default rules")
+		}
+	})
+}
+
+func TestPermissionContext_Fields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rule match populates all fields", func(t *testing.T) {
+		d := NewDispatcher(&config.PermissionsConfig{
+			Rules: []config.PermissionRule{
+				{Tool: "Bash", Pattern: "**/secret*", Action: "deny"},
+			},
+		})
+		d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+		_, pctx, _ := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"path": "/etc/secret.key"},
+		})
+		if pctx == nil {
+			t.Fatal("expected non-nil PermissionContext")
+		}
+		if pctx.RuleTool != "Bash" {
+			t.Errorf("expected RuleTool 'Bash', got %q", pctx.RuleTool)
+		}
+		if pctx.RulePattern != "**/secret*" {
+			t.Errorf("expected RulePattern '**/secret*', got %q", pctx.RulePattern)
+		}
+		if pctx.RuleAction != "deny" {
+			t.Errorf("expected RuleAction 'deny', got %q", pctx.RuleAction)
+		}
+		if pctx.Source != "rule" {
+			t.Errorf("expected Source 'rule', got %q", pctx.Source)
+		}
+	})
+
+	t.Run("no match returns risk_level source", func(t *testing.T) {
+		d := NewDispatcher(nil)
+		d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+		_, pctx, err := d.checkPermission("Bash", types.ToolInput{
+			Name:   "Bash",
+			Params: map[string]any{"path": "main.go"},
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if pctx == nil {
+			t.Fatal("expected non-nil PermissionContext")
+		}
+		if pctx.Source != "risk_level" {
+			t.Errorf("expected Source 'risk_level', got %q", pctx.Source)
+		}
+		if pctx.RuleTool != "" {
+			t.Errorf("expected empty RuleTool, got %q", pctx.RuleTool)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Doublestar integration verification
+// ---------------------------------------------------------------------------
+
+func TestDoublestarMatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"**/*.go", "src/main.go", true},
+		{"**/*.go", "main.go", true},
+		{"**/*.go", "src/sub/file_test.go", true},
+		{"*.go", "main.go", true},
+		{"*.go", "src/main.go", false},
+		{"**/secret*", "/home/user/secret.key", true},
+		{"**/secret*", "secret.txt", true},
+		{"Bash", "Bash", true},
+		{"Bash", "FileRead", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern+"/"+tt.path, func(t *testing.T) {
+			got, err := doublestar.Match(tt.pattern, tt.path)
+			if err != nil {
+				t.Fatalf("doublestar.Match(%q, %q) returned error: %v", tt.pattern, tt.path, err)
+			}
+			if got != tt.want {
+				t.Errorf("doublestar.Match(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestDispatcher_PermissionChannelFull(t *testing.T) {
