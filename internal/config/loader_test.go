@@ -4,7 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 // mockKeychain implements the keychain.Keychain interface for testing.
@@ -388,5 +391,378 @@ func TestConfig_SaveCreatesParentDir(t *testing.T) {
 	}
 	if loaded.UI.Theme != "dark" {
 		t.Errorf("expected 'dark', got %q", loaded.UI.Theme)
+	}
+}
+
+// ── Multi-Layer Config Tests ─────────────────────────────────────────────────
+
+func TestFindProjectConfig(t *testing.T) {
+	// Create a temp dir tree with m31a.toml at root
+	dir := t.TempDir()
+
+	// Create root/m31a.toml
+	rootCfg := filepath.Join(dir, "m31a.toml")
+	if err := os.WriteFile(rootCfg, []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create subdirectories
+	sub1 := filepath.Join(dir, "sub1")
+	sub2 := filepath.Join(dir, "sub1", "sub2")
+	for _, d := range []string{sub1, sub2} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Separate dir for no-config test (no m31a.toml in ancestry)
+	noConfigDir := t.TempDir()
+	deepEmpty := filepath.Join(noConfigDir, "a", "b", "c")
+	if err := os.MkdirAll(deepEmpty, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		cwd  string
+		want string
+	}{
+		{"same dir", dir, rootCfg},
+		{"1 level up", sub1, rootCfg},
+		{"2 levels up", sub2, rootCfg},
+		{"no config", deepEmpty, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findProjectConfig(tc.cwd)
+			if got != tc.want {
+				t.Errorf("findProjectConfig(%q) = %q, want %q", tc.cwd, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProjectConfigOverrides(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create "global" config
+	globalPath := filepath.Join(dir, "config.toml")
+	globalContent := `
+[ui]
+theme = "dark"
+
+[model]
+default = "gpt-4o"
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create project config in subdirectory
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfg := filepath.Join(projectDir, "m31a.toml")
+	projectContent := `
+[model]
+default = "claude-3"
+`
+	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to project dir, load global config
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Model.Default != "claude-3" {
+		t.Errorf("expected 'claude-3' (project override), got %q", cfg.Model.Default)
+	}
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("expected 'dark' (from global, not overridden), got %q", cfg.UI.Theme)
+	}
+}
+
+func TestMergeConfig(t *testing.T) {
+	base := &Config{}
+	base.UI.Theme = "dark"
+	base.Model.Default = "gpt-4o"
+	base.Provider.Default = "openrouter"
+	base.Ledger.MaxEntries = 100
+
+	overlay := &Config{}
+	overlay.Model.Default = "claude-3-opus"
+	overlay.UI.CompactMode = true
+	overlay.Ledger.Enabled = true
+
+	mergeConfig(base, overlay)
+
+	if base.Model.Default != "claude-3-opus" {
+		t.Errorf("expected 'claude-3-opus', got %q", base.Model.Default)
+	}
+	if base.UI.Theme != "dark" {
+		t.Errorf("expected 'dark' (preserved), got %q", base.UI.Theme)
+	}
+	if !base.UI.CompactMode {
+		t.Error("expected CompactMode true (from overlay)")
+	}
+	if base.Provider.Default != "openrouter" {
+		t.Errorf("expected 'openrouter' (preserved), got %q", base.Provider.Default)
+	}
+	if !base.Ledger.Enabled {
+		t.Error("expected Ledger.Enabled true (from overlay)")
+	}
+	if base.Ledger.MaxEntries != 100 {
+		t.Errorf("expected MaxEntries 100 (preserved), got %d", base.Ledger.MaxEntries)
+	}
+}
+
+// ── Validation Tests ─────────────────────────────────────────────────────────
+
+func TestValidateConfig_Valid(t *testing.T) {
+	cfg := &Config{
+		Provider: ProviderConfig{
+			Default: "openrouter",
+		},
+		Model: ModelConfig{
+			ContextWarningThreshold: 0.8,
+			ArbitrageThreshold:      0.5,
+		},
+		UI: UIConfig{
+			Theme:         "dark",
+			MaxIterations: 100,
+		},
+		Permissions: PermissionsConfig{
+			DefaultMode:    "prompt",
+			TimeoutSeconds: 300,
+		},
+		Ledger: LedgerConfig{
+			MaxEntries: 50,
+		},
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		t.Errorf("expected nil error for valid config, got: %v", err)
+	}
+}
+
+func TestValidateConfig_InvalidTheme(t *testing.T) {
+	cfg := &Config{
+		UI: UIConfig{
+			Theme: "neon",
+		},
+	}
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid theme, got nil")
+	}
+	if !strings.Contains(err.Error(), "ui.theme") {
+		t.Errorf("expected error to mention 'ui.theme', got: %v", err)
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected error to wrap ErrValidation")
+	}
+}
+
+func TestValidateConfig_InvalidThreshold(t *testing.T) {
+	cfg := &Config{
+		Model: ModelConfig{
+			ContextWarningThreshold: 1.5,
+		},
+	}
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid threshold, got nil")
+	}
+	if !strings.Contains(err.Error(), "context_warning_threshold") {
+		t.Errorf("expected error to mention 'context_warning_threshold', got: %v", err)
+	}
+}
+
+func TestValidateConfig_InvalidPermissionsMode(t *testing.T) {
+	cfg := &Config{
+		Permissions: PermissionsConfig{
+			DefaultMode: "auto",
+		},
+	}
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid permissions mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "default_mode") {
+		t.Errorf("expected error to mention 'default_mode', got: %v", err)
+	}
+}
+
+func TestValidateConfig_InvalidRuleAction(t *testing.T) {
+	cfg := &Config{
+		Permissions: PermissionsConfig{
+			Rules: []PermissionRule{
+				{Tool: "Bash", Action: "maybe"},
+			},
+		},
+	}
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid rule action, got nil")
+	}
+	if !strings.Contains(err.Error(), "rules[0].action") {
+		t.Errorf("expected error to mention 'rules[0].action', got: %v", err)
+	}
+}
+
+// ── Variable Substitution Tests ──────────────────────────────────────────────
+
+func TestVarSubstitution(t *testing.T) {
+	t.Setenv("TEST_MODEL", "claude-opus")
+
+	cfg := &Config{
+		Model: ModelConfig{
+			Default: "${TEST_MODEL}",
+		},
+	}
+
+	applyVarSubstitution(cfg)
+
+	if cfg.Model.Default != "claude-opus" {
+		t.Errorf("expected 'claude-opus', got %q", cfg.Model.Default)
+	}
+}
+
+func TestVarSubstitution_UnsetVar(t *testing.T) {
+	cfg := &Config{
+		Model: ModelConfig{
+			Default: "${UNSET_VAR}",
+		},
+	}
+
+	applyVarSubstitution(cfg)
+
+	if cfg.Model.Default != "${UNSET_VAR}" {
+		t.Errorf("expected '${UNSET_VAR}' (preserved), got %q", cfg.Model.Default)
+	}
+}
+
+func TestVarSubstitution_NoVars(t *testing.T) {
+	cfg := &Config{
+		Model: ModelConfig{
+			Default: "gpt-4o",
+		},
+	}
+
+	applyVarSubstitution(cfg)
+
+	if cfg.Model.Default != "gpt-4o" {
+		t.Errorf("expected 'gpt-4o', got %q", cfg.Model.Default)
+	}
+}
+
+func TestVarSubstitution_APIKey(t *testing.T) {
+	t.Setenv("OPENROUTER_KEY", "sk-or-v1-test123")
+
+	cfg := &Config{
+		Provider: ProviderConfig{
+			OpenRouter: ProviderCredentialConfig{
+				APIKey: "${OPENROUTER_KEY}",
+			},
+		},
+	}
+
+	applyVarSubstitution(cfg)
+
+	if cfg.Provider.OpenRouter.APIKey != "sk-or-v1-test123" {
+		t.Errorf("expected resolved API key, got %q", cfg.Provider.OpenRouter.APIKey)
+	}
+}
+
+// ── Env Override Test ────────────────────────────────────────────────────────
+
+func TestEnvVarOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[ui]
+theme = "dark"
+
+[model]
+default = "claude-sonnet"
+`
+	if err := os.WriteFile(path, []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("M31A_THEME", "light")
+	t.Setenv("M31A_DEFAULT_MODEL", "custom-model")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.UI.Theme != "light" {
+		t.Errorf("expected 'light' (env override), got %q", cfg.UI.Theme)
+	}
+	if cfg.Model.Default != "custom-model" {
+		t.Errorf("expected 'custom-model' (env override), got %q", cfg.Model.Default)
+	}
+}
+
+// ── PermissionsAgentConfig Test ──────────────────────────────────────────────
+
+func TestPermissionsAgentConfig(t *testing.T) {
+	cfg := &Config{
+		Permissions: PermissionsConfig{
+			Agents: map[string]PermissionsAgentConfig{
+				"build": {
+					DefaultAction: "allow",
+					Rules: []PermissionRule{
+						{Tool: "Bash", Action: "ask"},
+					},
+				},
+			},
+		},
+	}
+
+	// Marshal to TOML and back
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var reloaded Config
+	if _, err := toml.Decode(string(data), &reloaded); err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	if reloaded.Permissions.Agents == nil {
+		t.Fatal("expected Agents to be non-nil after round-trip")
+	}
+	buildAgent, ok := reloaded.Permissions.Agents["build"]
+	if !ok {
+		t.Fatal("expected 'build' agent in reloaded config")
+	}
+	if buildAgent.DefaultAction != "allow" {
+		t.Errorf("expected 'allow', got %q", buildAgent.DefaultAction)
+	}
+	if len(buildAgent.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(buildAgent.Rules))
+	}
+	if buildAgent.Rules[0].Tool != "Bash" || buildAgent.Rules[0].Action != "ask" {
+		t.Errorf("expected Tool=Bash Action=ask, got Tool=%q Action=%q", buildAgent.Rules[0].Tool, buildAgent.Rules[0].Action)
 	}
 }
