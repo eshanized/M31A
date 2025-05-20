@@ -9,6 +9,7 @@ type Config struct {
 	Permissions PermissionsConfig `toml:"permissions"`
 	Features    FeaturesConfig    `toml:"features"`
 	Ledger      LedgerConfig      `toml:"ledger"`
+	Agents      AgentsConfig      `toml:"agents"`
 }
 
 type ProviderConfig struct {
@@ -69,4 +70,17 @@ type FeaturesConfig struct {
 type LedgerConfig struct {
 	Enabled    bool `toml:"enabled"`
 	MaxEntries int  `toml:"max_entries"`
+}
+
+// AgentsConfig defines per-workflow-phase model assignments.
+// Each field names a workflow phase and holds a model ID string.
+// Allows users to assign different models to different workflow phases
+// (e.g., cheap model for Plan, powerful model for Execute).
+type AgentsConfig struct {
+	Default string `toml:"default"`
+	Plan    string `toml:"plan"`
+	Execute string `toml:"execute"`
+	Verify  string `toml:"verify"`
+	Ship    string `toml:"ship"`
+	Discuss string `toml:"discuss"`
 }

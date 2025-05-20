@@ -68,7 +68,8 @@ type ModelInfo struct {
 	Pricing       Pricing  `json:"pricing"`
 	Architecture  ArchInfo `json:"architecture"`
 	TopProvider   string   `json:"top_provider"`
-	Capabilities  CapFlags `json:"capabilities"`
+	Capabilities  CapFlags  `json:"capabilities"`
+	Variant       *string   `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
 }
 
 type MessageSegment struct {
