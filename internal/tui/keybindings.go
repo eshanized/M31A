@@ -252,6 +252,14 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 	r.Register(CtxGlobal, "ctrl+x m", "cycle model", func() tea.Cmd {
 		return func() tea.Msg { return KeyActionMsg{Action: "cycle_model"} }
 	})
+
+	// Direct Ctrl+M model cycling (REPL context only — textarea-focused)
+	r.Register(CtxREPL, "ctrl+m", "cycle model forward", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "cycle_model_forward"} }
+	})
+	r.Register(CtxREPL, "ctrl+shift+m", "cycle model backward", func() tea.Cmd {
+		return func() tea.Msg { return KeyActionMsg{Action: "cycle_model_backward"} }
+	})
 	r.Register(CtxGlobal, "ctrl+x t", "toggle theme", func() tea.Cmd {
 		return func() tea.Msg { return KeyActionMsg{Action: "toggle_theme"} }
 	})

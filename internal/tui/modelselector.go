@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 // providerFilter represents which provider's models to show.
@@ -111,10 +112,11 @@ type ModelSelector struct {
 	err         string
 	allModels   []types.ModelInfo // unfiltered model list
 	searchFocused bool
+	manager     *session.Manager // for favorites & recent models
 }
 
 // NewModelSelector creates a ModelSelector with search input and model list.
-func NewModelSelector(registry *provider.Registry) ModelSelector {
+func NewModelSelector(registry *provider.Registry, mgr *session.Manager) ModelSelector {
 	ti := textinput.New()
 	ti.Placeholder = "Search models..."
 	ti.CharLimit = 100
@@ -133,6 +135,7 @@ func NewModelSelector(registry *provider.Registry) ModelSelector {
 		list:     l,
 		search:   ti,
 		filter:   filterAll,
+		manager:  mgr,
 	}
 }
 

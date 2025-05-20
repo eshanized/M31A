@@ -141,7 +141,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		configPath:     configPath,
 		themeManager:   tm,
 		healthStatus:   types.HealthStatus{Status: "unknown"},
-		dispatcher:     tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir),
+		dispatcher:     tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir, &cfg.Permissions),
 		config:         cfg,
 		keychain:       kc,
 		sessionManager: sessionMgr,
@@ -164,7 +164,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	// Initialize model selector (uses registry)
 	if registry != nil {
-		app.modelSelector = NewModelSelector(registry)
+		app.modelSelector = NewModelSelector(registry, sessionMgr)
 	}
 
 	// Initialize command registry
@@ -209,6 +209,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		app.screen = ScreenREPL
 		app.replModel = &rp
 		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
+		app.replModel.SetDispatcher(app.dispatcher)
 		app.healthStatus = types.HealthStatus{
 			Status: "offline",
 			Error:  "No providers available — offline mode. History is readable but no new messages.",
@@ -219,6 +220,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		app.screen = ScreenREPL
 		app.replModel = &rp
 		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
+		app.replModel.SetDispatcher(app.dispatcher)
 		app.healthStatus = types.HealthStatus{Status: "live"}
 	}
 
@@ -590,7 +592,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/models":
 			if m.registry != nil {
 				m.prevScreen = m.screen
-				m.modelSelector = NewModelSelector(m.registry)
+				m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
 				m.screen = ScreenModelSelector
 				return m, m.modelSelector.Init()
 			}
@@ -678,11 +680,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.replModel = &rp
 					}
 					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					m.replModel.SetDispatcher(m.dispatcher)
 					// Replace messages with the loaded session's messages
 					m.replModel.ClearMessages()
 					for _, msg := range sess.Messages {
 						m.replModel.AddMessage(msg)
 					}
+					// Update workflow engine session ID so subsequent operations
+					// write to the correct session directory.
+					if m.workflowEngine != nil {
+						m.workflowEngine.SetSessionID(*result.SessionID)
+					}
+					m.dispatcher.SetSessionID(*result.SessionID)
 					m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
 				}
 				if result.Cmd != nil {
@@ -810,6 +819,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+			m.replModel.SetDispatcher(m.dispatcher)
 			// Size the REPL immediately with current window dimensions
 			if m.width > 0 && m.height > 0 {
 				m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -818,7 +828,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Screen == ScreenModelSelector {
 			m.prevScreen = m.screen
-			m.modelSelector = NewModelSelector(m.registry)
+			m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
 			m.screen = ScreenModelSelector
 			return m, m.modelSelector.Init()
 		}
@@ -861,6 +871,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activeProvider = event.To
 					if m.replModel != nil {
 						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+						m.replModel.SetDispatcher(m.dispatcher)
 						m.replModel.Update(msg)
 					}
 					return m, tea.Batch(
@@ -1078,6 +1089,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := m.registry.SetActive(cfgProvider); err == nil {
 					m.activeProvider = cfgProvider
 					m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
+					m.replModel.SetDispatcher(m.dispatcher)
 				}
 			}
 
@@ -1090,6 +1102,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if mi.ID == cfgModel {
 								m.activeModel = &mi
 								m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, "", m.config)
+								m.replModel.SetDispatcher(m.dispatcher)
 								break
 							}
 						}
@@ -1169,6 +1182,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+				m.replModel.SetDispatcher(m.dispatcher)
 				m.initialized = true
 				// Init sidebar
 				if m.sidebarModel == nil {
@@ -1441,6 +1455,61 @@ func currentKeyContext(screen Screen) KeyContext {
 	}
 }
 
+// cycleRecentModel cycles the active model through the recent models list.
+// Direction +1 = forward (newer), -1 = backward (older).
+func (m *AppState) cycleRecentModel(direction int) {
+	if m.sessionManager == nil || m.activeProvider == "" {
+		return
+	}
+
+	data, err := m.sessionManager.LoadRecentModels()
+	if err != nil || len(data.Recent) == 0 {
+		return
+	}
+
+	// Find current model index in recent list
+	currentIdx := -1
+	currentID := ""
+	if m.activeModel != nil {
+		currentID = m.activeModel.ID
+		for i, id := range data.Recent {
+			if id == currentID {
+				currentIdx = i
+				break
+			}
+		}
+	}
+
+	// Compute target index with wrap-around
+	targetIdx := 0
+	if currentIdx >= 0 {
+		targetIdx = currentIdx + direction
+		if targetIdx < 0 {
+			targetIdx = len(data.Recent) - 1
+		} else if targetIdx >= len(data.Recent) {
+			targetIdx = 0
+		}
+	}
+
+	// Look up model from active provider
+	provider, err := m.registry.Get(m.activeProvider)
+	if err != nil {
+		return
+	}
+	model, err := provider.GetModel(data.Recent[targetIdx])
+	if err != nil {
+		return
+	}
+
+	m.activeModel = model
+	if m.replModel != nil {
+		m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+	}
+
+	// Mark the model as recently used
+	m.sessionManager.AddRecentModel(model.ID) //nolint:errcheck
+}
+
 func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 	switch msg.Action {
 	case "toggle_sidebar":
@@ -1469,9 +1538,19 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 	case "cycle_model":
 		if m.registry != nil {
 			m.prevScreen = m.screen
-			m.modelSelector = NewModelSelector(m.registry)
+			m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
 			m.screen = ScreenModelSelector
 			return m, m.modelSelector.Init()
+		}
+	case "cycle_model_forward":
+		if m.sessionManager != nil {
+			m.cycleRecentModel(+1)
+			return m, nil
+		}
+	case "cycle_model_backward":
+		if m.sessionManager != nil {
+			m.cycleRecentModel(-1)
+			return m, nil
 		}
 	case "toggle_theme":
 		if m.themeManager != nil {

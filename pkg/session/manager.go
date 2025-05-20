@@ -401,6 +401,116 @@ func (m *Manager) ListChildren(parentID string) ([]SessionInfo, error) {
 	return children, nil
 }
 
+// RecentModelsData stores the recent model list and favorites for quick model switching.
+type RecentModelsData struct {
+	Recent    []string        `json:"recent"`    // model IDs ordered most-recent-first, max 10
+	Favorites map[string]bool `json:"favorites"` // model ID -> pinned
+}
+
+// recentModelsPath returns the path to the recent models file under ~/.m31a/.
+func (m *Manager) recentModelsPath() string {
+	return filepath.Join(filepath.Dir(m.baseDir), "recent_models.json")
+}
+
+// LoadRecentModels reads the recent models file from disk. If the file doesn't exist,
+// it returns an empty RecentModelsData with initialized fields.
+func (m *Manager) LoadRecentModels() (*RecentModelsData, error) {
+	path := m.recentModelsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &RecentModelsData{
+				Recent:    []string{},
+				Favorites: make(map[string]bool),
+			}, nil
+		}
+		return nil, fmt.Errorf("cannot read recent models: %w", err)
+	}
+
+	var rmd RecentModelsData
+	if err := json.Unmarshal(data, &rmd); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal recent models: %w", err)
+	}
+	if rmd.Recent == nil {
+		rmd.Recent = []string{}
+	}
+	if rmd.Favorites == nil {
+		rmd.Favorites = make(map[string]bool)
+	}
+	return &rmd, nil
+}
+
+// SaveRecentModels marshals and atomically writes the recent models data to disk.
+// Recent slice is pruned to max 10 entries before saving.
+func (m *Manager) SaveRecentModels(data *RecentModelsData) error {
+	// Enforce max 10 recent entries
+	if len(data.Recent) > 10 {
+		data.Recent = data.Recent[:10]
+	}
+	if data.Favorites == nil {
+		data.Favorites = make(map[string]bool)
+	}
+
+	payload, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("cannot marshal recent models: %w", err)
+	}
+	return m.atomicWrite(m.recentModelsPath(), payload)
+}
+
+// AddRecentModel adds a model ID to the top of the recent list. If the model
+// already exists in the list, it is moved to the front (dedup). The list is
+// capped at 10 entries.
+func (m *Manager) AddRecentModel(modelID string) error {
+	data, err := m.LoadRecentModels()
+	if err != nil {
+		return err
+	}
+
+	// Remove existing entry if present (dedup)
+	var updated []string
+	for _, id := range data.Recent {
+		if id != modelID {
+			updated = append(updated, id)
+		}
+	}
+	// Prepend to front
+	data.Recent = append([]string{modelID}, updated...)
+
+	// Cap at 10
+	if len(data.Recent) > 10 {
+		data.Recent = data.Recent[:10]
+	}
+
+	return m.SaveRecentModels(data)
+}
+
+// ToggleFavorite toggles the favorite status for a model ID. If already
+// favorited, it is removed; otherwise it is added.
+func (m *Manager) ToggleFavorite(modelID string) error {
+	data, err := m.LoadRecentModels()
+	if err != nil {
+		return err
+	}
+
+	if data.Favorites[modelID] {
+		delete(data.Favorites, modelID)
+	} else {
+		data.Favorites[modelID] = true
+	}
+
+	return m.SaveRecentModels(data)
+}
+
+// IsFavorite checks whether a model ID is marked as a favorite.
+func (m *Manager) IsFavorite(modelID string) bool {
+	data, err := m.LoadRecentModels()
+	if err != nil {
+		return false
+	}
+	return data.Favorites[modelID]
+}
+
 // SaveSession writes session.json and messages.json to disk atomically.
 func (m *Manager) SaveSession(s *Session) error {
 	// Save session metadata
