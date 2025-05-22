@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -35,9 +36,10 @@ type ReplModel struct {
 	textarea     textarea.Model
 	spinner      spinner.Model
 	scrollPos    int
-	inputHistory []string
-	historyPos   int
-	placeholder  string
+	inputHistory    []string
+	historyPos      int
+	frecentHistory  *FrecentHistory
+	placeholder     string
 	streaming    bool
 	thinking     bool
 	lastStatus   string
@@ -269,6 +271,20 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			m.inputHistory = append(m.inputHistory, input)
 			m.historyPos = len(m.inputHistory)
 
+			// Upsert into frecency history for LLM-bound prompts
+			// Only upsert non-shell, non-slash inputs (actual LLM prompts)
+			isShellMode := strings.HasPrefix(input, "!") || strings.HasPrefix(input, "\uff01")
+			isSlashCmd := strings.HasPrefix(input, "/")
+			if !isShellMode && !isSlashCmd && m.frecentHistory != nil {
+				m.frecentHistory.Upsert(input)
+				// Non-blocking save — fire and forget
+				go func() {
+					if err := m.frecentHistory.Save(); err != nil {
+						slog.Debug("failed to save prompt history", "error", err)
+					}
+				}()
+			}
+
 			// Shell mode: ! prefix bypasses LLM for direct command execution
 			// Must come BEFORE the / prefix check so !/bin/ls isn't caught as a slash command.
 			if strings.HasPrefix(input, "!") || strings.HasPrefix(input, "\uff01") {
@@ -406,6 +422,26 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			return cmds, true
 
 		case "up":
+			// Use frecency history if available and textarea has content (prefix matching)
+			currentText := m.textarea.Value()
+			if m.frecentHistory != nil && len(currentText) > 0 {
+				results := m.frecentHistory.Search(currentText, 10)
+				if len(results) > 0 {
+					// Cycle through results
+					if m.historyPos == -1 {
+						m.historyPos = 0
+					} else if m.historyPos < len(results)-1 {
+						m.historyPos++
+					} else {
+						m.historyPos = 0 // wrap around
+					}
+					m.textarea.SetValue(results[m.historyPos].Text)
+					m.textarea.SetCursor(len(m.textarea.Value()))
+					var cmds []tea.Cmd
+					return cmds, false
+				}
+			}
+			// Fallback to in-memory session history
 			if m.historyPos == -1 || len(m.inputHistory) == 0 {
 				var cmds []tea.Cmd
 				return cmds, false
@@ -419,6 +455,19 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			return cmds, false
 
 		case "down":
+			// Navigate through history items
+			if m.frecentHistory != nil && m.historyPos > 0 {
+				currentText := m.textarea.Value()
+				results := m.frecentHistory.Search(currentText, 10)
+				if len(results) > 0 && m.historyPos > 0 {
+					m.historyPos--
+					m.textarea.SetValue(results[m.historyPos].Text)
+					m.textarea.SetCursor(len(m.textarea.Value()))
+					var cmds []tea.Cmd
+					return cmds, false
+				}
+			}
+			// Fallback to in-memory session history
 			if m.historyPos < len(m.inputHistory)-1 {
 				m.historyPos++
 				m.textarea.SetValue(m.inputHistory[m.historyPos])
@@ -772,6 +821,11 @@ func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider stri
 
 func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {
 	m.dispatcher = d
+}
+
+// SetFrecentHistory sets the frecency history for prompt history navigation.
+func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
+	m.frecentHistory = fh
 }
 
 // executeShellCommand runs a shell command via the dispatcher's Bash tool,
