@@ -979,19 +979,57 @@ func handleHistory(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
-// handleDiff shows git diff of uncommitted changes.
+// handleDiff shows git diff of changes, optionally routing to the diff viewer
+// screen. Supports --staged, --stat, and <commit> argument variants.
 func handleDiff(args []string, ctx CommandContext) CommandResult {
 	if ctx.Git == nil {
 		return CommandResult{Success: false, Message: "No git repository available."}
 	}
 
+	if len(args) > 0 && args[0] == "--stat" {
+		// Show diffstat summary inline, no screen transition.
+		diff, err := ctx.Git.Diff("", "")
+		if err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Failed to get diff: %v", err)}
+		}
+		if diff == "" {
+			return CommandResult{Success: true, Message: "No changes."}
+		}
+		status, err := ctx.Git.StatusPorcelain()
+		if err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Failed to get status: %v", err)}
+		}
+		var b strings.Builder
+		b.WriteString("Diff Stat:\n")
+		totalAdd, totalDel := 0, 0
+		for _, s := range status {
+			b.WriteString(fmt.Sprintf("  %s  %s", s.Status, s.Path))
+			if s.Additions > 0 || s.Deletions > 0 {
+				b.WriteString(fmt.Sprintf("  (+%d, -%d)", s.Additions, s.Deletions))
+				totalAdd += s.Additions
+				totalDel += s.Deletions
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString(fmt.Sprintf("\n%d files changed, %d insertions(+), %d deletions(-)",
+			len(status), totalAdd, totalDel))
+		return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+	}
+
 	var diff string
 	var err error
+	var title string
 
 	if len(args) > 0 && args[0] == "--staged" {
 		diff, err = ctx.Git.DiffStaged()
+		title = "git diff --staged"
+	} else if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		// Treat argument as a commit ref: /diff HEAD~3
+		diff, err = ctx.Git.Diff(args[0], "HEAD")
+		title = fmt.Sprintf("git diff %s..HEAD", args[0])
 	} else {
 		diff, err = ctx.Git.Diff("", "")
+		title = "git diff"
 	}
 
 	if err != nil {
@@ -1005,12 +1043,19 @@ func handleDiff(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: true, Message: "No uncommitted changes."}
 	}
 
-	// Truncate long diffs
-	if len(diff) > 4096 {
-		diff = diff[:4096] + "\n\n... [diff truncated, use git diff for full output]"
+	// Route to diff viewer screen (no more truncation).
+	screen := ScreenDiff
+	return CommandResult{
+		Success: true,
+		Screen:  &screen,
+		Message: title,
+		Cmd: func() tea.Msg {
+			return DiffScreenMsg{
+				Diff:  diff,
+				Title: title,
+			}
+		},
 	}
-
-	return CommandResult{Success: true, Message: diff}
 }
 
 // handleTheme switches between dark and light themes.
