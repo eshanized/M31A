@@ -87,12 +87,13 @@ type ToolCall struct {
 }
 
 type Message struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
-	Segments  []MessageSegment `json:"segments"`
-	ToolCalls []ToolCall       `json:"tool_calls,omitempty"`
-	Usage     *Usage           `json:"usage,omitempty"`
-	CreatedAt time.Time        `json:"created_at"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	Segments   []MessageSegment `json:"segments"`
+	ToolCalls  []ToolCall       `json:"tool_calls,omitempty"`
+	Usage      *Usage           `json:"usage,omitempty"`
+	CreatedAt  time.Time        `json:"created_at"`
+	SkipForLLM bool             `json:"skip_for_llm,omitempty"`
 }
 
 type ToolInput struct {

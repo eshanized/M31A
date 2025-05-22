@@ -98,8 +98,20 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	risk := tool.RiskLevel()
 
 	if !allowedByRule {
-		// Check if a rule triggered "ask" — must prompt user even for safe tools
-		if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
+		// Shell mode flag: if interactive=false (user-initiated ! command),
+		// skip the permission modal but still respect deny rules (checked above).
+		interactive := true
+		if val, ok := input.Params["interactive"]; ok {
+			if iv, isBool := val.(bool); isBool {
+				interactive = iv
+			}
+		}
+
+		// When interactive is explicitly false, auto-approve (skip modal)
+		if !interactive {
+			// Shell mode — user explicitly requested execution via ! prefix.
+			// Deny rules are already enforced above. Skip the interactive modal.
+		} else if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
 			req := PermissionRequest{
 				ToolName:    call.Name,
 				Command:     extractCommandString(call.Name, call.Input),
@@ -132,8 +144,40 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 				d.permissions[call.Name] = resp.Allowed
 				d.mu.Unlock()
 			}
+		} else if pctx != nil && pctx.Source == "agent_default" && pctx.RuleAction == "ask" {
+			// Agent default action "ask" — prompt for all tools regardless of risk level
+			req := PermissionRequest{
+				ToolName:    call.Name,
+				Command:     extractCommandString(call.Name, call.Input),
+				RiskLevel:   risk,
+				TimeoutSecs: 300,
+				RuleAction:  "ask",
+			}
+
+			select {
+			case d.requestCh <- req:
+			default:
+				return types.ToolResult{}, m31errors.ErrPermissionDenied
+			}
+
+			var resp PermissionResponse
+			select {
+			case resp = <-d.responseCh:
+			case <-ctx.Done():
+				return types.ToolResult{}, ctx.Err()
+			}
+
+			if !resp.Allowed {
+				return types.ToolResult{}, m31errors.ErrPermissionDenied
+			}
+
+			if resp.Remember {
+				d.mu.Lock()
+				d.permissions[call.Name] = resp.Allowed
+				d.mu.Unlock()
+			}
 		} else {
-			// No matching rule — fall through to RiskLevel default behavior
+			// No matching rule or agent default — fall through to RiskLevel default behavior
 			if risk == types.RiskDangerous || risk == types.RiskDestructive {
 				d.mu.RLock()
 				allowed, remembered := d.permissions[call.Name]
@@ -311,13 +355,16 @@ func matchToolName(pattern, name string) bool {
 	return matched
 }
 
-// matchAnyParamValue checks if the given glob pattern matches any string
-// value in the params map.
+// matchAnyParamValue checks if the given glob pattern matches any value
+// in the params map (converted to string).
 func matchAnyParamValue(pattern string, params map[string]any) bool {
 	for _, v := range params {
-		str, ok := v.(string)
-		if !ok {
-			continue
+		var str string
+		switch val := v.(type) {
+		case string:
+			str = val
+		default:
+			str = fmt.Sprintf("%v", val)
 		}
 		matched, err := doublestar.Match(pattern, str)
 		if err != nil {
@@ -452,8 +499,8 @@ func (d *Dispatcher) SetSessionID(id string) {
 	}
 }
 
-func DefaultDispatcher(workDir, backupDir, sessionsDir string) *Dispatcher {
-	d := NewDispatcher(nil)
+func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) *Dispatcher {
+	d := NewDispatcher(cfg)
 	d.Register(NewBash(workDir))
 	d.Register(NewFileRead(workDir))
 	d.Register(NewFileWrite(workDir, backupDir))

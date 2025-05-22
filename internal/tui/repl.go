@@ -14,11 +14,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 )
+
+// ShellResultMsg is sent when a shell command (!prefix) completes execution.
+type ShellResultMsg struct {
+	Command string
+	Output  string
+	Err     string
+}
 
 type ReplModel struct {
 	theme        theme.Theme
@@ -63,6 +71,9 @@ type ReplModel struct {
 
 	// Config access for arbitrage settings
 	cfg *config.Config
+
+	// Dispatcher for shell mode (! prefix) command execution
+	dispatcher *tools.Dispatcher
 
 	// Streaming channel — created when a stream starts, read by handleStreamMsg
 	streamCh chan tea.Msg
@@ -258,6 +269,34 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			m.inputHistory = append(m.inputHistory, input)
 			m.historyPos = len(m.inputHistory)
 
+			// Shell mode: ! prefix bypasses LLM for direct command execution
+			// Must come BEFORE the / prefix check so !/bin/ls isn't caught as a slash command.
+			if strings.HasPrefix(input, "!") || strings.HasPrefix(input, "\uff01") {
+				command := strings.TrimPrefix(input, "!")
+				command = strings.TrimPrefix(command, "\uff01")
+				command = strings.TrimSpace(command)
+				if command == "" {
+					// Show help for shell mode
+					errMsg := types.Message{
+						Role:    "assistant",
+						Content: "Shell mode: type `!command` to execute a shell command directly (e.g., `!git status`).",
+						Segments: []types.MessageSegment{{
+							Type:    "content",
+							Content: "Shell mode: type `!command` to execute a shell command directly (e.g., `!git status`).",
+							Visible: true,
+						}},
+						CreatedAt: time.Now(),
+					}
+					m.messages = append(m.messages, errMsg)
+					m.renderMessages()
+					m.viewport.GotoBottom()
+					var cmds []tea.Cmd
+					return cmds, true
+				}
+				m.textarea.Reset()
+				return m.executeShellCommand(command)
+			}
+
 			// If input is a slash command, emit it for app-level handling
 			if strings.HasPrefix(input, "/") {
 				m.textarea.Reset()
@@ -338,7 +377,7 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 					req := provider.ChatRequest{
 						Model:    modelID,
-						Messages: m.messages,
+						Messages: m.messagesForLLM(),
 						Stream:   true,
 					}
 					m.streamCh = make(chan tea.Msg, 100)
@@ -470,6 +509,29 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			m.fallbackBanner = ""
 			m.renderMessages()
 		}
+
+	case ShellResultMsg:
+		// Replace the "Running..." message with actual command output
+		formatted := fmt.Sprintf("$ %s\n%s", msg.Command, msg.Output)
+		if msg.Err != "" {
+			formatted += fmt.Sprintf("\n[Error: %s]", msg.Err)
+		}
+		// Find the last assistant message with $ prefix and update it
+		for i := len(m.messages) - 1; i >= 0; i-- {
+			if m.messages[i].Role == "assistant" && strings.HasPrefix(m.messages[i].Content, "$ ") {
+				m.messages[i].Content = formatted
+				m.messages[i].Segments = []types.MessageSegment{{
+					Type:    "content",
+					Content: formatted,
+					Visible: true,
+				}}
+				break
+			}
+		}
+		m.renderMessages()
+		m.viewport.GotoBottom()
+		var cmds []tea.Cmd
+		return cmds, true
 
 	case FallbackEventMsg:
 		m.fallbackBanner = fmt.Sprintf("Provider switched: %s → %s (%s)", msg.From, msg.To, msg.Reason)
@@ -706,6 +768,94 @@ func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider stri
 	m.activeModel = model
 	m.sessionID = sessionID
 	m.cfg = cfg
+}
+
+func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {
+	m.dispatcher = d
+}
+
+// executeShellCommand runs a shell command via the dispatcher's Bash tool,
+// bypassing the LLM entirely. The command output is displayed in chat as
+// an assistant message but is marked SkipForLLM so it doesn't appear in
+// subsequent LLM requests. No permission modal (user explicitly requested
+// execution via ! prefix), though PermissionRule deny rules still apply.
+func (m *ReplModel) executeShellCommand(command string) ([]tea.Cmd, bool) {
+	// Show a "Running..." placeholder immediately
+	displayMsg := types.Message{
+		Role:    "assistant",
+		Content: fmt.Sprintf("$ %s\nRunning...\n", command),
+		Segments: []types.MessageSegment{{
+			Type:    "content",
+			Content: fmt.Sprintf("$ %s\nRunning...\n", command),
+			Visible: true,
+		}},
+		CreatedAt:  time.Now(),
+		SkipForLLM: true,
+	}
+	m.messages = append(m.messages, displayMsg)
+	m.renderMessages()
+	m.viewport.GotoBottom()
+
+	// Execute via goroutine that calls dispatcher.Execute with a Bash ToolCall
+	return []tea.Cmd{func() tea.Msg {
+		if m.dispatcher == nil {
+			return ShellResultMsg{
+				Command: command,
+				Output:  "",
+				Err:     "dispatcher not available",
+			}
+		}
+
+		// Construct ToolCall for Bash with interactive=false to skip permission modal
+		params := map[string]any{
+			"command":     command,
+			"description": "shell mode command",
+			"timeout":     300,
+			"interactive": false,
+		}
+		paramsJSON, _ := json.Marshal(params)
+		toolCall := types.ToolCall{
+			ID:    fmt.Sprintf("shell_%d", time.Now().UnixNano()),
+			Name:  "Bash",
+			Input: paramsJSON,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+		defer cancel()
+
+		result, err := m.dispatcher.Execute(ctx, toolCall)
+		if err != nil {
+			return ShellResultMsg{
+				Command: command,
+				Output:  result.Output,
+				Err:     err.Error(),
+			}
+		}
+		if result.Error != "" {
+			return ShellResultMsg{
+				Command: command,
+				Output:  result.Output,
+				Err:     result.Error,
+			}
+		}
+		return ShellResultMsg{
+			Command: command,
+			Output:  result.Output,
+			Err:     "",
+		}
+	}}, false
+}
+
+// messagesForLLM returns only messages that should be included in LLM context,
+// filtering out shell mode messages and any other messages marked SkipForLLM.
+func (m *ReplModel) messagesForLLM() []types.Message {
+	var filtered []types.Message
+	for _, msg := range m.messages {
+		if !msg.SkipForLLM {
+			filtered = append(filtered, msg)
+		}
+	}
+	return filtered
 }
 
 func (m *ReplModel) SetKeyRegistry(kr *KeyRegistry) {

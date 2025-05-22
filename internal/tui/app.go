@@ -1247,6 +1247,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.replModel = &rp
 					}
 					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					m.replModel.SetDispatcher(m.dispatcher)
 					for _, msg := range sess.Messages {
 						m.replModel.AddMessage(msg)
 					}
@@ -1503,8 +1504,9 @@ func (m *AppState) cycleRecentModel(direction int) {
 
 	m.activeModel = model
 	if m.replModel != nil {
-		m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
-	}
+			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+			m.replModel.SetDispatcher(m.dispatcher)
+		}
 
 	// Mark the model as recently used
 	m.sessionManager.AddRecentModel(model.ID) //nolint:errcheck
