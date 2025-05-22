@@ -325,3 +325,273 @@ func TestReplModel_EnterWithHistoryPosReset(t *testing.T) {
 		t.Errorf("historyPos should be reset to %d, got %d", len(m.inputHistory), m.historyPos)
 	}
 }
+
+func TestShellMode_DetectsBangPrefix(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Input starting with ! should trigger shell mode
+	m.textarea.SetValue("!ls -la")
+	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// sent=false because shell mode returns false (not a conversation turn)
+	if sent {
+		t.Error("Expected sent=false for shell mode command")
+	}
+
+	// Textarea should be reset
+	if m.textarea.Value() != "" {
+		t.Errorf("Expected empty textarea after shell command, got %q", m.textarea.Value())
+	}
+
+	// Should have assistant message with "Running..."
+	found := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && strings.HasPrefix(msg.Content, "$ ls -la") && strings.Contains(msg.Content, "Running") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected assistant message with '$ ls -la\\nRunning...'")
+	}
+
+	// Should return a non-nil cmd (the shell execution goroutine)
+	if len(cmds) == 0 {
+		t.Error("Expected at least one command (the shell execution goroutine)")
+	}
+
+	// Verify shell message is marked SkipForLLM
+	if len(m.messages) > 0 {
+		lastMsg := m.messages[len(m.messages)-1]
+		if !lastMsg.SkipForLLM {
+			t.Error("Shell message should have SkipForLLM=true")
+		}
+	}
+}
+
+func TestShellMode_EmptyCommand(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Just "!" should show help
+	m.textarea.SetValue("!")
+	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// sent=true because help message was shown
+	if !sent {
+		t.Error("Expected sent=true for empty shell mode (help shown)")
+	}
+
+	// Should have assistant message with "Shell mode:" guidance
+	found := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && strings.Contains(msg.Content, "Shell mode:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected assistant message with 'Shell mode:' guidance text")
+	}
+
+	// Textarea should NOT be reset (we didn't execute a command)
+	if m.textarea.Value() != "!" {
+		t.Errorf("Expected textarea to still contain '!', got %q", m.textarea.Value())
+	}
+
+	_ = cmds
+}
+
+func TestShellMode_NoLLMCall(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Shell mode should not trigger streaming
+	m.textarea.SetValue("!echo hello")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// streaming should be false
+	if m.streaming {
+		t.Error("Expected streaming=false after shell command")
+	}
+
+	// streamCh should be nil (no stream created)
+	if m.streamCh != nil {
+		t.Error("Expected streamCh=nil after shell command (no LLM stream created)")
+	}
+}
+
+func TestShellMode_NonBangInput(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Normal input should still work (create user message, error about no provider)
+	m.textarea.SetValue("hello")
+	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !sent {
+		t.Error("Expected sent=true for non-bang input")
+	}
+
+	// Should have a user message with "hello"
+	found := false
+	for _, msg := range m.messages {
+		if msg.Role == "user" && msg.Content == "hello" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected user message with 'hello' for non-bang input")
+	}
+
+	// Should NOT have SkipForLLM on user messages
+	for _, msg := range m.messages {
+		if msg.Role == "user" && msg.SkipForLLM {
+			t.Error("User message should NOT have SkipForLLM=true")
+		}
+	}
+
+	_ = cmds
+}
+
+func TestShellResultMsg_UpdatesDisplay(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// First, simulate a shell command that was sent
+	m.textarea.SetValue("!echo hello")
+	cmds, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// The "Running..." message should be there
+	runningFound := false
+	for _, msg := range m.messages {
+		if strings.Contains(msg.Content, "Running") && strings.Contains(msg.Content, "$ echo hello") {
+			runningFound = true
+			break
+		}
+	}
+	if !runningFound {
+		t.Error("Expected 'Running...' message before ShellResultMsg")
+	}
+
+	// Now send a ShellResultMsg to update the display
+	resultCmds, sent := m.Update(ShellResultMsg{
+		Command: "echo hello",
+		Output:  "hello\n",
+		Err:     "",
+	})
+
+	if !sent {
+		t.Error("Expected sent=true for ShellResultMsg")
+	}
+
+	// The "Running..." message should be replaced with actual output
+	outputFound := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && strings.HasPrefix(msg.Content, "$ echo hello") && strings.Contains(msg.Content, "hello") {
+			outputFound = true
+			// Should NOT contain "Running" anymore
+			if strings.Contains(msg.Content, "Running") {
+				t.Error("Updated message should not contain 'Running...'")
+			}
+			break
+		}
+	}
+	if !outputFound {
+		t.Error("Expected updated message with '$ echo hello\\nhello'")
+	}
+
+	_ = cmds
+	_ = resultCmds
+}
+
+func TestShellResultMsg_Error(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Simulate shell command
+	m.textarea.SetValue("!invalid-command")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Send error result
+	m.Update(ShellResultMsg{
+		Command: "invalid-command",
+		Output:  "",
+		Err:     "command not found",
+	})
+
+	// Message should contain [Error: command not found]
+	found := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && strings.HasPrefix(msg.Content, "$ invalid-command") && strings.Contains(msg.Content, "Error: command not found") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected error message with '[Error: command not found]'")
+	}
+}
+
+func TestShellMode_MessagesForLLM(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Add a user message (normal, skipForLLM=false)
+	m.textarea.SetValue("normal message")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Add a shell message (skipForLLM=true) via simulate
+	m.textarea.SetValue("!ls")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// messagesForLLM should include normal messages but NOT shell messages
+	llmMsgs := m.messagesForLLM()
+	for _, msg := range llmMsgs {
+		if msg.SkipForLLM {
+			t.Error("messagesForLLM() should not include SkipForLLM messages")
+		}
+	}
+
+	// At least the user message should be present
+	found := false
+	for _, msg := range llmMsgs {
+		if msg.Role == "user" && msg.Content == "normal message" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("messagesForLLM() should include normal user message")
+	}
+}
+
+func TestShellMode_BangBeforeSlash(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// "!/bin/ls" would be caught by slash handler if ! check came after /
+	// ! detection must come first
+	m.textarea.SetValue("!/bin/echo test")
+	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Should be handled as shell mode, not slash command
+	if sent {
+		t.Error("Expected sent=false for shell mode (not a slash command)")
+	}
+
+	found := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && strings.HasPrefix(msg.Content, "$ /bin/echo test") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected shell mode to handle !/bin/echo test (not slash command)")
+	}
+
+	_ = cmds
+}
