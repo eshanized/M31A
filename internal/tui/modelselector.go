@@ -42,10 +42,17 @@ func (f providerFilter) Next() providerFilter {
 	return (f + 1) % 3
 }
 
+// Styling constants for variant badge and favorite indicator.
+var (
+	modelVariantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA0A6")).Italic(true)
+	favoriteStarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D77757")).Bold(true)
+)
+
 // ModelItem implements list.DefaultItem for model display.
 type ModelItem struct {
-	Model    types.ModelInfo
-	Provider string
+	Model      types.ModelInfo
+	Provider   string
+	IsFavorite bool
 }
 
 func (i ModelItem) Title() string {
@@ -53,10 +60,23 @@ func (i ModelItem) Title() string {
 	if name == "" {
 		name = i.Model.ID
 	}
-	return fmt.Sprintf("%s [%s]", name, providerBadge(i.Provider))
+	title := fmt.Sprintf("%s [%s]", name, providerBadge(i.Provider))
+
+	// Append variant badge if Variant is set (non-nil)
+	if i.Model.Variant != nil {
+		title += " " + modelVariantStyle.Render(*i.Model.Variant)
+	}
+
+	return title
 }
 
 func (i ModelItem) Description() string {
+	// Favorite indicator
+	var desc string
+	if i.IsFavorite {
+		desc = favoriteStarStyle.Render("★") + " favorite | "
+	}
+
 	// Standard usage estimate: 100K input tokens, 50K output tokens
 	estCost := (i.Model.Pricing.InputPerMToken * 0.1) + (i.Model.Pricing.OutputPerMToken * 0.05)
 	costDesc := fmt.Sprintf("$%.4f (100K in + 50K out)", estCost)
@@ -65,7 +85,8 @@ func (i ModelItem) Description() string {
 	}
 	ctxDesc := fmt.Sprintf("context: %dK", i.Model.ContextLength/1024)
 	caps := capabilityString(i.Model.Capabilities)
-	return fmt.Sprintf("%s \u00b7 %s \u00b7 %s", costDesc, ctxDesc, caps)
+	desc += fmt.Sprintf("%s \u00b7 %s \u00b7 %s", costDesc, ctxDesc, caps)
+	return desc
 }
 
 func (i ModelItem) FilterValue() string {
@@ -251,6 +272,20 @@ func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "f", "F":
+			item := m.list.SelectedItem()
+			if item != nil {
+				mi, ok := item.(ModelItem)
+				if ok && m.manager != nil {
+					// Toggle favorite status via session manager
+					if err := m.manager.ToggleFavorite(mi.Model.ID); err == nil {
+						// Update the item's IsFavorite flag in the list
+						m.refilterList()
+					}
+				}
+			}
+			return m, nil
+
 		case "ctrl+c":
 			return m, tea.Quit
 
@@ -320,7 +355,7 @@ func (m ModelSelector) renderTopBar() string {
 
 	hints := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#9AA0A6")).
-		Render("[P] Filter  [Tab] Details  [/] Search  [Enter] Select  [Esc] Back")
+		Render("[P] Filter  [Tab] Details  [F] Favorite  [/] Search  [Enter] Select  [Esc] Back")
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		filterStyle.Render(filterText),
@@ -347,7 +382,7 @@ func (m ModelSelector) renderSearchInput() string {
 func (m ModelSelector) renderHelpBar() string {
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#9AA0A6")).
-		Render("P: cycle provider filter  |  Tab: toggle details  |  /: search  |  Enter: select  |  Esc: back")
+		Render("P: cycle provider filter  |  Tab: toggle details  |  F: toggle favorite  |  /: search  |  Enter: select  |  Esc: back")
 }
 
 // detailView renders the detail pane for the currently selected model.
@@ -363,12 +398,25 @@ func (m ModelSelector) detailView() string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Model: %s\n", d.ID))
 	b.WriteString(fmt.Sprintf("Provider: %s\n", d.Provider))
+	if d.Variant != nil {
+		b.WriteString(fmt.Sprintf("Variant: %s\n", *d.Variant))
+	}
 	b.WriteString(fmt.Sprintf("Description: %s\n", d.Description))
 	b.WriteString(fmt.Sprintf("Context: %d tokens\n", d.ContextLength))
 	b.WriteString(fmt.Sprintf("Tokenizer: %s\n", d.Architecture.TokenizerFamily))
 	b.WriteString(fmt.Sprintf("Pricing: $%.4f/M in, $%.4f/M out (est. $%.4f/100K+50K)\n",
 		d.Pricing.InputPerMToken, d.Pricing.OutputPerMToken, estCost))
 	b.WriteString(fmt.Sprintf("Capabilities: %s\n", capabilityString(d.Capabilities)))
+
+	// Favorite status line
+	if m.manager != nil {
+		isFav := m.manager.IsFavorite(d.ID)
+		if isFav {
+			b.WriteString(favoriteStarStyle.Render("Favorite: Yes\n"))
+		} else {
+			b.WriteString("Favorite: No\n")
+		}
+	}
 
 	return lipgloss.NewStyle().
 		Padding(1, 2).
@@ -388,6 +436,14 @@ func (m *ModelSelector) refilterList() {
 	var items []list.Item
 	searchText := strings.ToLower(m.search.Value())
 
+	// Load favorites map from manager (best effort — nil manager or error means no favorites)
+	var favorites map[string]bool
+	if m.manager != nil {
+		if data, err := m.manager.LoadRecentModels(); err == nil {
+			favorites = data.Favorites
+		}
+	}
+
 	for _, model := range m.allModels {
 		// Provider filter
 		if m.filter == filterOpenRouter && model.Provider != "openrouter" {
@@ -406,8 +462,9 @@ func (m *ModelSelector) refilterList() {
 		}
 
 		items = append(items, ModelItem{
-			Model:    model,
-			Provider: model.Provider,
+			Model:      model,
+			Provider:   model.Provider,
+			IsFavorite: favorites[model.ID],
 		})
 	}
 
