@@ -20,6 +20,7 @@ const (
 	ScreenExecute
 	ScreenVerify
 	ScreenShip
+	ScreenDiff Screen = 10
 )
 
 type AppMsg struct {
