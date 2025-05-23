@@ -156,10 +156,16 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// Diff returns the diff between two refs.
+// Diff returns the diff between two refs. If both refs are empty, it runs
+// plain `git diff` to show unstaged working-tree changes.
 func (g *Git) Diff(ref1, ref2 string) (string, error) {
-	ref := ref1 + ".." + ref2
-	out, err := g.run("diff", ref)
+	var args []string
+	if ref1 == "" && ref2 == "" {
+		args = []string{"diff"}
+	} else {
+		args = []string{"diff", ref1 + ".." + ref2}
+	}
+	out, err := g.run(args...)
 	if err != nil {
 		return out, fmt.Errorf("git diff: %w", err)
 	}

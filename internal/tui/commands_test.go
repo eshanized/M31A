@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/ledger"
@@ -1563,4 +1565,395 @@ func TestHandleFallback_SwitchFailure(t *testing.T) {
 	result, _ = r.Execute("/fallback openrouter", CommandContext{Registry: reg})
 	// This might succeed or fail depending on SetActive validation
 	_ = result
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers for diff tests
+// ---------------------------------------------------------------------------
+
+// sampleDiff returns a realistic git diff output for test parsing.
+func sampleDiff() string {
+	return `diff --git a/main.go b/main.go
+index abc123..def456 100644
+--- a/main.go
++++ b/main.go
+@@ -10,6 +10,8 @@ func main() {
+ 	println("hello")
+-	oldLine()
++	newLine()
++	extraLine()
+ 	println("world")
+ }`
+}
+
+// ---------------------------------------------------------------------------
+// TestDiffCommand — 5 argument variants
+// ---------------------------------------------------------------------------
+
+func TestDiffCommand_NoArgs(t *testing.T) {
+	r := DefaultCommands()
+	ctx, dir := newTestContext(t)
+	defer cleanupTestContext(dir)
+
+	// Create a file, commit it, then modify it (unstaged)
+	f := filepath.Join(dir, "hello.go")
+	if err := os.WriteFile(f, []byte("package main\nfunc main() {}"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := ctx.Git.Commit("initial"); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+	// Now modify (creates an unstaged diff)
+	if err := os.WriteFile(f, []byte("package main\nfunc main() { println(\"hi\") }"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	result, found := r.Execute("/diff", ctx)
+	if !found {
+		t.Fatal("expected /diff to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if result.Screen == nil {
+		t.Fatal("expected Screen to be set for full diff")
+	}
+	if *result.Screen != ScreenDiff {
+		t.Errorf("expected ScreenDiff (%d), got %d", ScreenDiff, *result.Screen)
+	}
+	if result.Cmd == nil {
+		t.Fatal("expected Cmd to be non-nil, carrying DiffScreenMsg")
+	}
+	msg := result.Cmd()
+	if _, ok := msg.(DiffScreenMsg); !ok {
+		t.Errorf("expected DiffScreenMsg from Cmd, got %T", msg)
+	}
+}
+
+func TestDiffCommand_Staged(t *testing.T) {
+	r := DefaultCommands()
+	ctx, dir := newTestContext(t)
+	defer cleanupTestContext(dir)
+
+	// Create a file, write content, stage it (don't commit)
+	f := filepath.Join(dir, "hello.go")
+	if err := os.WriteFile(f, []byte("package main\nfunc main() {}"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := ctx.Git.Add(f); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	result, found := r.Execute("/diff --staged", ctx)
+	if !found {
+		t.Fatal("expected /diff --staged to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if result.Screen == nil {
+		t.Fatal("expected Screen to be set for staged diff")
+	}
+	if *result.Screen != ScreenDiff {
+		t.Errorf("expected ScreenDiff (%d), got %d", ScreenDiff, *result.Screen)
+	}
+	if result.Cmd == nil {
+		t.Fatal("expected Cmd to carry DiffScreenMsg")
+	}
+	msg := result.Cmd()
+	dsm, ok := msg.(DiffScreenMsg)
+	if !ok {
+		t.Fatalf("expected DiffScreenMsg, got %T", msg)
+	}
+	if dsm.Diff == "" {
+		t.Error("expected non-empty diff content")
+	}
+	if !strings.Contains(dsm.Title, "staged") {
+		t.Errorf("expected 'staged' in title, got %q", dsm.Title)
+	}
+}
+
+func TestDiffCommand_Stat(t *testing.T) {
+	r := DefaultCommands()
+	ctx, dir := newTestContext(t)
+	defer cleanupTestContext(dir)
+
+	// Create a file with content, commit, then modify
+	f := filepath.Join(dir, "hello.go")
+	if err := os.WriteFile(f, []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := ctx.Git.Commit("initial"); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+	// Modify to create changes tracked by --stat
+	if err := os.WriteFile(f, []byte("package main\nfunc main() { println(\"hi\") }\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	result, found := r.Execute("/diff --stat", ctx)
+	if !found {
+		t.Fatal("expected /diff --stat to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	// --stat should NOT set Screen (inline output)
+	if result.Screen != nil {
+		t.Error("expected Screen to be nil for --stat (inline output)")
+	}
+	if !strings.Contains(result.Message, "Diff Stat") {
+		t.Errorf("expected 'Diff Stat' header, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "files changed") {
+		t.Errorf("expected 'files changed' summary, got: %s", result.Message)
+	}
+}
+
+func TestDiffCommand_NoChanges(t *testing.T) {
+	r := DefaultCommands()
+	ctx, dir := newTestContext(t)
+	defer cleanupTestContext(dir)
+
+	// Clean repo — no modifications
+	result, found := r.Execute("/diff", ctx)
+	if !found {
+		t.Fatal("expected /diff to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "No uncommitted changes") {
+		t.Errorf("expected 'No uncommitted changes' message, got: %s", result.Message)
+	}
+	if result.Screen != nil {
+		t.Error("expected Screen nil for no-diff case")
+	}
+}
+
+func TestDiffCommand_NoGit(t *testing.T) {
+	r := DefaultCommands()
+	result, found := r.Execute("/diff", CommandContext{Git: nil})
+	if !found {
+		t.Fatal("expected /diff to be found")
+	}
+	if result.Success {
+		t.Fatal("expected failure without git repo")
+	}
+	if !strings.Contains(result.Message, "No git repository") {
+		t.Errorf("expected 'No git repository' message, got: %s", result.Message)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestDiffModel — parseDiff, scroll, toggle
+// ---------------------------------------------------------------------------
+
+func TestDiffModel_ParseDiff(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	diffText := sampleDiff()
+	lines := m.parseDiff(diffText)
+
+	if len(lines) == 0 {
+		t.Fatal("expected parsed lines, got none")
+	}
+
+	// Verify line type classification
+	expected := []struct {
+		index int
+		kind  DiffLineType
+		hint  string
+	}{
+		{0, DiffHeader, "diff --git"},
+		{1, DiffHeader, "index"},
+		{2, DiffHeader, "---"},
+		{3, DiffHeader, "+++"},
+		{4, DiffHunk, "@@"},
+		{5, DiffContext, "space-prefixed context"},
+		{6, DiffDeleted, "removed line"},
+		{7, DiffAdded, "added line"},
+		{8, DiffAdded, "second added line"},
+		{9, DiffContext, "space-prefixed context"},
+		{10, DiffContext, "closing brace"},
+	}
+
+	for _, exp := range expected {
+		if exp.index >= len(lines) {
+			t.Errorf("expected line %d (%s), but diff has only %d lines", exp.index, exp.hint, len(lines))
+			continue
+		}
+		if lines[exp.index].Type != exp.kind {
+			t.Errorf("line %d (%s): expected type %d, got %d (content: %q)",
+				exp.index, exp.hint, exp.kind, lines[exp.index].Type, lines[exp.index].Content)
+		}
+	}
+}
+
+func TestDiffModel_Scroll(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	m.diff = sampleDiff()
+	m.lines = m.parseDiff(sampleDiff())
+
+	// Verify initial scroll position
+	if m.scrollPos != 0 {
+		t.Fatalf("expected scrollPos=0 initially, got %d", m.scrollPos)
+	}
+
+	// Arrow down
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = model.(DiffModel)
+	if m.scrollPos != 1 {
+		t.Errorf("expected scrollPos=1 after arrow down, got %d", m.scrollPos)
+	}
+
+	// Arrow down again
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = model.(DiffModel)
+	if m.scrollPos != 2 {
+		t.Errorf("expected scrollPos=2 after second arrow down, got %d", m.scrollPos)
+	}
+
+	// Arrow up
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = model.(DiffModel)
+	if m.scrollPos != 1 {
+		t.Errorf("expected scrollPos=1 after arrow up, got %d", m.scrollPos)
+	}
+
+	// g key (go to top)
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = model.(DiffModel)
+	if m.scrollPos != 0 {
+		t.Errorf("expected scrollPos=0 after 'g', got %d", m.scrollPos)
+	}
+
+	// Arrow up at top stays at 0
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = model.(DiffModel)
+	if m.scrollPos != 0 {
+		t.Errorf("expected scrollPos=0 when already at top, got %d", m.scrollPos)
+	}
+}
+
+func TestDiffModel_EscReturnsCloseMsg(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	m.diff = sampleDiff()
+	m.lines = m.parseDiff(sampleDiff())
+
+	model, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = model.(DiffModel)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd from esc key")
+	}
+	msg := cmd()
+	if _, ok := msg.(DiffCloseMsg); !ok {
+		t.Errorf("expected DiffCloseMsg from esc key, got %T", msg)
+	}
+}
+
+func TestDiffModel_HomeEndKeys(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	m.diff = sampleDiff()
+	m.lines = m.parseDiff(sampleDiff())
+
+	// Scroll down a bit
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = model.(DiffModel)
+	if m.scrollPos == 0 {
+		t.Fatal("expected scrollPos > 0 after scrolling")
+	}
+
+	// Home key goes to top
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = model.(DiffModel)
+	if m.scrollPos != 0 {
+		t.Errorf("expected scrollPos=0 after home, got %d", m.scrollPos)
+	}
+
+	// End key goes to bottom
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m = model.(DiffModel)
+	if m.scrollPos != len(m.lines)-1 {
+		t.Errorf("expected scrollPos=%d after end, got %d", len(m.lines)-1, m.scrollPos)
+	}
+}
+
+func TestDiffModel_ToggleSplit(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	m.diff = sampleDiff()
+	m.lines = m.parseDiff(sampleDiff())
+
+	if m.splitView {
+		t.Fatal("expected splitView=false initially")
+	}
+
+	// 's' key toggles split on
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = model.(DiffModel)
+	if !m.splitView {
+		t.Error("expected splitView=true after 's'")
+	}
+
+	// 's' again toggles back
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = model.(DiffModel)
+	if m.splitView {
+		t.Error("expected splitView=false after second 's'")
+	}
+}
+
+func TestDiffModel_EmptyDiff(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	view := m.View()
+	if !strings.Contains(view, "No diff to display") {
+		t.Errorf("expected placeholder message, got: %s", view)
+	}
+}
+
+func TestDiffModel_DiffScreenMsg(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	diffText := sampleDiff()
+
+	// Send DiffScreenMsg
+	model, _ := m.Update(DiffScreenMsg{Diff: diffText, Title: "git diff test"})
+	m = model.(DiffModel)
+
+	if m.title != "git diff test" {
+		t.Errorf("expected title 'git diff test', got %q", m.title)
+	}
+	if m.diff != diffText {
+		t.Errorf("expected diff text to be set")
+	}
+	if len(m.lines) == 0 {
+		t.Error("expected parsed lines after DiffScreenMsg")
+	}
+	if m.scrollPos != 0 {
+		t.Errorf("expected scrollPos=0 after new diff, got %d", m.scrollPos)
+	}
+}
+
+func TestDiffModel_ViewContainsColoredContent(t *testing.T) {
+	m := NewDiffModel(theme.Dark())
+	m.diff = sampleDiff()
+	m.lines = m.parseDiff(sampleDiff())
+	m.width = 120
+	m.height = 40
+	m.title = "git diff"
+
+	view := m.View()
+	// View should contain the title and diff content
+	if !strings.Contains(view, "git diff") {
+		t.Errorf("expected title in view, got: %s", view)
+	}
+	if !strings.Contains(view, "toggle split") {
+		t.Errorf("expected help bar with 'toggle split', got: %s", view)
+	}
+	if !strings.Contains(view, "oldLine") {
+		t.Errorf("expected diff content (oldLine) in view, got: %s", view)
+	}
+	if !strings.Contains(view, "newLine") {
+		t.Errorf("expected diff content (newLine) in view, got: %s", view)
+	}
 }

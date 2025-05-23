@@ -143,6 +143,8 @@ func (m *DiffModel) parseDiff(diffText string) []DiffLine {
 			dt = DiffHeader
 		case strings.HasPrefix(line, "+++"):
 			dt = DiffHeader
+		case strings.HasPrefix(line, "index "):
+			dt = DiffHeader
 		case strings.HasPrefix(line, "@@"):
 			dt = DiffHunk
 		case strings.HasPrefix(line, "+"):
