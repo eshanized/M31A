@@ -4,7 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,6 +26,11 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 )
+
+// fileRefPattern matches @filepath references for editor context auto-include.
+// It captures @./path, @../path, @path/to/file, and @/absolute/path.
+// It does NOT match standalone @user or @mention (requires a path separator '/').
+var fileRefPattern = regexp.MustCompile(`@(\./|\.\./|[^\s@]+/)[^\s@]+`)
 
 // ShellResultMsg is sent when a shell command (!prefix) completes execution.
 type ShellResultMsg struct {
@@ -70,6 +80,7 @@ type ReplModel struct {
 	activeProvider string
 	activeModel    *types.ModelInfo
 	sessionID      string
+	cwd            string // working directory for @filepath resolution
 
 	// Config access for arbitrage settings
 	cfg *config.Config
@@ -323,9 +334,12 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 				return cmds, false
 			}
 
+			// Expand @filepath references for LLM context
+			expandedInput := m.expandFileRefs(input)
+
 			userMsg := types.Message{
 				Role:      "user",
-				Content:   input,
+				Content:   expandedInput,
 				CreatedAt: time.Now(),
 			}
 			m.messages = append(m.messages, userMsg)
@@ -826,6 +840,79 @@ func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {
 // SetFrecentHistory sets the frecency history for prompt history navigation.
 func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
 	m.frecentHistory = fh
+}
+
+// SetCwd sets the working directory for @filepath resolution.
+func (m *ReplModel) SetCwd(cwd string) {
+	m.cwd = cwd
+}
+
+// expandFileRefs scans input for @filepath references, resolves file contents,
+// and replaces them with inline content blocks. Unresolvable references remain as-is.
+func (m *ReplModel) expandFileRefs(input string) string {
+	if m.cwd == "" {
+		return input
+	}
+
+	return fileRefPattern.ReplaceAllStringFunc(input, func(match string) string {
+		path := match[1:] // strip the @ prefix
+
+		// Resolve relative to cwd
+		resolvedPath := path
+		if !filepath.IsAbs(path) {
+			resolvedPath = filepath.Join(m.cwd, path)
+		}
+		resolvedPath = filepath.Clean(resolvedPath)
+
+		// Stat the file
+		fi, err := os.Stat(resolvedPath)
+		if err != nil {
+			// File not found or inaccessible — leave reference as-is
+			return match
+		}
+
+		if fi.IsDir() {
+			return match // directories not supported, leave as-is
+		}
+
+		// Size check: 100KB limit
+		const maxFileSize = 100 * 1024
+		if fi.Size() > maxFileSize {
+			return fmt.Sprintf("%s [file too large: %d bytes, max 100KB]", match, fi.Size())
+		}
+
+		// Read first 512 bytes for binary detection
+		f, err := os.Open(resolvedPath)
+		if err != nil {
+			return match
+		}
+		defer f.Close()
+
+		header := make([]byte, 512)
+		n, _ := f.Read(header)
+
+		// Detect content type via mime sniff
+		contentType := http.DetectContentType(header[:n])
+		if !strings.HasPrefix(contentType, "text/") &&
+			contentType != "application/json" &&
+			contentType != "application/xml" &&
+			contentType != "application/javascript" &&
+			contentType != "application/x-sh" &&
+			contentType != "application/yaml" {
+			// Binary file — show placeholder
+			return fmt.Sprintf("%s [binary: %s, %d bytes]", match, contentType, fi.Size())
+		}
+
+		// Read full content
+		f.Seek(0, 0)
+		content, err := io.ReadAll(f)
+		if err != nil {
+			return match
+		}
+
+		// Format: --- path/to/file ---\n{content}\n---
+		return fmt.Sprintf("--- %s ---\n%s\n---", path, string(content))
+	})
 }
 
 // executeShellCommand runs a shell command via the dispatcher's Bash tool,
