@@ -27,6 +27,15 @@ func NewModelCache(ttl time.Duration) *ModelCache {
 	}
 }
 
+// NewModelCacheWithStale creates a ModelCache with explicit TTL and stale TTL.
+func NewModelCacheWithStale(ttl time.Duration, staleTTL time.Duration) *ModelCache {
+	return &ModelCache{
+		models:   make(map[string]*types.ModelInfo),
+		ttl:      ttl,
+		staleTTL: staleTTL,
+	}
+}
+
 func (c *ModelCache) Get(id string) (*types.ModelInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
