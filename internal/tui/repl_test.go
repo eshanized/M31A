@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -822,5 +824,167 @@ func TestFrecentHistory_Clear(t *testing.T) {
 	}
 	if h.entries[0].Text != "new-entry" {
 		t.Errorf("Expected text 'new-entry', got %q", h.entries[0].Text)
+	}
+}
+
+// testReplModelWithCwd creates a ReplModel with the given cwd for @filepath testing.
+func testReplModelWithCwd(t *testing.T, cwd string) *ReplModel {
+	t.Helper()
+	m := NewReplModel(theme.Dark())
+	m.SetCwd(cwd)
+	return &m
+}
+
+func TestExpandFileRefs_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	if err := os.WriteFile(dir+"/test.txt", []byte("hello world"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	result := m.expandFileRefs("read @./test.txt please")
+	// The path in the output preserves the original reference (./test.txt)
+	if !strings.Contains(result, "hello world") {
+		t.Errorf("Expected 'hello world' in result, got %q", result)
+	}
+	if !strings.Contains(result, "--- ./test.txt ---") {
+		t.Errorf("Expected '--- ./test.txt ---' in result, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	result := m.expandFileRefs("check @./nonexistent.txt")
+	if result != "check @./nonexistent.txt" {
+		t.Errorf("Missing file: expected reference left as-is, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_BinaryFile(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	// Write a 4-byte PNG header (binary)
+	if err := os.WriteFile(dir+"/binary.bin", []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, 0644); err != nil {
+		t.Fatalf("failed to create binary file: %v", err)
+	}
+
+	result := m.expandFileRefs("view @./binary.bin")
+	if !strings.Contains(result, "[binary:") {
+		t.Errorf("Binary file: expected '[binary:' in result, got %q", result)
+	}
+	if !strings.Contains(result, "8 bytes") {
+		t.Errorf("Binary file: expected file size in result, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_FileTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	// Write a file larger than 100KB
+	data := make([]byte, 101*1024)
+	if err := os.WriteFile(dir+"/large.txt", data, 0644); err != nil {
+		t.Fatalf("failed to create large file: %v", err)
+	}
+
+	result := m.expandFileRefs("load @./large.txt")
+	if !strings.Contains(result, "[file too large:") {
+		t.Errorf("Large file: expected '[file too large:' in result, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_MultipleRefs(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	if err := os.WriteFile(dir+"/a.txt", []byte("alpha"), 0644); err != nil {
+		t.Fatalf("failed to create a.txt: %v", err)
+	}
+	if err := os.WriteFile(dir+"/b.txt", []byte("beta"), 0644); err != nil {
+		t.Fatalf("failed to create b.txt: %v", err)
+	}
+
+	result := m.expandFileRefs("@./a.txt and @./b.txt")
+	if !strings.Contains(result, "alpha") {
+		t.Errorf("MultipleRefs: expected 'alpha' in result, got %q", result)
+	}
+	if !strings.Contains(result, "beta") {
+		t.Errorf("MultipleRefs: expected 'beta' in result, got %q", result)
+	}
+	if !strings.Contains(result, "--- ./a.txt ---") {
+		t.Errorf("MultipleRefs: expected '--- ./a.txt ---' in result, got %q", result)
+	}
+	if !strings.Contains(result, "--- ./b.txt ---") {
+		t.Errorf("MultipleRefs: expected '--- ./b.txt ---' in result, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_NoRefs(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	result := m.expandFileRefs("hello world")
+	if result != "hello world" {
+		t.Errorf("NoRefs: expected unchanged input, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_NoCwd(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	// Deliberately NOT setting cwd
+
+	result := m.expandFileRefs("@./test.txt")
+	if result != "@./test.txt" {
+		t.Errorf("NoCwd: expected reference left as-is, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_AbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	absPath := dir + "/abs_file.txt"
+	if err := os.WriteFile(absPath, []byte("absolute content"), 0644); err != nil {
+		t.Fatalf("failed to create abs file: %v", err)
+	}
+
+	input := fmt.Sprintf("cat @%s", absPath)
+	result := m.expandFileRefs(input)
+	if !strings.Contains(result, "absolute content") {
+		t.Errorf("AbsolutePath: expected 'absolute content' in result, got %q", result)
+	}
+	// The output includes the full absolute path in the header
+	if !strings.Contains(result, "---") || !strings.Contains(result, "abs_file.txt") {
+		t.Errorf("AbsolutePath: expected file reference with abs_file.txt in result, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_NotAMention(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	result := m.expandFileRefs("hello @user check @mention")
+	if result != "hello @user check @mention" {
+		t.Errorf("NotAMention: expected unchanged, got %q", result)
+	}
+}
+
+func TestExpandFileRefs_Directory(t *testing.T) {
+	dir := t.TempDir()
+	m := testReplModelWithCwd(t, dir)
+
+	subDir := dir + "/subdir"
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+
+	input := fmt.Sprintf("list @%s", subDir)
+	result := m.expandFileRefs(input)
+	if result != input {
+		t.Errorf("Directory: expected reference left as-is, got %q", result)
 	}
 }
