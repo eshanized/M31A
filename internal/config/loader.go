@@ -33,8 +33,8 @@ func DefaultConfig() *Config {
 //  2. Global TOML (~/.m31a/config.toml via path arg)
 //  3. Environment variable overrides (M31A_*)
 //  4. Project-level m31a.toml (walked up from cwd, max 3 levels)
-//  5. Validation — type/range checks on known fields
-//  6. Variable substitution — ${VAR} → env value
+//  5. Variable substitution — ${VAR} → env value
+//  6. Validation — type/range checks on known fields
 //
 // Missing global config file is not an error — first-run flow handles creation.
 func Load(path string) (*Config, error) {
@@ -78,13 +78,14 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Step 6: Validation
+	// Step 6: Variable substitution (before validation so ${VAR} in
+	// enum fields like theme or permissions.default_mode resolves first)
+	applyVarSubstitution(cfg)
+
+	// Step 7: Validation
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
-
-	// Step 7: Variable substitution
-	applyVarSubstitution(cfg)
 
 	return cfg, nil
 }
@@ -124,6 +125,18 @@ func mergeConfig(base, overlay *Config) {
 	if overlay.Provider.Zen.APIKey != "" {
 		base.Provider.Zen.APIKey = overlay.Provider.Zen.APIKey
 	}
+	if overlay.Provider.OpenRouterBaseURL != "" {
+		base.Provider.OpenRouterBaseURL = overlay.Provider.OpenRouterBaseURL
+	}
+	if overlay.Provider.ZenBaseURL != "" {
+		base.Provider.ZenBaseURL = overlay.Provider.ZenBaseURL
+	}
+	if overlay.Provider.OpenRouterReferer != "" {
+		base.Provider.OpenRouterReferer = overlay.Provider.OpenRouterReferer
+	}
+	if overlay.Provider.OpenRouterTitle != "" {
+		base.Provider.OpenRouterTitle = overlay.Provider.OpenRouterTitle
+	}
 
 	// Model section
 	if overlay.Model.Default != "" {
@@ -144,6 +157,12 @@ func mergeConfig(base, overlay *Config) {
 	if overlay.Model.ArbitrageThreshold != 0 {
 		base.Model.ArbitrageThreshold = overlay.Model.ArbitrageThreshold
 	}
+	if overlay.Model.DefaultContextLength != 0 {
+		base.Model.DefaultContextLength = overlay.Model.DefaultContextLength
+	}
+	if overlay.Model.TokenEMAAlpha != 0 {
+		base.Model.TokenEMAAlpha = overlay.Model.TokenEMAAlpha
+	}
 
 	// UI section
 	if overlay.UI.Theme != "" {
@@ -160,6 +179,12 @@ func mergeConfig(base, overlay *Config) {
 	}
 	if overlay.UI.MaxIterations != 0 {
 		base.UI.MaxIterations = overlay.UI.MaxIterations
+	}
+	if overlay.UI.LeaderKey != "" {
+		base.UI.LeaderKey = overlay.UI.LeaderKey
+	}
+	if overlay.UI.LeaderTimeoutMs != 0 {
+		base.UI.LeaderTimeoutMs = overlay.UI.LeaderTimeoutMs
 	}
 
 	// Permissions section
@@ -187,6 +212,24 @@ func mergeConfig(base, overlay *Config) {
 	}
 	if overlay.Features.ResumeOnStartup {
 		base.Features.ResumeOnStartup = true
+	}
+	if overlay.Features.ModelCacheTTLMinutes != 0 {
+		base.Features.ModelCacheTTLMinutes = overlay.Features.ModelCacheTTLMinutes
+	}
+	if overlay.Features.ModelCacheStaleHours != 0 {
+		base.Features.ModelCacheStaleHours = overlay.Features.ModelCacheStaleHours
+	}
+	if overlay.Features.HealthCheckLiveMs != 0 {
+		base.Features.HealthCheckLiveMs = overlay.Features.HealthCheckLiveMs
+	}
+	if overlay.Features.HealthCheckSlowMs != 0 {
+		base.Features.HealthCheckSlowMs = overlay.Features.HealthCheckSlowMs
+	}
+	if overlay.Features.SessionIDLength != 0 {
+		base.Features.SessionIDLength = overlay.Features.SessionIDLength
+	}
+	if overlay.Features.MaxRecentModels != 0 {
+		base.Features.MaxRecentModels = overlay.Features.MaxRecentModels
 	}
 
 	// Ledger section
@@ -238,6 +281,20 @@ func validateConfig(cfg *Config) error {
 			ActualValue:  fmt.Sprintf("%v", cfg.Model.ArbitrageThreshold),
 		})
 	}
+	if cfg.Model.DefaultContextLength < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "model.default_context_length",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Model.DefaultContextLength),
+		})
+	}
+	if cfg.Model.TokenEMAAlpha < 0 || cfg.Model.TokenEMAAlpha > 1 {
+		errs = append(errs, ValidationError{
+			Field:        "model.token_ema_alpha",
+			ExpectedType: "float64 between 0 and 1",
+			ActualValue:  fmt.Sprintf("%v", cfg.Model.TokenEMAAlpha),
+		})
+	}
 
 	// UI
 	if cfg.UI.Theme != "" && cfg.UI.Theme != "dark" && cfg.UI.Theme != "light" && cfg.UI.Theme != "auto" {
@@ -252,6 +309,13 @@ func validateConfig(cfg *Config) error {
 			Field:        "ui.max_iterations",
 			ExpectedType: "non-negative integer",
 			ActualValue:  fmt.Sprintf("%d", cfg.UI.MaxIterations),
+		})
+	}
+	if cfg.UI.LeaderTimeoutMs < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "ui.leader_timeout_ms",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.UI.LeaderTimeoutMs),
 		})
 	}
 
@@ -302,6 +366,50 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 
+	// Features
+	if cfg.Features.ModelCacheTTLMinutes < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "features.model_cache_ttl_minutes",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.ModelCacheTTLMinutes),
+		})
+	}
+	if cfg.Features.ModelCacheStaleHours < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "features.model_cache_stale_hours",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.ModelCacheStaleHours),
+		})
+	}
+	if cfg.Features.HealthCheckLiveMs < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "features.healthcheck_live_ms",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.HealthCheckLiveMs),
+		})
+	}
+	if cfg.Features.HealthCheckSlowMs < 0 || cfg.Features.HealthCheckSlowMs < cfg.Features.HealthCheckLiveMs {
+		errs = append(errs, ValidationError{
+			Field:        "features.healthcheck_slow_ms",
+			ExpectedType: "non-negative integer >= healthcheck_live_ms",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.HealthCheckSlowMs),
+		})
+	}
+	if cfg.Features.SessionIDLength != 0 && (cfg.Features.SessionIDLength < 4 || cfg.Features.SessionIDLength > 16) {
+		errs = append(errs, ValidationError{
+			Field:        "features.session_id_length",
+			ExpectedType: "integer between 4 and 16",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.SessionIDLength),
+		})
+	}
+	if cfg.Features.MaxRecentModels < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "features.max_recent_models",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.MaxRecentModels),
+		})
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("%w: %v", ErrValidation, errs)
 	}
@@ -324,6 +432,17 @@ func applyVarSubstitution(cfg *Config) {
 		cfg.Permissions.Rules[i].Tool = substituteVars(cfg.Permissions.Rules[i].Tool)
 		cfg.Permissions.Rules[i].Pattern = substituteVars(cfg.Permissions.Rules[i].Pattern)
 		cfg.Permissions.Rules[i].Action = substituteVars(cfg.Permissions.Rules[i].Action)
+	}
+
+	for name := range cfg.Permissions.Agents {
+		agent := cfg.Permissions.Agents[name]
+		agent.DefaultAction = substituteVars(agent.DefaultAction)
+		for j := range agent.Rules {
+			agent.Rules[j].Tool = substituteVars(agent.Rules[j].Tool)
+			agent.Rules[j].Pattern = substituteVars(agent.Rules[j].Pattern)
+			agent.Rules[j].Action = substituteVars(agent.Rules[j].Action)
+		}
+		cfg.Permissions.Agents[name] = agent
 	}
 }
 
