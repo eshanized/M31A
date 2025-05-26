@@ -2,8 +2,8 @@
 
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
-> **Last Updated**: 2026-05-26
-> **Status**: Planning Phase
+> **Last Updated**: 2026-06-01
+> **Status**: Phase 12 Complete — UX & Editor Experience Adaptations
 
 ---
 
@@ -709,42 +709,52 @@ Plans:
 
 **Duration:** 2 weeks  
 **Complexity:** 6/10  
+**Status:** ✅ COMPLETE  
 **Milestone:** Session forking creates child sessions; multi-layer config with project-level override; permission rules use glob matching  
 **Source:** `rush/opencode_adaptation_report.md` (items 2, 9, 10)
 **Depends on:** Phase 10
 
 ### Adaptations
 
-1. **Session Forking** (adoption #2) — Add `ParentID` to session struct. Add `ForkSession()` to session Manager that copies message history and creates new session directory with parent reference. Add `/fork`, `/prev`, `/next` commands for sibling navigation.
+1. **Session Forking** (adoption #2) — ✅ `Session.ParentID/ChildrenIDs` implemented. `ForkSession()`, `SiblingSessions()`, `ListChildren()` in session Manager. `/fork`, `/prev`, `/next` slash commands registered in TUI. 14 tests passing.
 
-2. **Multi-Layer Configuration** (adoption #10) — Add project-level config (`m31a.toml` in project root) with env var override layer. Add config schema validation with clear error messages for malformed values. Variable substitution (`${VAR}`) support.
+2. **Multi-Layer Configuration** (adoption #10) — ✅ `findProjectConfig()` walks up from cwd (max 3 levels). `mergeConfig()` merges project toml over global/env. `validateConfig()` with typed `ValidationError`. `applyVarSubstitution()` for `${VAR}` patterns across all string fields. 17 tests, 72.8% coverage.
 
-3. **Permission Ruleset Completion** (adoption #9) — Config struct already has `PermissionRule` with `Pattern` field but it's never used in dispatch logic. Add glob pattern matching in the dispatcher's permission check against file paths. Add per-agent permission profiles.
+3. **Permission Ruleset Completion** (adoption #9) — ✅ Glob matching via `doublestar` in `checkPermission()`. Per-agent permission profiles (`PermissionsAgentConfig` + `SelectAgent()`). `matchAnyParamValue()` stringifies non-string types before glob. 11 test functions with 30+ subtests.
 
 ### Plans
 
 ```
 Plans:
-- [ ] 11-01-PLAN.md — Session Forking (Wave 1)
-- [ ] 11-02-PLAN.md — Multi-Layer Configuration (Wave 2)
-- [ ] 11-03-PLAN.md — Permission Ruleset Completion (Wave 2)
+- [x] 11-01-PLAN.md — Session Forking (Wave 1)
+- [x] 11-02-PLAN.md — Multi-Layer Configuration (Wave 2)
+- [x] 11-03-PLAN.md — Permission Ruleset Completion (Wave 2)
 ```
 
 ### Wave Structure
 
-| Wave | Plans | Autonomous |
-|------|-------|------------|
-| 1    | 11-01 | yes |
-| 2    | 11-02, 11-03 | yes, yes |
+| Wave | Plans | Autonomous | Status |
+|------|-------|------------|--------|
+| 1    | 11-01 | yes        | ✅ Done |
+| 2    | 11-02, 11-03 | yes, yes | ✅ Done |
+
+### Code Review
+
+Phase 11 underwent deep code review (14 source files, 15 test files):
+- **2 critical** — CR-01 (permission rules silently ignored), CR-02 (stale session ID after fork/prev/next) — **both fixed**
+- **7 warnings** — boolean merge asymmetry, var substitution order, agent ask bypass, missing agent DefaultAction substitution, non-string param matching — **all fixed**
+- **3 info** — unused interface, doc comment, test coverage gap — **documented for future work**
+- All fixes verified with `go test -race -count=1 ./...` (23 packages passing) and `CGO_ENABLED=0 go build`
 
 ### Deliverables
 
-- `Session.ParentID` field populated on fork; `/fork` creates child session
-- `/prev`, `/next` navigate sibling sessions
-- `m31a.toml` in project root overrides `~/.m31a/config.toml` fields
-- Malformed config produces clear validation errors
-- Dispatcher matches file paths against `PermissionRule.Pattern` globs
-- Per-agent permission profiles in config
+- ✅ `Session.ParentID` field populated on fork; `/fork` creates child session
+- ✅ `/prev`, `/next` navigate sibling sessions
+- ✅ `m31a.toml` in project root overrides `~/.m31a/config.toml` fields
+- ✅ Malformed config produces clear validation errors
+- ✅ Dispatcher matches file paths against `PermissionRule.Pattern` globs
+- ✅ Per-agent permission profiles in config
+- ✅ Code review findings addressed — all critical/warning items resolved
 
 ---
 
@@ -975,3 +985,5 @@ cmd/m31a/
 | 2026-05-26 | Initial roadmap created from V1 specification |
 | 2026-05-26 | Merged Claude roadmap improvements: complexity scores, LOC estimates, milestone versions, team multipliers, package dependency graph |
 | 2026-06-01 | Added Phase 10-13 for OpenCode adaptation adoption (items 1-4, 7-16 excluding MCP and Plugin System) |
+| 2026-06-01 | Phase 11 planned: 3 plans (Session Forking, Multi-Layer Config, Permission Ruleset Completion) |
+| 2026-06-01 | Phase 11 executed and completed — all 3 plans implemented, code review passed with all fixes applied |
