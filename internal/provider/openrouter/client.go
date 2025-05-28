@@ -23,25 +23,67 @@ var Version = "dev"
 var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	cache      *provider.ModelCache
+	apiKey              string
+	baseURL             string
+	httpClient          *http.Client
+	cache               *provider.ModelCache
+	referer             string
+	title               string
+	healthCheckLiveMs   int64
+	healthCheckSlowMs   int64
 }
 
-func New(apiKey string) (*Client, error) {
+// Options holds configurable settings for the OpenRouter client.
+type Options struct {
+	BaseURL           string
+	CacheTTL          time.Duration
+	CacheStaleTTL     time.Duration
+	Referer           string
+	Title             string
+	HealthCheckLiveMs int64
+	HealthCheckSlowMs int64
+}
+
+func New(apiKey string, opts Options) (*Client, error) {
 	if apiKey == "" {
 		return nil, m31errors.ErrInvalidKey
 	}
+	if opts.BaseURL == "" {
+		opts.BaseURL = "https://openrouter.ai/api/v1"
+	}
+	if opts.CacheTTL == 0 {
+		opts.CacheTTL = types.ModelCacheTTL
+	}
+	if opts.CacheStaleTTL == 0 {
+		opts.CacheStaleTTL = 24 * time.Hour
+	}
+	if opts.Referer == "" {
+		opts.Referer = "https://github.com/eshanized/M31A"
+	}
+	if opts.Title == "" {
+		opts.Title = "M31A"
+	}
+	if opts.HealthCheckLiveMs == 0 {
+		opts.HealthCheckLiveMs = 2000
+	}
+	if opts.HealthCheckSlowMs == 0 {
+		opts.HealthCheckSlowMs = 5000
+	}
+
+	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: "https://openrouter.ai/api/v1",
+		apiKey:              apiKey,
+		baseURL:             opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			},
 		},
-		cache: provider.NewModelCache(types.ModelCacheTTL),
+		cache:               cache,
+		referer:             opts.Referer,
+		title:               opts.Title,
+		healthCheckLiveMs:   opts.HealthCheckLiveMs,
+		healthCheckSlowMs:   opts.HealthCheckSlowMs,
 	}, nil
 }
 
@@ -163,8 +205,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	c.setCommonHeaders(httpReq)
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/eshanized/M31A")
-	httpReq.Header.Set("X-Title", "M31A")
+	httpReq.Header.Set("HTTP-Referer", c.referer)
+	httpReq.Header.Set("X-Title", c.title)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -253,9 +295,9 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	}
 
 	switch {
-	case latency < 2000:
+	case latency < c.healthCheckLiveMs:
 		return types.HealthStatus{Status: "live", LatencyMs: latency}
-	case latency < 5000:
+	case latency < c.healthCheckSlowMs:
 		return types.HealthStatus{Status: "slow", LatencyMs: latency}
 	default:
 		return types.HealthStatus{Status: "degraded", LatencyMs: latency}
