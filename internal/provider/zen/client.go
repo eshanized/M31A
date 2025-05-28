@@ -23,25 +23,61 @@ var Version = "dev"
 var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	cache      *provider.ModelCache
+	apiKey              string
+	baseURL             string
+	httpClient          *http.Client
+	cache               *provider.ModelCache
+	healthCheckLiveMs   int64
+	healthCheckSlowMs   int64
+	defaultContextLen   int64
 }
 
-func New(apiKey string) (*Client, error) {
+// Options holds configurable settings for the Zen client.
+type Options struct {
+	BaseURL           string
+	CacheTTL          time.Duration
+	CacheStaleTTL     time.Duration
+	HealthCheckLiveMs int64
+	HealthCheckSlowMs int64
+	DefaultContextLen int64
+}
+
+func New(apiKey string, opts Options) (*Client, error) {
 	if apiKey == "" {
 		return nil, m31errors.ErrInvalidKey
 	}
+	if opts.BaseURL == "" {
+		opts.BaseURL = "https://opencode.ai/zen/v1"
+	}
+	if opts.CacheTTL == 0 {
+		opts.CacheTTL = types.ModelCacheTTL
+	}
+	if opts.CacheStaleTTL == 0 {
+		opts.CacheStaleTTL = 24 * time.Hour
+	}
+	if opts.HealthCheckLiveMs == 0 {
+		opts.HealthCheckLiveMs = 2000
+	}
+	if opts.HealthCheckSlowMs == 0 {
+		opts.HealthCheckSlowMs = 5000
+	}
+	if opts.DefaultContextLen == 0 {
+		opts.DefaultContextLen = 128_000
+	}
+
+	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: "https://opencode.ai/zen/v1",
+		apiKey:              apiKey,
+		baseURL:             opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			},
 		},
-		cache: provider.NewModelCache(types.ModelCacheTTL),
+		cache:               cache,
+		healthCheckLiveMs:   opts.HealthCheckLiveMs,
+		healthCheckSlowMs:   opts.HealthCheckSlowMs,
+		defaultContextLen:   opts.DefaultContextLen,
 	}, nil
 }
 
@@ -101,7 +137,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			ID:            m.ID,
 			Name:          m.ID,
 			Description:   m.OwnedBy,
-			ContextLength: 128_000,
+			ContextLength: c.defaultContextLen,
 			Pricing: types.Pricing{
 				InputPerMToken:  0,
 				OutputPerMToken: 0,
@@ -243,9 +279,9 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	}
 
 	switch {
-	case latency < 2000:
+	case latency < c.healthCheckLiveMs:
 		return types.HealthStatus{Status: "live", LatencyMs: latency}
-	case latency < 5000:
+	case latency < c.healthCheckSlowMs:
 		return types.HealthStatus{Status: "slow", LatencyMs: latency}
 	default:
 		return types.HealthStatus{Status: "degraded", LatencyMs: latency}
