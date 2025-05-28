@@ -26,9 +26,23 @@ type Estimator struct {
 // If the model is not supported by tiktoken-go, the tokenizer is set to nil
 // and the rune-based fallback is used for estimation.
 func NewEstimator(modelID string) *Estimator {
+	return NewEstimatorWithOpts(modelID, EstimatorOpts{})
+}
+
+// EstimatorOpts holds optional settings for the estimator.
+type EstimatorOpts struct {
+	EMAAlpha float64 // EMA calibration rate (0.0–1.0). 0 means default (0.3).
+}
+
+// NewEstimatorWithOpts creates an Estimator with explicit options.
+func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
+	alpha := opts.EMAAlpha
+	if alpha <= 0 || alpha > 1 {
+		alpha = 0.3
+	}
 	e := &Estimator{
 		modelID:   modelID,
-		emaAlpha:  0.3,
+		emaAlpha:  alpha,
 		emaFactor: 1.0,
 	}
 
