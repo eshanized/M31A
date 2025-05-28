@@ -120,7 +120,7 @@ func RenderPromptMetadata(agentName, modelName, providerName string, t theme.The
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(modelName))
 	}
 	if providerName != "" {
-		providerShort := strings.ToUpper(providerName[:min(len(providerName), 3)])
+		providerShort := ProviderShortName(providerName)
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("["+providerShort+"]"))
 	}
 	if len(parts) == 0 {
