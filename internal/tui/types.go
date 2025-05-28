@@ -116,3 +116,10 @@ type ThemeChangedMsg struct {
 type SlashCommandMsg struct {
 	Command string
 }
+
+// ToastMsg is a transient notification message.
+type ToastMsg struct {
+	Text     string
+	Duration time.Duration
+	Type     string // "info", "success", "warning", "error"
+}
