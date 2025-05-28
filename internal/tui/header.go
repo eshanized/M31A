@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -14,25 +13,15 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 
 	brand := t.Header.Render("M31A")
 
-	var badgeStyle lipgloss.Style
 	var badgeText string
+	var badgeStyle lipgloss.Style
 	if provider == "" {
 		badgeStyle = t.ModelBadge.Foreground(t.TextSecondary)
 		badgeText = "[  ]"
 	} else {
-		var badge string
-		switch provider {
-		case "openrouter":
-			badgeStyle = t.ModelBadge.Foreground(t.Warning)
-			badge = "OR"
-		case "zen":
-			badgeStyle = t.ModelBadge.Foreground(t.Thinking)
-			badge = "ZEN"
-		default:
-			badgeStyle = t.ModelBadge.Foreground(t.TextSecondary)
-			badge = strings.ToUpper(provider[:min(len(provider), 3)])
-		}
+		badge, style := ProviderBadge(t, provider)
 		badgeText = "[" + badge + "]"
+		badgeStyle = style
 	}
 	badge := badgeStyle.Render(badgeText)
 
@@ -94,7 +83,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 			result = lipgloss.JoinHorizontal(lipgloss.Left, segments...)
 		}
 		if lipgloss.Width(result) > width && width >= 20 {
-			result = truncateWithANSI(result, width-3)
+			result = TruncateWithEllipsis(result, width-3)
 		} else if width < 20 {
 			result = "..."
 		}
@@ -117,41 +106,4 @@ func removeModelSegment(segments []string) []string {
 		}
 	}
 	return segments
-}
-
-// truncateWithANSI truncates a string containing ANSI escape codes to a given
-// display width, appending ellipsis. It preserves ANSI codes up to the
-// truncation point and closes any open SGR sequences.
-func truncateWithANSI(s string, maxWidth int) string {
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-
-	var result strings.Builder
-	visible := 0
-	inEscape := false
-
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b == '\x1b' {
-			inEscape = true
-			result.WriteByte(b)
-			continue
-		}
-		if inEscape {
-			result.WriteByte(b)
-			if b == 'm' {
-				inEscape = false
-			}
-			continue
-		}
-		visible++
-		if visible > maxWidth {
-			break
-		}
-		result.WriteByte(b)
-	}
-
-	result.WriteString("\x1b[0m...")
-	return result.String()
 }
