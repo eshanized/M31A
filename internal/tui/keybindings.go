@@ -20,10 +20,6 @@ const (
 	CtxModelSel  KeyContext = "modelselector"
 	CtxResume    KeyContext = "resume"
 	CtxPermModal KeyContext = "permission"
-	CtxPlan      KeyContext = "plan"
-	CtxExecute   KeyContext = "execute"
-	CtxVerify    KeyContext = "verify"
-	CtxShip      KeyContext = "ship"
 	CtxFirstRun  KeyContext = "firstrun"
 )
 
@@ -60,12 +56,25 @@ type KeyRegistry struct {
 	whichKeyActive bool
 }
 
-// NewKeyRegistry creates a new key registry with default leader key configuration.
-func NewKeyRegistry() *KeyRegistry {
+// KeyRegistryOpts holds optional settings for the key registry.
+type KeyRegistryOpts struct {
+	LeaderKey     string
+	LeaderTimeout time.Duration
+}
+
+// NewKeyRegistry creates a new key registry.
+// Defaults: leader key "ctrl+x", timeout 1 second.
+func NewKeyRegistry(opts KeyRegistryOpts) *KeyRegistry {
+	if opts.LeaderKey == "" {
+		opts.LeaderKey = "ctrl+x"
+	}
+	if opts.LeaderTimeout == 0 {
+		opts.LeaderTimeout = 1 * time.Second
+	}
 	return &KeyRegistry{
 		bindings:      make(map[KeyContext][]KeyBinding),
-		leaderKey:     "ctrl+x",
-		leaderTimeout: 1 * time.Second,
+		leaderKey:     opts.LeaderKey,
+		leaderTimeout: opts.LeaderTimeout,
 	}
 }
 
@@ -216,7 +225,7 @@ func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, t theme.Theme, maxWidth int
 		if truncateWidth < 10 {
 			return ""
 		}
-		result = truncateWithANSI(result, truncateWidth) + "..."
+		result = TruncateWithEllipsis(result, truncateWidth)
 	}
 	return result
 }
