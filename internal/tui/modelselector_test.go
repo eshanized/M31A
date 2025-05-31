@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -58,7 +59,7 @@ func newTestRegistry(t *testing.T) *provider.Registry {
 
 func TestModelSelector_New(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	if ms.registry == nil {
 		t.Fatal("expected non-nil registry")
@@ -73,7 +74,7 @@ func TestModelSelector_New(t *testing.T) {
 
 func TestModelSelector_Init(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	cmd := ms.Init()
 	if cmd == nil {
@@ -83,7 +84,7 @@ func TestModelSelector_Init(t *testing.T) {
 
 func TestModelSelector_ModelsLoaded(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter", ContextLength: 8192},
@@ -102,7 +103,7 @@ func TestModelSelector_ModelsLoaded(t *testing.T) {
 
 func TestModelSelector_SelectModel(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter", ContextLength: 8192},
@@ -141,7 +142,7 @@ func TestModelSelector_SelectModel(t *testing.T) {
 
 func TestModelSelector_Cancel(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter"},
@@ -168,7 +169,7 @@ func TestModelSelector_Cancel(t *testing.T) {
 
 func TestModelSelector_Search(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Alpha", Provider: "openrouter"},
@@ -204,7 +205,7 @@ func TestModelSelector_Search(t *testing.T) {
 
 func TestModelSelector_SearchCaseInsensitive(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Alpha", Provider: "openrouter"},
@@ -231,7 +232,7 @@ func TestModelSelector_SearchCaseInsensitive(t *testing.T) {
 
 func TestModelSelector_SearchClear(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Alpha", Provider: "openrouter"},
@@ -260,7 +261,7 @@ func TestModelSelector_SearchClear(t *testing.T) {
 
 func TestModelSelector_ProviderFilter(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter"},
@@ -291,7 +292,7 @@ func TestModelSelector_ProviderFilter(t *testing.T) {
 
 func TestModelSelector_ProviderFilterCycle(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter"},
@@ -329,7 +330,7 @@ func TestModelSelector_ProviderFilterCycle(t *testing.T) {
 
 func TestModelSelector_Navigation(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 
 	allModels := []types.ModelInfo{
 		{ID: "openrouter/model-a", Name: "A", Provider: "openrouter"},
@@ -373,7 +374,7 @@ func TestModelSelector_Navigation(t *testing.T) {
 
 func TestModelSelector_View_Loading(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 
@@ -385,7 +386,7 @@ func TestModelSelector_View_Loading(t *testing.T) {
 
 func TestModelSelector_View_Loaded(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 
@@ -410,7 +411,7 @@ func TestModelSelector_View_Loaded(t *testing.T) {
 
 func TestModelSelector_View_SearchActive(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 
@@ -436,7 +437,7 @@ func TestModelSelector_View_SearchActive(t *testing.T) {
 
 func TestModelSelector_EmptyModels(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 
@@ -452,7 +453,7 @@ func TestModelSelector_EmptyModels(t *testing.T) {
 
 func TestModelSelector_ErrorState(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 
@@ -471,7 +472,7 @@ func TestModelSelector_ErrorState(t *testing.T) {
 
 func TestModelSelector_DetailView(t *testing.T) {
 	r := newTestRegistry(t)
-	ms := NewModelSelector(r, nil)
+	ms := NewModelSelector(r, nil, theme.Dark())
 	ms.width = 80
 	ms.height = 24
 

@@ -8,10 +8,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -134,10 +136,12 @@ type ModelSelector struct {
 	allModels   []types.ModelInfo // unfiltered model list
 	searchFocused bool
 	manager     *session.Manager // for favorites & recent models
+	spinner     spinner.Model
+	theme       theme.Theme
 }
 
 // NewModelSelector creates a ModelSelector with search input and model list.
-func NewModelSelector(registry *provider.Registry, mgr *session.Manager) ModelSelector {
+func NewModelSelector(registry *provider.Registry, mgr *session.Manager, t theme.Theme) ModelSelector {
 	ti := textinput.New()
 	ti.Placeholder = "Search models..."
 	ti.CharLimit = 100
@@ -151,12 +155,17 @@ func NewModelSelector(registry *provider.Registry, mgr *session.Manager) ModelSe
 	l.SetFilteringEnabled(false)
 	l.DisableQuitKeybindings()
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
 	return ModelSelector{
 		registry: registry,
 		list:     l,
 		search:   ti,
 		filter:   filterAll,
 		manager:  mgr,
+		spinner:  sp,
+		theme:    t,
 	}
 }
 
@@ -165,6 +174,7 @@ func (m ModelSelector) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
 		fetchModelsCmd(m.registry),
+		m.spinner.Tick,
 	)
 }
 
@@ -203,6 +213,11 @@ func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		h, v := 6, 4
 		m.list.SetSize(msg.Width-h, msg.Height-v)
 		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 
 	case modelFetchCompleteMsg:
 		m.ready = true
@@ -309,7 +324,7 @@ func (m ModelSelector) View() string {
 	if !m.ready {
 		return lipgloss.Place(m.width, m.height,
 			lipgloss.Center, lipgloss.Center,
-			"Loading models...",
+			m.spinner.View()+" Loading models...",
 		)
 	}
 
@@ -335,7 +350,7 @@ func (m ModelSelector) View() string {
 
 	// Error message
 	if m.err != "" {
-		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B82"))
+		errStyle := lipgloss.NewStyle().Foreground(m.theme.Error)
 		parts = append(parts, errStyle.Render(m.err))
 	}
 
@@ -350,11 +365,11 @@ func (m ModelSelector) View() string {
 func (m ModelSelector) renderTopBar() string {
 	filterText := fmt.Sprintf("Showing: %s", m.filter.String())
 	filterStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D77757")).
+		Foreground(m.theme.Brand).
 		Bold(true)
 
 	hints := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9AA0A6")).
+		Foreground(m.theme.TextSecondary).
 		Render("[P] Filter  [Tab] Details  [F] Favorite  [/] Search  [Enter] Select  [Esc] Back")
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
@@ -368,11 +383,11 @@ func (m ModelSelector) renderTopBar() string {
 func (m ModelSelector) renderSearchInput() string {
 	searchStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#2E2E2E")).
+		BorderForeground(m.theme.Border).
 		Padding(0, 1)
 
 	searchLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9AA0A6")).
+		Foreground(m.theme.TextSecondary).
 		Render("Search:")
 
 	return searchStyle.Render(searchLabel + " " + m.search.View())
@@ -421,7 +436,7 @@ func (m ModelSelector) detailView() string {
 	return lipgloss.NewStyle().
 		Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#D77757")).
+		BorderForeground(m.theme.Brand).
 		Width(m.width - 6).
 		Render(b.String())
 }
