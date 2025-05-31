@@ -17,6 +17,9 @@ type ThinkingBlock struct {
 	expanded  bool
 	focused   bool
 	startedAt time.Time
+	// Cached duration to avoid recalculating every render
+	lastDurationStr string
+	lastDurationAt  time.Time
 }
 
 func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool, id int) *ThinkingBlock {
@@ -102,6 +105,12 @@ func (b *ThinkingBlock) ID() int {
 }
 
 func (b *ThinkingBlock) Duration() string {
+	now := time.Now()
+	// Return cached value if still valid (within 1 second)
+	if b.lastDurationStr != "" && now.Sub(b.lastDurationAt) < time.Second {
+		return b.lastDurationStr
+	}
+
 	var d time.Duration
 	if b.segment.DurationMs > 0 {
 		d = time.Duration(b.segment.DurationMs) * time.Millisecond
@@ -110,15 +119,20 @@ func (b *ThinkingBlock) Duration() string {
 	}
 
 	totalSecs := d.Seconds()
+	var result string
 	if totalSecs < 10 {
-		return fmt.Sprintf("%.1fs", totalSecs)
+		result = fmt.Sprintf("%.1fs", totalSecs)
+	} else if totalSecs < 60 {
+		result = fmt.Sprintf("%.1fs", totalSecs)
+	} else {
+		mins := int(totalSecs) / 60
+		secs := int(totalSecs) % 60
+		result = fmt.Sprintf("%dm %ds", mins, secs)
 	}
-	if totalSecs < 60 {
-		return fmt.Sprintf("%.1fs", totalSecs)
-	}
-	mins := int(totalSecs) / 60
-	secs := int(totalSecs) % 60
-	return fmt.Sprintf("%dm %ds", mins, secs)
+
+	b.lastDurationStr = result
+	b.lastDurationAt = now
+	return result
 }
 
 func (b *ThinkingBlock) Header(width int) string {
