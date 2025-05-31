@@ -44,7 +44,6 @@ type DiffModel struct {
 	width     int
 	height    int
 	scrollPos int
-	splitView bool
 	theme     theme.Theme
 	title     string
 }
@@ -52,9 +51,8 @@ type DiffModel struct {
 // NewDiffModel creates a new DiffModel with the given theme.
 func NewDiffModel(th theme.Theme) DiffModel {
 	return DiffModel{
-		lines:     []DiffLine{},
-		theme:     th,
-		splitView: false,
+		lines: []DiffLine{},
+		theme: th,
 	}
 }
 
@@ -79,8 +77,6 @@ func (m DiffModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "s", "S":
-			m.splitView = !m.splitView
 		case "up", "k":
 			if m.scrollPos > 0 {
 				m.scrollPos--
@@ -175,12 +171,8 @@ func (m DiffModel) View() string {
 
 	// --- title / header bar ---
 	var b strings.Builder
-	viewMode := "unified"
-	if m.splitView {
-		viewMode = "split"
-	}
-	titleStr := fmt.Sprintf(" %s  [%s]  line %d/%d",
-		m.title, viewMode, m.scrollPos+1, len(m.lines))
+	titleStr := fmt.Sprintf(" %s  [unified]  line %d/%d",
+		m.title, m.scrollPos+1, len(m.lines))
 	headerStyle := lipgloss.NewStyle().
 		Background(m.theme.Surface).
 		Foreground(m.theme.TextSecondary).
@@ -223,7 +215,7 @@ func (m DiffModel) View() string {
 	}
 
 	// --- help bar ---
-	helpBar := "[s] toggle split  [↑/↓] scroll  [g] top  [G] bottom  [esc] back"
+	helpBar := "[↑/↓] scroll  [g] top  [G] bottom  [esc] back"
 	helpStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 	if m.width > 0 {
 		helpStyle = helpStyle.Width(m.width)
