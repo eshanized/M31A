@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,11 @@ type AppState struct {
 	cmdPalette         *CommandPaletteModel
 	cmdPaletteOpen     bool
 	keyRegistry        *KeyRegistry
+	toastText          string
+	toastExpires       time.Time
+	toastType          string
+	sidebarManuallyHidden bool
+	diffModel          DiffModel
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
@@ -128,7 +134,17 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	// Initialize session manager
 	sessionBaseDir := filepath.Join(filepath.Dir(configPath), "sessions")
-	sessionMgr := session.NewManager(sessionBaseDir)
+	sessionIDBytes := 4 // 8 hex chars default
+	if cfg.Features.SessionIDLength > 0 {
+		sessionIDBytes = cfg.Features.SessionIDLength / 2
+		if sessionIDBytes < 2 {
+			sessionIDBytes = 2
+		}
+	}
+	sessionMgr := session.NewManager(sessionBaseDir, session.ManagerOpts{
+		SessionIDBytes:  sessionIDBytes,
+		MaxRecentModels: cfg.Features.MaxRecentModels,
+	})
 
 	// Initialize git operations and rollback
 	g := git.New(cwd)
@@ -164,7 +180,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	// Initialize model selector (uses registry)
 	if registry != nil {
-		app.modelSelector = NewModelSelector(registry, sessionMgr)
+		app.modelSelector = NewModelSelector(registry, sessionMgr, tm.Current())
 	}
 
 	// Initialize command registry
@@ -177,7 +193,14 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	app.cmdPalette = NewCommandPaletteModel()
 
 	// Initialize key registry
-	app.keyRegistry = NewKeyRegistry()
+	leaderTimeout := 1 * time.Second
+	if cfg.UI.LeaderTimeoutMs > 0 {
+		leaderTimeout = time.Duration(cfg.UI.LeaderTimeoutMs) * time.Millisecond
+	}
+	app.keyRegistry = NewKeyRegistry(KeyRegistryOpts{
+		LeaderKey:     cfg.UI.LeaderKey,
+		LeaderTimeout: leaderTimeout,
+	})
 	app.keyRegistry.RegisterDefaultBindings()
 
 	if registry != nil {
@@ -278,7 +301,9 @@ func (m *AppState) initWorkflowEngine() {
 
 	g := git.New(cwd)
 
-	est := tokens.NewEstimator(modelID)
+	est := tokens.NewEstimatorWithOpts(modelID, tokens.EstimatorOpts{
+		EMAAlpha: m.config.Model.TokenEMAAlpha,
+	})
 
 	eng, err := workflow.NewEngine(s.ID, cwd, backupDir, planningDir,
 		p, modelID, m.dispatcher, est, m.sessionManager)
@@ -380,6 +405,7 @@ func (ce *channelEmitter) Emit(msg tea.Msg) {
 	case ce.ch <- msg:
 	default:
 		// Channel full — drop the message to avoid blocking the engine.
+		slog.Warn("workflow message dropped: channel full", "msg_type", fmt.Sprintf("%T", msg))
 	}
 }
 
@@ -592,7 +618,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/models":
 			if m.registry != nil {
 				m.prevScreen = m.screen
-				m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
+				m.modelSelector = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
 				m.screen = ScreenModelSelector
 				return m, m.modelSelector.Init()
 			}
@@ -828,7 +854,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Screen == ScreenModelSelector {
 			m.prevScreen = m.screen
-			m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
+			m.modelSelector = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
 			m.screen = ScreenModelSelector
 			return m, m.modelSelector.Init()
 		}
@@ -1124,11 +1150,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sidebarModel != nil {
 			m.sidebarModel.Update(msg)
 			// Auto-show sidebar on wide terminals now that status is loaded
-			if m.width > 120 && m.replModel != nil {
+			if m.width > 120 && m.replModel != nil && !m.sidebarManuallyHidden {
 				m.sidebarModel.SetVisible(true)
 				m.replModel.SetSidebarWidth(sidebarWidth)
 			}
 		}
+		return m, nil
+
+	case ToastMsg:
+		m.toastText = msg.Text
+		m.toastExpires = time.Now().Add(msg.Duration)
+		m.toastType = msg.Type
 		return m, nil
 
 	case ThemeChangedMsg:
@@ -1142,11 +1174,29 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			m.replModel.SetTheme(t)
 		}
+		if m.modelSelector.registry != nil {
+			m.modelSelector.theme = t
+		}
 		if m.sidebarModel != nil {
 			m.sidebarModel.SetTheme(t)
 		}
 		if m.settingsModel != nil {
 			m.settingsModel.SetTheme(t)
+		}
+		return m, nil
+	}
+
+	// Handle diff screen messages at the app level
+	switch msg := msg.(type) {
+	case DiffScreenMsg:
+		m.diffModel = NewDiffModel(m.themeManager.Current())
+		m.screen = ScreenDiff
+		_, cmd := m.diffModel.Update(msg)
+		return m, cmd
+	case DiffCloseMsg:
+		m.screen = m.prevScreen
+		if m.screen == ScreenPermission {
+			m.screen = ScreenREPL
 		}
 		return m, nil
 	}
@@ -1319,6 +1369,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case ScreenDiff:
+		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		if m.diffModel.lines != nil || m.diffModel.diff != "" {
+			updated, cmd := m.diffModel.Update(msg)
+			m.diffModel = updated.(DiffModel)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
 	default:
 		return m, nil
 	}
@@ -1331,6 +1390,12 @@ func (m *AppState) View() string {
 
 	if m.width < 40 || m.height < 10 {
 		return fmt.Sprintf("Terminal too small: %dx%d (minimum 40x10)", m.width, m.height)
+	}
+
+	// Check if toast has expired
+	if m.toastText != "" && time.Now().After(m.toastExpires) {
+		m.toastText = ""
+		m.toastType = ""
 	}
 
 	switch m.screen {
@@ -1409,14 +1474,46 @@ func (m *AppState) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Ship screen — driven by workflow engine")
 
+	case ScreenDiff:
+		if m.diffModel.lines != nil || m.diffModel.diff != "" {
+			return m.renderToast(m.diffModel.View())
+		}
+		return m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading diff..."))
+
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Unknown screen")
 	}
 }
 
-// renderWithPalette overlays the command palette on top of the base view when open.
-// Deprecated: palette rendering now handled by REPL model.
+func (m *AppState) renderToast(content string) string {
+	if m.toastText == "" {
+		return content
+	}
+	var color lipgloss.Color
+	switch m.toastType {
+	case "success":
+		color = m.themeManager.Current().Success
+	case "warning":
+		color = m.themeManager.Current().Warning
+	case "error":
+		color = m.themeManager.Current().Error
+	default:
+		color = m.themeManager.Current().Thinking
+	}
+	toastStyle := lipgloss.NewStyle().
+		Foreground(color).
+		Background(m.themeManager.Current().Surface).
+		Padding(0, 2).
+		Bold(true)
+	toast := toastStyle.Render(m.toastText)
+	return lipgloss.JoinVertical(lipgloss.Center,
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, toast),
+		content,
+	)
+}
+
 func (m *AppState) renderWithPalette(base string) string {
 	if m.cmdPaletteOpen && m.cmdPalette != nil {
 		palette := m.cmdPalette.View()
@@ -1510,6 +1607,11 @@ func (m *AppState) cycleRecentModel(direction int) {
 
 	// Mark the model as recently used
 	m.sessionManager.AddRecentModel(model.ID) //nolint:errcheck
+
+	// Emit toast feedback
+	m.toastText = fmt.Sprintf("Model: %s", model.Name)
+	m.toastExpires = time.Now().Add(2 * time.Second)
+	m.toastType = "info"
 }
 
 func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
@@ -1517,6 +1619,7 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 	case "toggle_sidebar":
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
+			m.sidebarManuallyHidden = !m.sidebarModel.IsVisible()
 			if m.sidebarModel.IsVisible() {
 				if m.replModel != nil {
 					m.replModel.SetSidebarWidth(sidebarWidth)
@@ -1540,7 +1643,7 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 	case "cycle_model":
 		if m.registry != nil {
 			m.prevScreen = m.screen
-			m.modelSelector = NewModelSelector(m.registry, m.sessionManager)
+			m.modelSelector = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
 			m.screen = ScreenModelSelector
 			return m, m.modelSelector.Init()
 		}
