@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -151,39 +152,113 @@ func (m *ReplModel) renderWelcome() string {
 		return "Welcome to M31A"
 	}
 
-	title := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Render("M31A")
+	// ASCII art banner logo: M31A rendered in block characters
+	logo := m.renderBlockLogo("M31A")
 
-	subtitle := lipgloss.NewStyle().
+	// Input area — matches the screenshot: grey box with blue left border accent
+	inputBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(m.theme.Brand).
+		Background(lipgloss.Color("#2A2A2A")).
+		Padding(0, 2, 0, 2)
+
+	// Build the placeholder line
+	placeholderText := lipgloss.NewStyle().
 		Foreground(m.theme.TextMuted).
-		Render("Your terminal AI coding assistant.")
+		Render("What would you like to build?")
 
-	commands := []string{
-		"Type your question or goal",
-		"/workflow <goal>   Start a full coding workflow",
-		"/models             Browse available models",
-		"/settings           Open settings",
-		"/help               List all commands",
+	// Context sub-line (model · provider)
+	var contextParts []string
+	if m.activeModel != nil {
+		contextParts = append(contextParts, m.activeModel.Name)
 	}
-	var cmdLines []string
-	for _, cmd := range commands {
-		cmdLines = append(cmdLines, lipgloss.NewStyle().
+	if m.activeProvider != "" {
+		contextParts = append(contextParts, m.activeProvider)
+	}
+	contextLine := ""
+	if len(contextParts) > 0 {
+		contextLine = lipgloss.NewStyle().
 			Foreground(m.theme.TextMuted).
-			Render("  "+cmd))
+			Render(strings.Join(contextParts, " · "))
+	} else {
+		contextLine = lipgloss.NewStyle().
+			Foreground(m.theme.TextMuted).
+			Render("M31A")
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Top,
-		title,
+	// Assemble the input box content
+	inputLines := []string{placeholderText}
+	if contextLine != "" {
+		inputLines = append(inputLines, contextLine)
+	}
+	inputBox := inputBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Top, inputLines...))
+
+	// Keyboard hints
+	hints := lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render("ctrl+p commands  ctrl+b sidebar")
+
+	// Tip
+	tipDot := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("•")
+	tipText := lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render("Tip Run /config to set up your AI provider, or /help for all commands")
+	tip := tipDot + " " + tipText
+
+	// Bottom corners: cwd and version
+	cwdLabel := lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render(filepath.Base(m.cwd))
+	versionLabel := lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render("v0.1.0")
+	logoPadded := lipgloss.Place(m.width, lipgloss.Height(logo)+1, lipgloss.Center, lipgloss.Top, logo)
+
+	// Stack everything vertically, centered
+	centerGroup := lipgloss.JoinVertical(lipgloss.Center,
+		logoPadded,
 		"",
-		subtitle,
+		inputBox,
 		"",
-		lipgloss.NewStyle().Foreground(m.theme.Text).Bold(true).Render("Getting started:"),
-		strings.Join(cmdLines, "\n"),
+		hints,
 	)
 
+	// Use Place to center the group in the available space, pushing tip to bottom
+	tipArea := lipgloss.Place(m.width-4, 3, lipgloss.Left, lipgloss.Top, tip)
+	bottomBar := lipgloss.JoinHorizontal(lipgloss.Left,
+		cwdLabel,
+		lipgloss.Place(m.width-lipgloss.Width(cwdLabel)-lipgloss.Width(versionLabel)-4, 1, lipgloss.Right, lipgloss.Top, versionLabel),
+	)
+	bottomArea := lipgloss.Place(m.width, 3, lipgloss.Center, lipgloss.Bottom,
+		lipgloss.JoinVertical(lipgloss.Top, tipArea, bottomBar),
+	)
+
+	content := lipgloss.JoinVertical(lipgloss.Top, centerGroup, bottomArea)
 	return lipgloss.Place(m.width, m.viewport.Height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// renderBlockLogo renders a string in a 5x5 block-letter pixel art style.
+// Each character is composed of '#' and '.' characters.
+func (m *ReplModel) renderBlockLogo(s string) string {
+	// ASCII art banner for M31A
+	banner := `░███     ░███  ░██████    ░██      ░███    
+░████   ░████ ░██   ░██ ░████     ░██░██   
+░██░██ ░██░██       ░██   ░██    ░██  ░██  
+░██ ░████ ░██   ░█████    ░██   ░█████████ 
+░██  ░██  ░██       ░██   ░██   ░██    ░██ 
+░██       ░██ ░██   ░██   ░██   ░██    ░██ 
+░██       ░██  ░██████  ░██████ ░██    ░██ 
+                                           
+                                           
+                                           `
+
+	// Color the banner with the brand color
+	lines := strings.Split(banner, "\n")
+	styled := make([]string, len(lines))
+	for i, line := range lines {
+		styled[i] = lipgloss.NewStyle().Foreground(m.theme.Brand).Render(line)
+	}
+	return lipgloss.JoinVertical(lipgloss.Top, styled...)
 }
 
 func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
@@ -1293,14 +1368,7 @@ func (m *ReplModel) cycleThinkingFocus() {
 	for id := range m.thinkingBlocks {
 		indices = append(indices, id)
 	}
-	// Simple sort
-	for i := 0; i < len(indices); i++ {
-		for j := i + 1; j < len(indices); j++ {
-			if indices[j] < indices[i] {
-				indices[i], indices[j] = indices[j], indices[i]
-			}
-		}
-	}
+	sort.Ints(indices)
 
 	// Find next index after current focus
 	nextIdx := 0
@@ -1329,13 +1397,7 @@ func (m *ReplModel) cycleThinkingFocusBackward() {
 	for id := range m.thinkingBlocks {
 		indices = append(indices, id)
 	}
-	for i := 0; i < len(indices); i++ {
-		for j := i + 1; j < len(indices); j++ {
-			if indices[j] < indices[i] {
-				indices[i], indices[j] = indices[j], indices[i]
-			}
-		}
-	}
+	sort.Ints(indices)
 
 	prevIdx := len(indices) - 1
 	for i, id := range indices {
