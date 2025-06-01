@@ -51,7 +51,7 @@ func newTestContext(t *testing.T) (CommandContext, string) {
 	reg.Register("zen", &mockProvider{})
 
 	// Create session manager
-	sessionMgr := session.NewManager(filepath.Join(dir, "sessions"))
+	sessionMgr := session.NewManager(filepath.Join(dir, "sessions"), session.ManagerOpts{})
 
 	// Create a session
 	s, err := sessionMgr.NewSession("gpt-4o", "openrouter")
@@ -1386,7 +1386,7 @@ func TestHandleSessions_WithEmptySessions(t *testing.T) {
 	r := DefaultCommands()
 
 	dir := t.TempDir()
-	sessionMgr := session.NewManager(filepath.Join(dir, "sessions"))
+	sessionMgr := session.NewManager(filepath.Join(dir, "sessions"), session.ManagerOpts{})
 
 	ctx := CommandContext{SessionManager: sessionMgr}
 	result, _ := r.Execute("/sessions", ctx)
@@ -1418,7 +1418,7 @@ func TestHandleFork_Success(t *testing.T) {
 
 	// Mock session manager that supports ForkSession
 	dir := t.TempDir()
-	mgr := session.NewManager(dir)
+	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	parent, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -1455,7 +1455,7 @@ func TestHandlePrev_NoSession(t *testing.T) {
 func TestHandlePrev_AtFirstSibling(t *testing.T) {
 	r := DefaultCommands()
 	dir := t.TempDir()
-	mgr := session.NewManager(dir)
+	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	parent, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -1472,7 +1472,7 @@ func TestHandlePrev_AtFirstSibling(t *testing.T) {
 func TestHandlePrev_Navigation(t *testing.T) {
 	r := DefaultCommands()
 	dir := t.TempDir()
-	mgr := session.NewManager(dir)
+	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	parent, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -1501,7 +1501,7 @@ func TestHandlePrev_Navigation(t *testing.T) {
 func TestHandleNext_AtLastSibling(t *testing.T) {
 	r := DefaultCommands()
 	dir := t.TempDir()
-	mgr := session.NewManager(dir)
+	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	parent, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -1518,7 +1518,7 @@ func TestHandleNext_AtLastSibling(t *testing.T) {
 func TestHandleNext_Navigation(t *testing.T) {
 	r := DefaultCommands()
 	dir := t.TempDir()
-	mgr := session.NewManager(dir)
+	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	parent, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -1880,30 +1880,6 @@ func TestDiffModel_HomeEndKeys(t *testing.T) {
 	}
 }
 
-func TestDiffModel_ToggleSplit(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
-	m.diff = sampleDiff()
-	m.lines = m.parseDiff(sampleDiff())
-
-	if m.splitView {
-		t.Fatal("expected splitView=false initially")
-	}
-
-	// 's' key toggles split on
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	m = model.(DiffModel)
-	if !m.splitView {
-		t.Error("expected splitView=true after 's'")
-	}
-
-	// 's' again toggles back
-	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	m = model.(DiffModel)
-	if m.splitView {
-		t.Error("expected splitView=false after second 's'")
-	}
-}
-
 func TestDiffModel_EmptyDiff(t *testing.T) {
 	m := NewDiffModel(theme.Dark())
 	view := m.View()
@@ -1947,8 +1923,8 @@ func TestDiffModel_ViewContainsColoredContent(t *testing.T) {
 	if !strings.Contains(view, "git diff") {
 		t.Errorf("expected title in view, got: %s", view)
 	}
-	if !strings.Contains(view, "toggle split") {
-		t.Errorf("expected help bar with 'toggle split', got: %s", view)
+	if !strings.Contains(view, "scroll") {
+		t.Errorf("expected help bar with 'scroll', got: %s", view)
 	}
 	if !strings.Contains(view, "oldLine") {
 		t.Errorf("expected diff content (oldLine) in view, got: %s", view)

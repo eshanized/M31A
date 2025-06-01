@@ -97,8 +97,8 @@ func TestRenderPromptMetadata(t *testing.T) {
 	if !strings.Contains(result, "Build") {
 		t.Errorf("Should contain agent name, got %q", result)
 	}
-	if !strings.Contains(result, "OPE") {
-		t.Errorf("Should contain provider short name, got %q", result)
+	if !strings.Contains(result, "[OR]") {
+		t.Errorf("Should contain provider short name [OR], got %q", result)
 	}
 }
 

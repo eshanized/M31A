@@ -16,7 +16,7 @@ func newTestResumeModel(t *testing.T) (*ResumeModel, *session.Manager, string) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	mgr := session.NewManager(tmpDir)
+	mgr := session.NewManager(tmpDir, session.ManagerOpts{})
 	m := NewResumeModel(theme.Dark(), mgr)
 	m.width = 80
 	m.height = 24
@@ -267,7 +267,7 @@ func TestResume_WindowSize(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	mgr := session.NewManager(tmpDir)
+	mgr := session.NewManager(tmpDir, session.ManagerOpts{})
 	m := NewResumeModel(theme.Dark(), mgr)
 
 	// Initial size should be 0

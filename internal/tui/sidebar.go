@@ -180,12 +180,7 @@ func (m *SidebarModel) renderFileStatus(fs git.FileStatus, width int) string {
 		pathStr = fs.OldPath + " → " + fs.Path
 	}
 	maxPathLen := width - 4 // leave room for status char and padding
-	if lipgloss.Width(pathStr) > maxPathLen {
-		runes := []rune(pathStr)
-		if len(runes) > maxPathLen-3 {
-			pathStr = string(runes[:maxPathLen-3]) + "..."
-		}
-	}
+	pathStr = TruncateWithEllipsis(pathStr, maxPathLen)
 
 	pathStyle := lipgloss.NewStyle().
 		Foreground(m.theme.TextPrimary)
