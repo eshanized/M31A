@@ -58,6 +58,8 @@ func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			return nil, &AppMsg{Screen: ScreenExecute}
 		case "r", "R":
 			return nil, &AppMsg{Screen: ScreenREPL}
+		case "esc":
+			return nil, &AppMsg{Screen: ScreenREPL}
 		case "d", "D":
 			m.showDiff = !m.showDiff
 			m.showGraph = false

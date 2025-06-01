@@ -248,10 +248,10 @@ func TestShipModel_UpdateEscape(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	// Escape should not panic and should not emit any screen change
+	// Escape should return to REPL
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	if appMsg != nil {
-		t.Error("expected no AppMsg on escape")
+	if appMsg == nil || appMsg.Screen != ScreenREPL {
+		t.Error("expected AppMsg with ScreenREPL on escape")
 	}
 }
 
