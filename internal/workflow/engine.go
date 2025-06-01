@@ -202,6 +202,14 @@ func (e *Engine) SessionID() string {
 	return e.sessionID
 }
 
+// SetSessionID updates the engine's session ID and replans the planning
+// directory to point to the new session's planning folder. Used after
+// session-switching commands like /fork, /prev, /next.
+func (e *Engine) SetSessionID(id string) {
+	e.sessionID = id
+	e.planningDir = filepath.Join(filepath.Dir(e.planningDir), "..", id, "planning")
+}
+
 // SetMsgEmitter sets the callback for emitting messages back to the TUI.
 func (e *Engine) SetMsgEmitter(em MsgEmitter) {
 	e.msgEmitter = em
