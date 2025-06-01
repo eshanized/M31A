@@ -204,7 +204,7 @@ func TestDispatcher_GetTool(t *testing.T) {
 func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d := DefaultDispatcher(dir, dir, dir)
+	d := DefaultDispatcher(dir, dir, dir, nil)
 
 	names := d.List()
 	if len(names) != 9 {
@@ -423,10 +423,10 @@ func TestMatchAnyParamValue(t *testing.T) {
 		}
 	})
 
-	t.Run("no string params returns false", func(t *testing.T) {
+	t.Run("non-string values are stringified before matching", func(t *testing.T) {
 		params := map[string]any{"count": 42, "flag": true, "ratio": 3.14}
-		if matchAnyParamValue("**", params) {
-			t.Error("expected no match when no string params exist")
+		if !matchAnyParamValue("*4*", params) {
+			t.Error("expected match on stringified int 42 with pattern *4*")
 		}
 	})
 }
@@ -466,16 +466,20 @@ func TestMatchAnyParamValue_NonStringValues(t *testing.T) {
 		}
 	})
 
-	t.Run("all non-string types do not panic", func(t *testing.T) {
+	t.Run("all non-string types are stringified without panic", func(t *testing.T) {
 		params := map[string]any{
 			"int":    42,
 			"bool":   false,
 			"float":  3.14,
 			"nested": []string{"a", "b"},
 		}
-		// Should not panic, should return false
-		if matchAnyParamValue("**", params) {
-			t.Error("expected no match with all non-string types")
+		// Should not panic, and ** matches the stringified representations
+		if !matchAnyParamValue("**", params) {
+			t.Error("expected ** to match stringified non-string values")
+		}
+		// Specific pattern should match stringified value
+		if !matchAnyParamValue("*42*", params) {
+			t.Error("expected match on stringified int 42")
 		}
 	})
 }
