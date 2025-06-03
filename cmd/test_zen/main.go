@@ -23,7 +23,7 @@ func main() {
 
 	// Step 1: Create Zen client
 	fmt.Println("Step 1: Creating Zen client...")
-	client, err := zen.New(apiKey)
+	client, err := zen.New(apiKey, zen.Options{})
 	if err != nil {
 		fmt.Printf("FAIL: Cannot create Zen client: %v\n", err)
 		os.Exit(1)
