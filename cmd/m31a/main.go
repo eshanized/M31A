@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -14,6 +15,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider/openrouter"
 	"github.com/eshanized/M31A/internal/provider/zen"
 	"github.com/eshanized/M31A/internal/tui"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
 )
 
@@ -113,7 +115,23 @@ func main() {
 
 	// Register OpenRouter if API key available
 	if cfg.Provider.OpenRouter.APIKey != "" {
-		orClient, err := openrouter.New(cfg.Provider.OpenRouter.APIKey)
+		cacheTTL := types.ModelCacheTTL
+		if cfg.Features.ModelCacheTTLMinutes > 0 {
+			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
+		}
+		cacheStaleTTL := 24 * time.Hour
+		if cfg.Features.ModelCacheStaleHours > 0 {
+			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
+		}
+		orClient, err := openrouter.New(cfg.Provider.OpenRouter.APIKey, openrouter.Options{
+			BaseURL:           cfg.Provider.OpenRouterBaseURL,
+			CacheTTL:          cacheTTL,
+			CacheStaleTTL:     cacheStaleTTL,
+			Referer:           cfg.Provider.OpenRouterReferer,
+			Title:             cfg.Provider.OpenRouterTitle,
+			HealthCheckLiveMs: int64(cfg.Features.HealthCheckLiveMs),
+			HealthCheckSlowMs: int64(cfg.Features.HealthCheckSlowMs),
+		})
 		if err != nil {
 			logger.Warn("failed to create OpenRouter client", "error", err)
 		} else {
@@ -124,7 +142,22 @@ func main() {
 
 	// Register Zen if API key available
 	if cfg.Provider.Zen.APIKey != "" {
-		zenClient, err := zen.New(cfg.Provider.Zen.APIKey)
+		cacheTTL := types.ModelCacheTTL
+		if cfg.Features.ModelCacheTTLMinutes > 0 {
+			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
+		}
+		cacheStaleTTL := 24 * time.Hour
+		if cfg.Features.ModelCacheStaleHours > 0 {
+			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
+		}
+		zenClient, err := zen.New(cfg.Provider.Zen.APIKey, zen.Options{
+			BaseURL:           cfg.Provider.ZenBaseURL,
+			CacheTTL:          cacheTTL,
+			CacheStaleTTL:     cacheStaleTTL,
+			HealthCheckLiveMs: int64(cfg.Features.HealthCheckLiveMs),
+			HealthCheckSlowMs: int64(cfg.Features.HealthCheckSlowMs),
+			DefaultContextLen: int64(cfg.Model.DefaultContextLength),
+		})
 		if err != nil {
 			logger.Warn("failed to create Zen client", "error", err)
 		} else {
