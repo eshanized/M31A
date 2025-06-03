@@ -15,12 +15,30 @@ import (
 
 // Manager provides CRUD operations for sessions stored on disk.
 type Manager struct {
-	baseDir string // path to ~/.m31a/sessions
+	baseDir         string // path to ~/.m31a/sessions
+	sessionIDBytes  int    // number of random bytes for session IDs (default 4 = 8 hex chars)
+	maxRecentModels int    // max recent models to track (default 10)
 }
 
-// NewManager creates a Manager with the given base directory.
-func NewManager(baseDir string) *Manager {
-	return &Manager{baseDir: baseDir}
+// ManagerOpts holds optional settings for the Manager.
+type ManagerOpts struct {
+	SessionIDBytes  int // Number of random bytes (4 = 8 hex chars). 0 = default.
+	MaxRecentModels int // Max recent models. 0 = default (10).
+}
+
+// NewManager creates a Manager with the given base directory and optional settings.
+func NewManager(baseDir string, opts ManagerOpts) *Manager {
+	if opts.SessionIDBytes <= 0 {
+		opts.SessionIDBytes = 4
+	}
+	if opts.MaxRecentModels <= 0 {
+		opts.MaxRecentModels = 10
+	}
+	return &Manager{
+		baseDir:         baseDir,
+		sessionIDBytes:  opts.SessionIDBytes,
+		maxRecentModels: opts.MaxRecentModels,
+	}
 }
 
 // basePathFor returns the directory path for the given session ID.
@@ -94,10 +112,10 @@ func (m *Manager) planningDirPath(id string) string {
 	return filepath.Join(m.basePathFor(id), "planning")
 }
 
-// generateID generates a random 8-character hex session ID using crypto/rand.
-// Returns 4 bytes hex-encoded for 8 hex characters.
-func generateID() (string, error) {
-	b := make([]byte, 4)
+// generateID generates a random hex session ID using crypto/rand.
+// numBytes controls the length (4 bytes = 8 hex chars).
+func generateID(numBytes int) (string, error) {
+	b := make([]byte, numBytes)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("cannot generate session ID: %w", err)
 	}
@@ -110,7 +128,7 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 	// Generate unique ID (retry on collision, astronomically unlikely)
 	var id string
 	for i := 0; i < 10; i++ {
-		gid, err := generateID()
+		gid, err := generateID(m.sessionIDBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -278,7 +296,7 @@ func (m *Manager) ForkSession(parentID string) (*Session, error) {
 	// Generate unique ID (retry on collision)
 	var newID string
 	for i := 0; i < 10; i++ {
-		gid, err := generateID()
+		gid, err := generateID(m.sessionIDBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -441,11 +459,11 @@ func (m *Manager) LoadRecentModels() (*RecentModelsData, error) {
 }
 
 // SaveRecentModels marshals and atomically writes the recent models data to disk.
-// Recent slice is pruned to max 10 entries before saving.
+// Recent slice is pruned to max recent models before saving.
 func (m *Manager) SaveRecentModels(data *RecentModelsData) error {
-	// Enforce max 10 recent entries
-	if len(data.Recent) > 10 {
-		data.Recent = data.Recent[:10]
+	// Enforce max recent entries
+	if len(data.Recent) > m.maxRecentModels {
+		data.Recent = data.Recent[:m.maxRecentModels]
 	}
 	if data.Favorites == nil {
 		data.Favorites = make(map[string]bool)
@@ -477,9 +495,9 @@ func (m *Manager) AddRecentModel(modelID string) error {
 	// Prepend to front
 	data.Recent = append([]string{modelID}, updated...)
 
-	// Cap at 10
-	if len(data.Recent) > 10 {
-		data.Recent = data.Recent[:10]
+	// Cap at max recent models
+	if len(data.Recent) > m.maxRecentModels {
+		data.Recent = data.Recent[:m.maxRecentModels]
 	}
 
 	return m.SaveRecentModels(data)
