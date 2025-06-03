@@ -20,7 +20,7 @@ func newTestManager(t *testing.T) (*Manager, string) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	return NewManager(dir), dir
+	return NewManager(dir, ManagerOpts{}), dir
 }
 
 func TestSession_NewAndLoad(t *testing.T) {
@@ -529,7 +529,7 @@ func TestSession_ListSessionsEmptyBaseDir(t *testing.T) {
 
 func TestSession_GenerateIDFormat(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		id, err := generateID()
+		id, err := generateID(4) // 4 bytes = 8 hex chars
 		if err != nil {
 			t.Fatalf("generateID failed: %v", err)
 		}
