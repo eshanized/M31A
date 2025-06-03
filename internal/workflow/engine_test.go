@@ -28,7 +28,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	// Create session
 	sessionBaseDir := filepath.Join(dir, "sessions")
 	os.MkdirAll(sessionBaseDir, 0755)
-	mgr := session.NewManager(sessionBaseDir)
+	mgr := session.NewManager(sessionBaseDir, session.ManagerOpts{})
 
 	s, err := mgr.NewSession("test-model", "test-provider")
 	if err != nil {

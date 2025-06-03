@@ -68,7 +68,7 @@ func TestFullWorkflow(t *testing.T) {
 	// Create session
 	sessionBaseDir := filepath.Join(dir, "sessions")
 	os.MkdirAll(sessionBaseDir, 0755)
-	mgr := session.NewManager(sessionBaseDir)
+	mgr := session.NewManager(sessionBaseDir, session.ManagerOpts{})
 
 	s, err := mgr.NewSession("test-model", "test-provider")
 	if err != nil {
