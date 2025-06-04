@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 
@@ -19,9 +20,9 @@ func NewRegistry() *Registry {
 	}
 }
 
-func (r *Registry) Register(name string, p LLMProvider) {
+func (r *Registry) Register(name string, p LLMProvider) error {
 	if name == "" {
-		panic("provider name cannot be empty")
+		return fmt.Errorf("provider name cannot be empty")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -29,6 +30,7 @@ func (r *Registry) Register(name string, p LLMProvider) {
 	if r.active == "" {
 		r.active = name
 	}
+	return nil
 }
 
 func (r *Registry) Active() string {
