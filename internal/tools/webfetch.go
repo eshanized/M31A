@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,10 +14,77 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-type WebFetch struct{}
+type WebFetch struct {
+	sessionsDir     string
+	allowPrivateIPs bool
+}
 
-func NewWebFetch(_ string) *WebFetch {
-	return &WebFetch{}
+func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
+	return &WebFetch{
+		sessionsDir:     sessionsDir,
+		allowPrivateIPs: allowPrivateIPs,
+	}
+}
+
+// isPrivateIP returns true if the IP is loopback, link-local, RFC1918,
+// or cloud metadata. These should not be reachable by an external agent.
+func isPrivateIP(ip net.IP) bool {
+	if ip.IsLoopback() {
+		return true
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	// RFC1918 private ranges
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 10 ||
+			(ip4[0] == 172 && ip4[1]&0xf0 == 16) ||
+			(ip4[0] == 192 && ip4[1] == 168)
+	}
+	// fc00::/7 unique local
+	if ip16 := ip.To16(); ip16 != nil {
+		return ip16[0]&0xfe == 0xfc
+	}
+	return false
+}
+
+// resolveAndCheck resolves the host in a URL and rejects private IPs
+// unless allowPrivateIPs is true.
+func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+
+	// Check for literal IP first
+	if ip := net.ParseIP(host); ip != nil {
+		if !t.allowPrivateIPs && isPrivateIP(ip) {
+			return fmt.Errorf("access to private IP %s is blocked (SSRF protection)", ip)
+		}
+		return nil
+	}
+
+	// Resolve hostname
+	resolver := &net.Resolver{PreferGo: true}
+	addrs, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+	}
+
+	if !t.allowPrivateIPs {
+		for _, addr := range addrs {
+			if isPrivateIP(addr.IP) {
+				return fmt.Errorf("host %s resolves to private IP %s (SSRF protection)", host, addr.IP)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (t *WebFetch) Name() string {
@@ -69,6 +138,11 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("timeout must be between 1 and 120 seconds")
 	}
 
+	// SSRF protection: resolve and check hostname before connecting
+	if err := t.resolveAndCheck(ctx, urlStr); err != nil {
+		return types.ToolResult{}, err
+	}
+
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
@@ -86,6 +160,12 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("stopped after 5 redirects")
+			}
+			// SSRF protection: check each redirect target
+			if err := t.resolveAndCheck(ctx, req.URL.String()); err != nil {
+				slog.Warn("WebFetch redirect blocked by SSRF protection",
+					"url", req.URL.String(), "error", err)
+				return err
 			}
 			return nil
 		},
