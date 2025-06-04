@@ -58,14 +58,15 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	return d
 }
 
-func (d *Dispatcher) Register(tool types.Tool) {
+func (d *Dispatcher) Register(tool types.Tool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	name := tool.Name()
 	if _, ok := d.tools[name]; ok {
-		panic(fmt.Sprintf("tool already registered: %s", name))
+		return fmt.Errorf("tool already registered: %s", name)
 	}
 	d.tools[name] = tool
+	return nil
 }
 
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
@@ -110,7 +111,14 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		// When interactive is explicitly false, auto-approve (skip modal)
 		if !interactive {
 			// Shell mode — user explicitly requested execution via ! prefix.
-			// Deny rules are already enforced above. Skip the interactive modal.
+			// Deny rules are already enforced above. Still block dangerous
+			// and destructive tools to prevent accidental harm.
+			if risk == types.RiskDangerous || risk == types.RiskDestructive {
+				return types.ToolResult{
+					Error: fmt.Sprintf("tool %s (risk: %s) blocked in shell mode; use interactive mode to approve", call.Name, risk),
+				}, nil
+			}
+			// Safe and medium tools proceed without modal
 		} else if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
 			req := PermissionRequest{
 				ToolName:    call.Name,
@@ -499,18 +507,36 @@ func (d *Dispatcher) SetSessionID(id string) {
 	}
 }
 
-func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) *Dispatcher {
+func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) (*Dispatcher, error) {
 	d := NewDispatcher(cfg)
-	d.Register(NewBash(workDir))
-	d.Register(NewFileRead(workDir))
-	d.Register(NewFileWrite(workDir, backupDir))
-	d.Register(NewEdit(workDir, backupDir))
+	if err := d.Register(NewBash(workDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewFileRead(workDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewFileWrite(workDir, backupDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewEdit(workDir, backupDir)); err != nil {
+		return nil, err
+	}
 	todo := NewTodoWrite(sessionsDir, "")
 	d.todoWrite = todo
-	d.Register(todo)
-	d.Register(NewWebFetch(sessionsDir))
-	d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh))
-	d.Register(NewGlob(workDir))
-	d.Register(NewGrep(workDir))
-	return d
+	if err := d.Register(todo); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewWebFetch(sessionsDir, false)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewGlob(workDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewGrep(workDir)); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
