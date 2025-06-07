@@ -53,8 +53,6 @@ func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			return nil, &AppMsg{Screen: ScreenREPL}
 		case "esc":
 			return nil, &AppMsg{Screen: ScreenREPL}
-		case "o", "O":
-			// Open in browser (V1: placeholder)
 		}
 	}
 	return nil, nil
@@ -98,7 +96,7 @@ func (m *ShipModel) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("[O] Open in browser  [N] New session  [R] REPL  [Esc] Back"))
+		Render("[N] New session  [R] REPL  [Esc] Back"))
 
 	return sb.String()
 }
