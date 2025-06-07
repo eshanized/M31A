@@ -66,8 +66,6 @@ func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		case "tab":
 			m.showGraph = !m.showGraph
 			m.showDiff = false
-		case "e", "E":
-			// V1: placeholder for edit
 		}
 	}
 	return nil, nil
@@ -88,7 +86,7 @@ func (m *PlanModel) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("[A]ccept  [E]dit  [R]etry  [D]iff  Tab=Graph"))
+		Render("[A]ccept  [R]etry  [D]iff  Tab=Graph"))
 	sb.WriteString("\n\n")
 
 	if m.showGraph {
