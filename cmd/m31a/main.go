@@ -45,9 +45,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  /goal       /phase      /config     /models\n")
 		fmt.Fprintf(os.Stderr, "  /fallback\n\n")
 		fmt.Fprintf(os.Stderr, "Environment Variables:\n")
-		fmt.Fprintf(os.Stderr, "  M31A_CONFIG       Config file path (default: ~/.m31a/config.toml)\n")
-		fmt.Fprintf(os.Stderr, "  OPENROUTER_API_KEY  OpenRouter API key\n")
-		fmt.Fprintf(os.Stderr, "  ZEN_API_KEY         Zen API key\n")
+		fmt.Fprintf(os.Stderr, "  M31A_CONFIG           Config file path (default: ~/.m31a/config.toml)\n")
+		fmt.Fprintf(os.Stderr, "  M31A_OPENROUTER_API_KEY  OpenRouter API key\n")
+		fmt.Fprintf(os.Stderr, "  M31A_ZEN_API_KEY         Zen API key\n")
 		fmt.Fprintf(os.Stderr, "  M31A_LOG_FORMAT     Log format: json, text (default: json)\n")
 		fmt.Fprintf(os.Stderr, "  M31A_LOG_LEVEL      Log level: debug, info, warn, error (default: info)\n")
 	}
@@ -135,8 +135,11 @@ func main() {
 		if err != nil {
 			logger.Warn("failed to create OpenRouter client", "error", err)
 		} else {
-			registry.Register("openrouter", orClient)
-			logger.Info("OpenRouter provider registered")
+			if err := registry.Register("openrouter", orClient); err != nil {
+				logger.Warn("failed to register OpenRouter provider", "error", err)
+			} else {
+				logger.Info("OpenRouter provider registered")
+			}
 		}
 	}
 
@@ -161,8 +164,11 @@ func main() {
 		if err != nil {
 			logger.Warn("failed to create Zen client", "error", err)
 		} else {
-			registry.Register("zen", zenClient)
-			logger.Info("Zen provider registered")
+			if err := registry.Register("zen", zenClient); err != nil {
+				logger.Warn("failed to register Zen provider", "error", err)
+			} else {
+				logger.Info("Zen provider registered")
+			}
 		}
 	}
 
