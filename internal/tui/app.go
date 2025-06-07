@@ -150,6 +150,12 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	g := git.New(cwd)
 	rb := rollback.New(g)
 
+	dispatcher, err := tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir, &cfg.Permissions)
+	if err != nil {
+		slog.Error("failed to initialize tool dispatcher", "error", err)
+		os.Exit(1)
+	}
+
 	app := &AppState{
 		version:        version,
 		registry:       registry,
@@ -157,7 +163,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		configPath:     configPath,
 		themeManager:   tm,
 		healthStatus:   types.HealthStatus{Status: "unknown"},
-		dispatcher:     tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir, &cfg.Permissions),
+		dispatcher:     dispatcher,
 		config:         cfg,
 		keychain:       kc,
 		sessionManager: sessionMgr,
@@ -328,7 +334,7 @@ func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd 
 	// writing to it. Replace it; the old drainer sees nil and stops.
 	app.msgChan = nil
 
-	msgCh := make(chan tea.Msg, 64)
+	msgCh := make(chan tea.Msg, 256)
 	app.msgChan = msgCh
 
 	// Create a cancellable context for this phase
@@ -403,8 +409,8 @@ type channelEmitter struct {
 func (ce *channelEmitter) Emit(msg tea.Msg) {
 	select {
 	case ce.ch <- msg:
-	default:
-		// Channel full — drop the message to avoid blocking the engine.
+	case <-time.After(500 * time.Millisecond):
+		// Channel full after timeout — drop to avoid blocking the engine.
 		slog.Warn("workflow message dropped: channel full", "msg_type", fmt.Sprintf("%T", msg))
 	}
 }
@@ -624,9 +630,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Intercept /phase to start workflow engine phases
-		if strings.HasPrefix(cmd, "/phase ") && m.workflowEngine != nil {
-			parts := strings.Fields(cmd)
+		// Intercept /phase and phase aliases (/plan, /execute, /verify, /ship)
+		phaseCmd := ""
+		if strings.HasPrefix(cmd, "/phase ") {
+			phaseCmd = strings.TrimPrefix(cmd, "/phase ")
+		} else if cmd == "/plan" || strings.HasPrefix(cmd, "/plan ") {
+			phaseCmd = "plan" + strings.TrimPrefix(cmd, "/plan")
+		} else if cmd == "/execute" || strings.HasPrefix(cmd, "/execute ") {
+			phaseCmd = "execute" + strings.TrimPrefix(cmd, "/execute")
+		} else if cmd == "/verify" || strings.HasPrefix(cmd, "/verify ") {
+			phaseCmd = "verify" + strings.TrimPrefix(cmd, "/verify")
+		} else if cmd == "/ship" || strings.HasPrefix(cmd, "/ship ") {
+			phaseCmd = "ship" + strings.TrimPrefix(cmd, "/ship")
+		}
+		if phaseCmd != "" && m.workflowEngine != nil {
+			parts := strings.Fields(phaseCmd)
 			if len(parts) >= 2 {
 				phaseName := parts[1]
 				goal := ""
