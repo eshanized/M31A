@@ -77,11 +77,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// 4. Update ledger
 	sess, err := e.sessionMgr.LoadSession(e.sessionID)
 	if err == nil {
-		home := os.Getenv("HOME")
-		if home == "" {
-			home = os.Getenv("USERPROFILE")
-		}
-		if home != "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			e.logger.Warn("ledger update skipped: cannot determine home dir", "error", err)
+		} else {
 			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
 			l := ledger.New(ledgerPath)
 			entry := ledger.NewEntry(sess.Session, total, failed, skipped, len(commits), 0)
