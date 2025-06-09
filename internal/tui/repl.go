@@ -70,6 +70,8 @@ type ReplModel struct {
 	thinkingBlocks    map[int]*components.ThinkingBlock
 	toolCards         map[int]*components.ToolCard
 
+	lastArbitrageFetch time.Time // throttle auto-arbitrage model fetches
+
 	fallbackBanner   string    // current fallback banner text, empty = no banner
 	fallbackBannerAt time.Time // when the banner appeared (for 15s auto-dismiss)
 
@@ -448,25 +450,30 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 						return cmds, true
 					}
 
-					// Auto-arbitrage: if enabled, check if a cheaper model can handle this task
+					// Auto-arbitrage: if enabled, check if a cheaper model can handle this task.
+					// Throttle fetches to once per 5 minutes; FetchModels returns cached
+					// data when the cache is still fresh.
 					if m.cfg != nil && m.cfg.Model.AutoArbitrage && m.activeModel != nil {
-						fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 15*time.Second)
-						allModels, err := p.FetchModels(fetchCtx)
-						fetchCancel()
-						if err == nil && len(allModels) > 0 {
-							task := types.Task{
-								Description: input,
-								Files:       []string{},
-							}
-							rec, err := arbitrage.Recommend(allModels, task, m.cfg.Model.ArbitrageThreshold)
-							if err == nil && rec != nil {
-								// If the recommended model differs from current and is cheaper, switch
-								currentCost := m.activeModel.Pricing.OutputPerMToken
-								if rec.RecommendedModel.ModelID != modelID && rec.RecommendedModel.OutputCost < currentCost {
-									// Switch to recommended model for this request
-									modelID = rec.RecommendedModel.ModelID
+						if time.Since(m.lastArbitrageFetch) > 5*time.Minute || m.lastArbitrageFetch.IsZero() {
+							fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 15*time.Second)
+							allModels, err := p.FetchModels(fetchCtx)
+							fetchCancel()
+							if err == nil && len(allModels) > 0 {
+								task := types.Task{
+									Description: input,
+									Files:       []string{},
+								}
+								rec, err := arbitrage.Recommend(allModels, task, m.cfg.Model.ArbitrageThreshold)
+								if err == nil && rec != nil {
+									// If the recommended model differs from current and is cheaper, switch
+									currentCost := m.activeModel.Pricing.OutputPerMToken
+									if rec.RecommendedModel.ModelID != modelID && rec.RecommendedModel.OutputCost < currentCost {
+										// Switch to recommended model for this request
+										modelID = rec.RecommendedModel.ModelID
+									}
 								}
 							}
+							m.lastArbitrageFetch = time.Now()
 						}
 					}
 
