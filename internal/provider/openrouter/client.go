@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -42,6 +42,28 @@ type Options struct {
 	Title             string
 	HealthCheckLiveMs int64
 	HealthCheckSlowMs int64
+}
+
+// openrouterModelCapabilities holds explicit capability flags for known OpenRouter models.
+var openrouterModelCapabilities = map[string]types.CapFlags{
+	"anthropic/claude-sonnet-4":         {Tools: true, Reasoning: false},
+	"anthropic/claude-opus-4":           {Tools: true, Reasoning: false},
+	"anthropic/claude-3.5-sonnet":       {Tools: true, Reasoning: false},
+	"openai/gpt-4o":                     {Tools: true, Reasoning: false},
+	"openai/o1":                         {Tools: true, Reasoning: true},
+	"openai/o3":                         {Tools: true, Reasoning: true},
+	"deepseek/deepseek-r1":              {Tools: false, Reasoning: true},
+	"deepseek/deepseek-v3":              {Tools: true, Reasoning: false},
+	"google/gemini-2.5-pro":             {Tools: true, Reasoning: false},
+	"google/gemini-2.5-pro-exp":         {Tools: true, Reasoning: false},
+	"meta-llama/llama-3.3-70b-instruct": {Tools: true, Reasoning: false},
+}
+
+func openrouterModelCaps(modelID string) (types.CapFlags, bool) {
+	if caps, ok := openrouterModelCapabilities[modelID]; ok {
+		return caps, true
+	}
+	return types.CapFlags{}, false
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -122,26 +144,26 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
-		log.Printf("[openrouter] failed to create models request: %v; falling back to cache", err)
+		slog.Warn("openrouter failed to create models request", "error", err)
 		return c.staleFallback()
 	}
 	c.setCommonHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[openrouter] failed to fetch models: %v; falling back to cache", err)
+		slog.Warn("openrouter failed to fetch models", "error", err)
 		return c.staleFallback()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[openrouter] unexpected status %d fetching models; falling back to cache", resp.StatusCode)
+		slog.Warn("openrouter unexpected status fetching models", "status", resp.StatusCode)
 		return c.staleFallback()
 	}
 
 	var apiResp openRouterModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		log.Printf("[openrouter] failed to decode models response: %v; falling back to cache", err)
+		slog.Warn("openrouter failed to decode models response", "error", err)
 		return c.staleFallback()
 	}
 
@@ -157,10 +179,16 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
 			},
 			TopProvider: m.TopProvider,
-			Capabilities: types.CapFlags{
-				Tools:     strings.Contains(m.Architecture.Tokenizer, "tools") || strings.Contains(m.Architecture.Modality, "tool"),
-				Reasoning: strings.Contains(m.Description, "reasoning") || strings.Contains(m.ID, "r1"),
-			},
+			Capabilities: func() types.CapFlags {
+				if caps, ok := openrouterModelCaps(m.ID); ok {
+					return caps
+				}
+				// Fallback to string-sniff for unknown models
+				return types.CapFlags{
+					Tools:     strings.Contains(m.Architecture.Tokenizer, "tools") || strings.Contains(m.Architecture.Modality, "tool"),
+					Reasoning: strings.Contains(m.Description, "reasoning") || strings.Contains(m.ID, "r1"),
+				}
+			}(),
 		}
 		models = append(models, info)
 	}
