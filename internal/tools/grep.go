@@ -134,22 +134,19 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 
 	cmd := exec.Command("rg", args...)
 	cmd.Dir = t.workDir
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		// rg exits with code 1 when no matches found
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return types.ToolResult{Output: "No results found for pattern"}, nil
-		}
-		return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
+		return types.ToolResult{}, fmt.Errorf("rg stdout pipe failed: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("rg start failed: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var results []string
 	count := 0
-	for _, line := range lines {
-		if count >= maxResults {
-			break
-		}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() && count < maxResults {
+		line := scanner.Text()
 		var match rgMatch
 		if err := json.Unmarshal([]byte(line), &match); err != nil {
 			continue
@@ -164,6 +161,14 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 		content := strings.TrimRight(data.Lines.Text, "\n\r")
 		results = append(results, fmt.Sprintf("%s:%d: %s", data.Path.Text, data.LineNumber, content))
 		count++
+	}
+
+	if err := cmd.Wait(); err != nil {
+		// rg exits with code 1 when no matches found
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return types.ToolResult{Output: "No results found for pattern"}, nil
+		}
+		return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
 	}
 
 	if len(results) == 0 {
