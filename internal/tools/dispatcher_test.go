@@ -204,7 +204,10 @@ func TestDispatcher_GetTool(t *testing.T) {
 func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d := DefaultDispatcher(dir, dir, dir, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil)
+	if err != nil {
+		t.Fatalf("DefaultDispatcher failed: %v", err)
+	}
 
 	names := d.List()
 	if len(names) != 9 {
@@ -351,14 +354,14 @@ func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
 func TestDispatcher_RegisterDuplicate(t *testing.T) {
 	t.Parallel()
 	d := NewDispatcher(nil)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	if err := d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe}); err != nil {
+		t.Fatalf("first register failed: %v", err)
+	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for duplicate registration")
-		}
-	}()
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	err := d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	if err == nil {
+		t.Error("expected error for duplicate registration")
+	}
 }
 
 // ---------------------------------------------------------------------------
