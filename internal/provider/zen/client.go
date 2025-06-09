@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -40,6 +40,27 @@ type Options struct {
 	HealthCheckLiveMs int64
 	HealthCheckSlowMs int64
 	DefaultContextLen int64
+}
+
+// zenModelCapabilities holds known capability flags for Zen models.
+// Unknown models default to Tools: false, Reasoning: false.
+var zenModelCapabilities = map[string]types.CapFlags{
+	"deepseek-v3":      {Tools: true, Reasoning: false},
+	"deepseek-v3-free": {Tools: true, Reasoning: false},
+	"deepseek-r1":      {Tools: false, Reasoning: true},
+	"deepseek-r1-free": {Tools: false, Reasoning: true},
+	"claude-sonnet-4":  {Tools: true, Reasoning: false},
+	"claude-opus-4":    {Tools: true, Reasoning: false},
+	"gpt-4o":           {Tools: true, Reasoning: false},
+	"gemini-2.5-pro":   {Tools: true, Reasoning: false},
+}
+
+func zenModelCaps(modelID string) types.CapFlags {
+	if caps, ok := zenModelCapabilities[modelID]; ok {
+		return caps
+	}
+	slog.Warn("zen unknown model capabilities, defaulting to no tools", "model", modelID)
+	return types.CapFlags{Tools: false, Reasoning: false}
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -108,26 +129,26 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
-		log.Printf("[zen] failed to create models request: %v; falling back to cache", err)
+		slog.Warn("zen failed to create models request", "error", err)
 		return c.staleFallback()
 	}
 	c.setCommonHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[zen] failed to fetch models: %v; falling back to cache", err)
+		slog.Warn("zen failed to fetch models", "error", err)
 		return c.staleFallback()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[zen] unexpected status %d fetching models; falling back to cache", resp.StatusCode)
+		slog.Warn("zen unexpected status fetching models", "status", resp.StatusCode)
 		return c.staleFallback()
 	}
 
 	var apiResp zenModelsResp
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		log.Printf("[zen] failed to decode models response: %v; falling back to cache", err)
+		slog.Warn("zen failed to decode models response", "error", err)
 		return c.staleFallback()
 	}
 
@@ -143,10 +164,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				OutputPerMToken: 0,
 			},
 			TopProvider: "zen",
-			Capabilities: types.CapFlags{
-				Tools:     true,
-				Reasoning: false,
-			},
+			Capabilities:  zenModelCaps(m.ID),
 		}
 		models = append(models, info)
 	}
