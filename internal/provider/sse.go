@@ -15,7 +15,7 @@ type SSEParser struct {
 
 func NewSSEParser(resp *http.Response) *SSEParser {
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 65536), 65536)
+	scanner.Buffer(make([]byte, 0, sseMaxLineLength), sseMaxLineLength)
 	return &SSEParser{
 		scanner: scanner,
 		resp:    resp,
@@ -70,3 +70,6 @@ func (p *SSEParser) Close() error {
 
 // DefaultStreamTimeout is the maximum time to wait for a single SSE event.
 const DefaultStreamTimeout = 5 * time.Minute
+
+// sseMaxLineLength is the maximum size of a single SSE event line (1MB).
+const sseMaxLineLength = 1024 * 1024
