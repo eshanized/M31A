@@ -606,8 +606,8 @@ func TestResetCommand(t *testing.T) {
 func TestCommands_AllRegistered(t *testing.T) {
 	r := DefaultCommands()
 	names := r.List()
-	if len(names) != 30 {
-		t.Fatalf("expected exactly 30 commands, got %d: %v", len(names), names)
+	if len(names) != 37 {
+		t.Fatalf("expected exactly 37 commands, got %d: %v", len(names), names)
 	}
 
 	// Verify all expected commands are present
@@ -620,6 +620,8 @@ func TestCommands_AllRegistered(t *testing.T) {
 		"diff": false, "theme": false, "save": false, "key": false,
 		"log": false, "tokens": false, "health": false,
 		"fork": false, "prev": false, "next": false,
+		"plan": false, "execute": false, "verify": false, "ship": false,
+		"optimize": false, "pause": false, "resume-task": false,
 	}
 	hasExtra := false
 	for _, name := range names {
