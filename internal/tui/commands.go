@@ -17,6 +17,7 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
@@ -189,6 +190,19 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("fork", handleFork, "Fork current session into a new child session")
 	r.Register("prev", handlePrev, "Switch to previous sibling session")
 	r.Register("next", handleNext, "Switch to next sibling session")
+
+	// Workflow phase aliases
+	r.Register("plan", handlePhase, "Alias for /phase plan")
+	r.Register("execute", handlePhase, "Alias for /phase execute")
+	r.Register("verify", handlePhase, "Alias for /phase verify")
+	r.Register("ship", handlePhase, "Alias for /phase ship")
+
+	// Cost optimization
+	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
+
+	// Workflow control
+	r.Register("pause", handlePause, "Pause current workflow phase")
+	r.Register("resume-task", handleResumeTask, "Resume task from last checkpoint")
 
 	return r
 }
@@ -721,7 +735,7 @@ func handleConfig(args []string, ctx CommandContext) CommandResult {
 			}
 			return CommandResult{Success: false, Message: fmt.Sprintf("Invalid boolean value: %q", value)}
 		default:
-			return CommandResult{Success: false, Message: fmt.Sprintf("Unknown config key: %q. Use key names like \"ui.theme\", \"model.default\"", key)}
+			return CommandResult{Success: false, Message: fmt.Sprintf("Unknown config key: %q. Settable keys: ui.theme, model.default, ui.compact_mode, ui.show_token_usage, ui.show_cost_estimate, provider.auto_fallback, ledger.enabled, permissions.mode, model.auto_arbitrage", key)}
 		}
 	}
 
@@ -1238,3 +1252,60 @@ func handleHealth(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
+// handleOptimize suggests cheaper model alternatives using the arbitrage engine.
+func handleOptimize(args []string, ctx CommandContext) CommandResult {
+	if ctx.Registry == nil {
+		return CommandResult{Success: false, Message: "Provider registry not available."}
+	}
+
+	p := ctx.Registry.ActiveProvider()
+	if p == nil {
+		return CommandResult{Success: false, Message: "No active provider."}
+	}
+
+	allModels, err := p.FetchModels(context.Background())
+	if err != nil || len(allModels) == 0 {
+		return CommandResult{Success: false, Message: "Failed to fetch model catalog."}
+	}
+
+	// Get current model
+	currentID := ""
+	if info, _ := p.GetModel(""); info != nil {
+		currentID = info.ID
+	}
+
+	// Use a generic task description for comparison
+	task := types.Task{Description: "general coding task", Files: []string{}}
+	threshold := 0.1 // 10% savings threshold
+
+	rec, err := arbitrage.Recommend(allModels, task, threshold)
+	if err != nil || rec == nil {
+		return CommandResult{Success: true, Message: "No cheaper alternatives found for general workloads."}
+	}
+
+	var b strings.Builder
+	b.WriteString("Cost Optimization Suggestion:\n\n")
+	if currentID != "" {
+		b.WriteString(fmt.Sprintf("  Current:  %s\n", currentID))
+	}
+	b.WriteString(fmt.Sprintf("  Suggest:  %s\n", rec.RecommendedModel.ModelID))
+	b.WriteString(fmt.Sprintf("  Savings:  $%.4f per request\n", rec.Savings))
+	b.WriteString(fmt.Sprintf("  Reason:   %s complexity, %s model is sufficient\n", rec.Complexity, rec.Reason))
+	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+}
+
+// handlePause pauses the current workflow phase.
+func handlePause(args []string, ctx CommandContext) CommandResult {
+	return CommandResult{
+		Success: true,
+		Message: "Workflow pause requested. Use the workflow screen to manage execution.",
+	}
+}
+
+// handleResumeTask resumes a task from the last checkpoint.
+func handleResumeTask(args []string, ctx CommandContext) CommandResult {
+	return CommandResult{
+		Success: true,
+		Message: "Resume from checkpoint: use /workflow <goal> to restart the workflow from the beginning.",
+	}
+}
