@@ -106,7 +106,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, allTasks []m31types.Task) taskrunner.TaskResult {
 	start := time.Now()
 
-	for task.HealsAttempted <= m31types.MaxHealAttempts {
+	for task.HealsAttempted < m31types.MaxHealAttempts {
 		// Build context
 		messages := e.buildExecuteContext(task, allTasks)
 
