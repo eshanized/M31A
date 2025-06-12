@@ -76,6 +76,11 @@ type AppState struct {
 	workflowRunning    bool
 	currentPhase       types.WorkflowPhase
 	discussQuestions   []string
+	// Discuss Q&A flow (D-01 fix)
+	pendingDiscussAnswers map[int]string // index -> answer; nil when not in discuss Q&A
+	currentDiscussIndex   int            // next question to ask (0-based)
+	discussQuestionCount  int            // total questions in this discuss round
+	discussAnswerTimeout  *time.Timer    // 5-minute per-question timer
 	autoDream          *autodream.Consolidator
 	msgChan            chan tea.Msg // channel for workflow-emitted messages
 	workflowCtx        context.Context
@@ -413,6 +418,19 @@ func (ce *channelEmitter) Emit(msg tea.Msg) {
 		// Channel full after timeout — drop to avoid blocking the engine.
 		slog.Warn("workflow message dropped: channel full", "msg_type", fmt.Sprintf("%T", msg))
 	}
+}
+
+// resetDiscussQA clears the discuss Q&A state and stops the active timer.
+// Called when leaving the discuss phase (finalize, skip, error) so subsequent
+// Q&A rounds start from a clean slate.
+func (m *AppState) resetDiscussQA() {
+	if m.discussAnswerTimeout != nil {
+		m.discussAnswerTimeout.Stop()
+		m.discussAnswerTimeout = nil
+	}
+	m.pendingDiscussAnswers = nil
+	m.currentDiscussIndex = 0
+	m.discussQuestionCount = 0
 }
 
 func (m *AppState) Init() tea.Cmd {

@@ -106,6 +106,13 @@ type QuestionResponseMsg struct {
 	Answer string
 }
 
+// DiscussAnswerTimeoutMsg is emitted by the discuss answer timer when
+// 5 minutes elapse without the user answering the current question.
+// The TUI handler calls engine.SkipDiscuss() and advances to Plan.
+type DiscussAnswerTimeoutMsg struct {
+	QuestionIndex int
+}
+
 // ThemeChangedMsg is emitted when the theme is switched at runtime.
 type ThemeChangedMsg struct {
 	Theme string // "dark" or "light"
