@@ -4,8 +4,8 @@
 
 | Variable | Description | Default | Resolution Order |
 |----------|-------------|---------|-----------------|
-| `OPENROUTER_API_KEY` | OpenRouter API key | — | 1st (env var) |
-| `ZEN_API_KEY` | OpenCode Zen API key | — | 1st (env var) |
+| `M31A_OPENROUTER_API_KEY` | OpenRouter API key | — | 1st (env var) |
+| `M31A_ZEN_API_KEY` | OpenCode Zen API key | — | 1st (env var) |
 | `M31A_LOG_FORMAT` | Log output format | `json` | — |
 | `M31A_LOG_LEVEL` | Log verbosity level | `info` | — |
 
@@ -13,7 +13,7 @@
 
 API keys are resolved in the following order (first hit wins):
 
-1. Environment variable (`OPENROUTER_API_KEY` / `ZEN_API_KEY`)
+1. Environment variable (`M31A_OPENROUTER_API_KEY` / `M31A_ZEN_API_KEY`)
 2. OS keychain (secret-service on Linux, Keychain on macOS, Credential Manager on Windows)
 3. Config file (`~/.m31a/config.toml`)
 
