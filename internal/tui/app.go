@@ -1066,7 +1066,22 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, questionListenerCmd(m.dispatcher)
 
 	case QuestionResponseMsg:
-		// User answered — forward to the question tool via dispatcher
+		// If we're in the discuss Q&A flow, route the answer to the engine.
+		if m.pendingDiscussAnswers != nil && m.workflowEngine != nil {
+			idx := m.currentDiscussIndex
+			if err := m.workflowEngine.SubmitDiscussAnswer(idx, msg.Answer); err != nil {
+				slog.Warn("SubmitDiscussAnswer failed", "idx", idx, "err", err)
+			} else {
+				m.pendingDiscussAnswers[idx] = msg.Answer
+			}
+			m.currentDiscussIndex++
+			if m.currentDiscussIndex >= m.discussQuestionCount {
+				return m, m.finalizeDiscussAndAdvance()
+			}
+			return m, m.askNextDiscussQuestion()
+		}
+		// Otherwise, forward to the question tool via dispatcher
+		// (existing behavior for AskUserQuestion tool)
 		dresp := tools.QuestionResponse{Answer: msg.Answer}
 		select {
 		case m.dispatcher.QuestionResponseCh() <- dresp:
