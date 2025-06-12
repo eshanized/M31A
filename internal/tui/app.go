@@ -35,6 +35,21 @@ type FallbackNotification struct {
 	ShownAt   time.Time
 }
 
+// workflowEngineInterface captures the subset of *workflow.Engine methods
+// that the TUI uses. Defining it as an interface lets tests inject a mock
+// engine (see mockWorkflowEngine in app_test.go) without touching the
+// production code path. The real *workflow.Engine satisfies this interface.
+type workflowEngineInterface interface {
+	SessionID() string
+	SetSessionID(id string)
+	SetMsgEmitter(em workflow.MsgEmitter)
+	RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*workflow.PhaseResult, error)
+	DiscussState() workflow.DiscussState
+	SubmitDiscussAnswer(index int, answer string) error
+	SkipDiscuss() error
+	FinalizeDiscuss() error
+}
+
 type AppState struct {
 	screen           Screen
 	version          string
@@ -71,7 +86,7 @@ type AppState struct {
 	executeModel       *ExecuteModel
 	verifyModel        *VerifyModel
 	shipModel          *ShipModel
-	workflowEngine     *workflow.Engine
+	workflowEngine     workflowEngineInterface
 	workflowGoal       string
 	workflowRunning    bool
 	currentPhase       types.WorkflowPhase
@@ -431,6 +446,63 @@ func (m *AppState) resetDiscussQA() {
 	m.pendingDiscussAnswers = nil
 	m.currentDiscussIndex = 0
 	m.discussQuestionCount = 0
+}
+
+// askNextDiscussQuestion emits a QuestionRequestMsg for the current
+// question and starts a 5-minute timeout. Returns a tea.Cmd that
+// produces both the question and the timeout (use tea.Batch).
+func (m *AppState) askNextDiscussQuestion() tea.Cmd {
+	if m.currentDiscussIndex >= len(m.discussQuestions) {
+		// All questions answered — finalize and advance
+		return m.finalizeDiscussAndAdvance()
+	}
+	q := m.discussQuestions[m.currentDiscussIndex]
+	header := fmt.Sprintf("Discuss Q%d/%d", m.currentDiscussIndex+1, m.discussQuestionCount)
+
+	// Stop any existing timeout
+	if m.discussAnswerTimeout != nil {
+		m.discussAnswerTimeout.Stop()
+	}
+	// Start 5-minute timeout
+	m.discussAnswerTimeout = time.NewTimer(5 * time.Minute)
+
+	return tea.Batch(
+		func() tea.Msg {
+			return QuestionRequestMsg{
+				Question:    q,
+				Header:      header,
+				Options:     []string{},
+				AllowCustom: true,
+				ResponseCh:  m.dispatcher.QuestionResponseCh(),
+			}
+		},
+		func() tea.Msg {
+			<-m.discussAnswerTimeout.C
+			return DiscussAnswerTimeoutMsg{QuestionIndex: m.currentDiscussIndex}
+		},
+	)
+}
+
+// finalizeDiscussAndAdvance calls engine.FinalizeDiscuss, then advances to Plan.
+func (m *AppState) finalizeDiscussAndAdvance() tea.Cmd {
+	if m.workflowEngine != nil {
+		if err := m.workflowEngine.FinalizeDiscuss(); err != nil {
+			slog.Warn("FinalizeDiscuss failed", "err", err)
+		}
+	}
+	m.resetDiscussQA()
+	m.currentPhase = types.PhasePlan
+	return RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
+}
+
+// skipDiscussAndAdvance calls engine.SkipDiscuss, then advances to Plan.
+func (m *AppState) skipDiscussAndAdvance() tea.Cmd {
+	if m.workflowEngine != nil {
+		if err := m.workflowEngine.SkipDiscuss(); err != nil {
+			slog.Warn("SkipDiscuss failed", "err", err)
+		}
+	}
+	return m.finalizeDiscussAndAdvance()
 }
 
 func (m *AppState) Init() tea.Cmd {
@@ -1002,6 +1074,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, questionListenerCmd(m.dispatcher)
 
+	case DiscussAnswerTimeoutMsg:
+		// 5-minute timeout — skip remaining questions and advance
+		if m.pendingDiscussAnswers == nil {
+			return m, nil // Not in discuss Q&A; ignore
+		}
+		m.currentOperation = fmt.Sprintf("Discuss timeout on Q%d", m.currentDiscussIndex+1)
+		return m, m.skipDiscussAndAdvance()
+
 	case PlanReadyMsg:
 		// Plan phase completed with valid tasks — update the plan screen.
 		if len(msg.Tasks) > 0 && m.planModel == nil {
@@ -1057,22 +1137,44 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
 
 		case types.PhaseDiscuss:
-			// Extract questions from the discuss phase result
-			m.discussQuestions = make([]string, 0, len(msg.Messages))
-			for _, msg2 := range msg.Messages {
-				if msg2.Role == "assistant" {
-					m.discussQuestions = append(m.discussQuestions, msg2.Content)
-				}
-			}
-			if msg.NeedsAnswers {
-				// Show discuss screen and wait for user interaction
-				m.currentPhase = types.PhaseDiscuss
-				m.screen = ScreenREPL // Use REPL for Q&A interaction
+			// D-01 fix: wire the Discuss Q&A flow.
+			//
+			// Extract the parsed questions from the engine's discuss state
+			// (the engine already populated e.discussState.Questions in runDiscuss).
+			if m.workflowEngine == nil {
+				m.currentOperation = "Discuss phase: no engine"
+				m.workflowRunning = false
 				return m, nil
 			}
-			// No questions — auto-advance to Plan
-			m.currentPhase = types.PhasePlan
-			return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
+			engineState := m.workflowEngine.DiscussState()
+			questions := engineState.Questions
+
+			// For backward compat, also fall back to scanning Messages for
+			// assistant content (matches the old code path).
+			if len(questions) == 0 {
+				for _, msg2 := range msg.Messages {
+					if msg2.Role == "assistant" {
+						questions = append(questions, msg2.Content)
+					}
+				}
+			}
+
+			m.discussQuestions = questions
+			m.discussQuestionCount = len(questions)
+
+			if !msg.NeedsAnswers || len(questions) == 0 {
+				// No questions — auto-advance to Plan (unchanged behavior)
+				m.currentPhase = types.PhasePlan
+				return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
+			}
+
+			// Initialize Q&A state and ask the first question
+			m.pendingDiscussAnswers = make(map[int]string)
+			m.currentDiscussIndex = 0
+			m.currentPhase = types.PhaseDiscuss
+			m.screen = ScreenREPL
+
+			return m, m.askNextDiscussQuestion()
 
 		case types.PhasePlan:
 			if len(msg.Tasks) > 0 && m.planModel == nil {

@@ -16,7 +16,6 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/ledger"
@@ -55,7 +54,7 @@ type CommandContext struct {
 	Ledger         *ledger.Ledger
 	Rollback       *rollback.Rollback
 	AutoDream      *autodream.Consolidator
-	WorkflowEngine *workflow.Engine
+	WorkflowEngine workflowEngineInterface
 }
 
 // CommandRegistry holds a map of registered command handlers and their
