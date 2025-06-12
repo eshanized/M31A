@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
+	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
@@ -18,6 +20,11 @@ type Manager struct {
 	baseDir         string // path to ~/.m31a/sessions
 	sessionIDBytes  int    // number of random bytes for session IDs (default 4 = 8 hex chars)
 	maxRecentModels int    // max recent models to track (default 10)
+
+	// Session list cache (2-second TTL to avoid repeated filesystem walks)
+	sessionCache     []SessionInfo
+	sessionCacheTime time.Time
+	cacheMu          sync.RWMutex
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -165,6 +172,12 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 		return nil, fmt.Errorf("cannot create planning directory: %w", err)
 	}
 
+	// Invalidate list cache
+	m.cacheMu.Lock()
+	m.sessionCache = nil
+	m.sessionCacheTime = time.Time{}
+	m.cacheMu.Unlock()
+
 	return session, nil
 }
 
@@ -206,6 +219,16 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 // ListSessions returns all session directories sorted by last-modified descending.
 // Session directories with missing or corrupt session.json are marked Corrupted=true.
 func (m *Manager) ListSessions() ([]SessionInfo, error) {
+	// Check cache first (2-second TTL)
+	m.cacheMu.RLock()
+	if time.Since(m.sessionCacheTime) < 2*time.Second && m.sessionCache != nil {
+		result := make([]SessionInfo, len(m.sessionCache))
+		copy(result, m.sessionCache)
+		m.cacheMu.RUnlock()
+		return result, nil
+	}
+	m.cacheMu.RUnlock()
+
 	entries, err := os.ReadDir(m.baseDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -267,12 +290,26 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 		return sessions[i].LastModified.After(sessions[j].LastModified)
 	})
 
+	// Populate cache
+	m.cacheMu.Lock()
+	m.sessionCache = make([]SessionInfo, len(sessions))
+	copy(m.sessionCache, sessions)
+	m.sessionCacheTime = time.Now()
+	m.cacheMu.Unlock()
+
 	return sessions, nil
 }
 
 // DeleteSession removes the session directory and all its contents.
 func (m *Manager) DeleteSession(id string) error {
-	return os.RemoveAll(m.basePathFor(id))
+	err := os.RemoveAll(m.basePathFor(id))
+	if err == nil {
+		m.cacheMu.Lock()
+		m.sessionCache = nil
+		m.sessionCacheTime = time.Time{}
+		m.cacheMu.Unlock()
+	}
+	return err
 }
 
 // ArchiveSession moves the session directory into baseDir/archived/id.
@@ -281,7 +318,14 @@ func (m *Manager) ArchiveSession(id string) error {
 	if err := m.ensureDir(archiveDir); err != nil {
 		return fmt.Errorf("cannot create archive directory: %w", err)
 	}
-	return os.Rename(m.basePathFor(id), filepath.Join(archiveDir, id))
+	err := os.Rename(m.basePathFor(id), filepath.Join(archiveDir, id))
+	if err == nil {
+		m.cacheMu.Lock()
+		m.sessionCache = nil
+		m.sessionCacheTime = time.Time{}
+		m.cacheMu.Unlock()
+	}
+	return err
 }
 
 // ForkSession creates a child session from an existing parent session,
