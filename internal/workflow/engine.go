@@ -243,6 +243,14 @@ func (e *Engine) SubmitDiscussAnswer(index int, answer string) error {
 	return nil
 }
 
+// DiscussState returns a copy of the current discuss state. The TUI
+// uses this to read the parsed questions after the discuss phase
+// returns. The returned struct is a value copy so mutations by the
+// TUI do not affect the engine's internal state.
+func (e *Engine) DiscussState() DiscussState {
+	return e.discussState
+}
+
 // SkipDiscuss fills default (empty) answers and saves.
 func (e *Engine) SkipDiscuss() error {
 	if e.discussState.Questions == nil {
