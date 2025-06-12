@@ -7,6 +7,10 @@ import (
 	"github.com/pkoukk/tiktoken-go"
 )
 
+// NOTE: tiktoken-go is unmaintained since 2024. New tokenizers (e.g. o200k_base
+// for GPT-4o) may not be recognized, causing silent fallback to rune counting.
+// Monitor for a maintained fork or official replacement.
+
 // DefaultWarningThreshold is the default context usage ratio that triggers
 // the context warning banner (80%).
 const DefaultWarningThreshold = 0.80
