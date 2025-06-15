@@ -1105,7 +1105,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeModel != nil {
 				modelID = m.activeModel.ID
 			}
-			pm := NewPlanModel(msg.Tasks, t, modelID, m.activeProvider, 0, msg.CostEstimate)
+			pm := NewPlanModel(msg.Tasks, t, modelID, m.activeProvider, 0, msg.CostEstimate, m.width, m.height)
 			m.planModel = pm
 		}
 		m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
@@ -1199,7 +1199,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					modelID = m.activeModel.ID
 				}
 				providerName := m.activeProvider
-				pm := NewPlanModel(msg.Tasks, t, modelID, providerName, 0, "")
+				pm := NewPlanModel(msg.Tasks, t, modelID, providerName, 0, "", m.width, m.height)
 				m.planModel = pm
 			}
 			// Auto-advance to Execute
@@ -1208,7 +1208,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case types.PhaseExecute:
 			t := m.themeManager.Current()
-			m.executeModel = NewExecuteModel(msg.Tasks, t)
+			m.executeModel = NewExecuteModel(msg.Tasks, t, m.width, m.height)
 			m.screen = ScreenExecute
 			// Transition to Verify phase
 			m.currentPhase = types.PhaseVerify
@@ -1217,7 +1217,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case types.PhaseVerify:
 			t := m.themeManager.Current()
 			results := make(map[int]workflow.VerificationResult)
-			m.verifyModel = NewVerifyModel(msg.Tasks, results, t)
+			m.verifyModel = NewVerifyModel(msg.Tasks, results, t, m.width, m.height)
 			m.screen = ScreenVerify
 			// Transition to Ship phase
 			m.currentPhase = types.PhaseShip
@@ -1245,7 +1245,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				summary.TaskFailed = failed
 				summary.TaskSkipped = skipped
 			}
-			m.shipModel = NewShipModel(summary, t)
+			m.shipModel = NewShipModel(summary, t, m.width, m.height)
 			m.screen = ScreenShip
 			m.workflowRunning = false
 			return m, nil
@@ -1342,7 +1342,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle diff screen messages at the app level
 	switch msg := msg.(type) {
 	case DiffScreenMsg:
-		m.diffModel = NewDiffModel(m.themeManager.Current())
+		m.diffModel = NewDiffModel(m.themeManager.Current(), m.width, m.height)
 		m.screen = ScreenDiff
 		_, cmd := m.diffModel.Update(msg)
 		return m, cmd

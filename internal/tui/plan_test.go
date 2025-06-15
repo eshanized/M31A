@@ -16,7 +16,7 @@ func TestPlanModel_New(t *testing.T) {
 	}
 	th := theme.Dark()
 
-	m := NewPlanModel(tasks, th, "openrouter/model-a", "openrouter", 0.05, "2m")
+	m := NewPlanModel(tasks, th, "openrouter/model-a", "openrouter", 0.05, "2m", 0, 0)
 
 	if m == nil {
 		t.Fatal("expected non-nil PlanModel")
@@ -36,7 +36,7 @@ func TestPlanModel_UpdateWindowSize(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -54,7 +54,7 @@ func TestPlanModel_UpdateNavigation(t *testing.T) {
 		{ID: 2, Description: "Task 2", Status: types.StatusPending},
 		{ID: 3, Description: "Task 3", Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	// Navigate down
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -85,7 +85,7 @@ func TestPlanModel_UpdateNavigationBounds(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Only task", Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	// Should not go below 0
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -104,7 +104,7 @@ func TestPlanModel_UpdateKeyEvents(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	// Test accept key
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -113,14 +113,14 @@ func TestPlanModel_UpdateKeyEvents(t *testing.T) {
 	}
 
 	// Test retry key
-	m2 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m2 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if appMsg == nil || appMsg.Screen != ScreenREPL {
 		t.Error("expected ScreenREPL on 'r' key")
 	}
 
 	// Test diff toggle
-	m3 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m3 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 	m3.showDiff = false
 	_, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	if !m3.showDiff {
@@ -131,7 +131,7 @@ func TestPlanModel_UpdateKeyEvents(t *testing.T) {
 	}
 
 	// Test graph toggle
-	m4 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m4 := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 	_, _ = m4.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if !m4.showGraph {
 		t.Error("expected showGraph to be toggled on")
@@ -145,7 +145,7 @@ func TestPlanModel_UpdateCtrlC(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	// Ctrl+C should not panic and should not emit screen change
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -159,7 +159,7 @@ func TestPlanModel_ViewNonEmpty(t *testing.T) {
 		{ID: 1, Description: "Create main.go", Status: types.StatusPending, Files: []string{"main.go"}},
 		{ID: 2, Description: "Add tests", Dependencies: []int{1}, Status: types.StatusDone, Files: []string{"main_test.go"}},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "openrouter/model-a", "openrouter", 0.05, "2m")
+	m := NewPlanModel(tasks, theme.Dark(), "openrouter/model-a", "openrouter", 0.05, "2m", 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -179,7 +179,7 @@ func TestPlanModel_ViewNonEmpty(t *testing.T) {
 }
 
 func TestPlanModel_ViewLoading(t *testing.T) {
-	m := NewPlanModel(nil, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(nil, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 
 	view := m.View()
 	if !strings.Contains(view, "Loading") {
@@ -192,7 +192,7 @@ func TestPlanModel_RenderDependencyGraph(t *testing.T) {
 		{ID: 1, Description: "Base task", Status: types.StatusPending},
 		{ID: 2, Description: "Dependent task", Dependencies: []int{1}, Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 	m.width = 80
 	m.height = 24
 	m.showGraph = true
@@ -208,7 +208,7 @@ func TestPlanModel_RenderDiff(t *testing.T) {
 		{ID: 1, Description: "Modify file", Action: "Modify", Files: []string{"main.go"}, Status: types.StatusPending},
 		{ID: 2, Description: "New file", Action: "Create", Files: []string{"util.go"}, Status: types.StatusPending},
 	}
-	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m")
+	m := NewPlanModel(tasks, theme.Dark(), "model-a", "openrouter", 0.01, "1m", 0, 0)
 	m.width = 80
 	m.height = 24
 	m.showDiff = true

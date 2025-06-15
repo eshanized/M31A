@@ -29,11 +29,15 @@ type ShipModel struct {
 	height  int
 }
 
-// NewShipModel creates a Ship screen model.
-func NewShipModel(summary ShipSummary, t theme.Theme) *ShipModel {
+// NewShipModel creates a Ship screen model. width/height are required
+// non-zero dimensions so the screen renders immediately on creation
+// without waiting for a separate WindowSizeMsg (D-03 fix).
+func NewShipModel(summary ShipSummary, t theme.Theme, width, height int) *ShipModel {
 	return &ShipModel{
 		theme:   t,
 		summary: summary,
+		width:   width,
+		height:  height,
 	}
 }
 

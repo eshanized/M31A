@@ -48,11 +48,15 @@ type DiffModel struct {
 	title     string
 }
 
-// NewDiffModel creates a new DiffModel with the given theme.
-func NewDiffModel(th theme.Theme) DiffModel {
+// NewDiffModel creates a new DiffModel with the given theme. width/height
+// are required non-zero dimensions so the diff renders immediately on
+// creation without waiting for a separate WindowSizeMsg (D-03 fix).
+func NewDiffModel(th theme.Theme, width, height int) DiffModel {
 	return DiffModel{
-		lines: []DiffLine{},
-		theme: th,
+		lines:  []DiffLine{},
+		theme:  th,
+		width:  width,
+		height: height,
 	}
 }
 

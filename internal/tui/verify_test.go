@@ -21,7 +21,7 @@ func TestVerifyModel_New(t *testing.T) {
 	}
 	th := theme.Dark()
 
-	m := NewVerifyModel(tasks, results, th)
+	m := NewVerifyModel(tasks, results, th, 0, 0)
 
 	if m == nil {
 		t.Fatal("expected non-nil VerifyModel")
@@ -38,7 +38,7 @@ func TestVerifyModel_UpdateWindowSize(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusDone},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
 
@@ -56,7 +56,7 @@ func TestVerifyModel_UpdateNavigation(t *testing.T) {
 		{ID: 2, Description: "Task 2", Status: types.StatusPending},
 		{ID: 3, Description: "Task 3", Status: types.StatusDone},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 
 	// Navigate down
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -87,7 +87,7 @@ func TestVerifyModel_UpdateNavigationBounds(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Only task", Status: types.StatusDone},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 
 	// Should not go below 0
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -107,7 +107,7 @@ func TestVerifyModel_UpdateSkip(t *testing.T) {
 		{ID: 1, Description: "Task 1", Status: types.StatusPending},
 		{ID: 2, Description: "Task 2", Status: types.StatusPending},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 	m.selected = 1
 
 	// Skip selected task
@@ -122,7 +122,7 @@ func TestVerifyModel_UpdateAllDoneTransitions(t *testing.T) {
 		{ID: 1, Description: "Task 1", Status: types.StatusDone},
 		{ID: 2, Description: "Task 2", Status: types.StatusDone},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 
 	// When all tasks are done, pressing any key should transition to Ship
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -135,7 +135,7 @@ func TestVerifyModel_UpdateCtrlC(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusPending},
 	}
-	m := NewVerifyModel(tasks, nil, theme.Dark())
+	m := NewVerifyModel(tasks, nil, theme.Dark(), 0, 0)
 
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if appMsg != nil {
@@ -152,7 +152,7 @@ func TestVerifyModel_ViewNonEmpty(t *testing.T) {
 		1: {TaskID: 1, FilesExist: true, SyntaxOK: true, TestsOK: true},
 		2: {TaskID: 2, FilesExist: false, SyntaxOK: false, TestsOK: false, Errors: []string{"not run"}},
 	}
-	m := NewVerifyModel(tasks, results, theme.Dark())
+	m := NewVerifyModel(tasks, results, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -169,7 +169,7 @@ func TestVerifyModel_ViewNonEmpty(t *testing.T) {
 }
 
 func TestVerifyModel_ViewLoading(t *testing.T) {
-	m := NewVerifyModel(nil, nil, theme.Dark())
+	m := NewVerifyModel(nil, nil, theme.Dark(), 0, 0)
 
 	view := m.View()
 	if !strings.Contains(view, "Loading") {
@@ -184,7 +184,7 @@ func TestVerifyModel_ViewWithResults(t *testing.T) {
 	results := map[int]workflow.VerificationResult{
 		1: {TaskID: 1, FilesExist: true, SyntaxOK: true, TestsOK: true},
 	}
-	m := NewVerifyModel(tasks, results, theme.Dark())
+	m := NewVerifyModel(tasks, results, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -207,7 +207,7 @@ func TestVerifyModel_ViewWithFailures(t *testing.T) {
 	results := map[int]workflow.VerificationResult{
 		1: {TaskID: 1, FilesExist: false, SyntaxOK: false, TestsOK: false, Errors: []string{"error"}},
 	}
-	m := NewVerifyModel(tasks, results, theme.Dark())
+	m := NewVerifyModel(tasks, results, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -230,7 +230,7 @@ func TestVerifyModel_ViewUnrecoverable(t *testing.T) {
 	results := map[int]workflow.VerificationResult{
 		1: {TaskID: 1, FilesExist: false, SyntaxOK: false, TestsOK: false, Errors: []string{"fatal error"}},
 	}
-	m := NewVerifyModel(tasks, results, theme.Dark())
+	m := NewVerifyModel(tasks, results, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 

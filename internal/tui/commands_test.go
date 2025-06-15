@@ -1752,7 +1752,7 @@ func TestDiffCommand_NoGit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDiffModel_ParseDiff(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	diffText := sampleDiff()
 	lines := m.parseDiff(diffText)
 
@@ -1792,7 +1792,7 @@ func TestDiffModel_ParseDiff(t *testing.T) {
 }
 
 func TestDiffModel_Scroll(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	m.diff = sampleDiff()
 	m.lines = m.parseDiff(sampleDiff())
 
@@ -1838,7 +1838,7 @@ func TestDiffModel_Scroll(t *testing.T) {
 }
 
 func TestDiffModel_EscReturnsCloseMsg(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	m.diff = sampleDiff()
 	m.lines = m.parseDiff(sampleDiff())
 
@@ -1854,7 +1854,7 @@ func TestDiffModel_EscReturnsCloseMsg(t *testing.T) {
 }
 
 func TestDiffModel_HomeEndKeys(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	m.diff = sampleDiff()
 	m.lines = m.parseDiff(sampleDiff())
 
@@ -1883,7 +1883,7 @@ func TestDiffModel_HomeEndKeys(t *testing.T) {
 }
 
 func TestDiffModel_EmptyDiff(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	view := m.View()
 	if !strings.Contains(view, "No diff to display") {
 		t.Errorf("expected placeholder message, got: %s", view)
@@ -1891,7 +1891,7 @@ func TestDiffModel_EmptyDiff(t *testing.T) {
 }
 
 func TestDiffModel_DiffScreenMsg(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	diffText := sampleDiff()
 
 	// Send DiffScreenMsg
@@ -1913,7 +1913,7 @@ func TestDiffModel_DiffScreenMsg(t *testing.T) {
 }
 
 func TestDiffModel_ViewContainsColoredContent(t *testing.T) {
-	m := NewDiffModel(theme.Dark())
+	m := NewDiffModel(theme.Dark(), 0, 0)
 	m.diff = sampleDiff()
 	m.lines = m.parseDiff(sampleDiff())
 	m.width = 120

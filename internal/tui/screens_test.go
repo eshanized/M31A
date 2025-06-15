@@ -32,7 +32,7 @@ func testTasks() []types.Task {
 // ---------------------------------------------------------------------------
 
 func TestPlan_RenderView(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -46,7 +46,7 @@ func TestPlan_RenderView(t *testing.T) {
 }
 
 func TestPlan_TaskListDisplay(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -60,7 +60,7 @@ func TestPlan_TaskListDisplay(t *testing.T) {
 }
 
 func TestPlan_CostTimePanel(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -74,7 +74,7 @@ func TestPlan_CostTimePanel(t *testing.T) {
 }
 
 func TestPlan_AcceptAction(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -88,7 +88,7 @@ func TestPlan_AcceptAction(t *testing.T) {
 }
 
 func TestPlan_RetryAction(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -102,7 +102,7 @@ func TestPlan_RetryAction(t *testing.T) {
 }
 
 func TestPlan_DiffPreviewToggle(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -125,7 +125,7 @@ func TestPlan_DiffPreviewToggle(t *testing.T) {
 }
 
 func TestPlan_DependencyGraphToggle(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -141,7 +141,7 @@ func TestPlan_DependencyGraphToggle(t *testing.T) {
 }
 
 func TestPlan_SelectedTaskHighlight(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min")
+	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 	m.selected = 1
@@ -157,7 +157,7 @@ func TestPlan_SelectedTaskHighlight(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExecute_RenderView(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
+	m := NewExecuteModel(testTasks(), testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -171,7 +171,7 @@ func TestExecute_RenderView(t *testing.T) {
 }
 
 func TestExecute_ProgressBar(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
+	m := NewExecuteModel(testTasks(), testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -185,7 +185,7 @@ func TestExecute_ProgressBar(t *testing.T) {
 }
 
 func TestExecute_TaskStatusIndicators(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
+	m := NewExecuteModel(testTasks(), testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -197,7 +197,7 @@ func TestExecute_TaskStatusIndicators(t *testing.T) {
 
 func TestExecute_SkipAction(t *testing.T) {
 	tasks := testTasks()
-	m := NewExecuteModel(tasks, testTheme())
+	m := NewExecuteModel(tasks, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 	m.current = 1 // Select task 2 (pending)
@@ -209,7 +209,7 @@ func TestExecute_SkipAction(t *testing.T) {
 }
 
 func TestExecute_LiveToolCard(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
+	m := NewExecuteModel(testTasks(), testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 	m.toolCard = "$ go build ./...\n[OK] Completed in 2.34s"
@@ -224,7 +224,7 @@ func TestExecute_TransitionToVerify(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Action: "Create", Description: "test", Status: types.StatusDone},
 	}
-	m := NewExecuteModel(tasks, testTheme())
+	m := NewExecuteModel(tasks, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -246,7 +246,7 @@ func TestExecute_TransitionToVerify(t *testing.T) {
 }
 
 func TestExecute_SelectedTaskHighlight(t *testing.T) {
-	m := NewExecuteModel(testTasks(), testTheme())
+	m := NewExecuteModel(testTasks(), testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 	m.current = 1
@@ -262,7 +262,7 @@ func TestExecute_BlockedTaskDisplay(t *testing.T) {
 		{ID: 1, Action: "Create", Description: "task 1", Status: types.StatusPending, Dependencies: []int{}},
 		{ID: 2, Action: "Add", Description: "task 2", Status: types.StatusPending, Dependencies: []int{1}},
 	}
-	m := NewExecuteModel(tasks, testTheme())
+	m := NewExecuteModel(tasks, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -277,7 +277,7 @@ func TestExecute_BlockedTaskDisplay(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestVerify_RenderView(t *testing.T) {
-	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme())
+	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -296,7 +296,7 @@ func TestVerify_PassFailChecklist(t *testing.T) {
 		2: {TaskID: 2, FilesExist: true, SyntaxOK: false, TestsOK: false, Errors: []string{"build failed"}},
 	}
 
-	m := NewVerifyModel(testTasks(), results, testTheme())
+	m := NewVerifyModel(testTasks(), results, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -315,7 +315,7 @@ func TestVerify_SelfHealAction(t *testing.T) {
 	}
 	tasks := []types.Task{{ID: 1, Action: "Create", Description: "test", Status: types.StatusDone, Files: []string{"a.go"}}}
 
-	m := NewVerifyModel(tasks, results, testTheme())
+	m := NewVerifyModel(tasks, results, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -326,7 +326,7 @@ func TestVerify_SelfHealAction(t *testing.T) {
 }
 
 func TestVerify_SkipAction(t *testing.T) {
-	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme())
+	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 	m.selected = 1
@@ -345,7 +345,7 @@ func TestVerify_BisectResultDisplay(t *testing.T) {
 		{ID: 3, Action: "Test", Description: "broken task", Status: types.StatusUnrecoverable},
 	}
 
-	m := NewVerifyModel(tasks, results, testTheme())
+	m := NewVerifyModel(tasks, results, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -359,7 +359,7 @@ func TestVerify_UnrecoverableBadge(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Action: "Test", Description: "failed task", Status: types.StatusUnrecoverable},
 	}
-	m := NewVerifyModel(tasks, map[int]workflow.VerificationResult{}, testTheme())
+	m := NewVerifyModel(tasks, map[int]workflow.VerificationResult{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -373,7 +373,7 @@ func TestVerify_AutoTransitionToShip(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Action: "Create", Description: "test", Status: types.StatusDone},
 	}
-	m := NewVerifyModel(tasks, map[int]workflow.VerificationResult{}, testTheme())
+	m := NewVerifyModel(tasks, map[int]workflow.VerificationResult{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -395,7 +395,7 @@ func TestVerify_AutoTransitionToShip(t *testing.T) {
 }
 
 func TestVerify_SelectedTaskHighlight(t *testing.T) {
-	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme())
+	m := NewVerifyModel(testTasks(), map[int]workflow.VerificationResult{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 	m.selected = 1
@@ -416,7 +416,7 @@ func TestShip_RenderView(t *testing.T) {
 		Duration:  "12m 34s",
 		TaskDone:  6,
 		TaskTotal: 8,
-	}, testTheme())
+	}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -437,7 +437,7 @@ func TestShip_SummaryDisplay(t *testing.T) {
 		TaskTotal:   8,
 		TaskFailed:  1,
 		TaskSkipped: 1,
-	}, testTheme())
+	}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -456,7 +456,7 @@ func TestShip_CommitLog(t *testing.T) {
 			{ShortHash: "a1b2c34", Message: "feat(task 1): Create go.mod"},
 			{ShortHash: "b2c3d45", Message: "feat(task 2): Add main.go"},
 		},
-	}, testTheme())
+	}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -470,7 +470,7 @@ func TestShip_CommitLog(t *testing.T) {
 }
 
 func TestShip_NewSessionAction(t *testing.T) {
-	m := NewShipModel(ShipSummary{}, testTheme())
+	m := NewShipModel(ShipSummary{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -484,7 +484,7 @@ func TestShip_NewSessionAction(t *testing.T) {
 }
 
 func TestShip_ReturnToREPLAction(t *testing.T) {
-	m := NewShipModel(ShipSummary{}, testTheme())
+	m := NewShipModel(ShipSummary{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -498,7 +498,7 @@ func TestShip_ReturnToREPLAction(t *testing.T) {
 }
 
 func TestShip_OpenInBrowser(t *testing.T) {
-	m := NewShipModel(ShipSummary{}, testTheme())
+	m := NewShipModel(ShipSummary{}, testTheme(), 0, 0)
 	m.width = 80
 	m.height = 40
 

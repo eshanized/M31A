@@ -25,8 +25,10 @@ type PlanModel struct {
 	showGraph bool
 }
 
-// NewPlanModel creates a Plan screen model.
-func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerName string, estCost float64, estTime string) *PlanModel {
+// NewPlanModel creates a Plan screen model. width/height are required
+// non-zero dimensions so the plan renders immediately on creation
+// without waiting for a separate WindowSizeMsg (D-03 fix).
+func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerName string, estCost float64, estTime string, width, height int) *PlanModel {
 	return &PlanModel{
 		theme:    t,
 		tasks:    tasks,
@@ -34,6 +36,8 @@ func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerNam
 		provider: providerName,
 		estCost:  estCost,
 		estTime:  estTime,
+		width:    width,
+		height:   height,
 	}
 }
 

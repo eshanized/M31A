@@ -16,7 +16,7 @@ func TestExecuteModel_New(t *testing.T) {
 	}
 	th := theme.Dark()
 
-	m := NewExecuteModel(tasks, th)
+	m := NewExecuteModel(tasks, th, 0, 0)
 
 	if m == nil {
 		t.Fatal("expected non-nil ExecuteModel")
@@ -33,7 +33,7 @@ func TestExecuteModel_UpdateWindowSize(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusRunning},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -51,7 +51,7 @@ func TestExecuteModel_UpdateNavigation(t *testing.T) {
 		{ID: 2, Description: "Task 2", Status: types.StatusPending},
 		{ID: 3, Description: "Task 3", Status: types.StatusPending},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
 	// Navigate down
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -82,7 +82,7 @@ func TestExecuteModel_UpdateNavigationBounds(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Only task", Status: types.StatusRunning},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
 	// Should not go below 0
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -102,7 +102,7 @@ func TestExecuteModel_UpdateSkip(t *testing.T) {
 		{ID: 1, Description: "Task 1", Status: types.StatusRunning},
 		{ID: 2, Description: "Task 2", Status: types.StatusPending},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 	m.current = 1
 
 	// Skip current task
@@ -117,7 +117,7 @@ func TestExecuteModel_UpdateAllDoneTransitions(t *testing.T) {
 		{ID: 1, Description: "Task 1", Status: types.StatusDone},
 		{ID: 2, Description: "Task 2", Status: types.StatusDone},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
 	// When all tasks are done, pressing any key should transition to Verify
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -130,7 +130,7 @@ func TestExecuteModel_UpdateCtrlC(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusRunning},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if appMsg != nil {
@@ -144,7 +144,7 @@ func TestExecuteModel_ViewNonEmpty(t *testing.T) {
 		{ID: 2, Description: "Run tests", Status: types.StatusPending, Dependencies: []int{1}},
 		{ID: 3, Description: "Deploy", Status: types.StatusDone},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -164,7 +164,7 @@ func TestExecuteModel_ViewNonEmpty(t *testing.T) {
 }
 
 func TestExecuteModel_ViewLoading(t *testing.T) {
-	m := NewExecuteModel(nil, theme.Dark())
+	m := NewExecuteModel(nil, theme.Dark(), 0, 0)
 
 	view := m.View()
 	if !strings.Contains(view, "Loading") {
@@ -176,7 +176,7 @@ func TestExecuteModel_ViewWithToolCard(t *testing.T) {
 	tasks := []types.Task{
 		{ID: 1, Description: "Task 1", Status: types.StatusRunning},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 	m.toolCard = "Bash: go build ./..."
@@ -193,7 +193,7 @@ func TestExecuteModel_ViewSkippedAndFailed(t *testing.T) {
 		{ID: 2, Description: "Skipped task", Status: types.StatusSkipped},
 		{ID: 3, Description: "Failed task", Status: types.StatusFailed},
 	}
-	m := NewExecuteModel(tasks, theme.Dark())
+	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 

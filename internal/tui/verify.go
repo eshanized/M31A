@@ -21,12 +21,16 @@ type VerifyModel struct {
 	height   int
 }
 
-// NewVerifyModel creates a Verify screen model.
-func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationResult, t theme.Theme) *VerifyModel {
+// NewVerifyModel creates a Verify screen model. width/height are
+// required non-zero dimensions so the screen renders immediately
+// on creation without waiting for a separate WindowSizeMsg (D-03 fix).
+func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationResult, t theme.Theme, width, height int) *VerifyModel {
 	return &VerifyModel{
 		theme:   t,
 		tasks:   tasks,
 		results: results,
+		width:   width,
+		height:  height,
 	}
 }
 

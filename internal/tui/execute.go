@@ -20,11 +20,15 @@ type ExecuteModel struct {
 	toolCard string
 }
 
-// NewExecuteModel creates an Execute screen model.
-func NewExecuteModel(tasks []types.Task, t theme.Theme) *ExecuteModel {
+// NewExecuteModel creates an Execute screen model. width/height are
+// required non-zero dimensions so the screen renders immediately
+// on creation without waiting for a separate WindowSizeMsg (D-03 fix).
+func NewExecuteModel(tasks []types.Task, t theme.Theme, width, height int) *ExecuteModel {
 	return &ExecuteModel{
-		theme: t,
-		tasks: tasks,
+		theme:  t,
+		tasks:  tasks,
+		width:  width,
+		height: height,
 	}
 }
 

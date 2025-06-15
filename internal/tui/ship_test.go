@@ -24,7 +24,7 @@ func TestShipModel_New(t *testing.T) {
 	}
 	th := theme.Dark()
 
-	m := NewShipModel(summary, th)
+	m := NewShipModel(summary, th, 0, 0)
 
 	if m == nil {
 		t.Fatal("expected non-nil ShipModel")
@@ -47,7 +47,7 @@ func TestShipModel_UpdateWindowSize(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "5m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 
@@ -66,7 +66,7 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -76,7 +76,7 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 	}
 
 	// Test uppercase N
-	m2 := NewShipModel(summary, theme.Dark())
+	m2 := NewShipModel(summary, theme.Dark(), 0, 0)
 	m2.width = 80
 	m2.height = 24
 	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
@@ -92,7 +92,7 @@ func TestShipModel_UpdateREPL(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -102,7 +102,7 @@ func TestShipModel_UpdateREPL(t *testing.T) {
 	}
 
 	// Test uppercase R
-	m2 := NewShipModel(summary, theme.Dark())
+	m2 := NewShipModel(summary, theme.Dark(), 0, 0)
 	m2.width = 80
 	m2.height = 24
 	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
@@ -118,7 +118,7 @@ func TestShipModel_UpdateOpenBrowser(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -136,7 +136,7 @@ func TestShipModel_UpdateCtrlC(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if appMsg != nil {
@@ -157,7 +157,7 @@ func TestShipModel_ViewNonEmpty(t *testing.T) {
 		Duration:  "15m30s",
 		SessionID: "sess-001",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -184,7 +184,7 @@ func TestShipModel_ViewLoading(t *testing.T) {
 		SessionID: "sess-001",
 		Duration:  "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 
 	view := m.View()
 	if !strings.Contains(view, "Loading") {
@@ -203,7 +203,7 @@ func TestShipModel_ViewCommits(t *testing.T) {
 		Duration:  "2m",
 		SessionID: "sess-001",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -227,7 +227,7 @@ func TestShipModel_ViewNoCommits(t *testing.T) {
 		Duration:  "1m",
 		SessionID: "sess-001",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -244,7 +244,7 @@ func TestShipModel_UpdateEscape(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
@@ -262,7 +262,7 @@ func TestShipModel_UpdateUnknownKey(t *testing.T) {
 		SessionID:   "sess-001",
 		Duration:    "1m",
 	}
-	m := NewShipModel(summary, theme.Dark())
+	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
 	m.height = 24
 
