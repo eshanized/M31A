@@ -1317,4 +1317,140 @@ func TestApp_PhaseResultMsg_DiscussNoEngine_RecordsError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// D-02/D-03/D-05 fix tests (14-02): screen wiring & model dimensions
+// ---------------------------------------------------------------------------
+
+// newTestAppForScreens creates an AppState with a mock workflow engine
+// pre-installed, useful for screen-wiring tests that need RunPhaseCmd to
+// return non-nil without panicking on a nil engine.
+func newTestAppForScreens(t *testing.T) *AppState {
+	t.Helper()
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.workflowEngine = &mockWorkflowEngine{}
+	app.workflowGoal = "build a REST API"
+	app.width = 120
+	app.height = 40
+	return app
+}
+
+func TestApp_PhaseResultMsg_Plan_ReachesScreenPlan(t *testing.T) {
+	m := newTestAppForScreens(t)
+
+	tasks := []types.Task{
+		{ID: 1, Action: "create", Description: "Create main.go"},
+		{ID: 2, Action: "test", Description: "Add tests"},
+	}
+	msg := PhaseResultMsg{
+		Phase:   types.PhasePlan,
+		Success: true,
+		Tasks:   tasks,
+	}
+	_, _ = m.Update(msg)
+
+	if m.screen != ScreenPlan {
+		t.Errorf("expected screen=ScreenPlan, got %d", m.screen)
+	}
+	if m.planModel == nil {
+		t.Fatal("expected planModel to be created")
+	}
+	if m.planModel.width == 0 || m.planModel.height == 0 {
+		t.Errorf("expected non-zero planModel dimensions, got %dx%d",
+			m.planModel.width, m.planModel.height)
+	}
+}
+
+func TestApp_PlanAccept_RunsExecutePhase(t *testing.T) {
+	m := newTestAppForScreens(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+
+	// First, populate the plan
+	_, _ = m.Update(PhaseResultMsg{
+		Phase: types.PhasePlan, Success: true,
+		Tasks: []types.Task{{ID: 1, Action: "create"}},
+	})
+	if m.screen != ScreenPlan {
+		t.Fatalf("expected screen=ScreenPlan after Plan, got %d", m.screen)
+	}
+
+	// Reset the emitter counter to isolate the AppMsg dispatch
+	prev := mockEng.emitterSetCount
+
+	// Simulate PlanModel.Update emitting AppMsg on accept ('a' key)
+	_, cmd := m.Update(AppMsg{Screen: ScreenExecute})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd to run Execute phase")
+	}
+	// RunPhaseCmd synchronously sets the msg emitter (the goroutine that
+	// actually calls eng.RunPhase is async), so we use the same eager-signal
+	// pattern as the D-01 tests to verify the engine was wired.
+	if mockEng.emitterSetCount <= prev {
+		t.Error("expected SetMsgEmitter to be called eagerly on the engine (signals RunPhaseCmd ran)")
+	}
+	if m.currentPhase != types.PhaseExecute {
+		t.Errorf("expected currentPhase=PhaseExecute, got %s", m.currentPhase)
+	}
+}
+
+func TestApp_NewPlanModel_NonZeroSize(t *testing.T) {
+	m := newTestAppForScreens(t)
+	tasks := []types.Task{{ID: 1, Action: "create"}}
+
+	pm := NewPlanModel(tasks, m.themeManager.Current(), "model-x", "openrouter",
+		0, "", m.width, m.height)
+
+	if pm.width != 120 {
+		t.Errorf("expected width=120, got %d", pm.width)
+	}
+	if pm.height != 40 {
+		t.Errorf("expected height=40, got %d", pm.height)
+	}
+}
+
+func TestApp_PhaseResultMsg_Execute_StaysOnScreen(t *testing.T) {
+	m := newTestAppForScreens(t)
+
+	_, _ = m.Update(PhaseResultMsg{
+		Phase: types.PhaseExecute, Success: true,
+		Tasks: []types.Task{{ID: 1, Status: types.StatusDone}},
+	})
+
+	// Should NOT auto-advance — stay on the Execute screen
+	if m.currentPhase != types.PhaseExecute {
+		t.Errorf("expected currentPhase=PhaseExecute, got %s", m.currentPhase)
+	}
+	if m.screen != ScreenExecute {
+		t.Errorf("expected screen=ScreenExecute, got %d", m.screen)
+	}
+	if m.executeModel == nil {
+		t.Fatal("expected executeModel to be created")
+	}
+}
+
+func TestApp_ExecuteModel_AllDone_TransitionsToVerify(t *testing.T) {
+	m := newTestAppForScreens(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+
+	// Set up the execute screen
+	_, _ = m.Update(PhaseResultMsg{Phase: types.PhaseExecute, Success: true,
+		Tasks: []types.Task{{ID: 1, Status: types.StatusDone}}})
+	if m.screen != ScreenExecute {
+		t.Fatalf("expected screen=ScreenExecute, got %d", m.screen)
+	}
+
+	// Reset the emitter counter to isolate the AppMsg dispatch
+	prev := mockEng.emitterSetCount
+
+	// Simulate ExecuteModel.Update emitting AppMsg on allDone
+	_, cmd := m.Update(AppMsg{Screen: ScreenVerify})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd to run Verify phase")
+	}
+	// RunPhaseCmd synchronously sets the msg emitter — same eager-signal
+	// pattern as the D-01 tests.
+	if mockEng.emitterSetCount <= prev {
+		t.Error("expected SetMsgEmitter to be called eagerly on the engine (signals RunPhaseCmd ran)")
+	}
+}
+
 
