@@ -12,6 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 func TestNewApp_NoKey_CreatesFirstRun(t *testing.T) {
@@ -1065,6 +1066,254 @@ func TestApp_AppMsg_FirstRunScreen(t *testing.T) {
 
 	if updated.screen != ScreenFirstRun {
 		t.Errorf("Expected ScreenFirstRun, got %v", updated.screen)
+	}
+}
+
+// --- Discuss Q&A flow (D-01 fix) ---
+
+// mockWorkflowEngine captures calls to RunPhase/SubmitDiscussAnswer/etc.
+// for assertion in tests. It satisfies the workflowEngineInterface in app.go
+// so tests can inject it via app.workflowEngine.
+type mockWorkflowEngine struct {
+	submittedAnswers map[int]string
+	runPhaseCalls    []struct {
+		Phase types.WorkflowPhase
+		Goal  string
+	}
+	finalizeCalls   int
+	skipCalls       int
+	emitterSetCount int
+	discussState    workflow.DiscussState
+	sessionID       string
+}
+
+func (m *mockWorkflowEngine) DiscussState() workflow.DiscussState {
+	return m.discussState
+}
+func (m *mockWorkflowEngine) SubmitDiscussAnswer(idx int, ans string) error {
+	if m.submittedAnswers == nil {
+		m.submittedAnswers = make(map[int]string)
+	}
+	m.submittedAnswers[idx] = ans
+	return nil
+}
+func (m *mockWorkflowEngine) FinalizeDiscuss() error {
+	m.finalizeCalls++
+	return nil
+}
+func (m *mockWorkflowEngine) SkipDiscuss() error {
+	m.skipCalls++
+	return nil
+}
+func (m *mockWorkflowEngine) RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*workflow.PhaseResult, error) {
+	m.runPhaseCalls = append(m.runPhaseCalls, struct {
+		Phase types.WorkflowPhase
+		Goal  string
+	}{phase, goal})
+	return &workflow.PhaseResult{Phase: phase, Success: true}, nil
+}
+func (m *mockWorkflowEngine) SetMsgEmitter(_ workflow.MsgEmitter) { m.emitterSetCount++ }
+func (m *mockWorkflowEngine) SessionID() string                   { return m.sessionID }
+func (m *mockWorkflowEngine) SetSessionID(id string)              { m.sessionID = id }
+
+// newTestAppForDiscuss creates an AppState with a mock workflow engine
+// pre-installed. Used by the D-01 Discuss Q&A flow tests.
+func newTestAppForDiscuss(t *testing.T) *AppState {
+	t.Helper()
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.workflowEngine = &mockWorkflowEngine{}
+	app.workflowGoal = "build a REST API"
+	return app
+}
+
+func TestApp_PhaseResultMsg_DiscussNeedsAnswers_EmitsQuestion(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	mockEng.discussState = workflow.DiscussState{
+		Questions: []string{"What language?", "Which framework?"},
+	}
+
+	msg := PhaseResultMsg{
+		Phase:        types.PhaseDiscuss,
+		Success:      true,
+		NeedsAnswers: true,
+	}
+	m.Update(msg)
+
+	if m.pendingDiscussAnswers == nil {
+		t.Fatal("expected pendingDiscussAnswers to be initialized")
+	}
+	if m.currentDiscussIndex != 0 {
+		t.Errorf("expected currentDiscussIndex=0, got %d", m.currentDiscussIndex)
+	}
+	if m.discussQuestionCount != 2 {
+		t.Errorf("expected 2 questions, got %d", m.discussQuestionCount)
+	}
+	if m.screen != ScreenREPL {
+		t.Errorf("expected screen=ScreenREPL, got %v", m.screen)
+	}
+	if m.currentPhase != types.PhaseDiscuss {
+		t.Errorf("expected currentPhase=PhaseDiscuss, got %s", m.currentPhase)
+	}
+}
+
+func TestApp_QuestionResponseMsg_Discuss_RoutesToEngine(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	mockEng.discussState = workflow.DiscussState{
+		Questions: []string{"Q1", "Q2"},
+	}
+
+	// Trigger discuss start
+	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
+
+	// First answer — should route to engine and ask next question
+	_, cmd := m.Update(QuestionResponseMsg{Answer: "Go"})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd to ask next question")
+	}
+	if mockEng.submittedAnswers[0] != "Go" {
+		t.Errorf("expected answer 0='Go', got %q", mockEng.submittedAnswers[0])
+	}
+	if m.currentDiscussIndex != 1 {
+		t.Errorf("expected currentDiscussIndex=1, got %d", m.currentDiscussIndex)
+	}
+	if m.pendingDiscussAnswers[0] != "Go" {
+		t.Errorf("expected pendingDiscussAnswers[0]='Go', got %q", m.pendingDiscussAnswers[0])
+	}
+
+	// Second answer — should trigger finalize and advance
+	_, cmd = m.Update(QuestionResponseMsg{Answer: "Gin"})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd to finalize and advance")
+	}
+	if mockEng.finalizeCalls != 1 {
+		t.Errorf("expected FinalizeDiscuss to be called once, got %d", mockEng.finalizeCalls)
+	}
+	if mockEng.submittedAnswers[1] != "Gin" {
+		t.Errorf("expected answer 1='Gin', got %q", mockEng.submittedAnswers[1])
+	}
+	if m.currentPhase != types.PhasePlan {
+		t.Errorf("expected currentPhase=PhasePlan after finalize, got %s", m.currentPhase)
+	}
+	if m.pendingDiscussAnswers != nil {
+		t.Errorf("expected pendingDiscussAnswers to be cleared after finalize, got %v", m.pendingDiscussAnswers)
+	}
+}
+
+func TestApp_DiscussTimeout_CallsSkipDiscuss(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	mockEng.discussState = workflow.DiscussState{
+		Questions: []string{"Q1", "Q2"},
+	}
+
+	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
+	// Simulate timeout on first question
+	_, cmd := m.Update(DiscussAnswerTimeoutMsg{QuestionIndex: 0})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd on timeout")
+	}
+	if mockEng.skipCalls != 1 {
+		t.Errorf("expected SkipDiscuss called once, got %d", mockEng.skipCalls)
+	}
+	if mockEng.finalizeCalls != 1 {
+		t.Errorf("expected FinalizeDiscuss called once (via skip path), got %d", mockEng.finalizeCalls)
+	}
+	if m.currentPhase != types.PhasePlan {
+		t.Errorf("expected currentPhase=PhasePlan after skip, got %s", m.currentPhase)
+	}
+}
+
+func TestApp_DiscussTimeout_IgnoredWhenNotInQA(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	mockEng.discussState = workflow.DiscussState{}
+
+	// pendingDiscussAnswers is nil — timeout should be ignored
+	_, cmd := m.Update(DiscussAnswerTimeoutMsg{QuestionIndex: 0})
+	if cmd != nil {
+		t.Fatal("expected nil cmd when not in discuss Q&A")
+	}
+	if mockEng.skipCalls != 0 {
+		t.Errorf("expected SkipDiscuss not to be called, got %d", mockEng.skipCalls)
+	}
+}
+
+func TestApp_DiscussNoAnswers_AutoAdvancesToPlan(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	// No questions in state and NeedsAnswers: false → auto-advance
+	mockEng.discussState = workflow.DiscussState{}
+
+	_, cmd := m.Update(PhaseResultMsg{
+		Phase:        types.PhaseDiscuss,
+		Success:      true,
+		NeedsAnswers: false,
+	})
+	// After auto-advance, currentPhase should be Plan
+	if m.currentPhase != types.PhasePlan {
+		t.Errorf("expected currentPhase=Plan, got %s", m.currentPhase)
+	}
+	// Auto-advance must return a non-nil cmd to drive the next phase
+	if cmd == nil {
+		t.Error("expected non-nil cmd to drive Plan phase")
+	}
+	// RunPhaseCmd sets the msg emitter on the engine eagerly (synchronous),
+	// so we can verify the engine was wired without running the cmd.
+	if mockEng.emitterSetCount == 0 {
+		t.Error("expected SetMsgEmitter to be called eagerly on the engine")
+	}
+}
+
+func TestApp_ResetDiscussQA_ClearsState(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	mockEng := m.workflowEngine.(*mockWorkflowEngine)
+	mockEng.discussState = workflow.DiscussState{
+		Questions: []string{"Q1", "Q2"},
+	}
+
+	// Trigger discuss start to populate state and timer
+	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
+
+	if m.pendingDiscussAnswers == nil {
+		t.Fatal("expected state to be populated")
+	}
+	if m.discussAnswerTimeout == nil {
+		t.Fatal("expected timeout to be set")
+	}
+
+	m.resetDiscussQA()
+
+	if m.pendingDiscussAnswers != nil {
+		t.Errorf("expected pendingDiscussAnswers to be nil after reset, got %v", m.pendingDiscussAnswers)
+	}
+	if m.currentDiscussIndex != 0 {
+		t.Errorf("expected currentDiscussIndex=0 after reset, got %d", m.currentDiscussIndex)
+	}
+	if m.discussQuestionCount != 0 {
+		t.Errorf("expected discussQuestionCount=0 after reset, got %d", m.discussQuestionCount)
+	}
+}
+
+func TestApp_PhaseResultMsg_DiscussNoEngine_RecordsError(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+	m.workflowEngine = nil // explicitly nil
+
+	_, cmd := m.Update(PhaseResultMsg{
+		Phase:        types.PhaseDiscuss,
+		Success:      true,
+		NeedsAnswers: true,
+	})
+
+	if cmd != nil {
+		t.Errorf("expected nil cmd when engine is nil, got %v", cmd)
+	}
+	if m.workflowRunning {
+		t.Error("expected workflowRunning to be false")
+	}
+	if m.currentOperation == "" {
+		t.Error("expected currentOperation to be set with error message")
 	}
 }
 
