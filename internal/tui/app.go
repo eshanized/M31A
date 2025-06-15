@@ -97,7 +97,14 @@ type AppState struct {
 	discussQuestionCount  int            // total questions in this discuss round
 	discussAnswerTimeout  *time.Timer    // 5-minute per-question timer
 	autoDream          *autodream.Consolidator
-	msgChan            chan tea.Msg // channel for workflow-emitted messages
+	// Workflow message bus (D-04 fix: per-phase lifecycle).
+	// msgChan  : current phase's message channel (workflow → TUI)
+	// msgDone  : closed by the runner goroutine when the phase completes
+	// phaseGen : incremented on every RunPhaseCmd; drainer captures it
+	//            at spawn time and stops if it changes (a new phase started)
+	msgChan            chan tea.Msg
+	msgDone            chan struct{}
+	phaseGen           int
 	workflowCtx        context.Context
 	workflowCancel     context.CancelFunc
 	git                *git.Git
@@ -274,6 +281,14 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	}
 
 	return app
+}
+
+// currentPhaseGen returns the current phaseGen value for snapshot use by
+// the workflow drainer. The drainer captures this at spawn time and
+// returns nil if the value changes (a new phase started). Returns 0
+// when AppState is uninitialized.
+func (m *AppState) currentPhaseGen() int {
+	return m.phaseGen
 }
 
 func (m *AppState) initWorkflowEngine() {
