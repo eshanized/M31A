@@ -1453,4 +1453,125 @@ func TestApp_ExecuteModel_AllDone_TransitionsToVerify(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// D-04 fix tests (14-03): msgChan drainer synchronization
+// ---------------------------------------------------------------------------
+
+// TestApp_RunPhaseCmd_OldDrainerStopsOnNewPhase verifies that starting a new
+// phase via RunPhaseCmd increments phaseGen, closes the previous phase's
+// done channel, and that a drainer spawned with the old gen stops
+// immediately (returns nil) when invoked under the new gen.
+func TestApp_RunPhaseCmd_OldDrainerStopsOnNewPhase(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+
+	// Start phase 1
+	RunPhaseCmd(m, types.PhaseInitialize, "goal")
+	gen1 := m.phaseGen
+	oldDoneCh := m.msgDone
+	if gen1 == 0 {
+		t.Fatal("expected phaseGen to be incremented")
+	}
+
+	// Start phase 2 before phase 1 completes
+	RunPhaseCmd(m, types.PhaseDiscuss, "goal")
+	gen2 := m.phaseGen
+	if gen2 != gen1+1 {
+		t.Errorf("expected phaseGen to increment by 1, got %d -> %d", gen1, gen2)
+	}
+
+	// m.msgDone should now be a NEW channel (not the old one)
+	if m.msgDone == nil {
+		t.Fatal("expected msgDone to be non-nil after second RunPhaseCmd")
+	}
+
+	// The OLD done channel should be closed (this is what the drainer checks)
+	select {
+	case <-oldDoneCh:
+		// Good — the old done was closed when phase 2 started
+	default:
+		t.Error("expected old msgDone to be closed after RunPhaseCmd for new phase")
+	}
+
+	// A drainer spawned with gen1 must return nil immediately under gen2
+	// (the gen check at the top of workflowMsgDrainer stops it).
+	cmd := workflowMsgDrainer(m, gen1, oldDoneCh)
+	result := cmd()
+	if result != nil {
+		t.Errorf("expected gen1 drainer to return nil under gen2, got %T", result)
+	}
+}
+
+// TestApp_RunPhaseCmd_MessageDrainSynchronized verifies that messages
+// emitted via the engine's channelEmitter are picked up by the drainer
+// in the correct order. The drainer is invoked with the current gen
+// and the current done channel, mimicking what Update() does after
+// receiving a workflow message.
+func TestApp_RunPhaseCmd_MessageDrainSynchronized(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+
+	// Start a phase
+	RunPhaseCmd(m, types.PhaseInitialize, "goal")
+	gen := m.phaseGen
+	doneCh := m.msgDone
+	if m.msgChan == nil {
+		t.Fatal("expected msgChan to be non-nil after RunPhaseCmd")
+	}
+
+	// Emit a message via a channelEmitter bound to the same channel
+	em := &channelEmitter{ch: m.msgChan}
+	em.Emit(PlanReadyMsg{Tasks: []types.Task{{ID: 1}}, CostEstimate: "test"})
+
+	// Drainer should pick it up
+	cmd := workflowMsgDrainer(m, gen, doneCh)
+	result := cmd()
+	if result == nil {
+		t.Fatal("expected drainer to return a message, got nil")
+	}
+	if _, ok := result.(PlanReadyMsg); !ok {
+		t.Errorf("expected PlanReadyMsg, got %T", result)
+	}
+}
+
+// TestApp_RunPhaseCmd_DoneClosesOnRunnerCompletion simulates the runner
+// goroutine finishing a phase by closing the done channel. The drainer
+// should return nil on this condition (per the done-close branch).
+func TestApp_RunPhaseCmd_DoneClosesOnRunnerCompletion(t *testing.T) {
+	m := newTestAppForDiscuss(t)
+
+	// Start a phase and immediately close its done (simulating runner completion)
+	RunPhaseCmd(m, types.PhaseInitialize, "goal")
+	gen := m.phaseGen
+	doneCh := m.msgDone
+
+	// Simulate runner completion by closing the done channel
+	close(doneCh)
+
+	// Drainer should return nil because done is closed
+	cmd := workflowMsgDrainer(m, gen, doneCh)
+	result := cmd()
+	if result != nil {
+		t.Errorf("expected nil on done-closed, got %T", result)
+	}
+}
+
+// TestApp_SafeClose_HandlesDoubleClose verifies the safeClose helper:
+// returns true on first close, false on subsequent close attempts
+// (no panic), and false on nil channel.
+func TestApp_SafeClose_HandlesDoubleClose(t *testing.T) {
+	// First close returns true
+	ch := make(chan struct{})
+	if !safeClose(ch) {
+		t.Error("expected first close to return true")
+	}
+
+	// Second close returns false (no panic)
+	if safeClose(ch) {
+		t.Error("expected second close to return false (already closed)")
+	}
+
+	// nil channel
+	if safeClose(nil) {
+		t.Error("expected safeClose(nil) to return false")
+	}
+}
 
