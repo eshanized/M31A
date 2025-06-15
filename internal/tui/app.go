@@ -360,49 +360,82 @@ func (m *AppState) initWorkflowEngine() {
 // goroutine and emits a PhaseResultMsg on completion. It also sets up a
 // MsgEmitter on the engine so that TaskStartMsg and TaskUpdateMsg are emitted
 // during execution and PlanReadyMsg when the plan phase completes.
+//
+// D-04 fix: per-phase lifecycle synchronization. Each call:
+//   1. Cancels the previous phase's context
+//   2. Increments app.phaseGen so the old drainer sees the change and stops
+//   3. Closes the OLD app.msgDone (via safeClose) to signal the old drainer
+//   4. Creates a fresh msgCh + doneCh pair
+//   5. Captures the current phaseGen for the new drainer
+//   6. Sets the engine's MsgEmitter to use the new channel
+//
+// The runner goroutine uses `defer close(doneCh)` to signal the drainer
+// when the phase completes. The drainer selects on msgCh, done, and a
+// 100ms poll timer, and returns nil if app.phaseGen has changed.
 func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd {
-	// Cancel any previous phase's context to stop lingering goroutines
+	// 1. Cancel any previous phase's context to stop lingering goroutines
 	if app.workflowCancel != nil {
 		app.workflowCancel()
 	}
-	// Don't close the old msgChan — a lingering goroutine may still be
-	// writing to it. Replace it; the old drainer sees nil and stops.
-	app.msgChan = nil
 
+	// 2. Increment phase generation FIRST so any drainer from the
+	//    previous phase sees the change and stops on its next check.
+	app.phaseGen++
+
+	// 3. Close the OLD app.msgDone (defensive against double-close) to
+	//    signal the old drainer to stop. The old channel reference is
+	//    left in place until the drainer returns; we don't nil it out
+	//    because the drainer might still be reading from it.
+	if app.msgDone != nil {
+		safeClose(app.msgDone)
+	}
+
+	// 4. Create new per-phase channels
 	msgCh := make(chan tea.Msg, 256)
+	doneCh := make(chan struct{})
 	app.msgChan = msgCh
+	app.msgDone = doneCh
 
 	// Create a cancellable context for this phase
 	ctx, cancel := context.WithCancel(context.Background())
 	app.workflowCtx = ctx
 	app.workflowCancel = cancel
 
+	// 5. Capture the current phaseGen for the drainer. The drainer
+	//    checks this on every invocation and returns nil if it changes.
+	currentGen := app.phaseGen
+
 	eng := app.workflowEngine
 	eng.SetMsgEmitter(&channelEmitter{ch: msgCh})
 
-	// Phase runner: executes the phase, emits PlanReadyMsg if applicable, then closes the channel.
+	// Phase runner: executes the phase, emits PlanReadyMsg if applicable,
+	// then closes the done channel to signal the drainer.
 	runner := func() tea.Msg {
+		defer close(doneCh) // <-- signal drainer when phase completes
+
 		result, err := eng.RunPhase(ctx, phase, goal)
 		cancel() // Ensure cleanup
+
 		if err != nil {
-			close(msgCh)
 			return PhaseResultMsg{Phase: phase, Error: err.Error()}
 		}
 		if result == nil {
-			close(msgCh)
 			return PhaseResultMsg{Phase: phase, Error: "nil result"}
 		}
 
 		// Emit PlanReadyMsg when the plan phase completes successfully.
 		if phase == types.PhasePlan && result.Success && len(result.Tasks) > 0 {
-			msgCh <- PlanReadyMsg{
+			select {
+			case msgCh <- PlanReadyMsg{
 				Tasks:        result.Tasks,
 				CostEstimate: fmt.Sprintf("%d tasks", len(result.Tasks)),
 				TimeEstimate: "",
+			}:
+			case <-time.After(500 * time.Millisecond):
+				slog.Warn("dropped PlanReadyMsg: channel full")
 			}
 		}
 
-		close(msgCh)
 		return PhaseResultMsg{
 			Phase:               phase,
 			Tasks:               result.Tasks,
@@ -415,24 +448,64 @@ func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd 
 		}
 	}
 
-	// Return a batch: the runner executes the phase, the drainer reads emitted messages.
-	return tea.Batch(runner, workflowMsgDrainer(app))
+	// Return a batch: the runner executes the phase, the drainer reads
+	// emitted messages until done is closed or a new phase starts.
+	return tea.Batch(runner, workflowMsgDrainer(app, currentGen, doneCh))
 }
 
 // workflowMsgDrainer returns a tea.Cmd that reads one message from the
-// workflow message channel. After returning a message, the Update handler
-// should re-schedule the drainer to continue reading.
-func workflowMsgDrainer(app *AppState) tea.Cmd {
+// workflow message channel. Captures the phaseGen at spawn time; if
+// the gen changes (a new phase started), the drainer returns nil and
+// stops. Selects on msgCh, done, and a 100ms poll timer to ensure
+// forward progress even when no messages are pending.
+//
+// The Update handler should re-schedule the drainer with the CURRENT
+// app.phaseGen and app.msgDone to continue reading.
+func workflowMsgDrainer(app *AppState, gen int, done chan struct{}) tea.Cmd {
 	return func() tea.Msg {
-		if app.msgChan == nil {
+		// If the phase has been superseded, stop draining immediately.
+		if app.phaseGen != gen {
 			return nil
 		}
-		msg, ok := <-app.msgChan
-		if !ok {
-			app.msgChan = nil
+		// If the done channel is closed, the phase is finished.
+		select {
+		case <-done:
 			return nil
+		default:
 		}
-		return msg
+		// Try to receive a message, but don't block forever.
+		select {
+		case msg, ok := <-app.msgChan:
+			if !ok {
+				return nil
+			}
+			return msg
+		case <-done:
+			return nil
+		case <-time.After(100 * time.Millisecond):
+			// Re-check gen; if changed, stop. Otherwise re-schedule.
+			if app.phaseGen != gen {
+				return nil
+			}
+			return workflowMsgDrainer(app, gen, done)()
+		}
+	}
+}
+
+// safeClose closes ch if it's non-nil and not already closed. Returns
+// true if it actually performed the close, false otherwise. Used for
+// defensive double-close protection on the per-phase msgDone channel.
+func safeClose(ch chan struct{}) bool {
+	if ch == nil {
+		return false
+	}
+	select {
+	case <-ch:
+		// Already closed
+		return false
+	default:
+		close(ch)
+		return true
 	}
 }
 
@@ -1150,7 +1223,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.planModel = pm
 		}
 		m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
-		return m, workflowMsgDrainer(m)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
 
 	case workflow.TaskStartMsg:
 		// A task has begun execution — update the execute model.
@@ -1158,7 +1231,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.executeModel != nil {
 			m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
 		}
-		return m, workflowMsgDrainer(m)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
 
 	case workflow.TaskUpdateMsg:
 		// A task status changed — update the execute model.
@@ -1171,7 +1244,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusFailed)
 			}
 		}
-		return m, workflowMsgDrainer(m)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
 
 	case PhaseResultMsg:
 		if msg.Error != "" {
