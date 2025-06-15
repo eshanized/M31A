@@ -924,6 +924,32 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nextCmd
 
 	case AppMsg:
+		// Workflow phase routing: sub-models (Plan, Execute, Verify, Ship)
+		// emit AppMsg{Screen: ScreenExecute|Verify|Ship} to drive the next
+		// workflow phase. We dispatch to RunPhaseCmd instead of just
+		// changing m.screen so the engine actually runs the phase
+		// (D-02/D-05 fix).
+		switch msg.Screen {
+		case ScreenExecute:
+			if m.workflowEngine == nil {
+				return m, nil
+			}
+			m.currentPhase = types.PhaseExecute
+			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
+		case ScreenVerify:
+			if m.workflowEngine == nil {
+				return m, nil
+			}
+			m.currentPhase = types.PhaseVerify
+			return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
+		case ScreenShip:
+			if m.workflowEngine == nil {
+				return m, nil
+			}
+			m.currentPhase = types.PhaseShip
+			return m, RunPhaseCmd(m, types.PhaseShip, m.workflowGoal)
+		}
+
 		// Handle ModelSelected first — it may be set without a Screen field
 		if msg.ModelSelected != nil {
 			if m.registry != nil {
@@ -1202,26 +1228,36 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				pm := NewPlanModel(msg.Tasks, t, modelID, providerName, 0, "", m.width, m.height)
 				m.planModel = pm
 			}
-			// Auto-advance to Execute
+			if m.planModel != nil {
+				// Ensure latest window dimensions are reflected in the model
+				m.planModel.width = m.width
+				m.planModel.height = m.height
+				m.screen = ScreenPlan
+				m.currentPhase = types.PhasePlan
+				return m, nil // Stop auto-advance — wait for user 'A' press
+			}
+			// No tasks — skip ahead to Execute
 			m.currentPhase = types.PhaseExecute
 			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 
 		case types.PhaseExecute:
 			t := m.themeManager.Current()
 			m.executeModel = NewExecuteModel(msg.Tasks, t, m.width, m.height)
+			m.executeModel.width = m.width
+			m.executeModel.height = m.height
 			m.screen = ScreenExecute
-			// Transition to Verify phase
-			m.currentPhase = types.PhaseVerify
-			return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
+			m.currentPhase = types.PhaseExecute
+			return m, nil // Stop auto-advance to Verify — wait for AppMsg from execute
 
 		case types.PhaseVerify:
 			t := m.themeManager.Current()
 			results := make(map[int]workflow.VerificationResult)
 			m.verifyModel = NewVerifyModel(msg.Tasks, results, t, m.width, m.height)
+			m.verifyModel.width = m.width
+			m.verifyModel.height = m.height
 			m.screen = ScreenVerify
-			// Transition to Ship phase
-			m.currentPhase = types.PhaseShip
-			return m, RunPhaseCmd(m, types.PhaseShip, m.workflowGoal)
+			m.currentPhase = types.PhaseVerify
+			return m, nil // Stop auto-advance to Ship — wait for AppMsg from verify
 
 		case types.PhaseShip:
 			t := m.themeManager.Current()
