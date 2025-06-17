@@ -914,18 +914,25 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Intercept /workflow to start the full workflow chain
+		// Intercept /workflow to start the full workflow chain.
+		// The "resume" subcommand is a special case: it's handled by
+		// the command registry's handleWorkflow (which sets
+		// WorkflowResume: true) so we skip the prefix match below and
+		// let it fall through to the registry.
 		if strings.HasPrefix(cmd, "/workflow ") && m.workflowEngine != nil {
 			goal := strings.TrimPrefix(cmd, "/workflow ")
-			if goal == "" {
+			if goal == "resume" || strings.HasPrefix(goal, "resume ") {
+				// Fall through to the command registry for /workflow resume
+			} else if goal == "" {
 				m.currentOperation = "Usage: /workflow <your goal>"
 				return m, nil
+			} else {
+				m.workflowGoal = goal
+				m.workflowRunning = true
+				m.currentPhase = types.PhaseInitialize
+				m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
+				return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
 			}
-			m.workflowGoal = goal
-			m.workflowRunning = true
-			m.currentPhase = types.PhaseInitialize
-			m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
-			return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
 		}
 
 		// Try command registry for all other slash commands
@@ -953,6 +960,23 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		result, handled := m.cmdRegistry.Execute(cmd, ctx)
 		if handled {
 			m.currentOperation = result.Message
+
+			// /workflow resume — re-run the persisted phase (D-06).
+			// Populate the AppState from the loaded state and call
+			// RunPhaseCmd. The persistWorkflowState call from the
+			// PhaseResultMsg handler will then update session.json
+			// with the new transitions.
+			if result.WorkflowResume {
+				if m.workflowEngine == nil {
+					m.currentOperation = "Cannot resume workflow: no engine."
+					return m, nil
+				}
+				m.workflowGoal = result.ResumeGoal
+				m.currentPhase = result.ResumePhase
+				m.discussQuestions = result.ResumeQuestions
+				m.workflowRunning = true
+				return m, RunPhaseCmd(m, result.ResumePhase, result.ResumeGoal)
+			}
 
 			// Session switching: /fork, /prev, /next set SessionID to transition
 			if result.SessionID != nil && *result.SessionID != sessionID {

@@ -27,12 +27,20 @@ import (
 // success/failure status, a display message, and optional state transitions
 // (screen change, session ID, or config update).
 type CommandResult struct {
-	Success   bool
-	Message   string
-	Screen    *Screen
-	SessionID *string
-	Config    *config.Config
-	Cmd       func() tea.Msg // optional tea.Cmd to run after command
+	Success         bool
+	Message         string
+	Screen          *Screen
+	SessionID       *string
+	Config          *config.Config
+	Cmd             func() tea.Msg // optional tea.Cmd to run after command
+	// WorkflowResume triggers the TUI's SlashCommandMsg handler to re-run
+	// the workflow at the persisted phase (D-06). Set by the /workflow
+	// resume subcommand. The TUI reads ResumePhase/ResumeGoal/ResumeQuestions
+	// to populate the AppState before calling RunPhaseCmd.
+	WorkflowResume  bool
+	ResumePhase     types.WorkflowPhase
+	ResumeGoal      string
+	ResumeQuestions []string
 }
 
 // CommandHandler is a function that handles a slash command.
@@ -915,7 +923,51 @@ func handleTools(args []string, ctx CommandContext) CommandResult {
 }
 
 // handleWorkflow shows the current workflow phase, tasks, and progress.
+//
+// Subcommands:
+//
+//	/workflow          — show current workflow status
+//	/workflow resume   — restart the workflow at the persisted phase (D-06)
 func handleWorkflow(args []string, ctx CommandContext) CommandResult {
+	// /workflow resume — restart the workflow at the persisted phase.
+	// The TUI's SlashCommandMsg handler sees WorkflowResume=true and
+	// routes to RunPhaseCmd for the loaded phase.
+	if len(args) > 0 && args[0] == "resume" {
+		if ctx.SessionManager == nil {
+			return CommandResult{
+				Success: false,
+				Message: "No session manager available — cannot resume workflow.",
+			}
+		}
+		if ctx.SessionID == "" {
+			return CommandResult{
+				Success: false,
+				Message: "No active session. Start a workflow first.",
+			}
+		}
+		goal, phase, questions, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
+		if err != nil {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("Cannot load workflow state: %v", err),
+			}
+		}
+		if phase == types.PhaseIdle || phase == types.PhaseShip {
+			return CommandResult{
+				Success: false,
+				Message: "No workflow in progress. Use /workflow to start one.",
+			}
+		}
+		return CommandResult{
+			Success:         true,
+			Message:         fmt.Sprintf("Resuming workflow at phase: %s", phase),
+			WorkflowResume:  true,
+			ResumePhase:     phase,
+			ResumeGoal:      goal,
+			ResumeQuestions: questions,
+		}
+	}
+
 	if ctx.SessionManager == nil || ctx.SessionID == "" {
 		return CommandResult{Success: false, Message: "No active session. Start a workflow first."}
 	}
