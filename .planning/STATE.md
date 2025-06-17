@@ -2,25 +2,27 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 12 complete
-last_updated: "2026-06-01T00:38:39.691Z"
+status: Phase 14 — Plan 04 complete
+last_updated: "2026-06-02T05:00:00.000Z"
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 6
-  total_plans: 42
-  completed_plans: 34
-  percent: 67
+  total_plans: 48
+  completed_plans: 39
+  percent: 61
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 12 complete — UX & Editor Experience Adaptations
+Phase 14 — TUI ↔ Core Wiring Fixes (Plan 14-04 complete, 14-05/06 pending)
 
 ## Status
 
-Phase 12 complete — Model variants/favorites, shell mode, prompt history, diff viewer, @filepath auto-include
+Phase 14 — fixing 11 wiring issues identified by the TUI ↔ Core
+wiring audit (`rush/tui_core_wiring_report.md`): 1 critical, 3 high, 4 medium,
+3 low. Plans 14-01, 14-02, 14-03, and 14-04 are complete; 14-05 and 14-06 remain.
 
 ## Completed Phases
 
@@ -35,6 +37,25 @@ Phase 12 complete — Model variants/favorites, shell mode, prompt history, diff
 - Phase 10 — Provider & Message Layer Adaptations
 - Phase 11 — Session & Config Adaptations
 - Phase 12 — UX & Editor Experience Adaptations
+
+## In Progress
+
+- Phase 14 — TUI ↔ Core Wiring Fixes (4/6 plans complete)
+  - 14-01: ✅ Discuss Phase Q&A Wiring
+  - 14-02: ✅ Workflow Screen Wiring
+  - 14-03: ✅ msgChan Drainer Synchronization
+  - 14-04: ✅ Workflow State Persistence (D-06)
+  - 14-05: ⏳ Discuss Streaming + Low Severity (D-07/D-08/D-09/D-10)
+  - 14-06: ⏳ AppState Refactor (D-11, drafted, optional/stretch)
+
+## Phase 14 Plans
+
+- 14-01: Discuss Phase Q&A Wiring (Wave 1, CRITICAL — D-01)
+- 14-02: Workflow Screen Wiring (Wave 1, HIGH — D-02/D-03/D-05)
+- 14-03: msgChan Drainer Synchronization (Wave 1, HIGH — D-04)
+- 14-04: Workflow State Persistence (Wave 2, MEDIUM — D-06)
+- 14-05: Discuss Streaming + Low Severity (Wave 2, MEDIUM/LOW — D-07/D-08/D-09/D-10)
+- 14-06: AppState Refactor (Wave 3, MEDIUM — D-11, drafted, optional/stretch)
 
 ## Completed Plans (Phase 10)
 
@@ -57,6 +78,20 @@ Phase 12 complete — Model variants/favorites, shell mode, prompt history, diff
 - 12-05: Editor Context Auto-Include — @filepath syntax
 
 ## Key Decisions Made
+
+### Phase 14 Decisions (14-01 through 14-04)
+
+- **14-04 (D-06):** Workflow state (goal, phase, discuss questions) persists to `session.json` on every phase transition via `UpdateWorkflowState`. Resume is MANUAL (`/workflow resume` slash command) not AUTO — avoids surprising the user with mid-workflow jumps. AppState shows a 10-second resume toast on startup when a non-idle workflow is detected.
+- **14-04:** Toast uses existing `toastText`/`toastType`/`toastExpires` fields (not a `toasts` slice) and string `Type: "info"` (no `ToastInfo` constant). Follows convention from `cycleRecentModel` and `renderToast`.
+- **14-04:** `Session` struct gained `WorkflowGoal string` and `DiscussQuestions []string` fields (both `omitempty` for clean JSON). `DiscussQuestions` initialized to an empty slice (not nil) in `NewSession`.
+- **14-04:** `LoadWorkflowState` returns zero values (not error) for `ErrSessionCorrupted` (missing session) — matches the "session doesn't exist" handling contract.
+- **14-04:** `saveSessionAtomic` is a partial save (only `session.json`, not `messages.json`) — splits partial save for `UpdateWorkflowState` from full save in `SaveSession` to avoid clobbering in-flight message updates from the REPL.
+- **14-04:** `AppState` gained a `sessionID string` field set by `initWorkflowEngine` (the plan's code referenced `m.sessionID` throughout — field had to exist).
+- **14-04:** `/workflow resume` is intercepted in the command registry's `handleWorkflow` (not the `/workflow <goal>` prefix match in app.go). The prefix match was modified to skip when goal is `resume`.
+- **14-04:** PhaseShip case calls `UpdateWorkflowState` with empty values (post-Ship reset) after persisting the Ship phase, then clears in-memory `workflowGoal`/`currentPhase` — both persist AND in-memory reset.
+- **14-03 (D-04):** msgChan drainer pattern: `AppState` owns a `drainer` goroutine that reads `engine.msgChan` and dispatches `tea.Msg` via the program. All message-emitting goroutines go through the same channel, ensuring Bubble Tea's single-thread invariant.
+- **14-02 (D-02/D-03/D-05):** Workflow screens (Plan, Execute, Verify, Ship) wired to PhaseResultMsg transitions. Status indicators: `[x]` done, `[>]` running, `[ ]` queued, `[ ]` blocked.
+- **14-01 (D-01):** WorkflowEngine interface introduced in tui package for mock injection. Discuss phase Q&A flow uses tea.Batch for question + 5-minute timer emission per question.
 
 ### Phase 12 Decisions
 
@@ -105,3 +140,7 @@ Phase 12 complete — Model variants/favorites, shell mode, prompt history, diff
 ## Blockers
 
 None
+
+## Last Session
+
+- **2026-06-02** — Phase 14 Plan 14-04 (Workflow State Persistence) executed atomically. 5 tasks, 5 commits (`d1971f3`, `e95f599`, `5e4906e`, `940a123`, `c1f1f84`). All tests pass (`go test -count=1 -race ./...`). 14-05 next.
