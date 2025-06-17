@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,6 +215,51 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	session.MessageCount = len(session.Messages)
 
 	return &session, nil
+}
+
+// UpdateWorkflowState persists the workflow's current goal, phase,
+// and pending discuss questions to session.json. This is called
+// on every phase transition by the TUI.
+//
+// Returns an error if the session doesn't exist or the write fails.
+// The write is atomic (temp file + rename) so a crash mid-write
+// leaves the existing session.json intact.
+func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase, questions []string) error {
+	session, err := m.LoadSession(id)
+	if err != nil {
+		return fmt.Errorf("UpdateWorkflowState: load session: %w", err)
+	}
+	session.SetWorkflowState(goal, phase, questions)
+	return m.saveSessionAtomic(session)
+}
+
+// LoadWorkflowState reads just the workflow state fields from
+// session.json. Returns the persisted values, or zero values
+// (empty goal, PhaseIdle, empty questions) if the session
+// doesn't exist or the workflow state is unset.
+func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.WorkflowPhase, questions []string, err error) {
+	session, err := m.LoadSession(id)
+	if err != nil {
+		if errors.Is(err, m31errors.ErrSessionCorrupted) {
+			// Session doesn't exist yet — return zero values with no error
+			return "", types.PhaseIdle, nil, nil
+		}
+		return "", types.PhaseIdle, nil, err
+	}
+	g, p, q := session.WorkflowState()
+	return g, p, q, nil
+}
+
+// saveSessionAtomic writes the session metadata to session.json
+// atomically (temp file + rename). Used by UpdateWorkflowState;
+// also a building block for future session-modification operations.
+// Note: this does NOT update messages.json — use SaveSession for that.
+func (m *Manager) saveSessionAtomic(session *Session) error {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("cannot marshal session: %w", err)
+	}
+	return m.atomicWrite(m.sessionJSONPath(session.ID), data)
 }
 
 // ListSessions returns all session directories sorted by last-modified descending.
