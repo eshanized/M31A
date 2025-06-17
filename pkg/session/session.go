@@ -12,6 +12,11 @@ type Session struct {
 	Messages []types.Message     `json:"messages"`
 	Tasks    []types.Task        `json:"tasks"`
 	Project  *types.ProjectState `json:"project"`
+
+	// Workflow state (D-06 fix) — persisted to session.json so closing
+	// the app mid-workflow doesn't abandon progress.
+	WorkflowGoal     string   `json:"workflow_goal,omitempty"`
+	DiscussQuestions []string `json:"discuss_questions,omitempty"`
 }
 
 // NewSession creates a new Session with default values.
@@ -26,12 +31,29 @@ func NewSession(id, model, provider string) *Session {
 			MessageCount:  0,
 			WorkflowPhase: types.PhaseIdle,
 		},
-		Messages: make([]types.Message, 0),
-		Tasks:    make([]types.Task, 0),
+		Messages:         make([]types.Message, 0),
+		Tasks:            make([]types.Task, 0),
+		DiscussQuestions: make([]string, 0),
 	}
 }
 
 // SetPhase updates the workflow phase on the session.
 func (s *Session) SetPhase(phase types.WorkflowPhase) {
 	s.WorkflowPhase = phase
+}
+
+// SetWorkflowState records the workflow's current goal, phase, and
+// pending discuss questions. The TUI calls this on every phase
+// transition via Manager.UpdateWorkflowState.
+func (s *Session) SetWorkflowState(goal string, phase types.WorkflowPhase, questions []string) {
+	s.WorkflowGoal = goal
+	s.WorkflowPhase = phase
+	s.DiscussQuestions = questions
+}
+
+// WorkflowState returns the persisted workflow state. Zero values
+// for the goal and questions, and PhaseIdle for the phase, mean
+// no workflow is in progress.
+func (s *Session) WorkflowState() (goal string, phase types.WorkflowPhase, questions []string) {
+	return s.WorkflowGoal, s.WorkflowPhase, s.DiscussQuestions
 }
