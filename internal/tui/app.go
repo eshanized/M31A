@@ -91,6 +91,7 @@ type AppState struct {
 	workflowRunning    bool
 	currentPhase       types.WorkflowPhase
 	discussQuestions   []string
+	sessionID          string // session ID (set after initWorkflowEngine) — used for workflow state persistence
 	// Discuss Q&A flow (D-01 fix)
 	pendingDiscussAnswers map[int]string // index -> answer; nil when not in discuss Q&A
 	currentDiscussIndex   int            // next question to ask (0-based)
@@ -251,6 +252,12 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	app.initWorkflowEngine()
 
+	// D-06 fix: check for a persisted workflow state from a previous
+	// session. If the current session has a non-idle phase recorded,
+	// pre-populate the AppState so /workflow resume can continue from
+	// the saved point, and show a toast so the user is aware.
+	app.checkResumedWorkflowState()
+
 	// Initialize AutoDream consolidator with empty messages; will be
 	// synced whenever a user message is submitted.
 	app.autoDream = autodream.New(nil)
@@ -331,6 +338,7 @@ func (m *AppState) initWorkflowEngine() {
 
 	// Wire session ID to tool dispatcher (e.g. TodoWrite)
 	m.dispatcher.SetSessionID(s.ID)
+	m.sessionID = s.ID
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -354,6 +362,58 @@ func (m *AppState) initWorkflowEngine() {
 	}
 	eng.SetGit(g)
 	m.workflowEngine = eng
+}
+
+// persistWorkflowState writes the current workflow state (goal, phase,
+// pending discuss questions) to session.json. Failures are logged but
+// not returned — the workflow continues even if persistence fails (the
+// user can still finish the workflow in this session).
+//
+// Called on every phase transition so closing the app mid-workflow
+// preserves progress. After the Ship phase, the persisted state is
+// reset to idle so a future /workflow starts fresh.
+func (m *AppState) persistWorkflowState() {
+	if m.sessionManager == nil || m.sessionID == "" {
+		return
+	}
+	if err := m.sessionManager.UpdateWorkflowState(
+		m.sessionID, m.workflowGoal, m.currentPhase, m.discussQuestions,
+	); err != nil {
+		slog.Warn("persistWorkflowState failed", "err", err)
+	}
+}
+
+// checkResumedWorkflowState reads the persisted workflow state for the
+// current session. If a workflow was in progress (phase != idle, phase
+// != ship), pre-populates the AppState and shows a toast so the user
+// can run /workflow resume to continue. Called once during NewApp
+// after initWorkflowEngine has set m.sessionID.
+//
+// The toast uses the AppState's existing toast fields (toastText,
+// toastType, toastExpires) — not a dedicated ToastMsg queue — to match
+// the convention used elsewhere in the TUI.
+func (m *AppState) checkResumedWorkflowState() {
+	if m.sessionManager == nil || m.sessionID == "" {
+		return
+	}
+	goal, phase, questions, err := m.sessionManager.LoadWorkflowState(m.sessionID)
+	if err != nil {
+		// Persistence read failures are non-fatal; the workflow can
+		// still start fresh. Log at debug level.
+		slog.Debug("LoadWorkflowState failed", "err", err)
+		return
+	}
+	if phase == types.PhaseIdle || phase == types.PhaseShip {
+		// No workflow in progress — nothing to resume.
+		return
+	}
+	// Workflow was in progress — pre-populate state for /workflow resume
+	m.workflowGoal = goal
+	m.currentPhase = phase
+	m.discussQuestions = questions
+	m.toastText = fmt.Sprintf("Resumable workflow at %s. Use /workflow resume to continue.", phase)
+	m.toastType = "info"
+	m.toastExpires = time.Now().Add(10 * time.Second)
 }
 
 // RunPhaseCmd returns a tea.Cmd that executes the given workflow phase in a
@@ -1263,6 +1323,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case types.PhaseInitialize:
 			// Auto-advance to Discuss
 			m.currentPhase = types.PhaseDiscuss
+			m.persistWorkflowState()
 			return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
 
 		case types.PhaseDiscuss:
@@ -1294,6 +1355,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !msg.NeedsAnswers || len(questions) == 0 {
 				// No questions — auto-advance to Plan (unchanged behavior)
 				m.currentPhase = types.PhasePlan
+				m.persistWorkflowState()
 				return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 			}
 
@@ -1302,6 +1364,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentDiscussIndex = 0
 			m.currentPhase = types.PhaseDiscuss
 			m.screen = ScreenREPL
+			m.persistWorkflowState()
 
 			return m, m.askNextDiscussQuestion()
 
@@ -1322,10 +1385,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.planModel.height = m.height
 				m.screen = ScreenPlan
 				m.currentPhase = types.PhasePlan
+				m.persistWorkflowState()
 				return m, nil // Stop auto-advance — wait for user 'A' press
 			}
 			// No tasks — skip ahead to Execute
 			m.currentPhase = types.PhaseExecute
+			m.persistWorkflowState()
 			return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 
 		case types.PhaseExecute:
@@ -1335,6 +1400,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeModel.height = m.height
 			m.screen = ScreenExecute
 			m.currentPhase = types.PhaseExecute
+			m.persistWorkflowState()
 			return m, nil // Stop auto-advance to Verify — wait for AppMsg from execute
 
 		case types.PhaseVerify:
@@ -1345,6 +1411,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.verifyModel.height = m.height
 			m.screen = ScreenVerify
 			m.currentPhase = types.PhaseVerify
+			m.persistWorkflowState()
 			return m, nil // Stop auto-advance to Ship — wait for AppMsg from verify
 
 		case types.PhaseShip:
@@ -1372,6 +1439,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.shipModel = NewShipModel(summary, t, m.width, m.height)
 			m.screen = ScreenShip
 			m.workflowRunning = false
+			m.persistWorkflowState()
+			// After successful ship, reset the persisted workflow state to
+			// idle so a future /workflow starts fresh (and so the next
+			// startup doesn't show a stale resume toast).
+			if m.sessionManager != nil && m.sessionID != "" {
+				if err := m.sessionManager.UpdateWorkflowState(
+					m.sessionID, "", types.PhaseIdle, nil,
+				); err != nil {
+					slog.Warn("failed to reset workflow state after ship", "err", err)
+				}
+			}
+			m.workflowGoal = ""
+			m.currentPhase = types.PhaseIdle
 			return m, nil
 
 		default:
