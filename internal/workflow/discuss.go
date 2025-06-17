@@ -3,8 +3,10 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	m31types "github.com/eshanized/M31A/internal/types"
 )
@@ -16,8 +18,8 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 	// 1. Build context
 	messages := e.buildDiscussContext(goal)
 
-	// 2. Stream LLM
-	content, err := e.streamLLM(ctx, messages, false)
+	// 2. Stream LLM response with progressive token emission
+	iterator, err := e.streamLLMStreaming(ctx, messages, false)
 	if err != nil {
 		return &PhaseResult{
 			Phase:   m31types.PhaseDiscuss,
@@ -25,13 +27,46 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 			Error:   err.Error(),
 		}, err
 	}
+	defer iterator.Close()
 
-	// 3. Parse questions
-	questions := parseQuestions(content)
+	// 3. Iterate chunks, accumulate content, emit chunks to TUI
+	var content strings.Builder
+	for {
+		chunk, err := iterator.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return &PhaseResult{
+				Phase:   m31types.PhaseDiscuss,
+				Success: false,
+				Error:   err.Error(),
+			}, err
+		}
+		if chunk == nil {
+			continue
+		}
+		if chunk.Delta != "" {
+			content.WriteString(chunk.Delta)
+		}
+
+		// Emit the chunk to the TUI for progressive rendering
+		if e.msgEmitter != nil {
+			e.msgEmitter.Emit(m31types.StreamChunkMsg{
+				Chunk:  chunk,
+				Source: "discuss",
+			})
+		}
+	}
+
+	fullContent := content.String()
+
+	// 4. Parse questions
+	questions := parseQuestions(fullContent)
 
 	msg := m31types.Message{
 		Role:    "assistant",
-		Content: content,
+		Content: fullContent,
 	}
 
 	e.logger.Info("parsed questions", "count", len(questions))
@@ -42,10 +77,6 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 	}
 
 	// Return with questions — TUI handles Q&A collection, then calls SubmitDiscussAnswer/SkipDiscuss
-	// NOTE: NeedsAnswers is intentionally set to true here. This blocks the workflow engine
-	// from advancing to the next phase until the TUI collects user answers. This is by design
-	// and requires TUI coordination: the engine yields control back to the TUI, which displays
-	// the questions, gathers responses, and signals the engine to resume via FinalizeDiscuss().
 	result := &PhaseResult{
 		Phase:        m31types.PhaseDiscuss,
 		Success:      true,

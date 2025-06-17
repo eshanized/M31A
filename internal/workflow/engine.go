@@ -356,6 +356,23 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 	return e.consumeStream(iterator)
 }
 
+// streamLLMStreaming sends a chat request and returns the underlying
+// StreamIterator. The caller is responsible for iterating via Next()
+// and emitting each chunk to the TUI (typically via MsgEmitter).
+func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (*m31types.StreamIterator, error) {
+	req := provider.ChatRequest{
+		Model:            e.modelID,
+		Messages:         messages,
+		Stream:           false,
+		ReasoningEnabled: true,
+	}
+	if toolsEnabled {
+		req.Tools = e.buildToolDefinitions()
+	}
+
+	return e.provider.ChatCompletionStream(ctx, req)
+}
+
 // parseTasksFromJSON extracts tasks from LLM response, stripping markdown code blocks.
 func parseTasksFromJSON(content string) ([]m31types.Task, error) {
 	// Strip markdown code blocks

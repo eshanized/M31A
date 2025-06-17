@@ -766,3 +766,11 @@ func TestPermissionsAgentConfig(t *testing.T) {
 		t.Errorf("expected Tool=Bash Action=ask, got Tool=%q Action=%q", buildAgent.Rules[0].Tool, buildAgent.Rules[0].Action)
 	}
 }
+
+func TestDefaultConfig_SidebarWidthThresholdIs120(t *testing.T) {
+	t.Parallel()
+	c := DefaultConfig()
+	if c.UI.SidebarWidthThreshold != 120 {
+		t.Errorf("expected SidebarWidthThreshold=120, got %d", c.UI.SidebarWidthThreshold)
+	}
+}

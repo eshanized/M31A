@@ -36,6 +36,7 @@ type TickMsg struct {
 func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string, streamCh chan tea.Msg, streamDone chan struct{}) tea.Cmd {
 	go func() {
 		defer close(streamDone)
+		defer close(streamCh) // D-10: close data channel so consumers know no more messages are coming
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
 			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}

@@ -21,7 +21,11 @@ var ErrValidation = errors.New("config validation")
 // DefaultConfig returns a Config with zero-valued fields.
 // Missing config file causes Load to return DefaultConfig without error.
 func DefaultConfig() *Config {
-	return &Config{}
+	return &Config{
+		UI: UIConfig{
+			SidebarWidthThreshold: 120,
+		},
+	}
 }
 
 // Load reads a TOML config file from the given path, applies multi-layer
@@ -185,6 +189,9 @@ func mergeConfig(base, overlay *Config) {
 	}
 	if overlay.UI.LeaderTimeoutMs != 0 {
 		base.UI.LeaderTimeoutMs = overlay.UI.LeaderTimeoutMs
+	}
+	if overlay.UI.SidebarWidthThreshold != 0 {
+		base.UI.SidebarWidthThreshold = overlay.UI.SidebarWidthThreshold
 	}
 
 	// Permissions section

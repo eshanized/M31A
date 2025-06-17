@@ -1176,6 +1176,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case StreamChunkMsg:
+		if m.replModel != nil {
+			m.replModel.AppendStreamChunk(msg.Chunk)
+		}
+		return m, nil
+
 	case ErrorMsg:
 		m.currentOperation = fmt.Sprintf("Error: %v", msg.Err)
 		return m, nil
@@ -1530,8 +1536,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SidebarRefreshMsg:
 		if m.sidebarModel != nil {
 			m.sidebarModel.Update(msg)
-			// Auto-show sidebar on wide terminals now that status is loaded
-			if m.width > 120 && m.replModel != nil && !m.sidebarManuallyHidden {
+			threshold := 120
+			if m.config != nil && m.config.UI.SidebarWidthThreshold > 0 {
+				threshold = m.config.UI.SidebarWidthThreshold
+			}
+			if m.width > threshold && m.replModel != nil && !m.sidebarManuallyHidden {
 				m.sidebarModel.SetVisible(true)
 				m.replModel.SetSidebarWidth(sidebarWidth)
 			}
@@ -1555,9 +1564,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			m.replModel.SetTheme(t)
 		}
-		if m.modelSelector.registry != nil {
-			m.modelSelector.theme = t
-		}
+		m.modelSelector.SetTheme(t)
 		if m.sidebarModel != nil {
 			m.sidebarModel.SetTheme(t)
 		}

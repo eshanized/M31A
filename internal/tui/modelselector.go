@@ -525,3 +525,13 @@ func capabilityString(c types.CapFlags) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// SetRegistry updates the provider registry reference.
+func (m *ModelSelector) SetRegistry(registry *provider.Registry) {
+	m.registry = registry
+}
+
+// SetTheme updates the visual theme.
+func (m *ModelSelector) SetTheme(t theme.Theme) {
+	m.theme = t
+}

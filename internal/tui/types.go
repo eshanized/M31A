@@ -113,6 +113,11 @@ type DiscussAnswerTimeoutMsg struct {
 	QuestionIndex int
 }
 
+// StreamChunkMsg is emitted by workflow phases that stream LLM responses
+// (currently only the Discuss phase). The TUI renders each chunk in the
+// active screen via the REPL streaming infrastructure.
+type StreamChunkMsg = types.StreamChunkMsg
+
 // ThemeChangedMsg is emitted when the theme is switched at runtime.
 type ThemeChangedMsg struct {
 	Theme string // "dark" or "light"

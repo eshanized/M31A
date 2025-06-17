@@ -704,6 +704,16 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	return cmds, false
 }
 
+// AppendStreamChunk appends a streamed token from the Discuss phase
+// to the REPL's current streaming content buffer.
+func (m *ReplModel) AppendStreamChunk(chunk *types.StreamChunk) {
+	if chunk == nil || chunk.Delta == "" {
+		return
+	}
+	m.streaming = true
+	m.streamContent.WriteString(chunk.Delta)
+}
+
 func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	chunk := msg.Chunk
 	if chunk == nil {

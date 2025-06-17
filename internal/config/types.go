@@ -54,6 +54,8 @@ type UIConfig struct {
 	LeaderKey string `toml:"leader_key"`
 	// Leader key timeout duration in milliseconds. Default 1000.
 	LeaderTimeoutMs int `toml:"leader_timeout_ms"`
+	// Minimum terminal width before sidebar auto-shows. Default 120.
+	SidebarWidthThreshold int `toml:"sidebar_width_threshold"`
 }
 
 type PermissionsConfig struct {

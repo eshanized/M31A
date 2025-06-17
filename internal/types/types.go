@@ -159,6 +159,14 @@ type StreamIterator struct {
 	Close func() error
 }
 
+// StreamChunkMsg is emitted by workflow phases that stream LLM responses
+// (currently only the Discuss phase). The TUI renders each chunk in the
+// active screen via the REPL streaming infrastructure.
+type StreamChunkMsg struct {
+	Chunk  *StreamChunk
+	Source string // "discuss", "plan", "execute", etc.
+}
+
 type HealthStatus struct {
 	Status    string `json:"status"`
 	LatencyMs int64  `json:"latency_ms"`
