@@ -13,6 +13,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 func TestNewApp_NoKey_CreatesFirstRun(t *testing.T) {
@@ -1573,5 +1574,520 @@ func TestApp_SafeClose_HandlesDoubleClose(t *testing.T) {
 	if safeClose(nil) {
 		t.Error("expected safeClose(nil) to return false")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// D-06 fix tests (14-04): workflow state persistence
+// ---------------------------------------------------------------------------
+
+// TestApp_PhaseResultMsg_PersistsWorkflowState verifies that after a
+// successful PhaseResultMsg (PhaseInitialize), the workflow state
+// (goal + new currentPhase) is written to session.json via
+// sessionManager.UpdateWorkflowState. This is the core D-06 guarantee.
+func TestApp_PhaseResultMsg_PersistsWorkflowState(t *testing.T) {
+	// Use a temp dir for the session manager so we can verify disk writes
+	tmpDir := t.TempDir()
+
+	// Create a session manually so we have a real sessionID
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Create an AppState with a real sessionManager and sessionID
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	app.workflowEngine = &mockWorkflowEngine{sessionID: s.ID}
+	app.workflowGoal = "test goal"
+	app.workflowRunning = true
+
+	// Trigger the PhaseInitialize success — this should auto-advance
+	// to PhaseDiscuss and call persistWorkflowState.
+	app.Update(PhaseResultMsg{Phase: types.PhaseInitialize, Success: true})
+
+	if app.sessionManager == nil {
+		t.Fatal("expected sessionManager to be set")
+	}
+	if app.sessionID == "" {
+		t.Fatal("expected sessionID to be set")
+	}
+
+	// Verify the session.json on disk has the new state
+	goal, phase, _, err := app.sessionManager.LoadWorkflowState(app.sessionID)
+	if err != nil {
+		t.Fatalf("LoadWorkflowState failed: %v", err)
+	}
+	if goal != "test goal" {
+		t.Errorf("expected goal persisted, got %q", goal)
+	}
+	if phase != types.PhaseDiscuss {
+		t.Errorf("expected phase Discuss (auto-advance from Initialize), got %s", phase)
+	}
+}
+
+// TestApp_PhaseResultMsg_Plan_PersistsWorkflowState verifies that
+// the Plan phase transition also persists. (Plan sets m.currentPhase
+// in the branch that creates the planModel.)
+func TestApp_PhaseResultMsg_Plan_PersistsWorkflowState(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	app.workflowEngine = &mockWorkflowEngine{sessionID: s.ID}
+	app.workflowGoal = "build something"
+	app.width = 120
+	app.height = 40
+
+	tasks := []types.Task{
+		{ID: 1, Action: "create", Description: "Create main.go"},
+		{ID: 2, Action: "test", Description: "Add tests"},
+	}
+	app.Update(PhaseResultMsg{
+		Phase: types.PhasePlan, Success: true, Tasks: tasks,
+	})
+
+	goal, phase, _, err := app.sessionManager.LoadWorkflowState(app.sessionID)
+	if err != nil {
+		t.Fatalf("LoadWorkflowState failed: %v", err)
+	}
+	if goal != "build something" {
+		t.Errorf("expected goal persisted, got %q", goal)
+	}
+	if phase != types.PhasePlan {
+		t.Errorf("expected phase Plan, got %s", phase)
+	}
+}
+
+// TestApp_PhaseResultMsg_Ship_ResetsPersistedState verifies that the
+// Ship phase clears the persisted workflow state to idle after
+// success. This matches the D-06 contract: "After Ship, the
+// persisted state is reset to idle so a future /workflow starts
+// fresh."
+func TestApp_PhaseResultMsg_Ship_ResetsPersistedState(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	app.workflowEngine = &mockWorkflowEngine{sessionID: s.ID}
+	app.workflowGoal = "ship it"
+	app.width = 120
+	app.height = 40
+
+	// Pre-seed the persisted state to a non-idle phase
+	if err := sessMgr.UpdateWorkflowState(s.ID, "ship it", types.PhaseExecute, nil); err != nil {
+		t.Fatalf("seed UpdateWorkflowState failed: %v", err)
+	}
+
+	// Trigger Ship success
+	tasks := []types.Task{{ID: 1, Action: "ship", Status: types.StatusDone}}
+	app.Update(PhaseResultMsg{
+		Phase: types.PhaseShip, Success: true, Tasks: tasks,
+	})
+
+	// After Ship, persisted state should be reset to idle
+	goal, phase, _, err := app.sessionManager.LoadWorkflowState(app.sessionID)
+	if err != nil {
+		t.Fatalf("LoadWorkflowState failed: %v", err)
+	}
+	if goal != "" {
+		t.Errorf("expected empty goal after ship reset, got %q", goal)
+	}
+	if phase != types.PhaseIdle {
+		t.Errorf("expected phase Idle after ship reset, got %s", phase)
+	}
+	if app.workflowGoal != "" {
+		t.Errorf("expected in-memory workflowGoal cleared, got %q", app.workflowGoal)
+	}
+	if app.currentPhase != types.PhaseIdle {
+		t.Errorf("expected in-memory currentPhase Idle, got %s", app.currentPhase)
+	}
+}
+
+// TestApp_PhaseResultMsg_PersistsDiscussQuestions verifies that
+// pending discuss questions are persisted when the Discuss phase
+// transitions to itself (the NeedsAnswers:true branch — the user
+// is being asked questions).
+func TestApp_PhaseResultMsg_PersistsDiscussQuestions(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	mockEng := &mockWorkflowEngine{
+		sessionID:    s.ID,
+		discussState: workflow.DiscussState{Questions: []string{"Q1", "Q2"}},
+	}
+	app.workflowEngine = mockEng
+	app.workflowGoal = "build API"
+	app.width = 120
+	app.height = 40
+
+	// Discuss phase with NeedsAnswers: true and questions — should
+	// populate m.discussQuestions and persist.
+	app.Update(PhaseResultMsg{
+		Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true,
+	})
+
+	goal, phase, questions, err := app.sessionManager.LoadWorkflowState(app.sessionID)
+	if err != nil {
+		t.Fatalf("LoadWorkflowState failed: %v", err)
+	}
+	if goal != "build API" {
+		t.Errorf("expected goal 'build API', got %q", goal)
+	}
+	if phase != types.PhaseDiscuss {
+		t.Errorf("expected phase Discuss, got %s", phase)
+	}
+	if len(questions) != 2 || questions[0] != "Q1" {
+		t.Errorf("expected discuss questions [Q1 Q2], got %v", questions)
+	}
+}
+
+// TestApp_NewApp_ShowsResumeToast verifies that on startup, if the
+// persisted workflow state has a non-idle, non-ship phase, the
+// AppState pre-populates workflowGoal/currentPhase/discussQuestions
+// and shows a resume toast.
+//
+// Note: the toast field is toastText (not a toasts slice) per the
+// existing convention; the test reads m.toastText to verify the
+// toast was set.
+func TestApp_NewApp_ShowsResumeToast(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Pre-seed the persisted state to a non-idle phase
+	if err := sessMgr.UpdateWorkflowState(s.ID, "build REST API", types.PhasePlan, []string{"Q1"}); err != nil {
+		t.Fatalf("seed UpdateWorkflowState failed: %v", err)
+	}
+
+	// Create a new AppState, then manually invoke the resume check
+	// (we don't call NewApp because it tries to set up the real
+	// workflow engine which requires provider registry etc.)
+	app := newTestAppBareWithSession(t, sessMgr, s.ID)
+	app.checkResumedWorkflowState()
+
+	if app.workflowGoal != "build REST API" {
+		t.Errorf("expected workflowGoal 'build REST API', got %q", app.workflowGoal)
+	}
+	if app.currentPhase != types.PhasePlan {
+		t.Errorf("expected currentPhase Plan, got %s", app.currentPhase)
+	}
+	if len(app.discussQuestions) != 1 || app.discussQuestions[0] != "Q1" {
+		t.Errorf("expected discussQuestions [Q1], got %v", app.discussQuestions)
+	}
+	if app.toastText == "" {
+		t.Error("expected toastText to be set, got empty")
+	}
+	if !strings.Contains(app.toastText, "Resumable workflow") {
+		t.Errorf("expected toast to mention 'Resumable workflow', got %q", app.toastText)
+	}
+	if app.toastType != "info" {
+		t.Errorf("expected toastType 'info', got %q", app.toastType)
+	}
+}
+
+// TestApp_NewApp_NoResumeToastForIdleState verifies that when the
+// persisted state is PhaseIdle (no workflow in progress), no toast
+// is shown and the in-memory state is not pre-populated.
+func TestApp_NewApp_NoResumeToastForIdleState(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// No UpdateWorkflowState call — session has default idle state
+	app := newTestAppBareWithSession(t, sessMgr, s.ID)
+	app.checkResumedWorkflowState()
+
+	if app.toastText != "" {
+		t.Errorf("expected no toast for idle state, got %q", app.toastText)
+	}
+	if app.workflowGoal != "" {
+		t.Errorf("expected workflowGoal to remain empty, got %q", app.workflowGoal)
+	}
+	if app.currentPhase != types.PhaseIdle {
+		t.Errorf("expected currentPhase to remain idle, got %s", app.currentPhase)
+	}
+}
+
+// TestApp_PersistWorkflowState_NoSessionManager verifies the
+// defensive nil-check in persistWorkflowState — calling it without
+// a sessionManager should be a silent no-op (no panic).
+func TestApp_PersistWorkflowState_NoSessionManager(t *testing.T) {
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.sessionManager = nil
+	app.sessionID = "fake-id"
+	// Should not panic
+	app.persistWorkflowState()
+}
+
+// TestApp_PersistWorkflowState_EmptySessionID verifies the
+// defensive empty-sessionID check — should be a silent no-op.
+func TestApp_PersistWorkflowState_EmptySessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.sessionManager = sessMgr
+	app.sessionID = ""
+	// Should not panic
+	app.persistWorkflowState()
+}
+
+// TestSlashCommand_WorkflowResume_LoadsAndRuns verifies that the
+// /workflow resume slash command returns a CommandResult with
+// WorkflowResume=true and the loaded goal/phase/questions, which
+// the TUI's SlashCommandMsg handler then uses to drive RunPhaseCmd.
+func TestSlashCommand_WorkflowResume_LoadsAndRuns(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Pre-seed the persisted state
+	if err := sessMgr.UpdateWorkflowState(s.ID, "resume test", types.PhasePlan, []string{"Q1"}); err != nil {
+		t.Fatalf("UpdateWorkflowState failed: %v", err)
+	}
+
+	ctx := CommandContext{
+		SessionManager: sessMgr,
+		SessionID:      s.ID,
+	}
+
+	// Invoke handleWorkflow with the resume subcommand
+	result := handleWorkflow([]string{"resume"}, ctx)
+
+	if !result.WorkflowResume {
+		t.Error("expected WorkflowResume=true")
+	}
+	if result.ResumePhase != types.PhasePlan {
+		t.Errorf("expected ResumePhase=Plan, got %s", result.ResumePhase)
+	}
+	if result.ResumeGoal != "resume test" {
+		t.Errorf("expected ResumeGoal 'resume test', got %q", result.ResumeGoal)
+	}
+	if len(result.ResumeQuestions) != 1 || result.ResumeQuestions[0] != "Q1" {
+		t.Errorf("expected ResumeQuestions [Q1], got %v", result.ResumeQuestions)
+	}
+	if !result.Success {
+		t.Errorf("expected Success=true, got false; message=%q", result.Message)
+	}
+}
+
+// TestSlashCommand_WorkflowResume_NoActiveWorkflow verifies that
+// /workflow resume returns an error result when the persisted state
+// is PhaseIdle (no workflow in progress).
+func TestSlashCommand_WorkflowResume_NoActiveWorkflow(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	// No UpdateWorkflowState call — session is idle
+
+	ctx := CommandContext{
+		SessionManager: sessMgr,
+		SessionID:      s.ID,
+	}
+
+	result := handleWorkflow([]string{"resume"}, ctx)
+
+	if result.WorkflowResume {
+		t.Error("expected WorkflowResume=false for idle state")
+	}
+	if result.Success {
+		t.Error("expected Success=false for idle state")
+	}
+	if !strings.Contains(result.Message, "No workflow in progress") {
+		t.Errorf("expected 'No workflow in progress' message, got %q", result.Message)
+	}
+}
+
+// TestSlashCommand_WorkflowResume_NoSessionManager verifies that
+// /workflow resume returns an error when there's no session manager.
+func TestSlashCommand_WorkflowResume_NoSessionManager(t *testing.T) {
+	ctx := CommandContext{
+		SessionManager: nil,
+		SessionID:      "fake",
+	}
+
+	result := handleWorkflow([]string{"resume"}, ctx)
+
+	if result.WorkflowResume {
+		t.Error("expected WorkflowResume=false when no session manager")
+	}
+	if result.Success {
+		t.Error("expected Success=false when no session manager")
+	}
+}
+
+// TestSlashCommand_WorkflowResume_NoSessionID verifies that
+// /workflow resume returns an error when there's no session ID.
+func TestSlashCommand_WorkflowResume_NoSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+
+	ctx := CommandContext{
+		SessionManager: sessMgr,
+		SessionID:      "",
+	}
+
+	result := handleWorkflow([]string{"resume"}, ctx)
+
+	if result.WorkflowResume {
+		t.Error("expected WorkflowResume=false when no session ID")
+	}
+	if result.Success {
+		t.Error("expected Success=false when no session ID")
+	}
+}
+
+// TestSlashCommand_WorkflowResume_RoutedToRunPhaseCmd verifies that
+// when the SlashCommandMsg handler processes /workflow resume and
+// the result has WorkflowResume=true, the AppState is populated
+// from the result and RunPhaseCmd is invoked. Uses the eagerly
+// called SetMsgEmitter on the mock engine as the signal that
+// RunPhaseCmd wired the engine (same pattern as the D-01/D-02
+// tests — RunPhaseCmd's runner goroutine is async).
+func TestSlashCommand_WorkflowResume_RoutedToRunPhaseCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Pre-seed the persisted state
+	if err := sessMgr.UpdateWorkflowState(s.ID, "resume cmd test", types.PhaseExecute, []string{"Q1", "Q2"}); err != nil {
+		t.Fatalf("UpdateWorkflowState failed: %v", err)
+	}
+
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	mockEng := &mockWorkflowEngine{sessionID: s.ID}
+	app.workflowEngine = mockEng
+	app.screen = ScreenREPL
+	app.width = 120
+	app.height = 40
+
+	// Send the /workflow resume slash command
+	_, cmd := app.Update(SlashCommandMsg{Command: "/workflow resume"})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd to drive RunPhaseCmd")
+	}
+
+	// AppState should be populated from the loaded state
+	if app.workflowGoal != "resume cmd test" {
+		t.Errorf("expected workflowGoal 'resume cmd test', got %q", app.workflowGoal)
+	}
+	if app.currentPhase != types.PhaseExecute {
+		t.Errorf("expected currentPhase Execute, got %s", app.currentPhase)
+	}
+	if len(app.discussQuestions) != 2 || app.discussQuestions[0] != "Q1" {
+		t.Errorf("expected discussQuestions [Q1 Q2], got %v", app.discussQuestions)
+	}
+	if !app.workflowRunning {
+		t.Error("expected workflowRunning to be true after resume")
+	}
+
+	// The mock engine's emitter was set eagerly (synchronous signal
+	// from RunPhaseCmd that the engine was wired)
+	if mockEng.emitterSetCount == 0 {
+		t.Error("expected SetMsgEmitter to be called eagerly (RunPhaseCmd signal)")
+	}
+}
+
+// TestSlashCommand_WorkflowGoal_StillWorks verifies that the
+// existing /workflow <goal> path is not broken by the new resume
+// subcommand handling. A non-resume goal should still trigger
+// RunPhaseCmd with PhaseInitialize.
+func TestSlashCommand_WorkflowGoal_StillWorks(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessMgr := newTestAppSessionManager(t, tmpDir)
+	s, err := sessMgr.NewSession("gpt-4o", "openrouter")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	app := newTestAppWithSession(t, sessMgr, s.ID)
+	mockEng := &mockWorkflowEngine{sessionID: s.ID}
+	app.workflowEngine = mockEng
+	app.screen = ScreenREPL
+	app.width = 120
+	app.height = 40
+
+	// /workflow with a non-resume goal
+	_, cmd := app.Update(SlashCommandMsg{Command: "/workflow build something"})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd for /workflow <goal>")
+	}
+	if app.workflowGoal != "build something" {
+		t.Errorf("expected workflowGoal 'build something', got %q", app.workflowGoal)
+	}
+	if app.currentPhase != types.PhaseInitialize {
+		t.Errorf("expected currentPhase Initialize, got %s", app.currentPhase)
+	}
+	if mockEng.emitterSetCount == 0 {
+		t.Error("expected SetMsgEmitter to be called eagerly (RunPhaseCmd signal)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers for 14-04
+// ---------------------------------------------------------------------------
+
+// newTestAppSessionManager creates a real session Manager backed by
+// the given temp directory. Used by the D-06 tests to exercise the
+// real persistence path (write to disk, read back).
+func newTestAppSessionManager(t *testing.T, dir string) *session.Manager {
+	t.Helper()
+	return session.NewManager(dir, session.ManagerOpts{})
+}
+
+// newTestAppWithSession creates an AppState with a real session
+// manager and a pre-set sessionID. Unlike newTestAppForScreens (which
+// uses a stub workflow engine), this helper wires the session manager
+// directly so persistWorkflowState and checkResumedWorkflowState can
+// exercise the real Manager code path.
+func newTestAppWithSession(t *testing.T, sessMgr *session.Manager, sessionID string) *AppState {
+	t.Helper()
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.sessionManager = sessMgr
+	app.sessionID = sessionID
+	return app
+}
+
+// newTestAppBareWithSession creates a minimal AppState with a real
+// session manager and sessionID but NO workflow engine and no
+// screens. Used to test checkResumedWorkflowState in isolation
+// (the function only touches sessionManager, sessionID, and the
+// toast fields — it doesn't need a real engine).
+func newTestAppBareWithSession(t *testing.T, sessMgr *session.Manager, sessionID string) *AppState {
+	t.Helper()
+	app := &AppState{
+		sessionManager: sessMgr,
+		sessionID:      sessionID,
+		themeManager:   theme.NewManager(theme.ModeDark),
+		currentPhase:   types.PhaseIdle,
+	}
+	return app
 }
 
