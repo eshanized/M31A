@@ -2,15 +2,9 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -18,7 +12,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -108,6 +101,12 @@ type ReplModel struct {
 	// References for View() rendering
 	keyRegistry   *KeyRegistry
 	lastActivity  time.Time
+
+	// Slash command autocomplete
+	slashSuggestions []CommandInfo
+	slashSelected    int
+	slashVisible     bool
+	cmdRegistry      *CommandRegistry
 }
 
 func NewReplModel(t theme.Theme) ReplModel {
@@ -149,124 +148,50 @@ func NewReplModel(t theme.Theme) ReplModel {
 	return m
 }
 
-func (m *ReplModel) renderWelcome() string {
-	if m.width == 0 || m.height == 0 {
-		return "Welcome to M31A"
-	}
-
-	// ASCII art banner logo: M31A rendered in block characters
-	logo := m.renderBlockLogo("M31A")
-
-	// Input area — matches the screenshot: grey box with blue left border accent
-	inputBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), true, false, false, false).
-		BorderForeground(m.theme.Brand).
-		Background(lipgloss.Color("#2A2A2A")).
-		Padding(0, 2, 0, 2)
-
-	// Build the placeholder line
-	placeholderText := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("What would you like to build?")
-
-	// Context sub-line (model · provider)
-	var contextParts []string
-	if m.activeModel != nil {
-		contextParts = append(contextParts, m.activeModel.Name)
-	}
-	if m.activeProvider != "" {
-		contextParts = append(contextParts, m.activeProvider)
-	}
-	contextLine := ""
-	if len(contextParts) > 0 {
-		contextLine = lipgloss.NewStyle().
-			Foreground(m.theme.TextMuted).
-			Render(strings.Join(contextParts, " · "))
-	} else {
-		contextLine = lipgloss.NewStyle().
-			Foreground(m.theme.TextMuted).
-			Render("M31A")
-	}
-
-	// Assemble the input box content
-	inputLines := []string{placeholderText}
-	if contextLine != "" {
-		inputLines = append(inputLines, contextLine)
-	}
-	inputBox := inputBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Top, inputLines...))
-
-	// Keyboard hints
-	hints := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("ctrl+p commands  ctrl+b sidebar")
-
-	// Tip
-	tipDot := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("•")
-	tipText := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("Tip Run /config to set up your AI provider, or /help for all commands")
-	tip := tipDot + " " + tipText
-
-	// Bottom corners: cwd and version
-	cwdLabel := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render(filepath.Base(m.cwd))
-	versionLabel := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("v0.1.0")
-	logoPadded := lipgloss.Place(m.width, lipgloss.Height(logo)+1, lipgloss.Center, lipgloss.Top, logo)
-
-	// Stack everything vertically, centered
-	centerGroup := lipgloss.JoinVertical(lipgloss.Center,
-		logoPadded,
-		"",
-		inputBox,
-		"",
-		hints,
-	)
-
-	// Use Place to center the group in the available space, pushing tip to bottom
-	tipArea := lipgloss.Place(m.width-4, 3, lipgloss.Left, lipgloss.Top, tip)
-	bottomBar := lipgloss.JoinHorizontal(lipgloss.Left,
-		cwdLabel,
-		lipgloss.Place(m.width-lipgloss.Width(cwdLabel)-lipgloss.Width(versionLabel)-4, 1, lipgloss.Right, lipgloss.Top, versionLabel),
-	)
-	bottomArea := lipgloss.Place(m.width, 3, lipgloss.Center, lipgloss.Bottom,
-		lipgloss.JoinVertical(lipgloss.Top, tipArea, bottomBar),
-	)
-
-	content := lipgloss.JoinVertical(lipgloss.Top, centerGroup, bottomArea)
-	return lipgloss.Place(m.width, m.viewport.Height, lipgloss.Center, lipgloss.Center, content)
-}
-
-// renderBlockLogo renders a string in a 5x5 block-letter pixel art style.
-// Each character is composed of '#' and '.' characters.
-func (m *ReplModel) renderBlockLogo(s string) string {
-	// ASCII art banner for M31A
-	banner := `░███     ░███  ░██████    ░██      ░███    
-░████   ░████ ░██   ░██ ░████     ░██░██   
-░██░██ ░██░██       ░██   ░██    ░██  ░██  
-░██ ░████ ░██   ░█████    ░██   ░█████████ 
-░██  ░██  ░██       ░██   ░██   ░██    ░██ 
-░██       ░██ ░██   ░██   ░██   ░██    ░██ 
-░██       ░██  ░██████  ░██████ ░██    ░██ 
-                                           
-                                           
-                                           `
-
-	// Color the banner with the brand color
-	lines := strings.Split(banner, "\n")
-	styled := make([]string, len(lines))
-	for i, line := range lines {
-		styled[i] = lipgloss.NewStyle().Foreground(m.theme.Brand).Render(line)
-	}
-	return lipgloss.JoinVertical(lipgloss.Top, styled...)
-}
-
 func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	// Check if fallback banner has expired
 	if m.fallbackBanner != "" && time.Now().After(m.fallbackBannerAt) {
 		m.fallbackBanner = ""
+	}
+
+	// Handle slash command autocomplete key interactions
+	if m.slashVisible {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "tab":
+				// Autocomplete the selected suggestion
+				if m.slashSelected >= 0 && m.slashSelected < len(m.slashSuggestions) {
+					sel := m.slashSuggestions[m.slashSelected]
+					current := m.textarea.Value()
+					parts := strings.Fields(current)
+					if len(parts) > 0 && strings.HasPrefix(parts[0], "/") {
+						// Replace the partial command with the full suggestion
+						parts[0] = sel.Slash
+						completed := strings.Join(parts, " ")
+						m.textarea.SetValue(completed)
+						// Move cursor to end
+						m.textarea.CursorEnd()
+					}
+				}
+				m.slashVisible = false
+				m.slashSuggestions = nil
+				return nil, false
+			case "up":
+				if m.slashSelected > 0 {
+					m.slashSelected--
+				}
+				return nil, false
+			case "down":
+				if m.slashSelected < len(m.slashSuggestions)-1 {
+					m.slashSelected++
+				}
+				return nil, false
+			case "esc":
+				m.slashVisible = false
+				m.slashSuggestions = nil
+				return nil, false
+			}
+		}
 	}
 
 	switch msg := msg.(type) {
@@ -700,195 +625,54 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	m.viewport, vpCmd = m.viewport.Update(msg)
 	m.spinner, spCmd = m.spinner.Update(msg)
 
+	// Detect slash command typing and update suggestions
+	if m.cmdRegistry != nil {
+		current := m.textarea.Value()
+		if strings.HasPrefix(current, "/") {
+			// Extract the partial command (first word after /)
+			parts := strings.Fields(current)
+			partial := ""
+			if len(parts) > 0 {
+				partial = strings.TrimPrefix(parts[0], "/")
+			}
+
+			// Generate matching commands
+			allCmds := m.cmdRegistry.AllCommands()
+			m.slashSuggestions = nil
+			if partial == "" {
+				// Show all commands when just "/" is typed
+				m.slashSuggestions = allCmds
+			} else {
+				// Filter by partial match
+				q := strings.ToLower(partial)
+				for _, cmd := range allCmds {
+					name := strings.ToLower(cmd.Name)
+					slash := strings.ToLower(cmd.Slash)
+					if strings.HasPrefix(name, q) || strings.HasPrefix(slash, q) || strings.Contains(name, q) {
+						m.slashSuggestions = append(m.slashSuggestions, cmd)
+					}
+				}
+			}
+
+			// Show suggestions if we have matches and more than one option
+			if len(m.slashSuggestions) > 0 {
+				m.slashVisible = true
+				m.slashSelected = 0
+				// Limit to 8 suggestions
+				if len(m.slashSuggestions) > 8 {
+					m.slashSuggestions = m.slashSuggestions[:8]
+				}
+			} else {
+				m.slashVisible = false
+			}
+		} else {
+			m.slashVisible = false
+			m.slashSuggestions = nil
+		}
+	}
+
 	cmds = append(cmds, taCmd, vpCmd, spCmd)
 	return cmds, false
-}
-
-// AppendStreamChunk appends a streamed token from the Discuss phase
-// to the REPL's current streaming content buffer.
-func (m *ReplModel) AppendStreamChunk(chunk *types.StreamChunk) {
-	if chunk == nil || chunk.Delta == "" {
-		return
-	}
-	m.streaming = true
-	m.streamContent.WriteString(chunk.Delta)
-}
-
-func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
-	chunk := msg.Chunk
-	if chunk == nil {
-		return nil, false
-	}
-
-	m.streaming = true
-
-	switch chunk.Type {
-	case "content":
-		if m.activeSegmentType == "thinking" && m.streamContent.Len() > 0 {
-			m.streamSegments = append(m.streamSegments, types.MessageSegment{
-				Type:    "thinking",
-				Content: m.streamContent.String(),
-				Visible: true,
-			})
-			m.streamContent.Reset()
-		}
-		m.activeSegmentType = "content"
-		m.thinking = false
-		m.streamContent.WriteString(chunk.Delta)
-	case "thinking":
-		if m.activeSegmentType == "content" && m.streamContent.Len() > 0 {
-			m.streamSegments = append(m.streamSegments, types.MessageSegment{
-				Type:    "content",
-				Content: m.streamContent.String(),
-				Visible: true,
-			})
-			m.streamContent.Reset()
-		}
-		m.activeSegmentType = "thinking"
-		m.thinking = true
-		if m.thinkingStartAt.IsZero() {
-			m.thinkingStartAt = time.Now()
-		}
-
-		if chunk.Delta != "" {
-			m.streamContent.WriteString(chunk.Delta)
-		}
-	case "done":
-	}
-
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	// Continuation: schedule next read from stream channel.
-	// Must also watch streamDone so the cmd exits when the stream
-	// goroutine terminates (normal completion or cancellation).
-	streamCh := m.streamCh
-	streamDone := m.streamDone
-	streamCtx := m.streamCtx
-	nextCmd := func() tea.Msg {
-		select {
-		case msg := <-streamCh:
-			return msg
-		case <-streamDone:
-			// Stream goroutine exited — drain any remaining messages from
-			// the channel, then return nil to stop the continuation chain.
-			select {
-			case msg := <-streamCh:
-				return msg
-			default:
-				return nil
-			}
-		case <-streamCtx.Done():
-			// Context cancelled (e.g. user pressed Ctrl+C) — stop continuation.
-			return nil
-		}
-	}
-
-	return []tea.Cmd{nextCmd}, false
-}
-
-func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
-	if m.streamContent.Len() > 0 {
-		m.streamSegments = append(m.streamSegments, types.MessageSegment{
-			Type:    "content",
-			Content: m.streamContent.String(),
-			Visible: true,
-		})
-		m.streamContent.Reset()
-	}
-
-	msg.Message.Segments = m.streamSegments
-	if msg.Message.ToolCalls == nil || len(msg.Message.ToolCalls) == 0 {
-		msg.Message.ToolCalls = m.getToolCallsFromSegments()
-	}
-
-	m.messages = append(m.messages, msg.Message)
-
-	// Populate thinking blocks from finalized segments
-	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
-	for i, seg := range m.streamSegments {
-		if seg.Type == "thinking" {
-			tb := components.NewThinkingBlock(seg, m.theme, false, i)
-			m.thinkingBlocks[i] = tb
-		}
-	}
-
-	// Populate tool cards from tool calls
-	m.toolCards = make(map[int]*components.ToolCard)
-	for i, tc := range msg.Message.ToolCalls {
-		card := components.NewToolCard(tc, nil, components.ToolRunning, m.theme)
-		m.toolCards[i] = card
-	}
-
-	m.streaming = false
-	m.thinking = false
-	m.activeSegmentType = ""
-	m.streamSegments = nil
-	m.textarea.Focus()
-
-	// Capture usage and cost from stream
-	if msg.Usage != nil {
-		m.lastUsage = msg.Usage
-		if m.activeModel != nil {
-			p := m.activeModel.Pricing
-			m.lastCost = (p.InputPerMToken * float64(msg.Usage.PromptTokens) / 1e6) +
-				(p.OutputPerMToken * float64(msg.Usage.CompletionTokens) / 1e6)
-		}
-	}
-
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	var cmds []tea.Cmd
-	return cmds, true
-}
-
-func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
-	errMsg := types.Message{
-		Role:    "assistant",
-		Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
-		Segments: []types.MessageSegment{{
-			Type:    "content",
-			Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
-			Visible: true,
-		}},
-		CreatedAt: time.Now(),
-	}
-	m.messages = append(m.messages, errMsg)
-
-	m.streaming = false
-	m.thinking = false
-	m.activeSegmentType = ""
-	m.streamSegments = nil
-	m.streamContent.Reset()
-	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
-	m.toolCards = make(map[int]*components.ToolCard)
-	m.textarea.Focus()
-
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	var cmds []tea.Cmd
-	return cmds, true
-}
-
-func (m *ReplModel) streamTickCmds() ([]tea.Cmd, bool) {
-	var cmds []tea.Cmd
-	cmds = append(cmds, StreamTickCmd())
-	return cmds, false
-}
-
-func (m *ReplModel) getToolCallsFromSegments() []types.ToolCall {
-	var toolCalls []types.ToolCall
-	for _, seg := range m.streamSegments {
-		if seg.Type == "tool_use" && seg.Content != "" {
-			var tc types.ToolCall
-			if err := json.Unmarshal([]byte(seg.Content), &tc); err == nil {
-				toolCalls = append(toolCalls, tc)
-			}
-		}
-	}
-	return toolCalls
 }
 
 func (m *ReplModel) SetTheme(t theme.Theme) {
@@ -929,6 +713,10 @@ func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {
 	m.dispatcher = d
 }
 
+func (m *ReplModel) SetCommandRegistry(reg *CommandRegistry) {
+	m.cmdRegistry = reg
+}
+
 // SetFrecentHistory sets the frecency history for prompt history navigation.
 func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
 	m.frecentHistory = fh
@@ -937,158 +725,6 @@ func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
 // SetCwd sets the working directory for @filepath resolution.
 func (m *ReplModel) SetCwd(cwd string) {
 	m.cwd = cwd
-}
-
-// expandFileRefs scans input for @filepath references, resolves file contents,
-// and replaces them with inline content blocks. Unresolvable references remain as-is.
-func (m *ReplModel) expandFileRefs(input string) string {
-	if m.cwd == "" {
-		return input
-	}
-
-	return fileRefPattern.ReplaceAllStringFunc(input, func(match string) string {
-		path := match[1:] // strip the @ prefix
-
-		// Resolve relative to cwd
-		resolvedPath := path
-		if !filepath.IsAbs(path) {
-			resolvedPath = filepath.Join(m.cwd, path)
-		}
-		resolvedPath = filepath.Clean(resolvedPath)
-
-		// Stat the file
-		fi, err := os.Stat(resolvedPath)
-		if err != nil {
-			// File not found or inaccessible — leave reference as-is
-			return match
-		}
-
-		if fi.IsDir() {
-			return match // directories not supported, leave as-is
-		}
-
-		// Size check: 100KB limit
-		const maxFileSize = 100 * 1024
-		if fi.Size() > maxFileSize {
-			return fmt.Sprintf("%s [file too large: %d bytes, max 100KB]", match, fi.Size())
-		}
-
-		// Read first 512 bytes for binary detection
-		f, err := os.Open(resolvedPath)
-		if err != nil {
-			return match
-		}
-		defer f.Close()
-
-		header := make([]byte, 512)
-		n, _ := f.Read(header)
-
-		// Detect content type via mime sniff
-		contentType := http.DetectContentType(header[:n])
-		if !strings.HasPrefix(contentType, "text/") &&
-			contentType != "application/json" &&
-			contentType != "application/xml" &&
-			contentType != "application/javascript" &&
-			contentType != "application/x-sh" &&
-			contentType != "application/yaml" {
-			// Binary file — show placeholder
-			return fmt.Sprintf("%s [binary: %s, %d bytes]", match, contentType, fi.Size())
-		}
-
-		// Read full content
-		f.Seek(0, 0)
-		content, err := io.ReadAll(f)
-		if err != nil {
-			return match
-		}
-
-		// Format: --- path/to/file ---\n{content}\n---
-		return fmt.Sprintf("--- %s ---\n%s\n---", path, string(content))
-	})
-}
-
-// executeShellCommand runs a shell command via the dispatcher's Bash tool,
-// bypassing the LLM entirely. The command output is displayed in chat as
-// an assistant message but is marked SkipForLLM so it doesn't appear in
-// subsequent LLM requests. No permission modal (user explicitly requested
-// execution via ! prefix), though PermissionRule deny rules still apply.
-func (m *ReplModel) executeShellCommand(command string) ([]tea.Cmd, bool) {
-	// Show a "Running..." placeholder immediately
-	displayMsg := types.Message{
-		Role:    "assistant",
-		Content: fmt.Sprintf("$ %s\nRunning...\n", command),
-		Segments: []types.MessageSegment{{
-			Type:    "content",
-			Content: fmt.Sprintf("$ %s\nRunning...\n", command),
-			Visible: true,
-		}},
-		CreatedAt:  time.Now(),
-		SkipForLLM: true,
-	}
-	m.messages = append(m.messages, displayMsg)
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	// Execute via goroutine that calls dispatcher.Execute with a Bash ToolCall
-	return []tea.Cmd{func() tea.Msg {
-		if m.dispatcher == nil {
-			return ShellResultMsg{
-				Command: command,
-				Output:  "",
-				Err:     "dispatcher not available",
-			}
-		}
-
-		// Construct ToolCall for Bash with interactive=false to skip permission modal
-		params := map[string]any{
-			"command":     command,
-			"description": "shell mode command",
-			"timeout":     300,
-			"interactive": false,
-		}
-		paramsJSON, _ := json.Marshal(params)
-		toolCall := types.ToolCall{
-			ID:    fmt.Sprintf("shell_%d", time.Now().UnixNano()),
-			Name:  "Bash",
-			Input: paramsJSON,
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-		defer cancel()
-
-		result, err := m.dispatcher.Execute(ctx, toolCall)
-		if err != nil {
-			return ShellResultMsg{
-				Command: command,
-				Output:  result.Output,
-				Err:     err.Error(),
-			}
-		}
-		if result.Error != "" {
-			return ShellResultMsg{
-				Command: command,
-				Output:  result.Output,
-				Err:     result.Error,
-			}
-		}
-		return ShellResultMsg{
-			Command: command,
-			Output:  result.Output,
-			Err:     "",
-		}
-	}}, false
-}
-
-// messagesForLLM returns only messages that should be included in LLM context,
-// filtering out shell mode messages and any other messages marked SkipForLLM.
-func (m *ReplModel) messagesForLLM() []types.Message {
-	var filtered []types.Message
-	for _, msg := range m.messages {
-		if !msg.SkipForLLM {
-			filtered = append(filtered, msg)
-		}
-	}
-	return filtered
 }
 
 func (m *ReplModel) SetKeyRegistry(kr *KeyRegistry) {
@@ -1111,159 +747,6 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 	m.messages = append(m.messages, msg)
 	m.renderMessages()
 	m.viewport.GotoBottom()
-}
-
-func (m *ReplModel) renderMessages() {
-	var b strings.Builder
-
-	for _, msg := range m.messages {
-		if m.msgRenderer != nil {
-			rendered := m.msgRenderer.RenderMessage(msg, m.width)
-			b.WriteString(rendered)
-			b.WriteString("\n")
-		} else {
-			role := msg.Role
-			if role == "user" {
-				role = "You"
-			} else if role == "assistant" {
-				role = "Assistant"
-			}
-			b.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
-		}
-	}
-
-	if m.streaming {
-		b.WriteString(m.renderStreamingContent())
-	}
-
-	m.viewport.SetContent(b.String())
-}
-
-func (m *ReplModel) renderStreamingContent() string {
-	if m.msgRenderer == nil {
-		content := m.streamContent.String()
-		if content != "" {
-			return fmt.Sprintf("Assistant: %s\n", content)
-		}
-		return "Assistant: ...\n"
-	}
-
-	var segments []types.MessageSegment
-	segments = append(segments, m.streamSegments...)
-
-	if m.streamContent.Len() > 0 {
-		partial := m.streamContent.String()
-		if m.activeSegmentType == "thinking" {
-			segments = append(segments, types.MessageSegment{
-				Type:      "thinking",
-				Content:   partial,
-				Visible:   true,
-				StartedAt: m.thinkingStartAt,
-			})
-		} else {
-			segments = append(segments, types.MessageSegment{
-				Type:    "content",
-				Content: partial,
-				Visible: true,
-			})
-		}
-	}
-
-	msg := types.Message{
-		Role:     "assistant",
-		Content:  m.streamContent.String(),
-		Segments: segments,
-	}
-
-	return m.msgRenderer.RenderMessage(msg, m.width)
-}
-
-func (m *ReplModel) View() string {
-	if m.width == 0 {
-		return "Initializing..."
-	}
-
-	viewportStr := m.viewport.View()
-	inputStr := m.textarea.View()
-
-	// Render prompt metadata row: agent · model · provider
-	var agentName, modelName, providerName string
-	if m.activeModel != nil {
-		modelName = m.activeModel.Name
-	}
-	if m.activeProvider != "" {
-		providerName = m.activeProvider
-	}
-	metadataRow := RenderPromptMetadata(agentName, modelName, providerName, m.theme, m.width-m.sidebarWidth)
-
-	// Determine border highlight color
-	borderColor := m.theme.Border
-	if m.streaming {
-		borderColor = m.theme.Brand
-	} else if m.thinking {
-		borderColor = m.theme.Thinking
-	}
-
-	// Build the input container: textarea + metadata
-	inputContainer := lipgloss.JoinVertical(lipgloss.Top, inputStr, metadataRow)
-
-	// Apply left border + background to the container
-	borderStyle := lipgloss.NewStyle().
-		Border(theme.SplitBorder, true, false, false, false).
-		BorderForeground(borderColor).
-		Background(m.theme.BackgroundElement).
-		Padding(0, 2, 0, 2)
-	borderedInput := borderStyle.Render(inputContainer)
-
-	// Bottom border continuation line
-	bottomBorder := RenderPromptBottomBorder(borderColor, m.width-m.sidebarWidth)
-
-	// Status bar below the prompt
-	var statusInfo *StatusBarInfo
-	if m.lastUsage != nil && m.cfg != nil && m.cfg.UI.ShowCostEstimate {
-		statusInfo = &StatusBarInfo{
-			PromptTokens: m.lastUsage.PromptTokens,
-			TotalTokens:  m.lastUsage.TotalTokens,
-			Cost:         m.lastCost,
-			ShowCost:     true,
-		}
-	} else {
-		statusInfo = &StatusBarInfo{}
-	}
-	if m.keyRegistry != nil {
-		statusInfo.LeaderActive = m.keyRegistry.IsLeaderActive()
-		if !statusInfo.LeaderActive {
-			statusInfo.WhichKey = m.keyRegistry.RenderWhichKey(CtxREPL, m.theme, (m.width-m.sidebarWidth)/2)
-		}
-	}
-	statusInfo.IsStreaming = m.streaming
-	statusInfo.IsThinking = m.thinking
-	statusInfo.KeyboardHints = []string{"ctrl+p commands", "ctrl+b sidebar"}
-
-	status := RenderStatusBar(m.theme, m.GetStatusText(), m.lastActivity, m.width-m.sidebarWidth, statusInfo)
-
-	// Assemble the REPL content
-	var contentParts []string
-	contentParts = append(contentParts, viewportStr)
-	contentParts = append(contentParts, borderedInput)
-	contentParts = append(contentParts, bottomBorder)
-	contentParts = append(contentParts, status)
-
-	replContent := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
-
-	// Render fallback banner if active
-	if m.fallbackBanner != "" {
-		bannerStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#FDD663")).
-			Foreground(lipgloss.Color("#000000")).
-			Padding(0, 1).
-			Bold(true).
-			Width(m.width - m.sidebarWidth)
-		banner := bannerStyle.Render("[!] " + m.fallbackBanner)
-		replContent = lipgloss.JoinVertical(lipgloss.Top, banner, replContent)
-	}
-
-	return replContent
 }
 
 func (m *ReplModel) InputValue() string {
@@ -1296,179 +779,6 @@ func (m *ReplModel) GetStatusText() string {
 		return m.lastStatus
 	}
 	return ""
-}
-
-func (m *ReplModel) toggleAllThinkingBlocks() {
-	if len(m.thinkingBlocks) == 0 {
-		return
-	}
-
-	// Determine current state: all expanded, all collapsed, or mixed
-	allExpanded := true
-	allCollapsed := true
-	for _, block := range m.thinkingBlocks {
-		if block.IsExpanded() {
-			allCollapsed = false
-		} else {
-			allExpanded = false
-		}
-	}
-
-	// If all expanded → collapse all. If all hidden → expand all. Mixed → collapse all.
-	collapse := allExpanded || (!allExpanded && !allCollapsed)
-	for _, block := range m.thinkingBlocks {
-		if collapse {
-			if block.IsExpanded() {
-				block.Toggle()
-			}
-		} else {
-			if !block.IsExpanded() {
-				block.Toggle()
-			}
-		}
-	}
-}
-
-// toggleFocusedThinkingBlock toggles the focused block, or focuses the first collapsed one.
-func (m *ReplModel) toggleFocusedThinkingBlock() {
-	if len(m.thinkingBlocks) == 0 {
-		return
-	}
-
-	// Clear all focus first
-	for _, block := range m.thinkingBlocks {
-		block.SetFocused(false)
-	}
-
-	// If we have a valid focused block, toggle it
-	if m.thinkingFocusIndex >= 0 {
-		if block, ok := m.thinkingBlocks[m.thinkingFocusIndex]; ok {
-			block.Toggle()
-			block.SetFocused(true)
-			return
-		}
-	}
-
-	// No valid focus: find first collapsed block and focus+toggle it
-	for idx, block := range m.thinkingBlocks {
-		if !block.IsExpanded() {
-			block.Toggle()
-			block.SetFocused(true)
-			m.thinkingFocusIndex = idx
-			return
-		}
-	}
-
-	// All expanded: focus first one
-	for idx, block := range m.thinkingBlocks {
-		block.SetFocused(false)
-		if idx == 0 {
-			block.SetFocused(true)
-		}
-	}
-	m.thinkingFocusIndex = 0
-}
-
-// cycleThinkingFocus moves focus to the next thinking block.
-func (m *ReplModel) cycleThinkingFocus() {
-	if len(m.thinkingBlocks) == 0 {
-		return
-	}
-
-	// Clear current focus
-	for _, block := range m.thinkingBlocks {
-		block.SetFocused(false)
-	}
-
-	// Get sorted indices
-	indices := make([]int, 0, len(m.thinkingBlocks))
-	for id := range m.thinkingBlocks {
-		indices = append(indices, id)
-	}
-	sort.Ints(indices)
-
-	// Find next index after current focus
-	nextIdx := 0
-	for i, id := range indices {
-		if id == m.thinkingFocusIndex {
-			nextIdx = (i + 1) % len(indices)
-			break
-		}
-	}
-
-	m.thinkingFocusIndex = indices[nextIdx]
-	m.thinkingBlocks[m.thinkingFocusIndex].SetFocused(true)
-}
-
-// cycleThinkingFocusBackward moves focus to the previous thinking block.
-func (m *ReplModel) cycleThinkingFocusBackward() {
-	if len(m.thinkingBlocks) == 0 {
-		return
-	}
-
-	for _, block := range m.thinkingBlocks {
-		block.SetFocused(false)
-	}
-
-	indices := make([]int, 0, len(m.thinkingBlocks))
-	for id := range m.thinkingBlocks {
-		indices = append(indices, id)
-	}
-	sort.Ints(indices)
-
-	prevIdx := len(indices) - 1
-	for i, id := range indices {
-		if id == m.thinkingFocusIndex {
-			prevIdx = (i - 1 + len(indices)) % len(indices)
-			break
-		}
-	}
-
-	m.thinkingFocusIndex = indices[prevIdx]
-	m.thinkingBlocks[m.thinkingFocusIndex].SetFocused(true)
-}
-
-// ShowQuestion displays a question from the AskUserQuestion tool inline in the REPL.
-func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
-	m.activeQuestion = &msg
-
-	// Add a system message showing the question
-	questionText := components.FormatQuestion(msg.Question, msg.Header, msg.Options, m.width, m.theme)
-	questionMsg := types.Message{
-		Role:      "system",
-		Content:   questionText,
-		CreatedAt: time.Now(),
-	}
-	m.messages = append(m.messages, questionMsg)
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	// Focus the textarea for user input
-	m.textarea.Focus()
-	m.textarea.Placeholder = "Type your answer and press Enter..."
-}
-
-// HandleQuestionInput processes user input when a question is active.
-// Returns a tea.Cmd that sends the answer back to the tool, or nil if no answer.
-func (m *ReplModel) HandleQuestionInput() tea.Cmd {
-	if m.activeQuestion == nil {
-		return nil
-	}
-
-	answer := strings.TrimSpace(m.textarea.Value())
-	if answer == "" {
-		return nil
-	}
-
-	m.textarea.Reset()
-	m.activeQuestion = nil
-	m.textarea.Placeholder = "Type a message, /command, or goal..."
-	m.renderMessages()
-	m.viewport.GotoBottom()
-
-	return func() tea.Msg {
-		return QuestionResponseMsg{Answer: answer}
-	}
 }
 
 // LastUsage returns the usage from the last completed stream.
