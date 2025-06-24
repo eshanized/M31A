@@ -12,13 +12,11 @@ import (
 
 const sidebarWidth = 42
 
-// SidebarRefreshMsg is emitted when git status has been fetched.
 type SidebarRefreshMsg struct {
 	Statuses []git.FileStatus
 	Err      error
 }
 
-// SidebarModel renders a panel showing git-modified files.
 type SidebarModel struct {
 	theme    theme.Theme
 	git      *git.Git
@@ -39,12 +37,10 @@ func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
 	}
 }
 
-// Init starts fetching git status.
 func (m *SidebarModel) Init() tea.Cmd {
 	return m.refreshCmd()
 }
 
-// Update handles messages for the sidebar.
 func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -64,7 +60,6 @@ func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the sidebar panel.
 func (m *SidebarModel) View() string {
 	if !m.visible {
 		return ""
@@ -77,31 +72,18 @@ func (m *SidebarModel) View() string {
 
 	var lines []string
 
-	// Header
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(m.theme.TextPrimary).
-		Padding(0, 1)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.TextPrimary).Padding(0, 1)
 	lines = append(lines, headerStyle.Render("MODIFIED"))
 
-	// Separator
-	sep := lipgloss.NewStyle().
-		Foreground(m.theme.Border).
-		Render(strings.Repeat("─", w-2))
+	sep := lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("─", w-2))
 	lines = append(lines, sep)
 
 	if m.loading {
 		lines = append(lines, "  loading...")
 	} else if m.err != "" {
-		lines = append(lines, lipgloss.NewStyle().
-			Foreground(m.theme.Error).
-			Padding(0, 1).
-			Render(m.err))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.Error).Padding(0, 1).Render(m.err))
 	} else if len(m.statuses) == 0 {
-		lines = append(lines, lipgloss.NewStyle().
-			Foreground(m.theme.TextSecondary).
-			Padding(0, 1).
-			Render("no changes"))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Padding(0, 1).Render("no changes"))
 	} else {
 		for _, fs := range m.statuses {
 			line := m.renderFileStatus(fs, w-2)
@@ -109,39 +91,28 @@ func (m *SidebarModel) View() string {
 		}
 	}
 
-	// Pad to fill height
 	content := lipgloss.JoinVertical(lipgloss.Top, lines...)
-	panel := lipgloss.NewStyle().
-		Width(w).
-		Height(m.height).
-		Background(m.theme.Surface).
-		Padding(0, 1).
-		Render(content)
+	panel := lipgloss.NewStyle().Width(w).Height(m.height).Background(m.theme.Surface).Padding(0, 1).Render(content)
 
 	return panel
 }
 
-// Toggle flips the visibility state.
 func (m *SidebarModel) Toggle() {
 	m.visible = !m.visible
 }
 
-// SetVisible sets the visibility explicitly.
 func (m *SidebarModel) SetVisible(v bool) {
 	m.visible = v
 }
 
-// IsVisible returns current visibility.
 func (m *SidebarModel) IsVisible() bool {
 	return m.visible
 }
 
-// SetTheme updates the sidebar theme and triggers a re-render.
 func (m *SidebarModel) SetTheme(t theme.Theme) {
 	m.theme = t
 }
 
-// refreshCmd returns a tea.Cmd that fetches git status asynchronously.
 func (m *SidebarModel) refreshCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.git == nil || !m.git.IsRepo() {
@@ -153,7 +124,6 @@ func (m *SidebarModel) refreshCmd() tea.Cmd {
 }
 
 func (m *SidebarModel) renderFileStatus(fs git.FileStatus, width int) string {
-	// Status indicator
 	statusChar := fs.Status
 	statusColor := m.theme.TextSecondary
 	switch statusChar {
@@ -169,25 +139,19 @@ func (m *SidebarModel) renderFileStatus(fs git.FileStatus, width int) string {
 		statusColor = m.theme.TextSecondary
 	}
 
-	statusStr := lipgloss.NewStyle().
-		Foreground(statusColor).
-		Bold(true).
-		Render(statusChar)
+	statusStr := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(statusChar)
 
-	// Path (truncated to fit)
 	pathStr := fs.Path
 	if fs.Status == "R" && fs.OldPath != "" {
 		pathStr = fs.OldPath + " → " + fs.Path
 	}
-	maxPathLen := width - 4 // leave room for status char and padding
+	maxPathLen := width - 4
 	pathStr = TruncateWithEllipsis(pathStr, maxPathLen)
 
-	pathStyle := lipgloss.NewStyle().
-		Foreground(m.theme.TextPrimary)
+	pathStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
 
 	line := statusStr + " " + pathStyle.Render(pathStr)
 
-	// Diff stats if available
 	if fs.Additions > 0 || fs.Deletions > 0 {
 		statsWidth := width - lipgloss.Width(line) - 2
 		if statsWidth > 0 {
@@ -196,9 +160,7 @@ func (m *SidebarModel) renderFileStatus(fs git.FileStatus, width int) string {
 		}
 	}
 
-	return lipgloss.NewStyle().
-		Padding(0, 1).
-		Render(line)
+	return lipgloss.NewStyle().Padding(0, 1).Render(line)
 }
 
 func (m *SidebarModel) renderDiffStats(add, del int, maxWidth int) string {
