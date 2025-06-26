@@ -3,8 +3,10 @@ package tui
 import (
 	"time"
 
+	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 type Screen int
@@ -82,6 +84,13 @@ type PhaseResultMsg struct {
 	NeedsAnswers        bool
 	RequiresManualInput bool
 	DurationMs          int64
+
+	// Execution metrics (from workflow.PhaseResult)
+	Usage     *types.Usage
+	Cost      float64
+	ToolCalls int
+	Commits   []git.CommitInfo
+	DiffStats workflow.DiffStats
 }
 
 // PlanReadyMsg is emitted from RunPhaseCmd when the plan phase completes
