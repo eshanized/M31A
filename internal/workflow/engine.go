@@ -109,6 +109,22 @@ type PhaseResult struct {
 	DurationMs          int64
 	NeedsAnswers        bool
 	RequiresManualInput bool
+
+	// Execution metrics (populated by Execute/Ship phases)
+	Usage       *m31types.Usage // token usage from LLM calls
+	Cost        float64         // estimated cost
+	ToolCalls   int             // number of tool calls made
+	Commits     []git.CommitInfo // commits created during phase
+	DiffStats   DiffStats       // file change statistics (Ship phase)
+}
+
+// DiffStats holds file change statistics from git diff.
+type DiffStats struct {
+	FilesAdded    int
+	FilesModified int
+	FilesDeleted  int
+	Insertions    int
+	Deletions     int
 }
 
 // NewEngine creates a workflow engine.
