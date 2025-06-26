@@ -158,7 +158,7 @@ func TestExecuteModel_ViewNonEmpty(t *testing.T) {
 	if !strings.Contains(view, "Build binary") {
 		t.Error("expected task description in view")
 	}
-	if !strings.Contains(view, "complete") {
+	if !strings.Contains(view, "tasks") {
 		t.Error("expected progress info in view")
 	}
 }
