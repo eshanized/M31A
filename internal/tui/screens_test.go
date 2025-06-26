@@ -176,11 +176,9 @@ func TestExecute_ProgressBar(t *testing.T) {
 	m.height = 40
 
 	view := m.View()
-	if !containsStr(view, "complete") {
-		t.Error("Expected 'complete' in progress bar")
-	}
-	if !containsStr(view, "%") {
-		t.Error("Expected '%' in progress bar")
+	// New UI shows "N/M tasks" and segmented progress
+	if !containsStr(view, "tasks") {
+		t.Error("Expected 'tasks' in progress bar")
 	}
 }
 
@@ -190,8 +188,9 @@ func TestExecute_TaskStatusIndicators(t *testing.T) {
 	m.height = 40
 
 	view := m.View()
-	if !containsStr(view, "[x]") {
-		t.Error("Expected done indicator '[x]' in view")
+	// New UI uses ✓ for done tasks
+	if !containsStr(view, "[✓]") && !containsStr(view, "[x]") {
+		t.Error("Expected done task indicator in view")
 	}
 }
 
@@ -424,8 +423,8 @@ func TestShip_RenderView(t *testing.T) {
 	if view == "" {
 		t.Fatal("Expected non-empty view")
 	}
-	if !containsStr(view, "Session complete") {
-		t.Error("Expected 'Session complete' in view")
+	if !containsStr(view, "Session Complete") {
+		t.Error("Expected 'Session Complete' in view")
 	}
 }
 
@@ -442,11 +441,12 @@ func TestShip_SummaryDisplay(t *testing.T) {
 	m.height = 40
 
 	view := m.View()
-	if !containsStr(view, "6 done") {
-		t.Error("Expected task done count in view")
+	// New UI shows metrics as "6/8" format
+	if !containsStr(view, "6/8") {
+		t.Error("Expected task summary (6/8) in view")
 	}
-	if !containsStr(view, "1 failed") {
-		t.Error("Expected task failed count in view")
+	if !containsStr(view, "Failed") {
+		t.Error("Expected failed section in view")
 	}
 }
 
@@ -461,8 +461,8 @@ func TestShip_CommitLog(t *testing.T) {
 	m.height = 40
 
 	view := m.View()
-	if !containsStr(view, "Commits:") {
-		t.Error("Expected 'Commits:' header")
+	if !containsStr(view, "Commits") {
+		t.Error("Expected 'Commits' header")
 	}
 	if !containsStr(view, "a1b2c34") {
 		t.Error("Expected commit hash in view")
