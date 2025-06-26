@@ -50,9 +50,15 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 	// 4. Execute each group sequentially
 	var execErrors []string
+	toolCallCount := 0
 	for _, group := range groups {
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
-			return e.executeTaskWithTools(ctx, task, tasks)
+			result := e.executeTaskWithTools(ctx, task, tasks)
+			// Count tool calls from task result
+			if result.ToolCalls > 0 {
+				toolCallCount += result.ToolCalls
+			}
+			return result
 		}
 
 		if err := runner.ExecuteGroup(group, execFn); err != nil {
@@ -91,9 +97,10 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	e.logger.Info("execute phase complete", "total", total, "done", done, "failed", failed, "skipped", skipped)
 
 	result := &PhaseResult{
-		Phase:   m31types.PhaseExecute,
-		Success: allDone,
-		Tasks:   updatedTasks,
+		Phase:     m31types.PhaseExecute,
+		Success:   allDone,
+		Tasks:     updatedTasks,
+		ToolCalls: toolCallCount,
 	}
 	if len(execErrors) > 0 {
 		result.Error = strings.Join(execErrors, "; ")
@@ -133,6 +140,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		toolErr := false
 		var toolErrMsg error
 		var toolErrName string
+		toolCallCount := len(toolCalls)
 		for _, tc := range toolCalls {
 			result, err := e.dispatcher.Execute(ctx, tc)
 			if err != nil {
@@ -189,6 +197,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			Output:     content,
 			CommitHash: commitHash,
 			DurationMs: time.Since(start).Milliseconds(),
+			ToolCalls:  toolCallCount,
 		}
 	}
 
