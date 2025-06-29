@@ -16,6 +16,7 @@ type TaskResult struct {
 	Error      string
 	CommitHash string
 	DurationMs int64
+	ToolCalls  int // number of tool calls made during task execution
 }
 
 // ExecuteFunc is the function called to execute a single task.
