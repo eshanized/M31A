@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -67,6 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer cleanup()
+	slog.SetDefault(logger)
 
 	logger.Info("M31A starting",
 		"version", Version,
