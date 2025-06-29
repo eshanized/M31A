@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -112,15 +113,81 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 	e.logger.Info("ship phase complete", "duration", duration, "tasks", fmt.Sprintf("%d/%d", done, total))
 
+	// Collect git diff stats
+	var diffStats DiffStats
+	if e.git != nil {
+		diffStats = e.collectDiffStats()
+	}
+
 	result := &PhaseResult{
-		Phase:   m31types.PhaseShip,
-		Success: true,
+		Phase:     m31types.PhaseShip,
+		Success:   true,
+		Commits:   commits,
+		DiffStats: diffStats,
+		DurationMs: duration.Milliseconds(),
 	}
 	if failed > 0 {
 		result.Error = fmt.Sprintf("%d tasks failed", failed)
 		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
 	}
 	return result, nil
+}
+
+// collectDiffStats collects file change statistics from git diff.
+func (e *Engine) collectDiffStats() DiffStats {
+	stats := DiffStats{}
+
+	if e.git == nil {
+		return stats
+	}
+
+	// Use git diff --numstat to get per-file stats
+	diffOutput, err := e.git.Diff("HEAD", "")
+	if err != nil {
+		return stats
+	}
+
+	// Parse numstat format: <additions>\t<deletions>\t<filepath>
+	lines := strings.Split(diffOutput, "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		adds := 0
+		dels := 0
+		if parts[0] != "-" {
+			fmt.Sscanf(parts[0], "%d", &adds)
+		}
+		if parts[1] != "-" {
+			fmt.Sscanf(parts[1], "%d", &dels)
+		}
+
+		stats.Insertions += adds
+		stats.Deletions += dels
+
+		// Count file changes
+		filepath := parts[2]
+		if strings.HasPrefix(filepath, "a/") || strings.HasPrefix(filepath, "b/") {
+			filepath = strings.TrimPrefix(filepath, "a/")
+			filepath = strings.TrimPrefix(filepath, "b/")
+		}
+
+		// Simple heuristic: new files have all additions and no deletions
+		if adds > 0 && dels == 0 && parts[0] != "0" {
+			stats.FilesAdded++
+		} else if adds == 0 && dels > 0 {
+			stats.FilesDeleted++
+		} else {
+			stats.FilesModified++
+		}
+	}
+
+	return stats
 }
 
 // BuildSummary creates a ShipSummary from the current session state.
