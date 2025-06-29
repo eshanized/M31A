@@ -3,7 +3,7 @@
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
 > **Last Updated**: 2026-06-01
-> **Status**: Phase 12 Complete — UX & Editor Experience Adaptations
+> **Status**: Phase 14 in planning — TUI ↔ Core Wiring Fixes
 
 ---
 
@@ -845,6 +845,87 @@ Plans:
 
 ---
 
+## Phase 14 — TUI ↔ Core Wiring Fixes
+
+**Duration:** 3 weeks  
+**Complexity:** 8/10  
+**Milestone:** Multi-phase workflow `Initialize → Discuss → Plan → Execute → Verify → Ship` runs end-to-end without dead-ends, screen flashes, or message drops
+**Source:** `rush/tui_core_wiring_report.md` (11 wiring issues, D-01 through D-11)
+**Depends on:** Phase 13
+
+### Background
+
+The TUI ↔ Core wiring audit (`rush/tui_core_wiring_report.md`) followed
+a previous walkthrough that fixed 13 issues (W-01 through W-13) but
+missed workflow-phase wiring — specifically the Discuss/Plan/Execute/
+Verify phase transitions and the `msgChan` synchronization that
+backstops them. The audit identified 11 additional issues ranging from
+CRITICAL (Discuss phase deadlock) to LOW (style/cleanup).
+
+### Wiring Issues Fixed
+
+| ID | Severity | Component | Type | Plan |
+|----|----------|-----------|------|------|
+| D-01 | CRITICAL | Discuss phase Q&A | `dead_end` | 14-01 |
+| D-02 | HIGH | Plan screen | `unreachable_screen` | 14-02 |
+| D-03 | HIGH | PlanModel dimensions | `missing_init` | 14-02 |
+| D-04 | HIGH | msgChan race | `data_race` | 14-03 |
+| D-05 | MEDIUM | Execute/Verify flash | `unreachable_screen` | 14-02 |
+| D-06 | MEDIUM | Workflow state non-persistent | `missing_persistence` | 14-04 |
+| D-07 | MEDIUM | Discuss not streamed | `inconsistent_patterns` | 14-05 |
+| D-08 | LOW | PlanModel field access | `tight_coupling` | 14-05 |
+| D-09 | LOW | Sidebar threshold | `magic_number` | 14-05 |
+| D-10 | LOW | streamCh not closed | `resource_leak` | 14-05 |
+| D-11 | MEDIUM | AppState god object | `architectural_smell` | deferred |
+
+### Plans
+
+```
+Plans:
+- [ ] 14-01-PLAN.md — Discuss Phase Q&A Wiring (Wave 1, D-01)
+- [ ] 14-02-PLAN.md — Workflow Screen Wiring (Wave 1, D-02/D-03/D-05)
+- [ ] 14-03-PLAN.md — msgChan Drainer Synchronization (Wave 1, D-04)
+- [ ] 14-04-PLAN.md — Workflow State Persistence (Wave 2, D-06)
+- [ ] 14-05-PLAN.md — Discuss Streaming + Low Severity (Wave 2, D-07/D-08/D-09/D-10)
+- [ ] 14-06-PLAN.md — AppState Refactor (Wave 3, D-11, optional/stretch)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 14-01, 14-02, 14-03 | yes, yes, yes | — |
+| 2    | 14-04, 14-05 | yes, yes | Wave 1 |
+| 3    | 14-06 (stretch) | yes | Wave 2 |
+
+### Deliverables
+
+- Discuss phase Q&A: 5-minute timeout, sequential questions via existing
+  `QuestionRequestMsg` flow, no deadlock
+- Plan screen reachable with non-zero dimensions; user accepts via 'a' key
+- Execute/Verify/Ship screens wait for user confirmation (no flash)
+- `msgChan` synchronized via per-phase `done` channel and `phaseGen` counter
+- Workflow state (goal, phase, questions) persisted to `session.json`
+- `/workflow resume` command restores from persisted state
+- Discuss phase LLM response streams into REPL token-by-token
+- `streamCh` properly closed on stream end
+- `ModelSelector` setters (`SetRegistry`, `SetTheme`) replace direct field access
+- `SidebarWidthThreshold` configurable via `~/.m31a/config.toml` (default 120)
+- All existing tests still pass; new tests cover each fix
+
+### Out of Scope
+
+- **D-11 AppState refactor** — listed as Plan 14-06 but marked
+  optional/stretch. The coordinator pattern (WorkflowCoordinator,
+  ScreenRouter, StreamCoordinator) is recommended for the next major
+  release but is not required for v1.0 stability. May be deferred
+  to v1.1.
+- **Shell mode permission bypass** (loophole report H1) — already
+  documented as intentional; not a Phase 14 fix.
+- **Vision / multi-modal support** — out of M31A V1 scope.
+
+---
+
 ## Deferred to Future (V2.0+)
 
 | Feature | Reason for Deferral | Notes |
@@ -873,6 +954,7 @@ Phase 0 (Foundation)
               → Phase 11 (Session & Config Adaptations)
                 → Phase 12 (UX & Editor Experience)
                   → Phase 13 (Infrastructure & Sharing)
+                    → Phase 14 (TUI ↔ Core Wiring Fixes)
 ```
 
 **Parallel tracks:**
