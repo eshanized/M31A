@@ -215,16 +215,20 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 				m.replModel.SetSidebarWidth(0)
 			}
 		}
+		return m, nil
 	case "open_settings":
 		m.screen = ScreenSettings
+		return m, nil
 	case "new_session":
 		m.screen = ScreenFirstRun
 		m.replModel = nil
+		return m, nil
 	case "session_list":
 		if m.resumeModel != nil {
 			m.resumeModel.Refresh()
 		}
 		m.screen = ScreenResume
+		return m, nil
 	case "cycle_model":
 		if m.registry != nil {
 			m.prevScreen = m.screen

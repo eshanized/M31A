@@ -988,3 +988,36 @@ func TestExpandFileRefs_Directory(t *testing.T) {
 		t.Errorf("Directory: expected reference left as-is, got %q", result)
 	}
 }
+
+func TestReplModel_SlashCommandEmitsSlashCommandMsg(t *testing.T) {
+	m := NewReplModel(theme.Dark())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Set a slash command value
+	m.textarea.SetValue("/help")
+
+	// Press Enter
+	cmds, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Check that a SlashCommandMsg was emitted
+	found := false
+	for _, cmd := range cmds {
+		if cmd != nil {
+			msg := cmd()
+			if slashMsg, ok := msg.(SlashCommandMsg); ok {
+				found = true
+				if slashMsg.Command != "/help" {
+					t.Errorf("SlashCommandMsg.Command = %q, want %q", slashMsg.Command, "/help")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected SlashCommandMsg to be emitted for /help command")
+	}
+
+	// Textarea should be cleared
+	if m.textarea.Value() != "" {
+		t.Errorf("Expected textarea cleared after slash command, got %q", m.textarea.Value())
+	}
+}

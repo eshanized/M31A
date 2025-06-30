@@ -137,6 +137,7 @@ func DefaultCommands() *CommandRegistry {
 
 	r.Register("help", handleHelp, "List all available commands")
 	r.Register("clear", handleClear, "Clear current conversation context")
+	r.Register("settings", handleSettings, "Open settings editor")
 	r.Register("status", handleStatus, "Show current session info")
 	r.Register("model", handleModel, "Show or switch model")
 	r.Register("provider", handleProvider, "Show or switch provider")

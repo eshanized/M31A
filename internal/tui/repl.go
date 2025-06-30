@@ -512,56 +512,57 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 		case "t":
 			// Toggle focused thinking block (or first collapsed if none focused)
+			// Only when textarea is empty and there are thinking blocks
 			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
 				m.toggleFocusedThinkingBlock()
 				m.renderMessages()
 				var cmds []tea.Cmd
 				return cmds, false
 			}
-			var cmds []tea.Cmd
-			return cmds, false
+			// Fall through to textarea when typing
 
 		case "T":
 			// Toggle ALL thinking blocks (preserve existing behavior)
+			// Only when textarea is empty
 			if m.textarea.Value() == "" {
 				m.toggleAllThinkingBlocks()
 				m.renderMessages()
 				var cmds []tea.Cmd
 				return cmds, false
 			}
-			var cmds []tea.Cmd
-			return cmds, false
+			// Fall through to textarea when typing
 
 		case "tab":
 			// Cycle focus through thinking blocks
+			// Only when textarea is empty and there are thinking blocks
 			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
 				m.cycleThinkingFocus()
 				m.renderMessages()
 				var cmds []tea.Cmd
 				return cmds, false
 			}
-			var cmds []tea.Cmd
-			return cmds, false
+			// Fall through to textarea when typing
 
 		case "shift+tab":
 			// Cycle focus backwards through thinking blocks
+			// Only when textarea is empty and there are thinking blocks
 			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
 				m.cycleThinkingFocusBackward()
 				m.renderMessages()
 				var cmds []tea.Cmd
 				return cmds, false
 			}
-			var cmds []tea.Cmd
-			return cmds, false
+			// Fall through to textarea when typing
 
 		case "x":
-			// Dismiss fallback banner
+			// Dismiss fallback banner only when banner is visible
 			if m.fallbackBanner != "" {
 				m.fallbackBanner = ""
 				m.renderMessages()
+				var cmds []tea.Cmd
+				return cmds, false
 			}
-			var cmds []tea.Cmd
-			return cmds, false
+			// Fall through to textarea when no banner to dismiss
 
 		case "esc":
 			// Dismiss fallback banner on escape

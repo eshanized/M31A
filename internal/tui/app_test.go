@@ -2167,3 +2167,103 @@ func TestApp_SidebarThreshold_FromConfig(t *testing.T) {
 	}
 }
 
+
+// TestReplSlashCommand_EndToEnd verifies that typing a slash command in the REPL
+// and pressing Enter results in the app-level SlashCommandMsg handler executing.
+func TestReplSlashCommand_EndToEnd(t *testing.T) {
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.screen = ScreenREPL
+
+	// Simulate the REPL receiving a key enter with a slash command typed
+	// Since we can't directly set the REPL's textarea value (private),
+	// we simulate by sending a SlashCommandMsg directly to the app,
+	// which is what the REPL would emit after processing Enter.
+	newModel, cmd := app.Update(SlashCommandMsg{Command: "/settings"})
+	updated := newModel.(*AppState)
+
+	if updated.screen != ScreenSettings {
+		t.Errorf("Expected ScreenSettings after /settings, got %v", updated.screen)
+	}
+	if cmd != nil {
+		t.Error("Expected nil cmd for settings transition")
+	}
+
+	// Test /help command — should be handled by command registry
+	app2 := NewApp("test", nil, "key", "/tmp/config")
+	app2.screen = ScreenREPL
+
+	newModel2, cmd2 := app2.Update(SlashCommandMsg{Command: "/help"})
+	updated2 := newModel2.(*AppState)
+
+	// /help is handled by the registry, so screen should remain ScreenREPL
+	if updated2.screen != ScreenREPL {
+		t.Errorf("Expected ScreenREPL after /help, got %v", updated2.screen)
+	}
+	// /help returns a message in currentOperation
+	if updated2.currentOperation == "" {
+		t.Error("Expected currentOperation to be set after /help")
+	}
+	_ = cmd2
+}
+
+// TestReplSlashCommand_FullIntegration simulates typing a slash command
+// character by character through the full app → REPL → textarea pipeline.
+func TestReplSlashCommand_FullIntegration(t *testing.T) {
+	app := NewApp("test", nil, "key", "/tmp/config")
+	app.screen = ScreenREPL
+
+	// Ensure replModel exists
+	if app.replModel == nil {
+		t.Fatal("replModel is nil")
+	}
+
+	// Simulate window size
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// Simulate typing "/settings" character by character
+	for _, ch := range "/settings" {
+		app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	}
+
+	// Verify the textarea contains "/settings"
+	if app.replModel.textarea.Value() != "/settings" {
+		t.Errorf("Expected textarea to contain '/settings', got %q", app.replModel.textarea.Value())
+	}
+
+	// Press Enter — this returns a cmd that will emit SlashCommandMsg
+	// In the real app, Bubble Tea's event loop executes this cmd and sends
+	// the message back. We simulate that by extracting and executing the cmd.
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := newModel.(*AppState)
+
+	// The cmd is a tea.Batch containing the SlashCommandMsg emitter plus
+	// listener commands. In the real app, Bubble Tea's event loop executes
+	// all cmds and sends their messages back. We simulate by executing the
+	// batch and finding the SlashCommandMsg.
+	if cmd != nil {
+		result := cmd()
+		// tea.Batch with multiple cmds returns tea.BatchMsg
+		if batchMsg, ok := result.(tea.BatchMsg); ok {
+			for _, c := range batchMsg {
+				if c != nil {
+					msg := c()
+					if slashMsg, ok := msg.(SlashCommandMsg); ok {
+						// Process the SlashCommandMsg like Bubble Tea would
+						newModel2, _ := updated.Update(slashMsg)
+						updated = newModel2.(*AppState)
+						break
+					}
+				}
+			}
+		} else if slashMsg, ok := result.(SlashCommandMsg); ok {
+			// Single cmd case: directly a SlashCommandMsg
+			newModel2, _ := updated.Update(slashMsg)
+			updated = newModel2.(*AppState)
+		}
+	}
+
+	// Verify we transitioned to ScreenSettings
+	if updated.screen != ScreenSettings {
+		t.Errorf("Expected ScreenSettings after /settings, got %v", updated.screen)
+	}
+}

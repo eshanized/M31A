@@ -33,6 +33,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sidebarModel != nil {
 			m.sidebarModel.Update(msg)
 		}
+		if m.settingsModel != nil {
+			_, _ = m.settingsModel.Update(msg)
+		}
+		// modelSelector is a value type; only update if initialized
+		if m.modelSelector.registry != nil {
+			_, _ = m.modelSelector.Update(msg)
+		}
 		return m, nil
 
 	case LeaderTimeoutMsg:

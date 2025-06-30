@@ -22,6 +22,12 @@ func handleHelp(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
+// handleSettings switches to the settings screen.
+func handleSettings(args []string, ctx CommandContext) CommandResult {
+	screen := ScreenSettings
+	return CommandResult{Success: true, Screen: &screen}
+}
+
 // handleClear returns a confirmation that the context was cleared.
 func handleClear(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: "Context cleared."}

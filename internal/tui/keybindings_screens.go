@@ -101,14 +101,10 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 		return func() tea.Msg { return KeyActionMsg{Action: "toggle_theme"} }
 	})
 
-	r.Register(CtxREPL, "t", "toggle thinking (focused)", nil)
-	r.Register(CtxREPL, "T", "toggle all thinking", nil)
-	r.Register(CtxREPL, "tab", "next thinking block", nil)
-	r.Register(CtxREPL, "shift+tab", "prev thinking block", nil)
-	r.Register(CtxREPL, "pgup", "scroll up", nil)
-	r.Register(CtxREPL, "pgdown", "scroll down", nil)
-	r.Register(CtxREPL, "x", "dismiss banner", nil)
-	r.Register(CtxREPL, "esc", "clear input", nil)
+	// Single-character keys (t, T, x, esc, tab) are handled directly in ReplModel.Update()
+	// with conditional logic (only when textarea is empty). Do NOT register them here,
+	// as the KeyRegistry would consume them before they reach the textarea, breaking
+	// normal text input (e.g., typing "/settings" would lose the "t").
 
 	r.Register(CtxSettings, "ctrl+s", "save config", nil)
 	r.Register(CtxSettings, "tab", "next tab", nil)
