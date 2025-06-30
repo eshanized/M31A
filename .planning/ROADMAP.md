@@ -926,6 +926,149 @@ Plans:
 
 ---
 
+## Phase 15 — Comprehensive Deep Audit Fixes
+
+**Duration:** 3 weeks  
+**Complexity:** 8/10  
+**Milestone:** All 72 findings from the comprehensive deep codebase audit are fixed, with regression tests for every Critical and High issue, and the binary is ready for v1.0.0 release
+**Source:** `rush/comprehensive_deep_audit_2026.md` (72 findings, 7 Critical, 19 High, 28 Medium, 18 Low)
+**Depends on:** Phase 14 (TUI ↔ Core Wiring Fixes)
+
+### Background
+
+The comprehensive deep audit (`rush/comprehensive_deep_audit_2026.md`,
+auditor: `opencode / MiniMax-M3`, dated 2026-06-02) read every Go file
+in the 171-file tree across `cmd/`, `internal/`, and `pkg/`. It found
+**72 distinct issues** and identified five cross-cutting themes:
+
+1. **Channel ownership in the streaming pipeline is broken** (C-3, H-8,
+   H-9, H-14, M-21) — the REPL holds `streamCh`/`streamDone` and passes
+   them to a goroutine that closes them. Two owners, one channel.
+2. **Lint-by-string-match in lieu of typed errors** (C-5, H-11, M-29) —
+   `strings.Contains(errStr, "rate limit")` is fragile and locale/
+   wording dependent. `internal/errors` already defines 15 sentinels.
+3. **LLM output is untrusted but parsing code is fragile** (C-4, H-5,
+   M-22) — ReDoS, JSON comments, empty `done` case for usage tracking.
+4. **Configuration fields declared but unwired** (L-7, L-8, M-9) — the
+   package boundaries look complete but the wiring is partial.
+5. **Concurrency primitives in single-threaded contexts** (H-9, H-14,
+   C-3) — `sync.Once` and `sync.Mutex` are used in places where the
+   Bubble Tea single-thread model would have been sufficient, while
+   real concurrency bugs go unaddressed.
+
+The audit's recommended fix order (Critical first, then High, then
+Medium, then Low) is reflected in the wave structure below. **Every
+Critical and High must land with a regression test** — the audit's
+closing note: *"none of these findings have a regression test that
+would have caught them."*
+
+### Issues Fixed
+
+| ID | Sev | Component | Plan |
+|----|-----|-----------|------|
+| C-1 | CRITICAL | `replModel` nil deref (TUI panic) | 15-01 |
+| C-2 | CRITICAL | `AutoFallback` dead (resilience) | 15-05 |
+| C-3 | CRITICAL | Stream channel double-close | 15-02 |
+| C-4 | CRITICAL | `parseToolCalls` ReDoS / OOM | 15-03 |
+| C-5 | CRITICAL | `isDBusUnavailable` over-matches | 15-04 |
+| C-6 | CRITICAL | WebFetch SSRF DNS rebinding | 15-04 |
+| C-7 | CRITICAL | Bash `NaN` timeout + `go build ./...` | 15-04 |
+| H-1 | HIGH | `Schedule` group order non-deterministic | 15-06 |
+| H-2 | HIGH | Empty `Status` re-runs done tasks | 15-06 |
+| H-3 | HIGH | `healTask` verifies by `os.Stat` only | 15-06 |
+| H-4 | HIGH | Bisect loop unbounded | 15-06 |
+| H-5 | HIGH | JSON comment stripping | 15-03 |
+| H-6 | HIGH | `SetSessionID` `..` traversal | 15-06 |
+| H-7 | HIGH | `resolvedAPIKey` stale after fallback | 15-05 |
+| H-8 | HIGH | Segment-boundary logic divergent | 15-07 |
+| H-9 | HIGH | `safeClose` race | 15-02 |
+| H-10 | HIGH | Emitter drops silently | 15-07 |
+| H-11 | HIGH | Health interval substring check | 15-08 |
+| H-12 | HIGH | Zen key ignored at startup | 15-05 |
+| H-13 | HIGH | Slash command case sensitivity | 15-07 |
+| H-14 | HIGH | Stream goroutine concurrency | 15-02 |
+| H-15 | HIGH | Prompts embed not tested | 15-06 |
+| H-16 | HIGH | `collectDiffStats` heuristic broken | 15-06 |
+| H-17 | HIGH | `verifyTask` runs `go build ./...` | 15-06 |
+| H-18 | HIGH | `listCwdFiles` depth count fragile | 15-06 |
+| H-19 | HIGH | `session_id_length` silently clamped | 15-08 |
+| M-1..M-33 | MEDIUM | Various (28 issues) | 15-08/09/10 |
+| L-1..L-18 | LOW | Style/dead code (18 issues) | 15-08/10 |
+
+Full per-issue mapping is in the CONTEXT.md and individual PLAN.md
+files.
+
+### Plans
+
+```
+Plans:
+- [ ] 15-01-PLAN.md — Critical TUI Nil-Safety Guards (Wave 1, C-1)
+- [ ] 15-02-PLAN.md — Stream Pipeline Channel Ownership Refactor (Wave 1, C-3/H-9/H-14/M-21)
+- [ ] 15-03-PLAN.md — LLM Input Safety & Output Parsing Hardening (Wave 1, C-4/H-5/M-22)
+- [ ] 15-04-PLAN.md — Tool Security: Keychain, WebFetch, Bash Hardening (Wave 2, C-5/C-6/C-7)
+- [ ] 15-05-PLAN.md — Provider Resilience: Autofallback & Key Resolution (Wave 2, C-2/H-7/H-12)
+- [ ] 15-06-PLAN.md — Workflow Engine Correctness (Wave 2, H-1..H-6/H-15..H-18)
+- [ ] 15-07-PLAN.md — TUI Segment Logic & Concurrency Cleanup (Wave 3, H-8/H-10/H-11/H-13)
+- [ ] 15-08-PLAN.md — Typed Errors, Dead Config & Unwired Packages (Wave 3, H-19/M-*)
+- [ ] 15-09-PLAN.md — Session, Ledger, Rollback, AutoDream Hardening (Wave 4, M-6/M-7/M-16/M-19/M-20/M-27/M-28/M-31)
+- [ ] 15-10-PLAN.md — Low Priority Polish & Tool Cleanup (Wave 4, L-1..L-18/M-30/M-33)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 15-01, 15-02, 15-03 | yes, yes, yes | — |
+| 2    | 15-04, 15-05, 15-06 | yes, yes, yes | Wave 1 |
+| 3    | 15-07, 15-08 | yes, yes | Wave 2 |
+| 4    | 15-09, 15-10 | yes, yes | Wave 3 |
+
+### Deliverables
+
+- **Zero TUI panics** in normal user flow (C-1, H-9 guards)
+- **Stream pipeline single-owner** — channel allocation owned by
+  `StartStreamCmd`; REPL does not hold `streamCh`/`streamDone` (C-3,
+  H-14, M-21)
+- **LLM input bounded** — `parseToolCalls` capped at 1 MB; max tools
+  per call limited; JSON comments stripped (C-4, H-5)
+- **WebFetch SSRF safe** — `DialContext` resolves once, pins IP,
+  re-checks after connect (C-6)
+- **Bash `NaN`/`Inf` rejected** before cast; `verifyTask` scopes to
+  task packages (C-7, H-17)
+- **`AutoFallback` wired** — 429/503 trigger fallback; key resolution
+  follows active provider (C-2, H-7, H-12)
+- **Workflow engine deterministic** — sorted groups, `Status` →
+  `Pending` only if no `CommitHash`, `os.Stat`+`AcceptanceCriteria`
+  heal verify, `git bisect run`, prompts embed test, `git diff
+  --name-status` for DiffStats, `SetSessionID` uses
+  `baseSessionsDir`, `NewEngine` validates (H-1..H-6, H-15..H-18)
+- **Typed errors throughout** — `errors.Is(err,
+  m31errors.ErrRateLimited)` replaces string matching (H-11, C-5, M-29)
+- **TUI segment logic single-source** — `streaming.go` is the only
+  segment-boundary path; `repl_stream.go` reuses it (H-8, M-22, M-26)
+- **All regression tests pass** — `go test -race -count=1 -cover
+  ./...` green on Linux/macOS/Windows; coverage for `pkg/taskrunner`,
+  `pkg/bisect`, `pkg/rollback`, `internal/workflow`, `internal/provider`
+  ≥ 80%
+
+### Out of Scope
+
+- **AppState refactor (D-11 / M-32)** — already deferred from Phase 14;
+  coordinator pattern is a v1.1 concern.
+- **V1.1 features** (Ghost mode, Terminal PiP, Concurrent subagents) —
+  separate phase.
+- **MCP / Plugin / Vision** — explicit v2.0+.
+
+### Test Strategy
+
+Every Critical and High lands with at least one regression test that
+**would have caught the bug**. The audit's closing note is the basis
+for this rule: *"none of these findings have a regression test that
+would have caught them."* Mediums get a test where the cost is
+proportional to the value; Lows are spot-checked.
+
+---
+
 ## Deferred to Future (V2.0+)
 
 | Feature | Reason for Deferral | Notes |
