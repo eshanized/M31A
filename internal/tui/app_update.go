@@ -865,8 +865,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cfgProvider != "" && m.activeProvider != cfgProvider {
 				if err := m.registry.SetActive(cfgProvider); err == nil {
 					m.activeProvider = cfgProvider
-					m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
-					m.replModel.SetDispatcher(m.dispatcher)
+					// Fix C-1: guard against nil replModel
+					if m.replModel != nil {
+						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
+						m.replModel.SetDispatcher(m.dispatcher)
+					}
 				}
 			}
 
@@ -878,8 +881,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						for _, mi := range models {
 							if mi.ID == cfgModel {
 								m.activeModel = &mi
-								m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
-								m.replModel.SetDispatcher(m.dispatcher)
+								// Fix C-1: guard against nil replModel
+								if m.replModel != nil {
+									m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
+									m.replModel.SetDispatcher(m.dispatcher)
+								}
 								break
 							}
 						}
@@ -925,6 +931,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.themeManager = theme.NewManager(theme.ModeLight)
 		}
 		t := m.themeManager.Current()
+		// Fix C-1: guard against nil replModel
 		if m.replModel != nil {
 			m.replModel.SetTheme(t)
 		}
