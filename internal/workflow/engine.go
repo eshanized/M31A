@@ -769,12 +769,90 @@ func normalizeToolName(name string) string {
 	}
 }
 
+// stripJSONComments removes // line comments and /* ... */ block comments from
+// JSON text while preserving content inside double-quoted string literals.
+// Fix H-5: LLM responses may contain comments that cause json.Unmarshal to fail.
+func stripJSONComments(s string) string {
+	var out []rune
+	inString := false
+	escaped := false
+	i := 0
+	runes := []rune(s)
+	n := len(runes)
+	commentsStripped := false
+
+	for i < n {
+		c := runes[i]
+
+		if escaped {
+			out = append(out, c)
+			escaped = false
+			i++
+			continue
+		}
+
+		if inString {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			out = append(out, c)
+			i++
+			continue
+		}
+
+		// Not inside a string
+		if c == '"' {
+			inString = true
+			out = append(out, c)
+			i++
+			continue
+		}
+
+		// Check for // line comment
+		if c == '/' && i+1 < n && runes[i+1] == '/' {
+			commentsStripped = true
+			// Skip to end of line
+			for i < n && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// Check for /* ... */ block comment
+		if c == '/' && i+1 < n && runes[i+1] == '*' {
+			commentsStripped = true
+			i += 2 // skip past /*
+			for i < n {
+				if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2 // skip past */
+					break
+				}
+				i++
+			}
+			continue
+		}
+
+		out = append(out, c)
+		i++
+	}
+
+	if commentsStripped {
+		slog.Warn("extractJSONObject: stripped comments from LLM response (model regression signal)")
+	}
+
+	return string(out)
+}
+
 // extractJSONObject finds and returns the first complete JSON object starting
 // at the beginning of the string.
 func extractJSONObject(s string) string {
 	if !strings.HasPrefix(strings.TrimSpace(s), "{") {
 		return ""
 	}
+	// Fix H-5: strip comments before scanning for JSON structure.
+	s = stripJSONComments(s)
 	depth := 0
 	inString := false
 	escaped := false

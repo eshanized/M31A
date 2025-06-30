@@ -115,8 +115,30 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 
 	cfg, _ := GetReasoningConfig(modelID)
 
+	// Fix M-22: Extract usage from the final SSE chunk if present.
+	var usage *types.Usage
+	if usageRaw, exists := raw["usage"]; exists {
+		if usageMap, ok := usageRaw.(map[string]any); ok {
+			u := &types.Usage{}
+			if pt, ok := usageMap["prompt_tokens"].(float64); ok {
+				u.PromptTokens = int(pt)
+			}
+			if ct, ok := usageMap["completion_tokens"].(float64); ok {
+				u.CompletionTokens = int(ct)
+			}
+			if tt, ok := usageMap["total_tokens"].(float64); ok {
+				u.TotalTokens = int(tt)
+			}
+			usage = u
+		}
+	}
+
 	choices, ok := getNestedField(raw, "choices")
 	if !ok {
+		// Fix M-22: Some providers send usage without choices in the final chunk.
+		if usage != nil {
+			return &types.StreamChunk{Type: "usage", Usage: usage}, nil
+		}
 		return nil, fmt.Errorf("missing 'choices' field in SSE payload")
 	}
 
@@ -131,7 +153,7 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 	}
 
 	if finishReason, exists := firstChoice["finish_reason"]; exists && finishReason != nil {
-		return &types.StreamChunk{Type: "done"}, nil
+		return &types.StreamChunk{Type: "done", Usage: usage}, nil
 	}
 
 	delta, ok := firstChoice["delta"]

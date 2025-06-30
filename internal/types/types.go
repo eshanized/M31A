@@ -149,9 +149,10 @@ type Session struct {
 }
 
 type StreamChunk struct {
-	Type             string `json:"type"`
-	Delta            string `json:"delta"`
-	ThinkingDuration int64  `json:"thinking_duration"`
+	Type             string  `json:"type"`
+	Delta            string  `json:"delta"`
+	ThinkingDuration int64   `json:"thinking_duration"`
+	Usage            *Usage  `json:"usage,omitempty"`
 }
 
 type StreamIterator struct {

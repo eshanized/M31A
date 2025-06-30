@@ -33,10 +33,27 @@ type TickMsg struct {
 	Time time.Time
 }
 
-func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string, streamCh chan tea.Msg, streamDone chan struct{}) tea.Cmd {
+// Fix C-3: StartStreamCmd owns its channels internally. The caller (REPL)
+// never creates or disposes channels — they are allocated and closed within
+// this function. The goroutine owns the write side; the returned channel
+// is the read side for the BT update loop's continuation cmd.
+//
+// Fix M-21: The goroutine closes streamCh when it exits. There is no
+// separate streamDone channel — closing streamCh IS the done signal.
+// The cmd reads from streamCh; when closed, reads return the zero value
+// (nil for tea.Msg interface), which we detect and return as nil to stop
+// the Bubble Tea continuation chain.
+//
+// Double-invocation is safe: each call allocates fresh channels.
+func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) (tea.Cmd, <-chan tea.Msg) {
+	// Fix C-3: channels allocated locally — no caller creates or disposes them.
+	streamCh := make(chan tea.Msg, 64)
+
 	go func() {
-		defer close(streamDone)
-		defer close(streamCh) // D-10: close data channel so consumers know no more messages are coming
+		// Fix M-21: close streamCh when the goroutine exits. The cmd reader
+		// detects closure and returns nil to stop the continuation chain.
+		defer close(streamCh)
+
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
 			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
@@ -139,16 +156,19 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 		}
 	}()
 
-	// Return a cmd that reads from the shared stream channel.
-	// handleStreamMsg will return a new cmd after each StreamMsg to continue reading.
-	return func() tea.Msg {
-		select {
-		case msg := <-streamCh:
-			return msg
-		case <-ctx.Done():
-			return StreamErrorMsg{Err: ctx.Err()}
+	// Fix C-3: the cmd reads from streamCh. When the goroutine closes
+	// streamCh, the channel read returns the zero value (nil for tea.Msg
+	// interface), which we return as nil to stop the Bubble Tea cmd chain.
+	cmd := func() tea.Msg {
+		msg, ok := <-streamCh
+		if !ok {
+			// Fix M-21: channel closed — stream goroutine exited.
+			return nil
 		}
+		return msg
 	}
+
+	return cmd, streamCh
 }
 
 func StreamTickCmd() tea.Cmd {
