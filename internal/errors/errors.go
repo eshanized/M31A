@@ -17,4 +17,6 @@ var (
 	ErrTaskFailed            = errors.New("task failed")
 	ErrPhaseTransition       = errors.New("invalid phase transition")
 	ErrCheckpointNotFound    = errors.New("checkpoint not found")
+	// Fix C-4: Reject oversized LLM response payloads to prevent OOM.
+	ErrToolInputTooLarge = errors.New("tool input exceeds size limit")
 )

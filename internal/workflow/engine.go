@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/git"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
@@ -640,9 +641,23 @@ func parseQuestions(content string) []string {
 	return questions
 }
 
+// Fix C-4: Maximum number of tool calls to extract from a single response.
+const maxToolsPerCall = 16
+
+// Fix C-4: Maximum bytes to scan when looking for a single JSON object.
+// Prevents unbounded scanning of very large LLM replies.
+const maxJSONScanBytes = 64 << 10 // 64 KB
+
 // parseToolCalls extracts tool calls from response content.
 // Looks for JSON objects with a "name" or "tool" field inside code blocks or inline.
-func (e *Engine) parseToolCalls(content string) []m31types.ToolCall {
+func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
+	// Fix C-4: reject oversized LLM responses to prevent OOM.
+	if len(content) > m31types.MaxLLMResponseBytes {
+		slog.Warn("parseToolCalls: oversized LLM response rejected",
+			"bytes", len(content), "limit", m31types.MaxLLMResponseBytes)
+		return nil, m31errors.ErrToolInputTooLarge
+	}
+
 	var calls []m31types.ToolCall
 
 	// Pattern 1: JSON in code blocks ```<any lang> {...} ```
@@ -659,7 +674,11 @@ func (e *Engine) parseToolCalls(content string) []m31types.ToolCall {
 	// Pattern 2: Try to find standalone JSON objects with tool call fields
 	if len(calls) == 0 {
 		// Scan at each { position, use extractJSONObject for proper nesting
-		for i := 0; i < len(content); i++ {
+		scanLimit := len(content)
+		if scanLimit > maxJSONScanBytes {
+			scanLimit = maxJSONScanBytes
+		}
+		for i := 0; i < scanLimit; i++ {
 			if content[i] != '{' {
 				continue
 			}
@@ -680,7 +699,14 @@ func (e *Engine) parseToolCalls(content string) []m31types.ToolCall {
 		}
 	}
 
-	return calls
+	// Fix C-4: cap tool count to detect model regression.
+	if len(calls) > maxToolsPerCall {
+		slog.Warn("parseToolCalls: tool count exceeded cap, truncating",
+			"count", len(calls), "cap", maxToolsPerCall)
+		calls = calls[:maxToolsPerCall]
+	}
+
+	return calls, nil
 }
 
 // nextCallID returns a monotonically increasing counter for tool call IDs.

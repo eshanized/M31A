@@ -248,7 +248,10 @@ func TestEngine_ParseToolCalls_NestedObjects(t *testing.T) {
 
 	// Tool call with nested input object — the old regex pattern 2 could not match this
 	content := `{"name":"Bash","input":{"command":"echo hello"}}`
-	calls := eng.parseToolCalls(content)
+	calls, err := eng.parseToolCalls(content)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if len(calls) != 1 {
 		t.Fatalf("Expected 1 tool call, got %d", len(calls))
 	}
@@ -258,7 +261,10 @@ func TestEngine_ParseToolCalls_NestedObjects(t *testing.T) {
 
 	// Tool call with deeply nested input
 	content2 := `Here is the call: {"name":"FileWrite","input":{"path":"test.go","content":"package main"}}`
-	calls2 := eng.parseToolCalls(content2)
+	calls2, err := eng.parseToolCalls(content2)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if len(calls2) != 1 {
 		t.Fatalf("Expected 1 tool call from text, got %d", len(calls2))
 	}
@@ -268,7 +274,10 @@ func TestEngine_ParseToolCalls_NestedObjects(t *testing.T) {
 
 	// No tool call — just text with braces
 	content3 := `some {random} text without a name`
-	calls3 := eng.parseToolCalls(content3)
+	calls3, err := eng.parseToolCalls(content3)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if len(calls3) != 0 {
 		t.Errorf("Expected 0 tool calls, got %d", len(calls3))
 	}

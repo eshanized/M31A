@@ -16,4 +16,7 @@ const (
 	BashTimeout               = 30 * time.Minute
 	BashOutputLimit           = 50_000
 	DefaultContextLength      = 128_000
+	// Fix C-4: Maximum allowed LLM response size (1 MB) to prevent OOM
+	// in parseToolCalls.
+	MaxLLMResponseBytes = 1 << 20
 )

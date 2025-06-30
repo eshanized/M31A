@@ -134,7 +134,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		}
 
 		// Parse tool calls
-		toolCalls := e.parseToolCalls(content)
+		toolCalls, _ := e.parseToolCalls(content)
 
 		// Dispatch tool calls
 		toolErr := false
@@ -257,7 +257,7 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 	}
 
 	// Dispatch tool calls for fix
-	toolCalls := e.parseToolCalls(content)
+	toolCalls, _ := e.parseToolCalls(content)
 	if len(toolCalls) == 0 {
 		return taskrunner.TaskResult{
 			Success:    false,
