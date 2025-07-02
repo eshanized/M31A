@@ -34,9 +34,10 @@ type TickMsg struct {
 }
 
 // Fix C-3: StartStreamCmd owns its channels internally. The caller (REPL)
-// never creates or disposes channels — they are allocated and closed within
-// this function. The goroutine owns the write side; the returned channel
-// is the read side for the BT update loop's continuation cmd.
+// never creates, holds, or disposes channels — they are allocated and closed
+// within this function. The goroutine owns the write side; the returned cmd
+// reads from the channel internally. Double-invocation is safe: each call
+// allocates fresh channels.
 //
 // Fix M-21: The goroutine closes streamCh when it exits. There is no
 // separate streamDone channel — closing streamCh IS the done signal.
@@ -44,7 +45,9 @@ type TickMsg struct {
 // (nil for tea.Msg interface), which we detect and return as nil to stop
 // the Bubble Tea continuation chain.
 //
-// Double-invocation is safe: each call allocates fresh channels.
+// The returned tea.Cmd reads one message per invocation from the internal
+// channel. The caller manages continuation by returning a new cmd from
+// Update() — but the channel reference never escapes this closure.
 func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) (tea.Cmd, <-chan tea.Msg) {
 	// Fix C-3: channels allocated locally — no caller creates or disposes them.
 	streamCh := make(chan tea.Msg, 64)
@@ -159,6 +162,8 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 	// Fix C-3: the cmd reads from streamCh. When the goroutine closes
 	// streamCh, the channel read returns the zero value (nil for tea.Msg
 	// interface), which we return as nil to stop the Bubble Tea cmd chain.
+	// The channel reference is returned as a read-only hint; the caller
+	// stores it for continuation but never writes to or closes it.
 	cmd := func() tea.Msg {
 		msg, ok := <-streamCh
 		if !ok {

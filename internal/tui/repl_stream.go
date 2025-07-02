@@ -65,29 +65,27 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	m.renderMessages()
 	m.viewport.GotoBottom()
 
-	// Continuation: schedule next read from stream channel.
-	// Must also watch streamDone so the cmd exits when the stream
-	// goroutine terminates (normal completion or cancellation).
-	streamCh := m.streamCh
-	streamDone := m.streamDone
-	streamCtx := m.streamCtx
+	// Fix C-3: continuation cmd reads the next message from the goroutine's
+	// channel. StartStreamCmd owns the channel (allocated internally, closed
+	// by the goroutine); the REPL stores a read-only reference (m.streamCh)
+	// for continuation only. When the goroutine closes streamCh, the next
+	// read returns nil and stops.
+	// Fix H-14: the cmd is a pure read — no shared mutable state between the
+	// streaming goroutine and the BT update loop. All data crosses via tea.Msg
+	// values. streamContent and streamSegments live on ReplModel and are only
+	// mutated by the BT update loop (this handler), never by the goroutine.
 	nextCmd := func() tea.Msg {
-		select {
-		case msg := <-streamCh:
-			return msg
-		case <-streamDone:
-			// Stream goroutine exited — drain any remaining messages from
-			// the channel, then return nil to stop the continuation chain.
-			select {
-			case msg := <-streamCh:
-				return msg
-			default:
-				return nil
-			}
-		case <-streamCtx.Done():
-			// Context cancelled (e.g. user pressed Ctrl+C) — stop continuation.
+		// Fix C-3: m.streamCh is a read-only reference to the channel owned
+		// by StartStreamCmd's goroutine. We capture the reference (not the
+		// value) so we read from the same channel the goroutine writes to.
+		// When the goroutine closes streamCh, msg will be the zero value and
+		// ok will be false — we return nil to stop the Bubble Tea cmd chain.
+		streamCh := m.streamCh
+		msg, ok := <-streamCh
+		if !ok {
 			return nil
 		}
+		return msg
 	}
 
 	return []tea.Cmd{nextCmd}, false

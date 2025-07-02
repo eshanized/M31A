@@ -53,7 +53,6 @@ type ReplModel struct {
 
 	msgRenderer  *components.MessageRenderer
 	streamCancel context.CancelFunc
-	streamCtx    context.Context // current stream context, watched by continuation cmd
 
 	currentMessage    *types.Message
 	streamSegments    []types.MessageSegment
@@ -84,12 +83,11 @@ type ReplModel struct {
 	// Dispatcher for shell mode (! prefix) command execution
 	dispatcher *tools.Dispatcher
 
-	// Streaming channel — created when a stream starts, read by handleStreamMsg
-	streamCh chan tea.Msg
-
-	// streamDone is closed when the stream goroutine exits (normal or cancelled).
-	// Used by the continuation cmd to detect stream termination.
-	streamDone chan struct{}
+	// Fix C-3: streamCh is a read-only reference to the channel owned by
+	// StartStreamCmd's goroutine. The REPL never creates or closes this
+	// channel — it only reads from it via continuation cmds. The goroutine
+	// owns the write side and closes streamCh when the stream completes.
+	streamCh <-chan tea.Msg
 
 	// Last stream usage and cost (from StreamDoneMsg)
 	lastUsage *types.Usage
@@ -404,7 +402,6 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 					ctx, cancel := context.WithCancel(context.Background())
 					m.streamCancel = cancel
-					m.streamCtx = ctx
 					m.streaming = true
 					m.thinking = false
 					m.thinkingStartAt = time.Time{}
@@ -417,9 +414,10 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 						Messages: m.messagesForLLM(),
 						Stream:   true,
 					}
-					m.streamCh = make(chan tea.Msg, 100)
-					m.streamDone = make(chan struct{})
-					cmd := StartStreamCmd(ctx, p, req, m.sessionID, m.streamCh, m.streamDone)
+				// Fix C-3: StartStreamCmd owns its channels internally.
+				// The REPL stores a read-only reference for continuation only.
+				cmd, streamCh := StartStreamCmd(ctx, p, req, m.sessionID)
+				m.streamCh = streamCh
 					return []tea.Cmd{cmd}, true
 				}
 			}
