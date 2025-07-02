@@ -2,27 +2,31 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 14 — Plan 04 complete
-last_updated: "2026-06-02T05:00:00.000Z"
+status: Phase 15 — Plan 01 complete
+last_updated: "2026-06-02T16:38:40.000Z"
 progress:
-  total_phases: 10
-  completed_phases: 6
-  total_plans: 48
-  completed_plans: 39
-  percent: 61
+  total_phases: 11
+  completed_phases: 7
+  total_plans: 58
+  completed_plans: 40
+  percent: 64
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 14 — TUI ↔ Core Wiring Fixes (Plan 14-04 complete, 14-05/06 pending)
+Phase 15 — Comprehensive Deep Audit Fixes (Plan 15-01 complete)
 
 ## Status
 
-Phase 14 — fixing 11 wiring issues identified by the TUI ↔ Core
-wiring audit (`rush/tui_core_wiring_report.md`): 1 critical, 3 high, 4 medium,
-3 low. Plans 14-01, 14-02, 14-03, and 14-04 are complete; 14-05 and 14-06 remain.
+Phase 15 — fixing critical audit findings from the comprehensive deep audit.
+Plan 15-01 (C-1 nil-safety) is complete: nil-guards added to 3 unguarded
+branches in Update() and regression test created.
+
+## Last Session
+
+- **2026-06-02** — Phase 15 Plan 15-01 (Nil-Safety Guards) executed. 2 tasks, 2 commits (`bb4f670`, `b6ff1be`). tui package builds and vets clean. Pre-existing failures in workflow/repl_stream packages are unrelated.
 
 ## Completed Phases
 
@@ -141,6 +145,18 @@ wiring audit (`rush/tui_core_wiring_report.md`): 1 critical, 3 high, 4 medium,
 
 None
 
+## Phase 15 Plans
+
+- 15-01: ✅ Nil-Safety Guards (C-1 — CRITICAL)
+- 15-02: ⏳ (pending)
+- 15-03: ⏳ (pending)
+
+## Key Decisions Made
+
+### Phase 15 Decisions (15-01)
+
+- **15-01 (C-1):** Guard route chosen over lazy-init — minimal surface change, 3 one-line `if m.replModel == nil { return nil, nil }` additions. Regression test exercises 13 representative tea.Msg types with nil replModel.
+
 ## Last Session
 
-- **2026-06-02** — Phase 14 Plan 14-04 (Workflow State Persistence) executed atomically. 5 tasks, 5 commits (`d1971f3`, `e95f599`, `5e4906e`, `940a123`, `c1f1f84`). All tests pass (`go test -count=1 -race ./...`). 14-05 next.
+- **2026-06-02** — Phase 15 Plan 15-01 (Nil-Safety Guards) executed. 2 tasks, 2 commits (`bb4f670`, `b6ff1be`). tui package builds and vets clean. Pre-existing failures in workflow/repl_stream packages are unrelated.
