@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -425,21 +426,31 @@ func workflowMsgDrainer(app *AppState, gen int, done chan struct{}) tea.Cmd {
 	}
 }
 
-// safeClose closes ch if it's non-nil and not already closed. Returns
-// true if it actually performed the close, false otherwise. Used for
-// defensive double-close protection on the per-phase msgDone channel.
-func safeClose(ch chan struct{}) bool {
+// Fix H-9: safeCloseOnce replaces the racy check-then-close pattern with a
+// sync.Once-backed implementation. Multiple concurrent callers are safe — only
+// the first invocation closes the channel; subsequent calls are no-ops.
+// Returns true if THIS call performed the close, false otherwise (nil channel,
+// already closed, or another goroutine closed first).
+var closeOnces sync.Map // map[chan struct{}]*sync.Once
+
+func safeCloseOnce(ch chan struct{}) bool {
 	if ch == nil {
 		return false
 	}
-	select {
-	case <-ch:
-		// Already closed
-		return false
-	default:
+	oncePtr, _ := closeOnces.LoadOrStore(ch, &sync.Once{})
+	once := oncePtr.(*sync.Once)
+	closed := false
+	once.Do(func() {
 		close(ch)
-		return true
-	}
+		closed = true
+	})
+	return closed
+}
+
+// safeClose is a deprecated alias for safeCloseOnce. New code should use
+// safeCloseOnce directly. Kept for backward compatibility during migration.
+func safeClose(ch chan struct{}) bool {
+	return safeCloseOnce(ch)
 }
 
 // channelEmitter implements workflow.MsgEmitter by sending messages into a channel.
