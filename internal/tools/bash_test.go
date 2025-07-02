@@ -220,7 +220,8 @@ func TestBash_MissingCommandParam(t *testing.T) {
 
 func TestLimitWriter_UnderLimit(t *testing.T) {
 	t.Parallel()
-	lw := &limitWriter{limit: 100}
+	var buf strings.Builder
+	lw := &limitWriter{limit: 100, w: &buf}
 	n, err := lw.Write([]byte("hello"))
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +236,8 @@ func TestLimitWriter_UnderLimit(t *testing.T) {
 
 func TestLimitWriter_AtLimit(t *testing.T) {
 	t.Parallel()
-	lw := &limitWriter{limit: 5}
+	var buf strings.Builder
+	lw := &limitWriter{limit: 5, w: &buf}
 	n, err := lw.Write([]byte("hello"))
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +252,8 @@ func TestLimitWriter_AtLimit(t *testing.T) {
 
 func TestLimitWriter_OverLimit(t *testing.T) {
 	t.Parallel()
-	lw := &limitWriter{limit: 5}
+	var buf strings.Builder
+	lw := &limitWriter{limit: 5, w: &buf}
 	n, err := lw.Write([]byte("hello world"))
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +280,8 @@ func TestLimitWriter_OverLimit(t *testing.T) {
 
 func TestLimitWriter_ZeroLimit(t *testing.T) {
 	t.Parallel()
-	lw := &limitWriter{limit: 0}
+	var buf strings.Builder
+	lw := &limitWriter{limit: 0, w: &buf}
 	n, err := lw.Write([]byte("hello"))
 	if err != nil {
 		t.Fatal(err)
