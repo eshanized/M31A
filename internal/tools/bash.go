@@ -38,11 +38,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	commandRaw, ok := input.Params["command"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: command")
+		return types.ToolResult{}, fmt.Errorf("missing parameter: command: %w", m31errors.ErrToolExecution)
 	}
 	command, ok := commandRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter command must be a string")
+		return types.ToolResult{}, fmt.Errorf("parameter command must be a string: %w", m31errors.ErrToolExecution)
 	}
 
 	timeoutSec := 1800
@@ -52,7 +52,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 	if timeoutSec <= 0 {
-		timeoutSec = 1800
+		return types.ToolResult{}, fmt.Errorf("timeout must be positive: %w", m31errors.ErrInvalidTimeout)
+	}
+	if timeoutSec > int(types.BashTimeout.Seconds()) {
+		return types.ToolResult{}, fmt.Errorf("timeout exceeds max %s: %w", types.BashTimeout, m31errors.ErrInvalidTimeout)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
@@ -151,16 +154,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	output := outStr.String()
 
-	// Read wait error from channel (avoids data race)
-	var waitErr error
-	select {
-	case waitErr = <-waitCh:
-	case <-time.After(30 * time.Second):
-		waitErr = fmt.Errorf("wait timeout")
-	}
-
 	// Check if output was truncated
 	truncated := atomic.LoadInt64(&stdoutLimit.written) >= types.BashOutputLimit || atomic.LoadInt64(&stderrLimit.written) >= types.BashOutputLimit
+	if truncated {
+		output += "\n[... output truncated by 50K char cap]"
+	}
 
 	// Binary detection
 	if isBinary(output) {
@@ -168,6 +166,14 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	elapsed := time.Since(start).Milliseconds()
+
+	// Read wait error from channel (avoids data race)
+	var waitErr error
+	select {
+	case waitErr = <-waitCh:
+	case <-time.After(30 * time.Second):
+		waitErr = fmt.Errorf("wait timeout")
+	}
 
 	var exitCode int
 	if cmd.ProcessState != nil {

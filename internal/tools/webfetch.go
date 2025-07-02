@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -27,12 +28,16 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 }
 
 // isPrivateIP returns true if the IP is loopback, link-local, RFC1918,
-// or cloud metadata. These should not be reachable by an external agent.
+// IPv6 ULA, IPv6 link-local, or cloud metadata. These should not be
+// reachable by an external agent.
 func isPrivateIP(ip net.IP) bool {
 	if ip.IsLoopback() {
 		return true
 	}
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	if ip.IsUnspecified() {
 		return true
 	}
 	// RFC1918 private ranges
@@ -41,9 +46,24 @@ func isPrivateIP(ip net.IP) bool {
 			(ip4[0] == 172 && ip4[1]&0xf0 == 16) ||
 			(ip4[0] == 192 && ip4[1] == 168)
 	}
-	// fc00::/7 unique local
+	// IPv6: fc00::/7 unique local, fe80::/10 link-local
 	if ip16 := ip.To16(); ip16 != nil {
-		return ip16[0]&0xfe == 0xfc
+		if ip16[0]&0xfe == 0xfc {
+			return true // fc00::/7 ULA
+		}
+		if ip16[0] == 0xfe && (ip16[1]&0xc0) == 0x80 {
+			return true // fe80::/10 link-local
+		}
+		// IPv4-mapped IPv6: ::ffff:0:0/96 — check lower 32 bits
+		if ip16[0] == 0 && ip16[1] == 0 && ip16[2] == 0 && ip16[12] == 0xff && ip16[13] == 0xff {
+			v4 := net.IP(ip16[12:16])
+			if v4.IsLoopback() || v4.IsLinkLocalUnicast() {
+				return true
+			}
+			if v4[0] == 10 || (v4[0] == 172 && v4[1]&0xf0 == 16) || (v4[0] == 192 && v4[1] == 168) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -64,7 +84,7 @@ func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
 	// Check for literal IP first
 	if ip := net.ParseIP(host); ip != nil {
 		if !t.allowPrivateIPs && isPrivateIP(ip) {
-			return fmt.Errorf("access to private IP %s is blocked (SSRF protection)", ip)
+			return fmt.Errorf("access to private IP %s is blocked: %w", ip, errors.ErrPrivateIPBlocked)
 		}
 		return nil
 	}
@@ -79,7 +99,7 @@ func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
 	if !t.allowPrivateIPs {
 		for _, addr := range addrs {
 			if isPrivateIP(addr.IP) {
-				return fmt.Errorf("host %s resolves to private IP %s (SSRF protection)", host, addr.IP)
+				return fmt.Errorf("host %s resolves to private IP %s: %w", host, addr.IP, errors.ErrPrivateIPBlocked)
 			}
 		}
 	}

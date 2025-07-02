@@ -19,4 +19,8 @@ var (
 	ErrCheckpointNotFound    = errors.New("checkpoint not found")
 	// Fix C-4: Reject oversized LLM response payloads to prevent OOM.
 	ErrToolInputTooLarge = errors.New("tool input exceeds size limit")
+	// Fix C-5: Bash timeout must be positive and <= 30 minutes.
+	ErrInvalidTimeout = errors.New("invalid timeout: must be > 0 and <= 30m")
+	// Fix C-7: WebFetch SSRF — block private/loopback/link-local IPs.
+	ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
 )

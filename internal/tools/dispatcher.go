@@ -103,9 +103,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 		if !interactive {
 			if risk == types.RiskDangerous || risk == types.RiskDestructive {
-				return types.ToolResult{
-					Error: fmt.Sprintf("tool %s (risk: %s) blocked in shell mode; use interactive mode to approve", call.Name, risk),
-				}, nil
+				return types.ToolResult{}, fmt.Errorf("tool %s (risk: %s) blocked in shell mode: %w", call.Name, risk, m31errors.ErrPermissionDenied)
 			}
 		} else if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
 			if err := d.askPermission(ctx, call, risk, pctx); err != nil {
