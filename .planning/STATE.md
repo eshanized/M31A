@@ -148,7 +148,7 @@ None
 ## Phase 15 Plans
 
 - 15-01: ✅ Nil-Safety Guards (C-1 — CRITICAL)
-- 15-02: ⏳ (pending)
+- 15-02: ✅ Stream Pipeline Channel Ownership Refactor (C-3, H-9, H-14, M-21)
 - 15-03: ⏳ (pending)
 
 ## Key Decisions Made
@@ -157,6 +157,10 @@ None
 
 - **15-01 (C-1):** Guard route chosen over lazy-init — minimal surface change, 3 one-line `if m.replModel == nil { return nil, nil }` additions. Regression test exercises 13 representative tea.Msg types with nil replModel.
 
+### Phase 15 Decisions (15-02)
+
+- **15-02 (C-3/H-9/H-14/M-21):** Kept streamCh as a return value from StartStreamCmd for the continuation pattern (BT only calls a cmd once, so the REPL needs the channel reference). The goroutine owns the channel; the REPL stores a read-only reference. safeCloseOnce uses sync.Map of sync.Once per channel-pointer. Eliminated separate streamDone channel entirely.
+
 ## Last Session
 
-- **2026-06-02** — Phase 15 Plan 15-01 (Nil-Safety Guards) executed. 2 tasks, 2 commits (`bb4f670`, `b6ff1be`). tui package builds and vets clean. Pre-existing failures in workflow/repl_stream packages are unrelated.
+- **2026-06-02** — Phase 15 Plan 15-02 (Stream Pipeline Channel Ownership) executed. 3 tasks, 3 commits (`1db520e`, `bcd24a4`, `e53f5bc`). 4 regression tests pass with -race. tui package builds and vets clean.
