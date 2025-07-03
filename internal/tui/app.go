@@ -114,6 +114,11 @@ type AppState struct {
 	toastType          string
 	sidebarManuallyHidden bool
 	diffModel          DiffModel
+	// H-10/M-26: Header render cache — avoids re-rendering the header
+	// string via lipgloss on every TickMsg when nothing changed.
+	headerCacheKey   uint64 // FNV-1a hash of (provider, modelID, ctxUsed, ctxTotal, healthStatus, logLevel)
+	headerCacheValue string
+	headerCacheValid bool
 }
 
 func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {

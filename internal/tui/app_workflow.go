@@ -249,6 +249,7 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 	case "toggle_theme":
 		if m.themeManager != nil {
 			m.themeManager.Cycle()
+			m.headerCacheValid = false // H-10: invalidate header cache on theme change
 			t := m.themeManager.Current()
 			if m.replModel != nil {
 				m.replModel.SetTheme(t)

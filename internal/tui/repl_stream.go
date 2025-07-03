@@ -30,25 +30,15 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 
 	switch chunk.Type {
 	case "content":
-		if m.activeSegmentType == "thinking" && m.streamContent.Len() > 0 {
-			m.streamSegments = append(m.streamSegments, types.MessageSegment{
-				Type:    "thinking",
-				Content: m.streamContent.String(),
-				Visible: true,
-			})
-			m.streamContent.Reset()
+		if m.activeSegmentType == "thinking" {
+			m.closeActiveSegment()
 		}
 		m.activeSegmentType = "content"
 		m.thinking = false
 		m.streamContent.WriteString(chunk.Delta)
 	case "thinking":
-		if m.activeSegmentType == "content" && m.streamContent.Len() > 0 {
-			m.streamSegments = append(m.streamSegments, types.MessageSegment{
-				Type:    "content",
-				Content: m.streamContent.String(),
-				Visible: true,
-			})
-			m.streamContent.Reset()
+		if m.activeSegmentType == "content" {
+			m.closeActiveSegment()
 		}
 		m.activeSegmentType = "thinking"
 		m.thinking = true
@@ -91,15 +81,30 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	return []tea.Cmd{nextCmd}, false
 }
 
-func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
-	if m.streamContent.Len() > 0 {
-		m.streamSegments = append(m.streamSegments, types.MessageSegment{
-			Type:    "content",
-			Content: m.streamContent.String(),
-			Visible: true,
-		})
-		m.streamContent.Reset()
+// closeActiveSegment finalizes the current stream segment and appends it to
+// the segment list. It is called before switching segment types (H-8 fix)
+// and when the stream completes. The method is pure — no goroutines, no
+// external state — safe within the single-threaded BT update loop.
+func (m *ReplModel) closeActiveSegment() {
+	if m.streamContent.Len() == 0 {
+		return
 	}
+	seg := types.MessageSegment{
+		Type:    m.activeSegmentType,
+		Content: m.streamContent.String(),
+		Visible: true,
+	}
+	// Stamp thinking duration if we have a start time
+	if m.activeSegmentType == "thinking" && !m.thinkingStartAt.IsZero() {
+		seg.DurationMs = time.Since(m.thinkingStartAt).Milliseconds()
+	}
+	m.streamSegments = append(m.streamSegments, seg)
+	m.streamContent.Reset()
+}
+
+func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
+	// H-8: Close any active segment before finalizing the message.
+	m.closeActiveSegment()
 
 	msg.Message.Segments = m.streamSegments
 	if msg.Message.ToolCalls == nil || len(msg.Message.ToolCalls) == 0 {

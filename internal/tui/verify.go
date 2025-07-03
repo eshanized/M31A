@@ -53,12 +53,14 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			}
 		case "h", "H":
 			// Self-heal selected task: reset failed task to pending for re-execution
-			if m.selected < len(m.tasks) && m.tasks[m.selected].Status == types.StatusFailed {
+			// H-13: bounds check covers both single-task and multi-task selections.
+			if m.selected >= 0 && m.selected < len(m.tasks) && m.tasks[m.selected].Status == types.StatusFailed {
 				m.tasks[m.selected].Status = types.StatusPending
 			}
 		case "s", "S":
 			// Skip selected task
-			if m.selected < len(m.tasks) {
+			// H-13: bounds check covers both single-task and multi-task selections.
+			if m.selected >= 0 && m.selected < len(m.tasks) {
 				m.tasks[m.selected].Status = types.StatusSkipped
 			}
 		}

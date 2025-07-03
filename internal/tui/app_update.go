@@ -410,6 +410,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cancel()
 		m.healthCheckInFlight = false
 		m.healthStatus = result
+		m.headerCacheValid = false // H-10: invalidate header cache when health status changes
 		m.lastActivity = time.Now()
 		return m, NextHealthTick(calculateNextInterval(result))
 
@@ -469,6 +470,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeProvider = msg.ModelSelected.Provider
 			m.activeModel = &msg.ModelSelected.Model
+			m.headerCacheValid = false // H-10: invalidate header cache on model change
 			m.screen = m.prevScreen
 			return m, nil
 		}
@@ -885,6 +887,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						for _, mi := range models {
 							if mi.ID == cfgModel {
 								m.activeModel = &mi
+								m.headerCacheValid = false // H-10: invalidate header cache on model change
 								// Fix C-1: guard against nil replModel
 								if m.replModel != nil {
 									m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
