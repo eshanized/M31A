@@ -25,4 +25,6 @@ var (
 	ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
 	// Fix M-13: SSE stream truncated before [DONE] sentinel.
 	ErrStreamTruncated = errors.New("stream truncated before completion")
+	// Fix M-29: git bisect reset failed (e.g. no commits in range).
+	ErrBisectResetFailed = errors.New("bisect reset failed")
 )

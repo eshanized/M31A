@@ -336,12 +336,12 @@ func TestSession_Load_AcceptsEmptyPhase(t *testing.T) {
 	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	// Create a session with empty workflow phase (legacy)
-	sessionDir := filepath.Join(dir, "testid4")
+	sessionDir := filepath.Join(dir, "abc0def0")
 	os.MkdirAll(sessionDir, 0755)
-	sessionData := []byte(`{"id":"testid4","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z"}`)
+	sessionData := []byte(`{"id":"abc0def0","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z"}`)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
 
-	sess, err := mgr.LoadSession("testid4")
+	sess, err := mgr.LoadSession("abc0def0")
 	if err != nil {
 		t.Fatalf("expected no error for empty phase, got %v", err)
 	}

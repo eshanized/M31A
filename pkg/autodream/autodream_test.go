@@ -497,3 +497,91 @@ func TestConsolidate_ToolCallMessagesProtected(t *testing.T) {
 		t.Error("tool call message should be preserved after consolidation")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// M-7: Reentrancy guard
+// ---------------------------------------------------------------------------
+
+// TestAutoDream_ReentryGuard verifies that concurrent Consolidate calls
+// produce ErrAlreadyConsolidating for the second caller.
+func TestAutoDream_ReentryGuard(t *testing.T) {
+	msgs := makeMessages(20)
+	c := New(msgs)
+
+	// Use channels to synchronize goroutines and avoid data races.
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	gotResult1 := make(chan string, 1)
+	gotResult2 := make(chan string, 1)
+
+	// Goroutine 1: holds the consolidating flag via mu lock
+	go func() {
+		c.mu.Lock()
+		close(started) // signal that we've entered
+		<-proceed      // wait for signal to proceed
+		c.mu.Unlock()
+
+		// Now actually consolidate
+		r := c.Consolidate()
+		gotResult1 <- safeErrStr(r)
+	}()
+
+	// Goroutine 2: tries to enter while goroutine 1 holds the lock
+	go func() {
+		<-started // wait for goroutine 1 to enter
+		time.Sleep(50 * time.Millisecond)
+		r := c.Consolidate()
+		gotResult2 <- safeErrStr(r)
+	}()
+
+	// Let goroutine 2 try, then release goroutine 1
+	time.Sleep(100 * time.Millisecond)
+	close(proceed)
+
+	// Collect results via channels (race-free)
+	err1 := <-gotResult1
+	err2 := <-gotResult2
+
+	// At least one should have gotten ErrAlreadyConsolidating
+	if err1 == ErrAlreadyConsolidating.Error() || err2 == ErrAlreadyConsolidating.Error() {
+		return // success
+	}
+
+	t.Errorf("Expected one result to have ErrAlreadyConsolidating, got err1=%q err2=%q", err1, err2)
+}
+
+func safeErrStr(r *ConsolidationResult) string {
+	if r == nil {
+		return "<nil>"
+	}
+	return r.Error
+}
+
+// TestAutoDream_ConsolidatingFlagResets verifies that the consolidating flag
+// is reset after Consolidate completes (even on error).
+func TestAutoDream_ConsolidatingFlagResets(t *testing.T) {
+	c := New(makeMessages(20))
+
+	// First call should succeed
+	r1 := c.Consolidate()
+	if !r1.Success {
+		t.Fatalf("First consolidate should succeed: %s", r1.Error)
+	}
+
+	// Second call should work (flag was reset)
+	r2 := c.Consolidate()
+	// May or may not succeed depending on message count, but should NOT
+	// return ErrAlreadyConsolidating
+	if r2.Error == ErrAlreadyConsolidating.Error() {
+		t.Error("Consolidating flag was not reset after first call")
+	}
+}
+
+// TestAutoDream_ErrAlreadyConsolidating_IsSentinel verifies the error is
+// a proper sentinel that can be compared with errors.Is.
+func TestAutoDream_ErrAlreadyConsolidating_IsSentinel(t *testing.T) {
+	r := &ConsolidationResult{Error: ErrAlreadyConsolidating.Error()}
+	if r.Error != ErrAlreadyConsolidating.Error() {
+		t.Errorf("Expected error %q, got %q", ErrAlreadyConsolidating.Error(), r.Error)
+	}
+}

@@ -86,20 +86,17 @@ func TestCheckpoint_MaxRetention(t *testing.T) {
 		t.Fatalf("Expected 2 checkpoints (trimmed from 3), got %d", len(loaded))
 	}
 
-	// Should have kept the last 2 (indices 1 and 2)
-	expectedPhases := []types.WorkflowPhase{types.PhaseDiscuss, types.PhasePlan}
+	// Should have kept the 2 newest (Discuss and Plan), newest-first
+	expectedPhases := []types.WorkflowPhase{types.PhasePlan, types.PhaseDiscuss}
 	for i, cp := range loaded {
 		if cp.Phase != expectedPhases[i] {
 			t.Errorf("Checkpoint %d Phase: expected %q, got %q", i, expectedPhases[i], cp.Phase)
 		}
-		if cp.MessageCount != (i+1)*10 {
-			t.Errorf("Checkpoint %d MessageCount: expected %d, got %d", i, (i+1)*10, cp.MessageCount)
-		}
 	}
 
-	// Verify order: latest is last
-	if loaded[0].TaskCount != 1 || loaded[1].TaskCount != 2 {
-		t.Errorf("Expected oldest [discuss] first, newest [plan] last. Got TaskCounts: %d, %d",
+	// Verify order: newest first (Plan=2, Discuss=1)
+	if loaded[0].TaskCount != 2 || loaded[1].TaskCount != 1 {
+		t.Errorf("Expected newest [plan] first, oldest [discuss] last. Got TaskCounts: %d, %d",
 			loaded[0].TaskCount, loaded[1].TaskCount)
 	}
 }

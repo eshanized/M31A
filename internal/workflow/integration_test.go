@@ -22,6 +22,7 @@ type multiTurnMockProvider struct {
 }
 
 func (m *multiTurnMockProvider) Name() string { return "mock" }
+func (m *multiTurnMockProvider) APIKey() string { return "test-key" }
 func (m *multiTurnMockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
 	return nil, nil
 }

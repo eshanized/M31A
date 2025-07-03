@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"time"
+	"unicode"
 
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -12,6 +14,10 @@ type Session struct {
 	Messages []types.Message     `json:"messages"`
 	Tasks    []types.Task        `json:"tasks"`
 	Project  *types.ProjectState `json:"project"`
+
+	// ResumedAt records the time of the most recent resume. Nil for
+	// never-resumed sessions. Updated on every Manager.LoadSession call.
+	ResumedAt *time.Time `json:"resumed_at,omitempty"`
 
 	// Workflow state (D-06 fix) — persisted to session.json so closing
 	// the app mid-workflow doesn't abandon progress.
@@ -56,4 +62,18 @@ func (s *Session) SetWorkflowState(goal string, phase types.WorkflowPhase, quest
 // no workflow is in progress.
 func (s *Session) WorkflowState() (goal string, phase types.WorkflowPhase, questions []string) {
 	return s.WorkflowGoal, s.WorkflowPhase, s.DiscussQuestions
+}
+
+// validateSessionID checks that id is exactly types.SessionIDLength (8)
+// lowercase hexadecimal characters [a-f0-9].
+func validateSessionID(id string) error {
+	if len(id) != types.SessionIDLength {
+		return fmt.Errorf("session ID must be %d chars, got %d", types.SessionIDLength, len(id))
+	}
+	for _, c := range id {
+		if !unicode.IsDigit(c) && !(c >= 'a' && c <= 'f') {
+			return fmt.Errorf("session ID must contain only lowercase hex chars [a-f0-9], got %q", id)
+		}
+	}
+	return nil
 }

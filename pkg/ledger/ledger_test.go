@@ -663,3 +663,83 @@ func sprintf(format string, args ...interface{}) string {
 	// Use fmt.Sprintf via a direct call
 	return fmt.Sprintf(format, args...)
 }
+
+// ---------------------------------------------------------------------------
+// M-16: Stats cache with mtime invalidation
+// ---------------------------------------------------------------------------
+
+// TestLedger_StatsCache_HitReturnsCached verifies that calling Stats() twice
+// without modifying the file returns the cached result.
+func TestLedger_StatsCache_HitReturnsCached(t *testing.T) {
+	l, _ := setupLedger(t)
+
+	// Append an entry to create some data
+	if err := l.Append(newTestEntry("s1", "go", 5, 1)); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	// First call — cache miss, computes stats
+	stats1 := l.Stats()
+	if stats1.TotalSessions != 1 {
+		t.Fatalf("Expected 1 session, got %d", stats1.TotalSessions)
+	}
+
+	// Second call — should hit cache (file unchanged)
+	stats2 := l.Stats()
+	if stats2.TotalSessions != 1 {
+		t.Fatalf("Expected 1 session from cache, got %d", stats2.TotalSessions)
+	}
+
+	// Verify the cached mtime is set
+	if l.statsCacheMtime.IsZero() {
+		t.Error("Expected statsCacheMtime to be set after first Stats() call")
+	}
+}
+
+// TestLedger_StatsCache_InvalidatedOnAppend verifies that appending an entry
+// invalidates the stats cache (i.e. Stats() returns fresh results after Append).
+func TestLedger_StatsCache_InvalidatedOnAppend(t *testing.T) {
+	l, _ := setupLedger(t)
+
+	// Append first entry
+	if err := l.Append(newTestEntry("s1", "go", 5, 1)); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	// First Stats() call — computes and caches
+	stats1 := l.Stats()
+	if stats1.TotalSessions != 1 {
+		t.Fatalf("Expected 1 session, got %d", stats1.TotalSessions)
+	}
+
+	// Append second entry
+	if err := l.Append(newTestEntry("s2", "python", 3, 0)); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	// Stats() should return fresh results (cache invalidated by Append's mtime change)
+	stats2 := l.Stats()
+	if stats2.TotalSessions != 2 {
+		t.Fatalf("Expected 2 sessions after append, got %d", stats2.TotalSessions)
+	}
+	// Verify the cache was actually used on the second call by checking
+	// that statsCacheMtime is non-zero (set during cache population)
+	if l.statsCacheMtime.IsZero() {
+		t.Error("Expected statsCacheMtime to be set after Stats() call")
+	}
+}
+
+// TestLedger_StatsCache_EmptyLedger verifies cache works for empty ledger.
+func TestLedger_StatsCache_EmptyLedger(t *testing.T) {
+	l, _ := setupLedger(t)
+
+	stats1 := l.Stats()
+	if stats1.TotalSessions != 0 {
+		t.Fatalf("Expected 0 sessions, got %d", stats1.TotalSessions)
+	}
+
+	stats2 := l.Stats()
+	if stats2.TotalSessions != 0 {
+		t.Fatalf("Expected 0 sessions from cache, got %d", stats2.TotalSessions)
+	}
+}

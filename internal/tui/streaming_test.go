@@ -23,6 +23,10 @@ func (m *mockStreamProvider) Name() string {
 	return "mock-stream"
 }
 
+func (m *mockStreamProvider) APIKey() string {
+	return "test-key"
+}
+
 func (m *mockStreamProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 	return nil, nil
 }

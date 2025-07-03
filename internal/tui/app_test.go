@@ -219,6 +219,10 @@ func (m *mockProvider) Name() string {
 	return "mock"
 }
 
+func (m *mockProvider) APIKey() string {
+	return "test-key"
+}
+
 func (m *mockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 	return nil, nil
 }

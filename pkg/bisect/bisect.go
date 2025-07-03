@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+
+	m31errors "github.com/eshanized/M31A/internal/errors"
 )
 
 // CommitInfo represents metadata about a git commit.
@@ -46,14 +48,19 @@ func (b *Bisect) run(args ...string) (string, error) {
 // Run performs a git bisect between sessionStartHash (good) and headHash (bad)
 // using checkFn to determine pass/fail at each step.
 // checkFn returns true if the commit passes verification, false if it fails.
-func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (*BisectResult, error) {
+// On git bisect reset failure, returns an error wrapping ErrBisectResetFailed (M-29).
+func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (result *BisectResult, err error) {
 	if b.logger != nil {
 		b.logger.Info("bisect starting", "good", sessionStartHash, "bad", headHash)
 	}
 
-	// Ensure we always reset
+	// Ensure we always reset (M-29: wrap reset failure with typed error)
 	defer func() {
-		b.run("bisect", "reset")
+		if _, resetErr := b.run("bisect", "reset"); resetErr != nil {
+			if err == nil {
+				err = fmt.Errorf("bisect reset: %w: %w", m31errors.ErrBisectResetFailed, resetErr)
+			}
+		}
 	}()
 
 	// Start bisect

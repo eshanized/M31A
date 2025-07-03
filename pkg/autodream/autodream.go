@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -35,7 +36,14 @@ type Consolidator struct {
 	paused              bool
 	lastConsolidation   time.Time
 	totalConsolidations int
+	// M-7: Reentrancy guard — CAS prevents nested /compress calls from
+	// entering a double-summary state.
+	consolidatingInt int32 // atomic: 0=idle, 1=consolidating
 }
+
+// ErrAlreadyConsolidating is returned when a consolidation is already in
+// progress (M-7 reentrancy guard).
+var ErrAlreadyConsolidating = fmt.Errorf("autodream consolidation already in progress")
 
 // New creates a Consolidator that owns a defensive copy of the given messages.
 func New(messages []types.Message) *Consolidator {
@@ -97,8 +105,19 @@ func (c *Consolidator) CanConsolidate() bool {
 // Consolidate compacts the oldest 50% of non-protected messages into a single
 // memory segment. Protected messages (first message, system messages, tool call
 // messages, and the last 5 messages) are never consolidated.
+// Returns ErrAlreadyConsolidating if a consolidation is already in progress (M-7).
 func (c *Consolidator) Consolidate() *ConsolidationResult {
 	start := time.Now()
+
+	// M-7: Reentrancy guard — CAS prevents nested /compress calls.
+	if !atomic.CompareAndSwapInt32(&c.consolidatingInt, 0, 1) {
+		return &ConsolidationResult{
+			Success:    false,
+			DurationMs: time.Since(start).Milliseconds(),
+			Error:      ErrAlreadyConsolidating.Error(),
+		}
+	}
+	defer atomic.StoreInt32(&c.consolidatingInt, 0)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

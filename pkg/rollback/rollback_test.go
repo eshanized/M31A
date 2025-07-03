@@ -1,6 +1,7 @@
 package rollback
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -220,7 +221,7 @@ func TestSoftReset(t *testing.T) {
 	entries, _ := r.Chain(10)
 	firstHash := entries[len(entries)-1].CommitInfo.Hash
 
-	result, err := r.SoftReset(firstHash)
+	result, err := r.SoftReset(firstHash, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestSoftReset_WithUncommitted(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	result, err := r.SoftReset(hash0)
+	result, err := r.SoftReset(hash0, nil)
 	if err != nil {
 		t.Fatalf("SoftReset with uncommitted changes failed: %v", err)
 	}
@@ -454,7 +455,7 @@ func TestRollbackResult_MessageFormat(t *testing.T) {
 	entries, _ := r.Chain(10)
 	firstHash := entries[len(entries)-1].CommitInfo.Hash
 
-	result, err := r.SoftReset(firstHash)
+	result, err := r.SoftReset(firstHash, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -502,7 +503,7 @@ func TestSoftReset_InvalidHash(t *testing.T) {
 	createCommits(g, 2)
 
 	r := New(g)
-	_, err := r.SoftReset("deadbeef1234567890abcdef1234567890abcdef")
+		_, err := r.SoftReset("deadbeef1234567890abcdef1234567890abcdef", nil)
 	if err == nil {
 		t.Fatal("Expected error for invalid hash in SoftReset")
 	}
@@ -549,7 +550,7 @@ func TestSoftReset_CurrentHead(t *testing.T) {
 	r := New(g)
 	head, _ := g.HeadHash()
 
-	result, err := r.SoftReset(head)
+	result, err := r.SoftReset(head, nil)
 	if err != nil {
 		t.Fatalf("SoftReset to current HEAD failed: %v", err)
 	}
@@ -643,7 +644,7 @@ func TestCountCommitsBetween_SameHash(t *testing.T) {
 	head, _ := g.HeadHash()
 
 	// SoftReset to HEAD, then check the message has "0 commits undone"
-	result, err := r.SoftReset(head)
+	result, err := r.SoftReset(head, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -661,7 +662,7 @@ func TestBuildResult_ShortHash(t *testing.T) {
 	entries, _ := r.Chain(10)
 	firstHash := entries[len(entries)-1].CommitInfo.Hash
 
-	result, err := r.SoftReset(firstHash)
+	result, err := r.SoftReset(firstHash, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -754,7 +755,7 @@ func TestSoftReset_WithUncommitted_MessageStashed(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	result, err := r.SoftReset(hash0)
+	result, err := r.SoftReset(hash0, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -994,7 +995,7 @@ func TestRollbackResult_AllFields(t *testing.T) {
 	entries, _ := r.Chain(10)
 	hash0 := entries[len(entries)-1].CommitInfo.Hash
 
-	result, err := r.SoftReset(hash0)
+	result, err := r.SoftReset(hash0, nil)
 	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
@@ -1042,7 +1043,7 @@ func TestErrorPaths_InvalidWorkDir(t *testing.T) {
 	})
 
 	t.Run("SoftReset fails", func(t *testing.T) {
-		_, err := r.SoftReset("abc123")
+		_, err := r.SoftReset("abc123", nil)
 		if err == nil {
 			t.Fatal("Expected error for SoftReset with invalid workdir")
 		}
@@ -1121,4 +1122,83 @@ func TestErrorPaths_DestroyedRepo(t *testing.T) {
 // contains reports whether substr is within s.
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// ---------------------------------------------------------------------------
+// M-28: SoftReset callback
+// ---------------------------------------------------------------------------
+
+// TestSoftReset_Callback_Invoked verifies that the onReset callback is
+// invoked with the new HEAD hash after a successful soft reset.
+func TestSoftReset_Callback_Invoked(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 3)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	firstHash := entries[len(entries)-1].CommitInfo.Hash
+
+	callbackHash := ""
+	callbackCalled := false
+	onReset := func(newHead string) error {
+		callbackCalled = true
+		callbackHash = newHead
+		return nil
+	}
+
+	result, err := r.SoftReset(firstHash, onReset)
+	if err != nil {
+		t.Fatalf("SoftReset failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("Expected success")
+	}
+	if !callbackCalled {
+		t.Error("Expected onReset callback to be called")
+	}
+	if callbackHash != firstHash {
+		t.Errorf("Expected callback hash %s, got %s", firstHash, callbackHash)
+	}
+}
+
+// TestSoftReset_Callback_ErrorPropagated verifies that an error in the
+// callback is propagated and the reset result is not returned.
+func TestSoftReset_Callback_ErrorPropagated(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	firstHash := entries[len(entries)-1].CommitInfo.Hash
+
+	expectedErr := errors.New("callback failed")
+	onReset := func(newHead string) error {
+		return expectedErr
+	}
+
+	_, err := r.SoftReset(firstHash, onReset)
+	if err == nil {
+		t.Fatal("Expected error from callback")
+	}
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("Expected error to wrap callback error, got: %v", err)
+	}
+}
+
+// TestSoftReset_NilCallback verifies that nil callback works fine.
+func TestSoftReset_NilCallback(t *testing.T) {
+	_, g := setupRollback(t)
+	createCommits(g, 2)
+
+	r := New(g)
+	entries, _ := r.Chain(10)
+	firstHash := entries[len(entries)-1].CommitInfo.Hash
+
+	result, err := r.SoftReset(firstHash, nil)
+	if err != nil {
+		t.Fatalf("SoftReset with nil callback failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("Expected success")
+	}
 }

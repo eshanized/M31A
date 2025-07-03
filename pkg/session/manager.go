@@ -150,6 +150,11 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 		return nil, fmt.Errorf("failed to generate unique session ID after 10 attempts")
 	}
 
+	// L-13: Validate generated ID format
+	if err := validateSessionID(id); err != nil {
+		return nil, fmt.Errorf("generated invalid session ID: %w", err)
+	}
+
 	// Create session directory
 	sessionDir := m.basePathFor(id)
 	if err := m.ensureDir(sessionDir); err != nil {
@@ -185,8 +190,13 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 // LoadSession reads a session from disk and reconstructs it.
 // Returns the session if found, or ErrSessionCorrupted if session.json is missing
 // or contains invalid required fields (H-17: ID non-empty, StartedAt non-zero,
-// WorkflowPhase is a known value).
+// WorkflowPhase is a known value). Sets ResumedAt to the current time on every
+// successful load (M-6).
 func (m *Manager) LoadSession(id string) (*Session, error) {
+	if err := validateSessionID(id); err != nil {
+		return nil, m31errors.ErrSessionCorrupted
+	}
+
 	sessionPath := m.sessionJSONPath(id)
 
 	data, err := os.ReadFile(sessionPath)
@@ -235,6 +245,11 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	}
 	session.MessageCount = len(session.Messages)
 
+	// M-6: Record resume timestamp. ResumedAt is nil for first load,
+	// updated to now on every subsequent load.
+	now := time.Now()
+	session.ResumedAt = &now
+
 	return &session, nil
 }
 
@@ -259,6 +274,10 @@ func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase
 // (empty goal, PhaseIdle, empty questions) if the session
 // doesn't exist or the workflow state is unset.
 func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.WorkflowPhase, questions []string, err error) {
+	// Validate ID format — return zero values for invalid IDs
+	if err := validateSessionID(id); err != nil {
+		return "", types.PhaseIdle, nil, nil
+	}
 	session, err := m.LoadSession(id)
 	if err != nil {
 		if errors.Is(err, m31errors.ErrSessionCorrupted) {

@@ -103,7 +103,7 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: true, Message: result.Message}
 	}
 
-	result, err := ctx.Rollback.SoftReset(args[0])
+	result, err := ctx.Rollback.SoftReset(args[0], nil)
 	if err != nil {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Soft reset failed: %v", err)}
 	}

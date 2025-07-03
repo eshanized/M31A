@@ -40,6 +40,10 @@ type Ledger struct {
 	mu      sync.RWMutex
 	path    string
 	entries []LedgerEntry
+
+	// M-16: Stats cache with mtime-based invalidation.
+	statsCache      LedgerStats
+	statsCacheMtime time.Time
 }
 
 // LedgerStats holds aggregate statistics computed from all ledger entries.
@@ -228,9 +232,18 @@ func matchesAnyKeyword(entryKeywords, queryKeywords []string) bool {
 
 // Stats computes aggregate statistics from all entries.
 // Returns zero-valued stats for an empty ledger (never panics).
+// Uses mtime-based caching: if LEDGER.md hasn't been modified since
+// the last call, returns the cached result (M-16).
 func (l *Ledger) Stats() LedgerStats {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// M-16: Check mtime-based cache
+	if info, err := os.Stat(l.path); err == nil {
+		if l.statsCacheMtime.Equal(info.ModTime()) && l.statsCache.TotalSessions == len(l.entries) {
+			return l.statsCache
+		}
+	}
 
 	stats := LedgerStats{
 		TotalSessions: len(l.entries),
@@ -271,6 +284,12 @@ func (l *Ledger) Stats() LedgerStats {
 
 	// Top frameworks
 	stats.TopFrameworks = topN(frameworkCounts, 5)
+
+	// M-16: Update stats cache
+	if info, err := os.Stat(l.path); err == nil {
+		l.statsCache = stats
+		l.statsCacheMtime = info.ModTime()
+	}
 
 	return stats
 }

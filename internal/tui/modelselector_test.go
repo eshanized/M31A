@@ -19,6 +19,7 @@ type msMockProvider struct {
 }
 
 func (m *msMockProvider) Name() string                                         { return m.name }
+func (m *msMockProvider) APIKey() string                                       { return "test-key" }
 func (m *msMockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) { return m.models, nil }
 func (m *msMockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
 	return nil, nil

@@ -106,7 +106,9 @@ func (r *Rollback) Preview(hash string) (string, error) {
 
 // SoftReset performs a git reset --soft to the given commit.
 // If uncommitted changes exist, they are stashed first.
-func (r *Rollback) SoftReset(hash string) (*RollbackResult, error) {
+// The onReset callback, if non-nil, is called after the reset succeeds
+// with the new HEAD hash. Use this to sync TASKS.md status updates (M-28).
+func (r *Rollback) SoftReset(hash string, onReset func(newHead string) error) (*RollbackResult, error) {
 	prevHead, err := r.git.HeadHash()
 	if err != nil {
 		return nil, fmt.Errorf("soft reset: %w", err)
@@ -124,6 +126,13 @@ func (r *Rollback) SoftReset(hash string) (*RollbackResult, error) {
 	newHead, err := r.git.HeadHash()
 	if err != nil {
 		return nil, fmt.Errorf("soft reset: %w", err)
+	}
+
+	// M-28: Invoke callback to sync TASKS.md or other state
+	if onReset != nil {
+		if cbErr := onReset(newHead); cbErr != nil {
+			return nil, fmt.Errorf("soft reset callback: %w", cbErr)
+		}
 	}
 
 	return r.buildResult(prevHead, newHead, stashed, "stashed"), nil

@@ -66,15 +66,15 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	setupProcessGroup(cmd)
 
-	// Use limited writers that cap output at BashOutputLimit
-	stdoutLimit := &limitWriter{limit: int64(types.BashOutputLimit)}
-	stderrLimit := &limitWriter{limit: int64(types.BashOutputLimit)}
-
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
 
-	cmd.Stdout = io.MultiWriter(stdoutW, stdoutLimit)
-	cmd.Stderr = io.MultiWriter(stderrW, stderrLimit)
+	// Use limitWriter that gates the pipe writer — output is bounded at BashOutputLimit
+	stdoutLimit := &limitWriter{limit: int64(types.BashOutputLimit), w: stdoutW}
+	stderrLimit := &limitWriter{limit: int64(types.BashOutputLimit), w: stderrW}
+
+	cmd.Stdout = stdoutLimit
+	cmd.Stderr = stderrLimit
 
 	if err := cmd.Start(); err != nil {
 		// Close pipe ends to unblock the goroutines that will read from them
@@ -212,10 +212,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}, nil
 }
 
-// limitWriter writes up to limit bytes and then silently drops further writes.
+// limitWriter writes up to limit bytes through w and then silently drops further writes.
 type limitWriter struct {
 	limit   int64
 	written int64
+	w       io.Writer
 }
 
 func (lw *limitWriter) Write(p []byte) (int, error) {
@@ -226,9 +227,9 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 	if int64(len(p)) > remaining {
 		p = p[:remaining]
 	}
-	n := len(p)
+	n, err := lw.w.Write(p)
 	atomic.AddInt64(&lw.written, int64(n))
-	return n, nil
+	return n, err
 }
 
 // isBinary checks if a string contains null bytes (binary content).

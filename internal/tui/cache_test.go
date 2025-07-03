@@ -28,6 +28,8 @@ func (m *mockProviderWithModels) Name() string {
 	return "mock-with-models"
 }
 
+func (m *mockProviderWithModels) APIKey() string { return "test-key" }
+
 func (m *mockProviderWithModels) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 	return m.models, m.err
 }

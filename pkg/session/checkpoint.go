@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -22,25 +23,26 @@ type Checkpoint struct {
 
 // SaveCheckpoint appends a checkpoint to checkpoint.json for the given session.
 // If more than 2 checkpoints exist, the oldest are trimmed (only last 2 retained).
+// Writes are atomic (temp + rename) per M-20.
 func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
 	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
 
-	// Read existing checkpoints
-	checkpoints, err := m.LoadCheckpoints(sessionID)
+	// Read existing checkpoints directly (not via LoadCheckpoints which sorts)
+	existing, err := m.loadCheckpointsRaw(sessionID)
 	if err != nil {
 		return err
 	}
 
 	// Append new checkpoint
-	checkpoints = append(checkpoints, cp)
+	existing = append(existing, cp)
 
-	// Trim to max 2 (keep newest)
-	if len(checkpoints) > 2 {
-		checkpoints = checkpoints[len(checkpoints)-2:]
+	// Trim to max 2 (keep newest — last 2 in chronological order)
+	if len(existing) > 2 {
+		existing = existing[len(existing)-2:]
 	}
 
 	// Marshal and write atomically
-	data, err := json.Marshal(checkpoints)
+	data, err := json.Marshal(existing)
 	if err != nil {
 		return fmt.Errorf("cannot marshal checkpoints: %w", err)
 	}
@@ -48,9 +50,9 @@ func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
 	return m.atomicWrite(path, data)
 }
 
-// LoadCheckpoints reads all checkpoints from checkpoint.json for the given session.
-// Returns an empty slice without error if the file does not exist.
-func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
+// loadCheckpointsRaw reads checkpoints from disk in file order (chronological).
+// Used internally by SaveCheckpoint for read-trim-write without sorting.
+func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
 	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -68,6 +70,43 @@ func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 	return checkpoints, nil
 }
 
+// LoadCheckpoints reads all checkpoints from checkpoint.json for the given session.
+// Returns an empty slice without error if the file does not exist.
+// L-16: Prunes old checkpoints, keeping only the 2 most recent.
+func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
+	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Checkpoint{}, nil
+		}
+		return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
+	}
+
+	var checkpoints []Checkpoint
+	if err := json.Unmarshal(data, &checkpoints); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal checkpoints: %w", err)
+	}
+
+	// L-16: Sort by timestamp descending (newest first) and prune to max 2.
+	sort.Slice(checkpoints, func(i, j int) bool {
+		return checkpoints[i].Timestamp.After(checkpoints[j].Timestamp)
+	})
+
+	if len(checkpoints) > 2 {
+		pruned := checkpoints[2:]
+		checkpoints = checkpoints[:2]
+		// Rewrite the file to persist the pruned set
+		data, err := json.Marshal(checkpoints)
+		if err == nil {
+			_ = m.atomicWrite(path, data)
+		}
+		_ = pruned // pruned entries are discarded
+	}
+
+	return checkpoints, nil
+}
+
 // LatestCheckpoint returns the most recently saved checkpoint.
 // Returns ErrCheckpointNotFound if no checkpoints exist.
 func (m *Manager) LatestCheckpoint(sessionID string) (*Checkpoint, error) {
@@ -80,6 +119,6 @@ func (m *Manager) LatestCheckpoint(sessionID string) (*Checkpoint, error) {
 		return nil, m31errors.ErrCheckpointNotFound
 	}
 
-	// Last element is the most recent
-	return &checkpoints[len(checkpoints)-1], nil
+	// LoadCheckpoints returns newest-first (sorted by timestamp descending)
+	return &checkpoints[0], nil
 }
