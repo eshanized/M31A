@@ -74,6 +74,7 @@ type ReplModel struct {
 	registry       *provider.Registry
 	activeProvider string
 	activeModel    *types.ModelInfo
+	modelValid     bool // false when the active model is not in the current provider's catalog
 	sessionID      string
 	cwd            string // working directory for @filepath resolution
 
@@ -703,9 +704,44 @@ func (m *ReplModel) SetSidebarWidth(sw int) {
 func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) {
 	m.registry = registry
 	m.activeProvider = activeProvider
-	m.activeModel = model
 	m.sessionID = sessionID
 	m.cfg = cfg
+	m.modelValid = true
+
+	if model == nil || registry == nil {
+		m.activeModel = model
+		return
+	}
+
+	// L-18: Re-fetch model from new provider's catalog to validate it exists
+	p := registry.ActiveProvider()
+	if p != nil {
+		models, err := p.FetchModels(context.Background())
+		if err == nil {
+			found := false
+			for _, m := range models {
+				if m.ID == model.ID {
+					found = true
+					break
+				}
+			}
+			if found {
+				// Refresh cached model info (pricing, context length may differ between providers)
+				if info, _ := p.GetModel(model.ID); info != nil {
+					m.activeModel = info
+					return
+				}
+			}
+			// Model not found on new provider
+			m.modelValid = false
+			m.activeModel = model
+			return
+		}
+		// FetchModels failed — keep existing model
+		m.activeModel = model
+		return
+	}
+	m.activeModel = model
 }
 
 func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {

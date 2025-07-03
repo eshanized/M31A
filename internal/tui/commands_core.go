@@ -19,6 +19,7 @@ func handleHelp(args []string, ctx CommandContext) CommandResult {
 		desc := r.descriptions[name]
 		b.WriteString(fmt.Sprintf("  /%s — %s\n", name, desc))
 	}
+	b.WriteString("\nNote: command chaining with ';' is not supported. Use each command separately.")
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 

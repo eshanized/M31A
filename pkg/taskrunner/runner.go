@@ -42,7 +42,7 @@ func New(tasks []types.Task) *Runner {
 		status:      make(map[int]types.TaskStatus),
 		results:     make(map[int]TaskResult),
 		idToIdx:     make(map[int]int),
-		TaskTimeout: 30 * time.Minute,
+		TaskTimeout: types.BashTimeout,
 	}
 	for i, t := range tasks {
 		r.idToIdx[t.ID] = i

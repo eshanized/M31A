@@ -159,6 +159,29 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		}
 	}
 
+	// L-2: Reconcile default provider with available keys
+	if cfg.Provider.Default != "" && apiKey != "" {
+		defaultHasKey := false
+		switch cfg.Provider.Default {
+		case "openrouter":
+			defaultHasKey = cfg.Provider.OpenRouter.APIKey != ""
+		case "zen":
+			defaultHasKey = cfg.Provider.Zen.APIKey != ""
+		}
+		if !defaultHasKey {
+			var switchedTo string
+			if cfg.Provider.OpenRouter.APIKey != "" {
+				switchedTo = "openrouter"
+			} else if cfg.Provider.Zen.APIKey != "" {
+				switchedTo = "zen"
+			}
+			if switchedTo != "" {
+				slog.Warn("provider config mismatch", "default", cfg.Provider.Default, "switched_to", switchedTo)
+				cfg.Provider.Default = switchedTo
+			}
+		}
+	}
+
 	// Initialize session manager
 	sessionBaseDir := filepath.Join(filepath.Dir(configPath), "sessions")
 	sessionIDBytes := 4 // 8 hex chars default

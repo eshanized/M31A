@@ -53,6 +53,15 @@ func (i ModelItem) Description() string {
 	return desc
 }
 
+// DescriptionWidth returns the description truncated to the given display width.
+func (i ModelItem) DescriptionWidth(width int) string {
+	desc := i.Description()
+	if width <= 0 {
+		return desc
+	}
+	return TruncateWithEllipsis(desc, width)
+}
+
 func (i ModelItem) FilterValue() string {
 	return strings.ToLower(i.Model.Name + " " + i.Model.ID + " " + i.Model.Description + " " + i.Model.Provider)
 }

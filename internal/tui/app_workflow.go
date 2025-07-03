@@ -68,7 +68,7 @@ func (m *AppState) initWorkflowEngine() {
 	})
 
 	eng, err := workflow.NewEngine(s.ID, cwd, backupDir, planningDir,
-		p, modelID, m.dispatcher, est, m.sessionManager)
+		p, modelID, m.dispatcher, est, m.sessionManager, m.config)
 	if err != nil {
 		m.currentOperation = fmt.Sprintf("Workflow engine init failed: %v", err)
 		return

@@ -17,6 +17,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/git"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
@@ -86,6 +87,7 @@ type Engine struct {
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
+	cfg              *config.Config
 	git              *git.Git
 	dispatcher       *tools.Dispatcher
 	tokens           *tokens.Estimator
@@ -98,6 +100,34 @@ type Engine struct {
 	execCommand      func(name string, args ...string) *exec.Cmd
 	msgEmitter       MsgEmitter
 	callCounter      int64
+}
+
+// modelForPhase returns the per-phase model ID from AgentsConfig,
+// falling back to cfg.Model.Default when the phase field is empty.
+func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
+	if e.cfg == nil {
+		return e.modelID
+	}
+	var override string
+	switch phase {
+	case m31types.PhasePlan:
+		override = e.cfg.Agents.Plan
+	case m31types.PhaseExecute:
+		override = e.cfg.Agents.Execute
+	case m31types.PhaseVerify:
+		override = e.cfg.Agents.Verify
+	case m31types.PhaseShip:
+		override = e.cfg.Agents.Ship
+	case m31types.PhaseDiscuss:
+		override = e.cfg.Agents.Discuss
+	}
+	if override != "" {
+		return override
+	}
+	if e.cfg.Agents.Default != "" {
+		return e.cfg.Agents.Default
+	}
+	return e.modelID
 }
 
 // PhaseResult holds the outcome of a workflow phase.
@@ -130,7 +160,7 @@ type DiffStats struct {
 
 // NewEngine creates a workflow engine.
 func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLMProvider, modelID string,
-	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager) (*Engine, error) {
+	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager, cfg *config.Config) (*Engine, error) {
 
 	prompts, err := LoadPrompts()
 	if err != nil {
@@ -144,6 +174,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		planningDir: planningDir,
 		provider:    p,
 		modelID:     modelID,
+		cfg:         cfg,
 		dispatcher:  dispatcher,
 		tokens:      tokenEst,
 		sessionMgr:  sessionMgr,

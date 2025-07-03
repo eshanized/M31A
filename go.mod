@@ -48,3 +48,7 @@ require (
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )
+
+// Pin tiktoken-go to known-good version; replace with maintained fork
+// (e.g. eshanized/tiktoken-go) if upstream goes stale.
+replace github.com/pkoukk/tiktoken-go => github.com/pkoukk/tiktoken-go v0.1.8

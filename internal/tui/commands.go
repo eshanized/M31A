@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -47,12 +48,14 @@ type CommandContext struct {
 	Rollback       *rollback.Rollback
 	AutoDream      *autodream.Consolidator
 	WorkflowEngine workflowEngineInterface
+	CmdRegistry    *CommandRegistry
 }
 
 // CommandRegistry holds a map of registered command handlers and their descriptions.
 type CommandRegistry struct {
-	handlers     map[string]CommandHandler
-	descriptions map[string]string
+	handlers          map[string]CommandHandler
+	descriptions      map[string]string
+	lastCompressTime  time.Time
 }
 
 // NewCommandRegistry creates an empty CommandRegistry.

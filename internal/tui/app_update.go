@@ -295,6 +295,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			AutoDream:      m.autoDream,
 			Git:            m.git,
 			Rollback:       m.rollback,
+			CmdRegistry:    m.cmdRegistry,
 		}
 		result, handled := m.cmdRegistry.Execute(cmd, ctx)
 		if handled {

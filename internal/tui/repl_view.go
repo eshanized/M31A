@@ -97,7 +97,7 @@ func (m *ReplModel) View() string {
 	// Render fallback banner if active
 	if m.fallbackBanner != "" {
 		bannerStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#FDD663")).
+			Background(m.theme.Warning).
 			Foreground(lipgloss.Color("#000000")).
 			Padding(0, 1).
 			Bold(true).

@@ -10,16 +10,20 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// DefaultPermissionTimeout is the default permission modal timeout (5 minutes).
+const DefaultPermissionTimeout = 300 * time.Second
+
 type PermissionModal struct {
-	request   tools.PermissionRequest
-	theme     theme.Theme
-	elapsed   time.Duration
-	timeout   time.Duration
-	responded bool
-	response  tools.PermissionResponse
+	request tools.PermissionRequest
+	theme   theme.Theme
+	elapsed time.Duration
+	timeout time.Duration
 }
 
 func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout time.Duration) *PermissionModal {
+	if timeout <= 0 {
+		timeout = DefaultPermissionTimeout
+	}
 	return &PermissionModal{
 		request: request,
 		theme:   t,
@@ -27,10 +31,8 @@ func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout 
 	}
 }
 
-// Clear resets the modal to its inactive state, clearing rule context.
+// Clear resets the modal to its inactive state.
 func (m *PermissionModal) Clear() {
-	m.responded = false
-	m.response = tools.PermissionResponse{}
 	m.elapsed = 0
 }
 
@@ -131,25 +133,15 @@ func (m *PermissionModal) Render(width, height int) string {
 }
 
 func (m *PermissionModal) Allow() tools.PermissionResponse {
-	m.responded = true
-	m.response = tools.PermissionResponse{Allowed: true, Remember: false}
-	return m.response
+	return tools.PermissionResponse{Allowed: true, Remember: false}
 }
 
 func (m *PermissionModal) AllowAlways() tools.PermissionResponse {
-	m.responded = true
-	m.response = tools.PermissionResponse{Allowed: true, Remember: true}
-	return m.response
+	return tools.PermissionResponse{Allowed: true, Remember: true}
 }
 
 func (m *PermissionModal) Deny() tools.PermissionResponse {
-	m.responded = true
-	m.response = tools.PermissionResponse{Allowed: false, Remember: false}
-	return m.response
-}
-
-func (m *PermissionModal) IsResponded() bool {
-	return m.responded
+	return tools.PermissionResponse{Allowed: false, Remember: false}
 }
 
 func (m *PermissionModal) Tick() {

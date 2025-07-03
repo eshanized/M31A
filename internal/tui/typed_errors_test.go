@@ -55,7 +55,7 @@ func TestOptimizeCommand_UsesThreshold(t *testing.T) {
 // --- H-11: Typed error banner ---
 
 func TestTypedErrorBanner_ContextExceeded(t *testing.T) {
-	banner := renderErrorBanner(m31errors.ErrContextExceeded)
+	banner := renderErrorBanner(m31errors.ErrContextExceeded, theme.Dark())
 	if banner == "" {
 		t.Error("expected non-empty banner")
 	}
@@ -67,7 +67,7 @@ func TestTypedErrorBanner_ContextExceeded(t *testing.T) {
 }
 
 func TestTypedErrorBanner_InvalidKey(t *testing.T) {
-	banner := renderErrorBanner(m31errors.ErrInvalidKey)
+	banner := renderErrorBanner(m31errors.ErrInvalidKey, theme.Dark())
 	if banner == "" {
 		t.Error("expected non-empty banner")
 	}
@@ -77,7 +77,7 @@ func TestTypedErrorBanner_InvalidKey(t *testing.T) {
 }
 
 func TestTypedErrorBanner_RateLimited(t *testing.T) {
-	banner := renderErrorBanner(m31errors.ErrRateLimited)
+	banner := renderErrorBanner(m31errors.ErrRateLimited, theme.Dark())
 	if banner == "" {
 		t.Error("expected non-empty banner")
 	}
@@ -88,7 +88,7 @@ func TestTypedErrorBanner_RateLimited(t *testing.T) {
 
 func TestTypedErrorBanner_GenericError(t *testing.T) {
 	err := fmt.Errorf("weird network error")
-	banner := renderErrorBanner(err)
+	banner := renderErrorBanner(err, theme.Dark())
 	if banner == "" {
 		t.Error("expected non-empty banner")
 	}

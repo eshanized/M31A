@@ -45,7 +45,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		return types.ToolResult{}, fmt.Errorf("parameter command must be a string: %w", m31errors.ErrToolExecution)
 	}
 
-	timeoutSec := 1800
+	timeoutSec := int(types.BashTimeout.Seconds())
 	if customRaw, ok := input.Params["timeout"]; ok {
 		if customFloat, ok := customRaw.(float64); ok {
 			timeoutSec = int(customFloat)

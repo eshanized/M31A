@@ -24,7 +24,8 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 
 	logFile := filepath.Join(logDir, "m31a.log")
 	if err := rotateLogFiles(logDir, logFile); err != nil {
-		return nil, nil, fmt.Errorf("log rotation failed: %w", err)
+		// L-12: log rotation failure is non-fatal — warn and continue append-only
+		fmt.Fprintf(os.Stderr, "m31a: log rotation failed (%v); continuing with append-only log\n", err)
 	}
 
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

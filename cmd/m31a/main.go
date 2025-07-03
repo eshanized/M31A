@@ -20,37 +20,17 @@ import (
 	"github.com/eshanized/M31A/pkg/keychain"
 )
 
-var Version = "dev"
+	var Version = "dev"
 
 func main() {
+	// Build command registry for usage and TUI
+	cmdRegistry := tui.DefaultCommands()
+
 	// Parse CLI flags
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	helpFlag := flag.Bool("help", false, "Show usage information")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "M31A — Terminal AI Coding Agent\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: m31a [flags]\n\n")
-		fmt.Fprintf(os.Stderr, "A terminal-based AI coding agent that guides tasks through a\n")
-		fmt.Fprintf(os.Stderr, "six-phase workflow:\n\n")
-		fmt.Fprintf(os.Stderr, "  Initialize — Gather project context and environment info\n")
-		fmt.Fprintf(os.Stderr, "  Discuss    — Clarify requirements and scope with the user\n")
-		fmt.Fprintf(os.Stderr, "  Plan       — Build a structured task plan with dependencies\n")
-		fmt.Fprintf(os.Stderr, "  Execute    — Implement tasks sequentially using core tools\n")
-		fmt.Fprintf(os.Stderr, "  Verify     — Run tests and validate correctness\n")
-		fmt.Fprintf(os.Stderr, "  Ship       — Commit changes and finalize the session\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nSlash Commands (available in the TUI):\n")
-		fmt.Fprintf(os.Stderr, "  /help       /clear      /status     /model\n")
-		fmt.Fprintf(os.Stderr, "  /provider   /reset      /quit       /undo\n")
-		fmt.Fprintf(os.Stderr, "  /compress   /ledger     /rollback   /sessions\n")
-		fmt.Fprintf(os.Stderr, "  /goal       /phase      /config     /models\n")
-		fmt.Fprintf(os.Stderr, "  /fallback\n\n")
-		fmt.Fprintf(os.Stderr, "Environment Variables:\n")
-		fmt.Fprintf(os.Stderr, "  M31A_CONFIG           Config file path (default: ~/.m31a/config.toml)\n")
-		fmt.Fprintf(os.Stderr, "  M31A_OPENROUTER_API_KEY  OpenRouter API key\n")
-		fmt.Fprintf(os.Stderr, "  M31A_ZEN_API_KEY         Zen API key\n")
-		fmt.Fprintf(os.Stderr, "  M31A_LOG_FORMAT     Log format: json, text (default: json)\n")
-		fmt.Fprintf(os.Stderr, "  M31A_LOG_LEVEL      Log level: debug, info, warn, error (default: info)\n")
+		printUsage(cmdRegistry)
 	}
 	flag.Parse()
 	if *helpFlag {

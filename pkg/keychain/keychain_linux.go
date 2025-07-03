@@ -3,6 +3,7 @@
 package keychain
 
 import (
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -103,6 +104,9 @@ func (k *linuxKeychain) passGet(service string) (string, error) {
 	if err != nil {
 		if isPassNotFound(err) {
 			return "", ErrKeyNotFound
+		}
+		if isPassGPGFailure(err) {
+			return "", fmt.Errorf("gpg decrypt: %w", ErrKeychainDecrypt)
 		}
 		if isPassUnavailable(err) {
 			return "", ErrKeychainUnavailable
@@ -307,4 +311,17 @@ func isPassNotFound(err error) bool {
 		return strings.Contains(stderr, "not found") || strings.Contains(stderr, "not in")
 	}
 	return false
+}
+
+// isPassGPGFailure returns true if pass failed due to a GPG decryption error
+// (e.g., bad passphrase, corrupted secret blob).
+func isPassGPGFailure(err error) bool {
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return false
+	}
+	stderr := string(exitErr.Stderr)
+	return strings.Contains(stderr, "gpg: decryption failed") ||
+		strings.Contains(stderr, "bad passphrase") ||
+		strings.Contains(stderr, "gpg: error")
 }

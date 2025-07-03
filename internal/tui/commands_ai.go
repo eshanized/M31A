@@ -3,7 +3,11 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+// M-30: default cooldown between /compress calls to prevent token burn.
+const compressCooldown = 60 * time.Second
 
 // handleReset returns a result that transitions the TUI to the first-run screen.
 func handleReset(args []string, ctx CommandContext) CommandResult {
@@ -20,7 +24,25 @@ func handleCompress(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "AutoDream not available."}
 	}
 
+	// M-30: Enforce cooldown between compress calls
+	if ctx.CmdRegistry != nil {
+		if !ctx.CmdRegistry.lastCompressTime.IsZero() &&
+			time.Since(ctx.CmdRegistry.lastCompressTime) < compressCooldown {
+			remaining := compressCooldown - time.Since(ctx.CmdRegistry.lastCompressTime)
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("/compress cooldown: try again in %ds", int(remaining.Seconds())),
+			}
+		}
+	}
+
 	result := ctx.AutoDream.Consolidate()
+
+	// Record compress time after attempt (even on failure, to prevent rapid retry spam)
+	if ctx.CmdRegistry != nil {
+		ctx.CmdRegistry.lastCompressTime = time.Now()
+	}
+
 	if result.Error != "" {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Consolidation failed: %s", result.Error)}
 	}

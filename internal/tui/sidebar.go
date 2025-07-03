@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,20 +13,27 @@ import (
 
 const sidebarWidth = 42
 
+// sidebarStatusCacheTTL is how long the sidebar caches git status
+// to avoid hammering git on every TickMsg (60Hz).
+const sidebarStatusCacheTTL = 1 * time.Second
+
 type SidebarRefreshMsg struct {
 	Statuses []git.FileStatus
 	Err      error
 }
 
 type SidebarModel struct {
-	theme    theme.Theme
-	git      *git.Git
-	statuses []git.FileStatus
-	loading  bool
-	err      string
-	width    int
-	height   int
-	visible  bool
+	theme             theme.Theme
+	git               *git.Git
+	statuses          []git.FileStatus
+	err               string
+	loading           bool
+	width             int
+	height            int
+	visible           bool
+	lastStatusFetch   time.Time
+	gitStatusCache    []git.FileStatus
+	gitStatusCacheErr error
 }
 
 func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
@@ -118,7 +126,14 @@ func (m *SidebarModel) refreshCmd() tea.Cmd {
 		if m.git == nil || !m.git.IsRepo() {
 			return SidebarRefreshMsg{Statuses: nil, Err: nil}
 		}
+		// L-17: Use 1-second cache to avoid hammering git on every TickMsg
+		if !m.lastStatusFetch.IsZero() && time.Since(m.lastStatusFetch) < sidebarStatusCacheTTL {
+			return SidebarRefreshMsg{Statuses: m.gitStatusCache, Err: m.gitStatusCacheErr}
+		}
 		statuses, err := m.git.StatusPorcelain()
+		m.gitStatusCache = statuses
+		m.gitStatusCacheErr = err
+		m.lastStatusFetch = time.Now()
 		return SidebarRefreshMsg{Statuses: statuses, Err: err}
 	}
 }

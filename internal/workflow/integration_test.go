@@ -98,7 +98,7 @@ func TestFullWorkflow(t *testing.T) {
 	est := tokens.NewEstimator("test-model")
 
 	engine, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
-		mockP, "test-model", dispatcher, est, mgr)
+		mockP, "test-model", dispatcher, est, mgr, nil)
 	engine.SetGit(g)
 
 	ctx := context.Background()

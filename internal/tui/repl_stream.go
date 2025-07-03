@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -163,19 +164,19 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 
 // renderErrorBanner returns a styled error message based on the typed sentinel.
 // H-11: distinct banners for known error types.
-func renderErrorBanner(err error) string {
+func renderErrorBanner(err error, theme theme.Theme) string {
 	switch {
 	case errors.Is(err, m31errors.ErrContextExceeded):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FDD663")).Bold(true).
+		return lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).
 			Render("⚠ Context window exceeded. Use /compress to free space.")
 	case errors.Is(err, m31errors.ErrInvalidKey):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B82")).Bold(true).
+		return lipgloss.NewStyle().Foreground(theme.Error).Bold(true).
 			Render("✗ Invalid API key. Run /settings to update.")
 	case errors.Is(err, m31errors.ErrRateLimited):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FDD663")).Bold(true).
+		return lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).
 			Render("⚠ Rate limited. Auto-fallback in progress…")
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B82")).Bold(true).
+		return lipgloss.NewStyle().Foreground(theme.Error).Bold(true).
 			Render(fmt.Sprintf("✗ Error: %v", err))
 	}
 }
@@ -212,7 +213,7 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
 	}
 
 	// H-11: render styled banner for known error types
-	banner := renderErrorBanner(msg.Err)
+	banner := renderErrorBanner(msg.Err, m.theme)
 
 	errMsg := types.Message{
 		Role:    "assistant",

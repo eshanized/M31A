@@ -20,9 +20,6 @@ func TestNewPermissionModal_DangerousTool(t *testing.T) {
 	if m == nil {
 		t.Fatal("expected non-nil PermissionModal")
 	}
-	if m.IsResponded() {
-		t.Error("expected not responded initially")
-	}
 }
 
 func TestPermissionModal_Render(t *testing.T) {
@@ -52,9 +49,6 @@ func TestPermissionModal_Allow(t *testing.T) {
 	}
 	if resp.Remember {
 		t.Error("expected remember=false for Allow")
-	}
-	if !m.IsResponded() {
-		t.Error("expected responded after Allow")
 	}
 }
 
@@ -118,17 +112,8 @@ func TestPermissionModal_AutoDeny(t *testing.T) {
 		m.Tick()
 	}
 
-	if m.Remaining() <= 0 {
-		req2 := tools.PermissionRequest{
-			ToolName:  "Bash",
-			Command:   "ls",
-			RiskLevel: types.RiskSafe,
-		}
-		m2 := NewPermissionModal(req2, theme.Dark(), 0)
-		remaining := m2.Remaining()
-		if remaining != 0 {
-			t.Errorf("expected 0 remaining for zero timeout, got %v", remaining)
-		}
+	if m.Remaining() > 0 {
+		t.Error("expected remaining time to be <= 0 after sufficient ticks")
 	}
 }
 
@@ -155,5 +140,34 @@ func TestPermissionModal_RiskColor_Destructive(t *testing.T) {
 	result := m.Render(80, 24)
 	if result == "" {
 		t.Error("expected non-empty render for destructive tool")
+	}
+}
+
+// L-14: zero timeout defaults to 300s
+func TestPermissionModal_ZeroTimeoutDefaults300s(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:  "Bash",
+		Command:   "ls",
+		RiskLevel: types.RiskSafe,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 0)
+	remaining := m.Remaining()
+	if remaining < 299*time.Second || remaining > 300*time.Second {
+		t.Errorf("expected ~300s remaining for zero timeout, got %v", remaining)
+	}
+}
+
+// M-33: Allow/AllowAlways/Deny are stateless pure constructors
+func TestPermissionModal_AllowIsStateless(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:  "Bash",
+		Command:   "ls",
+		RiskLevel: types.RiskSafe,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	resp1 := m.Allow()
+	resp2 := m.Allow()
+	if resp1 != resp2 {
+		t.Errorf("expected Allow() to return same value both times, got %v and %v", resp1, resp2)
 	}
 }
