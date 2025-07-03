@@ -229,7 +229,7 @@ func handleFallback(args []string, ctx CommandContext) CommandResult {
 		if len(providers) > 1 {
 			b.WriteString("Use /fallback <provider_name> to switch.")
 		}
-		return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 	}
 
 	target := args[0]
@@ -261,10 +261,38 @@ func handleFallback(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: fmt.Sprintf("Switched from %s to %s. Use /status to confirm.", active, target)}
 }
 
+// handleCost toggles the ShowCostEstimate config flag and persists to disk.
+// M-23: the /cost command now actually flips the flag.
+func handleCost(args []string, ctx CommandContext) CommandResult {
+	if ctx.Config == nil {
+		return CommandResult{Success: false, Message: "Config not loaded."}
+	}
+
+	ctx.Config.UI.ShowCostEstimate = !ctx.Config.UI.ShowCostEstimate
+
+	if ctx.ConfigPath != "" {
+		if err := ctx.Config.Save(ctx.ConfigPath); err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Failed to persist config: %v", err)}
+		}
+	}
+
+	state := "disabled"
+	if ctx.Config.UI.ShowCostEstimate {
+		state = "enabled"
+	}
+	return CommandResult{Success: true, Message: fmt.Sprintf("Cost display: %s", state)}
+}
+
 // handleOptimize suggests cheaper model alternatives using the arbitrage engine.
+// H-19/M-12/M-14: reads AutoArbitrage and ArbitrageThreshold from config.
 func handleOptimize(args []string, ctx CommandContext) CommandResult {
 	if ctx.Registry == nil {
 		return CommandResult{Success: false, Message: "Provider registry not available."}
+	}
+
+	// M-12: respect AutoArbitrage config flag
+	if ctx.Config != nil && !ctx.Config.Model.AutoArbitrage {
+		return CommandResult{Success: false, Message: "AutoArbitrage is disabled in config. Set auto_arbitrage = true in [model] to enable."}
 	}
 
 	p := ctx.Registry.ActiveProvider()
@@ -282,8 +310,13 @@ func handleOptimize(args []string, ctx CommandContext) CommandResult {
 		currentID = info.ID
 	}
 
+	// M-14: read threshold from config
+	threshold := 0.15
+	if ctx.Config != nil && ctx.Config.Model.ArbitrageThreshold > 0 {
+		threshold = ctx.Config.Model.ArbitrageThreshold
+	}
+
 	task := types.Task{Description: "general coding task", Files: []string{}}
-	threshold := 0.1
 
 	rec, err := arbitrage.Recommend(allModels, task, threshold)
 	if err != nil || rec == nil {
@@ -297,7 +330,7 @@ func handleOptimize(args []string, ctx CommandContext) CommandResult {
 	}
 	b.WriteString(fmt.Sprintf("  Suggest:  %s\n", rec.RecommendedModel.ModelID))
 	b.WriteString(fmt.Sprintf("  Savings:  $%.4f per request\n", rec.Savings))
-	b.WriteString(fmt.Sprintf("  Reason:   %s complexity, %s model is sufficient\n", rec.Complexity, rec.Reason))
+	b.WriteString(fmt.Sprintf("  Reason:   %s complexity, %s\n", rec.Complexity, rec.Reason))
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 

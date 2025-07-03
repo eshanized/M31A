@@ -7,6 +7,7 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 type Screen int
@@ -143,4 +144,11 @@ type ToastMsg struct {
 	Text     string
 	Duration time.Duration
 	Type     string // "info", "success", "warning", "error"
+}
+
+// OptimizedMsg carries arbitrage recommendations back to the TUI.
+// H-19: wired from /optimize command and Plan screen "O" key.
+type OptimizedMsg struct {
+	Recommendations []arbitrage.ArbitrageRecommendation
+	TaskID          int
 }

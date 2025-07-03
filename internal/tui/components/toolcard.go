@@ -218,6 +218,12 @@ func (c *ToolCard) Toggle() {
 	c.collapsed = !c.collapsed
 }
 
+// SetCollapsed sets the collapsed state of the tool card.
+// M-17: used to honor AutoCollapseTools config flag.
+func (c *ToolCard) SetCollapsed(v bool) {
+	c.collapsed = v
+}
+
 func (c *ToolCard) IsCollapsed() bool {
 	return c.collapsed
 }

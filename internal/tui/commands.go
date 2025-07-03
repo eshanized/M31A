@@ -175,6 +175,7 @@ func DefaultCommands() *CommandRegistry {
 
 	// Cost optimization
 	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
+	r.Register("cost", handleCost, "Toggle cost estimate display in header")
 
 	// Workflow control
 	r.Register("pause", handlePause, "Pause current workflow phase")

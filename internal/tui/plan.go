@@ -70,6 +70,11 @@ func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		case "tab":
 			m.showGraph = !m.showGraph
 			m.showDiff = false
+		case "o", "O":
+			// H-19: trigger arbitrage optimization via command registry
+			return []tea.Cmd{func() tea.Msg {
+				return SlashCommandMsg{Command: "/optimize"}
+			}}, nil
 		}
 	}
 	return nil, nil

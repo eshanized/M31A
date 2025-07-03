@@ -2,10 +2,15 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -126,6 +131,10 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	m.toolCards = make(map[int]*components.ToolCard)
 	for i, tc := range msg.Message.ToolCalls {
 		card := components.NewToolCard(tc, nil, components.ToolRunning, m.theme)
+		// M-17: honor AutoCollapseTools config flag
+		if m.cfg != nil && m.cfg.Model.AutoCollapseTools {
+			card.SetCollapsed(true)
+		}
 		m.toolCards[i] = card
 	}
 
@@ -152,13 +161,65 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	return cmds, true
 }
 
+// renderErrorBanner returns a styled error message based on the typed sentinel.
+// H-11: distinct banners for known error types.
+func renderErrorBanner(err error) string {
+	switch {
+	case errors.Is(err, m31errors.ErrContextExceeded):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FDD663")).Bold(true).
+			Render("⚠ Context window exceeded. Use /compress to free space.")
+	case errors.Is(err, m31errors.ErrInvalidKey):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B82")).Bold(true).
+			Render("✗ Invalid API key. Run /settings to update.")
+	case errors.Is(err, m31errors.ErrRateLimited):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FDD663")).Bold(true).
+			Render("⚠ Rate limited. Auto-fallback in progress…")
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B82")).Bold(true).
+			Render(fmt.Sprintf("✗ Error: %v", err))
+	}
+}
+
+// typedErrorName walks the error chain and returns the sentinel name.
+// M-24: used in debug-mode logging so operators can see which sentinel fired.
+func typedErrorName(err error) string {
+	switch {
+	case errors.Is(err, m31errors.ErrContextExceeded):
+		return "ErrContextExceeded"
+	case errors.Is(err, m31errors.ErrInvalidKey):
+		return "ErrInvalidKey"
+	case errors.Is(err, m31errors.ErrRateLimited):
+		return "ErrRateLimited"
+	case errors.Is(err, m31errors.ErrProviderUnreachable):
+		return "ErrProviderUnreachable"
+	case errors.Is(err, m31errors.ErrModelNotFound):
+		return "ErrModelNotFound"
+	case errors.Is(err, m31errors.ErrToolExecution):
+		return "ErrToolExecution"
+	case errors.Is(err, m31errors.ErrPermissionDenied):
+		return "ErrPermissionDenied"
+	default:
+		return "unknown"
+	}
+}
+
 func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
+	// M-24: log typed sentinel name in debug mode
+	if os.Getenv("M31A_LOG_LEVEL") == "debug" {
+		slog.Debug("stream error",
+			"typed", typedErrorName(msg.Err),
+			"message", msg.Err.Error())
+	}
+
+	// H-11: render styled banner for known error types
+	banner := renderErrorBanner(msg.Err)
+
 	errMsg := types.Message{
 		Role:    "assistant",
-		Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
+		Content: banner,
 		Segments: []types.MessageSegment{{
 			Type:    "content",
-			Content: fmt.Sprintf("Error during streaming: %v", msg.Err),
+			Content: banner,
 			Visible: true,
 		}},
 		CreatedAt: time.Now(),
