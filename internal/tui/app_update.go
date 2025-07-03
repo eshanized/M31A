@@ -626,6 +626,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.askNextDiscussQuestion()
 		}
+		// C-1 nil guard: dispatcher may be nil during early init / tests.
+		if m.dispatcher == nil {
+			return m, nil
+		}
 		// Otherwise, forward to the question tool via dispatcher
 		// (existing behavior for AskUserQuestion tool)
 		dresp := tools.QuestionResponse{Answer: msg.Answer}

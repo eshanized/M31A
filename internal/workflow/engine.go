@@ -186,8 +186,37 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	return result, err
 }
 
+// validPhaseTransitions defines which phase transitions are allowed.
+// Any transition not in this map is rejected with ErrPhaseTransition.
+var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
+	m31types.PhaseIdle:       {m31types.PhaseInitialize},
+	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseIdle},
+	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseIdle},
+	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhaseIdle},
+	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseIdle},
+	m31types.PhaseVerify:     {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
+	m31types.PhaseShip:       {m31types.PhaseIdle},
+}
+
 // Transition saves a checkpoint and writes STATE.md for the new phase.
+// H-6: validates the transition is allowed by the phase ordering guard.
 func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase) error {
+	// H-6: Phase transition guard — reject out-of-order transitions.
+	allowed, ok := validPhaseTransitions[from]
+	if !ok {
+		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
+	}
+	valid := false
+	for _, a := range allowed {
+		if a == to {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
+	}
+
 	// Save checkpoint
 	cp := session.Checkpoint{
 		Phase:     to,
@@ -650,6 +679,9 @@ const maxJSONScanBytes = 64 << 10 // 64 KB
 
 // parseToolCalls extracts tool calls from response content.
 // Looks for JSON objects with a "name" or "tool" field inside code blocks or inline.
+// Returns ErrToolExecution when the LLM emits malformed JSON that looks like a
+// tool call but cannot be parsed (H-1). Accepts both array and single-object
+// forms (M-3).
 func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 	// Fix C-4: reject oversized LLM responses to prevent OOM.
 	if len(content) > m31types.MaxLLMResponseBytes {
@@ -659,6 +691,8 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 	}
 
 	var calls []m31types.ToolCall
+	var parseErrors int
+	var totalAttempts int
 
 	// Pattern 1: JSON in code blocks ```<any lang> {...} ```
 	blockRe := regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
@@ -666,7 +700,12 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 		if len(match) < 2 {
 			continue
 		}
-		if tc := parseSingleToolCall(match[1], e.nextCallID()); tc != nil {
+		totalAttempts++
+		tc, err := parseSingleToolCall(match[1], e.nextCallID())
+		if err != nil {
+			parseErrors++
+			slog.Warn("parseToolCalls: malformed tool call in code block", "error", err)
+		} else if tc != nil {
 			calls = append(calls, *tc)
 		}
 	}
@@ -691,12 +730,22 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 				i += len(obj) - 1 // skip past this object
 				continue
 			}
-			if tc := parseSingleToolCall(obj, e.nextCallID()); tc != nil {
+			totalAttempts++
+			tc, err := parseSingleToolCall(obj, e.nextCallID())
+			if err != nil {
+				parseErrors++
+				slog.Warn("parseToolCalls: malformed tool call object", "error", err)
+			} else if tc != nil {
 				calls = append(calls, *tc)
 				i += len(obj) - 1 // skip past this object
 				continue
 			}
 		}
+	}
+
+	// H-1: If we attempted to parse tool calls but all were malformed, return error.
+	if len(calls) == 0 && parseErrors > 0 && totalAttempts > 0 {
+		return nil, fmt.Errorf("parse tool calls: %d malformed JSON objects detected: %w", parseErrors, m31errors.ErrToolExecution)
 	}
 
 	// Fix C-4: cap tool count to detect model regression.
@@ -721,10 +770,48 @@ type toolCallJSON struct {
 	Input json.RawMessage `json:"input"`
 }
 
-func parseSingleToolCall(jsonStr string, callID int64) *m31types.ToolCall {
+// parseSingleToolCall attempts to parse a JSON string as a tool call.
+// Returns the parsed ToolCall, or an error if the JSON is malformed or
+// doesn't contain a valid tool call structure.
+func parseSingleToolCall(jsonStr string, callID int64) (*m31types.ToolCall, error) {
+	// M-3: Support single object form — if the string starts with '{' and
+	// does not start with '[', try wrapping it as a single-element array.
+	trimmed := strings.TrimSpace(jsonStr)
+	if strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		// Already a single object, parse directly below
+	} else if strings.HasPrefix(trimmed, "[") {
+		// Array form — extract first element
+		var arr []toolCallJSON
+		if err := json.Unmarshal([]byte(trimmed), &arr); err != nil {
+			return nil, fmt.Errorf("unmarshal tool call array: %w", err)
+		}
+		if len(arr) == 0 {
+			return nil, fmt.Errorf("empty tool call array")
+		}
+		tc := arr[0]
+		name := tc.Name
+		if name == "" {
+			name = tc.Tool
+		}
+		if name == "" {
+			return nil, fmt.Errorf("tool call missing name/tool field")
+		}
+		name = normalizeToolName(name)
+		input := tc.Input
+		if input == nil {
+			input = json.RawMessage("{}")
+		}
+		return &m31types.ToolCall{
+			ID:    fmt.Sprintf("call_%s_%d", name, callID),
+			Name:  name,
+			Input: input,
+		}, nil
+	}
+
+	// Single object form
 	var tc toolCallJSON
-	if err := json.Unmarshal([]byte(jsonStr), &tc); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(trimmed), &tc); err != nil {
+		return nil, fmt.Errorf("unmarshal tool call: %w", err)
 	}
 
 	name := tc.Name
@@ -732,7 +819,7 @@ func parseSingleToolCall(jsonStr string, callID int64) *m31types.ToolCall {
 		name = tc.Tool
 	}
 	if name == "" {
-		return nil
+		return nil, fmt.Errorf("tool call missing name/tool field")
 	}
 
 	// Normalize tool names to match registered tool names
@@ -747,7 +834,7 @@ func parseSingleToolCall(jsonStr string, callID int64) *m31types.ToolCall {
 		ID:    fmt.Sprintf("call_%s_%d", name, callID),
 		Name:  name,
 		Input: input,
-	}
+	}, nil
 }
 
 // normalizeToolName maps common LLM tool names to registered tool names.

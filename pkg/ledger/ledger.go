@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -118,53 +119,24 @@ func NewEntry(session types.Session, taskCount, failedTasks, skippedTasks, commi
 
 // Append adds an entry to the ledger, deduplicating by SessionID.
 // If the file doesn't exist, it creates it with a markdown table header.
-// Existing entries are not overwritten (same SessionID is silently skipped).
+// Returns an error wrapping ErrTaskFailed if an entry for the same SessionID
+// already exists (H-18 idempotency guard). The write is atomic: content is
+// written to a temp file then renamed to prevent corruption on crash (H-16).
 func (l *Ledger) Append(entry LedgerEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Dedup by SessionID
+	// H-18: Dedup by SessionID — reject duplicates with typed error.
 	for _, e := range l.entries {
 		if e.SessionID == entry.SessionID {
-			return nil
+			return fmt.Errorf("entry already exists for session %s: %w", entry.SessionID, m31errors.ErrTaskFailed)
 		}
 	}
 
 	l.entries = append(l.entries, entry)
 
-	// Append to file
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open ledger for append: %w", err)
-	}
-	defer f.Close()
-
-	// Check if file is empty — write header if new
-	fi, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("stat ledger: %w", err)
-	}
-	if fi.Size() == 0 {
-		if _, err := fmt.Fprintln(f, "# Cross-Session Learning Ledger"); err != nil {
-			return fmt.Errorf("write title: %w", err)
-		}
-		if _, err := fmt.Fprintln(f, ""); err != nil {
-			return fmt.Errorf("write blank line: %w", err)
-		}
-		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Cost | Duration |"); err != nil {
-			return fmt.Errorf("write column header: %w", err)
-		}
-		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|"); err != nil {
-			return fmt.Errorf("write separator: %w", err)
-		}
-	}
-
-	line := formatEntry(entry)
-	if _, err := fmt.Fprintln(f, line); err != nil {
-		return fmt.Errorf("append entry: %w", err)
-	}
-
-	return nil
+	// H-16: Atomic write via temp file + rename.
+	return l.rewriteFile()
 }
 
 // formatEntry serializes a LedgerEntry to a markdown table row.

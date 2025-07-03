@@ -1,12 +1,14 @@
 package ledger
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -130,7 +132,8 @@ func TestAppend(t *testing.T) {
 	}
 }
 
-// TestAppend_Dedup verifies that appending the same SessionID twice skips.
+// TestAppend_Dedup verifies that appending the same SessionID twice returns
+// ErrTaskFailed (H-18 idempotency guard).
 func TestAppend_Dedup(t *testing.T) {
 	l, _ := setupLedger(t)
 
@@ -140,8 +143,12 @@ func TestAppend_Dedup(t *testing.T) {
 	if err := l.Append(e1); err != nil {
 		t.Fatalf("Append(e1) failed: %v", err)
 	}
-	if err := l.Append(e2); err != nil {
-		t.Fatalf("Append(e2) failed: %v", err)
+	err := l.Append(e2)
+	if err == nil {
+		t.Fatal("expected error for duplicate session ID, got nil")
+	}
+	if !errors.Is(err, m31errors.ErrTaskFailed) {
+		t.Fatalf("expected ErrTaskFailed, got %v", err)
 	}
 
 	entries := l.Entries()

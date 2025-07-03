@@ -183,7 +183,9 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 }
 
 // LoadSession reads a session from disk and reconstructs it.
-// Returns the session if found, or ErrSessionCorrupted if session.json is missing.
+// Returns the session if found, or ErrSessionCorrupted if session.json is missing
+// or contains invalid required fields (H-17: ID non-empty, StartedAt non-zero,
+// WorkflowPhase is a known value).
 func (m *Manager) LoadSession(id string) (*Session, error) {
 	sessionPath := m.sessionJSONPath(id)
 
@@ -198,6 +200,25 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, m31errors.ErrSessionCorrupted
+	}
+
+	// H-17: Validate required fields.
+	if session.ID == "" {
+		return nil, fmt.Errorf("session %s has missing ID: %w", id, m31errors.ErrSessionCorrupted)
+	}
+	if session.StartedAt.IsZero() {
+		return nil, fmt.Errorf("session %s has zero StartedAt: %w", id, m31errors.ErrSessionCorrupted)
+	}
+	// Validate WorkflowPhase is a known value.
+	switch session.WorkflowPhase {
+	case types.PhaseIdle, types.PhaseInitialize, types.PhaseDiscuss,
+		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseShip:
+		// valid
+	case "":
+		// Empty phase defaults to idle — acceptable for legacy sessions
+		session.WorkflowPhase = types.PhaseIdle
+	default:
+		return nil, fmt.Errorf("session %s has unknown WorkflowPhase %q: %w", id, session.WorkflowPhase, m31errors.ErrSessionCorrupted)
 	}
 
 	// Try to load messages (graceful degradation if missing)
