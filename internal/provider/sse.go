@@ -2,15 +2,18 @@ package provider
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 type SSEParser struct {
-	scanner *bufio.Scanner
-	resp    *http.Response
+	scanner  *bufio.Scanner
+	resp     *http.Response
+	closeOnce sync.Once
 }
 
 func NewSSEParser(resp *http.Response) *SSEParser {
@@ -61,11 +64,22 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	}
 
 	data = strings.Join(dataParts, "")
+	if data == "" && len(dataParts) == 0 {
+		return "", "", fmt.Errorf("stream truncated before completion: %w", io.ErrUnexpectedEOF)
+	}
 	return eventType, data, nil
 }
 
+// Close releases the underlying response body. Idempotent — safe to call
+// multiple times.
 func (p *SSEParser) Close() error {
-	return p.resp.Body.Close()
+	var closeErr error
+	p.closeOnce.Do(func() {
+		if p.resp != nil && p.resp.Body != nil {
+			closeErr = p.resp.Body.Close()
+		}
+	})
+	return closeErr
 }
 
 // DefaultStreamTimeout is the maximum time to wait for a single SSE event.

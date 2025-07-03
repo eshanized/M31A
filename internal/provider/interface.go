@@ -8,6 +8,7 @@ import (
 
 type LLMProvider interface {
 	Name() string
+	APIKey() string
 	FetchModels(ctx context.Context) ([]types.ModelInfo, error)
 	ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error)
 	EstimateCost(modelID string, usage types.Usage) float64

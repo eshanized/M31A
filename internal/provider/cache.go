@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
+	"golang.org/x/sync/singleflight"
 )
 
 // DefaultCacheRefreshInterval is the default interval for automatic model
@@ -17,6 +19,7 @@ type ModelCache struct {
 	fetched  time.Time
 	ttl      time.Duration
 	staleTTL time.Duration
+	sfg      singleflight.Group
 }
 
 func NewModelCache(ttl time.Duration) *ModelCache {
@@ -34,6 +37,23 @@ func NewModelCacheWithStale(ttl time.Duration, staleTTL time.Duration) *ModelCac
 		ttl:      ttl,
 		staleTTL: staleTTL,
 	}
+}
+
+// Refresh deduplicates concurrent calls via singleflight — only one HTTP
+// request is made even if multiple goroutines call Refresh simultaneously.
+func (c *ModelCache) Refresh(ctx context.Context, fetchFn func(ctx context.Context) ([]types.ModelInfo, error)) ([]types.ModelInfo, error) {
+	v, err, _ := c.sfg.Do("refresh", func() (interface{}, error) {
+		models, fetchErr := fetchFn(ctx)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		c.Set(models)
+		return models, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]types.ModelInfo), nil
 }
 
 func (c *ModelCache) Get(id string) (*types.ModelInfo, bool) {

@@ -113,6 +113,10 @@ func (c *Client) Name() string {
 	return "openrouter"
 }
 
+func (c *Client) APIKey() string {
+	return c.apiKey
+}
+
 func (c *Client) userAgent() string {
 	return fmt.Sprintf("M31A/%s", Version)
 }

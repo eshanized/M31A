@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -15,6 +16,10 @@ type mockProvider struct {
 
 func (m *mockProvider) Name() string {
 	return m.name
+}
+
+func (m *mockProvider) APIKey() string {
+	return "mock-key"
 }
 
 func (m *mockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
@@ -59,8 +64,8 @@ func TestRegistry_SetActive_Unknown(t *testing.T) {
 	r.Register("a", &mockProvider{name: "a"})
 
 	err := r.SetActive("nonexistent")
-	if err != m31errors.ErrModelNotFound {
-		t.Fatalf("expected ErrModelNotFound, got %v", err)
+	if err == nil || !errors.Is(err, m31errors.ErrProviderUnreachable) {
+		t.Fatalf("expected ErrProviderUnreachable, got %v", err)
 	}
 
 	if active := r.Active(); active != "a" {
