@@ -158,18 +158,18 @@ func handleWorkflow(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 
-// handlePause pauses the current workflow phase.
+// handlePause informs the user that pause is available from the Execute screen.
 func handlePause(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{
 		Success: true,
-		Message: "Workflow pause requested. Use the workflow screen to manage execution.",
+		Message: "Pause is available from the Execute screen (press P during task execution).",
 	}
 }
 
-// handleResumeTask resumes a task from the last checkpoint.
+// handleResumeTask provides workflow restart information.
 func handleResumeTask(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{
 		Success: true,
-		Message: "Resume from checkpoint: use /workflow <goal> to restart the workflow from the beginning.",
+		Message: "Workflow restart is not yet implemented. Use /workflow <goal> to start a new workflow, or /workflow resume to restart from a persisted phase.",
 	}
 }

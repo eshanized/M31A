@@ -182,8 +182,8 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("cost", handleCost, "Toggle cost estimate display in header")
 
 	// Workflow control
-	r.Register("pause", handlePause, "Pause current workflow phase")
-	r.Register("resume-task", handleResumeTask, "Resume task from last checkpoint")
+	r.Register("pause", handlePause, "Show pause instructions (available on Execute screen)")
+	r.Register("resume-task", handleResumeTask, "Show workflow restart info (checkpoint resume not yet implemented)")
 
 	return r
 }

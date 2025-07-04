@@ -1962,3 +1962,45 @@ func TestDiffModel_ViewContainsColoredContent(t *testing.T) {
 		t.Errorf("expected diff content (newLine) in view, got: %s", view)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestPauseCommand
+// ---------------------------------------------------------------------------
+
+func TestPauseCommand(t *testing.T) {
+	r := DefaultCommands()
+	result, found := r.Execute("/pause", CommandContext{})
+	if !found {
+		t.Fatal("expected /pause to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "Execute screen") {
+		t.Errorf("expected 'Execute screen' in message, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "press P") {
+		t.Errorf("expected 'press P' in message, got: %s", result.Message)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestResumeTaskCommand
+// ---------------------------------------------------------------------------
+
+func TestResumeTaskCommand(t *testing.T) {
+	r := DefaultCommands()
+	result, found := r.Execute("/resume-task", CommandContext{})
+	if !found {
+		t.Fatal("expected /resume-task to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "not yet implemented") {
+		t.Errorf("expected 'not yet implemented' in message, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "/workflow") {
+		t.Errorf("expected '/workflow' suggestion in message, got: %s", result.Message)
+	}
+}
