@@ -246,7 +246,7 @@ func (m SettingsModel) confirmEdit() SettingsModel {
 		m.dirty = true
 	}
 	// Re-mask API key after edit
-	if f.masked == false && (f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key") {
+	if !f.masked && (f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key") {
 		f.masked = true
 	}
 	return m
@@ -265,7 +265,7 @@ func (m SettingsModel) cancelEdit() SettingsModel {
 	f.value = f.original
 	m.err = ""
 	// Re-mask API key after cancel
-	if f.masked == false && (f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key") {
+	if !f.masked && (f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key") {
 		f.masked = true
 	}
 	return m
