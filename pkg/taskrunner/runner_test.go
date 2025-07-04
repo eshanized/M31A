@@ -11,9 +11,9 @@ import (
 
 func newTask(id int, desc string, deps []int) types.Task {
 	return types.Task{
-		ID:          id,
-		Description: desc,
-		Action:      "Create",
+		ID:           id,
+		Description:  desc,
+		Action:       "Create",
 		Dependencies: deps,
 	}
 }
@@ -444,7 +444,7 @@ func TestRunner_Tasks(t *testing.T) {
 
 func TestRunner_NewWithExistingStatus(t *testing.T) {
 	tests := []struct {
-		name         string
+		name          string
 		initialStatus types.TaskStatus
 		expected      types.TaskStatus
 	}{

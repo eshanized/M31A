@@ -12,16 +12,16 @@ import (
 
 // PlanModel displays the task plan for user review.
 type PlanModel struct {
-	theme    theme.Theme
-	tasks    []types.Task
-	selected int
-	width    int
-	height   int
-	modelID  string
-	provider string
-	estCost  float64
-	estTime  string
-	showDiff bool
+	theme     theme.Theme
+	tasks     []types.Task
+	selected  int
+	width     int
+	height    int
+	modelID   string
+	provider  string
+	estCost   float64
+	estTime   string
+	showDiff  bool
 	showGraph bool
 }
 

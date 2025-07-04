@@ -33,10 +33,10 @@ type ExecuteModel struct {
 // on creation without waiting for a separate WindowSizeMsg (D-03 fix).
 func NewExecuteModel(tasks []types.Task, t theme.Theme, width, height int) *ExecuteModel {
 	return &ExecuteModel{
-		theme:    t,
-		tasks:    tasks,
-		width:    width,
-		height:   height,
+		theme:     t,
+		tasks:     tasks,
+		width:     width,
+		height:    height,
 		startedAt: time.Now(),
 	}
 }
@@ -261,4 +261,3 @@ func (m *ExecuteModel) renderMetricsHeader() string {
 
 	return components.MetricRow(metrics, m.width-4)
 }
-

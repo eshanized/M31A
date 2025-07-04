@@ -24,10 +24,10 @@ type ExecuteFunc func(ctx context.Context, task types.Task) TaskResult
 
 // Runner schedules and executes tasks with dependency resolution.
 type Runner struct {
-	tasks       []types.Task
-	status      map[int]types.TaskStatus
-	results     map[int]TaskResult
-	idToIdx     map[int]int
+	tasks        []types.Task
+	status       map[int]types.TaskStatus
+	results      map[int]TaskResult
+	idToIdx      map[int]int
 	OnTaskStart  func(task types.Task)
 	OnTaskUpdate func(task types.Task, status string)
 	// TaskTimeout is the per-task timeout. Zero means no timeout.

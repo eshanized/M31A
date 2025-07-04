@@ -23,14 +23,14 @@ var Version = "dev"
 var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
-	apiKey              string
-	baseURL             string
-	httpClient          *http.Client
-	cache               *provider.ModelCache
-	referer             string
-	title               string
-	healthCheckLiveMs   int64
-	healthCheckSlowMs   int64
+	apiKey            string
+	baseURL           string
+	httpClient        *http.Client
+	cache             *provider.ModelCache
+	referer           string
+	title             string
+	healthCheckLiveMs int64
+	healthCheckSlowMs int64
 }
 
 // Options holds configurable settings for the OpenRouter client.
@@ -94,18 +94,18 @@ func New(apiKey string, opts Options) (*Client, error) {
 
 	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
 	return &Client{
-		apiKey:              apiKey,
-		baseURL:             opts.BaseURL,
+		apiKey:  apiKey,
+		baseURL: opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			},
 		},
-		cache:               cache,
-		referer:             opts.Referer,
-		title:               opts.Title,
-		healthCheckLiveMs:   opts.HealthCheckLiveMs,
-		healthCheckSlowMs:   opts.HealthCheckSlowMs,
+		cache:             cache,
+		referer:           opts.Referer,
+		title:             opts.Title,
+		healthCheckLiveMs: opts.HealthCheckLiveMs,
+		healthCheckSlowMs: opts.HealthCheckSlowMs,
 	}, nil
 }
 
@@ -130,7 +130,7 @@ type openRouterModel struct {
 		PromptToken     float64 `json:"prompt_token"`
 		CompletionToken float64 `json:"completion_token"`
 	} `json:"pricing"`
-	TopProvider string `json:"top_provider"`
+	TopProvider  string `json:"top_provider"`
 	Architecture struct {
 		Modality  string `json:"modality"`
 		Tokenizer string `json:"tokenizer"`

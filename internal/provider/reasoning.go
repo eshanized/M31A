@@ -28,7 +28,7 @@ var reasoningParamMap = map[string]ReasoningConfig{
 		SSEField:      "choices.0.delta.reasoning",
 	},
 	"anthropic": {
-		ModelFamily:   "anthropic",
+		ModelFamily: "anthropic",
 		RequestParams: map[string]any{
 			"thinking": map[string]any{
 				"type":          "enabled",

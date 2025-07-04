@@ -18,9 +18,9 @@ type mockTool struct {
 	execFunc  func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
 }
 
-func (m *mockTool) Name() string                                        { return m.name }
-func (m *mockTool) Description() string                                 { return "mock tool for testing" }
-func (m *mockTool) RiskLevel() types.RiskLevel                          { return m.riskLevel }
+func (m *mockTool) Name() string               { return m.name }
+func (m *mockTool) Description() string        { return "mock tool for testing" }
+func (m *mockTool) RiskLevel() types.RiskLevel { return m.riskLevel }
 func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	if m.execFunc != nil {
 		return m.execFunc(ctx, input)
@@ -115,8 +115,8 @@ func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := d.Execute(context.Background(), types.ToolCall{
-			ID:   "call1",
-			Name: "bash",
+			ID:    "call1",
+			Name:  "bash",
 			Input: []byte(`{}`),
 		})
 		errCh <- err

@@ -2171,7 +2171,6 @@ func TestApp_SidebarThreshold_FromConfig(t *testing.T) {
 	}
 }
 
-
 // TestReplSlashCommand_EndToEnd verifies that typing a slash command in the REPL
 // and pressing Enter results in the app-level SlashCommandMsg handler executing.
 func TestReplSlashCommand_EndToEnd(t *testing.T) {

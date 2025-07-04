@@ -71,8 +71,8 @@ type mockProvider struct {
 	multiResponses []string // if set, returns responses[callCount] per call
 }
 
-func (m *mockProvider) Name() string                                       { return "mock" }
-func (m *mockProvider) APIKey() string                                     { return "test-key" }
+func (m *mockProvider) Name() string   { return "mock" }
+func (m *mockProvider) APIKey() string { return "test-key" }
 func (m *mockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
 	return nil, nil
 }
@@ -190,27 +190,27 @@ func TestEngine_ErrorHandling(t *testing.T) {
 
 func TestEngine_ParseQuestions(t *testing.T) {
 	tests := []struct {
-		name     string
-		content  string
-		wantLen  int
+		name      string
+		content   string
+		wantLen   int
 		wantFirst string
 	}{
 		{
-			name:     "numbered format",
-			content:  "1. What framework?\n2. What language?",
-			wantLen:  2,
+			name:      "numbered format",
+			content:   "1. What framework?\n2. What language?",
+			wantLen:   2,
 			wantFirst: "What framework?",
 		},
 		{
-			name:     "fallback question",
-			content:  "What framework should we use?\nHow about testing?",
-			wantLen:  2,
+			name:      "fallback question",
+			content:   "What framework should we use?\nHow about testing?",
+			wantLen:   2,
 			wantFirst: "What framework should we use?",
 		},
 		{
-			name:     "cap at 4",
-			content:  "1. Q1?\n2. Q2?\n3. Q3?\n4. Q4?\n5. Q5?",
-			wantLen:  4,
+			name:      "cap at 4",
+			content:   "1. Q1?\n2. Q2?\n3. Q3?\n4. Q4?\n5. Q5?",
+			wantLen:   4,
 			wantFirst: "Q1?",
 		},
 	}
@@ -351,9 +351,9 @@ func TestEngine_ExtractJSONArray(t *testing.T) {
 
 func TestEngine_ValidateTasks(t *testing.T) {
 	tests := []struct {
-		name      string
-		tasks     []m31types.Task
-		wantErrs  int
+		name     string
+		tasks    []m31types.Task
+		wantErrs int
 	}{
 		{
 			name:     "valid task",

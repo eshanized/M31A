@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -18,14 +18,18 @@ type msMockProvider struct {
 	models []types.ModelInfo
 }
 
-func (m *msMockProvider) Name() string                                         { return m.name }
-func (m *msMockProvider) APIKey() string                                       { return "test-key" }
-func (m *msMockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) { return m.models, nil }
+func (m *msMockProvider) Name() string   { return m.name }
+func (m *msMockProvider) APIKey() string { return "test-key" }
+func (m *msMockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
+	return m.models, nil
+}
 func (m *msMockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
 	return nil, nil
 }
 func (m *msMockProvider) EstimateCost(modelID string, usage types.Usage) float64 { return 0 }
-func (m *msMockProvider) HealthCheck(ctx context.Context) types.HealthStatus     { return types.HealthStatus{Status: "live"} }
+func (m *msMockProvider) HealthCheck(ctx context.Context) types.HealthStatus {
+	return types.HealthStatus{Status: "live"}
+}
 func (m *msMockProvider) GetModel(id string) (*types.ModelInfo, error) {
 	for i := range m.models {
 		if m.models[i].ID == id {
@@ -44,7 +48,7 @@ func newTestRegistry(t *testing.T) *provider.Registry {
 			{ID: "openrouter/model-a", Name: "Model A", Provider: "openrouter", ContextLength: 8192,
 				Pricing: types.Pricing{InputPerMToken: 1.0, OutputPerMToken: 3.0}},
 			{ID: "openrouter/model-b", Name: "Model B", Provider: "openrouter", ContextLength: 32768,
-				Pricing: types.Pricing{InputPerMToken: 2.0, OutputPerMToken: 6.0},
+				Pricing:      types.Pricing{InputPerMToken: 2.0, OutputPerMToken: 6.0},
 				Capabilities: types.CapFlags{Tools: true, Reasoning: true}},
 		},
 	})

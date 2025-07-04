@@ -48,72 +48,72 @@ type workflowEngineInterface interface {
 }
 
 type AppState struct {
-	screen           Screen
-	version          string
-	initialized      bool
-	registry         *provider.Registry
-	activeProvider   string
-	activeModel      *types.ModelInfo
-	currentOperation string
-	width            int
-	height           int
-	lastActivity     time.Time
-	healthStatus     types.HealthStatus
-	themeManager     *theme.Manager
-	firstRunModel    *FirstRunModel
-	replModel        *ReplModel
-	settingsModel    *SettingsModel
-	resumeModel      *ResumeModel
-	sessionManager   *session.Manager
-	keychain         keychain.Keychain
-	config           *config.Config
-	apiKey           string
-	configPath       string
-	ledger           *ledger.Ledger
-	prevScreen       Screen
-	permissionModal  *components.PermissionModal
-	dispatcher       *tools.Dispatcher
-	modelSelector      ModelSelector
+	screen               Screen
+	version              string
+	initialized          bool
+	registry             *provider.Registry
+	activeProvider       string
+	activeModel          *types.ModelInfo
+	currentOperation     string
+	width                int
+	height               int
+	lastActivity         time.Time
+	healthStatus         types.HealthStatus
+	themeManager         *theme.Manager
+	firstRunModel        *FirstRunModel
+	replModel            *ReplModel
+	settingsModel        *SettingsModel
+	resumeModel          *ResumeModel
+	sessionManager       *session.Manager
+	keychain             keychain.Keychain
+	config               *config.Config
+	apiKey               string
+	configPath           string
+	ledger               *ledger.Ledger
+	prevScreen           Screen
+	permissionModal      *components.PermissionModal
+	dispatcher           *tools.Dispatcher
+	modelSelector        ModelSelector
 	fallbackNotification *FallbackNotification
-	cmdRegistry        *CommandRegistry
-	planModel          *PlanModel
-	executeModel       *ExecuteModel
-	verifyModel        *VerifyModel
-	shipModel          *ShipModel
-	workflowEngine     workflowEngineInterface
-	workflowGoal       string
-	workflowRunning    bool
-	currentPhase       types.WorkflowPhase
-	discussQuestions   []string
-	sessionID          string // session ID (set after initWorkflowEngine) — used for workflow state persistence
+	cmdRegistry          *CommandRegistry
+	planModel            *PlanModel
+	executeModel         *ExecuteModel
+	verifyModel          *VerifyModel
+	shipModel            *ShipModel
+	workflowEngine       workflowEngineInterface
+	workflowGoal         string
+	workflowRunning      bool
+	currentPhase         types.WorkflowPhase
+	discussQuestions     []string
+	sessionID            string // session ID (set after initWorkflowEngine) — used for workflow state persistence
 	// Discuss Q&A flow (D-01 fix)
 	pendingDiscussAnswers map[int]string // index -> answer; nil when not in discuss Q&A
 	currentDiscussIndex   int            // next question to ask (0-based)
 	discussQuestionCount  int            // total questions in this discuss round
 	discussAnswerTimeout  *time.Timer    // 5-minute per-question timer
-	autoDream          *autodream.Consolidator
+	autoDream             *autodream.Consolidator
 	// Workflow message bus (D-04 fix: per-phase lifecycle).
 	// msgChan  : current phase's message channel (workflow → TUI)
 	// msgDone  : closed by the runner goroutine when the phase completes
 	// phaseGen : incremented on every RunPhaseCmd; drainer captures it
 	//            at spawn time and stops if it changes (a new phase started)
-	msgChan            chan tea.Msg
-	msgDone            chan struct{}
-	phaseGen           int
-	workflowCtx        context.Context
-	workflowCancel     context.CancelFunc
-	git                *git.Git
-	rollback           *rollback.Rollback
-	healthCheckInFlight bool
-	sidebarModel       *SidebarModel
-	cmdPalette         *CommandPaletteModel
-	cmdPaletteOpen     bool
-	keyRegistry        *KeyRegistry
-	toastText          string
-	toastExpires       time.Time
-	toastType          string
+	msgChan               chan tea.Msg
+	msgDone               chan struct{}
+	phaseGen              int
+	workflowCtx           context.Context
+	workflowCancel        context.CancelFunc
+	git                   *git.Git
+	rollback              *rollback.Rollback
+	healthCheckInFlight   bool
+	sidebarModel          *SidebarModel
+	cmdPalette            *CommandPaletteModel
+	cmdPaletteOpen        bool
+	keyRegistry           *KeyRegistry
+	toastText             string
+	toastExpires          time.Time
+	toastType             string
 	sidebarManuallyHidden bool
-	diffModel          DiffModel
+	diffModel             DiffModel
 	// H-10/M-26: Header render cache — avoids re-rendering the header
 	// string via lipgloss on every TickMsg when nothing changed.
 	headerCacheKey   uint64 // FNV-1a hash of (provider, modelID, ctxUsed, ctxTotal, healthStatus, logLevel)
@@ -328,12 +328,12 @@ func (m *AppState) currentPhaseGen() int {
 // during execution and PlanReadyMsg when the plan phase completes.
 //
 // D-04 fix: per-phase lifecycle synchronization. Each call:
-//   1. Cancels the previous phase's context
-//   2. Increments app.phaseGen so the old drainer sees the change and stops
-//   3. Closes the OLD app.msgDone (via safeClose) to signal the old drainer
-//   4. Creates a fresh msgCh + doneCh pair
-//   5. Captures the current phaseGen for the new drainer
-//   6. Sets the engine's MsgEmitter to use the new channel
+//  1. Cancels the previous phase's context
+//  2. Increments app.phaseGen so the old drainer sees the change and stops
+//  3. Closes the OLD app.msgDone (via safeClose) to signal the old drainer
+//  4. Creates a fresh msgCh + doneCh pair
+//  5. Captures the current phaseGen for the new drainer
+//  6. Sets the engine's MsgEmitter to use the new channel
 //
 // The runner goroutine uses `defer close(doneCh)` to signal the drainer
 // when the phase completes. The drainer selects on msgCh, done, and a

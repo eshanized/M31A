@@ -45,11 +45,11 @@ type ModelConfig struct {
 }
 
 type UIConfig struct {
-	Theme           string `toml:"theme"`
-	CompactMode     bool   `toml:"compact_mode"`
-	ShowTokenUsage  bool   `toml:"show_token_usage"`
-	ShowCostEstimate bool  `toml:"show_cost_estimate"`
-	MaxIterations   int    `toml:"max_iterations"`
+	Theme            string `toml:"theme"`
+	CompactMode      bool   `toml:"compact_mode"`
+	ShowTokenUsage   bool   `toml:"show_token_usage"`
+	ShowCostEstimate bool   `toml:"show_cost_estimate"`
+	MaxIterations    int    `toml:"max_iterations"`
 	// Leader key for chord shortcuts. Default "ctrl+x".
 	LeaderKey string `toml:"leader_key"`
 	// Leader key timeout duration in milliseconds. Default 1000.
@@ -81,15 +81,15 @@ type PermissionsAgentConfig struct {
 }
 
 type FeaturesConfig struct {
-	AutoBackup       bool `toml:"auto_backup"`
-	ResumeOnStartup  bool `toml:"resume_on_startup"`
+	AutoBackup      bool `toml:"auto_backup"`
+	ResumeOnStartup bool `toml:"resume_on_startup"`
 	// Model cache TTL in minutes. Default 5.
 	ModelCacheTTLMinutes int `toml:"model_cache_ttl_minutes"`
 	// Stale cache TTL in hours. Default 24.
 	ModelCacheStaleHours int `toml:"model_cache_stale_hours"`
 	// Health check latency thresholds in milliseconds.
-	HealthCheckLiveMs  int `toml:"healthcheck_live_ms"`
-	HealthCheckSlowMs  int `toml:"healthcheck_slow_ms"`
+	HealthCheckLiveMs int `toml:"healthcheck_live_ms"`
+	HealthCheckSlowMs int `toml:"healthcheck_slow_ms"`
 	// Session ID length in hex chars. Default 8.
 	SessionIDLength int `toml:"session_id_length"`
 	// Max recent models to remember. Default 10.

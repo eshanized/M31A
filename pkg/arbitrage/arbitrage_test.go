@@ -140,9 +140,9 @@ func TestEstimateTokens_FileAdjustment(t *testing.T) {
 
 func TestCompareModels(t *testing.T) {
 	models := []types.ModelInfo{
-		newTestModel("model-a", "provider-a", 5, 15, 128000),   // expensive
-		newTestModel("model-b", "provider-b", 1, 3, 128000),     // cheapest
-		newTestModel("model-c", "provider-c", 2, 6, 128000),     // mid
+		newTestModel("model-a", "provider-a", 5, 15, 128000), // expensive
+		newTestModel("model-b", "provider-b", 1, 3, 128000),  // cheapest
+		newTestModel("model-c", "provider-c", 2, 6, 128000),  // mid
 	}
 
 	estimates := CompareModels(models, 1000, 500)
@@ -211,7 +211,7 @@ func TestRecommend_SimpleTask(t *testing.T) {
 
 func TestRecommend_ComplexTask(t *testing.T) {
 	models := []types.ModelInfo{
-		newTestModel("cheap", "provider-a", 0.15, 0.45, 32000),   // cheapest but small context
+		newTestModel("cheap", "provider-a", 0.15, 0.45, 32000),    // cheapest but small context
 		newTestModel("capable", "provider-b", 0.16, 0.48, 128000), // slightly more, large context
 	}
 
@@ -232,7 +232,7 @@ func TestRecommend_ComplexTask(t *testing.T) {
 
 func TestRecommend_WithThreshold(t *testing.T) {
 	models := []types.ModelInfo{
-		newTestModel("cheap", "provider-a", 0.15, 0.45, 32000),   // cheapest, small context
+		newTestModel("cheap", "provider-a", 0.15, 0.45, 32000),    // cheapest, small context
 		newTestModel("capable", "provider-b", 0.16, 0.48, 128000), // slightly more, large context
 	}
 
@@ -254,11 +254,11 @@ func TestRecommend_WithThreshold(t *testing.T) {
 
 func TestShouldArbitrage(t *testing.T) {
 	tests := []struct {
-		name           string
-		current        float64
-		alternative    float64
-		threshold      float64
-		expected       bool
+		name        string
+		current     float64
+		alternative float64
+		threshold   float64
+		expected    bool
 	}{
 		{
 			name:        "significant savings",

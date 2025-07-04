@@ -71,7 +71,7 @@ func TestProviderFallback_RespectsRetryAfter(t *testing.T) {
 func TestSSE_CloseReleasesBody(t *testing.T) {
 	closeCount := 0
 	body := &mockReadCloser{
-		data:   []byte("data: {\"test\": true}\n\ndata: [DONE]\n\n"),
+		data:    []byte("data: {\"test\": true}\n\ndata: [DONE]\n\n"),
 		closeFn: func() { closeCount++ },
 	}
 	resp := &http.Response{

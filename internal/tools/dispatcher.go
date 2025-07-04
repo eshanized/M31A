@@ -22,10 +22,10 @@ type Dispatcher struct {
 	todoWrite      *TodoWrite
 	questionReqCh  chan QuestionRequest
 	questionRespCh chan QuestionResponse
-	rules         []config.PermissionRule
-	originalRules []config.PermissionRule
-	agents        map[string]config.PermissionsAgentConfig
-	activeAgent   string
+	rules          []config.PermissionRule
+	originalRules  []config.PermissionRule
+	agents         map[string]config.PermissionsAgentConfig
+	activeAgent    string
 }
 
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {

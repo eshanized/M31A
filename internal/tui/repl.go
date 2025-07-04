@@ -34,22 +34,22 @@ type ShellResultMsg struct {
 }
 
 type ReplModel struct {
-	theme        theme.Theme
-	messages     []types.Message
-	viewport     viewport.Model
-	textarea     textarea.Model
-	spinner      spinner.Model
-	scrollPos    int
-	inputHistory    []string
-	historyPos      int
-	frecentHistory  *FrecentHistory
-	placeholder     string
-	streaming    bool
-	thinking     bool
-	lastStatus   string
-	width        int
-	height       int
-	sidebarWidth int // width reserved for sidebar (0 if hidden)
+	theme          theme.Theme
+	messages       []types.Message
+	viewport       viewport.Model
+	textarea       textarea.Model
+	spinner        spinner.Model
+	scrollPos      int
+	inputHistory   []string
+	historyPos     int
+	frecentHistory *FrecentHistory
+	placeholder    string
+	streaming      bool
+	thinking       bool
+	lastStatus     string
+	width          int
+	height         int
+	sidebarWidth   int // width reserved for sidebar (0 if hidden)
 
 	msgRenderer  *components.MessageRenderer
 	streamCancel context.CancelFunc
@@ -68,7 +68,7 @@ type ReplModel struct {
 	fallbackBannerAt time.Time // when the banner appeared (for 15s auto-dismiss)
 
 	// Active question from AskUserQuestion tool
-	activeQuestion   *QuestionRequestMsg
+	activeQuestion *QuestionRequestMsg
 
 	// Provider access for LLM calls
 	registry       *provider.Registry
@@ -98,8 +98,8 @@ type ReplModel struct {
 	thinkingFocusIndex int // -1 = no focus, otherwise index into thinkingBlocks
 
 	// References for View() rendering
-	keyRegistry   *KeyRegistry
-	lastActivity  time.Time
+	keyRegistry  *KeyRegistry
+	lastActivity time.Time
 
 	// Slash command autocomplete
 	slashSuggestions []CommandInfo
@@ -415,10 +415,10 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 						Messages: m.messagesForLLM(),
 						Stream:   true,
 					}
-				// Fix C-3: StartStreamCmd owns its channels internally.
-				// The REPL stores a read-only reference for continuation only.
-				cmd, streamCh := StartStreamCmd(ctx, p, req, m.sessionID)
-				m.streamCh = streamCh
+					// Fix C-3: StartStreamCmd owns its channels internally.
+					// The REPL stores a read-only reference for continuation only.
+					cmd, streamCh := StartStreamCmd(ctx, p, req, m.sessionID)
+					m.streamCh = streamCh
 					return []tea.Cmd{cmd}, true
 				}
 			}

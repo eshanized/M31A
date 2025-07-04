@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/pkg/session"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 // runPlan generates a task list to accomplish the goal.

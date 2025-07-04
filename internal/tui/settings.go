@@ -37,14 +37,14 @@ var tabNames = map[settingsTab]string{
 
 // editableField represents a single config field that can be edited inline.
 type editableField struct {
-	label    string // display label
-	value    string // current displayed value
-	original string // original value for cancel
-	editing  bool   // currently being edited inline
-	masked   bool   // whether to mask display (for API keys)
-	maskChar string // masking character ("•")
+	label     string // display label
+	value     string // current displayed value
+	original  string // original value for cancel
+	editing   bool   // currently being edited inline
+	masked    bool   // whether to mask display (for API keys)
+	maskChar  string // masking character ("•")
 	fieldType string // "string", "int", "float", "bool"
-	key      string // config key path for save mapping
+	key       string // config key path for save mapping
 }
 
 // SettingsModel provides a tabbed configuration editor with inline editing.

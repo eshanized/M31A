@@ -267,8 +267,8 @@ func (k *linuxKeychain) passDelete(service string) error {
 func fmtSecret(conn *dbus.Conn, value string) map[string]interface{} {
 	var sessionPath dbus.ObjectPath // empty = first session
 	return map[string]interface{}{
-		"session":     sessionPath,
-		"value":       []byte(value),
+		"session":      sessionPath,
+		"value":        []byte(value),
 		"content_type": "text/plain",
 	}
 }

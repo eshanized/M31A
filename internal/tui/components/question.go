@@ -12,14 +12,14 @@ import (
 )
 
 type QuestionModel struct {
-	question   string
-	header     string
-	options    []string
+	question    string
+	header      string
+	options     []string
 	allowCustom bool
-	textarea   textarea.Model
-	selected   int
-	theme      theme.Theme
-	width      int
+	textarea    textarea.Model
+	selected    int
+	theme       theme.Theme
+	width       int
 }
 
 func NewQuestionModel(req tools.QuestionRequest, t theme.Theme, width int) QuestionModel {

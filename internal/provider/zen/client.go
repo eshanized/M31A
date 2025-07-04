@@ -23,13 +23,13 @@ var Version = "dev"
 var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
-	apiKey              string
-	baseURL             string
-	httpClient          *http.Client
-	cache               *provider.ModelCache
-	healthCheckLiveMs   int64
-	healthCheckSlowMs   int64
-	defaultContextLen   int64
+	apiKey            string
+	baseURL           string
+	httpClient        *http.Client
+	cache             *provider.ModelCache
+	healthCheckLiveMs int64
+	healthCheckSlowMs int64
+	defaultContextLen int64
 }
 
 // Options holds configurable settings for the Zen client.
@@ -88,17 +88,17 @@ func New(apiKey string, opts Options) (*Client, error) {
 
 	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
 	return &Client{
-		apiKey:              apiKey,
-		baseURL:             opts.BaseURL,
+		apiKey:  apiKey,
+		baseURL: opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			},
 		},
-		cache:               cache,
-		healthCheckLiveMs:   opts.HealthCheckLiveMs,
-		healthCheckSlowMs:   opts.HealthCheckSlowMs,
-		defaultContextLen:   opts.DefaultContextLen,
+		cache:             cache,
+		healthCheckLiveMs: opts.HealthCheckLiveMs,
+		healthCheckSlowMs: opts.HealthCheckSlowMs,
+		defaultContextLen: opts.DefaultContextLen,
 	}, nil
 }
 
@@ -167,8 +167,8 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				InputPerMToken:  0,
 				OutputPerMToken: 0,
 			},
-			TopProvider: "zen",
-			Capabilities:  zenModelCaps(m.ID),
+			TopProvider:  "zen",
+			Capabilities: zenModelCaps(m.ID),
 		}
 		models = append(models, info)
 	}

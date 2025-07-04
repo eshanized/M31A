@@ -53,9 +53,9 @@ type CommandContext struct {
 
 // CommandRegistry holds a map of registered command handlers and their descriptions.
 type CommandRegistry struct {
-	handlers          map[string]CommandHandler
-	descriptions      map[string]string
-	lastCompressTime  time.Time
+	handlers         map[string]CommandHandler
+	descriptions     map[string]string
+	lastCompressTime time.Time
 }
 
 // NewCommandRegistry creates an empty CommandRegistry.

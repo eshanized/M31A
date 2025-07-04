@@ -15,9 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eshanized/M31A/internal/git"
-	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/config"
+	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
@@ -61,13 +61,13 @@ type PromptRegistry struct {
 func LoadPrompts() (*PromptRegistry, error) {
 	r := &PromptRegistry{}
 	files := map[string]*string{
-		"prompts/base.md":            &r.Base,
-		"prompts/tool-use.md":        &r.ToolUse,
-		"prompts/plan-format.md":     &r.PlanFormat,
-		"prompts/execute-task.md":    &r.ExecuteTask,
+		"prompts/base.md":              &r.Base,
+		"prompts/tool-use.md":          &r.ToolUse,
+		"prompts/plan-format.md":       &r.PlanFormat,
+		"prompts/execute-task.md":      &r.ExecuteTask,
 		"prompts/discuss-questions.md": &r.Discuss,
-		"prompts/self-heal.md":       &r.SelfHeal,
-		"prompts/verify-checklist.md": &r.VerifyChecklist,
+		"prompts/self-heal.md":         &r.SelfHeal,
+		"prompts/verify-checklist.md":  &r.VerifyChecklist,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -142,11 +142,11 @@ type PhaseResult struct {
 	RequiresManualInput bool
 
 	// Execution metrics (populated by Execute/Ship phases)
-	Usage       *m31types.Usage // token usage from LLM calls
-	Cost        float64         // estimated cost
-	ToolCalls   int             // number of tool calls made
-	Commits     []git.CommitInfo // commits created during phase
-	DiffStats   DiffStats       // file change statistics (Ship phase)
+	Usage     *m31types.Usage  // token usage from LLM calls
+	Cost      float64          // estimated cost
+	ToolCalls int              // number of tool calls made
+	Commits   []git.CommitInfo // commits created during phase
+	DiffStats DiffStats        // file change statistics (Ship phase)
 }
 
 // DiffStats holds file change statistics from git diff.
@@ -599,8 +599,8 @@ func hasCycle(tasks []m31types.Task) bool {
 		// Iterative DFS using explicit stack
 		// Stack entries: (nodeID, depIndex, isNewNode)
 		type stackEntry struct {
-			id       int
-			depIdx   int
+			id         int
+			depIdx     int
 			firstVisit bool
 		}
 		stack := []stackEntry{{id: t.ID, firstVisit: true}}

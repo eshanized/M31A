@@ -9,11 +9,11 @@ import (
 
 // MetricCard renders a large number with label and optional trend.
 type MetricCard struct {
-	Value    string
-	Label    string
-	Trend    string // optional, e.g. "+12%" or "↑ 3"
-	Width    int
-	Align    lipgloss.Position
+	Value string
+	Label string
+	Trend string // optional, e.g. "+12%" or "↑ 3"
+	Width int
+	Align lipgloss.Position
 }
 
 // Render returns the metric card as a styled string.

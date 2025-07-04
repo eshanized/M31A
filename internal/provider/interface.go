@@ -30,5 +30,3 @@ type ToolDefinition struct {
 	Description string `json:"description"`
 	Parameters  string `json:"parameters"`
 }
-
-

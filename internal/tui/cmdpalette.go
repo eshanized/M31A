@@ -19,13 +19,13 @@ type CommandInfo struct {
 
 // CommandPaletteModel provides a fuzzy-searchable command palette overlay.
 type CommandPaletteModel struct {
-	input     textinput.Model
-	commands  []CommandInfo
-	matches   []CommandInfo
-	selected  int
-	width     int
-	height    int
-	open      bool
+	input    textinput.Model
+	commands []CommandInfo
+	matches  []CommandInfo
+	selected int
+	width    int
+	height   int
+	open     bool
 }
 
 func NewCommandPaletteModel() *CommandPaletteModel {

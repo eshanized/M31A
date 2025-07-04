@@ -68,8 +68,8 @@ type ModelInfo struct {
 	Pricing       Pricing  `json:"pricing"`
 	Architecture  ArchInfo `json:"architecture"`
 	TopProvider   string   `json:"top_provider"`
-	Capabilities  CapFlags  `json:"capabilities"`
-	Variant       *string   `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
+	Capabilities  CapFlags `json:"capabilities"`
+	Variant       *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
 }
 
 type MessageSegment struct {
@@ -117,15 +117,15 @@ type Tool interface {
 }
 
 type Task struct {
-	ID                 int              `json:"id"`
-	Description        string           `json:"description"`
-	Action             string           `json:"action"`
-	Dependencies       []int            `json:"dependencies"`
-	Files              []string         `json:"files"`
-	AcceptanceCriteria []string         `json:"acceptance_criteria"`
-	Status             TaskStatus       `json:"status"`
-	HealsAttempted     int              `json:"heals_attempted"`
-	CommitHash         string           `json:"commit_hash,omitempty"`
+	ID                 int        `json:"id"`
+	Description        string     `json:"description"`
+	Action             string     `json:"action"`
+	Dependencies       []int      `json:"dependencies"`
+	Files              []string   `json:"files"`
+	AcceptanceCriteria []string   `json:"acceptance_criteria"`
+	Status             TaskStatus `json:"status"`
+	HealsAttempted     int        `json:"heals_attempted"`
+	CommitHash         string     `json:"commit_hash,omitempty"`
 }
 
 type ProjectState struct {
@@ -149,10 +149,10 @@ type Session struct {
 }
 
 type StreamChunk struct {
-	Type             string  `json:"type"`
-	Delta            string  `json:"delta"`
-	ThinkingDuration int64   `json:"thinking_duration"`
-	Usage            *Usage  `json:"usage,omitempty"`
+	Type             string `json:"type"`
+	Delta            string `json:"delta"`
+	ThinkingDuration int64  `json:"thinking_duration"`
+	Usage            *Usage `json:"usage,omitempty"`
 }
 
 type StreamIterator struct {

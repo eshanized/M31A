@@ -503,7 +503,7 @@ func TestSoftReset_InvalidHash(t *testing.T) {
 	createCommits(g, 2)
 
 	r := New(g)
-		_, err := r.SoftReset("deadbeef1234567890abcdef1234567890abcdef", nil)
+	_, err := r.SoftReset("deadbeef1234567890abcdef1234567890abcdef", nil)
 	if err == nil {
 		t.Fatal("Expected error for invalid hash in SoftReset")
 	}
@@ -812,7 +812,7 @@ func TestCountCommitsBetween_DifferentHashes(t *testing.T) {
 
 	// Pick two reachable commits: oldest and newest (both in the log since no reset)
 	oldestHash := entries[len(entries)-1].CommitInfo.Hash // commit 0
-	newestHash := entries[0].CommitInfo.Hash               // commit 4 (HEAD)
+	newestHash := entries[0].CommitInfo.Hash              // commit 4 (HEAD)
 
 	// countCommitsBetween(oldest, newest): oldest is startHash, newest is endHash
 	// Log is newest first: [commit4, commit3, commit2, commit1, commit0]

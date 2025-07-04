@@ -20,7 +20,7 @@ import (
 	"github.com/eshanized/M31A/pkg/keychain"
 )
 
-	var Version = "dev"
+var Version = "dev"
 
 func main() {
 	// Build command registry for usage and TUI

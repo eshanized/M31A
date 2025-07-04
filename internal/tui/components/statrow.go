@@ -10,11 +10,11 @@ import (
 
 // StatRow renders a compact label-value pair with optional icon.
 type StatRow struct {
-	Label    string
-	Value    string
-	Icon     string // optional emoji or symbol
-	Width    int    // total width, 0 for auto
-	Align    lipgloss.Position
+	Label string
+	Value string
+	Icon  string // optional emoji or symbol
+	Width int    // total width, 0 for auto
+	Align lipgloss.Position
 }
 
 // Render returns the stat row as a string.

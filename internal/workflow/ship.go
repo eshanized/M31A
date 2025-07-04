@@ -10,10 +10,10 @@ import (
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
+	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
-	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // ShipSummary holds the session completion summary.
@@ -120,10 +120,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	}
 
 	result := &PhaseResult{
-		Phase:     m31types.PhaseShip,
-		Success:   true,
-		Commits:   commits,
-		DiffStats: diffStats,
+		Phase:      m31types.PhaseShip,
+		Success:    true,
+		Commits:    commits,
+		DiffStats:  diffStats,
 		DurationMs: duration.Milliseconds(),
 	}
 	if failed > 0 {

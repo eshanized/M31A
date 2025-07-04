@@ -293,7 +293,7 @@ Bisecting: 0 revisions left
 		},
 		{
 			name: "bracket at start with spaces",
-			log: `  [feed123] spaced commit`,
+			log:  `  [feed123] spaced commit`,
 			want: "feed123",
 		},
 		{
@@ -466,7 +466,7 @@ func TestBisect_ParseBisectLog_Unit(t *testing.T) {
 		},
 		{
 			name: "first bad commit line with leading spaces",
-			log: "  # first bad commit: [commit1] spaced line",
+			log:  "  # first bad commit: [commit1] spaced line",
 			want: "commit1",
 		},
 		{

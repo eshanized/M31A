@@ -193,8 +193,8 @@ func TestEstimateCost_KnownModel(t *testing.T) {
 			ID:   "test/model",
 			Name: "Test Model",
 			Pricing: types.Pricing{
-				InputPerMToken:  0.5,  // $0.5 per million input tokens
-				OutputPerMToken: 1.5,  // $1.5 per million output tokens
+				InputPerMToken:  0.5, // $0.5 per million input tokens
+				OutputPerMToken: 1.5, // $1.5 per million output tokens
 			},
 		},
 	})

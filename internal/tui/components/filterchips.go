@@ -9,9 +9,9 @@ import (
 
 // FilterChip represents a single filter toggle.
 type FilterChip struct {
-	Label    string
-	Active   bool
-	Icon     string // optional icon when active
+	Label  string
+	Active bool
+	Icon   string // optional icon when active
 }
 
 // FilterChips renders a horizontal row of filter toggles.

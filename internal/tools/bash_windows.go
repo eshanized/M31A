@@ -28,4 +28,3 @@ func processKill(pid int, sig int) {
 func newShellCmd(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, "cmd", "/C", command)
 }
-

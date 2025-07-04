@@ -183,11 +183,11 @@ func (g *Git) DiffStaged() (string, error) {
 
 // FileStatus represents a single file's git status.
 type FileStatus struct {
-	Status     string // e.g. "M", "A", "D", "R", "C", "U", "?"
-	Path       string
-	OldPath    string // for renames
-	Additions  int
-	Deletions  int
+	Status    string // e.g. "M", "A", "D", "R", "C", "U", "?"
+	Path      string
+	OldPath   string // for renames
+	Additions int
+	Deletions int
 }
 
 // StatusPorcelain returns structured git status for the working directory.

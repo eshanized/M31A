@@ -98,12 +98,12 @@ func TestFetchModels_PopulatesCache(t *testing.T) {
 			resp := map[string][]map[string]any{
 				"data": {
 					{
-						"id":              "deepseek/deepseek-r1",
-						"name":            "DeepSeek R1",
-						"context_length":  float64(65536),
-						"top_provider":    "DeepSeek",
-						"pricing":         map[string]any{"prompt_token": 0.00000055, "completion_token": 0.00000219},
-						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+						"id":             "deepseek/deepseek-r1",
+						"name":           "DeepSeek R1",
+						"context_length": float64(65536),
+						"top_provider":   "DeepSeek",
+						"pricing":        map[string]any{"prompt_token": 0.00000055, "completion_token": 0.00000219},
+						"architecture":   map[string]any{"modality": "text", "tokenizer": "gpt"},
 					},
 				},
 			}
@@ -140,12 +140,12 @@ func TestFetchModels_StaleFallback(t *testing.T) {
 			resp := map[string][]map[string]any{
 				"data": {
 					{
-						"id":              "test/model",
-						"name":            "Test Model",
-						"context_length":  float64(4096),
-						"top_provider":    "Test",
-						"pricing":         map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
-						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+						"id":             "test/model",
+						"name":           "Test Model",
+						"context_length": float64(4096),
+						"top_provider":   "Test",
+						"pricing":        map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
+						"architecture":   map[string]any{"modality": "text", "tokenizer": "gpt"},
 					},
 				},
 			}
@@ -191,8 +191,8 @@ func TestEstimateCost_KnownModel(t *testing.T) {
 			ID:   "test/model",
 			Name: "Test Model",
 			Pricing: types.Pricing{
-				InputPerMToken:  1.0,  // $1 per million input tokens
-				OutputPerMToken: 2.0,  // $2 per million output tokens
+				InputPerMToken:  1.0, // $1 per million input tokens
+				OutputPerMToken: 2.0, // $2 per million output tokens
 			},
 		},
 	})
@@ -213,12 +213,12 @@ func TestFetchModels_CacheHit(t *testing.T) {
 			resp := map[string][]map[string]any{
 				"data": {
 					{
-						"id":              "test/model",
-						"name":            "Test Model",
-						"context_length":  float64(4096),
-						"top_provider":    "Test",
-						"pricing":         map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
-						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+						"id":             "test/model",
+						"name":           "Test Model",
+						"context_length": float64(4096),
+						"top_provider":   "Test",
+						"pricing":        map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
+						"architecture":   map[string]any{"modality": "text", "tokenizer": "gpt"},
 					},
 				},
 			}
@@ -260,12 +260,12 @@ func TestFetchModels_CacheExpired(t *testing.T) {
 			resp := map[string][]map[string]any{
 				"data": {
 					{
-						"id":              "test/model",
-						"name":            "Test Model",
-						"context_length":  float64(4096),
-						"top_provider":    "Test",
-						"pricing":         map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
-						"architecture":    map[string]any{"modality": "text", "tokenizer": "gpt"},
+						"id":             "test/model",
+						"name":           "Test Model",
+						"context_length": float64(4096),
+						"top_provider":   "Test",
+						"pricing":        map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002},
+						"architecture":   map[string]any{"modality": "text", "tokenizer": "gpt"},
 					},
 				},
 			}

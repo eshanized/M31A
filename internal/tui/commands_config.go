@@ -229,7 +229,7 @@ func handleFallback(args []string, ctx CommandContext) CommandResult {
 		if len(providers) > 1 {
 			b.WriteString("Use /fallback <provider_name> to switch.")
 		}
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+		return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 	}
 
 	target := args[0]

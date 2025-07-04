@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/types"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestFileRead_SimpleRead(t *testing.T) {

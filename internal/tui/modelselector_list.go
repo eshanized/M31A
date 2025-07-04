@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -77,9 +77,11 @@ func newModelItemDelegate() modelItemDelegate {
 	return modelItemDelegate{defaultDelegate: d}
 }
 
-func (d modelItemDelegate) Height() int                               { return d.defaultDelegate.Height() }
-func (d modelItemDelegate) Spacing() int                              { return d.defaultDelegate.Spacing() }
-func (d modelItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return d.defaultDelegate.Update(msg, m) }
+func (d modelItemDelegate) Height() int  { return d.defaultDelegate.Height() }
+func (d modelItemDelegate) Spacing() int { return d.defaultDelegate.Spacing() }
+func (d modelItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+	return d.defaultDelegate.Update(msg, m)
+}
 func (d modelItemDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	d.defaultDelegate.Render(w, m, index, item)
 }

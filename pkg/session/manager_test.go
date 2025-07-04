@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // newTestManager creates a Manager backed by a temp directory.

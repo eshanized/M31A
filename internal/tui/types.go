@@ -28,8 +28,8 @@ const (
 
 type AppMsg struct {
 	Screen        Screen
-	SessionID     string         // populated by resume screen on selection
-	SaveKeychain  bool           // save API key to system keychain
+	SessionID     string            // populated by resume screen on selection
+	SaveKeychain  bool              // save API key to system keychain
 	ModelSelected *ModelSelectedMsg // model selection result
 }
 

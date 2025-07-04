@@ -11,8 +11,8 @@ import (
 )
 
 type SSEParser struct {
-	scanner  *bufio.Scanner
-	resp     *http.Response
+	scanner   *bufio.Scanner
+	resp      *http.Response
 	closeOnce sync.Once
 }
 

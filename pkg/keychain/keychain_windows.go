@@ -68,7 +68,7 @@ func (k *windowsKeychain) Set(service, value string) error {
 
 	var cred credential
 	cred.flags = 0
-	cred.persist = 2 // CRED_PERSIST_LOCAL_MACHINE
+	cred.persist = 2  // CRED_PERSIST_LOCAL_MACHINE
 	cred.credType = 1 // CRED_TYPE_GENERIC
 	cred.targetName = targetPtr
 	cred.credentialBlob = (*byte)(unsafe.Pointer(valuePtr))

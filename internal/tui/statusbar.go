@@ -15,13 +15,13 @@ type StatusBarInfo struct {
 	TotalTokens   int
 	Cost          float64
 	ShowCost      bool
-	WhichKey      string // which-key hint text to show
-	LeaderActive  bool   // if true, show leader prompt instead of normal content
-	AgentName     string // agent/model name for metadata row
-	ModelName     string // model name
-	ProviderName  string // provider short name
-	IsStreaming   bool   // currently streaming
-	IsThinking    bool   // currently in thinking mode
+	WhichKey      string   // which-key hint text to show
+	LeaderActive  bool     // if true, show leader prompt instead of normal content
+	AgentName     string   // agent/model name for metadata row
+	ModelName     string   // model name
+	ProviderName  string   // provider short name
+	IsStreaming   bool     // currently streaming
+	IsThinking    bool     // currently in thinking mode
 	KeyboardHints []string // e.g. ["ctrl+p commands", "ctrl+b sidebar"]
 }
 
@@ -150,7 +150,7 @@ func RenderPromptBottomBorder(color lipgloss.Color, width int) string {
 	if width < 1 {
 		return ""
 	}
-	left := lipgloss.NewStyle().Foreground(color).Render("\u2579") // ╹
+	left := lipgloss.NewStyle().Foreground(color).Render("\u2579")                          // ╹
 	fill := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("\u2580", width-1)) // ▀
 	return left + fill
 }

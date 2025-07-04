@@ -42,10 +42,10 @@ func TestShipModel_New(t *testing.T) {
 
 func TestShipModel_UpdateWindowSize(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    3,
-		TaskTotal:   3,
-		SessionID:   "sess-001",
-		Duration:    "5m",
+		TaskDone:  3,
+		TaskTotal: 3,
+		SessionID: "sess-001",
+		Duration:  "5m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 
@@ -61,10 +61,10 @@ func TestShipModel_UpdateWindowSize(t *testing.T) {
 
 func TestShipModel_UpdateNewSession(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
@@ -87,10 +87,10 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 
 func TestShipModel_UpdateREPL(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
@@ -113,10 +113,10 @@ func TestShipModel_UpdateREPL(t *testing.T) {
 
 func TestShipModel_UpdateOpenBrowser(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
@@ -131,10 +131,10 @@ func TestShipModel_UpdateOpenBrowser(t *testing.T) {
 
 func TestShipModel_UpdateCtrlC(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 
@@ -239,10 +239,10 @@ func TestShipModel_ViewNoCommits(t *testing.T) {
 
 func TestShipModel_UpdateEscape(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80
@@ -257,10 +257,10 @@ func TestShipModel_UpdateEscape(t *testing.T) {
 
 func TestShipModel_UpdateUnknownKey(t *testing.T) {
 	summary := ShipSummary{
-		TaskDone:    1,
-		TaskTotal:   1,
-		SessionID:   "sess-001",
-		Duration:    "1m",
+		TaskDone:  1,
+		TaskTotal: 1,
+		SessionID: "sess-001",
+		Duration:  "1m",
 	}
 	m := NewShipModel(summary, theme.Dark(), 0, 0)
 	m.width = 80

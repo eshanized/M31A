@@ -1081,11 +1081,11 @@ func TestFormatLedgerEntries(t *testing.T) {
 		// Create entries via the ledger
 		for i := 0; i < 10; i++ {
 			entry := ledger.LedgerEntry{
-				SessionID:  fmt.Sprintf("session-%d", i),
-				Provider:   "openrouter",
-				Model:      "gpt-4o",
-				TaskCount:  5,
-				Timestamp:  time.Now(),
+				SessionID: fmt.Sprintf("session-%d", i),
+				Provider:  "openrouter",
+				Model:     "gpt-4o",
+				TaskCount: 5,
+				Timestamp: time.Now(),
 			}
 			l.Append(entry)
 		}

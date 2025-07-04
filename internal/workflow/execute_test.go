@@ -105,11 +105,11 @@ func TestEngine_ExecuteTaskWithTools_ToolDispatch(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
 	task := m31types.Task{
-		ID:          1,
-		Action:      "Create",
-		Description: "Create main.go",
+		ID:           1,
+		Action:       "Create",
+		Description:  "Create main.go",
 		Dependencies: []int{},
-		Files:       []string{"main.go"},
+		Files:        []string{"main.go"},
 	}
 	allTasks := []m31types.Task{task}
 
@@ -182,11 +182,11 @@ func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
 	task := m31types.Task{
-		ID:          1,
-		Action:      "Create",
-		Description: "Create main.go",
+		ID:           1,
+		Action:       "Create",
+		Description:  "Create main.go",
 		Dependencies: []int{},
-		Files:       []string{"main.go"},
+		Files:        []string{"main.go"},
 	}
 	allTasks := []m31types.Task{task}
 
