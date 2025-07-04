@@ -29,9 +29,13 @@ func handleSettings(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Screen: &screen}
 }
 
-// handleClear returns a confirmation that the context was cleared.
+// handleClear clears the conversation context (message history).
 func handleClear(args []string, ctx CommandContext) CommandResult {
-	return CommandResult{Success: true, Message: "Context cleared."}
+	if ctx.ClearMessages != nil {
+		ctx.ClearMessages()
+		return CommandResult{Success: true, Message: "Context cleared."}
+	}
+	return CommandResult{Success: true, Message: "No conversation to clear."}
 }
 
 // handleStatus returns current session information.

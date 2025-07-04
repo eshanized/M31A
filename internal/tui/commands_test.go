@@ -649,16 +649,38 @@ func TestCommands_AllRegistered(t *testing.T) {
 
 func TestClearCommand(t *testing.T) {
 	r := DefaultCommands()
-	result, found := r.Execute("/clear", CommandContext{})
-	if !found {
-		t.Fatal("expected /clear to be found")
-	}
-	if !result.Success {
-		t.Fatalf("expected success, got: %s", result.Message)
-	}
-	if result.Message != "Context cleared." {
-		t.Errorf("expected 'Context cleared.', got: %s", result.Message)
-	}
+
+	t.Run("with callback", func(t *testing.T) {
+		cleared := false
+		result, found := r.Execute("/clear", CommandContext{
+			ClearMessages: func() { cleared = true },
+		})
+		if !found {
+			t.Fatal("expected /clear to be found")
+		}
+		if !result.Success {
+			t.Fatalf("expected success, got: %s", result.Message)
+		}
+		if result.Message != "Context cleared." {
+			t.Errorf("expected 'Context cleared.', got: %s", result.Message)
+		}
+		if !cleared {
+			t.Error("expected ClearMessages callback to be called")
+		}
+	})
+
+	t.Run("without callback", func(t *testing.T) {
+		result, found := r.Execute("/clear", CommandContext{})
+		if !found {
+			t.Fatal("expected /clear to be found")
+		}
+		if !result.Success {
+			t.Fatalf("expected success, got: %s", result.Message)
+		}
+		if result.Message != "No conversation to clear." {
+			t.Errorf("expected 'No conversation to clear.', got: %s", result.Message)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ type CommandContext struct {
 	AutoDream      *autodream.Consolidator
 	WorkflowEngine workflowEngineInterface
 	CmdRegistry    *CommandRegistry
+	ClearMessages  func() // callback to clear REPL message history
 }
 
 // CommandRegistry holds a map of registered command handlers and their descriptions.

@@ -296,6 +296,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Git:            m.git,
 			Rollback:       m.rollback,
 			CmdRegistry:    m.cmdRegistry,
+			ClearMessages: func() {
+				if m.replModel != nil {
+					m.replModel.ClearMessages()
+				}
+			},
 		}
 		result, handled := m.cmdRegistry.Execute(cmd, ctx)
 		if handled {
