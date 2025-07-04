@@ -78,7 +78,11 @@ func (m *PermissionModal) Render(width, height int) string {
 
 	keys := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("[Y] Allow Once    [A] Always Allow\n[N] Deny          [E] Exit M31A")
+		Render("[Y] Allow Once    [A] Always Allow\n[N] Deny")
+	exitHint := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Faint(true).
+		Render("[Esc] Exit")
 
 	countdown := lipgloss.NewStyle().
 		Foreground(m.theme.Warning).
@@ -113,6 +117,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	modalContent = lipgloss.JoinVertical(lipgloss.Top,
 		modalContent,
 		keys,
+		exitHint,
 		"",
 		countdown,
 	)
