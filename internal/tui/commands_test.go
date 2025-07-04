@@ -1373,6 +1373,30 @@ func TestHandleRollback_WithHardReset(t *testing.T) {
 		}
 	})
 
+	t.Run("hard reset without confirm shows warning", func(t *testing.T) {
+		ctx, dir := newTestContext(t)
+		defer cleanupTestContext(dir)
+
+		// Create a commit
+		f := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(f, []byte("content"), 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		if err := ctx.Git.Commit("initial"); err != nil {
+			t.Fatalf("Commit failed: %v", err)
+		}
+
+		result, _ := r.Execute("/rollback --hard HEAD~1", CommandContext{
+			Rollback: ctx.Rollback,
+		})
+		if result.Success {
+			t.Error("expected failure without --confirm flag")
+		}
+		if !strings.Contains(result.Message, "--confirm") {
+			t.Errorf("expected '--confirm' in warning, got: %s", result.Message)
+		}
+	})
+
 	t.Run("no git repo fallback", func(t *testing.T) {
 		result, _ := r.Execute("/rollback", CommandContext{Git: nil})
 		if !result.Success {

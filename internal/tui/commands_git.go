@@ -96,7 +96,21 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 	}
 
 	if args[0] == "--hard" && len(args) > 1 {
-		result, err := ctx.Rollback.HardReset(args[1])
+		// Check for --confirm flag
+		hasConfirm := false
+		commitRef := args[1]
+		for _, arg := range args[2:] {
+			if arg == "--confirm" {
+				hasConfirm = true
+			}
+		}
+		if !hasConfirm {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("This will permanently discard uncommitted changes and reset to %s. Use /rollback --hard %s --confirm to proceed.", commitRef, commitRef),
+			}
+		}
+		result, err := ctx.Rollback.HardReset(commitRef)
 		if err != nil {
 			return CommandResult{Success: false, Message: fmt.Sprintf("Hard reset failed: %v", err)}
 		}
