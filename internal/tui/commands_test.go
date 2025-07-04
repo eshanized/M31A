@@ -588,19 +588,35 @@ func TestInvalidCommands(t *testing.T) {
 
 func TestResetCommand(t *testing.T) {
 	r := DefaultCommands()
-	result, found := r.Execute("/reset", CommandContext{})
-	if !found {
-		t.Fatal("expected /reset to be found")
-	}
-	if !result.Success {
-		t.Fatalf("expected success, got: %s", result.Message)
-	}
-	if result.Screen == nil {
-		t.Fatal("expected Screen to be set for /reset")
-	}
-	if *result.Screen != ScreenFirstRun {
-		t.Errorf("expected ScreenFirstRun, got %d", *result.Screen)
-	}
+
+	t.Run("without confirm flag shows warning", func(t *testing.T) {
+		result, found := r.Execute("/reset", CommandContext{})
+		if !found {
+			t.Fatal("expected /reset to be found")
+		}
+		if result.Success {
+			t.Error("expected failure without --confirm flag")
+		}
+		if !strings.Contains(result.Message, "--confirm") {
+			t.Errorf("expected '--confirm' in warning message, got: %s", result.Message)
+		}
+	})
+
+	t.Run("with confirm flag proceeds", func(t *testing.T) {
+		result, found := r.Execute("/reset --confirm", CommandContext{})
+		if !found {
+			t.Fatal("expected /reset to be found")
+		}
+		if !result.Success {
+			t.Fatalf("expected success with --confirm, got: %s", result.Message)
+		}
+		if result.Screen == nil {
+			t.Fatal("expected Screen to be set for /reset --confirm")
+		}
+		if *result.Screen != ScreenFirstRun {
+			t.Errorf("expected ScreenFirstRun, got %d", *result.Screen)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,24 @@ import (
 const compressCooldown = 60 * time.Second
 
 // handleReset returns a result that transitions the TUI to the first-run screen.
+// Requires --confirm flag to prevent accidental data loss.
 func handleReset(args []string, ctx CommandContext) CommandResult {
+	// Check for --confirm flag
+	hasConfirm := false
+	for _, arg := range args {
+		if arg == "--confirm" {
+			hasConfirm = true
+			break
+		}
+	}
+
+	if !hasConfirm {
+		return CommandResult{
+			Success: false,
+			Message: "This will wipe all session data. Use /reset --confirm to proceed.",
+		}
+	}
+
 	if ctx.AutoDream != nil {
 		ctx.AutoDream.SetMessages(nil)
 	}
