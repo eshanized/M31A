@@ -788,15 +788,29 @@ func TestPhaseCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("valid phase", func(t *testing.T) {
-		// /phase with args is handled by app.go for workflow execution.
-		// The registry handler returns a guidance message.
+	t.Run("valid phase alias transitions", func(t *testing.T) {
+		// /phase plan with a workflow engine should trigger transition
+		result, _ := r.Execute("/phase plan", CommandContext{
+			WorkflowEngine: &mockWorkflowEngine{},
+		})
+		if !result.Success {
+			t.Fatalf("expected success, got: %s", result.Message)
+		}
+		if !strings.Contains(result.Message, "Starting plan phase") {
+			t.Errorf("expected transition message, got: %s", result.Message)
+		}
+		if result.Cmd == nil {
+			t.Fatal("expected Cmd to be set for phase transition")
+		}
+	})
+
+	t.Run("phase alias without engine shows error", func(t *testing.T) {
 		result, _ := r.Execute("/phase execute", CommandContext{})
 		if result.Success {
-			t.Fatalf("expected guidance message from registry handler, got success: %s", result.Message)
+			t.Fatalf("expected failure without engine, got: %s", result.Message)
 		}
-		if !strings.Contains(result.Message, "/phase <name>") {
-			t.Errorf("expected guidance message, got: %s", result.Message)
+		if !strings.Contains(result.Message, "no workflow engine") {
+			t.Errorf("expected 'no workflow engine' error, got: %s", result.Message)
 		}
 	})
 
@@ -1180,15 +1194,13 @@ func TestPhaseCommand_WithSession(t *testing.T) {
 		}
 	})
 
-	t.Run("phase with args returns guidance", func(t *testing.T) {
-		// /phase with args is handled by app.go for workflow execution.
-		// The registry handler returns a guidance message.
+	t.Run("phase with args and no engine shows error", func(t *testing.T) {
 		result, _ := r.Execute("/phase plan", CommandContext{})
 		if result.Success {
-			t.Fatalf("expected guidance message, got success: %s", result.Message)
+			t.Fatalf("expected failure, got success: %s", result.Message)
 		}
-		if !strings.Contains(result.Message, "/phase <name>") {
-			t.Errorf("expected guidance message, got: %s", result.Message)
+		if !strings.Contains(result.Message, "no workflow engine") {
+			t.Errorf("expected 'no workflow engine' error, got: %s", result.Message)
 		}
 	})
 }

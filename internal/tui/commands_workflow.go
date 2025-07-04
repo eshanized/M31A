@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -36,8 +37,34 @@ func handleGoal(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: fmt.Sprintf("Goal set: %s", goal)}
 }
 
-// handlePhase shows the current workflow phase.
+// handlePhase shows the current workflow phase or transitions to a new one.
 func handlePhase(args []string, ctx CommandContext) CommandResult {
+	// Phase aliases (/plan, /execute, /verify, /ship) pass the phase name as the
+	// first arg. Detect bare alias usage (single arg matching a valid phase) and
+	// route to transition instead of showing status.
+	validPhases := map[string]bool{
+		"idle": true, "initialize": true, "discuss": true,
+		"plan": true, "execute": true, "verify": true, "ship": true,
+	}
+
+	if len(args) == 1 && validPhases[args[0]] {
+		// Bare phase alias — attempt transition
+		phase := args[0]
+		if ctx.WorkflowEngine != nil {
+			return CommandResult{
+				Success: true,
+				Message: fmt.Sprintf("Starting %s phase...", phase),
+				Cmd: func() tea.Msg {
+					return SlashCommandMsg{Command: fmt.Sprintf("/phase %s", phase)}
+				},
+			}
+		}
+		return CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("Cannot start %s phase: no workflow engine available. Use /workflow <goal> to begin.", phase),
+		}
+	}
+
 	if len(args) > 0 {
 		return CommandResult{
 			Success: false,
