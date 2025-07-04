@@ -445,6 +445,10 @@ func TestUndoCommand(t *testing.T) {
 		if !strings.Contains(result.Message, "messages=5") {
 			t.Errorf("expected message count, got: %s", result.Message)
 		}
+		// Verify honest message about restoration not being implemented
+		if !strings.Contains(result.Message, "not yet implemented") {
+			t.Errorf("expected 'not yet implemented' notice, got: %s", result.Message)
+		}
 	})
 }
 

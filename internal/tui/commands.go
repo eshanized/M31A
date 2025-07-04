@@ -147,7 +147,7 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("provider", handleProvider, "Show or switch provider")
 	r.Register("reset", handleReset, "Reset to first-run screen")
 	r.Register("quit", handleQuit, "Exit the application")
-	r.Register("undo", handleUndo, "Restore latest checkpoint")
+	r.Register("undo", handleUndo, "Show latest checkpoint info (restoration not yet implemented)")
 	r.Register("compress", handleCompress, "Trigger context consolidation")
 	r.Register("ledger", handleLedger, "Show recent session entries")
 	r.Register("rollback", handleRollback, "Show commit chain or reset to commit")

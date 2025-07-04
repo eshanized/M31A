@@ -9,6 +9,7 @@ import (
 )
 
 // handleUndo loads the latest checkpoint and reports its details.
+// Note: actual checkpoint restoration is not yet implemented.
 func handleUndo(args []string, ctx CommandContext) CommandResult {
 	if ctx.SessionManager == nil || ctx.SessionID == "" {
 		return CommandResult{Success: false, Message: "No active session. Start a session first."}
@@ -21,7 +22,7 @@ func handleUndo(args []string, ctx CommandContext) CommandResult {
 
 	return CommandResult{
 		Success: true,
-		Message: fmt.Sprintf("Latest checkpoint: phase=%s, timestamp=%s, messages=%d, tasks=%d",
+		Message: fmt.Sprintf("Latest checkpoint: phase=%s, timestamp=%s, messages=%d, tasks=%d\nNote: checkpoint restoration is not yet implemented. Use /workflow resume to restart from a persisted workflow phase.",
 			cp.Phase, cp.Timestamp.Format("2006-01-02 15:04:05"), cp.MessageCount, cp.TaskCount),
 	}
 }
