@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 15 — Plan 01 complete
-last_updated: "2026-06-02T16:38:40.000Z"
+status: Phase 16 — Plan 01 complete
+last_updated: "2026-06-02T20:40:37Z"
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 7
-  total_plans: 58
-  completed_plans: 40
-  percent: 64
+  total_plans: 66
+  completed_plans: 50
+  percent: 59
 ---
 
 # M31A — Current State
@@ -151,6 +151,10 @@ None
 - 15-02: ✅ Stream Pipeline Channel Ownership Refactor (C-3, H-9, H-14, M-21)
 - 15-03: ⏳ (pending)
 
+## Phase 16 Plans
+
+- 16-01: ✅ Trust & Safety Fixes (12 tasks, 11 commits)
+
 ## Key Decisions Made
 
 ### Phase 15 Decisions (15-01)
@@ -163,4 +167,13 @@ None
 
 ## Last Session
 
-- **2026-06-02** — Phase 15 Plan 15-02 (Stream Pipeline Channel Ownership) executed. 3 tasks, 3 commits (`1db520e`, `bcd24a4`, `e53f5bc`). 4 regression tests pass with -race. tui package builds and vets clean.
+- **2026-06-02** — Phase 16 Plan 16-01 (Trust & Safety Fixes) executed. 12 tasks, 11 commits (`8cd53e5` through `a6c6c2a`). `/clear` now clears context, `/undo` honest, phase aliases trigger transitions, confirmations added for destructive ops, permission modal exit de-emphasized, RiskDangerous/VisualDestructive distinguished, execute/plan status display improved. tui package builds clean.
+
+### Phase 16 Decisions (16-01)
+
+- **16-01:** `/clear` uses callback pattern (`ClearMessages func()` on `CommandContext`) — clean separation of concerns without direct model reference.
+- **16-01:** Phase aliases (`/plan`, `/execute`, etc.) route through `handlePhase` with phase name detection — reuses existing infrastructure instead of duplicating.
+- **16-01:** `--confirm` flag required for `/reset` and `/rollback --hard` — prevents accidental data loss.
+- **16-01:** RiskDangerous uses `theme.Warning` (yellow), RiskDestructive uses `theme.Error` (red) — clear visual hierarchy.
+- **16-01:** Permission modal exit hint uses `Faint(true)` for subordinate appearance — reduces user anxiety.
+- **16-01:** Execute screen completion summary shows ✓ (green) or ⚠ (yellow) based on actual task status.
