@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -177,7 +176,7 @@ func renderErrorBanner(err error, theme theme.Theme) string {
 			Render("⚠ Rate limited. Auto-fallback in progress…")
 	default:
 		return lipgloss.NewStyle().Foreground(theme.Error).Bold(true).
-			Render(fmt.Sprintf("✗ Error: %v", err))
+			Render("✗ " + m31errors.UserMessage(err))
 	}
 }
 

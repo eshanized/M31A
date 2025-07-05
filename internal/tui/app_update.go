@@ -533,7 +533,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ErrorMsg:
-		m.currentOperation = fmt.Sprintf("Error: %v", msg.Err)
+		m.currentOperation = m31errors.UserMessage(msg.Err)
 		return m, nil
 
 	case StreamErrorMsg:

@@ -1,6 +1,9 @@
 package errors
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 var (
 	ErrProviderUnreachable = errors.New("provider unreachable")
@@ -28,3 +31,72 @@ var (
 	// Fix M-29: git bisect reset failed (e.g. no commits in range).
 	ErrBisectResetFailed = errors.New("bisect reset failed")
 )
+
+// UserMessage returns a user-friendly, actionable message for common errors.
+// Falls back to a generic message for unrecognized errors.
+func UserMessage(e error) string {
+	if e == nil {
+		return ""
+	}
+
+	// Check sentinel errors first (exact match via errors.Is)
+	switch {
+	case errors.Is(e, ErrProviderUnreachable):
+		return "Provider unreachable — check your internet connection"
+	case errors.Is(e, ErrRateLimited):
+		return "Rate limited — retry in a moment"
+	case errors.Is(e, ErrInvalidKey):
+		return "Invalid API key — run /settings to update"
+	case errors.Is(e, ErrContextExceeded):
+		return "Context window exceeded — conversation too long. Use /compress to reduce context."
+	case errors.Is(e, ErrModelNotFound):
+		return "Model not found — use /models to see available models"
+	case errors.Is(e, ErrSessionCorrupted):
+		return "Session data corrupted — try resuming from a different session"
+	case errors.Is(e, ErrNoBinaryContent):
+		return "Binary file cannot be displayed"
+	case errors.Is(e, ErrFileTooLarge):
+		return "File exceeds 5MB limit — use a smaller file"
+	case errors.Is(e, ErrCircularDependency):
+		return "Circular dependency in task graph — check task dependencies"
+	case errors.Is(e, ErrPermissionDenied):
+		return "Permission denied — check file permissions"
+	case errors.Is(e, ErrToolExecution):
+		return "Tool execution failed — check the error details"
+	case errors.Is(e, ErrTaskFailed):
+		return "Task failed — check the task output for details"
+	case errors.Is(e, ErrPhaseTransition):
+		return "Invalid phase transition — current phase does not allow this action"
+	case errors.Is(e, ErrCheckpointNotFound):
+		return "Checkpoint not found — no previous state to restore"
+	case errors.Is(e, ErrToolInputTooLarge):
+		return "Tool input too large — reduce the input size"
+	case errors.Is(e, ErrInvalidTimeout):
+		return "Invalid timeout — must be between 1 and 30 minutes"
+	case errors.Is(e, ErrPrivateIPBlocked):
+		return "Access to private IP blocked — SSRF protection active"
+	case errors.Is(e, ErrStreamTruncated):
+		return "Stream interrupted — try again"
+	case errors.Is(e, ErrBisectResetFailed):
+		return "Git bisect reset failed — try `git bisect reset` manually"
+	}
+
+	// Pattern matching for unwrapped errors
+	errStr := strings.ToLower(e.Error())
+	switch {
+	case strings.Contains(errStr, "connection refused"):
+		return "Cannot reach provider — check your internet connection"
+	case strings.Contains(errStr, "context canceled") || strings.Contains(errStr, "context deadline exceeded"):
+		return "Request cancelled"
+	case strings.Contains(errStr, "eof") || strings.Contains(errStr, "unexpected end of json"):
+		return "Connection lost — try again"
+	case strings.Contains(errStr, "401"):
+		return "Invalid API key — run /settings to update"
+	case strings.Contains(errStr, "429"):
+		return "Rate limited — retry in a moment"
+	case strings.Contains(errStr, "503"):
+		return "Provider temporarily unavailable — try again later"
+	}
+
+	return "An unexpected error occurred"
+}
