@@ -258,3 +258,48 @@ func TestFileRead_PathNotString(t *testing.T) {
 		t.Errorf("expected type error, got: %v", err)
 	}
 }
+
+func TestFileRead_BrokenSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "nonexistent_target")
+	linkPath := filepath.Join(dir, "broken_link")
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Skip("symlinks not supported on this system")
+	}
+
+	fr := NewFileRead(dir)
+	_, err := fr.Execute(context.Background(), types.ToolInput{
+		Name: "FileRead",
+		Params: map[string]any{
+			"path": "broken_link",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for broken symlink")
+	}
+	// Broken symlink produces "file not found" from EvalSymlinks — this is correct
+	if !strings.Contains(err.Error(), "file not found") && !strings.Contains(err.Error(), "cannot access") {
+		t.Errorf("expected file-not-found or cannot-access error, got: %v", err)
+	}
+}
+
+func TestFileRead_StatErrorPreservesMessage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fr := NewFileRead(dir)
+	// Reading a non-existent file that falls through to os.Stat
+	_, err := fr.Execute(context.Background(), types.ToolInput{
+		Name: "FileRead",
+		Params: map[string]any{
+			"path": "does_not_exist_at_all.txt",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	// The error should contain the path
+	if !strings.Contains(err.Error(), "does_not_exist_at_all.txt") {
+		t.Errorf("expected path in error message, got: %v", err)
+	}
+}

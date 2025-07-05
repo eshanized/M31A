@@ -86,7 +86,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		if os.IsNotExist(err) {
 			return types.ToolResult{}, fmt.Errorf("file not found: %s", path)
 		}
-		return types.ToolResult{}, m31errors.ErrPermissionDenied
+		return types.ToolResult{}, fmt.Errorf("cannot access %s: %w", path, err)
 	}
 	if fi.IsDir() {
 		return types.ToolResult{}, fmt.Errorf("path is a directory, not a file: %s", path)
@@ -101,7 +101,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	// Open and read
 	f, err := os.Open(resolved)
 	if err != nil {
-		return types.ToolResult{}, m31errors.ErrPermissionDenied
+		return types.ToolResult{}, fmt.Errorf("cannot access %s: %w", path, err)
 	}
 	defer f.Close()
 
