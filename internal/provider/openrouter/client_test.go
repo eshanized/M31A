@@ -538,3 +538,30 @@ func TestSanitizeProviderError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsContextExceeded(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		expected   bool
+	}{
+		{"context_length_exceeded", 400, `{"error":{"message":"context_length_exceeded"}}`, true},
+		{"maximum context length", 400, `{"error":{"message":"maximum context length is 128000"}}`, true},
+		{"request too large", 400, `{"error":{"message":"request too large for model"}}`, true},
+		{"context_length with exceed", 400, `{"error":{"message":"context_length must not exceed limit"}}`, true},
+		{"non-400 with context", 500, `{"error":{"message":"context_length_exceeded"}}`, false},
+		{"400 without context keywords", 400, `{"error":{"message":"invalid parameter"}}`, false},
+		{"context in unrelated error", 400, `{"error":{"message":"context is required"}}`, false},
+		{"case insensitive", 400, `{"error":{"message":"CONTEXT_LENGTH_EXCEEDED"}}`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isContextExceeded(tt.statusCode, tt.body)
+			if got != tt.expected {
+				t.Errorf("isContextExceeded(%d, %q) = %v, want %v", tt.statusCode, tt.body, got, tt.expected)
+			}
+		})
+	}
+}

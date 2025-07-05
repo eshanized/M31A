@@ -238,7 +238,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		case http.StatusServiceUnavailable:
 			return nil, m31errors.ErrProviderUnreachable
 		default:
-			if strings.Contains(bodyStr, "context_length") || strings.Contains(bodyStr, "context") {
+			if isContextExceeded(resp.StatusCode, bodyStr) {
 				return nil, m31errors.ErrContextExceeded
 			}
 			return nil, fmt.Errorf("%s", sanitizeProviderError(resp.StatusCode, bodyStr))
@@ -247,6 +247,19 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 
 	sse := provider.NewSSEParser(resp)
 	return c.makeIterator(sse, req.Model), nil
+}
+
+// isContextExceeded checks if an HTTP error indicates context window overflow.
+// Only matches HTTP 400 with specific context-related patterns to avoid false positives.
+func isContextExceeded(statusCode int, body string) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "context_length_exceeded") ||
+		strings.Contains(lower, "maximum context length") ||
+		strings.Contains(lower, "request too large") ||
+		strings.Contains(lower, "context_length") && strings.Contains(lower, "exceed")
 }
 
 func (c *Client) makeIterator(sse *provider.SSEParser, modelID string) *types.StreamIterator {
