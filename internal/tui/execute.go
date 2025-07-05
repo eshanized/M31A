@@ -214,6 +214,32 @@ func (m *ExecuteModel) View() string {
 		Foreground(m.theme.TextSecondary).
 		Render("P=Pause  R=Resume  S=Skip  ↑↓=Navigate"))
 
+	// Show completion summary when all tasks are done (before transitioning to Verify)
+	allDone := true
+	hasFailures := false
+	for _, task := range m.tasks {
+		switch task.Status {
+		case types.StatusDone:
+			// OK
+		case types.StatusFailed, types.StatusSkipped:
+			hasFailures = true
+		default:
+			allDone = false
+		}
+	}
+	if allDone {
+		sb.WriteString("\n\n")
+		if hasFailures {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(m.theme.Warning).
+				Render("⚠ Some tasks failed — review in Verify"))
+		} else {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(m.theme.Success).
+				Render("✓ All tasks complete"))
+		}
+	}
+
 	return sb.String()
 }
 
