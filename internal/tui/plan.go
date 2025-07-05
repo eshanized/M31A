@@ -126,8 +126,23 @@ func (m *PlanModel) renderTaskList() string {
 		if i == m.selected {
 			prefix = "[>]"
 		}
-		if task.Status == types.StatusDone {
+
+		// Show actual task status
+		switch task.Status {
+		case types.StatusDone:
 			prefix = "[x]"
+		case types.StatusRunning:
+			prefix = "[>]"
+		case types.StatusFailed:
+			prefix = "[!]"
+		case types.StatusSkipped:
+			prefix = "[-]"
+		case types.StatusPending:
+			if i == m.selected {
+				prefix = "[>]"
+			} else {
+				prefix = "[ ]"
+			}
 		}
 
 		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefix, task.ID, task.Description))
