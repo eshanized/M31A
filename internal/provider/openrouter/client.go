@@ -260,7 +260,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 			if strings.Contains(bodyStr, "context_length") || strings.Contains(bodyStr, "context") {
 				return nil, m31errors.ErrContextExceeded
 			}
-			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, bodyStr)
+			return nil, fmt.Errorf("%s", sanitizeProviderError(resp.StatusCode, bodyStr))
 		}
 	}
 
@@ -356,4 +356,50 @@ func (c *Client) cachedModels() []types.ModelInfo {
 func (c *Client) setCommonHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("User-Agent", c.userAgent())
+}
+
+// sanitizeProviderError maps HTTP status codes to friendly messages and
+// truncates/strips the response body to prevent raw HTML/JSON leaking to users.
+func sanitizeProviderError(statusCode int, body string) string {
+	// Strip HTML tags
+	cleaned := body
+	for i := strings.Index(cleaned, "<"); i != -1; i = strings.Index(cleaned, "<") {
+		end := strings.Index(cleaned[i:], ">")
+		if end == -1 {
+			break
+		}
+		cleaned = cleaned[:i] + cleaned[i+end+1:]
+	}
+
+	// Truncate to 200 chars
+	if len(cleaned) > 200 {
+		cleaned = cleaned[:200] + "…"
+	}
+
+	switch statusCode {
+	case http.StatusBadRequest:
+		msg := "Bad request — invalid parameters"
+		if cleaned != "" {
+			msg += ": " + cleaned
+		}
+		return msg
+	case http.StatusUnauthorized:
+		return "Invalid API key"
+	case http.StatusPaymentRequired:
+		return "Payment required — check your billing"
+	case http.StatusTooManyRequests:
+		return "Rate limited — retry in a moment"
+	case http.StatusInternalServerError:
+		return "Provider server error — try again later"
+	case http.StatusBadGateway:
+		return "Provider gateway error — try again later"
+	case http.StatusServiceUnavailable:
+		return "Provider temporarily unavailable"
+	default:
+		msg := fmt.Sprintf("Unexpected error (HTTP %d)", statusCode)
+		if cleaned != "" {
+			msg += ": " + cleaned
+		}
+		return msg
+	}
 }

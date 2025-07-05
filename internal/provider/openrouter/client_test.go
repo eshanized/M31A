@@ -505,3 +505,36 @@ func TestChatCompletionStream_Headers(t *testing.T) {
 		t.Fatal("expected User-Agent header")
 	}
 }
+
+func TestSanitizeProviderError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		contains   string
+		notContain string
+	}{
+		{"bad request", 400, "invalid param", "Bad request", ""},
+		{"unauthorized", 401, "", "Invalid API key", ""},
+		{"payment required", 402, "", "Payment required", ""},
+		{"rate limited", 429, "", "Rate limited", ""},
+		{"server error", 500, "", "server error", ""},
+		{"bad gateway", 502, "", "gateway error", ""},
+		{"service unavailable", 503, "", "unavailable", ""},
+		{"html stripped", 400, "<b>error</b> details", "error details", "<b>"},
+		{"body truncated", 400, strings.Repeat("x", 300), "…", ""},
+		{"unknown status", 418, "teapot", "HTTP 418", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeProviderError(tt.statusCode, tt.body)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("sanitizeProviderError(%d, %q) = %q, want it to contain %q", tt.statusCode, tt.body, result, tt.contains)
+			}
+			if tt.notContain != "" && strings.Contains(result, tt.notContain) {
+				t.Errorf("sanitizeProviderError(%d, %q) = %q, should NOT contain %q", tt.statusCode, tt.body, result, tt.notContain)
+			}
+		})
+	}
+}
