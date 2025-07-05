@@ -119,14 +119,19 @@ func TestPermissionModal_AutoDeny(t *testing.T) {
 
 func TestPermissionModal_RiskColor_Dangerous(t *testing.T) {
 	req := tools.PermissionRequest{
-		ToolName:  "Bash",
-		Command:   "rm -rf /",
-		RiskLevel: types.RiskDangerous,
+		ToolName:    "Bash",
+		Command:     "rm -rf /",
+		RiskLevel:   types.RiskDangerous,
+		TimeoutSecs: 300,
 	}
 	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
-	result := m.Render(80, 24)
-	if result == "" {
-		t.Error("expected non-empty render for dangerous tool")
+	if m == nil {
+		t.Fatal("expected non-nil PermissionModal")
+	}
+
+	// Verify risk color uses Warning (not Error) for Dangerous
+	if m.riskStyle().GetBackground() != theme.Dark().Warning {
+		t.Errorf("expected Dangerous risk level to use Warning color, got %v", m.riskStyle().GetBackground())
 	}
 }
 

@@ -165,7 +165,7 @@ func (m *PermissionModal) riskStyle() lipgloss.Style {
 	switch m.request.RiskLevel {
 	case types.RiskDangerous:
 		return lipgloss.NewStyle().
-			Background(m.theme.Error).
+			Background(m.theme.Warning).
 			Foreground(lipgloss.Color("#000000")).
 			Bold(true).
 			Padding(0, 1)
