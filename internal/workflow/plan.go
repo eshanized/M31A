@@ -20,6 +20,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	var lastErr error
 	var rawResponse string
 	var valErrs []string
+	var allValErrs []string // accumulate all validation errors across retries
 
 	// Retry loop for invalid task lists
 	for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
@@ -32,6 +33,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			lastErr = err
 			e.logger.Warn("LLM error in plan phase", "attempt", attempt, "error", err)
 			valErrs = []string{err.Error()}
+			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d LLM error: %s", attempt+1, err.Error()))
 			rawResponse = ""
 			continue
 		}
@@ -42,6 +44,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			lastErr = fmt.Errorf("parse error: %w", err)
 			e.logger.Warn("task parse error", "attempt", attempt, "error", err)
 			valErrs = []string{lastErr.Error()}
+			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d parse error: %s", attempt+1, lastErr.Error()))
 			rawResponse = content
 			continue
 		}
@@ -51,6 +54,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		if len(valErrs) > 0 {
 			lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
 			e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
+			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
 			rawResponse = content
 			continue
 		}
@@ -61,10 +65,11 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 
 	if len(tasks) == 0 {
 		e.logger.Error("failed to generate valid task list after retries", "retries", m31types.MaxPlanRetries)
+		combinedErrs := strings.Join(allValErrs, "\n")
 		return &PhaseResult{
 			Phase:               m31types.PhasePlan,
 			Success:             false,
-			Error:               lastErr.Error(),
+			Error:               fmt.Sprintf("Plan generation failed after %d attempts:\n%s", m31types.MaxPlanRetries, combinedErrs),
 			RequiresManualInput: true,
 		}, lastErr
 	}
