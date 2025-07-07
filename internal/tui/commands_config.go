@@ -360,6 +360,7 @@ func handleKey(args []string, ctx CommandContext) CommandResult {
 	}
 
 	b.WriteString("\nKey resolution order: environment variable → OS keychain → config file")
+	b.WriteString("\nUse /settings to change API keys")
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }
 

@@ -2156,3 +2156,22 @@ func TestLevenshtein(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyCommand(t *testing.T) {
+	r := DefaultCommands()
+	ctx, _ := newTestContext(t)
+
+	result, found := r.Execute("/key", ctx)
+	if !found {
+		t.Fatal("expected /key to be found")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "/settings") {
+		t.Errorf("expected '/settings' suggestion in output, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "Key resolution order") {
+		t.Errorf("expected 'Key resolution order' in output, got: %s", result.Message)
+	}
+}
