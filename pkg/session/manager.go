@@ -188,13 +188,15 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 }
 
 // LoadSession reads a session from disk and reconstructs it.
-// Returns the session if found, or ErrSessionCorrupted if session.json is missing
-// or contains invalid required fields (H-17: ID non-empty, StartedAt non-zero,
-// WorkflowPhase is a known value). Sets ResumedAt to the current time on every
-// successful load (M-6).
+// Returns the session if found, or a specific error for each failure mode:
+//   - ErrSessionNotFound: ID format invalid or directory missing
+//   - ErrSessionCorrupted: JSON parse failure or missing required fields
+//   - ErrSessionPermission: file access denied
+//
+// Sets ResumedAt to the current time on every successful load (M-6).
 func (m *Manager) LoadSession(id string) (*Session, error) {
 	if err := validateSessionID(id); err != nil {
-		return nil, m31errors.ErrSessionCorrupted
+		return nil, fmt.Errorf("invalid session ID %q: %w", id, m31errors.ErrSessionNotFound)
 	}
 
 	sessionPath := m.sessionJSONPath(id)
@@ -202,14 +204,17 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	data, err := os.ReadFile(sessionPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, m31errors.ErrSessionCorrupted
+			return nil, fmt.Errorf("session %s not found at %s: %w", id, sessionPath, m31errors.ErrSessionNotFound)
 		}
-		return nil, fmt.Errorf("cannot read session.json: %w", err)
+		if os.IsPermission(err) {
+			return nil, fmt.Errorf("cannot read session %s at %s: %w", id, sessionPath, m31errors.ErrSessionPermission)
+		}
+		return nil, fmt.Errorf("cannot read session %s: %w", id, err)
 	}
 
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, m31errors.ErrSessionCorrupted
+		return nil, fmt.Errorf("corrupt JSON in session.json for session %s: %w", id, m31errors.ErrSessionCorrupted)
 	}
 
 	// H-17: Validate required fields.

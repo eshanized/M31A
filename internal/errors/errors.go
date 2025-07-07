@@ -30,6 +30,10 @@ var (
 	ErrStreamTruncated = errors.New("stream truncated before completion")
 	// Fix M-29: git bisect reset failed (e.g. no commits in range).
 	ErrBisectResetFailed = errors.New("bisect reset failed")
+
+	// Session-specific errors for distinct failure modes.
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrSessionPermission  = errors.New("session access denied")
 )
 
 // UserMessage returns a user-friendly, actionable message for common errors.
@@ -79,6 +83,10 @@ func UserMessage(e error) string {
 		return "Stream interrupted — try again"
 	case errors.Is(e, ErrBisectResetFailed):
 		return "Git bisect reset failed — try `git bisect reset` manually"
+	case errors.Is(e, ErrSessionNotFound):
+		return "Session not found — check the session ID or start a new session"
+	case errors.Is(e, ErrSessionPermission):
+		return "Cannot access session — check file permissions"
 	}
 
 	// Pattern matching for unwrapped errors

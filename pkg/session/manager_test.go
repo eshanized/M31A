@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,8 +109,8 @@ func TestSession_LoadMissing(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	_, err := mgr.LoadSession("nonexistent")
-	if err != m31errors.ErrSessionCorrupted {
-		t.Errorf("Expected ErrSessionCorrupted for missing session, got %v", err)
+	if !errors.Is(err, m31errors.ErrSessionNotFound) {
+		t.Errorf("Expected ErrSessionNotFound for missing session, got %v", err)
 	}
 }
 
@@ -127,9 +128,51 @@ func TestSession_LoadCorruptJSON(t *testing.T) {
 	}
 
 	_, err := mgr.LoadSession("deadbeef")
-	if err != m31errors.ErrSessionCorrupted {
+	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
 		t.Errorf("Expected ErrSessionCorrupted for corrupt JSON, got %v", err)
 	}
+}
+
+func TestSessionErrors(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	t.Run("invalid ID format", func(t *testing.T) {
+		_, err := mgr.LoadSession("INVALID!")
+		if !errors.Is(err, m31errors.ErrSessionNotFound) {
+			t.Errorf("Expected ErrSessionNotFound for invalid ID, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "invalid session ID") {
+			t.Errorf("Expected 'invalid session ID' in error, got %v", err)
+		}
+	})
+
+	t.Run("missing session directory", func(t *testing.T) {
+		_, err := mgr.LoadSession("deadbeef")
+		if !errors.Is(err, m31errors.ErrSessionNotFound) {
+			t.Errorf("Expected ErrSessionNotFound for missing session, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("Expected 'not found' in error, got %v", err)
+		}
+	})
+
+	t.Run("corrupt JSON", func(t *testing.T) {
+		sessionDir := filepath.Join(dir, "aabbccdd")
+		if err := os.MkdirAll(sessionDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte("{corrupt"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := mgr.LoadSession("aabbccdd")
+		if !errors.Is(err, m31errors.ErrSessionCorrupted) {
+			t.Errorf("Expected ErrSessionCorrupted for corrupt JSON, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "corrupt JSON") {
+			t.Errorf("Expected 'corrupt JSON' in error, got %v", err)
+		}
+	})
 }
 
 func TestSession_LoadMissingMessages(t *testing.T) {
