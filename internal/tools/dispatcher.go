@@ -81,7 +81,11 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	var input types.ToolInput
 	if err := json.Unmarshal(call.Input, &input); err != nil {
-		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %w", call.Name, err)
+		rawInput := string(call.Input)
+		if len(rawInput) > 200 {
+			rawInput = rawInput[:200] + "…"
+		}
+		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %s. Raw input: %s", call.Name, err, rawInput)
 	}
 	input.Name = call.Name
 

@@ -844,3 +844,24 @@ func TestDispatcher_PermissionChannelFull(t *testing.T) {
 		t.Errorf("expected ErrPermissionDenied when channel is full, got: %v", err)
 	}
 }
+
+func TestToolInputJSON(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
+
+	_, err := d.Execute(context.Background(), types.ToolCall{
+		ID:    "call1",
+		Name:  "safe",
+		Input: []byte(`{invalid json}`),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid input JSON") {
+		t.Errorf("expected 'invalid input JSON' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Raw input") {
+		t.Errorf("expected 'Raw input' in error, got: %v", err)
+	}
+}
