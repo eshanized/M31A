@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,7 +75,8 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	d.mu.RUnlock()
 
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s", m31errors.ErrToolExecution, call.Name)
+		available := d.List()
+		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
 	}
 
 	var input types.ToolInput

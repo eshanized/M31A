@@ -62,6 +62,9 @@ func TestDispatcher_UnknownTool(t *testing.T) {
 	if !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("expected 'unknown tool', got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "Available tools") {
+		t.Errorf("expected 'Available tools' in error, got: %v", err)
+	}
 }
 
 func TestDispatcher_SafeToolNoPermission(t *testing.T) {
