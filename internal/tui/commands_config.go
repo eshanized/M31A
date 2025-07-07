@@ -292,7 +292,7 @@ func handleOptimize(args []string, ctx CommandContext) CommandResult {
 
 	// M-12: respect AutoArbitrage config flag
 	if ctx.Config != nil && !ctx.Config.Model.AutoArbitrage {
-		return CommandResult{Success: false, Message: "AutoArbitrage is disabled in config. Set auto_arbitrage = true in [model] to enable."}
+		return CommandResult{Success: false, Message: "AutoArbitrage is disabled. Set auto_arbitrage = true in [model] to enable, or use /config model.auto_arbitrage true"}
 	}
 
 	p := ctx.Registry.ActiveProvider()

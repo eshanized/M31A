@@ -2175,3 +2175,26 @@ func TestKeyCommand(t *testing.T) {
 		t.Errorf("expected 'Key resolution order' in output, got: %s", result.Message)
 	}
 }
+
+func TestOptimizeError(t *testing.T) {
+	r := DefaultCommands()
+
+	t.Run("disabled", func(t *testing.T) {
+		reg := provider.NewRegistry()
+		cfg := &config.Config{}
+		cfg.Model.AutoArbitrage = false
+		result, found := r.Execute("/optimize", CommandContext{Registry: reg, Config: cfg})
+		if !found {
+			t.Fatal("expected /optimize to be found")
+		}
+		if result.Success {
+			t.Fatal("expected failure when disabled")
+		}
+		if !strings.Contains(result.Message, "auto_arbitrage") {
+			t.Errorf("expected 'auto_arbitrage' in message, got: %s", result.Message)
+		}
+		if !strings.Contains(result.Message, "/config") {
+			t.Errorf("expected '/config' suggestion, got: %s", result.Message)
+		}
+	})
+}
