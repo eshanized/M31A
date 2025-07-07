@@ -106,7 +106,7 @@ func (k *linuxKeychain) passGet(service string) (string, error) {
 			return "", ErrKeyNotFound
 		}
 		if isPassGPGFailure(err) {
-			return "", fmt.Errorf("gpg decrypt: %w", ErrKeychainDecrypt)
+			return "", fmt.Errorf("GPG decryption failed — try 'pass init <gpg-id>' or re-store your API key with /settings: %w", ErrKeychainDecrypt)
 		}
 		if isPassUnavailable(err) {
 			return "", ErrKeychainUnavailable
