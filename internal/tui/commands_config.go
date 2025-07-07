@@ -185,7 +185,7 @@ func handleModels(args []string, ctx CommandContext) CommandResult {
 
 	ap := ctx.Registry.ActiveProvider()
 	if ap == nil {
-		return CommandResult{Success: false, Message: "No active provider."}
+		return CommandResult{Success: false, Message: "No active provider. Use /provider or /settings to configure one."}
 	}
 
 	models, err := ap.FetchModels(context.Background())

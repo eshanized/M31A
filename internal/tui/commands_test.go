@@ -910,6 +910,23 @@ func TestModelsCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("no active provider", func(t *testing.T) {
+		reg := provider.NewRegistry()
+		ctx := CommandContext{
+			Registry: reg,
+		}
+		result, _ := r.Execute("/models", ctx)
+		if result.Success {
+			t.Error("expected failure without active provider")
+		}
+		if !strings.Contains(result.Message, "/provider") {
+			t.Errorf("expected '/provider' suggestion, got: %s", result.Message)
+		}
+		if !strings.Contains(result.Message, "/settings") {
+			t.Errorf("expected '/settings' suggestion, got: %s", result.Message)
+		}
+	})
+
 	t.Run("with registry", func(t *testing.T) {
 		reg := provider.NewRegistry()
 		reg.Register("openrouter", &mockProvider{})
