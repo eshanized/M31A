@@ -2056,3 +2056,86 @@ func TestResumeTaskCommand(t *testing.T) {
 		t.Errorf("expected '/workflow' suggestion in message, got: %s", result.Message)
 	}
 }
+
+func TestCommandSuggestion(t *testing.T) {
+	r := DefaultCommands()
+
+	tests := []struct {
+		input    string
+		suggests string
+	}{
+		{"hlel", "help"},
+		{"statu", "status"},
+		{"clera", "clear"},
+		{"modl", "model"},
+		{"setings", "settings"},
+		{"quit", ""},       // exact match — no suggestion needed
+		{"xyzabc", ""},     // too far from any command
+		{"hlep", "help"},   // transposition
+		{"modle", "model"}, // transposition
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := suggestCommand(r, tt.input)
+			if got != tt.suggests {
+				t.Errorf("suggestCommand(%q) = %q, want %q", tt.input, got, tt.suggests)
+			}
+		})
+	}
+}
+
+func TestCommandSuggestionIntegration(t *testing.T) {
+	r := DefaultCommands()
+	ctx, _ := newTestContext(t)
+
+	// /hlel should suggest /help
+	result, handled := r.Execute("/hlel", ctx)
+	if !handled {
+		t.Fatal("expected command to be handled")
+	}
+	if result.Success {
+		t.Fatal("expected failure for typo")
+	}
+	if !strings.Contains(result.Message, "Did you mean /help") {
+		t.Errorf("expected 'Did you mean /help' in message, got: %s", result.Message)
+	}
+
+	// /xyzabc should not suggest anything specific
+	result, handled = r.Execute("/xyzabc", ctx)
+	if !handled {
+		t.Fatal("expected command to be handled")
+	}
+	if result.Success {
+		t.Fatal("expected failure for unknown command")
+	}
+	if strings.Contains(result.Message, "Did you mean") {
+		t.Errorf("should not suggest for unrelated input, got: %s", result.Message)
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"", "", 0},
+		{"abc", "", 3},
+		{"", "abc", 3},
+		{"abc", "abc", 0},
+		{"abc", "abd", 1},
+		{"abc", "ab", 1},
+		{"abc", "abcd", 1},
+		{"kitten", "sitting", 3},
+		{"hlel", "help", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%s", tt.a, tt.b), func(t *testing.T) {
+			got := levenshtein(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("levenshtein(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}

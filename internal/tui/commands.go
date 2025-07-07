@@ -114,12 +114,65 @@ func (r *CommandRegistry) Execute(input string, ctx CommandContext) (CommandResu
 	}
 	handler, found := r.Get(name)
 	if !found {
+		suggestion := suggestCommand(r, name)
+		if suggestion != "" {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("Unknown command: /%s. Did you mean /%s?", name, suggestion),
+			}, true
+		}
 		return CommandResult{
 			Success: false,
-			Message: fmt.Sprintf("unknown command: /%s. Type /help for available commands.", name),
+			Message: fmt.Sprintf("Unknown command: /%s. Type /help for available commands.", name),
 		}, true
 	}
 	return handler(args, ctx), true
+}
+
+// suggestCommand finds the closest command match using Levenshtein distance.
+// Returns "" if no command is within distance 1-2 (exact matches don't need suggestions).
+func suggestCommand(r *CommandRegistry, input string) string {
+	var best string
+	bestDist := 3 // max distance threshold (<= 2)
+	for _, cmd := range r.List() {
+		d := levenshtein(input, cmd)
+		if d > 0 && d < bestDist {
+			bestDist = d
+			best = cmd
+		}
+	}
+	return best
+}
+
+// levenshtein computes the edit distance between two strings.
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(curr[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[lb]
 }
 
 // ParseCommand splits an input string into a command name and arguments.
