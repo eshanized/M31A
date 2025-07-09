@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -82,6 +83,7 @@ type ResumeModel struct {
 	delTarget  string // session ID to delete
 	delItemID  string // session ID being deleted
 	errMsg     string
+	spinner    spinner.Model
 
 	// Search
 	searchInput textinput.Model
@@ -131,17 +133,25 @@ func NewResumeModel(t theme.Theme, mgr *session.Manager) *ResumeModel {
 	ti.CharLimit = 80
 	ti.Width = 40
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	rm := &ResumeModel{
 		list:        l,
 		manager:     mgr,
 		theme:       t,
 		searchInput: ti,
+		spinner:     sp,
 	}
 
 	// Initial population
 	rm.populateList()
 
 	return rm
+}
+
+func (m *ResumeModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 // populateList loads sessions from the manager into the list model.
@@ -226,6 +236,11 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.height = msg.Height
 		h, v := 4, 6 // margins (extra for search bar)
 		m.list.SetSize(msg.Width-h, msg.Height-v)
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
 		if m.confirmDel {
@@ -327,7 +342,7 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 // View renders the resume screen.
 func (m *ResumeModel) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "Loading..."
+		return m.spinner.View() + " Loading..."
 	}
 
 	if m.confirmDel {

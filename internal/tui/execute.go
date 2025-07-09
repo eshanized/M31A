@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
@@ -26,19 +27,28 @@ type ExecuteModel struct {
 	totalCost   float64
 	toolCalls   int
 	paused      bool
+	spinner     spinner.Model
 }
 
 // NewExecuteModel creates an Execute screen model. width/height are
 // required non-zero dimensions so the screen renders immediately
 // on creation without waiting for a separate WindowSizeMsg (D-03 fix).
 func NewExecuteModel(tasks []types.Task, t theme.Theme, width, height int) *ExecuteModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &ExecuteModel{
 		theme:     t,
 		tasks:     tasks,
 		width:     width,
 		height:    height,
 		startedAt: time.Now(),
+		spinner:   sp,
 	}
+}
+
+func (m *ExecuteModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 // UpdateTaskStatus updates the status of a task by ID.
@@ -57,6 +67,11 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return nil, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -96,7 +111,7 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 
 func (m *ExecuteModel) View() string {
 	if m.width == 0 {
-		return "Loading execute..."
+		return m.spinner.View() + " Loading execute..."
 	}
 
 	var sb strings.Builder

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
@@ -63,10 +64,14 @@ type SettingsModel struct {
 	ledger       *ledger.Ledger
 	configPath   string
 	keychain     keychain.Keychain
+	spinner      spinner.Model
 }
 
 // NewSettingsModel creates a SettingsModel with the given config, theme, and optional ledger.
 func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *ledger.Ledger, kc keychain.Keychain) SettingsModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	m := SettingsModel{
 		config:     cfg,
 		configPath: configPath,
@@ -75,9 +80,14 @@ func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *l
 		fields:     make(map[settingsTab][]*editableField),
 		ledger:     l,
 		keychain:   kc,
+		spinner:    sp,
 	}
 	m.buildFields()
 	return m
+}
+
+func (m SettingsModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 // buildFields populates editable fields from the current config.
@@ -399,6 +409,11 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
 	case SettingsSavedMsg:
 		m.dirty = false
 		m.statusMsg = "Configuration saved successfully."
@@ -499,7 +514,7 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 // View renders the settings screen.
 func (m SettingsModel) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "Loading..."
+		return m.spinner.View() + " Loading..."
 	}
 
 	tabBar := m.renderTabBar()

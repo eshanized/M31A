@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -23,12 +24,16 @@ type PlanModel struct {
 	estTime   string
 	showDiff  bool
 	showGraph bool
+	spinner   spinner.Model
 }
 
 // NewPlanModel creates a Plan screen model. width/height are required
 // non-zero dimensions so the plan renders immediately on creation
 // without waiting for a separate WindowSizeMsg (D-03 fix).
 func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerName string, estCost float64, estTime string, width, height int) *PlanModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &PlanModel{
 		theme:    t,
 		tasks:    tasks,
@@ -38,7 +43,12 @@ func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerNam
 		estTime:  estTime,
 		width:    width,
 		height:   height,
+		spinner:  sp,
 	}
+}
+
+func (m *PlanModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
@@ -47,6 +57,11 @@ func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return nil, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -82,7 +97,7 @@ func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 
 func (m *PlanModel) View() string {
 	if m.width == 0 {
-		return "Loading plan..."
+		return m.spinner.View() + " Loading plan..."
 	}
 
 	var sb strings.Builder

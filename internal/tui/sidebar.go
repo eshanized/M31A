@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
@@ -34,19 +35,24 @@ type SidebarModel struct {
 	lastStatusFetch   time.Time
 	gitStatusCache    []git.FileStatus
 	gitStatusCacheErr error
+	spinner           spinner.Model
 }
 
 func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &SidebarModel{
 		theme:   t,
 		git:     g,
 		width:   sidebarWidth,
 		loading: true,
+		spinner: sp,
 	}
 }
 
 func (m *SidebarModel) Init() tea.Cmd {
-	return m.refreshCmd()
+	return tea.Batch(m.refreshCmd(), m.spinner.Tick)
 }
 
 func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -56,6 +62,10 @@ func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.width == 0 {
 			m.width = sidebarWidth
 		}
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case SidebarRefreshMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -87,7 +97,7 @@ func (m *SidebarModel) View() string {
 	lines = append(lines, sep)
 
 	if m.loading {
-		lines = append(lines, "  loading...")
+		lines = append(lines, "  "+m.spinner.View()+" loading...")
 	} else if m.err != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.Error).Padding(0, 1).Render(m.err))
 	} else if len(m.statuses) == 0 {

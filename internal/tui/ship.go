@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
@@ -35,18 +36,27 @@ type ShipModel struct {
 	summary ShipSummary
 	width   int
 	height  int
+	spinner spinner.Model
 }
 
 // NewShipModel creates a Ship screen model. width/height are required
 // non-zero dimensions so the screen renders immediately on creation
 // without waiting for a separate WindowSizeMsg (D-03 fix).
 func NewShipModel(summary ShipSummary, t theme.Theme, width, height int) *ShipModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &ShipModel{
 		theme:   t,
 		summary: summary,
 		width:   width,
 		height:  height,
+		spinner: sp,
 	}
+}
+
+func (m *ShipModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
@@ -55,6 +65,11 @@ func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return nil, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -72,7 +87,7 @@ func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 
 func (m *ShipModel) View() string {
 	if m.width == 0 {
-		return "Loading ship..."
+		return m.spinner.View() + " Loading ship..."
 	}
 
 	var sb strings.Builder

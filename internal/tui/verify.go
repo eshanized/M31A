@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -19,19 +20,28 @@ type VerifyModel struct {
 	selected int
 	width    int
 	height   int
+	spinner  spinner.Model
 }
 
 // NewVerifyModel creates a Verify screen model. width/height are
 // required non-zero dimensions so the screen renders immediately
 // on creation without waiting for a separate WindowSizeMsg (D-03 fix).
 func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationResult, t theme.Theme, width, height int) *VerifyModel {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &VerifyModel{
 		theme:   t,
 		tasks:   tasks,
 		results: results,
 		width:   width,
 		height:  height,
+		spinner: sp,
 	}
+}
+
+func (m *VerifyModel) Init() tea.Cmd {
+	return m.spinner.Tick
 }
 
 func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
@@ -40,6 +50,11 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return nil, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -82,7 +97,7 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 
 func (m *VerifyModel) View() string {
 	if m.width == 0 {
-		return "Loading verify..."
+		return m.spinner.View() + " Loading verify..."
 	}
 
 	var sb strings.Builder
