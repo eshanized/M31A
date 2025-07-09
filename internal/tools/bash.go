@@ -93,15 +93,18 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	// Signal forwarding on cancellation
 	var killOnce sync.Once
 	cmdDone := make(chan struct{})
+	var terminationMsg string
 	go func() {
 		select {
 		case <-ctx.Done():
 			if cmd.Process != nil {
 				killOnce.Do(func() {
+					terminationMsg = "Terminating process..."
 					processKill(cmd.Process.Pid, sigInt)
 				})
 				time.AfterFunc(5*time.Second, func() {
 					killOnce.Do(func() {
+						terminationMsg = "Force killing process..."
 						processKill(cmd.Process.Pid, sigKill)
 					})
 				})
@@ -190,6 +193,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 			}, nil
 		}
 		if ctx.Err() == context.Canceled {
+			// Add termination message if available
+			if terminationMsg != "" {
+				output = terminationMsg + "\n" + output
+			}
 			return types.ToolResult{
 				Output:     output,
 				DurationMs: elapsed,
