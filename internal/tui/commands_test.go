@@ -214,7 +214,7 @@ func TestCommandRegistry(t *testing.T) {
 		if result.Success {
 			t.Error("expected result.Success=false for unknown command")
 		}
-		if !strings.Contains(result.Message, "unknown command") {
+		if !strings.Contains(strings.ToLower(result.Message), "unknown command") {
 			t.Errorf("expected 'unknown command' in message, got: %s", result.Message)
 		}
 	})
@@ -553,7 +553,7 @@ func TestInvalidCommands(t *testing.T) {
 		if result.Success {
 			t.Error("expected failure for unknown command")
 		}
-		if !strings.Contains(result.Message, "unknown command") {
+		if !strings.Contains(strings.ToLower(result.Message), "unknown command") {
 			t.Errorf("expected 'unknown command' error, got: %s", result.Message)
 		}
 		if !strings.Contains(result.Message, "/help") {

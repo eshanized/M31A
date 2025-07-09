@@ -92,8 +92,9 @@ func TestTypedErrorBanner_GenericError(t *testing.T) {
 	if banner == "" {
 		t.Error("expected non-empty banner")
 	}
-	if !containsText(banner, "weird network error") {
-		t.Errorf("banner does not contain error text, got: %q", banner)
+	// UserMessage maps unrecognized errors to a generic friendly message
+	if !containsText(banner, "An unexpected error occurred") {
+		t.Errorf("banner does not contain generic error text, got: %q", banner)
 	}
 }
 

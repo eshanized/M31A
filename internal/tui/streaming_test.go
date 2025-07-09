@@ -395,8 +395,8 @@ func TestReplModel_HandleStreamErrorMsg(t *testing.T) {
 	if m.messages[0].Role != "assistant" {
 		t.Errorf("message role = %q, want %q", m.messages[0].Role, "assistant")
 	}
-	if !strings.Contains(m.messages[0].Content, "unexpected EOF") {
-		t.Errorf("error message content = %q, want it to contain 'unexpected EOF'", m.messages[0].Content)
+	if !strings.Contains(m.messages[0].Content, "Connection lost") {
+		t.Errorf("error message content = %q, want it to contain 'Connection lost'", m.messages[0].Content)
 	}
 	_ = cmds
 }
