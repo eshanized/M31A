@@ -31,6 +31,12 @@ type ShipSummary struct {
 func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error) {
 	e.logger.Info("ship phase starting")
 
+	// Emit intermediate progress
+	e.emit(IntermediateProgressMsg{
+		Phase:   "ship",
+		Message: "Creating final commit...",
+	})
+
 	// 1. Load tasks for summary
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {

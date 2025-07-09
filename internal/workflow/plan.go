@@ -24,6 +24,12 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 
 	// Retry loop for invalid task lists
 	for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
+		// Emit intermediate progress
+		e.emit(IntermediateProgressMsg{
+			Phase:   "plan",
+			Message: fmt.Sprintf("Creating task list... (attempt %d)", attempt+1),
+		})
+
 		// 1. Build context with error feedback on retries
 		messages := e.buildPlanContext(goal, tasks, valErrs, rawResponse)
 

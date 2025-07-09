@@ -16,6 +16,12 @@ import (
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
 	e.logger.Info("verify phase starting")
 
+	// Emit intermediate progress
+	e.emit(IntermediateProgressMsg{
+		Phase:   "verify",
+		Message: "Running acceptance checks...",
+	})
+
 	// 1. Load tasks
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {

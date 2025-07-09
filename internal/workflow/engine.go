@@ -88,6 +88,12 @@ type PhaseTransitionCompleteMsg struct {
 	Error string
 }
 
+// IntermediateProgressMsg is emitted during long operations to show progress.
+type IntermediateProgressMsg struct {
+	Phase   string
+	Message string
+}
+
 //go:embed prompts/*.md
 var promptFS embed.FS
 

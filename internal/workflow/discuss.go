@@ -15,6 +15,12 @@ import (
 func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, error) {
 	e.logger.Info("discuss phase starting")
 
+	// Emit intermediate progress
+	e.emit(IntermediateProgressMsg{
+		Phase:   "discuss",
+		Message: "Generating clarifying questions...",
+	})
+
 	// 1. Build context
 	messages := e.buildDiscussContext(goal)
 
