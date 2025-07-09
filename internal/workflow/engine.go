@@ -94,6 +94,16 @@ type IntermediateProgressMsg struct {
 	Message string
 }
 
+// ThinkingStartMsg is emitted when LLM processing begins.
+type ThinkingStartMsg struct {
+	Context string
+}
+
+// ThinkingCompleteMsg is emitted when LLM processing ends.
+type ThinkingCompleteMsg struct {
+	Context string
+}
+
 //go:embed prompts/*.md
 var promptFS embed.FS
 
@@ -492,6 +502,11 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 
 // streamLLM sends a chat request and returns the full response content.
 func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
+	// Emit thinking start message
+	e.emit(ThinkingStartMsg{
+		Context: "LLM processing...",
+	})
+
 	req := provider.ChatRequest{
 		Model:            e.modelID,
 		Messages:         messages,
@@ -504,10 +519,17 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 
 	iterator, err := e.provider.ChatCompletionStream(ctx, req)
 	if err != nil {
+		e.emit(ThinkingCompleteMsg{
+			Context: "LLM processing failed",
+		})
 		return "", err
 	}
 
-	return e.consumeStream(iterator)
+	result, err := e.consumeStream(iterator)
+	e.emit(ThinkingCompleteMsg{
+		Context: "LLM processing complete",
+	})
+	return result, err
 }
 
 // streamLLMStreaming sends a chat request and returns the underlying
