@@ -92,8 +92,20 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 
 		// Self-heal
 		failure := fmt.Sprintf("verification failed: %v", result.Errors)
-		healResult := e.healTask(ctx, task, failure)
 		tasks[i].HealsAttempted++
+		e.emit(SelfHealStartMsg{
+			TaskID:  task.ID,
+			Attempt: tasks[i].HealsAttempted,
+			Max:     m31types.MaxHealAttempts,
+		})
+		healResult := e.healTask(ctx, task, failure)
+		e.emit(SelfHealCompleteMsg{
+			TaskID:  task.ID,
+			Attempt: tasks[i].HealsAttempted,
+			Max:     m31types.MaxHealAttempts,
+			Success: healResult.Success,
+			Error:   healResult.Error,
+		})
 
 		if healResult.Success {
 			// Re-verify

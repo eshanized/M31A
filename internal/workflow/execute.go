@@ -135,7 +135,19 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			}
 			task.HealsAttempted++
 			e.logger.Info("self-healing task after LLM failure", "task", task.ID, "attempt", task.HealsAttempted)
+			e.emit(SelfHealStartMsg{
+				TaskID:  task.ID,
+				Attempt: task.HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+			})
 			healResult := e.healTask(ctx, task, failureReason)
+			e.emit(SelfHealCompleteMsg{
+				TaskID:  task.ID,
+				Attempt: task.HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+				Success: healResult.Success,
+				Error:   healResult.Error,
+			})
 			if !healResult.Success {
 				return healResult
 			}
@@ -204,7 +216,19 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			failureReason := fmt.Sprintf("tool %s failed: %v", toolErrName, toolErrMsg)
 			task.HealsAttempted++
 			e.logger.Info("self-healing task after tool failure", "task", task.ID, "attempt", task.HealsAttempted)
+			e.emit(SelfHealStartMsg{
+				TaskID:  task.ID,
+				Attempt: task.HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+			})
 			healResult := e.healTask(ctx, task, failureReason)
+			e.emit(SelfHealCompleteMsg{
+				TaskID:  task.ID,
+				Attempt: task.HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+				Success: healResult.Success,
+				Error:   healResult.Error,
+			})
 			if !healResult.Success {
 				return healResult
 			}

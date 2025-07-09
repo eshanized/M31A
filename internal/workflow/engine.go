@@ -57,6 +57,22 @@ type ToolCompleteMsg struct {
 	Error      string
 }
 
+// SelfHealStartMsg is emitted when a self-heal attempt begins.
+type SelfHealStartMsg struct {
+	TaskID  int
+	Attempt int
+	Max     int
+}
+
+// SelfHealCompleteMsg is emitted when a self-heal attempt finishes.
+type SelfHealCompleteMsg struct {
+	TaskID  int
+	Attempt int
+	Max     int
+	Success bool
+	Error   string
+}
+
 //go:embed prompts/*.md
 var promptFS embed.FS
 
