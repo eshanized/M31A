@@ -43,6 +43,20 @@ type TaskUpdateMsg struct {
 	Status string
 }
 
+// ToolStartMsg is emitted when a tool call begins execution.
+type ToolStartMsg struct {
+	ToolName    string
+	Description string
+}
+
+// ToolCompleteMsg is emitted when a tool call finishes execution.
+type ToolCompleteMsg struct {
+	ToolName   string
+	Success    bool
+	DurationMs int64
+	Error      string
+}
+
 //go:embed prompts/*.md
 var promptFS embed.FS
 

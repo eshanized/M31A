@@ -151,13 +151,36 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		var toolErrName string
 		toolCallCount := len(toolCalls)
 		for _, tc := range toolCalls {
+			// Emit tool start message
+			e.emit(ToolStartMsg{
+				ToolName:    tc.Name,
+				Description: fmt.Sprintf("Executing %s", tc.Name),
+			})
+
+			toolStart := time.Now()
 			result, err := e.dispatcher.Execute(ctx, tc)
+			toolDuration := time.Since(toolStart).Milliseconds()
+
 			if err != nil {
+				// Emit tool failure
+				e.emit(ToolCompleteMsg{
+					ToolName:   tc.Name,
+					Success:    false,
+					DurationMs: toolDuration,
+					Error:      err.Error(),
+				})
 				toolErr = true
 				toolErrMsg = err
 				toolErrName = tc.Name
 				break
 			}
+
+			// Emit tool success
+			e.emit(ToolCompleteMsg{
+				ToolName:   tc.Name,
+				Success:    true,
+				DurationMs: toolDuration,
+			})
 
 			// Feed tool result back
 			messages = append(messages, m31types.Message{
