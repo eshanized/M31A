@@ -73,6 +73,21 @@ type SelfHealCompleteMsg struct {
 	Error   string
 }
 
+// PhaseTransitionStartMsg is emitted when a phase transition begins.
+type PhaseTransitionStartMsg struct {
+	From    string
+	To      string
+	Context string
+}
+
+// PhaseTransitionCompleteMsg is emitted when a phase transition completes.
+type PhaseTransitionCompleteMsg struct {
+	From  string
+	To    string
+	Success bool
+	Error string
+}
+
 //go:embed prompts/*.md
 var promptFS embed.FS
 
@@ -278,19 +293,45 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
 	}
 
+	// Emit phase transition start message
+	e.emit(PhaseTransitionStartMsg{
+		From:    string(from),
+		To:      string(to),
+		Context: fmt.Sprintf("Moving to %s phase...", to),
+	})
+
 	// Save checkpoint
 	cp := session.Checkpoint{
 		Phase:     to,
 		Timestamp: time.Now(),
 	}
 	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, cp); err != nil {
+		e.emit(PhaseTransitionCompleteMsg{
+			From:    string(from),
+			To:      string(to),
+			Success: false,
+			Error:   err.Error(),
+		})
 		return fmt.Errorf("save checkpoint: %w", err)
 	}
 
 	// Write STATE.md
 	if err := e.sessionMgr.SaveState(e.sessionID, to, "transitioning", string(to)); err != nil {
+		e.emit(PhaseTransitionCompleteMsg{
+			From:    string(from),
+			To:      string(to),
+			Success: false,
+			Error:   err.Error(),
+		})
 		return fmt.Errorf("save state: %w", err)
 	}
+
+	// Emit phase transition complete message
+	e.emit(PhaseTransitionCompleteMsg{
+		From:    string(from),
+		To:      string(to),
+		Success: true,
+	})
 
 	return nil
 }
