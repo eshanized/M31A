@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // SparklineChars are the Unicode block characters for sparklines.
@@ -15,6 +16,7 @@ type Sparkline struct {
 	Values []int
 	Width  int // if 0, uses len(Values)
 	Label  string
+	Theme  theme.Theme
 }
 
 // Render returns the sparkline as a string.
@@ -66,7 +68,11 @@ func (s Sparkline) Render() string {
 	result := b.String()
 
 	if s.Label != "" {
-		labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9AA0A6"))
+		t := s.Theme
+		if t.Text == "" {
+			t = theme.Default()
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
 		result = result + " " + labelStyle.Render(s.Label)
 	}
 
