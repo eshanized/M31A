@@ -141,12 +141,16 @@ func (b *ThinkingBlock) Header(width int) string {
 		toggle = "−"
 	}
 
-	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Brand)
 	if b.focused {
 		toggleStyle = toggleStyle.Bold(true)
 	}
 
-	label := fmt.Sprintf("[%s] Thinking (%s)", toggle, b.Duration())
+	hint := " [T] to expand"
+	if b.expanded {
+		hint = " [T] to collapse"
+	}
+	label := fmt.Sprintf("[%s] Thinking (%s)%s", toggle, b.Duration(), hint)
 
 	if lipgloss.Width(label) > width-4 {
 		maxWidth := width - 7
@@ -157,12 +161,12 @@ func (b *ThinkingBlock) Header(width int) string {
 	}
 
 	beforeDur := fmt.Sprintf("[%s] Thinking (", toggle)
-	afterDur := ")"
+	hintSuffix := fmt.Sprintf(")%s", hint)
 	durStr := b.Duration()
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		toggleStyle.Render(beforeDur),
 		lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(durStr),
-		toggleStyle.Render(afterDur),
+		toggleStyle.Render(hintSuffix),
 	)
 }
