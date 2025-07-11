@@ -144,8 +144,13 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 
 	var results []string
 	count := 0
+	truncated := false
 	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() && count < maxResults {
+	for scanner.Scan() {
+		if count >= maxResults {
+			truncated = true
+			break
+		}
 		line := scanner.Text()
 		var match rgMatch
 		if err := json.Unmarshal([]byte(line), &match); err != nil {
@@ -175,7 +180,12 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 		return types.ToolResult{Output: "No results found for pattern"}, nil
 	}
 
-	return types.ToolResult{Output: strings.Join(results, "\n")}, nil
+	output := strings.Join(results, "\n")
+	if truncated {
+		output += fmt.Sprintf("\n[... %d more matches (limit: %d)]", count-maxResults, maxResults)
+	}
+
+	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
 func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
@@ -187,6 +197,7 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 	gitignorePatterns := loadGitignore(t.workDir)
 
 	var results []string
+	truncated := false
 	err = filepath.Walk(searchPath, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible files
@@ -247,6 +258,7 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 			lineNum++
 			if re.MatchString(scanner.Text()) {
 				if len(results) >= maxResults {
+					truncated = true
 					return filepath.SkipAll
 				}
 				relPath, _ := filepath.Rel(t.workDir, path)
@@ -263,7 +275,12 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 		return types.ToolResult{Output: "No results found for pattern"}, nil
 	}
 
-	return types.ToolResult{Output: strings.Join(results, "\n")}, nil
+	output := strings.Join(results, "\n")
+	if truncated {
+		output += fmt.Sprintf("\n[... %d more matches (limit: %d)]", len(results)-maxResults, maxResults)
+	}
+
+	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
 func loadGitignore(dir string) []string {
