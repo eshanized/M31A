@@ -170,14 +170,12 @@ func (m *ShipModel) renderMetrics() string {
 
 // renderTaskSummary renders the task summary with a segmented bar.
 func (m *ShipModel) renderTaskSummary() string {
-	t := theme.Default()
-
 	// Segmented bar
 	segBar := components.SegmentedBar{
 		Segments: []components.Segment{
-			{Count: m.summary.TaskDone, Color: t.Success, Label: "done"},
-			{Count: m.summary.TaskFailed, Color: t.Error, Label: "failed"},
-			{Count: m.summary.TaskSkipped, Color: t.Warning, Label: "skipped"},
+			{Count: m.summary.TaskDone, Color: m.theme.Success, Label: "done"},
+			{Count: m.summary.TaskFailed, Color: m.theme.Error, Label: "failed"},
+			{Count: m.summary.TaskSkipped, Color: m.theme.Warning, Label: "skipped"},
 		},
 		Width: m.width - 4,
 	}
@@ -197,8 +195,6 @@ func (m *ShipModel) renderTaskSummary() string {
 
 // renderFileChanges renders the file changes summary.
 func (m *ShipModel) renderFileChanges() string {
-	t := theme.Default()
-
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(m.theme.Brand).
@@ -214,11 +210,11 @@ func (m *ShipModel) renderFileChanges() string {
 	for i := range stats {
 		switch i {
 		case 0:
-			stats[i].Label = lipgloss.NewStyle().Foreground(t.Success).Render(stats[i].Label)
+			stats[i].Label = lipgloss.NewStyle().Foreground(m.theme.Success).Render(stats[i].Label)
 		case 1:
-			stats[i].Label = lipgloss.NewStyle().Foreground(t.Thinking).Render(stats[i].Label)
+			stats[i].Label = lipgloss.NewStyle().Foreground(m.theme.Thinking).Render(stats[i].Label)
 		case 2:
-			stats[i].Label = lipgloss.NewStyle().Foreground(t.Error).Render(stats[i].Label)
+			stats[i].Label = lipgloss.NewStyle().Foreground(m.theme.Error).Render(stats[i].Label)
 		}
 	}
 
@@ -230,8 +226,8 @@ func (m *ShipModel) renderFileChanges() string {
 	// Diff stat bar
 	diffStat := components.SegmentedBar{
 		Segments: []components.Segment{
-			{Count: m.summary.Insertions, Color: t.Success},
-			{Count: m.summary.Deletions, Color: t.Error},
+			{Count: m.summary.Insertions, Color: m.theme.Success},
+			{Count: m.summary.Deletions, Color: m.theme.Error},
 		},
 		Width: m.width - 8,
 	}

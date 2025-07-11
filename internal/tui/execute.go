@@ -156,12 +156,11 @@ func (m *ExecuteModel) View() string {
 	total := len(m.tasks)
 
 	// Segmented progress bar showing done/skipped/failed/pending
-	t := theme.Default()
 	segBar := components.SegmentedBar{
 		Segments: []components.Segment{
-			{Count: completed, Color: t.Success, Label: "done"},
-			{Count: skipped, Color: t.Warning, Label: "skipped"},
-			{Count: failed, Color: t.Error, Label: "failed"},
+			{Count: completed, Color: m.theme.Success, Label: "done"},
+			{Count: skipped, Color: m.theme.Warning, Label: "skipped"},
+			{Count: failed, Color: m.theme.Error, Label: "failed"},
 		},
 		Width: m.width - 4,
 	}
@@ -174,15 +173,15 @@ func (m *ExecuteModel) View() string {
 		extra := ""
 		switch task.Status {
 		case types.StatusDone:
-			statusIcon = lipgloss.NewStyle().Foreground(t.Success).Render("[✓]")
+			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Success).Render("[✓]")
 		case types.StatusRunning:
 			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Brand).Render("[▶]")
 			extra = "  ← running"
 		case types.StatusSkipped:
-			statusIcon = lipgloss.NewStyle().Foreground(t.Warning).Render("[-]")
+			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Warning).Render("[-]")
 			extra = "  ← skipped"
 		case types.StatusFailed:
-			statusIcon = lipgloss.NewStyle().Foreground(t.Error).Render("[✗]")
+			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Error).Render("[✗]")
 			extra = "  ← failed"
 		case types.StatusPending:
 			// Check if blocked
@@ -196,7 +195,7 @@ func (m *ExecuteModel) View() string {
 				}
 			}
 			if blocked {
-				extra = lipgloss.NewStyle().Foreground(t.TextMuted).Render(
+				extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(
 					fmt.Sprintf("  ← blocked (dep: %d)", task.Dependencies[0]))
 			}
 		}
