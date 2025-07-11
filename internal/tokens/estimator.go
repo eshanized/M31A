@@ -128,11 +128,12 @@ func (e *Estimator) ContextWarningBanner(used int, total int64, threshold float6
 	}
 
 	percent := int(ratio * 100)
+	remaining := int(total) - used
 
 	warning := lipgloss.NewStyle().
 		Background(lipgloss.Color("#FDD663")).
 		Foreground(lipgloss.Color("#000000")).
-		Render(fmt.Sprintf("⚠ Context at %d%% — consider using /compress", percent))
+		Render(fmt.Sprintf("⚠ Context at %d%% — %d tokens remaining — consider using /compress", percent, remaining))
 
 	return warning
 }
