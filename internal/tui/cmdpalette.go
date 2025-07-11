@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // CommandInfo represents a command available in the palette.
@@ -26,19 +27,21 @@ type CommandPaletteModel struct {
 	width    int
 	height   int
 	open     bool
+	theme    theme.Theme
 }
 
-func NewCommandPaletteModel() *CommandPaletteModel {
+func NewCommandPaletteModel(t theme.Theme) *CommandPaletteModel {
 	ti := textinput.New()
 	ti.Placeholder = "Search commands..."
 	ti.CharLimit = 64
 	ti.Prompt = "> "
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EAED"))
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#D77757"))
+	ti.TextStyle = lipgloss.NewStyle().Foreground(t.Text)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
 
 	return &CommandPaletteModel{
 		input:    ti,
 		selected: 0,
+		theme:    t,
 	}
 }
 
@@ -138,13 +141,13 @@ func (m *CommandPaletteModel) View() string {
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#D77757")).
+		Foreground(m.theme.Brand).
 		Padding(0, 1)
 	lines = append(lines, titleStyle.Render("Command Palette"))
 
 	// Separator
 	sep := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#2E2E2E")).
+		Foreground(m.theme.Border).
 		Render(strings.Repeat("─", paletteWidth-2))
 	lines = append(lines, sep)
 
@@ -166,8 +169,8 @@ func (m *CommandPaletteModel) View() string {
 		style := lipgloss.NewStyle().Padding(0, 1)
 		if i == m.selected {
 			style = lipgloss.NewStyle().
-				Background(lipgloss.Color("#2E2E2E")).
-				Foreground(lipgloss.Color("#E8EAED")).
+				Background(m.theme.Surface).
+				Foreground(m.theme.Text).
 				Padding(0, 1)
 		}
 
@@ -195,14 +198,14 @@ func (m *CommandPaletteModel) View() string {
 
 	if len(m.matches) == 0 {
 		lines = append(lines, lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9AA0A6")).
+			Foreground(m.theme.TextSecondary).
 			Padding(0, 1).
 			Render("No matching commands"))
 	}
 
 	// Hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9AA0A6")).
+		Foreground(m.theme.TextSecondary).
 		Padding(0, 1)
 	lines = append(lines, "")
 	lines = append(lines, hintStyle.Render("↑↓ navigate · enter execute · esc close"))
@@ -213,8 +216,8 @@ func (m *CommandPaletteModel) View() string {
 		Width(paletteWidth).
 		Height(paletteHeight).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#D77757")).
-		Background(lipgloss.Color("#1A1A1A")).
+		BorderForeground(m.theme.Brand).
+		Background(m.theme.Background).
 		Render(content)
 
 	// Center the panel

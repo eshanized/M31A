@@ -246,7 +246,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	app.sidebarModel = NewSidebarModel(g, tm.Current())
 
 	// Initialize command palette
-	app.cmdPalette = NewCommandPaletteModel()
+	app.cmdPalette = NewCommandPaletteModel(tm.Current())
 
 	// Initialize key registry
 	leaderTimeout := 1 * time.Second
