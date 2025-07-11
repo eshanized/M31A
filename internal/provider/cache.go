@@ -14,12 +14,13 @@ import (
 const DefaultCacheRefreshInterval = 5 * time.Minute
 
 type ModelCache struct {
-	mu       sync.RWMutex
-	models   map[string]*types.ModelInfo
-	fetched  time.Time
-	ttl      time.Duration
-	staleTTL time.Duration
-	sfg      singleflight.Group
+	mu         sync.RWMutex
+	models     map[string]*types.ModelInfo
+	fetched    time.Time
+	ttl        time.Duration
+	staleTTL   time.Duration
+	sfg        singleflight.Group
+	refreshing bool
 }
 
 func NewModelCache(ttl time.Duration) *ModelCache {
@@ -42,6 +43,16 @@ func NewModelCacheWithStale(ttl time.Duration, staleTTL time.Duration) *ModelCac
 // Refresh deduplicates concurrent calls via singleflight — only one HTTP
 // request is made even if multiple goroutines call Refresh simultaneously.
 func (c *ModelCache) Refresh(ctx context.Context, fetchFn func(ctx context.Context) ([]types.ModelInfo, error)) ([]types.ModelInfo, error) {
+	c.mu.Lock()
+	c.refreshing = true
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.refreshing = false
+		c.mu.Unlock()
+	}()
+
 	v, err, _ := c.sfg.Do("refresh", func() (interface{}, error) {
 		models, fetchErr := fetchFn(ctx)
 		if fetchErr != nil {
@@ -91,6 +102,12 @@ func (c *ModelCache) IsStale() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return time.Since(c.fetched) > c.staleTTL
+}
+
+func (c *ModelCache) IsRefreshing() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.refreshing
 }
 
 func (c *ModelCache) Len() int {
