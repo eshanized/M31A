@@ -163,6 +163,7 @@ func (m *ExecuteModel) View() string {
 			{Count: failed, Color: m.theme.Error, Label: "failed"},
 		},
 		Width: m.width - 4,
+		Theme: m.theme,
 	}
 	sb.WriteString(fmt.Sprintf("%d/%d tasks  %s\n\n",
 		completed+skipped, total, segBar.Render()))
@@ -280,15 +281,16 @@ func (m *ExecuteModel) renderMetricsHeader() string {
 
 	// Build metrics
 	metrics := []components.MetricCard{
-		{Value: components.FormatDuration(elapsedSec), Label: "Elapsed"},
-		{Value: fmt.Sprintf("%d/%d", done, len(m.tasks)), Label: "Complete"},
-		{Value: fmt.Sprintf("%d", m.toolCalls), Label: "Tool Calls"},
+		{Value: components.FormatDuration(elapsedSec), Label: "Elapsed", Theme: m.theme},
+		{Value: fmt.Sprintf("%d/%d", done, len(m.tasks)), Label: "Complete", Theme: m.theme},
+		{Value: fmt.Sprintf("%d", m.toolCalls), Label: "Tool Calls", Theme: m.theme},
 	}
 
 	if m.totalTokens > 0 {
 		metrics = append(metrics, components.MetricCard{
 			Value: components.FormatMetric(m.totalTokens),
 			Label: "Tokens",
+			Theme: m.theme,
 		})
 	}
 
@@ -296,6 +298,7 @@ func (m *ExecuteModel) renderMetricsHeader() string {
 		metrics = append(metrics, components.MetricCard{
 			Value: components.FormatCost(m.totalCost),
 			Label: "Cost",
+			Theme: m.theme,
 		})
 	}
 

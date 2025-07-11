@@ -15,6 +15,7 @@ type ProgressBar struct {
 	Width    int     // total width including percentage
 	ShowPct  bool    // show percentage text
 	Style    ProgressBarStyle
+	Theme    theme.Theme
 }
 
 // ProgressBarStyle defines the visual style of the progress bar.
@@ -33,7 +34,10 @@ func (p ProgressBar) Render() string {
 		p.Width = 30
 	}
 
-	t := theme.Default()
+	t := p.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 	pct := p.Progress
 	if pct < 0 {
 		pct = 0
@@ -101,6 +105,7 @@ func (p ProgressBar) Render() string {
 type SegmentedBar struct {
 	Segments []Segment
 	Width    int
+	Theme    theme.Theme
 }
 
 // Segment represents a portion of a segmented bar.
@@ -145,7 +150,10 @@ func (s SegmentedBar) Render() string {
 
 	// Fill remaining with background
 	if remaining > 0 {
-		t := theme.Default()
+		t := s.Theme
+		if t.Text == "" {
+			t = theme.Default()
+		}
 		bar.WriteString(lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("░", remaining)))
 	}
 

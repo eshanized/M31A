@@ -14,11 +14,15 @@ type MetricCard struct {
 	Trend string // optional, e.g. "+12%" or "↑ 3"
 	Width int
 	Align lipgloss.Position
+	Theme theme.Theme
 }
 
 // Render returns the metric card as a styled string.
 func (m MetricCard) Render() string {
-	t := theme.Default()
+	t := m.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 
 	valueStyle := lipgloss.NewStyle().
 		Foreground(t.Brand).

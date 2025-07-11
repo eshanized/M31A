@@ -147,14 +147,15 @@ func (m *ShipModel) View() string {
 // renderMetrics renders the session metrics dashboard.
 func (m *ShipModel) renderMetrics() string {
 	metrics := []components.MetricCard{
-		{Value: fmt.Sprintf("%d/%d", m.summary.TaskDone, m.summary.TaskTotal), Label: "Tasks"},
-		{Value: fmt.Sprintf("%d", len(m.summary.Commits)), Label: "Commits"},
+		{Value: fmt.Sprintf("%d/%d", m.summary.TaskDone, m.summary.TaskTotal), Label: "Tasks", Theme: m.theme},
+		{Value: fmt.Sprintf("%d", len(m.summary.Commits)), Label: "Commits", Theme: m.theme},
 	}
 
 	if m.summary.TotalTokens > 0 {
 		metrics = append(metrics, components.MetricCard{
 			Value: components.FormatMetric(m.summary.TotalTokens),
 			Label: "Tokens",
+			Theme: m.theme,
 		})
 	}
 
@@ -162,6 +163,7 @@ func (m *ShipModel) renderMetrics() string {
 		metrics = append(metrics, components.MetricCard{
 			Value: components.FormatCost(m.summary.TotalCost),
 			Label: "Cost",
+			Theme: m.theme,
 		})
 	}
 
@@ -178,16 +180,18 @@ func (m *ShipModel) renderTaskSummary() string {
 			{Count: m.summary.TaskSkipped, Color: m.theme.Warning, Label: "skipped"},
 		},
 		Width: m.width - 4,
+		Theme: m.theme,
 	}
 
 	// Stats row
 	stats := components.StatGroup{
 		Stats: []components.StatRow{
-			{Label: "Done", Value: fmt.Sprintf("%d", m.summary.TaskDone), Icon: "✓"},
-			{Label: "Failed", Value: fmt.Sprintf("%d", m.summary.TaskFailed), Icon: "✗"},
-			{Label: "Skipped", Value: fmt.Sprintf("%d", m.summary.TaskSkipped), Icon: "-"},
+			{Label: "Done", Value: fmt.Sprintf("%d", m.summary.TaskDone), Icon: "✓", Theme: m.theme},
+			{Label: "Failed", Value: fmt.Sprintf("%d", m.summary.TaskFailed), Icon: "✗", Theme: m.theme},
+			{Label: "Skipped", Value: fmt.Sprintf("%d", m.summary.TaskSkipped), Icon: "-", Theme: m.theme},
 		},
 		Width: m.width - 4,
+		Theme: m.theme,
 	}
 
 	return segBar.Render() + "\n" + stats.Render()
@@ -216,6 +220,7 @@ func (m *ShipModel) renderFileChanges() string {
 		case 2:
 			stats[i].Label = lipgloss.NewStyle().Foreground(m.theme.Error).Render(stats[i].Label)
 		}
+		stats[i].Theme = m.theme
 	}
 
 	parts := make([]string, len(stats))
@@ -230,6 +235,7 @@ func (m *ShipModel) renderFileChanges() string {
 			{Count: m.summary.Deletions, Color: m.theme.Error},
 		},
 		Width: m.width - 8,
+		Theme: m.theme,
 	}
 
 	return header + "\n" + strings.Join(parts, "  ") + "\n" + diffStat.Render()

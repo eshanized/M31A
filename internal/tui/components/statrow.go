@@ -15,11 +15,15 @@ type StatRow struct {
 	Icon  string // optional emoji or symbol
 	Width int    // total width, 0 for auto
 	Align lipgloss.Position
+	Theme theme.Theme
 }
 
 // Render returns the stat row as a string.
 func (s StatRow) Render() string {
-	t := theme.Default()
+	t := s.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(t.TextSecondary)
@@ -53,6 +57,7 @@ type StatGroup struct {
 	Stats     []StatRow
 	Separator bool
 	Width     int
+	Theme     theme.Theme
 }
 
 // Render returns the stat group as a string.
@@ -65,10 +70,14 @@ func (s StatGroup) Render() string {
 
 	for i, stat := range s.Stats {
 		stat.Width = s.Width
+		stat.Theme = s.Theme
 		rows = append(rows, stat.Render())
 
 		if s.Separator && i < len(s.Stats)-1 {
-			t := theme.Default()
+			t := s.Theme
+			if t.Text == "" {
+				t = theme.Default()
+			}
 			sep := lipgloss.NewStyle().
 				Foreground(t.Border).
 				Render(strings.Repeat("─", s.Width))

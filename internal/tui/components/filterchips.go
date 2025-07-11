@@ -18,6 +18,7 @@ type FilterChip struct {
 type FilterChips struct {
 	Chips    []FilterChip
 	Selected int // index of focused chip
+	Theme    theme.Theme
 }
 
 // Render returns the filter chips as a string.
@@ -26,7 +27,10 @@ func (f FilterChips) Render() string {
 		return ""
 	}
 
-	t := theme.Default()
+	t := f.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 	parts := make([]string, len(f.Chips))
 
 	for i, chip := range f.Chips {
@@ -94,11 +98,15 @@ type ChipGroup struct {
 	Label     string
 	Chips     FilterChips
 	Separator bool
+	Theme     theme.Theme
 }
 
 // Render returns the chip group as a string.
 func (g ChipGroup) Render() string {
-	t := theme.Default()
+	t := g.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).
