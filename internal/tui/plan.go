@@ -160,7 +160,14 @@ func (m *PlanModel) renderTaskList() string {
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefix, task.ID, task.Description))
+		desc := task.Description
+		if i != m.selected {
+			maxDescWidth := m.width - 20
+			if maxDescWidth > 0 {
+				desc = TruncateWithEllipsis(desc, maxDescWidth)
+			}
+		}
+		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefix, task.ID, desc))
 
 		deps := "-"
 		if len(task.Dependencies) > 0 {
