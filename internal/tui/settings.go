@@ -591,7 +591,7 @@ func (m SettingsModel) renderField(f *editableField, isFocused bool) string {
 		// Masked display
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary))
 		if f.value == "" {
-			value = mutedStyle.Render("(not configured)")
+			value = mutedStyle.Render("(not set)")
 		} else {
 			masked := strings.Repeat(f.maskChar, 8)
 			value = mutedStyle.Render(masked)
@@ -603,7 +603,7 @@ func (m SettingsModel) renderField(f *editableField, isFocused bool) string {
 		// Focused but not editing
 		focusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Brand))
 		if f.value == "" {
-			value = focusedStyle.Render("[empty]")
+			value = focusedStyle.Render("(not set)")
 		} else {
 			value = focusedStyle.Render(f.value)
 		}
@@ -611,7 +611,7 @@ func (m SettingsModel) renderField(f *editableField, isFocused bool) string {
 		// Normal display
 		valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextPrimary))
 		if f.value == "" {
-			value = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary)).Render("(empty)")
+			value = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary)).Render("(not set)")
 		} else {
 			value = valStyle.Render(f.value)
 		}
