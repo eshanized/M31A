@@ -11,12 +11,13 @@ import (
 )
 
 type ThinkingBlock struct {
-	id        int
-	segment   types.MessageSegment
-	theme     theme.Theme
-	expanded  bool
-	focused   bool
-	startedAt time.Time
+	id              int
+	segment         types.MessageSegment
+	theme           theme.Theme
+	expanded        bool
+	focused         bool
+	startedAt       time.Time
+	scrollOffset    int
 	// Cached duration to avoid recalculating every render
 	lastDurationStr string
 	lastDurationAt  time.Time
@@ -55,12 +56,51 @@ func (b *ThinkingBlock) Render(width int) string {
 	}
 
 	// Expanded: left-bordered block with content
+	maxContentLines := 20 // cap at ~50% of typical 40-line terminal
+	lines := strings.Split(b.segment.Content, "\n")
+	totalLines := len(lines)
+
+	// Apply scroll offset
+	startLine := b.scrollOffset
+	if startLine > totalLines-maxContentLines {
+		startLine = totalLines - maxContentLines
+	}
+	if startLine < 0 {
+		startLine = 0
+	}
+	endLine := startLine + maxContentLines
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	visibleContent := strings.Join(lines[startLine:endLine], "\n")
+
+	// Scroll indicators
+	scrollInfo := ""
+	if totalLines > maxContentLines {
+		scrollParts := []string{}
+		if startLine > 0 {
+			scrollParts = append(scrollParts, fmt.Sprintf("↑ %d lines above", startLine))
+		}
+		if endLine < totalLines {
+			scrollParts = append(scrollParts, fmt.Sprintf("↓ %d lines below", totalLines-endLine))
+		}
+		scrollInfo = "  " + strings.Join(scrollParts, " · ")
+	}
+
 	content := lipgloss.NewStyle().
 		Foreground(b.theme.TextMuted).
 		Italic(true).
 		Width(contentWidth).
 		Padding(0, 1).
-		Render(b.segment.Content)
+		Render(visibleContent)
+
+	if scrollInfo != "" {
+		content += "\n" + lipgloss.NewStyle().
+			Foreground(b.theme.TextSecondary).
+			Padding(0, 1).
+			Render(scrollInfo)
+	}
 
 	separator := lipgloss.NewStyle().
 		Foreground(b.theme.Border).
@@ -102,6 +142,33 @@ func (b *ThinkingBlock) IsExpanded() bool {
 
 func (b *ThinkingBlock) ID() int {
 	return b.id
+}
+
+// ScrollUp scrolls the expanded thinking content up by n lines.
+func (b *ThinkingBlock) ScrollUp(n int) {
+	b.scrollOffset -= n
+	if b.scrollOffset < 0 {
+		b.scrollOffset = 0
+	}
+}
+
+// ScrollDown scrolls the expanded thinking content down by n lines.
+func (b *ThinkingBlock) ScrollDown(n int) {
+	b.scrollOffset += n
+	maxContentLines := 20
+	lines := strings.Split(b.segment.Content, "\n")
+	maxOffset := len(lines) - maxContentLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if b.scrollOffset > maxOffset {
+		b.scrollOffset = maxOffset
+	}
+}
+
+// ScrollOffset returns the current scroll offset.
+func (b *ThinkingBlock) ScrollOffset() int {
+	return b.scrollOffset
 }
 
 func (b *ThinkingBlock) Duration() string {
