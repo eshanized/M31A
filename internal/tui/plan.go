@@ -183,13 +183,76 @@ func (m *PlanModel) renderDependencyGraph() string {
 	var sb strings.Builder
 	sb.WriteString("Dependency Graph:\n\n")
 
+	// Build adjacency: parent → children
+	children := make(map[int][]int)
+	roots := []int{}
+	hasParent := make(map[int]bool)
+
 	for _, task := range m.tasks {
 		if len(task.Dependencies) == 0 {
-			sb.WriteString(fmt.Sprintf("  [%d] %s\n", task.ID, task.Description))
+			roots = append(roots, task.ID)
 		} else {
 			for _, dep := range task.Dependencies {
-				sb.WriteString(fmt.Sprintf("  [%d] -> [%d] %s\n", dep, task.ID, task.Description))
+				children[dep] = append(children[dep], task.ID)
+				hasParent[task.ID] = true
 			}
+		}
+	}
+
+	// Task lookup
+	byID := make(map[int]types.Task)
+	for _, task := range m.tasks {
+		byID[task.ID] = task
+	}
+
+	// Render tree recursively with indentation
+	var renderNode func(id int, depth int, prefix string, isLast bool)
+	renderNode = func(id int, depth int, prefix string, isLast bool) {
+		task := byID[id]
+		connector := "├── "
+		if isLast {
+			connector = "└── "
+		}
+		if depth == 0 {
+			connector = ""
+		}
+
+		nodeStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
+		descStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+
+		sb.WriteString(prefix)
+		sb.WriteString(connector)
+		sb.WriteString(nodeStyle.Render(fmt.Sprintf("[%d]", task.ID)))
+		sb.WriteString(" ")
+		sb.WriteString(descStyle.Render(task.Description))
+		sb.WriteString("\n")
+
+		childList := children[id]
+		for i, childID := range childList {
+			newPrefix := prefix
+			if depth > 0 {
+				if isLast {
+					newPrefix += "    "
+				} else {
+					newPrefix += "│   "
+				}
+			}
+			renderNode(childID, depth+1, newPrefix, i == len(childList)-1)
+		}
+	}
+
+	// Render root nodes and any orphaned nodes
+	rendered := make(map[int]bool)
+	for i, rootID := range roots {
+		renderNode(rootID, 0, "", i == len(roots)-1)
+		rendered[rootID] = true
+	}
+
+	// Render nodes with parents that weren't reached (circular protection)
+	for _, task := range m.tasks {
+		if !rendered[task.ID] {
+			sb.WriteString(fmt.Sprintf("  [%d] %s\n", task.ID, task.Description))
+			rendered[task.ID] = true
 		}
 	}
 
