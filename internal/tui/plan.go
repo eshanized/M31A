@@ -137,27 +137,41 @@ func (m *PlanModel) renderTaskList() string {
 	var sb strings.Builder
 
 	for i, task := range m.tasks {
-		prefix := "[ ]"
-		if i == m.selected {
-			prefix = "[>]"
-		}
+		var prefix string
+		var prefixStyle lipgloss.Style
 
-		// Show actual task status
+		// Determine status prefix and color
 		switch task.Status {
 		case types.StatusDone:
 			prefix = "[x]"
+			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.Success)
 		case types.StatusRunning:
 			prefix = "[>]"
+			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.Brand)
 		case types.StatusFailed:
 			prefix = "[!]"
+			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.Error)
 		case types.StatusSkipped:
 			prefix = "[-]"
+			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.Warning)
 		case types.StatusPending:
 			if i == m.selected {
 				prefix = "[>]"
+				prefixStyle = lipgloss.NewStyle().Foreground(m.theme.Brand)
 			} else {
 				prefix = "[ ]"
+				prefixStyle = lipgloss.NewStyle().Foreground(m.theme.TextMuted)
 			}
+		default:
+			prefix = "[ ]"
+			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+		}
+
+		// Override style for selected item
+		if i == m.selected {
+			prefixStyle = lipgloss.NewStyle().
+				Foreground(m.theme.Brand).
+				Bold(true)
 		}
 
 		desc := task.Description
@@ -167,7 +181,7 @@ func (m *PlanModel) renderTaskList() string {
 				desc = TruncateWithEllipsis(desc, maxDescWidth)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefix, task.ID, desc))
+		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefixStyle.Render(prefix), task.ID, desc))
 
 		deps := "-"
 		if len(task.Dependencies) > 0 {
