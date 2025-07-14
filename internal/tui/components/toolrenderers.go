@@ -71,7 +71,7 @@ func (b *BaseRenderer) RenderGenericOutput(output string, truncated bool, collap
 		return lipgloss.NewStyle().
 			Foreground(b.theme.TextSecondary).
 			Italic(true).
-			Render(fmt.Sprintf("[+%d lines hidden]", hidden))
+			Render(fmt.Sprintf("[+%d lines hidden — Space to expand]", hidden))
 	}
 	if truncated {
 		output += "\n" + lipgloss.NewStyle().
