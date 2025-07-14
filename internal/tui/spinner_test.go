@@ -15,7 +15,7 @@ func TestSpinnerLoading(t *testing.T) {
 
 	t.Run("PlanModel shows spinner when loading", func(t *testing.T) {
 		// Create model with zero dimensions (loading state)
-		m := NewPlanModel([]types.Task{}, theme, "", "", 0, "", 0, 0)
+		m := NewPlanModel([]types.Task{}, theme, "", "", "", 0, "", 0, 0)
 		view := m.View()
 		if view == "Loading plan..." {
 			t.Error("PlanModel should show spinner, not static text")
@@ -89,7 +89,7 @@ func TestSpinnerLoading(t *testing.T) {
 	})
 
 	t.Run("Spinner ticks on TickMsg", func(t *testing.T) {
-		m := NewPlanModel([]types.Task{}, theme, "", "", 0, "", 80, 24)
+		m := NewPlanModel([]types.Task{}, theme, "", "", "", 0, "", 80, 24)
 		// Send a tick message
 		cmd := m.Init()
 		if cmd == nil {

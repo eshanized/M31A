@@ -13,37 +13,39 @@ import (
 
 // PlanModel displays the task plan for user review.
 type PlanModel struct {
-	theme     theme.Theme
-	tasks     []types.Task
-	selected  int
-	width     int
-	height    int
-	modelID   string
-	provider  string
-	estCost   float64
-	estTime   string
-	showDiff  bool
-	showGraph bool
-	spinner   spinner.Model
+	theme       theme.Theme
+	tasks       []types.Task
+	selected    int
+	width       int
+	height      int
+	modelID     string
+	modelName   string
+	provider    string
+	estCost     float64
+	estTime     string
+	showDiff    bool
+	showGraph   bool
+	spinner     spinner.Model
 }
 
 // NewPlanModel creates a Plan screen model. width/height are required
 // non-zero dimensions so the plan renders immediately on creation
 // without waiting for a separate WindowSizeMsg (D-03 fix).
-func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, providerName string, estCost float64, estTime string, width, height int) *PlanModel {
+func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, modelName string, providerName string, estCost float64, estTime string, width, height int) *PlanModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &PlanModel{
-		theme:    t,
-		tasks:    tasks,
-		modelID:  modelID,
-		provider: providerName,
-		estCost:  estCost,
-		estTime:  estTime,
-		width:    width,
-		height:   height,
-		spinner:  sp,
+		theme:     t,
+		tasks:     tasks,
+		modelID:   modelID,
+		modelName: modelName,
+		provider:  providerName,
+		estCost:   estCost,
+		estTime:   estTime,
+		width:     width,
+		height:    height,
+		spinner:   sp,
 	}
 }
 
@@ -121,14 +123,18 @@ func (m *PlanModel) View() string {
 		sb.WriteString(m.renderTaskList())
 	}
 
-	// Cost/Time panel
+	// Cost/Time panel — show human-readable model name with raw ID as tooltip
+	modelDisplay := m.modelName
+	if modelDisplay == "" {
+		modelDisplay = m.modelID
+	}
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.Border).
 		Padding(1, 2).
 		Render(fmt.Sprintf("Model: %s\nEst cost: $%.2f\nEst time: %s\nProvider: %s",
-			m.modelID, m.estCost, m.estTime, m.provider)))
+			modelDisplay, m.estCost, m.estTime, m.provider)))
 
 	return sb.String()
 }

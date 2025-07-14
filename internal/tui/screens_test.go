@@ -32,7 +32,7 @@ func testTasks() []types.Task {
 // ---------------------------------------------------------------------------
 
 func TestPlan_RenderView(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "", "openrouter", 0.12, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -46,7 +46,7 @@ func TestPlan_RenderView(t *testing.T) {
 }
 
 func TestPlan_TaskListDisplay(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -60,7 +60,7 @@ func TestPlan_TaskListDisplay(t *testing.T) {
 }
 
 func TestPlan_CostTimePanel(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "openrouter", 0.12, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "claude-3", "", "openrouter", 0.12, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -74,7 +74,7 @@ func TestPlan_CostTimePanel(t *testing.T) {
 }
 
 func TestPlan_AcceptAction(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -88,7 +88,7 @@ func TestPlan_AcceptAction(t *testing.T) {
 }
 
 func TestPlan_RetryAction(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -102,7 +102,7 @@ func TestPlan_RetryAction(t *testing.T) {
 }
 
 func TestPlan_DiffPreviewToggle(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -125,7 +125,7 @@ func TestPlan_DiffPreviewToggle(t *testing.T) {
 }
 
 func TestPlan_DependencyGraphToggle(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 
@@ -141,7 +141,7 @@ func TestPlan_DependencyGraphToggle(t *testing.T) {
 }
 
 func TestPlan_SelectedTaskHighlight(t *testing.T) {
-	m := NewPlanModel(testTasks(), testTheme(), "model", "provider", 0.1, "5 min", 0, 0)
+	m := NewPlanModel(testTasks(), testTheme(), "model", "", "provider", 0.1, "5 min", 0, 0)
 	m.width = 80
 	m.height = 40
 	m.selected = 1

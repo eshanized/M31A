@@ -660,10 +660,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.Tasks) > 0 && m.planModel == nil {
 			t := m.themeManager.Current()
 			modelID := ""
+			modelName := ""
 			if m.activeModel != nil {
 				modelID = m.activeModel.ID
+				modelName = m.activeModel.Name
 			}
-			pm := NewPlanModel(msg.Tasks, t, modelID, m.activeProvider, 0, msg.CostEstimate, m.width, m.height)
+			pm := NewPlanModel(msg.Tasks, t, modelID, modelName, m.activeProvider, 0, msg.CostEstimate, m.width, m.height)
 			m.planModel = pm
 		}
 		m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
@@ -756,11 +758,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(msg.Tasks) > 0 && m.planModel == nil {
 				t := m.themeManager.Current()
 				modelID := ""
+				modelName := ""
 				if m.activeModel != nil {
 					modelID = m.activeModel.ID
+					modelName = m.activeModel.Name
 				}
 				providerName := m.activeProvider
-				pm := NewPlanModel(msg.Tasks, t, modelID, providerName, 0, "", m.width, m.height)
+				pm := NewPlanModel(msg.Tasks, t, modelID, modelName, providerName, 0, "", m.width, m.height)
 				m.planModel = pm
 			}
 			if m.planModel != nil {

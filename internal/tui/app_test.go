@@ -1402,7 +1402,7 @@ func TestApp_NewPlanModel_NonZeroSize(t *testing.T) {
 	m := newTestAppForScreens(t)
 	tasks := []types.Task{{ID: 1, Action: "create"}}
 
-	pm := NewPlanModel(tasks, m.themeManager.Current(), "model-x", "openrouter",
+	pm := NewPlanModel(tasks, m.themeManager.Current(), "model-x", "", "openrouter",
 		0, "", m.width, m.height)
 
 	if pm.width != 120 {
