@@ -14,7 +14,7 @@ type ToolRenderer interface {
 	RenderHeader(width int) string
 	RenderInput(call types.ToolCall, width int) string
 	RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string
-	RenderStatus(state ToolState, durationMs int64, width int) string
+	RenderStatus(state ToolState, durationMs int64, width int, errMsg string) string
 }
 
 type BaseRenderer struct {
@@ -39,7 +39,7 @@ func (b *BaseRenderer) RenderHeader(width int) string {
 	return lipgloss.NewStyle().Width(width).Render(label)
 }
 
-func (b *BaseRenderer) RenderStatus(state ToolState, durationMs int64, width int) string {
+func (b *BaseRenderer) RenderStatus(state ToolState, durationMs int64, width int, errMsg string) string {
 	var badge string
 	switch state {
 	case ToolRunning:
@@ -55,7 +55,30 @@ func (b *BaseRenderer) RenderStatus(state ToolState, durationMs int64, width int
 	case ToolError:
 		badge = b.theme.ErrorBadge.Render(" ERR ")
 	}
-	return lipgloss.NewStyle().Width(width).Padding(0, 1).Render(badge)
+	status := lipgloss.NewStyle().Width(width).Padding(0, 1).Render(badge)
+
+	// Show error message inline below badge, truncated to 3 lines
+	if state == ToolError && errMsg != "" {
+		errLines := strings.Split(errMsg, "\n")
+		maxLines := 3
+		if len(errLines) > maxLines {
+			errLines = errLines[:maxLines]
+			truncatedMsg := strings.Join(errLines, "\n") + "\n..."
+			status += "\n" + lipgloss.NewStyle().
+				Foreground(b.theme.Error).
+				Width(width).
+				Padding(0, 1).
+				Render(truncatedMsg)
+		} else {
+			status += "\n" + lipgloss.NewStyle().
+				Foreground(b.theme.Error).
+				Width(width).
+				Padding(0, 1).
+				Render(errMsg)
+		}
+	}
+
+	return status
 }
 
 func (b *BaseRenderer) RenderGenericOutput(output string, truncated bool, collapsed bool, width int) string {

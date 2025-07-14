@@ -38,13 +38,19 @@ func (r *BashRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *BashRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	var output string
+	var errMsg string
 	if result != nil {
 		output = result.Output
+		if state == ToolError && result.Error != "" {
+			errMsg = result.Error
+		} else if state == ToolError && output != "" {
+			errMsg = output
+		}
 	}
 	parts := []string{}
 	if !collapsed && output != "" {
 		parts = append(parts, r.RenderGenericOutput(output, truncated, false, width))
 	}
-	parts = append(parts, r.RenderStatus(state, durationMs, width))
+	parts = append(parts, r.RenderStatus(state, durationMs, width, errMsg))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
 }

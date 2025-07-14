@@ -37,7 +37,7 @@ func (r *EditRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *EditRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	if result == nil || result.Output == "" {
-		return r.RenderStatus(state, durationMs, width)
+		return r.RenderStatus(state, durationMs, width, "")
 	}
 
 	output := result.Output
@@ -59,7 +59,7 @@ func (r *EditRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 				Foreground(r.theme.TextSecondary).
 				Italic(true).
 				Render(fmt.Sprintf("[+%d lines hidden]", hidden)),
-			r.RenderStatus(state, durationMs, width),
+			r.RenderStatus(state, durationMs, width, ""),
 		)
 	}
 
@@ -77,7 +77,7 @@ func (r *EditRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 
 	return lipgloss.JoinVertical(lipgloss.Top,
 		lipgloss.NewStyle().Width(width).Padding(0, 1).Render(strings.Join(diffLines, "\n")),
-		r.RenderStatus(state, durationMs, width),
+		r.RenderStatus(state, durationMs, width, ""),
 	)
 }
 
@@ -109,7 +109,7 @@ func (r *FileReadRenderer) RenderOutput(result *types.ToolResult, state ToolStat
 	if !collapsed && output != "" {
 		parts = append(parts, r.RenderGenericOutput(output, truncated, false, width))
 	}
-	parts = append(parts, r.RenderStatus(state, durationMs, width))
+	parts = append(parts, r.RenderStatus(state, durationMs, width, ""))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
 }
 
@@ -134,7 +134,7 @@ func (r *FileWriteRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *FileWriteRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	if result == nil || result.Output == "" {
-		return r.RenderStatus(state, durationMs, width)
+		return r.RenderStatus(state, durationMs, width, "")
 	}
 
 	byteCount := len(result.Output)
@@ -150,6 +150,6 @@ func (r *FileWriteRenderer) RenderOutput(result *types.ToolResult, state ToolSta
 			Width(width).
 			Padding(0, 1).
 			Render(statusLine),
-		r.RenderStatus(state, durationMs, width),
+		r.RenderStatus(state, durationMs, width, ""),
 	)
 }

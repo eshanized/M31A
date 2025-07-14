@@ -52,7 +52,7 @@ func (r *TodoWriteRenderer) RenderInput(call types.ToolCall, width int) string {
 }
 
 func (r *TodoWriteRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
-	return r.RenderStatus(state, durationMs, width)
+	return r.RenderStatus(state, durationMs, width, "")
 }
 
 type GrepRenderer struct {
@@ -76,7 +76,7 @@ func (r *GrepRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *GrepRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	if result == nil || result.Output == "" {
-		return r.RenderStatus(state, durationMs, width)
+		return r.RenderStatus(state, durationMs, width, "")
 	}
 
 	if collapsed {
@@ -86,13 +86,13 @@ func (r *GrepRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 				Foreground(r.theme.TextSecondary).
 				Italic(true).
 				Render(fmt.Sprintf("[%d matches]", matchCount)),
-			r.RenderStatus(state, durationMs, width),
+			r.RenderStatus(state, durationMs, width, ""),
 		)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Top,
 		r.RenderGenericOutput(result.Output, truncated, false, width),
-		r.RenderStatus(state, durationMs, width),
+		r.RenderStatus(state, durationMs, width, ""),
 	)
 }
 
@@ -117,7 +117,7 @@ func (r *GlobRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *GlobRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	if result == nil || result.Output == "" {
-		return r.RenderStatus(state, durationMs, width)
+		return r.RenderStatus(state, durationMs, width, "")
 	}
 
 	if collapsed {
@@ -127,13 +127,13 @@ func (r *GlobRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 				Foreground(r.theme.TextSecondary).
 				Italic(true).
 				Render(fmt.Sprintf("[%d files]", fileCount)),
-			r.RenderStatus(state, durationMs, width),
+			r.RenderStatus(state, durationMs, width, ""),
 		)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Top,
 		r.RenderGenericOutput(result.Output, truncated, false, width),
-		r.RenderStatus(state, durationMs, width),
+		r.RenderStatus(state, durationMs, width, ""),
 	)
 }
 
@@ -165,13 +165,19 @@ func (r *GenericRenderer) RenderInput(call types.ToolCall, width int) string {
 
 func (r *GenericRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
 	var output string
+	var errMsg string
 	if result != nil {
 		output = result.Output
+		if state == ToolError && result.Error != "" {
+			errMsg = result.Error
+		} else if state == ToolError && output != "" {
+			errMsg = output
+		}
 	}
 	parts := []string{}
 	if !collapsed && output != "" {
 		parts = append(parts, r.RenderGenericOutput(output, truncated, false, width))
 	}
-	parts = append(parts, r.RenderStatus(state, durationMs, width))
+	parts = append(parts, r.RenderStatus(state, durationMs, width, errMsg))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
 }
