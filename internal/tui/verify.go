@@ -171,20 +171,29 @@ func (m *VerifyModel) View() string {
 				sb.WriteString(m.cross("Tests failed"))
 			}
 
-			if !result.FilesExist || !result.SyntaxOK || !result.TestsOK {
-				if task.Status == types.StatusUnrecoverable {
-					sb.WriteString(lipgloss.NewStyle().
-						Foreground(m.theme.Error).
-						Bold(true).
-						Render("  [UNRECOVERABLE]"))
-					sb.WriteString("\n")
-				} else {
-					sb.WriteString(lipgloss.NewStyle().
-						Foreground(m.theme.TextSecondary).
-						Render("  [H] Self-heal"))
-					sb.WriteString("\n")
+		if !result.FilesExist || !result.SyntaxOK || !result.TestsOK {
+			if task.Status == types.StatusUnrecoverable {
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(m.theme.Error).
+					Bold(true).
+					Render("  [UNRECOVERABLE]"))
+				sb.WriteString("\n")
+			} else {
+				healHint := "[H] Self-heal"
+				if task.HealsAttempted > 0 {
+					remaining := 2 - task.HealsAttempted
+					if remaining > 0 {
+						healHint = fmt.Sprintf("[H] Self-heal (%d attempt%s remaining)", remaining, map[bool]string{true: "", false: "s"}[remaining == 1])
+					} else {
+						healHint = "[H] Self-heal (exhausted)"
+					}
 				}
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(m.theme.TextSecondary).
+					Render("  " + healHint))
+				sb.WriteString("\n")
 			}
+		}
 		}
 
 		sb.WriteString("\n")
