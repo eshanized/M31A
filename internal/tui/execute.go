@@ -267,7 +267,14 @@ func (m *ExecuteModel) View() string {
 				Render(" " + statusIcon + " ")
 		}
 
-		sb.WriteString(fmt.Sprintf("%s %d. %s%s\n", prefix, task.ID, task.Description, extra))
+		desc := task.Description
+		if i != m.current {
+			maxDescWidth := m.width - 20
+			if maxDescWidth > 0 {
+				desc = TruncateWithEllipsis(desc, maxDescWidth)
+			}
+		}
+		sb.WriteString(fmt.Sprintf("%s %d. %s%s\n", prefix, task.ID, desc, extra))
 	}
 
 	// Tool card
