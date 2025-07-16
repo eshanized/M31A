@@ -233,8 +233,28 @@ func (m *ExecuteModel) View() string {
 				}
 			}
 			if blocked {
+				// Collect all blocking dependency IDs
+				var blockingDeps []int
+				for _, dep := range task.Dependencies {
+					for _, other := range m.tasks {
+						if other.ID == dep && (other.Status == types.StatusPending || other.Status == types.StatusRunning) {
+							blockingDeps = append(blockingDeps, dep)
+							break
+						}
+					}
+				}
+				depStr := ""
+				if len(blockingDeps) <= 5 {
+					ds := make([]string, len(blockingDeps))
+					for i, d := range blockingDeps {
+						ds[i] = fmt.Sprintf("%d", d)
+					}
+					depStr = strings.Join(ds, ", ")
+				} else {
+					depStr = fmt.Sprintf("%d tasks", len(blockingDeps))
+				}
 				extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(
-					fmt.Sprintf("  ← blocked (dep: %d)", task.Dependencies[0]))
+					fmt.Sprintf("  ← blocked by: %s", depStr))
 			}
 		}
 
