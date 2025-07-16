@@ -119,10 +119,26 @@ func TestExecuteModel_UpdateAllDoneTransitions(t *testing.T) {
 	}
 	m := NewExecuteModel(tasks, theme.Dark(), 0, 0)
 
-	// When all tasks are done, pressing any key should transition to Verify
+	// When all tasks are done, pressing a key should start the transition timer
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if appMsg != nil {
+		t.Error("expected no immediate transition when all tasks are done")
+	}
+	if !m.transitioning {
+		t.Error("expected transitioning flag to be set")
+	}
+
+	// Simulate transition ticks
+	for i := 0; i < 2; i++ {
+		_, appMsg = m.Update(TransitionTickMsg{})
+		if appMsg != nil {
+			t.Error("expected no transition before countdown completes")
+		}
+	}
+	// Final tick should trigger transition
+	_, appMsg = m.Update(TransitionTickMsg{})
 	if appMsg == nil || appMsg.Screen != ScreenVerify {
-		t.Error("expected ScreenVerify when all tasks are done")
+		t.Error("expected ScreenVerify after transition countdown")
 	}
 }
 

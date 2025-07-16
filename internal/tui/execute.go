@@ -15,19 +15,22 @@ import (
 
 // ExecuteModel displays task execution progress.
 type ExecuteModel struct {
-	theme       theme.Theme
-	tasks       []types.Task
-	current     int
-	width       int
-	height      int
-	toolCard    string
-	startedAt   time.Time
-	taskStarted time.Time
-	totalTokens int
-	totalCost   float64
-	toolCalls   int
-	paused      bool
-	spinner     spinner.Model
+	theme         theme.Theme
+	tasks         []types.Task
+	current       int
+	width         int
+	height        int
+	toolCard      string
+	startedAt     time.Time
+	taskStarted   time.Time
+	totalTokens   int
+	totalCost     float64
+	toolCalls     int
+	paused        bool
+	spinner       spinner.Model
+	allDone       bool
+	transitioning bool
+	transitionSec int
 }
 
 // NewExecuteModel creates an Execute screen model. width/height are
@@ -73,7 +76,27 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return []tea.Cmd{cmd}, nil
 
+	case TransitionTickMsg:
+		if m.transitioning {
+			m.transitionSec--
+			if m.transitionSec <= 0 {
+				return nil, &AppMsg{Screen: ScreenVerify}
+			}
+			return []tea.Cmd{m.transitionTick()}, nil
+		}
+
 	case tea.KeyMsg:
+		// If transitioning, allow Esc to cancel
+		if m.transitioning {
+			switch msg.String() {
+			case "esc":
+				m.transitioning = false
+				m.transitionSec = 0
+				return nil, nil
+			}
+			return nil, nil
+		}
+
 		switch msg.String() {
 		case "up", "k":
 			if m.current > 0 {
@@ -92,9 +115,13 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			m.paused = !m.paused
 		case "r", "R":
 			m.paused = false
+		case "enter":
+			if m.allDone {
+				return nil, &AppMsg{Screen: ScreenVerify}
+			}
 		}
 
-		// Check if all done
+		// Check if all done — start transition timer
 		allDone := true
 		for _, t := range m.tasks {
 			if t.Status == types.StatusPending || t.Status == types.StatusRunning {
@@ -102,8 +129,11 @@ func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 				break
 			}
 		}
-		if allDone {
-			return nil, &AppMsg{Screen: ScreenVerify}
+		if allDone && !m.allDone {
+			m.allDone = true
+			m.transitioning = true
+			m.transitionSec = 3
+			return []tea.Cmd{m.transitionTick()}, nil
 		}
 	}
 	return nil, nil
@@ -255,6 +285,10 @@ func (m *ExecuteModel) View() string {
 			sb.WriteString(lipgloss.NewStyle().
 				Foreground(m.theme.Warning).
 				Render("⚠ Some tasks failed — review in Verify"))
+		} else if m.transitioning {
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(m.theme.Success).
+				Render(fmt.Sprintf("✓ All tasks complete — transitioning to Verify in %ds (Esc to cancel)", m.transitionSec)))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().
 				Foreground(m.theme.Success).
@@ -265,7 +299,15 @@ func (m *ExecuteModel) View() string {
 	return sb.String()
 }
 
-// renderMetricsHeader renders the execution metrics dashboard.
+// transitionTick returns a tea.Cmd that emits a TransitionTickMsg after 1 second.
+func (m *ExecuteModel) transitionTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return TransitionTickMsg{}
+	})
+}
+
+// TransitionTickMsg is emitted every second during the transition countdown.
+type TransitionTickMsg struct{}
 func (m *ExecuteModel) renderMetricsHeader() string {
 	// Calculate elapsed time
 	elapsed := time.Since(m.startedAt)
