@@ -291,15 +291,31 @@ func (m *PlanModel) renderDiffPreview() string {
 	sb.WriteString("Predicted File Changes:\n\n")
 
 	for _, task := range m.tasks {
+		if len(task.Files) == 0 {
+			continue
+		}
+
+		// Task header
+		taskHeaderStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Brand).
+			Bold(true)
+		sb.WriteString(taskHeaderStyle.Render(fmt.Sprintf("Task %d: %s", task.ID, task.Description)))
+		sb.WriteString(fmt.Sprintf(" (%d files)\n", len(task.Files)))
+
+		// Files under this task
 		for _, f := range task.Files {
 			action := "+"
+			actionStyle := lipgloss.NewStyle().Foreground(m.theme.Success)
 			if task.Action == "Modify" {
 				action = "~"
+				actionStyle = lipgloss.NewStyle().Foreground(m.theme.Warning)
 			} else if task.Action == "Delete" {
 				action = "-"
+				actionStyle = lipgloss.NewStyle().Foreground(m.theme.Error)
 			}
-			sb.WriteString(fmt.Sprintf("  %s %s\n", action, f))
+			sb.WriteString(fmt.Sprintf("  %s %s\n", actionStyle.Render(action), f))
 		}
+		sb.WriteString("\n")
 	}
 
 	return sb.String()
