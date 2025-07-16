@@ -165,8 +165,15 @@ func (m *ExecuteModel) View() string {
 		Width: m.width - 4,
 		Theme: m.theme,
 	}
-	sb.WriteString(fmt.Sprintf("%d/%d tasks  %s\n\n",
-		completed+skipped, total, segBar.Render()))
+	sb.WriteString(fmt.Sprintf("%d/%d tasks completed", completed, total))
+	if skipped > 0 {
+		sb.WriteString(fmt.Sprintf(" (%d skipped)", skipped))
+	}
+	if failed > 0 {
+		sb.WriteString(fmt.Sprintf(" (%d failed)", failed))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(segBar.Render())
 
 	// Task list
 	for i, task := range m.tasks {
