@@ -14,13 +14,15 @@ import (
 
 // VerifyModel displays verification results for each task.
 type VerifyModel struct {
-	theme    theme.Theme
-	tasks    []types.Task
-	results  map[int]workflow.VerificationResult
-	selected int
-	width    int
-	height   int
-	spinner  spinner.Model
+	theme           theme.Theme
+	tasks           []types.Task
+	results         map[int]workflow.VerificationResult
+	selected        int
+	width           int
+	height          int
+	spinner         spinner.Model
+	confirmHeal     bool // awaiting self-heal confirmation
+	confirmHealTask int  // task ID being confirmed for heal
 }
 
 // NewVerifyModel creates a Verify screen model. width/height are
@@ -57,6 +59,26 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		return []tea.Cmd{cmd}, nil
 
 	case tea.KeyMsg:
+		// Handle self-heal confirmation
+		if m.confirmHeal {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				// Confirm self-heal
+				for i := range m.tasks {
+					if m.tasks[i].ID == m.confirmHealTask && m.tasks[i].Status == types.StatusFailed {
+						m.tasks[i].Status = types.StatusPending
+						break
+					}
+				}
+				m.confirmHeal = false
+				return nil, nil
+			case "n", "N", "esc":
+				m.confirmHeal = false
+				return nil, nil
+			}
+			return nil, nil
+		}
+
 		switch msg.String() {
 		case "up", "k":
 			if m.selected > 0 {
@@ -67,10 +89,10 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 				m.selected++
 			}
 		case "h", "H":
-			// Self-heal selected task: reset failed task to pending for re-execution
-			// H-13: bounds check covers both single-task and multi-task selections.
+			// Self-heal: show confirmation before resetting
 			if m.selected >= 0 && m.selected < len(m.tasks) && m.tasks[m.selected].Status == types.StatusFailed {
-				m.tasks[m.selected].Status = types.StatusPending
+				m.confirmHeal = true
+				m.confirmHealTask = m.tasks[m.selected].ID
 			}
 		case "s", "S":
 			// Skip selected task
@@ -98,6 +120,11 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 func (m *VerifyModel) View() string {
 	if m.width == 0 {
 		return m.spinner.View() + " Loading verify..."
+	}
+
+	// Show self-heal confirmation dialog
+	if m.confirmHeal {
+		return m.renderHealConfirmation()
 	}
 
 	var sb strings.Builder
@@ -182,4 +209,18 @@ func (m *VerifyModel) cross(text string) string {
 	return lipgloss.NewStyle().
 		Foreground(m.theme.Error).
 		Render(fmt.Sprintf("    ✗ %s\n", text))
+}
+
+func (m *VerifyModel) renderHealConfirmation() string {
+	prompt := fmt.Sprintf("Self-heal task %d?\n\n(Y/N) — Press Y to attempt heal, N to cancel", m.confirmHealTask)
+
+	confirmStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color(m.theme.SurfaceElevated)).
+		Foreground(lipgloss.Color(m.theme.TextPrimary)).
+		Padding(1, 2).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color(m.theme.Warning))
+
+	rendered := confirmStyle.Render(prompt)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)
 }
