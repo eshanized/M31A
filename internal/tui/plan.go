@@ -112,7 +112,7 @@ func (m *PlanModel) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("[A]ccept  [R]etry  [D]iff  Tab=Graph"))
+		Render("[A]ccept  [R]etry  [D]iff  Tab=Graph  [Esc] Back  [↑/↓] Navigate  [Enter] Select"))
 	sb.WriteString("\n\n")
 
 	if m.showGraph {
