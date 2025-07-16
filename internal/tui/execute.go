@@ -213,8 +213,8 @@ func (m *ExecuteModel) View() string {
 		case types.StatusDone:
 			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Success).Render("[✓]")
 		case types.StatusRunning:
-			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Brand).Render("[▶]")
-			extra = "  ← running"
+			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render("[▶]")
+			extra = "  " + lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render("← running") + " " + m.spinner.View()
 		case types.StatusSkipped:
 			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Warning).Render("[-]")
 			extra = "  ← skipped"
