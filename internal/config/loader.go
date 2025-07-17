@@ -418,7 +418,14 @@ func validateConfig(cfg *Config) error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("%w: %v", ErrValidation, errs)
+		var b strings.Builder
+		b.WriteString("Invalid configuration:\n")
+		for _, err := range errs {
+			b.WriteString("- ")
+			b.WriteString(err.Error())
+			b.WriteString("\n")
+		}
+		return fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
 	return nil
 }

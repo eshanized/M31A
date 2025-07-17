@@ -126,7 +126,7 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 		return &ConsolidationResult{
 			Success:    false,
 			DurationMs: time.Since(start).Milliseconds(),
-			Error:      "cannot consolidate: paused, too few messages, or nothing to consolidate",
+			Error:      "Nothing to compress yet — conversation is still short",
 		}
 	}
 
@@ -136,7 +136,7 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 		return &ConsolidationResult{
 			Success:    false,
 			DurationMs: time.Since(start).Milliseconds(),
-			Error:      "no messages to consolidate",
+			Error:      "No messages available for compression — try having a longer conversation first",
 		}
 	}
 
