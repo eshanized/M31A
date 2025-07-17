@@ -554,6 +554,8 @@ func TestIsContextExceeded(t *testing.T) {
 		{"400 without context keywords", 400, `{"error":{"message":"invalid parameter"}}`, false},
 		{"context in unrelated error", 400, `{"error":{"message":"context is required"}}`, false},
 		{"case insensitive", 400, `{"error":{"message":"CONTEXT_LENGTH_EXCEEDED"}}`, true},
+		{"context window exceeded", 400, `{"error":{"message":"context window exceeded"}}`, true},
+		{"bad request no context", 400, `{"error":{"message":"bad request"}}`, false},
 	}
 
 	for _, tt := range tests {
