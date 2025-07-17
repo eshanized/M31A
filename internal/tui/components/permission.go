@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -69,12 +70,13 @@ func (m *PermissionModal) Render(width, height int) string {
 		riskLabel,
 	)
 
+	highlighted := highlightCommand(m.request.Command, m.theme)
 	cmdBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.Border).
 		Padding(0, 1).
 		Width(modalWidth - 6).
-		Render(m.request.Command)
+		Render(highlighted)
 
 	keys := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
@@ -211,4 +213,32 @@ func formatDuration(d time.Duration) string {
 	mins := totalSecs / 60
 	secs := totalSecs % 60
 	return fmt.Sprintf("%d:%02d", mins, secs)
+}
+
+func highlightCommand(cmd string, t theme.Theme) string {
+	if cmd == "" {
+		return cmd
+	}
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return cmd
+	}
+
+	var result strings.Builder
+	cmdStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	argStyle := lipgloss.NewStyle().Foreground(t.TextPrimary)
+	pipeStyle := lipgloss.NewStyle().Foreground(t.Warning)
+
+	result.WriteString(cmdStyle.Render(parts[0]))
+	for _, part := range parts[1:] {
+		result.WriteString(" ")
+		if part == "|" || part == "&&" || part == "||" || part == ">" || part == ">>" || part == "<" {
+			result.WriteString(pipeStyle.Render(part))
+		} else if strings.HasPrefix(part, "-") {
+			result.WriteString(argStyle.Render(part))
+		} else {
+			result.WriteString(argStyle.Render(part))
+		}
+	}
+	return result.String()
 }

@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -65,7 +66,7 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		truncated = result.Truncated
 		if isBinaryContent(output) {
 			isBinary = true
-			output = "[binary content]"
+			output = fmt.Sprintf("[binary content, %d bytes]", len(output))
 		} else {
 			output = SanitizeOutput(output)
 		}
@@ -85,7 +86,11 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		tc.durationMs = result.DurationMs
 	}
 
-	lineCount := strings.Count(output, "\n") + 1
+	trimmed := strings.TrimRight(output, "\n")
+	lineCount := strings.Count(trimmed, "\n") + 1
+	if trimmed == "" {
+		lineCount = 0
+	}
 	if lineCount > 20 {
 		tc.collapsed = true
 	}
@@ -144,6 +149,9 @@ func (c *ToolCard) renderInline(width int) string {
 	case ToolSuccess:
 		if c.truncated {
 			desc = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("completed (truncated)")
+		} else if c.collapsed && c.output != "" {
+			lineCount := strings.Count(c.output, "\n") + 1
+			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("completed [+%d lines — Space to expand]", lineCount))
 		} else {
 			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("completed")
 		}
