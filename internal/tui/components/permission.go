@@ -84,9 +84,22 @@ func (m *PermissionModal) Render(width, height int) string {
 		Faint(true).
 		Render("[Esc] Exit")
 
-	countdown := lipgloss.NewStyle().
-		Foreground(m.theme.Warning).
-		Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(m.Remaining())))
+	remaining := m.Remaining()
+	var countdown string
+	if remaining <= 0 {
+		countdown = lipgloss.NewStyle().
+			Foreground(m.theme.Error).
+			Bold(true).
+			Render("Tool will be rejected")
+	} else if remaining <= 30*time.Second {
+		countdown = lipgloss.NewStyle().
+			Foreground(m.theme.Error).
+			Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(remaining)))
+	} else {
+		countdown = lipgloss.NewStyle().
+			Foreground(m.theme.Warning).
+			Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(remaining)))
+	}
 
 	// Rule context section (displayed when a permission rule matched)
 	var ruleInfo string

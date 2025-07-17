@@ -15,32 +15,34 @@ import (
 )
 
 type Dispatcher struct {
-	mu             sync.RWMutex
-	tools          map[string]types.Tool
-	permissions    map[string]bool
-	requestCh      chan PermissionRequest
-	responseCh     chan PermissionResponse
-	todoWrite      *TodoWrite
-	questionReqCh  chan QuestionRequest
-	questionRespCh chan QuestionResponse
-	rules          []config.PermissionRule
-	originalRules  []config.PermissionRule
-	agents         map[string]config.PermissionsAgentConfig
-	activeAgent    string
+	mu               sync.RWMutex
+	tools            map[string]types.Tool
+	permissions      map[string]bool
+	requestCh        chan PermissionRequest
+	responseCh       chan PermissionResponse
+	todoWrite        *TodoWrite
+	questionReqCh    chan QuestionRequest
+	questionRespCh   chan QuestionResponse
+	rules            []config.PermissionRule
+	originalRules    []config.PermissionRule
+	agents           map[string]config.PermissionsAgentConfig
+	activeAgent      string
+	permissionTimeout int
 }
 
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
-		tools:          make(map[string]types.Tool),
-		permissions:    make(map[string]bool),
-		requestCh:      make(chan PermissionRequest, 8),
-		responseCh:     make(chan PermissionResponse),
-		questionReqCh:  make(chan QuestionRequest, 4),
-		questionRespCh: make(chan QuestionResponse),
-		rules:          []config.PermissionRule{},
-		originalRules:  []config.PermissionRule{},
-		agents:         make(map[string]config.PermissionsAgentConfig),
-		activeAgent:    "default",
+		tools:            make(map[string]types.Tool),
+		permissions:      make(map[string]bool),
+		requestCh:        make(chan PermissionRequest, 8),
+		responseCh:       make(chan PermissionResponse),
+		questionReqCh:    make(chan QuestionRequest, 4),
+		questionRespCh:   make(chan QuestionResponse),
+		rules:            []config.PermissionRule{},
+		originalRules:    []config.PermissionRule{},
+		agents:           make(map[string]config.PermissionsAgentConfig),
+		activeAgent:      "default",
+		permissionTimeout: 300, // default 300 seconds
 	}
 	if cfg != nil {
 		if cfg.Rules != nil {
@@ -51,6 +53,9 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		}
 		if cfg.Agents != nil {
 			d.agents = cfg.Agents
+		}
+		if cfg.TimeoutSeconds > 0 {
+			d.permissionTimeout = cfg.TimeoutSeconds
 		}
 	}
 	return d

@@ -580,7 +580,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prevScreen = m.screen
 		m.screen = ScreenPermission
 		t := m.themeManager.Current()
-		pm := components.NewPermissionModal(msg.Request, t, 5*time.Minute)
+		timeout := time.Duration(msg.Request.TimeoutSecs) * time.Second
+		if timeout <= 0 {
+			timeout = components.DefaultPermissionTimeout
+		}
+		pm := components.NewPermissionModal(msg.Request, t, timeout)
 		m.permissionModal = pm
 		return m, tea.Batch(
 			permissionListenerCmd(m.dispatcher),

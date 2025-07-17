@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/eshanized/M31A/internal/config"
@@ -121,7 +122,7 @@ func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, ris
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
-		TimeoutSecs: 300,
+		TimeoutSecs: d.permissionTimeout,
 		RuleTool:    pctx.RuleTool,
 		RulePattern: pctx.RulePattern,
 		RuleAction:  pctx.RuleAction,
@@ -133,9 +134,15 @@ func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, ris
 		return m31errors.ErrPermissionDenied
 	}
 
+	// Create a timeout context for the permission request
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
+	defer cancel()
+
 	var resp PermissionResponse
 	select {
 	case resp = <-d.responseCh:
+	case <-timeoutCtx.Done():
+		return m31errors.ErrPermissionDenied
 	case <-ctx.Done():
 		return ctx.Err()
 	}
