@@ -92,6 +92,9 @@ func (m *CommandPaletteModel) Update(msg tea.Msg) tea.Cmd {
 		m.height = msg.Height
 	case tea.KeyMsg:
 		switch msg.Type {
+		case tea.KeyEsc:
+			m.Close()
+			return nil
 		case tea.KeyUp:
 			if m.selected > 0 {
 				m.selected--

@@ -8,17 +8,45 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleHelp lists all registered commands with their descriptions.
+// handleHelp lists all registered commands with their descriptions, grouped by category.
 func handleHelp(args []string, ctx CommandContext) CommandResult {
+	// Per-command help
+	if len(args) > 0 {
+		cmd := strings.TrimPrefix(args[0], "/")
+		r := DefaultCommands()
+		if desc, ok := r.descriptions[cmd]; ok {
+			return CommandResult{Success: true, Message: fmt.Sprintf("/%s — %s", cmd, desc)}
+		}
+		return CommandResult{Success: true, Message: fmt.Sprintf("No additional help available for /%s", cmd)}
+	}
+
 	r := DefaultCommands()
-	names := r.List()
+
+	categories := []struct {
+		name    string
+		commands []string
+	}{
+		{"Session", []string{"new", "resume", "sessions", "fork", "prev", "next", "clear"}},
+		{"Workflow", []string{"workflow", "plan", "execute", "verify", "ship", "pause", "resume-task"}},
+		{"Config", []string{"settings", "provider", "model", "theme", "key", "config"}},
+		{"Git", []string{"commit", "log", "rollback", "diff"}},
+		{"AI", []string{"compress", "optimize", "models"}},
+		{"System", []string{"help", "status", "health", "log", "version"}},
+	}
 
 	var b strings.Builder
-	b.WriteString("Available commands:\n")
-	for _, name := range names {
-		desc := r.descriptions[name]
-		b.WriteString(fmt.Sprintf("  /%s — %s\n", name, desc))
+	for _, cat := range categories {
+		b.WriteString(fmt.Sprintf("\n%s:\n", cat.name))
+		for _, name := range cat.commands {
+			if desc, ok := r.descriptions[name]; ok {
+				b.WriteString(fmt.Sprintf("  /%-18s %s\n", name, desc))
+			}
+		}
 	}
+
+	b.WriteString("\nShell Mode:\n")
+	b.WriteString("  !<command>       Run a shell command directly (e.g., !ls -la)\n")
+
 	b.WriteString("\nNote: command chaining with ';' is not supported. Use each command separately.")
 	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 }

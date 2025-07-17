@@ -102,7 +102,7 @@ func (m *ReplModel) View() string {
 			Padding(0, 1).
 			Bold(true).
 			Width(m.width - m.sidebarWidth)
-		banner := bannerStyle.Render("[!] " + m.fallbackBanner)
+		banner := bannerStyle.Render("[!] " + m.fallbackBanner + "  [x] Dismiss")
 		replContent = lipgloss.JoinVertical(lipgloss.Top, banner, replContent)
 	}
 
