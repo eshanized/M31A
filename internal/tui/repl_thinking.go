@@ -145,7 +145,7 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 	m.activeQuestion = &msg
 
 	// Add a system message showing the question
-	questionText := components.FormatQuestion(msg.Question, msg.Header, msg.Options, m.width, m.theme)
+	questionText := components.FormatQuestion(msg.Question, msg.Header, msg.Options, m.width, m.theme, msg.TimeoutSecs)
 	questionMsg := types.Message{
 		Role:      "system",
 		Content:   questionText,

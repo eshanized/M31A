@@ -523,6 +523,7 @@ func questionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
 			Header:      req.Header,
 			Options:     req.Options,
 			AllowCustom: req.AllowCustom,
+			TimeoutSecs: req.TimeoutSecs,
 			ResponseCh:  dispatcher.QuestionResponseCh(),
 		}
 	}

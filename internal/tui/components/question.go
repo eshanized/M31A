@@ -151,7 +151,7 @@ func (m *QuestionModel) SetWidth(width int) {
 }
 
 // FormatQuestion formats a question for display in a compact form (e.g., in the REPL).
-func FormatQuestion(question, header string, options []string, width int, t theme.Theme) string {
+func FormatQuestion(question, header string, options []string, width int, t theme.Theme, timeoutSecs ...int) string {
 	var b strings.Builder
 
 	if header != "" {
@@ -171,6 +171,10 @@ func FormatQuestion(question, header string, options []string, width int, t them
 		for i, opt := range options {
 			b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, opt))
 		}
+	}
+
+	if len(timeoutSecs) > 0 && timeoutSecs[0] > 0 {
+		b.WriteString(fmt.Sprintf("\n  Timeout: %ds — no response uses default", timeoutSecs[0]))
 	}
 
 	return lipgloss.NewStyle().

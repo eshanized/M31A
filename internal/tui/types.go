@@ -108,6 +108,7 @@ type QuestionRequestMsg struct {
 	Header      string
 	Options     []string
 	AllowCustom bool
+	TimeoutSecs int
 	ResponseCh  chan tools.QuestionResponse
 }
 
