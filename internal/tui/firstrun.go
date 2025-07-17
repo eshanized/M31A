@@ -342,7 +342,7 @@ func (m *FirstRunModel) renderFeatureCards() string {
 		{"🤖", "AI-Powered", "Natural language to code"},
 		{"⚡", "Fast Execution", "Parallel task execution"},
 		{"🔄", "Self-Healing", "Auto-fixes failed tasks"},
-		{"", "Git Integrated", "Auto-commits your work"},
+		{"⚙", "Git Integrated", "Auto-commits your work"},
 	}
 
 	cards := make([]string, len(features))
@@ -416,10 +416,10 @@ func (m *FirstRunModel) viewProviderSelect() string {
 	}
 
 	providers := []provider{
-		{key: "1", icon: "◆", name: "OpenRouter", desc: "Access 100+ models", keyFormat: "sk-or-v1-..."},
-		{key: "2", icon: "◈", name: "Zen", desc: "Fast & cost-effective", keyFormat: "zk-..."},
-		{key: "3", icon: "◆◈", name: "Both", desc: "OpenRouter + Zen", keyFormat: ""},
-		{key: "4", icon: "○", name: "Skip", desc: "Start without API key", keyFormat: ""},
+		{key: "1", icon: "◆", name: "OpenRouter", desc: "100+ models, pay-per-use", keyFormat: "sk-or-v1-..."},
+		{key: "2", icon: "◈", name: "Zen", desc: "Fast inference, competitive pricing", keyFormat: "zk-..."},
+		{key: "3", icon: "◆◈", name: "Both", desc: "OpenRouter + Zen (auto-fallback)", keyFormat: ""},
+		{key: "4", icon: "○", name: "Skip", desc: "Configure later via /settings", keyFormat: ""},
 	}
 
 	var lines []string
