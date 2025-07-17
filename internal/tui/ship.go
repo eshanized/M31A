@@ -32,11 +32,12 @@ type ShipSummary struct {
 
 // ShipModel displays the session completion summary.
 type ShipModel struct {
-	theme   theme.Theme
-	summary ShipSummary
-	width   int
-	height  int
-	spinner spinner.Model
+	theme            theme.Theme
+	summary          ShipSummary
+	width            int
+	height           int
+	spinner          spinner.Model
+	confirmNewSession bool
 }
 
 // NewShipModel creates a Ship screen model. width/height are required
@@ -74,11 +75,22 @@ func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "n", "N":
-			// New session
-			return nil, &AppMsg{Screen: ScreenFirstRun}
-		case "r", "R":
-			return nil, &AppMsg{Screen: ScreenREPL}
+			if m.confirmNewSession {
+				return nil, &AppMsg{Screen: ScreenFirstRun}
+			}
+			m.confirmNewSession = true
+			return nil, nil
+		case "y", "Y":
+			if m.confirmNewSession {
+				return nil, &AppMsg{Screen: ScreenFirstRun}
+			}
 		case "esc":
+			if m.confirmNewSession {
+				m.confirmNewSession = false
+				return nil, nil
+			}
+			return nil, &AppMsg{Screen: ScreenREPL}
+		case "r", "R":
 			return nil, &AppMsg{Screen: ScreenREPL}
 		}
 	}
@@ -137,9 +149,15 @@ func (m *ShipModel) View() string {
 
 	// Keys
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("[N] New session  [R] REPL  [Esc] Back"))
+	if m.confirmNewSession {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(m.theme.Warning).
+			Render("Start new session? Current session will be archived. [Y] Confirm  [Esc] Cancel"))
+	} else {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Render("[N] New session  [R] REPL  [Esc] Back"))
+	}
 
 	return sb.String()
 }
@@ -248,11 +266,16 @@ func (m *ShipModel) renderNextActions() string {
 		Foreground(m.theme.TextSecondary).
 		Render("Suggested next actions")
 
-	actions := []string{
-		"Run tests to verify changes",
-		"Review changes with /diff",
-		"Commit any remaining changes",
+	var actions []string
+	if m.summary.TaskFailed > 0 {
+		actions = append(actions, "Review failed tasks with /verify")
+		actions = append(actions, "Check /rollback to revert problematic commits")
 	}
+	actions = append(actions, "Review changes with /diff")
+	if len(m.summary.Commits) > 0 {
+		actions = append(actions, "Push commits to remote")
+	}
+	actions = append(actions, "Start a new session with [N]")
 
 	actionStyle := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).

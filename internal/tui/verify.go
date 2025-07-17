@@ -80,6 +80,8 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		}
 
 		switch msg.String() {
+		case "esc":
+			return nil, &AppMsg{Screen: ScreenREPL}
 		case "up", "k":
 			if m.selected > 0 {
 				m.selected--
@@ -171,6 +173,15 @@ func (m *VerifyModel) View() string {
 				sb.WriteString(m.cross("Tests failed"))
 			}
 
+			// Show error details for failed checks
+			if len(result.Errors) > 0 {
+				for _, err := range result.Errors {
+					sb.WriteString(lipgloss.NewStyle().
+						Foreground(m.theme.Error).
+						Render(fmt.Sprintf("    %s\n", err)))
+				}
+			}
+
 		if !result.FilesExist || !result.SyntaxOK || !result.TestsOK {
 			if task.Status == types.StatusUnrecoverable {
 				sb.WriteString(lipgloss.NewStyle().
@@ -207,7 +218,7 @@ func (m *VerifyModel) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("H=Self-heal  S=Skip"))
+		Render("H=Self-heal  S=Skip  Esc=Back"))
 
 	return sb.String()
 }
