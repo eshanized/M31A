@@ -178,6 +178,10 @@ func (m *VerifyModel) View() string {
 					Bold(true).
 					Render("  [UNRECOVERABLE]"))
 				sb.WriteString("\n")
+				sb.WriteString(lipgloss.NewStyle().
+					Foreground(m.theme.TextSecondary).
+					Render("  Run git bisect to find the issue · Check /rollback or fix manually"))
+				sb.WriteString("\n")
 			} else {
 				healHint := "[H] Self-heal"
 				if task.HealsAttempted > 0 {
