@@ -87,3 +87,25 @@ func TestSSEParser_EmptyStream(t *testing.T) {
 		t.Fatalf("expected EOF, got %v", err)
 	}
 }
+
+func TestSSEParser_DoneWithWhitespace(t *testing.T) {
+	resp := bodyReader("data: [DONE] \n\n")
+	p := NewSSEParser(resp)
+	defer p.Close()
+
+	_, _, err := p.Next()
+	if err != io.EOF {
+		t.Fatalf("expected EOF for [DONE] with trailing whitespace, got %v", err)
+	}
+}
+
+func TestSSEParser_DoneWithoutWhitespace(t *testing.T) {
+	resp := bodyReader("data: [DONE]\n\n")
+	p := NewSSEParser(resp)
+	defer p.Close()
+
+	_, _, err := p.Next()
+	if err != io.EOF {
+		t.Fatalf("expected EOF for [DONE] without whitespace, got %v", err)
+	}
+}

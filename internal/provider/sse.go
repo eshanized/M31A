@@ -54,7 +54,7 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	for _, line := range lines {
 		if strings.HasPrefix(line, "data: ") {
 			payload := strings.TrimPrefix(line, "data: ")
-			if payload == "[DONE]" {
+			if strings.TrimSpace(payload) == "[DONE]" {
 				return "", "", io.EOF
 			}
 			dataParts = append(dataParts, payload)
