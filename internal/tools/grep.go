@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -138,6 +139,8 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("rg stdout pipe failed: %w", err)
 	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return types.ToolResult{}, fmt.Errorf("rg start failed: %w", err)
 	}
@@ -175,6 +178,10 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 		// rg exits with code 1 when no matches found
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return types.ToolResult{Output: "No results found for pattern"}, nil
+		}
+		stderrStr := strings.TrimSpace(stderr.String())
+		if stderrStr != "" {
+			return types.ToolResult{}, fmt.Errorf("rg execution failed: %w\nstderr: %s", err, stderrStr)
 		}
 		return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
 	}
