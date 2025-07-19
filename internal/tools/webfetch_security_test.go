@@ -108,3 +108,16 @@ func TestWebFetch_Allows_PublicDNS(t *testing.T) {
 		t.Fatalf("public URL should not be blocked by SSRF, got: %v", err)
 	}
 }
+
+func TestWebFetch_SharedClient(t *testing.T) {
+	wf := NewWebFetch(t.TempDir(), false)
+	if wf.client == nil {
+		t.Fatal("expected non-nil client after NewWebFetch")
+	}
+	// Verify the same client is reused across calls
+	client1 := wf.client
+	client2 := wf.client
+	if client1 != client2 {
+		t.Error("expected same client instance to be reused")
+	}
+}

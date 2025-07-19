@@ -18,13 +18,32 @@ import (
 type WebFetch struct {
 	sessionsDir     string
 	allowPrivateIPs bool
+	client          *http.Client
 }
 
 func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
-	return &WebFetch{
+	wf := &WebFetch{
 		sessionsDir:     sessionsDir,
 		allowPrivateIPs: allowPrivateIPs,
 	}
+	wf.client = &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			// SSRF protection: check each redirect target
+			if err := wf.resolveAndCheck(req.Context(), req.URL.String()); err != nil {
+				slog.Warn("WebFetch redirect blocked by SSRF protection",
+					"url", req.URL.String(), "error", err)
+				return err
+			}
+			return nil
+		},
+	}
+	return wf
 }
 
 // isPrivateIP returns true if the IP is loopback, link-local, RFC1918,
@@ -174,23 +193,11 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
-	// Execute request
-	client := &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("stopped after 5 redirects")
-			}
-			// SSRF protection: check each redirect target
-			if err := t.resolveAndCheck(ctx, req.URL.String()); err != nil {
-				slog.Warn("WebFetch redirect blocked by SSRF protection",
-					"url", req.URL.String(), "error", err)
-				return err
-			}
-			return nil
-		},
-	}
-	resp, err := client.Do(req)
+	// Execute request — use shared client with per-request timeout via context
+	reqCtx, reqCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer reqCancel()
+	req = req.WithContext(reqCtx)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("request failed: %w", err)
 	}
