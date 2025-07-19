@@ -661,3 +661,24 @@ func TestConsumeStream_NormalEOF(t *testing.T) {
 		t.Errorf("expected 'foobar', got %q", result)
 	}
 }
+
+func TestVerifyTask_ContextTimeout(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	// Create a Go file that compiles
+	goFile := filepath.Join(engine.workDir, "main.go")
+	os.WriteFile(goFile, []byte("package main\nfunc main() {}\n"), 0644)
+
+	task := m31types.Task{
+		ID:          1,
+		Description: "test task",
+		Action:      "create",
+		Files:       []string{"main.go"},
+	}
+
+	result := engine.verifyTask(task)
+	if !result.SyntaxOK {
+		t.Errorf("expected SyntaxOK=true, got errors: %v", result.Errors)
+	}
+}

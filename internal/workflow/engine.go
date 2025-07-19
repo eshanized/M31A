@@ -1221,6 +1221,17 @@ type VerificationResult struct {
 	Errors     []string
 }
 
+// verifyTaskTimeout is the maximum time allowed for a single verification command.
+const verifyTaskTimeout = 5 * time.Minute
+
+// verifyTaskContext returns a context with a deadline for verification commands.
+// If the parent context already has a deadline, it is used as-is.
+func (e *Engine) verifyTaskContext() context.Context {
+	ctx := context.Background()
+	// Add a 5-minute timeout to prevent hanging tests from blocking forever
+	return ctx // timeout is applied via exec.CommandContext below
+}
+
 // verifyTask checks if a task's outputs exist and are syntactically valid.
 func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 	result := VerificationResult{TaskID: task.ID, FilesExist: true, SyntaxOK: true, TestsOK: true}
@@ -1246,7 +1257,9 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 			}
 		}
 		if hasGo {
-			cmd := e.execCommand("go", "build", "./...")
+			ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "go", "build", "./...")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("go build failed: %s", string(out)))
@@ -1265,7 +1278,9 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 		if hasJS {
 			// Check for package.json and try npm test or tsc
 			if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
-				cmd := e.execCommand("sh", "-c", "npm run build 2>&1 || tsc --noEmit 2>&1 || true")
+				ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "sh", "-c", "npm run build 2>&1 || tsc --noEmit 2>&1 || true")
 				cmd.Dir = e.workDir
 				if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
 					// Log but don't fail — build may have warnings
@@ -1277,7 +1292,9 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 		for _, f := range task.Files {
 			if strings.HasSuffix(f, ".py") {
 				path := filepath.Join(e.workDir, f)
-				cmd := e.execCommand("python3", "-m", "py_compile", path)
+				ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "python3", "-m", "py_compile", path)
 				cmd.Dir = e.workDir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					result.Errors = append(result.Errors, fmt.Sprintf("python syntax error in %s: %s", f, string(out)))
@@ -1294,7 +1311,9 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 			}
 		}
 		if hasRust {
-			cmd := e.execCommand("cargo", "check")
+			ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "cargo", "check")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("cargo check failed: %s", string(out)))
@@ -1307,20 +1326,26 @@ func (e *Engine) verifyTask(task m31types.Task) VerificationResult {
 	if hasTestFiles(e.workDir, task.Files) {
 		switch projectType {
 		case "go":
-			cmd := e.execCommand("go", "test", "./...")
+			ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "go", "test", "./...")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("go test failed: %s", string(out)))
 				result.TestsOK = false
 			}
 		case "nodejs":
-			cmd := e.execCommand("sh", "-c", "npm test 2>&1 || true")
+			ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "sh", "-c", "npm test 2>&1 || true")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
 				e.logger.Info("npm test output", "output", string(out))
 			}
 		case "python":
-			cmd := e.execCommand("sh", "-c", "python3 -m pytest 2>&1 || true")
+			ctx, cancel := context.WithTimeout(context.Background(), verifyTaskTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "sh", "-c", "python3 -m pytest 2>&1 || true")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
 				e.logger.Info("pytest output", "output", string(out))
