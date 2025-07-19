@@ -148,7 +148,10 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		if count >= maxResults {
-			truncated = true
+			// Check if there are more results beyond the limit
+			if scanner.Scan() {
+				truncated = true
+			}
 			break
 		}
 		line := scanner.Text()
@@ -182,7 +185,7 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 
 	output := strings.Join(results, "\n")
 	if truncated {
-		output += fmt.Sprintf("\n[... %d more matches (limit: %d)]", count-maxResults, maxResults)
+		output += fmt.Sprintf("\n[... more matches (limit: %d)]", maxResults)
 	}
 
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
@@ -277,7 +280,7 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 
 	output := strings.Join(results, "\n")
 	if truncated {
-		output += fmt.Sprintf("\n[... %d more matches (limit: %d)]", len(results)-maxResults, maxResults)
+		output += fmt.Sprintf("\n[... more matches (limit: %d)]", maxResults)
 	}
 
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
