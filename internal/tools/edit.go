@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -193,9 +195,28 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 	}
 
 	// Write to temp file then rename
-	tmpPath := targetPath + ".m31a_edit_tmp"
-	if err := os.WriteFile(tmpPath, []byte(newContent), 0644); err != nil {
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return fmt.Errorf("cannot generate temp name: %w", err)
+	}
+	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("create temp file failed: %w", err)
+	}
+	if _, err := tmpFile.WriteString(newContent); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("write failed: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync failed: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close failed: %w", err)
 	}
 	if err := os.Rename(tmpPath, targetPath); err != nil {
 		os.Remove(tmpPath)
