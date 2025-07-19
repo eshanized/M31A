@@ -293,19 +293,19 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		rp := NewReplModel(tm.Current())
 		app.screen = ScreenREPL
 		app.replModel = &rp
-		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
+		_ = app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
 		app.replModel.SetDispatcher(app.dispatcher)
 		app.replModel.SetCommandRegistry(app.cmdRegistry)
 		app.healthStatus = types.HealthStatus{
-			Status: "offline",
-			Error:  "No providers available — offline mode. History is readable but no new messages.",
+			Status:  "offline",
+			Error:   "No providers available — offline mode. History is readable but no new messages.",
 		}
 		app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
 	} else {
 		rp := NewReplModel(tm.Current())
 		app.screen = ScreenREPL
 		app.replModel = &rp
-		app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
+		_ = app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
 		app.replModel.SetDispatcher(app.dispatcher)
 		app.replModel.SetCommandRegistry(app.cmdRegistry)
 		app.healthStatus = types.HealthStatus{Status: "live"}
@@ -543,14 +543,14 @@ func formatDurationMs(ms int64) string {
 
 // cycleRecentModel cycles the active model through the recent models list.
 // Direction +1 = forward (newer), -1 = backward (older).
-func (m *AppState) cycleRecentModel(direction int) {
+func (m *AppState) cycleRecentModel(direction int) tea.Cmd {
 	if m.sessionManager == nil || m.activeProvider == "" {
-		return
+		return nil
 	}
 
 	data, err := m.sessionManager.LoadRecentModels()
 	if err != nil || len(data.Recent) == 0 {
-		return
+		return nil
 	}
 
 	// Find current model index in recent list
@@ -580,16 +580,17 @@ func (m *AppState) cycleRecentModel(direction int) {
 	// Look up model from active provider
 	provider, err := m.registry.Get(m.activeProvider)
 	if err != nil {
-		return
+		return nil
 	}
 	model, err := provider.GetModel(data.Recent[targetIdx])
 	if err != nil {
-		return
+		return nil
 	}
 
 	m.activeModel = model
+	var cmd tea.Cmd
 	if m.replModel != nil {
-		m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+		cmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
 		m.replModel.SetDispatcher(m.dispatcher)
 	}
 
@@ -600,6 +601,7 @@ func (m *AppState) cycleRecentModel(direction int) {
 	m.toastText = fmt.Sprintf("Model: %s", model.Name)
 	m.toastExpires = time.Now().Add(2 * time.Second)
 	m.toastType = "info"
+	return cmd
 }
 
 func calculateNextInterval(status types.HealthStatus) time.Duration {

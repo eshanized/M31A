@@ -238,13 +238,13 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 		}
 	case "cycle_model_forward":
 		if m.sessionManager != nil {
-			m.cycleRecentModel(+1)
-			return m, nil
+			cmd := m.cycleRecentModel(+1)
+			return m, cmd
 		}
 	case "cycle_model_backward":
 		if m.sessionManager != nil {
-			m.cycleRecentModel(-1)
-			return m, nil
+			cmd := m.cycleRecentModel(-1)
+			return m, cmd
 		}
 	case "toggle_theme":
 		if m.themeManager != nil {

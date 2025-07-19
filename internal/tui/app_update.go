@@ -325,12 +325,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Session switching: /fork, /prev, /next set SessionID to transition
 			if result.SessionID != nil && *result.SessionID != sessionID {
+				var providerCmd tea.Cmd
 				if sess, err := m.sessionManager.LoadSession(*result.SessionID); err == nil && sess != nil {
 					if m.replModel == nil {
 						rp := NewReplModel(m.themeManager.Current())
 						m.replModel = &rp
 					}
-					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					providerCmd = m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
 					m.replModel.SetDispatcher(m.dispatcher)
 					m.replModel.SetCommandRegistry(m.cmdRegistry)
 					// Replace messages with the loaded session's messages
@@ -347,9 +348,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
 				}
 				if result.Cmd != nil {
-					return m, tea.Batch(result.Cmd)
+					return m, tea.Batch(result.Cmd, providerCmd)
 				}
-				return m, nil
+				return m, providerCmd
 			}
 
 			if result.Screen != nil {
@@ -481,6 +482,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		var providerCmd tea.Cmd
 		if msg.Screen == ScreenREPL && m.replModel == nil {
 			rp := NewReplModel(m.themeManager.Current())
 			m.replModel = &rp
@@ -499,7 +501,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.dispatcher.SetSessionID(s.ID)
 				}
 			}
-			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+			providerCmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 			m.replModel.SetDispatcher(m.dispatcher)
 			m.replModel.SetCommandRegistry(m.cmdRegistry)
 			// Size the REPL immediately with current window dimensions
@@ -515,7 +517,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.modelSelector.Init()
 		}
 		m.screen = msg.Screen
-		return m, nil
+		return m, providerCmd
 
 	case FallbackEventMsg:
 		m.activeProvider = msg.To
@@ -523,6 +525,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Event:     msg,
 			Dismissed: false,
 			ShownAt:   time.Now(),
+		}
+		return m, nil
+
+	case ProviderModelsFetchedMsg:
+		if m.replModel != nil {
+			m.replModel.handleProviderModelsFetched(msg)
 		}
 		return m, nil
 
@@ -558,15 +566,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && event != nil {
 					m.activeProvider = event.To
 					if m.replModel != nil {
-						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+						fallbackCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
 						m.replModel.SetDispatcher(m.dispatcher)
 						m.replModel.Update(msg)
+						return m, tea.Batch(
+							func() tea.Msg {
+								return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
+							},
+							fallbackCmd,
+						)
 					}
-					return m, tea.Batch(
-						func() tea.Msg {
-							return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
-						},
-					)
 				}
 			}
 		}
@@ -880,6 +889,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// If the default model or provider changed, update active provider/model
+		var settingsCmd tea.Cmd
 		if m.config != nil && m.registry != nil {
 			cfgProvider := m.config.Provider.Default
 			if cfgProvider != "" && m.activeProvider != cfgProvider {
@@ -887,7 +897,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activeProvider = cfgProvider
 					// Fix C-1: guard against nil replModel
 					if m.replModel != nil {
-						m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
+						settingsCmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
 						m.replModel.SetDispatcher(m.dispatcher)
 					}
 				}
@@ -904,7 +914,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.headerCacheValid = false // H-10: invalidate header cache on model change
 								// Fix C-1: guard against nil replModel
 								if m.replModel != nil {
-									m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
+									settingsCmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
 									m.replModel.SetDispatcher(m.dispatcher)
 								}
 								break
@@ -922,6 +932,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			NextHealthTick(types.HealthCheckInterval),
 			NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
+			settingsCmd,
 		)
 
 	case SidebarRefreshMsg:
@@ -1011,7 +1022,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+				providerCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 				m.replModel.SetDispatcher(m.dispatcher)
 				m.initialized = true
 				// Init sidebar
@@ -1029,7 +1040,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 				cmds = append(cmds, healthCmd)
 				cmds = append(cmds,
-					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
+					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval),
+					providerCmd)
 			}
 		}
 		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
@@ -1076,12 +1088,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						rp := NewReplModel(m.themeManager.Current())
 						m.replModel = &rp
 					}
-					m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+					providerCmd := m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
 					m.replModel.SetDispatcher(m.dispatcher)
 					for _, msg := range sess.Messages {
 						m.replModel.AddMessage(msg)
 					}
 					m.currentOperation = fmt.Sprintf("Session %s loaded", appMsg.SessionID)
+					cmds = append(cmds, providerCmd)
 				} else {
 					m.currentOperation = fmt.Sprintf("Failed to load session %s", appMsg.SessionID)
 				}

@@ -701,7 +701,18 @@ func (m *ReplModel) SetSidebarWidth(sw int) {
 	m.textarea.SetWidth(replWidth)
 }
 
-func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) {
+// ProviderModelsFetchedMsg is returned when FetchModels completes asynchronously.
+type ProviderModelsFetchedMsg struct {
+	Models []types.ModelInfo
+	Model  *types.ModelInfo
+	Err    error
+}
+
+// SetProvider configures the active provider and returns a tea.Cmd that
+// asynchronously validates the model by fetching the provider's model catalog.
+// The returned cmd performs FetchModels in the background and emits a
+// ProviderModelsFetchedMsg when complete, keeping the TUI responsive.
+func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) tea.Cmd {
 	m.registry = registry
 	m.activeProvider = activeProvider
 	m.sessionID = sessionID
@@ -710,38 +721,50 @@ func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider stri
 
 	if model == nil || registry == nil {
 		m.activeModel = model
-		return
+		return nil
 	}
 
-	// L-18: Re-fetch model from new provider's catalog to validate it exists
+	m.activeModel = model
+
+	// Return an async command that validates the model against the provider's catalog
 	p := registry.ActiveProvider()
-	if p != nil {
-		models, err := p.FetchModels(context.Background())
-		if err == nil {
-			found := false
-			for _, m := range models {
-				if m.ID == model.ID {
-					found = true
-					break
-				}
-			}
-			if found {
-				// Refresh cached model info (pricing, context length may differ between providers)
-				if info, _ := p.GetModel(model.ID); info != nil {
+	if p == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		models, err := p.FetchModels(ctx)
+		return ProviderModelsFetchedMsg{Models: models, Model: model, Err: err}
+	}
+}
+
+// handleProviderModelsFetched processes the async result of SetProvider's FetchModels call.
+func (m *ReplModel) handleProviderModelsFetched(msg ProviderModelsFetchedMsg) {
+	if msg.Err != nil || msg.Model == nil {
+		return
+	}
+	found := false
+	for _, model := range msg.Models {
+		if model.ID == msg.Model.ID {
+			found = true
+			break
+		}
+	}
+	if found {
+		// Refresh cached model info (pricing, context length may differ between providers)
+		if m.registry != nil {
+			p := m.registry.ActiveProvider()
+			if p != nil {
+				if info, _ := p.GetModel(msg.Model.ID); info != nil {
 					m.activeModel = info
 					return
 				}
 			}
-			// Model not found on new provider
-			m.modelValid = false
-			m.activeModel = model
-			return
 		}
-		// FetchModels failed — keep existing model
-		m.activeModel = model
-		return
 	}
-	m.activeModel = model
+	// Model not found on new provider
+	m.modelValid = false
 }
 
 func (m *ReplModel) SetDispatcher(d *tools.Dispatcher) {
