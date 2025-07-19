@@ -196,3 +196,42 @@ func TestGlob_GlobType(t *testing.T) {
 		t.Error("expected non-empty description")
 	}
 }
+
+func TestGlob_RG_Sorted(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Create .gitignore to trigger rg path
+	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0644)
+	// Create files in reverse alphabetical order
+	os.WriteFile(filepath.Join(dir, "zebra.go"), []byte("package zebra"), 0644)
+	os.WriteFile(filepath.Join(dir, "apple.go"), []byte("package apple"), 0644)
+	os.WriteFile(filepath.Join(dir, "mango.go"), []byte("package mango"), 0644)
+
+	g := NewGlob(dir)
+	result, err := g.Execute(context.Background(), toolInput("pattern", "*.go"))
+	if err != nil {
+		t.Skipf("skipping rg-based test: %v", err)
+	}
+	// Check that results are sorted (apple before mango before zebra)
+	lines := strings.Split(result.Output, "\n")
+	appleIdx := -1
+	mangoIdx := -1
+	zebraIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "apple.go") {
+			appleIdx = i
+		}
+		if strings.Contains(line, "mango.go") {
+			mangoIdx = i
+		}
+		if strings.Contains(line, "zebra.go") {
+			zebraIdx = i
+		}
+	}
+	if appleIdx >= 0 && mangoIdx >= 0 && appleIdx > mangoIdx {
+		t.Errorf("expected apple.go before mango.go, got apple at %d, mango at %d", appleIdx, mangoIdx)
+	}
+	if mangoIdx >= 0 && zebraIdx >= 0 && mangoIdx > zebraIdx {
+		t.Errorf("expected mango.go before zebra.go, got mango at %d, zebra at %d", mangoIdx, zebraIdx)
+	}
+}

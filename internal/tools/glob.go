@@ -117,7 +117,7 @@ func (t *Glob) globWithDoublestar(pattern string) ([]string, error) {
 }
 
 func (t *Glob) globWithRG(pattern string) ([]string, error) {
-	cmd := exec.Command("rg", "--files", "--glob", pattern)
+	cmd := exec.Command("rg", "--files", "--sort", "path", "--glob", pattern)
 	cmd.Dir = t.workDir
 	out, err := cmd.Output()
 	if err != nil {
