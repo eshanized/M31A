@@ -487,14 +487,18 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 
 	for {
 		chunk, err := iterator.Next()
-		if chunk != nil && chunk.Delta != "" {
-			sb.WriteString(chunk.Delta)
-		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			// Preserve partial content before non-EOF errors
+			if chunk != nil && chunk.Delta != "" {
+				sb.WriteString(chunk.Delta)
+			}
 			return sb.String(), err
+		}
+		if chunk != nil && chunk.Delta != "" {
+			sb.WriteString(chunk.Delta)
 		}
 	}
 	return sb.String(), nil

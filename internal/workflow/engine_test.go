@@ -601,3 +601,63 @@ func TestEngine_PhasePromptComposition(t *testing.T) {
 		t.Error("Plan system prompt missing plan format instructions")
 	}
 }
+
+func TestConsumeStream_ErrorBeforeEOF(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	// Create a mock iterator that returns content then a non-EOF error
+	callCount := 0
+	iterator := &m31types.StreamIterator{
+		Next: func() (*m31types.StreamChunk, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return &m31types.StreamChunk{Delta: "hello "}, nil
+			case 2:
+				return &m31types.StreamChunk{Delta: "world"}, io.ErrUnexpectedEOF
+			default:
+				return nil, io.EOF
+			}
+		},
+		Close: func() error { return nil },
+	}
+
+	result, err := engine.consumeStream(iterator)
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
+	}
+	// Partial content before error should be preserved
+	if result != "hello world" {
+		t.Errorf("expected 'hello world', got %q", result)
+	}
+}
+
+func TestConsumeStream_NormalEOF(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	callCount := 0
+	iterator := &m31types.StreamIterator{
+		Next: func() (*m31types.StreamChunk, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return &m31types.StreamChunk{Delta: "foo"}, nil
+			case 2:
+				return &m31types.StreamChunk{Delta: "bar"}, nil
+			default:
+				return nil, io.EOF
+			}
+		},
+		Close: func() error { return nil },
+	}
+
+	result, err := engine.consumeStream(iterator)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result != "foobar" {
+		t.Errorf("expected 'foobar', got %q", result)
+	}
+}
