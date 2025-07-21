@@ -211,7 +211,7 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 			ToolName:    call.Name,
 			Command:     extractCommandString(call.Name, call.Input),
 			RiskLevel:   risk,
-			TimeoutSecs: 300,
+			TimeoutSecs: d.permissionTimeout,
 		}
 
 		select {
@@ -220,9 +220,15 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 			return m31errors.ErrPermissionDenied
 		}
 
+		// Create a timeout context for the permission request
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
+		defer cancel()
+
 		var resp PermissionResponse
 		select {
 		case resp = <-d.responseCh:
+		case <-timeoutCtx.Done():
+			return m31errors.ErrPermissionDenied
 		case <-ctx.Done():
 			return ctx.Err()
 		}
