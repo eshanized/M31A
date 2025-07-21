@@ -28,7 +28,49 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 	}
 	wf.client = &http.Client{
 		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// Resolve DNS once
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid address: %w", err)
+				}
+
+				resolver := &net.Resolver{PreferGo: true}
+				addrs, err := resolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+				}
+
+				if len(addrs) == 0 {
+					return nil, fmt.Errorf("no IP addresses found for %s", host)
+				}
+
+				// Check first IP for private range
+				if !wf.allowPrivateIPs && isPrivateIP(addrs[0].IP) {
+					return nil, fmt.Errorf("access to private IP %s is blocked: %w", addrs[0].IP, errors.ErrPrivateIPBlocked)
+				}
+
+				// Pin the resolved IP for connection
+				pinnedAddr := net.JoinHostPort(addrs[0].IP.String(), port)
+
+				// Connect with the pinned IP
+				dialer := &net.Dialer{Timeout: 30 * time.Second}
+				conn, err := dialer.DialContext(ctx, network, pinnedAddr)
+				if err != nil {
+					return nil, err
+				}
+
+				// Re-check after connect (paranoid check)
+				if tcpConn, ok := conn.(*net.TCPConn); ok {
+					remoteAddr := tcpConn.RemoteAddr().(*net.TCPAddr)
+					if !wf.allowPrivateIPs && isPrivateIP(remoteAddr.IP) {
+						conn.Close()
+						return nil, fmt.Errorf("connected to private IP %s is blocked: %w", remoteAddr.IP, errors.ErrPrivateIPBlocked)
+					}
+				}
+
+				return conn, nil
+			},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
