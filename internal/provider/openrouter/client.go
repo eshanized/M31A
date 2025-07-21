@@ -278,6 +278,7 @@ func isContextExceeded(statusCode int, body string) bool {
 	return strings.Contains(lower, "context_length_exceeded") ||
 		strings.Contains(lower, "maximum context length") ||
 		strings.Contains(lower, "request too large") ||
+		strings.Contains(lower, "context window exceeded") ||
 		strings.Contains(lower, "context_length") && strings.Contains(lower, "exceed")
 }
 
@@ -374,15 +375,23 @@ func (c *Client) setCommonHeaders(req *http.Request) {
 // sanitizeProviderError maps HTTP status codes to friendly messages and
 // truncates/strips the response body to prevent raw HTML/JSON leaking to users.
 func sanitizeProviderError(statusCode int, body string) string {
-	// Strip HTML tags
-	cleaned := body
-	for i := strings.Index(cleaned, "<"); i != -1; i = strings.Index(cleaned, "<") {
-		end := strings.Index(cleaned[i:], ">")
-		if end == -1 {
-			break
+	// Single-pass HTML stripping
+	var b strings.Builder
+	inTag := false
+	for _, ch := range body {
+		if ch == '<' {
+			inTag = true
+			continue
 		}
-		cleaned = cleaned[:i] + cleaned[i+end+1:]
+		if ch == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			b.WriteRune(ch)
+		}
 	}
+	cleaned := b.String()
 
 	// Truncate to 200 chars
 	if len(cleaned) > 200 {
