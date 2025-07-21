@@ -125,11 +125,11 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
 		}
 
-		input, err := os.ReadFile(targetPath)
+		existingContent, err := os.ReadFile(targetPath)
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot read original for backup: %w", err)
 		}
-		if err := os.WriteFile(backupPath, input, 0644); err != nil {
+		if err := os.WriteFile(backupPath, existingContent, 0644); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot write backup: %w", err)
 		}
 	}
