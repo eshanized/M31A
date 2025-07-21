@@ -234,12 +234,14 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 			return nil
 		}
 
-		// Check for binary
+		// Open file once for binary detection and scanning
 		f, err := os.Open(path)
 		if err != nil {
 			return nil
 		}
+		defer f.Close()
 
+		// Read first 512 bytes for binary detection
 		header := make([]byte, 512)
 		n, _ := f.Read(header)
 		isBinary := false
@@ -251,14 +253,12 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 				}
 			}
 		}
-		f.Close()
 		if isBinary {
 			return nil
 		}
 
-		// Re-open for scanning
-		f, err = os.Open(path)
-		if err != nil {
+		// Reset reader to beginning for scanning
+		if _, err := f.Seek(0, 0); err != nil {
 			return nil
 		}
 
