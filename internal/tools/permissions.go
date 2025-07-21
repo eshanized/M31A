@@ -165,7 +165,7 @@ func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call typ
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
-		TimeoutSecs: 300,
+		TimeoutSecs: d.permissionTimeout,
 		RuleAction:  "ask",
 	}
 
@@ -175,9 +175,15 @@ func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call typ
 		return m31errors.ErrPermissionDenied
 	}
 
+	// Create a timeout context for the permission request
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
+	defer cancel()
+
 	var resp PermissionResponse
 	select {
 	case resp = <-d.responseCh:
+	case <-timeoutCtx.Done():
+		return m31errors.ErrPermissionDenied
 	case <-ctx.Done():
 		return ctx.Err()
 	}
