@@ -506,11 +506,14 @@ func (c *Config) Save(path string) error {
 		path = envPath
 	}
 
-	// Don't persist API keys — they came from env vars or keychain
-	c.Provider.OpenRouter.APIKey = ""
-	c.Provider.Zen.APIKey = ""
+	// Copy the config to avoid mutating the original
+	cfgCopy := *c
 
-	data, err := toml.Marshal(c)
+	// Don't persist API keys — they came from env vars or keychain
+	cfgCopy.Provider.OpenRouter.APIKey = ""
+	cfgCopy.Provider.Zen.APIKey = ""
+
+	data, err := toml.Marshal(&cfgCopy)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
