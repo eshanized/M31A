@@ -310,12 +310,28 @@ func stripTags(html string, tags ...string) string {
 			if start == -1 {
 				break
 			}
-			end := strings.Index(html, "</"+tag+">")
-			if end == -1 {
+			// Find end of opening tag
+			tagEnd := strings.Index(html[start:], ">")
+			if tagEnd == -1 {
 				break
 			}
-			end += len(tag) + 3 // len("</>") = 3
-			html = html[:start] + html[end:]
+			tagEnd += start + 1
+
+			// Check for self-closing tag (/> at end)
+			if strings.HasSuffix(html[start:tagEnd], "/") {
+				html = html[:start] + html[tagEnd:]
+				continue
+			}
+
+			// Find closing tag
+			closeTag := "</" + tag + ">"
+			closeStart := strings.Index(html[tagEnd:], closeTag)
+			if closeStart == -1 {
+				break
+			}
+			closeStart += tagEnd
+			closeEnd := closeStart + len(closeTag)
+			html = html[:start] + html[closeEnd:]
 		}
 	}
 	return html
