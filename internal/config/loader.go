@@ -246,6 +246,26 @@ func mergeConfig(base, overlay *Config) {
 	if overlay.Ledger.MaxEntries != 0 {
 		base.Ledger.MaxEntries = overlay.Ledger.MaxEntries
 	}
+
+	// Agents section (per-workflow-phase model assignments)
+	if overlay.Agents.Default != "" {
+		base.Agents.Default = overlay.Agents.Default
+	}
+	if overlay.Agents.Plan != "" {
+		base.Agents.Plan = overlay.Agents.Plan
+	}
+	if overlay.Agents.Execute != "" {
+		base.Agents.Execute = overlay.Agents.Execute
+	}
+	if overlay.Agents.Verify != "" {
+		base.Agents.Verify = overlay.Agents.Verify
+	}
+	if overlay.Agents.Ship != "" {
+		base.Agents.Ship = overlay.Agents.Ship
+	}
+	if overlay.Agents.Discuss != "" {
+		base.Agents.Discuss = overlay.Agents.Discuss
+	}
 }
 
 // ValidationError describes a single field-level config validation failure.
