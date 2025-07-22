@@ -2,31 +2,29 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 16 — Plan 01 complete
-last_updated: "2026-06-02T20:40:37Z"
+status: Phase 17 complete
+last_updated: "2026-06-03T17:00:00Z"
 progress:
   total_phases: 12
-  completed_phases: 7
-  total_plans: 66
-  completed_plans: 50
-  percent: 59
+  completed_phases: 9
+  total_plans: 70
+  completed_plans: 59
+  percent: 84
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 15 — Comprehensive Deep Audit Fixes (Plan 15-01 complete)
+None — Phase 17 complete
 
 ## Status
 
-Phase 15 — fixing critical audit findings from the comprehensive deep audit.
-Plan 15-01 (C-1 nil-safety) is complete: nil-guards added to 3 unguarded
-branches in Update() and regression test created.
+Phase 17 (Post-Phase-16 Audit Fixes) is complete. 4 plans verified/committed: 17-01 (Critical build/test — all pre-existing), 17-02 (High severity — 8 commits), 17-03 (Medium severity — 9 commits), 17-04 (Low severity — 5 commits + 3 pre-existing). 36 issues from comprehensive codebase audit addressed.
 
 ## Last Session
 
-- **2026-06-02** — Phase 15 Plan 15-01 (Nil-Safety Guards) executed. 2 tasks, 2 commits (`bb4f670`, `b6ff1be`). tui package builds and vets clean. Pre-existing failures in workflow/repl_stream packages are unrelated.
+- **2026-06-03** — Phase 17 executed. All 36 audit findings resolved across 4 plans. go.mod bumped to 1.24, atomic.Bool for cache refresh, crypto/rand temp files, Zen tests fixed, isContextExceeded patterns verified, Grep truncation fixed, WebFetch shared client, SSE whitespace trim, Glob sorted, Engine error handling, async SetProvider, Edit fsync, SSRF DNS pinning, config merge, permission timeouts, API key preservation, HTML strip optimization, relative gitignore paths, secure file permissions.
 
 ## Completed Phases
 
@@ -41,6 +39,8 @@ branches in Update() and regression test created.
 - Phase 10 — Provider & Message Layer Adaptations
 - Phase 11 — Session & Config Adaptations
 - Phase 12 — UX & Editor Experience Adaptations
+- Phase 16 — UX Polish
+- Phase 17 — Post-Phase-16 Audit Fixes
 
 ## In Progress
 
@@ -82,6 +82,22 @@ branches in Update() and regression test created.
 - 12-05: Editor Context Auto-Include — @filepath syntax
 
 ## Key Decisions Made
+
+### Phase 17 Decisions (17-01 through 17-04)
+
+- **17-01:** All 4 Critical issues (C-1 through C-4) were pre-existing fixes from earlier phases. No new code changes needed — verified go.mod Go 1.24, atomic.Bool cache refresh, crypto/rand temp files, Zen test patterns.
+- **17-02 (H-1):** isContextExceeded already had "context window exceeded" pattern; added test coverage to confirm.
+- **17-02 (H-2/H-3):** Grep truncation simplified to generic "[... more matches (limit: N)]" — counting exact remaining matches requires full scan.
+- **17-02 (H-4):** WebFetch shares a single http.Client across calls for connection reuse; per-request timeout via context.WithTimeout.
+- **17-02 (H-5):** SSEParser uses strings.TrimSpace before [DONE] comparison.
+- **17-02 (H-7):** consumeStream checks errors before appending delta to preserve partial content on non-EOF errors.
+- **17-02 (H-8):** verifyTask uses exec.CommandContext with 5-minute timeout for go test commands.
+- **17-02 (H-9):** SetProvider returns tea.Cmd for async model validation — prevents TUI event loop blocking.
+- **17-03 (M-4):** WebFetch SSRF DNS pinning resolves once, checks IP, connects with pinned IP to prevent TOCTOU races.
+- **17-03 (M-10):** Config.Save copies struct before clearing API keys to prevent receiver mutation.
+- **17-04 (L-1):** HTML stripping uses single-pass scanner instead of O(n²) nested loops.
+- **17-04 (L-5):** config.atomicWrite uses os.OpenFile with 0600 permissions for security-sensitive config files.
+- **17-04 (L-6):** Registry.SetActive returns ErrProviderNotFound sentinel error for unregistered providers.
 
 ### Phase 14 Decisions (14-01 through 14-04)
 
@@ -150,10 +166,13 @@ None
 - 15-01: ✅ Nil-Safety Guards (C-1 — CRITICAL)
 - 15-02: ✅ Stream Pipeline Channel Ownership Refactor (C-3, H-9, H-14, M-21)
 - 15-03: ⏳ (pending)
-
-## Phase 16 Plans
-
-- 16-01: ✅ Trust & Safety Fixes (12 tasks, 11 commits)
+- 16-02: ✅ Error UX Fixes (15 tasks)
+- 16-03: ✅ Feedback & Loading (Tasks 11-12, timeout warnings)
+- 16-04: ✅ Theme & Visual Fixes (theme injection, color fixes)
+- 16-05: ✅ Navigation & Help (command palette Esc, categorized /help)
+- 16-06: ✅ Screen-Specific (ship/verify improvements, first-run fixes)
+- 16-07: ✅ Tool & Provider (tool card improvements, permission syntax)
+- 16-08: ✅ Config & Polish (config validation, autodream messages)
 
 ## Key Decisions Made
 
@@ -167,7 +186,7 @@ None
 
 ## Last Session
 
-- **2026-06-02** — Phase 16 Plan 16-01 (Trust & Safety Fixes) executed. 12 tasks, 11 commits (`8cd53e5` through `a6c6c2a`). `/clear` now clears context, `/undo` honest, phase aliases trigger transitions, confirmations added for destructive ops, permission modal exit de-emphasized, RiskDangerous/VisualDestructive distinguished, execute/plan status display improved. tui package builds clean.
+- **2026-06-03** — Phase 17 executed. 4 plans across 4 waves: Critical build/test (17-01, pre-existing), High severity (17-02, 8 commits), Medium severity (17-03, 9 commits), Low severity (17-04, 5 commits + 3 pre-existing). 36 audit findings from comprehensive codebase audit resolved. All tests pass, build clean.
 
 ### Phase 16 Decisions (16-01)
 
@@ -177,3 +196,10 @@ None
 - **16-01:** RiskDangerous uses `theme.Warning` (yellow), RiskDestructive uses `theme.Error` (red) — clear visual hierarchy.
 - **16-01:** Permission modal exit hint uses `Faint(true)` for subordinate appearance — reduces user anxiety.
 - **16-01:** Execute screen completion summary shows ✓ (green) or ⚠ (yellow) based on actual task status.
+
+## Phase 17 Plans
+
+- 17-01: ✅ Critical Build & Test Fixes (C-1 through C-4, all pre-existing)
+- 17-02: ✅ High Severity Correctness Fixes (H-1 through H-9)
+- 17-03: ✅ Medium Severity Fixes (M-1 through M-11)
+- 17-04: ✅ Low Severity Polish (L-1 through L-11)
