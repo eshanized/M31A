@@ -584,8 +584,8 @@ func atomicWrite(path string, data []byte) error {
 	}
 	tmpPath := filepath.Join(dir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
 
-	// Write to temp file
-	tmpFile, err := os.Create(tmpPath)
+	// Write to temp file with secure permissions
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
