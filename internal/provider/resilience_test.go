@@ -29,8 +29,8 @@ func TestRegistry_SetActive_RejectsEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
-	if !errors.Is(err, m31errors.ErrProviderUnreachable) {
-		t.Fatalf("expected ErrProviderUnreachable, got: %v", err)
+	if !errors.Is(err, m31errors.ErrProviderNotFound) {
+		t.Fatalf("expected ErrProviderNotFound, got: %v", err)
 	}
 }
 
@@ -42,8 +42,8 @@ func TestRegistry_SetActive_RejectsUnknown(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
-	if !errors.Is(err, m31errors.ErrProviderUnreachable) {
-		t.Fatalf("expected ErrProviderUnreachable, got: %v", err)
+	if !errors.Is(err, m31errors.ErrProviderNotFound) {
+		t.Fatalf("expected ErrProviderNotFound, got: %v", err)
 	}
 }
 

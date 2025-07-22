@@ -7,6 +7,7 @@ import (
 
 var (
 	ErrProviderUnreachable = errors.New("provider unreachable")
+	ErrProviderNotFound    = errors.New("provider not found")
 	ErrRateLimited         = errors.New("rate limited")
 	ErrInvalidKey          = errors.New("invalid API key")
 	ErrContextExceeded     = errors.New("context window exceeded")
@@ -32,8 +33,8 @@ var (
 	ErrBisectResetFailed = errors.New("bisect reset failed")
 
 	// Session-specific errors for distinct failure modes.
-	ErrSessionNotFound    = errors.New("session not found")
-	ErrSessionPermission  = errors.New("session access denied")
+	ErrSessionNotFound   = errors.New("session not found")
+	ErrSessionPermission = errors.New("session access denied")
 )
 
 // UserMessage returns a user-friendly, actionable message for common errors.
@@ -47,6 +48,8 @@ func UserMessage(e error) string {
 	switch {
 	case errors.Is(e, ErrProviderUnreachable):
 		return "Provider unreachable — check your internet connection"
+	case errors.Is(e, ErrProviderNotFound):
+		return "Provider not found — use /settings to configure providers"
 	case errors.Is(e, ErrRateLimited):
 		return "Rate limited — retry in a moment"
 	case errors.Is(e, ErrInvalidKey):

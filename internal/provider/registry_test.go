@@ -64,8 +64,8 @@ func TestRegistry_SetActive_Unknown(t *testing.T) {
 	r.Register("a", &mockProvider{name: "a"})
 
 	err := r.SetActive("nonexistent")
-	if err == nil || !errors.Is(err, m31errors.ErrProviderUnreachable) {
-		t.Fatalf("expected ErrProviderUnreachable, got %v", err)
+	if err == nil || !errors.Is(err, m31errors.ErrProviderNotFound) {
+		t.Fatalf("expected ErrProviderNotFound, got %v", err)
 	}
 
 	if active := r.Active(); active != "a" {
