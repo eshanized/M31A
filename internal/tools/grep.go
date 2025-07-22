@@ -310,10 +310,22 @@ func loadGitignore(dir string) []string {
 }
 
 func matchesGitignore(path string, patterns []string) bool {
+	// Convert to relative path for matching
+	relPath, err := filepath.Rel(".", path)
+	if err != nil {
+		relPath = path
+	}
 	for _, p := range patterns {
-		match, _ := doublestar.Match(p, path)
+		match, _ := doublestar.Match(p, relPath)
 		if match {
 			return true
+		}
+		// Also match against just the filename for simple patterns
+		if !strings.Contains(p, "/") {
+			match, _ = doublestar.Match(p, filepath.Base(relPath))
+			if match {
+				return true
+			}
 		}
 	}
 	return false
