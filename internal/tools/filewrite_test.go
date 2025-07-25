@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -345,5 +346,35 @@ func TestFileWrite_ContentNotString(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parameter content must be a string") {
 		t.Errorf("expected type error, got: %v", err)
+	}
+}
+
+func TestFileWrite_BackupPruning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	backupDir := t.TempDir()
+	fw := NewFileWrite(dir, backupDir)
+
+	// Write the file 12 times to trigger pruning (max is 10)
+	for i := 0; i < 12; i++ {
+		_, err := fw.Execute(context.Background(), types.ToolInput{
+			Name: "FileWrite",
+			Params: map[string]any{
+				"path":    "prune_test.txt",
+				"content": fmt.Sprintf("version %d", i),
+			},
+		})
+		if err != nil {
+			t.Fatalf("write %d failed: %v", i, err)
+		}
+	}
+
+	// Verify at most 10 backups exist
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) > maxBackupsPerFile {
+		t.Errorf("expected at most %d backups, got %d", maxBackupsPerFile, len(entries))
 	}
 }

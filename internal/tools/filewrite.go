@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +20,8 @@ type FileWrite struct {
 	workDir   string
 	backupDir string
 }
+
+const maxBackupsPerFile = 10
 
 func NewFileWrite(workDir, backupDir string) *FileWrite {
 	return &FileWrite{workDir: workDir, backupDir: backupDir}
@@ -132,6 +136,9 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		if err := os.WriteFile(backupPath, existingContent, 0644); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot write backup: %w", err)
 		}
+
+		// Prune old backups for this file to prevent unbounded accumulation
+		t.pruneBackups(sanitized)
 	}
 
 	// Create parent directories
@@ -183,4 +190,40 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		Output:     fmt.Sprintf("Wrote %d bytes to %s", len(contentBytes), path),
 		DurationMs: elapsed,
 	}, nil
+}
+
+// pruneBackups removes the oldest backups for a given file prefix when the
+// count exceeds maxBackupsPerFile. Backups are sorted lexicographically
+// (timestamp in the name ensures chronological order). Logs but does not
+// fail on removal errors.
+func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
+	entries, err := os.ReadDir(t.backupDir)
+	if err != nil {
+		slog.Warn("cannot read backup directory for pruning", "dir", t.backupDir, "error", err)
+		return
+	}
+
+	// Filter to backups matching this file's prefix
+	var matches []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), sanitizedPrefix+".") {
+			matches = append(matches, e.Name())
+		}
+	}
+
+	if len(matches) <= maxBackupsPerFile {
+		return
+	}
+
+	// Sort lexicographically — timestamp in the name ensures chronological order
+	sort.Strings(matches)
+
+	// Delete oldest entries (lowest sort order) to keep exactly maxBackupsPerFile
+	toDelete := matches[:len(matches)-maxBackupsPerFile]
+	for _, name := range toDelete {
+		path := filepath.Join(t.backupDir, name)
+		if err := os.Remove(path); err != nil {
+			slog.Warn("failed to prune old backup", "path", path, "error", err)
+		}
+	}
 }

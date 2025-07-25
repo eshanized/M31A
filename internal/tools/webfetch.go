@@ -9,16 +9,26 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// dnsCacheEntry caches DNS resolution results for a hostname to prevent
+// DNS rebinding (TOCTOU) attacks. The 5-minute TTL ensures stale entries
+// are refreshed while still pinning IPs for the duration of a request.
+type dnsCacheEntry struct {
+	addrs   []net.IPAddr
+	expires time.Time
+}
+
 type WebFetch struct {
 	sessionsDir     string
 	allowPrivateIPs bool
 	client          *http.Client
+	dnsCache        sync.Map // map[string]*dnsCacheEntry; key=hostname
 }
 
 func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
@@ -29,28 +39,27 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 	wf.client = &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				// Resolve DNS once
 				host, port, err := net.SplitHostPort(addr)
 				if err != nil {
 					return nil, fmt.Errorf("invalid address: %w", err)
 				}
 
-				resolver := &net.Resolver{PreferGo: true}
-				addrs, err := resolver.LookupIPAddr(ctx, host)
+				// Use pinned DNS cache to prevent TOCTOU rebinding attacks
+				addrs, err := wf.resolveAndCache(ctx, host)
 				if err != nil {
-					return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+					return nil, err
 				}
 
-				if len(addrs) == 0 {
-					return nil, fmt.Errorf("no IP addresses found for %s", host)
+				// Check ALL resolved IPs against private range (not just the first)
+				if !wf.allowPrivateIPs {
+					for _, addr := range addrs {
+						if isPrivateIP(addr.IP) {
+							return nil, fmt.Errorf("access to private IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
+						}
+					}
 				}
 
-				// Check first IP for private range
-				if !wf.allowPrivateIPs && isPrivateIP(addrs[0].IP) {
-					return nil, fmt.Errorf("access to private IP %s is blocked: %w", addrs[0].IP, errors.ErrPrivateIPBlocked)
-				}
-
-				// Pin the resolved IP for connection
+				// Pin the first IP for connection
 				pinnedAddr := net.JoinHostPort(addrs[0].IP.String(), port)
 
 				// Connect with the pinned IP
@@ -166,6 +175,48 @@ func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
 	}
 
 	return nil
+}
+
+// resolveAndCache resolves DNS for a hostname using a sync.Map cache with
+// 5-minute TTL. Caching pins IPs for the request lifecycle, preventing DNS
+// rebinding (TOCTOU) attacks where an attacker changes DNS between resolution
+// and connection.
+func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IPAddr, error) {
+	// Check for literal IP — no caching needed
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IPAddr{{IP: ip}}, nil
+	}
+
+	now := time.Now()
+	ttl := 5 * time.Minute
+
+	// Check cache
+	if cached, ok := t.dnsCache.Load(host); ok {
+		entry := cached.(*dnsCacheEntry)
+		if now.Before(entry.expires) {
+			return entry.addrs, nil
+		}
+		// Expired — fall through to re-resolve
+	}
+
+	// Resolve
+	resolver := &net.Resolver{PreferGo: true}
+	addrs, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no IP addresses found for %s", host)
+	}
+
+	// Store in cache
+	entry := &dnsCacheEntry{
+		addrs:   addrs,
+		expires: now.Add(ttl),
+	}
+	t.dnsCache.Store(host, entry)
+
+	return addrs, nil
 }
 
 func (t *WebFetch) Name() string {
