@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +19,32 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
+// newTestAppWithKey creates an AppState with a dummy API key in a temp config,
+// so tests that need a REPL model can use this instead of NewApp directly.
+func newTestAppWithKey(t *testing.T) *AppState {
+	t.Helper()
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	cfg := `[provider]
+default = "openrouter"
+[provider.openrouter]
+api_key = "sk-or-v1-test-key"
+`
+	if err := os.WriteFile(configPath, []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app, err := NewApp("test", nil, configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
 func TestNewApp_NoKey_CreatesFirstRun(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	if app.screen != ScreenFirstRun {
 		t.Errorf("Expected ScreenFirstRun, got %d", app.screen)
 	}
@@ -31,7 +57,21 @@ func TestNewApp_NoKey_CreatesFirstRun(t *testing.T) {
 }
 
 func TestNewApp_WithKey_CreatesREPL(t *testing.T) {
-	app := NewApp("test", nil, "sk-or-v1-key", "/tmp/config")
+	// Create a temp config file with an API key
+	tmpDir := t.TempDir()
+	configPath := tmpDir + "/config.toml"
+	cfg := `[provider]
+default = "openrouter"
+[provider.openrouter]
+api_key = "sk-or-v1-key"
+`
+	if err := os.WriteFile(configPath, []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app, err := NewApp("test", nil, configPath)
+	if err != nil {
+	t.Fatal(err)
+	}
 	if app.screen != ScreenREPL {
 		t.Errorf("Expected ScreenREPL, got %d", app.screen)
 	}
@@ -44,7 +84,10 @@ func TestNewApp_WithKey_CreatesREPL(t *testing.T) {
 }
 
 func TestNewApp_Version(t *testing.T) {
-	app := NewApp("v1.0.0", nil, "key", "/tmp/config")
+	app, err := NewApp("v1.0.0", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	if app.version != "v1.0.0" {
 		t.Errorf("Expected version v1.0.0, got %q", app.version)
 	}
@@ -52,7 +95,10 @@ func TestNewApp_Version(t *testing.T) {
 
 func TestNewApp_RegistryActive(t *testing.T) {
 	reg := provider.NewRegistry()
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	if app.activeProvider != "" {
 		t.Errorf("Expected empty active provider with empty registry, got %q", app.activeProvider)
 	}
@@ -61,7 +107,10 @@ func TestNewApp_RegistryActive(t *testing.T) {
 func TestApp_Init_ReturnsCmd(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	cmd := app.Init()
 	if cmd == nil {
 		t.Error("Init() should return non-nil command when registry has active provider")
@@ -69,7 +118,10 @@ func TestApp_Init_ReturnsCmd(t *testing.T) {
 }
 
 func TestApp_Init_AlwaysReturnsPermissionListener(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	cmd := app.Init()
 	if cmd == nil {
 		t.Error("Init() should always return non-nil cmd (permission listener)")
@@ -77,7 +129,10 @@ func TestApp_Init_AlwaysReturnsPermissionListener(t *testing.T) {
 }
 
 func TestApp_CtrlC_Quits(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("Expected non-nil command for ctrl+c")
@@ -90,7 +145,10 @@ func TestApp_CtrlC_Quits(t *testing.T) {
 }
 
 func TestApp_ScreenTransition(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	newModel, _ := app.Update(AppMsg{Screen: ScreenFirstRun})
 	updated := newModel.(*AppState)
 	if updated.screen != ScreenFirstRun {
@@ -99,7 +157,10 @@ func TestApp_ScreenTransition(t *testing.T) {
 }
 
 func TestApp_FirstRunToREPL(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	if app.screen != ScreenFirstRun {
 		t.Fatalf("Expected ScreenFirstRun initially, got %d", app.screen)
 	}
@@ -116,7 +177,10 @@ func TestApp_FirstRunToREPL(t *testing.T) {
 
 func TestApp_HealthTick_Reschedules(t *testing.T) {
 	reg := provider.NewRegistry()
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	newModel, cmd := app.Update(HealthCheckTickMsg{Time: testTime})
 	if cmd == nil {
 		t.Fatal("Expected non-nil command for health tick")
@@ -125,7 +189,10 @@ func TestApp_HealthTick_Reschedules(t *testing.T) {
 }
 
 func TestApp_View_NotEmpty(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := app.View()
 	if v == "" {
@@ -134,7 +201,10 @@ func TestApp_View_NotEmpty(t *testing.T) {
 }
 
 func TestApp_TerminalTooSmall(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 30, Height: 5})
 	v := app.View()
 	if !strings.Contains(v, "Terminal too small") {
@@ -146,7 +216,10 @@ func TestApp_TerminalTooSmall(t *testing.T) {
 }
 
 func TestApp_ViewFirstRun(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := app.View()
 	if v == "" {
@@ -155,7 +228,10 @@ func TestApp_ViewFirstRun(t *testing.T) {
 }
 
 func TestApp_ErrorMsg(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	newModel, _ := app.Update(ErrorMsg{Err: testErr})
 	updated := newModel.(*AppState)
 	if updated.currentOperation == "" {
@@ -165,7 +241,10 @@ func TestApp_ErrorMsg(t *testing.T) {
 }
 
 func TestApp_AppMsgWithFallbackEvent(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	newModel, _ := app.Update(AppMsg{Screen: ScreenREPL})
 	updated := newModel.(*AppState)
 
@@ -179,7 +258,10 @@ func TestApp_AppMsgWithFallbackEvent(t *testing.T) {
 }
 
 func TestApp_InitFirstRunReturnsPermissionListener(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	cmd := app.Init()
 	if cmd == nil {
 		t.Error("First-run Init should return permission listener cmd")
@@ -187,14 +269,20 @@ func TestApp_InitFirstRunReturnsPermissionListener(t *testing.T) {
 }
 
 func TestApp_ScreenREPLWithNilRepl(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.replModel = nil
 	newModel, _ := app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	_ = newModel
 }
 
 func TestApp_HealthTickNoRegistry(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.registry = nil
 	newModel, cmd := app.Update(HealthCheckTickMsg{Time: testTime})
 	if cmd == nil {
@@ -206,7 +294,10 @@ func TestApp_HealthTickNoRegistry(t *testing.T) {
 func TestApp_InitWithRegistryReturnsCmd(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	cmd := app.Init()
 	if cmd == nil {
 		t.Error("Init with registry should return health ticker cmd")
@@ -253,7 +344,10 @@ func (e testError) Error() string {
 }
 
 func TestApp_PhaseResultMsg_InitializeAutoAdvances(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := PhaseResultMsg{
 		Phase:   types.PhaseInitialize,
@@ -271,7 +365,10 @@ func TestApp_PhaseResultMsg_InitializeAutoAdvances(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_InitializeError(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := PhaseResultMsg{
 		Phase: types.PhaseInitialize,
@@ -289,7 +386,10 @@ func TestApp_PhaseResultMsg_InitializeError(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_InitializeUnsuccessful(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := PhaseResultMsg{
 		Phase:   types.PhaseInitialize,
@@ -307,7 +407,10 @@ func TestApp_PhaseResultMsg_InitializeUnsuccessful(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_DiscussAutoAdvances(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := PhaseResultMsg{
 		Phase: types.PhaseDiscuss,
@@ -326,7 +429,10 @@ func TestApp_PhaseResultMsg_DiscussAutoAdvances(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_PlanAutoAdvances(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	tasks := []types.Task{{ID: 1, Description: "Build feature"}}
 	msg := PhaseResultMsg{
@@ -343,7 +449,10 @@ func TestApp_PhaseResultMsg_PlanAutoAdvances(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_ExecuteTransitions(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	tasks := []types.Task{{ID: 1, Description: "Run tests"}}
 	msg := PhaseResultMsg{
@@ -360,7 +469,10 @@ func TestApp_PhaseResultMsg_ExecuteTransitions(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_VerifyTransitions(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	tasks := []types.Task{{ID: 1, Description: "Verify tests"}}
 	msg := PhaseResultMsg{
@@ -377,7 +489,10 @@ func TestApp_PhaseResultMsg_VerifyTransitions(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_ShipTransitions(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	tasks := []types.Task{{ID: 1, Description: "Ship it", Status: types.StatusDone}}
 	msg := PhaseResultMsg{
@@ -395,7 +510,10 @@ func TestApp_PhaseResultMsg_ShipTransitions(t *testing.T) {
 }
 
 func TestApp_PhaseResultMsg_UnknownPhase(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := PhaseResultMsg{
 		Phase:   types.WorkflowPhase("unknown_phase"),
@@ -421,7 +539,10 @@ func TestApp_PhaseResultMsg_UnknownPhase(t *testing.T) {
 // --- SettingsSavedMsg test ---
 
 func TestApp_SettingsSavedMsg(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := SettingsSavedMsg{}
 	newModel, cmd := app.Update(msg)
@@ -438,7 +559,10 @@ func TestApp_SettingsSavedMsg(t *testing.T) {
 // --- RefreshCacheMsg test ---
 
 func TestApp_RefreshCacheMsg_NoRegistry(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := RefreshCacheMsg{}
 	newModel, cmd := app.Update(msg)
@@ -453,7 +577,10 @@ func TestApp_RefreshCacheMsg_NoRegistry(t *testing.T) {
 func TestApp_RefreshCacheMsg_WithProvider(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := RefreshCacheMsg{ProviderName: "openrouter"}
 	newModel, cmd := app.Update(msg)
@@ -468,7 +595,10 @@ func TestApp_RefreshCacheMsg_WithProvider(t *testing.T) {
 // --- StreamErrorMsg test ---
 
 func TestApp_StreamErrorMsg_NoFallback(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := StreamErrorMsg{Err: testError{}}
 	newModel, _ := app.Update(msg)
@@ -484,7 +614,7 @@ func TestApp_StreamErrorMsg_NoFallback(t *testing.T) {
 // --- Key event tests ---
 
 func TestApp_CtrlC_CancelsStream(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app := newTestAppWithKey(t)
 	app.screen = ScreenREPL
 	app.replModel.streaming = true
 	cancelCalled := false
@@ -512,7 +642,10 @@ func TestApp_CtrlC_CancelsStream(t *testing.T) {
 }
 
 func TestApp_WindowResize(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	newModel, cmd := app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	updated := newModel.(*AppState)
@@ -536,7 +669,10 @@ func TestApp_WindowResize(t *testing.T) {
 func TestApp_AppMsg_ModelSelected(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.prevScreen = ScreenREPL
 
 	modelInfo := types.ModelInfo{ID: "gpt-4", Provider: "openrouter"}
@@ -563,7 +699,10 @@ func TestApp_AppMsg_ModelSelected(t *testing.T) {
 // --- Settings screen transition test ---
 
 func TestApp_SettingsScreenTransition(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 
 	newModel, cmd := app.Update(SlashCommandMsg{Command: "/settings"})
@@ -578,7 +717,10 @@ func TestApp_SettingsScreenTransition(t *testing.T) {
 }
 
 func TestApp_SettingsScreenUpdate(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenSettings
 
 	newModel, _ := app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -592,7 +734,10 @@ func TestApp_SettingsScreenUpdate(t *testing.T) {
 // --- Resume screen transition test ---
 
 func TestApp_ResumeScreenTransition(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 
 	newModel, cmd := app.Update(SlashCommandMsg{Command: "/resume"})
@@ -611,7 +756,10 @@ func TestApp_ResumeScreenTransition(t *testing.T) {
 func TestApp_ModelsScreenTransition(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 
 	newModel, cmd := app.Update(SlashCommandMsg{Command: "/models"})
@@ -628,7 +776,10 @@ func TestApp_ModelsScreenTransition(t *testing.T) {
 // --- Fallback dismissal test ---
 
 func TestApp_FallbackDismissal(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.fallbackNotification = &FallbackNotification{
 		Event:     FallbackEventMsg{From: "openrouter", To: "zen", Reason: "rate_limited"},
 		Dismissed: false,
@@ -650,7 +801,10 @@ func TestApp_FallbackDismissal(t *testing.T) {
 func TestApp_HealthTick_WithProvider(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	msg := HealthCheckTickMsg{Time: testTime}
 	newModel, cmd := app.Update(msg)
@@ -686,7 +840,10 @@ func TestApp_HealthTick_WithProvider(t *testing.T) {
 // --- ScreenREPL update with nil replModel ---
 
 func TestApp_REPLScreenNilReplModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 	app.replModel = nil
 
@@ -703,7 +860,10 @@ func TestApp_REPLScreenNilReplModel(t *testing.T) {
 func TestApp_ModelSelectorEscape(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenModelSelector
 	app.prevScreen = ScreenREPL
 
@@ -718,7 +878,10 @@ func TestApp_ModelSelectorEscape(t *testing.T) {
 // --- FirstRun screen update with AppMsg ---
 
 func TestApp_FirstRunWithAppMsgScreenChange(t *testing.T) {
-	app := NewApp("test", nil, "", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenFirstRun
 	app.firstRunModel = &FirstRunModel{}
 
@@ -733,7 +896,10 @@ func TestApp_FirstRunWithAppMsgScreenChange(t *testing.T) {
 // --- Permission screen key handling ---
 
 func TestApp_PermissionScreen_YesKey(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenPermission
 	th := theme.NewManager(theme.ModeDark).Current()
 	req := tools.PermissionRequest{ToolName: "bash", Command: "ls", RiskLevel: types.RiskSafe}
@@ -755,7 +921,10 @@ func TestApp_PermissionScreen_YesKey(t *testing.T) {
 }
 
 func TestApp_PermissionScreen_AllowAlwaysKey(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenPermission
 	th := theme.NewManager(theme.ModeDark).Current()
 	req := tools.PermissionRequest{ToolName: "bash", Command: "ls", RiskLevel: types.RiskSafe}
@@ -780,7 +949,10 @@ func TestApp_PermissionScreen_AllowAlwaysKey(t *testing.T) {
 }
 
 func TestApp_PermissionScreen_DenyKey(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenPermission
 	th := theme.NewManager(theme.ModeDark).Current()
 	req := tools.PermissionRequest{ToolName: "bash", Command: "ls", RiskLevel: types.RiskSafe}
@@ -802,7 +974,10 @@ func TestApp_PermissionScreen_DenyKey(t *testing.T) {
 }
 
 func TestApp_PermissionScreen_QuitKey(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenPermission
 	th := theme.NewManager(theme.ModeDark).Current()
 	req := tools.PermissionRequest{ToolName: "bash", Command: "ls", RiskLevel: types.RiskSafe}
@@ -820,7 +995,10 @@ func TestApp_PermissionScreen_QuitKey(t *testing.T) {
 }
 
 func TestApp_PermissionScreen_UnknownKey(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenPermission
 	th := theme.NewManager(theme.ModeDark).Current()
 	req := tools.PermissionRequest{ToolName: "bash", Command: "ls", RiskLevel: types.RiskSafe}
@@ -836,7 +1014,10 @@ func TestApp_PermissionScreen_UnknownKey(t *testing.T) {
 // --- Additional View tests ---
 
 func TestApp_ViewSettings(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenSettings
 	v := app.View()
@@ -846,7 +1027,10 @@ func TestApp_ViewSettings(t *testing.T) {
 }
 
 func TestApp_ViewResume(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenResume
 	v := app.View()
@@ -858,7 +1042,10 @@ func TestApp_ViewResume(t *testing.T) {
 func TestApp_ViewModelSelector(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenModelSelector
 	v := app.View()
@@ -868,7 +1055,10 @@ func TestApp_ViewModelSelector(t *testing.T) {
 }
 
 func TestApp_ViewPlan(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenPlan
 	v := app.View()
@@ -881,7 +1071,10 @@ func TestApp_ViewPlan(t *testing.T) {
 }
 
 func TestApp_ViewExecute(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenExecute
 	v := app.View()
@@ -894,7 +1087,10 @@ func TestApp_ViewExecute(t *testing.T) {
 }
 
 func TestApp_ViewVerify(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenVerify
 	v := app.View()
@@ -907,7 +1103,10 @@ func TestApp_ViewVerify(t *testing.T) {
 }
 
 func TestApp_ViewShip(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenShip
 	v := app.View()
@@ -920,7 +1119,10 @@ func TestApp_ViewShip(t *testing.T) {
 }
 
 func TestApp_ViewPermission(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenPermission
 	v := app.View()
@@ -930,7 +1132,10 @@ func TestApp_ViewPermission(t *testing.T) {
 }
 
 func TestApp_ViewPermission_Error(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenPermission
 	app.permissionModal = nil
@@ -941,7 +1146,10 @@ func TestApp_ViewPermission_Error(t *testing.T) {
 }
 
 func TestApp_ViewREPL_NilReplModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenREPL
 	app.replModel = nil
@@ -952,7 +1160,10 @@ func TestApp_ViewREPL_NilReplModel(t *testing.T) {
 }
 
 func TestApp_ViewFirstRun_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenFirstRun
 	app.firstRunModel = nil
@@ -963,7 +1174,10 @@ func TestApp_ViewFirstRun_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewSettings_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenSettings
 	app.settingsModel = nil
@@ -974,7 +1188,10 @@ func TestApp_ViewSettings_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewResume_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenResume
 	app.resumeModel = nil
@@ -985,7 +1202,10 @@ func TestApp_ViewResume_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewPlan_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenPlan
 	app.planModel = nil
@@ -996,7 +1216,10 @@ func TestApp_ViewPlan_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewExecute_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenExecute
 	app.executeModel = nil
@@ -1007,7 +1230,10 @@ func TestApp_ViewExecute_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewVerify_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenVerify
 	app.verifyModel = nil
@@ -1018,7 +1244,10 @@ func TestApp_ViewVerify_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewShip_NilModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	app.screen = ScreenShip
 	app.shipModel = nil
@@ -1029,7 +1258,10 @@ func TestApp_ViewShip_NilModel(t *testing.T) {
 }
 
 func TestApp_ViewUnknownScreen(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	// Use an invalid screen value
 	app.screen = Screen(999)
@@ -1045,7 +1277,10 @@ func TestApp_ViewUnknownScreen(t *testing.T) {
 // --- Additional Update tests ---
 
 func TestApp_AppMsg_ScreenREPL_CreatesReplModel(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.replModel = nil
 
 	newModel, _ := app.Update(AppMsg{Screen: ScreenREPL})
@@ -1062,7 +1297,10 @@ func TestApp_AppMsg_ScreenREPL_CreatesReplModel(t *testing.T) {
 func TestApp_AppMsg_ModelSelectorScreen(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("openrouter", &mockProvider{})
-	app := NewApp("test", reg, "key", "/tmp/config")
+	app, err := NewApp("test", reg, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 
 	newModel, cmd := app.Update(AppMsg{Screen: ScreenModelSelector})
@@ -1080,7 +1318,10 @@ func TestApp_AppMsg_ModelSelectorScreen(t *testing.T) {
 }
 
 func TestApp_AppMsg_FirstRunScreen(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 
 	newModel, _ := app.Update(AppMsg{Screen: ScreenFirstRun})
 	updated := newModel.(*AppState)
@@ -1141,7 +1382,10 @@ func (m *mockWorkflowEngine) SetSessionID(id string)              { m.sessionID 
 // pre-installed. Used by the D-01 Discuss Q&A flow tests.
 func newTestAppForDiscuss(t *testing.T) *AppState {
 	t.Helper()
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.workflowEngine = &mockWorkflowEngine{}
 	app.workflowGoal = "build a REST API"
 	return app
@@ -1347,7 +1591,10 @@ func TestApp_PhaseResultMsg_DiscussNoEngine_RecordsError(t *testing.T) {
 // return non-nil without panicking on a nil engine.
 func newTestAppForScreens(t *testing.T) *AppState {
 	t.Helper()
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.workflowEngine = &mockWorkflowEngine{}
 	app.workflowGoal = "build a REST API"
 	app.width = 120
@@ -1846,7 +2093,10 @@ func TestApp_NewApp_NoResumeToastForIdleState(t *testing.T) {
 // defensive nil-check in persistWorkflowState — calling it without
 // a sessionManager should be a silent no-op (no panic).
 func TestApp_PersistWorkflowState_NoSessionManager(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.sessionManager = nil
 	app.sessionID = "fake-id"
 	// Should not panic
@@ -1858,7 +2108,10 @@ func TestApp_PersistWorkflowState_NoSessionManager(t *testing.T) {
 func TestApp_PersistWorkflowState_EmptySessionID(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessMgr := newTestAppSessionManager(t, tmpDir)
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.sessionManager = sessMgr
 	app.sessionID = ""
 	// Should not panic
@@ -2084,7 +2337,10 @@ func newTestAppSessionManager(t *testing.T, dir string) *session.Manager {
 // exercise the real Manager code path.
 func newTestAppWithSession(t *testing.T, sessMgr *session.Manager, sessionID string) *AppState {
 	t.Helper()
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.sessionManager = sessMgr
 	app.sessionID = sessionID
 	return app
@@ -2148,7 +2404,7 @@ func TestReplModel_AppendStreamChunk(t *testing.T) {
 
 func TestApp_StreamChunkMsg_RoutesToRepl(t *testing.T) {
 	t.Parallel()
-	m := NewApp("test", nil, "key", "/tmp/config")
+	m := newTestAppWithKey(t)
 	m.width = 120
 	m.height = 40
 
@@ -2166,7 +2422,10 @@ func TestApp_StreamChunkMsg_RoutesToRepl(t *testing.T) {
 
 func TestApp_SidebarThreshold_FromConfig(t *testing.T) {
 	t.Parallel()
-	m := NewApp("test", nil, "key", "/tmp/config")
+	m, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	m.config = &config.Config{}
 	m.config.UI.SidebarWidthThreshold = 150
 	m.width = 140
@@ -2184,7 +2443,10 @@ func TestApp_SidebarThreshold_FromConfig(t *testing.T) {
 // TestReplSlashCommand_EndToEnd verifies that typing a slash command in the REPL
 // and pressing Enter results in the app-level SlashCommandMsg handler executing.
 func TestReplSlashCommand_EndToEnd(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app.screen = ScreenREPL
 
 	// Simulate the REPL receiving a key enter with a slash command typed
@@ -2202,7 +2464,10 @@ func TestReplSlashCommand_EndToEnd(t *testing.T) {
 	}
 
 	// Test /help command — should be handled by command registry
-	app2 := NewApp("test", nil, "key", "/tmp/config")
+	app2, err := NewApp("test", nil, "/tmp/config")
+	if err != nil {
+	t.Fatal(err)
+	}
 	app2.screen = ScreenREPL
 
 	newModel2, cmd2 := app2.Update(SlashCommandMsg{Command: "/help"})
@@ -2222,7 +2487,7 @@ func TestReplSlashCommand_EndToEnd(t *testing.T) {
 // TestReplSlashCommand_FullIntegration simulates typing a slash command
 // character by character through the full app → REPL → textarea pipeline.
 func TestReplSlashCommand_FullIntegration(t *testing.T) {
-	app := NewApp("test", nil, "key", "/tmp/config")
+	app := newTestAppWithKey(t)
 	app.screen = ScreenREPL
 
 	// Ensure replModel exists

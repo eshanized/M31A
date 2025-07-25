@@ -67,7 +67,6 @@ type AppState struct {
 	sessionManager       *session.Manager
 	keychain             keychain.Keychain
 	config               *config.Config
-	apiKey               string
 	configPath           string
 	ledger               *ledger.Ledger
 	prevScreen           Screen
@@ -121,7 +120,7 @@ type AppState struct {
 	headerCacheValid bool
 }
 
-func NewApp(version string, registry *provider.Registry, apiKey string, configPath string) *AppState {
+func NewApp(version string, registry *provider.Registry, configPath string) (*AppState, error) {
 	tm := theme.NewManager(theme.ModeDark)
 
 	cwd, err := os.Getwd()
@@ -148,19 +147,17 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	}
 
 	// Resolve API keys via env var → keychain → config file
-	if apiKey == "" {
-		// If no explicit apiKey, try resolving from config resolution
-		if kc != nil {
-			cfg.ResolveAPIKeys(kc)
-		}
-		apiKey = cfg.Provider.OpenRouter.APIKey
-		if apiKey == "" {
-			apiKey = cfg.Provider.Zen.APIKey
-		}
+	resolvedAPIKey := ""
+	if kc != nil {
+		cfg.ResolveAPIKeys(kc)
+	}
+	resolvedAPIKey = cfg.Provider.OpenRouter.APIKey
+	if resolvedAPIKey == "" {
+		resolvedAPIKey = cfg.Provider.Zen.APIKey
 	}
 
 	// L-2: Reconcile default provider with available keys
-	if cfg.Provider.Default != "" && apiKey != "" {
+	if cfg.Provider.Default != "" && resolvedAPIKey != "" {
 		defaultHasKey := false
 		switch cfg.Provider.Default {
 		case "openrouter":
@@ -202,14 +199,12 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 
 	dispatcher, err := tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir, &cfg.Permissions)
 	if err != nil {
-		slog.Error("failed to initialize tool dispatcher", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("failed to initialize tool dispatcher: %w", err)
 	}
 
 	app := &AppState{
 		version:        version,
 		registry:       registry,
-		apiKey:         apiKey,
 		configPath:     configPath,
 		themeManager:   tm,
 		healthStatus:   types.HealthStatus{Status: "unknown"},
@@ -284,7 +279,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 	// synced whenever a user message is submitted.
 	app.autoDream = autodream.New(nil)
 
-	if apiKey == "" {
+	if resolvedAPIKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath)
 		app.screen = ScreenFirstRun
 		app.firstRunModel = &fr
@@ -311,7 +306,7 @@ func NewApp(version string, registry *provider.Registry, apiKey string, configPa
 		app.healthStatus = types.HealthStatus{Status: "live"}
 	}
 
-	return app
+	return app, nil
 }
 
 // currentPhaseGen returns the current phaseGen value for snapshot use by

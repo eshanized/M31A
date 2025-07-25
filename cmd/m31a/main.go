@@ -161,14 +161,12 @@ func main() {
 		}
 	}
 
-	// Resolve API key for TUI (based on active provider)
-	resolvedAPIKey := cfg.Provider.OpenRouter.APIKey
-	if cfg.Provider.Default == "zen" {
-		resolvedAPIKey = cfg.Provider.Zen.APIKey
-	}
-
 	// Create and launch TUI app
-	app := tui.NewApp(Version, registry, resolvedAPIKey, configPath)
+	app, err := tui.NewApp(Version, registry, configPath)
+	if err != nil {
+		logger.Error("failed to initialize application", "error", err)
+		os.Exit(1)
+	}
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		logger.Error("TUI exited with error", "error", err)
