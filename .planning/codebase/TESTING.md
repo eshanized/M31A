@@ -1,366 +1,505 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-06-02
+**Analysis Date:** 2026-06-04
 
 ## Test Framework
 
-**Framework:** Standard library `testing` only. **No `testify`**, no `gofakeit`, no third-party assertion library.
-- Assertion API is `t.Errorf`, `t.Fatalf`, `t.Logf` directly.
-- Benchmark files: none present in the repository (verified with `grep -r "^func Benchmark"`).
+**Runner:**
+- Standard Go `testing` package — no external test frameworks
+- Config: no config file; run via `go test` or Makefile targets
+- Go version: 1.24 (per `go.mod`)
 
-**Run commands** (from `Makefile`):
+**Assertion Library:**
+- Standard `testing.T` methods: `t.Fatal()`, `t.Fatalf()`, `t.Error()`, `t.Errorf()`
+- `errors.Is()` for sentinel error assertions
+- `strings.Contains()` for output validation
+- No testify, no gomock, no external assertion libraries
+
+**Run Commands:**
 ```bash
-go test -race -cover -coverprofile=coverage.out ./...   # full suite, with race detector + coverage
-go test -race -cover ./...                              # CI shorthand (CONTRIBUTING.md)
+go test -race -cover ./...          # Run all tests with race detector + coverage
+go test -v -race -run TestName ./... # Run specific test
+make test                            # Same as go test -race -cover
+make test-specific TEST=TestReplModel # Run specific test by name
+make bench                           # Run benchmarks
 ```
-
-**Required flags:**
-- `-race` — race detector is **mandatory**. PRs are rejected if race conditions are introduced (CONTRIBUTING.md).
-- `-cover` — coverage is always measured.
 
 ## Test File Organization
 
-**Location:** Co-located with source. Every production `.go` file has a matching `*_test.go` in the same directory.
-- `internal/tools/bash.go` → `internal/tools/bash_test.go`
-- `internal/provider/zen/client.go` → `internal/provider/zen/client_test.go`
-- `internal/tui/components/toolcard.go` → `internal/tui/components/toolcard_test.go`
-
-**Package:** Same package as the source file (white-box testing), not `_test` package suffix. Examples: `package tools`, `package workflow`, `package provider`.
+**Location:** Co-located with source files (`*_test.go` in same package)
 
 **Naming:**
-- File: `<source>_test.go`
-- Functions: `TestX_Y` (Type_Method or Type_Scenario) — see `internal/tools/bash_test.go`:
-  - `TestBash_SimpleCommand`, `TestBash_Name`, `TestBash_Description`, `TestBash_RiskLevel`
-  - `TestBash_WithWorkingDirectory`, `TestBash_Stderr`, `TestBash_Timeout`
-  - `TestBash_ContextCancellation`, `TestBash_NonZeroExit`, `TestBash_OutputTruncated`
-  - `TestBash_BinaryOutput`, `TestBash_CommandNotFound`, `TestBash_MissingCommandParam`
-  - `TestBash_CommandNotString`, `TestBash_CustomTimeout`, `TestBash_InvalidTimeout`
-- Internal helpers (unexported): `TestLimitWriter_UnderLimit`, `TestIsBinary_Empty` (`bash_test.go:222-328`).
-- Constructor coverage via dedicated tests: `TestBash_Name`, `TestBash_Description`, `TestBash_RiskLevel`.
+- Test files: `<source>_test.go` — `bash_test.go`, `registry_test.go`, `loader_test.go`
+- Security tests: `<source>_security_test.go` — `bash_security_test.go`, `webfetch_security_test.go`
+- Package tests use `_test` suffix for black-box testing: `package provider_test` (rare)
+
+**Structure:**
+```
+internal/
+├── tools/
+│   ├── bash.go              # Source
+│   ├── bash_unix.go         # Platform-specific source
+│   ├── bash_test.go         # Tests (same package)
+│   ├── bash_security_test.go # Security-focused tests
+│   ├── fileread.go
+│   ├── fileread_test.go
+│   ├── filewrite.go
+│   ├── filewrite_test.go
+│   ├── glob.go
+│   ├── glob_test.go
+│   ├── grep.go
+│   ├── grep_test.go
+│   └── dispatcher_test.go
+├── provider/
+│   ├── interface.go
+│   ├── registry.go
+│   ├── registry_test.go
+│   ├── cache.go
+│   ├── cache_test.go
+│   ├── cache_refresh_test.go
+│   ├── sse.go
+│   ├── sse_test.go
+│   ├── reasoning.go
+│   ├── reasoning_test.go
+│   ├── fallback.go
+│   ├── resilience_test.go
+│   └── openrouter/
+│       ├── client.go
+│       └── client_test.go
+```
 
 ## Test Structure
 
-**Setup helpers** (created in-test, not in a base suite):
+**Suite Organization:**
 ```go
-func TestBash_SimpleCommand(t *testing.T) {
+func TestFunctionName(t *testing.T) {
     t.Parallel()
-    b := NewBash(t.TempDir())          // temp dir
-    result, err := b.Execute(context.Background(), types.ToolInput{...})
-    // assertions
-}
-```
+    // Setup
+    dir := t.TempDir()
+    tool := NewTool(dir)
 
-`t.TempDir()` is used universally for filesystem isolation; the directory is cleaned up automatically.
+    // Execute
+    result, err := tool.Execute(context.Background(), types.ToolInput{
+        Name: "ToolName",
+        Params: map[string]any{...},
+    })
 
-`t.Helper()` is used to mark helper functions (`pkg/ledger/ledger_test.go:43`).
-
-**Suite-level helpers** in test packages (e.g. `pkg/autodream/autodream_test.go:17-91`):
-- `makeMessages(n int) []types.Message`
-- `makeMessagesWithContent(content []string) []types.Message`
-- `makeSystemMessages(n int, sysIdx []int) []types.Message`
-- `makeToolCallMessages(n int, toolIdx []int) []types.Message`
-- `sampleContent(i int) string`
-- `format(s string, args ...interface{}) string` (avoids `fmt.Sprintf` import in test tables)
-
-**Test organization convention:**
-- Each test file starts with a comment block dividing test categories when non-trivial (e.g. `internal/tools/dispatcher_test.go:364-366`: `// Permission ruleset matching tests`; `pkg/autodream/autodream_test.go:12-94`: `// Test helpers`, `// CanConsolidate tests`, `// Consolidate tests`, `// Pause / Resume tests`, etc.).
-- Section comment headers look like:
-  ```go
-  // ---------------------------------------------------------------------------
-  // Doublestar integration verification
-  // ---------------------------------------------------------------------------
-  ```
-
-## Parallelism
-
-`t.Parallel()` is invoked at the **top of every test function** that doesn't share state with siblings. ~106 occurrences across the repository.
-
-When to skip `t.Parallel()`:
-- Tests that mutate shared state across the test binary (e.g. long-running bash tests with explicit timing assertions in `bash_test.go:53-68, 87-108, 155-170`).
-- Tests using channels for handshakes with goroutines inside the test body.
-
-**Helper goroutines** for permission flow tests (`internal/tools/dispatcher_test.go:82-109, 111-131, 133-167`):
-```go
-errCh := make(chan error, 1)
-go func() {
-    _, err := d.Execute(context.Background(), types.ToolCall{ID: "call1", Name: "bash", Input: []byte(`{}`)})
-    errCh <- err
-}()
-
-req := <-d.RequestCh()
-if req.ToolName != "bash" { t.Errorf(...) }
-d.ApprovePermission(true, false)
-
-if err := <-errCh; err != nil { t.Errorf(...) }
-```
-Always pair: spawn goroutine, wait for request on channel, respond, drain result from channel.
-
-## Mocking
-
-**Mock strategies used** (in order of preference):
-
-**1. In-package mock implementations** for interfaces, written inline in the test file:
-```go
-// internal/tools/dispatcher_test.go:15-29
-type mockTool struct {
-    name      string
-    riskLevel types.RiskLevel
-    execFunc  func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
-}
-func (m *mockTool) Name() string { return m.name }
-func (m *mockTool) Description() string { return "mock tool for testing" }
-func (m *mockTool) RiskLevel() types.RiskLevel { return m.riskLevel }
-func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
-    if m.execFunc != nil { return m.execFunc(ctx, input) }
-    return types.ToolResult{Output: "ok"}, nil
-}
-```
-
-**2. In-memory fakes** for storage-style interfaces (`pkg/keychain/keychain_test.go:8-35`):
-```go
-type mockKeychain struct { store map[string]string }
-func (m *mockKeychain) Get(service string) (string, error)   { ... }
-func (m *mockKeychain) Set(service, value string) error      { ... }
-func (m *mockKeychain) Delete(service string) error          { ... }
-```
-
-**3. `httptest.NewServer` for HTTP mocks** (full server, not `httptest.NewRecorder`):
-```go
-// internal/provider/openrouter/client_test.go:39-57
-ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if r.URL.Path == "/auth/key" {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte(`{"status":"ok"}`))
+    // Assert
+    if err != nil {
+        t.Fatal(err)
     }
-}))
-defer ts.Close()
-
-c, _ := New("test-key", Options{})
-c.baseURL = ts.URL         // inject the test server URL directly
-status := c.HealthCheck(context.Background())
-```
-
-The test rewrites `c.baseURL` to the test server's URL after construction — this is the standard injection pattern for clients whose `Options.BaseURL` is set at construction.
-
-**4. Streaming SSE test bodies** (in-memory readers, no server):
-```go
-// internal/provider/sse_test.go:10-14
-func bodyReader(s string) *http.Response {
-    return &http.Response{Body: io.NopCloser(strings.NewReader(s))}
+    if !strings.Contains(result.Output, "expected") {
+        t.Errorf("expected 'expected' in output, got: %s", result.Output)
+    }
 }
 ```
-This is a one-off helper used to feed the SSE parser with synthetic stream content.
 
-**5. Real OS test files via `t.TempDir()` and `os.WriteFile`** for tools that touch the filesystem (`internal/tools/fileread_test.go`, `internal/tools/filewrite_test.go`, `internal/tools/grep_test.go`, `internal/tools/glob_test.go`, `pkg/ledger/ledger_test.go`).
-
-**What to mock** (from observations):
-- HTTP clients: use `httptest.NewServer`.
-- Permission flows: use a real `Dispatcher` with a `mockTool` registered, drive it via channels.
-- Keychain: in-memory `mockKeychain`.
-- Tool dependencies: never mock the tool under test itself; provide a `mockTool` to the dispatcher.
-
-**What NOT to mock:**
-- Time — use `time.Now()` directly; for cache staleness tests, manually backdate fields:
-  ```go
-  // internal/provider/cache_test.go:28
-  c.fetched = time.Now().Add(-10 * time.Minute)
-  ```
-- The tool implementation itself — always exercise the real `*Bash`, `*FileRead`, etc.
-
-## Fixtures and Factories
-
-**Test data factories** are defined at the top of the test file and prefixed with the type (`newTest*`):
-- `newTestEntry` in `pkg/ledger/ledger_test.go:14-25`
-- `newTestSession` in `pkg/ledger/ledger_test.go:28-39`
-- `newTask` in `pkg/taskrunner/runner_test.go:12-19`
-- `setupLedger` in `pkg/ledger/ledger_test.go:42-48` (returns `(*Ledger, string)`)
-- `makeMessages`, `makeMessagesWithContent`, `makeSystemMessages`, `makeToolCallMessages` in `pkg/autodream/autodream_test.go:17-86`
-
-**Parametrized tool input helper:**
+**Table-Driven Tests:**
 ```go
-// internal/tools/grep_test.go: uses toolInput("pattern", "main") shorthand
-```
-Although the helper itself is not always defined as exported, the pattern is consistent: build a `types.ToolInput` with one named param.
-
-**Test fixtures on disk** (no shared `testdata/` directory is heavily used; tests inline content):
-- `pkg/ledger/ledger_test.go:76-83` writes a pre-formatted `LEDGER.md` content string directly via `os.WriteFile`.
-
-## Table-Driven Tests
-
-The repository uses both table tests and individual test functions. Table tests are preferred when the matrix is small and uniform; otherwise individual `TestX_Y` functions are written.
-
-**Table-test example with anonymous struct** (`internal/tools/dispatcher_test.go:368-393`):
-```go
-func TestMatchToolName(t *testing.T) {
-    t.Parallel()
+func TestSanitizeProviderError(t *testing.T) {
     tests := []struct {
-        name    string
-        pattern string
-        tool    string
-        want    bool
+        name       string
+        statusCode int
+        body       string
+        contains   string
+        notContain string
     }{
-        {"exact match", "Bash", "Bash", true},
-        {"wildcard", "*", "Bash", true},
-        {"glob prefix", "B*", "Bash", true},
-        // ...
+        {"bad request", 400, "invalid param", "Bad request", ""},
+        {"unauthorized", 401, "", "Invalid API key", ""},
+        {"rate limited", 429, "", "Rate limited", ""},
     }
+
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            got := matchToolName(tt.pattern, tt.tool)
-            if got != tt.want { t.Errorf(...) }
+            result := sanitizeProviderError(tt.statusCode, tt.body)
+            if !strings.Contains(result, tt.contains) {
+                t.Errorf("sanitizeProviderError(%d, %q) = %q, want it to contain %q",
+                    tt.statusCode, tt.body, result, tt.contains)
+            }
         })
     }
 }
 ```
 
-**Named struct slice for table tests** (`pkg/taskrunner/runner_test.go:446-472`):
+**Subtests:**
 ```go
-tests := []struct {
-    name          string
-    initialStatus types.TaskStatus
-    expected      types.TaskStatus
-}{...}
-```
-
-**Subtests via `t.Run(name, fn)`** — used for all table tests and for grouping within a single test function (`internal/tui/components/toolcard_test.go:178-219` for `TestSanitizeOutput`).
-
-## Error Testing
-
-**Sentinel error comparison:** `errors.Is` (or direct equality for tests that import the same package).
-```go
-// internal/tools/dispatcher_test.go:128
-if err := <-errCh; err != m31errors.ErrPermissionDenied {
-    t.Errorf("expected ErrPermissionDenied, got: %v", err)
-}
-```
-
-**Error message substring matching:** when a wrapped error is expected, check the message:
-```go
-// internal/tools/bash_test.go:216
-if !strings.Contains(err.Error(), "missing parameter: command") {
-    t.Errorf("expected missing parameter error, got: %v", err)
-}
-```
-
-**Panic testing:** use `defer recover()` and assert the panic value:
-```go
-// internal/tools/dispatcher_test.go:351-362
-func TestDispatcher_RegisterDuplicate(t *testing.T) {
-    t.Parallel()
-    d := NewDispatcher(nil)
-    d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
-    defer func() {
-        if r := recover(); r == nil {
-            t.Error("expected panic for duplicate registration")
+func TestCacheRefresh(t *testing.T) {
+    t.Run("IsRefreshing returns false initially", func(t *testing.T) {
+        cache := NewModelCache(5 * time.Minute)
+        if cache.IsRefreshing() {
+            t.Error("expected IsRefreshing to be false initially")
         }
-    }()
-    d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+    })
+
+    t.Run("IsRefreshing returns true during refresh", func(t *testing.T) {
+        cache := NewModelCache(5 * time.Minute)
+        cache.refreshing.Store(true)
+        if !cache.IsRefreshing() {
+            t.Error("expected IsRefreshing to be true during refresh")
+        }
+    })
 }
 ```
+
+## Mocking
+
+**Framework:** Hand-written mocks — no external mocking library
+
+**Patterns:**
+
+```go
+// Mock provider (internal/provider/registry_test.go)
+type mockProvider struct {
+    name         string
+    healthStatus string
+}
+
+func (m *mockProvider) Name() string { return m.name }
+func (m *mockProvider) APIKey() string { return "mock-key" }
+func (m *mockProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) { return nil, nil }
+func (m *mockProvider) ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error) { return nil, nil }
+func (m *mockProvider) EstimateCost(modelID string, usage types.Usage) float64 { return 0 }
+func (m *mockProvider) HealthCheck(ctx context.Context) types.HealthStatus {
+    return types.HealthStatus{Status: m.healthStatus}
+}
+func (m *mockProvider) GetModel(id string) (*types.ModelInfo, error) { return nil, nil }
+```
+
+```go
+// Mock tool with configurable exec function (internal/tools/dispatcher_test.go)
+type mockTool struct {
+    name      string
+    riskLevel types.RiskLevel
+    execFunc  func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
+}
+
+func (m *mockTool) Name() string               { return m.name }
+func (m *mockTool) Description() string        { return "mock tool for testing" }
+func (m *mockTool) RiskLevel() types.RiskLevel { return m.riskLevel }
+func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+    if m.execFunc != nil {
+        return m.execFunc(ctx, input)
+    }
+    return types.ToolResult{Output: "ok"}, nil
+}
+```
+
+```go
+// Mock keychain (internal/config/loader_test.go)
+type mockKeychain struct {
+    store map[string]string
+}
+
+func (m *mockKeychain) Get(service string) (string, error) {
+    if v, ok := m.store[service]; ok {
+        return v, nil
+    }
+    return "", errors.New("not found")
+}
+
+func (m *mockKeychain) Set(service, value string) error {
+    m.store[service] = value
+    return nil
+}
+
+func (m *mockKeychain) Delete(service string) error {
+    delete(m.store, service)
+    return nil
+}
+```
+
+```go
+// Mock ReadCloser for SSE testing (internal/provider/resilience_test.go)
+type mockReadCloser struct {
+    data    []byte
+    offset  int
+    closeFn func()
+    closed  bool
+}
+
+func (m *mockReadCloser) Read(p []byte) (int, error) {
+    if m.offset >= len(m.data) {
+        return 0, io.EOF
+    }
+    n := copy(p, m.data[m.offset:])
+    m.offset += n
+    return n, nil
+}
+
+func (m *mockReadCloser) Close() error {
+    if !m.closed {
+        m.closed = true
+        if m.closeFn != nil {
+            m.closeFn()
+        }
+    }
+    return nil
+}
+```
+
+**What to Mock:**
+- LLM providers (network calls)
+- OS keychain (platform-specific)
+- File system (use `t.TempDir()` instead)
+- HTTP endpoints (use `httptest.NewServer`)
+
+**What NOT to Mock:**
+- Internal data structures
+- Standard library functions
+- Git operations (use real git in temp dirs)
+
+## Fixtures and Factories
+
+**Test Data:**
+```go
+// Helper function to create ToolInput (internal/tools/glob_test.go)
+func toolInput(key, value string) types.ToolInput {
+    return types.ToolInput{
+        Name:   "test",
+        Params: map[string]any{key: value},
+    }
+}
+
+// Helper to set up a real git repo (internal/git/git_test.go)
+func setupRepo(t *testing.T) (*Git, string) {
+    t.Helper()
+    dir := t.TempDir()
+    g := New(dir)
+    if err := g.Init(); err != nil {
+        t.Fatalf("Init failed: %v", err)
+    }
+    if err := g.ConfigUser("Test User", "test@test.com"); err != nil {
+        t.Fatalf("ConfigUser failed: %v", err)
+    }
+    return g, dir
+}
+```
+
+**Location:** Inline in test files — no separate fixture directories.
 
 ## Coverage
 
-**Targets** (CONTRIBUTING.md):
-- **75% overall** across the module.
-- **90% for critical packages:** `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`.
+**Requirements:** Race detector enabled (`-race`), coverage profile generated
 
-**Current coverage files** (root): `coverage.out`, `coverage.html`, `coverage_phase6.out`, `cover.out` — measured during phase work.
-
-**View coverage:**
+**View Coverage:**
 ```bash
-go test -race -cover -coverprofile=coverage.out ./...
+make cover         # Generate HTML report (coverage.html)
 go tool cover -html=coverage.out -o coverage.html
 ```
 
+**CI Coverage:** Uploaded as GitHub Actions artifact (`coverage.out`)
+
 ## Test Types
 
-**Unit tests** (primary mode):
-- All packages have unit tests in the same file directory.
-- Test one method or behavior per function (with table subtests for variations).
+**Unit Tests:**
+- Scope: Individual functions/methods in isolation
+- Pattern: Construct → Execute → Assert
+- Examples: `TestBash_SimpleCommand`, `TestFileRead_SimpleRead`, `TestGlob_SimplePattern`
 
-**Integration tests:**
-- `internal/workflow/integration_test.go` — full six-phase workflow.
-- `internal/workflow/engine_test.go` — engine orchestration.
+**Integration Tests:**
+- Scope: Multiple components working together
+- Pattern: Real HTTP servers (`httptest.NewServer`), real git repos (`t.TempDir()`)
+- Examples: `TestChatCompletionStream_*` (SSE parsing + provider client), `TestGit_*` (full git operations)
 
-**Subprocess / shell tests:**
-- `internal/tools/bash_test.go` actually spawns subprocesses (`echo`, `sleep`, `exit`, `printf`).
-- `TestBash_ContextCancellation` (`bash_test.go:110-136`) launches a 30s sleep in a goroutine, cancels context, asserts the goroutine returns within 5s.
-
-**Compile-time interface checks** in production code (e.g. `internal/provider/zen/client.go:23`):
-```go
-var _ provider.LLMProvider = (*Client)(nil)
-```
-Tests rely on the same interfaces but don't have a `var _` line.
+**E2E Tests:**
+- Framework: Not used at this scale — integration tests cover the critical paths
+- Full workflow tests are handled at the application level
 
 ## Common Patterns
 
-**Async testing with timeout:**
+**Async Testing:**
 ```go
-// internal/tools/dispatcher_test.go:341-348
-select {
-case err := <-errCh:
-    if err == nil { t.Error("expected context cancellation error") }
-case <-time.After(2 * time.Second):
-    t.Fatal("expected context cancellation to be handled")
+func TestBash_ContextCancellation(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    b := NewBash(t.TempDir())
+
+    errCh := make(chan error, 1)
+    go func() {
+        _, err := b.Execute(ctx, types.ToolInput{
+            Name:   "Bash",
+            Params: map[string]any{"command": "sleep 30"},
+        })
+        errCh <- err
+    }()
+
+    time.Sleep(100 * time.Millisecond)
+    cancel()
+
+    select {
+    case err := <-errCh:
+        if err == nil {
+            t.Log("context cancellation returned no error")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("command not cancelled in time")
+    }
 }
 ```
 
-**Temp file in subdirectory:**
+**HTTP Server Mocking:**
 ```go
-os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0755)
-os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("..."), 0644)
-```
-Used in `grep_test.go:138-139`, `glob_test.go` to simulate project layout.
+func TestHealthCheck_Live(t *testing.T) {
+    ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/auth/key" {
+            w.WriteHeader(http.StatusOK)
+            w.Write([]byte(`{"status":"ok"}`))
+        }
+    }))
+    defer ts.Close()
 
-**Symlink safety tests** (`internal/tools/fileread_test.go:119-142`):
-```go
-if err := os.Symlink(outsideFile, symlinkPath); err != nil {
-    t.Skip("symlinks not supported on this system")
+    c, _ := New("test-key", Options{})
+    c.baseURL = ts.URL  // Override base URL for testing
+
+    status := c.HealthCheck(context.Background())
+    if status.Status != "live" {
+        t.Fatalf("expected status %q, got %q", "live", status.Status)
+    }
 }
 ```
-Skip gracefully when the test environment cannot create symlinks.
 
-**Time-based cache testing** (`internal/provider/cache_test.go:107-141`):
-- Use very short TTLs (`10 * time.Millisecond`) plus `time.Sleep(20 * time.Millisecond)` to test expiry.
-- Or directly mutate the `fetched` field to simulate the passage of time.
-
-**Results() copy test** (`pkg/taskrunner/runner_test.go:596-616`):
-- Get the map, mutate the copy, assert internal state is unchanged.
-- Verifies defensive copying in accessor methods.
-
-**Immutability test for returned slices** (`pkg/autodream/autodream_test.go:394-416`):
+**Permission Gating Tests:**
 ```go
-got := c.Messages()
-got[0].Content = "MUTATED"
-got = append(got, types.Message{...})
-internal := c.Messages()
-if internal[0].Content == "MUTATED" { t.Error("mutating returned slice should not affect internal state") }
+func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
+    d := NewDispatcher(nil)
+    d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+
+    errCh := make(chan error, 1)
+    go func() {
+        _, err := d.Execute(context.Background(), types.ToolCall{
+            ID:    "call1",
+            Name:  "bash",
+            Input: []byte(`{"name": "bash", "params": {"command": "echo hello"}}`),
+        })
+        errCh <- err
+    }()
+
+    req := <-d.RequestCh()  // Read from permission channel
+    if req.ToolName != "bash" {
+        t.Errorf("expected request for 'bash', got %q", req.ToolName)
+    }
+    d.ApprovePermission(true, false)  // Approve permission
+
+    if err := <-errCh; err != nil {
+        t.Errorf("expected nil error after approval, got: %v", err)
+    }
+}
 ```
 
-**JSON object comparison** via `json.Marshal`/`json.Equal` is **not** used; tests use field-by-field comparison with `t.Errorf` per field.
+**Error Assertion:**
+```go
+// Sentinel error comparison
+if err != m31errors.ErrInvalidKey {
+    t.Fatalf("expected ErrInvalidKey, got %v", err)
+}
 
-**Atomic counter test patterns:** rarely needed; the codebase uses `atomic.AddInt64` in `internal/workflow/engine.go:647` (`nextCallID`) but does not have a dedicated test for that helper.
+// Wrapped sentinel error (works with errors.Is)
+wrappedErr := fmt.Errorf("auth failed: %w", m31errors.ErrInvalidKey)
+if !errors.Is(wrappedErr, m31errors.ErrInvalidKey) {
+    t.Errorf("expected wrapped error to match sentinel")
+}
 
-## Where to Add New Tests
+// Error message content
+if !strings.Contains(err.Error(), "outside working directory") {
+    t.Errorf("expected 'outside working directory' error, got: %v", err)
+}
+```
 
-| New code goes in | Tests live in |
-|---|---|
-| `internal/tools/mytool.go` | `internal/tools/mytool_test.go` (co-located) |
-| `internal/provider/<provider>/client.go` | `internal/provider/<provider>/client_test.go` |
-| `internal/workflow/<phase>.go` | `internal/workflow/<phase>_test.go` |
-| `internal/tui/<screen>.go` | `internal/tui/<screen>_test.go` |
-| `internal/tui/components/<comp>.go` | `internal/tui/components/<comp>_test.go` |
-| `pkg/<pkg>/<file>.go` | `pkg/<pkg>/<file>_test.go` |
-| `cmd/m31a/main.go` | No tests (entry point only; covered by integration). |
+**Parallel Testing:**
+```go
+func TestTool_Something(t *testing.T) {
+    t.Parallel()  // Mark test as safe for parallel execution
+    // ... test body
+}
+```
 
-**Minimum test coverage for a new tool:**
-- `TestX_Name`, `TestX_Description`, `TestX_RiskLevel` (constructor coverage).
-- At least one happy-path test exercising real filesystem/process.
-- At least one parameter-validation test (missing param, wrong type).
-- At least one error test (binary file, timeout, cancellation, permission denied, file-not-found).
+**Temp Directory Isolation:**
+```go
+func TestFileWrite_SimpleWrite(t *testing.T) {
+    t.Parallel()
+    dir := t.TempDir()      // Auto-cleaned after test
+    backupDir := t.TempDir()
+    fw := NewFileWrite(dir, backupDir)
+    // ... test body using isolated directories
+}
+```
 
-**Test naming within a new package:** follow `TestX_Y` style with a stable prefix matching the type under test.
+## Test Naming Conventions
+
+**Pattern:** `Test<Type>_<Method>_<Scenario>`
+
+**Examples:**
+- `TestBash_SimpleCommand` — basic functionality
+- `TestBash_Timeout` — edge case
+- `TestBash_ContextCancellation` — concurrency scenario
+- `TestFileWrite_PathOutsideWorkDir` — security boundary
+- `TestFileWrite_BinaryContent` — error condition
+- `TestChatCompletionStream_WithThinking` — feature-specific
+- `TestRegistry_SetActive_Unknown` — error path
+- `TestModelCache_Get_StaleFallback` — resilience scenario
+
+## Test Helpers
+
+**Common Helpers:**
+```go
+// t.Helper() for setup functions
+func setupRepo(t *testing.T) (*Git, string) {
+    t.Helper()
+    // ... setup code
+}
+
+// ToolInput factory
+func toolInput(key, value string) types.ToolInput {
+    return types.ToolInput{
+        Name:   "test",
+        Params: map[string]any{key: value},
+    }
+}
+```
+
+## CI/CD Testing
+
+**GitHub Actions:**
+```yaml
+# .github/workflows/ci.yml
+test:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Run tests
+      run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+
+build:
+  strategy:
+    matrix:
+      os: [ubuntu-latest, macos-latest, windows-latest]
+      arch: [amd64, arm64]
+  steps:
+    - name: Build
+      run: CGO_ENABLED=0 GOARCH=${{ matrix.arch }} go build -o m31a ./cmd/m31a
+    - name: Vet
+      run: GOARCH=${{ matrix.arch }} go vet ./cmd/m31a
+```
+
+**Makefile Targets:**
+- `make test` — `go test -race -cover -coverprofile=coverage.out ./...`
+- `make test-fast` — `go test -cover ./...` (no race detector)
+- `make test-verbose` — `go test -v -race -cover ./...`
+- `make test-specific TEST=TestName` — Run specific test
+- `make bench` — `go test -bench=. -benchmem -run=^$ ./...`
+- `make cover` — Generate HTML coverage report
+- `make lint` — `golangci-lint run ./... --timeout=5m`
+- `make check` — `fmt tidy vet test` (full CI pipeline)
+
+## Key Testing Statistics
+
+- **Test files:** 80
+- **Total Go files:** 194
+- **Test-to-source ratio:** ~41%
+- **Framework:** Standard `testing` only
+- **Mocking:** Hand-written mocks
+- **CI:** GitHub Actions with race detector + coverage
 
 ---
 
-*Testing analysis: 2026-06-02*
+*Testing analysis: 2026-06-04*

