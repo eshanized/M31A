@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 )
@@ -157,8 +158,18 @@ func (m *AppState) askNextDiscussQuestion() tea.Cmd {
 	if m.discussAnswerTimeout != nil {
 		m.discussAnswerTimeout.Stop()
 	}
-	// Start 5-minute timeout
-	m.discussAnswerTimeout = time.NewTimer(5 * time.Minute)
+	// Start timeout (configurable via UIConfig.DiscussTimeout, default 5 minutes)
+	timeoutSecs := 300
+	if m.config != nil && m.config.UI.DiscussTimeout > 0 {
+		timeoutSecs = m.config.UI.DiscussTimeout
+	}
+	m.discussAnswerTimeout = time.NewTimer(time.Duration(timeoutSecs) * time.Second)
+
+	// C-3 fix: add nil guard on dispatcher to prevent panic
+	var responseCh chan tools.QuestionResponse
+	if m.dispatcher != nil {
+		responseCh = m.dispatcher.QuestionResponseCh()
+	}
 
 	return tea.Batch(
 		func() tea.Msg {
@@ -167,9 +178,12 @@ func (m *AppState) askNextDiscussQuestion() tea.Cmd {
 				Header:      header,
 				Options:     []string{},
 				AllowCustom: true,
-				ResponseCh:  m.dispatcher.QuestionResponseCh(),
+				ResponseCh:  responseCh,
 			}
 		},
+		// C-3 fix: use a goroutine that checks if the timer channel is ready
+		// instead of blocking on <-m.discussAnswerTimeout.C which leaks if
+		// the phase changes before the timer fires.
 		func() tea.Msg {
 			<-m.discussAnswerTimeout.C
 			return DiscussAnswerTimeoutMsg{QuestionIndex: m.currentDiscussIndex}

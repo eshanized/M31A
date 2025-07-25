@@ -244,7 +244,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			if err := e.git.Commit(fmt.Sprintf("feat: %s", task.Description)); err != nil {
 				e.logger.Warn("commit failed", "task", task.ID, "error", err)
 			} else {
-				commitHash, _ = e.git.HeadHash()
+				var hashErr error
+				commitHash, hashErr = e.git.HeadHash()
+				if hashErr != nil {
+					e.logger.Warn("git HeadHash failed after commit", "task", task.ID, "error", hashErr)
+				}
 			}
 		}
 
@@ -341,7 +345,11 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		if err := e.git.Commit(fmt.Sprintf("fix: %s", task.Description)); err != nil {
 			e.logger.Warn("heal commit failed", "task", task.ID, "error", err)
 		} else {
-			commitHash, _ = e.git.HeadHash()
+			var hashErr error
+			commitHash, hashErr = e.git.HeadHash()
+			if hashErr != nil {
+				e.logger.Warn("git HeadHash failed after heal commit", "task", task.ID, "error", hashErr)
+			}
 		}
 	}
 

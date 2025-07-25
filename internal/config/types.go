@@ -56,6 +56,8 @@ type UIConfig struct {
 	LeaderTimeoutMs int `toml:"leader_timeout_ms"`
 	// Minimum terminal width before sidebar auto-shows. Default 120.
 	SidebarWidthThreshold int `toml:"sidebar_width_threshold"`
+	// Discuss Q&A timeout in seconds. Default 300 (5 minutes).
+	DiscussTimeout int `toml:"discuss_timeout"`
 }
 
 type PermissionsConfig struct {

@@ -42,7 +42,7 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		originalRules:    []config.PermissionRule{},
 		agents:           make(map[string]config.PermissionsAgentConfig),
 		activeAgent:      "default",
-		permissionTimeout: 300, // default 300 seconds
+		permissionTimeout: types.DefaultPermissionTimeout,
 	}
 	if cfg != nil {
 		if cfg.Rules != nil {

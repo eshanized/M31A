@@ -59,7 +59,11 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 	var commits []git.CommitInfo
 	if e.git != nil {
-		commits, _ = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		var err error
+		commits, err = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		if err != nil {
+			e.logger.Warn("git log failed during ship summary", "error", err)
+		}
 	}
 
 	summary := ShipSummary{
@@ -204,7 +208,11 @@ func (e *Engine) BuildSummary() ShipSummary {
 
 	var commits []git.CommitInfo
 	if e.git != nil {
-		commits, _ = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		var err error
+		commits, err = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		if err != nil {
+			e.logger.Warn("git log failed during ship summary", "error", err)
+		}
 	}
 
 	return ShipSummary{

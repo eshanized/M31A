@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -112,159 +113,71 @@ func findProjectConfig(cwd string) string {
 	return ""
 }
 
-// mergeConfig performs a field-level merge of overlay into base.
+// mergeConfig performs a reflection-based merge of overlay into base.
 // Overlay non-zero values override base values. Zero-valued fields in overlay
-// leave base values unchanged. This is a flat merge per top-level section.
+// leave base values unchanged. Handles nested structs recursively.
 func mergeConfig(base, overlay *Config) {
-	// Provider section
-	if overlay.Provider.Default != "" {
-		base.Provider.Default = overlay.Provider.Default
-	}
-	if overlay.Provider.AutoFallback {
-		base.Provider.AutoFallback = true
-	}
-	if overlay.Provider.OpenRouter.APIKey != "" {
-		base.Provider.OpenRouter.APIKey = overlay.Provider.OpenRouter.APIKey
-	}
-	if overlay.Provider.Zen.APIKey != "" {
-		base.Provider.Zen.APIKey = overlay.Provider.Zen.APIKey
-	}
-	if overlay.Provider.OpenRouterBaseURL != "" {
-		base.Provider.OpenRouterBaseURL = overlay.Provider.OpenRouterBaseURL
-	}
-	if overlay.Provider.ZenBaseURL != "" {
-		base.Provider.ZenBaseURL = overlay.Provider.ZenBaseURL
-	}
-	if overlay.Provider.OpenRouterReferer != "" {
-		base.Provider.OpenRouterReferer = overlay.Provider.OpenRouterReferer
-	}
-	if overlay.Provider.OpenRouterTitle != "" {
-		base.Provider.OpenRouterTitle = overlay.Provider.OpenRouterTitle
-	}
+	mergeStructs(reflect.ValueOf(base).Elem(), reflect.ValueOf(overlay).Elem())
+}
 
-	// Model section
-	if overlay.Model.Default != "" {
-		base.Model.Default = overlay.Model.Default
-	}
-	if overlay.Model.ContextWarningThreshold != 0 {
-		base.Model.ContextWarningThreshold = overlay.Model.ContextWarningThreshold
-	}
-	if overlay.Model.ShowThinkingByDefault {
-		base.Model.ShowThinkingByDefault = true
-	}
-	if overlay.Model.AutoCollapseTools {
-		base.Model.AutoCollapseTools = true
-	}
-	if overlay.Model.AutoArbitrage {
-		base.Model.AutoArbitrage = true
-	}
-	if overlay.Model.ArbitrageThreshold != 0 {
-		base.Model.ArbitrageThreshold = overlay.Model.ArbitrageThreshold
-	}
-	if overlay.Model.DefaultContextLength != 0 {
-		base.Model.DefaultContextLength = overlay.Model.DefaultContextLength
-	}
-	if overlay.Model.TokenEMAAlpha != 0 {
-		base.Model.TokenEMAAlpha = overlay.Model.TokenEMAAlpha
-	}
-
-	// UI section
-	if overlay.UI.Theme != "" {
-		base.UI.Theme = overlay.UI.Theme
-	}
-	if overlay.UI.CompactMode {
-		base.UI.CompactMode = true
-	}
-	if overlay.UI.ShowTokenUsage {
-		base.UI.ShowTokenUsage = true
-	}
-	if overlay.UI.ShowCostEstimate {
-		base.UI.ShowCostEstimate = true
-	}
-	if overlay.UI.MaxIterations != 0 {
-		base.UI.MaxIterations = overlay.UI.MaxIterations
-	}
-	if overlay.UI.LeaderKey != "" {
-		base.UI.LeaderKey = overlay.UI.LeaderKey
-	}
-	if overlay.UI.LeaderTimeoutMs != 0 {
-		base.UI.LeaderTimeoutMs = overlay.UI.LeaderTimeoutMs
-	}
-	if overlay.UI.SidebarWidthThreshold != 0 {
-		base.UI.SidebarWidthThreshold = overlay.UI.SidebarWidthThreshold
-	}
-
-	// Permissions section
-	if overlay.Permissions.DefaultMode != "" {
-		base.Permissions.DefaultMode = overlay.Permissions.DefaultMode
-	}
-	if overlay.Permissions.TimeoutSeconds != 0 {
-		base.Permissions.TimeoutSeconds = overlay.Permissions.TimeoutSeconds
-	}
-	if len(overlay.Permissions.Rules) > 0 {
-		base.Permissions.Rules = overlay.Permissions.Rules
-	}
-	if len(overlay.Permissions.Agents) > 0 {
-		if base.Permissions.Agents == nil {
-			base.Permissions.Agents = make(map[string]PermissionsAgentConfig)
+// mergeStructs recursively merges overlay fields into base using reflection.
+func mergeStructs(base, overlay reflect.Value) {
+	overlayType := overlay.Type()
+	for i := 0; i < overlay.NumField(); i++ {
+		field := overlayType.Field(i)
+		if !field.IsExported() {
+			continue
 		}
-		for k, v := range overlay.Permissions.Agents {
-			base.Permissions.Agents[k] = v
+		baseField := base.FieldByName(field.Name)
+		overlayField := overlay.FieldByName(field.Name)
+		if !baseField.IsValid() || !overlayField.IsValid() {
+			continue
 		}
+		mergeField(baseField, overlayField, field.Type)
 	}
+}
 
-	// Features section
-	if overlay.Features.AutoBackup {
-		base.Features.AutoBackup = true
-	}
-	if overlay.Features.ResumeOnStartup {
-		base.Features.ResumeOnStartup = true
-	}
-	if overlay.Features.ModelCacheTTLMinutes != 0 {
-		base.Features.ModelCacheTTLMinutes = overlay.Features.ModelCacheTTLMinutes
-	}
-	if overlay.Features.ModelCacheStaleHours != 0 {
-		base.Features.ModelCacheStaleHours = overlay.Features.ModelCacheStaleHours
-	}
-	if overlay.Features.HealthCheckLiveMs != 0 {
-		base.Features.HealthCheckLiveMs = overlay.Features.HealthCheckLiveMs
-	}
-	if overlay.Features.HealthCheckSlowMs != 0 {
-		base.Features.HealthCheckSlowMs = overlay.Features.HealthCheckSlowMs
-	}
-	if overlay.Features.SessionIDLength != 0 {
-		base.Features.SessionIDLength = overlay.Features.SessionIDLength
-	}
-	if overlay.Features.MaxRecentModels != 0 {
-		base.Features.MaxRecentModels = overlay.Features.MaxRecentModels
-	}
-
-	// Ledger section
-	if overlay.Ledger.Enabled {
-		base.Ledger.Enabled = true
-	}
-	if overlay.Ledger.MaxEntries != 0 {
-		base.Ledger.MaxEntries = overlay.Ledger.MaxEntries
-	}
-
-	// Agents section (per-workflow-phase model assignments)
-	if overlay.Agents.Default != "" {
-		base.Agents.Default = overlay.Agents.Default
-	}
-	if overlay.Agents.Plan != "" {
-		base.Agents.Plan = overlay.Agents.Plan
-	}
-	if overlay.Agents.Execute != "" {
-		base.Agents.Execute = overlay.Agents.Execute
-	}
-	if overlay.Agents.Verify != "" {
-		base.Agents.Verify = overlay.Agents.Verify
-	}
-	if overlay.Agents.Ship != "" {
-		base.Agents.Ship = overlay.Agents.Ship
-	}
-	if overlay.Agents.Discuss != "" {
-		base.Agents.Discuss = overlay.Agents.Discuss
+// mergeField copies a single field from overlay to base if non-zero.
+func mergeField(base, overlay reflect.Value, typ reflect.Type) {
+	switch typ.Kind() {
+	case reflect.String:
+		if overlay.String() != "" {
+			base.SetString(overlay.String())
+		}
+	case reflect.Bool:
+		// Only override if overlay is true (false is zero value)
+		if overlay.Bool() {
+			base.SetBool(true)
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if overlay.Int() != 0 {
+			base.SetInt(overlay.Int())
+		}
+	case reflect.Float32, reflect.Float64:
+		if overlay.Float() != 0 {
+			base.SetFloat(overlay.Float())
+		}
+	case reflect.Slice:
+		if !overlay.IsNil() && overlay.Len() > 0 {
+			newSlice := reflect.MakeSlice(typ, overlay.Len(), overlay.Len())
+			reflect.Copy(newSlice, overlay)
+			base.Set(newSlice)
+		}
+	case reflect.Map:
+		if !overlay.IsNil() {
+			if base.IsNil() {
+				base.Set(reflect.MakeMap(typ))
+			}
+			iter := overlay.MapRange()
+			for iter.Next() {
+				base.SetMapIndex(iter.Key(), iter.Value())
+			}
+		}
+	case reflect.Struct:
+		// Only recurse if overlay struct is not zero-valued
+		if !overlay.IsZero() {
+			mergeStructs(base, overlay)
+		}
 	}
 }
 

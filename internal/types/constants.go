@@ -19,4 +19,7 @@ const (
 	// Fix C-4: Maximum allowed LLM response size (1 MB) to prevent OOM
 	// in parseToolCalls.
 	MaxLLMResponseBytes = 1 << 20
+	// DefaultPermissionTimeout is the default permission modal timeout in seconds.
+	// Used by both the TUI permission modal and the tool dispatcher.
+	DefaultPermissionTimeout = 300
 )

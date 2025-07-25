@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -55,13 +56,18 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			tasks[i].Status = m31types.StatusUnrecoverable
 			e.logger.Warn("task unrecoverable", "id", task.ID)
 
-			// Trigger bisect — use the commit before session started as 'good'
-			headHash, _ := e.git.HeadHash()
-			goodHash := e.sessionStartHash
-			if goodHash == "" {
-				// Fallback: use HEAD~50 if sessionStartHash not captured
-				goodHash = "HEAD~50"
+		// Trigger bisect — use the commit before session started as 'good'
+		headHash, _ := e.git.HeadHash()
+		goodHash := e.sessionStartHash
+		if goodHash == "" {
+			// Fallback: find root commit instead of hardcoded HEAD~50
+			if rootHash, err := e.findRootCommit(); err == nil {
+				goodHash = rootHash
+			} else {
+				// Last resort for single-commit repos
+				goodHash = "HEAD~1"
 			}
+		}
 			b := bisect.New(e.workDir, e.logger)
 			checkFn := func() bool {
 				vr := e.verifyTask(task)
@@ -171,4 +177,28 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
 	}
 	return result, nil
+}
+
+// findRootCommit runs git rev-list --max-parents=0 HEAD to find the
+// root commit of the repository. Used as a fallback when sessionStartHash
+// is empty during bisect setup.
+func (e *Engine) findRootCommit() (string, error) {
+	if e.git == nil {
+		return "", fmt.Errorf("git not initialized")
+	}
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = e.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-list: %w", err)
+	}
+	hash := strings.TrimSpace(string(out))
+	if hash == "" {
+		return "", fmt.Errorf("empty root commit hash")
+	}
+	// rev-list may return multiple hashes (root commits); take the first
+	if idx := strings.IndexByte(hash, '\n'); idx > 0 {
+		hash = hash[:idx]
+	}
+	return hash, nil
 }

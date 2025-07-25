@@ -629,7 +629,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t := m.themeManager.Current()
 		timeout := time.Duration(msg.Request.TimeoutSecs) * time.Second
 		if timeout <= 0 {
-			timeout = components.DefaultPermissionTimeout
+			timeout = time.Duration(types.DefaultPermissionTimeout) * time.Second
 		}
 		pm := components.NewPermissionModal(msg.Request, t, timeout)
 		m.permissionModal = pm
