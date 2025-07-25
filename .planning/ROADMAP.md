@@ -1226,10 +1226,10 @@ The codebase audit produced 36 identified concerns across 9 categories:
 
 ```
 Plans:
-- [ ] 19-01-PLAN.md — Tech Debt & Bug Fixes (Wave 1)
-- [ ] 19-02-PLAN.md — Security Hardening (Wave 1)
-- [ ] 19-03-PLAN.md — Performance & Fragile Area Improvements (Wave 2)
-- [ ] 19-04-PLAN.md — Missing Features & Test Coverage (Wave 2)
+- [ ] 19-01-PLAN.md — Tech Debt & Bug Fixes (Wave 1): TD-1 through TD-6, BUG-1 through BUG-4
+- [ ] 19-02-PLAN.md — Security Hardening (Wave 1): SEC-1 through SEC-4
+- [ ] 19-03-PLAN.md — Performance & Fragile Area Improvements (Wave 2): PERF-1 through PERF-4, FRAG-1 through FRAG-4
+- [ ] 19-04-PLAN.md — Missing Features & Test Coverage (Wave 2): FEAT-1 through FEAT-3, TEST-1 through TEST-7, DEP-1 through DEP-3
 ```
 
 ### Wave Structure
