@@ -24,21 +24,39 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.initialized = true
+		// H-1 fix: collect returned tea.Cmd from sub-models and batch them.
+		// Previously, all returned cmds were silently discarded, causing
+		// streaming freezes on terminal resize.
+		var cmds []tea.Cmd
 		if m.replModel != nil {
-			m.replModel.Update(msg)
+			newCmds, _ := m.replModel.Update(msg)
+			cmds = append(cmds, newCmds...)
 		}
 		if m.firstRunModel != nil {
-			m.firstRunModel.Update(msg)
+			newCmds, _ := m.firstRunModel.Update(msg)
+			cmds = append(cmds, newCmds...)
 		}
 		if m.sidebarModel != nil {
-			m.sidebarModel.Update(msg)
+			_, cmd := m.sidebarModel.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if m.settingsModel != nil {
-			_, _ = m.settingsModel.Update(msg)
+			_, cmd := m.settingsModel.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		// modelSelector is a value type; only update if initialized
 		if m.modelSelector.registry != nil {
-			_, _ = m.modelSelector.Update(msg)
+			_, cmd := m.modelSelector.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		if len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
 
@@ -89,7 +107,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Open command palette with ctrl+p
 		if msg.String() == "ctrl+p" {
 			if m.cmdPalette != nil && m.screen == ScreenREPL {
-				cmds := m.cmdRegistry.AllCommands()
+				cmds := m.cmdRegistry.AllCommandsWithExecute()
 				// Add sidebar toggle command
 				cmds = append(cmds, CommandInfo{
 					Name:        "Toggle sidebar",
@@ -251,6 +269,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentPhase = phase
 				return m, RunPhaseCmd(m, phase, goal)
 			}
+			// Bare alias like /plan — show usage hint instead of silently doing nothing
+			if m.replModel != nil {
+				errMsg := types.Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("Usage: /%s <goal> — e.g., /%s build a REST API", parts[0], parts[0]),
+					Segments: []types.MessageSegment{{
+						Type:    "content",
+						Content: fmt.Sprintf("Usage: /%s <goal> — e.g., /%s build a REST API", parts[0], parts[0]),
+						Visible: true,
+					}},
+					CreatedAt: time.Now(),
+				}
+				m.replModel.AddMessage(errMsg)
+			}
+			return m, nil
 		}
 
 		// Intercept /workflow to start the full workflow chain.
@@ -405,43 +438,48 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.healthCheckInFlight = true
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		p := m.registry.ActiveProvider()
 		if p == nil {
-			cancel()
 			m.healthCheckInFlight = false
 			return m, NextHealthTick(types.HealthCheckInterval)
 		}
 
-		result := p.HealthCheck(ctx)
-		cancel()
+		// C-1 fix: run health check in a goroutine to avoid blocking Update()
+		return m, HealthCheckCmd(p)
+
+	case HealthCheckResultMsg:
+		// C-1 fix: receive async health check result
 		m.healthCheckInFlight = false
-		m.healthStatus = result
+		m.healthStatus = msg.Result
 		m.headerCacheValid = false // H-10: invalidate header cache when health status changes
 		m.lastActivity = time.Now()
-		return m, NextHealthTick(calculateNextInterval(result))
+		return m, NextHealthTick(calculateNextInterval(msg.Result))
 
 	case RefreshCacheMsg:
 		if m.registry == nil || m.activeProvider == "" {
 			return m, NextCacheRefreshTick(provider.DefaultCacheRefreshInterval)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-
 		providerName := msg.ProviderName
 		if providerName == "" {
 			providerName = m.activeProvider
 		}
 
-		errMsg, nextCmd := handleCacheRefresh(ctx, m.registry, providerName)
-		cancel()
-		if errMsg != "" {
-			m.currentOperation = errMsg
+		// C-2 fix: run cache refresh in a goroutine to avoid blocking Update()
+		return m, CacheRefreshCmd(m.registry, providerName)
+
+	case CacheRefreshResultMsg:
+		// C-2 fix: receive async cache refresh result
+		if msg.ErrMsg != "" {
+			m.currentOperation = msg.ErrMsg
 		} else {
 			m.currentOperation = ""
 			m.lastActivity = time.Now()
 		}
-		return m, nextCmd
+		if msg.NextCmd != nil {
+			return m, msg.NextCmd
+		}
+		return m, nil
 
 	case AppMsg:
 		// Workflow phase routing: sub-models (Plan, Execute, Verify, Ship)
@@ -618,12 +656,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dispatcher.ApprovePermission(resp.Allowed, resp.Remember)
 				m.screen = m.prevScreen
 				m.permissionModal = nil
+				// H-3 fix: stop the tick loop by NOT returning a new tick
 				return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 			}
+			// H-3 fix: only continue ticking while modal is active
+			return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
+				return PermissionTickMsg{}
+			})
 		}
-		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return PermissionTickMsg{}
-		})
+		// H-3 fix: modal is nil or wrong screen — stop ticking
+		return m, nil
 
 	case QuestionRequestMsg:
 		// Display question in REPL and wait for user answer
@@ -682,7 +724,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.planModel = pm
 		}
 		m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
-		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDoneCloser.chan_())
 
 	case workflow.TaskStartMsg:
 		// A task has begun execution — update the execute model.
@@ -690,7 +732,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.executeModel != nil {
 			m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
 		}
-		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDoneCloser.chan_())
 
 	case workflow.TaskUpdateMsg:
 		// A task status changed — update the execute model.
@@ -703,7 +745,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusFailed)
 			}
 		}
-		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDone)
+		return m, workflowMsgDrainer(m, m.phaseGen, m.msgDoneCloser.chan_())
 
 	case PhaseResultMsg:
 		if msg.Error != "" {
@@ -877,6 +919,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentPhase = types.PhaseIdle
 			return m, nil
 
+		case types.PhaseIdle:
+			// H-17 fix: handle PhaseIdle to properly set workflowRunning to false.
+			// Without this case, the app remains permanently in "running" state
+			// after an idle transition.
+			m.workflowRunning = false
+			m.currentOperation = ""
+			return m, nil
+
 		default:
 			return m, nil
 		}
@@ -953,6 +1003,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toastText = msg.Text
 		m.toastExpires = time.Now().Add(msg.Duration)
 		m.toastType = msg.Type
+		// H-2 fix: schedule toast expiry via tea.Tick so View() stays pure
+		return m, tea.Tick(msg.Duration, func(t time.Time) tea.Msg {
+			return ToastExpiryMsg{}
+		})
+
+	case ToastExpiryMsg:
+		// H-2 fix: clear expired toast in Update(), not View()
+		if m.toastText != "" && time.Now().After(m.toastExpires) {
+			m.toastText = ""
+			m.toastType = ""
+		}
 		return m, nil
 
 	case ThemeChangedMsg:

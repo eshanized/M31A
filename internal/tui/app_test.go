@@ -657,14 +657,29 @@ func TestApp_HealthTick_WithProvider(t *testing.T) {
 	updated := newModel.(*AppState)
 
 	if cmd == nil {
-		t.Error("Expected non-nil cmd to reschedule health check")
+		t.Error("Expected non-nil cmd to perform async health check")
 	}
-	// The mock provider returns HealthStatus{Status: "live", LatencyMs: 42}
-	if updated.healthStatus.Status != "live" {
-		t.Errorf("Expected health status 'live', got %q", updated.healthStatus.Status)
-	}
-	if updated.healthStatus.LatencyMs != 42 {
-		t.Errorf("Expected latency 42ms, got %d", updated.healthStatus.LatencyMs)
+	// C-1 fix: health check is now async. The cmd returns a HealthCheckResultMsg.
+	// Execute the cmd to get the result.
+	if cmd != nil {
+		resultMsg := cmd()
+		if resultMsg == nil {
+			t.Error("Expected non-nil result from health check cmd")
+		} else {
+			healthResult, ok := resultMsg.(HealthCheckResultMsg)
+			if !ok {
+				t.Errorf("Expected HealthCheckResultMsg, got %T", resultMsg)
+			} else {
+				updated2, _ := updated.Update(healthResult)
+				updated3 := updated2.(*AppState)
+				if updated3.healthStatus.Status != "live" {
+					t.Errorf("Expected health status 'live', got %q", updated3.healthStatus.Status)
+				}
+				if updated3.healthStatus.LatencyMs != 42 {
+					t.Errorf("Expected latency 42ms, got %d", updated3.healthStatus.LatencyMs)
+				}
+			}
+		}
 	}
 }
 
@@ -1473,7 +1488,7 @@ func TestApp_RunPhaseCmd_OldDrainerStopsOnNewPhase(t *testing.T) {
 	// Start phase 1
 	RunPhaseCmd(m, types.PhaseInitialize, "goal")
 	gen1 := m.phaseGen
-	oldDoneCh := m.msgDone
+	oldDoneCh := m.msgDoneCloser.chan_()
 	if gen1 == 0 {
 		t.Fatal("expected phaseGen to be incremented")
 	}
@@ -1485,9 +1500,9 @@ func TestApp_RunPhaseCmd_OldDrainerStopsOnNewPhase(t *testing.T) {
 		t.Errorf("expected phaseGen to increment by 1, got %d -> %d", gen1, gen2)
 	}
 
-	// m.msgDone should now be a NEW channel (not the old one)
-	if m.msgDone == nil {
-		t.Fatal("expected msgDone to be non-nil after second RunPhaseCmd")
+	// m.msgDoneCloser should now be a NEW closer (not the old one)
+	if m.msgDoneCloser == nil {
+		t.Fatal("expected msgDoneCloser to be non-nil after second RunPhaseCmd")
 	}
 
 	// The OLD done channel should be closed (this is what the drainer checks)
@@ -1518,7 +1533,7 @@ func TestApp_RunPhaseCmd_MessageDrainSynchronized(t *testing.T) {
 	// Start a phase
 	RunPhaseCmd(m, types.PhaseInitialize, "goal")
 	gen := m.phaseGen
-	doneCh := m.msgDone
+	doneCh := m.msgDoneCloser.chan_()
 	if m.msgChan == nil {
 		t.Fatal("expected msgChan to be non-nil after RunPhaseCmd")
 	}
@@ -1547,7 +1562,7 @@ func TestApp_RunPhaseCmd_DoneClosesOnRunnerCompletion(t *testing.T) {
 	// Start a phase and immediately close its done (simulating runner completion)
 	RunPhaseCmd(m, types.PhaseInitialize, "goal")
 	gen := m.phaseGen
-	doneCh := m.msgDone
+	doneCh := m.msgDoneCloser.chan_()
 
 	// Simulate runner completion by closing the done channel
 	close(doneCh)
@@ -1560,24 +1575,19 @@ func TestApp_RunPhaseCmd_DoneClosesOnRunnerCompletion(t *testing.T) {
 	}
 }
 
-// TestApp_SafeClose_HandlesDoubleClose verifies the safeClose helper:
-// returns true on first close, false on subsequent close attempts
-// (no panic), and false on nil channel.
+// TestApp_SafeClose_HandlesDoubleClose verifies the channelCloser:
+// returns true on first close, false on subsequent close attempts (no panic).
 func TestApp_SafeClose_HandlesDoubleClose(t *testing.T) {
 	// First close returns true
 	ch := make(chan struct{})
-	if !safeClose(ch) {
+	cc := newChannelCloser(ch)
+	if !cc.close() {
 		t.Error("expected first close to return true")
 	}
 
 	// Second close returns false (no panic)
-	if safeClose(ch) {
+	if cc.close() {
 		t.Error("expected second close to return false (already closed)")
-	}
-
-	// nil channel
-	if safeClose(nil) {
-		t.Error("expected safeClose(nil) to return false")
 	}
 }
 

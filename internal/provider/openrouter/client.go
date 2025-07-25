@@ -45,6 +45,8 @@ type Options struct {
 }
 
 // openrouterModelCapabilities holds explicit capability flags for known OpenRouter models.
+// This map is used by openrouterModelCaps() to look up capabilities for known models.
+// For unknown models, a heuristic fallback is used (see FetchModels).
 var openrouterModelCapabilities = map[string]types.CapFlags{
 	"anthropic/claude-sonnet-4":         {Tools: true, Reasoning: false},
 	"anthropic/claude-opus-4":           {Tools: true, Reasoning: false},
@@ -64,6 +66,12 @@ func openrouterModelCaps(modelID string) (types.CapFlags, bool) {
 		return caps, true
 	}
 	return types.CapFlags{}, false
+}
+
+// UpdateModelCapabilities updates or adds an entry in the model capabilities
+// map at runtime. This allows capability overrides without recompilation.
+func UpdateModelCapabilities(modelID string, caps types.CapFlags) {
+	openrouterModelCapabilities[modelID] = caps
 }
 
 func New(apiKey string, opts Options) (*Client, error) {

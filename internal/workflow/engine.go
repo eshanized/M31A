@@ -514,7 +514,6 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 	req := provider.ChatRequest{
 		Model:            e.modelID,
 		Messages:         messages,
-		Stream:           false,
 		ReasoningEnabled: true,
 	}
 	if toolsEnabled {
@@ -543,7 +542,6 @@ func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Mes
 	req := provider.ChatRequest{
 		Model:            e.modelID,
 		Messages:         messages,
-		Stream:           false,
 		ReasoningEnabled: true,
 	}
 	if toolsEnabled {
@@ -985,6 +983,10 @@ func normalizeToolName(name string) string {
 		return "Glob"
 	case "grep", "search", "search_files":
 		return "Grep"
+	case "edit", "search_replace":
+		return "FileEdit"
+	case "web_fetch", "fetch", "http_get":
+		return "WebFetch"
 	default:
 		return name
 	}

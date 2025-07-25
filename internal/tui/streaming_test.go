@@ -562,18 +562,19 @@ done2:
 	}
 }
 
-// TestSafeClose_RaceFree verifies that safeCloseOnce is race-free when
+// TestSafeClose_RaceFree verifies that channelCloser.close is race-free when
 // called from 100 concurrent goroutines (H-9). The test must pass with
 // -race to confirm no data race.
 func TestSafeClose_RaceFree(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ch := make(chan struct{})
+		cc := newChannelCloser(ch)
 		var wg sync.WaitGroup
 		for j := 0; j < 100; j++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				safeCloseOnce(ch)
+				cc.close()
 			}()
 		}
 		wg.Wait()
@@ -583,13 +584,8 @@ func TestSafeClose_RaceFree(t *testing.T) {
 		case <-ch:
 			// Good — channel is closed
 		default:
-			t.Error("channel should be closed after concurrent safeCloseOnce calls")
+			t.Error("channel should be closed after concurrent close calls")
 		}
-	}
-
-	// nil channel should return false without panic
-	if safeCloseOnce(nil) {
-		t.Error("expected safeCloseOnce(nil) to return false")
 	}
 }
 
@@ -645,18 +641,19 @@ func TestDeferOrder_StreamDoneClosesFirst(t *testing.T) {
 }
 
 // TestSafeCloseOnce_FirstCallerWins verifies that exactly one caller
-// of safeCloseOnce performs the close, and all others see closed=false.
+// of channelCloser.close performs the close, and all others see closed=false.
 func TestSafeCloseOnce_FirstCallerWins(t *testing.T) {
 	ch := make(chan struct{})
+	cc := newChannelCloser(ch)
 
 	// First call should close
-	if !safeCloseOnce(ch) {
+	if !cc.close() {
 		t.Error("first call should return true (performed close)")
 	}
 
 	// Subsequent calls should not close
 	for i := 0; i < 10; i++ {
-		if safeCloseOnce(ch) {
+		if cc.close() {
 			t.Errorf("call %d should return false (already closed)", i)
 		}
 	}

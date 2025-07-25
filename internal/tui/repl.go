@@ -198,9 +198,11 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		m.width = msg.Width
 		m.height = msg.Height
 		inputHeight := 3
-		// Account for header(1) + status bar(1) + textarea borders/padding(2)
-		// + viewport borders(2) + thinking indicator(1) + streaming status(1) = 8 total chrome lines
-		const chromeHeight = 8
+		// Account for textarea(3) + metadataRow(1) + bottomBorder(1) + statusBar(1) = 6 total chrome lines.
+		// The viewport itself has no borders. Previous value of 8 was wrong
+		// (counted phantom "viewport borders" and "thinking indicator" lines that
+		// don't exist in the current layout).
+		const chromeHeight = 6
 		vpHeight := msg.Height - chromeHeight - inputHeight
 		if vpHeight < 1 {
 			vpHeight = 1
@@ -413,7 +415,6 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 					req := provider.ChatRequest{
 						Model:    modelID,
 						Messages: m.messagesForLLM(),
-						Stream:   true,
 					}
 					// Fix C-3: StartStreamCmd owns its channels internally.
 					// The REPL stores a read-only reference for continuation only.
@@ -816,8 +817,17 @@ func (m *ReplModel) Messages() []types.Message {
 }
 
 // ClearMessages removes all messages from the REPL model and re-renders the viewport.
+// M-38 fix: also resets streaming state so /clear works during active streams.
 func (m *ReplModel) ClearMessages() {
 	m.messages = nil
+	// M-38 fix: reset streaming state
+	m.streaming = false
+	m.thinking = false
+	m.activeSegmentType = ""
+	m.streamSegments = nil
+	m.streamContent.Reset()
+	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
+	m.toolCards = make(map[int]*components.ToolCard)
 	m.renderMessages()
 	m.viewport.GotoBottom()
 }

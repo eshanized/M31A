@@ -20,7 +20,6 @@ type ChatRequest struct {
 	Model            string           `json:"model"`
 	Messages         []types.Message  `json:"messages"`
 	MaxTokens        int              `json:"max_tokens,omitempty"`
-	Stream           bool             `json:"stream"`
 	Tools            []ToolDefinition `json:"tools,omitempty"`
 	ReasoningEnabled bool             `json:"reasoning_enabled,omitempty"`
 }

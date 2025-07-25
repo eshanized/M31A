@@ -98,7 +98,7 @@ type AppState struct {
 	// phaseGen : incremented on every RunPhaseCmd; drainer captures it
 	//            at spawn time and stops if it changes (a new phase started)
 	msgChan               chan tea.Msg
-	msgDone               chan struct{}
+	msgDoneCloser         *channelCloser
 	phaseGen              int
 	workflowCtx           context.Context
 	workflowCancel        context.CancelFunc
@@ -330,7 +330,7 @@ func (m *AppState) currentPhaseGen() int {
 // D-04 fix: per-phase lifecycle synchronization. Each call:
 //  1. Cancels the previous phase's context
 //  2. Increments app.phaseGen so the old drainer sees the change and stops
-//  3. Closes the OLD app.msgDone (via safeClose) to signal the old drainer
+//  3. Closes the OLD app.msgDoneCloser (via channelCloser.close) to
 //  4. Creates a fresh msgCh + doneCh pair
 //  5. Captures the current phaseGen for the new drainer
 //  6. Sets the engine's MsgEmitter to use the new channel
@@ -348,19 +348,19 @@ func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd 
 	//    previous phase sees the change and stops on its next check.
 	app.phaseGen++
 
-	// 3. Close the OLD app.msgDone (defensive against double-close) to
+	// 3. Close the OLD app.msgDoneCloser (defensive against double-close) to
 	//    signal the old drainer to stop. The old channel reference is
 	//    left in place until the drainer returns; we don't nil it out
 	//    because the drainer might still be reading from it.
-	if app.msgDone != nil {
-		safeClose(app.msgDone)
+	if app.msgDoneCloser != nil {
+		app.msgDoneCloser.close()
 	}
 
 	// 4. Create new per-phase channels
 	msgCh := make(chan tea.Msg, 256)
 	doneCh := make(chan struct{})
 	app.msgChan = msgCh
-	app.msgDone = doneCh
+	app.msgDoneCloser = newChannelCloser(doneCh)
 
 	// Create a cancellable context for this phase
 	ctx, cancel := context.WithCancel(context.Background())
@@ -454,31 +454,35 @@ func workflowMsgDrainer(app *AppState, gen int, done chan struct{}) tea.Cmd {
 	}
 }
 
-// Fix H-9: safeCloseOnce replaces the racy check-then-close pattern with a
-// sync.Once-backed implementation. Multiple concurrent callers are safe — only
-// the first invocation closes the channel; subsequent calls are no-ops.
-// Returns true if THIS call performed the close, false otherwise (nil channel,
-// already closed, or another goroutine closed first).
-var closeOnces sync.Map // map[chan struct{}]*sync.Once
+// channelCloser wraps a chan struct{} with a sync.Once to guarantee
+// exactly-once close semantics without a global sync.Map. Each
+// channelCloser is allocated per phase in RunPhaseCmd, eliminating
+// the unbounded global map that previously tracked close-once state.
+type channelCloser struct {
+	ch   chan struct{}
+	once sync.Once
+}
 
-func safeCloseOnce(ch chan struct{}) bool {
-	if ch == nil {
-		return false
-	}
-	oncePtr, _ := closeOnces.LoadOrStore(ch, &sync.Once{})
-	once := oncePtr.(*sync.Once)
+// newChannelCloser creates a new channelCloser wrapping ch.
+func newChannelCloser(ch chan struct{}) *channelCloser {
+	return &channelCloser{ch: ch}
+}
+
+// close closes the underlying channel exactly once. Returns true if
+// this call performed the close, false otherwise.
+func (cc *channelCloser) close() bool {
 	closed := false
-	once.Do(func() {
-		close(ch)
+	cc.once.Do(func() {
+		close(cc.ch)
 		closed = true
 	})
 	return closed
 }
 
-// safeClose is a deprecated alias for safeCloseOnce. New code should use
-// safeCloseOnce directly. Kept for backward compatibility during migration.
-func safeClose(ch chan struct{}) bool {
-	return safeCloseOnce(ch)
+// chan returns the underlying channel (read-only for callers that
+// need to select on it).
+func (cc *channelCloser) chan_() chan struct{} {
+	return cc.ch
 }
 
 // channelEmitter implements workflow.MsgEmitter by sending messages into a channel.
