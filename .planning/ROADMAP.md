@@ -1069,6 +1069,93 @@ proportional to the value; Lows are spot-checked.
 
 ---
 
+## Phase 16 — UX Polish
+
+**Duration:** 2 weeks  
+**Complexity:** 5/10  
+**Status:** ✅ COMPLETE  
+**Milestone:** Permission timeout urgency, question timeout warnings, /help categorized, shell mode docs, tool card improvements, permission syntax highlighting, config validation formatting, autodream message improvements
+
+### Plans
+
+```
+Plans:
+- [x] 16-01-PLAN.md — Trust & Safety Fixes (Wave 1)
+- [x] 16-02-PLAN.md — Error UX Fixes (Wave 1)
+- [x] 16-03-PLAN.md — Feedback & Loading (Wave 2)
+- [x] 16-04-PLAN.md — Theme & Visual Fixes (Wave 2)
+- [x] 16-05-PLAN.md — Navigation & Help (Wave 2)
+- [x] 16-06-PLAN.md — Screen-Specific (Wave 3)
+- [x] 16-07-PLAN.md — Tool & Provider (Wave 3)
+- [x] 16-08-PLAN.md — Config & Polish (Wave 3)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 16-01, 16-02 | yes, yes |
+| 2    | 16-03, 16-04, 16-05 | yes, yes, yes |
+| 3    | 16-06, 16-07, 16-08 | yes, yes, yes |
+
+---
+
+## Phase 17 — Post-Phase-16 Audit Fixes
+
+**Duration:** 1 day  
+**Complexity:** 4/10  
+**Status:** ✅ COMPLETE  
+**Milestone:** All 36 issues from comprehensive codebase audit resolved
+
+### Background
+
+A comprehensive codebase audit performed after Phase 16 found 36 issues
+(4 Critical, 9 High, 12 Medium, 11 Low) across build, test, correctness,
+security, and code quality. All fixes verified with `go test -race` and
+`go build ./...`.
+
+### Plans
+
+```
+Plans:
+- [x] 17-01-PLAN.md — Critical Build & Test Fixes (Wave 1, C-1 through C-4)
+- [x] 17-02-PLAN.md — High Severity Correctness Fixes (Wave 2, H-1 through H-9)
+- [x] 17-03-PLAN.md — Medium Severity Fixes (Wave 3, M-1 through M-11)
+- [x] 17-04-PLAN.md — Low Severity Polish (Wave 4, L-1 through L-11)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 17-01 | yes |
+| 2    | 17-02 | yes |
+| 3    | 17-03 | yes |
+| 4    | 17-04 | yes |
+
+### Key Fixes
+
+- **C-1:** go.mod bumped to Go 1.24 (testing.Context support)
+- **C-2:** ModelCache.Refresh uses atomic.Bool (deadlock prevention)
+- **C-3:** Edit.atomicWrite uses crypto/rand temp filenames (race prevention)
+- **C-4:** Zen client error patterns verified, tests passing
+- **H-4:** WebFetch shares http.Client (connection reuse)
+- **H-5:** SSEParser trims whitespace before [DONE]
+- **H-9:** SetProvider returns tea.Cmd (async, no TUI blocking)
+- **M-4:** WebFetch SSRF DNS pinning (TOCTOU prevention)
+- **M-10:** Config.Save copies struct before clearing API keys
+- **L-5:** config.atomicWrite uses 0600 permissions
+- **L-6:** Registry.SetActive returns ErrProviderNotFound
+
+### Deliverables
+
+- All 36 audit findings resolved
+- `go build ./...` clean
+- `go vet ./...` zero errors
+- `go test -race ./...` passes
+
+---
+
 ## Deferred to Future (V2.0+)
 
 | Feature | Reason for Deferral | Notes |
