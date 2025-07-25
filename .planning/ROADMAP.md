@@ -1156,6 +1156,103 @@ Plans:
 
 ---
 
+## Phase 18 — Welcome Page Rebuild
+
+**Duration:** 1 day  
+**Complexity:** 3/10  
+**Status:** ✅ COMPLETE  
+**Milestone:** Clean, professional welcome page with proper layout and no broken UI elements  
+**Source:** User request — rebuild welcome/landing page shown in screenshot  
+**Depends on:** None
+
+### Background
+
+The current welcome/landing page has visual issues:
+1. Pixelated ASCII art logo using Unicode block characters (░███) that render poorly
+2. Broken UI elements (horizontal lines visible in screenshot)
+3. Poor layout and visual hierarchy
+4. "No provider configured" warning needs better styling
+
+### Plans
+
+```
+Plans:
+- [x] 18-01-PLAN.md — Logo and Layout Rewrite (Wave 1)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1    | 18-01 | yes |
+
+### Deliverables
+
+- Clean ASCII art logo (4 lines max, not pixelated)
+- No broken UI elements (horizontal lines fixed)
+- Centered, balanced layout
+- Provider status card with proper styling
+- Input box with placeholder text
+- Keyboard shortcut hints
+- Bottom bar (cwd + version)
+- All existing tests pass
+- No compile errors
+
+---
+
+## Phase 19 — Comprehensive Codebase Concerns Fixes
+
+**Duration:** 3 weeks  
+**Complexity:** 7/10  
+**Status:** 📋 PLANNED  
+**Milestone:** All items from `.planning/codebase/CONCERNS.md` addressed  
+**Source:** Codebase audit — CONCERNS.md generated 2026-06-04  
+**Depends on:** Phase 18
+
+### Background
+
+The codebase audit produced 36 identified concerns across 9 categories:
+- 6 Tech Debt items (sync.Map leak, dead Stream field, hardcoded maps, deprecated aliases, manual config merge)
+- 5 Known Bugs (HEAD~50 fallback, discuss timeout, permission timeout mismatch, silent git errors)
+- 4 Security Considerations (SSRF TOCTOU, os.Exit in library, API key in memory, backup accumulation)
+- 4 Performance Bottlenecks (filepath.Walk, HTML conversion, JSON extraction, sync.Map lookup)
+- 4 Fragile Areas (workflow engine, app_update.go, streaming pipeline, permission system)
+- 3 Scaling Limits (session accumulation, ledger growth, model cache)
+- 3 Dependencies at Risk (singleflight, doublestar, BurntSushi/toml)
+- 3 Missing Critical Features (backup pruning, session auto-cleanup, config hot-reload)
+- 7 Test Coverage Gaps (app_update, permissions, commands, repl_stream, quickactions, keychain, error paths)
+
+### Plans
+
+```
+Plans:
+- [ ] 19-01-PLAN.md — Tech Debt & Bug Fixes (Wave 1)
+- [ ] 19-02-PLAN.md — Security Hardening (Wave 1)
+- [ ] 19-03-PLAN.md — Performance & Fragile Area Improvements (Wave 2)
+- [ ] 19-04-PLAN.md — Missing Features & Test Coverage (Wave 2)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous |
+|------|-------|------------|
+| 1 | 19-01, 19-02 | yes, yes |
+| 2 | 19-03, 19-04 | yes, yes |
+
+### Deliverables
+
+- All 6 tech debt items resolved
+- All 5 known bugs fixed
+- All 4 security considerations mitigated
+- All 4 performance bottlenecks improved
+- Fragile areas decomposed or hardened
+- Backup pruning, session auto-cleanup, config hot-reload implemented
+- Test coverage gaps filled (permissions, commands, error paths)
+- `go test -race ./...` passes
+- `golangci-lint run ./...` clean
+
+---
+
 ## Deferred to Future (V2.0+)
 
 | Feature | Reason for Deferral | Notes |
