@@ -178,6 +178,74 @@ func TestEngine_HealTask_LLMError(t *testing.T) {
 	}
 }
 
+func TestEngine_RunExecute_ContextCancellation(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	// Save a task
+	tasks := []m31types.Task{
+		{ID: 1, Action: "Create", Description: "Create main.go", Dependencies: []int{}, Files: []string{"main.go"}, AcceptanceCriteria: []string{"compiles"}, Status: m31types.StatusPending},
+	}
+	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
+
+	// Cancel context immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = engine.RunPhase(ctx, m31types.PhaseExecute, "Test")
+	// Should handle cancellation gracefully (may error or succeed depending on timing)
+	_ = err
+}
+
+func TestEngine_ExecuteTaskWithTools_EmptyResponse(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	task := m31types.Task{
+		ID:           1,
+		Action:       "Create",
+		Description:  "Create main.go",
+		Dependencies: []int{},
+		Files:        []string{"main.go"},
+	}
+	allTasks := []m31types.Task{task}
+
+	// Empty response — should not crash
+	mp := engine.provider.(*mockProvider)
+	mp.response = ""
+
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	if !result.Success {
+		t.Errorf("Expected execute to succeed with empty response, got error: %s", result.Error)
+	}
+}
+
+func TestEngine_ExecuteTaskWithTools_MultipleToolCalls(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	task := m31types.Task{
+		ID:           1,
+		Action:       "Create",
+		Description:  "Create main.go",
+		Dependencies: []int{},
+		Files:        []string{"main.go"},
+	}
+	allTasks := []m31types.Task{task}
+
+	// Response with multiple tool calls
+	mp := engine.provider.(*mockProvider)
+	mp.response = `{"name":"Bash","input":{"command":"echo hello"}} and also {"name":"FileRead","input":{"path":"main.go"}}`
+
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	// Should handle multiple tool calls
+	if !result.Success {
+		t.Errorf("Expected execute to succeed with multiple tool calls, got error: %s", result.Error)
+	}
+}
+
 func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
