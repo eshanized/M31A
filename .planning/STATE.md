@@ -2,21 +2,21 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 17 complete
-last_updated: "2026-06-03T17:00:00Z"
+status: Phase 19 in progress
+last_updated: "2026-06-04T03:15:00.000Z"
 progress:
-  total_phases: 12
-  completed_phases: 9
-  total_plans: 70
-  completed_plans: 59
-  percent: 84
+  total_phases: 19
+  completed_phases: 14
+  total_plans: 80
+  completed_plans: 70
+  percent: 88
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-None — Phase 17 complete
+Phase 19 — Comprehensive Codebase Concerns Fixes (4 plans, 2 waves)
 
 ## Status
 
@@ -41,16 +41,19 @@ Phase 17 (Post-Phase-16 Audit Fixes) is complete. 4 plans verified/committed: 17
 - Phase 12 — UX & Editor Experience Adaptations
 - Phase 16 — UX Polish
 - Phase 17 — Post-Phase-16 Audit Fixes
+- Phase 18 — Welcome Page Rebuild
 
 ## In Progress
 
-- Phase 14 — TUI ↔ Core Wiring Fixes (4/6 plans complete)
-  - 14-01: ✅ Discuss Phase Q&A Wiring
-  - 14-02: ✅ Workflow Screen Wiring
-  - 14-03: ✅ msgChan Drainer Synchronization
-  - 14-04: ✅ Workflow State Persistence (D-06)
-  - 14-05: ⏳ Discuss Streaming + Low Severity (D-07/D-08/D-09/D-10)
-  - 14-06: ⏳ AppState Refactor (D-11, drafted, optional/stretch)
+- Phase 19 — Comprehensive Codebase Concerns Fixes (2/4 plans complete)
+  - 19-01: ✅ Nil-Safety & Concurrency Fixes
+  - 19-02: ✅ Provider Robustness & Config Fixes
+  - 19-03: ✅ Post-Phase-18 Codebase Concerns Fixes
+  - 19-04: ✅ Session Cleanup, Config Hot-Reload & Test Coverage
+  - 19-05: ⏳ (pending)
+  - 19-06: ⏳ (pending)
+  - 19-07: ⏳ (pending)
+  - 19-08: ⏳ (pending)
 
 ## Phase 14 Plans
 
