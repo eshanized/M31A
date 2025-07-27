@@ -334,6 +334,12 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}, nil
 }
 
+// PERF-2: This function uses multiple string passes (Index, ReplaceAll, ToLower)
+// on the full HTML body. Each pass re-processes the entire string. For V1, this
+// is acceptable because: (1) response bodies are capped at 5MB, (2) adding
+// golang.org/x/net/html would be a significant dependency for marginal gain.
+// If profiling shows this as a bottleneck, consider a single-pass parser.
+//
 // htmlToMarkdown converts HTML to a simplified markdown representation.
 // This is a pure-Go implementation without external dependencies.
 func htmlToMarkdown(html string) string {
