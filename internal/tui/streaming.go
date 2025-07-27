@@ -1,5 +1,27 @@
 package tui
 
+// STREAMING PIPELINE — GOROUTINE OWNERSHIP MODEL
+//
+// Architecture: Bubble Tea is single-threaded. All state mutations go through Update().
+// The streaming pipeline uses one goroutine per active stream that reads SSE chunks
+// and sends typed tea.Msg values through a channel. The TUI's Update() loop receives
+// these messages and updates AppState.
+//
+// Channel lifecycle (per stream):
+// 1. StartStreamCmd creates a buffered channel (chan tea.Msg, cap 256)
+// 2. A goroutine reads from the provider's StreamIterator and sends to the channel
+// 3. A tea.Cmd (streamListenerCmd) polls the channel and returns messages to Update()
+// 4. When the stream ends (EOF or error), the goroutine closes the channel
+// 5. streamListenerCmd detects the closed channel and stops polling
+//
+// CRITICAL RULES:
+// - The goroutine OWNS the channel; it creates and closes it
+// - The TUI only READS from the channel; never closes it
+// - safeCloseOnce is used as a defensive guard against double-close
+// - No AppState mutation happens in the goroutine; only tea.Msg emission
+//
+// Historical fixes: C-3 (double-close), M-21 (channel ownership), M-35-36 (race conditions)
+
 import (
 	"context"
 	"io"
@@ -80,33 +102,21 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			close(done)
 		}()
 
-		var segments []types.MessageSegment
-		var activeContent strings.Builder
+		// M-35-36 fix: the goroutine only accumulates raw content for
+		// msg.Message.Content and tracks usage. Segment building is done
+		// exclusively by the REPL model (repl_stream.go) which has full
+		// visibility into segment boundaries. The goroutine's old segment
+		// building code was always overwritten by handleStreamDoneMsg.
+		var fullContent strings.Builder
 		var lastUsage *types.Usage
 
 		for {
 			chunk, err := iterator.Next()
 			if err == io.EOF {
-				if activeContent.Len() > 0 {
-					segments = append(segments, types.MessageSegment{
-						Type:    "content",
-						Content: activeContent.String(),
-						Visible: true,
-					})
-				}
-
-				var fullContent strings.Builder
-				for _, seg := range segments {
-					if seg.Type == "content" {
-						fullContent.WriteString(seg.Content)
-					}
-				}
-
 				msg := types.Message{
-					Role:     "assistant",
-					Content:  fullContent.String(),
-					Segments: segments,
-					Usage:    lastUsage,
+					Role:    "assistant",
+					Content: fullContent.String(),
+					Usage:   lastUsage,
 				}
 
 				streamCh <- StreamDoneMsg{
@@ -137,22 +147,7 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 
 			switch chunk.Type {
 			case "content":
-				activeContent.WriteString(chunk.Delta)
-			case "thinking":
-				if activeContent.Len() > 0 {
-					segments = append(segments, types.MessageSegment{
-						Type:    "content",
-						Content: activeContent.String(),
-						Visible: true,
-					})
-					activeContent.Reset()
-				}
-				segments = append(segments, types.MessageSegment{
-					Type:       "thinking",
-					Content:    chunk.Delta,
-					DurationMs: chunk.ThinkingDuration,
-					Visible:    true,
-				})
+				fullContent.WriteString(chunk.Delta)
 			case "done":
 				lastUsage = &types.Usage{}
 			}
