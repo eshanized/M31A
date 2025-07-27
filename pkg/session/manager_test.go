@@ -973,6 +973,97 @@ func TestSession_ForkSessionPreservesProject(t *testing.T) {
 	}
 }
 
+func TestManager_Cleanup(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	// Create 3 session dirs: 2 old (>30 days), 1 new
+	oldTime := time.Now().Add(-31 * 24 * time.Hour)
+	newTime := time.Now()
+
+	for _, tc := range []struct {
+		id      string
+		modTime time.Time
+	}{
+		{"old00001", oldTime},
+		{"old00002", oldTime},
+		{"new00001", newTime},
+	} {
+		sessionDir := filepath.Join(dir, tc.id)
+		if err := os.MkdirAll(sessionDir, 0755); err != nil {
+			t.Fatalf("Failed to create session dir %s: %v", tc.id, err)
+		}
+		// Write a minimal session.json so it looks like a real session
+		sessionJSON := filepath.Join(sessionDir, "session.json")
+		if err := os.WriteFile(sessionJSON, []byte(`{"id":"`+tc.id+`"}`), 0644); err != nil {
+			t.Fatalf("Failed to write session.json: %v", err)
+		}
+		// Set the directory modtime to simulate age
+		if err := os.Chtimes(sessionDir, tc.modTime, tc.modTime); err != nil {
+			t.Fatalf("Failed to set modtime: %v", err)
+		}
+	}
+
+	// Run cleanup with 30-day retention
+	removed, err := mgr.Cleanup(30 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("Cleanup failed: %v", err)
+	}
+
+	if removed != 2 {
+		t.Errorf("Expected 2 sessions removed, got %d", removed)
+	}
+
+	// Verify new session still exists
+	if _, err := os.Stat(filepath.Join(dir, "new00001")); os.IsNotExist(err) {
+		t.Error("New session should still exist after cleanup")
+	}
+
+	// Verify old sessions were removed
+	for _, old := range []string{"old00001", "old00002"} {
+		if _, err := os.Stat(filepath.Join(dir, old)); !os.IsNotExist(err) {
+			t.Errorf("Old session %s should have been removed", old)
+		}
+	}
+}
+
+func TestManager_CleanupNonExistentDir(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewManager(filepath.Join(dir, "nonexistent"), ManagerOpts{})
+
+	removed, err := mgr.Cleanup(30 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("Cleanup on nonexistent dir should not error: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("Expected 0 removed, got %d", removed)
+	}
+}
+
+func TestManager_CleanupSkipsArchived(t *testing.T) {
+	mgr, dir := newTestManager(t)
+	defer os.RemoveAll(dir)
+
+	oldTime := time.Now().Add(-31 * 24 * time.Hour)
+
+	// Create archived dir with old session
+	archivedDir := filepath.Join(dir, "archived", "arch0001")
+	if err := os.MkdirAll(archivedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivedDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := mgr.Cleanup(30 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("Cleanup failed: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("Expected 0 removed (archived should be skipped), got %d", removed)
+	}
+}
+
 func TestSession_MarshalSessionJSON(t *testing.T) {
 	s := NewSession("abcdef12", "gpt-4o", "openrouter")
 	s.Messages = []types.Message{

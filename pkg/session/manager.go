@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -662,6 +663,47 @@ func (m *Manager) IsFavorite(modelID string) bool {
 		return false
 	}
 	return data.Favorites[modelID]
+}
+
+// Cleanup removes session directories older than maxAge.
+// Called on startup to prevent unbounded disk accumulation.
+func (m *Manager) Cleanup(maxAge time.Duration) (int, error) {
+	entries, err := os.ReadDir(m.baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read sessions dir: %w", err)
+	}
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if entry.Name() == "archived" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			path := filepath.Join(m.baseDir, entry.Name())
+			if err := os.RemoveAll(path); err != nil {
+				slog.Warn("failed to remove old session", "path", path, "error", err)
+				continue
+			}
+			removed++
+		}
+	}
+	if removed > 0 {
+		m.cacheMu.Lock()
+		m.sessionCache = nil
+		m.sessionCacheTime = time.Time{}
+		m.cacheMu.Unlock()
+	}
+	return removed, nil
 }
 
 // SaveSession writes session.json and messages.json to disk atomically.

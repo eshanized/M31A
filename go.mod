@@ -1,9 +1,11 @@
 module github.com/eshanized/M31A
 
-go 1.22
+go 1.24
 
 require (
+	// DEP-3: BurntSushi/toml v1 — in maintenance mode; v2 has different API; migrate when ready
 	github.com/BurntSushi/toml v1.6.0
+	// DEP-2: doublestar v4 — pin current version; check for breaking changes before upgrading
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.0
@@ -12,6 +14,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/pkoukk/tiktoken-go v0.1.8
+	// DEP-1: golang.org/x/sync/singleflight — stable x/ package, appropriate usage
 	golang.org/x/sync v0.10.0
 )
 

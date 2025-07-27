@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/eshanized/M31A/pkg/keychain"
@@ -482,6 +484,39 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 	}
 
 	return nil
+}
+
+// ConfigReloadMsg is emitted when the config file changes on disk.
+type ConfigReloadMsg struct {
+	Config *Config
+	Error  error
+}
+
+// WatchConfig polls the config file for changes and sends ConfigReloadMsg
+// to the provided channel when a change is detected. Runs until ctx is cancelled.
+func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
+	var lastModTime time.Time
+	if info, err := os.Stat(path); err == nil {
+		lastModTime = info.ModTime()
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(lastModTime) {
+				lastModTime = info.ModTime()
+				cfg, err := Load(path)
+				ch <- ConfigReloadMsg{Config: cfg, Error: err}
+			}
+		}
+	}
 }
 
 // atomicWrite writes data to path atomically using a temp file and rename.

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -620,6 +622,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = m.prevScreen
 		if m.screen == ScreenPermission {
 			m.screen = ScreenREPL
+		}
+		return m, nil
+	case config.ConfigReloadMsg:
+		if msg.Error != nil {
+			slog.Warn("config reload failed", "error", msg.Error)
+			return m, nil
+		}
+		// Update non-provider fields only (theme, UI, permissions, features)
+		if msg.Config != nil {
+			m.config.UI = msg.Config.UI
+			m.config.Permissions = msg.Config.Permissions
+			m.config.Features = msg.Config.Features
+			m.config.Ledger = msg.Config.Ledger
 		}
 		return m, nil
 	}

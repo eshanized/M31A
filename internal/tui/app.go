@@ -118,6 +118,10 @@ type AppState struct {
 	headerCacheKey   uint64 // FNV-1a hash of (provider, modelID, ctxUsed, ctxTotal, healthStatus, logLevel)
 	headerCacheValue string
 	headerCacheValid bool
+	// FEAT-3: Config hot-reload
+	configReloadCh chan config.ConfigReloadMsg
+	configWatchCtx context.Context
+	configWatchCancel context.CancelFunc
 }
 
 func NewApp(version string, registry *provider.Registry, configPath string) (*AppState, error) {
@@ -192,6 +196,13 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 		SessionIDBytes:  sessionIDBytes,
 		MaxRecentModels: cfg.Features.MaxRecentModels,
 	})
+
+	// Session auto-cleanup: remove sessions older than 30 days
+	if removed, err := sessionMgr.Cleanup(30 * 24 * time.Hour); err != nil {
+		slog.Warn("session cleanup failed", "error", err)
+	} else if removed > 0 {
+		slog.Info("cleaned up old sessions", "count", removed)
+	}
 
 	// Initialize git operations and rollback
 	g := git.New(cwd)
@@ -278,6 +289,11 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 	// Initialize AutoDream consolidator with empty messages; will be
 	// synced whenever a user message is submitted.
 	app.autoDream = autodream.New(nil)
+
+	// FEAT-3: Start config file watcher for hot-reload
+	app.configReloadCh = make(chan config.ConfigReloadMsg, 1)
+	app.configWatchCtx, app.configWatchCancel = context.WithCancel(context.Background())
+	go config.WatchConfig(app.configWatchCtx, configPath, app.configReloadCh)
 
 	if resolvedAPIKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath)
