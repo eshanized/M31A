@@ -259,6 +259,7 @@ func isContextExceeded(statusCode int, body string) bool {
 	return strings.Contains(lower, "context_length_exceeded") ||
 		strings.Contains(lower, "maximum context length") ||
 		strings.Contains(lower, "request too large") ||
+		strings.Contains(lower, "context window exceeded") ||
 		strings.Contains(lower, "context_length") && strings.Contains(lower, "exceed")
 }
 
@@ -371,7 +372,11 @@ func sanitizeProviderError(statusCode int, body string) string {
 		}
 		return msg
 	case http.StatusUnauthorized:
-		return "Invalid API key"
+		msg := "Invalid API key"
+		if cleaned != "" {
+			msg += ": " + cleaned
+		}
+		return msg
 	case http.StatusPaymentRequired:
 		return "Payment required — check your billing"
 	case http.StatusTooManyRequests:
@@ -379,7 +384,11 @@ func sanitizeProviderError(statusCode int, body string) string {
 	case http.StatusInternalServerError:
 		return "Provider server error — try again later"
 	case http.StatusBadGateway:
-		return "Provider gateway error — try again later"
+		msg := fmt.Sprintf("Provider gateway error (HTTP %d) — try again later", statusCode)
+		if cleaned != "" {
+			msg += ": " + cleaned
+		}
+		return msg
 	case http.StatusServiceUnavailable:
 		return "Provider temporarily unavailable"
 	default:
