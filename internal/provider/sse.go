@@ -30,6 +30,9 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 
 	for p.scanner.Scan() {
 		line := p.scanner.Text()
+		// H-18 fix: trim \r from SSE lines to prevent JSON parse failures
+		// on providers that send \r\n line endings.
+		line = strings.TrimRight(line, "\r")
 
 		if line == "" {
 			if len(lines) > 0 {
