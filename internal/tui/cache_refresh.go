@@ -62,3 +62,15 @@ func handleCacheRefresh(ctx context.Context, registry *provider.Registry, provid
 
 	return "", NextCacheRefreshTick(provider.DefaultCacheRefreshInterval)
 }
+
+// CacheRefreshCmd returns a tea.Cmd that performs the cache refresh in a
+// goroutine and emits CacheRefreshResultMsg when complete. C-2 fix: the
+// HTTP call no longer blocks Bubble Tea's Update() loop.
+func CacheRefreshCmd(registry *provider.Registry, providerName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		errMsg, nextCmd := handleCacheRefresh(ctx, registry, providerName)
+		return CacheRefreshResultMsg{ErrMsg: errMsg, NextCmd: nextCmd}
+	}
+}
