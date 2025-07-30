@@ -33,3 +33,15 @@ func NextHealthTick(interval time.Duration) tea.Cmd {
 		return HealthCheckTickMsg{Time: t}
 	})
 }
+
+// HealthCheckCmd returns a tea.Cmd that performs the health check in a
+// goroutine and emits HealthCheckResultMsg when complete. C-1 fix: the
+// HTTP call no longer blocks Bubble Tea's Update() loop.
+func HealthCheckCmd(p provider.LLMProvider) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		result := p.HealthCheck(ctx)
+		return HealthCheckResultMsg{Result: result}
+	}
+}
