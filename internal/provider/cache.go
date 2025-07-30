@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -20,7 +21,7 @@ type ModelCache struct {
 	ttl        time.Duration
 	staleTTL   time.Duration
 	sfg        singleflight.Group
-	refreshing bool
+	refreshing atomic.Bool
 }
 
 func NewModelCache(ttl time.Duration) *ModelCache {
@@ -43,15 +44,9 @@ func NewModelCacheWithStale(ttl time.Duration, staleTTL time.Duration) *ModelCac
 // Refresh deduplicates concurrent calls via singleflight — only one HTTP
 // request is made even if multiple goroutines call Refresh simultaneously.
 func (c *ModelCache) Refresh(ctx context.Context, fetchFn func(ctx context.Context) ([]types.ModelInfo, error)) ([]types.ModelInfo, error) {
-	c.mu.Lock()
-	c.refreshing = true
-	c.mu.Unlock()
+	c.refreshing.Store(true)
 
-	defer func() {
-		c.mu.Lock()
-		c.refreshing = false
-		c.mu.Unlock()
-	}()
+	defer c.refreshing.Store(false)
 
 	v, err, _ := c.sfg.Do("refresh", func() (interface{}, error) {
 		models, fetchErr := fetchFn(ctx)
@@ -105,9 +100,7 @@ func (c *ModelCache) IsStale() bool {
 }
 
 func (c *ModelCache) IsRefreshing() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.refreshing
+	return c.refreshing.Load()
 }
 
 func (c *ModelCache) Len() int {
