@@ -16,10 +16,8 @@ func TestCacheRefresh(t *testing.T) {
 	t.Run("IsRefreshing returns true during refresh", func(t *testing.T) {
 		cache := NewModelCache(5 * time.Minute)
 		// We can't easily test the actual refresh without a mock,
-		// but we can test the flag behavior
-		cache.mu.Lock()
-		cache.refreshing = true
-		cache.mu.Unlock()
+		// but we can test the flag behavior using atomic operations
+		cache.refreshing.Store(true)
 
 		if !cache.IsRefreshing() {
 			t.Error("expected IsRefreshing to be true during refresh")
@@ -28,9 +26,7 @@ func TestCacheRefresh(t *testing.T) {
 
 	t.Run("IsRefreshing returns false after refresh", func(t *testing.T) {
 		cache := NewModelCache(5 * time.Minute)
-		cache.mu.Lock()
-		cache.refreshing = false
-		cache.mu.Unlock()
+		cache.refreshing.Store(false)
 
 		if cache.IsRefreshing() {
 			t.Error("expected IsRefreshing to be false after refresh")
@@ -48,9 +44,7 @@ func TestCacheRefresh(t *testing.T) {
 		}()
 		go func() {
 			for i := 0; i < 100; i++ {
-				cache.mu.Lock()
-				cache.refreshing = !cache.refreshing
-				cache.mu.Unlock()
+				cache.refreshing.Store(!cache.refreshing.Load())
 			}
 			done <- true
 		}()
