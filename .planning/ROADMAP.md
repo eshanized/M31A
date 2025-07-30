@@ -1177,7 +1177,10 @@ The current welcome/landing page has visual issues:
 
 ```
 Plans:
-- [x] 18-01-PLAN.md — Logo and Layout Rewrite (Wave 1)
+- [x] 19-01-PLAN.md — Tech Debt & Bug Fixes (Wave 1)
+- [x] 19-02-PLAN.md — Security Hardening (Wave 1)
+- [x] 19-03-PLAN.md — Performance & Fragile Area Improvements (Wave 2)
+- [x] 19-04-PLAN.md — Missing Features & Test Coverage (Wave 2)
 ```
 
 ### Wave Structure
@@ -1204,7 +1207,7 @@ Plans:
 
 **Duration:** 3 weeks  
 **Complexity:** 7/10  
-**Status:** 📋 PLANNED  
+**Status:** ✅ COMPLETE  
 **Milestone:** All items from `.planning/codebase/CONCERNS.md` addressed  
 **Source:** Codebase audit — CONCERNS.md generated 2026-06-04  
 **Depends on:** Phase 18
