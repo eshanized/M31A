@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -16,11 +15,8 @@ func (m *AppState) View() string {
 		return fmt.Sprintf("Terminal too small: %dx%d (minimum 40x10)", m.width, m.height)
 	}
 
-	// Check if toast has expired
-	if m.toastText != "" && time.Now().After(m.toastExpires) {
-		m.toastText = ""
-		m.toastType = ""
-	}
+	// H-2 fix: toast expiry is now handled in Update() via ToastExpiryMsg.
+	// View() is pure — no state mutation.
 
 	switch m.screen {
 	case ScreenFirstRun:
