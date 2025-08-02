@@ -71,7 +71,8 @@ func (m *FirstRunModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			return nil, nil
+			// H-7 fix: return tea.Quit so user can exit first-run
+			return []tea.Cmd{tea.Quit}, nil
 		}
 	}
 
@@ -234,8 +235,10 @@ func (m *FirstRunModel) updateKeychainPrompt(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 }
 
 func (m *FirstRunModel) updateComplete(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	m.state = FirstRunComplete
-	return nil, &AppMsg{Screen: ScreenREPL}
+	// H-6 fix: make this a no-op after the first call. Previously, every
+	// message (resize, keystroke, etc.) would emit AppMsg{Screen: ScreenREPL},
+	// causing repeated screen transitions and potential duplicate session creation.
+	return nil, nil
 }
 
 func (m *FirstRunModel) State() FirstRunState {
@@ -313,16 +316,15 @@ func (m *FirstRunModel) viewWelcome() string {
 
 // renderWelcomeLogo renders the M31A ASCII art logo.
 func (m *FirstRunModel) renderWelcomeLogo() string {
-	banner := `░███     ░███  ░██████    ░██      ░███    
-░████   ░████ ░██   ░██ ░████     ░██░██   
-░██░██ ░██░██       ░██   ░██    ░██  ░██  
-░██ ░████ ░██   ░█████    ░██   ░█████████ 
-░██  ░██  ░██       ░██   ░██   ░██    ░██ 
-░██       ░██ ░██   ░██   ░██   ░██    ░██ 
-░██       ░██  ░██████  ░██████ ░██    ░██ 
-                                           
-                                           
-                                           `
+	banner := `░███     ░███  ░██████    ░██      ░███    ░██
+░████   ░████ ░██   ░██ ░████     ░██░██   ░██
+░██░██ ░██░██       ░██   ░██    ░██  ░██  ░██
+░██ ░████ ░██   ░█████    ░██   ░█████████ ░██
+░██  ░██  ░██       ░██   ░██   ░██    ░██ ░██
+░██       ░██ ░██   ░██   ░██   ░██    ░██ ░██
+░██       ░██  ░██████  ░██████ ░██    ░██ ░██
+                                            
+                                            `
 
 	lines := strings.Split(banner, "\n")
 	styled := make([]string, len(lines))
