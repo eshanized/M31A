@@ -49,7 +49,14 @@ func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, t theme.Theme, maxWidth int
 		))
 	}
 
-	result := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+	// Join parts with spacing between them
+	var result string
+	for i, p := range parts {
+		if i > 0 {
+			result += "  "
+		}
+		result += p
+	}
 	if lipgloss.Width(result) > maxWidth {
 		truncateWidth := maxWidth - 3
 		if truncateWidth < 10 {
