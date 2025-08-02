@@ -36,9 +36,8 @@ const (
 	BadgeMuted
 )
 
-// NewBadge creates a badge from a preset.
-func NewBadge(label string, preset BadgePreset) Badge {
-	t := theme.Default()
+// NewBadge creates a badge from a preset using the provided theme.
+func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
 	var style lipgloss.Style
 
 	switch preset {
@@ -82,8 +81,7 @@ func RenderBadges(badges []Badge) string {
 }
 
 // CapabilityBadge returns a badge for a model capability.
-func CapabilityBadge(capability string) Badge {
-	t := theme.Default()
+func CapabilityBadge(capability string, t theme.Theme) Badge {
 	style := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).
 		Padding(0, 1)
@@ -91,17 +89,17 @@ func CapabilityBadge(capability string) Badge {
 }
 
 // StatusBadge returns a badge for a task/operation status.
-func StatusBadge(status string) Badge {
+func StatusBadge(status string, t theme.Theme) Badge {
 	switch status {
 	case "done", "pass", "complete":
-		return NewBadge(status, BadgeSuccess)
+		return NewBadge(status, BadgeSuccess, t)
 	case "running", "thinking", "pending":
-		return NewBadge(status, BadgeInfo)
+		return NewBadge(status, BadgeInfo, t)
 	case "failed", "error":
-		return NewBadge(status, BadgeError)
+		return NewBadge(status, BadgeError, t)
 	case "warning", "skipped":
-		return NewBadge(status, BadgeWarning)
+		return NewBadge(status, BadgeWarning, t)
 	default:
-		return NewBadge(status, BadgeMuted)
+		return NewBadge(status, BadgeMuted, t)
 	}
 }
