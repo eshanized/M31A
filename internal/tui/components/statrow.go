@@ -93,11 +93,15 @@ type KeyValue struct {
 	Key   string
 	Value string
 	Width int
+	Theme theme.Theme
 }
 
 // Render returns the key-value pair as a string.
 func (kv KeyValue) Render() string {
-	t := theme.Default()
+	t := kv.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(t.TextSecondary)
@@ -122,6 +126,7 @@ func (kv KeyValue) Render() string {
 type KeyValueGrid struct {
 	Pairs []KeyValue
 	Width int
+	Theme theme.Theme
 }
 
 // Render returns the key-value grid as a string.
@@ -130,10 +135,14 @@ func (g KeyValueGrid) Render() string {
 		return ""
 	}
 
-	t := theme.Default()
+	t := g.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
 	rows := make([]string, len(g.Pairs))
 
 	for i, pair := range g.Pairs {
+		pair.Theme = t
 		keyStyle := lipgloss.NewStyle().
 			Foreground(t.TextSecondary)
 
