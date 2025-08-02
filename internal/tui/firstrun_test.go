@@ -329,11 +329,16 @@ func TestFirstRun_WindowSize(t *testing.T) {
 func TestFirstRun_CompleteStateEmitsOnce(t *testing.T) {
 	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
 	m.state = FirstRunComplete
+	// H-6 fix: updateComplete is now a no-op. It should not emit AppMsg
+	// on subsequent messages (resize, keystroke, etc.) to prevent repeated
+	// screen transitions.
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if appMsg == nil || appMsg.Screen != ScreenREPL {
-		t.Error("Complete state should emit AppMsg with ScreenREPL")
+	if appMsg != nil {
+		t.Error("Complete state should be a no-op (return nil, nil)")
 	}
-	_ = cmds
+	if len(cmds) > 0 {
+		t.Error("Complete state should not return any commands")
+	}
 }
 
 func TestFirstRun_SetTheme(t *testing.T) {
