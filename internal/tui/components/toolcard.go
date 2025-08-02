@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -96,7 +97,13 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 	}
 
 	if len(output) > types.MaxToolOutputChars {
-		tc.output = output[:types.MaxToolOutputChars]
+		// H-19 fix: use rune-based slicing to avoid splitting multi-byte UTF-8 characters
+		runeCount := utf8.RuneCountInString(output)
+		if runeCount > types.MaxToolOutputChars {
+			tc.output = string([]rune(output)[:types.MaxToolOutputChars])
+		} else {
+			tc.output = output
+		}
 		tc.truncated = true
 	}
 
