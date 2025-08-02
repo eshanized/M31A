@@ -41,7 +41,6 @@ type KeyRegistry struct {
 	leaderActive  bool
 	leaderKey     string
 	leaderTimeout time.Duration
-	leaderTimer   *time.Timer
 
 	whichKeyActive bool
 }
@@ -76,7 +75,6 @@ func (r *KeyRegistry) Register(ctx KeyContext, key, description string, action K
 
 func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
 	if r.leaderActive {
-		r.cancelLeaderTimer()
 		r.leaderActive = false
 
 		chordKey := r.leaderKey + " " + key
@@ -131,14 +129,8 @@ func (r *KeyRegistry) IsLeaderActive() bool {
 
 func (r *KeyRegistry) DeactivateLeader() {
 	r.leaderActive = false
-	r.cancelLeaderTimer()
-}
-
-func (r *KeyRegistry) cancelLeaderTimer() {
-	if r.leaderTimer != nil {
-		r.leaderTimer.Stop()
-		r.leaderTimer = nil
-	}
+	// H-20 fix: leader timeout is managed via LeaderTimeoutMsg → DeactivateLeader().
+	// The old cancelLeaderTimer() was a no-op (leaderTimer was never assigned).
 }
 
 func (r *KeyRegistry) GetContextBindings(ctx KeyContext) []KeyBinding {
