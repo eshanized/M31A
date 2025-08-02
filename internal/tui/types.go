@@ -3,6 +3,7 @@ package tui
 import (
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
@@ -129,10 +130,30 @@ type DiscussAnswerTimeoutMsg struct {
 // active screen via the REPL streaming infrastructure.
 type StreamChunkMsg = types.StreamChunkMsg
 
+// HealthCheckResultMsg carries the result of an async health check back to
+// the TUI update loop. C-1 fix: health checks now run in a tea.Cmd goroutine
+// instead of blocking Update().
+type HealthCheckResultMsg struct {
+	Result types.HealthStatus
+}
+
+// CacheRefreshResultMsg carries the result of an async cache refresh back to
+// the TUI update loop. C-2 fix: cache refreshes now run in a tea.Cmd goroutine
+// instead of blocking Update().
+type CacheRefreshResultMsg struct {
+	ErrMsg    string
+	NextCmd   tea.Cmd
+}
+
 // ThemeChangedMsg is emitted when the theme is switched at runtime.
 type ThemeChangedMsg struct {
 	Theme string // "dark" or "light"
 }
+
+// ToastExpiryMsg is emitted when a toast notification expires. H-2 fix:
+// toast expiry is now handled in Update() instead of View() to maintain
+// Bubble Tea's pure rendering contract.
+type ToastExpiryMsg struct{}
 
 // SlashCommandMsg is emitted by the REPL when the user enters a slash command.
 // It carries the raw command string for app-level processing.
