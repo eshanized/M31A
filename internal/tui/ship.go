@@ -112,7 +112,7 @@ func (m *ShipModel) View() string {
 	sb.WriteString("\n\n")
 
 	// Session info with badges
-	sessionBadge := components.NewBadge(m.summary.SessionID, components.BadgeMuted).Render()
+	sessionBadge := components.NewBadge(m.summary.SessionID, components.BadgeMuted, m.theme).Render()
 	sb.WriteString(fmt.Sprintf("Session %s  Duration: %s\n\n", sessionBadge, m.summary.Duration))
 
 	// Metrics dashboard
