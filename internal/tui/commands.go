@@ -103,6 +103,28 @@ func (r *CommandRegistry) AllCommands() []CommandInfo {
 	return cmds
 }
 
+// AllCommandsWithExecute returns all registered commands with Execute functions
+// wired to emit SlashCommandMsg. Used by the command palette so that pressing
+// Enter on a selected command routes through the standard slash-command flow.
+func (r *CommandRegistry) AllCommandsWithExecute() []CommandInfo {
+	names := r.List()
+	cmds := make([]CommandInfo, 0, len(names))
+	for _, name := range names {
+		cmdName := name // capture for closure
+		cmds = append(cmds, CommandInfo{
+			Name:        cmdName,
+			Description: r.descriptions[cmdName],
+			Slash:       "/" + cmdName,
+			Execute: func() tea.Cmd {
+				return func() tea.Msg {
+					return SlashCommandMsg{Command: "/" + cmdName}
+				}
+			},
+		})
+	}
+	return cmds
+}
+
 // Execute parses input as a command, looks up the handler, and runs it.
 func (r *CommandRegistry) Execute(input string, ctx CommandContext) (CommandResult, bool) {
 	name, args, ok := ParseCommand(input)
