@@ -26,12 +26,12 @@ func handleHelp(args []string, ctx CommandContext) CommandResult {
 		name    string
 		commands []string
 	}{
-		{"Session", []string{"new", "resume", "sessions", "fork", "prev", "next", "clear"}},
-		{"Workflow", []string{"workflow", "plan", "execute", "verify", "ship", "pause", "resume-task"}},
-		{"Config", []string{"settings", "provider", "model", "theme", "key", "config"}},
-		{"Git", []string{"commit", "log", "rollback", "diff"}},
-		{"AI", []string{"compress", "optimize", "models"}},
-		{"System", []string{"help", "status", "health", "log", "version"}},
+		{"Session", []string{"sessions", "fork", "prev", "next", "save", "clear", "undo"}},
+		{"Workflow", []string{"workflow", "plan", "execute", "verify", "ship", "goal", "phase", "pause", "resume-task"}},
+		{"Config", []string{"settings", "provider", "model", "models", "fallback", "theme", "key", "config"}},
+		{"Git", []string{"rollback", "diff", "log", "ledger"}},
+		{"AI", []string{"compress", "optimize", "cost", "tokens"}},
+		{"System", []string{"help", "status", "health", "tools", "history", "quit", "reset"}},
 	}
 
 	var b strings.Builder
