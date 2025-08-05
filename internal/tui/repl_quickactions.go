@@ -25,22 +25,22 @@ func (m *ReplModel) renderQuickActions() string {
 	cards := make([]string, len(actions))
 	for i, a := range actions {
 		cardStyle := lipgloss.NewStyle().
-			Background(t.Surface).
+			Background(t.SurfaceElevated).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
-			Padding(0, 1).
-			Width(18)
+			Padding(1, 1).
+			Width(20)
 
 		symbolStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
 		keyStyle := lipgloss.NewStyle().Foreground(t.Brand)
-		labelStyle := lipgloss.NewStyle().Foreground(t.TextPrimary)
+		labelStyle := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
 		descStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
 
 		header := symbolStyle.Render(a.symbol) + " " + keyStyle.Render(a.key)
 		label := labelStyle.Render(a.label)
 		desc := descStyle.Render(a.description)
 
-		content := lipgloss.JoinVertical(lipgloss.Left, header, label, desc)
+		content := lipgloss.JoinVertical(lipgloss.Left, header, "", label, desc)
 		cards[i] = cardStyle.Render(content)
 	}
 
