@@ -199,8 +199,9 @@ func TestApp_Update_ReplModelNil_NoPanic(t *testing.T) {
 			}
 		}()
 		_, cmd := app.Update(ToastMsg{Text: "hello", Duration: time.Second, Type: "info"})
-		if cmd != nil {
-			t.Errorf("expected nil cmd, got %T", cmd)
+		// H-2 fix: ToastMsg now returns a tea.Tick cmd to schedule toast expiry
+		if cmd == nil {
+			t.Error("expected non-nil cmd (toast expiry timer)")
 		}
 	})
 
