@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
@@ -179,148 +178,76 @@ func (m *ReplModel) renderWelcome() string {
 		return "Welcome to M31A"
 	}
 
-	// ASCII art banner logo: M31A rendered in block characters
-	logo := m.renderBlockLogo("M31A")
+	// 1. Logo (compact, 4 lines)
+	logo := m.renderLogo()
 
-	// Provider status card
+	// 2. Provider status card
 	providerCard := m.renderProviderCard()
 
-	// Quick actions panel
-	quickActions := m.renderQuickActions()
+	// 3. Input area with placeholder
+	inputBox := m.renderInputBox()
 
-	// Session stats bar
-	statsBar := m.renderSessionStats()
+	// 4. Keyboard hints
+	hints := renderKeyboardHints(m.theme)
 
-	// Input area — matches the screenshot: grey box with blue left border accent
-	inputBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), true, false, false, false).
-		BorderForeground(m.theme.Brand).
-		Background(lipgloss.Color("#2A2A2A")).
-		Padding(0, 2, 0, 2)
+	// 5. Bottom bar (cwd + version)
+	bottomBar := m.renderBottomBar()
 
-	// Build the placeholder line
-	placeholderText := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("What would you like to build?")
-
-	// Context sub-line (model · provider)
-	var contextParts []string
-	if m.activeModel != nil {
-		contextParts = append(contextParts, m.activeModel.Name)
-	}
-	if m.activeProvider != "" {
-		contextParts = append(contextParts, m.activeProvider)
-	}
-	contextLine := ""
-	if len(contextParts) > 0 {
-		contextLine = lipgloss.NewStyle().
-			Foreground(m.theme.TextMuted).
-			Render(strings.Join(contextParts, " · "))
-	} else {
-		contextLine = lipgloss.NewStyle().
-			Foreground(m.theme.TextMuted).
-			Render("M31A")
-	}
-
-	// Assemble the input box content
-	inputLines := []string{placeholderText}
-	if contextLine != "" {
-		inputLines = append(inputLines, contextLine)
-	}
-	inputBox := inputBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Top, inputLines...))
-
-	// Keyboard hints
-	hints := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("ctrl+p commands  ctrl+b sidebar  ctrl+x for more")
-
-	// Tip
-	tips := []string{
-		"Run /config to set up your AI provider",
-		"Use @filepath to include file context",
-		"Press /help to see all commands",
-		"Use !prefix for shell commands",
-		"Press ctrl+x m to cycle models",
-	}
-	tipIdx := int(time.Now().Unix()) % len(tips)
-	tipDot := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("•")
-	tipText := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("Tip: " + tips[tipIdx])
-	tip := tipDot + " " + tipText
-
-	// Bottom corners: cwd and version
-	cwdLabel := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render(filepath.Base(m.cwd))
-	versionLabel := lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("v0.1.0")
-
-	logoPadded := lipgloss.Place(m.width, lipgloss.Height(logo)+1, lipgloss.Center, lipgloss.Top, logo)
-
-	// Build the main layout
-	// Stack: Logo → Provider Card → Quick Actions → Input Box → Stats → Hints
-	mainContent := lipgloss.JoinVertical(lipgloss.Center,
-		logoPadded,
+	// Stack vertically, centered
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		logo,
 		"",
 		providerCard,
 		"",
-		quickActions,
-		"",
 		inputBox,
-		"",
-		statsBar,
 		"",
 		hints,
 	)
 
-	// Use Place to center the group in the available space, pushing tip to bottom
-	availableHeight := m.viewport.Height - 4 // reserve space for tip and bottom bar
-	content := lipgloss.Place(m.width, availableHeight, lipgloss.Center, lipgloss.Center, mainContent)
+	// Center in available space
+	availableHeight := m.height - 4 // reserve for bottom bar
+	centered := lipgloss.Place(m.width, availableHeight, lipgloss.Center, lipgloss.Center, content)
 
-	tipArea := lipgloss.Place(m.width-4, 2, lipgloss.Left, lipgloss.Top, tip)
-	bottomBar := lipgloss.JoinHorizontal(lipgloss.Left,
-		cwdLabel,
-		lipgloss.Place(m.width-lipgloss.Width(cwdLabel)-lipgloss.Width(versionLabel)-4, 1, lipgloss.Right, lipgloss.Top, versionLabel),
-	)
-	bottomArea := lipgloss.Place(m.width, 3, lipgloss.Center, lipgloss.Bottom,
-		lipgloss.JoinVertical(lipgloss.Top, tipArea, bottomBar),
-	)
-
-	return lipgloss.JoinVertical(lipgloss.Top, content, bottomArea)
+	return lipgloss.JoinVertical(lipgloss.Top, centered, bottomBar)
 }
 
 // renderProviderCard shows current model/provider status or setup prompt.
 func (m *ReplModel) renderProviderCard() string {
-	t := theme.Default()
+	t := m.theme
 
 	if m.activeModel == nil || m.activeProvider == "" {
 		// Not configured - show setup prompt
 		style := lipgloss.NewStyle().
-			Background(t.Surface).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Warning).
-			Padding(0, 2)
+			Padding(0, 2).
+			Width(40)
 
 		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Render("●")
-		text := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("No provider configured — run /settings to get started")
-		return style.Render(warningDot + " " + text)
+		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render("No provider configured")
+		subtitle := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("Run /settings to get started")
+
+		content := lipgloss.JoinVertical(lipgloss.Left,
+			warningDot+" "+title,
+			subtitle,
+		)
+
+		return style.Render(content)
 	}
 
 	// Configured - show provider info
 	style := lipgloss.NewStyle().
-		Background(t.Surface).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Success).
-		Padding(0, 2)
+		Padding(0, 2).
+		Width(40)
 
 	// Model name
 	modelStyle := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
 	modelBadge := modelStyle.Render(m.activeModel.Name)
 
 	// Provider badge
-	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrand).Render()
+	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrand, m.theme).Render()
 
 	// Pricing info
 	pricingText := ""
@@ -349,60 +276,109 @@ func (m *ReplModel) renderProviderCard() string {
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
-// renderSessionStats shows basic session statistics.
-func (m *ReplModel) renderSessionStats() string {
-	t := m.theme
 
-	stats := []struct {
-		label  string
-		value  string
-		symbol string
-	}{
-		{label: "Msgs", value: fmt.Sprintf("%d", len(m.messages)), symbol: "#"},
-		{label: "Tokens", value: "0", symbol: "T"},
-		{label: "Cost", value: "$0.00", symbol: "$"},
-		{label: "Session", value: "New", symbol: "S"},
-	}
 
-	if m.lastUsage != nil {
-		stats[1].value = components.FormatMetric(m.lastUsage.TotalTokens)
-		stats[2].value = components.FormatCost(m.lastCost)
-	}
+// renderLogo renders a clean ASCII art logo for M31A.
+func (m *ReplModel) renderLogo() string {
+	logo := `  __  _______  __
+ /  |/  / __ \/ _/
+/ /|_/ / /_/ / _/
+/_/  /_/\____/_/ v0.1.0`
 
-	parts := make([]string, len(stats))
-	for i, s := range stats {
-		symbolStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-		labelStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
-		valueStyle := lipgloss.NewStyle().Foreground(t.TextPrimary)
-
-		parts[i] = symbolStyle.Render(s.symbol) + " " + labelStyle.Render(s.label) + ": " + valueStyle.Render(s.value)
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
-}
-
-// renderBlockLogo renders a string in a 5x5 block-letter pixel art style.
-// Each character is composed of '#' and '.' characters.
-func (m *ReplModel) renderBlockLogo(s string) string {
-	// ASCII art banner for M31A
-	banner := `░███     ░███  ░██████    ░██      ░███    
-░████   ░████ ░██   ░██ ░████     ░██░██   
-░██░██ ░██░██       ░██   ░██    ░██  ░██  
-░██ ░████ ░██   ░█████    ░██   ░█████████ 
-░██  ░██  ░██       ░██   ░██   ░██    ░██ 
-░██       ░██ ░██   ░██   ░██   ░██    ░██ 
-░██       ░██  ░██████  ░██████ ░██    ░██ 
-                                           
-                                           
-                                           `
-
-	// Color the banner with the brand color
-	lines := strings.Split(banner, "\n")
+	lines := strings.Split(logo, "\n")
 	styled := make([]string, len(lines))
 	for i, line := range lines {
 		styled[i] = lipgloss.NewStyle().Foreground(m.theme.Brand).Render(line)
 	}
 	return lipgloss.JoinVertical(lipgloss.Top, styled...)
+}
+
+// renderInputBox renders the input area with placeholder text.
+func (m *ReplModel) renderInputBox() string {
+	t := m.theme
+
+	style := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(t.Brand).
+		Background(lipgloss.Color("#2A2A2A")).
+		Padding(0, 2).
+		Width(50)
+
+	placeholder := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render("Type a message, /command, or goal...")
+
+	// Context line (model · provider)
+	var contextParts []string
+	if m.activeModel != nil {
+		contextParts = append(contextParts, m.activeModel.Name)
+	}
+	if m.activeProvider != "" {
+		contextParts = append(contextParts, m.activeProvider)
+	}
+	contextLine := ""
+	if len(contextParts) > 0 {
+		contextLine = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render(strings.Join(contextParts, " · "))
+	} else {
+		contextLine = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render("M31A")
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Top, placeholder, contextLine)
+	return style.Render(content)
+}
+
+// renderKeyboardHints renders keyboard shortcut hints.
+func renderKeyboardHints(t theme.Theme) string {
+	hints := []struct {
+		key   string
+		label string
+	}{
+		{"ctrl+p", "commands"},
+		{"ctrl+b", "sidebar"},
+		{"ctrl+x", "leader"},
+	}
+
+	parts := make([]string, len(hints))
+	for i, h := range hints {
+		keyStyle := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Bold(true)
+		labelStyle := lipgloss.NewStyle().
+			Foreground(t.TextMuted)
+
+		parts[i] = keyStyle.Render(h.key) + " " + labelStyle.Render(h.label)
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Center, parts...)
+}
+
+// renderBottomBar renders the bottom bar with cwd and version.
+func (m *ReplModel) renderBottomBar() string {
+	t := m.theme
+
+	cwdLabel := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render(filepath.Base(m.cwd))
+
+	versionLabel := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render("v0.1.0")
+
+	// Right-align version
+	spacer := m.width - lipgloss.Width(cwdLabel) - lipgloss.Width(versionLabel) - 4
+	if spacer < 0 {
+		spacer = 0
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Left,
+		"  "+cwdLabel,
+		strings.Repeat(" ", spacer),
+		versionLabel+"  ",
+	)
 }
 
 // renderSlashSuggestions renders the autocomplete dropdown for slash commands.
