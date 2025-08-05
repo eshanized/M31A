@@ -481,6 +481,7 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 
 		case "ctrl+s":
 			// Save synchronously to avoid async closure issues
+			oldTheme := m.config.UI.Theme
 			m.applyFieldValues()
 			m.dirty = false
 			if err := m.config.Save(m.configPath); err != nil {
@@ -490,9 +491,17 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			// Save API keys to keychain if available
 			m.saveAPIKeysToKeychain()
 			m.statusMsg = "Configuration saved successfully."
-			return m, func() tea.Msg {
+			// H-5 fix: emit ThemeChangedMsg if theme actually changed
+			var cmds []tea.Cmd
+			cmds = append(cmds, func() tea.Msg {
 				return SettingsSavedMsg{}
+			})
+			if m.config.UI.Theme != oldTheme {
+				cmds = append(cmds, func() tea.Msg {
+					return ThemeChangedMsg{Theme: m.config.UI.Theme}
+				})
 			}
+			return m, tea.Batch(cmds...)
 
 		case "backspace":
 			if m.isEditing() {
