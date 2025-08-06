@@ -234,11 +234,15 @@ func TestHelpCommand(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", result.Message)
 	}
 
-	// Verify all 16 command names appear in the output
+	// Verify all expected command names appear in the output
 	commands := []string{
 		"/help", "/clear", "/status", "/model", "/provider",
 		"/reset", "/quit", "/undo", "/compress", "/ledger",
 		"/rollback", "/sessions", "/goal", "/phase", "/config", "/models",
+		"/fork", "/prev", "/next", "/save", "/workflow", "/plan",
+		"/execute", "/verify", "/ship", "/theme", "/key", "/fallback",
+		"/tools", "/history", "/diff", "/log", "/tokens", "/health",
+		"/optimize", "/cost", "/pause", "/resume-task",
 	}
 	for _, cmd := range commands {
 		if !strings.Contains(result.Message, cmd) {
