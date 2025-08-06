@@ -228,8 +228,14 @@ func TestVerify_HealKey_SingleTask(t *testing.T) {
 	m := NewVerifyModel(tasks, nil, theme.Dark(), 120, 40)
 	m.selected = 0
 
-	// Send 'h' key
+	// First 'h' sets confirmation gate
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if m.tasks[0].Status != types.StatusFailed {
+		t.Errorf("first 'h' should set confirmation gate, got status = %v", m.tasks[0].Status)
+	}
+
+	// 'y' confirms self-heal
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 	if m.tasks[0].Status != types.StatusPending {
 		t.Errorf("task status = %v, want StatusPending (heal should reset failed task)", m.tasks[0].Status)
