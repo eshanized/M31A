@@ -474,7 +474,13 @@ func TestShip_NewSessionAction(t *testing.T) {
 	m.width = 80
 	m.height = 40
 
+	// First 'n' sets confirmation gate
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if appMsg != nil {
+		t.Fatal("First 'n' should set confirmation gate, not trigger action")
+	}
+	// Second 'n' confirms and triggers new session
+	_, appMsg = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	if appMsg == nil {
 		t.Fatal("Expected AppMsg on new session")
 	}
