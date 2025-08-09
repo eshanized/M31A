@@ -304,13 +304,31 @@ func TestSettings_Save(t *testing.T) {
 
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 
-	// Ctrl+S should save and return SettingsSavedMsg
+	// Ctrl+S should save and return a cmd (may be a batch with SettingsSavedMsg)
 	if cmd == nil {
 		t.Fatal("expected a cmd from Ctrl+S")
 	}
 	msg := cmd()
-	if _, ok := msg.(SettingsSavedMsg); !ok {
-		t.Fatalf("Expected SettingsSavedMsg, got %T", msg)
+	// H-5 fix: settings save now returns a batch that may include ThemeChangedMsg.
+	// Check if it's a BatchMsg and look for SettingsSavedMsg inside.
+	switch m := msg.(type) {
+	case SettingsSavedMsg:
+		// Direct SettingsSavedMsg (no theme change)
+	case tea.BatchMsg:
+		found := false
+		for _, subCmd := range m {
+			if subResult := subCmd(); subResult != nil {
+				if _, ok := subResult.(SettingsSavedMsg); ok {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Expected SettingsSavedMsg in batch, got %T", msg)
+		}
+	default:
+		t.Fatalf("Expected SettingsSavedMsg or BatchMsg, got %T", msg)
 	}
 	if m.dirty {
 		t.Error("expected dirty to be false after save")
