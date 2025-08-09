@@ -288,12 +288,12 @@ func TestSession_Load_RejectsMissingID(t *testing.T) {
 	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	// Create a session with empty ID
-	sessionDir := filepath.Join(dir, "testid")
+	sessionDir := filepath.Join(dir, "aabbccdf")
 	os.MkdirAll(sessionDir, 0755)
 	sessionData := []byte(`{"id":"","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z","workflow_phase":"idle"}`)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
 
-	_, err := mgr.LoadSession("testid")
+	_, err := mgr.LoadSession("aabbccdf")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
 		t.Errorf("expected ErrSessionCorrupted for missing ID, got %v", err)
 	}
@@ -304,12 +304,12 @@ func TestSession_Load_RejectsZeroStartedAt(t *testing.T) {
 	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	// Create a session with zero StartedAt
-	sessionDir := filepath.Join(dir, "testid2")
+	sessionDir := filepath.Join(dir, "aabbccdd")
 	os.MkdirAll(sessionDir, 0755)
-	sessionData := []byte(`{"id":"testid2","model":"test","provider":"test","started_at":"0001-01-01T00:00:00Z","workflow_phase":"idle"}`)
+	sessionData := []byte(`{"id":"aabbccdd","model":"test","provider":"test","started_at":"0001-01-01T00:00:00Z","workflow_phase":"idle"}`)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
 
-	_, err := mgr.LoadSession("testid2")
+	_, err := mgr.LoadSession("aabbccdd")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
 		t.Errorf("expected ErrSessionCorrupted for zero StartedAt, got %v", err)
 	}
@@ -320,12 +320,12 @@ func TestSession_Load_RejectsUnknownPhase(t *testing.T) {
 	mgr := session.NewManager(dir, session.ManagerOpts{})
 
 	// Create a session with unknown workflow phase
-	sessionDir := filepath.Join(dir, "testid3")
+	sessionDir := filepath.Join(dir, "aabbccde")
 	os.MkdirAll(sessionDir, 0755)
-	sessionData := []byte(`{"id":"testid3","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z","workflow_phase":"bogus"}`)
+	sessionData := []byte(`{"id":"aabbccde","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z","workflow_phase":"bogus"}`)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
 
-	_, err := mgr.LoadSession("testid3")
+	_, err := mgr.LoadSession("aabbccde")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
 		t.Errorf("expected ErrSessionCorrupted for unknown phase, got %v", err)
 	}
