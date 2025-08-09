@@ -70,7 +70,13 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
+	// First 'n' sets confirmation gate
 	_, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if appMsg != nil {
+		t.Error("first 'n' should set confirmation gate, not trigger action")
+	}
+	// Second 'n' confirms and triggers new session
+	_, appMsg = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	if appMsg == nil || appMsg.Screen != ScreenFirstRun {
 		t.Error("expected ScreenFirstRun on 'n' key")
 	}
@@ -79,6 +85,12 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 	m2 := NewShipModel(summary, theme.Dark(), 0, 0)
 	m2.width = 80
 	m2.height = 24
+	// First 'N' sets confirmation gate
+	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if appMsg != nil {
+		t.Error("first 'N' should set confirmation gate, not trigger action")
+	}
+	// Second 'N' confirms and triggers new session
 	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	if appMsg == nil || appMsg.Screen != ScreenFirstRun {
 		t.Error("expected ScreenFirstRun on 'N' key")
