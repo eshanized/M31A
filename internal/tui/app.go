@@ -135,7 +135,7 @@ type AppState struct {
 // It also invalidates the header cache so the phase indicator updates.
 func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 	m.currentPhase = phase
-	m.workflowRunning = (phase != types.PhaseIdle && phase != types.PhaseShip)
+	m.workflowRunning = (phase != types.PhaseIdle)
 	m.headerCacheValid = false
 }
 
