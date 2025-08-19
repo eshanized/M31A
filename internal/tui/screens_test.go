@@ -484,8 +484,8 @@ func TestShip_NewSessionAction(t *testing.T) {
 	if appMsg == nil {
 		t.Fatal("Expected AppMsg on new session")
 	}
-	if appMsg.Screen != ScreenFirstRun {
-		t.Errorf("Expected ScreenFirstRun, got %d", appMsg.Screen)
+	if appMsg.Screen != ScreenREPL || appMsg.Action != "new_session" {
+		t.Errorf("Expected ScreenREPL with new_session action, got screen=%d action=%s", appMsg.Screen, appMsg.Action)
 	}
 }
 

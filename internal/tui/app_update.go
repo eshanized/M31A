@@ -158,6 +158,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				resp = m.permissionModal.AllowAlways()
 			case "n", "N":
 				resp = m.permissionModal.Deny()
+			case "ctrl+c":
+				resp = m.permissionModal.Deny()
+				m.permissionModalActive = false
+				m.permissionModal = nil
+				m.screen = m.prevScreen
+				return m, func() tea.Msg {
+					return PermissionResponseMsg{Response: resp}
+				}
 			case "e", "E":
 				return m, tea.Quit
 			default:
@@ -172,7 +180,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.workflowRunning && m.workflowCancel != nil {
 				m.workflowCancel()
 				m.currentOperation = "Workflow cancelled"
-				m.workflowRunning = false
+				m.setWorkflowPhase(types.PhaseIdle)
 				return m, nil
 			}
 			// If streaming, cancel stream and stay in app
@@ -264,8 +272,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.workflowGoal = goal
-				m.workflowRunning = true
-				m.currentPhase = phase
+				m.setWorkflowPhase(phase)
+				m.workflowStartTime = time.Now()
 				return m, RunPhaseCmd(m, phase, goal)
 			}
 			// Bare alias like /plan — show usage hint instead of silently doing nothing
@@ -299,8 +307,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			} else {
 				m.workflowGoal = goal
-				m.workflowRunning = true
-				m.currentPhase = types.PhaseInitialize
+				m.setWorkflowPhase(types.PhaseInitialize)
+				m.workflowStartTime = time.Now()
 				m.currentOperation = fmt.Sprintf("Starting workflow: %s", goal)
 				return m, RunPhaseCmd(m, types.PhaseInitialize, goal)
 			}
@@ -349,9 +357,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.workflowGoal = result.ResumeGoal
-				m.currentPhase = result.ResumePhase
+				m.setWorkflowPhase(result.ResumePhase)
 				m.discussQuestions = result.ResumeQuestions
-				m.workflowRunning = true
 				return m, RunPhaseCmd(m, result.ResumePhase, result.ResumeGoal)
 			}
 
@@ -360,7 +367,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var providerCmd tea.Cmd
 				if sess, err := m.sessionManager.LoadSession(*result.SessionID); err == nil && sess != nil {
 					if m.replModel == nil {
-						rp := NewReplModel(m.themeManager.Current())
+						rp := NewReplModel(m.themeManager.Current(), m.version)
 						m.replModel = &rp
 					}
 					providerCmd = m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
@@ -378,6 +385,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.dispatcher.SetSessionID(*result.SessionID)
 					m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
+					if m.planModel != nil {
+						m.planModel.sessionID = *result.SessionID
+					}
+					if m.executeModel != nil {
+						m.executeModel.sessionID = *result.SessionID
+					}
+					if m.verifyModel != nil {
+						m.verifyModel.sessionID = *result.SessionID
+					}
+					if m.shipModel != nil {
+						m.shipModel.sessionID = *result.SessionID
+					}
 				}
 				if result.Cmd != nil {
 					return m, tea.Batch(result.Cmd, providerCmd)
@@ -493,6 +512,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case StreamChunkMsg:
+		if m.workflowRunning && m.currentPhase != types.PhaseDiscuss {
+			m.pendingStreamChunks = append(m.pendingStreamChunks, msg.Chunk)
+			return m, nil
+		}
 		if m.replModel != nil {
 			m.replModel.AppendStreamChunk(msg.Chunk)
 		}
@@ -523,6 +546,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, event, err := provider.FindFallbackProvider(m.registry, m.activeProvider)
 				if err == nil && event != nil {
 					m.activeProvider = event.To
+					if m.workflowPaused {
+						m.workflowPaused = false
+					}
 					if m.replModel != nil {
 						fallbackCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
 						m.replModel.SetDispatcher(m.dispatcher)
@@ -536,6 +562,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		}
+		// Context exceeded stops workflow entirely
+		if errors.Is(msg.Err, m31errors.ErrContextExceeded) && m.workflowRunning {
+			m.setWorkflowPhase(types.PhaseIdle)
+			m.resetDiscussQA()
+			m.flushPendingStreamChunks()
+			if m.replModel != nil {
+				m.replModel.Update(msg)
+			}
+			return m, nil
+		}
+		// Pause workflow on stream error if running
+		if m.workflowRunning {
+			m.workflowPaused = true
 		}
 		// Pass the error through to the REPL model for display
 		if m.replModel != nil {
@@ -629,12 +669,25 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Warn("config reload failed", "error", msg.Error)
 			return m, nil
 		}
-		// Update non-provider fields only (theme, UI, permissions, features)
 		if msg.Config != nil {
+			// Detect theme change before updating config
+			oldTheme := ""
+			if m.config != nil {
+				oldTheme = m.config.UI.Theme
+			}
 			m.config.UI = msg.Config.UI
 			m.config.Permissions = msg.Config.Permissions
 			m.config.Features = msg.Config.Features
 			m.config.Ledger = msg.Config.Ledger
+			// Apply theme change if different
+			if m.config.UI.Theme != oldTheme && m.config.UI.Theme != "" {
+				themeMsg := ThemeChangedMsg{Theme: m.config.UI.Theme}
+				return m.handleThemeChanged(themeMsg)
+			}
+			// Update dispatcher permissions
+			if m.dispatcher != nil {
+				m.dispatcher.UpdatePermissions(&msg.Config.Permissions)
+			}
 		}
 		return m, nil
 	}
@@ -656,8 +709,41 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.keychain.Set(service, key)
 					}
 				}
-				rp := NewReplModel(m.themeManager.Current())
-				m.replModel = &rp
+
+				// Update active provider/model from first-run selections
+				selectedProviders := m.firstRunModel.SelectedProviders()
+				if len(selectedProviders) > 0 {
+					m.activeProvider = selectedProviders[0]
+					if m.registry != nil {
+						// Try to set the active provider in the registry
+						if err := m.registry.SetActive(m.activeProvider); err == nil {
+							// Fetch models to populate the cache and find the default model
+							p := m.registry.ActiveProvider()
+							if p != nil {
+								ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+								models, err := p.FetchModels(ctx)
+								cancel()
+								if err == nil && len(models) > 0 {
+									// Use config default model if set, otherwise use first model
+									if m.config != nil && m.config.Model.Default != "" {
+										for _, model := range models {
+											if model.ID == m.config.Model.Default {
+												m.activeModel = &model
+												break
+											}
+										}
+									}
+									if m.activeModel == nil {
+										m.activeModel = &models[0]
+									}
+								}
+							}
+						}
+					}
+				}
+
+						rp := NewReplModel(m.themeManager.Current(), m.version)
+						m.replModel = &rp
 
 				// Create a session so that /status, /save, etc. work
 				sessionID := ""
@@ -671,6 +757,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				providerCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 				m.replModel.SetDispatcher(m.dispatcher)
+				m.replModel.SetCommandRegistry(m.cmdRegistry)
 				m.initialized = true
 				// Init sidebar
 				if m.sidebarModel == nil {
@@ -732,13 +819,30 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Load session data into the REPL model
 				if sess, err := m.sessionManager.LoadSession(appMsg.SessionID); err == nil && sess != nil {
 					if m.replModel == nil {
-						rp := NewReplModel(m.themeManager.Current())
+						rp := NewReplModel(m.themeManager.Current(), m.version)
 						m.replModel = &rp
 					}
 					providerCmd := m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
 					m.replModel.SetDispatcher(m.dispatcher)
+					m.replModel.SetSessionID(sess.ID)
 					for _, msg := range sess.Messages {
 						m.replModel.AddMessage(msg)
+					}
+					if m.workflowEngine != nil {
+						m.workflowEngine.SetSessionID(sess.ID)
+					}
+					m.dispatcher.SetSessionID(sess.ID)
+					if m.planModel != nil {
+						m.planModel.sessionID = sess.ID
+					}
+					if m.executeModel != nil {
+						m.executeModel.sessionID = sess.ID
+					}
+					if m.verifyModel != nil {
+						m.verifyModel.sessionID = sess.ID
+					}
+					if m.shipModel != nil {
+						m.shipModel.sessionID = sess.ID
 					}
 					m.currentOperation = fmt.Sprintf("Session %s loaded", appMsg.SessionID)
 					cmds = append(cmds, providerCmd)
@@ -801,8 +905,26 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			subCmds, appMsg := m.shipModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
-				if appMsg.Screen == ScreenFirstRun {
-					m.replModel = nil
+				if appMsg.Action == "new_session" {
+					// Create a fresh session and reset workflow state
+					if m.sessionManager != nil {
+						modelID := ""
+						providerName := ""
+						if m.activeModel != nil {
+							modelID = m.activeModel.ID
+						}
+						providerName = m.activeProvider
+						sess, err := m.sessionManager.NewSession(modelID, providerName)
+						if err == nil && m.workflowEngine != nil {
+							m.workflowEngine.SetSessionID(sess.ID)
+						}
+					}
+					m.workflowGoal = ""
+					m.workflowRunning = false
+					m.currentPhase = types.PhaseIdle
+					if m.replModel != nil {
+						m.replModel.ClearMessages()
+					}
 				}
 			}
 			cmds = append(cmds, subCmds...)

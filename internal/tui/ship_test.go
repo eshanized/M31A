@@ -77,8 +77,8 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 	}
 	// Second 'n' confirms and triggers new session
 	_, appMsg = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if appMsg == nil || appMsg.Screen != ScreenFirstRun {
-		t.Error("expected ScreenFirstRun on 'n' key")
+	if appMsg == nil || appMsg.Screen != ScreenREPL || appMsg.Action != "new_session" {
+		t.Error("expected ScreenREPL with new_session action on 'n' key")
 	}
 
 	// Test uppercase N
@@ -92,8 +92,8 @@ func TestShipModel_UpdateNewSession(t *testing.T) {
 	}
 	// Second 'N' confirms and triggers new session
 	_, appMsg = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
-	if appMsg == nil || appMsg.Screen != ScreenFirstRun {
-		t.Error("expected ScreenFirstRun on 'N' key")
+	if appMsg == nil || appMsg.Screen != ScreenREPL || appMsg.Action != "new_session" {
+		t.Error("expected ScreenREPL with new_session action on 'N' key")
 	}
 }
 

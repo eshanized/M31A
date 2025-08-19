@@ -28,6 +28,8 @@ type ShipSummary struct {
 	Deletions     int
 	TotalTokens   int
 	TotalCost     float64
+	Model         string
+	Provider      string
 }
 
 // ShipModel displays the session completion summary.
@@ -38,6 +40,7 @@ type ShipModel struct {
 	height           int
 	spinner          spinner.Model
 	confirmNewSession bool
+	sessionID        string
 }
 
 // NewShipModel creates a Ship screen model. width/height are required
@@ -76,13 +79,13 @@ func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		switch msg.String() {
 		case "n", "N":
 			if m.confirmNewSession {
-				return nil, &AppMsg{Screen: ScreenFirstRun}
+				return nil, &AppMsg{Screen: ScreenREPL, Action: "new_session"}
 			}
 			m.confirmNewSession = true
 			return nil, nil
 		case "y", "Y":
 			if m.confirmNewSession {
-				return nil, &AppMsg{Screen: ScreenFirstRun}
+				return nil, &AppMsg{Screen: ScreenREPL, Action: "new_session"}
 			}
 		case "esc":
 			if m.confirmNewSession {
