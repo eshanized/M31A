@@ -23,6 +23,8 @@ type VerifyModel struct {
 	spinner         spinner.Model
 	confirmHeal     bool // awaiting self-heal confirmation
 	confirmHealTask int  // task ID being confirmed for heal
+	sessionID       string
+	healFunc        func(taskID int) tea.Cmd // callback to trigger self-healing
 }
 
 // NewVerifyModel creates a Verify screen model. width/height are
@@ -46,6 +48,16 @@ func (m *VerifyModel) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
+// UpdateResults replaces the verification results map.
+func (m *VerifyModel) UpdateResults(results map[int]workflow.VerificationResult) {
+	m.results = results
+}
+
+// SetHealFunc sets the callback invoked when self-heal is confirmed.
+func (m *VerifyModel) SetHealFunc(fn func(taskID int) tea.Cmd) {
+	m.healFunc = fn
+}
+
 func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -63,7 +75,7 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		if m.confirmHeal {
 			switch msg.String() {
 			case "y", "Y", "enter":
-				// Confirm self-heal
+				// Confirm self-heal: reset task to pending, then trigger healing
 				for i := range m.tasks {
 					if m.tasks[i].ID == m.confirmHealTask && m.tasks[i].Status == types.StatusFailed {
 						m.tasks[i].Status = types.StatusPending
@@ -71,6 +83,9 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 					}
 				}
 				m.confirmHeal = false
+				if m.healFunc != nil {
+					return []tea.Cmd{m.healFunc(m.confirmHealTask)}, nil
+				}
 				return nil, nil
 			case "n", "N", "esc":
 				m.confirmHeal = false

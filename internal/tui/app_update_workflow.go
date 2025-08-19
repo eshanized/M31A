@@ -17,16 +17,21 @@ import (
 
 // handlePlanReady handles the PlanReadyMsg when the plan phase completes with valid tasks.
 func (m *AppState) handlePlanReady(msg PlanReadyMsg) (tea.Model, tea.Cmd) {
-	if len(msg.Tasks) > 0 && m.planModel == nil {
-		t := m.themeManager.Current()
-		modelID := ""
-		modelName := ""
-		if m.activeModel != nil {
-			modelID = m.activeModel.ID
-			modelName = m.activeModel.Name
+	if len(msg.Tasks) > 0 {
+		if m.planModel == nil {
+			t := m.themeManager.Current()
+			modelID := ""
+			modelName := ""
+			if m.activeModel != nil {
+				modelID = m.activeModel.ID
+				modelName = m.activeModel.Name
+			}
+			pm := NewPlanModel(msg.Tasks, t, modelID, modelName, m.activeProvider, 0, msg.CostEstimate, m.width, m.height)
+			m.planModel = pm
+		} else {
+			m.planModel.UpdateTasks(msg.Tasks)
+			m.planModel.SetDimensions(m.width, m.height)
 		}
-		pm := NewPlanModel(msg.Tasks, t, modelID, modelName, m.activeProvider, 0, msg.CostEstimate, m.width, m.height)
-		m.planModel = pm
 	}
 	m.currentOperation = fmt.Sprintf("Plan ready: %d tasks", len(msg.Tasks))
 	return m, workflowMsgDrainer(m, m.phaseGen, m.msgDoneCloser.chan_())
@@ -59,19 +64,33 @@ func (m *AppState) handleTaskUpdate(msg workflow.TaskUpdateMsg) (tea.Model, tea.
 func (m *AppState) handlePhaseResult(msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != "" {
 		m.currentOperation = fmt.Sprintf("Phase %s failed: %s", msg.Phase, msg.Error)
-		m.workflowRunning = false
+		m.setWorkflowPhase(types.PhaseIdle)
+		m.resetDiscussQA()
+		m.flushPendingStreamChunks()
+		if m.replModel != nil {
+			m.replModel.AddMessage(types.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("Workflow error in %s: %s", msg.Phase, msg.Error),
+				Segments: []types.MessageSegment{{
+					Type: "content", Content: fmt.Sprintf("Workflow error in %s: %s", msg.Phase, msg.Error), Visible: true,
+				}},
+				CreatedAt: time.Now(),
+			})
+		}
 		return m, nil
 	}
 	if !msg.Success {
 		m.currentOperation = fmt.Sprintf("Phase %s completed unsuccessfully", msg.Phase)
-		m.workflowRunning = false
+		m.setWorkflowPhase(types.PhaseIdle)
+		m.resetDiscussQA()
+		m.flushPendingStreamChunks()
 		return m, nil
 	}
 	m.currentOperation = fmt.Sprintf("Phase %s completed", msg.Phase)
 
 	switch msg.Phase {
 	case types.PhaseInitialize:
-		m.currentPhase = types.PhaseDiscuss
+		m.setWorkflowPhase(types.PhaseDiscuss)
 		m.persistWorkflowState()
 		return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
 
@@ -91,7 +110,8 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 		return handlePhaseShip(m, msg)
 
 	case types.PhaseIdle:
-		m.workflowRunning = false
+		m.setWorkflowPhase(types.PhaseIdle)
+		m.flushPendingStreamChunks()
 		m.currentOperation = ""
 		return m, nil
 
@@ -100,11 +120,21 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// flushPendingStreamChunks delivers any buffered stream chunks to the REPL model.
+func (m *AppState) flushPendingStreamChunks() {
+	for _, chunk := range m.pendingStreamChunks {
+		if m.replModel != nil {
+			m.replModel.AppendStreamChunk(chunk)
+		}
+	}
+	m.pendingStreamChunks = nil
+}
+
 // handlePhaseDiscuss handles the Discuss phase completion within PhaseResultMsg.
 func handlePhaseDiscuss(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	if m.workflowEngine == nil {
 		m.currentOperation = "Discuss phase: no engine"
-		m.workflowRunning = false
+		m.setWorkflowPhase(types.PhaseIdle)
 		return m, nil
 	}
 	engineState := m.workflowEngine.DiscussState()
@@ -122,14 +152,14 @@ func handlePhaseDiscuss(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	m.discussQuestionCount = len(questions)
 
 	if !msg.NeedsAnswers || len(questions) == 0 {
-		m.currentPhase = types.PhasePlan
+		m.setWorkflowPhase(types.PhasePlan)
 		m.persistWorkflowState()
 		return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 	}
 
 	m.pendingDiscussAnswers = make(map[int]string)
 	m.currentDiscussIndex = 0
-	m.currentPhase = types.PhaseDiscuss
+	m.setWorkflowPhase(types.PhaseDiscuss)
 	m.screen = ScreenREPL
 	m.persistWorkflowState()
 
@@ -138,27 +168,32 @@ func handlePhaseDiscuss(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 
 // handlePhasePlan handles the Plan phase completion within PhaseResultMsg.
 func handlePhasePlan(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
-	if len(msg.Tasks) > 0 && m.planModel == nil {
-		t := m.themeManager.Current()
-		modelID := ""
-		modelName := ""
-		if m.activeModel != nil {
-			modelID = m.activeModel.ID
-			modelName = m.activeModel.Name
+	if len(msg.Tasks) > 0 {
+		if m.planModel == nil {
+			t := m.themeManager.Current()
+			modelID := ""
+			modelName := ""
+			if m.activeModel != nil {
+				modelID = m.activeModel.ID
+				modelName = m.activeModel.Name
+			}
+			providerName := m.activeProvider
+			pm := NewPlanModel(msg.Tasks, t, modelID, modelName, providerName, 0, "", m.width, m.height)
+			m.planModel = pm
+		} else {
+			m.planModel.UpdateTasks(msg.Tasks)
+			m.planModel.SetDimensions(m.width, m.height)
 		}
-		providerName := m.activeProvider
-		pm := NewPlanModel(msg.Tasks, t, modelID, modelName, providerName, 0, "", m.width, m.height)
-		m.planModel = pm
 	}
 	if m.planModel != nil {
 		m.planModel.width = m.width
 		m.planModel.height = m.height
 		m.screen = ScreenPlan
-		m.currentPhase = types.PhasePlan
+		m.setWorkflowPhase(types.PhasePlan)
 		m.persistWorkflowState()
 		return m, nil
 	}
-	m.currentPhase = types.PhaseExecute
+	m.setWorkflowPhase(types.PhaseExecute)
 	m.persistWorkflowState()
 	return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 }
@@ -175,7 +210,7 @@ func handlePhaseExecute(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	}
 	m.executeModel.totalCost = msg.Cost
 	m.screen = ScreenExecute
-	m.currentPhase = types.PhaseExecute
+	m.setWorkflowPhase(types.PhaseExecute)
 	m.persistWorkflowState()
 	return m, nil
 }
@@ -184,11 +219,31 @@ func handlePhaseExecute(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 func handlePhaseVerify(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	t := m.themeManager.Current()
 	results := make(map[int]workflow.VerificationResult)
-	m.verifyModel = NewVerifyModel(msg.Tasks, results, t, m.width, m.height)
+	for _, task := range msg.Tasks {
+		results[task.ID] = workflow.VerificationResult{
+			FilesExist: task.Status == types.StatusDone,
+			SyntaxOK:   task.Status != types.StatusFailed,
+			TestsOK:    task.Status == types.StatusDone,
+		}
+	}
+	if m.verifyModel == nil {
+		m.verifyModel = NewVerifyModel(msg.Tasks, results, t, m.width, m.height)
+	} else {
+		m.verifyModel.UpdateResults(results)
+	}
+	// Set heal callback to trigger self-healing via the workflow engine
+	m.verifyModel.SetHealFunc(func(taskID int) tea.Cmd {
+		return func() tea.Msg {
+			if m.workflowEngine != nil {
+				m.workflowEngine.HealTask(taskID)
+			}
+			return nil
+		}
+	})
 	m.verifyModel.width = m.width
 	m.verifyModel.height = m.height
 	m.screen = ScreenVerify
-	m.currentPhase = types.PhaseVerify
+	m.setWorkflowPhase(types.PhaseVerify)
 	m.persistWorkflowState()
 	return m, nil
 }
@@ -196,9 +251,18 @@ func handlePhaseVerify(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 // handlePhaseShip handles the Ship phase completion within PhaseResultMsg.
 func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	t := m.themeManager.Current()
+
+	// Auto-backup: snapshot the session directory before resetting
+	// workflow state so the user always has a restore point.
+	m.backupCurrentSession()
+
 	summary := ShipSummary{
 		SessionID: m.workflowEngine.SessionID(),
 	}
+	if m.activeModel != nil {
+		summary.Model = m.activeModel.ID
+	}
+	summary.Provider = m.activeProvider
 	if m.executeModel != nil {
 		done, total, failed, skipped := 0, len(msg.Tasks), 0, 0
 		for _, task := range msg.Tasks {
@@ -230,7 +294,8 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 
 	m.shipModel = NewShipModel(summary, t, m.width, m.height)
 	m.screen = ScreenShip
-	m.workflowRunning = false
+	m.setWorkflowPhase(types.PhaseIdle)
+	m.flushPendingStreamChunks()
 	m.persistWorkflowState()
 	if m.sessionManager != nil && m.sessionID != "" {
 		if err := m.sessionManager.UpdateWorkflowState(
@@ -240,12 +305,16 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.workflowGoal = ""
-	m.currentPhase = types.PhaseIdle
 	return m, nil
 }
 
 // handlePermissionRequest handles PermissionRequestMsg by showing the permission modal.
 func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model, tea.Cmd) {
+	if m.permissionModalActive {
+		m.pendingPermissionRequests = append(m.pendingPermissionRequests, msg)
+		return m, permissionListenerCmd(m.dispatcher)
+	}
+	m.permissionModalActive = true
 	m.prevScreen = m.screen
 	m.screen = ScreenPermission
 	t := m.themeManager.Current()
@@ -269,6 +338,12 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) (tea.Mode
 	m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
 	m.screen = m.prevScreen
 	m.permissionModal = nil
+	m.permissionModalActive = false
+	if len(m.pendingPermissionRequests) > 0 {
+		next := m.pendingPermissionRequests[0]
+		m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
+		return m.handlePermissionRequest(next)
+	}
 	return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 }
 
@@ -281,6 +356,12 @@ func (m *AppState) handlePermissionTick() (tea.Model, tea.Cmd) {
 			m.dispatcher.ApprovePermission(resp.Allowed, resp.Remember)
 			m.screen = m.prevScreen
 			m.permissionModal = nil
+			m.permissionModalActive = false
+			if len(m.pendingPermissionRequests) > 0 {
+				next := m.pendingPermissionRequests[0]
+				m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
+				return m.handlePermissionRequest(next)
+			}
 			return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
 		}
 		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
@@ -340,19 +421,19 @@ func (m *AppState) handleAppMsg(msg AppMsg) (tea.Model, tea.Cmd) {
 		if m.workflowEngine == nil {
 			return m, nil
 		}
-		m.currentPhase = types.PhaseExecute
+		m.setWorkflowPhase(types.PhaseExecute)
 		return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
 	case ScreenVerify:
 		if m.workflowEngine == nil {
 			return m, nil
 		}
-		m.currentPhase = types.PhaseVerify
+		m.setWorkflowPhase(types.PhaseVerify)
 		return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
 	case ScreenShip:
 		if m.workflowEngine == nil {
 			return m, nil
 		}
-		m.currentPhase = types.PhaseShip
+		m.setWorkflowPhase(types.PhaseShip)
 		return m, RunPhaseCmd(m, types.PhaseShip, m.workflowGoal)
 	}
 
@@ -369,7 +450,7 @@ func (m *AppState) handleAppMsg(msg AppMsg) (tea.Model, tea.Cmd) {
 
 	var providerCmd tea.Cmd
 	if msg.Screen == ScreenREPL && m.replModel == nil {
-		rp := NewReplModel(m.themeManager.Current())
+		rp := NewReplModel(m.themeManager.Current(), m.version)
 		m.replModel = &rp
 		m.initialized = true
 		if m.sidebarModel == nil {
@@ -482,6 +563,18 @@ func (m *AppState) handleThemeChanged(msg ThemeChangedMsg) (tea.Model, tea.Cmd) 
 	}
 	if m.settingsModel != nil {
 		m.settingsModel.SetTheme(t)
+	}
+	if m.planModel != nil {
+		m.planModel.theme = t
+	}
+	if m.executeModel != nil {
+		m.executeModel.theme = t
+	}
+	if m.verifyModel != nil {
+		m.verifyModel.theme = t
+	}
+	if m.shipModel != nil {
+		m.shipModel.theme = t
 	}
 	return m, nil
 }

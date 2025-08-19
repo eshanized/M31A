@@ -270,6 +270,54 @@ func (e *Engine) SetMsgEmitter(em MsgEmitter) {
 	e.msgEmitter = em
 }
 
+// HealTask triggers self-healing for a specific task by ID.
+// Returns true if healing was attempted, false if the task cannot be healed.
+func (e *Engine) HealTask(taskID int) bool {
+	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
+	if err != nil {
+		e.logger.Warn("failed to load tasks for heal", "error", err)
+		return false
+	}
+	for i, task := range tasks {
+		if task.ID == taskID && task.Status == m31types.StatusFailed {
+			if task.HealsAttempted >= m31types.MaxHealAttempts {
+				e.logger.Warn("task already at max heal attempts", "id", taskID)
+				return false
+			}
+			tasks[i].HealsAttempted++
+			e.emit(SelfHealStartMsg{
+				TaskID:  task.ID,
+				Attempt: tasks[i].HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+			})
+			failure := fmt.Sprintf("manual heal requested for task %d", task.ID)
+			healResult := e.healTask(context.Background(), task, failure)
+			e.emit(SelfHealCompleteMsg{
+				TaskID:  task.ID,
+				Attempt: tasks[i].HealsAttempted,
+				Max:     m31types.MaxHealAttempts,
+				Success: healResult.Success,
+				Error:   healResult.Error,
+			})
+			if healResult.Success {
+				newResult := e.verifyTask(task)
+				if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+					tasks[i].Status = m31types.StatusDone
+				} else {
+					tasks[i].Status = m31types.StatusFailed
+				}
+			} else {
+				if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
+					tasks[i].Status = m31types.StatusUnrecoverable
+				}
+			}
+			_ = e.sessionMgr.SaveTasks(e.sessionID, tasks)
+			return true
+		}
+	}
+	return false
+}
+
 // emit sends a message to the TUI if an emitter is configured.
 func (e *Engine) emit(msg tea.Msg) {
 	if e.msgEmitter != nil {
@@ -317,7 +365,10 @@ func (e *Engine) SkipDiscuss() error {
 }
 
 func (e *Engine) FinalizeDiscuss() error {
-	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
+	if projErr != nil {
+		e.logger.Warn("failed to load project for discuss finalization", "error", projErr)
+	}
 	var questions, answers []string
 	for i, q := range e.discussState.Questions {
 		questions = append(questions, q)
@@ -332,7 +383,7 @@ func (e *Engine) FinalizeDiscuss() error {
 	}
 	// Auto-transition to Plan
 	if err := e.Transition(context.Background(), m31types.PhaseDiscuss, m31types.PhasePlan); err != nil {
-		e.logger.Warn("failed to transition to plan", "error", err)
+		return fmt.Errorf("transition to plan: %w", err)
 	}
 	return nil
 }

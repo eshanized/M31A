@@ -1377,6 +1377,7 @@ func (m *mockWorkflowEngine) RunPhase(ctx context.Context, phase types.WorkflowP
 func (m *mockWorkflowEngine) SetMsgEmitter(_ workflow.MsgEmitter) { m.emitterSetCount++ }
 func (m *mockWorkflowEngine) SessionID() string                   { return m.sessionID }
 func (m *mockWorkflowEngine) SetSessionID(id string)              { m.sessionID = id }
+func (m *mockWorkflowEngine) HealTask(taskID int) bool            { return false }
 
 // newTestAppForDiscuss creates an AppState with a mock workflow engine
 // pre-installed. Used by the D-01 Discuss Q&A flow tests.
@@ -2389,7 +2390,7 @@ func TestModelSelector_SetRegistry(t *testing.T) {
 func TestReplModel_AppendStreamChunk(t *testing.T) {
 	t.Parallel()
 	th := theme.NewManager(theme.ModeDark)
-	repl := NewReplModel(th.Current())
+	repl := NewReplModel(th.Current(), "test")
 	repl.AppendStreamChunk(&types.StreamChunk{Type: "content", Delta: "Hello "})
 	repl.AppendStreamChunk(&types.StreamChunk{Type: "content", Delta: "world"})
 	if repl.streamContent.String() != "Hello world" {

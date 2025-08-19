@@ -45,6 +45,7 @@ type workflowEngineInterface interface {
 	SubmitDiscussAnswer(index int, answer string) error
 	SkipDiscuss() error
 	FinalizeDiscuss() error
+	HealTask(taskID int) bool
 }
 
 type AppState struct {
