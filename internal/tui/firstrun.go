@@ -31,21 +31,33 @@ type validationResultMsg struct {
 }
 
 type FirstRunModel struct {
-	state         FirstRunState
-	theme         theme.Theme
-	cursor        int
-	providers     []string
-	apiKeyInput   textinput.Model
-	apiKeyValue   string
-	validating    bool
-	validationErr string
-	statusMsg     string
-	width         int
-	height        int
-	configPath    string
+	state              FirstRunState
+	theme              theme.Theme
+	version            string
+	cursor             int
+	providers          []string
+	apiKeyInput        textinput.Model
+	apiKeyValue        string
+	validating         bool
+	validationErr      string
+	statusMsg          string
+	width              int
+	height             int
+	configPath         string
+	openrouterBaseURL  string
+	zenBaseURL         string
+	openrouterReferer  string
+	openrouterTitle    string
 }
 
-func NewFirstRunModel(t theme.Theme, configPath string) FirstRunModel {
+type FirstRunOpts struct {
+	OpenRouterBaseURL string
+	ZenBaseURL        string
+	OpenRouterReferer string
+	OpenRouterTitle   string
+}
+
+func NewFirstRunModel(t theme.Theme, configPath string, version string, opts ...FirstRunOpts) FirstRunModel {
 	ti := textinput.New()
 	ti.Placeholder = "sk-or-v1-..."
 	ti.EchoMode = textinput.EchoPassword
@@ -53,13 +65,22 @@ func NewFirstRunModel(t theme.Theme, configPath string) FirstRunModel {
 	ti.Width = 60
 	ti.CharLimit = 128
 
-	return FirstRunModel{
+	m := FirstRunModel{
 		state:       FirstRunWelcome,
 		theme:       t,
+		version:     version,
 		providers:   make([]string, 0),
 		apiKeyInput: ti,
 		configPath:  configPath,
 	}
+	if len(opts) > 0 {
+		o := opts[0]
+		m.openrouterBaseURL = o.OpenRouterBaseURL
+		m.zenBaseURL = o.ZenBaseURL
+		m.openrouterReferer = o.OpenRouterReferer
+		m.openrouterTitle = o.OpenRouterTitle
+	}
+	return m
 }
 
 func (m *FirstRunModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
@@ -189,7 +210,7 @@ func (m *FirstRunModel) updateKeyInput(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 					}
 					// Validate key by making a test request
 					for _, provider := range m.providers {
-						if err := validateAPIKey(provider, input); err != nil {
+						if err := validateAPIKey(provider, input, m.openrouterBaseURL, m.zenBaseURL, m.openrouterReferer, m.openrouterTitle); err != nil {
 							return validationResultMsg{valid: false, err: fmt.Sprintf("%s: %v", provider, err)}
 						}
 					}
@@ -296,7 +317,11 @@ func (m *FirstRunModel) viewWelcome() string {
 		)
 
 	// Footer
-	footer := lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render("M31A v0.1.0 — MIT License")
+	version := m.version
+	if version == "" {
+		version = "dev"
+	}
+	footer := lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render("M31A " + version + " — MIT License")
 
 	// Stack: Logo → Features → Prompt → Shortcuts → Footer
 	content := lipgloss.JoinVertical(lipgloss.Center,
@@ -605,7 +630,7 @@ func (m *FirstRunModel) viewComplete() string {
 }
 
 // validateAPIKey makes a test HTTP request to verify the API key works.
-func validateAPIKey(provider, key string) error {
+func validateAPIKey(provider, key, openrouterBaseURL, zenBaseURL, openrouterReferer, openrouterTitle string) error {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
@@ -616,9 +641,17 @@ func validateAPIKey(provider, key string) error {
 	var url string
 	switch provider {
 	case "openrouter":
-		url = "https://openrouter.ai/api/v1/auth/key"
+		baseURL := openrouterBaseURL
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+		url = baseURL + "/auth/key"
 	case "zen":
-		url = "https://opencode.ai/zen/v1/models"
+		baseURL := zenBaseURL
+		if baseURL == "" {
+			baseURL = "https://opencode.ai/zen/v1"
+		}
+		url = baseURL + "/models"
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -630,8 +663,16 @@ func validateAPIKey(provider, key string) error {
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("User-Agent", "M31A/dev")
 	if provider == "openrouter" {
-		req.Header.Set("HTTP-Referer", "https://github.com/eshanized/M31A")
-		req.Header.Set("X-Title", "M31A")
+		referer := openrouterReferer
+		if referer == "" {
+			referer = "https://github.com/eshanized/M31A"
+		}
+		title := openrouterTitle
+		if title == "" {
+			title = "M31A"
+		}
+		req.Header.Set("HTTP-Referer", referer)
+		req.Header.Set("X-Title", title)
 	}
 
 	resp, err := client.Do(req)

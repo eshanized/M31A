@@ -122,6 +122,20 @@ type AppState struct {
 	configReloadCh chan config.ConfigReloadMsg
 	configWatchCtx context.Context
 	configWatchCancel context.CancelFunc
+	// Phase 21: state synchronization and message flow
+	pendingStreamChunks       []*types.StreamChunk // buffered during non-discuss workflow phases
+	permissionModalActive     bool                 // true while permission modal is displayed
+	pendingPermissionRequests []PermissionRequestMsg // queued when modal already active
+	workflowPaused            bool                 // true when workflow paused due to provider error
+	workflowStartTime         time.Time            // when the current workflow started
+}
+
+// setWorkflowPhase keeps workflowRunning and currentPhase synchronized.
+// It also invalidates the header cache so the phase indicator updates.
+func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
+	m.currentPhase = phase
+	m.workflowRunning = (phase != types.PhaseIdle && phase != types.PhaseShip)
+	m.headerCacheValid = false
 }
 
 func NewApp(version string, registry *provider.Registry, configPath string) (*AppState, error) {
@@ -290,18 +304,53 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 	// synced whenever a user message is submitted.
 	app.autoDream = autodream.New(nil)
 
+	// Populate session activity sparkline on the REPL's provider card
+	// when we have enough history. Best-effort — errors fall back to
+	// an empty sparkline.
+	if app.replModel != nil {
+		app.replModel.SetSessionSparkline(app.sessionHealthSparkline())
+	}
+
 	// FEAT-3: Start config file watcher for hot-reload
 	app.configReloadCh = make(chan config.ConfigReloadMsg, 1)
 	app.configWatchCtx, app.configWatchCancel = context.WithCancel(context.Background())
 	go config.WatchConfig(app.configWatchCtx, configPath, app.configReloadCh)
 
 	if resolvedAPIKey == "" {
-		fr := NewFirstRunModel(tm.Current(), configPath)
+		fr := NewFirstRunModel(tm.Current(), configPath, version, FirstRunOpts{
+			OpenRouterBaseURL: cfg.Provider.OpenRouterBaseURL,
+			ZenBaseURL:        cfg.Provider.ZenBaseURL,
+			OpenRouterReferer: cfg.Provider.OpenRouterReferer,
+			OpenRouterTitle:   cfg.Provider.OpenRouterTitle,
+		})
 		app.screen = ScreenFirstRun
 		app.firstRunModel = &fr
+	} else if cfg.Features.ResumeOnStartup {
+		// ResumeOnStartup: prefer the session browser so the user can
+		// pick up an existing conversation instead of starting fresh.
+		// Fall through to the REPL path if no sessions are available.
+		if sessions, err := sessionMgr.ListSessions(); err == nil && len(sessions) > 0 {
+			app.screen = ScreenResume
+		} else {
+			rp := NewReplModel(tm.Current(), version)
+			app.screen = ScreenREPL
+			app.replModel = &rp
+			_ = app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
+			app.replModel.SetDispatcher(app.dispatcher)
+			app.replModel.SetCommandRegistry(app.cmdRegistry)
+			if registry == nil || registry.ActiveProvider() == nil {
+				app.healthStatus = types.HealthStatus{
+					Status: "offline",
+					Error:  "No providers available — offline mode. History is readable but no new messages.",
+				}
+				app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
+			} else {
+				app.healthStatus = types.HealthStatus{Status: "live"}
+			}
+		}
 	} else if registry == nil || registry.ActiveProvider() == nil {
 		// No providers available — offline mode
-		rp := NewReplModel(tm.Current())
+		rp := NewReplModel(tm.Current(), version)
 		app.screen = ScreenREPL
 		app.replModel = &rp
 		_ = app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
@@ -313,7 +362,7 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 		}
 		app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
 	} else {
-		rp := NewReplModel(tm.Current())
+		rp := NewReplModel(tm.Current(), version)
 		app.screen = ScreenREPL
 		app.replModel = &rp
 		_ = app.replModel.SetProvider(registry, app.activeProvider, app.activeModel, "", app.config)
