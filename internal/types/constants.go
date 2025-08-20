@@ -22,4 +22,10 @@ const (
 	// DefaultPermissionTimeout is the default permission modal timeout in seconds.
 	// Used by both the TUI permission modal and the tool dispatcher.
 	DefaultPermissionTimeout = 300
+	// StaleCacheTTL is the fallback TTL for stale model cache entries.
+	StaleCacheTTL = 24 * time.Hour
+	// DefaultHealthLiveMs is the default health check latency threshold for "live" status.
+	DefaultHealthLiveMs = 500
+	// DefaultHealthSlowMs is the default health check latency threshold for "slow" status.
+	DefaultHealthSlowMs = 2000
 )

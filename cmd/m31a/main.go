@@ -104,7 +104,7 @@ func main() {
 		if cfg.Features.ModelCacheTTLMinutes > 0 {
 			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
 		}
-		cacheStaleTTL := 24 * time.Hour
+		cacheStaleTTL := types.StaleCacheTTL
 		if cfg.Features.ModelCacheStaleHours > 0 {
 			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
 		}
@@ -134,7 +134,7 @@ func main() {
 		if cfg.Features.ModelCacheTTLMinutes > 0 {
 			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
 		}
-		cacheStaleTTL := 24 * time.Hour
+		cacheStaleTTL := types.StaleCacheTTL
 		if cfg.Features.ModelCacheStaleHours > 0 {
 			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
 		}

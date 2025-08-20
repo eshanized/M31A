@@ -73,16 +73,16 @@ func New(apiKey string, opts Options) (*Client, error) {
 		opts.CacheTTL = types.ModelCacheTTL
 	}
 	if opts.CacheStaleTTL == 0 {
-		opts.CacheStaleTTL = 24 * time.Hour
+		opts.CacheStaleTTL = types.StaleCacheTTL
 	}
 	if opts.HealthCheckLiveMs == 0 {
-		opts.HealthCheckLiveMs = 500 // Match config default (FeaturesConfig.HealthCheckLiveMs)
+		opts.HealthCheckLiveMs = types.DefaultHealthLiveMs
 	}
 	if opts.HealthCheckSlowMs == 0 {
-		opts.HealthCheckSlowMs = 2000 // Match config default (FeaturesConfig.HealthCheckSlowMs)
+		opts.HealthCheckSlowMs = types.DefaultHealthSlowMs
 	}
 	if opts.DefaultContextLen == 0 {
-		opts.DefaultContextLen = 128_000
+		opts.DefaultContextLen = types.DefaultContextLength
 	}
 
 	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)

@@ -84,10 +84,10 @@ func New(apiKey string, opts Options) (*Client, error) {
 		opts.Title = "M31A"
 	}
 	if opts.HealthCheckLiveMs == 0 {
-		opts.HealthCheckLiveMs = 500 // Match config default (FeaturesConfig.HealthCheckLiveMs)
+		opts.HealthCheckLiveMs = types.DefaultHealthLiveMs
 	}
 	if opts.HealthCheckSlowMs == 0 {
-		opts.HealthCheckSlowMs = 2000 // Match config default (FeaturesConfig.HealthCheckSlowMs)
+		opts.HealthCheckSlowMs = types.DefaultHealthSlowMs
 	}
 
 	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
