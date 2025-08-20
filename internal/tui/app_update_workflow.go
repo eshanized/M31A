@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
@@ -552,6 +553,13 @@ func (m *AppState) handleThemeChanged(msg ThemeChangedMsg) (tea.Model, tea.Cmd) 
 		m.themeManager = theme.NewManager(theme.ModeDark)
 	case "light":
 		m.themeManager = theme.NewManager(theme.ModeLight)
+	case "auto":
+		// Detect terminal background luminance and select appropriate mode
+		if lipgloss.HasDarkBackground() {
+			m.themeManager = theme.NewManager(theme.ModeDark)
+		} else {
+			m.themeManager = theme.NewManager(theme.ModeLight)
+		}
 	}
 	t := m.themeManager.Current()
 	if m.replModel != nil {
