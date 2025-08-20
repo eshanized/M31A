@@ -44,34 +44,24 @@ type Options struct {
 	HealthCheckSlowMs int64
 }
 
-// openrouterModelCapabilities holds explicit capability flags for known OpenRouter models.
-// This map is used by openrouterModelCaps() to look up capabilities for known models.
-// For unknown models, a heuristic fallback is used (see FetchModels).
-var openrouterModelCapabilities = map[string]types.CapFlags{
-	"anthropic/claude-sonnet-4":         {Tools: true, Reasoning: false},
-	"anthropic/claude-opus-4":           {Tools: true, Reasoning: false},
-	"anthropic/claude-3.5-sonnet":       {Tools: true, Reasoning: false},
-	"openai/gpt-4o":                     {Tools: true, Reasoning: false},
-	"openai/o1":                         {Tools: true, Reasoning: true},
-	"openai/o3":                         {Tools: true, Reasoning: true},
-	"deepseek/deepseek-r1":              {Tools: false, Reasoning: true},
-	"deepseek/deepseek-v3":              {Tools: true, Reasoning: false},
-	"google/gemini-2.5-pro":             {Tools: true, Reasoning: false},
-	"google/gemini-2.5-pro-exp":         {Tools: true, Reasoning: false},
-	"meta-llama/llama-3.3-70b-instruct": {Tools: true, Reasoning: false},
-}
-
-func openrouterModelCaps(modelID string) (types.CapFlags, bool) {
-	if caps, ok := openrouterModelCapabilities[modelID]; ok {
-		return caps, true
+// parseModelCapabilities infers capability flags from the model ID using heuristics.
+// TODO: Query provider API for actual capabilities when available (e.g. OpenRouter model metadata).
+// Tools capability defaults to true for all models since most modern LLMs support function calling.
+func parseModelCapabilities(modelID string) types.CapFlags {
+	id := strings.ToLower(modelID)
+	caps := types.CapFlags{
+		Tools: true, // Default: assume tool support for all models
 	}
-	return types.CapFlags{}, false
-}
-
-// UpdateModelCapabilities updates or adds an entry in the model capabilities
-// map at runtime. This allows capability overrides without recompilation.
-func UpdateModelCapabilities(modelID string, caps types.CapFlags) {
-	openrouterModelCapabilities[modelID] = caps
+	// Detect reasoning/thinking models by ID patterns
+	if strings.Contains(id, "reason") || strings.Contains(id, "thinking") ||
+		strings.Contains(id, "/o1") || strings.Contains(id, "/o3") || strings.Contains(id, "/o4") {
+		caps.Reasoning = true
+	}
+	// Detect vision/multimodal models by ID patterns
+	if strings.Contains(id, "vision") || strings.Contains(id, "multimodal") {
+		caps.Vision = true
+	}
+	return caps
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -106,7 +96,8 @@ func New(apiKey string, opts Options) (*Client, error) {
 		baseURL: opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
+				DialContext:           (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
+				ResponseHeaderTimeout: 30 * time.Second,
 			},
 		},
 		cache:             cache,
@@ -192,14 +183,8 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			},
 			TopProvider: m.TopProvider,
 			Capabilities: func() types.CapFlags {
-				if caps, ok := openrouterModelCaps(m.ID); ok {
-					return caps
-				}
-				// Fallback to string-sniff for unknown models
-				return types.CapFlags{
-					Tools:     strings.Contains(m.Architecture.Tokenizer, "tools") || strings.Contains(m.Architecture.Modality, "tool"),
-					Reasoning: strings.Contains(m.Description, "reasoning") || strings.Contains(m.ID, "r1"),
-				}
+				// Infer capabilities from model ID heuristics
+				return parseModelCapabilities(m.ID)
 			}(),
 		}
 		models = append(models, info)
@@ -254,7 +239,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
@@ -342,6 +327,7 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	if err != nil {
 		return types.HealthStatus{Status: "offline", LatencyMs: latency, Error: err.Error()}
 	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {

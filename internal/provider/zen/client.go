@@ -42,25 +42,24 @@ type Options struct {
 	DefaultContextLen int64
 }
 
-// zenModelCapabilities holds known capability flags for Zen models.
-// Unknown models default to Tools: false, Reasoning: false.
-var zenModelCapabilities = map[string]types.CapFlags{
-	"deepseek-v3":      {Tools: true, Reasoning: false},
-	"deepseek-v3-free": {Tools: true, Reasoning: false},
-	"deepseek-r1":      {Tools: false, Reasoning: true},
-	"deepseek-r1-free": {Tools: false, Reasoning: true},
-	"claude-sonnet-4":  {Tools: true, Reasoning: false},
-	"claude-opus-4":    {Tools: true, Reasoning: false},
-	"gpt-4o":           {Tools: true, Reasoning: false},
-	"gemini-2.5-pro":   {Tools: true, Reasoning: false},
-}
-
-func zenModelCaps(modelID string) types.CapFlags {
-	if caps, ok := zenModelCapabilities[modelID]; ok {
-		return caps
+// parseZenModelCapabilities infers capability flags from the model ID using heuristics.
+// TODO: Query provider API for actual capabilities when available.
+// Tools capability defaults to true for all models since most modern LLMs support function calling.
+func parseZenModelCapabilities(modelID string) types.CapFlags {
+	id := strings.ToLower(modelID)
+	caps := types.CapFlags{
+		Tools: true, // Default: assume tool support for all models
 	}
-	slog.Warn("zen unknown model capabilities, defaulting to no tools", "model", modelID)
-	return types.CapFlags{Tools: false, Reasoning: false}
+	// Detect reasoning/thinking models by ID patterns
+	if strings.Contains(id, "reason") || strings.Contains(id, "thinking") ||
+		strings.Contains(id, "-r1") || strings.Contains(id, "/o1") || strings.Contains(id, "/o3") {
+		caps.Reasoning = true
+	}
+	// Detect vision/multimodal models by ID patterns
+	if strings.Contains(id, "vision") || strings.Contains(id, "multimodal") {
+		caps.Vision = true
+	}
+	return caps
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -168,7 +167,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				OutputPerMToken: 0,
 			},
 			TopProvider:  "zen",
-			Capabilities: zenModelCaps(m.ID),
+			Capabilities: parseZenModelCapabilities(m.ID),
 		}
 		models = append(models, info)
 	}
@@ -232,7 +231,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		case http.StatusUnauthorized:
 			// Check if it's a credits/billing issue vs actual invalid key
 			if strings.Contains(bodyStr, "CreditsError") || strings.Contains(bodyStr, "payment") || strings.Contains(bodyStr, "billing") || strings.Contains(bodyStr, "credit") {
-				return nil, fmt.Errorf("no credits: %s", sanitizeProviderError(resp.StatusCode, bodyStr))
+				return nil, fmt.Errorf("no credits: %s: %w", sanitizeProviderError(resp.StatusCode, bodyStr), m31errors.ErrNoCredits)
 			}
 			return nil, m31errors.ErrInvalidKey
 		case http.StatusServiceUnavailable:
@@ -308,6 +307,7 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	if err != nil {
 		return types.HealthStatus{Status: "offline", LatencyMs: latency, Error: err.Error()}
 	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
