@@ -70,7 +70,8 @@ func (c *ModelCache) Get(id string) (*types.ModelInfo, bool) {
 	if !ok {
 		return nil, false
 	}
-	if c.IsExpired() && c.IsStale() {
+	elapsed := time.Since(c.fetched)
+	if elapsed > c.ttl && elapsed > c.staleTTL {
 		return nil, false
 	}
 	return model, true
@@ -120,7 +121,8 @@ func (c *ModelCache) Models() map[string]*types.ModelInfo {
 	defer c.mu.RUnlock()
 	result := make(map[string]*types.ModelInfo, len(c.models))
 	for k, v := range c.models {
-		result[k] = v
+		cp := *v
+		result[k] = &cp
 	}
 	return result
 }

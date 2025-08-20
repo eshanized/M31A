@@ -123,6 +123,12 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	for i, seg := range m.streamSegments {
 		if seg.Type == "thinking" {
 			tb := components.NewThinkingBlock(seg, m.theme, false, i)
+			// ShowThinkingByDefault=false (default) → collapse thinking blocks
+			// so they don't clutter the conversation. Users can toggle them
+			// open with the 't' / 'T' keys.
+			if m.cfg == nil || !m.cfg.Model.ShowThinkingByDefault {
+				tb.Toggle()
+			}
 			m.thinkingBlocks[i] = tb
 		}
 	}

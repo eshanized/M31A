@@ -31,6 +31,7 @@ type ExecuteModel struct {
 	allDone       bool
 	transitioning bool
 	transitionSec int
+	sessionID     string
 }
 
 // NewExecuteModel creates an Execute screen model. width/height are

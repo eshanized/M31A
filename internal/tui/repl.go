@@ -35,6 +35,7 @@ type ShellResultMsg struct {
 
 type ReplModel struct {
 	theme          theme.Theme
+	version        string
 	messages       []types.Message
 	viewport       viewport.Model
 	textarea       textarea.Model
@@ -106,9 +107,15 @@ type ReplModel struct {
 	slashSelected    int
 	slashVisible     bool
 	cmdRegistry      *CommandRegistry
+
+	// Recent session activity sparkline (populated by AppState via SetSessionSparkline)
+	sessionSparkline string
 }
 
-func NewReplModel(t theme.Theme) ReplModel {
+// MaxMessageHistory is the maximum number of messages retained in the REPL.
+const MaxMessageHistory = 1000
+
+func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message, /command, or goal..."
 	ta.SetWidth(80)
@@ -131,6 +138,7 @@ func NewReplModel(t theme.Theme) ReplModel {
 
 	m := ReplModel{
 		theme:          t,
+		version:        version,
 		viewport:       vp,
 		textarea:       ta,
 		spinner:        s,
@@ -790,6 +798,12 @@ func (m *ReplModel) SetKeyRegistry(kr *KeyRegistry) {
 	m.keyRegistry = kr
 }
 
+// SetSessionSparkline updates the recent-activity sparkline shown in the
+// provider card on the welcome screen. Passing an empty string hides it.
+func (m *ReplModel) SetSessionSparkline(spark string) {
+	m.sessionSparkline = spark
+}
+
 func (m *ReplModel) SetLastActivity(t time.Time) {
 	m.lastActivity = t
 }
@@ -802,8 +816,16 @@ func (m *ReplModel) SetThinking(v bool) {
 	m.thinking = v
 }
 
+// SetSessionID updates the session ID for this REPL model.
+func (m *ReplModel) SetSessionID(id string) {
+	m.sessionID = id
+}
+
 func (m *ReplModel) AddMessage(msg types.Message) {
 	m.messages = append(m.messages, msg)
+	if len(m.messages) > MaxMessageHistory {
+		m.messages = m.messages[len(m.messages)-500:]
+	}
 	m.renderMessages()
 	m.viewport.GotoBottom()
 }

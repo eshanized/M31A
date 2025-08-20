@@ -71,7 +71,12 @@ func (r *Rollback) Chain(limit int) ([]RollbackEntry, error) {
 		isCurrent := c.Hash == head
 		var diff string
 		if !isCurrent {
-			diff, _ = r.git.Diff(c.Hash, "HEAD")
+			d, err := r.git.Diff(c.Hash, "HEAD")
+			if err != nil {
+				diff = fmt.Sprintf("[diff unavailable: %v]", err)
+			} else {
+				diff = d
+			}
 		}
 		entries[i] = RollbackEntry{
 			CommitInfo:    c,

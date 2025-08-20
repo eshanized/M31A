@@ -273,6 +273,12 @@ func (m *ReplModel) renderProviderCard() string {
 		parts = append(parts, contextText)
 	}
 
+	// Recent session activity sparkline (optional, shown when we have history)
+	if m.sessionSparkline != "" {
+		sparkStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
+		parts = append(parts, sparkStyle.Render(m.sessionSparkline))
+	}
+
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
@@ -280,10 +286,14 @@ func (m *ReplModel) renderProviderCard() string {
 
 // renderLogo renders a clean ASCII art logo for M31A.
 func (m *ReplModel) renderLogo() string {
+	version := m.version
+	if version == "" {
+		version = "dev"
+	}
 	logo := `  __  _______  __
  /  |/  / __ \/ _/
-/ /|_/ / /_/ / _/
-/_/  /_/\____/_/ v0.1.0`
+ / /|_/ / /_/ / _/
+ /_/  /_/\____/_/ ` + version
 
 	lines := strings.Split(logo, "\n")
 	styled := make([]string, len(lines))
@@ -364,9 +374,13 @@ func (m *ReplModel) renderBottomBar() string {
 		Foreground(t.TextMuted).
 		Render(filepath.Base(m.cwd))
 
+	version := m.version
+	if version == "" {
+		version = "dev"
+	}
 	versionLabel := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
-		Render("v0.1.0")
+		Render(version)
 
 	// Right-align version
 	spacer := m.width - lipgloss.Width(cwdLabel) - lipgloss.Width(versionLabel) - 4

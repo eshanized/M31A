@@ -13,7 +13,7 @@ import (
 // --- H-8: Segment transition tests ---
 
 func TestSegmentTransition_NoRace(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.width = 120
 	m.height = 40
 	m.activeSegmentType = "thinking"
@@ -48,7 +48,7 @@ func TestSegmentTransition_NoRace(t *testing.T) {
 }
 
 func TestSegmentTransition_StuckThinking(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.width = 120
 	m.height = 40
 	m.activeSegmentType = "thinking"

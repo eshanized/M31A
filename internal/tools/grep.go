@@ -45,6 +45,10 @@ func (t *Grep) RiskLevel() types.RiskLevel {
 func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, err
+	}
+
 	patternRaw, ok := input.Params["pattern"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: pattern")
@@ -53,8 +57,8 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("parameter pattern must be a string")
 	}
-	if len(pattern) > 1024 {
-		return types.ToolResult{}, fmt.Errorf("regex pattern too long (max 1024 chars)")
+	if len(pattern) > MaxGrepPatternLength {
+		return types.ToolResult{}, fmt.Errorf("regex pattern too long (max %d chars)", MaxGrepPatternLength)
 	}
 
 	searchPath := t.workDir
@@ -91,7 +95,7 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
-	maxResults := 100
+	maxResults := DefaultMaxGrepResults
 	if maxRaw, ok := input.Params["max_results"]; ok {
 		if maxFloat, ok := maxRaw.(float64); ok {
 			maxResults = int(maxFloat)

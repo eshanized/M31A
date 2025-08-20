@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +36,10 @@ func (t *FileRead) RiskLevel() types.RiskLevel {
 
 func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
+
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, err
+	}
 
 	pathRaw, ok := input.Params["path"]
 	if !ok {
@@ -95,7 +100,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	// Check file size
 	fileSize := fi.Size()
 	if fileSize > int64(limit) {
-		return types.ToolResult{}, m31errors.ErrFileTooLarge
+		return types.ToolResult{}, fmt.Errorf("file %s exceeds size limit: %w", path, m31errors.ErrFileTooLarge)
 	}
 
 	// Open and read
@@ -107,7 +112,10 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	// Read first 512 bytes for binary detection
 	header := make([]byte, 512)
-	n, _ := f.Read(header)
+	n, readErr := f.Read(header)
+	if readErr != nil && readErr != io.EOF {
+		return types.ToolResult{}, fmt.Errorf("read header: %w", readErr)
+	}
 	header = header[:n]
 
 	// Check for null byte (binary detection)

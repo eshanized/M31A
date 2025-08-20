@@ -105,7 +105,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					termMu.Unlock()
 					processKill(cmd.Process.Pid, sigInt)
 				})
-				time.AfterFunc(5*time.Second, func() {
+				time.AfterFunc(BashKillGracePeriod, func() {
 					killOnce.Do(func() {
 						termMu.Lock()
 						terminationMsg = "Force killing process..."
@@ -160,6 +160,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	wg.Wait()
 
+	// Close pipe readers explicitly (L-11)
+	stdoutR.Close()
+	stderrR.Close()
+
 	output := outStr.String()
 
 	// Check if output was truncated
@@ -179,7 +183,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var waitErr error
 	select {
 	case waitErr = <-waitCh:
-	case <-time.After(30 * time.Second):
+	case <-time.After(BashWaitTimeout):
 		waitErr = fmt.Errorf("wait timeout")
 	}
 

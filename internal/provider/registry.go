@@ -52,6 +52,20 @@ func (r *Registry) SetActive(name string) error {
 	return nil
 }
 
+// TrySetActive atomically sets the provider as active if it exists.
+// Returns the provider and nil on success. This prevents TOCTOU races
+// where another goroutine could SetActive between Get and SetActive.
+func (r *Registry) TrySetActive(name string) (LLMProvider, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.providers[name]
+	if !ok {
+		return nil, fmt.Errorf("provider %q not registered: %w", name, m31errors.ErrProviderNotFound)
+	}
+	r.active = name
+	return p, nil
+}
+
 func (r *Registry) Get(name string) (LLMProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

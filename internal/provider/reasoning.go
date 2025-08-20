@@ -152,41 +152,41 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 		return nil, fmt.Errorf("first choice in 'choices' array is not an object")
 	}
 
+	delta, deltaOk := firstChoice["delta"]
+	if deltaOk {
+		deltaMap, ok := delta.(map[string]any)
+		if ok {
+			if cfg.ModelFamily == "anthropic" {
+				if contentType, exists := deltaMap["type"]; exists {
+					if contentTypeStr, ok := contentType.(string); ok && contentTypeStr == "thinking" {
+						content, _ := deltaMap["content"].(string)
+						return &types.StreamChunk{Type: "thinking", Delta: content, Usage: usage}, nil
+					}
+				}
+			}
+
+			if cfg.SSEField != "" {
+				parts := strings.Split(cfg.SSEField, ".")
+				if len(parts) >= 4 {
+					fieldName := parts[len(parts)-1]
+					if val, exists := deltaMap[fieldName]; exists {
+						if str, ok := val.(string); ok && str != "" {
+							return &types.StreamChunk{Type: "thinking", Delta: str, Usage: usage}, nil
+						}
+					}
+				}
+			}
+
+			content, _ := deltaMap["content"].(string)
+			if content != "" {
+				return &types.StreamChunk{Type: "content", Delta: content, Usage: usage}, nil
+			}
+		}
+	}
+
 	if finishReason, exists := firstChoice["finish_reason"]; exists && finishReason != nil {
 		return &types.StreamChunk{Type: "done", Usage: usage}, nil
 	}
 
-	delta, ok := firstChoice["delta"]
-	if !ok {
-		return nil, nil
-	}
-
-	deltaMap, ok := delta.(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-
-	if cfg.ModelFamily == "anthropic" {
-		if contentType, exists := deltaMap["type"]; exists {
-			if contentTypeStr, ok := contentType.(string); ok && contentTypeStr == "thinking" {
-				content, _ := deltaMap["content"].(string)
-				return &types.StreamChunk{Type: "thinking", Delta: content}, nil
-			}
-		}
-	}
-
-	if cfg.SSEField != "" {
-		parts := strings.Split(cfg.SSEField, ".")
-		if len(parts) >= 4 {
-			fieldName := parts[len(parts)-1]
-			if val, exists := deltaMap[fieldName]; exists {
-				if str, ok := val.(string); ok && str != "" {
-					return &types.StreamChunk{Type: "thinking", Delta: str}, nil
-				}
-			}
-		}
-	}
-
-	content, _ := deltaMap["content"].(string)
-	return &types.StreamChunk{Type: "content", Delta: content}, nil
+	return &types.StreamChunk{Type: "content", Delta: "", Usage: usage}, nil
 }

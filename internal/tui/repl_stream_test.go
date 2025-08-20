@@ -16,7 +16,7 @@ import (
 func newTestReplModel(t *testing.T) *ReplModel {
 	t.Helper()
 	th := theme.NewManager(theme.ModeDark).Current()
-	rm := NewReplModel(th)
+	rm := NewReplModel(th, "test")
 	rm.cfg = &config.Config{}
 	rm.thinkingBlocks = make(map[int]*components.ThinkingBlock)
 	rm.toolCards = make(map[int]*components.ToolCard)

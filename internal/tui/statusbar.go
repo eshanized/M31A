@@ -80,25 +80,19 @@ func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, wi
 		rightWidth = 0
 		padding = width - leftWidth
 		if padding < 0 {
-			maxOpWidth := width - 4
-			if maxOpWidth < 0 {
-				maxOpWidth = 0
+			// Left side too wide — truncate the styled leftText (which includes WhichKey hints)
+			maxLeftWidth := width - 2
+			if maxLeftWidth < 0 {
+				maxLeftWidth = 0
 			}
-			shortOp := operation
-			if len(shortOp) > maxOpWidth {
-				if maxOpWidth > 3 {
-					shortOp = shortOp[:maxOpWidth-3] + "..."
-				} else {
-					shortOp = ""
-				}
-			}
-			if shortOp == "" {
-				leftText = ""
-			} else {
-				leftText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(shortOp)
+			if lipgloss.Width(leftText) > maxLeftWidth {
+				leftText = TruncateWithEllipsis(leftText, maxLeftWidth)
 			}
 			leftWidth = lipgloss.Width(leftText)
 			padding = width - leftWidth
+			if padding < 0 {
+				padding = 0
+			}
 			rightText = ""
 			rightWidth = 0
 		}

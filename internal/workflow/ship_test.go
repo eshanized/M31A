@@ -133,8 +133,8 @@ func TestEngine_RunShip_WithFailedTasks(t *testing.T) {
 	if result == nil {
 		t.Fatal("Expected non-nil result even with failed tasks")
 	}
-	if !result.Success {
-		t.Error("Expected result.Success=true (ship completed, just with failures)")
+	if result.Success {
+		t.Error("Expected result.Success=false when tasks failed")
 	}
 	if result.Phase != m31types.PhaseShip {
 		t.Errorf("Expected phase ship, got %s", result.Phase)

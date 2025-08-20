@@ -13,7 +13,7 @@ import (
 // and still display the question inline.
 func TestReplModel_ShowQuestion_DiscussQuestion(t *testing.T) {
 	th := theme.NewManager(theme.ModeDark).Current()
-	m := NewReplModel(th)
+	m := NewReplModel(th, "test")
 	m.ShowQuestion(QuestionRequestMsg{
 		Question:    "Which web framework?",
 		Header:      "Discuss Q1/3",
@@ -38,7 +38,7 @@ func TestReplModel_ShowQuestion_DiscussQuestion(t *testing.T) {
 // tool path still works — options list is non-empty.
 func TestReplModel_ShowQuestion_WithOptions(t *testing.T) {
 	th := theme.NewManager(theme.ModeDark).Current()
-	m := NewReplModel(th)
+	m := NewReplModel(th, "test")
 	m.ShowQuestion(QuestionRequestMsg{
 		Question:    "Pick a language",
 		Header:      "Language",

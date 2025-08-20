@@ -7,6 +7,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 type FallbackEvent struct {
@@ -26,23 +27,22 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 			continue
 		}
 
-		p, err := registry.Get(name)
+		p, err := registry.TrySetActive(name)
 		if err != nil {
 			continue
 		}
 
+		// Use defer cancel() to ensure cleanup even if HealthCheck panics
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		status := p.HealthCheck(ctx)
-		cancel()
+		status := func() types.HealthStatus {
+			defer cancel()
+			return p.HealthCheck(ctx)
+		}()
 
 		if status.Status == "live" || status.Status == "slow" {
 			reason := "rate_limited"
 			if status.Status == "slow" {
 				reason = "unavailable"
-			}
-
-			if err := registry.SetActive(name); err != nil {
-				continue
 			}
 
 			return name, &FallbackEvent{
@@ -56,21 +56,72 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 	return "", nil, m31errors.ErrProviderUnreachable
 }
 
+// RetryInfo holds Retry-After metadata extracted from an HTTP response.
+// Wait is zero when no retry header is present.
+type RetryInfo struct {
+	RateLimited bool
+	RetryAfter  string
+	Wait        time.Duration
+}
+
+// InspectResponse extracts rate-limit and Retry-After metadata from an
+// HTTP response using IsRateLimited and GetRetryAfter. Returns a zero
+// RetryInfo for nil responses. Callers use this to decide whether to
+// wait before falling back to another provider.
+func InspectResponse(resp *http.Response) RetryInfo {
+	info := RetryInfo{
+		RateLimited: IsRateLimited(resp),
+		RetryAfter:  GetRetryAfter(resp),
+	}
+	if info.RetryAfter != "" {
+		if seconds, err := strconv.Atoi(info.RetryAfter); err == nil && seconds > 0 {
+			info.Wait = time.Duration(seconds) * time.Second
+			if info.Wait > maxRetryAfter {
+				info.Wait = maxRetryAfter
+			}
+		}
+	}
+	return info
+}
+
+// FallbackAfterWait describes a pending fallback: the provider to switch to,
+// the event describing the transition, and the delay to apply before
+// committing the switch. Returned by FindFallbackWithRetryAfter so the
+// caller (typically the TUI layer) can schedule the wait asynchronously
+// via a tea.Cmd instead of blocking the event loop.
+type FallbackAfterWait struct {
+	Event *FallbackEvent
+	Wait  time.Duration
+	Err   error
+}
+
 // FindFallbackWithRetryAfter attempts fallback with Retry-After awareness.
-// When the current provider returns 429 with a Retry-After header, it waits
-// up to the specified duration (capped at 60s) before trying the other provider.
-func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string) (string, *FallbackEvent, error) {
+// Instead of blocking the caller (which would stall the Bubble Tea event
+// loop), it returns a FallbackAfterWait describing the delay the caller
+// should schedule asynchronously. The caller is responsible for waiting
+// the returned Wait duration before applying the provider switch.
+//
+// When the current provider returned a 429 with a Retry-After header,
+// Wait is capped at maxRetryAfter (60s).
+func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string) FallbackAfterWait {
+	wait := time.Duration(0)
 	if retryAfterHeader != "" {
 		if seconds, err := strconv.Atoi(retryAfterHeader); err == nil && seconds > 0 {
-			wait := time.Duration(seconds) * time.Second
+			wait = time.Duration(seconds) * time.Second
 			if wait > maxRetryAfter {
 				wait = maxRetryAfter
 			}
-			time.Sleep(wait)
 		}
 	}
 
-	return FindFallbackProvider(registry, currentProvider)
+	_, event, err := FindFallbackProvider(registry, currentProvider)
+	if err != nil {
+		return FallbackAfterWait{Err: err}
+	}
+	if event != nil && wait > 0 {
+		event.Reason = "rate_limited"
+	}
+	return FallbackAfterWait{Event: event, Wait: wait, Err: err}
 }
 
 // IsRateLimited checks if an HTTP response indicates rate limiting (429).

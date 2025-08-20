@@ -196,10 +196,12 @@ func (m *AppState) finalizeDiscussAndAdvance() tea.Cmd {
 	if m.workflowEngine != nil {
 		if err := m.workflowEngine.FinalizeDiscuss(); err != nil {
 			slog.Warn("FinalizeDiscuss failed", "err", err)
+			m.setWorkflowPhase(types.PhaseIdle)
+			return nil
 		}
 	}
 	m.resetDiscussQA()
-	m.currentPhase = types.PhasePlan
+	m.setWorkflowPhase(types.PhasePlan)
 	return RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 }
 

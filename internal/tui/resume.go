@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -90,6 +92,10 @@ type ResumeModel struct {
 	searchQuery string
 	allSessions []session.SessionInfo // full unfiltered list
 
+	// Filter chips — narrow the list to sessions in selected workflow phases
+	filterChips    components.FilterChips
+	chipsFocused   bool
+
 	// Preview
 	preview *SessionPreview
 }
@@ -136,12 +142,27 @@ func NewResumeModel(t theme.Theme, mgr *session.Manager) *ResumeModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
+
+	chips := components.FilterChips{
+		Chips: []components.FilterChip{
+			{Label: "all", Active: true},
+			{Label: "idle", Active: false},
+			{Label: "discuss", Active: false},
+			{Label: "plan", Active: false},
+			{Label: "execute", Active: false},
+			{Label: "verify", Active: false},
+			{Label: "ship", Active: false},
+		},
+		Theme: t,
+	}
+
 	rm := &ResumeModel{
 		list:        l,
 		manager:     mgr,
 		theme:       t,
 		searchInput: ti,
 		spinner:     sp,
+		filterChips: chips,
 	}
 
 	// Initial population
@@ -166,22 +187,63 @@ func (m *ResumeModel) populateList() {
 	m.applySearch()
 }
 
-// applySearch filters allSessions based on searchQuery and updates the list.
+// applySearch filters allSessions by search query and the active filter
+// chips, then updates the list. "all" chip means no phase filter.
 func (m *ResumeModel) applySearch() {
 	query := strings.ToLower(strings.TrimSpace(m.searchQuery))
-	if query == "" {
-		m.list.SetItems(sessionInfoToItems(m.allSessions))
-		return
-	}
+
+	// Determine active phase filters. If "all" is active or no specific
+	// phase chip is active, skip phase filtering.
+	activePhases := m.activePhaseFilters()
 
 	var filtered []session.SessionInfo
 	for _, s := range m.allSessions {
-		haystack := strings.ToLower(s.ID + " " + s.Model + " " + s.Provider)
-		if strings.Contains(haystack, query) {
-			filtered = append(filtered, s)
+		// Phase filter
+		if len(activePhases) > 0 && !activePhases[s.WorkflowPhase] {
+			continue
 		}
+		// Text filter
+		if query != "" {
+			haystack := strings.ToLower(s.ID + " " + s.Model + " " + s.Provider)
+			if !strings.Contains(haystack, query) {
+				continue
+			}
+		}
+		filtered = append(filtered, s)
 	}
 	m.list.SetItems(sessionInfoToItems(filtered))
+}
+
+// activePhaseFilters returns the set of workflow phases currently selected
+// in the filter chips row. Returns nil when no specific phase chip is
+// active (either "all" is on, or every chip is off).
+func (m *ResumeModel) activePhaseFilters() map[types.WorkflowPhase]bool {
+	active := make(map[types.WorkflowPhase]bool)
+	for i, chip := range m.filterChips.Chips {
+		if !chip.Active {
+			continue
+		}
+		switch i {
+		case 0: // "all"
+			return nil
+		case 1:
+			active[types.PhaseIdle] = true
+		case 2:
+			active[types.PhaseDiscuss] = true
+		case 3:
+			active[types.PhasePlan] = true
+		case 4:
+			active[types.PhaseExecute] = true
+		case 5:
+			active[types.PhaseVerify] = true
+		case 6:
+			active[types.PhaseShip] = true
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return active
 }
 
 // loadPreview loads a session's first message for the preview pane.
@@ -263,6 +325,45 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			return nil, nil
 		}
 
+		// If chips row is focused: navigate/toggle, then return.
+		if m.chipsFocused {
+			switch msg.String() {
+			case "tab", "down":
+				m.chipsFocused = false
+				return nil, nil
+			case "left", "h":
+				if m.filterChips.Selected > 0 {
+					m.filterChips.Selected--
+				}
+				return nil, nil
+			case "right", "l":
+				if m.filterChips.Selected < len(m.filterChips.Chips)-1 {
+					m.filterChips.Selected++
+				}
+				return nil, nil
+			case " ", "enter":
+				idx := m.filterChips.Selected
+				if idx == 0 {
+					// "all" chip clears other selections
+					for i := range m.filterChips.Chips {
+						m.filterChips.Chips[i].Active = i == 0
+					}
+				} else {
+					m.filterChips.ToggleChip(idx)
+					m.filterChips.Chips[0].Active = false
+					if m.filterChips.ActiveCount() == 0 {
+						m.filterChips.Chips[0].Active = true
+					}
+				}
+				m.applySearch()
+				return nil, nil
+			case "esc":
+				m.chipsFocused = false
+				return nil, nil
+			}
+			return nil, nil
+		}
+
 		// If search input is focused
 		if m.searchInput.Focused() {
 			switch msg.String() {
@@ -289,6 +390,10 @@ func (m *ResumeModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		case "/":
 			// Focus search
 			m.searchInput.Focus()
+			return nil, nil
+		case "f", "F":
+			// Focus filter chips row
+			m.chipsFocused = true
 			return nil, nil
 		case "enter":
 			item := m.list.SelectedItem()
@@ -352,13 +457,25 @@ func (m *ResumeModel) View() string {
 	return m.renderBrowser()
 }
 
-// renderBrowser renders the search bar + list + preview layout.
+// renderBrowser renders the search bar + filter chips + list + preview layout.
 func (m *ResumeModel) renderBrowser() string {
 	var parts []string
 
 	// Search bar
 	searchBar := m.renderSearchBar()
 	parts = append(parts, searchBar)
+
+	// Filter chips row (above the list)
+	chipsRow := m.filterChips.Render()
+	if m.chipsFocused {
+		// Visual hint: underline when focused
+		chipsRow = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(m.theme.Brand).
+			Render(chipsRow)
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+	parts = append(parts, labelStyle.Render("Filter: ")+" "+chipsRow)
 
 	// Main area: list on left, preview on right (if width allows)
 	listView := m.list.View()
@@ -389,7 +506,7 @@ func (m *ResumeModel) renderBrowser() string {
 
 	// Footer hints
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary))
-	footer := footerStyle.Render("Enter: resume  |  /: search  |  N: new  |  D: delete  |  Esc: back")
+	footer := footerStyle.Render("Enter: resume  |  /: search  |  F: filter  |  N: new  |  D: delete  |  Esc: back")
 	parts = append(parts, "", footer)
 
 	return strings.Join(parts, "\n")

@@ -101,12 +101,14 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 
 	// Wait for response
 	var answer string
+	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
+	defer timer.Stop()
 	select {
 	case resp := <-t.responseCh:
 		answer = resp.Answer
 	case <-ctx.Done():
 		return types.ToolResult{}, ctx.Err()
-	case <-time.After(time.Duration(timeoutSecs) * time.Second):
+	case <-timer.C:
 		return types.ToolResult{}, fmt.Errorf("question timed out after %d seconds", timeoutSecs)
 	}
 

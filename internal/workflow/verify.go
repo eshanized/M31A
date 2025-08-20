@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -54,51 +53,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 
 		if task.HealsAttempted >= m31types.MaxHealAttempts {
 			tasks[i].Status = m31types.StatusUnrecoverable
-			e.logger.Warn("task unrecoverable", "id", task.ID)
-
-		// Trigger bisect — use the commit before session started as 'good'
-		headHash, _ := e.git.HeadHash()
-		goodHash := e.sessionStartHash
-		if goodHash == "" {
-			// Fallback: find root commit instead of hardcoded HEAD~50
-			if rootHash, err := e.findRootCommit(); err == nil {
-				goodHash = rootHash
-			} else {
-				// Last resort for single-commit repos
-				goodHash = "HEAD~1"
-			}
-		}
-			b := bisect.New(e.workDir, e.logger)
-			checkFn := func() bool {
-				vr := e.verifyTask(task)
-				return vr.FilesExist && vr.SyntaxOK && vr.TestsOK
-			}
-			bisectResult, err := b.Run(goodHash, headHash, checkFn)
-			if err == nil && bisectResult != nil {
-				e.logger.Info("bisect found offending commit",
-					"commit", bisectResult.OffendingCommit.ShortHash)
-
-				// Targeted heal using bisect context
-				failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",
-					bisectResult.OffendingCommit.ShortHash, bisectResult.Diff, result.Errors)
-				healResult := e.healTask(ctx, task, failure)
-				tasks[i].HealsAttempted++
-
-				if healResult.Success {
-					// Re-verify
-					newResult := e.verifyTask(task)
-					if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
-						tasks[i].Status = m31types.StatusDone
-						e.logger.Info("task healed after bisect", "id", task.ID)
-					} else {
-						e.logger.Warn("post-bisect heal did not fix task", "id", task.ID)
-						tasks[i].Status = m31types.StatusUnrecoverable
-					}
-				} else {
-					e.logger.Warn("post-bisect heal failed", "id", task.ID, "error", healResult.Error)
-					tasks[i].Status = m31types.StatusUnrecoverable
-				}
-			}
+			e.logger.Warn("task unrecoverable — max heal attempts exceeded", "id", task.ID)
 			continue
 		}
 
@@ -127,10 +82,18 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 				e.logger.Info("task healed and verified", "id", task.ID)
 			} else {
 				e.logger.Warn("heal did not fix task", "id", task.ID)
+				// Try bisect as fallback before giving up
+				if healed := e.tryBisectHeal(ctx, &tasks[i], task, result); healed {
+					continue
+				}
 				tasks[i].Status = m31types.StatusFailed
 			}
 		} else {
 			e.logger.Warn("self-heal failed", "id", task.ID, "error", healResult.Error)
+			// Try bisect as fallback before marking unrecoverable
+			if healed := e.tryBisectHeal(ctx, &tasks[i], task, result); healed {
+				continue
+			}
 			if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
 				tasks[i].Status = m31types.StatusUnrecoverable
 			}
@@ -186,13 +149,11 @@ func (e *Engine) findRootCommit() (string, error) {
 	if e.git == nil {
 		return "", fmt.Errorf("git not initialized")
 	}
-	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
-	cmd.Dir = e.workDir
-	out, err := cmd.Output()
+	out, err := e.git.Run("rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git rev-list: %w", err)
 	}
-	hash := strings.TrimSpace(string(out))
+	hash := strings.TrimSpace(out)
 	if hash == "" {
 		return "", fmt.Errorf("empty root commit hash")
 	}
@@ -201,4 +162,73 @@ func (e *Engine) findRootCommit() (string, error) {
 		hash = hash[:idx]
 	}
 	return hash, nil
+}
+
+// tryBisectHeal attempts to heal a failed task using git bisect to find
+// the offending commit, then re-healing with that context. Returns true
+// if the task was successfully healed and re-verified.
+func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, task m31types.Task, verifyResult VerificationResult) bool {
+	if e.git == nil {
+		return false
+	}
+
+	headHash, err := e.git.HeadHash()
+	if err != nil {
+		e.logger.Warn("bisect fallback: cannot get HEAD hash", "error", err)
+		return false
+	}
+
+	goodHash := e.sessionStartHash
+	if goodHash == "" {
+		if rootHash, err := e.findRootCommit(); err == nil {
+			goodHash = rootHash
+		} else {
+			// Cannot determine a good commit for bisect
+			e.logger.Warn("bisect fallback: cannot determine good commit for bisect")
+			return false
+		}
+	}
+
+	b := bisect.New(e.workDir, e.logger)
+	b.SetGit(e.git)
+	checkFn := func() bool {
+		vr := e.verifyTask(task)
+		return vr.FilesExist && vr.SyntaxOK && vr.TestsOK
+	}
+	bisectResult, err := b.Run(goodHash, headHash, checkFn)
+	if err != nil || bisectResult == nil {
+		e.logger.Warn("bisect fallback failed", "error", err)
+		return false
+	}
+
+	e.logger.Info("bisect found offending commit",
+		"commit", bisectResult.OffendingCommit.ShortHash)
+
+	// Targeted heal using bisect context
+	failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",
+		bisectResult.OffendingCommit.ShortHash, bisectResult.Diff, verifyResult.Errors)
+	healResult := e.healTask(ctx, task, failure)
+	taskEntry.HealsAttempted++
+
+	if !healResult.Success {
+		e.logger.Warn("post-bisect heal failed", "id", task.ID, "error", healResult.Error)
+		if taskEntry.HealsAttempted >= m31types.MaxHealAttempts {
+			taskEntry.Status = m31types.StatusUnrecoverable
+		}
+		return false
+	}
+
+	// Re-verify after bisect heal
+	newResult := e.verifyTask(task)
+	if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+		taskEntry.Status = m31types.StatusDone
+		e.logger.Info("task healed after bisect", "id", task.ID)
+		return true
+	}
+
+	e.logger.Warn("post-bisect heal did not fix task", "id", task.ID)
+	if taskEntry.HealsAttempted >= m31types.MaxHealAttempts {
+		taskEntry.Status = m31types.StatusUnrecoverable
+	}
+	return false
 }

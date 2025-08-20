@@ -2,14 +2,19 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
 )
+
+var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type TodoWrite struct {
 	sessionsDir string
@@ -105,13 +110,27 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 
 	// Write to session directory
+	if !sessionIDRe.MatchString(t.sessionID) {
+		return types.ToolResult{}, fmt.Errorf("invalid session ID: must be alphanumeric")
+	}
 	sessionDir := filepath.Join(t.sessionsDir, t.sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return types.ToolResult{}, fmt.Errorf("cannot create session directory: %w", err)
 	}
 
 	todoPath := filepath.Join(sessionDir, "TODO.md")
-	if err := os.WriteFile(todoPath, []byte(b.String()), 0644); err != nil {
+	content := []byte(b.String())
+
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot generate temp name: %w", err)
+	}
+	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
+	if err := os.WriteFile(tmpPath, content, 0644); err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot write temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, todoPath); err != nil {
+		os.Remove(tmpPath)
 		return types.ToolResult{}, fmt.Errorf("cannot write TODO.md: %w", err)
 	}
 

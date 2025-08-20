@@ -64,11 +64,14 @@ func (s *Session) WorkflowState() (goal string, phase types.WorkflowPhase, quest
 	return s.WorkflowGoal, s.WorkflowPhase, s.DiscussQuestions
 }
 
-// validateSessionID checks that id is exactly types.SessionIDLength (8)
+// validateSessionID checks that id is exactly expectedLen
 // lowercase hexadecimal characters [a-f0-9].
-func validateSessionID(id string) error {
-	if len(id) != types.SessionIDLength {
-		return fmt.Errorf("session ID must be %d chars, got %d", types.SessionIDLength, len(id))
+func validateSessionID(id string, expectedLen int) error {
+	if expectedLen <= 0 {
+		expectedLen = types.SessionIDLength
+	}
+	if len(id) != expectedLen {
+		return fmt.Errorf("session ID must be %d chars, got %d", expectedLen, len(id))
 	}
 	for _, c := range id {
 		if !unicode.IsDigit(c) && !(c >= 'a' && c <= 'f') {

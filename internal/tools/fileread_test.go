@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +71,7 @@ func TestFileRead_TooLarge(t *testing.T) {
 			"path": "large.bin",
 		},
 	})
-	if err != m31errors.ErrFileTooLarge {
+	if !errors.Is(err, m31errors.ErrFileTooLarge) {
 		t.Errorf("expected ErrFileTooLarge, got: %v", err)
 	}
 }
@@ -236,7 +237,7 @@ func TestFileRead_WithLimit(t *testing.T) {
 			"limit": float64(500),
 		},
 	})
-	if err != m31errors.ErrFileTooLarge {
+	if !errors.Is(err, m31errors.ErrFileTooLarge) {
 		t.Errorf("expected ErrFileTooLarge, got: %v", err)
 	}
 }

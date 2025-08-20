@@ -109,11 +109,10 @@ func hasTestFiles(workDir string, files []string) bool {
 const verifyTaskTimeout = 5 * time.Minute
 
 // verifyTaskContext returns a context with a deadline for verification commands.
-// If the parent context already has a deadline, it is used as-is.
-func (e *Engine) verifyTaskContext() context.Context {
-	ctx := context.Background()
-	// Add a 5-minute timeout to prevent hanging tests from blocking forever
-	return ctx // timeout is applied via exec.CommandContext below
+// Derives from the parent context so session cancellation propagates.
+func (e *Engine) verifyTaskContext(parent context.Context) context.Context {
+	ctx, _ := context.WithTimeout(parent, verifyTaskTimeout)
+	return ctx
 }
 
 // verifyTask checks if a task's outputs exist and are syntactically valid.

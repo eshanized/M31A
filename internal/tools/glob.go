@@ -37,6 +37,10 @@ func (t *Glob) RiskLevel() types.RiskLevel {
 func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, err
+	}
+
 	patternRaw, ok := input.Params["pattern"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: pattern")
@@ -69,7 +73,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
-	const maxResults = 1000
+	maxResults := MaxGlobResults
 	truncated := false
 	origCount := len(matches)
 	if len(matches) > maxResults {
@@ -94,7 +98,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format("2006-01-02 15:04"))
+		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(DateFormat))
 	}
 	if truncated {
 		fmt.Fprintf(&b, "[... %d more files]", origCount-maxResults)

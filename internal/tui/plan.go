@@ -26,6 +26,7 @@ type PlanModel struct {
 	showDiff    bool
 	showGraph   bool
 	spinner     spinner.Model
+	sessionID   string
 }
 
 // NewPlanModel creates a Plan screen model. width/height are required
@@ -51,6 +52,23 @@ func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, modelName s
 
 func (m *PlanModel) Init() tea.Cmd {
 	return m.spinner.Tick
+}
+
+// UpdateTasks replaces the task list and adjusts selection if out of bounds.
+func (m *PlanModel) UpdateTasks(tasks []types.Task) {
+	m.tasks = tasks
+	if m.selected >= len(tasks) {
+		m.selected = len(tasks) - 1
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+}
+
+// SetDimensions updates the plan model's width and height.
+func (m *PlanModel) SetDimensions(width, height int) {
+	m.width = width
+	m.height = height
 }
 
 func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {

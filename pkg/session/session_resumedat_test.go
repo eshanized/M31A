@@ -151,7 +151,7 @@ func TestSession_IDValidation_RejectsBadFormat(t *testing.T) {
 
 	for _, tt := range badIDs {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSessionID(tt.id)
+			err := validateSessionID(tt.id, types.SessionIDLength)
 			if err == nil {
 				t.Errorf("validateSessionID(%q) should return error, got nil", tt.id)
 			}
@@ -172,7 +172,7 @@ func TestSession_IDValidation_AcceptsValidFormat(t *testing.T) {
 
 	for _, id := range validIDs {
 		t.Run(id, func(t *testing.T) {
-			if err := validateSessionID(id); err != nil {
+			if err := validateSessionID(id, types.SessionIDLength); err != nil {
 				t.Errorf("validateSessionID(%q) should succeed, got %v", id, err)
 			}
 		})

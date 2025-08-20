@@ -189,7 +189,7 @@ func TestMatchAnyParamValue_CommandGlob(t *testing.T) {
 		{"rm with no args", "rm", map[string]any{"command": "rm"}, true},
 		{"empty command matches *", "*", map[string]any{"command": ""}, true},
 		{"git command with spaces", "git *", map[string]any{"command": "git status"}, true},
-		{"int param stringified", "*42*", map[string]any{"count": 42}, true},
+		{"int param stringified", "*42*", map[string]any{"command": "42"}, true},
 	}
 
 	for _, tt := range tests {

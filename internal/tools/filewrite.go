@@ -21,7 +21,8 @@ type FileWrite struct {
 	backupDir string
 }
 
-const maxBackupsPerFile = 10
+// MaxBackupsPerFile is the maximum number of backups to keep per file.
+// Defined in constants.go as MaxBackupsPerFile.
 
 func NewFileWrite(workDir, backupDir string) *FileWrite {
 	return &FileWrite{workDir: workDir, backupDir: backupDir}
@@ -125,7 +126,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		backupName := fmt.Sprintf("%s.%s.%s", sanitized, time.Now().Format("20060102T150405.000"), hex.EncodeToString(randBytes))
 		backupPath := filepath.Join(t.backupDir, backupName)
 
-		if err := os.MkdirAll(t.backupDir, 0755); err != nil {
+		if err := os.MkdirAll(t.backupDir, DirPermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
 		}
 
@@ -133,7 +134,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot read original for backup: %w", err)
 		}
-		if err := os.WriteFile(backupPath, existingContent, 0644); err != nil {
+		if err := os.WriteFile(backupPath, existingContent, FilePermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot write backup: %w", err)
 		}
 
@@ -193,7 +194,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 }
 
 // pruneBackups removes the oldest backups for a given file prefix when the
-// count exceeds maxBackupsPerFile. Backups are sorted lexicographically
+// count exceeds MaxBackupsPerFile. Backups are sorted lexicographically
 // (timestamp in the name ensures chronological order). Logs but does not
 // fail on removal errors.
 func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
@@ -211,15 +212,15 @@ func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
 		}
 	}
 
-	if len(matches) <= maxBackupsPerFile {
+	if len(matches) <= MaxBackupsPerFile {
 		return
 	}
 
 	// Sort lexicographically — timestamp in the name ensures chronological order
 	sort.Strings(matches)
 
-	// Delete oldest entries (lowest sort order) to keep exactly maxBackupsPerFile
-	toDelete := matches[:len(matches)-maxBackupsPerFile]
+	// Delete oldest entries (lowest sort order) to keep exactly MaxBackupsPerFile
+	toDelete := matches[:len(matches)-MaxBackupsPerFile]
 	for _, name := range toDelete {
 		path := filepath.Join(t.backupDir, name)
 		if err := os.Remove(path); err != nil {

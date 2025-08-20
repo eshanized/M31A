@@ -247,7 +247,7 @@ func TestTickMsg_Time(t *testing.T) {
 // --- ReplModel streaming handler tests ---
 
 func TestReplModel_HandleStreamMsg(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	// Send content chunks
 	m.Update(StreamMsg{
@@ -288,7 +288,7 @@ func TestReplModel_HandleStreamMsg(t *testing.T) {
 }
 
 func TestReplModel_HandleStreamDoneMsg(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.streaming = true
 	m.streamContent.WriteString("Hello World")
 	m.activeSegmentType = "content"
@@ -333,7 +333,7 @@ func TestReplModel_HandleStreamDoneMsg(t *testing.T) {
 }
 
 func TestReplModel_HandleStreamDoneMsg_WithSegments(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.streaming = true
 	m.streamContent.WriteString("Final answer")
 	m.streamSegments = []types.MessageSegment{
@@ -366,7 +366,7 @@ func TestReplModel_HandleStreamDoneMsg_WithSegments(t *testing.T) {
 }
 
 func TestReplModel_HandleStreamErrorMsg(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.streaming = true
 	m.thinking = true
 	m.streamContent.WriteString("partial content")
@@ -402,7 +402,7 @@ func TestReplModel_HandleStreamErrorMsg(t *testing.T) {
 }
 
 func TestReplModel_StreamTickMsg(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.streaming = true
 
 	cmds, _ := m.Update(TickMsg{Time: time.Now()})
@@ -417,7 +417,7 @@ func TestReplModel_StreamTickMsg(t *testing.T) {
 }
 
 func TestReplModel_StreamMsg_ThinkingTransitions(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	// Send content chunk first (establishes content baseline)
 	m.Update(StreamMsg{

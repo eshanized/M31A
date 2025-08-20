@@ -39,6 +39,12 @@ func (g *Git) run(args ...string) (string, error) {
 	return string(out), nil
 }
 
+// Run executes a git command and returns the output. This is the exported
+// version of run for commands not covered by specific wrapper methods.
+func (g *Git) Run(args ...string) (string, error) {
+	return g.run(args...)
+}
+
 // Init initializes a new git repository in the working directory.
 func (g *Git) Init() error {
 	_, err := g.run("init")
@@ -56,7 +62,7 @@ func (g *Git) IsRepo() bool {
 
 // Add stages the given paths.
 func (g *Git) Add(paths ...string) error {
-	args := append([]string{"add"}, paths...)
+	args := append([]string{"add", "--"}, paths...)
 	_, err := g.run(args...)
 	if err != nil {
 		return fmt.Errorf("git add: %w", err)
@@ -199,7 +205,10 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 	}
 
 	// Get diff stats via --numstat
-	numstatOut, _ := g.run("diff", "--numstat", "HEAD")
+	numstatOut, numstatErr := g.run("diff", "--numstat", "HEAD")
+	if numstatErr != nil {
+		numstatOut = ""
+	}
 	numstatMap := make(map[string]struct{ add, del int })
 	for _, line := range strings.Split(strings.TrimSpace(numstatOut), "\n") {
 		if line == "" {
@@ -319,7 +328,11 @@ func (g *Git) CurrentBranch() (string, error) {
 }
 
 // ResetSoft resets HEAD to the given commit, keeping changes staged.
+// Creates a backup branch for rollback safety.
 func (g *Git) ResetSoft(commit string) error {
+	if _, err := g.run("branch", "--force", "m31a-backup-pre-reset"); err != nil {
+		return fmt.Errorf("create backup branch: %w", err)
+	}
 	_, err := g.run("reset", "--soft", commit)
 	if err != nil {
 		return fmt.Errorf("git reset --soft: %w", err)
@@ -328,7 +341,11 @@ func (g *Git) ResetSoft(commit string) error {
 }
 
 // ResetHard resets HEAD to the given commit, discarding all changes.
+// Creates a backup branch for rollback safety.
 func (g *Git) ResetHard(commit string) error {
+	if _, err := g.run("branch", "--force", "m31a-backup-pre-reset"); err != nil {
+		return fmt.Errorf("create backup branch: %w", err)
+	}
 	_, err := g.run("reset", "--hard", commit)
 	if err != nil {
 		return fmt.Errorf("git reset --hard: %w", err)

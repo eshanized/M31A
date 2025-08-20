@@ -374,7 +374,7 @@ func TestFileWrite_BackupPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) > maxBackupsPerFile {
-		t.Errorf("expected at most %d backups, got %d", maxBackupsPerFile, len(entries))
+	if len(entries) > MaxBackupsPerFile {
+		t.Errorf("expected at most %d backups, got %d", MaxBackupsPerFile, len(entries))
 	}
 }

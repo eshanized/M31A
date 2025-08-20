@@ -63,7 +63,7 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 				pinnedAddr := net.JoinHostPort(addrs[0].IP.String(), port)
 
 				// Connect with the pinned IP
-				dialer := &net.Dialer{Timeout: 30 * time.Second}
+				dialer := &net.Dialer{Timeout: time.Duration(DefaultTimeoutSecs) * time.Second}
 				conn, err := dialer.DialContext(ctx, network, pinnedAddr)
 				if err != nil {
 					return nil, err
@@ -82,8 +82,8 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 			},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("stopped after 5 redirects")
+		if len(via) >= MaxRedirects {
+			return fmt.Errorf("stopped after %d redirects", MaxRedirects)
 			}
 			// SSRF protection: check each redirect target
 			if err := wf.resolveAndCheck(req.Context(), req.URL.String()); err != nil {
@@ -188,7 +188,7 @@ func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IPAd
 	}
 
 	now := time.Now()
-	ttl := 5 * time.Minute
+	ttl := DNSCacheTTL
 
 	// Check cache
 	if cached, ok := t.dnsCache.Load(host); ok {
@@ -228,7 +228,7 @@ func (t *WebFetch) Description() string {
 }
 
 func (t *WebFetch) RiskLevel() types.RiskLevel {
-	return types.RiskSafe
+	return types.RiskMedium
 }
 
 func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
@@ -262,12 +262,12 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		}
 	}
 
-	timeout := 30
+	timeout := DefaultTimeoutSecs
 	if tRaw, ok := input.Params["timeout"].(float64); ok {
 		timeout = int(tRaw)
 	}
-	if timeout <= 0 || timeout > 120 {
-		return types.ToolResult{}, fmt.Errorf("timeout must be between 1 and 120 seconds")
+	if timeout <= 0 || timeout > MaxTimeoutSecs {
+		return types.ToolResult{}, fmt.Errorf("timeout must be between 1 and %d seconds", MaxTimeoutSecs)
 	}
 
 	// SSRF protection: resolve and check hostname before connecting

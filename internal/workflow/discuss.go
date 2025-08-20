@@ -109,7 +109,10 @@ func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 	}
 
 	// Load PROJECT.md
-	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
+	if projErr != nil {
+		e.logger.Warn("failed to load project for discuss context", "error", projErr)
+	}
 	projectType := "unknown"
 	framework := ""
 	if project != nil {

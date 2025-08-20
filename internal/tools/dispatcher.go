@@ -34,14 +34,14 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
 		tools:            make(map[string]types.Tool),
 		permissions:      make(map[string]bool),
-		requestCh:        make(chan PermissionRequest, 8),
+		requestCh:        make(chan PermissionRequest, PermissionChannelBuffer),
 		responseCh:       make(chan PermissionResponse),
-		questionReqCh:    make(chan QuestionRequest, 4),
+		questionReqCh:    make(chan QuestionRequest, QuestionChannelBuffer),
 		questionRespCh:   make(chan QuestionResponse),
 		rules:            []config.PermissionRule{},
 		originalRules:    []config.PermissionRule{},
 		agents:           make(map[string]config.PermissionsAgentConfig),
-		activeAgent:      "default",
+		activeAgent:      DefaultAgentName,
 		permissionTimeout: types.DefaultPermissionTimeout,
 	}
 	if cfg != nil {
@@ -59,6 +59,25 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		}
 	}
 	return d
+}
+
+// UpdatePermissions hot-reloads the permission configuration.
+func (d *Dispatcher) UpdatePermissions(cfg *config.PermissionsConfig) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if cfg == nil {
+		return
+	}
+	if cfg.Rules != nil {
+		d.rules = make([]config.PermissionRule, len(cfg.Rules))
+		copy(d.rules, cfg.Rules)
+	}
+	if cfg.Agents != nil {
+		d.agents = cfg.Agents
+	}
+	if cfg.TimeoutSeconds > 0 {
+		d.permissionTimeout = cfg.TimeoutSeconds
+	}
 }
 
 func (d *Dispatcher) Register(tool types.Tool) error {
@@ -113,7 +132,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		}
 
 		if !interactive {
-			if risk == types.RiskDangerous || risk == types.RiskDestructive {
+			if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
 				return types.ToolResult{}, fmt.Errorf("tool %s (risk: %s) blocked in shell mode: %w", call.Name, risk, m31errors.ErrPermissionDenied)
 			}
 		} else if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
@@ -125,7 +144,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 				return types.ToolResult{}, err
 			}
 		} else {
-			if risk == types.RiskDangerous || risk == types.RiskDestructive {
+			if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
 				if err := d.askPermissionFallback(ctx, call, risk); err != nil {
 					return types.ToolResult{}, err
 				}

@@ -208,7 +208,7 @@ func TestTypedErrorName_DebugLog(t *testing.T) {
 	t.Setenv("M31A_LOG_LEVEL", "debug")
 
 	// Create a minimal ReplModel and trigger the error handler
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.width = 80
 	m.height = 40
 

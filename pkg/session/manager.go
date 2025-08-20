@@ -55,6 +55,13 @@ func (m *Manager) basePathFor(id string) string {
 	return filepath.Join(m.baseDir, id)
 }
 
+// BaseDir returns the directory path that holds all session folders.
+// Used by callers that need to locate session data on disk (e.g. the
+// auto-backup feature copies the session tree to a sibling directory).
+func (m *Manager) BaseDir() string {
+	return m.baseDir
+}
+
 // atomicWrite atomically writes data to path by writing to a temp file in the
 // same directory then renaming. The temp file uses crypto/rand for a unique name.
 func (m *Manager) atomicWrite(path string, data []byte) (err error) {
@@ -152,7 +159,7 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 	}
 
 	// L-13: Validate generated ID format
-	if err := validateSessionID(id); err != nil {
+	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
 		return nil, fmt.Errorf("generated invalid session ID: %w", err)
 	}
 
@@ -196,7 +203,7 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 //
 // Sets ResumedAt to the current time on every successful load (M-6).
 func (m *Manager) LoadSession(id string) (*Session, error) {
-	if err := validateSessionID(id); err != nil {
+	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
 		return nil, fmt.Errorf("invalid session ID %q: %w", id, m31errors.ErrSessionNotFound)
 	}
 
@@ -281,7 +288,7 @@ func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase
 // doesn't exist or the workflow state is unset.
 func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.WorkflowPhase, questions []string, err error) {
 	// Validate ID format — return zero values for invalid IDs
-	if err := validateSessionID(id); err != nil {
+	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
 		return "", types.PhaseIdle, nil, nil
 	}
 	session, err := m.LoadSession(id)
@@ -374,6 +381,7 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 		info.Provider = s.Provider
 		info.StartedAt = s.StartedAt
 		info.MessageCount = s.MessageCount
+		info.WorkflowPhase = s.WorkflowPhase
 		sessions = append(sessions, info)
 	}
 

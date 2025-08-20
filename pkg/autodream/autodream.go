@@ -38,7 +38,7 @@ type Consolidator struct {
 	totalConsolidations int
 	// M-7: Reentrancy guard — CAS prevents nested /compress calls from
 	// entering a double-summary state.
-	consolidatingInt int32 // atomic: 0=idle, 1=consolidating
+	consolidating atomic.Bool
 }
 
 // ErrAlreadyConsolidating is returned when a consolidation is already in
@@ -74,6 +74,12 @@ func (c *Consolidator) SetMessages(messages []types.Message) {
 
 // canConsolidateLocked checks whether consolidation is possible.
 // Caller must hold at least a read lock.
+//
+// AutoDreamThreshold calibrates the minimum useful compression: the
+// candidate set must be large enough that consolidating a fraction
+// (1 - threshold) of it still removes at least one message. This
+// keeps consolidation from firing when the candidate pool is too
+// small for a meaningful compression pass.
 func (c *Consolidator) canConsolidateLocked() bool {
 	if c.paused {
 		return false
@@ -84,6 +90,17 @@ func (c *Consolidator) canConsolidateLocked() bool {
 	protected := c.protectedIndices()
 	candidates := c.candidateIndices(protected)
 	if len(candidates) == 0 {
+		return false
+	}
+	// Require that the candidate pool is large enough to justify a
+	// consolidation pass: at least one message must be removable after
+	// applying the AutoDreamThreshold compression ratio.
+	compressFraction := 1.0 - types.AutoDreamThreshold
+	minRemovable := int(math.Ceil(compressFraction * float64(len(candidates))))
+	if minRemovable < 1 {
+		minRemovable = 1
+	}
+	if len(candidates) < minRemovable {
 		return false
 	}
 	// If all candidates are already memory segments, there is nothing to consolidate.
@@ -110,14 +127,14 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 	start := time.Now()
 
 	// M-7: Reentrancy guard — CAS prevents nested /compress calls.
-	if !atomic.CompareAndSwapInt32(&c.consolidatingInt, 0, 1) {
+	if !c.consolidating.CompareAndSwap(false, true) {
 		return &ConsolidationResult{
 			Success:    false,
 			DurationMs: time.Since(start).Milliseconds(),
 			Error:      ErrAlreadyConsolidating.Error(),
 		}
 	}
-	defer atomic.StoreInt32(&c.consolidatingInt, 0)
+	defer c.consolidating.Store(false)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

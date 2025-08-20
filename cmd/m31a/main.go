@@ -85,7 +85,10 @@ func main() {
 	}
 
 	// Initialize keychain (may fail gracefully — keychain is optional)
-	kc, _ := keychain.New()
+	kc, kcErr := keychain.New()
+	if kcErr != nil {
+		logger.Warn("keychain initialization failed", "error", kcErr)
+	}
 	if kc != nil {
 		if err := cfg.ResolveAPIKeys(kc); err != nil {
 			logger.Warn("failed to resolve API keys", "error", err)
@@ -157,8 +160,11 @@ func main() {
 	// Set active provider based on config default (first registered if default empty)
 	if cfg.Provider.Default != "" {
 		if err := registry.SetActive(cfg.Provider.Default); err != nil {
-			logger.Warn("failed to set active provider, using first registered", "error", err)
+			logger.Warn("configured default provider not registered, using first registered provider", "default", cfg.Provider.Default, "error", err)
 		}
+	}
+	if registry.Active() == "" {
+		logger.Warn("no active provider — TUI will start without LLM access")
 	}
 
 	// Create and launch TUI app

@@ -63,6 +63,14 @@ func formatLedgerEntries(entries []ledger.LedgerEntry, title string) CommandResu
 }
 
 // handleRollback shows the commit chain or performs a rollback.
+// Subcommands:
+//
+//	/rollback                          — show commit chain
+//	/rollback <hash>                   — soft reset to hash (keeps changes staged)
+//	/rollback --hard <hash> --confirm  — hard reset (discards uncommitted changes)
+//	/rollback --safe <hash> --confirm  — hard reset then pop stash (preserves uncommitted changes)
+//	/rollback --preview <hash>         — show diff between hash and HEAD without resetting
+//	/rollback --head                   — show current HEAD hash
 func handleRollback(args []string, ctx CommandContext) CommandResult {
 	if len(args) == 0 {
 		if ctx.Rollback != nil {
@@ -93,6 +101,63 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 
 	if ctx.Rollback == nil {
 		return CommandResult{Success: false, Message: "Rollback not available."}
+	}
+
+	// /rollback --head — show current HEAD hash
+	if args[0] == "--head" {
+		head, err := ctx.Rollback.CurrentHead()
+		if err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Failed to read HEAD: %v", err)}
+		}
+		return CommandResult{Success: true, Message: fmt.Sprintf("HEAD: %s", head)}
+	}
+
+	// /rollback --preview <hash> — show diff without modifying the tree
+	if args[0] == "--preview" {
+		if len(args) < 2 {
+			return CommandResult{Success: false, Message: "Usage: /rollback --preview <hash>"}
+		}
+		diff, err := ctx.Rollback.Preview(args[1])
+		if err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Preview failed: %v", err)}
+		}
+		if diff == "" {
+			return CommandResult{Success: true, Message: fmt.Sprintf("No diff between %s and HEAD.", args[1])}
+		}
+		screen := ScreenDiff
+		return CommandResult{
+			Success: true,
+			Screen:  &screen,
+			Message: fmt.Sprintf("Rollback preview: %s..HEAD", args[1]),
+			Cmd: func() tea.Msg {
+				return DiffScreenMsg{
+					Diff:  diff,
+					Title: fmt.Sprintf("Rollback preview: %s..HEAD", args[1]),
+				}
+			},
+		}
+	}
+
+	// /rollback --safe <hash> [--confirm] — hard reset then pop stash (preserves uncommitted changes)
+	if args[0] == "--safe" && len(args) > 1 {
+		commitRef := args[1]
+		hasConfirm := false
+		for _, arg := range args[2:] {
+			if arg == "--confirm" {
+				hasConfirm = true
+			}
+		}
+		if !hasConfirm {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("Safe reset preserves uncommitted changes via stash pop. Use /rollback --safe %s --confirm to proceed.", commitRef),
+			}
+		}
+		result, err := ctx.Rollback.SafeReset(commitRef)
+		if err != nil {
+			return CommandResult{Success: false, Message: fmt.Sprintf("Safe reset failed: %v", err)}
+		}
+		return CommandResult{Success: true, Message: result.Message}
 	}
 
 	if args[0] == "--hard" && len(args) > 1 {

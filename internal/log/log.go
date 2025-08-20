@@ -106,7 +106,9 @@ func removeOldRotatedFiles(logDir string) error {
 			continue
 		}
 		if parsed.Before(cutoff) {
-			os.Remove(filepath.Join(logDir, name))
+			if err := os.Remove(filepath.Join(logDir, name)); err != nil {
+				slog.Warn("failed to remove old rotated log file", "path", filepath.Join(logDir, name), "error", err)
+			}
 		}
 	}
 

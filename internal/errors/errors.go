@@ -10,6 +10,7 @@ var (
 	ErrProviderNotFound    = errors.New("provider not found")
 	ErrRateLimited         = errors.New("rate limited")
 	ErrInvalidKey          = errors.New("invalid API key")
+	ErrNoCredits           = errors.New("no credits available")
 	ErrContextExceeded     = errors.New("context window exceeded")
 	ErrModelNotFound       = errors.New("model not found")
 	ErrSessionCorrupted    = errors.New("session data corrupted")
@@ -31,6 +32,7 @@ var (
 	ErrStreamTruncated = errors.New("stream truncated before completion")
 	// Fix M-29: git bisect reset failed (e.g. no commits in range).
 	ErrBisectResetFailed = errors.New("bisect reset failed")
+	ErrBisectFailed      = errors.New("bisect failed")
 
 	// Session-specific errors for distinct failure modes.
 	ErrSessionNotFound   = errors.New("session not found")
@@ -54,6 +56,8 @@ func UserMessage(e error) string {
 		return "Rate limited — retry in a moment"
 	case errors.Is(e, ErrInvalidKey):
 		return "Invalid API key — run /settings to update"
+	case errors.Is(e, ErrNoCredits):
+		return "No credits remaining — please top up your account"
 	case errors.Is(e, ErrContextExceeded):
 		return "Context window exceeded — conversation too long. Use /compress to reduce context."
 	case errors.Is(e, ErrModelNotFound):
@@ -86,6 +90,8 @@ func UserMessage(e error) string {
 		return "Stream interrupted — try again"
 	case errors.Is(e, ErrBisectResetFailed):
 		return "Git bisect reset failed — try `git bisect reset` manually"
+	case errors.Is(e, ErrBisectFailed):
+		return "Git bisect failed — check bisect state and retry"
 	case errors.Is(e, ErrSessionNotFound):
 		return "Session not found — check the session ID or start a new session"
 	case errors.Is(e, ErrSessionPermission):

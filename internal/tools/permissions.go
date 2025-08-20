@@ -97,8 +97,28 @@ func matchToolName(pattern, name string) bool {
 	return matched
 }
 
+func riskLevelValue(r types.RiskLevel) int {
+	switch r {
+	case types.RiskSafe:
+		return 0
+	case types.RiskMedium:
+		return 1
+	case types.RiskDangerous:
+		return 2
+	case types.RiskDestructive:
+		return 3
+	default:
+		return -1
+	}
+}
+
 func matchAnyParamValue(pattern string, params map[string]any) bool {
-	for _, v := range params {
+	paramKeys := []string{"path", "url", "command", "pattern"}
+	for _, key := range paramKeys {
+		v, ok := params[key]
+		if !ok {
+			continue
+		}
 		var str string
 		switch val := v.(type) {
 		case string:

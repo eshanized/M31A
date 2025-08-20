@@ -3,46 +3,55 @@ package bisect
 import (
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 
+	"github.com/eshanized/M31A/internal/git"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 )
 
-// CommitInfo represents metadata about a git commit.
-type CommitInfo struct {
-	Hash      string `json:"hash"`
-	ShortHash string `json:"short_hash"`
-	Author    string `json:"author"`
-	Message   string `json:"message"`
-}
-
 // BisectResult holds the offending commit and its diff.
 type BisectResult struct {
-	OffendingCommit CommitInfo
+	OffendingCommit git.CommitInfo
 	Diff            string
+}
+
+// GitRunner is the subset of *git.Git that Bisect uses. Using an interface
+// lets callers inject test doubles without pulling in the full git wrapper.
+type GitRunner interface {
+	Run(args ...string) (string, error)
 }
 
 // Bisect wraps git bisect operations.
 type Bisect struct {
 	workDir string
 	logger  *slog.Logger
+	git     GitRunner
 }
 
-// New creates a Bisect instance.
+// New creates a Bisect instance backed by the project's git wrapper.
+// If git is nil, a minimal exec-based fallback is used (kept for
+// backward compatibility with callers that don't wire the wrapper).
 func New(workDir string, logger *slog.Logger) *Bisect {
 	return &Bisect{workDir: workDir, logger: logger}
 }
 
-// run executes a git command.
+// SetGit wires the project's git wrapper into the bisect instance.
+func (b *Bisect) SetGit(g GitRunner) {
+	b.git = g
+}
+
+// run executes a git command via the wired git wrapper. Falls back to
+// the in-process exec.Command only when no wrapper was provided.
 func (b *Bisect) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = b.workDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, string(out))
+	if b.git != nil {
+		out, err := b.git.Run(args...)
+		if err != nil {
+			return out, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return strings.TrimSpace(out), nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	// Fallback: no wrapper wired — use direct exec (preserves legacy callers).
+	return execGit(b.workDir, args...)
 }
 
 // Run performs a git bisect between sessionStartHash (good) and headHash (bad)
@@ -121,7 +130,8 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	diff, _ := b.run("diff", offending+"^.."+offending)
 
 	return &BisectResult{
-		OffendingCommit: CommitInfo{
+		OffendingCommit: git.CommitInfo{
+			Hash:      offending,
 			ShortHash: offending,
 		},
 		Diff: diff,

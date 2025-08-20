@@ -15,13 +15,13 @@ import (
 
 func TestNewReplModel_Components(t *testing.T) {
 	t.Run("NonZeroViewport", func(t *testing.T) {
-		m := NewReplModel(theme.Dark())
+		m := NewReplModel(theme.Dark(), "test")
 		if m.viewport.Width == 0 && m.viewport.Height == 0 {
 			t.Error("NewReplModel viewport should have non-zero dimensions")
 		}
 	})
 	t.Run("NonZeroTextarea", func(t *testing.T) {
-		m := NewReplModel(theme.Dark())
+		m := NewReplModel(theme.Dark(), "test")
 		if !m.textarea.Focused() {
 			t.Error("NewReplModel textarea should be focused")
 		}
@@ -29,7 +29,7 @@ func TestNewReplModel_Components(t *testing.T) {
 }
 
 func TestReplModel_EnterSendsMessage(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.textarea.SetValue("hello world")
 	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !sent {
@@ -49,7 +49,7 @@ func TestReplModel_EnterSendsMessage(t *testing.T) {
 }
 
 func TestReplModel_EnterEmptyInput(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.textarea.SetValue("  ")
 	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if sent {
@@ -62,7 +62,7 @@ func TestReplModel_EnterEmptyInput(t *testing.T) {
 }
 
 func TestReplModel_WindowResize(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	cmds, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	if m.width != 100 {
 		t.Errorf("Expected width=100, got %d", m.width)
@@ -77,7 +77,7 @@ func TestReplModel_WindowResize(t *testing.T) {
 }
 
 func TestReplModel_InputHistory(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m.textarea.SetValue("hello")
@@ -107,7 +107,7 @@ func TestReplModel_InputHistory(t *testing.T) {
 }
 
 func TestReplModel_ViewNotEmpty(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := m.View()
 	if v == "" {
@@ -116,7 +116,7 @@ func TestReplModel_ViewNotEmpty(t *testing.T) {
 }
 
 func TestReplModel_AddMessage(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	msg := types.Message{
 		Role:    "assistant",
 		Content: "Hello, how can I help?",
@@ -132,7 +132,7 @@ func TestReplModel_AddMessage(t *testing.T) {
 }
 
 func TestReplModel_GetStatusText(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	if s := m.GetStatusText(); s != "" {
 		t.Errorf("Expected empty status, got %q", s)
@@ -151,7 +151,7 @@ func TestReplModel_GetStatusText(t *testing.T) {
 }
 
 func TestReplModel_EscClearsInput(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.textarea.SetValue("some text")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e', 's', 'c'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -162,7 +162,7 @@ func TestReplModel_EscClearsInput(t *testing.T) {
 }
 
 func TestReplModel_PgUpPgDown(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m.textarea.SetValue("line1")
@@ -179,7 +179,7 @@ func TestReplModel_PgUpPgDown(t *testing.T) {
 }
 
 func TestReplModel_ScrollPos(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m.textarea.SetValue("a")
@@ -206,7 +206,7 @@ func TestReplModel_ScrollPos(t *testing.T) {
 }
 
 func TestReplModel_HistoryNavigationAtEnd(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	m.textarea.SetValue("first")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -225,7 +225,7 @@ func TestReplModel_HistoryNavigationAtEnd(t *testing.T) {
 }
 
 func TestReplModel_InputValue(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.textarea.SetValue("  hello  ")
 
 	if v := m.InputValue(); v != "hello" {
@@ -234,7 +234,7 @@ func TestReplModel_InputValue(t *testing.T) {
 }
 
 func TestReplModel_DownEmptyHistory(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if len(m.inputHistory) != 0 {
@@ -245,7 +245,7 @@ func TestReplModel_DownEmptyHistory(t *testing.T) {
 }
 
 func TestReplModel_UpEmptyHistory(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 
 	cmds, sent := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	if len(m.inputHistory) != 0 {
@@ -256,7 +256,7 @@ func TestReplModel_UpEmptyHistory(t *testing.T) {
 }
 
 func TestReplModel_RenderMessages(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.AddMessage(types.Message{Role: "user", Content: "hi"})
 	m.AddMessage(types.Message{Role: "assistant", Content: "hello"})
@@ -272,7 +272,7 @@ func TestReplModel_RenderMessages(t *testing.T) {
 }
 
 func TestReplModel_SpinnerTick(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	cmd := m.SpinnerTick()
 	if cmd == nil {
 		t.Error("SpinnerTick() should return non-nil command")
@@ -280,7 +280,7 @@ func TestReplModel_SpinnerTick(t *testing.T) {
 }
 
 func TestReplModel_StatusTextPriority(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.SetStreaming(true)
 	m.SetThinking(true)
 
@@ -290,7 +290,7 @@ func TestReplModel_StatusTextPriority(t *testing.T) {
 }
 
 func TestReplModel_MessageRoleMapping(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.AddMessage(types.Message{Role: "system", Content: "system message"})
 	content := m.viewport.View()
@@ -300,7 +300,7 @@ func TestReplModel_MessageRoleMapping(t *testing.T) {
 }
 
 func TestReplModel_MultipleRenders(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
 
 	m.textarea.SetValue("msg1")
@@ -317,7 +317,7 @@ func TestReplModel_MultipleRenders(t *testing.T) {
 }
 
 func TestReplModel_EnterWithHistoryPosReset(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m.textarea.SetValue("a")
@@ -331,7 +331,7 @@ func TestReplModel_EnterWithHistoryPosReset(t *testing.T) {
 }
 
 func TestShellMode_DetectsBangPrefix(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Input starting with ! should trigger shell mode
@@ -375,7 +375,7 @@ func TestShellMode_DetectsBangPrefix(t *testing.T) {
 }
 
 func TestShellMode_EmptyCommand(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Just "!" should show help
@@ -408,7 +408,7 @@ func TestShellMode_EmptyCommand(t *testing.T) {
 }
 
 func TestShellMode_NoLLMCall(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Shell mode should not trigger streaming
@@ -427,7 +427,7 @@ func TestShellMode_NoLLMCall(t *testing.T) {
 }
 
 func TestShellMode_NonBangInput(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Normal input should still work (create user message, error about no provider)
@@ -461,7 +461,7 @@ func TestShellMode_NonBangInput(t *testing.T) {
 }
 
 func TestShellResultMsg_UpdatesDisplay(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// First, simulate a shell command that was sent
@@ -512,7 +512,7 @@ func TestShellResultMsg_UpdatesDisplay(t *testing.T) {
 }
 
 func TestShellResultMsg_Error(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Simulate shell command
@@ -540,7 +540,7 @@ func TestShellResultMsg_Error(t *testing.T) {
 }
 
 func TestShellMode_MessagesForLLM(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Add a user message (normal, skipForLLM=false)
@@ -573,7 +573,7 @@ func TestShellMode_MessagesForLLM(t *testing.T) {
 }
 
 func TestShellMode_BangBeforeSlash(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// "!/bin/ls" would be caught by slash handler if ! check came after /
@@ -830,7 +830,7 @@ func TestFrecentHistory_Clear(t *testing.T) {
 // testReplModelWithCwd creates a ReplModel with the given cwd for @filepath testing.
 func testReplModelWithCwd(t *testing.T, cwd string) *ReplModel {
 	t.Helper()
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.SetCwd(cwd)
 	return &m
 }
@@ -934,7 +934,7 @@ func TestExpandFileRefs_NoRefs(t *testing.T) {
 }
 
 func TestExpandFileRefs_NoCwd(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	// Deliberately NOT setting cwd
 
 	result := m.expandFileRefs("@./test.txt")
@@ -990,7 +990,7 @@ func TestExpandFileRefs_Directory(t *testing.T) {
 }
 
 func TestReplModel_SlashCommandEmitsSlashCommandMsg(t *testing.T) {
-	m := NewReplModel(theme.Dark())
+	m := NewReplModel(theme.Dark(), "test")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Set a slash command value

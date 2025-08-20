@@ -38,6 +38,10 @@ func (t *Edit) RiskLevel() types.RiskLevel {
 func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, err
+	}
+
 	pathRaw, ok := input.Params["path"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
@@ -300,19 +304,22 @@ func lineTrimmedReplace(content, oldString, newString string) (string, error) {
 		}
 		if match {
 			// Found match at line i, replace preserving original indentation
-			newLines := make([]string, len(contentLines))
-			copy(newLines, contentLines[:i])
+			newLines := make([]string, 0, len(contentLines))
+			newLines = append(newLines, contentLines[:i]...)
 
 			newContentLines := strings.Split(newString, "\n")
 			// Try to preserve indentation from original lines
 			for k, ncLine := range newContentLines {
-				if k < len(oldLines) {
+				if k < len(oldLines) && i+k < len(contentLines) {
 					indent := leadingWhitespace(contentLines[i+k])
 					ncLine = indent + strings.TrimSpace(ncLine)
 				}
 				newLines = append(newLines, ncLine)
 			}
-			newLines = append(newLines, contentLines[i+len(oldLines)])
+			// Bounds check: only append remaining lines if match is not at end of file
+			if i+len(oldLines) < len(contentLines) {
+				newLines = append(newLines, contentLines[i+len(oldLines):]...)
+			}
 
 			return strings.Join(newLines, "\n"), nil
 		}
@@ -342,8 +349,8 @@ func whitespaceNormalizedReplace(content, oldString, newString string) (string, 
 
 func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
-	if len(oldLines) < 3 {
-		return "", fmt.Errorf("fuzzy anchor requires at least 3 lines")
+	if len(oldLines) < MinLinesForFuzzy {
+		return "", fmt.Errorf("fuzzy anchor requires at least %d lines", MinLinesForFuzzy)
 	}
 
 	contentLines := strings.Split(content, "\n")
@@ -377,7 +384,7 @@ func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
 		}
 		avgSimilarity := totalSimilarity / float64(len(middleOld))
 
-		if avgSimilarity >= 0.7 {
+		if avgSimilarity >= LevenshteinThreshold {
 			// Good enough match
 			newLines := make([]string, len(contentLines))
 			copy(newLines, contentLines[:i])

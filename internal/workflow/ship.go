@@ -40,6 +40,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// 1. Load tasks for summary
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {
+		e.logger.Warn("failed to load tasks for ship summary, using empty list", "error", err)
 		tasks = []m31types.Task{}
 	}
 
@@ -49,6 +50,9 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 	// 2. Final git commit
 	if e.git != nil {
+		if err := e.git.AddAll(); err != nil {
+			e.logger.Warn("git add all before ship commit failed", "error", err)
+		}
 		if err := e.git.Commit(fmt.Sprintf("chore: ship %s", e.sessionID)); err != nil {
 			return nil, fmt.Errorf("ship commit: %w", err)
 		}
@@ -138,6 +142,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	}
 	if failed > 0 {
 		result.Error = fmt.Sprintf("%d tasks failed", failed)
+		result.Success = false
 		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
 	}
 	return result, nil

@@ -8,14 +8,14 @@ import (
 )
 
 func TestFirstRun_InitialState(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	if m.State() != FirstRunWelcome {
 		t.Errorf("Expected FirstRunWelcome, got %d", m.State())
 	}
 }
 
 func TestFirstRun_WelcomeToProviderSelect(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.State() != FirstRunProviderSelect {
 		t.Errorf("Expected FirstRunProviderSelect, got %d", m.State())
@@ -23,7 +23,7 @@ func TestFirstRun_WelcomeToProviderSelect(t *testing.T) {
 }
 
 func TestFirstRun_WelcomeSpace(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	if m.State() != FirstRunProviderSelect {
 		t.Errorf("Space should advance to ProviderSelect, got %d", m.State())
@@ -35,7 +35,7 @@ func TestFirstRun_WelcomeSpace(t *testing.T) {
 }
 
 func TestFirstRun_SelectOpenRouter(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if m.State() != FirstRunKeyInput {
@@ -48,7 +48,7 @@ func TestFirstRun_SelectOpenRouter(t *testing.T) {
 }
 
 func TestFirstRun_SelectZen(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	providers := m.SelectedProviders()
@@ -58,7 +58,7 @@ func TestFirstRun_SelectZen(t *testing.T) {
 }
 
 func TestFirstRun_SelectBoth(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	providers := m.SelectedProviders()
@@ -68,7 +68,7 @@ func TestFirstRun_SelectBoth(t *testing.T) {
 }
 
 func TestFirstRun_SelectSkip(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if m.State() != FirstRunComplete {
@@ -81,7 +81,7 @@ func TestFirstRun_SelectSkip(t *testing.T) {
 }
 
 func TestFirstRun_SelectSkipWithS(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if m.State() != FirstRunComplete {
@@ -90,7 +90,7 @@ func TestFirstRun_SelectSkipWithS(t *testing.T) {
 }
 
 func TestFirstRun_KeyInputValidation(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.providers = []string{"openrouter"}
 	m.apiKeyInput.SetValue("sk-or-v1-1234567890abcdef")
@@ -104,7 +104,7 @@ func TestFirstRun_KeyInputValidation(t *testing.T) {
 }
 
 func TestFirstRun_KeyInputValidationShortKey(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.apiKeyInput.SetValue("short")
 	cmds, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -130,7 +130,7 @@ func TestFirstRun_KeyInputValidationShortKey(t *testing.T) {
 }
 
 func TestFirstRun_KeyInputValidationLongKey(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.apiKeyInput.SetValue("sk-or-v1-1234567890abcdef")
 	cmds, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -147,7 +147,7 @@ func TestFirstRun_KeyInputValidationLongKey(t *testing.T) {
 }
 
 func TestFirstRun_ValidationSuccessToKeychainPrompt(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunValidating
 	m.apiKeyValue = "sk-or-v1-1234567890abcdef"
 	cmds, appMsg := m.Update(validationResultMsg{valid: true})
@@ -161,7 +161,7 @@ func TestFirstRun_ValidationSuccessToKeychainPrompt(t *testing.T) {
 }
 
 func TestFirstRun_ValidationFailureToKeyInput(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunValidating
 	cmds, appMsg := m.Update(validationResultMsg{valid: false, err: "bad key"})
 	if m.State() != FirstRunKeyInput {
@@ -177,7 +177,7 @@ func TestFirstRun_ValidationFailureToKeyInput(t *testing.T) {
 }
 
 func TestFirstRun_KeychainPromptYes(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeychainPrompt
 	m.apiKeyValue = "sk-or-v1-1234567890abcdef"
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
@@ -191,7 +191,7 @@ func TestFirstRun_KeychainPromptYes(t *testing.T) {
 }
 
 func TestFirstRun_KeychainPromptEnter(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeychainPrompt
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.State() != FirstRunComplete {
@@ -204,7 +204,7 @@ func TestFirstRun_KeychainPromptEnter(t *testing.T) {
 }
 
 func TestFirstRun_KeychainPromptNo(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeychainPrompt
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	if m.State() != FirstRunComplete {
@@ -226,7 +226,7 @@ func TestFirstRun_ViewNotEmpty(t *testing.T) {
 		FirstRunComplete,
 	}
 	for _, s := range states {
-		m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+		m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 		m.state = s
 		m.width = 80
 		m.height = 24
@@ -241,7 +241,7 @@ func TestFirstRun_ViewNotEmpty(t *testing.T) {
 }
 
 func TestFirstRun_EscGoesBack(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.providers = []string{"openrouter"}
 	m.apiKeyInput.SetValue("some-key")
@@ -256,7 +256,7 @@ func TestFirstRun_EscGoesBack(t *testing.T) {
 }
 
 func TestFirstRun_EmptyKeyEnter(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.providers = []string{"openrouter"}
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -270,7 +270,7 @@ func TestFirstRun_EmptyKeyEnter(t *testing.T) {
 }
 
 func TestFirstRun_CtrlC(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	cmds, appMsg := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if appMsg != nil {
 		t.Error("Should not emit AppMsg on ctrl+c")
@@ -279,7 +279,7 @@ func TestFirstRun_CtrlC(t *testing.T) {
 }
 
 func TestFirstRun_APIKeyGetter(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunKeyInput
 	m.apiKeyInput.SetValue("sk-or-v1-secret")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -289,7 +289,7 @@ func TestFirstRun_APIKeyGetter(t *testing.T) {
 }
 
 func TestFirstRun_ProviderSelectWithEnter(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.cursor = 1
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -303,7 +303,7 @@ func TestFirstRun_ProviderSelectWithEnter(t *testing.T) {
 }
 
 func TestFirstRun_ProviderSelectUpDown(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunProviderSelect
 	m.providers = []string{"openrouter", "zen", "other1", "other2"}
 
@@ -319,7 +319,7 @@ func TestFirstRun_ProviderSelectUpDown(t *testing.T) {
 }
 
 func TestFirstRun_WindowSize(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	if m.width != 120 || m.height != 40 {
 		t.Errorf("Expected 120x40, got %dx%d", m.width, m.height)
@@ -327,7 +327,7 @@ func TestFirstRun_WindowSize(t *testing.T) {
 }
 
 func TestFirstRun_CompleteStateEmitsOnce(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	m.state = FirstRunComplete
 	// H-6 fix: updateComplete is now a no-op. It should not emit AppMsg
 	// on subsequent messages (resize, keystroke, etc.) to prevent repeated
@@ -342,7 +342,7 @@ func TestFirstRun_CompleteStateEmitsOnce(t *testing.T) {
 }
 
 func TestFirstRun_SetTheme(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/test")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/test", "test")
 	light := theme.Light()
 	m.SetTheme(light)
 	if m.theme.Mode != light.Mode {
@@ -351,7 +351,7 @@ func TestFirstRun_SetTheme(t *testing.T) {
 }
 
 func TestFirstRun_ConfigPath(t *testing.T) {
-	m := NewFirstRunModel(theme.Dark(), "/tmp/.m31a/config.toml")
+	m := NewFirstRunModel(theme.Dark(), "/tmp/.m31a/config.toml", "test")
 	if m.configPath != "/tmp/.m31a/config.toml" {
 		t.Errorf("Expected /tmp/.m31a/config.toml, got %q", m.configPath)
 	}

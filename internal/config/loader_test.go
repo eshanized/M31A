@@ -652,8 +652,8 @@ func TestVarSubstitution_UnsetVar(t *testing.T) {
 
 	applyVarSubstitution(cfg)
 
-	if cfg.Model.Default != "${UNSET_VAR}" {
-		t.Errorf("expected '${UNSET_VAR}' (preserved), got %q", cfg.Model.Default)
+	if cfg.Model.Default != "" {
+		t.Errorf("expected empty string (unset var replaced), got %q", cfg.Model.Default)
 	}
 }
 

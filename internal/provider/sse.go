@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,14 +15,23 @@ type SSEParser struct {
 	scanner   *bufio.Scanner
 	resp      *http.Response
 	closeOnce sync.Once
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func NewSSEParser(resp *http.Response) *SSEParser {
+	return NewSSEParserWithContext(resp, context.Background())
+}
+
+func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParser {
+	ctx, cancel := context.WithCancel(ctx)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, sseMaxLineLength), sseMaxLineLength)
 	return &SSEParser{
 		scanner: scanner,
 		resp:    resp,
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
@@ -29,6 +39,15 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	var lines []string
 
 	for p.scanner.Scan() {
+		// H-7: Check context cancellation between lines
+		if p.ctx != nil {
+			select {
+			case <-p.ctx.Done():
+				return "", "", p.ctx.Err()
+			default:
+			}
+		}
+
 		line := p.scanner.Text()
 		// H-18 fix: trim \r from SSE lines to prevent JSON parse failures
 		// on providers that send \r\n line endings.
@@ -78,6 +97,9 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 func (p *SSEParser) Close() error {
 	var closeErr error
 	p.closeOnce.Do(func() {
+		if p.cancel != nil {
+			p.cancel()
+		}
 		if p.resp != nil && p.resp.Body != nil {
 			closeErr = p.resp.Body.Close()
 		}

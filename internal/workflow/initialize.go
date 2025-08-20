@@ -30,7 +30,7 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 			return nil, fmt.Errorf("git init: %w", err)
 		}
 		if err := e.git.ConfigUser("M31A", "m31a@local"); err != nil {
-			e.logger.Warn("failed to set git user", "error", err)
+			return nil, fmt.Errorf("git config user: %w", err)
 		}
 		e.logger.Info("initialized git repository")
 	}
@@ -63,7 +63,10 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 
 	// Auto-transition to Discuss
 	if err := e.Transition(ctx, types.PhaseInitialize, types.PhaseDiscuss); err != nil {
-		e.logger.Warn("failed to transition to discuss", "error", err)
+		return &PhaseResult{
+			Phase:   types.PhaseInitialize,
+			Success: true,
+		}, fmt.Errorf("transition to discuss: %w", err)
 	}
 
 	return &PhaseResult{

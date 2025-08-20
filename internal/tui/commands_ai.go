@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 )
-
 // M-30: default cooldown between /compress calls to prevent token burn.
 const compressCooldown = 60 * time.Second
 
@@ -36,9 +35,40 @@ func handleReset(args []string, ctx CommandContext) CommandResult {
 }
 
 // handleCompress triggers AutoDream context consolidation.
+// Subcommands:
+//
+//	/compress         — consolidate the conversation
+//	/compress stats   — show consolidation statistics
+//	/compress pause   — pause automatic consolidation
+//	/compress resume  — resume automatic consolidation
 func handleCompress(args []string, ctx CommandContext) CommandResult {
 	if ctx.AutoDream == nil {
 		return CommandResult{Success: false, Message: "AutoDream not available."}
+	}
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "stats":
+			stats := ctx.AutoDream.Stats()
+			var b strings.Builder
+			b.WriteString("AutoDream statistics:\n")
+			b.WriteString(fmt.Sprintf("  Total messages:        %v\n", stats["total_messages"]))
+			b.WriteString(fmt.Sprintf("  Total consolidations:  %v\n", stats["total_consolidations"]))
+			b.WriteString(fmt.Sprintf("  Paused:                %v\n", stats["paused"]))
+			b.WriteString(fmt.Sprintf("  Estimated tokens:      %v\n", stats["estimated_tokens"]))
+			if last, ok := stats["last_consolidation"].(string); ok && last != "" {
+				b.WriteString(fmt.Sprintf("  Last consolidation:    %s\n", last))
+			} else {
+				b.WriteString("  Last consolidation:    never\n")
+			}
+			return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+		case "pause":
+			ctx.AutoDream.Pause()
+			return CommandResult{Success: true, Message: "AutoDream paused. Use /compress resume to re-enable."}
+		case "resume":
+			ctx.AutoDream.Resume()
+			return CommandResult{Success: true, Message: "AutoDream resumed."}
+		}
 	}
 
 	// M-30: Enforce cooldown between compress calls
@@ -53,6 +83,14 @@ func handleCompress(args []string, ctx CommandContext) CommandResult {
 		}
 	}
 
+	// Pre-check: use CanConsolidate to fail fast with a friendly message.
+	if !ctx.AutoDream.CanConsolidate() {
+		return CommandResult{
+			Success: false,
+			Message: "Nothing to compress yet — conversation is still short or AutoDream is paused.",
+		}
+	}
+
 	result := ctx.AutoDream.Consolidate()
 
 	// Record compress time after attempt (even on failure, to prevent rapid retry spam)
@@ -63,7 +101,11 @@ func handleCompress(args []string, ctx CommandContext) CommandResult {
 	if result.Error != "" {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Consolidation failed: %s", result.Error)}
 	}
-	return CommandResult{Success: true, Message: result.Summary}
+
+	// Surface useful stats alongside the summary so the user sees the impact.
+	msg := fmt.Sprintf("%s\n  Removed %d messages, saved ~%d tokens (%dms)",
+		result.Summary, result.MessagesRemoved, result.TokensSaved, result.DurationMs)
+	return CommandResult{Success: true, Message: msg}
 }
 
 // handleTokens estimates token count for provided text.

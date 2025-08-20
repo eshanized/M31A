@@ -2,8 +2,8 @@
 
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
-> **Last Updated**: 2026-06-01
-> **Status**: Phase 14 in planning — TUI ↔ Core Wiring Fixes
+> **Last Updated**: 2026-06-05
+> **Status**: Phase 22 in planning — Hardcoded Values & Logical Bug Fixes
 
 ---
 
@@ -15,7 +15,7 @@
 | **Estimated V1 Duration** | 21 weeks (1 senior Go developer) |
 | **Estimated V1 Duration (2-person team)** | 14-15 weeks (Phases 1/2 and 4/5 parallelized) |
 | **Estimated V1.1 Duration** | 6 weeks additional (week 27 total) |
-| **Total Phases** | 10 (9 for V1, 1 for V1.1) |
+| **Total Phases** | 12 (9 for V1, 1 for V1.1, 2 for bug fixes) |
 | **Total Packages** | ~23 (internal + public) |
 | **TUI Screens** | 10+ |
 | **Core Tools** | 5 (V1) + 7 deferred (V1.1) |
@@ -1399,3 +1399,161 @@ cmd/m31a/
 | 2026-06-01 | Added Phase 10-13 for OpenCode adaptation adoption (items 1-4, 7-16 excluding MCP and Plugin System) |
 | 2026-06-01 | Phase 11 planned: 3 plans (Session Forking, Multi-Layer Config, Permission Ruleset Completion) |
 | 2026-06-01 | Phase 11 executed and completed — all 3 plans implemented, code review passed with all fixes applied |
+| 2026-06-04 | Phase 21 planned: 4 plans (TUI Logical Errors and Connectivity Fixes from rush/tui_logical_errors_and_connectivity_report.md) |
+
+---
+
+## Phase 20 — Internal Wiring and Logic Fixes
+
+**Duration:** 1 week  
+**Complexity:** 8/10  
+**Status:** In Progress
+**Milestone:** All 6 critical wiring and logical flaws from rush/internal_wiring_and_logic_report.md are resolved.
+**Source:** rush/internal_wiring_and_logic_report.md
+**Depends on:** Phase 19
+
+### Deliverables
+- Token Usage Tracking fixed
+- TUI State Concurrency Violation resolved
+- Ignored Per-Phase Configuration fixed
+- TUI/Engine Synchronization Failure resolved
+- Resumable Workflow Deadlock fixed
+- Redundant Phase Transition Logic removed
+
+---
+
+## Phase 21 — TUI Logical Errors and Connectivity Fixes
+
+**Duration:** 2 weeks  
+**Complexity:** 8/10  
+**Status:** Planned
+**Milestone:** All 11 categories of TUI logical errors and connectivity issues from rush/tui_logical_errors_and_connectivity_report.md are resolved.
+**Source:** rush/tui_logical_errors_and_connectivity_report.md
+**Depends on:** Phase 19
+
+### Background
+
+The TUI logical errors and connectivity audit (`rush/tui_logical_errors_and_connectivity_report.md`) analyzed ~6,500+ lines of TUI code across 19 source files. It identified 11 categories of issues affecting state synchronization, message flow, component connectivity, error handling, timer/goroutine management, memory management, UI rendering, config hot-reload, input handling, and accessibility.
+
+### Issues Fixed
+
+| Wave | Issues | Plans |
+|------|--------|-------|
+| 1 (Critical) | State Synchronization, Message Flow, Component Connectivity, Phase Transitions | 21-01 |
+| 2 (High) | Error Handling, Timer/Goroutine Management, Memory Management | 21-02 |
+| 3 (Medium) | UI Rendering, Config Hot-Reload, Input Handling | 21-03 |
+| 4 (Low) | Accessibility and Usability | 21-04 |
+
+### Plans
+
+```
+Plans:
+- [ ] 21-01-PLAN.md — Critical State & Component Fixes (Wave 1)
+- [ ] 21-02-PLAN.md — Error Handling & Resource Management (Wave 2)
+- [ ] 21-03-PLAN.md — UI Rendering & Input Handling (Wave 3)
+- [ ] 21-04-PLAN.md — Accessibility Improvements (Wave 4)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 21-01 | yes | — |
+| 2    | 21-02 | yes | Wave 1 |
+| 3    | 21-03 | yes | Wave 2 |
+| 4    | 21-04 | yes | Wave 3 |
+
+### Deliverables
+
+- workflowRunning and currentPhase never diverge
+- sessionID propagates to all components on change
+- model/provider changes update all dependent components
+- StreamMsg handled correctly during all phases
+- PermissionRequestMsg queued when modal active
+- PlanModel always reflects current tasks
+- ExecuteModel receives streaming updates
+- VerifyModel contains actual verification results
+- ShipModel summary has complete data
+- Phase transitions clean up properly on error
+- StreamErrorMsg properly updates workflow state
+- Provider errors pause/resume workflow correctly
+- Context exceeded triggers cleanup
+- Discuss timeout timer properly stopped
+- Health check ticker properly managed
+- Stream goroutine lifecycle correct
+- Message history bounded
+- Thinking blocks cache properly managed
+- Tool cards cache properly managed
+- Header cache reflects current state
+- Sidebar width propagates to message renderer
+- Theme changes propagate to all components
+- Config reload applies all changes
+- Permission config changes take effect
+- Slash during streaming handled gracefully
+- Rapid key presses queued correctly
+- Ctrl+C during permission modal works
+- Color contrast meets WCAG standards
+- Keyboard navigation discoverable
+- Unicode characters render correctly with fallbacks
+
+---
+
+## Phase 22 — Hardcoded Values & Logical Bug Fixes
+
+**Duration:** 2 weeks  
+**Complexity:** 7/10  
+**Status:** Planned
+**Milestone:** All 36 hardcoded values, 11 logical bugs, and config wiring issues from rush/deep_logical_errors_and_hardcoded_values_report.md are fixed.
+**Source:** rush/deep_logical_errors_and_hardcoded_values_report.md
+**Depends on:** Phase 14 (TUI ↔ Core Wiring Fixes)
+
+### Background
+
+The deep audit (`rush/deep_logical_errors_and_hardcoded_values_report.md`) identified 36 hardcoded values, 11 logical bugs, 15 TUI screen issues, and 26 config/settings problems. The most critical issues involve hardcoded provider URLs that ignore user configuration, model capability maps that violate the "no hardcoded model lists" architecture rule, and several TUI state management bugs.
+
+### Issues Fixed
+
+| Wave | Issues | Plans |
+|------|--------|-------|
+| 1 (Critical) | BUG-01 (firstrun URLs), BUG-05 (self-heal), BUG-06 (new session), Config Wiring | 22-01 |
+| 2 (High) | BUG-03 (workflowRunning), BUG-04 (theme auto), BUG-02 (bool merge), Model Maps, Health Defaults | 22-02 |
+| 3 (Medium) | Tool Constants (18 values), Config Validation (7 fields), Duplicated Constants, WebFetch UA | 22-03 |
+| 4 (Low) | TUI Minor Issues, Settings UX, Missing Config Fields | 22-04 |
+
+### Plans
+
+```
+Plans:
+- [ ] 22-01-PLAN.md — Critical Bug Fixes & Config Wiring (Wave 1)
+- [ ] 22-02-PLAN.md — High Priority Bug Fixes & Model Map Removal (Wave 2)
+- [ ] 22-03-PLAN.md — Tool Constants & Config Validation (Wave 3)
+- [ ] 22-04-PLAN.md — Low Priority Polish & Config Fields (Wave 4)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 22-01 | yes | — |
+| 2    | 22-02 | yes | Wave 1 |
+| 3    | 22-03 | yes | Wave 2 |
+| 4    | 22-04 | yes | Wave 3 |
+
+### Deliverables
+
+- First-run validation uses configurable base URLs (BUG-01)
+- Self-heal confirmation actually triggers healing (BUG-05)
+- New session creates fresh session, not first-run wizard (BUG-06)
+- All 8 config fields wired to provider Options structs
+- Ship phase included in workflowRunning check (BUG-03)
+- Theme "auto" handled in runtime switch (BUG-04)
+- Config bool merge preserves explicit false values (BUG-02)
+- No hardcoded model capability maps in providers
+- Health check defaults consistent between config and providers
+- All 18 tool magic numbers extracted to named constants
+- Config validation for all numeric fields
+- WebFetch User-Agent uses Version variable
+- No duplicate constants across packages
+- Tab-completion standardized
+- Settings unsaved changes warning
+- Missing config fields added for tool limits
