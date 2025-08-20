@@ -76,10 +76,10 @@ func New(apiKey string, opts Options) (*Client, error) {
 		opts.CacheStaleTTL = 24 * time.Hour
 	}
 	if opts.HealthCheckLiveMs == 0 {
-		opts.HealthCheckLiveMs = 2000
+		opts.HealthCheckLiveMs = 500 // Match config default (FeaturesConfig.HealthCheckLiveMs)
 	}
 	if opts.HealthCheckSlowMs == 0 {
-		opts.HealthCheckSlowMs = 5000
+		opts.HealthCheckSlowMs = 2000 // Match config default (FeaturesConfig.HealthCheckSlowMs)
 	}
 	if opts.DefaultContextLen == 0 {
 		opts.DefaultContextLen = 128_000

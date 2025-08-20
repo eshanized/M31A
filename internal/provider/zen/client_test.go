@@ -583,7 +583,7 @@ func TestHealthCheck_Offline(t *testing.T) {
 func TestHealthCheck_Slow(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond) // Between live (500ms) and slow threshold (2000ms)
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -596,8 +596,8 @@ func TestHealthCheck_Slow(t *testing.T) {
 	if status.Status != "slow" {
 		t.Fatalf("expected status %q, got %q", "slow", status.Status)
 	}
-	if status.LatencyMs < 2000 {
-		t.Fatalf("expected latency >= 2000ms for slow status, got %d", status.LatencyMs)
+	if status.LatencyMs < 500 {
+		t.Fatalf("expected latency >= 500ms for slow status, got %d", status.LatencyMs)
 	}
 }
 

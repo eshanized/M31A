@@ -59,7 +59,7 @@ func TestHealthCheck_Live(t *testing.T) {
 func TestHealthCheck_Slow(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/key" {
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond) // Between live (500ms) and slow threshold (2000ms)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 		}
