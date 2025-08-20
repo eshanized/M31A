@@ -15,18 +15,35 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
 )
 
 // ErrValidation is returned when config validation fails.
 var ErrValidation = errors.New("config validation")
 
-// DefaultConfig returns a Config with zero-valued fields.
-// Missing config file causes Load to return DefaultConfig without error.
+// DefaultConfig returns a Config with sane defaults. Missing config file
+// causes Load to return DefaultConfig without error.
 func DefaultConfig() *Config {
 	return &Config{
 		UI: UIConfig{
 			SidebarWidthThreshold: 120,
+			MaxIterations:         100,
+			DiscussTimeout:        300,
+			LeaderTimeoutMs:       1000,
+		},
+		Model: ModelConfig{
+			ContextWarningThreshold: types.ContextWarningThreshold,
+			TokenEMAAlpha:           0.3,
+			DefaultContextLength:    types.DefaultContextLength,
+		},
+		Features: FeaturesConfig{
+			ModelCacheTTLMinutes: 5,
+			ModelCacheStaleHours: 24,
+			SessionIDLength:      types.SessionIDLength,
+			MaxRecentModels:      10,
+			HealthCheckLiveMs:    500,
+			HealthCheckSlowMs:    2000,
 		},
 	}
 }
@@ -74,7 +91,9 @@ func Load(path string) (*Config, error) {
 
 	// Step 5: Layer 4 — Project-level config (m31a.toml in cwd)
 	cwd, err := os.Getwd()
-	if err == nil {
+	if err != nil {
+		slog.Warn("cannot determine working directory, skipping project config", "error", err)
+	} else {
 		if projectPath := findProjectConfig(cwd); projectPath != "" {
 			var projectCfg Config
 			if _, err := toml.DecodeFile(projectPath, &projectCfg); err != nil {
@@ -92,6 +111,12 @@ func Load(path string) (*Config, error) {
 	// Step 7: Validation
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
+	// M-12: TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
+	if cfg.Model.TokenEMAAlpha == 0 {
+		slog.Warn("token_ema_alpha is 0 (disabled), applying default 0.3")
+		cfg.Model.TokenEMAAlpha = 0.3
 	}
 
 	return cfg, nil
@@ -147,9 +172,12 @@ func mergeField(base, overlay reflect.Value, typ reflect.Type) {
 			base.SetString(overlay.String())
 		}
 	case reflect.Bool:
-		// Only override if overlay is true (false is zero value)
+		// Only overwrite if overlay bool is explicitly true.
+		// Zero-valued (false) bools in overlay preserve the base value,
+		// since we cannot distinguish "not set" from "explicitly set to false"
+		// without TOML metadata tracking.
 		if overlay.Bool() {
-			base.SetBool(true)
+			base.SetBool(overlay.Bool())
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if overlay.Int() != 0 {
@@ -176,10 +204,7 @@ func mergeField(base, overlay reflect.Value, typ reflect.Type) {
 			}
 		}
 	case reflect.Struct:
-		// Only recurse if overlay struct is not zero-valued
-		if !overlay.IsZero() {
-			mergeStructs(base, overlay)
-		}
+		mergeStructs(base, overlay)
 	}
 }
 
@@ -407,7 +432,7 @@ func substituteVars(s string) string {
 		if val, ok := os.LookupEnv(name); ok {
 			return val
 		}
-		return match
+		return ""
 	})
 }
 
