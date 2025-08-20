@@ -223,6 +223,7 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 	g := git.New(cwd)
 	rb := rollback.New(g)
 
+	tools.SetVersion(version)
 	dispatcher, err := tools.DefaultDispatcher(cwd, backupDir, sessionBaseDir, &cfg.Permissions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tool dispatcher: %w", err)

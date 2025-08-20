@@ -16,6 +16,17 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Version is the application version used in User-Agent headers.
+// Set via SetVersion() from cmd/m31a/main.go.
+var Version = "dev"
+
+// SetVersion sets the application version for User-Agent headers.
+func SetVersion(v string) {
+	if v != "" {
+		Version = v
+	}
+}
+
 // dnsCacheEntry caches DNS resolution results for a hostname to prevent
 // DNS rebinding (TOCTOU) attacks. The 5-minute TTL ensures stale entries
 // are refreshed while still pinning IPs for the duration of a request.
@@ -282,7 +293,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}
 
 	// Browser user agent
-	req.Header.Set("User-Agent", "M31A/1.0 (AI Coding Agent; +https://github.com/eshanized/M31A)")
+	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s (AI Coding Agent; +https://github.com/eshanized/M31A)", Version))
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
