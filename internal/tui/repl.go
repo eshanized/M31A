@@ -223,12 +223,19 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Minimum input height is 1 line (even on very small terminals)
 		inputHeight := 3
+		const minInputHeight = 1
 		// Account for textarea(3) + metadataRow(1) + bottomBorder(1) + statusBar(1) = 6 total chrome lines.
-		// The viewport itself has no borders. Previous value of 8 was wrong
-		// (counted phantom "viewport borders" and "thinking indicator" lines that
-		// don't exist in the current layout).
 		const chromeHeight = 6
+		availableForContent := msg.Height - chromeHeight
+		if availableForContent < minInputHeight+1 {
+			// Terminal too small — give input minimum height, viewport gets what's left
+			inputHeight = minInputHeight
+			if availableForContent > minInputHeight {
+				inputHeight = availableForContent - 1
+			}
+		}
 		vpHeight := msg.Height - chromeHeight - inputHeight
 		if vpHeight < 1 {
 			vpHeight = 1
