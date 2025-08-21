@@ -51,20 +51,21 @@ type editableField struct {
 // SettingsModel provides a tabbed configuration editor with inline editing.
 // Follows Bubble Tea model pattern (value receiver, returns new model).
 type SettingsModel struct {
-	config       *config.Config
-	theme        theme.Theme
-	activeTab    settingsTab
-	fields       map[settingsTab][]*editableField
-	focusedField int
-	width        int
-	height       int
-	dirty        bool
-	err          string
-	statusMsg    string
-	ledger       *ledger.Ledger
-	configPath   string
-	keychain     keychain.Keychain
-	spinner      spinner.Model
+	config            *config.Config
+	theme             theme.Theme
+	activeTab         settingsTab
+	fields            map[settingsTab][]*editableField
+	focusedField      int
+	width             int
+	height            int
+	dirty             bool
+	err               string
+	statusMsg         string
+	ledger            *ledger.Ledger
+	configPath        string
+	keychain          keychain.Keychain
+	spinner           spinner.Model
+	showUnsavedWarning bool
 }
 
 // NewSettingsModel creates a SettingsModel with the given config, theme, and optional ledger.
@@ -429,10 +430,19 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
+			if m.showUnsavedWarning {
+				m.showUnsavedWarning = false
+				return m, nil
+			}
 			if m.isEditing() {
 				return m.cancelEdit(), nil
 			}
-			// Not editing — return to REPL
+			// Not editing — check for unsaved changes
+			if m.dirty {
+				m.showUnsavedWarning = true
+				return m, nil
+			}
+			// No changes — return to REPL
 			return m, func() tea.Msg {
 				return AppMsg{Screen: ScreenREPL}
 			}
@@ -503,6 +513,40 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 
+		case "y", "Y":
+			// Save and exit from unsaved warning
+			if m.showUnsavedWarning {
+				oldTheme := m.config.UI.Theme
+				m.applyFieldValues()
+				m.dirty = false
+				m.showUnsavedWarning = false
+				if err := m.config.Save(m.configPath); err != nil {
+					m.err = fmt.Sprintf("Save failed: %v", err)
+					return m, nil
+				}
+				m.saveAPIKeysToKeychain()
+				var cmds []tea.Cmd
+				cmds = append(cmds, func() tea.Msg {
+					return AppMsg{Screen: ScreenREPL}
+				})
+				if m.config.UI.Theme != oldTheme {
+					cmds = append(cmds, func() tea.Msg {
+						return ThemeChangedMsg{Theme: m.config.UI.Theme}
+					})
+				}
+				return m, tea.Batch(cmds...)
+			}
+
+		case "n", "N":
+			// Discard and exit from unsaved warning
+			if m.showUnsavedWarning {
+				m.dirty = false
+				m.showUnsavedWarning = false
+				return m, func() tea.Msg {
+					return AppMsg{Screen: ScreenREPL}
+				}
+			}
+
 		case "backspace":
 			if m.isEditing() {
 				return m.deleteChar(), nil
@@ -530,7 +574,37 @@ func (m SettingsModel) View() string {
 	content := m.renderActiveTab()
 	footer := m.renderFooter()
 
-	return lipgloss.JoinVertical(lipgloss.Top, tabBar, "", content, "", footer)
+	mainView := lipgloss.JoinVertical(lipgloss.Top, tabBar, "", content, "", footer)
+
+	if m.showUnsavedWarning {
+		return m.renderUnsavedWarning(mainView)
+	}
+
+	return mainView
+}
+
+// renderUnsavedWarning renders an unsaved changes confirmation modal over the settings view.
+func (m SettingsModel) renderUnsavedWarning(bg string) string {
+	title := lipgloss.NewStyle().
+		Foreground(m.theme.Warning).
+		Bold(true).
+		Render("Unsaved Changes")
+
+	hint := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render("[Y] Save  [N] Discard  [Esc] Cancel")
+
+	warningBox := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(m.theme.Warning).
+		Padding(1, 2).
+		Width(50).
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", hint))
+
+	// Center the modal
+	centeredModal := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, warningBox)
+
+	return lipgloss.JoinVertical(lipgloss.Top, bg, centeredModal)
 }
 
 // renderTabBar renders the tab headers row.
