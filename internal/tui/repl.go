@@ -113,6 +113,9 @@ type ReplModel struct {
 
 	// Auto-scroll control: track if user has manually scrolled up
 	userScrolled bool
+
+	// Debounce for thinking block toggle during streaming
+	lastToggleAt time.Time
 }
 
 // autoScrollConditionally scrolls to bottom only if the user hasn't manually scrolled up.
@@ -277,6 +280,24 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 				m.renderMessages()
 				var cmds []tea.Cmd
 				return cmds, true
+			case "t":
+				// Toggle focused thinking block during streaming (debounced)
+				if len(m.thinkingBlocks) > 0 && time.Since(m.lastToggleAt) > 100*time.Millisecond {
+					m.lastToggleAt = time.Now()
+					m.toggleFocusedThinkingBlock()
+					m.renderMessages()
+				}
+				var cmds []tea.Cmd
+				return cmds, false
+			case "T":
+				// Toggle ALL thinking blocks during streaming (debounced)
+				if len(m.thinkingBlocks) > 0 && time.Since(m.lastToggleAt) > 100*time.Millisecond {
+					m.lastToggleAt = time.Now()
+					m.toggleAllThinkingBlocks()
+					m.renderMessages()
+				}
+				var cmds []tea.Cmd
+				return cmds, false
 			}
 			var cmds []tea.Cmd
 			return cmds, false
