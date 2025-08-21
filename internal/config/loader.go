@@ -45,6 +45,14 @@ func DefaultConfig() *Config {
 			HealthCheckLiveMs:    500,
 			HealthCheckSlowMs:    2000,
 		},
+		Tools: ToolsConfig{
+			MaxGlobResults:       1000,
+			MaxGrepResults:       100,
+			BashKillGraceSecs:    5,
+			MaxBackupsPerFile:    10,
+			WebfetchMaxRedirects: 5,
+			WebfetchUserAgent:    "M31A/dev",
+		},
 	}
 }
 
@@ -374,6 +382,43 @@ func validateConfig(cfg *Config) error {
 			Field:        "features.max_recent_models",
 			ExpectedType: "non-negative integer",
 			ActualValue:  fmt.Sprintf("%d", cfg.Features.MaxRecentModels),
+		})
+	}
+
+	// Tools
+	if cfg.Tools.MaxGlobResults < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.max_glob_results",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.MaxGlobResults),
+		})
+	}
+	if cfg.Tools.MaxGrepResults < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.max_grep_results",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.MaxGrepResults),
+		})
+	}
+	if cfg.Tools.BashKillGraceSecs < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.bash_kill_grace_secs",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.BashKillGraceSecs),
+		})
+	}
+	if cfg.Tools.MaxBackupsPerFile < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.max_backups_per_file",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.MaxBackupsPerFile),
+		})
+	}
+	if cfg.Tools.WebfetchMaxRedirects < 0 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.webfetch_max_redirects",
+			ExpectedType: "non-negative integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.WebfetchMaxRedirects),
 		})
 	}
 

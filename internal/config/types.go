@@ -9,6 +9,7 @@ type Config struct {
 	Permissions PermissionsConfig `toml:"permissions"`
 	Features    FeaturesConfig    `toml:"features"`
 	Ledger      LedgerConfig      `toml:"ledger"`
+	Tools       ToolsConfig       `toml:"tools"`
 	Agents      AgentsConfig      `toml:"agents"`
 }
 
@@ -107,6 +108,16 @@ type LedgerConfig struct {
 // Each field names a workflow phase and holds a model ID string.
 // Allows users to assign different models to different workflow phases
 // (e.g., cheap model for Plan, powerful model for Execute).
+// ToolsConfig defines configurable limits for tool execution.
+type ToolsConfig struct {
+	MaxGlobResults       int    `toml:"max_glob_results"`
+	MaxGrepResults       int    `toml:"max_grep_results"`
+	BashKillGraceSecs    int    `toml:"bash_kill_grace_secs"`
+	MaxBackupsPerFile    int    `toml:"max_backups_per_file"`
+	WebfetchMaxRedirects int    `toml:"webfetch_max_redirects"`
+	WebfetchUserAgent    string `toml:"webfetch_user_agent"`
+}
+
 type AgentsConfig struct {
 	Default string `toml:"default"`
 	Plan    string `toml:"plan"`
