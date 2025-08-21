@@ -58,7 +58,7 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	}
 
 	m.renderMessages()
-	m.viewport.GotoBottom()
+	m.autoScrollConditionally()
 
 	// Fix C-3: continuation cmd reads the next message from the goroutine's
 	// channel. StartStreamCmd owns the channel (allocated internally, closed
@@ -161,7 +161,7 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 	}
 
 	m.renderMessages()
-	m.viewport.GotoBottom()
+	m.autoScrollConditionally()
 
 	var cmds []tea.Cmd
 	return cmds, true

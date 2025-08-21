@@ -110,6 +110,21 @@ type ReplModel struct {
 
 	// Recent session activity sparkline (populated by AppState via SetSessionSparkline)
 	sessionSparkline string
+
+	// Auto-scroll control: track if user has manually scrolled up
+	userScrolled bool
+}
+
+// autoScrollConditionally scrolls to bottom only if the user hasn't manually scrolled up.
+func (m *ReplModel) autoScrollConditionally() {
+	if !m.userScrolled {
+		m.viewport.GotoBottom()
+	}
+}
+
+// AtBottom returns true if the viewport is at or near the bottom.
+func (m *ReplModel) atBottom() bool {
+	return m.viewport.AtBottom()
 }
 
 // MaxMessageHistory is the maximum number of messages retained in the REPL.
@@ -245,7 +260,7 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	case TickMsg:
 		if m.streaming {
 			m.renderMessages()
-			m.viewport.GotoBottom()
+			m.autoScrollConditionally()
 		}
 		return m.streamTickCmds()
 
@@ -510,11 +525,16 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 		case "pgup":
 			m.viewport.HalfViewUp()
+			m.userScrolled = true
 			var cmds []tea.Cmd
 			return cmds, false
 
 		case "pgdown":
 			m.viewport.HalfViewDown()
+			// Reset auto-scroll if user scrolls back to bottom
+			if m.viewport.AtBottom() {
+				m.userScrolled = false
+			}
 			var cmds []tea.Cmd
 			return cmds, false
 
@@ -827,7 +847,7 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 		m.messages = m.messages[len(m.messages)-500:]
 	}
 	m.renderMessages()
-	m.viewport.GotoBottom()
+	m.autoScrollConditionally()
 }
 
 func (m *ReplModel) InputValue() string {
@@ -852,6 +872,7 @@ func (m *ReplModel) ClearMessages() {
 	m.toolCards = make(map[int]*components.ToolCard)
 	m.renderMessages()
 	m.viewport.GotoBottom()
+	m.userScrolled = false
 }
 
 func (m *ReplModel) SpinnerTick() tea.Cmd {
