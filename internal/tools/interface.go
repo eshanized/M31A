@@ -2,11 +2,22 @@ package tools
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// permissionRequestID is a monotonically increasing counter for correlating
+// permission requests with responses. This prevents response mix-ups when
+// multiple permission requests are in flight (V1.1 concurrent subagents).
+var permissionRequestID atomic.Int64
+
+func nextPermissionRequestID() int64 {
+	return permissionRequestID.Add(1)
+}
+
 type PermissionRequest struct {
+	ID          int64           `json:"id"`
 	ToolName    string          `json:"tool_name"`
 	Command     string          `json:"command"`
 	RiskLevel   types.RiskLevel `json:"risk_level"`
@@ -18,8 +29,9 @@ type PermissionRequest struct {
 }
 
 type PermissionResponse struct {
-	Allowed  bool `json:"allowed"`
-	Remember bool `json:"remember"`
+	RequestID int64 `json:"request_id"`
+	Allowed   bool  `json:"allowed"`
+	Remember  bool  `json:"remember"`
 }
 
 // PermissionContext carries additional info about a matched rule
