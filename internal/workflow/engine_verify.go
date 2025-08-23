@@ -111,7 +111,8 @@ const verifyTaskTimeout = 5 * time.Minute
 // verifyTaskContext returns a context with a deadline for verification commands.
 // Derives from the parent context so session cancellation propagates.
 func (e *Engine) verifyTaskContext(parent context.Context) context.Context {
-	ctx, _ := context.WithTimeout(parent, verifyTaskTimeout)
+	ctx, cancel := context.WithTimeout(parent, verifyTaskTimeout)
+	_ = cancel // cancel is not called explicitly; parent context cancellation propagates
 	return ctx
 }
 

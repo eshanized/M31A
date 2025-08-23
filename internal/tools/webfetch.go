@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/errors"
@@ -18,13 +19,27 @@ import (
 
 // Version is the application version used in User-Agent headers.
 // Set via SetVersion() from cmd/m31a/main.go.
-var Version = "dev"
+//
+//nolint:gochecknoglobals // package-level singleton, set once at startup
+var Version atomic.Value
+
+func init() {
+	Version.Store("dev")
+}
 
 // SetVersion sets the application version for User-Agent headers.
 func SetVersion(v string) {
 	if v != "" {
-		Version = v
+		Version.Store(v)
 	}
+}
+
+// getVersion returns the current version string.
+func getVersion() string {
+	if v, ok := Version.Load().(string); ok {
+		return v
+	}
+	return "dev"
 }
 
 // dnsCacheEntry caches DNS resolution results for a hostname to prevent
@@ -293,7 +308,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}
 
 	// Browser user agent
-	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s (AI Coding Agent; +https://github.com/eshanized/M31A)", Version))
+	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s (AI Coding Agent; +https://github.com/eshanized/M31A)", getVersion()))
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
