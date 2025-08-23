@@ -33,6 +33,26 @@ func (t *Bash) RiskLevel() types.RiskLevel {
 	return types.RiskDangerous
 }
 
+// ParameterSchema returns the JSON Schema for Bash tool parameters.
+func (t *Bash) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"command": {
+				"type": "string",
+				"description": "The shell command to execute"
+			},
+			"timeout": {
+				"type": "integer",
+				"description": "Timeout in seconds (default 1800, max 1800)",
+				"minimum": 1,
+				"maximum": 1800
+			}
+		},
+		"required": ["command"]
+	}`
+}
+
 func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
