@@ -116,6 +116,14 @@ type Tool interface {
 	Execute(ctx context.Context, input ToolInput) (ToolResult, error)
 }
 
+// SchemaProvider is an optional interface that tools can implement to
+// provide JSON Schema parameter definitions to the LLM. Tools that
+// implement this interface will have their schemas included in tool
+// definitions sent to the provider.
+type SchemaProvider interface {
+	ParameterSchema() string
+}
+
 type Task struct {
 	ID                 int        `json:"id"`
 	Description        string     `json:"description"`
