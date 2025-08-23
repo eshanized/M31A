@@ -13,8 +13,8 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-func (d *Dispatcher) ApprovePermission(allowed bool, remember bool) {
-	d.responseCh <- PermissionResponse{Allowed: allowed, Remember: remember}
+func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember bool) {
+	d.responseCh <- PermissionResponse{RequestID: requestID, Allowed: allowed, Remember: remember}
 }
 
 func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
@@ -138,7 +138,9 @@ func matchAnyParamValue(pattern string, params map[string]any) bool {
 }
 
 func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, risk types.RiskLevel, pctx *PermissionContext) error {
+	reqID := nextPermissionRequestID()
 	req := PermissionRequest{
+		ID:          reqID,
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
@@ -158,14 +160,27 @@ func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, ris
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
 	defer cancel()
 
+	// RC-2 fix: match responses by request ID to prevent mix-ups
 	var resp PermissionResponse
-	select {
-	case resp = <-d.responseCh:
-	case <-timeoutCtx.Done():
-		return m31errors.ErrPermissionDenied
-	case <-ctx.Done():
-		return ctx.Err()
+	for {
+		select {
+		case r := <-d.responseCh:
+			if r.RequestID == reqID {
+				resp = r
+				goto done
+			}
+			// Not ours — put it back and keep looking
+			select {
+			case d.responseCh <- r:
+			default:
+			}
+		case <-timeoutCtx.Done():
+			return m31errors.ErrPermissionDenied
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+done:
 
 	if !resp.Allowed {
 		return m31errors.ErrPermissionDenied
@@ -181,7 +196,9 @@ func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, ris
 }
 
 func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
+	reqID := nextPermissionRequestID()
 	req := PermissionRequest{
+		ID:          reqID,
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
@@ -200,13 +217,24 @@ func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call typ
 	defer cancel()
 
 	var resp PermissionResponse
-	select {
-	case resp = <-d.responseCh:
-	case <-timeoutCtx.Done():
-		return m31errors.ErrPermissionDenied
-	case <-ctx.Done():
-		return ctx.Err()
+	for {
+		select {
+		case r := <-d.responseCh:
+			if r.RequestID == reqID {
+				resp = r
+				goto done
+			}
+			select {
+			case d.responseCh <- r:
+			default:
+			}
+		case <-timeoutCtx.Done():
+			return m31errors.ErrPermissionDenied
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+done:
 
 	if !resp.Allowed {
 		return m31errors.ErrPermissionDenied
@@ -227,7 +255,9 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 	d.mu.RUnlock()
 
 	if !remembered || !allowed {
+		reqID := nextPermissionRequestID()
 		req := PermissionRequest{
+			ID:          reqID,
 			ToolName:    call.Name,
 			Command:     extractCommandString(call.Name, call.Input),
 			RiskLevel:   risk,
@@ -245,13 +275,24 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 		defer cancel()
 
 		var resp PermissionResponse
-		select {
-		case resp = <-d.responseCh:
-		case <-timeoutCtx.Done():
-			return m31errors.ErrPermissionDenied
-		case <-ctx.Done():
-			return ctx.Err()
+		for {
+			select {
+			case r := <-d.responseCh:
+				if r.RequestID == reqID {
+					resp = r
+					goto done
+				}
+				select {
+				case d.responseCh <- r:
+				default:
+				}
+			case <-timeoutCtx.Done():
+				return m31errors.ErrPermissionDenied
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
+	done:
 
 		if !resp.Allowed {
 			return m31errors.ErrPermissionDenied
