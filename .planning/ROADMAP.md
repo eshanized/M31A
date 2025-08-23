@@ -3,7 +3,7 @@
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
 > **Last Updated**: 2026-06-05
-> **Status**: Phase 22 in planning — Hardcoded Values & Logical Bug Fixes
+> **Status**: Phase 22 complete — Hardcoded Values & Logical Bug Fixes
 
 ---
 
@@ -1502,7 +1502,7 @@ Plans:
 
 **Duration:** 2 weeks  
 **Complexity:** 7/10  
-**Status:** Planned
+**Status:** ✓ Complete
 **Milestone:** All 36 hardcoded values, 11 logical bugs, and config wiring issues from rush/deep_logical_errors_and_hardcoded_values_report.md are fixed.
 **Source:** rush/deep_logical_errors_and_hardcoded_values_report.md
 **Depends on:** Phase 14 (TUI ↔ Core Wiring Fixes)
@@ -1524,10 +1524,10 @@ The deep audit (`rush/deep_logical_errors_and_hardcoded_values_report.md`) ident
 
 ```
 Plans:
-- [ ] 22-01-PLAN.md — Critical Bug Fixes & Config Wiring (Wave 1)
-- [ ] 22-02-PLAN.md — High Priority Bug Fixes & Model Map Removal (Wave 2)
-- [ ] 22-03-PLAN.md — Tool Constants & Config Validation (Wave 3)
-- [ ] 22-04-PLAN.md — Low Priority Polish & Config Fields (Wave 4)
+- [x] 22-01-PLAN.md — Critical Bug Fixes & Config Wiring (Wave 1)
+- [x] 22-02-PLAN.md — High Priority Bug Fixes & Model Map Removal (Wave 2)
+- [x] 22-03-PLAN.md — Tool Constants & Config Validation (Wave 3)
+- [x] 22-04-PLAN.md — Low Priority Polish & Config Fields (Wave 4)
 ```
 
 ### Wave Structure
