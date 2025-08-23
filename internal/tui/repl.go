@@ -184,17 +184,15 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			switch keyMsg.String() {
 			case "tab":
-				// Autocomplete the selected suggestion
-				if m.slashSelected >= 0 && m.slashSelected < len(m.slashSuggestions) {
-					sel := m.slashSuggestions[m.slashSelected]
+				// Second Tab: accept the first match
+				if len(m.slashSuggestions) > 0 {
+					sel := m.slashSuggestions[0]
 					current := m.textarea.Value()
 					parts := strings.Fields(current)
 					if len(parts) > 0 && strings.HasPrefix(parts[0], "/") {
-						// Replace the partial command with the full suggestion
 						parts[0] = sel.Slash
 						completed := strings.Join(parts, " ")
 						m.textarea.SetValue(completed)
-						// Move cursor to end
 						m.textarea.CursorEnd()
 					}
 				}
@@ -589,6 +587,13 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 			// Fall through to textarea when typing
 
 		case "tab":
+			// First Tab: show slash command completion menu if suggestions exist
+			if len(m.slashSuggestions) > 0 && !m.slashVisible {
+				m.slashVisible = true
+				m.slashSelected = 0
+				var cmds []tea.Cmd
+				return cmds, false
+			}
 			// Cycle focus through thinking blocks
 			// Only when textarea is empty and there are thinking blocks
 			if m.textarea.Value() == "" && len(m.thinkingBlocks) > 0 {
@@ -713,7 +718,8 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 			// Show suggestions if we have matches and more than one option
 			if len(m.slashSuggestions) > 0 {
-				m.slashVisible = true
+				// Don't show immediately — wait for Tab press
+				m.slashVisible = false
 				m.slashSelected = 0
 				// Limit to 8 suggestions
 				if len(m.slashSuggestions) > 8 {
