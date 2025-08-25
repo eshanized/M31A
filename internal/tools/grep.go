@@ -42,6 +42,28 @@ func (t *Grep) RiskLevel() types.RiskLevel {
 	return types.RiskSafe
 }
 
+// ParameterSchema returns the JSON Schema for Grep tool parameters.
+func (t *Grep) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"pattern": {
+				"type": "string",
+				"description": "Regex pattern to search for in file contents"
+			},
+			"path": {
+				"type": "string",
+				"description": "File or directory to search (defaults to working directory)"
+			},
+			"include": {
+				"type": "string",
+				"description": "File pattern to include (e.g. '*.go')"
+			}
+		},
+		"required": ["pattern"]
+	}`
+}
+
 func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
