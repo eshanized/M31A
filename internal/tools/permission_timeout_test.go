@@ -94,7 +94,7 @@ func TestPermissionTimeout(t *testing.T) {
 		}
 
 		// Respond before timeout
-		d.ApprovePermission(true, false)
+		d.ApprovePermission(req.ID, true, false)
 
 		select {
 		case err := <-errCh:
