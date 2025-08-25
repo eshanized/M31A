@@ -51,9 +51,8 @@ func (m *AppState) backupCurrentSession() {
 	}
 
 	slog.Info("auto-backup complete", "session", m.sessionID, "path", dst)
-	m.toastText = fmt.Sprintf("Auto-backup saved: %s", filepath.Base(dst))
-	m.toastType = "info"
-	m.toastExpires = time.Now().Add(4 * time.Second)
+	// BUG-02 fix: do not mutate AppState fields from this goroutine context.
+	// The caller (handlePhaseShip) must emit a ToastMsg via tea.Cmd instead.
 }
 
 // copyDir recursively copies src into dst (dst is created). It is used
@@ -89,6 +88,45 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// backupCurrentSessionAsync is like backupCurrentSession but returns the
+// backup path on success (for the caller to emit a ToastMsg) instead of
+// mutating AppState fields directly. BUG-02 fix.
+func (m *AppState) backupCurrentSessionAsync() string {
+	if m.config == nil || !m.config.Features.AutoBackup {
+		return ""
+	}
+	if m.sessionID == "" || m.sessionManager == nil {
+		return ""
+	}
+
+	sessionsDir := m.sessionManager.BaseDir()
+	if sessionsDir == "" {
+		return ""
+	}
+	src := filepath.Join(sessionsDir, m.sessionID)
+	if _, err := os.Stat(src); err != nil {
+		slog.Debug("auto-backup: source missing", "err", err)
+		return ""
+	}
+
+	backupRoot := filepath.Join(filepath.Dir(sessionsDir), "backups")
+	if err := os.MkdirAll(backupRoot, 0755); err != nil {
+		slog.Warn("auto-backup: cannot create backup dir", "err", err)
+		return ""
+	}
+
+	stamp := time.Now().Format("20060102-150405")
+	dst := filepath.Join(backupRoot, fmt.Sprintf("%s-%s", m.sessionID, stamp))
+
+	if err := copyDir(src, dst); err != nil {
+		slog.Warn("auto-backup failed", "err", err)
+		return ""
+	}
+
+	slog.Info("auto-backup complete", "session", m.sessionID, "path", dst)
+	return filepath.Base(dst)
 }
 
 // sessionHealthSparkline builds a small sparkline from the message counts
