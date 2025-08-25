@@ -43,11 +43,9 @@ func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
 		ch <- result{r, e}
 	}()
 
-	// Send permission request (give it a moment to send)
-	time.Sleep(50 * time.Millisecond)
-
 	// Deny permission
-	d.ApprovePermission(false, false)
+	req := <-d.RequestCh()
+	d.ApprovePermission(req.ID, false, false)
 
 	select {
 	case r := <-ch:
@@ -132,11 +130,9 @@ func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
 		ch <- result{r, e}
 	}()
 
-	// Give it a moment to send the request
-	time.Sleep(50 * time.Millisecond)
-
 	// Allow permission
-	d.ApprovePermission(true, false)
+	req := <-d.RequestCh()
+	d.ApprovePermission(req.ID, true, false)
 
 	select {
 	case r := <-ch:
