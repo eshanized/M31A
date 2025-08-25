@@ -64,6 +64,7 @@ type Engine struct {
 	sessionID        string
 	workDir          string
 	backupDir        string
+	sessionsRoot     string // BUG-08 fix: store sessions root for reliable planningDir recalculation
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
@@ -119,21 +120,26 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
+	// BUG-08 fix: derive sessionsRoot from planningDir reliably
+	// planningDir = <sessionsRoot>/<sessionID>/planning
+	sessionsRoot := filepath.Dir(filepath.Dir(planningDir))
+
 	return &Engine{
-		sessionID:   sessionID,
-		workDir:     workDir,
-		backupDir:   backupDir,
-		planningDir: planningDir,
-		provider:    p,
-		modelID:     modelID,
-		cfg:         cfg,
-		dispatcher:  dispatcher,
-		tokens:      tokenEst,
-		sessionMgr:  sessionMgr,
-		prompts:     prompts,
-		logger:      slog.Default(),
-		startTime:   time.Now(),
-		execCommand: exec.Command,
+		sessionID:    sessionID,
+		workDir:      workDir,
+		backupDir:    backupDir,
+		sessionsRoot: sessionsRoot,
+		planningDir:  planningDir,
+		provider:     p,
+		modelID:      modelID,
+		cfg:          cfg,
+		dispatcher:   dispatcher,
+		tokens:       tokenEst,
+		sessionMgr:   sessionMgr,
+		prompts:      prompts,
+		logger:       slog.Default(),
+		startTime:    time.Now(),
+		execCommand:  exec.Command,
 	}, nil
 }
 
@@ -262,7 +268,8 @@ func (e *Engine) SessionID() string {
 // session-switching commands like /fork, /prev, /next.
 func (e *Engine) SetSessionID(id string) {
 	e.sessionID = id
-	e.planningDir = filepath.Join(filepath.Dir(e.planningDir), "..", id, "planning")
+	// BUG-08 fix: use stored sessionsRoot instead of brittle .. navigation
+	e.planningDir = filepath.Join(e.sessionsRoot, id, "planning")
 }
 
 // SetMsgEmitter sets the callback for emitting messages back to the TUI.
@@ -396,11 +403,16 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 		if !ok {
 			continue
 		}
-		defs = append(defs, provider.ToolDefinition{
+		def := provider.ToolDefinition{
 			Name:        tool.Name(),
 			Description: tool.Description(),
-			Parameters:  "{}", // Simplified - real implementation would have JSON schema
-		})
+			Parameters:  "{}",
+		}
+		// BUG-09 fix: use SchemaProvider interface for real parameter schemas
+		if sp, ok := tool.(m31types.SchemaProvider); ok {
+			def.Parameters = sp.ParameterSchema()
+		}
+		defs = append(defs, def)
 	}
 	return defs
 }
