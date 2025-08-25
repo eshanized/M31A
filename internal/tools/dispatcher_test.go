@@ -104,7 +104,7 @@ func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 	if req.Command != "echo hello" {
 		t.Errorf("expected Command 'echo hello', got %q", req.Command)
 	}
-	d.ApprovePermission(true, false)
+	d.ApprovePermission(req.ID, true, false)
 
 	if err := <-errCh; err != nil {
 		t.Errorf("expected nil error after approval, got: %v", err)
@@ -125,8 +125,8 @@ func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 		errCh <- err
 	}()
 
-	<-d.RequestCh()
-	d.ApprovePermission(false, false)
+	req := <-d.RequestCh()
+	d.ApprovePermission(req.ID, false, false)
 
 	if err := <-errCh; err != m31errors.ErrPermissionDenied {
 		t.Errorf("expected ErrPermissionDenied, got: %v", err)
@@ -148,8 +148,8 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 		errCh1 <- err
 	}()
 
-	<-d.RequestCh()
-	d.ApprovePermission(true, true)
+	req := <-d.RequestCh()
+	d.ApprovePermission(req.ID, true, true)
 
 	if err := <-errCh1; err != nil {
 		t.Fatalf("first call failed: %v", err)
@@ -318,7 +318,7 @@ func TestDispatcher_DestructiveToolPermission(t *testing.T) {
 	if req.Command != "write test.txt" && req.Command != `{"name":"filewrite","params":{"path":"test.txt"}}` {
 		t.Errorf("expected Command 'write test.txt' or raw JSON, got %q", req.Command)
 	}
-	d.ApprovePermission(true, false)
+	d.ApprovePermission(req.ID, true, false)
 
 	if err := <-errCh; err != nil {
 		t.Errorf("expected nil error after approval, got: %v", err)
