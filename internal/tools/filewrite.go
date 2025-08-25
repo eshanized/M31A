@@ -40,6 +40,24 @@ func (t *FileWrite) RiskLevel() types.RiskLevel {
 	return types.RiskDestructive
 }
 
+// ParameterSchema returns the JSON Schema for FileWrite tool parameters.
+func (t *FileWrite) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"path": {
+				"type": "string",
+				"description": "Path to the file to write (relative to working directory)"
+			},
+			"content": {
+				"type": "string",
+				"description": "The content to write to the file"
+			}
+		},
+		"required": ["path", "content"]
+	}`
+}
+
 func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
