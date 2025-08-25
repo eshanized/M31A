@@ -34,6 +34,25 @@ func (t *FileRead) RiskLevel() types.RiskLevel {
 	return types.RiskSafe
 }
 
+// ParameterSchema returns the JSON Schema for FileRead tool parameters.
+func (t *FileRead) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"path": {
+				"type": "string",
+				"description": "Path to the file to read (relative to working directory)"
+			},
+			"limit": {
+				"type": "integer",
+				"description": "Maximum number of bytes to read (default 5242880)",
+				"minimum": 1
+			}
+		},
+		"required": ["path"]
+	}`
+}
+
 func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
