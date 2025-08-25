@@ -34,6 +34,24 @@ func (t *Glob) RiskLevel() types.RiskLevel {
 	return types.RiskSafe
 }
 
+// ParameterSchema returns the JSON Schema for Glob tool parameters.
+func (t *Glob) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"pattern": {
+				"type": "string",
+				"description": "Glob pattern to match files (supports ** for recursive)"
+			},
+			"path": {
+				"type": "string",
+				"description": "Directory to search in (defaults to working directory)"
+			}
+		},
+		"required": ["pattern"]
+	}`
+}
+
 func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
