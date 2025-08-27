@@ -124,16 +124,26 @@ type AppState struct {
 	configWatchCtx context.Context
 	configWatchCancel context.CancelFunc
 	// Phase 21: state synchronization and message flow
-	pendingStreamChunks       []*types.StreamChunk // buffered during non-discuss workflow phases
-	permissionModalActive     bool                 // true while permission modal is displayed
-	pendingPermissionRequests []PermissionRequestMsg // queued when modal already active
-	workflowPaused            bool                 // true when workflow paused due to provider error
-	workflowStartTime         time.Time            // when the current workflow started
+	pendingStreamChunks         []*types.StreamChunk // buffered during non-discuss workflow phases
+	permissionModalActive       bool                 // true while permission modal is displayed
+	pendingPermissionRequests   []PermissionRequestMsg // queued when modal already active
+	pendingPermissionRequestID  int64                // RC-2: request ID for correlation with response
+	workflowPaused              bool                 // true when workflow paused due to provider error
+	workflowStartTime           time.Time            // when the current workflow started
 }
 
 // setWorkflowPhase keeps workflowRunning and currentPhase synchronized.
 // It also invalidates the header cache so the phase indicator updates.
 func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
+	// BUG-04 fix: flush pending stream chunks when workflow ends or transitions
+	if phase == types.PhaseIdle && len(m.pendingStreamChunks) > 0 {
+		for _, chunk := range m.pendingStreamChunks {
+			if m.replModel != nil {
+				m.replModel.AppendStreamChunk(chunk)
+			}
+		}
+		m.pendingStreamChunks = nil
+	}
 	m.currentPhase = phase
 	m.workflowRunning = (phase != types.PhaseIdle)
 	m.headerCacheValid = false
