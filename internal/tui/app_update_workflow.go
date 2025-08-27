@@ -255,7 +255,19 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 
 	// Auto-backup: snapshot the session directory before resetting
 	// workflow state so the user always has a restore point.
-	m.backupCurrentSession()
+	// BUG-02 fix: backupCurrentSession no longer mutates AppState fields directly.
+	// Instead, we capture the backup path and emit a ToastMsg via tea.Cmd.
+	var backupCmd tea.Cmd
+	backupPath := m.backupCurrentSessionAsync()
+	if backupPath != "" {
+		backupCmd = func() tea.Msg {
+			return ToastMsg{
+				Text:     fmt.Sprintf("Auto-backup saved: %s", backupPath),
+				Duration: 4 * time.Second,
+				Type:     "info",
+			}
+		}
+	}
 
 	summary := ShipSummary{
 		SessionID: m.workflowEngine.SessionID(),
@@ -306,6 +318,9 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.workflowGoal = ""
+	if backupCmd != nil {
+		return m, backupCmd
+	}
 	return m, nil
 }
 
@@ -316,6 +331,7 @@ func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model,
 		return m, permissionListenerCmd(m.dispatcher)
 	}
 	m.permissionModalActive = true
+	m.pendingPermissionRequestID = msg.Request.ID // RC-2: store request ID for response correlation
 	m.prevScreen = m.screen
 	m.screen = ScreenPermission
 	t := m.themeManager.Current()
@@ -336,10 +352,11 @@ func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model,
 
 // handlePermissionResponse handles PermissionResponseMsg by approving/denying the permission.
 func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) (tea.Model, tea.Cmd) {
-	m.dispatcher.ApprovePermission(msg.Response.Allowed, msg.Response.Remember)
+	m.dispatcher.ApprovePermission(m.pendingPermissionRequestID, msg.Response.Allowed, msg.Response.Remember)
 	m.screen = m.prevScreen
 	m.permissionModal = nil
 	m.permissionModalActive = false
+	m.pendingPermissionRequestID = 0
 	if len(m.pendingPermissionRequests) > 0 {
 		next := m.pendingPermissionRequests[0]
 		m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
@@ -354,10 +371,11 @@ func (m *AppState) handlePermissionTick() (tea.Model, tea.Cmd) {
 		m.permissionModal.Tick()
 		if m.permissionModal.Remaining() <= 0 {
 			resp := m.permissionModal.Deny()
-			m.dispatcher.ApprovePermission(resp.Allowed, resp.Remember)
+			m.dispatcher.ApprovePermission(m.pendingPermissionRequestID, resp.Allowed, resp.Remember)
 			m.screen = m.prevScreen
 			m.permissionModal = nil
 			m.permissionModalActive = false
+			m.pendingPermissionRequestID = 0
 			if len(m.pendingPermissionRequests) > 0 {
 				next := m.pendingPermissionRequests[0]
 				m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
