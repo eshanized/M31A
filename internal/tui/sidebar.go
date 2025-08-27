@@ -70,8 +70,12 @@ func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.Err != nil {
 			m.err = msg.Err.Error()
+			m.gitStatusCacheErr = msg.Err
 		} else {
 			m.statuses = msg.Statuses
+			m.gitStatusCache = msg.Statuses
+			m.gitStatusCacheErr = nil
+			m.lastStatusFetch = time.Now()
 			m.err = ""
 		}
 	}
@@ -132,18 +136,20 @@ func (m *SidebarModel) SetTheme(t theme.Theme) {
 }
 
 func (m *SidebarModel) refreshCmd() tea.Cmd {
+	// BUG-03 fix: capture cache values in closure for read-only access;
+	// cache writes happen in Update() on the main thread only.
+	lastFetch := m.lastStatusFetch
+	cachedStatuses := m.gitStatusCache
+	cachedErr := m.gitStatusCacheErr
 	return func() tea.Msg {
 		if m.git == nil || !m.git.IsRepo() {
 			return SidebarRefreshMsg{Statuses: nil, Err: nil}
 		}
 		// L-17: Use 1-second cache to avoid hammering git on every TickMsg
-		if !m.lastStatusFetch.IsZero() && time.Since(m.lastStatusFetch) < sidebarStatusCacheTTL {
-			return SidebarRefreshMsg{Statuses: m.gitStatusCache, Err: m.gitStatusCacheErr}
+		if !lastFetch.IsZero() && time.Since(lastFetch) < sidebarStatusCacheTTL {
+			return SidebarRefreshMsg{Statuses: cachedStatuses, Err: cachedErr}
 		}
 		statuses, err := m.git.StatusPorcelain()
-		m.gitStatusCache = statuses
-		m.gitStatusCacheErr = err
-		m.lastStatusFetch = time.Now()
 		return SidebarRefreshMsg{Statuses: statuses, Err: err}
 	}
 }
