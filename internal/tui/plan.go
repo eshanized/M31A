@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 // PlanModel displays the task plan for user review.
@@ -69,6 +70,19 @@ func (m *PlanModel) UpdateTasks(tasks []types.Task) {
 func (m *PlanModel) SetDimensions(width, height int) {
 	m.width = width
 	m.height = height
+}
+
+// ApplyArbitrage applies model cost optimization recommendations to the plan.
+// BUG-05 fix: implements the handler for OptimizedMsg.
+func (m *PlanModel) ApplyArbitrage(recs []arbitrage.ArbitrageRecommendation) {
+	for _, rec := range recs {
+		if rec.Savings > 0 {
+			m.estCost -= rec.Savings
+			if m.estCost < 0 {
+				m.estCost = 0
+			}
+		}
+	}
 }
 
 func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
