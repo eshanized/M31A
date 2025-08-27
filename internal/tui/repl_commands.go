@@ -51,7 +51,7 @@ func (m *ReplModel) executeShellCommand(command string) ([]tea.Cmd, bool) {
 		params := map[string]any{
 			"command":     command,
 			"description": "shell mode command",
-			"timeout":     300,
+			"timeout":     int(types.BashTimeout.Seconds()),
 			"interactive": false,
 		}
 		paramsJSON, _ := json.Marshal(params)
@@ -61,7 +61,7 @@ func (m *ReplModel) executeShellCommand(command string) ([]tea.Cmd, bool) {
 			Input: paramsJSON,
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), types.BashTimeout)
 		defer cancel()
 
 		result, err := m.dispatcher.Execute(ctx, toolCall)
@@ -141,7 +141,11 @@ func (m *ReplModel) expandFileRefs(input string) string {
 		defer f.Close()
 
 		header := make([]byte, 512)
-		n, _ := f.Read(header)
+		n, readErr := f.Read(header)
+		if readErr != nil && n == 0 {
+			// EH-1 fix: handle read errors — fall back to showing file path only
+			return match
+		}
 
 		// Detect content type via mime sniff
 		contentType := http.DetectContentType(header[:n])
