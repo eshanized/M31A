@@ -97,7 +97,7 @@ func (m *ReplModel) View() string {
 	if m.fallbackBanner != "" {
 		bannerStyle := lipgloss.NewStyle().
 			Background(m.theme.Warning).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.Background).
 			Padding(0, 1).
 			Bold(true).
 			Width(m.width - m.sidebarWidth)
@@ -125,6 +125,11 @@ func (m *ReplModel) renderMessages() {
 			}
 			b.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 		}
+	}
+
+	// BUG-06 fix: show quick actions welcome screen when no messages
+	if len(m.messages) == 0 && !m.streaming {
+		b.WriteString(m.renderQuickActions())
 	}
 
 	if m.streaming {
@@ -310,7 +315,7 @@ func (m *ReplModel) renderInputBox() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(t.Brand).
-		Background(lipgloss.Color("#2A2A2A")).
+		Background(t.Surface).
 		Padding(0, 2).
 		Width(50)
 
