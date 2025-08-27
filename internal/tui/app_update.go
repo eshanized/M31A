@@ -616,6 +616,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SettingsSavedMsg:
 		return m.handleSettingsSaved()
 
+	case OptimizedMsg:
+		// BUG-05 fix: handle arbitrage optimization results
+		if len(msg.Recommendations) > 0 && m.planModel != nil {
+			m.planModel.ApplyArbitrage(msg.Recommendations)
+		}
+		m.currentOperation = fmt.Sprintf("Optimized %d tasks", len(msg.Recommendations))
+		return m, nil
+
 	case SidebarRefreshMsg:
 		if m.sidebarModel != nil {
 			m.sidebarModel.Update(msg)
@@ -675,10 +683,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.config != nil {
 				oldTheme = m.config.UI.Theme
 			}
+			// BUG-12 fix: sync ALL config sections, not just UI/Permissions/Features/Ledger
 			m.config.UI = msg.Config.UI
 			m.config.Permissions = msg.Config.Permissions
 			m.config.Features = msg.Config.Features
 			m.config.Ledger = msg.Config.Ledger
+			m.config.Provider = msg.Config.Provider
+			m.config.Model = msg.Config.Model
+			m.config.Agents = msg.Config.Agents
 			// Apply theme change if different
 			if m.config.UI.Theme != oldTheme && m.config.UI.Theme != "" {
 				themeMsg := ThemeChangedMsg{Theme: m.config.UI.Theme}
