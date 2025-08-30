@@ -11,8 +11,8 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// DefaultPermissionTimeout is the default permission modal timeout (5 minutes).
-const DefaultPermissionTimeout = 300 * time.Second
+// DefaultPermissionTimeout is the default permission modal timeout, derived from the shared constant.
+var DefaultPermissionTimeout = time.Duration(types.DefaultPermissionTimeout) * time.Second
 
 type PermissionModal struct {
 	request tools.PermissionRequest
@@ -181,29 +181,29 @@ func (m *PermissionModal) riskStyle() lipgloss.Style {
 	case types.RiskDangerous:
 		return lipgloss.NewStyle().
 			Background(m.theme.Warning).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.BadgeForeground).
 			Bold(true).
 			Padding(0, 1)
 	case types.RiskDestructive:
 		return lipgloss.NewStyle().
 			Background(m.theme.Error).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.BadgeForeground).
 			Bold(true).
 			Padding(0, 1)
 	case types.RiskMedium:
 		return lipgloss.NewStyle().
 			Background(m.theme.Warning).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.BadgeForeground).
 			Padding(0, 1)
 	case types.RiskSafe:
 		return lipgloss.NewStyle().
 			Background(m.theme.TextSecondary).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.BadgeForeground).
 			Padding(0, 1)
 	default:
 		return lipgloss.NewStyle().
 			Background(m.theme.TextSecondary).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(m.theme.BadgeForeground).
 			Padding(0, 1)
 	}
 }

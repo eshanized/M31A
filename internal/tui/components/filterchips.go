@@ -45,7 +45,7 @@ func (f FilterChips) Render() string {
 			if chip.Active {
 				style = lipgloss.NewStyle().
 					Background(t.Brand).
-					Foreground(lipgloss.Color("#000000")).
+					Foreground(t.BadgeForeground).
 					Bold(true).
 					Padding(0, 1)
 			} else {

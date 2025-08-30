@@ -50,7 +50,7 @@ func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
 	case BadgeInfo:
 		style = lipgloss.NewStyle().
 			Background(t.Thinking).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(t.BadgeForeground).
 			Padding(0, 1).
 			Bold(true)
 	case BadgeBrand:

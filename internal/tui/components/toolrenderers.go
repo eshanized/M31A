@@ -31,7 +31,7 @@ func (b *BaseRenderer) RenderHeader(width int) string {
 	if !ok {
 		labelStyle = lipgloss.NewStyle().
 			Background(b.theme.TextSecondary).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(b.theme.BadgeForeground).
 			Padding(0, 1).
 			Bold(true)
 	}
