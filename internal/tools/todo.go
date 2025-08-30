@@ -114,7 +114,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		return types.ToolResult{}, fmt.Errorf("invalid session ID: must be alphanumeric")
 	}
 	sessionDir := filepath.Join(t.sessionsDir, t.sessionID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
 		return types.ToolResult{}, fmt.Errorf("cannot create session directory: %w", err)
 	}
 
@@ -126,7 +126,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		return types.ToolResult{}, fmt.Errorf("cannot generate temp name: %w", err)
 	}
 	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	if err := os.WriteFile(tmpPath, content, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
 		return types.ToolResult{}, fmt.Errorf("cannot write temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, todoPath); err != nil {

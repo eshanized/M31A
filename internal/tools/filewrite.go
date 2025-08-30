@@ -162,7 +162,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	// Create parent directories
 	if createDirs {
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(targetPath), DirPermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot create directories: %w", err)
 		}
 	}

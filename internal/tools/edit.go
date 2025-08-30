@@ -185,16 +185,16 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
 		backupPath := filepath.Join(t.backupDir, fmt.Sprintf("%s.%d.bak", sanitized, time.Now().Unix()))
 
-		if err := os.MkdirAll(t.backupDir, 0755); err != nil {
+		if err := os.MkdirAll(t.backupDir, DirPermission); err != nil {
 			return fmt.Errorf("cannot create backup directory: %w", err)
 		}
-		if err := os.WriteFile(backupPath, oldContent, 0644); err != nil {
+		if err := os.WriteFile(backupPath, oldContent, FilePermission); err != nil {
 			return fmt.Errorf("cannot write backup: %w", err)
 		}
 	}
 
 	// Create parent directories if needed
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), DirPermission); err != nil {
 		return fmt.Errorf("cannot create directories: %w", err)
 	}
 
