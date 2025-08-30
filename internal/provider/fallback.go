@@ -17,7 +17,7 @@ type FallbackEvent struct {
 }
 
 // maxRetryAfter is the maximum duration to wait for Retry-After header (60s cap).
-const maxRetryAfter = 60 * time.Second
+const maxRetryAfter = types.MaxRetryAfterWait
 
 func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
 	names := registry.List()
