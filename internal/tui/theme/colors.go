@@ -34,9 +34,12 @@ func Dark() Theme {
 		DiffAddedBg:       lipgloss.Color("#81C99520"),
 		DiffRemovedBg:     lipgloss.Color("#F28B8220"),
 		DiffContextBg:     lipgloss.Color("#242424"),
+		BadgeForeground:   lipgloss.Color("#000000"),
+		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
+		BadgeTextDark:     lipgloss.Color("#000000"),
 	}
-	t.Header = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 2).Bold(true)
-	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1).Bold(true)
+	t.Header = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 2).Bold(true)
+	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 1).Bold(true)
 	t.ContextBar = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextSecondary)).Padding(0, 1)
 	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
 	t.StatusSlow = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Bold(true)
@@ -47,14 +50,7 @@ func Dark() Theme {
 	t.Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Thinking))
 	t.ThinkingBlock = lipgloss.NewStyle().Background(lipgloss.Color(t.CodeBG)).Foreground(lipgloss.Color(t.Thinking)).Padding(0, 1).Italic(true)
 	t.ToolCard = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
-	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
+	buildBadgeStyles(&t)
 	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
 	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color(t.Brand))
 	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
@@ -93,9 +89,12 @@ func Light() Theme {
 		DiffAddedBg:       lipgloss.Color("#1E8E3E20"),
 		DiffRemovedBg:     lipgloss.Color("#D9302520"),
 		DiffContextBg:     lipgloss.Color("#F8F9FA"),
+		BadgeForeground:   lipgloss.Color("#000000"),
+		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
+		BadgeTextDark:     lipgloss.Color("#000000"),
 	}
-	t.Header = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 2).Bold(true)
-	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1).Bold(true)
+	t.Header = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 2).Bold(true)
+	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 1).Bold(true)
 	t.ContextBar = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextSecondary)).Padding(0, 1)
 	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
 	t.StatusSlow = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Bold(true)
@@ -106,18 +105,24 @@ func Light() Theme {
 	t.Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Thinking))
 	t.ThinkingBlock = lipgloss.NewStyle().Background(lipgloss.Color(t.CodeBG)).Foreground(lipgloss.Color(t.Thinking)).Padding(0, 1).Italic(true)
 	t.ToolCard = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
-	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
-	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(lipgloss.Color("#000000")).Padding(0, 1).Bold(true)
+	buildBadgeStyles(&t)
 	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
 	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color(t.Brand))
 	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 	return t
+}
+
+// buildBadgeStyles sets all badge/label styles using the theme's BadgeForeground color.
+func buildBadgeStyles(t *Theme) {
+	fg := lipgloss.Color(t.BadgeForeground)
+	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
 }
 
 func Auto() Theme {

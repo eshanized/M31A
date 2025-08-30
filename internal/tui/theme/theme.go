@@ -70,6 +70,9 @@ type Theme struct {
 	DiffAddedBg       lipgloss.Color
 	DiffRemovedBg     lipgloss.Color
 	DiffContextBg     lipgloss.Color
+	BadgeForeground   lipgloss.Color // foreground color for colored badges (black on both dark/light)
+	BadgeTextLight    lipgloss.Color // white text for dark-themed badges
+	BadgeTextDark     lipgloss.Color // black text for light-themed badges
 }
 
 type Manager struct {
