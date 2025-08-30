@@ -528,12 +528,12 @@ func TestSanitizeProviderError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeProviderError(tt.statusCode, tt.body)
+			result := provider.SanitizeProviderError(tt.statusCode, tt.body, "openrouter")
 			if !strings.Contains(result, tt.contains) {
-				t.Errorf("sanitizeProviderError(%d, %q) = %q, want it to contain %q", tt.statusCode, tt.body, result, tt.contains)
+				t.Errorf("SanitizeProviderError(%d, %q) = %q, want it to contain %q", tt.statusCode, tt.body, result, tt.contains)
 			}
 			if tt.notContain != "" && strings.Contains(result, tt.notContain) {
-				t.Errorf("sanitizeProviderError(%d, %q) = %q, should NOT contain %q", tt.statusCode, tt.body, result, tt.notContain)
+				t.Errorf("SanitizeProviderError(%d, %q) = %q, should NOT contain %q", tt.statusCode, tt.body, result, tt.notContain)
 			}
 		})
 	}
@@ -560,9 +560,9 @@ func TestIsContextExceeded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isContextExceeded(tt.statusCode, tt.body)
+			got := provider.IsContextExceeded(tt.statusCode, tt.body)
 			if got != tt.expected {
-				t.Errorf("isContextExceeded(%d, %q) = %v, want %v", tt.statusCode, tt.body, got, tt.expected)
+				t.Errorf("IsContextExceeded(%d, %q) = %v, want %v", tt.statusCode, tt.body, got, tt.expected)
 			}
 		})
 	}
