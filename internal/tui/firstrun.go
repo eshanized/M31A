@@ -588,7 +588,7 @@ func (m *FirstRunModel) viewKeychainPrompt() string {
 
 	yes := lipgloss.NewStyle().
 		Background(m.theme.Success).
-		Foreground(lipgloss.Color("#000000")).
+		Foreground(m.theme.BadgeForeground).
 		Bold(true).
 		Padding(0, 2).
 		Render("Y / Enter = Yes")
