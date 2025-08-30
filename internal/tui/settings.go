@@ -618,7 +618,7 @@ func (m SettingsModel) renderTabBar() string {
 		if tab == m.activeTab {
 			style = lipgloss.NewStyle().
 				Background(lipgloss.Color(m.theme.Brand)).
-				Foreground(lipgloss.Color("#FFFFFF")).
+				Foreground(m.theme.BadgeTextLight).
 				Padding(0, 2).
 				Bold(true)
 		} else {

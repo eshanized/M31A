@@ -107,10 +107,10 @@ func NewResumeModel(t theme.Theme, mgr *session.Manager) *ResumeModel {
 	// Style the delegate for our theme
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Background(lipgloss.Color(t.Brand)).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Foreground(t.BadgeTextLight)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
 		Background(lipgloss.Color(t.Brand)).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Foreground(t.BadgeTextLight)
 	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
 		Background(lipgloss.Color(t.Surface)).
 		Foreground(lipgloss.Color(t.TextPrimary))
