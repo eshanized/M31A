@@ -127,7 +127,7 @@ func (m *AppState) checkResumedWorkflowState() {
 	m.discussQuestions = questions
 	m.toastText = fmt.Sprintf("Resumable workflow at %s. Use /workflow resume to continue.", phase)
 	m.toastType = "info"
-	m.toastExpires = time.Now().Add(10 * time.Second)
+	m.toastExpires = time.Now().Add(types.ToastDuration)
 }
 
 // resetDiscussQA clears the discuss Q&A state and stops the active timer.

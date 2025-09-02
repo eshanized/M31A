@@ -441,7 +441,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case HealthCheckTickMsg:
 		if m.healthCheckInFlight {
-			return m, NextHealthTick(5 * time.Second)
+			return m, NextHealthTick(types.HealthCheckRetryDelay)
 		}
 		if m.registry == nil || m.activeProvider == "" {
 			return m, NextHealthTick(types.HealthCheckInterval)
@@ -463,7 +463,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// C-1 fix: run health check in a goroutine to avoid blocking Update()
-		return m, HealthCheckCmd(p)
+		timeout := time.Duration(m.config.Features.HealthCheckTimeoutSecs) * time.Second
+		return m, HealthCheckCmd(p, timeout)
 
 	case HealthCheckResultMsg:
 		// C-1 fix: receive async health check result

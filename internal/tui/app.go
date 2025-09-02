@@ -222,8 +222,12 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 		MaxRecentModels: cfg.Features.MaxRecentModels,
 	})
 
-	// Session auto-cleanup: remove sessions older than 30 days
-	if removed, err := sessionMgr.Cleanup(30 * 24 * time.Hour); err != nil {
+	// Session auto-cleanup: remove sessions older than configured retention
+	retentionDays := cfg.Features.SessionRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	if removed, err := sessionMgr.Cleanup(time.Duration(retentionDays) * 24 * time.Hour); err != nil {
 		slog.Warn("session cleanup failed", "error", err)
 	} else if removed > 0 {
 		slog.Info("cleaned up old sessions", "count", removed)
@@ -469,8 +473,8 @@ func RunPhaseCmd(app *AppState, phase types.WorkflowPhase, goal string) tea.Cmd 
 				CostEstimate: fmt.Sprintf("%d tasks", len(result.Tasks)),
 				TimeEstimate: "",
 			}:
-			case <-time.After(500 * time.Millisecond):
-				slog.Warn("dropped PlanReadyMsg: channel full")
+case <-time.After(types.ChannelSendTimeout):
+			slog.Warn("dropped PlanReadyMsg: channel full")
 			}
 		}
 
@@ -565,7 +569,7 @@ type channelEmitter struct {
 func (ce *channelEmitter) Emit(msg tea.Msg) {
 	select {
 	case ce.ch <- msg:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(types.ChannelSendTimeout):
 		// Channel full after timeout — drop to avoid blocking the engine.
 		slog.Warn("workflow message dropped: channel full", "msg_type", fmt.Sprintf("%T", msg))
 	}
@@ -684,10 +688,10 @@ func calculateNextInterval(status types.HealthStatus) time.Duration {
 	if status.Error != "" &&
 		(strings.Contains(strings.ToLower(status.Error), "rate limit") ||
 			strings.Contains(strings.ToLower(status.Error), "429")) {
-		return 120 * time.Second
+		return types.MaxRetryAfterWait
 	}
 	if status.Status == "offline" {
-		return 120 * time.Second
+		return types.MaxRetryAfterWait
 	}
 	return types.HealthCheckInterval
 }
