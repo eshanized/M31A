@@ -11,6 +11,24 @@ type Config struct {
 	Ledger      LedgerConfig      `toml:"ledger"`
 	Tools       ToolsConfig       `toml:"tools"`
 	Agents      AgentsConfig      `toml:"agents"`
+	Git         GitConfig         `toml:"git"`
+	Verify      VerifyConfig      `toml:"verify"`
+}
+
+// GitConfig holds configurable git commit message prefixes and user identity.
+type GitConfig struct {
+	CommitPrefix string `toml:"commit_prefix"`
+	FixPrefix    string `toml:"fix_prefix"`
+	ShipPrefix   string `toml:"ship_prefix"`
+	UserName     string `toml:"user_name"`
+	UserEmail    string `toml:"user_email"`
+}
+
+// VerifyConfig holds configurable verification commands.
+// Empty values trigger auto-detection (existing behavior).
+type VerifyConfig struct {
+	BuildCommand string `toml:"build_command"`
+	TestCommand  string `toml:"test_command"`
 }
 
 type ProviderConfig struct {
@@ -59,6 +77,22 @@ type UIConfig struct {
 	SidebarWidthThreshold int `toml:"sidebar_width_threshold"`
 	// Discuss Q&A timeout in seconds. Default 300 (5 minutes).
 	DiscussTimeout int `toml:"discuss_timeout"`
+	// Max lines for thinking block content. Default 20.
+	ThinkingMaxLines int `toml:"thinking_max_lines"`
+	// Permission modal width in columns. Default 60.
+	PermissionModalWidth int `toml:"permission_modal_width"`
+	// Sidebar width in columns. Default 42.
+	SidebarWidth int `toml:"sidebar_width"`
+	// Max message history entries. Default 1000.
+	MaxMessageHistory int `toml:"max_message_history"`
+	// Fallback banner display duration in seconds. Default 15.
+	FallbackBannerSecs int `toml:"fallback_banner_timeout_secs"`
+	// Default number of log lines to show. Default 20.
+	DefaultLogLines int `toml:"default_log_lines"`
+	// Max sessions to list in resume screen. Default 10.
+	SessionListLimit int `toml:"session_list_limit"`
+	// Thinking block opacity. Default 0.6.
+	ThinkingOpacity float64 `toml:"thinking_opacity"`
 }
 
 type PermissionsConfig struct {
@@ -97,6 +131,12 @@ type FeaturesConfig struct {
 	SessionIDLength int `toml:"session_id_length"`
 	// Max recent models to remember. Default 10.
 	MaxRecentModels int `toml:"max_recent_models"`
+	// Session retention in days. Default 30.
+	SessionRetentionDays int `toml:"session_retention_days"`
+	// Health check timeout in seconds. Default 10.
+	HealthCheckTimeoutSecs int `toml:"health_check_timeout_secs"`
+	// Rate limit backoff in seconds. Default 120.
+	RateLimitBackoffSecs int `toml:"rate_limit_backoff_secs"`
 }
 
 type LedgerConfig struct {
@@ -110,12 +150,13 @@ type LedgerConfig struct {
 // (e.g., cheap model for Plan, powerful model for Execute).
 // ToolsConfig defines configurable limits for tool execution.
 type ToolsConfig struct {
-	MaxGlobResults       int    `toml:"max_glob_results"`
-	MaxGrepResults       int    `toml:"max_grep_results"`
-	BashKillGraceSecs    int    `toml:"bash_kill_grace_secs"`
-	MaxBackupsPerFile    int    `toml:"max_backups_per_file"`
-	WebfetchMaxRedirects int    `toml:"webfetch_max_redirects"`
-	WebfetchUserAgent    string `toml:"webfetch_user_agent"`
+	MaxGlobResults       int      `toml:"max_glob_results"`
+	MaxGrepResults       int      `toml:"max_grep_results"`
+	BashKillGraceSecs    int      `toml:"bash_kill_grace_secs"`
+	MaxBackupsPerFile    int      `toml:"max_backups_per_file"`
+	WebfetchMaxRedirects int      `toml:"webfetch_max_redirects"`
+	WebfetchUserAgent    string   `toml:"webfetch_user_agent"`
+	SkipDirs             []string `toml:"skip_dirs"`
 }
 
 type AgentsConfig struct {
