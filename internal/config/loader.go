@@ -31,6 +31,14 @@ func DefaultConfig() *Config {
 			MaxIterations:         100,
 			DiscussTimeout:        300,
 			LeaderTimeoutMs:       1000,
+			ThinkingMaxLines:      20,
+			PermissionModalWidth:  60,
+			SidebarWidth:          42,
+			MaxMessageHistory:     1000,
+			FallbackBannerSecs:    15,
+			DefaultLogLines:       20,
+			SessionListLimit:      10,
+			ThinkingOpacity:       0.6,
 		},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
@@ -38,20 +46,31 @@ func DefaultConfig() *Config {
 			DefaultContextLength:    types.DefaultContextLength,
 		},
 		Features: FeaturesConfig{
-			ModelCacheTTLMinutes: 5,
-			ModelCacheStaleHours: 24,
-			SessionIDLength:      types.SessionIDLength,
-			MaxRecentModels:      10,
-			HealthCheckLiveMs:    500,
-			HealthCheckSlowMs:    2000,
+			ModelCacheTTLMinutes:   5,
+			ModelCacheStaleHours:   24,
+			SessionIDLength:        types.SessionIDLength,
+			MaxRecentModels:        types.DefaultMaxRecentModels,
+			HealthCheckLiveMs:      types.DefaultHealthLiveMs,
+			HealthCheckSlowMs:      types.DefaultHealthSlowMs,
+			SessionRetentionDays:   30,
+			HealthCheckTimeoutSecs: 10,
+			RateLimitBackoffSecs:   120,
 		},
 		Tools: ToolsConfig{
-			MaxGlobResults:       1000,
-			MaxGrepResults:       100,
-			BashKillGraceSecs:    5,
-			MaxBackupsPerFile:    10,
-			WebfetchMaxRedirects: 5,
+			MaxGlobResults:       types.DefaultMaxGlobResults,
+			MaxGrepResults:       types.DefaultMaxGrepResults,
+			BashKillGraceSecs:    types.DefaultBashKillGraceSecs,
+			MaxBackupsPerFile:    types.DefaultMaxBackupsPerFile,
+			WebfetchMaxRedirects: types.DefaultWebfetchMaxRedirects,
 			WebfetchUserAgent:    "M31A/dev",
+			SkipDirs:             []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"},
+		},
+		Git: GitConfig{
+			CommitPrefix: "feat",
+			FixPrefix:    "fix",
+			ShipPrefix:   "chore",
+			UserName:     "M31A",
+			UserEmail:    "m31a@local",
 		},
 	}
 }
@@ -104,10 +123,17 @@ func Load(path string) (*Config, error) {
 	} else {
 		if projectPath := findProjectConfig(cwd); projectPath != "" {
 			var projectCfg Config
-			if _, err := toml.DecodeFile(projectPath, &projectCfg); err != nil {
+			meta, err := toml.DecodeFile(projectPath, &projectCfg)
+			if err != nil {
 				slog.Warn("failed to decode project config", "path", projectPath, "error", err)
 			} else {
-				mergeConfig(cfg, &projectCfg)
+				// Build set of explicitly defined keys to distinguish
+				// "not set" from "explicitly set to false" for bool fields.
+				defined := make(map[string]bool)
+				for _, key := range meta.Undecoded() {
+					defined[key.String()] = true
+				}
+				mergeConfig(cfg, &projectCfg, defined)
 			}
 		}
 	}
@@ -134,7 +160,7 @@ func Load(path string) (*Config, error) {
 // an m31a.toml file. Returns the path if found, or "" if none exists.
 func findProjectConfig(cwd string) string {
 	dir := cwd
-	for i := 0; i < 3; i++ {
+	for i := 0; i < types.MaxProjectConfigDepth; i++ {
 		candidate := filepath.Join(dir, "m31a.toml")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
@@ -151,12 +177,14 @@ func findProjectConfig(cwd string) string {
 // mergeConfig performs a reflection-based merge of overlay into base.
 // Overlay non-zero values override base values. Zero-valued fields in overlay
 // leave base values unchanged. Handles nested structs recursively.
-func mergeConfig(base, overlay *Config) {
-	mergeStructs(reflect.ValueOf(base).Elem(), reflect.ValueOf(overlay).Elem())
+// The defined set tracks which TOML keys were explicitly set, enabling
+// bool fields to be overridden with false.
+func mergeConfig(base, overlay *Config, defined map[string]bool) {
+	mergeStructs(reflect.ValueOf(base).Elem(), reflect.ValueOf(overlay).Elem(), defined, "")
 }
 
 // mergeStructs recursively merges overlay fields into base using reflection.
-func mergeStructs(base, overlay reflect.Value) {
+func mergeStructs(base, overlay reflect.Value, defined map[string]bool, prefix string) {
 	overlayType := overlay.Type()
 	for i := 0; i < overlay.NumField(); i++ {
 		field := overlayType.Field(i)
@@ -168,23 +196,44 @@ func mergeStructs(base, overlay reflect.Value) {
 		if !baseField.IsValid() || !overlayField.IsValid() {
 			continue
 		}
-		mergeField(baseField, overlayField, field.Type)
+		fieldPrefix := prefix
+		if fieldPrefix != "" {
+			fieldPrefix += "."
+		}
+		fieldPrefix += toTOMLKey(field.Name)
+		mergeField(baseField, overlayField, field.Type, defined, fieldPrefix)
 	}
 }
 
+// toTOMLKey converts a Go field name to a TOML key (snake_case).
+func toTOMLKey(name string) string {
+	var result []byte
+	for i, ch := range name {
+		if ch >= 'A' && ch <= 'Z' {
+			if i > 0 {
+				result = append(result, '_')
+			}
+			result = append(result, byte(ch+32))
+		} else {
+			result = append(result, byte(ch))
+		}
+	}
+	return string(result)
+}
+
 // mergeField copies a single field from overlay to base if non-zero.
-func mergeField(base, overlay reflect.Value, typ reflect.Type) {
+func mergeField(base, overlay reflect.Value, typ reflect.Type, defined map[string]bool, key string) {
 	switch typ.Kind() {
 	case reflect.String:
 		if overlay.String() != "" {
 			base.SetString(overlay.String())
 		}
 	case reflect.Bool:
-		// Only overwrite if overlay bool is explicitly true.
-		// Zero-valued (false) bools in overlay preserve the base value,
-		// since we cannot distinguish "not set" from "explicitly set to false"
-		// without TOML metadata tracking.
-		if overlay.Bool() {
+		// G-4 fix: Check if the bool was explicitly defined in the TOML.
+		// If explicitly set, always overwrite (even with false).
+		// If not in the defined set, only overwrite if overlay is true
+		// (to preserve base value for unset fields).
+		if defined[key] || overlay.Bool() {
 			base.SetBool(overlay.Bool())
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -212,7 +261,7 @@ func mergeField(base, overlay reflect.Value, typ reflect.Type) {
 			}
 		}
 	case reflect.Struct:
-		mergeStructs(base, overlay)
+		mergeStructs(base, overlay, defined, key)
 	}
 }
 
@@ -504,7 +553,7 @@ func (c *Config) Save(path string) error {
 	}
 
 	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), types.DirPermission); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
@@ -569,7 +618,7 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 	if info, err := os.Stat(path); err == nil {
 		lastModTime = info.ModTime()
 	}
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(types.ConfigWatchInterval)
 	defer ticker.Stop()
 	for {
 		select {

@@ -505,7 +505,7 @@ func TestMergeConfig(t *testing.T) {
 	overlay.UI.CompactMode = true
 	overlay.Ledger.Enabled = true
 
-	mergeConfig(base, overlay)
+	mergeConfig(base, overlay, nil)
 
 	if base.Model.Default != "claude-3-opus" {
 		t.Errorf("expected 'claude-3-opus', got %q", base.Model.Default)
