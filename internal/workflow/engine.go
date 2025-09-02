@@ -83,6 +83,20 @@ type Engine struct {
 	callCounter      int64
 }
 
+// gitConfig returns the git config with safe defaults when cfg is nil.
+func (e *Engine) gitConfig() config.GitConfig {
+	if e.cfg != nil {
+		return e.cfg.Git
+	}
+	return config.GitConfig{
+		CommitPrefix: "feat",
+		FixPrefix:    "fix",
+		ShipPrefix:   "chore",
+		UserName:     "M31A",
+		UserEmail:    "m31a@local",
+	}
+}
+
 // modelForPhase returns the per-phase model ID from AgentsConfig,
 // falling back to cfg.Model.Default when the phase field is empty.
 func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
