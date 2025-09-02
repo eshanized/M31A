@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/types"
 )
+
 // M-30: default cooldown between /compress calls to prevent token burn.
-const compressCooldown = 60 * time.Second
+var compressCooldown = types.CompressCooldown
 
 // handleReset returns a result that transitions the TUI to the first-run screen.
 // Requires --confirm flag to prevent accidental data loss.

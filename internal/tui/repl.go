@@ -667,7 +667,7 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 
 	case FallbackEventMsg:
 		m.fallbackBanner = fmt.Sprintf("Provider switched: %s → %s (%s)", msg.From, msg.To, msg.Reason)
-		m.fallbackBannerAt = time.Now().Add(15 * time.Second)
+		m.fallbackBannerAt = time.Now().Add(time.Duration(m.cfg.UI.FallbackBannerSecs) * time.Second)
 		m.renderMessages()
 		var cmds []tea.Cmd
 		return cmds, false

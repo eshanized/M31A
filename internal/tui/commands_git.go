@@ -301,7 +301,10 @@ func handleLog(args []string, ctx CommandContext) CommandResult {
 	}
 
 	lines := strings.Split(string(entries), "\n")
-	n := 20
+	n := ctx.Config.UI.DefaultLogLines
+	if n <= 0 {
+		n = 20
+	}
 	if len(args) > 0 {
 		if count, err := strconv.Atoi(args[0]); err == nil && count > 0 {
 			n = count

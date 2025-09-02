@@ -127,7 +127,10 @@ func handleHistory(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
 	}
 
-	limit := 10
+	limit := ctx.Config.UI.SessionListLimit
+	if limit <= 0 {
+		limit = 10
+	}
 	if len(args) > 0 {
 		if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
 			limit = n
