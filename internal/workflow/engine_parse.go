@@ -265,7 +265,7 @@ func parseQuestions(content string) []string {
 }
 
 // Fix C-4: Maximum number of tool calls to extract from a single response.
-const maxToolsPerCall = 16
+const maxToolsPerCall = m31types.MaxToolsPerCall
 
 // Fix C-4: Maximum bytes to scan when looking for a single JSON object.
 // Prevents unbounded scanning of very large LLM replies.

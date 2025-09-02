@@ -57,7 +57,7 @@ func listCwdFiles(workDir string) string {
 		}
 		// Depth limit: count path separators
 		depth := strings.Count(rel, string(filepath.Separator))
-		if depth >= 3 {
+		if depth >= m31types.MaxCwdFileDepth {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
