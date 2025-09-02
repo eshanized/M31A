@@ -29,14 +29,14 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 		if err := e.git.Init(); err != nil {
 			return nil, fmt.Errorf("git init: %w", err)
 		}
-		if err := e.git.ConfigUser("M31A", "m31a@local"); err != nil {
+		if err := e.git.ConfigUser(e.gitConfig().UserName, e.gitConfig().UserEmail); err != nil {
 			return nil, fmt.Errorf("git config user: %w", err)
 		}
 		e.logger.Info("initialized git repository")
 	}
 
 	// 4. Create planning directory
-	if err := os.MkdirAll(e.planningDir, 0755); err != nil {
+	if err := os.MkdirAll(e.planningDir, types.DirPermission); err != nil {
 		return nil, fmt.Errorf("create planning dir: %w", err)
 	}
 

@@ -53,7 +53,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		if err := e.git.AddAll(); err != nil {
 			e.logger.Warn("git add all before ship commit failed", "error", err)
 		}
-		if err := e.git.Commit(fmt.Sprintf("chore: ship %s", e.sessionID)); err != nil {
+		if err := e.git.Commit(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); err != nil {
 			return nil, fmt.Errorf("ship commit: %w", err)
 		}
 	}

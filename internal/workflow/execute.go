@@ -266,7 +266,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			if err := e.git.AddAll(); err != nil {
 				e.logger.Warn("git add failed", "task", task.ID, "error", err)
 			}
-			if err := e.git.Commit(fmt.Sprintf("feat: %s", task.Description)); err != nil {
+			if err := e.git.Commit(fmt.Sprintf("%s: %s", e.gitConfig().CommitPrefix, task.Description)); err != nil {
 				e.logger.Warn("commit failed", "task", task.ID, "error", err)
 			} else {
 				var hashErr error
@@ -374,7 +374,7 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		if err := e.git.AddAll(); err != nil {
 			e.logger.Warn("git add failed during heal", "task", task.ID, "error", err)
 		}
-		if err := e.git.Commit(fmt.Sprintf("fix: %s", task.Description)); err != nil {
+		if err := e.git.Commit(fmt.Sprintf("%s: %s", e.gitConfig().FixPrefix, task.Description)); err != nil {
 			e.logger.Warn("heal commit failed", "task", task.ID, "error", err)
 		} else {
 			var hashErr error
