@@ -396,12 +396,7 @@ func htmlToMarkdown(html string) string {
 	html = stripAllTags(html)
 
 	// Decode common HTML entities
-	html = strings.ReplaceAll(html, "&amp;", "&")
-	html = strings.ReplaceAll(html, "&lt;", "<")
-	html = strings.ReplaceAll(html, "&gt;", ">")
-	html = strings.ReplaceAll(html, "&quot;", "\"")
-	html = strings.ReplaceAll(html, "&#39;", "'")
-	html = strings.ReplaceAll(html, "&nbsp;", " ")
+	html = decodeHTMLEntities(html)
 
 	// Normalize whitespace
 	html = normalizeWhitespace(html)
@@ -418,12 +413,7 @@ func htmlToText(html string) string {
 	html = stripAllTags(html)
 
 	// Decode entities
-	html = strings.ReplaceAll(html, "&amp;", "&")
-	html = strings.ReplaceAll(html, "&lt;", "<")
-	html = strings.ReplaceAll(html, "&gt;", ">")
-	html = strings.ReplaceAll(html, "&quot;", "\"")
-	html = strings.ReplaceAll(html, "&#39;", "'")
-	html = strings.ReplaceAll(html, "&nbsp;", " ")
+	html = decodeHTMLEntities(html)
 
 	return normalizeWhitespace(html)
 }
@@ -577,6 +567,17 @@ func convertLinks(html string) string {
 		lower = strings.ToLower(html)
 	}
 	return html
+}
+
+// decodeHTMLEntities replaces common HTML entities with their character equivalents.
+func decodeHTMLEntities(s string) string {
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	return s
 }
 
 func stripAllTags(html string) string {
