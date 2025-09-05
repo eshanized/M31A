@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), types.DirPermission); err != nil {
 		logger.Error("cannot create config directory", "error", err)
 		os.Exit(1)
 	}
