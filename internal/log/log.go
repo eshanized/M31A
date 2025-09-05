@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	dirPermission  = 0755
+	filePermission = 0644
+)
+
 var defaultLogger *slog.Logger
 
 func NewLogger(version string) (*slog.Logger, func(), error) {
@@ -18,7 +23,7 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	}
 
 	logDir := filepath.Join(homeDir, ".m31a")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, dirPermission); err != nil {
 		return nil, nil, fmt.Errorf("cannot create log directory %s: %w", logDir, err)
 	}
 
@@ -28,7 +33,7 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 		fmt.Fprintf(os.Stderr, "m31a: log rotation failed (%v); continuing with append-only log\n", err)
 	}
 
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePermission)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot open log file %s: %w", logFile, err)
 	}
