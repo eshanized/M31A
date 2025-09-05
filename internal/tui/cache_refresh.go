@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // CacheRefreshTicker returns a tea.Cmd that emits RefreshCacheMsg on the
@@ -68,7 +69,7 @@ func handleCacheRefresh(ctx context.Context, registry *provider.Registry, provid
 // HTTP call no longer blocks Bubble Tea's Update() loop.
 func CacheRefreshCmd(registry *provider.Registry, providerName string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), types.HTTPDialTimeout)
 		defer cancel()
 		errMsg, nextCmd := handleCacheRefresh(ctx, registry, providerName)
 		return CacheRefreshResultMsg{ErrMsg: errMsg, NextCmd: nextCmd}
