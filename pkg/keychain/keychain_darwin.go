@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-const accountName = "m31a"
+// accountName is the keychain account identifier (from shared constant).
+const accountName = AccountName
 
 // validServiceName checks that the service parameter contains only lowercase
 // ASCII letters (a-z) after the m31a/ prefix. This prevents command injection

@@ -1,6 +1,10 @@
 package keychain
 
-const servicePrefix = "m31a/"
+const (
+	servicePrefix = "m31a/"
+	// AccountName is the keychain account identifier used across all platforms.
+	AccountName = "m31a"
+)
 
 // Keychain provides OS-native secure storage for API keys.
 // Each platform implements this interface using the native secret storage mechanism.

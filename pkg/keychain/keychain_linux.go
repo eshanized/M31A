@@ -176,7 +176,7 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 		"org.freedesktop.Secret.Item.Label": label,
 		"org.freedesktop.Secret.Item.Attributes": map[string]string{
 			"service": servicePath,
-			"account": "m31a",
+			"account": AccountName,
 		},
 	}
 	call = obj.Call("org.freedesktop.Secret.Service.CreateItem", 0, collection, props, secret, true)
