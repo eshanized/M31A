@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // backupCurrentSession copies the current session's directory to the
@@ -37,7 +39,7 @@ func (m *AppState) backupCurrentSession() {
 	}
 
 	backupRoot := filepath.Join(filepath.Dir(sessionsDir), "backups")
-	if err := os.MkdirAll(backupRoot, 0755); err != nil {
+	if err := os.MkdirAll(backupRoot, types.DirPermission); err != nil {
 		slog.Warn("auto-backup: cannot create backup dir", "err", err)
 		return
 	}
@@ -83,7 +85,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(d, data, 0644); err != nil {
+		if err := os.WriteFile(d, data, types.FilePermission); err != nil {
 			return err
 		}
 	}
@@ -112,7 +114,7 @@ func (m *AppState) backupCurrentSessionAsync() string {
 	}
 
 	backupRoot := filepath.Join(filepath.Dir(sessionsDir), "backups")
-	if err := os.MkdirAll(backupRoot, 0755); err != nil {
+	if err := os.MkdirAll(backupRoot, types.DirPermission); err != nil {
 		slog.Warn("auto-backup: cannot create backup dir", "err", err)
 		return ""
 	}

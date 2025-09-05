@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // HistoryEntry represents a single prompt history entry with frecency tracking.
@@ -192,7 +194,7 @@ func (h *FrecentHistory) atomicWrite(path string, data []byte) (err error) {
 		}
 	}()
 
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, types.FilePermission)
 	if err != nil {
 		return err
 	}
