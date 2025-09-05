@@ -61,7 +61,7 @@ type LedgerStats struct {
 // New creates a Ledger for the given file path. If the file already exists,
 // it parses existing entries into memory. The directory is created if needed.
 func New(filePath string) *Ledger {
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), types.DirPermission); err != nil {
 		return &Ledger{path: filePath}
 	}
 
