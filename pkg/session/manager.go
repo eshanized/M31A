@@ -41,7 +41,7 @@ func NewManager(baseDir string, opts ManagerOpts) *Manager {
 		opts.SessionIDBytes = 4
 	}
 	if opts.MaxRecentModels <= 0 {
-		opts.MaxRecentModels = 10
+		opts.MaxRecentModels = types.DefaultMaxRecentModels
 	}
 	return &Manager{
 		baseDir:         baseDir,
@@ -82,7 +82,7 @@ func (m *Manager) atomicWrite(path string, data []byte) (err error) {
 		}
 	}()
 
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, types.FilePermission)
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
@@ -108,9 +108,9 @@ func (m *Manager) atomicWrite(path string, data []byte) (err error) {
 	return nil
 }
 
-// ensureDir creates the directory at path (including parents) with 0755 perms.
+// ensureDir creates the directory at path (including parents) with DirPermission perms.
 func (m *Manager) ensureDir(path string) error {
-	return os.MkdirAll(path, 0755)
+	return os.MkdirAll(path, types.DirPermission)
 }
 
 // sessionJSONPath returns the path to the session.json file for the given ID.
