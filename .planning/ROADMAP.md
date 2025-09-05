@@ -3,7 +3,7 @@
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
 > **Last Updated**: 2026-06-05
-> **Status**: Phase 22 complete — Hardcoded Values & Logical Bug Fixes
+> **Status**: Phase 23 planned — Hardcoded Values & Function Simplification
 
 ---
 
@@ -1557,3 +1557,61 @@ Plans:
 - Tab-completion standardized
 - Settings unsaved changes warning
 - Missing config fields added for tool limits
+
+---
+
+## Phase 23 — Hardcoded Values & Function Simplification
+
+**Duration:** 2 weeks  
+**Complexity:** 7/10  
+**Status:** Planned
+**Milestone:** All 94 findings from rush/hardcoded_values_and_simplification_report.md are fixed: duplicated functions extracted, constants centralized, config fields added, theme colors consolidated.
+**Source:** rush/hardcoded_values_and_simplification_report.md
+**Depends on:** Phase 22
+
+### Background
+
+The comprehensive codebase audit (`rush/hardcoded_values_and_simplification_report.md`) identified 94 findings across 5 categories: 12 duplicated functions between OpenRouter and Zen providers, 38 hardcoded values that should be user-configurable, 28 magic numbers missing named constants, 10 theme/color duplications, and 6 config system gaps. Two findings are bugs: Zen's unbounded body read (OOM risk) and missing ResponseHeaderTimeout.
+
+### Issues Fixed
+
+| Wave | Issues | Plans |
+|------|--------|-------|
+| 1 (Critical/High) | Provider duplication (S-1–S-8), Bugs (C-16, C-17), Health strings (S-12) | 23-01 |
+| 2 (Medium-High) | Theme consolidation (S-9, T-1–T-3), Constants (S-10, S-11, C-18, C-30, C-31, C-35) | 23-02 |
+| 3 (Medium) | Config fields for 30+ hardcoded values (C-3–C-14, C-19–C-29, C-32–C-34, C-36–C-37), Env vars (G-1), DefaultConfig (G-2) | 23-03 |
+| 4 (Low) | Bool merge bug (G-4), WebFetch UA (C-32), Full verification of all 94 findings | 23-04 |
+
+### Plans
+
+```
+Plans:
+- [ ] 23-01-PLAN.md — Provider Function Extraction & Bug Fixes (Wave 1)
+- [ ] 23-02-PLAN.md — Theme Consolidation & Constants Centralization (Wave 2)
+- [ ] 23-03-PLAN.md — Config Fields for Hardcoded Values (Wave 3)
+- [ ] 23-04-PLAN.md — Remaining Fixes, Config Bool Merge Bug & Verification (Wave 4)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 23-01 | yes | — |
+| 2    | 23-02 | yes | Wave 1 |
+| 3    | 23-03 | yes | Wave 1 |
+| 4    | 23-04 | yes | Waves 1–3 |
+
+### Deliverables
+
+- `internal/provider/common.go` with 8 shared functions extracted from both clients
+- `internal/provider/capabilities.go` with `ParseModelCapabilities`
+- Zen body read bounded with `io.LimitReader` (C-16 bug fix)
+- Zen HTTP transport has `ResponseHeaderTimeout` (C-17 bug fix)
+- Theme struct has `BadgeForeground`, `BadgeTextLight`, `BadgeTextDark` fields
+- Zero `#000000` or `#FFFFFF` hardcoded in component files
+- All 12 duplicated functions eliminated
+- 30+ named constants in `types/constants.go`
+- 15+ new config fields with sensible defaults
+- 4+ env var overrides added
+- Config bool merge bug fixed
+- All 94 findings verified as FIXED or DEFERRED
