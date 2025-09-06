@@ -158,6 +158,14 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 	}, nil
 }
 
+// SetModel updates the active model ID and provider for the engine.
+func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
+	e.modelID = modelID
+	if p != nil {
+		e.provider = p
+	}
+}
+
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	start := time.Now()
@@ -403,10 +411,6 @@ func (e *Engine) FinalizeDiscuss() error {
 	}
 	if err := e.saveDiscussAnswers(project, questions, answers); err != nil {
 		return fmt.Errorf("save discuss answers: %w", err)
-	}
-	// Auto-transition to Plan
-	if err := e.Transition(context.Background(), m31types.PhaseDiscuss, m31types.PhasePlan); err != nil {
-		return fmt.Errorf("transition to plan: %w", err)
 	}
 	return nil
 }

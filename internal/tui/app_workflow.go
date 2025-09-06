@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 func (m *AppState) initWorkflowEngine() {
@@ -45,8 +47,15 @@ func (m *AppState) initWorkflowEngine() {
 		return
 	}
 
-	// Create a session for the workflow
-	s, err := m.sessionManager.NewSession(modelID, m.activeProvider)
+	// Re-use existing session ID if available (resumable workflow),
+	// otherwise create a new session.
+	var s *session.Session
+	var err error
+	if m.sessionID != "" {
+		s, err = m.sessionManager.LoadSession(m.sessionID)
+	} else {
+		s, err = m.sessionManager.NewSession(modelID, m.activeProvider)
+	}
 	if err != nil {
 		m.currentOperation = fmt.Sprintf("Workflow engine init failed: %v", err)
 		return
@@ -97,31 +106,22 @@ func (m *AppState) persistWorkflowState() {
 	}
 }
 
-// checkResumedWorkflowState reads the persisted workflow state for the
+// CheckResumedWorkflowState reads the persisted workflow state for the
 // current session. If a workflow was in progress (phase != idle, phase
 // != ship), pre-populates the AppState and shows a toast so the user
-// can run /workflow resume to continue. Called once during NewApp
-// after initWorkflowEngine has set m.sessionID.
-//
-// The toast uses the AppState's existing toast fields (toastText,
-// toastType, toastExpires) — not a dedicated ToastMsg queue — to match
-// the convention used elsewhere in the TUI.
-func (m *AppState) checkResumedWorkflowState() {
+// can run /workflow resume to continue. Exported for testing.
+func (m *AppState) CheckResumedWorkflowState() {
 	if m.sessionManager == nil || m.sessionID == "" {
 		return
 	}
 	goal, phase, questions, err := m.sessionManager.LoadWorkflowState(m.sessionID)
 	if err != nil {
-		// Persistence read failures are non-fatal; the workflow can
-		// still start fresh. Log at debug level.
 		slog.Debug("LoadWorkflowState failed", "err", err)
 		return
 	}
 	if phase == types.PhaseIdle || phase == types.PhaseShip {
-		// No workflow in progress — nothing to resume.
 		return
 	}
-	// Workflow was in progress — pre-populate state for /workflow resume
 	m.workflowGoal = goal
 	m.currentPhase = phase
 	m.discussQuestions = questions
@@ -199,6 +199,8 @@ func (m *AppState) finalizeDiscussAndAdvance() tea.Cmd {
 			m.setWorkflowPhase(types.PhaseIdle)
 			return nil
 		}
+		// TUI coordinates the phase transition (not the engine)
+		_ = m.workflowEngine.Transition(context.Background(), types.PhaseDiscuss, types.PhasePlan)
 	}
 	m.resetDiscussQA()
 	m.setWorkflowPhase(types.PhasePlan)

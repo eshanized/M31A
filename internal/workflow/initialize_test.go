@@ -65,13 +65,14 @@ func TestEngine_Initialize_WritesState(t *testing.T) {
 		t.Fatalf("RunPhase initialize failed: %v", err)
 	}
 
-	// Auto-transition to Discuss means STATE.md should now show discuss phase
+	// Phase transitions are now coordinated by the TUI, not the engine.
+	// After runInitialize, STATE.md should show initialize phase.
 	phase, _, _, _, err := engine.sessionMgr.LoadState(engine.sessionID)
 	if err != nil {
 		t.Fatalf("LoadState failed: %v", err)
 	}
-	if phase != m31types.PhaseDiscuss {
-		t.Errorf("Expected state phase discuss (after auto-transition), got %s", phase)
+	if phase != m31types.PhaseInitialize {
+		t.Errorf("Expected state phase initialize, got %s", phase)
 	}
 }
 

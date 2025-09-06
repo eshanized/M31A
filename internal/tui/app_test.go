@@ -1377,6 +1377,11 @@ func (m *mockWorkflowEngine) RunPhase(ctx context.Context, phase types.WorkflowP
 func (m *mockWorkflowEngine) SetMsgEmitter(_ workflow.MsgEmitter) { m.emitterSetCount++ }
 func (m *mockWorkflowEngine) SessionID() string                   { return m.sessionID }
 func (m *mockWorkflowEngine) SetSessionID(id string)              { m.sessionID = id }
+func (m *mockWorkflowEngine) SetModel(modelID string, _ provider.LLMProvider) {
+}
+func (m *mockWorkflowEngine) Transition(_ context.Context, _, _ types.WorkflowPhase) error {
+	return nil
+}
 func (m *mockWorkflowEngine) HealTask(taskID int) bool            { return false }
 
 // newTestAppForDiscuss creates an AppState with a mock workflow engine
@@ -2042,7 +2047,7 @@ func TestApp_NewApp_ShowsResumeToast(t *testing.T) {
 	// (we don't call NewApp because it tries to set up the real
 	// workflow engine which requires provider registry etc.)
 	app := newTestAppBareWithSession(t, sessMgr, s.ID)
-	app.checkResumedWorkflowState()
+	app.CheckResumedWorkflowState()
 
 	if app.workflowGoal != "build REST API" {
 		t.Errorf("expected workflowGoal 'build REST API', got %q", app.workflowGoal)
@@ -2077,7 +2082,7 @@ func TestApp_NewApp_NoResumeToastForIdleState(t *testing.T) {
 
 	// No UpdateWorkflowState call — session has default idle state
 	app := newTestAppBareWithSession(t, sessMgr, s.ID)
-	app.checkResumedWorkflowState()
+	app.CheckResumedWorkflowState()
 
 	if app.toastText != "" {
 		t.Errorf("expected no toast for idle state, got %q", app.toastText)
@@ -2334,7 +2339,7 @@ func newTestAppSessionManager(t *testing.T, dir string) *session.Manager {
 // newTestAppWithSession creates an AppState with a real session
 // manager and a pre-set sessionID. Unlike newTestAppForScreens (which
 // uses a stub workflow engine), this helper wires the session manager
-// directly so persistWorkflowState and checkResumedWorkflowState can
+// directly so persistWorkflowState and CheckResumedWorkflowState can
 // exercise the real Manager code path.
 func newTestAppWithSession(t *testing.T, sessMgr *session.Manager, sessionID string) *AppState {
 	t.Helper()
@@ -2349,7 +2354,7 @@ func newTestAppWithSession(t *testing.T, sessMgr *session.Manager, sessionID str
 
 // newTestAppBareWithSession creates a minimal AppState with a real
 // session manager and sessionID but NO workflow engine and no
-// screens. Used to test checkResumedWorkflowState in isolation
+// screens. Used to test CheckResumedWorkflowState in isolation
 // (the function only touches sessionManager, sessionID, and the
 // toast fields — it doesn't need a real engine).
 func newTestAppBareWithSession(t *testing.T, sessMgr *session.Manager, sessionID string) *AppState {

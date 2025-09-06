@@ -39,8 +39,10 @@ type FallbackNotification struct {
 type workflowEngineInterface interface {
 	SessionID() string
 	SetSessionID(id string)
+	SetModel(modelID string, p provider.LLMProvider)
 	SetMsgEmitter(em workflow.MsgEmitter)
 	RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*workflow.PhaseResult, error)
+	Transition(ctx context.Context, from, to types.WorkflowPhase) error
 	DiscussState() workflow.DiscussState
 	SubmitDiscussAnswer(index int, answer string) error
 	SkipDiscuss() error
@@ -314,7 +316,28 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 	// session. If the current session has a non-idle phase recorded,
 	// pre-populate the AppState so /workflow resume can continue from
 	// the saved point, and show a toast so the user is aware.
-	app.checkResumedWorkflowState()
+	// Task 5: check BEFORE initWorkflowEngine creates a new session,
+	// and load session history for the resumed session.
+	if sessions, err := sessionMgr.ListSessions(); err == nil && len(sessions) > 0 {
+		recent := sessions[0]
+		if goal, phase, questions, err := sessionMgr.LoadWorkflowState(recent.ID); err == nil {
+			if phase != types.PhaseIdle && phase != types.PhaseShip {
+				app.sessionID = recent.ID
+				app.workflowGoal = goal
+				app.currentPhase = phase
+				app.discussQuestions = questions
+				app.toastText = fmt.Sprintf("Resumable workflow at %s. Use /workflow resume to continue.", phase)
+				app.toastType = "info"
+				app.toastExpires = time.Now().Add(types.ToastDuration)
+				// Load session history for the resumed session
+				if sess, err := sessionMgr.LoadSession(recent.ID); err == nil && sess != nil {
+					for _, msg := range sess.Messages {
+						app.replModel.AddMessage(msg)
+					}
+				}
+			}
+		}
+	}
 
 	// Initialize AutoDream consolidator with empty messages; will be
 	// synced whenever a user message is submitted.

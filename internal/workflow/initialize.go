@@ -61,14 +61,6 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 
 	e.logger.Info("initialize phase complete")
 
-	// Auto-transition to Discuss
-	if err := e.Transition(ctx, types.PhaseInitialize, types.PhaseDiscuss); err != nil {
-		return &PhaseResult{
-			Phase:   types.PhaseInitialize,
-			Success: true,
-		}, fmt.Errorf("transition to discuss: %w", err)
-	}
-
 	return &PhaseResult{
 		Phase:   types.PhaseInitialize,
 		Success: true,

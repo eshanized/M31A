@@ -91,6 +91,10 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Phase {
 	case types.PhaseInitialize:
+		// TUI coordinates the phase transition (not the engine)
+		if m.workflowEngine != nil {
+			_ = m.workflowEngine.Transition(context.Background(), types.PhaseInitialize, types.PhaseDiscuss)
+		}
 		m.setWorkflowPhase(types.PhaseDiscuss)
 		m.persistWorkflowState()
 		return m, RunPhaseCmd(m, types.PhaseDiscuss, m.workflowGoal)
@@ -462,6 +466,16 @@ func (m *AppState) handleAppMsg(msg AppMsg) (tea.Model, tea.Cmd) {
 		}
 		m.activeProvider = msg.ModelSelected.Provider
 		m.activeModel = &msg.ModelSelected.Model
+		// Sync model to workflow engine
+		if m.workflowEngine != nil && m.registry != nil {
+			if p := m.registry.ActiveProvider(); p != nil {
+				m.workflowEngine.SetModel(m.activeModel.ID, p)
+			}
+		}
+		// Sync model to REPL
+		if m.replModel != nil {
+			m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
+		}
 		m.headerCacheValid = false
 		m.screen = m.prevScreen
 		return m, nil
