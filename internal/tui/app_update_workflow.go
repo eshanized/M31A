@@ -543,6 +543,11 @@ func (m *AppState) handleSettingsSaved() (tea.Model, tea.Cmd) {
 					settingsCmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
 					m.replModel.SetDispatcher(m.dispatcher)
 				}
+				if m.workflowEngine != nil && m.activeModel != nil {
+					if p := m.registry.ActiveProvider(); p != nil {
+						m.workflowEngine.SetModel(m.activeModel.ID, p)
+					}
+				}
 			}
 		}
 
@@ -558,6 +563,9 @@ func (m *AppState) handleSettingsSaved() (tea.Model, tea.Cmd) {
 							if m.replModel != nil {
 								settingsCmd = m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
 								m.replModel.SetDispatcher(m.dispatcher)
+							}
+							if m.workflowEngine != nil {
+								m.workflowEngine.SetModel(mi.ID, p)
 							}
 							break
 						}

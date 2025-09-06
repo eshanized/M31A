@@ -933,8 +933,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.workflowGoal = ""
-					m.workflowRunning = false
-					m.currentPhase = types.PhaseIdle
+					m.setWorkflowPhase(types.PhaseIdle)
 					if m.replModel != nil {
 						m.replModel.ClearMessages()
 					}

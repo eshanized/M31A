@@ -123,7 +123,7 @@ func (m *AppState) CheckResumedWorkflowState() {
 		return
 	}
 	m.workflowGoal = goal
-	m.currentPhase = phase
+	m.setWorkflowPhase(phase)
 	m.discussQuestions = questions
 	m.toastText = fmt.Sprintf("Resumable workflow at %s. Use /workflow resume to continue.", phase)
 	m.toastType = "info"
