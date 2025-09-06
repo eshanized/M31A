@@ -145,11 +145,12 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 				return
 			}
 
+			if chunk.Usage != nil {
+				lastUsage = chunk.Usage
+			}
 			switch chunk.Type {
 			case "content":
 				fullContent.WriteString(chunk.Delta)
-			case "done":
-				lastUsage = &types.Usage{}
 			}
 		}
 	}()

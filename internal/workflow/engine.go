@@ -68,6 +68,7 @@ type Engine struct {
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
+	activePhase      m31types.WorkflowPhase
 	cfg              *config.Config
 	git              *git.Git
 	dispatcher       *tools.Dispatcher
@@ -160,6 +161,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	start := time.Now()
+	e.activePhase = phase
 
 	var result *PhaseResult
 	var err error
@@ -474,7 +476,7 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 	})
 
 	req := provider.ChatRequest{
-		Model:            e.modelID,
+		Model:            e.modelForPhase(e.activePhase),
 		Messages:         messages,
 		ReasoningEnabled: true,
 	}
@@ -502,7 +504,7 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 // and emitting each chunk to the TUI (typically via MsgEmitter).
 func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (*m31types.StreamIterator, error) {
 	req := provider.ChatRequest{
-		Model:            e.modelID,
+		Model:            e.modelForPhase(e.activePhase),
 		Messages:         messages,
 		ReasoningEnabled: true,
 	}

@@ -19,8 +19,9 @@ const sidebarWidth = 42
 const sidebarStatusCacheTTL = 1 * time.Second
 
 type SidebarRefreshMsg struct {
-	Statuses []git.FileStatus
-	Err      error
+	Statuses  []git.FileStatus
+	Err       error
+	FromCache bool
 }
 
 type SidebarModel struct {
@@ -70,12 +71,16 @@ func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.Err != nil {
 			m.err = msg.Err.Error()
-			m.gitStatusCacheErr = msg.Err
+			if !msg.FromCache {
+				m.gitStatusCacheErr = msg.Err
+			}
 		} else {
 			m.statuses = msg.Statuses
-			m.gitStatusCache = msg.Statuses
-			m.gitStatusCacheErr = nil
-			m.lastStatusFetch = time.Now()
+			if !msg.FromCache {
+				m.gitStatusCache = msg.Statuses
+				m.gitStatusCacheErr = nil
+				m.lastStatusFetch = time.Now()
+			}
 			m.err = ""
 		}
 	}
@@ -147,10 +152,10 @@ func (m *SidebarModel) refreshCmd() tea.Cmd {
 		}
 		// L-17: Use 1-second cache to avoid hammering git on every TickMsg
 		if !lastFetch.IsZero() && time.Since(lastFetch) < sidebarStatusCacheTTL {
-			return SidebarRefreshMsg{Statuses: cachedStatuses, Err: cachedErr}
+			return SidebarRefreshMsg{Statuses: cachedStatuses, Err: cachedErr, FromCache: true}
 		}
 		statuses, err := m.git.StatusPorcelain()
-		return SidebarRefreshMsg{Statuses: statuses, Err: err}
+		return SidebarRefreshMsg{Statuses: statuses, Err: err, FromCache: false}
 	}
 }
 
