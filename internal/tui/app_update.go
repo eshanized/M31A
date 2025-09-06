@@ -547,6 +547,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, event, err := provider.FindFallbackProvider(m.registry, m.activeProvider)
 				if err == nil && event != nil {
 					m.activeProvider = event.To
+					wasPaused := m.workflowPaused
 					if m.workflowPaused {
 						m.workflowPaused = false
 					}
@@ -554,12 +555,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						fallbackCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
 						m.replModel.SetDispatcher(m.dispatcher)
 						m.replModel.Update(msg)
-						return m, tea.Batch(
-							func() tea.Msg {
-								return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
-							},
-							fallbackCmd,
-						)
+						var cmds []tea.Cmd
+						cmds = append(cmds, func() tea.Msg {
+							return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
+						}, fallbackCmd)
+						// Resume paused workflow after provider recovery
+						if wasPaused && m.workflowRunning && m.currentPhase != types.PhaseIdle {
+							cmds = append(cmds, RunPhaseCmd(m, m.currentPhase, m.workflowGoal))
+						}
+						return m, tea.Batch(cmds...)
 					}
 				}
 			}
