@@ -225,7 +225,7 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 			m.sidebarManuallyHidden = !m.sidebarModel.IsVisible()
 			if m.sidebarModel.IsVisible() {
 				if m.replModel != nil {
-					m.replModel.SetSidebarWidth(sidebarWidth)
+					m.replModel.SetSidebarWidth(defaultSidebarWidth)
 				}
 				return m, m.sidebarModel.refreshCmd()
 			}

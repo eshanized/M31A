@@ -4,20 +4,32 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// PhaseBreadcrumb holds the current workflow phase for header rendering.
+type PhaseBreadcrumb struct {
+	Current types.WorkflowPhase
+}
+
 // RenderHeader is a pure function that builds the header string from
 // the provided parameters. It is also called by CachedRenderHeader
 // when the cache is invalidated.
+// Redesigned with block-character anchors (▓▓▓ M31A ▓) and phase breadcrumb.
 func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 	health types.HealthStatus, contextUsed int64, contextTotal int64, width int) string {
 
-	brand := t.Header.Render("M31A")
+	// Left anchor: block characters for visual weight
+	anchorStyle := lipgloss.NewStyle().
+		Foreground(t.Brand).
+		Bold(true)
+	brand := anchorStyle.Render("▓▓▓ M31A ▓")
 
+	// Provider badge
 	var badgeText string
 	var badgeStyle lipgloss.Style
 	if provider == "" {
@@ -30,6 +42,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 	}
 	badge := badgeStyle.Render(badgeText)
 
+	// Model name — truncated to fit, neutral color
 	var modelSegment string
 	if model != nil {
 		name := model.Name
@@ -37,9 +50,10 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 		if len(runes) > 20 {
 			name = string(runes[:20]) + "..."
 		}
-		modelSegment = t.ModelBadge.Render(name)
+		modelSegment = lipgloss.NewStyle().Foreground(t.TextSecondary).Render(name)
 	}
 
+	// Context bar — right-aligned, color-coded
 	var contextSegment string
 	if contextTotal == 0 {
 		contextSegment = t.ContextBar.Render("--/-- ctx")
@@ -60,6 +74,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 		contextSegment = t.ContextBar.Foreground(color).Render(ctxText)
 	}
 
+	// Health status
 	var healthSegment string
 	switch health.Status {
 	case "live":
@@ -72,6 +87,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 		healthSegment = t.StatusOffline.Render("[??]")
 	}
 
+	// Assemble left side
 	segments := []string{brand}
 	if badge != "" {
 		segments = append(segments, badge)
@@ -95,6 +111,72 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 	}
 
 	return result
+}
+
+// RenderPhaseBreadcrumb renders a horizontal breadcrumb showing workflow phases.
+// Past phases are muted, current is brand+bold with ↑ pointer, future is muted.
+func RenderPhaseBreadcrumb(t theme.Theme, current types.WorkflowPhase, width int) string {
+	phases := []struct {
+		name string
+		id   types.WorkflowPhase
+	}{
+		{"DISCUSS", types.PhaseDiscuss},
+		{"PLAN", types.PhasePlan},
+		{"EXECUTE", types.PhaseExecute},
+		{"VERIFY", types.PhaseVerify},
+		{"SHIP", types.PhaseShip},
+	}
+
+	var parts []string
+	for i, p := range phases {
+		var style lipgloss.Style
+		if p.id == current {
+			style = t.PhaseActive
+		} else if phaseOrder(p.id) < phaseOrder(current) {
+			style = t.PhasePast
+		} else {
+			style = t.PhaseFuture
+		}
+
+		text := p.name
+		if p.id == current {
+			text = "↑ " + text
+		}
+
+		parts = append(parts, style.Render(text))
+
+		// Add separator between phases (not after last)
+		if i < len(phases)-1 {
+			sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ─── ")
+			parts = append(parts, sep)
+		}
+	}
+
+	result := strings.Join(parts, "")
+	if lipgloss.Width(result) > width {
+		result = TruncateWithEllipsis(result, width)
+	}
+	return result
+}
+
+// phaseOrder returns a numeric order for workflow phases.
+func phaseOrder(p types.WorkflowPhase) int {
+	switch p {
+	case types.PhaseInitialize:
+		return 0
+	case types.PhaseDiscuss:
+		return 1
+	case types.PhasePlan:
+		return 2
+	case types.PhaseExecute:
+		return 3
+	case types.PhaseVerify:
+		return 4
+	case types.PhaseShip:
+		return 5
+	default:
+		return -1
+	}
 }
 
 // computeHeaderKey builds a FNV-1a hash over the header inputs.

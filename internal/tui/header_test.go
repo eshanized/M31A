@@ -15,6 +15,13 @@ func TestRenderHeader_ContainsBrand(t *testing.T) {
 	}
 }
 
+func TestRenderHeader_BlockAnchor(t *testing.T) {
+	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{}, 0, 0, 120)
+	if !strings.Contains(result, "▓") {
+		t.Errorf("Header should contain block anchor '▓', got %q", result)
+	}
+}
+
 func TestRenderHeader_ProviderBadge(t *testing.T) {
 	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{}, 0, 0, 120)
 	if !strings.Contains(result, "[OR]") {
@@ -120,5 +127,63 @@ func TestRenderHeader_ContextColorError(t *testing.T) {
 	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{}, 96000, 100000, 120)
 	if !strings.Contains(result, "ctx") {
 		t.Errorf("96%% context should show context bar, got %q", result)
+	}
+}
+
+func TestRenderHeader_Width80(t *testing.T) {
+	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{Status: "live"}, 0, 0, 80)
+	if result == "" {
+		t.Error("Header at 80 cols should not be empty")
+	}
+}
+
+func TestRenderHeader_Width160(t *testing.T) {
+	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{Status: "live"}, 0, 0, 160)
+	if result == "" {
+		t.Error("Header at 160 cols should not be empty")
+	}
+}
+
+func TestRenderHeader_Width200(t *testing.T) {
+	result := RenderHeader(theme.Dark(), "openrouter", nil, types.HealthStatus{Status: "live"}, 0, 0, 200)
+	if result == "" {
+		t.Error("Header at 200 cols should not be empty")
+	}
+}
+
+func TestRenderPhaseBreadcrumb_Current(t *testing.T) {
+	result := RenderPhaseBreadcrumb(theme.Dark(), types.PhaseExecute, 120)
+	if !strings.Contains(result, "EXECUTE") {
+		t.Errorf("Phase breadcrumb should contain 'EXECUTE', got %q", result)
+	}
+	if !strings.Contains(result, "↑") {
+		t.Errorf("Current phase should have ↑ pointer, got %q", result)
+	}
+}
+
+func TestRenderPhaseBreadcrumb_Past(t *testing.T) {
+	result := RenderPhaseBreadcrumb(theme.Dark(), types.PhaseExecute, 120)
+	if !strings.Contains(result, "DISCUSS") {
+		t.Errorf("Past phases should appear, got %q", result)
+	}
+	if !strings.Contains(result, "PLAN") {
+		t.Errorf("Past phases should appear, got %q", result)
+	}
+}
+
+func TestRenderPhaseBreadcrumb_Future(t *testing.T) {
+	result := RenderPhaseBreadcrumb(theme.Dark(), types.PhaseExecute, 120)
+	if !strings.Contains(result, "VERIFY") {
+		t.Errorf("Future phases should appear, got %q", result)
+	}
+	if !strings.Contains(result, "SHIP") {
+		t.Errorf("Future phases should appear, got %q", result)
+	}
+}
+
+func TestRenderPhaseBreadcrumb_Separators(t *testing.T) {
+	result := RenderPhaseBreadcrumb(theme.Dark(), types.PhasePlan, 120)
+	if !strings.Contains(result, "───") {
+		t.Errorf("Phase breadcrumb should have separators, got %q", result)
 	}
 }

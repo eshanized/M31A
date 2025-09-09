@@ -11,18 +11,20 @@ import (
 
 // StatusBarInfo carries optional info to render in the status bar.
 type StatusBarInfo struct {
-	PromptTokens  int
-	TotalTokens   int
-	Cost          float64
-	ShowCost      bool
-	WhichKey      string   // which-key hint text to show
-	LeaderActive  bool     // if true, show leader prompt instead of normal content
-	AgentName     string   // agent/model name for metadata row
-	ModelName     string   // model name
-	ProviderName  string   // provider short name
-	IsStreaming   bool     // currently streaming
-	IsThinking    bool     // currently in thinking mode
-	KeyboardHints []string // e.g. ["ctrl+p commands", "ctrl+b sidebar"]
+	PromptTokens     int
+	TotalTokens      int
+	Cost             float64
+	ShowCost         bool
+	WhichKey         string   // which-key hint text to show
+	LeaderActive     bool     // if true, show leader prompt instead of normal content
+	AgentName        string   // agent/model name for metadata row
+	ModelName        string   // model name
+	ProviderName     string   // provider short name
+	IsStreaming      bool     // currently streaming
+	IsThinking       bool     // currently in thinking mode
+	KeyboardHints    []string // e.g. ["ctrl+p commands", "ctrl+b sidebar"]
+	WorkflowPhase    string   // e.g. "discuss", "plan", "execute"
+	QuestionProgress string   // e.g. "question 2/4"
 }
 
 func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, width int, info *StatusBarInfo) string {
@@ -41,6 +43,13 @@ func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, wi
 		if info.IsThinking {
 			leftText = t.Spinner.Render("\u22EF") + " " + lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render("thinking...")
 		}
+	} else if info != nil && info.WorkflowPhase != "" {
+		// Workflow state: show phase with context
+		phaseText := "▸ " + info.WorkflowPhase
+		if info.QuestionProgress != "" {
+			phaseText += " · " + info.QuestionProgress
+		}
+		leftText = lipgloss.NewStyle().Foreground(t.Brand).Render(phaseText)
 	} else if operation == "" {
 		leftText = lipgloss.NewStyle().Foreground(t.TextMuted).Render("Ready")
 	} else {

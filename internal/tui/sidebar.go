@@ -12,7 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-const sidebarWidth = 42
+const defaultSidebarWidth = 120
 
 // sidebarStatusCacheTTL is how long the sidebar caches git status
 // to avoid hammering git on every TickMsg (60Hz).
@@ -46,7 +46,7 @@ func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
 	return &SidebarModel{
 		theme:   t,
 		git:     g,
-		width:   sidebarWidth,
+		width:   defaultSidebarWidth,
 		loading: true,
 		spinner: sp,
 	}
@@ -61,7 +61,7 @@ func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		if m.width == 0 {
-			m.width = sidebarWidth
+			m.width = defaultSidebarWidth
 		}
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -94,7 +94,7 @@ func (m *SidebarModel) View() string {
 
 	w := m.width
 	if w <= 0 {
-		w = sidebarWidth
+		w = defaultSidebarWidth
 	}
 
 	var lines []string
@@ -138,6 +138,18 @@ func (m *SidebarModel) IsVisible() bool {
 
 func (m *SidebarModel) SetTheme(t theme.Theme) {
 	m.theme = t
+}
+
+// SetWidth sets the sidebar width in columns.
+func (m *SidebarModel) SetWidth(w int) {
+	if w > 0 {
+		m.width = w
+	}
+}
+
+// GetWidth returns the current sidebar width in columns.
+func (m *SidebarModel) GetWidth() int {
+	return m.width
 }
 
 func (m *SidebarModel) refreshCmd() tea.Cmd {

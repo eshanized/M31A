@@ -70,9 +70,10 @@ func (m *PermissionModal) Render(width, height int) string {
 		riskLabel,
 	)
 
+	// Tool card with exact command (double-border for blocking semantics)
 	highlighted := highlightCommand(m.request.Command, m.theme)
 	cmdBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.DoubleBorder()).
 		BorderForeground(m.theme.Border).
 		Padding(0, 1).
 		Width(modalWidth - 6).
@@ -102,6 +103,9 @@ func (m *PermissionModal) Render(width, height int) string {
 			Foreground(m.theme.Warning).
 			Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(remaining)))
 	}
+
+	// Countdown bar using half-block characters (▀▄)
+	countdownBar := m.renderCountdownBar(modalWidth - 6)
 
 	// Rule context section (displayed when a permission rule matched)
 	var ruleInfo string
@@ -134,6 +138,7 @@ func (m *PermissionModal) Render(width, height int) string {
 		keys,
 		exitHint,
 		"",
+		countdownBar,
 		countdown,
 	)
 
@@ -150,6 +155,32 @@ func (m *PermissionModal) Render(width, height int) string {
 		lipgloss.Center, lipgloss.Center,
 		modal,
 	)
+}
+
+// renderCountdownBar renders a progress bar using half-block characters (▀▄).
+// Fills from left to right based on remaining time ratio.
+func (m *PermissionModal) renderCountdownBar(maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+
+	total := m.timeout.Seconds()
+	remaining := m.Remaining().Seconds()
+	if total <= 0 {
+		return ""
+	}
+
+	ratio := remaining / total
+	filledWidth := int(ratio * float64(maxWidth))
+	if filledWidth > maxWidth {
+		filledWidth = maxWidth
+	}
+	emptyWidth := maxWidth - filledWidth
+
+	filled := lipgloss.NewStyle().Foreground(m.theme.Warning).Render(strings.Repeat("█", filledWidth))
+	empty := lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("░", emptyWidth))
+
+	return filled + empty
 }
 
 func (m *PermissionModal) Allow() tools.PermissionResponse {
