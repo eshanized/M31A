@@ -2,8 +2,8 @@
 
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
-> **Last Updated**: 2026-06-05
-> **Status**: Phase 23 planned — Hardcoded Values & Function Simplification
+> **Last Updated**: 2026-06-06
+> **Status**: Phase 24 planned — TUI Redesign
 
 ---
 
@@ -1615,3 +1615,75 @@ Plans:
 - 4+ env var overrides added
 - Config bool merge bug fixed
 - All 94 findings verified as FIXED or DEFERRED
+
+---
+
+## Phase 24 — TUI Redesign
+
+**Duration:** 3 weeks
+**Complexity:** 8/10
+**Status:** Planned
+**Milestone:** Complete visual and interaction redesign of all M31A TUI screens based on the TUI Redesign Proposal
+**Source:** rush/tui_redesign_proposal.md
+**Depends on:** Phase 23
+
+### Background
+
+The TUI Redesign Proposal (`rush/tui_redesign_proposal.md`) analyzed ~350KB of Go source across 70+ TUI files and proposes a complete visual overhaul of all 10 existing screens plus 6 new proposed screens. The redesign maintains all architectural constraints: Bubble Tea single-threaded model, lipgloss styling, no CSS animations, charmbracelet component ecosystem, CGO_ENABLED=0.
+
+### Requirement IDs
+
+| ID | Description |
+|----|-------------|
+| TUI-01 | Theme Enhancement — new color tokens, border/drawing primitives, sparkline/starfield components |
+| TUI-02 | Shared Chrome — Header (block anchors, phase breadcrumb), StatusBar (multi-segment), Sidebar (configurable width), PermissionModal (countdown bar) |
+| TUI-03 | REPL Redesign — Mission Control with role gutters, timestamp bars, double-border tool cards, git status strip |
+| TUI-04 | FirstRun Redesign — Launchpad with galaxy metaphor, 2x2 feature cards, provider constellation picker |
+| TUI-05 | Plan Screen Redesign — Blueprint with Kanban layout, file impact, dependency graph |
+| TUI-06 | Execute + Verify Redesign — Mission Live with live metrics, QA Gate with per-task result panels |
+| TUI-07 | Ship + Diff Redesign — Launch Pad with commit review, enhanced diff with syntax highlighting |
+| TUI-08 | ModelSelector + Settings + Resume — Observatory with sparklines, Control Tower with icon tabs, Vault with timeline view |
+
+### Plans
+
+```
+Plans:
+- [ ] 24-01-PLAN.md — Theme Enhancement + Shared Chrome (Wave 1)
+- [ ] 24-02-PLAN.md — REPL + FirstRun Redesign (Wave 2)
+- [ ] 24-03-PLAN.md — Plan + Execute + Verify Redesign (Wave 3)
+- [ ] 24-04-PLAN.md — Ship + Diff Redesign (Wave 3)
+- [ ] 24-05-PLAN.md — ModelSelector + Settings + Resume Redesign (Wave 4)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 24-01 | yes | — |
+| 2    | 24-02 | yes | Wave 1 |
+| 3    | 24-03, 24-04 | yes, yes | Wave 1 |
+| 4    | 24-05 | yes | Wave 1 |
+
+### Deliverables
+
+- Theme struct has new style fields: CardBorder, PhaseActive, PhasePast, PhaseFuture, TimelineDate, MetricValue, MetricLabel
+- Dark() and Light() use new color palette: Brand=#7C3AED, Accent=#06B6D4, Success=#10B981, Warning=#F59E0B, Error=#EF4444, Surface=#1E1E2E
+- Sparkline component renders braille/block character visualizations
+- Starfield component renders deterministic scattered dots
+- Header renders with block-character anchors and phase breadcrumb
+- StatusBar adapts to idle/streaming/workflow states
+- Sidebar width configurable (default 120)
+- PermissionModal has double-border, tool card, and countdown bar
+- REPL renders with role gutters, timestamp bars, double-border tool cards
+- FirstRun shows galaxy starfield, 2x2 feature cards, provider constellation picker
+- Plan screen shows Blueprint layout with detail box, file impact, dependency graph
+- Execute screen shows live metrics, progress bar, running task panel
+- Verify screen shows summary bar, per-task result panels, self-heal overlay
+- Ship screen shows commit review, diff summary, ship action card
+- Diff screen renders with syntax highlighting and line numbers
+- ModelSelector shows sparklines, capability badges, detail pane with cost bars
+- Settings shows icon tabs, two-column layout, description pane
+- Resume shows timeline view, session cards with phase badges, preview pane
+- All screens render gracefully at 80, 120, 160, 200 cols
+- `go test -race ./internal/tui/...` passes
+- `go vet ./internal/tui/...` exits 0
