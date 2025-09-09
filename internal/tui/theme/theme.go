@@ -73,6 +73,22 @@ type Theme struct {
 	BadgeForeground   lipgloss.Color // foreground color for colored badges (black on both dark/light)
 	BadgeTextLight    lipgloss.Color // white text for dark-themed badges
 	BadgeTextDark     lipgloss.Color // black text for light-themed badges
+
+	// Card border styles for panel/card rendering
+	CardBorder       lipgloss.Style // rounded card border, default brand color
+	CardBorderActive lipgloss.Style // focused card border, brand + bold
+	CardBorderError  lipgloss.Style // error card border, error color
+	CardBorderWarn   lipgloss.Style // warning card border, warning color
+
+	// Workflow phase styles
+	PhaseActive lipgloss.Style // current workflow phase, brand + bold
+	PhasePast   lipgloss.Style // completed workflow phases, muted
+	PhaseFuture lipgloss.Style // upcoming workflow phases, muted
+
+	// Timeline and metric styles
+	TimelineDate lipgloss.Style // session timeline date headers
+	MetricValue  lipgloss.Style // large metric numbers, brand foreground
+	MetricLabel  lipgloss.Style // metric label below value, muted
 }
 
 type Manager struct {

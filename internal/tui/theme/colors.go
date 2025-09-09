@@ -5,35 +5,35 @@ import "github.com/charmbracelet/lipgloss"
 func Dark() Theme {
 	t := Theme{
 		Mode:              ModeDark,
-		Background:        lipgloss.Color("#0D0D0D"),
-		Surface:           lipgloss.Color("#1A1A1A"),
-		SurfaceElevated:   lipgloss.Color("#242424"),
+		Background:        lipgloss.Color("#0F0F1A"),
+		Surface:           lipgloss.Color("#1E1E2E"),
+		SurfaceElevated:   lipgloss.Color("#2A2A3E"),
 		Border:            lipgloss.Color("#2E2E2E"),
-		Brand:             lipgloss.Color("#D77757"),
-		TextPrimary:       lipgloss.Color("#E8EAED"),
-		TextSecondary:     lipgloss.Color("#9AA0A6"),
-		Thinking:          lipgloss.Color("#8AB4F8"),
-		Success:           lipgloss.Color("#6BCB77"),
-		Error:             lipgloss.Color("#FF6B6B"),
-		Warning:           lipgloss.Color("#FFD93D"),
+		Brand:             lipgloss.Color("#7C3AED"),
+		TextPrimary:       lipgloss.Color("#E2E8F0"),
+		TextSecondary:     lipgloss.Color("#94A3B8"),
+		Thinking:          lipgloss.Color("#8B5CF6"),
+		Success:           lipgloss.Color("#10B981"),
+		Error:             lipgloss.Color("#EF4444"),
+		Warning:           lipgloss.Color("#F59E0B"),
 		CodeBG:            lipgloss.Color("#2D2D2D"),
 		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#1A1A1A"),
-		BackgroundElement: lipgloss.Color("#242424"),
-		Text:              lipgloss.Color("#E8EAED"),
-		TextMuted:         lipgloss.Color("#9AA0A6"),
+		BackgroundPanel:   lipgloss.Color("#1E1E2E"),
+		BackgroundElement: lipgloss.Color("#2A2A3E"),
+		Text:              lipgloss.Color("#E2E8F0"),
+		TextMuted:         lipgloss.Color("#475569"),
 		BorderActive:      lipgloss.Color("#484848"),
 		BorderSubtle:      lipgloss.Color("#3C3C3C"),
-		Primary:           lipgloss.Color("#D77757"),
-		Secondary:         lipgloss.Color("#8AB4F8"),
-		Accent:            lipgloss.Color("#8AB4F8"),
-		Info:              lipgloss.Color("#8AB4F8"),
+		Primary:           lipgloss.Color("#7C3AED"),
+		Secondary:         lipgloss.Color("#06B6D4"),
+		Accent:            lipgloss.Color("#06B6D4"),
+		Info:              lipgloss.Color("#06B6D4"),
 		ThinkingOpacity:   0.6,
 		DiffAdded:         lipgloss.Color("#81C995"),
 		DiffRemoved:       lipgloss.Color("#F28B82"),
 		DiffAddedBg:       lipgloss.Color("#81C99520"),
 		DiffRemovedBg:     lipgloss.Color("#F28B8220"),
-		DiffContextBg:     lipgloss.Color("#242424"),
+		DiffContextBg:     lipgloss.Color("#2A2A3E"),
 		BadgeForeground:   lipgloss.Color("#000000"),
 		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
 		BadgeTextDark:     lipgloss.Color("#000000"),
@@ -54,6 +54,32 @@ func Dark() Theme {
 	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
 	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color(t.Brand))
 	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+
+	// New card border styles
+	t.CardBorder = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand))
+	t.CardBorderActive = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand)).
+		Bold(true)
+	t.CardBorderError = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Error))
+	t.CardBorderWarn = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Warning))
+
+	// Workflow phase styles
+	t.PhaseActive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+	t.PhasePast = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+	t.PhaseFuture = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+
+	// Timeline and metric styles
+	t.TimelineDate = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted)).Bold(true)
+	t.MetricValue = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+	t.MetricLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+
 	return t
 }
 
@@ -64,30 +90,30 @@ func Light() Theme {
 		Surface:           lipgloss.Color("#F8F9FA"),
 		SurfaceElevated:   lipgloss.Color("#FFFFFF"),
 		Border:            lipgloss.Color("#E0E0E0"),
-		Brand:             lipgloss.Color("#C45C3A"),
-		TextPrimary:       lipgloss.Color("#1F1F1F"),
-		TextSecondary:     lipgloss.Color("#5F6368"),
-		Thinking:          lipgloss.Color("#1967D2"),
-		Success:           lipgloss.Color("#1E8E3E"),
-		Error:             lipgloss.Color("#D93025"),
-		Warning:           lipgloss.Color("#F9AB00"),
+		Brand:             lipgloss.Color("#7C3AED"),
+		TextPrimary:       lipgloss.Color("#1E293B"),
+		TextSecondary:     lipgloss.Color("#64748B"),
+		Thinking:          lipgloss.Color("#7C3AED"),
+		Success:           lipgloss.Color("#059669"),
+		Error:             lipgloss.Color("#DC2626"),
+		Warning:           lipgloss.Color("#D97706"),
 		CodeBG:            lipgloss.Color("#F1F3F4"),
 		ToolLabel:         make(map[string]lipgloss.Style),
 		BackgroundPanel:   lipgloss.Color("#F8F9FA"),
 		BackgroundElement: lipgloss.Color("#FFFFFF"),
-		Text:              lipgloss.Color("#1F1F1F"),
-		TextMuted:         lipgloss.Color("#5F6368"),
+		Text:              lipgloss.Color("#1E293B"),
+		TextMuted:         lipgloss.Color("#94A3B8"),
 		BorderActive:      lipgloss.Color("#C0C0C0"),
 		BorderSubtle:      lipgloss.Color("#E8E8E8"),
-		Primary:           lipgloss.Color("#C45C3A"),
-		Secondary:         lipgloss.Color("#1967D2"),
-		Accent:            lipgloss.Color("#1967D2"),
-		Info:              lipgloss.Color("#1967D2"),
+		Primary:           lipgloss.Color("#7C3AED"),
+		Secondary:         lipgloss.Color("#0891B2"),
+		Accent:            lipgloss.Color("#0891B2"),
+		Info:              lipgloss.Color("#0891B2"),
 		ThinkingOpacity:   0.6,
-		DiffAdded:         lipgloss.Color("#1E8E3E"),
-		DiffRemoved:       lipgloss.Color("#D93025"),
-		DiffAddedBg:       lipgloss.Color("#1E8E3E20"),
-		DiffRemovedBg:     lipgloss.Color("#D9302520"),
+		DiffAdded:         lipgloss.Color("#059669"),
+		DiffRemoved:       lipgloss.Color("#DC2626"),
+		DiffAddedBg:       lipgloss.Color("#05966920"),
+		DiffRemovedBg:     lipgloss.Color("#DC262620"),
 		DiffContextBg:     lipgloss.Color("#F8F9FA"),
 		BadgeForeground:   lipgloss.Color("#000000"),
 		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
@@ -109,6 +135,32 @@ func Light() Theme {
 	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
 	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color(t.Brand))
 	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+
+	// New card border styles
+	t.CardBorder = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand))
+	t.CardBorderActive = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand)).
+		Bold(true)
+	t.CardBorderError = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Error))
+	t.CardBorderWarn = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Warning))
+
+	// Workflow phase styles
+	t.PhaseActive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+	t.PhasePast = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+	t.PhaseFuture = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+
+	// Timeline and metric styles
+	t.TimelineDate = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted)).Bold(true)
+	t.MetricValue = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
+	t.MetricLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+
 	return t
 }
 

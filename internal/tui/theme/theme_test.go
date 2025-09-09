@@ -4,16 +4,16 @@ import "testing"
 
 func TestDarkTheme_Background(t *testing.T) {
 	t.Run("Background", func(t *testing.T) {
-		if got := string(Dark().Background); got != "#0D0D0D" {
-			t.Errorf("Dark().Background = %q, want %q", got, "#0D0D0D")
+		if got := string(Dark().Background); got != "#0F0F1A" {
+			t.Errorf("Dark().Background = %q, want %q", got, "#0F0F1A")
 		}
 	})
 }
 
 func TestDarkTheme_Brand(t *testing.T) {
 	t.Run("Brand", func(t *testing.T) {
-		if got := string(Dark().Brand); got != "#D77757" {
-			t.Errorf("Dark().Brand = %q, want %q", got, "#D77757")
+		if got := string(Dark().Brand); got != "#7C3AED" {
+			t.Errorf("Dark().Brand = %q, want %q", got, "#7C3AED")
 		}
 	})
 }
@@ -28,8 +28,8 @@ func TestLightTheme_Background(t *testing.T) {
 
 func TestLightTheme_Brand(t *testing.T) {
 	t.Run("Brand", func(t *testing.T) {
-		if got := string(Light().Brand); got != "#C45C3A" {
-			t.Errorf("Light().Brand = %q, want %q", got, "#C45C3A")
+		if got := string(Light().Brand); got != "#7C3AED" {
+			t.Errorf("Light().Brand = %q, want %q", got, "#7C3AED")
 		}
 	})
 }
@@ -56,8 +56,8 @@ func TestManager_Cycle(t *testing.T) {
 func TestManager_Current(t *testing.T) {
 	t.Run("AfterDarkConstruction", func(t *testing.T) {
 		m := NewManager(ModeDark)
-		if got := string(m.Current().Background); got != "#0D0D0D" {
-			t.Errorf("Current().Background = %q, want %q", got, "#0D0D0D")
+		if got := string(m.Current().Background); got != "#0F0F1A" {
+			t.Errorf("Current().Background = %q, want %q", got, "#0F0F1A")
 		}
 	})
 	t.Run("AfterCycle", func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestToolLabel_Keys(t *testing.T) {
 
 func TestDefault_Dark(t *testing.T) {
 	d := Default()
-	if got := string(d.Background); got != "#0D0D0D" {
-		t.Errorf("Default().Background = %q, want %q", got, "#0D0D0D")
+	if got := string(d.Background); got != "#0F0F1A" {
+		t.Errorf("Default().Background = %q, want %q", got, "#0F0F1A")
 	}
 }
