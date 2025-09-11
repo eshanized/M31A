@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -136,23 +137,40 @@ func (m *PlanModel) View() string {
 
 	var sb strings.Builder
 
-	// Header
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Render(" Plan "))
+	// Blueprint header bar: ╭─ Blueprint ── N tasks ── Est. $X.XX ── model-name ─╮
+	sb.WriteString(m.renderHeaderBar())
+
+	// Key hints row
+	sb.WriteString(m.renderKeyHints())
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("[A]ccept  [R]etry  [D]iff  Tab=Graph  [Esc] Back  [↑/↓] Navigate  [Enter] Select"))
-	sb.WriteString("\n\n")
+
+	// Separator
+	sb.WriteString(strings.Repeat("─", m.width-2))
+	sb.WriteString("\n")
 
 	if m.showGraph {
-		sb.WriteString(m.renderDependencyGraph())
+		sb.WriteString(m.renderHorizontalDependencyGraph())
 	} else if m.showDiff {
 		sb.WriteString(m.renderDiffPreview())
 	} else {
+		// Selected task detail box (double-border)
+		if len(m.tasks) > 0 && m.selected >= 0 && m.selected < len(m.tasks) {
+			sb.WriteString(m.renderDetailBox(m.tasks[m.selected]))
+			sb.WriteString("\n")
+		}
+
+		// Compact task list
 		sb.WriteString(m.renderTaskList())
+		sb.WriteString("\n")
+
+		// File impact section for selected task
+		if len(m.tasks) > 0 && m.selected >= 0 && m.selected < len(m.tasks) {
+			task := m.tasks[m.selected]
+			if len(task.Files) > 0 {
+				sb.WriteString(m.renderFileImpact(task))
+				sb.WriteString("\n")
+			}
+		}
 	}
 
 	// Cost/Time panel — show human-readable model name with raw ID as tooltip
@@ -160,7 +178,6 @@ func (m *PlanModel) View() string {
 	if modelDisplay == "" {
 		modelDisplay = m.modelID
 	}
-	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.Border).
@@ -171,6 +188,147 @@ func (m *PlanModel) View() string {
 	return sb.String()
 }
 
+// renderHeaderBar renders the Blueprint header with border.
+//
+//	╭─ Blueprint ── N tasks ── Est. $X.XX ── model-name ─╮
+func (m *PlanModel) renderHeaderBar() string {
+	modelDisplay := m.modelName
+	if modelDisplay == "" {
+		modelDisplay = m.modelID
+	}
+
+	content := fmt.Sprintf(" Plan (Blueprint) ── %d tasks ── Est. $%.2f ── %s ", len(m.tasks), m.estCost, modelDisplay)
+
+	// Pad or truncate to fit width
+	innerWidth := m.width - 4 // account for ╭ and ╮
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+	runes := []rune(content)
+	if len(runes) > innerWidth {
+		content = string(runes[:innerWidth-1]) + "…"
+	} else if len(runes) < innerWidth {
+		content += strings.Repeat("─", innerWidth-len(runes))
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+
+	return borderStyle.Render("╭" + content + "╮") + "\n"
+}
+
+// renderKeyHints renders the keyboard shortcut hints row.
+//
+//	[A]ccept  [R]etry  [D]iff  [O]ptimize  Tab=Graph  Esc=Back
+func (m *PlanModel) renderKeyHints() string {
+	hintStyle := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+
+	var sb strings.Builder
+	sb.WriteString("│ ")
+	sb.WriteString(keyStyle.Render("[A]ccept"))
+	sb.WriteString("  ")
+	sb.WriteString(keyStyle.Render("[R]etry"))
+	sb.WriteString("  ")
+	sb.WriteString(keyStyle.Render("[D]iff"))
+	sb.WriteString("  ")
+	sb.WriteString(keyStyle.Render("[O]ptimize"))
+	sb.WriteString("  ")
+	sb.WriteString(keyStyle.Render("Tab=Graph"))
+	sb.WriteString("  ")
+	sb.WriteString(keyStyle.Render("Esc=Back"))
+	sb.WriteString(strings.Repeat(" ", max(0, m.width-lipgloss.Width(sb.String())-1)))
+	sb.WriteString(hintStyle.Render("│"))
+
+	return sb.String()
+}
+
+// renderDetailBox renders the selected task in a double-border box.
+//
+//	╔════════════════════════════════════════════════════════╗
+//	║  TASK #3 (selected)                                   ║
+//	║  Update webhook signature verification                ║
+//	║  Depends on: #1, #2  ·  Blocks: #5, #6  ·  Files: 2  ║
+//	╚════════════════════════════════════════════════════════╝
+func (m *PlanModel) renderDetailBox(task types.Task) string {
+	doubleBorder := lipgloss.Border{
+		Top:         "═",
+		Bottom:      "═",
+		Left:        "║",
+		Right:       "║",
+		TopLeft:     "╔",
+		TopRight:    "╗",
+		BottomLeft:  "╚",
+		BottomRight: "╝",
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(m.theme.TextPrimary)
+
+	detailStyle := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary)
+
+	// Build blocks list
+	var blocks []int
+	for _, other := range m.tasks {
+		for _, dep := range other.Dependencies {
+			if dep == task.ID {
+				blocks = append(blocks, other.ID)
+			}
+		}
+	}
+
+	// Build detail line
+	var details []string
+	if len(task.Dependencies) > 0 {
+		ds := make([]string, len(task.Dependencies))
+		for i, d := range task.Dependencies {
+			ds[i] = fmt.Sprintf("#%d", d)
+		}
+		details = append(details, fmt.Sprintf("Depends on: %s", strings.Join(ds, ", ")))
+	}
+	if len(blocks) > 0 {
+		bs := make([]string, len(blocks))
+		for i, b := range blocks {
+			bs[i] = fmt.Sprintf("#%d", b)
+		}
+		details = append(details, fmt.Sprintf("Blocks: %s", strings.Join(bs, ", ")))
+	}
+	details = append(details, fmt.Sprintf("Files: %d", len(task.Files)))
+
+	detailLine := strings.Join(details, "  ·  ")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render(fmt.Sprintf("  TASK #%d (selected)", task.ID)),
+		descStyle.Render("  "+task.Description),
+		detailStyle.Render("  "+detailLine),
+	)
+
+	boxWidth := m.width - 2
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	box := lipgloss.NewStyle().
+		Border(doubleBorder).
+		BorderForeground(m.theme.CardBorderActive.GetForeground()).
+		Width(boxWidth).
+		Padding(0, 1).
+		Render(content)
+
+	return box
+}
+
+// renderTaskList renders a compact task list with status icons and action badges.
 func (m *PlanModel) renderTaskList() string {
 	var sb strings.Builder
 
@@ -213,13 +371,17 @@ func (m *PlanModel) renderTaskList() string {
 		}
 
 		desc := task.Description
-		if i != m.selected {
-			maxDescWidth := m.width - 20
-			if maxDescWidth > 0 {
-				desc = TruncateWithEllipsis(desc, maxDescWidth)
-			}
+		// Truncate description to leave room for action badge
+		badgeWidth := 8 // " NEW ✦" or " MOD ~"
+		maxDescWidth := m.width - badgeWidth - 10
+		if maxDescWidth > 0 {
+			desc = TruncateWithEllipsis(desc, maxDescWidth)
 		}
-		sb.WriteString(fmt.Sprintf("%s %d. %s\n", prefixStyle.Render(prefix), task.ID, desc))
+
+		// Action badge
+		badge := m.actionBadge(task.Action)
+
+		sb.WriteString(fmt.Sprintf("%s %d. %s%s\n", prefixStyle.Render(prefix), task.ID, desc, badge))
 
 		deps := "-"
 		if len(task.Dependencies) > 0 {
@@ -238,14 +400,75 @@ func (m *PlanModel) renderTaskList() string {
 	return sb.String()
 }
 
-func (m *PlanModel) renderDependencyGraph() string {
+// actionBadge returns a styled action badge for a task.
+func (m *PlanModel) actionBadge(action string) string {
+	badgeStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+
+	switch action {
+	case "Create", "create":
+		return badgeStyle.Foreground(m.theme.Success).Render("  ✦ NEW")
+	case "Modify", "modify":
+		return badgeStyle.Foreground(m.theme.Warning).Render("  ~ MOD")
+	case "Delete", "delete":
+		return badgeStyle.Foreground(m.theme.Error).Render("  ✗ DEL")
+	default:
+		// Default to MOD for unspecified actions
+		return badgeStyle.Foreground(m.theme.Warning).Render("  ~ MOD")
+	}
+}
+
+// renderFileImpact renders the file impact section for the selected task.
+func (m *PlanModel) renderFileImpact(task types.Task) string {
+	var sb strings.Builder
+
+	// Section header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Bold(true)
+	sb.WriteString(headerStyle.Render("── File Impact "))
+	sb.WriteString(strings.Repeat("─", max(0, m.width-lipgloss.Width(headerStyle.Render("── File Impact "))-2)))
+	sb.WriteString("\n")
+
+	// File list with action badges
+	fileStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+
+	for _, f := range task.Files {
+		action := m.actionBadge(task.Action)
+
+		// Estimate lines changed (heuristic: ~30 lines per file for display)
+		estLines := 30
+		barWidth := 16
+		filled := int(math.Min(float64(barWidth), float64(estLines)/100.0*float64(barWidth)))
+		empty := barWidth - filled
+
+		bar := lipgloss.NewStyle().Foreground(m.theme.Brand).Render(strings.Repeat("█", filled)) +
+			lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("░", empty))
+
+		sb.WriteString(fmt.Sprintf("  %s  %s  %s  ~%d lines changed\n",
+			fileStyle.Render(f),
+			action,
+			bar,
+			estLines,
+		))
+	}
+
+	return sb.String()
+}
+
+// renderHorizontalDependencyGraph renders a left-to-right dependency graph.
+//
+//	●─── #1: Install stripe-node v14
+//	│
+//	●─── #2: Update TypeScript types
+//	│
+//	└──● #3: Update webhook sig ─────────────●─── #5: Add idempotency
+func (m *PlanModel) renderHorizontalDependencyGraph() string {
 	var sb strings.Builder
 	sb.WriteString("Dependency Graph:\n\n")
 
 	// Build adjacency: parent → children
 	children := make(map[int][]int)
 	roots := []int{}
-	hasParent := make(map[int]bool)
 
 	for _, task := range m.tasks {
 		if len(task.Dependencies) == 0 {
@@ -253,7 +476,6 @@ func (m *PlanModel) renderDependencyGraph() string {
 		} else {
 			for _, dep := range task.Dependencies {
 				children[dep] = append(children[dep], task.ID)
-				hasParent[task.ID] = true
 			}
 		}
 	}
@@ -264,24 +486,27 @@ func (m *PlanModel) renderDependencyGraph() string {
 		byID[task.ID] = task
 	}
 
-	// Render tree recursively with indentation
+	// Render tree recursively
 	var renderNode func(id int, depth int, prefix string, isLast bool)
 	renderNode = func(id int, depth int, prefix string, isLast bool) {
-		task := byID[id]
+		task, ok := byID[id]
+		if !ok {
+			return
+		}
 		connector := "├── "
 		if isLast {
 			connector = "└── "
 		}
 		if depth == 0 {
-			connector = ""
+			connector = "●─── "
 		}
 
-		nodeStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
+		nodeStyle := lipgloss.NewStyle().Foreground(m.theme.Brand)
 		descStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 
 		sb.WriteString(prefix)
 		sb.WriteString(connector)
-		sb.WriteString(nodeStyle.Render(fmt.Sprintf("[%d]", task.ID)))
+		sb.WriteString(nodeStyle.Render(fmt.Sprintf("#%d", task.ID)))
 		sb.WriteString(" ")
 		sb.WriteString(descStyle.Render(task.Description))
 		sb.WriteString("\n")
@@ -300,20 +525,30 @@ func (m *PlanModel) renderDependencyGraph() string {
 		}
 	}
 
-	// Render root nodes and any orphaned nodes
+	// Render root nodes
 	rendered := make(map[int]bool)
 	for i, rootID := range roots {
 		renderNode(rootID, 0, "", i == len(roots)-1)
 		rendered[rootID] = true
 	}
 
-	// Render nodes with parents that weren't reached (circular protection)
+	// Render any nodes not reached (circular protection)
 	for _, task := range m.tasks {
 		if !rendered[task.ID] {
-			sb.WriteString(fmt.Sprintf("  [%d] %s\n", task.ID, task.Description))
+			nodeStyle := lipgloss.NewStyle().Foreground(m.theme.Brand)
+			descStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+			sb.WriteString(fmt.Sprintf("  %s %s\n",
+				nodeStyle.Render(fmt.Sprintf("#%d", task.ID)),
+				descStyle.Render(task.Description)))
 			rendered[task.ID] = true
 		}
 	}
+
+	// Legend
+	sb.WriteString("\n")
+	legendStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+	sb.WriteString(legendStyle.Render("  ●  root task  ──  dependency edge  [Esc] back to task list"))
+	sb.WriteString("\n")
 
 	return sb.String()
 }
