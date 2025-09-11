@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -147,139 +148,34 @@ func (m *ExecuteModel) View() string {
 
 	var sb strings.Builder
 
-	// Header with execution status
-	headerStyle := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true)
-
-	statusBadge := "▶ Running"
-	if m.paused {
-		statusBadge = "⏸ Paused"
-	}
-	sb.WriteString(headerStyle.Render(" Execute "))
-	sb.WriteString(" ")
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render(statusBadge))
-	sb.WriteString("\n\n")
-
-	// Metrics dashboard header
-	sb.WriteString(m.renderMetricsHeader())
-	sb.WriteString("\n\n")
-
-	// Progress bar
-	completed := 0
-	running := 0
-	failed := 0
-	skipped := 0
-	for _, t := range m.tasks {
-		switch t.Status {
-		case types.StatusDone:
-			completed++
-		case types.StatusRunning:
-			running++
-		case types.StatusSkipped:
-			skipped++
-		case types.StatusFailed:
-			failed++
-		}
-	}
-	total := len(m.tasks)
-
-	// Segmented progress bar showing done/skipped/failed/pending
-	segBar := components.SegmentedBar{
-		Segments: []components.Segment{
-			{Count: completed, Color: m.theme.Success, Label: "done"},
-			{Count: skipped, Color: m.theme.Warning, Label: "skipped"},
-			{Count: failed, Color: m.theme.Error, Label: "failed"},
-		},
-		Width: m.width - 4,
-		Theme: m.theme,
-	}
-	sb.WriteString(fmt.Sprintf("%d/%d tasks completed", completed, total))
-	if skipped > 0 {
-		sb.WriteString(fmt.Sprintf(" (%d skipped)", skipped))
-	}
-	if failed > 0 {
-		sb.WriteString(fmt.Sprintf(" (%d failed)", failed))
-	}
+	// Header: Mission Live
+	sb.WriteString(m.renderHeader())
 	sb.WriteString("\n")
-	sb.WriteString(segBar.Render())
 
-	// Task list
-	for i, task := range m.tasks {
-		statusIcon := "[ ]"
-		extra := ""
-		switch task.Status {
-		case types.StatusDone:
-			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Success).Render("[✓]")
-		case types.StatusRunning:
-			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render("[▶]")
-			extra = "  " + lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render("← running") + " " + m.spinner.View()
-		case types.StatusSkipped:
-			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Warning).Render("[-]")
-			extra = "  ← skipped"
-		case types.StatusFailed:
-			statusIcon = lipgloss.NewStyle().Foreground(m.theme.Error).Render("[✗]")
-			extra = "  ← failed"
-		case types.StatusPending:
-			// Check if blocked
-			blocked := false
-			for _, dep := range task.Dependencies {
-				for _, other := range m.tasks {
-					if other.ID == dep && (other.Status == types.StatusPending || other.Status == types.StatusRunning) {
-						blocked = true
-						break
-					}
-				}
-			}
-			if blocked {
-				// Collect all blocking dependency IDs
-				var blockingDeps []int
-				for _, dep := range task.Dependencies {
-					for _, other := range m.tasks {
-						if other.ID == dep && (other.Status == types.StatusPending || other.Status == types.StatusRunning) {
-							blockingDeps = append(blockingDeps, dep)
-							break
-						}
-					}
-				}
-				depStr := ""
-				if len(blockingDeps) <= 5 {
-					ds := make([]string, len(blockingDeps))
-					for i, d := range blockingDeps {
-						ds[i] = fmt.Sprintf("%d", d)
-					}
-					depStr = strings.Join(ds, ", ")
-				} else {
-					depStr = fmt.Sprintf("%d tasks", len(blockingDeps))
-				}
-				extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(
-					fmt.Sprintf("  ← blocked by: %s", depStr))
-			}
-		}
+	// Live metrics bar (dense single-line)
+	sb.WriteString(m.renderLiveMetrics())
+	sb.WriteString("\n")
 
-		prefix := statusIcon
-		if i == m.current {
-			prefix = lipgloss.NewStyle().
-				Background(m.theme.Surface).
-				Foreground(m.theme.Brand).
-				Bold(true).
-				Render(" " + statusIcon + " ")
-		}
+	// Separator
+	sb.WriteString(strings.Repeat("─", m.width-2))
+	sb.WriteString("\n")
 
-		desc := task.Description
-		if i != m.current {
-			maxDescWidth := m.width - 20
-			if maxDescWidth > 0 {
-				desc = TruncateWithEllipsis(desc, maxDescWidth)
-			}
-		}
-		sb.WriteString(fmt.Sprintf("%s %d. %s%s\n", prefix, task.ID, desc, extra))
+	// Progress bar with completion percentage
+	sb.WriteString(m.renderProgressBar())
+	sb.WriteString("\n")
+
+	// Running task panel (double-border) if any task is running
+	runningTask := m.findRunningTask()
+	if runningTask != nil {
+		sb.WriteString(m.renderRunningPanel(runningTask))
+		sb.WriteString("\n")
 	}
 
-	// Tool card
-	if m.toolCard != "" {
+	// Compact task list
+	sb.WriteString(m.renderCompactTaskList())
+
+	// Tool card (shown below task list if no running panel)
+	if m.toolCard != "" && runningTask == nil {
 		sb.WriteString("\n")
 		sb.WriteString(lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -289,12 +185,12 @@ func (m *ExecuteModel) View() string {
 	}
 
 	// Keys
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
 		Render("P=Pause  R=Resume  S=Skip  ↑↓=Navigate"))
 
-	// Show completion summary when all tasks are done (before transitioning to Verify)
+	// Show completion summary when all tasks are done
 	allDone := true
 	hasFailures := false
 	for _, task := range m.tasks {
@@ -327,6 +223,228 @@ func (m *ExecuteModel) View() string {
 	return sb.String()
 }
 
+// renderHeader renders the Mission Live header bar.
+func (m *ExecuteModel) renderHeader() string {
+	headerStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+
+	statusBadge := "▶ Running"
+	if m.paused {
+		statusBadge = "⏸ Paused"
+	}
+
+	return headerStyle.Render(" Mission Live (Execute) ") + " " +
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(statusBadge)
+}
+
+// renderLiveMetrics renders the dense live metrics bar.
+//
+//	Elapsed: 2m 14s  │  3/8 tasks  │  47 tool calls  │  $0.08  │  89K ctx
+func (m *ExecuteModel) renderLiveMetrics() string {
+	elapsed := time.Since(m.startedAt)
+	elapsedSec := int(elapsed.Seconds())
+
+	done := 0
+	for _, t := range m.tasks {
+		if t.Status == types.StatusDone {
+			done++
+		}
+	}
+
+	separator := lipgloss.NewStyle().Foreground(m.theme.Border).Render("│")
+
+	metrics := []string{
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+			fmt.Sprintf("Elapsed: %s", components.FormatDuration(elapsedSec))),
+		separator,
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+			fmt.Sprintf("%d/%d tasks", done, len(m.tasks))),
+		separator,
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+			fmt.Sprintf("%d tool calls", m.toolCalls)),
+		separator,
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+			fmt.Sprintf("$%.2f", m.totalCost)),
+		separator,
+		lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+			fmt.Sprintf("%s ctx", components.FormatMetric(m.totalTokens))),
+	}
+
+	return strings.Join(metrics, " ")
+}
+
+// renderProgressBar renders a progress bar with completion percentage.
+//
+//	████████████████░░░░░░░░░░░░░░░░░░░░░░░░  3/8 complete
+func (m *ExecuteModel) renderProgressBar() string {
+	done := 0
+	for _, t := range m.tasks {
+		if t.Status == types.StatusDone {
+			done++
+		}
+	}
+	total := len(m.tasks)
+	if total == 0 {
+		return ""
+	}
+
+	pct := float64(done) / float64(total)
+	barWidth := m.width - 20
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	filledWidth := int(math.Round(pct * float64(barWidth)))
+	if filledWidth > barWidth {
+		filledWidth = barWidth
+	}
+	emptyWidth := barWidth - filledWidth
+
+	filled := lipgloss.NewStyle().Foreground(m.theme.Brand).Render(strings.Repeat("█", filledWidth))
+	empty := lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("░", emptyWidth))
+
+	pctStr := lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(
+		fmt.Sprintf("  %d/%d complete", done, total))
+
+	return filled + empty + pctStr
+}
+
+// findRunningTask returns the currently running task, or nil.
+func (m *ExecuteModel) findRunningTask() *types.Task {
+	for i := range m.tasks {
+		if m.tasks[i].Status == types.StatusRunning {
+			return &m.tasks[i]
+		}
+	}
+	return nil
+}
+
+// renderRunningPanel renders the running task in a double-border panel.
+func (m *ExecuteModel) renderRunningPanel(task *types.Task) string {
+	doubleBorder := lipgloss.Border{
+		Top:         "═",
+		Bottom:      "═",
+		Left:        "║",
+		Right:       "║",
+		TopLeft:     "╔",
+		TopRight:    "╗",
+		BottomLeft:  "╚",
+		BottomRight: "╝",
+	}
+
+	headerStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Warning).
+		Bold(true)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		headerStyle.Render(fmt.Sprintf("  ▶ RUNNING  Task #%d: %s", task.ID, task.Description)),
+		"",
+	)
+
+	// Add tool card if present
+	if m.toolCard != "" {
+		content = lipgloss.JoinVertical(lipgloss.Left,
+			content,
+			"  "+m.toolCard,
+		)
+	}
+
+	boxWidth := m.width - 2
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	return lipgloss.NewStyle().
+		Border(doubleBorder).
+		BorderForeground(m.theme.Warning).
+		Width(boxWidth).
+		Padding(0, 1).
+		Render(content)
+}
+
+// renderCompactTaskList renders a compact task list with status icons,
+// elapsed time, and tool call count.
+func (m *ExecuteModel) renderCompactTaskList() string {
+	var sb strings.Builder
+
+	for _, task := range m.tasks {
+		var statusIcon string
+		var iconStyle lipgloss.Style
+		extra := ""
+
+		switch task.Status {
+		case types.StatusDone:
+			statusIcon = "[✓]"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.Success)
+		case types.StatusRunning:
+			statusIcon = "[▶]"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+		case types.StatusSkipped:
+			statusIcon = "·"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.Warning)
+			extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("  ← skipped")
+		case types.StatusFailed:
+			statusIcon = "✗"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.Error)
+			extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("  ← failed")
+		case types.StatusPending:
+			statusIcon = "·"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+			// Check if blocked
+			var blockingDeps []int
+			for _, dep := range task.Dependencies {
+				for _, other := range m.tasks {
+					if other.ID == dep && (other.Status == types.StatusPending || other.Status == types.StatusRunning) {
+						blockingDeps = append(blockingDeps, dep)
+						break
+					}
+				}
+			}
+			if len(blockingDeps) > 0 {
+				depStr := ""
+				if len(blockingDeps) <= 5 {
+					ds := make([]string, len(blockingDeps))
+					for j, d := range blockingDeps {
+						ds[j] = fmt.Sprintf("#%d", d)
+					}
+					depStr = strings.Join(ds, ", ")
+				} else {
+					depStr = fmt.Sprintf("%d tasks", len(blockingDeps))
+				}
+				extra = lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(
+					fmt.Sprintf("  [blocked by: %s]", depStr))
+			}
+		default:
+			statusIcon = "·"
+			iconStyle = lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+		}
+
+		// Truncate description
+		desc := task.Description
+		maxDescWidth := m.width - 30
+		if maxDescWidth > 0 {
+			desc = TruncateWithEllipsis(desc, maxDescWidth)
+		}
+
+		// Format: ✓  1  Install stripe-node v14                   0m 23s  12✦
+		icon := iconStyle.Render(statusIcon)
+		taskID := lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(fmt.Sprintf("%d", task.ID))
+
+		sb.WriteString(fmt.Sprintf("%s  %s  %s%s\n", icon, taskID, desc, extra))
+	}
+
+	// Total tool call count at bottom
+	if m.toolCalls > 0 {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Render(fmt.Sprintf("  %d✦ total", m.toolCalls)))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
 // transitionTick returns a tea.Cmd that emits a TransitionTickMsg after 1 second.
 func (m *ExecuteModel) transitionTick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -336,6 +454,7 @@ func (m *ExecuteModel) transitionTick() tea.Cmd {
 
 // TransitionTickMsg is emitted every second during the transition countdown.
 type TransitionTickMsg struct{}
+
 func (m *ExecuteModel) renderMetricsHeader() string {
 	// Calculate elapsed time
 	elapsed := time.Since(m.startedAt)
