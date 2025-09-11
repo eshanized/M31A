@@ -19,15 +19,14 @@ func (m *ReplModel) View() string {
 	viewportStr := m.viewport.View()
 	inputStr := m.textarea.View()
 
-	// Render prompt metadata row: agent · model · provider
-	var agentName, modelName, providerName string
-	if m.activeModel != nil {
-		modelName = m.activeModel.Name
-	}
-	if m.activeProvider != "" {
-		providerName = m.activeProvider
-	}
-	metadataRow := RenderPromptMetadata(agentName, modelName, providerName, m.theme, m.width-m.sidebarWidth)
+	// Render model context line above textarea: │ M31A · model-name · provider
+	modelContextLine := m.renderModelContextLine()
+
+	// Bottom border with Enter-to-send hint
+	bottomBorder := m.renderInputBottomBorder()
+
+	// Assemble input frame: model context + textarea + bottom border
+	inputFrame := lipgloss.JoinVertical(lipgloss.Top, modelContextLine, inputStr, bottomBorder)
 
 	// Determine border highlight color
 	borderColor := m.theme.Border
@@ -37,16 +36,13 @@ func (m *ReplModel) View() string {
 		borderColor = m.theme.Thinking
 	}
 
-	// Build the input container: textarea + metadata
-	inputContainer := lipgloss.JoinVertical(lipgloss.Top, inputStr, metadataRow)
-
-	// Apply left border + background to the container
+	// Apply left border + background to the input frame
 	borderStyle := lipgloss.NewStyle().
 		Border(theme.SplitBorder, true, false, false, false).
 		BorderForeground(borderColor).
 		Background(m.theme.BackgroundElement).
 		Padding(0, 2, 0, 2)
-	borderedInput := borderStyle.Render(inputContainer)
+	borderedInput := borderStyle.Render(inputFrame)
 
 	// Render slash command suggestions dropdown
 	var suggestionStr string
@@ -54,8 +50,8 @@ func (m *ReplModel) View() string {
 		suggestionStr = m.renderSlashSuggestions()
 	}
 
-	// Bottom border continuation line
-	bottomBorder := RenderPromptBottomBorder(borderColor, m.width-m.sidebarWidth)
+	// Git status strip (above input, when sidebar is hidden)
+	gitStrip := m.renderGitStatusStrip()
 
 	// Status bar below the prompt
 	var statusInfo *StatusBarInfo
@@ -77,18 +73,19 @@ func (m *ReplModel) View() string {
 	}
 	statusInfo.IsStreaming = m.streaming
 	statusInfo.IsThinking = m.thinking
-	// KeyboardHints removed - WhichKey provides the same info
 
 	status := RenderStatusBar(m.theme, m.GetStatusText(), m.lastActivity, m.width-m.sidebarWidth, statusInfo)
 
 	// Assemble the REPL content
 	var contentParts []string
 	contentParts = append(contentParts, viewportStr)
+	if gitStrip != "" {
+		contentParts = append(contentParts, gitStrip)
+	}
 	contentParts = append(contentParts, borderedInput)
 	if suggestionStr != "" {
 		contentParts = append(contentParts, suggestionStr)
 	}
-	contentParts = append(contentParts, bottomBorder)
 	contentParts = append(contentParts, status)
 
 	replContent := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
@@ -108,22 +105,90 @@ func (m *ReplModel) View() string {
 	return replContent
 }
 
+// renderModelContextLine renders the input frame's model context line:
+// │ M31A · model-name · provider
+func (m *ReplModel) renderModelContextLine() string {
+	t := m.theme
+
+	var parts []string
+	parts = append(parts, "M31A")
+
+	if m.activeModel != nil && m.activeModel.Name != "" {
+		parts = append(parts, m.activeModel.Name)
+	}
+	if m.activeProvider != "" {
+		parts = append(parts, m.activeProvider)
+	}
+
+	contextText := strings.Join(parts, " · ")
+	gutterStyle := lipgloss.NewStyle().Foreground(t.Brand)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		gutterStyle.Render("│"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(contextText),
+	)
+}
+
+// renderInputBottomBorder renders the bottom border of the input frame:
+// ╹▀▀▀───────────────── Enter to send · Ctrl+C cancel ────────────────
+func (m *ReplModel) renderInputBottomBorder() string {
+	t := m.theme
+	width := m.width - m.sidebarWidth
+
+	return RenderPromptBottomBorder(t.Border, width)
+}
+
+// renderGitStatusStrip shows modified files in a thin row above the input.
+// Only shown when sidebar is hidden and there are modified files.
+func (m *ReplModel) renderGitStatusStrip() string {
+	// Only show when sidebar is hidden
+	if m.sidebarWidth > 0 {
+		return ""
+	}
+
+	// Check for modified files via git status (read-only, non-blocking)
+	// We'll use a simple approach: check if we have cwd set and run git status
+	if m.cwd == "" {
+		return ""
+	}
+
+	// For now, return empty — the git strip is populated externally
+	// via SetGitStatusStrip() or rendered from session state.
+	// This is the structural hook for the feature.
+	return ""
+}
+
 func (m *ReplModel) renderMessages() {
 	var b strings.Builder
+	availableWidth := m.width - m.sidebarWidth
 
-	for _, msg := range m.messages {
+	for i, msg := range m.messages {
+		// Insert timestamp bar between messages (except before the first one)
+		if i > 0 && !msg.CreatedAt.IsZero() {
+			tsBar := components.RenderTimestampBar(m.theme, msg.CreatedAt, availableWidth)
+			if tsBar != "" {
+				b.WriteString(tsBar)
+				b.WriteString("\n")
+			}
+		}
+
 		if m.msgRenderer != nil {
-			rendered := m.msgRenderer.RenderMessage(msg, m.width)
+			rendered := m.msgRenderer.RenderMessage(msg, availableWidth)
 			b.WriteString(rendered)
 			b.WriteString("\n")
 		} else {
-			role := msg.Role
-			if role == "user" {
-				role = "You"
-			} else if role == "assistant" {
-				role = "Assistant"
+			// Fallback: simple rendering with gutter
+			role := "M31A"
+			gutterColor := m.theme.Brand
+			if msg.Role == "user" {
+				role = "USER"
+				gutterColor = m.theme.TextSecondary
 			}
-			b.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+			gutter := lipgloss.NewStyle().Foreground(gutterColor).Render("│ " + role)
+			b.WriteString(gutter)
+			b.WriteString("\n  ")
+			b.WriteString(msg.Content)
+			b.WriteString("\n")
 		}
 	}
 
@@ -136,6 +201,13 @@ func (m *ReplModel) renderMessages() {
 		b.WriteString(m.renderStreamingContent())
 	}
 
+	// Add scroll indicator if not at bottom
+	if !m.atBottom() && len(m.messages) > 0 {
+		scrollIndicator := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("▼")
+		b.WriteString(scrollIndicator)
+		b.WriteString("\n")
+	}
+
 	m.viewport.SetContent(b.String())
 }
 
@@ -143,9 +215,11 @@ func (m *ReplModel) renderStreamingContent() string {
 	if m.msgRenderer == nil {
 		content := m.streamContent.String()
 		if content != "" {
-			return fmt.Sprintf("Assistant: %s\n", content)
+			gutter := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("│ M31A")
+			return gutter + "\n  " + content + "\n"
 		}
-		return "Assistant: ...\n"
+		gutter := lipgloss.NewStyle().Foreground(m.theme.Brand).Render("│ M31A")
+		return gutter + "\n  ...\n"
 	}
 
 	var segments []types.MessageSegment
@@ -175,7 +249,8 @@ func (m *ReplModel) renderStreamingContent() string {
 		Segments: segments,
 	}
 
-	return m.msgRenderer.RenderMessage(msg, m.width)
+	availableWidth := m.width - m.sidebarWidth
+	return m.msgRenderer.RenderMessage(msg, availableWidth)
 }
 
 func (m *ReplModel) renderWelcome() string {
@@ -286,8 +361,6 @@ func (m *ReplModel) renderProviderCard() string {
 
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
-
-
 
 // renderLogo renders a clean ASCII art logo for M31A.
 func (m *ReplModel) renderLogo() string {

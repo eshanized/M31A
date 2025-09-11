@@ -36,6 +36,13 @@ var ToolIcons = map[string]string{
 	"Question":  "?",
 }
 
+// ToolStatusIcons maps tool state to status prefix characters.
+var ToolStatusIcons = map[ToolState]string{
+	ToolRunning: "\u27f3", // ⟳
+	ToolSuccess: "\u2713", // ✓
+	ToolError:   "\u2717", // ✗
+}
+
 type ToolState int
 
 const (
@@ -54,6 +61,7 @@ type ToolCard struct {
 	theme      theme.Theme
 	collapsed  bool
 	renderer   ToolRenderer
+	lineCount  int // output line count (for header display)
 }
 
 func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState, t theme.Theme) *ToolCard {
@@ -92,12 +100,12 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 	if trimmed == "" {
 		lineCount = 0
 	}
+	tc.lineCount = lineCount
 	if lineCount > 20 {
 		tc.collapsed = true
 	}
 
 	if len(output) > types.MaxToolOutputChars {
-		// H-19 fix: use rune-based slicing to avoid splitting multi-byte UTF-8 characters
 		runeCount := utf8.RuneCountInString(output)
 		if runeCount > types.MaxToolOutputChars {
 			tc.output = string([]rune(output)[:types.MaxToolOutputChars])
@@ -138,7 +146,7 @@ func (c *ToolCard) Render(width int) string {
 		return c.renderInline(cardWidth)
 	}
 
-	// Expanded with output: render as left-bordered block
+	// Expanded with output: render as double-border block
 	return c.renderBlock(cardWidth)
 }
 
@@ -148,6 +156,8 @@ func (c *ToolCard) renderInline(width int) string {
 	if icon == "" {
 		icon = "\u2022"
 	}
+
+	statusIcon := ToolStatusIcons[c.state]
 
 	var desc string
 	switch c.state {
@@ -167,6 +177,7 @@ func (c *ToolCard) renderInline(width int) string {
 	}
 
 	parts := []string{
+		lipgloss.NewStyle().Foreground(c.theme.Text).Render(statusIcon),
 		lipgloss.NewStyle().Foreground(c.theme.Text).Render(icon),
 		lipgloss.NewStyle().Foreground(c.theme.Text).Render(c.toolName),
 	}
@@ -188,9 +199,11 @@ func (c *ToolCard) renderInline(width int) string {
 		Render(line)
 }
 
-// renderBlock renders a tool as a left-bordered block with background.
+// renderBlock renders a tool as a double-border block with status and timing.
+// Uses ╔═╗ double-border to distinguish from panel borders (╭─╮).
 func (c *ToolCard) renderBlock(width int) string {
-	header := c.renderer.RenderHeader(width)
+	// Build header with status icon, tool label, elapsed time, and line count
+	header := c.renderDoubleBorderHeader(width)
 
 	var contentParts []string
 	contentParts = append(contentParts, header)
@@ -218,23 +231,112 @@ func (c *ToolCard) renderBlock(width int) string {
 
 	content := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
 
+	// Double-border style: ╔═╗ for tool cards (distinct from panel borders)
+	doubleBorder := lipgloss.Border{
+		Top:         "═",
+		Bottom:      "═",
+		Left:        "║",
+		Right:       "║",
+		TopLeft:     "╔",
+		TopRight:    "╗",
+		BottomLeft:  "╚",
+		BottomRight: "╝",
+	}
+
 	blockStyle := lipgloss.NewStyle().
-		Border(theme.SplitBorder, true, false, false, false).
-		BorderForeground(c.theme.Border).
+		Border(doubleBorder).
+		BorderForeground(c.getBorderColor()).
 		Background(c.theme.BackgroundPanel).
-		Padding(1, 2).
+		Padding(0, 1).
 		MarginTop(1).
 		Width(width + 4)
 
 	return blockStyle.Render(content)
 }
 
+// renderDoubleBorderHeader renders the tool card header with status icon,
+// tool label, elapsed time, and line count.
+func (c *ToolCard) renderDoubleBorderHeader(width int) string {
+	statusIcon := ToolStatusIcons[c.state]
+	statusColor := c.theme.TextMuted
+	switch c.state {
+	case ToolSuccess:
+		statusColor = c.theme.Success
+	case ToolError:
+		statusColor = c.theme.Error
+	case ToolRunning:
+		statusColor = c.theme.Warning
+	}
+
+	// Status icon
+	statusStr := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
+
+	// Tool label badge
+	labelStyle, ok := c.theme.ToolLabel[c.toolName]
+	if !ok {
+		labelStyle = lipgloss.NewStyle().
+			Background(c.theme.TextSecondary).
+			Foreground(c.theme.BadgeForeground).
+			Padding(0, 1).
+			Bold(true)
+	}
+	label := labelStyle.Render(fmt.Sprintf(" %s ", c.toolName))
+
+	// Right-aligned info: elapsed time + line count
+	var infoParts []string
+	if c.durationMs > 0 {
+		dur := fmt.Sprintf("%.0fms", float64(c.durationMs))
+		infoParts = append(infoParts, dur)
+	}
+	if c.lineCount > 0 {
+		infoParts = append(infoParts, fmt.Sprintf("%d lines", c.lineCount))
+	}
+	if c.truncated {
+		infoParts = append(infoParts, "truncated")
+	}
+
+	infoStr := ""
+	if len(infoParts) > 0 {
+		infoStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(strings.Join(infoParts, "  "))
+	}
+
+	// Join: status icon + label ... info
+	left := lipgloss.JoinHorizontal(lipgloss.Top, statusStr, " ", label)
+	right := infoStr
+
+	// Calculate available width for spacing
+	leftWidth := lipgloss.Width(left)
+	rightWidth := lipgloss.Width(right)
+	spacing := width - leftWidth - rightWidth
+	if spacing < 2 {
+		spacing = 2
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		left,
+		strings.Repeat(" ", spacing),
+		right,
+	)
+}
+
+// getBorderColor returns the appropriate border color based on tool state.
+func (c *ToolCard) getBorderColor() lipgloss.Color {
+	switch c.state {
+	case ToolRunning:
+		return c.theme.Warning
+	case ToolSuccess:
+		return c.theme.Border
+	case ToolError:
+		return c.theme.Error
+	default:
+		return c.theme.Border
+	}
+}
+
 func (c *ToolCard) Toggle() {
 	c.collapsed = !c.collapsed
 }
 
-// SetCollapsed sets the collapsed state of the tool card.
-// M-17: used to honor AutoCollapseTools config flag.
 func (c *ToolCard) SetCollapsed(v bool) {
 	c.collapsed = v
 }
