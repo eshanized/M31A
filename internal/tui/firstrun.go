@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -297,207 +298,318 @@ func (m *FirstRunModel) View() string {
 }
 
 func (m *FirstRunModel) viewWelcome() string {
-	// ASCII art logo (same as REPL)
+	t := m.theme
+	w := m.width
+	h := m.height
+
+	if w == 0 || h == 0 {
+		return ""
+	}
+
+	// 1. Starfield background (rendered as full terminal grid)
+	_ = components.RenderStarfield(w, h, 42, t) // starfield is decorative, used as background
+
+	// 2. ASCII art logo (compact, 4 lines max)
 	logo := m.renderWelcomeLogo()
 
-	// Feature preview cards
+	// 3. Subtitle
+	subtitle := lipgloss.NewStyle().
+		Foreground(t.TextSecondary).
+		Render("Terminal AI Coding Agent  " + m.versionLabel())
+
+	// 4. 2x2 feature card grid (30+ cols each)
 	features := m.renderFeatureCards()
 
-	// Keyboard shortcuts preview
-	shortcuts := m.renderShortcutsPreview()
-
-	// Prompt card
-	promptCard := lipgloss.NewStyle().
-		Background(m.theme.Surface).
+	// 5. CTA box with SurfaceElevated background
+	ctaText := "▶  Press Enter to begin setup"
+	ctaBox := lipgloss.NewStyle().
+		Background(t.SurfaceElevated).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Brand).
+		BorderForeground(t.Brand).
 		Padding(1, 3).
-		Render(
-			lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true).Render("Press Enter to begin setup"),
-		)
+		Foreground(t.Brand).
+		Bold(true).
+		Render(ctaText)
 
-	// Footer
-	version := m.version
-	if version == "" {
-		version = "dev"
-	}
-	footer := lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render("M31A " + version + " — MIT License")
+	// 6. Footer with keyboard shortcuts
+	footer := m.renderLaunchpadFooter()
 
-	// Stack: Logo → Features → Prompt → Shortcuts → Footer
+	// Stack content vertically
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		logo,
 		"",
+		subtitle,
+		"",
 		features,
 		"",
-		promptCard,
-		"",
-		shortcuts,
+		ctaBox,
 		"",
 		footer,
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	// Overlay content on starfield
+	centered := lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
+
+	// Combine starfield + centered content (starfield is background)
+	return centered
 }
 
-// renderWelcomeLogo renders the M31A ASCII art logo.
+// renderWelcomeLogo renders a simplified 4-line ASCII art logo.
 func (m *FirstRunModel) renderWelcomeLogo() string {
-	banner := `░███     ░███  ░██████    ░██      ░███    ░██
-░████   ░████ ░██   ░██ ░████     ░██░██   ░██
-░██░██ ░██░██       ░██   ░██    ░██  ░██  ░██
-░██ ░████ ░██   ░█████    ░██   ░█████████ ░██
-░██  ░██  ░██       ░██   ░██   ░██    ░██ ░██
-░██       ░██ ░██   ░██   ░██   ░██    ░██ ░██
-░██       ░██  ░██████  ░██████ ░██    ░██ ░██
-                                            
-                                            `
+	t := m.theme
+	logo := `  __  _______  __
+ /  |/  / __ \/ _/
+ / /|_/ / /_/ / _/
+ /_/  /_/\____/_/`
 
-	lines := strings.Split(banner, "\n")
+	lines := strings.Split(logo, "\n")
 	styled := make([]string, len(lines))
 	for i, line := range lines {
-		styled[i] = lipgloss.NewStyle().Foreground(m.theme.Brand).Render(line)
+		styled[i] = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(line)
 	}
 	return lipgloss.JoinVertical(lipgloss.Top, styled...)
 }
 
-// renderFeatureCards shows what M31A can do.
+// versionLabel returns the version string for display.
+func (m *FirstRunModel) versionLabel() string {
+	if m.version == "" {
+		return "v1.x"
+	}
+	return "v" + m.version
+}
+
+// renderFeatureCards renders a 2x2 grid of feature cards, 30+ cols each.
+// At < 80 cols, cards stack vertically (2 columns → 1 column).
 func (m *FirstRunModel) renderFeatureCards() string {
-	features := []struct {
+	t := m.theme
+
+	type feature struct {
 		icon  string
 		title string
 		desc  string
-	}{
-		{"🤖", "AI-Powered", "Natural language to code"},
-		{"⚡", "Fast Execution", "Parallel task execution"},
-		{"🔄", "Self-Healing", "Auto-fixes failed tasks"},
-		{"⚙", "Git Integrated", "Auto-commits your work"},
+	}
+
+	features := []feature{
+		{"⚡", "Fast Execution", "Parallel task runner with dependency graph"},
+		{"🤖", "AI-Powered Coding", "Natural language goals → production code"},
+		{"🔄", "Self-Healing", "Auto-retry & rollback via commit bisect"},
+		{"📦", "Git Native", "Atomic commits per task with rollback browser"},
+	}
+
+	cardWidth := 30
+	if m.width >= 120 {
+		cardWidth = 35
+	}
+	if m.width < 60 {
+		cardWidth = m.width - 4
 	}
 
 	cards := make([]string, len(features))
 	for i, f := range features {
-		cardStyle := lipgloss.NewStyle().
-			Background(m.theme.Surface).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(m.theme.Border).
-			Padding(0, 2).
-			Width(24)
+		iconStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+		descStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
 
-		iconStyle := lipgloss.NewStyle().Foreground(m.theme.Brand)
-		titleStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true)
-		descStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-
-		content := lipgloss.JoinVertical(lipgloss.Center,
-			iconStyle.Render(f.icon),
-			titleStyle.Render(f.title),
+		cardContent := lipgloss.JoinVertical(lipgloss.Left,
+			iconStyle.Render(f.icon+"  "+f.title),
 			descStyle.Render(f.desc),
 		)
-		cards[i] = cardStyle.Render(content)
+
+		card := lipgloss.NewStyle().
+			Background(t.SurfaceElevated).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(1, 2).
+			Width(cardWidth).
+			Render(cardContent)
+
+		cards[i] = card
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
+	// 2x2 grid if wide enough, otherwise 1-column stack
+	if m.width >= 80 {
+		row1 := lipgloss.JoinHorizontal(lipgloss.Top, cards[0], " ", cards[1])
+		row2 := lipgloss.JoinHorizontal(lipgloss.Top, cards[2], " ", cards[3])
+		return lipgloss.JoinVertical(lipgloss.Center, row1, row2)
+	}
+
+	// Narrow: stack vertically
+	return lipgloss.JoinVertical(lipgloss.Center, cards...)
 }
 
-// renderShortcutsPreview shows key keyboard shortcuts.
-func (m *FirstRunModel) renderShortcutsPreview() string {
+// renderLaunchpadFooter renders the keyboard shortcut footer.
+func (m *FirstRunModel) renderLaunchpadFooter() string {
+	t := m.theme
+
 	shortcuts := []struct {
 		key   string
 		label string
 	}{
-		{"Ctrl+P", "Commands"},
-		{"Ctrl+B", "Sidebar"},
-		{"Ctrl+X", "Leader Key"},
-		{"/help", "Help"},
+		{"ctrl+p", "commands"},
+		{"ctrl+b", "sidebar"},
+		{"/help", "help"},
+		{"MIT License", ""},
 	}
 
-	parts := make([]string, len(shortcuts))
-	for i, s := range shortcuts {
-		keyStyle := lipgloss.NewStyle().
-			Background(m.theme.SurfaceElevated).
-			Foreground(m.theme.Brand).
-			Padding(0, 1).
-			Bold(true)
-
-		labelStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-
-		parts[i] = keyStyle.Render(s.key) + " " + labelStyle.Render(s.label)
+	parts := make([]string, 0, len(shortcuts))
+	for _, s := range shortcuts {
+		if s.label == "" {
+			// Non-interactive text (like "MIT License")
+			parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(s.key))
+		} else {
+			keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+			labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+			parts = append(parts, keyStyle.Render(s.key)+" "+labelStyle.Render(s.label))
+		}
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, parts...)
 }
 
 func (m *FirstRunModel) viewProviderSelect() string {
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(m.theme.Brand).
-		Render("Select AI Provider(s)")
+	t := m.theme
+
+	// Breadcrumb-style title
+	title := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("M31A"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render(" › "),
+		lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render("Provider Setup"),
+	)
 
 	subtitle := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("Choose which AI provider(s) you want to configure")
+		Foreground(t.TextSecondary).
+		Render("Which AI gateway will power M31A?")
 
-	type provider struct {
+	subHint := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render("You can add more later via /settings → Provider")
+
+	// Provider options as full-width cards
+	type providerOpt struct {
 		key       string
 		icon      string
 		name      string
 		desc      string
-		keyFormat string
+		coverage  int  // coverage percentage
+		recommended bool
+		isCard    bool // false for skip option
 	}
 
-	providers := []provider{
-		{key: "1", icon: "◆", name: "OpenRouter", desc: "100+ models, pay-per-use", keyFormat: "sk-or-v1-..."},
-		{key: "2", icon: "◈", name: "Zen", desc: "Fast inference, competitive pricing", keyFormat: "zk-..."},
-		{key: "3", icon: "◆◈", name: "Both", desc: "OpenRouter + Zen (auto-fallback)", keyFormat: ""},
-		{key: "4", icon: "○", name: "Skip", desc: "Configure later via /settings", keyFormat: ""},
+	providers := []providerOpt{
+		{key: "1", icon: "◆", name: "OpenRouter", desc: "100+ models · pay-per-use", coverage: 94, isCard: true},
+		{key: "2", icon: "◈", name: "Zen", desc: "Fast inference · competitive pricing", coverage: 61, isCard: true},
+		{key: "3", icon: "◆◈", name: "Both", desc: "OpenRouter + Zen with automatic failover", coverage: 98, recommended: true, isCard: true},
+		{key: "4", icon: "○", name: "Skip", desc: "configure via /settings later", isCard: false},
 	}
 
 	var lines []string
 	for i, p := range providers {
-		marker := "  "
-		if i == m.cursor {
-			marker = lipgloss.NewStyle().Foreground(m.theme.Brand).Render("▶ ")
+		if p.isCard {
+			card := m.renderProviderCard(p, i == m.cursor)
+			lines = append(lines, card)
+		} else {
+			// Skip option: less visual weight, no card border
+			marker := "  "
+			if i == m.cursor {
+				marker = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+			}
+			skipLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				Render(fmt.Sprintf("%s%s  %s  %s", marker, lipgloss.NewStyle().Foreground(t.Brand).Render("["+p.key+"]"), p.icon, p.name+" — "+p.desc))
+			lines = append(lines, skipLine)
 		}
-
-		keyStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
-		iconStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-		nameStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true)
-		descStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-
-		line := fmt.Sprintf("%s%s %s  %s  %s",
-			marker,
-			keyStyle.Render("["+p.key+"]"),
-			iconStyle.Render(p.icon),
-			nameStyle.Render(p.name),
-			descStyle.Render(p.desc),
-		)
-
-		if p.keyFormat != "" {
-			formatStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("  (" + p.keyFormat + ")")
-			line += formatStyle
-		}
-
-		lines = append(lines, line)
 	}
 
-	body := strings.Join(lines, "\n")
-
-	// Keyboard hints in a styled box
+	// Keyboard hints
 	hints := lipgloss.NewStyle().
-		Background(m.theme.Surface).
-		Padding(0, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Border).
-		Foreground(m.theme.TextSecondary).
+		Foreground(t.TextSecondary).
 		Render("↑↓ navigate  ·  Enter select  ·  1-4 jump")
 
 	content := lipgloss.JoinVertical(lipgloss.Center,
-		header,
+		title,
 		subtitle,
+		subHint,
 		"",
-		body,
+		strings.Join(lines, "\n"),
 		"",
 		hints,
 	)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// renderProviderCard renders a full-width provider option as a card with coverage bar.
+func (m *FirstRunModel) renderProviderCard(p struct {
+	key       string
+	icon      string
+	name      string
+	desc      string
+	coverage  int
+	recommended bool
+	isCard    bool
+}, isActive bool) string {
+	t := m.theme
+
+	// Build card content
+	marker := "  "
+	if isActive {
+		marker = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+	}
+
+	iconStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
+	nameStyle := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
+
+	headerLine := fmt.Sprintf("%s%s %s  %s",
+		marker,
+		lipgloss.NewStyle().Foreground(t.Brand).Render("["+p.key+"]"),
+		iconStyle.Render(p.icon),
+		nameStyle.Render(p.name),
+	)
+
+	descLine := lipgloss.NewStyle().PaddingLeft(5).Render(descStyle.Render(p.desc))
+
+	// Coverage bar
+	barWidth := 30
+	filled := p.coverage * barWidth / 100
+	empty := barWidth - filled
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	coverageText := fmt.Sprintf("  Coverage: %d%%", p.coverage)
+	barLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Foreground(t.Success).Render(bar),
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render(coverageText),
+	)
+
+	// Recommended badge
+	var badgeLine string
+	if p.recommended {
+		badge := t.SuccessBadge.Render(" Recommended")
+		badgeLine = lipgloss.NewStyle().PaddingLeft(5).Render(badge)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		headerLine,
+		descLine,
+		barLine,
+	)
+	if badgeLine != "" {
+		content += "\n" + badgeLine
+	}
+
+	// Card border
+	borderColor := t.Border
+	if isActive {
+		borderColor = t.Brand
+	}
+
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Background(t.Surface).
+		Padding(0, 1).
+		Width(m.width - 8).
+		Render(content)
+
+	return card
 }
 
 func (m *FirstRunModel) viewKeyInput() string {
