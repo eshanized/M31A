@@ -107,51 +107,48 @@ func (m *ShipModel) View() string {
 
 	var sb strings.Builder
 
-	// Celebration header
+	// ── Header bar: Launch Pad
+	remaining := m.width - 4
+	title := "Launch Pad"
+	subtitle := "Ready to Ship"
+	headerInner := fmt.Sprintf("%s ── %s", title, subtitle)
+	if len(headerInner) < remaining {
+		headerInner += strings.Repeat("─", remaining-len(headerInner))
+	}
+	headerBorder := "╭─ " + headerInner + "╮"
 	sb.WriteString(lipgloss.NewStyle().
-		Foreground(m.theme.Success).
+		Foreground(m.theme.Brand).
 		Bold(true).
-		Render(" ✓ Session Complete!"))
+		Render(headerBorder))
+	sb.WriteString("\n")
+
+	separator := strings.Repeat("─", m.width-2)
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(m.theme.Border).
+		Render(separator))
 	sb.WriteString("\n\n")
 
-	// Session info with badges
+	// ── Session info with badges
 	sessionBadge := components.NewBadge(m.summary.SessionID, components.BadgeMuted, m.theme).Render()
 	sb.WriteString(fmt.Sprintf("Session %s  Duration: %s\n\n", sessionBadge, m.summary.Duration))
 
-	// Metrics dashboard
+	// ── Metrics dashboard
 	sb.WriteString(m.renderMetrics())
 	sb.WriteString("\n\n")
 
-	// Task summary with segmented bar
-	sb.WriteString(m.renderTaskSummary())
-	sb.WriteString("\n\n")
-
-	// File changes summary
-	if m.summary.FilesAdded > 0 || m.summary.FilesModified > 0 || m.summary.FilesDeleted > 0 {
-		sb.WriteString(m.renderFileChanges())
-		sb.WriteString("\n\n")
-	}
-
-	// Commits
-	if len(m.summary.Commits) > 0 {
-		sb.WriteString(lipgloss.NewStyle().
-			Bold(true).
-			Foreground(m.theme.Brand).
-			Render("Commits"))
-		sb.WriteString("\n")
-
-		for _, c := range m.summary.Commits {
-			hashStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-			sb.WriteString(fmt.Sprintf("  %s %s\n", hashStyle.Render(c.ShortHash), c.Message))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Next actions
-	sb.WriteString(m.renderNextActions())
-
-	// Keys
+	// ── Commits section
+	sb.WriteString(m.renderCommits())
 	sb.WriteString("\n")
+
+	// ── Diff summary section
+	sb.WriteString(m.renderDiffSummary())
+	sb.WriteString("\n")
+
+	// ── Ship action card
+	sb.WriteString(m.renderShipAction())
+	sb.WriteString("\n")
+
+	// ── Key hints
 	if m.confirmNewSession {
 		sb.WriteString(lipgloss.NewStyle().
 			Foreground(m.theme.Warning).
@@ -191,34 +188,172 @@ func (m *ShipModel) renderMetrics() string {
 	return components.MetricRow(metrics, m.width-4)
 }
 
-// renderTaskSummary renders the task summary with a segmented bar.
-func (m *ShipModel) renderTaskSummary() string {
-	// Segmented bar
-	segBar := components.SegmentedBar{
-		Segments: []components.Segment{
-			{Count: m.summary.TaskDone, Color: m.theme.Success, Label: "done"},
-			{Count: m.summary.TaskFailed, Color: m.theme.Error, Label: "failed"},
-			{Count: m.summary.TaskSkipped, Color: m.theme.Warning, Label: "skipped"},
-		},
-		Width: m.width - 4,
-		Theme: m.theme,
+// renderCommits renders the commits section with HEAD indicator.
+func (m *ShipModel) renderCommits() string {
+	var sb strings.Builder
+
+	// Section title
+	titleLen := len(fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits)))
+	remaining := m.width - 4
+	titleBar := fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits))
+	if titleLen < remaining {
+		titleBar += strings.Repeat("─", remaining-titleLen)
+	}
+	sb.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(m.theme.TextSecondary).
+		Render(titleBar))
+	sb.WriteString("\n\n")
+
+	if len(m.summary.Commits) == 0 {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(m.theme.TextMuted).
+			Render("  No commits yet"))
+		sb.WriteString("\n")
+		return sb.String()
 	}
 
-	// Stats row
-	stats := components.StatGroup{
-		Stats: []components.StatRow{
-			{Label: "Done", Value: fmt.Sprintf("%d", m.summary.TaskDone), Icon: "✓", Theme: m.theme},
-			{Label: "Failed", Value: fmt.Sprintf("%d", m.summary.TaskFailed), Icon: "✗", Theme: m.theme},
-			{Label: "Skipped", Value: fmt.Sprintf("%d", m.summary.TaskSkipped), Icon: "-", Theme: m.theme},
-		},
-		Width: m.width - 4,
-		Theme: m.theme,
+	hashStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
+	msgStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+	headStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+
+	for i, c := range m.summary.Commits {
+		if i == 0 {
+			// HEAD commit gets the ▶ indicator in brand color
+			sb.WriteString(fmt.Sprintf("  %s  %s  %s\n",
+				headStyle.Render("▶"),
+				hashStyle.Render(c.ShortHash),
+				msgStyle.Render(c.Message)))
+		} else {
+			sb.WriteString(fmt.Sprintf("     %s  %s\n",
+				hashStyle.Render(c.ShortHash),
+				msgStyle.Render(c.Message)))
+		}
 	}
 
-	return segBar.Render() + "\n" + stats.Render()
+	return sb.String()
 }
 
-// renderFileChanges renders the file changes summary.
+// renderDiffSummary renders the diff summary with action badges and line counts.
+func (m *ShipModel) renderDiffSummary() string {
+	var sb strings.Builder
+
+	// Section title
+	titleBar := "── Diff Summary "
+	titleLen := len(titleBar)
+	remaining := m.width - 4
+	if titleLen < remaining {
+		titleBar += strings.Repeat("─", remaining-titleLen)
+	}
+	sb.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(m.theme.TextSecondary).
+		Render(titleBar))
+	sb.WriteString("\n\n")
+
+	// File-level diff summary: use Insertions/Deletions from summary
+	// Since ShipSummary doesn't have per-file data, show aggregate
+	addedStyle := lipgloss.NewStyle().Foreground(m.theme.DiffAdded)
+	removedStyle := lipgloss.NewStyle().Foreground(m.theme.DiffRemoved)
+	mutedStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+
+	totalFiles := m.summary.FilesAdded + m.summary.FilesModified + m.summary.FilesDeleted
+	if totalFiles == 0 && m.summary.Insertions == 0 && m.summary.Deletions == 0 {
+		sb.WriteString(mutedStyle.Render("  No file changes recorded"))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	// Show individual file summaries if we have file counts
+	if m.summary.FilesAdded > 0 {
+		for i := 0; i < m.summary.FilesAdded; i++ {
+			sb.WriteString(fmt.Sprintf("  %s %s\n",
+				lipgloss.NewStyle().Foreground(m.theme.Success).Render("✦"),
+				mutedStyle.Render(fmt.Sprintf("new file %d", i+1))))
+		}
+	}
+	if m.summary.FilesModified > 0 {
+		for i := 0; i < m.summary.FilesModified; i++ {
+			sb.WriteString(fmt.Sprintf("  %s %s\n",
+				lipgloss.NewStyle().Foreground(m.theme.Warning).Render("~"),
+				mutedStyle.Render(fmt.Sprintf("modified file %d", i+1))))
+		}
+	}
+	if m.summary.FilesDeleted > 0 {
+		for i := 0; i < m.summary.FilesDeleted; i++ {
+			sb.WriteString(fmt.Sprintf("  %s %s\n",
+				lipgloss.NewStyle().Foreground(m.theme.Error).Render("✗"),
+				mutedStyle.Render(fmt.Sprintf("deleted file %d", i+1))))
+		}
+	}
+
+	// Total line
+	totalLine := fmt.Sprintf("Total: %s added  /  %s removed  /  %d files changed",
+		addedStyle.Render(fmt.Sprintf("+%d lines", m.summary.Insertions)),
+		removedStyle.Render(fmt.Sprintf("-%d lines", m.summary.Deletions)),
+		totalFiles)
+	sb.WriteString("\n")
+	sb.WriteString(totalLine)
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// renderShipAction renders the ship action card with keyboard shortcuts.
+func (m *ShipModel) renderShipAction() string {
+	var sb strings.Builder
+
+	// Section title
+	titleBar := "── Ship Action "
+	titleLen := len(titleBar)
+	remaining := m.width - 4
+	if titleLen < remaining {
+		titleBar += strings.Repeat("─", remaining-titleLen)
+	}
+	sb.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(m.theme.TextSecondary).
+		Render(titleBar))
+	sb.WriteString("\n\n")
+
+	// Card with rounded border
+	cardWidth := m.width - 8
+	if cardWidth < 40 {
+		cardWidth = 40
+	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.Brand).
+		Padding(0, 1)
+
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
+
+	// Build card content
+	var cardLines []string
+	cardLines = append(cardLines, fmt.Sprintf("%s %s",
+		keyStyle.Render("[S]"),
+		descStyle.Render("Ship: push branch + open PR")))
+	cardLines = append(cardLines, fmt.Sprintf("%s %s",
+		keyStyle.Render("[C]"),
+		descStyle.Render("Copy: copy commit hashes to clipboard")))
+	cardLines = append(cardLines, fmt.Sprintf("%s %s",
+		keyStyle.Render("[R]"),
+		descStyle.Render("Rollback: revert commits via /rollback")))
+	cardLines = append(cardLines, fmt.Sprintf("%s %s",
+		keyStyle.Render("[Esc]"),
+		descStyle.Render("Return to REPL without shipping")))
+
+	cardContent := strings.Join(cardLines, "\n")
+	rendered := cardStyle.Width(cardWidth).Render(cardContent)
+	sb.WriteString(rendered)
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// renderFileChanges renders the file changes summary (legacy, kept for backward compat).
 func (m *ShipModel) renderFileChanges() string {
 	header := lipgloss.NewStyle().
 		Bold(true).
@@ -231,7 +366,6 @@ func (m *ShipModel) renderFileChanges() string {
 		{Label: "Deleted", Value: fmt.Sprintf("%d", m.summary.FilesDeleted), Icon: "-"},
 	}
 
-	// Color-code the stats
 	for i := range stats {
 		switch i {
 		case 0:
@@ -249,7 +383,6 @@ func (m *ShipModel) renderFileChanges() string {
 		parts[i] = s.Render()
 	}
 
-	// Diff stat bar
 	diffStat := components.SegmentedBar{
 		Segments: []components.Segment{
 			{Count: m.summary.Insertions, Color: m.theme.Success},
@@ -262,7 +395,7 @@ func (m *ShipModel) renderFileChanges() string {
 	return header + "\n" + strings.Join(parts, "  ") + "\n" + diffStat.Render()
 }
 
-// renderNextActions renders suggested next actions.
+// renderNextActions renders suggested next actions (legacy, kept for backward compat).
 func (m *ShipModel) renderNextActions() string {
 	header := lipgloss.NewStyle().
 		Bold(true).

@@ -423,8 +423,8 @@ func TestShip_RenderView(t *testing.T) {
 	if view == "" {
 		t.Fatal("Expected non-empty view")
 	}
-	if !containsStr(view, "Session Complete") {
-		t.Error("Expected 'Session Complete' in view")
+	if !containsStr(view, "Launch Pad") {
+		t.Error("Expected 'Launch Pad' in view")
 	}
 }
 
@@ -445,8 +445,8 @@ func TestShip_SummaryDisplay(t *testing.T) {
 	if !containsStr(view, "6/8") {
 		t.Error("Expected task summary (6/8) in view")
 	}
-	if !containsStr(view, "Failed") {
-		t.Error("Expected failed section in view")
+	if !containsStr(view, "Commits") {
+		t.Error("Expected 'Commits' section in view")
 	}
 }
 

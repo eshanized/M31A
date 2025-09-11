@@ -177,8 +177,8 @@ func TestShipModel_ViewNonEmpty(t *testing.T) {
 	if view == "" {
 		t.Fatal("View() should not be empty")
 	}
-	if !strings.Contains(view, "Session Complete") {
-		t.Error("expected 'Session Complete' in view")
+	if !strings.Contains(view, "Launch Pad") {
+		t.Error("expected 'Launch Pad' in view")
 	}
 	if !strings.Contains(view, "sess-001") {
 		t.Error("expected session ID in view")
@@ -244,8 +244,8 @@ func TestShipModel_ViewNoCommits(t *testing.T) {
 	m.height = 24
 
 	view := m.View()
-	if !strings.Contains(view, "Session Complete") {
-		t.Error("expected 'Session Complete' in view even with no commits")
+	if !strings.Contains(view, "Launch Pad") {
+		t.Error("expected 'Launch Pad' in view even with no commits")
 	}
 }
 
