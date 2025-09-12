@@ -3,7 +3,7 @@
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
 > **Last Updated**: 2026-06-06
-> **Status**: Phase 24 planned — TUI Redesign
+> **Status**: Phase 25 in planning — Comprehensive Wiring & Inconsistency Fixes
 
 ---
 
@@ -1622,7 +1622,7 @@ Plans:
 
 **Duration:** 3 weeks
 **Complexity:** 8/10
-**Status:** Planned
+**Status:** Complete ✓
 **Milestone:** Complete visual and interaction redesign of all M31A TUI screens based on the TUI Redesign Proposal
 **Source:** rush/tui_redesign_proposal.md
 **Depends on:** Phase 23
@@ -1648,11 +1648,11 @@ The TUI Redesign Proposal (`rush/tui_redesign_proposal.md`) analyzed ~350KB of G
 
 ```
 Plans:
-- [ ] 24-01-PLAN.md — Theme Enhancement + Shared Chrome (Wave 1)
-- [ ] 24-02-PLAN.md — REPL + FirstRun Redesign (Wave 2)
-- [ ] 24-03-PLAN.md — Plan + Execute + Verify Redesign (Wave 3)
-- [ ] 24-04-PLAN.md — Ship + Diff Redesign (Wave 3)
-- [ ] 24-05-PLAN.md — ModelSelector + Settings + Resume Redesign (Wave 4)
+- [x] 24-01-PLAN.md — Theme Enhancement + Shared Chrome (Wave 1)
+- [x] 24-02-PLAN.md — REPL + FirstRun Redesign (Wave 2)
+- [x] 24-03-PLAN.md — Plan + Execute + Verify Redesign (Wave 3)
+- [x] 24-04-PLAN.md — Ship + Diff Redesign (Wave 3)
+- [x] 24-05-PLAN.md — ModelSelector + Settings + Resume Redesign (Wave 4)
 ```
 
 ### Wave Structure
@@ -1687,3 +1687,72 @@ Plans:
 - All screens render gracefully at 80, 120, 160, 200 cols
 - `go test -race ./internal/tui/...` passes
 - `go vet ./internal/tui/...` exits 0
+
+---
+
+## Phase 25 — Comprehensive Wiring & Inconsistency Fixes
+
+**Duration:** 2 weeks
+**Complexity:** 8/10
+**Status:** Planning
+**Milestone:** All 10 critical, 39 warning, and 17 info findings from `rush/comprehensive_wiring_inconsistency_report.md` are resolved. The codebase has clean architecture compliance (no rule violations), correct wiring (no dead code paths), correct concurrency (no goroutine leaks, no View() mutations), and consistent error handling (sentinel-wrapping across all tools/providers).
+**Source:** rush/comprehensive_wiring_inconsistency_report.md
+**Depends on:** Phase 24
+
+### Background
+
+A 6-agent parallel deep audit of 148 Go source files across 23 packages produced 66 findings. The audit found 10 critical issues that cause feature breakage (Edit tool unreachable, Grep filter ignored, View() mutating state), data corruption (duplicate assistant messages in task execution), platform build failure (Windows missing build tags), and security feature non-functional (permission rules never loaded). 39 warnings cover operator-precedence bugs, dead sentinel errors, incomplete parameter schemas, architecture violations, and listener goroutine leaks. 17 info items confirm the dependency graph is a clean DAG, vet/test pass cleanly, and reasoning normalization is correctly wired. Fix priority is P0 (CR-01, CR-02, CR-05, CR-08 — 1-2 hr each), P1 (CR-03, CR-04, CR-09, CR-10, W-01, W-06, W-25 — 2-4 hr each), P2 (CR-06, CR-07, W-02, W-07, W-09, W-19, W-20, W-22 — 1-3 hr each), P3 (all remaining warnings and info — 30 min each).
+
+### Requirement IDs
+
+| ID | Description |
+|----|-------------|
+| WIRE-01 | Critical Fixes — Edit tool routing, Grep filter param, message history dedup, Windows build tags |
+| WIRE-02 | Concurrency Safety — View() purity, config watcher shutdown, listener goroutine cleanup, token estimation consultation |
+| WIRE-03 | Permission System — wire Rules into dispatcher, fix matchAnyParamValue param coverage, complete error wrapping |
+| WIRE-04 | Provider Hardening — registry sentinel errors, singleflight dedup, operator precedence, IsContextExceeded precedence, comment/doc fixes, ErrNoCredits parity |
+| WIRE-05 | Workflow Robustness — Ship phase write ordering, double-write elimination, plan screen kickoff, Engine.tokens consultation, checkpoint at Discuss→Plan |
+| WIRE-06 | Tool Completeness — TodoWrite/AskUserQuestion normalizeToolName, parameter schemas, renderer coverage, ToolIcons fix, ensure Bash/Edit/etc. return ErrToolExecution |
+| WIRE-07 | Architecture Compliance — remove `internal/config` import from `internal/tools`, document `internal/config`→`pkg/keychain` dependency, move TUI component permission types to `internal/types` |
+| WIRE-08 | Documentation — refresh `docs/INTERFACES.md`, remove dead sentinels or wire them, refresh file inventory |
+
+### Plans
+
+```
+Plans:
+- [ ] 25-01-PLAN.md — P0 Critical Fixes (Wave 1)
+- [ ] 25-02-PLAN.md — P1 Concurrency & Architecture (Wave 2)
+- [ ] 25-03-PLAN.md — P2 Resource & UX Fixes (Wave 3)
+- [ ] 25-04-PLAN.md — P3 Backlog, Docs & Verification (Wave 4)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1    | 25-01 | yes | — |
+| 2    | 25-02 | yes | Wave 1 |
+| 3    | 25-03 | yes | Wave 2 |
+| 4    | 25-04 | yes | Wave 3 |
+
+### Deliverables
+
+- Edit tool reachable in production (`normalizeToolName` → `"Edit"`)
+- Grep tool filter parameter (`include`/`glob`) actually applies
+- Token estimation consulted before every LLM request; 80% warning, 95% block
+- `View()` is a pure function; mutations moved to `Update()`
+- Task execution produces one assistant message per LLM response with N tool results, not N duplicated assistant messages
+- `configWatchCancel` invoked on shutdown; no inotify fd leak
+- `permissionListenerCmd`/`questionListenerCmd` goroutines close on response
+- Windows build target `windows/amd64` succeeds
+- Permission rules from `config.toml` flow into dispatcher at startup
+- Ship phase writes `STATE.md` and checkpoint before archive move
+- All sentinels used (`ErrProviderNotFound` not `ErrProviderUnreachable` for lookup, etc.)
+- `internal/tools` has zero non-architected imports
+- All tools implement `ParameterSchema()` returning valid JSON Schema
+- `RendererForTool` covers `WebFetch` and `AskUserQuestion`
+- Dead sentinel errors either wired or removed from `UserMessage()`
+- `docs/INTERFACES.md` matches `internal/types/types.go`
+- `go test -race -count=1 ./...` passes
+- `go vet ./...` exits 0
+- `go build -o m31a ./cmd/m31a` succeeds for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
