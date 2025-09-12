@@ -61,6 +61,7 @@ type ModelSelector struct {
 	manager       *session.Manager
 	spinner       spinner.Model
 	theme         theme.Theme
+	usageHistory  map[string][]float64 // model ID -> usage frequency data
 }
 
 func NewModelSelector(registry *provider.Registry, mgr *session.Manager, t theme.Theme) ModelSelector {
@@ -70,7 +71,7 @@ func NewModelSelector(registry *provider.Registry, mgr *session.Manager, t theme
 	ti.Width = 40
 
 	items := []list.Item{}
-	delegate := newModelItemDelegate()
+	delegate := newModelItemDelegate(t)
 	l := list.New(items, delegate, 0, 0)
 	l.Title = "Model Selector"
 	l.SetShowStatusBar(false)
@@ -81,13 +82,14 @@ func NewModelSelector(registry *provider.Registry, mgr *session.Manager, t theme
 	sp.Spinner = spinner.Dot
 
 	return ModelSelector{
-		registry: registry,
-		list:     l,
-		search:   ti,
-		filter:   filterAll,
-		manager:  mgr,
-		spinner:  sp,
-		theme:    t,
+		registry:     registry,
+		list:         l,
+		search:       ti,
+		filter:       filterAll,
+		manager:      mgr,
+		spinner:      sp,
+		theme:        t,
+		usageHistory: make(map[string][]float64),
 	}
 }
 
@@ -274,10 +276,18 @@ func (m *ModelSelector) refilterList() {
 			}
 		}
 
+		// Get or generate usage data for sparkline
+		usageData := m.usageHistory[model.ID]
+		if usageData == nil {
+			usageData = generateMockUsageData(model.ID)
+			m.usageHistory[model.ID] = usageData
+		}
+
 		items = append(items, ModelItem{
 			Model:      model,
 			Provider:   model.Provider,
 			IsFavorite: favorites[model.ID],
+			UsageData:  usageData,
 		})
 	}
 
@@ -291,4 +301,25 @@ func (m *ModelSelector) refilterList() {
 	})
 
 	m.list.SetItems(items)
+}
+
+// generateMockUsageData creates deterministic mock usage data based on model ID.
+// In production, this would come from session history.
+func generateMockUsageData(modelID string) []float64 {
+	// Use a simple hash for deterministic but varied data
+	hash := 0
+	for _, ch := range modelID {
+		hash = hash*31 + int(ch)
+	}
+	if hash < 0 {
+		hash = -hash
+	}
+
+	// Generate 7 days of mock usage data
+	data := make([]float64, 7)
+	for i := range data {
+		val := float64((hash>>(uint(i)*3))%8) / 7.0
+		data[i] = val
+	}
+	return data
 }
