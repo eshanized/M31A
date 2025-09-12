@@ -36,6 +36,39 @@ var tabNames = map[settingsTab]string{
 	tabLedger:      "Ledger",
 }
 
+var tabIcons = map[settingsTab]string{
+	tabGeneral:     "⚙",
+	tabProvider:    "🔑",
+	tabModel:       "🤖",
+	tabPermissions: "🛡",
+	tabFeatures:    "📋",
+	tabLedger:      "📊",
+}
+
+var fieldDescriptions = map[string]string{
+	"ui.theme":                    "Controls the color scheme of M31A. Options: \"dark\", \"light\", \"auto\"",
+	"ui.compact_mode":             "Reduces spacing for more content on screen",
+	"ui.show_token_usage":         "Displays token count in the header bar",
+	"ui.show_cost_estimate":       "Shows estimated cost per request",
+	"ui.max_iterations":           "Maximum tool call iterations per response",
+	"provider.default":            "Which provider to use by default (openrouter or zen)",
+	"provider.auto_fallback":      "Automatically switch provider on rate limit or error",
+	"provider.openrouter.api_key": "API key for OpenRouter gateway. Stored in OS keychain on save.",
+	"provider.zen.api_key":        "API key for OpenCode Zen gateway. Stored in OS keychain on save.",
+	"model.default":               "Default model ID for chat completions",
+	"model.context_warning_threshold": "Context usage % that triggers a warning banner (0.0-1.0)",
+	"model.show_thinking_by_default":  "Show thinking/reasoning blocks by default",
+	"model.auto_collapse_tools":       "Automatically collapse tool call output in chat",
+	"model.auto_arbitrage":            "Automatically suggest cheaper models for simple tasks",
+	"model.arbitrage_threshold":       "Complexity threshold for auto-arbitrage suggestions (0.0-1.0)",
+	"permissions.default_mode":    "Permission mode: ask, auto, or deny",
+	"permissions.timeout_seconds": "Seconds to wait for permission response before auto-deny",
+	"features.auto_backup":        "Create backup before file writes",
+	"features.resume_on_startup":  "Offer to resume last session on startup",
+	"ledger.enabled":              "Enable cross-session learning ledger",
+	"ledger.max_entries":          "Maximum entries in the learning ledger",
+}
+
 // editableField represents a single config field that can be edited inline.
 type editableField struct {
 	label     string // display label
@@ -571,7 +604,7 @@ func (m SettingsModel) View() string {
 	}
 
 	tabBar := m.renderTabBar()
-	content := m.renderActiveTab()
+	content := m.renderTwoColumnContent()
 	footer := m.renderFooter()
 
 	mainView := lipgloss.JoinVertical(lipgloss.Top, tabBar, "", content, "", footer)
@@ -607,29 +640,163 @@ func (m SettingsModel) renderUnsavedWarning(bg string) string {
 	return lipgloss.JoinVertical(lipgloss.Top, bg, centeredModal)
 }
 
-// renderTabBar renders the tab headers row.
+// renderTabBar renders the tab headers row with icons and underline.
 func (m SettingsModel) renderTabBar() string {
 	var tabs []string
 	for i := 0; i < int(tabCount); i++ {
 		tab := settingsTab(i)
 		name := tabNames[tab]
+		icon := tabIcons[tab]
 
 		var style lipgloss.Style
 		if tab == m.activeTab {
 			style = lipgloss.NewStyle().
-				Background(lipgloss.Color(m.theme.Brand)).
-				Foreground(m.theme.BadgeTextLight).
-				Padding(0, 2).
+				Foreground(lipgloss.Color(m.theme.Brand)).
+				Padding(0, 1).
 				Bold(true)
 		} else {
 			style = lipgloss.NewStyle().
-				Background(lipgloss.Color(m.theme.Surface)).
 				Foreground(lipgloss.Color(m.theme.TextSecondary)).
-				Padding(0, 2)
+				Padding(0, 1)
 		}
-		tabs = append(tabs, style.Render(name))
+		tabs = append(tabs, style.Render(icon+" "+name))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+
+	// Add underline for active tab
+	underlineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Brand))
+	underline := underlineStyle.Render(strings.Repeat("━", m.width-4))
+
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, underline)
+}
+
+// renderTwoColumnContent renders the two-column layout: fields on left, description pane on right.
+func (m SettingsModel) renderTwoColumnContent() string {
+	leftColumn := m.renderFieldColumn()
+	rightColumn := m.renderDescriptionPane()
+
+	leftWidth := m.width * 60 / 100
+	rightWidth := m.width - leftWidth - 4
+
+	leftStyled := lipgloss.NewStyle().
+		Width(leftWidth).
+		Render(leftColumn)
+	rightStyled := lipgloss.NewStyle().
+		Width(rightWidth).
+		Render(rightColumn)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, rightStyled)
+}
+
+// renderFieldColumn renders the field list for the current tab.
+func (m SettingsModel) renderFieldColumn() string {
+	var lines []string
+	lines = append(lines, m.sectionHeader(tabNames[m.activeTab]+" Settings"))
+	lines = append(lines, "")
+
+	fields := m.fields[m.activeTab]
+	for i, f := range fields {
+		lines = append(lines, m.renderField(f, i == m.focusedField))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderDescriptionPane renders the description pane for the focused field.
+func (m SettingsModel) renderDescriptionPane() string {
+	fields := m.fields[m.activeTab]
+	if m.focusedField < 0 || m.focusedField >= len(fields) {
+		return ""
+	}
+
+	f := fields[m.focusedField]
+	var lines []string
+
+	// Field name in bold
+	fieldNameStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Brand)).
+		Bold(true)
+	lines = append(lines, fieldNameStyle.Render(f.label))
+	lines = append(lines, "")
+
+	// Separator
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Border)).
+		Render(strings.Repeat("─", 30)))
+
+	// Description text
+	desc := fieldDescriptions[f.key]
+	if desc == "" {
+		desc = "No description available."
+	}
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.TextSecondary)).
+		Render(desc))
+	lines = append(lines, "")
+
+	// Current value
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.TextPrimary)).
+		Bold(true).
+		Render("Current:"))
+	val := f.value
+	if f.masked && f.value != "" {
+		val = "••••••••"
+	}
+	lines = append(lines, lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.TextPrimary)).
+		Render("  "+val))
+
+	// Mini dropdown for enum fields
+	if f.fieldType == "string" && f.key == "ui.theme" {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.theme.TextSecondary)).
+			Render("Options:"))
+		options := []string{"dark", "light", "auto"}
+		for _, opt := range options {
+			if opt == f.value {
+				lines = append(lines, lipgloss.NewStyle().
+					Foreground(lipgloss.Color(m.theme.Brand)).
+					Render("  ◆ "+opt+" ←"))
+			} else {
+				lines = append(lines, lipgloss.NewStyle().
+					Foreground(lipgloss.Color(m.theme.TextSecondary)).
+					Render("  ○ "+opt))
+			}
+		}
+	}
+
+	if f.fieldType == "string" && f.key == "provider.default" {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.theme.TextSecondary)).
+			Render("Options:"))
+		options := []string{"openrouter", "zen"}
+		for _, opt := range options {
+			if opt == f.value {
+				lines = append(lines, lipgloss.NewStyle().
+					Foreground(lipgloss.Color(m.theme.Brand)).
+					Render("  ◆ "+opt+" ←"))
+			} else {
+				lines = append(lines, lipgloss.NewStyle().
+					Foreground(lipgloss.Color(m.theme.TextSecondary)).
+					Render("  ○ "+opt))
+			}
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(m.theme.Border)).
+		Padding(1, 1).
+		Width(m.width*40/100 - 4)
+
+	return boxStyle.Render(content)
 }
 
 // renderActiveTab dispatches to the correct tab renderer.
@@ -863,14 +1030,24 @@ func (m SettingsModel) renderLedgerTab() string {
 	return strings.Join(lines, "\n")
 }
 
-// renderFooter renders the footer with key hints and status.
+// renderFooter renders the footer with key hints, unsaved indicator, and status.
 func (m SettingsModel) renderFooter() string {
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.TextSecondary)).Faint(true)
 	footer := helpStyle.Render("[Tab/←→] Navigate  [↑↓] Select  [Enter] Edit/Toggle  [Esc] Back  [Ctrl+S] Save")
 
+	// Unsaved indicator
 	if m.dirty {
 		dirtyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Warning)).Bold(true)
-		footer = dirtyStyle.Render("Unsaved changes • ") + footer
+		// Count dirty fields
+		dirtyCount := 0
+		for _, fields := range m.fields {
+			for _, f := range fields {
+				if f.value != f.original {
+					dirtyCount++
+				}
+			}
+		}
+		footer = dirtyStyle.Render(fmt.Sprintf("● %d unsaved", dirtyCount)) + "  " + footer
 	}
 	if m.statusMsg != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Success))
