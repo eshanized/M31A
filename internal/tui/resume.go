@@ -21,6 +21,14 @@ type sessionItem struct {
 	title, desc string
 	id          string
 	corrupted   bool
+	phase       string // workflow phase for badge
+	goal        string // project goal for display
+	model       string
+	provider    string
+	startedAt   time.Time
+	msgCount    int
+	duration    time.Duration
+	isActive    bool // most recent session
 }
 
 func (i sessionItem) Title() string       { return i.title }
@@ -32,20 +40,23 @@ func sessionInfoToItem(info session.SessionInfo) sessionItem {
 	item := sessionItem{
 		id:        info.ID,
 		corrupted: info.Corrupted,
+		phase:     string(info.WorkflowPhase),
+		model:     info.Model,
+		provider:  info.Provider,
+		startedAt: info.StartedAt,
+		msgCount:  info.MessageCount,
 	}
 
 	if info.Corrupted {
 		item.title = fmt.Sprintf("%s [!]", info.ID)
 		item.desc = "Corrupted session data"
 	} else {
-		item.title = fmt.Sprintf("%s — %s", info.ID, info.Model)
+		item.title = info.ID
 		provider := info.Provider
 		if provider == "" {
 			provider = "unknown"
 		}
-		msgCount := info.MessageCount
-		started := info.StartedAt.Format("2006-01-02 15:04")
-		item.desc = fmt.Sprintf("%s · %d messages · Started: %s", provider, msgCount, started)
+		item.desc = fmt.Sprintf("%s · %d messages", provider, info.MessageCount)
 	}
 
 	return item
@@ -457,7 +468,7 @@ func (m *ResumeModel) View() string {
 	return m.renderBrowser()
 }
 
-// renderBrowser renders the search bar + filter chips + list + preview layout.
+// renderBrowser renders the search bar + filter chips + timeline view layout.
 func (m *ResumeModel) renderBrowser() string {
 	var parts []string
 
@@ -477,8 +488,8 @@ func (m *ResumeModel) renderBrowser() string {
 	labelStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 	parts = append(parts, labelStyle.Render("Filter: ")+" "+chipsRow)
 
-	// Main area: list on left, preview on right (if width allows)
-	listView := m.list.View()
+	// Main area: timeline view
+	timelineView := m.renderTimeline()
 
 	if m.width > 100 && m.preview != nil && !m.preview.Corrupted {
 		previewView := m.renderPreview(m.width/2 - 4)
@@ -487,7 +498,7 @@ func (m *ResumeModel) renderBrowser() string {
 
 		listStyled := lipgloss.NewStyle().
 			Width(listWidth).
-			Render(listView)
+			Render(timelineView)
 		previewStyled := lipgloss.NewStyle().
 			Width(previewWidth).
 			Render(previewView)
@@ -495,7 +506,7 @@ func (m *ResumeModel) renderBrowser() string {
 		mainContent := lipgloss.JoinHorizontal(lipgloss.Top, listStyled, previewStyled)
 		parts = append(parts, mainContent)
 	} else {
-		parts = append(parts, listView)
+		parts = append(parts, timelineView)
 	}
 
 	// Error message
@@ -510,6 +521,236 @@ func (m *ResumeModel) renderBrowser() string {
 	parts = append(parts, "", footer)
 
 	return strings.Join(parts, "\n")
+}
+
+// renderTimeline renders sessions grouped by date with session cards.
+func (m *ResumeModel) renderTimeline() string {
+	items := m.list.Items()
+	if len(items) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Italic(true).
+			Padding(2, 4)
+		return emptyStyle.Render("No sessions found")
+	}
+
+	// Group sessions by date
+	type dateGroup struct {
+		label    string
+		sessions []sessionItem
+	}
+
+	groups := make(map[string]*dateGroup)
+	var groupOrder []string
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	for _, item := range items {
+		si, ok := item.(sessionItem)
+		if !ok {
+			continue
+		}
+
+		var dateKey, label string
+		if si.corrupted {
+			dateKey = "unknown"
+			label = "UNKNOWN"
+		} else {
+			dateStr := si.startedAt.Format("2006-01-02")
+			switch dateStr {
+			case today:
+				dateKey = today
+				label = "TODAY"
+			case yesterday:
+				dateKey = yesterday
+				label = "YESTERDAY"
+			default:
+				dateKey = dateStr
+				label = si.startedAt.Format("Jan 02")
+			}
+		}
+
+		if _, exists := groups[dateKey]; !exists {
+			groups[dateKey] = &dateGroup{label: label}
+			groupOrder = append(groupOrder, dateKey)
+		}
+		groups[dateKey].sessions = append(groups[dateKey].sessions, si)
+	}
+
+	// Render groups
+	var lines []string
+	for _, dateKey := range groupOrder {
+		group := groups[dateKey]
+
+		// Date header
+		headerStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Brand).
+			Bold(true)
+		lines = append(lines, headerStyle.Render(group.label))
+		lines = append(lines, "")
+
+		// Session cards
+		for _, si := range group.sessions {
+			card := m.renderSessionCard(si)
+			lines = append(lines, card)
+			lines = append(lines, "")
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderSessionCard renders a single session as a rounded-border card.
+func (m *ResumeModel) renderSessionCard(si sessionItem) string {
+	var lines []string
+
+	// Line 1: ▶  ID  ●  model   time  PHASE
+	var line1 strings.Builder
+
+	// Selection indicator
+	if si.id == m.currentSelectedID() {
+		line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.Brand).Render("▶ "))
+	} else {
+		line1.WriteString("  ")
+	}
+
+	// Session ID
+	line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render(si.id))
+
+	// Active dot
+	line1.WriteString("  ")
+	if si.isActive {
+		line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.Success).Render("●"))
+	} else {
+		line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("○"))
+	}
+	line1.WriteString("  ")
+
+	// Model
+	model := si.model
+	if model == "" {
+		model = "unknown"
+	}
+	line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render(model))
+
+	// Time
+	if !si.startedAt.IsZero() {
+		timeStr := si.startedAt.Format("15:04")
+		padding := m.width - 8 - lipgloss.Width(line1.String()) - len(timeStr) - 10
+		if padding > 0 {
+			line1.WriteString(strings.Repeat(" ", padding))
+		}
+		line1.WriteString(lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(timeStr))
+	}
+
+	// Phase badge
+	phase := si.phase
+	if phase == "" {
+		phase = "IDLE"
+	}
+	line1.WriteString("  ")
+	line1.WriteString(m.renderPhaseBadge(phase))
+
+	lines = append(lines, line1.String())
+
+	// Line 2: Goal text
+	if si.goal != "" {
+		goal := si.goal
+		if len(goal) > 60 {
+			goal = goal[:57] + "..."
+		}
+		lines = append(lines, "   "+lipgloss.NewStyle().
+			Foreground(m.theme.TextSecondary).
+			Render("\""+goal+"\""))
+	}
+
+	// Line 3: Stats
+	provider := si.provider
+	if provider == "" {
+		provider = "unknown"
+	}
+	stats := fmt.Sprintf("%d messages · %s", si.msgCount, provider)
+	if si.duration > 0 {
+		stats += fmt.Sprintf(" · %s", formatDuration(si.duration))
+	}
+	lines = append(lines, "   "+lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render(stats))
+
+	// Build card with rounded border
+	content := strings.Join(lines, "\n")
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.Border).
+		Padding(0, 1).
+		Width(m.width - 4)
+
+	return cardStyle.Render(content)
+}
+
+// renderPhaseBadge renders a phase badge with progress indicator.
+func (m *ResumeModel) renderPhaseBadge(phase string) string {
+	var progress string
+	switch strings.ToUpper(phase) {
+	case "IDLE":
+		progress = "░░░░░░░░"
+	case "DISCUSS":
+		progress = "██░░░░░░"
+	case "PLAN":
+		progress = "████░░░░"
+	case "EXECUTE":
+		progress = "██████░░"
+	case "VERIFY":
+		progress = "███████░"
+	case "SHIP":
+		progress = "████████"
+	default:
+		progress = "░░░░░░░░"
+	}
+
+	filledStyle := lipgloss.NewStyle().Foreground(m.theme.Brand)
+	emptyStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+
+	// Count filled/empty blocks
+	filled := 0
+	for _, ch := range progress {
+		if ch == '█' {
+			filled++
+		}
+	}
+	empty := 8 - filled
+
+	bar := filledStyle.Render(strings.Repeat("█", filled)) +
+		emptyStyle.Render(strings.Repeat("░", empty))
+
+	return fmt.Sprintf("%s %s", bar, lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render(strings.ToUpper(phase)))
+}
+
+// currentSelectedID returns the ID of the currently selected session in the list.
+func (m *ResumeModel) currentSelectedID() string {
+	if sel := m.list.SelectedItem(); sel != nil {
+		if si, ok := sel.(sessionItem); ok {
+			return si.id
+		}
+	}
+	return ""
+}
+
+// formatDuration formats a duration as a human-readable string.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	return fmt.Sprintf("%dh %dm", h, m)
 }
 
 // renderSearchBar renders the search input with a label.
