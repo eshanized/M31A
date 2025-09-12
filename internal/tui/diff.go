@@ -161,6 +161,29 @@ func (m *DiffModel) parseDiff(diffText string) []DiffLine {
 	return result
 }
 
+// computeStats computes file change statistics from parsed diff lines.
+func (m *DiffModel) computeStats() (insertions, deletions, files int) {
+	inDiff := false
+	for _, line := range m.lines {
+		switch line.Type {
+		case DiffHeader:
+			if strings.HasPrefix(line.Content, "diff --git") {
+				files++
+				inDiff = true
+			}
+		case DiffAdded:
+			if inDiff {
+				insertions++
+			}
+		case DiffDeleted:
+			if inDiff {
+				deletions++
+			}
+		}
+	}
+	return
+}
+
 // View implements tea.Model.View. It renders the diff with lipgloss syntax
 // highlighting — green for additions, red for deletions, brand for hunk
 // headers, muted italic for file headers. Shows a header bar with title,
@@ -173,22 +196,32 @@ func (m DiffModel) View() string {
 		return "No changes in diff."
 	}
 
-	// --- title / header bar ---
+	// --- title / header bar with rounded border ---
 	var b strings.Builder
-	titleStr := fmt.Sprintf(" %s  [unified]  line %d/%d",
-		m.title, m.scrollPos+1, len(m.lines))
-	headerStyle := lipgloss.NewStyle().
-		Background(m.theme.Surface).
-		Foreground(m.theme.TextSecondary).
-		Padding(0, 1)
-	if m.width > 0 {
-		headerStyle = headerStyle.Width(m.width)
+	insertions, deletions, files := m.computeStats()
+	titleStr := fmt.Sprintf(" Diff: %s", m.title)
+	statsStr := ""
+	if files > 0 {
+		statsStr = fmt.Sprintf("  %d files changed, +%d insertions, -%d deletions", files, insertions, deletions)
 	}
-	b.WriteString(headerStyle.Render(titleStr))
+	headerContent := titleStr + statsStr
+
+	// Round the header with border
+	headerBorder := "╭─" + headerContent
+	remaining := m.width - len(headerBorder) - 1
+	if remaining > 0 {
+		headerBorder += strings.Repeat("─", remaining)
+	}
+	headerBorder += "╮"
+
+	headerStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+	b.WriteString(headerStyle.Render(headerBorder))
 	b.WriteString("\n")
 
 	// --- visible lines ---
-	viewportHeight := m.height - 3 // header + padding + help bar
+	viewportHeight := m.height - 4 // header + border + help bar + padding
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -198,28 +231,70 @@ func (m DiffModel) View() string {
 	}
 	visible := m.lines[m.scrollPos:end]
 
+	// Line number gutter width
+	gutterWidth := 4
+	lineNum := m.scrollPos + 1
+
 	for _, line := range visible {
-		var style lipgloss.Style
+		var lineStyle lipgloss.Style
+		var prefix string
+
 		switch line.Type {
 		case DiffAdded:
-			style = lipgloss.NewStyle().Foreground(m.theme.DiffAdded)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.DiffAdded).
+				Background(m.theme.DiffAddedBg)
+			prefix = "+"
 		case DiffDeleted:
-			style = lipgloss.NewStyle().Foreground(m.theme.DiffRemoved)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.DiffRemoved).
+				Background(m.theme.DiffRemovedBg)
+			prefix = "-"
 		case DiffHunk:
-			style = lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.Thinking).
+				Italic(true)
+			prefix = " "
 		case DiffHeader:
-			style = lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Italic(true)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.Brand).
+				Bold(true)
+			prefix = " "
 		case DiffContext:
-			style = lipgloss.NewStyle().Foreground(m.theme.Text)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.Text).
+				Background(m.theme.DiffContextBg)
+			prefix = " "
 		default:
-			style = lipgloss.NewStyle().Foreground(m.theme.Text)
+			lineStyle = lipgloss.NewStyle().
+				Foreground(m.theme.Text)
+			prefix = " "
 		}
-		b.WriteString(style.Render(line.Content))
+
+		// Line numbers for added/deleted lines
+		gutterStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
+		switch line.Type {
+		case DiffAdded, DiffDeleted:
+			gutter := fmt.Sprintf("%*d ", gutterWidth, lineNum)
+			b.WriteString(gutterStyle.Render(gutter))
+			b.WriteString(lineStyle.Render(prefix + line.Content))
+			lineNum++
+		case DiffContext:
+			gutter := fmt.Sprintf("%*d ", gutterWidth, lineNum)
+			b.WriteString(gutterStyle.Render(gutter))
+			b.WriteString(lineStyle.Render(prefix + line.Content))
+			lineNum++
+		default:
+			// Headers and hunks don't increment line numbers
+			gutter := strings.Repeat(" ", gutterWidth+1)
+			b.WriteString(gutterStyle.Render(gutter))
+			b.WriteString(lineStyle.Render(line.Content))
+		}
 		b.WriteString("\n")
 	}
 
 	// --- help bar ---
-	helpBar := "[↑/↓] scroll  [g] top  [G] bottom  [esc] back"
+	helpBar := "↑↓ scroll  ·  Tab toggle unified/split  ·  Esc back"
 	helpStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 	if m.width > 0 {
 		helpStyle = helpStyle.Width(m.width)
