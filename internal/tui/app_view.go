@@ -36,10 +36,6 @@ func (m *AppState) View() string {
 			return "Loading..."
 		}
 
-		// Update REPL model with current app state for View() rendering
-		m.replModel.SetKeyRegistry(m.keyRegistry)
-		m.replModel.SetLastActivity(m.lastActivity)
-
 		var mainContent string
 		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
 			sidebar := m.sidebarModel.View()

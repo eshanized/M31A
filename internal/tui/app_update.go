@@ -18,6 +18,13 @@ import (
 )
 
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// CR-04 fix: sync repl context from AppState in Update(), not View().
+	// View() must be a pure render function with no state mutations.
+	if m.replModel != nil {
+		m.replModel.SetKeyRegistry(m.keyRegistry)
+		m.replModel.SetLastActivity(m.lastActivity)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
