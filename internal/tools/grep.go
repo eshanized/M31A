@@ -111,7 +111,7 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	var globFilter string
-	if globRaw, ok := input.Params["glob"]; ok {
+	if globRaw, ok := input.Params["include"]; ok {
 		if globStr, ok := globRaw.(string); ok {
 			globFilter = globStr
 		}

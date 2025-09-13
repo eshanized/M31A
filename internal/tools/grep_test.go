@@ -37,7 +37,7 @@ func TestGrep_WithGlob(t *testing.T) {
 		Name: "Grep",
 		Params: map[string]any{
 			"pattern": "main",
-			"glob":    "*.go",
+			"include": "*.go",
 		},
 	})
 	if err != nil {
@@ -484,5 +484,34 @@ func TestGrep_PatternNotString(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parameter pattern must be a string") {
 		t.Errorf("expected type error, got: %v", err)
+	}
+}
+
+func TestGrep_IncludeSchemaKey(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Create test files
+	os.WriteFile(filepath.Join(dir, "app.go"), []byte("package main\nfunc main() {}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Main Project with main\n"), 0644)
+
+	g := NewGrep(dir)
+	// Use the schema-aligned "include" key (not the old "glob" key)
+	result, err := g.Execute(context.Background(), types.ToolInput{
+		Name: "Grep",
+		Params: map[string]any{
+			"pattern": "main",
+			"include": "*.go",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should find matches in app.go
+	if !strings.Contains(result.Output, "app.go") {
+		t.Errorf("expected app.go in results, got: %s", result.Output)
+	}
+	// Should NOT find matches in README.md
+	if strings.Contains(result.Output, "README.md") {
+		t.Errorf("include filter should have excluded README.md, got: %s", result.Output)
 	}
 }
