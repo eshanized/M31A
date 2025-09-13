@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/provider"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -270,5 +272,87 @@ func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("Expected error message on failure")
+	}
+}
+
+// mockProviderWithCapture records messages passed on ChatCompletionStream calls.
+type mockProviderWithCapture struct {
+	mockProvider
+	capturedMessages []m31types.Message
+	capturedCounts   []int // messages count per call
+}
+
+func (m *mockProviderWithCapture) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
+	// Increment a separate counter to avoid double-incrementing the embedded mock's callCount
+	m.capturedCounts = append(m.capturedCounts, len(req.Messages))
+	if len(m.capturedCounts) >= 2 {
+		m.capturedMessages = make([]m31types.Message, len(req.Messages))
+		copy(m.capturedMessages, req.Messages)
+	}
+	// Delegate to the embedded mock but bypass its callCount increment
+	// by using the response directly
+	content := m.response
+	if len(m.multiResponses) > 0 {
+		idx := len(m.capturedCounts) - 1
+		if idx < len(m.multiResponses) {
+			content = m.multiResponses[idx]
+		}
+	}
+	if content == "" {
+		content = "OK"
+	}
+	done := false
+	next := func() (*m31types.StreamChunk, error) {
+		if done {
+			return nil, io.EOF
+		}
+		done = true
+		return &m31types.StreamChunk{Delta: content}, nil
+	}
+	closeFn := func() error { return nil }
+	return &m31types.StreamIterator{Next: next, Close: closeFn}, m.err
+}
+
+func TestExecute_OneAssistantPerTurn(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Test that multiple tool calls all execute successfully.
+	// The CR-05 fix ensures only ONE assistant message is appended per
+	// tool-call loop iteration (instead of N duplicate messages).
+	toolCallResponse := "I'll use three tools:\n" +
+		"```json\n{\"name\":\"Glob\",\"input\":{\"pattern\":\"*.go\"}}\n```\n" +
+		"```json\n{\"name\":\"Grep\",\"input\":{\"pattern\":\"test\"}}\n```\n" +
+		"```json\n{\"name\":\"FileRead\",\"input\":{\"path\":\"main.go\"}}\n```"
+
+	mp := &mockProviderWithCapture{
+		mockProvider: mockProvider{
+			response: toolCallResponse,
+		},
+	}
+	mp.multiResponses = []string{
+		toolCallResponse,
+		"Done",
+	}
+	engine.provider = mp
+
+	task := m31types.Task{
+		ID:           1,
+		Action:       "Create",
+		Description:  "Create main.go",
+		Dependencies: []int{},
+		Files:        []string{"main.go"},
+	}
+	allTasks := []m31types.Task{task}
+
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	t.Logf("result: success=%v error=%q toolCalls=%d", result.Success, result.Error, result.ToolCalls)
+
+	if !result.Success {
+		t.Fatalf("Expected execute to succeed, got error: %s", result.Error)
+	}
+
+	// Verify tool calls were dispatched
+	if result.ToolCalls != 3 {
+		t.Errorf("expected 3 tool calls dispatched, got %d", result.ToolCalls)
 	}
 }

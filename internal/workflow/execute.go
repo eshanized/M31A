@@ -187,6 +187,15 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 		var toolErrMsg error
 		var toolErrName string
 		toolCallCount := len(toolCalls)
+
+		// CR-05 fix: add ONE assistant message outside the tool-call loop
+		// to prevent N duplicate assistant messages for N tool calls.
+		messages = append(messages, m31types.Message{
+			Role:      "assistant",
+			Content:   content,
+			ToolCalls: toolCalls,
+		})
+
 		for _, tc := range toolCalls {
 			// Emit tool start message
 			e.emit(ToolStartMsg{
@@ -220,11 +229,6 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			})
 
 			// Feed tool result back
-			messages = append(messages, m31types.Message{
-				Role:      "assistant",
-				Content:   content,
-				ToolCalls: []m31types.ToolCall{tc},
-			})
 			messages = append(messages, m31types.Message{
 				Role:    "tool",
 				Content: result.Output,
