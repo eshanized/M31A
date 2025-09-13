@@ -2551,3 +2551,24 @@ func TestReplSlashCommand_FullIntegration(t *testing.T) {
 		t.Errorf("Expected ScreenSettings after /settings, got %v", updated.screen)
 	}
 }
+
+// TestShutdown_WaitsForConfigWatcher verifies that Shutdown() cancels the
+// config watcher goroutine and waits for it to exit (no goroutine leak).
+func TestShutdown_WaitsForConfigWatcher(t *testing.T) {
+	t.Parallel()
+	app := newTestAppWithKey(t)
+
+	// Shutdown should return without blocking
+	done := make(chan struct{})
+	go func() {
+		app.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success: Shutdown returned
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown() blocked for more than 5s — config watcher goroutine may be leaked")
+	}
+}

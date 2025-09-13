@@ -122,9 +122,10 @@ type AppState struct {
 	headerCacheValue string
 	headerCacheValid bool
 	// FEAT-3: Config hot-reload
-	configReloadCh chan config.ConfigReloadMsg
-	configWatchCtx context.Context
+	configReloadCh    chan config.ConfigReloadMsg
+	configWatchCtx    context.Context
 	configWatchCancel context.CancelFunc
+	configWatcherWg   sync.WaitGroup // CR-06: track config watcher goroutine for clean shutdown
 	// Phase 21: state synchronization and message flow
 	pendingStreamChunks         []*types.StreamChunk // buffered during non-discuss workflow phases
 	permissionModalActive       bool                 // true while permission modal is displayed
@@ -149,6 +150,15 @@ func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 	m.currentPhase = phase
 	m.workflowRunning = (phase != types.PhaseIdle)
 	m.headerCacheValid = false
+}
+
+// Shutdown cleanly stops all background goroutines.
+// CR-06: cancels config watcher and waits for it to exit.
+func (m *AppState) Shutdown() {
+	if m.configWatchCancel != nil {
+		m.configWatchCancel()
+	}
+	m.configWatcherWg.Wait()
 }
 
 func NewApp(version string, registry *provider.Registry, configPath string) (*AppState, error) {
@@ -353,7 +363,11 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 	// FEAT-3: Start config file watcher for hot-reload
 	app.configReloadCh = make(chan config.ConfigReloadMsg, 1)
 	app.configWatchCtx, app.configWatchCancel = context.WithCancel(context.Background())
-	go config.WatchConfig(app.configWatchCtx, configPath, app.configReloadCh)
+	app.configWatcherWg.Add(1)
+	go func() {
+		defer app.configWatcherWg.Done()
+		config.WatchConfig(app.configWatchCtx, configPath, app.configReloadCh)
+	}()
 
 	if resolvedAPIKey == "" {
 		fr := NewFirstRunModel(tm.Current(), configPath, version, FirstRunOpts{
