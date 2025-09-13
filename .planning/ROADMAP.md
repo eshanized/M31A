@@ -1720,10 +1720,11 @@ A 6-agent parallel deep audit of 148 Go source files across 23 packages produced
 
 ```
 Plans:
-- [ ] 25-01-PLAN.md — P0 Critical Fixes (Wave 1)
-- [ ] 25-02-PLAN.md — P1 Concurrency & Architecture (Wave 2)
-- [ ] 25-03-PLAN.md — P2 Resource & UX Fixes (Wave 3)
-- [ ] 25-04-PLAN.md — P3 Backlog, Docs & Verification (Wave 4)
+- [ ] 25-01-PLAN.md — Wave 1: Critical Correctness (CR-01–CR-10, 9 tasks)
+- [ ] 25-02-PLAN.md — Wave 2: Provider Hardening (W-02–W-11, 8 tasks)
+- [ ] 25-03-PLAN.md — Wave 3: Tool/Permission Surface (W-13–W-33, 9 tasks)
+- [ ] 25-04-PLAN.md — Wave 4a: Parity Warnings (W-09–W-36, 15 tasks)
+- [ ] 25-05-PLAN.md — Wave 4b: Info Findings (I-01–I-18, 17 tasks)
 ```
 
 ### Wave Structure
@@ -1733,7 +1734,7 @@ Plans:
 | 1    | 25-01 | yes | — |
 | 2    | 25-02 | yes | Wave 1 |
 | 3    | 25-03 | yes | Wave 2 |
-| 4    | 25-04 | yes | Wave 3 |
+| 4    | 25-04, 25-05 | yes | Wave 3 |
 
 ### Deliverables
 
