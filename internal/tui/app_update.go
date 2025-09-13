@@ -802,7 +802,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					providerCmd)
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenREPL:
@@ -814,7 +814,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastActivity = time.Now()
 			m.currentOperation = "Ready"
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenSettings:
@@ -824,13 +824,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		(*m.settingsModel), cmd = m.settingsModel.Update(msg)
 		cmds := []tea.Cmd{cmd}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenPermission:
 		// Permission modal is visible; keep listeners active so subsequent
 		// permission requests are picked up after the current one resolves.
-		return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 
 	case ScreenResume:
 		if m.resumeModel == nil {
@@ -875,7 +875,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenModelSelector:
@@ -887,11 +887,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := m.modelSelector.Update(msg)
 		m.modelSelector = updated.(ModelSelector)
 		cmds := []tea.Cmd{cmd}
-		cmds = append(cmds, permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		return m, tea.Batch(cmds...)
 
 	case ScreenPlan:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 		if m.planModel != nil {
 			subCmds, appMsg := m.planModel.Update(msg)
 			if appMsg != nil {
@@ -902,7 +902,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenExecute:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 		if m.executeModel != nil {
 			subCmds, appMsg := m.executeModel.Update(msg)
 			if appMsg != nil {
@@ -913,7 +913,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenVerify:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 		if m.verifyModel != nil {
 			subCmds, appMsg := m.verifyModel.Update(msg)
 			if appMsg != nil {
@@ -924,7 +924,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenShip:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 		if m.shipModel != nil {
 			subCmds, appMsg := m.shipModel.Update(msg)
 			if appMsg != nil {
@@ -955,7 +955,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenDiff:
-		cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 		if m.diffModel.lines != nil || m.diffModel.diff != "" {
 			updated, cmd := m.diffModel.Update(msg)
 			m.diffModel = updated.(DiffModel)

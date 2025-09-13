@@ -332,7 +332,7 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model, tea.Cmd) {
 	if m.permissionModalActive {
 		m.pendingPermissionRequests = append(m.pendingPermissionRequests, msg)
-		return m, permissionListenerCmd(m.dispatcher)
+		return m, permissionListenerCmd(m.shutdownCtx, m.dispatcher)
 	}
 	m.permissionModalActive = true
 	m.pendingPermissionRequestID = msg.Request.ID // RC-2: store request ID for response correlation
@@ -346,8 +346,8 @@ func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model,
 	pm := components.NewPermissionModal(msg.Request, t, timeout)
 	m.permissionModal = pm
 	return m, tea.Batch(
-		permissionListenerCmd(m.dispatcher),
-		questionListenerCmd(m.dispatcher),
+		permissionListenerCmd(m.shutdownCtx, m.dispatcher),
+		questionListenerCmd(m.shutdownCtx, m.dispatcher),
 		tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
 			return PermissionTickMsg{}
 		}),
@@ -366,7 +366,7 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) (tea.Mode
 		m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
 		return m.handlePermissionRequest(next)
 	}
-	return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+	return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 }
 
 // handlePermissionTick handles PermissionTickMsg for the permission modal timeout.
@@ -385,7 +385,7 @@ func (m *AppState) handlePermissionTick() (tea.Model, tea.Cmd) {
 				m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
 				return m.handlePermissionRequest(next)
 			}
-			return m, tea.Batch(permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher))
+			return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		}
 		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
 			return PermissionTickMsg{}
@@ -399,7 +399,7 @@ func (m *AppState) handleQuestionRequest(msg QuestionRequestMsg) (tea.Model, tea
 	if m.replModel != nil {
 		m.replModel.ShowQuestion(msg)
 	}
-	return m, questionListenerCmd(m.dispatcher)
+	return m, questionListenerCmd(m.shutdownCtx, m.dispatcher)
 }
 
 // handleQuestionResponse handles QuestionResponseMsg from the user.
@@ -425,7 +425,7 @@ func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) (tea.Model, t
 	case m.dispatcher.QuestionResponseCh() <- dresp:
 	default:
 	}
-	return m, questionListenerCmd(m.dispatcher)
+	return m, questionListenerCmd(m.shutdownCtx, m.dispatcher)
 }
 
 // handleDiscussAnswerTimeout handles DiscussAnswerTimeoutMsg for the 5-minute timeout.

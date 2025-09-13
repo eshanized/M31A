@@ -2572,3 +2572,62 @@ func TestShutdown_WaitsForConfigWatcher(t *testing.T) {
 		t.Fatal("Shutdown() blocked for more than 5s — config watcher goroutine may be leaked")
 	}
 }
+
+// TestPermissionListenerCmd_ContextCancel verifies that permissionListenerCmd
+// returns nil (exits cleanly) when its context is cancelled.
+func TestPermissionListenerCmd_ContextCancel(t *testing.T) {
+	t.Parallel()
+	d := tools.NewDispatcher(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		cmd := permissionListenerCmd(ctx, d)
+		// cmd is a tea.Cmd that blocks until a permission request or ctx cancellation
+		// We call it in a goroutine; it should return nil when ctx is cancelled
+		result := cmd()
+		if result != nil {
+			t.Errorf("expected nil when context cancelled, got %v", result)
+		}
+		close(done)
+	}()
+
+	// Give the goroutine time to start, then cancel
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("permissionListenerCmd did not exit within 5s of context cancellation")
+	}
+}
+
+// TestQuestionListenerCmd_ContextCancel verifies that questionListenerCmd
+// returns nil (exits cleanly) when its context is cancelled.
+func TestQuestionListenerCmd_ContextCancel(t *testing.T) {
+	t.Parallel()
+	d := tools.NewDispatcher(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		cmd := questionListenerCmd(ctx, d)
+		result := cmd()
+		if result != nil {
+			t.Errorf("expected nil when context cancelled, got %v", result)
+		}
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("questionListenerCmd did not exit within 5s of context cancellation")
+	}
+}

@@ -126,6 +126,10 @@ type AppState struct {
 	configWatchCtx    context.Context
 	configWatchCancel context.CancelFunc
 	configWatcherWg   sync.WaitGroup // CR-06: track config watcher goroutine for clean shutdown
+	// CR-07: shutdown context for listener goroutines
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	listenerWg     sync.WaitGroup
 	// Phase 21: state synchronization and message flow
 	pendingStreamChunks         []*types.StreamChunk // buffered during non-discuss workflow phases
 	permissionModalActive       bool                 // true while permission modal is displayed
@@ -155,6 +159,11 @@ func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 // Shutdown cleanly stops all background goroutines.
 // CR-06: cancels config watcher and waits for it to exit.
 func (m *AppState) Shutdown() {
+	// CR-07: cancel listener goroutines
+	if m.shutdownCancel != nil {
+		m.shutdownCancel()
+	}
+	// CR-06: cancel config watcher
 	if m.configWatchCancel != nil {
 		m.configWatchCancel()
 	}
@@ -268,6 +277,8 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 		git:            g,
 		rollback:       rb,
 	}
+	// CR-07: initialize shutdown context for listener goroutines
+	app.shutdownCtx, app.shutdownCancel = context.WithCancel(context.Background())
 
 	// Initialize ledger for settings stats display
 	ledgerPath := filepath.Join(filepath.Dir(configPath), "LEDGER.md")
@@ -613,7 +624,7 @@ func (ce *channelEmitter) Emit(msg tea.Msg) {
 }
 
 func (m *AppState) Init() tea.Cmd {
-	cmds := []tea.Cmd{permissionListenerCmd(m.dispatcher), questionListenerCmd(m.dispatcher)}
+	cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
 	if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
 		cmds = append(cmds, HealthCheckTicker(context.Background(), m.registry, m.activeProvider, types.HealthCheckInterval))
 		cmds = append(cmds, CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
@@ -623,25 +634,35 @@ func (m *AppState) Init() tea.Cmd {
 
 // permissionListenerCmd returns a tea.Cmd that watches the dispatcher's
 // permission request channel and feeds requests into the Bubble Tea event loop.
-func permissionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
+// CR-07: accepts context for clean shutdown via select on ctx.Done().
+func permissionListenerCmd(ctx context.Context, dispatcher *tools.Dispatcher) tea.Cmd {
 	return func() tea.Msg {
-		req := <-dispatcher.RequestCh()
-		return PermissionRequestMsg{Request: req}
+		select {
+		case <-ctx.Done():
+			return nil
+		case req := <-dispatcher.RequestCh():
+			return PermissionRequestMsg{Request: req}
+		}
 	}
 }
 
 // questionListenerCmd returns a tea.Cmd that watches the dispatcher's
 // question request channel and feeds requests into the Bubble Tea event loop.
-func questionListenerCmd(dispatcher *tools.Dispatcher) tea.Cmd {
+// CR-07: accepts context for clean shutdown via select on ctx.Done().
+func questionListenerCmd(ctx context.Context, dispatcher *tools.Dispatcher) tea.Cmd {
 	return func() tea.Msg {
-		req := <-dispatcher.QuestionRequestCh()
-		return QuestionRequestMsg{
-			Question:    req.Question,
-			Header:      req.Header,
-			Options:     req.Options,
-			AllowCustom: req.AllowCustom,
-			TimeoutSecs: req.TimeoutSecs,
-			ResponseCh:  dispatcher.QuestionResponseCh(),
+		select {
+		case <-ctx.Done():
+			return nil
+		case req := <-dispatcher.QuestionRequestCh():
+			return QuestionRequestMsg{
+				Question:    req.Question,
+				Header:      req.Header,
+				Options:     req.Options,
+				AllowCustom: req.AllowCustom,
+				TimeoutSecs: req.TimeoutSecs,
+				ResponseCh:  dispatcher.QuestionResponseCh(),
+			}
 		}
 	}
 }
