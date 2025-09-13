@@ -6,7 +6,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -397,10 +396,9 @@ func handleHealth(args []string, ctx CommandContext) CommandResult {
 
 	home, err := os.UserHomeDir()
 	if err == nil {
-		var statfs syscall.Statfs_t
-		if err := syscall.Statfs(home, &statfs); err == nil {
-			availGB := float64(statfs.Bavail*uint64(statfs.Bsize)) / 1e9
-			b.WriteString(fmt.Sprintf("  Disk:        %.1f GB available\n", availGB))
+		if totalBytes, err := diskUsage(home); err == nil {
+			totalGB := float64(totalBytes) / 1e9
+			b.WriteString(fmt.Sprintf("  Disk:        %.1f GB total\n", totalGB))
 		}
 	}
 
