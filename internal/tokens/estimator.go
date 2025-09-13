@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/pkoukk/tiktoken-go"
 )
 
@@ -141,4 +142,15 @@ func (e *Estimator) ContextWarningBanner(used int, total int64, threshold float6
 // ModelID returns the model identifier for this estimator.
 func (e *Estimator) ModelID() string {
 	return e.modelID
+}
+
+// EstimateMessages returns the estimated total token count for a slice of
+// messages, summing the content of each message. Tool calls and other
+// metadata are not estimated (they are typically small relative to content).
+func (e *Estimator) EstimateMessages(messages []types.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += e.Estimate(msg.Content)
+	}
+	return total
 }

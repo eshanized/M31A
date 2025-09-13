@@ -356,6 +356,31 @@ func (e *Engine) emit(msg tea.Msg) {
 	}
 }
 
+// preflightContextCheck estimates token usage before each LLM request
+// and returns ErrContextExceeded if the estimate exceeds 95% of the
+// model's context window. Returns nil if estimation is unavailable.
+func (e *Engine) preflightContextCheck(messages []m31types.Message) error {
+	if e.tokens == nil || e.provider == nil {
+		return nil
+	}
+	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.activePhase))
+	if err != nil || modelInfo == nil {
+		return nil
+	}
+	estimated := e.tokens.EstimateMessages(messages)
+	contextLength := modelInfo.ContextLength
+	if contextLength <= 0 {
+		contextLength = m31types.DefaultContextLength
+	}
+	if float64(estimated) > 0.95*float64(contextLength) {
+		return fmt.Errorf("%w: estimated %d tokens exceeds 95%% of %d context", m31errors.ErrContextExceeded, estimated, contextLength)
+	}
+	if float64(estimated) > 0.80*float64(contextLength) {
+		slog.Warn("context usage approaching limit", "estimated", estimated, "limit", contextLength, "pct", float64(estimated)/float64(contextLength))
+	}
+	return nil
+}
+
 // SubmitDiscussAnswer records an answer for a discuss question.
 func (e *Engine) SubmitDiscussAnswer(index int, answer string) error {
 	if e.discussState.Questions == nil {
@@ -474,6 +499,11 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 
 // streamLLM sends a chat request and returns the full response content.
 func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
+	// CR-03: preflight context check before sending to LLM
+	if err := e.preflightContextCheck(messages); err != nil {
+		return "", err
+	}
+
 	// Emit thinking start message
 	e.emit(ThinkingStartMsg{
 		Context: "LLM processing...",

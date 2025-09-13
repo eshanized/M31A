@@ -2,12 +2,14 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
@@ -680,5 +682,62 @@ func TestVerifyTask_ContextTimeout(t *testing.T) {
 	result := engine.verifyTask(task)
 	if !result.SyntaxOK {
 		t.Errorf("expected SyntaxOK=true, got errors: %v", result.Errors)
+	}
+}
+
+// mockProviderWithModel returns a provider that serves a specific ModelInfo.
+type mockProviderWithModel struct {
+	mockProvider
+	model *m31types.ModelInfo
+}
+
+func (m *mockProviderWithModel) GetModel(id string) (*m31types.ModelInfo, error) {
+	return m.model, nil
+}
+
+func TestEngine_PreflightContextCheck(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Set up a provider that returns a model with small context window (100 tokens)
+	engine.provider = &mockProviderWithModel{
+		model: &m31types.ModelInfo{
+			ID:            "test-model",
+			ContextLength: 100,
+		},
+	}
+
+	// Create messages that will exceed 95% of 100 tokens (95 tokens)
+	longContent := strings.Repeat("word ", 60) // ~60 tokens via rune fallback
+	messages := []m31types.Message{
+		{Role: "user", Content: longContent},
+	}
+
+	err := engine.preflightContextCheck(messages)
+	if err == nil {
+		t.Fatal("expected ErrContextExceeded, got nil")
+	}
+	if !errors.Is(err, m31errors.ErrContextExceeded) {
+		t.Errorf("expected errors.Is(err, ErrContextExceeded), got: %v", err)
+	}
+}
+
+func TestEngine_PreflightContextCheck_BelowThreshold(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Set up a provider that returns a model with large context window
+	engine.provider = &mockProviderWithModel{
+		model: &m31types.ModelInfo{
+			ID:            "test-model",
+			ContextLength: 128000,
+		},
+	}
+
+	messages := []m31types.Message{
+		{Role: "user", Content: "hello"},
+	}
+
+	err := engine.preflightContextCheck(messages)
+	if err != nil {
+		t.Errorf("expected nil error for small context, got: %v", err)
 	}
 }
