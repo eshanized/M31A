@@ -445,8 +445,12 @@ func normalizeToolName(name string) string {
 		return "Glob"
 	case "grep", "search", "search_files":
 		return "Grep"
-	case "edit", "search_replace":
-		return "FileEdit"
+	case "fileedit", "file_edit", "edit", "search_replace":
+		return "Edit"
+	case "todowrite", "todo_write":
+		return "TodoWrite"
+	case "askuserquestion", "ask_user_question", "ask_user":
+		return "AskUserQuestion"
 	case "web_fetch", "fetch", "http_get":
 		return "WebFetch"
 	default:
