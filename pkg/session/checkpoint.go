@@ -73,14 +73,24 @@ func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
 // LoadCheckpoints reads all checkpoints from checkpoint.json for the given session.
 // Returns an empty slice without error if the file does not exist.
 // L-16: Prunes old checkpoints, keeping only the 2 most recent.
+// CR-10: Falls back to archived path if the primary session directory no longer exists.
 func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []Checkpoint{}, nil
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
 		}
-		return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
+		// CR-10: Try archived path if session was archived
+		archivedPath := filepath.Join(m.baseDir, "archived", sessionID, "checkpoint.json")
+		data, err = os.ReadFile(archivedPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return []Checkpoint{}, nil
+			}
+			return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
+		}
+		path = archivedPath
 	}
 
 	var checkpoints []Checkpoint
