@@ -107,14 +107,14 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("ledger update skipped: cannot load session", "error", err)
 	}
 
-	// 5. Archive session
-	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
-		e.logger.Warn("archive session failed", "error", err)
-	}
-
-	// 6. Write final STATE.md
+	// 5. Write final STATE.md before archiving (CR-10: fix write ordering)
 	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseShip, "complete", "session shipped"); err != nil {
 		e.logger.Warn("save state failed", "error", err)
+	}
+
+	// 6. Archive session (after state is persisted)
+	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
+		e.logger.Warn("archive session failed", "error", err)
 	}
 
 	// 7. Save checkpoint

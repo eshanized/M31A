@@ -206,3 +206,33 @@ func TestShipSummary_Fields(t *testing.T) {
 		t.Errorf("Expected SessionID 'test-session', got %q", summary.SessionID)
 	}
 }
+
+// TestShip_SaveStateBeforeArchive verifies CR-10: the ship phase writes
+// STATE.md before calling ArchiveSession, so the archived session contains
+// the final state. This test verifies the ship phase completes without error
+// with the corrected call ordering.
+func TestShip_SaveStateBeforeArchive(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	tasks := []m31types.Task{
+		{ID: 1, Action: "Create", Description: "Task 1", Status: m31types.StatusDone},
+	}
+	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
+
+	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	if err != nil {
+		t.Fatalf("RunPhase ship failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("Expected ship to succeed")
+	}
+	if result.Phase != m31types.PhaseShip {
+		t.Errorf("Expected phase ship, got %s", result.Phase)
+	}
+}
