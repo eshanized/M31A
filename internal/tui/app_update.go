@@ -792,10 +792,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 				}
 				// Don't auto-show sidebar until git status is loaded
-				healthCmd := HealthCheckTicker(
-					context.Background(), m.registry, m.activeProvider,
-					types.HealthCheckInterval,
-				)
+			healthCmd := HealthCheckTicker(
+				context.Background(),
+				types.HealthCheckInterval,
+			)
 				cmds = append(cmds, healthCmd)
 				cmds = append(cmds,
 					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval),

@@ -9,8 +9,7 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-func HealthCheckTicker(ctx context.Context, registry *provider.Registry,
-	activeProvider string, interval time.Duration) tea.Cmd {
+func HealthCheckTicker(ctx context.Context, interval time.Duration) tea.Cmd {
 
 	if ctx == nil {
 		return nil

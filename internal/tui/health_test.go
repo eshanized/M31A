@@ -9,7 +9,7 @@ import (
 )
 
 func TestHealthCheckTicker_ReturnsCmd(t *testing.T) {
-	cmd := HealthCheckTicker(context.Background(), nil, "test", time.Second)
+	cmd := HealthCheckTicker(context.Background(), time.Second)
 	if cmd == nil {
 		t.Error("HealthCheckTicker should return non-nil command")
 	}
@@ -63,7 +63,7 @@ func TestCalculateNextInterval_429(t *testing.T) {
 }
 
 func TestHealthCheckTicker_NilCtx(t *testing.T) {
-	cmd := HealthCheckTicker(nil, nil, "", time.Second)
+	cmd := HealthCheckTicker(nil, time.Second)
 	if cmd != nil {
 		t.Error("Nil context should return nil command")
 	}
