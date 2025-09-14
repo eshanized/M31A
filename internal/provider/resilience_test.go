@@ -29,8 +29,8 @@ func TestRegistry_SetActive_RejectsEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
-	if !errors.Is(err, m31errors.ErrProviderNotFound) {
-		t.Fatalf("expected ErrProviderNotFound, got: %v", err)
+	if !errors.Is(err, m31errors.ErrInvalidProvider) {
+		t.Fatalf("expected ErrInvalidProvider, got: %v", err)
 	}
 }
 

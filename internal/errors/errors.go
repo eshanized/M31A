@@ -8,6 +8,7 @@ import (
 var (
 	ErrProviderUnreachable = errors.New("provider unreachable")
 	ErrProviderNotFound    = errors.New("provider not found")
+	ErrInvalidProvider     = errors.New("invalid provider name")
 	ErrRateLimited         = errors.New("rate limited")
 	ErrInvalidKey          = errors.New("invalid API key")
 	ErrNoCredits           = errors.New("no credits available")
@@ -52,6 +53,8 @@ func UserMessage(e error) string {
 		return "Provider unreachable — check your internet connection"
 	case errors.Is(e, ErrProviderNotFound):
 		return "Provider not found — use /settings to configure providers"
+	case errors.Is(e, ErrInvalidProvider):
+		return "Invalid provider name — cannot be empty"
 	case errors.Is(e, ErrRateLimited):
 		return "Rate limited — retry in a moment"
 	case errors.Is(e, ErrInvalidKey):

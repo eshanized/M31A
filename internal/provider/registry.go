@@ -43,7 +43,7 @@ func (r *Registry) SetActive(name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if name == "" {
-		return fmt.Errorf("provider name cannot be empty: %w", m31errors.ErrProviderNotFound)
+		return fmt.Errorf("provider name cannot be empty: %w", m31errors.ErrInvalidProvider)
 	}
 	if _, ok := r.providers[name]; !ok {
 		return fmt.Errorf("provider %q not registered: %w", name, m31errors.ErrProviderNotFound)
