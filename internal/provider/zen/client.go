@@ -107,49 +107,46 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		return provider.CachedModels(c.cache), nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
-	if err != nil {
-		slog.Warn("zen failed to create models request", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-	provider.SetCommonHeaders(req, c.apiKey, Version)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		slog.Warn("zen failed to fetch models", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("zen unexpected status fetching models", "status", resp.StatusCode)
-		return provider.StaleFallback(c.cache)
-	}
-
-	var apiResp zenModelsResp
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		slog.Warn("zen failed to decode models response", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-
-	models := make([]types.ModelInfo, 0, len(apiResp.Data))
-	for _, m := range apiResp.Data {
-		info := types.ModelInfo{
-			ID:            m.ID,
-			Name:          m.ID,
-			Description:   m.OwnedBy,
-			ContextLength: c.defaultContextLen,
-			Pricing: types.Pricing{
-				InputPerMToken:  0,
-				OutputPerMToken: 0,
-			},
-			TopProvider:  "zen",
-			Capabilities: provider.ParseModelCapabilities(m.ID, "-r1"),
+	models, err := c.cache.Refresh(ctx, func(ctx context.Context) ([]types.ModelInfo, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+		if err != nil {
+			return nil, err
 		}
-		models = append(models, info)
+		provider.SetCommonHeaders(req, c.apiKey, Version)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("models fetch returned status %d", resp.StatusCode)
+		}
+		var apiResp zenModelsResp
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			return nil, err
+		}
+		models := make([]types.ModelInfo, 0, len(apiResp.Data))
+		for _, m := range apiResp.Data {
+			info := types.ModelInfo{
+				ID:            m.ID,
+				Name:          m.ID,
+				Description:   m.OwnedBy,
+				ContextLength: c.defaultContextLen,
+				Pricing: types.Pricing{
+					InputPerMToken:  0,
+					OutputPerMToken: 0,
+				},
+				TopProvider:  "zen",
+				Capabilities: provider.ParseModelCapabilities(m.ID, "-r1"),
+			}
+			models = append(models, info)
+		}
+		return models, nil
+	})
+	if err != nil {
+		slog.Warn("zen failed to refresh models", "error", err)
+		return provider.StaleFallback(c.cache)
 	}
-
-	c.cache.Set(models)
 	return models, nil
 }
 

@@ -120,49 +120,46 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		return provider.CachedModels(c.cache), nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
-	if err != nil {
-		slog.Warn("openrouter failed to create models request", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-	provider.SetCommonHeaders(req, c.apiKey, Version)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		slog.Warn("openrouter failed to fetch models", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("openrouter unexpected status fetching models", "status", resp.StatusCode)
-		return provider.StaleFallback(c.cache)
-	}
-
-	var apiResp openRouterModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		slog.Warn("openrouter failed to decode models response", "error", err)
-		return provider.StaleFallback(c.cache)
-	}
-
-	models := make([]types.ModelInfo, 0, len(apiResp.Data))
-	for _, m := range apiResp.Data {
-		info := types.ModelInfo{
-			ID:            m.ID,
-			Name:          m.Name,
-			Description:   m.Description,
-			ContextLength: m.ContextLen,
-			Pricing: types.Pricing{
-				InputPerMToken:  m.Pricing.PromptToken * 1_000_000,
-				OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
-			},
-			TopProvider:  m.TopProvider,
-			Capabilities: provider.ParseModelCapabilities(m.ID),
+	models, err := c.cache.Refresh(ctx, func(ctx context.Context) ([]types.ModelInfo, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+		if err != nil {
+			return nil, err
 		}
-		models = append(models, info)
+		provider.SetCommonHeaders(req, c.apiKey, Version)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("models fetch returned status %d", resp.StatusCode)
+		}
+		var apiResp openRouterModelsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			return nil, err
+		}
+		models := make([]types.ModelInfo, 0, len(apiResp.Data))
+		for _, m := range apiResp.Data {
+			info := types.ModelInfo{
+				ID:            m.ID,
+				Name:          m.Name,
+				Description:   m.Description,
+				ContextLength: m.ContextLen,
+				Pricing: types.Pricing{
+					InputPerMToken:  m.Pricing.PromptToken * 1_000_000,
+					OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
+				},
+				TopProvider:  m.TopProvider,
+				Capabilities: provider.ParseModelCapabilities(m.ID),
+			}
+			models = append(models, info)
+		}
+		return models, nil
+	})
+	if err != nil {
+		slog.Warn("openrouter failed to refresh models", "error", err)
+		return provider.StaleFallback(c.cache)
 	}
-
-	c.cache.Set(models)
 	return models, nil
 }
 
