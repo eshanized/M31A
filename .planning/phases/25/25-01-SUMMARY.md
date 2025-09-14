@@ -102,7 +102,7 @@ Each task was committed atomically:
 6. **Task 6: CR-06 — Shutdown Config Watcher Goroutine** - `2505aed` (fix)
 7. **Task 7: CR-07 — Clean Up Listener Goroutines** - `e82afbc` (fix)
 8. **Task 8: CR-08 — Windows Build Tag for Disk Usage** - `5c26256` (fix)
-9. **Task 9: CR-10 — Fix Ship Phase Write Ordering** - `a4c10c9` (fix)
+9. **Task 9: CR-10 — Fix Ship Phase Write Ordering** - `a4c10c9` + `713499e` (fix)
 
 ## Files Created/Modified
 - `internal/workflow/engine_parse.go` — Fixed normalizeToolName case values (CR-01)
@@ -163,6 +163,14 @@ Each task was committed atomically:
 - **Verification:** TestExecute_OneAssistantPerTurn passes
 - **Committed in:** 6b027a1 (Task 5 commit)
 
+**4. [Rule 1 - Bug] Fixed ship phase ordering — checkpoint and LoadCheckpoints archived fallback**
+- **Found during:** Task 9 (CR-10)
+- **Issue:** SaveCheckpoint ran after ArchiveSession (session dir gone), and LoadCheckpoints didn't check archived path
+- **Fix:** Moved SaveCheckpoint before ArchiveSession; added archived path fallback to LoadCheckpoints
+- **Files modified:** internal/workflow/ship.go, pkg/session/checkpoint.go
+- **Verification:** TestFullWorkflow integration test passes
+- **Committed in:** 713499e (Task 9 follow-up)
+
 ---
 
 **Total deviations:** 3 auto-fixed (2 bugs, 1 missing critical)
@@ -182,7 +190,7 @@ None - no external service configuration required.
 ## Self-Check: PASSED
 
 - SUMMARY.md: FOUND
-- All 9 task commits verified: dcbd0fa, e30a09e, 516df72, 8b6c75a, 6b027a1, 2505aed, e82afbc, 5c26256, a4c10c9
+- All 9 task commits verified: dcbd0fa, e30a09e, 516df72, 8b6c75a, 6b027a1, 2505aed, e82afbc, 5c26256, a4c10c9, 713499e
 
 ---
 *Phase: 25*
