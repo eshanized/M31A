@@ -16,7 +16,7 @@ type FallbackEvent struct {
 	Reason string `json:"reason"`
 }
 
-// maxRetryAfter is the maximum duration to wait for Retry-After header (60s cap).
+// maxRetryAfter is the maximum duration to wait for Retry-After header (120s cap).
 const maxRetryAfter = types.MaxRetryAfterWait
 
 func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
@@ -102,7 +102,7 @@ type FallbackAfterWait struct {
 // the returned Wait duration before applying the provider switch.
 //
 // When the current provider returned a 429 with a Retry-After header,
-// Wait is capped at maxRetryAfter (60s).
+// Wait is capped at maxRetryAfter (120s).
 func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string) FallbackAfterWait {
 	wait := time.Duration(0)
 	if retryAfterHeader != "" {
