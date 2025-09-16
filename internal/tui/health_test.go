@@ -70,7 +70,7 @@ func TestHealthCheckTicker_NilCtx(t *testing.T) {
 }
 
 func TestHealthCheckTicker_ZeroInterval(t *testing.T) {
-	cmd := HealthCheckTicker(context.Background(), nil, "", 0)
+	cmd := HealthCheckTicker(context.Background(), 0)
 	if cmd == nil {
 		t.Error("Zero interval should default to HealthCheckInterval")
 	}
