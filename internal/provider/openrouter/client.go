@@ -206,7 +206,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		}
 	}
 
-	sse := provider.NewSSEParser(resp)
+	sse := provider.NewSSEParserWithContext(resp, ctx)
 	return c.makeIterator(sse, req.Model), nil
 }
 
