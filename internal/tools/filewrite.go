@@ -63,20 +63,20 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	pathRaw, ok := input.Params["path"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: path", m31errors.ErrToolExecution)
 	}
 	path, ok := pathRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter path must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter path must be a string", m31errors.ErrToolExecution)
 	}
 
 	contentRaw, ok := input.Params["content"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: content")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: content", m31errors.ErrToolExecution)
 	}
 	content, ok := contentRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter content must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter content must be a string", m31errors.ErrToolExecution)
 	}
 
 	createDirs := true
@@ -101,7 +101,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 	targetPath, err := filepath.Abs(joined)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Path safety: verify resolved path is within workDir
@@ -111,10 +111,10 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		// File exists — resolve symlinks
 		resolved, err = filepath.EvalSymlinks(targetPath)
 		if err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
 		}
 	} else if !os.IsNotExist(err) {
-		return types.ToolResult{}, fmt.Errorf("cannot stat path: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot stat path: %v", m31errors.ErrToolExecution, err)
 	} else {
 		// File doesn't exist — resolve parent directory through symlinks
 		parentDir := filepath.Dir(targetPath)
@@ -129,7 +129,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		workDirPrefix += string(filepath.Separator)
 	}
 	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+		return types.ToolResult{}, fmt.Errorf("%w: path resolves outside working directory", m31errors.ErrToolExecution)
 	}
 	targetPath = resolved
 
@@ -139,21 +139,21 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
 		randBytes := make([]byte, 4)
 		if _, err := rand.Read(randBytes); err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot generate backup name: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot generate backup name: %v", m31errors.ErrToolExecution, err)
 		}
 		backupName := fmt.Sprintf("%s.%s.%s", sanitized, time.Now().Format("20060102T150405.000"), hex.EncodeToString(randBytes))
 		backupPath := filepath.Join(t.backupDir, backupName)
 
 		if err := os.MkdirAll(t.backupDir, DirPermission); err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot create backup directory: %v", m31errors.ErrToolExecution, err)
 		}
 
 		existingContent, err := os.ReadFile(targetPath)
 		if err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot read original for backup: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot read original for backup: %v", m31errors.ErrToolExecution, err)
 		}
 		if err := os.WriteFile(backupPath, existingContent, FilePermission); err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot write backup: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot write backup: %v", m31errors.ErrToolExecution, err)
 		}
 
 		// Prune old backups for this file to prevent unbounded accumulation
@@ -163,14 +163,14 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	// Create parent directories
 	if createDirs {
 		if err := os.MkdirAll(filepath.Dir(targetPath), DirPermission); err != nil {
-			return types.ToolResult{}, fmt.Errorf("cannot create directories: %w", err)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot create directories: %v", m31errors.ErrToolExecution, err)
 		}
 	}
 
 	// Temp file creation
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot generate temp name: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, err)
 	}
 	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
 
@@ -187,18 +187,18 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}()
 
 	if _, err := tmpFile.Write(contentBytes); err != nil {
-		return types.ToolResult{}, fmt.Errorf("write failed: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: write failed: %v", m31errors.ErrToolExecution, err)
 	}
 	if err := tmpFile.Sync(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("fsync failed: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: fsync failed: %v", m31errors.ErrToolExecution, err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("close failed: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: close failed: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, targetPath); err != nil {
-		return types.ToolResult{}, fmt.Errorf("rename failed: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: rename failed: %v", m31errors.ErrToolExecution, err)
 	}
 
 	cleanup = false

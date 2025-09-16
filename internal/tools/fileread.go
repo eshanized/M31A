@@ -57,16 +57,16 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	start := time.Now()
 
 	if err := ctx.Err(); err != nil {
-		return types.ToolResult{}, err
+		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
 	}
 
 	pathRaw, ok := input.Params["path"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: path", m31errors.ErrToolExecution)
 	}
 	path, ok := pathRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter path must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter path must be a string", m31errors.ErrToolExecution)
 	}
 
 	limit := types.MaxFileSize
@@ -83,16 +83,16 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}
 	absPath, err := filepath.Abs(joined)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Resolve symlinks
 	resolved, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return types.ToolResult{}, fmt.Errorf("file not found: %s", path)
+			return types.ToolResult{}, fmt.Errorf("%w: file not found: %s", m31errors.ErrToolExecution, path)
 		}
-		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Verify resolved path is within workDir (with separator guard)
@@ -101,31 +101,31 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		workDirPrefix += string(filepath.Separator)
 	}
 	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+		return types.ToolResult{}, fmt.Errorf("%w: path resolves outside working directory", m31errors.ErrToolExecution)
 	}
 
 	// Check if it's a directory
 	fi, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return types.ToolResult{}, fmt.Errorf("file not found: %s", path)
+			return types.ToolResult{}, fmt.Errorf("%w: file not found: %s", m31errors.ErrToolExecution, path)
 		}
-		return types.ToolResult{}, fmt.Errorf("cannot access %s: %w", path, err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %v", m31errors.ErrToolExecution, path, err)
 	}
 	if fi.IsDir() {
-		return types.ToolResult{}, fmt.Errorf("path is a directory, not a file: %s", path)
+		return types.ToolResult{}, fmt.Errorf("%w: path is a directory, not a file: %s", m31errors.ErrToolExecution, path)
 	}
 
 	// Check file size
 	fileSize := fi.Size()
 	if fileSize > int64(limit) {
-		return types.ToolResult{}, fmt.Errorf("file %s exceeds size limit: %w", path, m31errors.ErrFileTooLarge)
+		return types.ToolResult{}, fmt.Errorf("%w: file %s exceeds size limit", m31errors.ErrFileTooLarge, path)
 	}
 
 	// Open and read
 	f, err := os.Open(resolved)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot access %s: %w", path, err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %v", m31errors.ErrToolExecution, path, err)
 	}
 	defer f.Close()
 
@@ -133,7 +133,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	header := make([]byte, 512)
 	n, readErr := f.Read(header)
 	if readErr != nil && readErr != io.EOF {
-		return types.ToolResult{}, fmt.Errorf("read header: %w", readErr)
+		return types.ToolResult{}, fmt.Errorf("%w: read header: %v", m31errors.ErrToolExecution, readErr)
 	}
 	header = header[:n]
 
