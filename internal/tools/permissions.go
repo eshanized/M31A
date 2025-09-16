@@ -119,20 +119,35 @@ func matchAnyParamValue(pattern string, params map[string]any) bool {
 		if !ok {
 			continue
 		}
-		var str string
-		switch val := v.(type) {
-		case string:
-			str = val
-		default:
-			str = fmt.Sprintf("%v", val)
-		}
-		matched, err := doublestar.Match(pattern, str)
-		if err != nil {
-			continue
-		}
-		if matched {
+		if matchValue(v, pattern) {
 			return true
 		}
+	}
+	return false
+}
+
+func matchValue(v any, pattern string) bool {
+	switch val := v.(type) {
+	case string:
+		matched, _ := doublestar.Match(pattern, val)
+		return matched
+	case map[string]any:
+		for _, inner := range val {
+			if matchValue(inner, pattern) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range val {
+			if matchValue(item, pattern) {
+				return true
+			}
+		}
+	default:
+		// int, bool, etc. — stringify for matching
+		s := fmt.Sprintf("%v", val)
+		matched, _ := doublestar.Match(pattern, s)
+		return matched
 	}
 	return false
 }
