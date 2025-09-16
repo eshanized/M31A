@@ -317,6 +317,14 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 			}
 			obj := extractJSONObject(content[i:])
 			if obj == "" {
+				// Check if this looks like a tool call but is malformed JSON
+				remaining := content[i:]
+				if strings.Contains(remaining, `"name"`) || strings.Contains(remaining, `"tool"`) {
+					// Malformed JSON that looks like a tool call
+					totalAttempts++
+					parseErrors++
+					slog.Warn("parseToolCalls: malformed JSON object with tool call fields")
+				}
 				continue
 			}
 			// Quick pre-check: does this object have "name" or "tool" field?
@@ -534,48 +542,28 @@ func stripJSONComments(s string) string {
 	return string(out)
 }
 
-// PERF-3: This function scans from each '{' position, giving O(n*m) complexity
-// where n = content length and m = number of JSON objects. The 64KB
-// maxJSONScanBytes cap limits worst case. Acceptable for V1 since LLM
-// responses are typically <64KB of tool call JSON.
-//
 // extractJSONObject finds and returns the first complete JSON object starting
 // at the beginning of the string.
+// Uses json.NewDecoder for robust parsing without index drift issues.
 func extractJSONObject(s string) string {
-	if !strings.HasPrefix(strings.TrimSpace(s), "{") {
-		return ""
-	}
 	// Fix H-5: strip comments before scanning for JSON structure.
 	s = stripJSONComments(s)
-	depth := 0
-	inString := false
-	escaped := false
-	for i, c := range s {
-		if escaped {
-			escaped = false
-			continue
-		}
-		switch c {
-		case '\\':
-			if inString {
-				escaped = true
-			}
-		case '"':
-			inString = !inString
-		case '{':
-			if !inString {
-				depth++
-			}
-		case '}':
-			if !inString {
-				depth--
-				if depth == 0 {
-					return s[:i+1]
-				}
-			}
-		}
+
+	// Find the first '{' or '[' to skip surrounding text
+	trimmed := strings.TrimSpace(s)
+	startIdx := strings.IndexAny(trimmed, "{[")
+	if startIdx < 0 {
+		return ""
 	}
-	return ""
+
+	dec := json.NewDecoder(strings.NewReader(trimmed[startIdx:]))
+
+	// Decode the first JSON value
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // formatTaskSummary creates a markdown table of tasks.

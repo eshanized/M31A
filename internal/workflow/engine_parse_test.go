@@ -1,6 +1,56 @@
 package workflow
 
-import "testing"
+import (
+	"testing"
+)
+
+func TestExtractJSONObject_NoDrift(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple object",
+			input:    `{"a": 1}`,
+			expected: `{"a": 1}`,
+		},
+		{
+			name:     "nested object",
+			input:    `{"a": {"b": 2}}`,
+			expected: `{"a": {"b": 2}}`,
+		},
+		{
+			name:     "array",
+			input:    `[{"a": 1}, {"b": 2}]`,
+			expected: `[{"a": 1}, {"b": 2}]`,
+		},
+		{
+			name:     "string with braces",
+			input:    `{"a": "{hello}"}`,
+			expected: `{"a": "{hello}"}`,
+		},
+		{
+			name:     "object with surrounding text",
+			input:    `Here is the JSON: {"a": 1} and more text`,
+			expected: `{"a": 1}`,
+		},
+		{
+			name:     "no JSON object",
+			input:    `no json here`,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractJSONObject(tt.input)
+			if got != tt.expected {
+				t.Errorf("extractJSONObject(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
 
 func TestNormalizeToolName(t *testing.T) {
 	tests := []struct {
