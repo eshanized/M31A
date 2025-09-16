@@ -3,6 +3,7 @@ package openrouter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -536,6 +537,30 @@ func TestSanitizeProviderError(t *testing.T) {
 				t.Errorf("SanitizeProviderError(%d, %q) = %q, should NOT contain %q", tt.statusCode, tt.body, result, tt.notContain)
 			}
 		})
+	}
+}
+
+func TestHTTP402_NoCredits(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			w.WriteHeader(http.StatusPaymentRequired)
+			w.Write([]byte(`{"error":{"message":"Insufficient credits"}}`))
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key", Options{})
+	c.baseURL = ts.URL
+
+	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
+		Model:    "test/model",
+		Messages: []types.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for 402 response")
+	}
+	if !errors.Is(err, m31errors.ErrNoCredits) {
+		t.Fatalf("expected ErrNoCredits, got: %v", err)
 	}
 }
 

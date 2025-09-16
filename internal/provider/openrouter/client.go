@@ -196,6 +196,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 			return nil, m31errors.ErrRateLimited
 		case http.StatusUnauthorized:
 			return nil, m31errors.ErrInvalidKey
+		case http.StatusPaymentRequired:
+			return nil, fmt.Errorf("%w: insufficient credits on OpenRouter", m31errors.ErrNoCredits)
 		case http.StatusServiceUnavailable:
 			return nil, m31errors.ErrProviderUnreachable
 		default:
