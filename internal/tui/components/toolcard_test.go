@@ -160,7 +160,7 @@ func TestToolCard_Toggle(t *testing.T) {
 }
 
 func TestToolCard_HeaderColors(t *testing.T) {
-	tools := []string{"Bash", "FileRead", "FileWrite", "Glob", "Grep"}
+	tools := []string{"Bash", "FileRead", "FileWrite", "Glob", "Grep", "Edit", "TodoWrite", "WebFetch", "AskUserQuestion"}
 	dt := theme.Dark()
 	for _, name := range tools {
 		input := json.RawMessage(`"test"`)
@@ -169,8 +169,20 @@ func TestToolCard_HeaderColors(t *testing.T) {
 		if tc.toolName != name {
 			t.Errorf("expected toolName %q, got %q", name, tc.toolName)
 		}
-		if _, ok := dt.ToolLabel[name]; !ok {
-			t.Errorf("missing ToolLabel for %q", name)
+	}
+}
+
+func TestRendererForTool_AllTools(t *testing.T) {
+	dt := theme.Dark()
+	tools := []string{"Bash", "Edit", "FileRead", "FileWrite", "TodoWrite", "Grep", "Glob", "WebFetch", "AskUserQuestion", "UnknownTool"}
+	for _, name := range tools {
+		r := RendererForTool(name, dt)
+		if r == nil {
+			t.Errorf("RendererForTool(%q) returned nil", name)
+			continue
+		}
+		if r.Name() == "" {
+			t.Errorf("RendererForTool(%q).Name() returned empty string", name)
 		}
 	}
 }

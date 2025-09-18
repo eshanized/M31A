@@ -125,6 +125,10 @@ func RendererForTool(toolName string, t theme.Theme) ToolRenderer {
 		return NewGrepRenderer(t)
 	case "Glob":
 		return NewGlobRenderer(t)
+	case "WebFetch":
+		return NewWebFetchRenderer(t)
+	case "AskUserQuestion":
+		return NewAskUserQuestionRenderer(t)
 	default:
 		return NewGenericRenderer(toolName, t)
 	}

@@ -181,3 +181,61 @@ func (r *GenericRenderer) RenderOutput(result *types.ToolResult, state ToolState
 	parts = append(parts, r.RenderStatus(state, durationMs, width, errMsg))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
 }
+
+type WebFetchRenderer struct {
+	BaseRenderer
+}
+
+func NewWebFetchRenderer(t theme.Theme) *WebFetchRenderer {
+	return &WebFetchRenderer{BaseRenderer: BaseRenderer{toolName: "WebFetch", theme: t}}
+}
+
+func (r *WebFetchRenderer) RenderInput(call types.ToolCall, width int) string {
+	var params map[string]any
+	if err := json.Unmarshal(call.Input, &params); err != nil {
+		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	}
+	if url, ok := params["url"].(string); ok {
+		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("fetch " + url)
+	}
+	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+}
+
+func (r *WebFetchRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
+	if result == nil || result.Output == "" {
+		return r.RenderStatus(state, durationMs, width, "")
+	}
+	return lipgloss.JoinVertical(lipgloss.Top,
+		r.RenderGenericOutput(result.Output, truncated, collapsed, width),
+		r.RenderStatus(state, durationMs, width, ""),
+	)
+}
+
+type AskUserQuestionRenderer struct {
+	BaseRenderer
+}
+
+func NewAskUserQuestionRenderer(t theme.Theme) *AskUserQuestionRenderer {
+	return &AskUserQuestionRenderer{BaseRenderer: BaseRenderer{toolName: "AskUserQuestion", theme: t}}
+}
+
+func (r *AskUserQuestionRenderer) RenderInput(call types.ToolCall, width int) string {
+	var params map[string]any
+	if err := json.Unmarshal(call.Input, &params); err != nil {
+		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	}
+	if question, ok := params["question"].(string); ok {
+		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("ask: " + question)
+	}
+	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+}
+
+func (r *AskUserQuestionRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
+	if result == nil || result.Output == "" {
+		return r.RenderStatus(state, durationMs, width, "")
+	}
+	return lipgloss.JoinVertical(lipgloss.Top,
+		r.RenderGenericOutput(result.Output, truncated, false, width),
+		r.RenderStatus(state, durationMs, width, ""),
+	)
+}
