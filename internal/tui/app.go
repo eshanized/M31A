@@ -137,6 +137,7 @@ type AppState struct {
 	pendingPermissionRequestID  int64                // RC-2: request ID for correlation with response
 	workflowPaused              bool                 // true when workflow paused due to provider error
 	workflowStartTime           time.Time            // when the current workflow started
+	healthTicker                *time.Ticker         // health check ticker (stopped in Shutdown)
 }
 
 // setWorkflowPhase keeps workflowRunning and currentPhase synchronized.
@@ -159,6 +160,10 @@ func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 // Shutdown cleanly stops all background goroutines.
 // CR-06: cancels config watcher and waits for it to exit.
 func (m *AppState) Shutdown() {
+	// W-12: stop health check ticker
+	if m.healthTicker != nil {
+		m.healthTicker.Stop()
+	}
 	// CR-07: cancel listener goroutines
 	if m.shutdownCancel != nil {
 		m.shutdownCancel()
