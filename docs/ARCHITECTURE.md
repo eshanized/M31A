@@ -210,3 +210,22 @@ If estimated tokens exceed 80% of the model's context window:
 - A warning banner is shown in the TUI header
 - AutoDream consolidation is triggered automatically
 - If tokens exceed 95%, the request is blocked with `ErrContextExceeded`
+
+## Known Architecture Violations
+
+### CR-09: internal/tools imports internal/config (Deferred to Phase 26+)
+
+**Status:** Known violation, documented for tracking.
+
+The following files in `internal/tools/` import `internal/config`:
+- `internal/tools/dispatcher.go`
+- `internal/tools/permissions.go`
+- `internal/tools/defaults.go`
+
+**Rule:** `internal/tools/` may only import `internal/types/` and `internal/errors/`.
+
+**Root cause:** `PermissionRule` type is defined in `internal/config/types.go` but is consumed by `internal/tools/permissions.go`. Moving the type to `internal/types/types.go` would resolve the violation but cascades across 6+ files.
+
+**Planned fix:** Phase 26+ will move `PermissionRule` to `internal/types/` and update all import paths.
+
+**Phase 25 action:** Document only; do NOT modify the imports.
