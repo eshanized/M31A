@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -46,11 +47,11 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	todosRaw, ok := input.Params["todos"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: todos")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: todos", m31errors.ErrToolExecution)
 	}
 	todosSlice, ok := todosRaw.([]any)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter todos must be an array")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter todos must be an array", m31errors.ErrToolExecution)
 	}
 
 	type TodoItem struct {
@@ -63,12 +64,12 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	for i, tRaw := range todosSlice {
 		tMap, ok := tRaw.(map[string]any)
 		if !ok {
-			return types.ToolResult{}, fmt.Errorf("todo item %d must be an object", i)
+			return types.ToolResult{}, fmt.Errorf("%w: todo item %d must be an object", m31errors.ErrToolExecution, i)
 		}
 
 		content, ok := tMap["content"].(string)
 		if !ok {
-			return types.ToolResult{}, fmt.Errorf("todo item %d missing content field", i)
+			return types.ToolResult{}, fmt.Errorf("%w: todo item %d missing content field", m31errors.ErrToolExecution, i)
 		}
 
 		status := "pending"
@@ -77,7 +78,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 			case "pending", "in_progress", "completed", "cancelled":
 				status = s
 			default:
-				return types.ToolResult{}, fmt.Errorf("todo item %d has invalid status: %s", i, s)
+				return types.ToolResult{}, fmt.Errorf("%w: todo item %d has invalid status: %s", m31errors.ErrToolExecution, i, s)
 			}
 		}
 
@@ -87,7 +88,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 			case "high", "medium", "low":
 				priority = p
 			default:
-				return types.ToolResult{}, fmt.Errorf("todo item %d has invalid priority: %s", i, p)
+				return types.ToolResult{}, fmt.Errorf("%w: todo item %d has invalid priority: %s", m31errors.ErrToolExecution, i, p)
 			}
 		}
 
@@ -111,11 +112,11 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	// Write to session directory
 	if !sessionIDRe.MatchString(t.sessionID) {
-		return types.ToolResult{}, fmt.Errorf("invalid session ID: must be alphanumeric")
+		return types.ToolResult{}, fmt.Errorf("%w: invalid session ID: must be alphanumeric", m31errors.ErrToolExecution)
 	}
 	sessionDir := filepath.Join(t.sessionsDir, t.sessionID)
 	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot create session directory: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot create session directory: %v", m31errors.ErrToolExecution, err)
 	}
 
 	todoPath := filepath.Join(sessionDir, "TODO.md")
@@ -123,15 +124,15 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot generate temp name: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, err)
 	}
 	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
 	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
-		return types.ToolResult{}, fmt.Errorf("cannot write temp file: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot write temp file: %v", m31errors.ErrToolExecution, err)
 	}
 	if err := os.Rename(tmpPath, todoPath); err != nil {
 		os.Remove(tmpPath)
-		return types.ToolResult{}, fmt.Errorf("cannot write TODO.md: %w", err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot write TODO.md: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Build summary

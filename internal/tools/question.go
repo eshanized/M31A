@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -51,11 +52,11 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 
 	questionRaw, ok := input.Params["question"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: question")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: question", m31errors.ErrToolExecution)
 	}
 	question, ok := questionRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter question must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter question must be a string", m31errors.ErrToolExecution)
 	}
 
 	header := ""
@@ -96,7 +97,7 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 	case <-ctx.Done():
 		return types.ToolResult{}, ctx.Err()
 	default:
-		return types.ToolResult{}, fmt.Errorf("question channel full")
+		return types.ToolResult{}, fmt.Errorf("%w: question channel full", m31errors.ErrToolExecution)
 	}
 
 	// Wait for response
@@ -109,7 +110,7 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 	case <-ctx.Done():
 		return types.ToolResult{}, ctx.Err()
 	case <-timer.C:
-		return types.ToolResult{}, fmt.Errorf("question timed out after %d seconds", timeoutSecs)
+		return types.ToolResult{}, fmt.Errorf("%w: question timed out after %d seconds", m31errors.ErrToolExecution, timeoutSecs)
 	}
 
 	elapsed := time.Since(start).Milliseconds()
