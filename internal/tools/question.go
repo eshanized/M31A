@@ -47,6 +47,29 @@ func (t *AskUserQuestion) RiskLevel() types.RiskLevel {
 	return types.RiskSafe
 }
 
+// ParameterSchema returns the JSON Schema for AskUserQuestion tool parameters.
+func (t *AskUserQuestion) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"question": {"type": "string", "description": "Question to ask the user"},
+			"header": {"type": "string", "description": "Short header for the question"},
+			"options": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"label": {"type": "string"},
+						"description": {"type": "string"}
+					}
+				},
+				"description": "Answer options"
+			}
+		},
+		"required": ["question"]
+	}`
+}
+
 func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 

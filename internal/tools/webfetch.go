@@ -108,8 +108,8 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 			},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= MaxRedirects {
-			return fmt.Errorf("stopped after %d redirects", MaxRedirects)
+			if len(via) >= MaxRedirects {
+				return fmt.Errorf("stopped after %d redirects", MaxRedirects)
 			}
 			// SSRF protection: check each redirect target
 			if err := wf.resolveAndCheck(req.Context(), req.URL.String()); err != nil {
@@ -255,6 +255,18 @@ func (t *WebFetch) Description() string {
 
 func (t *WebFetch) RiskLevel() types.RiskLevel {
 	return types.RiskMedium
+}
+
+// ParameterSchema returns the JSON Schema for WebFetch tool parameters.
+func (t *WebFetch) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"url": {"type": "string", "description": "URL to fetch"},
+			"format": {"type": "string", "enum": ["text", "markdown", "html"], "description": "Output format", "default": "markdown"}
+		},
+		"required": ["url"]
+	}`
 }
 
 func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {

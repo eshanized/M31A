@@ -35,6 +35,19 @@ func (t *Edit) RiskLevel() types.RiskLevel {
 	return types.RiskDangerous
 }
 
+// ParameterSchema returns the JSON Schema for Edit tool parameters.
+func (t *Edit) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"path": {"type": "string", "description": "File path to edit"},
+			"old_string": {"type": "string", "description": "Exact string to find and replace"},
+			"new_string": {"type": "string", "description": "Replacement string"}
+		},
+		"required": ["path", "old_string", "new_string"]
+	}`
+}
+
 func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 

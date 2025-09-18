@@ -42,6 +42,28 @@ func (t *TodoWrite) RiskLevel() types.RiskLevel {
 	return types.RiskSafe
 }
 
+// ParameterSchema returns the JSON Schema for TodoWrite tool parameters.
+func (t *TodoWrite) ParameterSchema() string {
+	return `{
+		"type": "object",
+		"properties": {
+			"todos": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"content": {"type": "string"},
+						"status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+						"priority": {"type": "string", "enum": ["high", "medium", "low"]}
+					}
+				},
+				"description": "List of todo items"
+			}
+		},
+		"required": ["todos"]
+	}`
+}
+
 func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
