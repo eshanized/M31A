@@ -308,10 +308,9 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("timeout must be between 1 and %d seconds", MaxTimeoutSecs)
 	}
 
-	// SSRF protection: resolve and check hostname before connecting
-	if err := t.resolveAndCheck(ctx, urlStr); err != nil {
-		return types.ToolResult{}, err
-	}
+	// SSRF protection is handled by the dialer's resolver in the HTTP client.
+	// No separate resolveAndCheck call needed here — the dialer resolves DNS,
+	// checks for private IPs, and pins the IP for the connection.
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
