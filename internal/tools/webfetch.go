@@ -339,12 +339,14 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}
 
 	// Read body with size limit (5MB)
-	const maxSize = 5 * 1024 * 1024
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
+	if resp.ContentLength > types.MaxFileSize {
+		return types.ToolResult{}, fmt.Errorf("response too large: %d bytes exceeds %d limit", resp.ContentLength, types.MaxFileSize)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, types.MaxFileSize+1))
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("failed to read response body: %w", err)
 	}
-	if len(body) > maxSize {
+	if len(body) > types.MaxFileSize {
 		return types.ToolResult{}, fmt.Errorf("response exceeds 5MB limit")
 	}
 
