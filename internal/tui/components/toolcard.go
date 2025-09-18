@@ -33,7 +33,7 @@ var ToolIcons = map[string]string{
 	"Glob":      "\u2731",
 	"Grep":      "\u2731",
 	"TodoWrite": "\u2699",
-	"Question":  "?",
+	"AskUserQuestion": "?",
 }
 
 // ToolStatusIcons maps tool state to status prefix characters.
