@@ -4,6 +4,8 @@
 > for LLM context in future OpenCode sessions. The source of truth is always the
 > `.go` files. This document is a convenience mirror for quick reference.
 
+> **Last Updated:** 2026-06-06
+
 ---
 
 ## Package: `internal/types/types.go`
@@ -93,15 +95,16 @@ type ArchInfo struct {
 
 ```go
 type ModelInfo struct {
-    ID            string   `json:"id"`
-    Provider      string   `json:"provider"`
-    Name          string   `json:"name"`
-    Description   string   `json:"description"`
-    ContextLength int64    `json:"context_length"`
-    Pricing       Pricing  `json:"pricing"`
-    Architecture  ArchInfo `json:"architecture"`
-    TopProvider   string   `json:"top_provider"`
-    Capabilities  CapFlags `json:"capabilities"`
+	ID            string   `json:"id"`
+	Provider      string   `json:"provider"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	ContextLength int64    `json:"context_length"`
+	Pricing       Pricing  `json:"pricing"`
+	Architecture  ArchInfo `json:"architecture"`
+	TopProvider   string   `json:"top_provider"`
+	Capabilities  CapFlags `json:"capabilities"`
+	Variant       *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
 }
 ```
 
@@ -109,10 +112,11 @@ type ModelInfo struct {
 
 ```go
 type MessageSegment struct {
-    Type       string `json:"type"`
-    Content    string `json:"content"`
-    DurationMs int64  `json:"duration_ms"`
-    Visible    bool   `json:"visible"`
+	Type       string    `json:"type"`
+	Content    string    `json:"content"`
+	DurationMs int64     `json:"duration_ms"`
+	Visible    bool      `json:"visible"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
 }
 ```
 
@@ -130,12 +134,13 @@ type ToolCall struct {
 
 ```go
 type Message struct {
-    Role      string           `json:"role"`
-    Content   string           `json:"content"`
-    Segments  []MessageSegment `json:"segments"`
-    ToolCalls []ToolCall       `json:"tool_calls,omitempty"`
-    Usage     *Usage           `json:"usage,omitempty"`
-    CreatedAt time.Time        `json:"created_at"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	Segments   []MessageSegment `json:"segments"`
+	ToolCalls  []ToolCall       `json:"tool_calls,omitempty"`
+	Usage      *Usage           `json:"usage,omitempty"`
+	CreatedAt  time.Time        `json:"created_at"`
+	SkipForLLM bool             `json:"skip_for_llm,omitempty"`
 }
 ```
 
@@ -171,14 +176,31 @@ type Tool interface {
 }
 ```
 
+### SchemaProvider
+
+```go
+// SchemaProvider is an optional interface that tools can implement to
+// provide JSON Schema parameter definitions to the LLM.
+type SchemaProvider interface {
+    ParameterSchema() string
+}
+```
+
 ### FilePrediction
 
 ```go
 type FilePrediction struct {
-    Path           string `json:"path"`
-    Action         string `json:"action"`
-    EstimatedLines int    `json:"estimated_lines"`
+	Path           string `json:"path"`
+	Action         string `json:"action"`
+	EstimatedLines int    `json:"estimated_lines"`
 }
+
+// FilePrediction action constants
+const (
+	FileActionCreate = "create"
+	FileActionModify = "modify"
+	FileActionDelete = "delete"
+)
 ```
 
 ### Task
@@ -214,13 +236,15 @@ type ProjectState struct {
 
 ```go
 type Session struct {
-    ID            string        `json:"id"`
-    Model         string        `json:"model"`
-    Provider      string        `json:"provider"`
-    StartedAt     time.Time     `json:"started_at"`
-    MessageCount  int           `json:"message_count"`
-    WorkflowPhase WorkflowPhase `json:"workflow_phase"`
-    Project       *ProjectState `json:"project,omitempty"`
+	ID            string        `json:"id"`
+	ParentID      string        `json:"parent_id,omitempty"`
+	ChildrenIDs   []string      `json:"children_ids,omitempty"`
+	Model         string        `json:"model"`
+	Provider      string        `json:"provider"`
+	StartedAt     time.Time     `json:"started_at"`
+	MessageCount  int           `json:"message_count"`
+	WorkflowPhase WorkflowPhase `json:"workflow_phase"`
+	Project       *ProjectState `json:"project,omitempty"`
 }
 ```
 
@@ -228,9 +252,10 @@ type Session struct {
 
 ```go
 type StreamChunk struct {
-    Type             string `json:"type"`
-    Delta            string `json:"delta"`
-    ThinkingDuration int64  `json:"thinking_duration"`
+	Type             string `json:"type"`
+	Delta            string `json:"delta"`
+	ThinkingDuration int64  `json:"thinking_duration"`
+	Usage            *Usage `json:"usage,omitempty"`
 }
 ```
 
@@ -240,6 +265,16 @@ type StreamChunk struct {
 type StreamIterator struct {
     Next  func() (*StreamChunk, error)
     Close func() error
+}
+```
+
+### StreamChunkMsg
+
+```go
+// StreamChunkMsg is emitted by workflow phases that stream LLM responses.
+type StreamChunkMsg struct {
+    Chunk  *StreamChunk
+    Source string // "discuss", "plan", "execute", etc.
 }
 ```
 
@@ -477,20 +512,30 @@ const (
 
 ```go
 var (
-    ErrProviderUnreachable  = errors.New("provider unreachable")
-    ErrRateLimited          = errors.New("rate limited")
-    ErrInvalidKey           = errors.New("invalid API key")
-    ErrContextExceeded      = errors.New("context window exceeded")
-    ErrModelNotFound        = errors.New("model not found")
-    ErrSessionCorrupted     = errors.New("session data corrupted")
-    ErrNoBinaryContent      = errors.New("binary content not displayable")
-    ErrFileTooLarge         = errors.New("file exceeds 5MB limit")
-    ErrCircularDependency   = errors.New("circular dependency in task graph")
-    ErrBisectFailed         = errors.New("git bisect failed to identify regression")
-    ErrPermissionDenied     = errors.New("permission denied")
-    ErrToolExecution        = errors.New("tool execution failed")
-    ErrTaskFailed           = errors.New("task failed")
-    ErrPhaseTransition      = errors.New("invalid phase transition")
-    ErrCheckpointNotFound   = errors.New("checkpoint not found")
+	ErrProviderUnreachable  = errors.New("provider unreachable")
+	ErrProviderNotFound     = errors.New("provider not found")
+	ErrInvalidProvider      = errors.New("invalid provider name")
+	ErrRateLimited          = errors.New("rate limited")
+	ErrInvalidKey           = errors.New("invalid API key")
+	ErrNoCredits            = errors.New("no credits available")
+	ErrContextExceeded      = errors.New("context window exceeded")
+	ErrModelNotFound        = errors.New("model not found")
+	ErrSessionCorrupted     = errors.New("session data corrupted")
+	ErrNoBinaryContent      = errors.New("binary content not displayable")
+	ErrFileTooLarge         = errors.New("file exceeds 5MB limit")
+	ErrCircularDependency   = errors.New("circular dependency in task graph")
+	ErrPermissionDenied     = errors.New("permission denied")
+	ErrToolExecution        = errors.New("tool execution failed")
+	ErrTaskFailed           = errors.New("task failed")
+	ErrPhaseTransition      = errors.New("invalid phase transition")
+	ErrCheckpointNotFound   = errors.New("checkpoint not found")
+	ErrToolInputTooLarge    = errors.New("tool input exceeds size limit")
+	ErrInvalidTimeout       = errors.New("invalid timeout: must be > 0 and <= 30m")
+	ErrPrivateIPBlocked     = errors.New("access to private IP is blocked (SSRF protection)")
+	ErrStreamTruncated      = errors.New("stream truncated before completion")
+	ErrBisectResetFailed    = errors.New("bisect reset failed")
+	ErrBisectFailed         = errors.New("bisect failed")
+	ErrSessionNotFound      = errors.New("session not found")
+	ErrSessionPermission    = errors.New("session access denied")
 )
 ```
