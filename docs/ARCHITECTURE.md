@@ -229,3 +229,15 @@ The following files in `internal/tools/` import `internal/config`:
 **Planned fix:** Phase 26+ will move `PermissionRule` to `internal/types/` and update all import paths.
 
 **Phase 25 action:** Document only; do NOT modify the imports.
+
+### W-26: Permission component imports tools package
+
+**Status:** Known coupling, documented for tracking.
+
+`internal/tui/components/permission.go` imports `internal/tools` to access tool risk levels
+for the permission modal display. This creates a TUI→Tools dependency.
+
+**Impact:** Low — the import is read-only (risk level lookup), not a circular dependency.
+
+**Planned fix:** Phase 26+ may extract risk level metadata into `internal/types/` to eliminate
+the dependency.
