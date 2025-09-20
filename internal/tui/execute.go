@@ -27,12 +27,25 @@ type ExecuteModel struct {
 	totalTokens   int
 	totalCost     float64
 	toolCalls     int
+	tasksCompleted int
+	tasksFailed    int
 	paused        bool
 	spinner       spinner.Model
 	allDone       bool
 	transitioning bool
 	transitionSec int
 	sessionID     string
+}
+
+// recordTaskMetric records a task completion or failure metric.
+// Must be called from Update(), never from View().
+func (m *ExecuteModel) recordTaskMetric(metric string) {
+	switch metric {
+	case "completed":
+		m.tasksCompleted++
+	case "failed":
+		m.tasksFailed++
+	}
 }
 
 // NewExecuteModel creates an Execute screen model. width/height are
