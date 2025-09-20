@@ -68,6 +68,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		if err != nil {
 			e.logger.Warn("git log failed during ship summary", "error", err)
 		}
+		// W-17: Truncate commit log to last 50 lines
+		if len(commits) > 50 {
+			commits = commits[len(commits)-50:]
+		}
 	}
 
 	summary := ShipSummary{
