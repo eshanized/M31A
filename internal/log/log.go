@@ -41,7 +41,11 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{Level: resolveLogLevel()}
 
-	if os.Getenv("M31A_LOG_FORMAT") == "text" {
+	format := os.Getenv("M31A_LOG_FORMAT")
+	if format == "" {
+		format = "json"
+	}
+	if format == "text" {
 		handler = slog.NewTextHandler(f, opts)
 	} else {
 		handler = slog.NewJSONHandler(f, opts)
