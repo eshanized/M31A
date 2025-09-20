@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	m31errors "github.com/eshanized/M31A/internal/errors"
 )
 
 type SSEParser struct {
@@ -87,7 +89,7 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 
 	data = strings.Join(dataParts, "")
 	if data == "" && len(dataParts) == 0 {
-		return "", "", fmt.Errorf("stream truncated before completion: %w", io.ErrUnexpectedEOF)
+		return "", "", fmt.Errorf("%w: stream chunk read interrupted", m31errors.ErrStreamTruncated)
 	}
 	return eventType, data, nil
 }
