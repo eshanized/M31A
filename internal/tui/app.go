@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,7 @@ type AppState struct {
 	height               int
 	lastActivity         time.Time
 	healthStatus         types.HealthStatus
+	healthStatusAtomic   atomic.Value // atomic copy for safe reads from View goroutine
 	themeManager         *theme.Manager
 	firstRunModel        *FirstRunModel
 	replModel            *ReplModel

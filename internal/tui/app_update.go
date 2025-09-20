@@ -477,6 +477,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// C-1 fix: receive async health check result
 		m.healthCheckInFlight = false
 		m.healthStatus = msg.Result
+		m.healthStatusAtomic.Store(msg.Result) // atomic store for safe reads
 		m.headerCacheValid = false // H-10: invalidate header cache when health status changes
 		m.lastActivity = time.Now()
 		return m, NextHealthTick(calculateNextInterval(msg.Result))

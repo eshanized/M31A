@@ -201,16 +201,23 @@ func (m *AppState) CachedRenderHeader(contextUsed, contextTotal int64) string {
 	if m.activeModel != nil {
 		modelID = m.activeModel.ID
 	}
+	// Atomic read for health status to avoid data races.
+	var health types.HealthStatus
+	if v := m.healthStatusAtomic.Load(); v != nil {
+		health = v.(types.HealthStatus)
+	} else {
+		health = m.healthStatus // fallback for initialization
+	}
 	key := computeHeaderKey(
 		m.activeProvider, modelID,
 		contextUsed, contextTotal,
-		m.healthStatus.Status, m.width,
+		health.Status, m.width,
 	)
 	if m.headerCacheValid && m.headerCacheKey == key {
 		return m.headerCacheValue
 	}
 	t := m.themeManager.Current()
-	result := RenderHeader(t, m.activeProvider, m.activeModel, m.healthStatus,
+	result := RenderHeader(t, m.activeProvider, m.activeModel, health,
 		contextUsed, contextTotal, m.width)
 	m.headerCacheValue = result
 	m.headerCacheKey = key
