@@ -136,6 +136,13 @@ type Task struct {
 	CommitHash         string     `json:"commit_hash,omitempty"`
 }
 
+// FilePrediction action constants for consistent action values.
+const (
+	FileActionCreate = "create"
+	FileActionModify = "modify"
+	FileActionDelete = "delete"
+)
+
 type ProjectState struct {
 	Goal        string            `json:"goal"`
 	ProjectType string            `json:"project_type"`
