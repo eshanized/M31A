@@ -85,8 +85,9 @@ func TestRegistry_List(t *testing.T) {
 	if names[0] != "a" {
 		t.Fatalf("expected first name %q, got %q", "a", names[0])
 	}
-	if names[1] != "b" {
-		t.Fatalf("expected second name %q, got %q", "b", names[1])
+	// "b" was registered first, so it's the active provider — List() appends " (active)"
+	if names[1] != "b (active)" {
+		t.Fatalf("expected second name %q, got %q", "b (active)", names[1])
 	}
 }
 
