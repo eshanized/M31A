@@ -37,7 +37,7 @@ func DefaultConfig() *Config {
 			MaxMessageHistory:     1000,
 			FallbackBannerSecs:    15,
 			DefaultLogLines:       20,
-			SessionListLimit:      10,
+			SessionListLimit:      20,
 			ThinkingOpacity:       0.6,
 		},
 		Model: ModelConfig{
