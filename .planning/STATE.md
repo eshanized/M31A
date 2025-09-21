@@ -2,29 +2,30 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: Phase 22 complete
-last_updated: "2026-06-05T02:04:51.983Z"
+status: milestone_complete
+last_updated: 2026-06-06T17:21:14.447Z
 progress:
-  total_phases: 18
-  completed_phases: 11
-  total_plans: 87
-  completed_plans: 70
-  percent: 61
+  total_phases: 24
+  completed_phases: 13
+  total_plans: 99
+  completed_plans: 80
+  percent: 54
+stopped_at: Milestone complete (Phase 25 was final phase)
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-None — Phase 22 complete
+None — Phase 24 complete
 
 ## Status
 
-Phase 17 (Post-Phase-16 Audit Fixes) is complete. 4 plans verified/committed: 17-01 (Critical build/test — all pre-existing), 17-02 (High severity — 8 commits), 17-03 (Medium severity — 9 commits), 17-04 (Low severity — 5 commits + 3 pre-existing). 36 issues from comprehensive codebase audit addressed.
+Phase 24 (TUI Redesign) is complete. 5 plans across 2 waves: Theme + Shared Chrome (24-01), REPL + FirstRun (24-02), Plan + Execute + Verify (24-03), Ship + Diff (24-04), ModelSelector + Settings + Resume (24-05). Complete visual overhaul of all 10 TUI screens with new color tokens, shared chrome components, and redesigned screens.
 
 ## Last Session
 
-- **2026-06-03** — Phase 17 executed. All 36 audit findings resolved across 4 plans. go.mod bumped to 1.24, atomic.Bool for cache refresh, crypto/rand temp files, Zen tests fixed, isContextExceeded patterns verified, Grep truncation fixed, WebFetch shared client, SSE whitespace trim, Glob sorted, Engine error handling, async SetProvider, Edit fsync, SSRF DNS pinning, config merge, permission timeouts, API key preservation, HTML strip optimization, relative gitignore paths, secure file permissions.
+- **2026-06-06** — Phase 24 executed. 5 plans across 2 waves: Wave 1 (24-01: theme tokens, sparkline, starfield, header, statusbar, sidebar, permission modal — 4 commits), Wave 2 (24-02: REPL + FirstRun — 3 commits, 24-03: Plan + Execute + Verify — 4 commits, 24-04: Ship + Diff — 3 commits, 24-05: ModelSelector + Settings + Resume — 4 commits). Total 18 commits. All tests pass, build clean.
 
 ## Completed Phases
 
@@ -42,6 +43,7 @@ Phase 17 (Post-Phase-16 Audit Fixes) is complete. 4 plans verified/committed: 17
 - Phase 16 — UX Polish
 - Phase 17 — Post-Phase-16 Audit Fixes
 - Phase 18 — Welcome Page Rebuild
+- Phase 24 — TUI Redesign
 
 ## In Progress
 
@@ -206,3 +208,11 @@ None
 - 17-02: ✅ High Severity Correctness Fixes (H-1 through H-9)
 - 17-03: ✅ Medium Severity Fixes (M-1 through M-11)
 - 17-04: ✅ Low Severity Polish (L-1 through L-11)
+
+## Completed Plans (Phase 24)
+
+- 24-01: ✅ Theme Enhancement + Shared Chrome — new color tokens, sparkline, starfield, header, statusbar, sidebar, permission modal
+- 24-02: ✅ REPL + FirstRun Redesign — Mission Control with role gutters, Launchpad with galaxy metaphor
+- 24-03: ✅ Plan + Execute + Verify Redesign — Blueprint, Mission Live, QA Gate screens
+- 24-04: ✅ Ship + Diff Redesign — Launch Pad with commit review, enhanced diff with syntax highlighting
+- 24-05: ✅ ModelSelector + Settings + Resume — Model Observatory, Control Tower, Session Vault
