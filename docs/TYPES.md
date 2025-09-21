@@ -39,6 +39,9 @@ fallback. Always prefer env vars or keychain storage.
 | `BashTimeout` | `30 * time.Minute` | Absolute timeout for Bash tool execution |
 | `BashOutputLimit` | `50_000` | Max characters to stream from Bash output to TUI |
 | `DefaultContextLength` | `128_000` | Fallback context length if model metadata unavailable |
+| `EMACorrectionAlpha` | `0.3` | EMA correction rate for token estimation calibration |
+
+> **Note:** `auto_fallback` defaults to `false` in code. A future version may change this to `true`.
 
 ---
 
