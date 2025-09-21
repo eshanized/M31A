@@ -28,7 +28,7 @@ func (t *Edit) Name() string {
 }
 
 func (t *Edit) Description() string {
-	return "Make targeted edits to a file using line-range replacement or smart string matching."
+	return "Make targeted edits to a file: replace an exact string (old_string→new_string) or replace a line range (start_line+end_line+new_string). Prefer this over FileWrite for partial modifications."
 }
 
 func (t *Edit) RiskLevel() types.RiskLevel {
@@ -40,11 +40,13 @@ func (t *Edit) ParameterSchema() string {
 	return `{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "File path to edit"},
-			"old_string": {"type": "string", "description": "Exact string to find and replace"},
-			"new_string": {"type": "string", "description": "Replacement string"}
+			"path": {"type": "string", "description": "File path to edit (relative to working directory)"},
+			"old_string": {"type": "string", "description": "Exact string to find and replace (use with new_string; mutually exclusive with start_line/end_line)"},
+			"new_string": {"type": "string", "description": "Replacement string (required for both modes)"},
+			"start_line": {"type": "integer", "description": "First line to replace, 1-indexed inclusive (use with end_line; mutually exclusive with old_string)"},
+			"end_line": {"type": "integer", "description": "Last line to replace, 1-indexed inclusive (use with start_line)"}
 		},
-		"required": ["path", "old_string", "new_string"]
+		"required": ["path", "new_string"]
 	}`
 }
 
