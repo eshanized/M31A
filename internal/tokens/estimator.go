@@ -43,7 +43,7 @@ type EstimatorOpts struct {
 func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 	alpha := opts.EMAAlpha
 	if alpha <= 0 || alpha > 1 {
-		alpha = 0.3
+		alpha = types.EMACorrectionAlpha
 	}
 	e := &Estimator{
 		modelID:   modelID,

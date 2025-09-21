@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -154,6 +155,8 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	result, err := tool.Execute(ctx, input)
 	elapsed := time.Since(start).Milliseconds()
+
+	slog.Debug("tool executed", "tool", call.Name, "duration_ms", elapsed, "error", err)
 
 	res := types.ToolResult{
 		ToolCallID: call.ID,

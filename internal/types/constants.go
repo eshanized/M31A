@@ -76,6 +76,9 @@ const (
 	// MaxRetryAfterWait is the maximum wait time for retry-after headers
 	MaxRetryAfterWait = 120 * time.Second
 
+	// EMACorrectionAlpha is the default EMA correction rate for token estimation calibration.
+	EMACorrectionAlpha = 0.3
+
 	// MaxToolsPerCall is the max tool calls allowed per LLM response
 	MaxToolsPerCall = 16
 	// MaxCwdFileDepth is the max directory depth for cwd file schema
