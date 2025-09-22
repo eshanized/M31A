@@ -2144,6 +2144,9 @@ func TestSlashCommand_WorkflowResume_LoadsAndRuns(t *testing.T) {
 	ctx := CommandContext{
 		SessionManager: sessMgr,
 		SessionID:      s.ID,
+		// BUG-2 fix: WorkflowEngine must be non-nil so the new engine guard
+		// doesn't short-circuit before the session-state lookup.
+		WorkflowEngine: &mockWorkflowEngine{sessionID: s.ID},
 	}
 
 	// Invoke handleWorkflow with the resume subcommand
@@ -2181,6 +2184,9 @@ func TestSlashCommand_WorkflowResume_NoActiveWorkflow(t *testing.T) {
 	ctx := CommandContext{
 		SessionManager: sessMgr,
 		SessionID:      s.ID,
+		// BUG-2 fix: WorkflowEngine must be non-nil so the new engine guard
+		// doesn't short-circuit before the idle-state check.
+		WorkflowEngine: &mockWorkflowEngine{sessionID: s.ID},
 	}
 
 	result := handleWorkflow([]string{"resume"}, ctx)
@@ -2193,6 +2199,28 @@ func TestSlashCommand_WorkflowResume_NoActiveWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "No workflow in progress") {
 		t.Errorf("expected 'No workflow in progress' message, got %q", result.Message)
+	}
+}
+
+// TestSlashCommand_WorkflowResume_NoEngine verifies that /workflow resume
+// returns an actionable error when no workflow engine is available (BUG-2 fix).
+func TestSlashCommand_WorkflowResume_NoEngine(t *testing.T) {
+	ctx := CommandContext{
+		SessionManager: nil,
+		SessionID:      "",
+		WorkflowEngine: nil, // offline mode / no API key
+	}
+
+	result := handleWorkflow([]string{"resume"}, ctx)
+
+	if result.Success {
+		t.Error("expected Success=false when no workflow engine")
+	}
+	if !strings.Contains(result.Message, "No workflow engine available") {
+		t.Errorf("expected actionable 'no engine' message, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "/settings") {
+		t.Errorf("expected /settings hint in message, got %q", result.Message)
 	}
 }
 
