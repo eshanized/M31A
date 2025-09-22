@@ -231,12 +231,26 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenResume
 			return m, nil
 		case "/models":
-			if m.registry != nil {
-				m.prevScreen = m.screen
-				m.modelSelector = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
-				m.screen = ScreenModelSelector
-				return m, m.modelSelector.Init()
+			// BUG-7 fix: add explicit error instead of silent fallthrough when registry is nil.
+			if m.registry == nil {
+				if m.replModel != nil {
+					m.replModel.AddMessage(types.Message{
+						Role:    "assistant",
+						Content: "No providers configured. Use /settings to add an API key.",
+						Segments: []types.MessageSegment{{
+							Type:    "content",
+							Content: "No providers configured. Use /settings to add an API key.",
+							Visible: true,
+						}},
+						CreatedAt: time.Now(),
+					})
+				}
+				return m, nil
 			}
+			m.prevScreen = m.screen
+			m.modelSelector = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
+			m.screen = ScreenModelSelector
+			return m, m.modelSelector.Init()
 		}
 
 		// Intercept /phase and phase aliases (/plan, /execute, /verify, /ship)
@@ -415,6 +429,35 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = *result.Screen
 				if *result.Screen == ScreenFirstRun {
 					m.replModel = nil
+				}
+				// Lazy-init ScreenMetrics model and load stats on transition
+				if *result.Screen == ScreenMetrics {
+					if m.metricsModel == nil {
+						m.metricsModel = NewMetricsModel(m.themeManager.Current())
+					}
+					m.metricsModel.width = m.width
+					m.metricsModel.height = m.height
+					m.metricsModel.LoadStats(m.sessionManager)
+				}
+				// Lazy-init ScreenGoalInput model on transition
+				if *result.Screen == ScreenGoalInput {
+					if m.goalInputModel == nil {
+						var recent []string
+						if m.sessionManager != nil {
+							sessions, _ := m.sessionManager.ListSessions()
+							for _, s := range sessions {
+								if len(recent) >= 5 {
+									break
+								}
+								if sess, err := m.sessionManager.LoadSession(s.ID); err == nil && sess != nil && sess.Project != nil && sess.Project.Goal != "" {
+									recent = append(recent, sess.Project.Goal)
+								}
+							}
+						}
+						m.goalInputModel = NewGoalInputModel(m.themeManager.Current(), recent)
+					}
+					m.goalInputModel.width = m.width
+					m.goalInputModel.height = m.height
 				}
 				if result.Cmd != nil {
 					return m, tea.Batch(result.Cmd)
@@ -766,7 +809,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-
 						rp := NewReplModel(m.themeManager.Current(), m.version)
 						m.replModel = &rp
 
@@ -776,9 +818,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					s, err := m.sessionManager.NewSession(m.activeModel.ID, m.activeProvider)
 					if err == nil {
 						sessionID = s.ID
+						// BUG-4 fix: store the session ID on AppState so that
+						// workflow commands that read m.sessionID (via workflowEngine.SessionID)
+						// can find the active session without requiring a restart.
+						m.sessionID = s.ID
 						m.dispatcher.SetSessionID(s.ID)
 					}
 				}
+
+				// BUG-3 fix: Re-initialize the workflow engine now that a provider,
+				// model, and session are available. initWorkflowEngine() was called
+				// once in NewApp() but returned early because no API key was configured.
+				// Calling it again here ensures /workflow, /plan, /execute, etc. work
+				// immediately after first-run setup without requiring a restart.
+				m.initWorkflowEngine()
 
 				providerCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 				m.replModel.SetDispatcher(m.dispatcher)
@@ -793,14 +846,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 				}
 				// Don't auto-show sidebar until git status is loaded
-			healthCmd := HealthCheckTicker(
-				context.Background(),
-				types.HealthCheckInterval,
-			)
-				cmds = append(cmds, healthCmd)
-				cmds = append(cmds,
-					CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval),
-					providerCmd)
+				// BUG-9 fix: only start health/cache tickers when a provider is configured.
+				// In offline mode (no provider after first-run skip or key-less setup),
+				// starting these tickers creates a pointless 60s retry loop.
+				if m.activeProvider != "" && m.registry != nil {
+					healthCmd := HealthCheckTicker(
+						context.Background(),
+						types.HealthCheckInterval,
+					)
+					cmds = append(cmds, healthCmd)
+					cmds = append(cmds,
+						CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval),
+						providerCmd)
+				} else {
+					cmds = append(cmds, providerCmd)
+				}
 			}
 		}
 		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
@@ -961,6 +1021,40 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			updated, cmd := m.diffModel.Update(msg)
 			m.diffModel = updated.(DiffModel)
 			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case ScreenMetrics:
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
+		if m.metricsModel != nil {
+			subCmds, appMsg := m.metricsModel.Update(msg)
+			if appMsg != nil {
+				m.screen = appMsg.Screen
+			}
+			cmds = append(cmds, subCmds...)
+		}
+		return m, tea.Batch(cmds...)
+
+	case ScreenGoalInput:
+		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
+		if m.goalInputModel != nil {
+			subCmds, appMsg := m.goalInputModel.Update(msg)
+			if appMsg != nil {
+				if appMsg.Action == "workflow_start_goal" && m.goalInputModel != nil {
+					// User confirmed goal — capture and navigate to REPL then start workflow
+					goal := m.goalInputModel.Goal()
+					m.screen = ScreenREPL
+					if goal != "" && m.workflowEngine != nil {
+						m.workflowGoal = goal
+						m.setWorkflowPhase(types.PhaseDiscuss)
+						m.showPhaseBreadcrumb = true
+						return m, RunPhaseCmd(m, types.PhaseDiscuss, goal)
+					}
+				} else {
+					m.screen = appMsg.Screen
+				}
+			}
+			cmds = append(cmds, subCmds...)
 		}
 		return m, tea.Batch(cmds...)
 
