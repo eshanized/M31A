@@ -37,12 +37,19 @@ func (m *AppState) View() string {
 		}
 
 		var mainContent string
+		replView := m.replModel.View()
+
+		// Show phase breadcrumb banner above REPL when a workflow is active
+		if m.showPhaseBreadcrumb && m.workflowRunning {
+			breadcrumb := RenderPhaseBreadcrumb(m.themeManager.Current(), m.currentPhase, m.width)
+			replView = lipgloss.JoinVertical(lipgloss.Top, breadcrumb, replView)
+		}
+
 		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
 			sidebar := m.sidebarModel.View()
-			replView := m.replModel.View()
 			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, replView, sidebar)
 		} else {
-			mainContent = m.replModel.View()
+			mainContent = replView
 		}
 
 		return m.renderWithPalette(mainContent)
@@ -96,6 +103,21 @@ func (m *AppState) View() string {
 		}
 		return m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Loading diff..."))
+
+	// New screens from TUI redesign proposal
+	case ScreenMetrics:
+		if m.metricsModel != nil {
+			return m.metricsModel.View()
+		}
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading metrics...")
+
+	case ScreenGoalInput:
+		if m.goalInputModel != nil {
+			return m.goalInputModel.View()
+		}
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading goal input...")
 
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
