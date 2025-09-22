@@ -24,6 +24,12 @@ func handleModel(args []string, ctx CommandContext) CommandResult {
 	}
 
 	if args[0] == "--selector" {
+		// BUG-8 fix: guard against nil registry before opening the model selector.
+		// Without this check, the ModelSelector receives a nil registry and
+		// renders a broken, empty screen.
+		if ctx.Registry == nil {
+			return CommandResult{Success: false, Message: "No providers configured. Use /settings to add an API key."}
+		}
 		screen := ScreenModelSelector
 		return CommandResult{Success: true, Screen: &screen, Message: "Opening model selector..."}
 	}
@@ -296,7 +302,8 @@ func handleOptimize(args []string, ctx CommandContext) CommandResult {
 
 	p := ctx.Registry.ActiveProvider()
 	if p == nil {
-		return CommandResult{Success: false, Message: "No active provider."}
+		// BUG-10 fix: make the error message actionable.
+		return CommandResult{Success: false, Message: "No active provider. Configure an API key via /settings or /key."}
 	}
 
 	allModels, err := p.FetchModels(context.Background())
@@ -342,10 +349,24 @@ func handleKey(args []string, ctx CommandContext) CommandResult {
 	var b strings.Builder
 	b.WriteString("API Key Status:\n")
 
+	// BUG-11 fix: show the correct resolution source instead of always
+	// saying "(from config)". Check env var first, then whether the key
+	// is in the config's in-memory field (which may have been populated
+	// from the keychain during startup via ResolveAPIKeys).
+	openRouterEnvKey := os.Getenv("OPENROUTER_API_KEY")
+	zenEnvKey := os.Getenv("ZEN_API_KEY")
+
 	if ctx.Config.Provider.OpenRouter.APIKey != "" {
 		key := ctx.Config.Provider.OpenRouter.APIKey
 		masked := "***" + key[len(key)-4:]
-		b.WriteString(fmt.Sprintf("  OpenRouter:  %s (from config)\n", masked))
+		source := "from config"
+		if openRouterEnvKey != "" && openRouterEnvKey == key {
+			source = "from env: OPENROUTER_API_KEY"
+		} else if openRouterEnvKey != "" {
+			// env var set but value differs — env was resolved at startup
+			source = "from env: OPENROUTER_API_KEY"
+		}
+		b.WriteString(fmt.Sprintf("  OpenRouter:  %s (%s)\n", masked, source))
 	} else {
 		b.WriteString("  OpenRouter:  not set\n")
 	}
@@ -353,7 +374,13 @@ func handleKey(args []string, ctx CommandContext) CommandResult {
 	if ctx.Config.Provider.Zen.APIKey != "" {
 		key := ctx.Config.Provider.Zen.APIKey
 		masked := "***" + key[len(key)-4:]
-		b.WriteString(fmt.Sprintf("  Zen:         %s (from config)\n", masked))
+		source := "from config"
+		if zenEnvKey != "" && zenEnvKey == key {
+			source = "from env: ZEN_API_KEY"
+		} else if zenEnvKey != "" {
+			source = "from env: ZEN_API_KEY"
+		}
+		b.WriteString(fmt.Sprintf("  Zen:         %s (%s)\n", masked, source))
 	} else {
 		b.WriteString("  Zen:         not set\n")
 	}
