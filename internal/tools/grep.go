@@ -57,7 +57,11 @@ func (t *Grep) ParameterSchema() string {
 			},
 			"include": {
 				"type": "string",
-				"description": "File pattern to include (e.g. '*.go')"
+				"description": "Glob pattern to filter files (e.g. '*.go', '**/*.ts')"
+			},
+			"max_results": {
+				"type": "integer",
+				"description": "Maximum number of matches to return (default 100, min 1)"
 			}
 		},
 		"required": ["pattern"]
