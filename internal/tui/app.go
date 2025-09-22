@@ -140,6 +140,11 @@ type AppState struct {
 	workflowPaused              bool                 // true when workflow paused due to provider error
 	workflowStartTime           time.Time            // when the current workflow started
 	healthTicker                *time.Ticker         // health check ticker (stopped in Shutdown)
+
+	// New screens from TUI redesign proposal (section 6.2)
+	metricsModel        *MetricsModel   // ScreenMetrics — session analytics dashboard
+	goalInputModel      *GoalInputModel // ScreenGoalInput — full-screen goal entry
+	showPhaseBreadcrumb bool            // show workflow phase breadcrumb row below header
 }
 
 // setWorkflowPhase keeps workflowRunning and currentPhase synchronized.
@@ -156,6 +161,8 @@ func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 	}
 	m.currentPhase = phase
 	m.workflowRunning = (phase != types.PhaseIdle)
+	// Sync phase breadcrumb visibility with workflow running state
+	m.showPhaseBreadcrumb = m.workflowRunning
 	m.headerCacheValid = false
 }
 
