@@ -40,7 +40,7 @@ func (t *AskUserQuestion) Name() string {
 }
 
 func (t *AskUserQuestion) Description() string {
-	return "Ask the user a question and wait for their answer."
+	return "Ask the user a question and wait for their answer. Use only in interactive sessions — NEVER in automated task execution flows."
 }
 
 func (t *AskUserQuestion) RiskLevel() types.RiskLevel {
@@ -53,7 +53,7 @@ func (t *AskUserQuestion) ParameterSchema() string {
 		"type": "object",
 		"properties": {
 			"question": {"type": "string", "description": "Question to ask the user"},
-			"header": {"type": "string", "description": "Short header for the question"},
+			"header": {"type": "string", "description": "Short header displayed above the question"},
 			"options": {
 				"type": "array",
 				"items": {
@@ -63,8 +63,10 @@ func (t *AskUserQuestion) ParameterSchema() string {
 						"description": {"type": "string"}
 					}
 				},
-				"description": "Answer options"
-			}
+				"description": "Pre-defined answer options shown to the user"
+			},
+			"allow_custom": {"type": "boolean", "description": "Allow user to type a custom answer instead of choosing an option (default true)"},
+			"timeout": {"type": "integer", "description": "Seconds to wait for user answer before timing out (default 300)"}
 		},
 		"required": ["question"]
 	}`
