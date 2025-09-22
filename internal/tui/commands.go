@@ -255,10 +255,21 @@ func DefaultCommands() *CommandRegistry {
 	// Cost optimization
 	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
 	r.Register("cost", handleCost, "Toggle cost estimate display in header")
+	r.Register("metrics", handleMetrics, "Open session analytics dashboard")
 
 	// Workflow control
 	r.Register("pause", handlePause, "Show pause instructions (available on Execute screen)")
 	r.Register("resume-task", handleResumeTask, "Show workflow restart info (checkpoint resume not yet implemented)")
 
 	return r
+}
+
+// handleMetrics opens ScreenMetrics — the session analytics dashboard.
+func handleMetrics(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenMetrics
+	return CommandResult{
+		Success: true,
+		Screen:  &screen,
+		Message: "Opening metrics dashboard...",
+	}
 }
