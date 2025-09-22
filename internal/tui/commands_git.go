@@ -301,7 +301,11 @@ func handleLog(args []string, ctx CommandContext) CommandResult {
 	}
 
 	lines := strings.Split(string(entries), "\n")
-	n := ctx.Config.UI.DefaultLogLines
+	// BUG-6 fix: guard against nil Config before reading UI.DefaultLogLines.
+	n := 20
+	if ctx.Config != nil {
+		n = ctx.Config.UI.DefaultLogLines
+	}
 	if n <= 0 {
 		n = 20
 	}
