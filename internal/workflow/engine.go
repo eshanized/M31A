@@ -28,13 +28,12 @@ var promptFS embed.FS
 
 // PromptRegistry holds all loaded prompt templates.
 type PromptRegistry struct {
-	Base            string
-	ToolUse         string
-	PlanFormat      string
-	ExecuteTask     string
-	Discuss         string
-	SelfHeal        string
-	VerifyChecklist string
+	Base        string
+	ToolUse     string
+	PlanFormat  string
+	ExecuteTask string
+	Discuss     string
+	SelfHeal    string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -47,7 +46,6 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/execute-task.md":      &r.ExecuteTask,
 		"prompts/discuss-questions.md": &r.Discuss,
 		"prompts/self-heal.md":         &r.SelfHeal,
-		"prompts/verify-checklist.md":  &r.VerifyChecklist,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -321,7 +319,11 @@ func (e *Engine) HealTask(taskID int) bool {
 				Attempt: tasks[i].HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			failure := fmt.Sprintf("manual heal requested for task %d", task.ID)
+			failure := fmt.Sprintf(
+				"Manual heal triggered by user.\nTask description: %s\nFiles: %v\nAcceptance criteria: %v\n"+
+					"Inspect the files listed above, identify any issues, and apply a fix.",
+				task.Description, task.Files, task.AcceptanceCriteria,
+			)
 			healResult := e.healTask(context.Background(), task, failure)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
