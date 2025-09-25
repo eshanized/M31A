@@ -113,7 +113,31 @@ func handleTools(args []string, ctx CommandContext) CommandResult {
 
 // handleWorkflow shows the current workflow phase, tasks, and progress.
 func handleWorkflow(args []string, ctx CommandContext) CommandResult {
+	// /workflow start → open full-screen goal entry (ScreenGoalInput)
+	if len(args) > 0 && args[0] == "start" {
+		if ctx.WorkflowEngine == nil {
+			return CommandResult{
+				Success: false,
+				Message: "No workflow engine available. Configure an API key via /settings.",
+			}
+		}
+		screen := ScreenGoalInput
+		return CommandResult{
+			Success: true,
+			Screen:  &screen,
+			Message: "Opening goal entry...",
+		}
+	}
+
 	if len(args) > 0 && args[0] == "resume" {
+		// BUG-2 fix: check for workflow engine first so the user gets an
+		// actionable error (no API key) rather than a confusing "No active session".
+		if ctx.WorkflowEngine == nil {
+			return CommandResult{
+				Success: false,
+				Message: "No workflow engine available. Configure an API key via /settings or restart M31A to run first-run setup.",
+			}
+		}
 		if ctx.SessionManager == nil {
 			return CommandResult{
 				Success: false,
@@ -146,6 +170,15 @@ func handleWorkflow(args []string, ctx CommandContext) CommandResult {
 			ResumePhase:     phase,
 			ResumeGoal:      goal,
 			ResumeQuestions: questions,
+		}
+	}
+
+	// BUG-1 fix: check for workflow engine first so the user gets an
+	// actionable error (no API key) rather than a confusing "No active session".
+	if ctx.WorkflowEngine == nil {
+		return CommandResult{
+			Success: false,
+			Message: "No workflow engine available. Configure an API key via /settings or restart M31A to run first-run setup.",
 		}
 	}
 
