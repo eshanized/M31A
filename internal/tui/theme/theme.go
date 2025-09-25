@@ -89,6 +89,12 @@ type Theme struct {
 	TimelineDate lipgloss.Style // session timeline date headers
 	MetricValue  lipgloss.Style // large metric numbers, brand foreground
 	MetricLabel  lipgloss.Style // metric label below value, muted
+
+	// Block character constants for progress bars, sparklines, and density indicators
+	BlockFull string // "█" full block
+	BlockHigh string // "▓" high density
+	BlockMed  string // "▒" medium density
+	BlockLow  string // "░" low density
 }
 
 type Manager struct {
