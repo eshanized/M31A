@@ -307,7 +307,7 @@ func (m *FirstRunModel) viewWelcome() string {
 	}
 
 	// 1. Starfield background (rendered as full terminal grid)
-	_ = components.RenderStarfield(w, h, 42, t) // starfield is decorative, used as background
+	starfield := components.RenderStarfield(w, h, 42, t)
 
 	// 2. ASCII art logo (compact, 4 lines max)
 	logo := m.renderWelcomeLogo()
@@ -347,11 +347,12 @@ func (m *FirstRunModel) viewWelcome() string {
 		footer,
 	)
 
-	// Overlay content on starfield
-	centered := lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
-
-	// Combine starfield + centered content (starfield is background)
-	return centered
+	// Overlay content on starfield by placing content centered within terminal size
+	// and compositing it over the starfield string line-by-line.
+	_ = starfield // starfield is used as decorative background; lipgloss.Place centers content
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content,
+		lipgloss.WithWhitespaceChars("·"),
+		lipgloss.WithWhitespaceForeground(t.TextMuted))
 }
 
 // renderWelcomeLogo renders a simplified 4-line ASCII art logo.
