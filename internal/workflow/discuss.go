@@ -122,10 +122,21 @@ func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 		framework = project.Framework
 	}
 
-	ctx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s", goal, projectType, framework)
+	// The system prompt (discuss-questions.md) already instructs the model on question format.
+	// The user message supplies only the project context so the model can generate relevant questions.
+	userCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s", goal, projectType, framework)
+
+	// Inform the model if answers have already been captured so it doesn't repeat covered ground.
+	if project != nil && len(project.Answers) > 0 {
+		userCtx += "\n\nNote: the following questions have already been answered — do not repeat them:\n"
+		for q := range project.Answers {
+			userCtx += "- " + q + "\n"
+		}
+	}
+
 	messages = append(messages, m31types.Message{
 		Role:    "user",
-		Content: ctx + "\n\nAsk 2-4 clarifying questions to understand the requirements better. Number each question. Be specific and concise.",
+		Content: userCtx,
 	})
 
 	return messages
