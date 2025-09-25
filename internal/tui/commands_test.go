@@ -332,7 +332,10 @@ func TestModelCommand(t *testing.T) {
 	})
 
 	t.Run("selector flag", func(t *testing.T) {
-		result, _ := r.Execute("/model --selector", CommandContext{})
+		// BUG-8 fix: --selector now requires a registry; test must provide one.
+		reg := provider.NewRegistry()
+		reg.Register("openrouter", &mockProvider{})
+		result, _ := r.Execute("/model --selector", CommandContext{Registry: reg})
 		if !result.Success {
 			t.Fatalf("expected success, got: %s", result.Message)
 		}
@@ -341,6 +344,17 @@ func TestModelCommand(t *testing.T) {
 		}
 		if *result.Screen != ScreenModelSelector {
 			t.Errorf("expected ScreenModelSelector, got %d", *result.Screen)
+		}
+	})
+
+	t.Run("selector flag no registry", func(t *testing.T) {
+		// BUG-8 fix: --selector with nil registry should return an error, not a broken screen.
+		result, _ := r.Execute("/model --selector", CommandContext{})
+		if result.Success {
+			t.Error("expected failure when no registry configured")
+		}
+		if !strings.Contains(result.Message, "No providers configured") {
+			t.Errorf("expected actionable error message, got: %s", result.Message)
 		}
 	})
 }
@@ -630,8 +644,8 @@ func TestResetCommand(t *testing.T) {
 func TestCommands_AllRegistered(t *testing.T) {
 	r := DefaultCommands()
 	names := r.List()
-	if len(names) != 39 {
-		t.Fatalf("expected exactly 39 commands, got %d: %v", len(names), names)
+	if len(names) != 40 {
+		t.Fatalf("expected exactly 40 commands, got %d: %v", len(names), names)
 	}
 
 	// Verify all expected commands are present
@@ -646,7 +660,7 @@ func TestCommands_AllRegistered(t *testing.T) {
 		"fork": false, "prev": false, "next": false,
 		"plan": false, "execute": false, "verify": false, "ship": false,
 		"optimize": false, "pause": false, "resume-task": false,
-		"cost": false,
+		"cost": false, "metrics": false,
 	}
 	hasExtra := false
 	for _, name := range names {
@@ -1222,7 +1236,10 @@ func TestPhaseCommand_WithSession(t *testing.T) {
 		ctx, dir := newTestContext(t)
 		defer cleanupTestContext(dir)
 
-		result, _ := r.Execute("/phase", ctx)
+		result, found := r.Execute("/phase", ctx)
+		if !found {
+			t.Fatal("expected /phase to be found")
+		}
 		if !result.Success {
 			t.Fatalf("expected success, got: %s", result.Message)
 		}
