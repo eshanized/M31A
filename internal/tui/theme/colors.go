@@ -80,6 +80,12 @@ func Dark() Theme {
 	t.MetricValue = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 	t.MetricLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
 
+	// Block character constants for progress bars, sparklines, density indicators
+	t.BlockFull = "█"
+	t.BlockHigh = "▓"
+	t.BlockMed = "▒"
+	t.BlockLow = "░"
+
 	return t
 }
 
@@ -160,6 +166,12 @@ func Light() Theme {
 	t.TimelineDate = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted)).Bold(true)
 	t.MetricValue = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 	t.MetricLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+
+	// Block character constants for progress bars, sparklines, density indicators
+	t.BlockFull = "█"
+	t.BlockHigh = "▓"
+	t.BlockMed = "▒"
+	t.BlockLow = "░"
 
 	return t
 }
