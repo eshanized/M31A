@@ -127,7 +127,13 @@ func handleHistory(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
 	}
 
-	limit := ctx.Config.UI.SessionListLimit
+	// BUG-5 fix: guard against nil Config before reading UI.SessionListLimit.
+	// While config is always set in NewApp(), this prevents a panic in edge
+	// cases (failed config reload, test environments).
+	limit := 10
+	if ctx.Config != nil {
+		limit = ctx.Config.UI.SessionListLimit
+	}
 	if limit <= 0 {
 		limit = 10
 	}
