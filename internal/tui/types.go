@@ -25,6 +25,13 @@ const (
 	ScreenVerify
 	ScreenShip
 	ScreenDiff Screen = 10
+
+	// New screens added in TUI redesign (section 6.1 of tui_redesign_proposal.md)
+	ScreenLedger    Screen = 11 // /ledger command — browse the learning journal
+	ScreenRollback  Screen = 12 // /rollback command — commit time machine
+	ScreenGoalInput Screen = 13 // /workflow start — full-screen goal entry
+	ScreenDiscuss   Screen = 14 // Discuss phase — dedicated Q&A flow
+	ScreenMetrics   Screen = 15 // /metrics command — session analytics dashboard
 )
 
 type AppMsg struct {
