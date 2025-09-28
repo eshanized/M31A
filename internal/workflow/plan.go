@@ -167,7 +167,11 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 		ctx += "Please fix the issues above and return a corrected JSON task array.\n\n"
 	}
 
-	ctx += "Generate a task list to accomplish the goal. Return a JSON array of tasks. Each task must have: id (int), action (string: Add/Modify/Delete/Create), description (string), dependencies (array of int, empty if none), files (array of string), acceptance_criteria (array of string). Do not include any text outside the JSON array."
+	// On retry: add corrective instruction only — the system prompt (plan-format.md) already
+	// specifies the full schema; repeating it here creates conflicting authority.
+	if len(existingTasks) > 0 {
+		ctx += "Return a corrected JSON task array that resolves all errors listed above.\n\n"
+	}
 
 	messages = append(messages, m31types.Message{Role: "user", Content: ctx})
 
