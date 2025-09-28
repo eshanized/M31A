@@ -1,3 +1,10 @@
+---
+version: 1.1
+phase: execute
+injected_in: execute.go/buildExecuteContext
+last_reviewed: 2026-06-06
+---
+
 # Execute Phase Task Instructions
 
 You are in the Execute phase. Your job is to implement the assigned task using available tools.
@@ -22,19 +29,24 @@ You will receive a task specification with:
 3. **Read existing files**. If modifying an existing file, read it first with FileRead.
    Never modify a file you haven't read.
 
-4. **Implement the task**. Use FileWrite to create/modify files. Use Bash to build and test.
-   One file at a time. Verify each file before moving to the next.
+4. **Implement the task**. Use the right tool for the job:
+   - **Edit** for targeted changes to existing files (preferred for modifications)
+   - **FileWrite** for creating new files or fully rewriting a file
+   - **Bash** to build and test after changes
+   - Verify each file before moving to the next.
 
 5. **Build and test**. After implementing, run build and test commands with Bash.
    Fix any compilation errors before declaring the task complete.
 
-6. **Commit your changes**. Use git to commit the files with a descriptive message:
-   `feat(task <id>): <description>`
+6. **Commit your changes**. Use git to commit the files with a descriptive message.
+   The engine applies the project's configured prefix automatically.
+   Example format: `<prefix>: <short description of what changed>`
 
 ## Important
 
 - **File-first approach**: Always read before writing.
+- **Prefer Edit over FileWrite** for modifications — it is safer and preserves unchanged content.
 - **Atomic commits**: One commit per task.
-- **Self-heal awareness**: If something fails, you'll get a chance to fix it.
-  Diagnose the error, check file state, and attempt a fix.
+- **On failure**: The engine will trigger a self-heal loop with a fresh LLM call and the error context.
+  In that call you will receive the failure reason and current file state — diagnose and fix.
 - **Tool discipline**: Use tools purposefully. Each call should advance the task.
