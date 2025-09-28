@@ -317,8 +317,8 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) 
 	})
 
 	// Current task spec
-	taskSpec := fmt.Sprintf("Execute task %d: %d\nAction: %s\nDescription: %s\nFiles: %v\nDependencies: %v",
-		task.ID, task.ID, task.Action, task.Description, task.Files, task.Dependencies)
+	taskSpec := fmt.Sprintf("## Current Task\nID: %d\nAction: %s\nDescription: %s\nFiles to create/modify: %v\nDepends on task IDs: %v",
+		task.ID, task.Action, task.Description, task.Files, task.Dependencies)
 	if len(task.AcceptanceCriteria) > 0 {
 		taskSpec += "\nAcceptance criteria: " + strings.Join(task.AcceptanceCriteria, "; ")
 	}
@@ -336,7 +336,10 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 
 	messages := []m31types.Message{
 		{Role: "system", Content: e.buildSystemPrompt(e.prompts.SelfHeal)},
-		{Role: "user", Content: fmt.Sprintf("Task %d failed: %s\n\nCurrent file state:\n%s\n\nFix the issue and use tools to apply the fix.",
+		{Role: "user", Content: fmt.Sprintf(
+			"## Self-Heal Request\n\nTask %d failed with the following error:\n\n%s\n\n## Current File State\n\n%s\n\n"+
+				"Diagnose the root cause using the diagnostic steps in your instructions, then apply a fix using your available tools."+
+				" Prefer Edit for targeted changes; use FileWrite only when rewriting a file entirely.",
 			task.ID, failure, e.readTaskFiles(task.Files))},
 	}
 
