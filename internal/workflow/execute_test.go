@@ -90,10 +90,10 @@ func TestEngine_BuildExecuteContext(t *testing.T) {
 		t.Error("Task list not included in execute context")
 	}
 
-	// Task spec message
+	// Task spec message — new structured format uses "## Current Task" header
 	found = false
 	for _, m := range messages {
-		if m.Role == "user" && strings.Contains(m.Content, "Execute task 1") {
+		if m.Role == "user" && strings.Contains(m.Content, "## Current Task") && strings.Contains(m.Content, "ID: 1") {
 			found = true
 			break
 		}
