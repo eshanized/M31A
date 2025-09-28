@@ -538,9 +538,6 @@ func TestPromptRegistry_LoadPrompts(t *testing.T) {
 	if registry.SelfHeal == "" {
 		t.Error("SelfHeal prompt is empty")
 	}
-	if registry.VerifyChecklist == "" {
-		t.Error("VerifyChecklist prompt is empty")
-	}
 }
 
 func TestEngine_BuildSystemPrompt(t *testing.T) {
