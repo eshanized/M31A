@@ -1,3 +1,10 @@
+---
+version: 1.1
+phase: plan
+injected_in: plan.go/buildPlanContext
+last_reviewed: 2026-06-06
+---
+
 # Plan Phase Output Format
 
 You are in the Plan phase. Your job is to generate a task list to accomplish the user's goal.
@@ -26,6 +33,7 @@ Each task must have these fields:
 4. IDs must be unique.
 5. Every task must have a non-empty description and action.
 6. Order tasks by dependency depth (independent tasks first).
+7. Do NOT include a `status` field — the engine sets it automatically after parsing.
 
 ## Example
 
