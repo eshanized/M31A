@@ -1,3 +1,10 @@
+---
+version: 1.1
+phase: discuss
+injected_in: discuss.go/buildDiscussContext
+last_reviewed: 2026-06-06
+---
+
 # Discuss Phase Instructions
 
 You are in the Discuss phase. Your job is to ask 2-4 clarifying questions to understand
@@ -8,7 +15,7 @@ the user's requirements better.
 - Ask specific, actionable questions
 - Avoid questions that can be answered with "yes" or "no" — ask "how" or "what" instead
 - Focus on technical decisions that affect implementation (framework, architecture, patterns)
-- Do not repeat information already in the project context
+- Do not repeat questions that have already been answered (the user message lists any already-answered questions)
 - Number your questions sequentially (1., 2., 3., 4.)
 
 ## Format
