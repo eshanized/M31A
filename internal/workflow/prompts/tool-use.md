@@ -1,3 +1,10 @@
+---
+version: 1.1
+phase: plan, execute
+injected_in: engine.go/buildSystemPrompt (Plan + Execute phases)
+last_reviewed: 2026-06-06
+---
+
 # Tool Usage Instructions
 
 ## Bash
@@ -15,16 +22,26 @@
 - Max file size: 5MB. Larger files will be rejected.
 - Binary detection: binary files are not displayed.
 - Path resolution: paths are relative to the working directory.
-- Never use for: writing files (use FileWrite), listing directories (use Glob)
+- Never use for: writing files (use FileWrite or Edit), listing directories (use Glob)
 
 ## FileWrite
 
-- Use for: creating new files, modifying existing files
+- Use for: creating brand-new files, or fully rewriting a file from scratch
 - Atomic writes: files are written to a temp file, then renamed. No partial writes.
 - Backup: existing files are backed up before modification.
-- Always read the file first if you're modifying it. Never write blindly.
+- **Prefer Edit over FileWrite when modifying an existing file** — FileWrite replaces the entire content.
 - Path resolution: paths are relative to the working directory.
 - Format: provide the complete file content, not just diffs.
+
+## Edit
+
+- Use for: targeted modifications to existing files — string replacement or line-range replacement
+- **Prefer this over FileWrite when changing less than ~80% of a file**
+- Two modes:
+  - **String mode**: provide `old_string` (exact text to find) and `new_string` (replacement)
+  - **Line-range mode**: provide `start_line`, `end_line`, and `new_string` (replaces those lines)
+- Cascading match strategies: exact → line-trimmed → whitespace-normalized → fuzzy-anchor
+- Always read the file first so you know the exact text to replace.
 
 ## Glob
 
@@ -37,13 +54,36 @@
 
 - Use for: searching file contents, finding specific patterns
 - Patterns: supports regular expressions
-- Path: can limit search to a specific directory
+- Path: can limit search to a specific directory or file
+- Include: can filter by file glob (e.g. `*.go`)
+- Max results: configurable via `max_results` parameter (default 100)
 - Prefer over: `grep` in Bash (Grep is faster and safer)
 - Pure Go fallback available if ripgrep is not installed.
 
+## WebFetch
+
+- Use for: fetching documentation, API references, or external resources by URL
+- Returns: text/markdown content of the page (no JavaScript execution)
+- Timeout: 30 seconds
+- Do not use for: downloading binary files or authenticating to services
+
+## TodoWrite
+
+- Use for: writing a structured TODO list to track task progress in the session
+- Call after starting or completing significant steps to keep the list current
+- Parameters: `todos` — array of `{content, status, priority}` objects
+- Status values: `pending`, `in_progress`, `completed`, `cancelled`
+- Priority values: `high`, `medium`, `low`
+
+## AskUserQuestion
+
+- Use for: pausing execution to ask the user a clarifying question
+- **NEVER use in automated task execution flows** — only in interactive sessions
+- Parameters: `question` (required), `header`, `options`, `allow_custom`, `timeout`
+- The tool blocks until the user answers or the timeout expires
+
 ## General Rules
 
-- One tool call at a time. Wait for results before proceeding.
 - If a tool fails, diagnose the issue before retrying.
 - Never chain destructive tool calls without confirmation.
 - Do not use tools for purposes they were not designed for.
