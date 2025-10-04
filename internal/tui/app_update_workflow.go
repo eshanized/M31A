@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
@@ -162,17 +161,24 @@ func handlePhaseDiscuss(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 		return m, RunPhaseCmd(m, types.PhasePlan, m.workflowGoal)
 	}
 
-	m.pendingDiscussAnswers = make(map[int]string)
-	m.currentDiscussIndex = 0
+	// Transition to dedicated ScreenDiscuss
+	m.discussModel = NewDiscussModel(m.themeManager.Current(), questions, m.width, m.height)
+	m.screen = ScreenDiscuss
 	m.setWorkflowPhase(types.PhaseDiscuss)
-	m.screen = ScreenREPL
 	m.persistWorkflowState()
 
-	return m, m.askNextDiscussQuestion()
+	return m, m.discussModel.Init()
 }
 
 // handlePhasePlan handles the Plan phase completion within PhaseResultMsg.
 func handlePhasePlan(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
+	// Compute actual cost from usage and pricing
+	estCost := msg.Cost
+	if estCost == 0 && msg.Usage != nil && m.activeModel != nil {
+		estCost = m.activeModel.Pricing.InputPerMToken * float64(msg.Usage.PromptTokens) / 1_000_000
+		estCost += m.activeModel.Pricing.OutputPerMToken * float64(msg.Usage.CompletionTokens) / 1_000_000
+	}
+
 	if len(msg.Tasks) > 0 {
 		if m.planModel == nil {
 			t := m.themeManager.Current()
@@ -183,11 +189,12 @@ func handlePhasePlan(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 				modelName = m.activeModel.Name
 			}
 			providerName := m.activeProvider
-			pm := NewPlanModel(msg.Tasks, t, modelID, modelName, providerName, 0, "", m.width, m.height)
+			pm := NewPlanModel(msg.Tasks, t, modelID, modelName, providerName, estCost, "", m.width, m.height)
 			m.planModel = pm
 		} else {
 			m.planModel.UpdateTasks(msg.Tasks)
 			m.planModel.SetDimensions(m.width, m.height)
+			m.planModel.estCost = estCost
 		}
 	}
 	if m.planModel != nil {
@@ -240,9 +247,10 @@ func handlePhaseVerify(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	m.verifyModel.SetHealFunc(func(taskID int) tea.Cmd {
 		return func() tea.Msg {
 			if m.workflowEngine != nil {
-				m.workflowEngine.HealTask(taskID)
+				success := m.workflowEngine.HealTask(taskID)
+				return HealResultMsg{TaskID: taskID, Success: success}
 			}
-			return nil
+			return HealResultMsg{TaskID: taskID, Success: false}
 		}
 	})
 	m.verifyModel.width = m.width
@@ -328,71 +336,7 @@ func handlePhaseShip(m *AppState, msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handlePermissionRequest handles PermissionRequestMsg by showing the permission modal.
-func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model, tea.Cmd) {
-	if m.permissionModalActive {
-		m.pendingPermissionRequests = append(m.pendingPermissionRequests, msg)
-		return m, permissionListenerCmd(m.shutdownCtx, m.dispatcher)
-	}
-	m.permissionModalActive = true
-	m.pendingPermissionRequestID = msg.Request.ID // RC-2: store request ID for response correlation
-	m.prevScreen = m.screen
-	m.screen = ScreenPermission
-	t := m.themeManager.Current()
-	timeout := time.Duration(msg.Request.TimeoutSecs) * time.Second
-	if timeout <= 0 {
-		timeout = time.Duration(types.DefaultPermissionTimeout) * time.Second
-	}
-	pm := components.NewPermissionModal(msg.Request, t, timeout)
-	m.permissionModal = pm
-	return m, tea.Batch(
-		permissionListenerCmd(m.shutdownCtx, m.dispatcher),
-		questionListenerCmd(m.shutdownCtx, m.dispatcher),
-		tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return PermissionTickMsg{}
-		}),
-	)
-}
 
-// handlePermissionResponse handles PermissionResponseMsg by approving/denying the permission.
-func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) (tea.Model, tea.Cmd) {
-	m.dispatcher.ApprovePermission(m.pendingPermissionRequestID, msg.Response.Allowed, msg.Response.Remember)
-	m.screen = m.prevScreen
-	m.permissionModal = nil
-	m.permissionModalActive = false
-	m.pendingPermissionRequestID = 0
-	if len(m.pendingPermissionRequests) > 0 {
-		next := m.pendingPermissionRequests[0]
-		m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
-		return m.handlePermissionRequest(next)
-	}
-	return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-}
-
-// handlePermissionTick handles PermissionTickMsg for the permission modal timeout.
-func (m *AppState) handlePermissionTick() (tea.Model, tea.Cmd) {
-	if m.screen == ScreenPermission && m.permissionModal != nil {
-		m.permissionModal.Tick()
-		if m.permissionModal.Remaining() <= 0 {
-			resp := m.permissionModal.Deny()
-			m.dispatcher.ApprovePermission(m.pendingPermissionRequestID, resp.Allowed, resp.Remember)
-			m.screen = m.prevScreen
-			m.permissionModal = nil
-			m.permissionModalActive = false
-			m.pendingPermissionRequestID = 0
-			if len(m.pendingPermissionRequests) > 0 {
-				next := m.pendingPermissionRequests[0]
-				m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
-				return m.handlePermissionRequest(next)
-			}
-			return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-		}
-		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return PermissionTickMsg{}
-		})
-	}
-	return m, nil
-}
 
 // handleQuestionRequest handles QuestionRequestMsg by showing the question in REPL.
 func (m *AppState) handleQuestionRequest(msg QuestionRequestMsg) (tea.Model, tea.Cmd) {
