@@ -150,6 +150,12 @@ None - no external service configuration required.
 - Build passes, tests pass, vet passes
 - Ready for further TUI refactoring or feature development
 
+## Self-Check: PASSED
+
+- SUMMARY.md exists: ✓
+- Refactor commits exist: ✓
+- Docs commit exists: ✓
+
 ---
 *Phase: 27-tui-component-decomposition*
 *Completed: 2026-06-07*
