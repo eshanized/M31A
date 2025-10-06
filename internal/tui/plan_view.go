@@ -5,130 +5,9 @@ import (
 	"math"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/pkg/arbitrage"
 )
-
-// PlanModel displays the task plan for user review.
-type PlanModel struct {
-	theme       theme.Theme
-	tasks       []types.Task
-	selected    int
-	width       int
-	height      int
-	modelID     string
-	modelName   string
-	provider    string
-	estCost     float64
-	estTime     string
-	showDiff    bool
-	showGraph   bool
-	spinner     spinner.Model
-	sessionID   string
-}
-
-// NewPlanModel creates a Plan screen model. width/height are required
-// non-zero dimensions so the plan renders immediately on creation
-// without waiting for a separate WindowSizeMsg (D-03 fix).
-func NewPlanModel(tasks []types.Task, t theme.Theme, modelID string, modelName string, providerName string, estCost float64, estTime string, width, height int) *PlanModel {
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
-	return &PlanModel{
-		theme:     t,
-		tasks:     tasks,
-		modelID:   modelID,
-		modelName: modelName,
-		provider:  providerName,
-		estCost:   estCost,
-		estTime:   estTime,
-		width:     width,
-		height:    height,
-		spinner:   sp,
-	}
-}
-
-func (m *PlanModel) Init() tea.Cmd {
-	return m.spinner.Tick
-}
-
-// UpdateTasks replaces the task list and adjusts selection if out of bounds.
-func (m *PlanModel) UpdateTasks(tasks []types.Task) {
-	m.tasks = tasks
-	if m.selected >= len(tasks) {
-		m.selected = len(tasks) - 1
-	}
-	if m.selected < 0 {
-		m.selected = 0
-	}
-}
-
-// SetDimensions updates the plan model's width and height.
-func (m *PlanModel) SetDimensions(width, height int) {
-	m.width = width
-	m.height = height
-}
-
-// ApplyArbitrage applies model cost optimization recommendations to the plan.
-// BUG-05 fix: implements the handler for OptimizedMsg.
-func (m *PlanModel) ApplyArbitrage(recs []arbitrage.ArbitrageRecommendation) {
-	for _, rec := range recs {
-		if rec.Savings > 0 {
-			m.estCost -= rec.Savings
-			if m.estCost < 0 {
-				m.estCost = 0
-			}
-		}
-	}
-}
-
-func (m *PlanModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return nil, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return []tea.Cmd{cmd}, nil
-
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "up", "k":
-			if m.selected > 0 {
-				m.selected--
-			}
-		case "down", "j":
-			if m.selected < len(m.tasks)-1 {
-				m.selected++
-			}
-		case "a", "A":
-			return nil, &AppMsg{Screen: ScreenExecute}
-		case "r", "R":
-			return nil, &AppMsg{Screen: ScreenREPL}
-		case "esc":
-			return nil, &AppMsg{Screen: ScreenREPL}
-		case "d", "D":
-			m.showDiff = !m.showDiff
-			m.showGraph = false
-		case "tab":
-			m.showGraph = !m.showGraph
-			m.showDiff = false
-		case "o", "O":
-			// H-19: trigger arbitrage optimization via command registry
-			return []tea.Cmd{func() tea.Msg {
-				return SlashCommandMsg{Command: "/optimize"}
-			}}, nil
-		}
-	}
-	return nil, nil
-}
 
 func (m *PlanModel) View() string {
 	if m.width == 0 {
@@ -137,14 +16,9 @@ func (m *PlanModel) View() string {
 
 	var sb strings.Builder
 
-	// Blueprint header bar: ╭─ Blueprint ── N tasks ── Est. $X.XX ── model-name ─╮
 	sb.WriteString(m.renderHeaderBar())
-
-	// Key hints row
 	sb.WriteString(m.renderKeyHints())
 	sb.WriteString("\n")
-
-	// Separator
 	sb.WriteString(strings.Repeat("─", m.width-2))
 	sb.WriteString("\n")
 
@@ -153,17 +27,14 @@ func (m *PlanModel) View() string {
 	} else if m.showDiff {
 		sb.WriteString(m.renderDiffPreview())
 	} else {
-		// Selected task detail box (double-border)
 		if len(m.tasks) > 0 && m.selected >= 0 && m.selected < len(m.tasks) {
 			sb.WriteString(m.renderDetailBox(m.tasks[m.selected]))
 			sb.WriteString("\n")
 		}
 
-		// Compact task list
 		sb.WriteString(m.renderTaskList())
 		sb.WriteString("\n")
 
-		// File impact section for selected task
 		if len(m.tasks) > 0 && m.selected >= 0 && m.selected < len(m.tasks) {
 			task := m.tasks[m.selected]
 			if len(task.Files) > 0 {
@@ -173,7 +44,6 @@ func (m *PlanModel) View() string {
 		}
 	}
 
-	// Cost/Time panel — show human-readable model name with raw ID as tooltip
 	modelDisplay := m.modelName
 	if modelDisplay == "" {
 		modelDisplay = m.modelID
@@ -188,9 +58,6 @@ func (m *PlanModel) View() string {
 	return sb.String()
 }
 
-// renderHeaderBar renders the Blueprint header with border.
-//
-//	╭─ Blueprint ── N tasks ── Est. $X.XX ── model-name ─╮
 func (m *PlanModel) renderHeaderBar() string {
 	modelDisplay := m.modelName
 	if modelDisplay == "" {
@@ -199,8 +66,7 @@ func (m *PlanModel) renderHeaderBar() string {
 
 	content := fmt.Sprintf(" Plan (Blueprint) ── %d tasks ── Est. $%.2f ── %s ", len(m.tasks), m.estCost, modelDisplay)
 
-	// Pad or truncate to fit width
-	innerWidth := m.width - 4 // account for ╭ and ╮
+	innerWidth := m.width - 4
 	if innerWidth < 20 {
 		innerWidth = 20
 	}
@@ -218,9 +84,6 @@ func (m *PlanModel) renderHeaderBar() string {
 	return borderStyle.Render("╭" + content + "╮") + "\n"
 }
 
-// renderKeyHints renders the keyboard shortcut hints row.
-//
-//	[A]ccept  [R]etry  [D]iff  [O]ptimize  Tab=Graph  Esc=Back
 func (m *PlanModel) renderKeyHints() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary)
@@ -248,13 +111,6 @@ func (m *PlanModel) renderKeyHints() string {
 	return sb.String()
 }
 
-// renderDetailBox renders the selected task in a double-border box.
-//
-//	╔════════════════════════════════════════════════════════╗
-//	║  TASK #3 (selected)                                   ║
-//	║  Update webhook signature verification                ║
-//	║  Depends on: #1, #2  ·  Blocks: #5, #6  ·  Files: 2  ║
-//	╚════════════════════════════════════════════════════════╝
 func (m *PlanModel) renderDetailBox(task types.Task) string {
 	doubleBorder := lipgloss.Border{
 		Top:         "═",
@@ -277,7 +133,6 @@ func (m *PlanModel) renderDetailBox(task types.Task) string {
 	detailStyle := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary)
 
-	// Build blocks list
 	var blocks []int
 	for _, other := range m.tasks {
 		for _, dep := range other.Dependencies {
@@ -287,7 +142,6 @@ func (m *PlanModel) renderDetailBox(task types.Task) string {
 		}
 	}
 
-	// Build detail line
 	var details []string
 	if len(task.Dependencies) > 0 {
 		ds := make([]string, len(task.Dependencies))
@@ -328,7 +182,6 @@ func (m *PlanModel) renderDetailBox(task types.Task) string {
 	return box
 }
 
-// renderTaskList renders a compact task list with status icons and action badges.
 func (m *PlanModel) renderTaskList() string {
 	var sb strings.Builder
 
@@ -336,7 +189,6 @@ func (m *PlanModel) renderTaskList() string {
 		var prefix string
 		var prefixStyle lipgloss.Style
 
-		// Determine status prefix and color
 		switch task.Status {
 		case types.StatusDone:
 			prefix = "[x]"
@@ -363,7 +215,6 @@ func (m *PlanModel) renderTaskList() string {
 			prefixStyle = lipgloss.NewStyle().Foreground(m.theme.TextMuted)
 		}
 
-		// Override style for selected item
 		if i == m.selected {
 			prefixStyle = lipgloss.NewStyle().
 				Foreground(m.theme.Brand).
@@ -371,14 +222,12 @@ func (m *PlanModel) renderTaskList() string {
 		}
 
 		desc := task.Description
-		// Truncate description to leave room for action badge
-		badgeWidth := 8 // " NEW ✦" or " MOD ~"
+		badgeWidth := 8
 		maxDescWidth := m.width - badgeWidth - 10
 		if maxDescWidth > 0 {
 			desc = TruncateWithEllipsis(desc, maxDescWidth)
 		}
 
-		// Action badge
 		badge := m.actionBadge(task.Action)
 
 		sb.WriteString(fmt.Sprintf("%s %d. %s%s\n", prefixStyle.Render(prefix), task.ID, desc, badge))
@@ -400,28 +249,9 @@ func (m *PlanModel) renderTaskList() string {
 	return sb.String()
 }
 
-// actionBadge returns a styled action badge for a task.
-func (m *PlanModel) actionBadge(action string) string {
-	badgeStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-
-	switch action {
-	case "Create", "create":
-		return badgeStyle.Foreground(m.theme.Success).Render("  ✦ NEW")
-	case "Modify", "modify":
-		return badgeStyle.Foreground(m.theme.Warning).Render("  ~ MOD")
-	case "Delete", "delete":
-		return badgeStyle.Foreground(m.theme.Error).Render("  ✗ DEL")
-	default:
-		// Default to MOD for unspecified actions
-		return badgeStyle.Foreground(m.theme.Warning).Render("  ~ MOD")
-	}
-}
-
-// renderFileImpact renders the file impact section for the selected task.
 func (m *PlanModel) renderFileImpact(task types.Task) string {
 	var sb strings.Builder
 
-	// Section header
 	headerStyle := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
 		Bold(true)
@@ -429,13 +259,11 @@ func (m *PlanModel) renderFileImpact(task types.Task) string {
 	sb.WriteString(strings.Repeat("─", max(0, m.width-lipgloss.Width(headerStyle.Render("── File Impact "))-2)))
 	sb.WriteString("\n")
 
-	// File list with action badges
 	fileStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
 
 	for _, f := range task.Files {
 		action := m.actionBadge(task.Action)
 
-		// Estimate lines changed (heuristic: ~30 lines per file for display)
 		estLines := 30
 		barWidth := 16
 		filled := int(math.Min(float64(barWidth), float64(estLines)/100.0*float64(barWidth)))
@@ -455,18 +283,10 @@ func (m *PlanModel) renderFileImpact(task types.Task) string {
 	return sb.String()
 }
 
-// renderHorizontalDependencyGraph renders a left-to-right dependency graph.
-//
-//	●─── #1: Install stripe-node v14
-//	│
-//	●─── #2: Update TypeScript types
-//	│
-//	└──● #3: Update webhook sig ─────────────●─── #5: Add idempotency
 func (m *PlanModel) renderHorizontalDependencyGraph() string {
 	var sb strings.Builder
 	sb.WriteString("Dependency Graph:\n\n")
 
-	// Build adjacency: parent → children
 	children := make(map[int][]int)
 	roots := []int{}
 
@@ -480,13 +300,11 @@ func (m *PlanModel) renderHorizontalDependencyGraph() string {
 		}
 	}
 
-	// Task lookup
 	byID := make(map[int]types.Task)
 	for _, task := range m.tasks {
 		byID[task.ID] = task
 	}
 
-	// Render tree recursively
 	var renderNode func(id int, depth int, prefix string, isLast bool)
 	renderNode = func(id int, depth int, prefix string, isLast bool) {
 		task, ok := byID[id]
@@ -525,14 +343,12 @@ func (m *PlanModel) renderHorizontalDependencyGraph() string {
 		}
 	}
 
-	// Render root nodes
 	rendered := make(map[int]bool)
 	for i, rootID := range roots {
 		renderNode(rootID, 0, "", i == len(roots)-1)
 		rendered[rootID] = true
 	}
 
-	// Render any nodes not reached (circular protection)
 	for _, task := range m.tasks {
 		if !rendered[task.ID] {
 			nodeStyle := lipgloss.NewStyle().Foreground(m.theme.Brand)
@@ -544,7 +360,6 @@ func (m *PlanModel) renderHorizontalDependencyGraph() string {
 		}
 	}
 
-	// Legend
 	sb.WriteString("\n")
 	legendStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 	sb.WriteString(legendStyle.Render("  ●  root task  ──  dependency edge  [Esc] back to task list"))
@@ -562,14 +377,12 @@ func (m *PlanModel) renderDiffPreview() string {
 			continue
 		}
 
-		// Task header
 		taskHeaderStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Brand).
 			Bold(true)
 		sb.WriteString(taskHeaderStyle.Render(fmt.Sprintf("Task %d: %s", task.ID, task.Description)))
 		sb.WriteString(fmt.Sprintf(" (%d files)\n", len(task.Files)))
 
-		// Files under this task
 		for _, f := range task.Files {
 			action := "+"
 			actionStyle := lipgloss.NewStyle().Foreground(m.theme.Success)
