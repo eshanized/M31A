@@ -2,30 +2,29 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
-status: milestone_complete
-last_updated: 2026-06-06T17:21:14.447Z
+status: active
+last_updated: "2026-06-07T00:28:18.996Z"
 progress:
-  total_phases: 24
-  completed_phases: 13
-  total_plans: 99
-  completed_plans: 80
-  percent: 54
-stopped_at: Milestone complete (Phase 25 was final phase)
+  total_phases: 26
+  completed_phases: 15
+  total_plans: 109
+  completed_plans: 88
+  percent: 58
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-None — Phase 24 complete
+Phase 27: TUI Component Decomposition — 2/4 plans complete
 
 ## Status
 
-Phase 24 (TUI Redesign) is complete. 5 plans across 2 waves: Theme + Shared Chrome (24-01), REPL + FirstRun (24-02), Plan + Execute + Verify (24-03), Ship + Diff (24-04), ModelSelector + Settings + Resume (24-05). Complete visual overhaul of all 10 TUI screens with new color tokens, shared chrome components, and redesigned screens.
+Phase 27 (TUI Component Decomposition) is in progress. Plan 27-01 (Core App Decomposition) and 27-02 (Settings & REPL Decomposition) are complete. 2 plans remaining across 2 waves.
 
 ## Last Session
 
-- **2026-06-06** — Phase 24 executed. 5 plans across 2 waves: Wave 1 (24-01: theme tokens, sparkline, starfield, header, statusbar, sidebar, permission modal — 4 commits), Wave 2 (24-02: REPL + FirstRun — 3 commits, 24-03: Plan + Execute + Verify — 4 commits, 24-04: Ship + Diff — 3 commits, 24-05: ModelSelector + Settings + Resume — 4 commits). Total 18 commits. All tests pass, build clean.
+- **2026-06-07** — Phase 27 continued. Plans 27-01 (Core App Decomposition) and 27-02 (Settings & REPL Decomposition) complete. 27-01: extracted AppState, channel types, slash command handling, screen routing, and permission handlers. 27-02: split settings.go (1103 lines) into 4 modules (model/view/edit/tabs); decomposed repl.go from 937 to 209 lines via model/state/welcome/keys extraction. All files under 400 lines.
 
 ## Completed Phases
 
@@ -40,10 +39,14 @@ Phase 24 (TUI Redesign) is complete. 5 plans across 2 waves: Theme + Shared Chro
 - Phase 10 — Provider & Message Layer Adaptations
 - Phase 11 — Session & Config Adaptations
 - Phase 12 — UX & Editor Experience Adaptations
+- Phase 14 — Discuss Phase Q&A Wiring
 - Phase 16 — UX Polish
 - Phase 17 — Post-Phase-16 Audit Fixes
 - Phase 18 — Welcome Page Rebuild
+- Phase 19 — Comprehensive Codebase Concerns Fixes
 - Phase 24 — TUI Redesign
+- Phase 25 — Wiring Fixes
+- Phase 26 — TUI Screen Completion & Wiring Fixes
 
 ## In Progress
 
@@ -216,3 +219,12 @@ None
 - 24-03: ✅ Plan + Execute + Verify Redesign — Blueprint, Mission Live, QA Gate screens
 - 24-04: ✅ Ship + Diff Redesign — Launch Pad with commit review, enhanced diff with syntax highlighting
 - 24-05: ✅ ModelSelector + Settings + Resume — Model Observatory, Control Tower, Session Vault
+
+## Phase 26 Plans
+
+- 26-01: ⏳ ScreenLedger Implementation (Wave 1, MISS-01)
+- 26-02: ⏳ ScreenRollback Implementation (Wave 1, MISS-02)
+- 26-03: ⏳ ScreenDiscuss Implementation (Wave 1, MISS-03)
+- 26-04: ⏳ Plan/Execute/Verify Wiring Fixes (Wave 2, WIR-01–WIR-03)
+- 26-05: ⏳ Diff/ModelSelector/GoalInput/Metrics Fixes (Wave 2, WIR-04–WIR-07)
+- 26-06: ⏳ Minor Polish: Sidebar, Frecent, Permission Queue (Wave 3, MIN-01–MIN-03)

@@ -2,8 +2,8 @@
 
 > **Source of truth:** This roadmap is derived directly from `adrenaline/idea.md` and `adrenaline/REFERENCE.md`. All estimates assume a **single senior Go developer**. Team multipliers are noted where applicable.
 > **Version**: V1 (Dual-Provider: OpenRouter + OpenCode Zen)
-> **Last Updated**: 2026-06-06
-> **Status**: Phase 25 in planning — Comprehensive Wiring & Inconsistency Fixes
+> **Last Updated**: 2026-06-07
+> **Status**: Phase 26 ready — TUI Screen Completion & Wiring Fixes
 
 ---
 
@@ -1757,3 +1757,140 @@ Plans:
 - `go test -race -count=1 ./...` passes
 - `go vet ./...` exits 0
 - `go build -o m31a ./cmd/m31a` succeeds for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
+
+---
+
+## Phase 26 — TUI Screen Completion & Wiring Fixes
+
+**Duration:** 1.5 weeks
+**Complexity:** 7/10
+**Status:** Ready for execution
+**Milestone:** All 16 declared TUI screen types are fully implemented, routable, and correctly wired. Missing screens (Ledger, Rollback, Discuss) exist. Wiring issues (cost estimation, pause/resume, self-heal re-verification) are resolved.
+**Source:** rush/TUI_SCREEN_DETAILED_REPORT.md
+**Depends on:** Phase 25
+
+### Background
+
+An exhaustive audit of all 16 TUI screen types in `internal/tui/` identified 3 missing screens (ScreenLedger, ScreenRollback, ScreenDiscuss), 7 moderate wiring issues (placeholder cost data, disconnected pause/resume, ignored self-heal returns), and 3 minor polish items (hardcoded sidebar width, fabricated latency data, permission queue overflow). The screens are declared in `internal/tui/types.go` (enum values 0–15) and routed in `app_view.go`, but several lack implementations or have dead code paths.
+
+### Requirement IDs
+
+| ID | Description |
+|----|-------------|
+| MISS-01 | ScreenLedger (enum 11) — no implementation; `/ledger` dead-ends |
+| MISS-02 | ScreenRollback (enum 12) — no implementation; `/rollback` dead-ends |
+| MISS-03 | ScreenDiscuss (enum 14) — no dedicated screen; Q&A flows through REPL |
+| WIR-01 | Plan cost estimation is `fmt.Sprintf("%d tasks", len(tasks))` placeholder |
+| WIR-02 | Execute `paused` field exists but P/R keys not wired to workflow engine |
+| WIR-03 | Verify `healFunc` calls `HealTask()` but return value ignored |
+| WIR-04 | Diff split view toggle mentioned but only unified view implemented |
+| WIR-05 | ModelSelector `generateMockUsageData()` placeholder |
+| WIR-06 | GoalInput skips PhaseInitialize (project type detection) |
+| WIR-07 | Metrics daily usage is text-only — no sparkline |
+| MIN-01 | `defaultSidebarWidth = 120` hardcoded |
+| MIN-02 | `frecentHistory` max size not configurable |
+| MIN-03 | Permission queue could stall if dispatcher channel is full |
+
+### Plans
+
+```
+Plans:
+- [ ] 26-01-PLAN.md — ScreenLedger Implementation (Wave 1, MISS-01)
+- [ ] 26-02-PLAN.md — ScreenRollback Implementation (Wave 1, MISS-02)
+- [ ] 26-03-PLAN.md — ScreenDiscuss Implementation (Wave 1, MISS-03)
+- [ ] 26-04-PLAN.md — Plan/Execute/Verify Wiring Fixes (Wave 2, WIR-01–WIR-03)
+- [ ] 26-05-PLAN.md — Diff/ModelSelector/GoalInput/Metrics Fixes (Wave 2, WIR-04–WIR-07)
+- [ ] 26-06-PLAN.md — Minor Polish: Sidebar, Frecent, Permission Queue (Wave 3, MIN-01–MIN-03)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1 | 26-01, 26-02, 26-03 | yes | — |
+| 2 | 26-04, 26-05 | yes | Wave 1 |
+| 3 | 26-06 | yes | Wave 2 |
+
+### Deliverables
+
+- `/ledger` opens ScreenLedger with filterable session history and aggregate stats
+- `/rollback` opens ScreenRollback with commit list, `[HEAD]` marker, diff preview, soft/hard rollback
+- Discuss phase has dedicated ScreenDiscuss with progress bar, timer, and timeout
+- Plan screen shows real `$X.XXXX` cost estimates from provider pricing
+- Execute screen P/R keys toggle pause/resume on workflow engine
+- Verify screen self-heal triggers re-verification via HealResultMsg
+- Diff screen supports unified/split view toggle (`V` key)
+- ModelSelector shows real latency data (or omits column)
+- GoalInput routes through PhaseInitialize before PhaseDiscuss
+- Metrics daily usage includes sparkline visualization
+- Sidebar width configurable via `config.toml`
+- Frecent history max size configurable via `config.toml`
+- Permission queue denies with error when buffer full (no deadlock)
+- `go test -race -count=1 ./...` passes
+- `CGO_ENABLED=0 go build ./cmd/m31a` succeeds
+
+---
+
+## Phase 27 — TUI Component Decomposition
+
+**Duration:** 2 weeks
+**Complexity:** 6/10
+**Status:** In Progress (1/4 plans complete)
+**Milestone:** All large TUI files (>500 lines) split into focused modules; no single file exceeds 400 lines; all tests pass; build clean on all platforms.
+**Source:** Codebase analysis of internal/tui/ file sizes and component organization
+**Depends on:** Phase 26
+
+### Background
+
+Codebase analysis of `internal/tui/` reveals 17 source files exceeding 300 lines, with 5 files exceeding 800 lines. The largest files (`app_update.go` at 1157 lines, `settings.go` at 1103 lines, `repl.go` at 937 lines) contain multiple concerns mixed together — model definitions, update logic, view rendering, and domain-specific handlers. This decomposition follows the existing pattern established by `modelselector.go` → `modelselector_list.go` + `modelselector_view.go` and `repl.go` → `repl_view.go` + `repl_stream.go` + `repl_thinking.go` + `repl_commands.go`.
+
+### Requirement IDs
+
+| ID | Description |
+|----|-------------|
+| SPLIT-01 | app_update.go (1157 lines) — split into app_update_core.go, app_update_workflow.go (existing), app_update_interactive.go |
+| SPLIT-02 | settings.go (1103 lines) — split into settings_model.go, settings_view.go, settings_tabs.go |
+| SPLIT-03 | repl.go (937 lines) — extract ReplModel struct + NewReplModel to repl_model.go, Set*/Get* methods to repl_state.go |
+| SPLIT-04 | resume.go (861 lines) — split into resume_model.go, resume_view.go |
+| SPLIT-05 | firstrun.go (804 lines) — split into firstrun_model.go, firstrun_view.go |
+| SPLIT-06 | app.go (794 lines) — extract AppState struct + NewApp to app_state.go, channel types to app_channel.go |
+| SPLIT-07 | app_update_workflow.go (637 lines) — extract permission handlers to app_update_permission.go |
+| SPLIT-08 | plan.go (589 lines) — split into plan_model.go, plan_view.go |
+| SPLIT-09 | execute.go (521 lines) — split into execute_model.go, execute_view.go |
+| SPLIT-10 | repl_view.go (535 lines) — extract renderWelcome to repl_welcome.go |
+| SPLIT-11 | diff.go (436 lines) — split into diff_model.go, diff_view.go |
+| SPLIT-12 | ship.go (427 lines) — split into ship_model.go, ship_view.go |
+| SPLIT-13 | Verify all splits compile and all existing tests pass unchanged |
+
+### Plans
+
+```
+Plans:
+- [x] 27-01-PLAN.md — Wave 1: Core App Decomposition (SPLIT-01, SPLIT-06, SPLIT-07) — Complete
+- [x] 27-02-PLAN.md — Wave 2: Settings & REPL Decomposition (SPLIT-02, SPLIT-03, SPLIT-10) — Complete
+- [ ] 27-03-PLAN.md — Wave 3: Screen Model Decomposition (SPLIT-04, SPLIT-05, SPLIT-08, SPLIT-09, SPLIT-11, SPLIT-12)
+- [ ] 27-04-PLAN.md — Wave 4: Verification & Cleanup (SPLIT-13)
+```
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Depends on |
+|------|-------|------------|------------|
+| 1 | 27-01 | yes | — |
+| 2 | 27-02 | yes | Wave 1 |
+| 3 | 27-03 | yes | Wave 2 |
+| 4 | 27-04 | yes | Wave 3 |
+
+### Deliverables
+
+- `app_update.go` reduced from 1157 to ~350 lines (core message routing only)
+- `settings.go` reduced from 1103 to ~350 lines (model + Update only)
+- `repl.go` reduced from 937 to ~400 lines (Update logic only)
+- `resume.go` reduced from 861 to ~400 lines (model + Update only)
+- `firstrun.go` reduced from 804 to ~400 lines (model + state transitions only)
+- `app.go` reduced from 794 to ~400 lines (Init + phase infrastructure only)
+- All new files follow existing naming conventions (`*_model.go`, `*_view.go`, `*_state.go`)
+- All existing test files pass without modification (no import path changes)
+- `go test -race -count=1 ./...` passes
+- `CGO_ENABLED=0 go build ./cmd/m31a` succeeds for all 5 platforms
+- No file in `internal/tui/` exceeds 400 lines
