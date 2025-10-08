@@ -39,6 +39,7 @@ func DefaultConfig() *Config {
 			DefaultLogLines:       20,
 			SessionListLimit:      20,
 			ThinkingOpacity:       0.6,
+			FrecentHistorySize:    100,
 		},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
