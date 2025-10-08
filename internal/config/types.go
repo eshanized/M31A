@@ -93,6 +93,8 @@ type UIConfig struct {
 	SessionListLimit int `toml:"session_list_limit"`
 	// Thinking block opacity. Default 0.6.
 	ThinkingOpacity float64 `toml:"thinking_opacity"`
+	// Frecent history max entries. Default 100.
+	FrecentHistorySize int `toml:"frecent_history_size"`
 }
 
 type PermissionsConfig struct {
