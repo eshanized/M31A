@@ -4,101 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/components"
-	"github.com/eshanized/M31A/internal/tui/theme"
 )
-
-// ShipSummary holds session completion data.
-type ShipSummary struct {
-	TaskDone      int
-	TaskTotal     int
-	TaskFailed    int
-	TaskSkipped   int
-	Commits       []git.CommitInfo
-	Duration      string
-	SessionID     string
-	FilesAdded    int
-	FilesModified int
-	FilesDeleted  int
-	Insertions    int
-	Deletions     int
-	TotalTokens   int
-	TotalCost     float64
-	Model         string
-	Provider      string
-}
-
-// ShipModel displays the session completion summary.
-type ShipModel struct {
-	theme            theme.Theme
-	summary          ShipSummary
-	width            int
-	height           int
-	spinner          spinner.Model
-	confirmNewSession bool
-	sessionID        string
-}
-
-// NewShipModel creates a Ship screen model. width/height are required
-// non-zero dimensions so the screen renders immediately on creation
-// without waiting for a separate WindowSizeMsg (D-03 fix).
-func NewShipModel(summary ShipSummary, t theme.Theme, width, height int) *ShipModel {
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
-	return &ShipModel{
-		theme:   t,
-		summary: summary,
-		width:   width,
-		height:  height,
-		spinner: sp,
-	}
-}
-
-func (m *ShipModel) Init() tea.Cmd {
-	return m.spinner.Tick
-}
-
-func (m *ShipModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return nil, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return []tea.Cmd{cmd}, nil
-
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "n", "N":
-			if m.confirmNewSession {
-				return nil, &AppMsg{Screen: ScreenREPL, Action: "new_session"}
-			}
-			m.confirmNewSession = true
-			return nil, nil
-		case "y", "Y":
-			if m.confirmNewSession {
-				return nil, &AppMsg{Screen: ScreenREPL, Action: "new_session"}
-			}
-		case "esc":
-			if m.confirmNewSession {
-				m.confirmNewSession = false
-				return nil, nil
-			}
-			return nil, &AppMsg{Screen: ScreenREPL}
-		case "r", "R":
-			return nil, &AppMsg{Screen: ScreenREPL}
-		}
-	}
-	return nil, nil
-}
 
 func (m *ShipModel) View() string {
 	if m.width == 0 {
@@ -107,7 +15,6 @@ func (m *ShipModel) View() string {
 
 	var sb strings.Builder
 
-	// ── Header bar: Launch Pad
 	remaining := m.width - 4
 	title := "Launch Pad"
 	subtitle := "Ready to Ship"
@@ -128,27 +35,21 @@ func (m *ShipModel) View() string {
 		Render(separator))
 	sb.WriteString("\n\n")
 
-	// ── Session info with badges
 	sessionBadge := components.NewBadge(m.summary.SessionID, components.BadgeMuted, m.theme).Render()
 	sb.WriteString(fmt.Sprintf("Session %s  Duration: %s\n\n", sessionBadge, m.summary.Duration))
 
-	// ── Metrics dashboard
 	sb.WriteString(m.renderMetrics())
 	sb.WriteString("\n\n")
 
-	// ── Commits section
 	sb.WriteString(m.renderCommits())
 	sb.WriteString("\n")
 
-	// ── Diff summary section
 	sb.WriteString(m.renderDiffSummary())
 	sb.WriteString("\n")
 
-	// ── Ship action card
 	sb.WriteString(m.renderShipAction())
 	sb.WriteString("\n")
 
-	// ── Key hints
 	if m.confirmNewSession {
 		sb.WriteString(lipgloss.NewStyle().
 			Foreground(m.theme.Warning).
@@ -162,7 +63,6 @@ func (m *ShipModel) View() string {
 	return sb.String()
 }
 
-// renderMetrics renders the session metrics dashboard.
 func (m *ShipModel) renderMetrics() string {
 	metrics := []components.MetricCard{
 		{Value: fmt.Sprintf("%d/%d", m.summary.TaskDone, m.summary.TaskTotal), Label: "Tasks", Theme: m.theme},
@@ -188,11 +88,9 @@ func (m *ShipModel) renderMetrics() string {
 	return components.MetricRow(metrics, m.width-4)
 }
 
-// renderCommits renders the commits section with HEAD indicator.
 func (m *ShipModel) renderCommits() string {
 	var sb strings.Builder
 
-	// Section title
 	titleLen := len(fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits)))
 	remaining := m.width - 4
 	titleBar := fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits))
@@ -219,7 +117,6 @@ func (m *ShipModel) renderCommits() string {
 
 	for i, c := range m.summary.Commits {
 		if i == 0 {
-			// HEAD commit gets the ▶ indicator in brand color
 			sb.WriteString(fmt.Sprintf("  %s  %s  %s\n",
 				headStyle.Render("▶"),
 				hashStyle.Render(c.ShortHash),
@@ -234,11 +131,9 @@ func (m *ShipModel) renderCommits() string {
 	return sb.String()
 }
 
-// renderDiffSummary renders the diff summary with action badges and line counts.
 func (m *ShipModel) renderDiffSummary() string {
 	var sb strings.Builder
 
-	// Section title
 	titleBar := "── Diff Summary "
 	titleLen := len(titleBar)
 	remaining := m.width - 4
@@ -251,8 +146,6 @@ func (m *ShipModel) renderDiffSummary() string {
 		Render(titleBar))
 	sb.WriteString("\n\n")
 
-	// File-level diff summary: use Insertions/Deletions from summary
-	// Since ShipSummary doesn't have per-file data, show aggregate
 	addedStyle := lipgloss.NewStyle().Foreground(m.theme.DiffAdded)
 	removedStyle := lipgloss.NewStyle().Foreground(m.theme.DiffRemoved)
 	mutedStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
@@ -264,7 +157,6 @@ func (m *ShipModel) renderDiffSummary() string {
 		return sb.String()
 	}
 
-	// Show individual file summaries if we have file counts
 	if m.summary.FilesAdded > 0 {
 		for i := 0; i < m.summary.FilesAdded; i++ {
 			sb.WriteString(fmt.Sprintf("  %s %s\n",
@@ -287,7 +179,6 @@ func (m *ShipModel) renderDiffSummary() string {
 		}
 	}
 
-	// Total line
 	totalLine := fmt.Sprintf("Total: %s added  /  %s removed  /  %d files changed",
 		addedStyle.Render(fmt.Sprintf("+%d lines", m.summary.Insertions)),
 		removedStyle.Render(fmt.Sprintf("-%d lines", m.summary.Deletions)),
@@ -299,11 +190,9 @@ func (m *ShipModel) renderDiffSummary() string {
 	return sb.String()
 }
 
-// renderShipAction renders the ship action card with keyboard shortcuts.
 func (m *ShipModel) renderShipAction() string {
 	var sb strings.Builder
 
-	// Section title
 	titleBar := "── Ship Action "
 	titleLen := len(titleBar)
 	remaining := m.width - 4
@@ -316,7 +205,6 @@ func (m *ShipModel) renderShipAction() string {
 		Render(titleBar))
 	sb.WriteString("\n\n")
 
-	// Card with rounded border
 	cardWidth := m.width - 8
 	if cardWidth < 40 {
 		cardWidth = 40
@@ -330,7 +218,6 @@ func (m *ShipModel) renderShipAction() string {
 	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
 
-	// Build card content
 	var cardLines []string
 	cardLines = append(cardLines, fmt.Sprintf("%s %s",
 		keyStyle.Render("[S]"),
@@ -353,7 +240,6 @@ func (m *ShipModel) renderShipAction() string {
 	return sb.String()
 }
 
-// renderFileChanges renders the file changes summary (legacy, kept for backward compat).
 func (m *ShipModel) renderFileChanges() string {
 	header := lipgloss.NewStyle().
 		Bold(true).
@@ -395,7 +281,6 @@ func (m *ShipModel) renderFileChanges() string {
 	return header + "\n" + strings.Join(parts, "  ") + "\n" + diffStat.Render()
 }
 
-// renderNextActions renders suggested next actions (legacy, kept for backward compat).
 func (m *ShipModel) renderNextActions() string {
 	header := lipgloss.NewStyle().
 		Bold(true).
