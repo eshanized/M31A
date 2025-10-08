@@ -25,6 +25,20 @@ internal/tui/                 (Bubble Tea app, all screens)
 internal/errors/              (sentinel errors — imported by all packages)
 ```
 
+### TUI Component Decomposition (Phase 27)
+
+The `internal/tui/` package follows a model-view decomposition pattern:
+
+- **Model files** (`*_model.go`): Hold Bubble Tea `Model` structs and `Update()` logic
+- **View files** (`*_view.go`): Contain `View()` rendering functions
+- **Tab files** (`*_tabs.go`): Tab navigation and rendering for multi-tab screens
+- **State files** (`*_state.go`): In-memory state structs and state management
+- **Key files** (`*_keys.go`): Key binding definitions per screen
+
+Sub-packages:
+- `internal/tui/components/` — Reusable TUI components (toolcard, thinking, sparkline, etc.)
+- `internal/tui/theme/` — Color palette and theme definitions
+
 ### Dependency Rules
 
 - `internal/types/` must have zero internal imports — it is the leaf package.
