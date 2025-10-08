@@ -113,7 +113,51 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) ([]tea.Cmd, bool) {
 		m.renderMessages()
 	}
 
-	return nil, false
+	// Forward unmatched keys to the textarea so character input works.
+	var taCmd tea.Cmd
+	m.textarea, taCmd = m.textarea.Update(msg)
+
+	// Update slash command suggestions after textarea changes
+	if m.cmdRegistry != nil {
+		current := m.textarea.Value()
+		if strings.HasPrefix(current, "/") {
+			parts := strings.Fields(current)
+			partial := ""
+			if len(parts) > 0 {
+				partial = strings.TrimPrefix(parts[0], "/")
+			}
+
+			allCmds := m.cmdRegistry.AllCommands()
+			m.slashSuggestions = nil
+			if partial == "" {
+				m.slashSuggestions = allCmds
+			} else {
+				q := strings.ToLower(partial)
+				for _, cmd := range allCmds {
+					name := strings.ToLower(cmd.Name)
+					slash := strings.ToLower(cmd.Slash)
+					if strings.HasPrefix(name, q) || strings.HasPrefix(slash, q) || strings.Contains(name, q) {
+						m.slashSuggestions = append(m.slashSuggestions, cmd)
+					}
+				}
+			}
+
+			if len(m.slashSuggestions) > 0 {
+				m.slashVisible = false
+				m.slashSelected = 0
+				if len(m.slashSuggestions) > 8 {
+					m.slashSuggestions = m.slashSuggestions[:8]
+				}
+			} else {
+				m.slashVisible = false
+			}
+		} else {
+			m.slashVisible = false
+			m.slashSuggestions = nil
+		}
+	}
+
+	return []tea.Cmd{taCmd}, false
 }
 
 // handleEnterKey processes the Enter key press.
