@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,6 +28,27 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 						key := m.firstRunModel.APIKey()
 						service := fmt.Sprintf("m31a/%s", provider)
 						m.keychain.Set(service, key)
+					}
+				}
+
+				// Also save API key to config file so it persists across restarts
+				if m.firstRunModel.APIKey() != "" {
+					apiKey := m.firstRunModel.APIKey()
+					for _, p := range m.firstRunModel.SelectedProviders() {
+						switch p {
+						case "openrouter":
+							m.config.Provider.OpenRouter.APIKey = apiKey
+						case "zen":
+							m.config.Provider.Zen.APIKey = apiKey
+						}
+					}
+					// Set default provider to the first selected one
+					if len(m.firstRunModel.SelectedProviders()) > 0 {
+						m.config.Provider.Default = m.firstRunModel.SelectedProviders()[0]
+					}
+					// Persist to disk
+					if err := m.config.Save(m.configPath); err != nil {
+						slog.Warn("failed to save config after first-run", "error", err)
 					}
 				}
 
@@ -97,6 +119,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.width > 0 && m.height > 0 {
 					m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 				}
+				// Refresh viewport so welcome screen reflects the new provider/model
+				m.replModel.RefreshViewport()
 				// Don't auto-show sidebar until git status is loaded
 				// BUG-9 fix: only start health/cache tickers when a provider is configured.
 				// In offline mode (no provider after first-run skip or key-less setup),
