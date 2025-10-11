@@ -21,6 +21,10 @@ func (m *AppState) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 	switch cmd {
 	case "/settings":
 		m.screen = ScreenSettings
+		if m.settingsModel != nil {
+			m.settingsModel.width = m.width
+			m.settingsModel.height = m.height
+		}
 		return m, nil
 	case "/resume":
 		if m.resumeModel != nil {
