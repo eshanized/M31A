@@ -123,19 +123,19 @@ func (m *CommandPaletteModel) View() string {
 	}
 
 	paletteWidth := m.width * 4 / 5
-	if paletteWidth > 80 {
-		paletteWidth = 80
+	if paletteWidth > 120 {
+		paletteWidth = 120
 	}
-	if paletteWidth < 40 {
-		paletteWidth = 40
+	if paletteWidth < 50 {
+		paletteWidth = 50
 	}
 
 	paletteHeight := m.height * 3 / 5
-	if paletteHeight > 20 {
-		paletteHeight = 20
+	if paletteHeight > 40 {
+		paletteHeight = 40
 	}
-	if paletteHeight < 6 {
-		paletteHeight = 6
+	if paletteHeight < 8 {
+		paletteHeight = 8
 	}
 
 	// Build content
