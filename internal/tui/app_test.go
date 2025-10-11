@@ -1411,17 +1411,15 @@ func TestApp_PhaseResultMsg_DiscussNeedsAnswers_EmitsQuestion(t *testing.T) {
 	}
 	m.Update(msg)
 
-	if m.pendingDiscussAnswers == nil {
-		t.Fatal("expected pendingDiscussAnswers to be initialized")
+	// New flow: discussModel is created and screen transitions to ScreenDiscuss
+	if m.discussModel == nil {
+		t.Fatal("expected discussModel to be initialized")
 	}
-	if m.currentDiscussIndex != 0 {
-		t.Errorf("expected currentDiscussIndex=0, got %d", m.currentDiscussIndex)
+	if m.discussModel.questionCount != 2 {
+		t.Errorf("expected 2 questions, got %d", m.discussModel.questionCount)
 	}
-	if m.discussQuestionCount != 2 {
-		t.Errorf("expected 2 questions, got %d", m.discussQuestionCount)
-	}
-	if m.screen != ScreenREPL {
-		t.Errorf("expected screen=ScreenREPL, got %v", m.screen)
+	if m.screen != ScreenDiscuss {
+		t.Errorf("expected screen=ScreenDiscuss, got %v", m.screen)
 	}
 	if m.currentPhase != types.PhaseDiscuss {
 		t.Errorf("expected currentPhase=PhaseDiscuss, got %s", m.currentPhase)
@@ -1435,40 +1433,24 @@ func TestApp_QuestionResponseMsg_Discuss_RoutesToEngine(t *testing.T) {
 		Questions: []string{"Q1", "Q2"},
 	}
 
-	// Trigger discuss start
+	// Trigger discuss start — new flow creates ScreenDiscuss
 	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
 
-	// First answer — should route to engine and ask next question
-	_, cmd := m.Update(QuestionResponseMsg{Answer: "Go"})
-	if cmd == nil {
-		t.Fatal("expected non-nil cmd to ask next question")
+	// With the new ScreenDiscuss flow, answers are handled by the model,
+	// not by handleQuestionResponse. The old inline REPL flow is dead code.
+	// Verify that the model was created correctly.
+	if m.discussModel == nil {
+		t.Fatal("expected discussModel to be initialized")
 	}
-	if mockEng.submittedAnswers[0] != "Go" {
-		t.Errorf("expected answer 0='Go', got %q", mockEng.submittedAnswers[0])
+	if m.screen != ScreenDiscuss {
+		t.Errorf("expected screen=ScreenDiscuss, got %v", m.screen)
 	}
-	if m.currentDiscussIndex != 1 {
-		t.Errorf("expected currentDiscussIndex=1, got %d", m.currentDiscussIndex)
-	}
-	if m.pendingDiscussAnswers[0] != "Go" {
-		t.Errorf("expected pendingDiscussAnswers[0]='Go', got %q", m.pendingDiscussAnswers[0])
-	}
-
-	// Second answer — should trigger finalize and advance
-	_, cmd = m.Update(QuestionResponseMsg{Answer: "Gin"})
-	if cmd == nil {
-		t.Fatal("expected non-nil cmd to finalize and advance")
-	}
-	if mockEng.finalizeCalls != 1 {
-		t.Errorf("expected FinalizeDiscuss to be called once, got %d", mockEng.finalizeCalls)
-	}
-	if mockEng.submittedAnswers[1] != "Gin" {
-		t.Errorf("expected answer 1='Gin', got %q", mockEng.submittedAnswers[1])
-	}
-	if m.currentPhase != types.PhasePlan {
-		t.Errorf("expected currentPhase=PhasePlan after finalize, got %s", m.currentPhase)
-	}
-	if m.pendingDiscussAnswers != nil {
-		t.Errorf("expected pendingDiscussAnswers to be cleared after finalize, got %v", m.pendingDiscussAnswers)
+	// The QuestionResponseMsg handler should still work for non-discuss questions
+	// (dispatcher-based questions), but shouldn't affect discuss state.
+	_, _ = m.Update(QuestionResponseMsg{Answer: "test"})
+	// Verify discuss state is unchanged (model handles its own flow)
+	if m.discussModel.currentIndex != 0 {
+		t.Errorf("expected discussModel.currentIndex to remain 0, got %d", m.discussModel.currentIndex)
 	}
 }
 
@@ -1480,19 +1462,18 @@ func TestApp_DiscussTimeout_CallsSkipDiscuss(t *testing.T) {
 	}
 
 	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
-	// Simulate timeout on first question
+
+	// With the new ScreenDiscuss flow, the model handles its own timeout.
+	// The DiscussAnswerTimeoutMsg handler checks pendingDiscussAnswers (old flow)
+	// which is nil in the new flow, so it should be a no-op.
 	_, cmd := m.Update(DiscussAnswerTimeoutMsg{QuestionIndex: 0})
-	if cmd == nil {
-		t.Fatal("expected non-nil cmd on timeout")
+	// The old flow's timeout handler returns nil when pendingDiscussAnswers is nil
+	if cmd != nil {
+		t.Errorf("expected nil cmd (old timeout handler is no-op in new flow), got %v", cmd)
 	}
-	if mockEng.skipCalls != 1 {
-		t.Errorf("expected SkipDiscuss called once, got %d", mockEng.skipCalls)
-	}
-	if mockEng.finalizeCalls != 1 {
-		t.Errorf("expected FinalizeDiscuss called once (via skip path), got %d", mockEng.finalizeCalls)
-	}
-	if m.currentPhase != types.PhasePlan {
-		t.Errorf("expected currentPhase=PhasePlan after skip, got %s", m.currentPhase)
+	// Verify screen is still ScreenDiscuss (model manages its own timeout)
+	if m.screen != ScreenDiscuss {
+		t.Errorf("expected screen=ScreenDiscuss, got %v", m.screen)
 	}
 }
 
@@ -1544,14 +1525,11 @@ func TestApp_ResetDiscussQA_ClearsState(t *testing.T) {
 		Questions: []string{"Q1", "Q2"},
 	}
 
-	// Trigger discuss start to populate state and timer
+	// Trigger discuss start to populate state (new flow creates discussModel)
 	m.Update(PhaseResultMsg{Phase: types.PhaseDiscuss, Success: true, NeedsAnswers: true})
 
-	if m.pendingDiscussAnswers == nil {
-		t.Fatal("expected state to be populated")
-	}
-	if m.discussAnswerTimeout == nil {
-		t.Fatal("expected timeout to be set")
+	if m.discussModel == nil {
+		t.Fatal("expected discussModel to be populated")
 	}
 
 	m.resetDiscussQA()
@@ -1564,6 +1542,9 @@ func TestApp_ResetDiscussQA_ClearsState(t *testing.T) {
 	}
 	if m.discussQuestionCount != 0 {
 		t.Errorf("expected discussQuestionCount=0 after reset, got %d", m.discussQuestionCount)
+	}
+	if m.discussModel != nil {
+		t.Errorf("expected discussModel to be nil after reset, got %v", m.discussModel)
 	}
 }
 
