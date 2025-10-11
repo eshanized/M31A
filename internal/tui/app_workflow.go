@@ -141,6 +141,7 @@ func (m *AppState) resetDiscussQA() {
 	m.pendingDiscussAnswers = nil
 	m.currentDiscussIndex = 0
 	m.discussQuestionCount = 0
+	m.discussModel = nil
 }
 
 // askNextDiscussQuestion emits a QuestionRequestMsg for the current
@@ -223,15 +224,15 @@ func (m *AppState) handleKeyAction(msg KeyActionMsg) (*AppState, tea.Cmd) {
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
 			m.sidebarManuallyHidden = !m.sidebarModel.IsVisible()
-			if m.sidebarModel.IsVisible() {
-				if m.replModel != nil {
-					m.replModel.SetSidebarWidth(defaultSidebarWidth)
-				}
-				return m, m.sidebarModel.refreshCmd()
-			}
+		if m.sidebarModel.IsVisible() {
 			if m.replModel != nil {
-				m.replModel.SetSidebarWidth(0)
+				m.replModel.SetSidebarWidth(m.sidebarModel.GetWidth())
 			}
+			return m, m.sidebarModel.refreshCmd()
+		}
+		if m.replModel != nil {
+			m.replModel.SetSidebarWidth(0)
+		}
 		}
 		return m, nil
 	case "open_settings":
