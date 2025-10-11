@@ -13,11 +13,13 @@ import (
 )
 
 // handleLedger shows session history from the learning ledger.
+// When invoked with no args, opens the full ScreenLedger browser.
 func handleLedger(args []string, ctx CommandContext) CommandResult {
 	if ctx.Ledger == nil {
 		return CommandResult{Success: false, Message: "Ledger not available."}
 	}
 
+	// /ledger stats — show stats inline
 	if len(args) > 0 && args[0] == "stats" {
 		stats := ctx.Ledger.Stats()
 		var b strings.Builder
@@ -35,13 +37,19 @@ func handleLedger(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
 	}
 
-	if len(args) > 0 {
-		entries := ctx.Ledger.EntriesFiltered(args[0], nil, 5)
-		return formatLedgerEntries(entries, fmt.Sprintf("Recent sessions (type: %s)", args[0]))
+	// /ledger — open full screen browser
+	if len(args) == 0 {
+		screen := ScreenLedger
+		return CommandResult{
+			Success: true,
+			Screen:  &screen,
+			Message: "Opening ledger...",
+		}
 	}
 
-	entries := ctx.Ledger.Entries()
-	return formatLedgerEntries(entries, "Recent sessions")
+	// /ledger <type> — filtered inline
+	entries := ctx.Ledger.EntriesFiltered(args[0], nil, 5)
+	return formatLedgerEntries(entries, fmt.Sprintf("Recent sessions (type: %s)", args[0]))
 }
 
 func formatLedgerEntries(entries []ledger.LedgerEntry, title string) CommandResult {
@@ -73,29 +81,15 @@ func formatLedgerEntries(entries []ledger.LedgerEntry, title string) CommandResu
 //	/rollback --head                   — show current HEAD hash
 func handleRollback(args []string, ctx CommandContext) CommandResult {
 	if len(args) == 0 {
-		if ctx.Rollback != nil {
-			entries, err := ctx.Rollback.Chain(10)
-			if err != nil {
-				return CommandResult{Success: false, Message: fmt.Sprintf("Failed to get commit chain: %v", err)}
+		// /rollback — open full screen browser
+		if ctx.Rollback != nil || ctx.Git != nil {
+			screen := ScreenRollback
+			return CommandResult{
+				Success: true,
+				Screen:  &screen,
+				Message: "Opening rollback...",
 			}
-			commits := make([]git.CommitInfo, len(entries))
-			for i, e := range entries {
-				commits[i] = e.CommitInfo
-			}
-			return formatCommitChain(commits)
 		}
-
-		if ctx.Git != nil {
-			commits, err := ctx.Git.Log(false, "")
-			if err != nil {
-				return CommandResult{Success: false, Message: fmt.Sprintf("Failed to get git log: %v", err)}
-			}
-			if len(commits) > 10 {
-				commits = commits[:10]
-			}
-			return formatCommitChain(commits)
-		}
-
 		return CommandResult{Success: false, Message: "No git repository available."}
 	}
 
