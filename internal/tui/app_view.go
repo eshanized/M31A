@@ -119,6 +119,27 @@ func (m *AppState) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Loading goal input...")
 
+	case ScreenLedger:
+		if m.ledgerModel != nil {
+			return m.ledgerModel.View()
+		}
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading ledger...")
+
+	case ScreenRollback:
+		if m.rollbackModel != nil {
+			return m.rollbackModel.View()
+		}
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading rollback...")
+
+	case ScreenDiscuss:
+		if m.discussModel != nil {
+			return m.discussModel.View()
+		}
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Loading discuss...")
+
 	default:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			"Unknown screen")
