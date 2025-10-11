@@ -137,16 +137,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sidebarModel != nil {
 				m.sidebarModel.Toggle()
 				// Refresh git status and adjust REPL layout when sidebar state changes
-				if m.sidebarModel.IsVisible() {
-					if m.replModel != nil {
-						m.replModel.SetSidebarWidth(defaultSidebarWidth)
-					}
-					return m, m.sidebarModel.refreshCmd()
-				} else {
-					if m.replModel != nil {
-						m.replModel.SetSidebarWidth(0)
-					}
+			if m.sidebarModel.IsVisible() {
+				if m.replModel != nil {
+					m.replModel.SetSidebarWidth(m.sidebarModel.GetWidth())
 				}
+				return m, m.sidebarModel.refreshCmd()
+			} else {
+				if m.replModel != nil {
+					m.replModel.SetSidebarWidth(0)
+				}
+			}
 			}
 			return m, nil
 		}
@@ -443,7 +443,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.width > threshold && m.replModel != nil && !m.sidebarManuallyHidden {
 				m.sidebarModel.SetVisible(true)
-				m.replModel.SetSidebarWidth(defaultSidebarWidth)
+				m.replModel.SetSidebarWidth(m.sidebarModel.GetWidth())
 			}
 		}
 		return m, nil
