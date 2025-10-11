@@ -182,3 +182,20 @@ type OptimizedMsg struct {
 	Recommendations []arbitrage.ArbitrageRecommendation
 	TaskID          int
 }
+
+// GoalSubmittedMsg is emitted by GoalInputModel when the user submits a goal.
+// The AppState routes this to PhaseInitialize before starting PhaseDiscuss.
+type GoalSubmittedMsg struct {
+	Goal string
+}
+
+// ExecutePauseMsg is emitted by ExecuteModel when the user toggles pause/resume.
+type ExecutePauseMsg struct {
+	Paused bool
+}
+
+// HealResultMsg is emitted after a self-heal attempt completes.
+type HealResultMsg struct {
+	TaskID  int
+	Success bool
+}
