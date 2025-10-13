@@ -172,9 +172,16 @@ func (d modelItemDelegate) Render(w io.Writer, m list.Model, index int, item lis
 		line2 += "  " + caps
 	}
 
-	// Line 3: Sparkline
+	// Line 3: Sparkline (only show when there's real usage data)
 	line3 := "     "
-	if len(mi.UsageData) > 0 {
+	hasRealData := false
+	for _, v := range mi.UsageData {
+		if v > 0 {
+			hasRealData = true
+			break
+		}
+	}
+	if hasRealData {
 		sparkWidth := 20
 		if m.Width()-10 < sparkWidth {
 			sparkWidth = m.Width() - 10
