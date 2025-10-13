@@ -164,13 +164,16 @@ func (m *FirstRunModel) renderLaunchpadFooter() string {
 	}
 
 	parts := make([]string, 0, len(shortcuts))
-	for _, s := range shortcuts {
+	for i, s := range shortcuts {
 		if s.label == "" {
 			parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(s.key))
 		} else {
 			keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
 			labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 			parts = append(parts, keyStyle.Render(s.key)+" "+labelStyle.Render(s.label))
+		}
+		if i < len(shortcuts)-1 {
+			parts = append(parts, "  ")
 		}
 	}
 
