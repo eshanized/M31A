@@ -81,14 +81,13 @@ func (m *GoalInputModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 			return nil, &AppMsg{Screen: ScreenREPL}
 
 		case "ctrl+enter", "alt+enter":
-			// Submit the goal
+			// Submit the goal — route through PhaseInitialize before Discuss
 			goal := m.Goal()
 			if goal == "" {
 				return nil, nil
 			}
 			return nil, &AppMsg{
-				Screen: ScreenREPL,
-				Action: "workflow_start_goal",
+				Action: "goal_submitted",
 			}
 
 		case "tab":
