@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -32,6 +33,9 @@ type MetricsModel struct {
 
 	// Daily usage (last 14 days): day index → session count
 	dailyUsage []dailyStat
+
+	// Sparkline data for daily usage visualization
+	sparklineData []float64
 }
 
 type modelUsageStat struct {
@@ -98,13 +102,16 @@ func (m *MetricsModel) LoadStats(mgr *session.Manager) {
 
 	// Build daily stats slice in order
 	m.dailyUsage = nil
+	m.sparklineData = nil
 	for i := 13; i >= 0; i-- {
 		d := now.AddDate(0, 0, -i)
 		key := d.Format("2006-01-02")
+		sessions := dailyMap[key]
 		m.dailyUsage = append(m.dailyUsage, dailyStat{
 			label:    dayLabels[13-i],
-			sessions: dailyMap[key],
+			sessions: sessions,
 		})
+		m.sparklineData = append(m.sparklineData, float64(sessions))
 	}
 	_ = dayLabels
 
@@ -244,7 +251,7 @@ func (m *MetricsModel) renderStatCards() string {
 	return "  " + lipgloss.JoinHorizontal(lipgloss.Top, cards...)
 }
 
-// renderDailyUsage renders a horizontal bar chart for session activity.
+// renderDailyUsage renders a horizontal bar chart for session activity with sparkline.
 func (m *MetricsModel) renderDailyUsage() string {
 	t := m.theme
 
@@ -262,6 +269,22 @@ func (m *MetricsModel) renderDailyUsage() string {
 		maxSessions = 1
 	}
 
+	// Sparkline visualization
+	var sparklineStr string
+	if len(m.sparklineData) > 0 {
+		sparkWidth := m.width - 20
+		if sparkWidth < 10 {
+			sparkWidth = 10
+		}
+		if sparkWidth > 40 {
+			sparkWidth = 40
+		}
+		sparklineStr = components.RenderSparkline(m.sparklineData, sparkWidth, t)
+		if sparklineStr != "" {
+			sparklineStr = "  " + sparklineStr + "\n"
+		}
+	}
+
 	barWidth := m.width - 30
 	if barWidth < 10 {
 		barWidth = 10
@@ -271,6 +294,9 @@ func (m *MetricsModel) renderDailyUsage() string {
 	}
 
 	var sb strings.Builder
+	if sparklineStr != "" {
+		sb.WriteString(sparklineStr)
+	}
 	for _, d := range m.dailyUsage {
 		filled := int(math.Round(float64(d.sessions) / float64(maxSessions) * float64(barWidth)))
 		empty := barWidth - filled
