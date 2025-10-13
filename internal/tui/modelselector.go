@@ -279,7 +279,7 @@ func (m *ModelSelector) refilterList() {
 		// Get or generate usage data for sparkline
 		usageData := m.usageHistory[model.ID]
 		if usageData == nil {
-			usageData = generateMockUsageData(model.ID)
+			usageData = make([]float64, 7)
 			m.usageHistory[model.ID] = usageData
 		}
 
