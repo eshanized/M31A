@@ -544,14 +544,14 @@ func TestRollbackCommand(t *testing.T) {
 		if !result.Success {
 			t.Fatalf("expected success, got: %s", result.Message)
 		}
-		if !strings.Contains(result.Message, "Recent commits") {
-			t.Errorf("expected 'Recent commits' header, got: %s", result.Message)
+		if result.Screen == nil {
+			t.Fatal("expected Screen to be set for ScreenRollback")
 		}
-		if !strings.Contains(result.Message, "[HEAD]") {
-			t.Errorf("expected [HEAD] marker, got: %s", result.Message)
+		if *result.Screen != ScreenRollback {
+			t.Errorf("expected Screen=ScreenRollback, got %v", *result.Screen)
 		}
-		if !strings.Contains(result.Message, "commit 2") {
-			t.Errorf("expected newest commit 'commit 2', got: %s", result.Message)
+		if !strings.Contains(result.Message, "Opening rollback") {
+			t.Errorf("expected 'Opening rollback' message, got: %s", result.Message)
 		}
 	})
 }
@@ -982,6 +982,12 @@ func TestLedgerCommand(t *testing.T) {
 		result, _ := r.Execute("/ledger", ctx)
 		if !result.Success {
 			t.Fatalf("expected success, got: %s", result.Message)
+		}
+		if result.Screen == nil {
+			t.Fatal("expected Screen to be set for ScreenLedger")
+		}
+		if *result.Screen != ScreenLedger {
+			t.Errorf("expected Screen=ScreenLedger, got %v", *result.Screen)
 		}
 	})
 
