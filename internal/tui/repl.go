@@ -182,10 +182,9 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 				}
 			}
 
-			// Show suggestions if we have matches and more than one option
+			// Show suggestions if we have matches
 			if len(m.slashSuggestions) > 0 {
-				// Don't show immediately — wait for Tab press
-				m.slashVisible = false
+				m.slashVisible = true
 				m.slashSelected = 0
 				// Limit to 8 suggestions
 				if len(m.slashSuggestions) > 8 {
