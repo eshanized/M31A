@@ -182,6 +182,12 @@ func (m *ReplModel) ClearMessages() {
 	m.userScrolled = false
 }
 
+// RefreshViewport forces a re-render of the viewport content.
+// Call this after provider/model changes to update the welcome screen.
+func (m *ReplModel) RefreshViewport() {
+	m.renderMessages()
+}
+
 func (m *ReplModel) SpinnerTick() tea.Cmd {
 	return m.spinner.Tick
 }
