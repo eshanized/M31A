@@ -143,7 +143,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) ([]tea.Cmd, bool) {
 			}
 
 			if len(m.slashSuggestions) > 0 {
-				m.slashVisible = false
+				m.slashVisible = true
 				m.slashSelected = 0
 				if len(m.slashSuggestions) > 8 {
 					m.slashSuggestions = m.slashSuggestions[:8]
