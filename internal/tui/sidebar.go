@@ -12,7 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-const defaultSidebarWidth = 120
+const defaultSidebarWidth = 42
 
 // sidebarStatusCacheTTL is how long the sidebar caches git status
 // to avoid hammering git on every TickMsg (60Hz).
