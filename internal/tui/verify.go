@@ -75,10 +75,10 @@ func (m *VerifyModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 		if m.confirmHeal {
 			switch msg.String() {
 			case "y", "Y", "enter":
-				// Confirm self-heal: reset task to pending, then trigger healing
+				// Confirm self-heal: set task to running, then trigger healing
 				for i := range m.tasks {
 					if m.tasks[i].ID == m.confirmHealTask && m.tasks[i].Status == types.StatusFailed {
-						m.tasks[i].Status = types.StatusPending
+						m.tasks[i].Status = types.StatusRunning
 						break
 					}
 				}
