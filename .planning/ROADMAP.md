@@ -1835,7 +1835,7 @@ Plans:
 
 **Duration:** 2 weeks
 **Complexity:** 6/10
-**Status:** In Progress (1/4 plans complete)
+**Status:** Complete
 **Milestone:** All large TUI files (>500 lines) split into focused modules; no single file exceeds 400 lines; all tests pass; build clean on all platforms.
 **Source:** Codebase analysis of internal/tui/ file sizes and component organization
 **Depends on:** Phase 26
@@ -1868,8 +1868,8 @@ Codebase analysis of `internal/tui/` reveals 17 source files exceeding 300 lines
 Plans:
 - [x] 27-01-PLAN.md — Wave 1: Core App Decomposition (SPLIT-01, SPLIT-06, SPLIT-07) — Complete
 - [x] 27-02-PLAN.md — Wave 2: Settings & REPL Decomposition (SPLIT-02, SPLIT-03, SPLIT-10) — Complete
-- [ ] 27-03-PLAN.md — Wave 3: Screen Model Decomposition (SPLIT-04, SPLIT-05, SPLIT-08, SPLIT-09, SPLIT-11, SPLIT-12)
-- [ ] 27-04-PLAN.md — Wave 4: Verification & Cleanup (SPLIT-13)
+- [x] 27-03-PLAN.md — Wave 3: Screen Model Decomposition (SPLIT-04, SPLIT-05, SPLIT-08, SPLIT-09, SPLIT-11, SPLIT-12) — Complete
+- [x] 27-04-PLAN.md — Wave 4: Verification & Cleanup (SPLIT-13) — Complete
 ```
 
 ### Wave Structure

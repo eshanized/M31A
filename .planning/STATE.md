@@ -3,28 +3,28 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
 status: active
-last_updated: "2026-06-07T00:28:18.996Z"
+last_updated: "2026-06-07T00:55:00Z"
 progress:
-  total_phases: 26
-  completed_phases: 15
-  total_plans: 109
-  completed_plans: 88
-  percent: 58
+  total_phases: 27
+  completed_phases: 27
+  total_plans: 113
+  completed_plans: 90
+  percent: 80
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 27: TUI Component Decomposition — 2/4 plans complete
+Phase 27: TUI Component Decomposition — COMPLETE
 
 ## Status
 
-Phase 27 (TUI Component Decomposition) is in progress. Plan 27-01 (Core App Decomposition) and 27-02 (Settings & REPL Decomposition) are complete. 2 plans remaining across 2 waves.
+Phase 27 (TUI Component Decomposition) is complete. All 4 plans executed successfully. Fixed critical REPL input bug, verified all tests pass, build clean.
 
 ## Last Session
 
-- **2026-06-07** — Phase 27 continued. Plans 27-01 (Core App Decomposition) and 27-02 (Settings & REPL Decomposition) complete. 27-01: extracted AppState, channel types, slash command handling, screen routing, and permission handlers. 27-02: split settings.go (1103 lines) into 4 modules (model/view/edit/tabs); decomposed repl.go from 937 to 209 lines via model/state/welcome/keys extraction. All files under 400 lines.
+- **2026-06-07** — Phase 27 completed. Plan 27-04 executed: Verification & Cleanup (5 tasks). Fixed critical bug: REPL character input broken after decomposition. Verified all 537 tests pass with race detector. Build clean on all platforms. Updated ARCHITECTURE.md with decomposition pattern.
 
 ## Completed Phases
 
@@ -47,6 +47,7 @@ Phase 27 (TUI Component Decomposition) is in progress. Plan 27-01 (Core App Deco
 - Phase 24 — TUI Redesign
 - Phase 25 — Wiring Fixes
 - Phase 26 — TUI Screen Completion & Wiring Fixes
+- Phase 27 — TUI Component Decomposition
 
 ## In Progress
 
