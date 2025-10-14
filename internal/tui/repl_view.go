@@ -15,7 +15,6 @@ func (m *ReplModel) View() string {
 	}
 
 	viewportStr := m.viewport.View()
-	inputStr := m.textarea.View()
 
 	// Render model context line above textarea: │ M31A · model-name · provider
 	modelContextLine := m.renderModelContextLine()
@@ -24,6 +23,7 @@ func (m *ReplModel) View() string {
 	bottomBorder := m.renderInputBottomBorder()
 
 	// Assemble input frame: model context + textarea + bottom border
+	inputStr := m.textarea.View()
 	inputFrame := lipgloss.JoinVertical(lipgloss.Top, modelContextLine, inputStr, bottomBorder)
 
 	// Determine border highlight color
@@ -35,11 +35,16 @@ func (m *ReplModel) View() string {
 	}
 
 	// Apply left border + background to the input frame
+	replWidth := m.width - m.sidebarWidth
+	if replWidth < 20 {
+		replWidth = 20
+	}
 	borderStyle := lipgloss.NewStyle().
 		Border(theme.SplitBorder, true, false, false, false).
 		BorderForeground(borderColor).
 		Background(m.theme.BackgroundElement).
-		Padding(0, 2, 0, 2)
+		Padding(0, 2, 0, 2).
+		Width(replWidth)
 	borderedInput := borderStyle.Render(inputFrame)
 
 	// Render slash command suggestions dropdown
@@ -107,6 +112,7 @@ func (m *ReplModel) View() string {
 // │ M31A · model-name · provider
 func (m *ReplModel) renderModelContextLine() string {
 	t := m.theme
+	width := m.width - m.sidebarWidth
 
 	var parts []string
 	parts = append(parts, "M31A")
@@ -121,9 +127,11 @@ func (m *ReplModel) renderModelContextLine() string {
 	contextText := strings.Join(parts, " · ")
 	gutterStyle := lipgloss.NewStyle().Foreground(t.Brand)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		gutterStyle.Render("│"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(contextText),
+	return lipgloss.NewStyle().Width(width).Render(
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			gutterStyle.Render("│"),
+			lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(contextText),
+		),
 	)
 }
 
