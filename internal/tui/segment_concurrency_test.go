@@ -237,8 +237,8 @@ func TestVerify_HealKey_SingleTask(t *testing.T) {
 	// 'y' confirms self-heal
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
-	if m.tasks[0].Status != types.StatusPending {
-		t.Errorf("task status = %v, want StatusPending (heal should reset failed task)", m.tasks[0].Status)
+	if m.tasks[0].Status != types.StatusRunning {
+		t.Errorf("task status = %v, want StatusRunning (heal sets task to running during attempt)", m.tasks[0].Status)
 	}
 }
 
