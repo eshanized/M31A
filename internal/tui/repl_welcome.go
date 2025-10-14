@@ -21,31 +21,24 @@ func (m *ReplModel) renderWelcome() string {
 	// 2. Provider status card
 	providerCard := m.renderProviderCard()
 
-	// 3. Input area with placeholder
-	inputBox := m.renderInputBox()
-
-	// 4. Keyboard hints
+	// 3. Keyboard hints
 	hints := renderKeyboardHints(m.theme)
 
-	// 5. Bottom bar (cwd + version)
-	bottomBar := m.renderBottomBar()
-
-	// Stack vertically, centered
+	// Stack vertically, centered (no input box — the real textarea is below the viewport)
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		logo,
 		"",
 		providerCard,
 		"",
-		inputBox,
-		"",
 		hints,
 	)
 
-	// Center in available space
-	availableHeight := m.height - 4 // reserve for bottom bar
-	centered := lipgloss.Place(m.width, availableHeight, lipgloss.Center, lipgloss.Center, content)
-
-	return lipgloss.JoinVertical(lipgloss.Top, centered, bottomBar)
+	// Center in available space (account for sidebar width)
+	availableWidth := m.width - m.sidebarWidth
+	if availableWidth < 20 {
+		availableWidth = 20
+	}
+	return lipgloss.Place(availableWidth, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // renderProviderCard shows current model/provider status or setup prompt.
@@ -187,7 +180,7 @@ func renderKeyboardHints(t theme.Theme) string {
 		{"ctrl+x", "leader"},
 	}
 
-	parts := make([]string, len(hints))
+	parts := make([]string, 0, len(hints)*2)
 	for i, h := range hints {
 		keyStyle := lipgloss.NewStyle().
 			Foreground(t.Brand).
@@ -195,7 +188,10 @@ func renderKeyboardHints(t theme.Theme) string {
 		labelStyle := lipgloss.NewStyle().
 			Foreground(t.TextMuted)
 
-		parts[i] = keyStyle.Render(h.key) + " " + labelStyle.Render(h.label)
+		parts = append(parts, keyStyle.Render(h.key)+" "+labelStyle.Render(h.label))
+		if i < len(hints)-1 {
+			parts = append(parts, "  ")
+		}
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, parts...)
