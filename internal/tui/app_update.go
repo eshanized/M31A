@@ -1,518 +1,804 @@
 package tui
 
 import (
-	"errors"
-	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/config"
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
+// Update implements tea.Model. It is the single dispatch point for all messages.
+// CRITICAL: Never mutate AppState from a goroutine. All mutations go here.
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// CR-04 fix: sync repl context from AppState in Update(), not View().
-	// View() must be a pure render function with no state mutations.
-	if m.replModel != nil {
-		m.replModel.SetKeyRegistry(m.keyRegistry)
-		m.replModel.SetLastActivity(m.lastActivity)
-	}
+	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	// ── Window resize ──────────────────────────────────────────────────────────
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.initialized = true
-		// H-1 fix: collect returned tea.Cmd from sub-models and batch them.
-		// Previously, all returned cmds were silently discarded, causing
-		// streaming freezes on terminal resize.
-		var cmds []tea.Cmd
-		if m.replModel != nil {
-			newCmds, _ := m.replModel.Update(msg)
-			cmds = append(cmds, newCmds...)
-		}
-		if m.firstRunModel != nil {
-			newCmds, _ := m.firstRunModel.Update(msg)
-			cmds = append(cmds, newCmds...)
-		}
-		if m.sidebarModel != nil {
-			_, cmd := m.sidebarModel.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		if m.settingsModel != nil {
-			_, cmd := m.settingsModel.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		// modelSelector is a value type; only update if initialized
-		if m.modelSelector.registry != nil {
-			_, cmd := m.modelSelector.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		if len(cmds) > 0 {
-			return m, tea.Batch(cmds...)
-		}
-		return m, nil
+		cmds = append(cmds, m.handleWindowResize(msg))
 
+	// ── Keyboard ───────────────────────────────────────────────────────────────
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			if m.streamCancelFn != nil {
+				m.streamCancelFn()
+				m.streamCancelFn = nil
+			}
+			return m, nil
+		default:
+			cmds = append(cmds, m.routeKeyMsg(msg))
+		}
+
+	// ── Screen routing ─────────────────────────────────────────────────────────
+	case AppMsg:
+		cmds = append(cmds, m.handleAppMsg(msg))
+
+	// ── Key action ────────────────────────────────────────────────────────────
+	case KeyActionMsg:
+		cmds = append(cmds, m.handleKeyAction(msg.Action))
+
+	// ── Leader timeout ────────────────────────────────────────────────────────
 	case LeaderTimeoutMsg:
 		if m.keyRegistry != nil {
 			m.keyRegistry.DeactivateLeader()
 		}
-		return m, nil
 
-	case KeyActionMsg:
-		return m.handleKeyAction(msg)
-
-	case tea.KeyMsg:
-		// Command palette: when open, route all keys to it
-		if m.cmdPaletteOpen && m.cmdPalette != nil {
-			switch msg.String() {
-			case "esc", "ctrl+c":
-				m.cmdPalette.Close()
-				m.cmdPaletteOpen = false
-				return m, nil
-			case "enter":
-				if cmd := m.cmdPalette.SelectedCommand(); cmd != nil && cmd.Execute != nil {
-					execCmd := cmd.Execute()
-					m.cmdPalette.Close()
-					m.cmdPaletteOpen = false
-					return m, execCmd
-				}
-				// No command selected, just close
-				m.cmdPalette.Close()
-				m.cmdPaletteOpen = false
-				return m, nil
-			}
-			m.cmdPalette.Update(msg)
-			return m, nil
-		}
-
-		// Leader key chord dispatch via KeyRegistry
-		if m.keyRegistry != nil && m.screen == ScreenREPL {
-			ctx := currentKeyContext(m.screen)
-			if handled, cmd := m.keyRegistry.Handle(msg.String(), ctx); handled {
-				if cmd != nil {
-					return m, cmd
-				}
-				// Key was consumed (e.g. leader activation), fall through
-			}
-		}
-
-		// Open command palette with ctrl+p
-		if msg.String() == "ctrl+p" {
-			if m.cmdPalette != nil && m.screen == ScreenREPL {
-				cmds := m.cmdRegistry.AllCommandsWithExecute()
-				// Add sidebar toggle command
-				cmds = append(cmds, CommandInfo{
-					Name:        "Toggle sidebar",
-					Description: "Show/hide the file status sidebar",
-					Slash:       "",
-					Execute: func() tea.Cmd {
-						if m.sidebarModel != nil {
-							m.sidebarModel.Toggle()
-						}
-						return nil
-					},
-				})
-				m.cmdPalette.SetCommands(cmds)
-				m.cmdPalette.Open()
-				m.cmdPaletteOpen = true
-				return m, nil
-			}
-		}
-
-		// Toggle sidebar with ctrl+b
-		if msg.String() == "ctrl+b" && m.screen == ScreenREPL {
-			if m.sidebarModel != nil {
-				m.sidebarModel.Toggle()
-				// Refresh git status and adjust REPL layout when sidebar state changes
-			if m.sidebarModel.IsVisible() {
-				if m.replModel != nil {
-					m.replModel.SetSidebarWidth(m.sidebarModel.GetWidth())
-				}
-				return m, m.sidebarModel.refreshCmd()
-			} else {
-				if m.replModel != nil {
-					m.replModel.SetSidebarWidth(0)
-				}
-			}
-			}
-			return m, nil
-		}
-
-		if m.fallbackNotification != nil && !m.fallbackNotification.Dismissed && msg.String() == "x" {
-			m.fallbackNotification.Dismissed = true
-			return m, nil
-		}
-		if m.screen == ScreenPermission && m.permissionModal != nil {
-			var resp tools.PermissionResponse
-			switch msg.String() {
-			case "y", "Y":
-				resp = m.permissionModal.Allow()
-			case "a", "A":
-				resp = m.permissionModal.AllowAlways()
-			case "n", "N":
-				resp = m.permissionModal.Deny()
-			case "ctrl+c":
-				resp = m.permissionModal.Deny()
-				m.permissionModalActive = false
-				m.permissionModal = nil
-				m.screen = m.prevScreen
-				return m, func() tea.Msg {
-					return PermissionResponseMsg{Response: resp}
-				}
-			case "e", "E":
-				return m, tea.Quit
-			default:
-				return m, nil
-			}
-			return m, func() tea.Msg {
-				return PermissionResponseMsg{Response: resp}
-			}
-		}
-		if msg.String() == "ctrl+c" {
-			// If workflow is running, cancel it
-			if m.workflowRunning && m.workflowCancel != nil {
-				m.workflowCancel()
-				m.currentOperation = "Workflow cancelled"
-				m.setWorkflowPhase(types.PhaseIdle)
-				return m, nil
-			}
-			// If streaming, cancel stream and stay in app
-			if m.screen == ScreenREPL && m.replModel != nil && m.replModel.streaming {
-				if m.replModel.streamCancel != nil {
-					m.replModel.streamCancel()
-				}
-				m.replModel.streaming = false
-				m.replModel.thinking = false
-				m.currentOperation = "Streaming cancelled. Press Ctrl+C again to exit."
-				return m, nil
-			}
-			// Graceful shutdown: save session state before quitting
-			if m.sessionManager != nil && m.workflowEngine != nil {
-				sessionID := m.workflowEngine.SessionID()
-				if sess, err := m.sessionManager.LoadSession(sessionID); err == nil && sess != nil {
-					if err := m.sessionManager.SaveSession(sess); err != nil {
-						m.currentOperation = "Saving session failed: " + err.Error()
-					}
-				}
-			}
-			return m, tea.Quit
-		}
+	// ── Slash command ─────────────────────────────────────────────────────────
 	case SlashCommandMsg:
-		return m.handleSlashCommand(msg.Command)
+		cmds = append(cmds, m.handleSlashCommand(msg.Command))
 
+	// ── Streaming ─────────────────────────────────────────────────────────────
+	case StreamMsg:
+		if m.replModel != nil {
+			cs, _ := m.replModel.handleStreamMsg(msg)
+			cmds = append(cmds, cs...)
+		}
+	case StreamDoneMsg:
+		if m.replModel != nil {
+			cs, _ := m.replModel.handleStreamDoneMsg(msg)
+			cmds = append(cmds, cs...)
+		}
+	case StreamErrorMsg:
+		if m.replModel != nil {
+			cs, _ := m.replModel.handleStreamErrorMsg(msg)
+			cmds = append(cmds, cs...)
+		}
+	case TickMsg:
+		if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
+			replM, cmd := m.replModel.Update(msg)
+			if r, ok := replM.(*ReplModel); ok {
+				m.replModel = r
+			}
+			cmds = append(cmds, cmd)
+		}
+
+	// ── Health ────────────────────────────────────────────────────────────────
 	case HealthCheckTickMsg:
-		if m.healthCheckInFlight {
-			return m, NextHealthTick(types.HealthCheckRetryDelay)
+		if m.activeProvider != "" && m.registry != nil {
+			if p, err := m.registry.Get(m.activeProvider); err == nil {
+				cmds = append(cmds, HealthCheckCmd(p, 10*time.Second))
+			}
 		}
-		if m.registry == nil || m.activeProvider == "" {
-			return m, NextHealthTick(types.HealthCheckInterval)
-		}
-
-		// Skip health check if we're already in a rate-limited state
-		// to avoid making things worse
-		if m.healthStatus.Status == "offline" ||
-			strings.Contains(strings.ToLower(m.healthStatus.Error), "rate limit") ||
-			strings.Contains(m.healthStatus.Error, "429") {
-			return m, NextHealthTick(120 * time.Second)
-		}
-
-		m.healthCheckInFlight = true
-		p := m.registry.ActiveProvider()
-		if p == nil {
-			m.healthCheckInFlight = false
-			return m, NextHealthTick(types.HealthCheckInterval)
-		}
-
-		// C-1 fix: run health check in a goroutine to avoid blocking Update()
-		timeout := time.Duration(m.config.Features.HealthCheckTimeoutSecs) * time.Second
-		return m, HealthCheckCmd(p, timeout)
+		cmds = append(cmds, NextHealthTick(types.HealthCheckInterval))
 
 	case HealthCheckResultMsg:
-		// C-1 fix: receive async health check result
-		m.healthCheckInFlight = false
 		m.healthStatus = msg.Result
-		m.healthStatusAtomic.Store(msg.Result) // atomic store for safe reads
-		m.headerCacheValid = false // H-10: invalidate header cache when health status changes
-		m.lastActivity = time.Now()
-		return m, NextHealthTick(calculateNextInterval(msg.Result))
+		m.lastHealth = time.Now()
 
+	// ── Cache refresh ─────────────────────────────────────────────────────────
 	case RefreshCacheMsg:
-		if m.registry == nil || m.activeProvider == "" {
-			return m, NextCacheRefreshTick(provider.DefaultCacheRefreshInterval)
+		if m.registry != nil {
+			provider := msg.ProviderName
+			if provider == "" {
+				provider = m.activeProvider
+			}
+			cmds = append(cmds, CacheRefreshCmd(m.registry, provider))
 		}
-
-		providerName := msg.ProviderName
-		if providerName == "" {
-			providerName = m.activeProvider
-		}
-
-		// C-2 fix: run cache refresh in a goroutine to avoid blocking Update()
-		return m, CacheRefreshCmd(m.registry, providerName)
-
 	case CacheRefreshResultMsg:
-		// C-2 fix: receive async cache refresh result
-		if msg.ErrMsg != "" {
-			m.currentOperation = msg.ErrMsg
-		} else {
-			m.currentOperation = ""
-			m.lastActivity = time.Now()
-		}
 		if msg.NextCmd != nil {
-			return m, msg.NextCmd
+			cmds = append(cmds, msg.NextCmd)
 		}
-		return m, nil
 
-	case AppMsg:
-		return m.handleAppMsg(msg)
+	// ── Permission modal ──────────────────────────────────────────────────────
+	case PermissionRequestMsg:
+		m.permRequest = &msg.Request
+		m.permCountdown = msg.Request.TimeoutSecs
+		m.screen = ScreenPermission
 
+	case PermissionResponseMsg:
+		cmds = append(cmds, m.handlePermissionResponse(msg))
+
+	case PermissionTickMsg:
+		cmds = append(cmds, m.handlePermissionTick())
+
+	// ── Question modal ────────────────────────────────────────────────────────
+	case QuestionRequestMsg:
+		m.questionRequest = &msg
+		m.screen = ScreenPermission // reuse permission overlay
+
+	case QuestionResponseMsg:
+		cmds = append(cmds, m.handleQuestionResponse(msg))
+
+	// ── Workflow phase result ─────────────────────────────────────────────────
+	case PhaseResultMsg:
+		cmds = append(cmds, m.handlePhaseResult(msg))
+
+	case PlanReadyMsg:
+		cmds = append(cmds, m.handlePlanReady(msg))
+
+	case ExecutePauseMsg:
+		if m.executeModel != nil {
+			m.executeModel.paused = msg.Paused
+		}
+
+	case HealResultMsg:
+		if m.verifyModel != nil {
+			m.verifyModel.Update(msg)
+		}
+
+	// ── Goal submitted ────────────────────────────────────────────────────────
+	case GoalSubmittedMsg:
+		m.workflowGoal = msg.Goal
+		m.screen = ScreenREPL
+		cmds = append(cmds, m.runWorkflowFromGoal(msg.Goal))
+
+	// ── Toast ─────────────────────────────────────────────────────────────────
+	case ToastMsg:
+		m.toastText = msg.Text
+		m.toastType = msg.Type
+		m.toastExpiry = time.Now().Add(msg.Duration)
+		cmds = append(cmds, tea.Tick(msg.Duration, func(time.Time) tea.Msg {
+			return ToastExpiryMsg{}
+		}))
+
+	case ToastExpiryMsg:
+		if time.Now().After(m.toastExpiry) {
+			m.toastText = ""
+		}
+
+	// ── Settings saved ────────────────────────────────────────────────────────
+	case SettingsSavedMsg:
+		// Optionally reload config here
+		m.screen = ScreenREPL
+
+	// ── Theme changed ─────────────────────────────────────────────────────────
+	case ThemeChangedMsg:
+		switch msg.Theme {
+		case "dark":
+			m.themeManager = theme.NewManager(theme.ModeDark)
+		case "light":
+			m.themeManager = theme.NewManager(theme.ModeLight)
+		case "auto":
+			m.themeManager = theme.NewManager(theme.ModeAuto)
+		}
+		t := m.themeManager.Current()
+		if m.replModel != nil {
+			m.replModel.SetTheme(t)
+		}
+		if m.sidebarModel != nil {
+			m.sidebarModel.SetTheme(t)
+		}
+		if m.cmdPalette != nil {
+			m.cmdPalette.SetTheme(t)
+		}
+		if m.settingsModel != nil {
+			m.settingsModel.SetTheme(t)
+		}
+
+	// ── Fallback event ────────────────────────────────────────────────────────
 	case FallbackEventMsg:
-		return m.handleFallbackEvent(msg)
+		m.activeProvider = msg.To
+		slog.Info("provider fallback", "from", msg.From, "to", msg.To, "reason", msg.Reason)
 
+	// ── Model selected ────────────────────────────────────────────────────────
+	case ModelSelectedMsg:
+		m.activeModel = &msg.Model
+		m.activeProvider = msg.Provider
+		if m.replModel != nil {
+			providerCmd := m.replModel.SetProvider(m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
+			cmds = append(cmds, providerCmd)
+		}
+		m.screen = ScreenREPL
+
+	// ── Sidebar refresh ───────────────────────────────────────────────────────
+	case SidebarRefreshMsg:
+		if m.sidebarModel != nil {
+			m.sidebarModel.Update(msg)
+		}
+
+	// ── Diff screen ───────────────────────────────────────────────────────────
+	case DiffScreenMsg:
+		if m.diffModel == nil {
+			m.diffModel = NewDiffModel(m.themeManager.Current())
+		}
+		m.diffModel.SetDiff(msg.Diff)
+		m.diffModel.width = m.width
+		m.diffModel.height = m.height
+		m.screen = ScreenDiff
+
+	case DiffCloseMsg:
+		m.screen = ScreenREPL
+
+	// ── Error ─────────────────────────────────────────────────────────────────
+	case ErrorMsg:
+		if m.replModel != nil {
+			m.replModel.AddMessage(makeAssistantMsg("Error: " + msg.Err.Error()))
+		}
+
+	// ── ProviderModelsFetched ─────────────────────────────────────────────────
 	case ProviderModelsFetchedMsg:
 		if m.replModel != nil {
 			m.replModel.handleProviderModelsFetched(msg)
 		}
-		return m, nil
 
-	case StreamChunkMsg:
-		if m.workflowRunning && m.currentPhase != types.PhaseDiscuss {
-			m.pendingStreamChunks = append(m.pendingStreamChunks, msg.Chunk)
-			return m, nil
-		}
+	// ── ThinkingBlockToggle ───────────────────────────────────────────────────
+	case ThinkingBlockToggleMsg:
 		if m.replModel != nil {
-			m.replModel.AppendStreamChunk(msg.Chunk)
+			m.replModel.handleThinkingToggle(msg)
 		}
-		return m, nil
 
-	case ErrorMsg:
-		m.currentOperation = m31errors.UserMessage(msg.Err)
-		return m, nil
+	// ── Model/command palette sub-model forwarding ────────────────────────────
+	default:
+		switch m.screen {
+		case ScreenModelSelector:
+			if m.msModel != nil {
+				newMs, cmd := m.msModel.Update(msg)
+				if nm, ok := newMs.(*ModelSelector); ok {
+					m.msModel = nm
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenResume:
+			if m.resumeModel != nil {
+				newResume, cmd := m.resumeModel.Update(msg)
+				if nr, ok := newResume.(*ResumeModel); ok {
+					m.resumeModel = nr
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenDiscuss:
+			if m.discussModel != nil {
+				newDiscuss, cmd := m.discussModel.Update(msg)
+				if nd, ok := newDiscuss.(*DiscussModel); ok {
+					m.discussModel = nd
+				}
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
 
-	case StreamErrorMsg:
-		// Check if this is a rate-limit or unavailable error that should trigger fallback
-		if m.registry != nil && m.activeProvider != "" && m.config != nil && m.config.Provider.AutoFallback {
-			reason := ""
-			if errors.Is(msg.Err, m31errors.ErrRateLimited) {
-				reason = "rate_limited"
-			} else if errors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
-				reason = "unavailable"
-			} else {
-				// Fallback string matching for unwrapped provider errors
-				errStr := msg.Err.Error()
-				if strings.Contains(errStr, "429") || strings.Contains(strings.ToLower(errStr), "rate limit") {
-					reason = "rate_limited"
-				} else if strings.Contains(errStr, "503") || strings.Contains(strings.ToLower(errStr), "unavailable") {
-					reason = "unavailable"
-				}
-			}
-			if reason != "" {
-				_, event, err := provider.FindFallbackProvider(m.registry, m.activeProvider)
-				if err == nil && event != nil {
-					m.activeProvider = event.To
-					wasPaused := m.workflowPaused
-					if m.workflowPaused {
-						m.workflowPaused = false
-					}
-					if m.replModel != nil {
-						fallbackCmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.replModel.sessionID, m.config)
-						m.replModel.SetDispatcher(m.dispatcher)
-						m.replModel.Update(msg)
-						var cmds []tea.Cmd
-						cmds = append(cmds, func() tea.Msg {
-							return FallbackEventMsg{From: event.From, To: event.To, Reason: reason}
-						}, fallbackCmd)
-						// Resume paused workflow after provider recovery
-						if wasPaused && m.workflowRunning && m.currentPhase != types.PhaseIdle {
-							cmds = append(cmds, RunPhaseCmd(m, m.currentPhase, m.workflowGoal))
-						}
-						return m, tea.Batch(cmds...)
-					}
-				}
-			}
+	return m, tea.Batch(cmds...)
+}
+
+// ─── Routing helpers ──────────────────────────────────────────────────────────
+
+// routeToScreen returns the initialization cmd for the current screen.
+func (m *AppState) routeToScreen() tea.Cmd {
+	switch m.screen {
+	case ScreenFirstRun:
+		if m.firstRunModel == nil {
+			fm := NewFirstRunModel(m.themeManager.Current())
+			m.firstRunModel = fm
 		}
-		// Context exceeded stops workflow entirely
-		if errors.Is(msg.Err, m31errors.ErrContextExceeded) && m.workflowRunning {
-			m.setWorkflowPhase(types.PhaseIdle)
-			m.resetDiscussQA()
-			m.flushPendingStreamChunks()
-			if m.replModel != nil {
-				m.replModel.Update(msg)
-			}
-			return m, nil
+		return m.firstRunModel.Init()
+	case ScreenREPL:
+		m.ensureReplModel()
+		if m.replModel.width == 0 {
+			m.replModel.width = m.width
+			m.replModel.height = m.height
 		}
-		// Pause workflow on stream error if running
-		if m.workflowRunning {
-			m.workflowPaused = true
+		return m.replModel.Init()
+	default:
+		return nil
+	}
+}
+
+// handleWindowResize resizes all sub-models.
+func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
+	sw := 0
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+		sw = m.sidebarModel.GetWidth()
+	}
+
+	if m.replModel != nil {
+		m.replModel.width = msg.Width
+		m.replModel.height = msg.Height
+		m.replModel.SetSidebarWidth(sw)
+		replM, cmd := m.replModel.Update(msg)
+		if r, ok := replM.(*ReplModel); ok {
+			m.replModel = r
 		}
-		// Pass the error through to the REPL model for display
+		return cmd
+	}
+
+	if m.planModel != nil {
+		m.planModel.SetDimensions(msg.Width, msg.Height)
+	}
+	if m.executeModel != nil {
+		m.executeModel.width = msg.Width
+		m.executeModel.height = msg.Height
+	}
+	if m.settingsModel != nil {
+		m.settingsModel.width = msg.Width
+		m.settingsModel.height = msg.Height
+	}
+	if m.cmdPalette != nil {
+		m.cmdPalette.SetDimensions(msg.Width, msg.Height)
+	}
+	if m.msModel != nil {
+		m.msModel.SetDimensions(msg.Width, msg.Height)
+	}
+	if m.resumeModel != nil {
+		m.resumeModel.SetDimensions(msg.Width, msg.Height)
+	}
+	if m.diffModel != nil {
+		m.diffModel.width = msg.Width
+		m.diffModel.height = msg.Height
+	}
+	return nil
+}
+
+// routeKeyMsg routes key events to the active screen.
+func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
+	// Command palette has priority
+	if m.cmdPalette != nil && m.cmdPalette.IsOpen() {
+		newPalette, cmd := m.cmdPalette.Update(msg)
+		m.cmdPalette = newPalette
+		return cmd
+	}
+
+	// Global leader key
+	if m.keyRegistry != nil {
+		handled, cmd := m.keyRegistry.Handle(msg.String(), CtxGlobal)
+		if handled {
+			return cmd
+		}
+	}
+
+	switch m.screen {
+	case ScreenREPL:
 		if m.replModel != nil {
-			m.replModel.Update(msg)
-		}
-		return m, nil
-
-	case PermissionRequestMsg:
-		return m.handlePermissionRequest(msg)
-
-	case PermissionResponseMsg:
-		return m.handlePermissionResponse(msg)
-
-	case PermissionTickMsg:
-		return m.handlePermissionTick()
-
-	case QuestionRequestMsg:
-		return m.handleQuestionRequest(msg)
-
-	case QuestionResponseMsg:
-		return m.handleQuestionResponse(msg)
-
-	case DiscussAnswerTimeoutMsg:
-		return m.handleDiscussAnswerTimeout()
-
-	case PlanReadyMsg:
-		return m.handlePlanReady(msg)
-
-	case workflow.TaskStartMsg:
-		return m.handleTaskStart(msg)
-
-	case workflow.TaskUpdateMsg:
-		return m.handleTaskUpdate(msg)
-
-	case PhaseResultMsg:
-		return m.handlePhaseResult(msg)
-
-	case SettingsSavedMsg:
-		return m.handleSettingsSaved()
-
-	case OptimizedMsg:
-		// BUG-05 fix: handle arbitrage optimization results
-		if len(msg.Recommendations) > 0 && m.planModel != nil {
-			m.planModel.ApplyArbitrage(msg.Recommendations)
-		}
-		m.currentOperation = fmt.Sprintf("Optimized %d tasks", len(msg.Recommendations))
-		return m, nil
-
-	case ExecutePauseMsg:
-		if m.workflowEngine != nil {
-			// Pause/resume is tracked locally on the ExecuteModel.
-			// The engine doesn't have Pause/Resume methods in V1,
-			// but the UI state is preserved for future use.
-			if msg.Paused {
-				m.currentOperation = "Execution paused"
-			} else {
-				m.currentOperation = "Execution resumed"
+			newRepl, cmd := m.replModel.Update(msg)
+			if r, ok := newRepl.(*ReplModel); ok {
+				m.replModel = r
 			}
+			return cmd
 		}
-		return m, nil
-
-	case HealResultMsg:
+	case ScreenPermission:
+		return m.handlePermissionKey(msg)
+	case ScreenModelSelector:
+		if m.msModel != nil {
+			newMs, cmd := m.msModel.Update(msg)
+			if nm, ok := newMs.(*ModelSelector); ok {
+				m.msModel = nm
+			}
+			return cmd
+		}
+	case ScreenSettings:
+		if m.settingsModel != nil {
+			newSettings, cmd := m.settingsModel.Update(msg)
+			m.settingsModel = newSettings
+			return cmd
+		}
+	case ScreenResume:
+		if m.resumeModel != nil {
+			newResume, cmd := m.resumeModel.Update(msg)
+			if nr, ok := newResume.(*ResumeModel); ok {
+				m.resumeModel = nr
+			}
+			return cmd
+		}
+	case ScreenPlan:
+		if m.planModel != nil {
+			newPlan, cmd := m.planModel.Update(msg)
+			m.planModel = newPlan
+			return cmd
+		}
+	case ScreenExecute:
+		if m.executeModel != nil {
+			newExec, cmd := m.executeModel.Update(msg)
+			m.executeModel = newExec
+			return cmd
+		}
+	case ScreenVerify:
 		if m.verifyModel != nil {
-			// Update task status based on heal result
-			for i := range m.verifyModel.tasks {
-				if m.verifyModel.tasks[i].ID == msg.TaskID {
-					if msg.Success {
-						m.verifyModel.tasks[i].Status = types.StatusDone
-					} else {
-						m.verifyModel.tasks[i].Status = types.StatusFailed
+			newVerify, cmd := m.verifyModel.Update(msg)
+			m.verifyModel = newVerify
+			return cmd
+		}
+	case ScreenShip:
+		if m.shipModel != nil {
+			newShip, cmd := m.shipModel.Update(msg)
+			m.shipModel = newShip
+			return cmd
+		}
+	case ScreenDiscuss:
+		if m.discussModel != nil {
+			newDiscuss, cmd := m.discussModel.Update(msg)
+			if nd, ok := newDiscuss.(*DiscussModel); ok {
+				m.discussModel = nd
+			}
+			return cmd
+		}
+	case ScreenDiff:
+		if m.diffModel != nil {
+			newDiff, cmd := m.diffModel.Update(msg)
+			if nd, ok := newDiff.(*DiffModel); ok {
+				m.diffModel = nd
+			}
+			return cmd
+		}
+	case ScreenGoalInput:
+		if m.goalInput != nil {
+			newGoal, cmd := m.goalInput.Update(msg)
+			if ng, ok := newGoal.(*GoalInputModel); ok {
+				m.goalInput = ng
+			}
+			return cmd
+		}
+	case ScreenFirstRun:
+		if m.firstRunModel != nil {
+			newFR, cmd := m.firstRunModel.Update(msg)
+			if nfr, ok := newFR.(*FirstRunModel); ok {
+				m.firstRunModel = nfr
+			}
+			return cmd
+		}
+	case ScreenLedger:
+		if m.ledgerModel != nil {
+			newLedger, cmd := m.ledgerModel.Update(msg)
+			if nl, ok := newLedger.(*LedgerModel); ok {
+				m.ledgerModel = nl
+			}
+			return cmd
+		}
+	case ScreenRollback:
+		if m.rollbackModel != nil {
+			newRB, cmd := m.rollbackModel.Update(msg)
+			if nr, ok := newRB.(*RollbackModel); ok {
+				m.rollbackModel = nr
+			}
+			return cmd
+		}
+	}
+	return nil
+}
+
+// handleAppMsg handles AppMsg screen transitions.
+func (m *AppState) handleAppMsg(msg AppMsg) tea.Cmd {
+	if msg.ModelSelected != nil {
+		m.activeModel = &msg.ModelSelected.Model
+		m.activeProvider = msg.ModelSelected.Provider
+		m.screen = ScreenREPL
+		return nil
+	}
+
+	if msg.Screen != 0 || msg.Action != "" {
+		return m.routeAppMsgAction(msg)
+	}
+
+	if msg.SessionID != "" {
+		return m.loadAndRestoreSession(msg.SessionID, true)
+	}
+
+	return nil
+}
+
+// routeAppMsgAction handles action-based screen routing.
+func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
+	switch msg.Action {
+	case "new_session":
+		return m.startNewSession()
+	case "session_list":
+		return m.openResumeScreen()
+	case "open_settings":
+		return m.openSettingsScreen()
+	case "open_palette":
+		if m.cmdPalette == nil {
+			m.cmdPalette = NewCommandPalette(m.cmdRegistry, m.themeManager.Current())
+			m.cmdPalette.SetDimensions(m.width, m.height)
+		}
+		m.cmdPalette.Open()
+		return nil
+	case "toggle_sidebar":
+		if m.sidebarModel != nil {
+			m.sidebarModel.Toggle()
+		}
+		return nil
+	case "toggle_theme":
+		newMode := m.themeManager.Cycle()
+		themeName := "dark"
+		switch newMode {
+		case theme.ModeLight:
+			themeName = "light"
+		case theme.ModeAuto:
+			themeName = "auto"
+		}
+		return func() tea.Msg {
+			return ThemeChangedMsg{Theme: themeName}
+		}
+	case "cancel_stream":
+		if m.streamCancelFn != nil {
+			m.streamCancelFn()
+			m.streamCancelFn = nil
+		}
+		return nil
+	}
+
+	// Screen-based routing
+	return m.navigateToScreen(msg.Screen)
+}
+
+// navigateToScreen transitions to the given screen.
+func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
+	m.prevScreen = m.screen
+	m.screen = screen
+	switch screen {
+	case ScreenREPL:
+		m.ensureReplModel()
+		return nil
+	case ScreenModelSelector:
+		if m.msModel == nil {
+			m.msModel = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
+			m.msModel.SetDimensions(m.width, m.height)
+		}
+		return m.msModel.Init()
+	case ScreenSettings:
+		if m.settingsModel == nil {
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath)
+			m.settingsModel.width = m.width
+			m.settingsModel.height = m.height
+		}
+		return nil
+	case ScreenResume:
+		return m.openResumeScreen()
+	case ScreenGoalInput:
+		if m.goalInput == nil {
+			m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
+			m.goalInput.width = m.width
+			m.goalInput.height = m.height
+		}
+		return m.goalInput.Init()
+	case ScreenLedger:
+		if m.ledgerModel == nil {
+			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
+			m.ledgerModel.width = m.width
+			m.ledgerModel.height = m.height
+		}
+		return nil
+	case ScreenRollback:
+		if m.rollbackModel == nil {
+			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, m.width, m.height)
+		}
+		return nil
+	case ScreenMetrics:
+		if m.metricsModel == nil {
+			m.metricsModel = NewMetricsModel(m.themeManager.Current())
+			m.metricsModel.width = m.width
+			m.metricsModel.height = m.height
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handleKeyAction processes KeyActionMsg strings.
+func (m *AppState) handleKeyAction(action string) tea.Cmd {
+	switch action {
+	case "open_settings":
+		return m.navigateToScreen(ScreenSettings)
+	case "toggle_sidebar":
+		if m.sidebarModel != nil {
+			m.sidebarModel.Toggle()
+			if m.replModel != nil {
+				sw := m.sidebarModel.GetWidth()
+				m.replModel.SetSidebarWidth(sw)
+			}
+		}
+		return nil
+	case "new_session":
+		return m.startNewSession()
+	case "session_list":
+		return m.openResumeScreen()
+	case "open_palette":
+		if m.cmdPalette == nil {
+			m.cmdPalette = NewCommandPalette(m.cmdRegistry, m.themeManager.Current())
+			m.cmdPalette.SetDimensions(m.width, m.height)
+		}
+		m.cmdPalette.Open()
+		return nil
+	case "cycle_model", "cycle_model_forward":
+		return m.navigateToScreen(ScreenModelSelector)
+	case "cycle_model_backward":
+		return m.navigateToScreen(ScreenModelSelector)
+	case "toggle_theme":
+		newMode := m.themeManager.Cycle()
+		themeName := "dark"
+		switch newMode {
+		case theme.ModeLight:
+			themeName = "light"
+		case theme.ModeAuto:
+			themeName = "auto"
+		}
+		return func() tea.Msg {
+			return ThemeChangedMsg{Theme: themeName}
+		}
+	case "cancel_stream":
+		if m.streamCancelFn != nil {
+			m.streamCancelFn()
+			m.streamCancelFn = nil
+		}
+		return nil
+	}
+	return nil
+}
+
+// ─── Session helpers ──────────────────────────────────────────────────────────
+
+// startNewSession creates a new session and switches to the REPL.
+func (m *AppState) startNewSession() tea.Cmd {
+	if m.sessionManager == nil {
+		return nil
+	}
+
+	modelID := ""
+	if m.activeModel != nil {
+		modelID = m.activeModel.ID
+	}
+
+	sess, err := m.sessionManager.NewSession(modelID, m.activeProvider)
+	if err != nil {
+		slog.Error("new session failed", "err", err)
+		return nil
+	}
+
+	m.sessionID = sess.ID
+	m.ensureReplModel()
+	m.replModel.ClearMessages()
+	m.replModel.SetSessionID(sess.ID)
+	m.workflowPhase = types.PhaseIdle
+	m.workflowGoal = ""
+	m.screen = ScreenREPL
+
+	return m.syncReplProvider(sess.ID)
+}
+
+// openResumeScreen loads session list and navigates to the resume screen.
+func (m *AppState) openResumeScreen() tea.Cmd {
+	return func() tea.Msg {
+		var sessions []*session.Session
+		if m.sessionManager != nil {
+			infos, err := m.sessionManager.ListSessions()
+			if err == nil {
+				for i, info := range infos {
+					if i >= 20 {
+						break
 					}
-					break
+					sess, err := m.sessionManager.LoadSession(info.ID)
+					if err == nil {
+						sessions = append(sessions, sess)
+					}
 				}
 			}
 		}
-		m.currentOperation = fmt.Sprintf("Heal result for task %d: success=%v", msg.TaskID, msg.Success)
-		return m, nil
+		return resumeScreenReadyMsg{sessions: sessions}
+	}
+}
 
-	case SidebarRefreshMsg:
-		if m.sidebarModel != nil {
-			m.sidebarModel.Update(msg)
-			threshold := 120
-			if m.config != nil && m.config.UI.SidebarWidthThreshold > 0 {
-				threshold = m.config.UI.SidebarWidthThreshold
-			}
-			if m.width > threshold && m.replModel != nil && !m.sidebarManuallyHidden {
-				m.sidebarModel.SetVisible(true)
-				m.replModel.SetSidebarWidth(m.sidebarModel.GetWidth())
-			}
+// resumeScreenReadyMsg carries loaded sessions for the resume screen.
+type resumeScreenReadyMsg struct {
+	sessions []*session.Session
+}
+
+// openSettingsScreen transitions to the settings screen.
+func (m *AppState) openSettingsScreen() tea.Cmd {
+	return m.navigateToScreen(ScreenSettings)
+}
+
+// runWorkflowFromGoal starts the discuss → plan → execute workflow.
+func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
+	m.workflowGoal = goal
+	cmds := []tea.Cmd{m.initWorkflowEngine()}
+	m.workflowPhase = types.PhaseInitialize
+	cmds = append(cmds, m.RunPhaseCmd(types.PhaseInitialize))
+	return tea.Batch(cmds...)
+}
+
+// ─── Permission helpers ───────────────────────────────────────────────────────
+
+// handlePermissionResponse processes the user's permission decision.
+func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
+	if m.dispatcher == nil {
+		return nil
+	}
+	reqID := m.permRequest.ID
+	allowed := msg.Response.Allowed
+	remember := msg.Response.Remember
+	m.permRequest = nil
+	m.screen = ScreenREPL
+	if m.dispatcher != nil {
+		go m.dispatcher.ApprovePermission(reqID, allowed, remember)
+	}
+	return nil
+}
+
+// handlePermissionTick decrements the permission countdown.
+func (m *AppState) handlePermissionTick() tea.Cmd {
+	if m.permCountdown > 0 {
+		m.permCountdown--
+		if m.permCountdown == 0 {
+			// Auto-deny on timeout
+			return m.handlePermissionResponse(PermissionResponseMsg{
+				Response: tools.PermissionResponse{
+					RequestID: m.permRequest.ID,
+					Allowed:   false,
+				},
+			})
 		}
-		return m, nil
+	}
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return PermissionTickMsg{}
+	})
+}
 
-	case ToastMsg:
-		m.toastText = msg.Text
-		m.toastExpires = time.Now().Add(msg.Duration)
-		m.toastType = msg.Type
-		// H-2 fix: schedule toast expiry via tea.Tick so View() stays pure
-		return m, tea.Tick(msg.Duration, func(t time.Time) tea.Msg {
-			return ToastExpiryMsg{}
+// handlePermissionKey processes keys in the permission modal.
+func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
+	if m.questionRequest != nil {
+		return m.handleQuestionKey(msg)
+	}
+	if m.permRequest == nil {
+		m.screen = ScreenREPL
+		return nil
+	}
+	switch msg.String() {
+	case "y", "enter":
+		return m.handlePermissionResponse(PermissionResponseMsg{
+			Response: tools.PermissionResponse{
+				RequestID: m.permRequest.ID,
+				Allowed:   true,
+			},
 		})
-
-	case ToastExpiryMsg:
-		// H-2 fix: clear expired toast in Update(), not View()
-		if m.toastText != "" && time.Now().After(m.toastExpires) {
-			m.toastText = ""
-			m.toastType = ""
-		}
-		return m, nil
-
-	case ThemeChangedMsg:
-		return m.handleThemeChanged(msg)
+	case "n", "esc":
+		return m.handlePermissionResponse(PermissionResponseMsg{
+			Response: tools.PermissionResponse{
+				RequestID: m.permRequest.ID,
+				Allowed:   false,
+			},
+		})
 	}
+	return nil
+}
 
-	// Handle diff screen messages at the app level
-	switch msg := msg.(type) {
-	case DiffScreenMsg:
-		m.diffModel = NewDiffModel(m.themeManager.Current(), m.width, m.height)
-		m.screen = ScreenDiff
-		_, cmd := m.diffModel.Update(msg)
-		return m, cmd
-	case DiffCloseMsg:
-		m.screen = m.prevScreen
-		if m.screen == ScreenPermission {
-			m.screen = ScreenREPL
-		}
-		return m, nil
-	case config.ConfigReloadMsg:
-		if msg.Error != nil {
-			slog.Warn("config reload failed", "error", msg.Error)
-			return m, nil
-		}
-		if msg.Config != nil {
-			// Detect theme change before updating config
-			oldTheme := ""
-			if m.config != nil {
-				oldTheme = m.config.UI.Theme
-			}
-			// BUG-12 fix: sync ALL config sections, not just UI/Permissions/Features/Ledger
-			m.config.UI = msg.Config.UI
-			m.config.Permissions = msg.Config.Permissions
-			m.config.Features = msg.Config.Features
-			m.config.Ledger = msg.Config.Ledger
-			m.config.Provider = msg.Config.Provider
-			m.config.Model = msg.Config.Model
-			m.config.Agents = msg.Config.Agents
-			// Apply theme change if different
-			if m.config.UI.Theme != oldTheme && m.config.UI.Theme != "" {
-				themeMsg := ThemeChangedMsg{Theme: m.config.UI.Theme}
-				return m.handleThemeChanged(themeMsg)
-			}
-			// Update dispatcher permissions
-			if m.dispatcher != nil {
-				m.dispatcher.UpdatePermissions(&msg.Config.Permissions)
-			}
-		}
-		return m, nil
+// handleQuestionKey processes keys in the question modal.
+func (m *AppState) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
+	if m.questionRequest == nil {
+		m.screen = ScreenREPL
+		return nil
 	}
+	return m.handleQuestionResponse(QuestionResponseMsg{Answer: ""})
+}
 
-	return m.routeToScreen(msg)
+// handleQuestionResponse processes the user's question answer.
+func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) tea.Cmd {
+	if m.dispatcher == nil || m.questionRequest == nil {
+		return nil
+	}
+	respCh := m.questionRequest.ResponseCh
+	m.questionRequest = nil
+	m.screen = ScreenREPL
+
+	if respCh != nil {
+		go func() {
+			respCh <- tools.QuestionResponse{Answer: msg.Answer}
+		}()
+	}
+	return nil
 }
