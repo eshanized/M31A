@@ -117,45 +117,8 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) ([]tea.Cmd, bool) {
 	var taCmd tea.Cmd
 	m.textarea, taCmd = m.textarea.Update(msg)
 
-	// Update slash command suggestions after textarea changes
-	if m.cmdRegistry != nil {
-		current := m.textarea.Value()
-		if strings.HasPrefix(current, "/") {
-			parts := strings.Fields(current)
-			partial := ""
-			if len(parts) > 0 {
-				partial = strings.TrimPrefix(parts[0], "/")
-			}
-
-			allCmds := m.cmdRegistry.AllCommands()
-			m.slashSuggestions = nil
-			if partial == "" {
-				m.slashSuggestions = allCmds
-			} else {
-				q := strings.ToLower(partial)
-				for _, cmd := range allCmds {
-					name := strings.ToLower(cmd.Name)
-					slash := strings.ToLower(cmd.Slash)
-					if strings.HasPrefix(name, q) || strings.HasPrefix(slash, q) || strings.Contains(name, q) {
-						m.slashSuggestions = append(m.slashSuggestions, cmd)
-					}
-				}
-			}
-
-			if len(m.slashSuggestions) > 0 {
-				m.slashVisible = true
-				m.slashSelected = 0
-				if len(m.slashSuggestions) > 8 {
-					m.slashSuggestions = m.slashSuggestions[:8]
-				}
-			} else {
-				m.slashVisible = false
-			}
-		} else {
-			m.slashVisible = false
-			m.slashSuggestions = nil
-		}
-	}
+	// Update slash command suggestions after textarea changes (canonical implementation)
+	m.updateSlashSuggestions()
 
 	return []tea.Cmd{taCmd}, false
 }
@@ -203,17 +166,7 @@ func (m *ReplModel) handleEnterKey() ([]tea.Cmd, bool) {
 		command = strings.TrimPrefix(command, "\uff01")
 		command = strings.TrimSpace(command)
 		if command == "" {
-			errMsg := types.Message{
-				Role:    "assistant",
-				Content: "Shell mode: type `!command` to execute a shell command directly (e.g., `!git status`).",
-				Segments: []types.MessageSegment{{
-					Type:    "content",
-					Content: "Shell mode: type `!command` to execute a shell command directly (e.g., `!git status`).",
-					Visible: true,
-				}},
-				CreatedAt: time.Now(),
-			}
-			m.messages = append(m.messages, errMsg)
+			m.messages = append(m.messages, makeAssistantMsg("Shell mode: type `!command` to execute a shell command directly (e.g., `!git status`)."))
 			m.renderMessages()
 			m.viewport.GotoBottom()
 			return nil, true
@@ -253,17 +206,7 @@ func (m *ReplModel) handleEnterKey() ([]tea.Cmd, bool) {
 			if m.activeModel != nil {
 				modelID = m.activeModel.ID
 			} else {
-				errMsg := types.Message{
-					Role:    "assistant",
-					Content: "No model selected. Set one up via /settings or /model command.",
-					Segments: []types.MessageSegment{{
-						Type:    "content",
-						Content: "No model selected. Set one up via /settings or /model command.",
-						Visible: true,
-					}},
-					CreatedAt: time.Now(),
-				}
-				m.messages = append(m.messages, errMsg)
+				m.messages = append(m.messages, makeAssistantMsg("No model selected. Set one up via /settings or /model command."))
 				m.renderMessages()
 				m.viewport.GotoBottom()
 				return nil, true
@@ -311,18 +254,8 @@ func (m *ReplModel) handleEnterKey() ([]tea.Cmd, bool) {
 		}
 	}
 
-	// No provider configured
-	errMsg := types.Message{
-		Role:    "assistant",
-		Content: "No AI provider configured. Set up an API key via /config or restart M31A to run first-run setup.",
-		Segments: []types.MessageSegment{{
-			Type:    "content",
-			Content: "No AI provider configured. Set up an API key via /config or restart M31A to run first-run setup.",
-			Visible: true,
-		}},
-		CreatedAt: time.Now(),
-	}
-	m.messages = append(m.messages, errMsg)
+	// No AI provider configured
+	m.messages = append(m.messages, makeAssistantMsg("No AI provider configured. Set up an API key via /config or restart M31A to run first-run setup."))
 	m.renderMessages()
 	m.viewport.GotoBottom()
 

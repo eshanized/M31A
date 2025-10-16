@@ -220,17 +220,7 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
 	// H-11: render styled banner for known error types
 	banner := renderErrorBanner(msg.Err, m.theme)
 
-	errMsg := types.Message{
-		Role:    "assistant",
-		Content: banner,
-		Segments: []types.MessageSegment{{
-			Type:    "content",
-			Content: banner,
-			Visible: true,
-		}},
-		CreatedAt: time.Now(),
-	}
-	m.messages = append(m.messages, errMsg)
+	m.messages = append(m.messages, makeAssistantMsg(banner))
 
 	m.streaming = false
 	m.thinking = false

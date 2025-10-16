@@ -25,12 +25,11 @@ func (m *AppState) handlePermissionRequest(msg PermissionRequestMsg) (tea.Model,
 	}
 	pm := components.NewPermissionModal(msg.Request, t, timeout)
 	m.permissionModal = pm
+	listenerCmds := m.listenerCmds()
 	return m, tea.Batch(
-		permissionListenerCmd(m.shutdownCtx, m.dispatcher),
-		questionListenerCmd(m.shutdownCtx, m.dispatcher),
-		tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
+		append(listenerCmds, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
 			return PermissionTickMsg{}
-		}),
+		}))...,
 	)
 }
 
@@ -46,7 +45,7 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) (tea.Mode
 		m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
 		return m.handlePermissionRequest(next)
 	}
-	return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
+	return m, tea.Batch(m.listenerCmds()...)
 }
 
 // handlePermissionTick handles PermissionTickMsg for the permission modal timeout.
@@ -65,7 +64,7 @@ func (m *AppState) handlePermissionTick() (tea.Model, tea.Cmd) {
 				m.pendingPermissionRequests = m.pendingPermissionRequests[1:]
 				return m.handlePermissionRequest(next)
 			}
-			return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
+			return m, tea.Batch(m.listenerCmds()...)
 		}
 		return m, tea.Every(100*time.Millisecond, func(t time.Time) tea.Msg {
 			return PermissionTickMsg{}

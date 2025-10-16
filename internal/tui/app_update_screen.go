@@ -139,35 +139,35 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-		return m, tea.Batch(cmds...)
+	cmds = append(cmds, m.listenerCmds()...)
+	return m, tea.Batch(cmds...)
 
-	case ScreenREPL:
-		if m.replModel == nil {
-			return m, nil
-		}
-		cmds, sent := m.replModel.Update(msg)
-		if sent {
-			m.lastActivity = time.Now()
-			m.currentOperation = "Ready"
-		}
-		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-		return m, tea.Batch(cmds...)
+case ScreenREPL:
+	if m.replModel == nil {
+		return m, nil
+	}
+	cmds, sent := m.replModel.Update(msg)
+	if sent {
+		m.lastActivity = time.Now()
+		m.currentOperation = "Ready"
+	}
+	cmds = append(cmds, m.listenerCmds()...)
+	return m, tea.Batch(cmds...)
 
-	case ScreenSettings:
-		if m.settingsModel == nil {
-			return m, nil
-		}
-		var cmd tea.Cmd
-		(*m.settingsModel), cmd = m.settingsModel.Update(msg)
-		cmds := []tea.Cmd{cmd}
-		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-		return m, tea.Batch(cmds...)
+case ScreenSettings:
+	if m.settingsModel == nil {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	(*m.settingsModel), cmd = m.settingsModel.Update(msg)
+	cmds := []tea.Cmd{cmd}
+	cmds = append(cmds, m.listenerCmds()...)
+	return m, tea.Batch(cmds...)
 
-	case ScreenPermission:
-		// Permission modal is visible; keep listeners active so subsequent
-		// permission requests are picked up after the current one resolves.
-		return m, tea.Batch(permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
+case ScreenPermission:
+	// Permission modal is visible; keep listeners active so subsequent
+	// permission requests are picked up after the current one resolves.
+	return m, tea.Batch(m.listenerCmds()...)
 
 	case ScreenResume:
 		if m.resumeModel == nil {
@@ -212,10 +212,10 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		cmds = append(cmds, permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher))
-		return m, tea.Batch(cmds...)
+	cmds = append(cmds, m.listenerCmds()...)
+	return m, tea.Batch(cmds...)
 
-	case ScreenModelSelector:
+case ScreenModelSelector:
 		// Intercept Esc to navigate back (two-step: first Esc blurs search, second Esc exits)
 		if keyMsg, ok := msg.(tea.KeyMsg); ok && !m.modelSelector.searchFocused && keyMsg.String() == "esc" {
 			m.screen = m.prevScreen
@@ -228,8 +228,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenPlan:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.planModel != nil {
+	cmds := m.listenerCmds()
+	if m.planModel != nil {
 			subCmds, appMsg := m.planModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -239,8 +239,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenExecute:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.executeModel != nil {
+	cmds := m.listenerCmds()
+	if m.executeModel != nil {
 			subCmds, appMsg := m.executeModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -250,8 +250,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenVerify:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.verifyModel != nil {
+	cmds := m.listenerCmds()
+	if m.verifyModel != nil {
 			subCmds, appMsg := m.verifyModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -261,8 +261,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenShip:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.shipModel != nil {
+	cmds := m.listenerCmds()
+	if m.shipModel != nil {
 			subCmds, appMsg := m.shipModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -292,8 +292,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenDiff:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.diffModel.lines != nil || m.diffModel.diff != "" {
+	cmds := m.listenerCmds()
+	if m.diffModel.lines != nil || m.diffModel.diff != "" {
 			updated, cmd := m.diffModel.Update(msg)
 			m.diffModel = updated.(DiffModel)
 			cmds = append(cmds, cmd)
@@ -301,8 +301,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenMetrics:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.metricsModel != nil {
+	cmds := m.listenerCmds()
+	if m.metricsModel != nil {
 			subCmds, appMsg := m.metricsModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -312,8 +312,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenGoalInput:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.goalInputModel != nil {
+	cmds := m.listenerCmds()
+	if m.goalInputModel != nil {
 			subCmds, appMsg := m.goalInputModel.Update(msg)
 			if appMsg != nil {
 				if appMsg.Action == "goal_submitted" && m.goalInputModel != nil {
@@ -335,8 +335,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenLedger:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.ledgerModel != nil {
+	cmds := m.listenerCmds()
+	if m.ledgerModel != nil {
 			subCmds, appMsg := m.ledgerModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -346,8 +346,8 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenRollback:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
-		if m.rollbackModel != nil {
+	cmds := m.listenerCmds()
+	if m.rollbackModel != nil {
 			subCmds, appMsg := m.rollbackModel.Update(msg)
 			if appMsg != nil {
 				m.screen = appMsg.Screen
@@ -362,7 +362,7 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ScreenDiscuss:
-		cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
+		cmds := m.listenerCmds()
 		if m.discussModel != nil {
 			subCmds, appMsg := m.discussModel.Update(msg)
 			if appMsg != nil {

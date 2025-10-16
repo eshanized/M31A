@@ -36,16 +36,7 @@ func (m *AppState) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		// BUG-7 fix: add explicit error instead of silent fallthrough when registry is nil.
 		if m.registry == nil {
 			if m.replModel != nil {
-				m.replModel.AddMessage(types.Message{
-					Role:    "assistant",
-					Content: "No providers configured. Use /settings to add an API key.",
-					Segments: []types.MessageSegment{{
-						Type:    "content",
-						Content: "No providers configured. Use /settings to add an API key.",
-						Visible: true,
-					}},
-					CreatedAt: time.Now(),
-				})
+				m.replModel.AddMessage(makeAssistantMsg("No providers configured. Use /settings to add an API key."))
 			}
 			return m, nil
 		}
@@ -101,17 +92,7 @@ func (m *AppState) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		// Bare alias like /plan — show usage hint instead of silently doing nothing
 		if m.replModel != nil {
-			errMsg := types.Message{
-				Role:    "assistant",
-				Content: fmt.Sprintf("Usage: /%s <goal> — e.g., /%s build a REST API", parts[0], parts[0]),
-				Segments: []types.MessageSegment{{
-					Type:    "content",
-					Content: fmt.Sprintf("Usage: /%s <goal> — e.g., /%s build a REST API", parts[0], parts[0]),
-					Visible: true,
-				}},
-				CreatedAt: time.Now(),
-			}
-			m.replModel.AddMessage(errMsg)
+			m.replModel.AddMessage(makeAssistantMsg(fmt.Sprintf("Usage: /%s <goal> — e.g., /%s build a REST API", parts[0], parts[0])))
 		}
 		return m, nil
 	}
@@ -295,17 +276,7 @@ func (m *AppState) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	// Unknown command — show as error in REPL
 	if m.replModel != nil {
-		errMsg := types.Message{
-			Role:    "assistant",
-			Content: fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd),
-			Segments: []types.MessageSegment{{
-				Type:    "content",
-				Content: fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd),
-				Visible: true,
-			}},
-			CreatedAt: time.Now(),
-		}
-		m.replModel.AddMessage(errMsg)
+		m.replModel.AddMessage(makeAssistantMsg(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd)))
 	}
 	return m, nil
 }

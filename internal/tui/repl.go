@@ -153,51 +153,8 @@ func (m *ReplModel) Update(msg tea.Msg) ([]tea.Cmd, bool) {
 	m.viewport, vpCmd = m.viewport.Update(msg)
 	m.spinner, spCmd = m.spinner.Update(msg)
 
-	// Detect slash command typing and update suggestions
-	if m.cmdRegistry != nil {
-		current := m.textarea.Value()
-		if strings.HasPrefix(current, "/") {
-			// Extract the partial command (first word after /)
-			parts := strings.Fields(current)
-			partial := ""
-			if len(parts) > 0 {
-				partial = strings.TrimPrefix(parts[0], "/")
-			}
-
-			// Generate matching commands
-			allCmds := m.cmdRegistry.AllCommands()
-			m.slashSuggestions = nil
-			if partial == "" {
-				// Show all commands when just "/" is typed
-				m.slashSuggestions = allCmds
-			} else {
-				// Filter by partial match
-				q := strings.ToLower(partial)
-				for _, cmd := range allCmds {
-					name := strings.ToLower(cmd.Name)
-					slash := strings.ToLower(cmd.Slash)
-					if strings.HasPrefix(name, q) || strings.HasPrefix(slash, q) || strings.Contains(name, q) {
-						m.slashSuggestions = append(m.slashSuggestions, cmd)
-					}
-				}
-			}
-
-			// Show suggestions if we have matches
-			if len(m.slashSuggestions) > 0 {
-				m.slashVisible = true
-				m.slashSelected = 0
-				// Limit to 8 suggestions
-				if len(m.slashSuggestions) > 8 {
-					m.slashSuggestions = m.slashSuggestions[:8]
-				}
-			} else {
-				m.slashVisible = false
-			}
-		} else {
-			m.slashVisible = false
-			m.slashSuggestions = nil
-		}
-	}
+	// Update slash command suggestions after textarea changes (canonical implementation)
+	m.updateSlashSuggestions()
 
 	cmds = append(cmds, taCmd, vpCmd, spCmd)
 	return cmds, false

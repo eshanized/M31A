@@ -68,14 +68,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) (tea.Model, tea.Cmd) {
 		m.resetDiscussQA()
 		m.flushPendingStreamChunks()
 		if m.replModel != nil {
-			m.replModel.AddMessage(types.Message{
-				Role:    "assistant",
-				Content: fmt.Sprintf("Workflow error in %s: %s", msg.Phase, msg.Error),
-				Segments: []types.MessageSegment{{
-					Type: "content", Content: fmt.Sprintf("Workflow error in %s: %s", msg.Phase, msg.Error), Visible: true,
-				}},
-				CreatedAt: time.Now(),
-			})
+			m.replModel.AddMessage(makeAssistantMsg(fmt.Sprintf("Workflow error in %s: %s", msg.Phase, msg.Error)))
 		}
 		return m, nil
 	}

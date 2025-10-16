@@ -197,7 +197,7 @@ func workflowMsgDrainer(app *AppState, gen int, done chan struct{}) tea.Cmd {
 
 
 func (m *AppState) Init() tea.Cmd {
-	cmds := []tea.Cmd{permissionListenerCmd(m.shutdownCtx, m.dispatcher), questionListenerCmd(m.shutdownCtx, m.dispatcher)}
+	cmds := m.listenerCmds()
 	if m.screen == ScreenREPL && m.registry != nil && m.activeProvider != "" {
 		cmds = append(cmds, HealthCheckTicker(context.Background(), types.HealthCheckInterval))
 		cmds = append(cmds, CacheRefreshTicker(m.activeProvider, provider.DefaultCacheRefreshInterval))
