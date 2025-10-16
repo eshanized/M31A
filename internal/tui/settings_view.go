@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // View renders the settings screen.
@@ -38,14 +39,14 @@ func (m SettingsModel) renderUnsavedWarning(bg string) string {
 		Render("[Y] Save  [N] Discard  [Esc] Cancel")
 
 	warningBox := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
+		Border(theme.DoubleBorder).
 		BorderForeground(m.theme.Warning).
 		Padding(1, 2).
 		Width(50).
 		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", hint))
 
 	// Center the modal
-	centeredModal := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, warningBox)
+	centeredModal := centerScreen(warningBox, m.width, m.height)
 
 	return lipgloss.JoinVertical(lipgloss.Top, bg, centeredModal)
 }

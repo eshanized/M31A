@@ -160,7 +160,7 @@ func (m *AppState) askNextDiscussQuestion() tea.Cmd {
 		m.discussAnswerTimeout.Stop()
 	}
 	// Start timeout (configurable via UIConfig.DiscussTimeout, default 5 minutes)
-	timeoutSecs := 300
+	timeoutSecs := types.DefaultPermissionTimeout
 	if m.config != nil && m.config.UI.DiscussTimeout > 0 {
 		timeoutSecs = m.config.UI.DiscussTimeout
 	}

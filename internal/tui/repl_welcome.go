@@ -38,7 +38,7 @@ func (m *ReplModel) renderWelcome() string {
 	if availableWidth < 20 {
 		availableWidth = 20
 	}
-	return lipgloss.Place(availableWidth, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, availableWidth, m.height)
 }
 
 // renderProviderCard shows current model/provider status or setup prompt.
@@ -118,17 +118,7 @@ func (m *ReplModel) renderLogo() string {
 	if version == "" {
 		version = "dev"
 	}
-	logo := `  __  _______  __
- /  |/  / __ \/ _/
- / /|_/ / /_/ / _/
- /_/  /_/\____/_/ ` + version
-
-	lines := strings.Split(logo, "\n")
-	styled := make([]string, len(lines))
-	for i, line := range lines {
-		styled[i] = lipgloss.NewStyle().Foreground(m.theme.Brand).Render(line)
-	}
-	return lipgloss.JoinVertical(lipgloss.Top, styled...)
+	return components.RenderLogo(version, false, m.theme.Brand)
 }
 
 // renderInputBox renders the input area with placeholder text.

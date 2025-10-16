@@ -73,7 +73,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	// Tool card with exact command (double-border for blocking semantics)
 	highlighted := highlightCommand(m.request.Command, m.theme)
 	cmdBox := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
+		Border(theme.DoubleBorder).
 		BorderForeground(m.theme.Border).
 		Padding(0, 1).
 		Width(modalWidth - 6).
@@ -97,11 +97,11 @@ func (m *PermissionModal) Render(width, height int) string {
 	} else if remaining <= 30*time.Second {
 		countdown = lipgloss.NewStyle().
 			Foreground(m.theme.Error).
-			Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(remaining)))
+			Render(fmt.Sprintf("Auto-deny in %s...", formatDurationClock(remaining)))
 	} else {
 		countdown = lipgloss.NewStyle().
 			Foreground(m.theme.Warning).
-			Render(fmt.Sprintf("Auto-deny in %s...", formatDuration(remaining)))
+			Render(fmt.Sprintf("Auto-deny in %s...", formatDurationClock(remaining)))
 	}
 
 	// Countdown bar using half-block characters (▀▄)
@@ -146,7 +146,7 @@ func (m *PermissionModal) Render(width, height int) string {
 		Background(m.theme.SurfaceElevated).
 		Foreground(m.theme.TextPrimary).
 		Padding(1, 2).
-		Border(lipgloss.DoubleBorder()).
+		Border(theme.DoubleBorder).
 		BorderForeground(m.theme.Brand).
 		Width(modalWidth).
 		Render(modalContent)
@@ -239,7 +239,7 @@ func (m *PermissionModal) riskStyle() lipgloss.Style {
 	}
 }
 
-func formatDuration(d time.Duration) string {
+func formatDurationClock(d time.Duration) string {
 	totalSecs := int(d.Seconds())
 	mins := totalSecs / 60
 	secs := totalSecs % 60

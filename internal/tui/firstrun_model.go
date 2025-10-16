@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 type FirstRunState int
@@ -285,13 +286,13 @@ func validateAPIKey(provider, key, openrouterBaseURL, zenBaseURL, openrouterRefe
 	case "openrouter":
 		baseURL := openrouterBaseURL
 		if baseURL == "" {
-			baseURL = "https://openrouter.ai/api/v1"
+			baseURL = types.DefaultOpenRouterBaseURL
 		}
 		url = baseURL + "/auth/key"
 	case "zen":
 		baseURL := zenBaseURL
 		if baseURL == "" {
-			baseURL = "https://opencode.ai/zen/v1"
+			baseURL = types.DefaultZenBaseURL
 		}
 		url = baseURL + "/models"
 	default:
@@ -303,15 +304,15 @@ func validateAPIKey(provider, key, openrouterBaseURL, zenBaseURL, openrouterRefe
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("User-Agent", "M31A/dev")
+	req.Header.Set("User-Agent", types.DefaultUserAgent)
 	if provider == "openrouter" {
 		referer := openrouterReferer
 		if referer == "" {
-			referer = "https://github.com/eshanized/M31A"
+			referer = types.DefaultReferer
 		}
 		title := openrouterTitle
 		if title == "" {
-			title = "M31A"
+			title = types.DefaultXTitle
 		}
 		req.Header.Set("HTTP-Referer", referer)
 		req.Header.Set("X-Title", title)

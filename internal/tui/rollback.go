@@ -290,7 +290,7 @@ func (m *RollbackModel) renderConfirmation() string {
 		Background(lipgloss.Color(m.theme.SurfaceElevated)).
 		Foreground(lipgloss.Color(m.theme.TextPrimary)).
 		Padding(1, 2).
-		Border(lipgloss.DoubleBorder()).
+		Border(theme.DoubleBorder).
 		BorderForeground(lipgloss.Color(m.theme.Warning))
 
 	hintStyle := lipgloss.NewStyle().
@@ -302,5 +302,5 @@ func (m *RollbackModel) renderConfirmation() string {
 		hintStyle.Render("Y: confirm  |  N: cancel"),
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/ledger"
 )
@@ -175,8 +176,7 @@ func (m *LedgerModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 // View renders the ledger screen.
 func (m *LedgerModel) View() string {
 	if !m.loaded {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			m.spinner.View()+" Loading ledger...")
+		return centerScreen(m.spinner.View()+" Loading ledger...", m.width, m.height)
 	}
 
 	var parts []string
@@ -323,19 +323,7 @@ func (m *LedgerModel) renderEntry(idx int, entry ledger.LedgerEntry) string {
 
 // renderSearchBar renders the filter input.
 func (m *LedgerModel) renderSearchBar() string {
-	label := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Render("🔍 ")
-
-	searchRow := lipgloss.JoinHorizontal(lipgloss.Center, label, m.searchInput.View())
-
-	style := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Padding(0, 1).
-		Width(m.width - 2)
-
-	return style.Render(searchRow)
+	return components.RenderSearchBar("🔍 ", m.searchInput.View(), m.width, m.theme.Brand, m.theme.TextSecondary)
 }
 
 func min(a, b int) int {

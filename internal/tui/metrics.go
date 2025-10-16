@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -79,7 +80,7 @@ func (m *MetricsModel) LoadStats(mgr *session.Manager) {
 	var dayLabels []string
 	for i := 13; i >= 0; i-- {
 		d := now.AddDate(0, 0, -i)
-		key := d.Format("2006-01-02")
+		key := d.Format(types.DateFormat)
 		label := d.Format("Jan 02")
 		dailyMap[key] = 0
 		dayLabels = append(dayLabels, label)
@@ -90,7 +91,7 @@ func (m *MetricsModel) LoadStats(mgr *session.Manager) {
 
 	for _, s := range sessions {
 		// Daily usage
-		key := s.StartedAt.Format("2006-01-02")
+		key := s.StartedAt.Format(types.DateFormat)
 		if _, ok := dailyMap[key]; ok {
 			dailyMap[key]++
 		}
@@ -105,7 +106,7 @@ func (m *MetricsModel) LoadStats(mgr *session.Manager) {
 	m.sparklineData = nil
 	for i := 13; i >= 0; i-- {
 		d := now.AddDate(0, 0, -i)
-		key := d.Format("2006-01-02")
+		key := d.Format(types.DateFormat)
 		sessions := dailyMap[key]
 		m.dailyUsage = append(m.dailyUsage, dailyStat{
 			label:    dayLabels[13-i],

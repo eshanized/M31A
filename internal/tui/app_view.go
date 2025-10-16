@@ -73,76 +73,65 @@ func (m *AppState) View() string {
 		if m.planModel != nil {
 			return m.planModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Plan screen — driven by workflow engine")
+		return centerScreen("Plan screen — driven by workflow engine", m.width, m.height)
 
 	case ScreenExecute:
 		if m.executeModel != nil {
 			return m.executeModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Execute screen — driven by workflow engine")
+		return centerScreen("Execute screen — driven by workflow engine", m.width, m.height)
 
 	case ScreenVerify:
 		if m.verifyModel != nil {
 			return m.verifyModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Verify screen — driven by workflow engine")
+		return centerScreen("Verify screen — driven by workflow engine", m.width, m.height)
 
 	case ScreenShip:
 		if m.shipModel != nil {
 			return m.shipModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Ship screen — driven by workflow engine")
+		return centerScreen("Ship screen — driven by workflow engine", m.width, m.height)
 
 	case ScreenDiff:
 		if m.diffModel.lines != nil || m.diffModel.diff != "" {
 			return m.renderToast(m.diffModel.View())
 		}
-		return m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading diff..."))
+		return m.renderToast(centerScreen("Loading diff...", m.width, m.height))
 
 	// New screens from TUI redesign proposal
 	case ScreenMetrics:
 		if m.metricsModel != nil {
 			return m.metricsModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading metrics...")
+		return centerScreen("Loading metrics...", m.width, m.height)
 
 	case ScreenGoalInput:
 		if m.goalInputModel != nil {
 			return m.goalInputModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading goal input...")
+		return centerScreen("Loading goal input...", m.width, m.height)
 
 	case ScreenLedger:
 		if m.ledgerModel != nil {
 			return m.ledgerModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading ledger...")
+		return centerScreen("Loading ledger...", m.width, m.height)
 
 	case ScreenRollback:
 		if m.rollbackModel != nil {
 			return m.rollbackModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading rollback...")
+		return centerScreen("Loading rollback...", m.width, m.height)
 
 	case ScreenDiscuss:
 		if m.discussModel != nil {
 			return m.discussModel.View()
 		}
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Loading discuss...")
+		return centerScreen("Loading discuss...", m.width, m.height)
 
 	default:
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Unknown screen")
+		return centerScreen("Unknown screen", m.width, m.height)
 	}
 }
 
@@ -177,7 +166,7 @@ func (m *AppState) renderWithPalette(base string) string {
 	if m.cmdPaletteOpen && m.cmdPalette != nil {
 		palette := m.cmdPalette.View()
 		if palette != "" {
-			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, palette)
+			return centerScreen(palette, m.width, m.height)
 		}
 	}
 	return base

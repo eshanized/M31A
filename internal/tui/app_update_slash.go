@@ -168,40 +168,9 @@ func (m *AppState) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 		// Session switching: /fork, /prev, /next set SessionID to transition
 		if result.SessionID != nil && *result.SessionID != sessionID {
-			var providerCmd tea.Cmd
-			if sess, err := m.sessionManager.LoadSession(*result.SessionID); err == nil && sess != nil {
-				if m.replModel == nil {
-					rp := NewReplModel(m.themeManager.Current(), m.version)
-					m.replModel = &rp
-				}
-				providerCmd = m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
-				m.replModel.SetDispatcher(m.dispatcher)
-				m.replModel.SetCommandRegistry(m.cmdRegistry)
-				// Replace messages with the loaded session's messages
-				m.replModel.ClearMessages()
-				for _, msg := range sess.Messages {
-					m.replModel.AddMessage(msg)
-				}
-				// Update workflow engine session ID so subsequent operations
-				// write to the correct session directory.
-				if m.workflowEngine != nil {
-					m.workflowEngine.SetSessionID(*result.SessionID)
-				}
-				m.dispatcher.SetSessionID(*result.SessionID)
-				m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
-				if m.planModel != nil {
-					m.planModel.sessionID = *result.SessionID
-				}
-				if m.executeModel != nil {
-					m.executeModel.sessionID = *result.SessionID
-				}
-				if m.verifyModel != nil {
-					m.verifyModel.sessionID = *result.SessionID
-				}
-				if m.shipModel != nil {
-					m.shipModel.sessionID = *result.SessionID
-				}
-			}
+			// Load session data using the shared helper (clearExisting=true for slash commands)
+			providerCmd := m.loadAndRestoreSession(*result.SessionID, true)
+			m.currentOperation = fmt.Sprintf("Session %s loaded", *result.SessionID)
 			if result.Cmd != nil {
 				return m, tea.Batch(result.Cmd, providerCmd)
 			}

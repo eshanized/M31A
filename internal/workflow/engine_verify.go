@@ -29,11 +29,7 @@ func (e *Engine) readTaskFiles(files []string) string {
 	return sb.String()
 }
 
-var skipDirs = map[string]bool{
-	"node_modules": true, "vendor": true, ".next": true,
-	"dist": true, "build": true, "target": true,
-	".venv": true, "venv": true, "__pycache__": true,
-}
+var skipDirs = m31types.SkipDirsMap()
 
 // listCwdFiles returns a list of files in the working directory with sizes.
 // Limits depth to 3 levels and skips known heavy directories.

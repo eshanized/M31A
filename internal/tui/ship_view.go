@@ -91,12 +91,8 @@ func (m *ShipModel) renderMetrics() string {
 func (m *ShipModel) renderCommits() string {
 	var sb strings.Builder
 
-	titleLen := len(fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits)))
-	remaining := m.width - 4
-	titleBar := fmt.Sprintf("── Commits (%d) ", len(m.summary.Commits))
-	if titleLen < remaining {
-		titleBar += strings.Repeat("─", remaining-titleLen)
-	}
+	title := fmt.Sprintf("Commits (%d)", len(m.summary.Commits))
+	titleBar := components.RenderSectionHeader(title, m.width-4)
 	sb.WriteString(lipgloss.NewStyle().
 		Bold(true).
 		Foreground(m.theme.TextSecondary).
@@ -134,12 +130,7 @@ func (m *ShipModel) renderCommits() string {
 func (m *ShipModel) renderDiffSummary() string {
 	var sb strings.Builder
 
-	titleBar := "── Diff Summary "
-	titleLen := len(titleBar)
-	remaining := m.width - 4
-	if titleLen < remaining {
-		titleBar += strings.Repeat("─", remaining-titleLen)
-	}
+	titleBar := components.RenderSectionHeader("Diff Summary", m.width-4)
 	sb.WriteString(lipgloss.NewStyle().
 		Bold(true).
 		Foreground(m.theme.TextSecondary).
@@ -193,12 +184,7 @@ func (m *ShipModel) renderDiffSummary() string {
 func (m *ShipModel) renderShipAction() string {
 	var sb strings.Builder
 
-	titleBar := "── Ship Action "
-	titleLen := len(titleBar)
-	remaining := m.width - 4
-	if titleLen < remaining {
-		titleBar += strings.Repeat("─", remaining-titleLen)
-	}
+	titleBar := components.RenderSectionHeader("Ship Action", m.width-4)
 	sb.WriteString(lipgloss.NewStyle().
 		Bold(true).
 		Foreground(m.theme.TextSecondary).

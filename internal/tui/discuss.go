@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // DiscussModel provides a dedicated Q&A flow for the discuss phase.
@@ -20,7 +21,7 @@ type DiscussModel struct {
 	currentIndex  int
 	answers       map[int]string
 	textInput     textarea.Model
-	timer         int // seconds remaining (300 = 5 min)
+	timer         int // seconds remaining (DefaultPermissionTimeout = 5 min)
 	timerActive   bool
 	questionCount int
 }
@@ -45,7 +46,7 @@ func NewDiscussModel(t theme.Theme, questions []string, width, height int) *Disc
 		currentIndex:  0,
 		answers:       make(map[int]string),
 		textInput:     ta,
-		timer:         300,
+		timer:         types.DefaultPermissionTimeout,
 		timerActive:   true,
 		width:         width,
 		height:        height,
@@ -76,7 +77,7 @@ func (m *DiscussModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 				}
 				m.currentIndex++
 				m.textInput.SetValue("")
-				m.timer = 300
+				m.timer = types.DefaultPermissionTimeout
 				if m.currentIndex >= m.questionCount {
 					return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_complete"}
 				}
@@ -104,7 +105,7 @@ func (m *DiscussModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
 				// Auto-skip on timeout
 				m.currentIndex++
 				m.textInput.SetValue("")
-				m.timer = 300
+				m.timer = types.DefaultPermissionTimeout
 				if m.currentIndex >= m.questionCount {
 					return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_complete"}
 				}
@@ -137,8 +138,7 @@ func (m *DiscussModel) tickCmd() tea.Cmd {
 // View renders the discuss screen.
 func (m *DiscussModel) View() string {
 	if m.currentIndex >= m.questionCount {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"All questions answered. Advancing to plan phase...")
+		return centerScreen("All questions answered. Advancing to plan phase...", m.width, m.height)
 	}
 
 	var parts []string
@@ -188,7 +188,7 @@ func (m *DiscussModel) View() string {
 	footer := footerStyle.Render("[Enter] Submit · [Tab] Skip question · [Esc] Skip all")
 	parts = append(parts, footer)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, strings.Join(parts, "\n"))
+	return centerScreen(strings.Join(parts, "\n"), m.width, m.height)
 }
 
 // renderProgressBar renders a progress indicator.

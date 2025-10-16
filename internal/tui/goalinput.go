@@ -216,5 +216,5 @@ func (m *GoalInputModel) View() string {
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Center, contentParts...)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }

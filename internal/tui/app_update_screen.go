@@ -112,9 +112,7 @@ func (m *AppState) routeToScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.replModel.SetCommandRegistry(m.cmdRegistry)
 				m.initialized = true
 				// Init sidebar
-				if m.sidebarModel == nil {
-					m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
-				}
+				m.ensureSidebarModel()
 				// Size the REPL immediately with current window dimensions
 				if m.width > 0 && m.height > 0 {
 					m.replModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -177,34 +175,9 @@ case ScreenPermission:
 		if appMsg != nil {
 			m.screen = appMsg.Screen
 			if appMsg.SessionID != "" {
-				// Load session data into the REPL model
-				if sess, err := m.sessionManager.LoadSession(appMsg.SessionID); err == nil && sess != nil {
-					if m.replModel == nil {
-						rp := NewReplModel(m.themeManager.Current(), m.version)
-						m.replModel = &rp
-					}
-					providerCmd := m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
-					m.replModel.SetDispatcher(m.dispatcher)
-					m.replModel.SetSessionID(sess.ID)
-					for _, msg := range sess.Messages {
-						m.replModel.AddMessage(msg)
-					}
-					if m.workflowEngine != nil {
-						m.workflowEngine.SetSessionID(sess.ID)
-					}
-					m.dispatcher.SetSessionID(sess.ID)
-					if m.planModel != nil {
-						m.planModel.sessionID = sess.ID
-					}
-					if m.executeModel != nil {
-						m.executeModel.sessionID = sess.ID
-					}
-					if m.verifyModel != nil {
-						m.verifyModel.sessionID = sess.ID
-					}
-					if m.shipModel != nil {
-						m.shipModel.sessionID = sess.ID
-					}
+				// Load session data using the shared helper
+				providerCmd := m.loadAndRestoreSession(appMsg.SessionID, false)
+				if providerCmd != nil {
 					m.currentOperation = fmt.Sprintf("Session %s loaded", appMsg.SessionID)
 					cmds = append(cmds, providerCmd)
 				} else {

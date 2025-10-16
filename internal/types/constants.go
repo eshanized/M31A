@@ -2,6 +2,10 @@ package types
 
 import "time"
 
+// NOTE: Some constants below are intentionally duplicated in internal/tools/constants.go
+// to avoid an import cycle (tools → types is allowed, but tools → types → tools is not).
+// If you change a value here, update the corresponding value in tools/constants.go.
+
 const (
 	ModelCacheTTL           = 5 * time.Minute
 	HealthCheckInterval     = 60 * time.Second
@@ -88,4 +92,23 @@ const (
 	ConfigWatchInterval = 5 * time.Second
 	// MaxProjectConfigDepth is the max parent directory depth for project config discovery
 	MaxProjectConfigDepth = 3
+
+	// DefaultUserAgent is the default User-Agent header for API requests
+	DefaultUserAgent = "M31A/dev"
+	// DefaultXTitle is the default X-Title header for OpenRouter
+	DefaultXTitle = "M31A"
+	// DateFormat is the standard date format used across the application
+	DateFormat = "2006-01-02"
 )
+
+// SkipDirs is the list of directories to skip during file traversal.
+var SkipDirs = []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"}
+
+// SkipDirsMap returns a map for O(1) lookup of skip directories.
+func SkipDirsMap() map[string]bool {
+	m := make(map[string]bool, len(SkipDirs))
+	for _, d := range SkipDirs {
+		m[d] = true
+	}
+	return m
+}

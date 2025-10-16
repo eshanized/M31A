@@ -9,10 +9,7 @@ import (
 
 func (m ModelSelector) View() string {
 	if !m.ready {
-		return lipgloss.Place(m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			m.spinner.View()+" Loading models...",
-		)
+		return centerScreen(m.spinner.View()+" Loading models...", m.width, m.height)
 	}
 
 	var parts []string

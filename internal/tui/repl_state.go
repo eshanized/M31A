@@ -25,15 +25,21 @@ func (m *ReplModel) SetTheme(t theme.Theme) {
 	}
 }
 
+// replWidth returns the available REPL width, clamped to a minimum of 20 columns.
+func (m *ReplModel) replWidth() int {
+	w := m.width - m.sidebarWidth
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
 // SetSidebarWidth updates the reserved width for the sidebar and recalculates
 // the REPL's internal widths. Call this when the sidebar is shown/hidden.
 func (m *ReplModel) SetSidebarWidth(sw int) {
 	m.sidebarWidth = sw
 	// Recalculate layout with current window dimensions
-	replWidth := m.width - sw
-	if replWidth < 20 {
-		replWidth = 20
-	}
+	replWidth := m.replWidth()
 	m.viewport.Width = replWidth
 	if m.msgRenderer != nil {
 		_ = m.msgRenderer.SetWidth(replWidth - 4)

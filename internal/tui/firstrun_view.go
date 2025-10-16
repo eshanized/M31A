@@ -75,18 +75,7 @@ func (m *FirstRunModel) viewWelcome() string {
 }
 
 func (m *FirstRunModel) renderWelcomeLogo() string {
-	t := m.theme
-	logo := `  __  _______  __
- /  |/  / __ \/ _/
- / /|_/ / /_/ / _/
- /_/  /_/\____/_/`
-
-	lines := strings.Split(logo, "\n")
-	styled := make([]string, len(lines))
-	for i, line := range lines {
-		styled[i] = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(line)
-	}
-	return lipgloss.JoinVertical(lipgloss.Top, styled...)
+	return components.RenderLogo("", true, m.theme.Brand)
 }
 
 func (m *FirstRunModel) versionLabel() string {
@@ -217,7 +206,7 @@ func (m *FirstRunModel) viewProviderSelect() string {
 	var lines []string
 	for i, p := range providers {
 		if p.isCard {
-			card := m.renderProviderCard(p, i == m.cursor)
+			card := m.renderProviderSelectionCard(p, i == m.cursor)
 			lines = append(lines, card)
 		} else {
 			marker := "  "
@@ -245,10 +234,10 @@ func (m *FirstRunModel) viewProviderSelect() string {
 		hints,
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }
 
-func (m *FirstRunModel) renderProviderCard(p struct {
+func (m *FirstRunModel) renderProviderSelectionCard(p struct {
 	key        string
 	icon       string
 	name       string
@@ -365,7 +354,7 @@ func (m *FirstRunModel) viewKeyInput() string {
 	parts = append(parts, footer)
 
 	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }
 
 func (m *FirstRunModel) viewValidating() string {
@@ -386,7 +375,7 @@ func (m *FirstRunModel) viewValidating() string {
 		subtitle,
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }
 
 func (m *FirstRunModel) viewKeychainPrompt() string {
@@ -420,7 +409,7 @@ func (m *FirstRunModel) viewKeychainPrompt() string {
 		lipgloss.JoinHorizontal(lipgloss.Center, yes, "   ", no),
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }
 
 func (m *FirstRunModel) viewComplete() string {
@@ -439,5 +428,5 @@ func (m *FirstRunModel) viewComplete() string {
 		text,
 	)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerScreen(content, m.width, m.height)
 }

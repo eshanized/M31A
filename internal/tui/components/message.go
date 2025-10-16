@@ -15,6 +15,15 @@ import (
 // "│ M31A" = 7 chars + 1 space = 8 chars total.
 const GutterWidth = 8
 
+// calcContentWidth returns the available content width, clamped to a minimum of 20 columns.
+func calcContentWidth(width int) int {
+	w := width - GutterWidth
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
 type MessageRenderer struct {
 	theme    theme.Theme
 	renderer *glamour.TermRenderer
@@ -94,10 +103,7 @@ func RenderTimestampBar(t theme.Theme, ts time.Time, width int) string {
 //   <content>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
 	gutterStyle := lipgloss.NewStyle().Foreground(r.theme.TextSecondary)
-	contentWidth := width - GutterWidth
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
+	contentWidth := calcContentWidth(width)
 
 	// Gutter line
 	gutter := gutterStyle.Render("│ USER")
@@ -135,10 +141,7 @@ func (r *MessageRenderer) renderUserContent(content string, width int) string {
 // │ M31A
 //   <content>
 func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) string {
-	contentWidth := width - GutterWidth
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
+	contentWidth := calcContentWidth(width)
 
 	// Render segments
 	var rendered []string
@@ -215,10 +218,7 @@ func FormatTimeBar(ts time.Time) string {
 func WrapWithGutter(content string, gutterChar lipgloss.Style, width int) string {
 	lines := strings.Split(content, "\n")
 	result := make([]string, len(lines))
-	contentWidth := width - GutterWidth
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
+	contentWidth := calcContentWidth(width)
 	for i, line := range lines {
 		result[i] = lipgloss.JoinHorizontal(lipgloss.Top,
 			gutterChar.Render("│"),

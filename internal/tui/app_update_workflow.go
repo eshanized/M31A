@@ -376,25 +376,19 @@ func (m *AppState) handleDiscussAnswerTimeout() (tea.Model, tea.Cmd) {
 
 // handleAppMsg handles AppMsg for workflow phase routing.
 func (m *AppState) handleAppMsg(msg AppMsg) (tea.Model, tea.Cmd) {
-	switch msg.Screen {
-	case ScreenExecute:
+	// Workflow phase routing table
+	phaseRoutes := map[Screen]types.WorkflowPhase{
+		ScreenExecute: types.PhaseExecute,
+		ScreenVerify:  types.PhaseVerify,
+		ScreenShip:    types.PhaseShip,
+	}
+
+	if phase, ok := phaseRoutes[msg.Screen]; ok {
 		if m.workflowEngine == nil {
 			return m, nil
 		}
-		m.setWorkflowPhase(types.PhaseExecute)
-		return m, RunPhaseCmd(m, types.PhaseExecute, m.workflowGoal)
-	case ScreenVerify:
-		if m.workflowEngine == nil {
-			return m, nil
-		}
-		m.setWorkflowPhase(types.PhaseVerify)
-		return m, RunPhaseCmd(m, types.PhaseVerify, m.workflowGoal)
-	case ScreenShip:
-		if m.workflowEngine == nil {
-			return m, nil
-		}
-		m.setWorkflowPhase(types.PhaseShip)
-		return m, RunPhaseCmd(m, types.PhaseShip, m.workflowGoal)
+		m.setWorkflowPhase(phase)
+		return m, RunPhaseCmd(m, phase, m.workflowGoal)
 	}
 
 	if msg.ModelSelected != nil {
@@ -423,9 +417,7 @@ func (m *AppState) handleAppMsg(msg AppMsg) (tea.Model, tea.Cmd) {
 		rp := NewReplModel(m.themeManager.Current(), m.version)
 		m.replModel = &rp
 		m.initialized = true
-		if m.sidebarModel == nil {
-			m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
-		}
+		m.ensureSidebarModel()
 		sessionID := ""
 		if m.sessionManager != nil && m.activeModel != nil && m.activeProvider != "" {
 			s, err := m.sessionManager.NewSession(m.activeModel.ID, m.activeProvider)

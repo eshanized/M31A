@@ -87,13 +87,7 @@ func (e *Engine) gitConfig() config.GitConfig {
 	if e.cfg != nil {
 		return e.cfg.Git
 	}
-	return config.GitConfig{
-		CommitPrefix: "feat",
-		FixPrefix:    "fix",
-		ShipPrefix:   "chore",
-		UserName:     "M31A",
-		UserEmail:    "m31a@local",
-	}
+	return config.DefaultGitConfig()
 }
 
 // modelForPhase returns the per-phase model ID from AgentsConfig,

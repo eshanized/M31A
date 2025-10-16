@@ -5,7 +5,26 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
+
+// diffLineStyle returns the style and prefix for a diff line type.
+func diffLineStyle(lineType DiffLineType, th *theme.Theme) (lipgloss.Style, string) {
+	switch lineType {
+	case DiffAdded:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.DiffAdded)).Background(lipgloss.Color(th.DiffAddedBg)), "+"
+	case DiffDeleted:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.DiffRemoved)).Background(lipgloss.Color(th.DiffRemovedBg)), "-"
+	case DiffHunk:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Thinking)).Italic(true), " "
+	case DiffHeader:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Brand)).Bold(true), " "
+	case DiffContext:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Text)).Background(lipgloss.Color(th.DiffContextBg)), " "
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Text)), " "
+	}
+}
 
 // View implements tea.Model.View.
 func (m DiffModel) View() string {
@@ -61,26 +80,7 @@ func (m DiffModel) renderSplitView() string {
 		var lineStyle lipgloss.Style
 		var prefix string
 
-		switch line.Type {
-		case DiffAdded:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.DiffAdded).Background(m.theme.DiffAddedBg)
-			prefix = "+"
-		case DiffDeleted:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.DiffRemoved).Background(m.theme.DiffRemovedBg)
-			prefix = "-"
-		case DiffHunk:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.Thinking).Italic(true)
-			prefix = " "
-		case DiffHeader:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
-			prefix = " "
-		case DiffContext:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.Text).Background(m.theme.DiffContextBg)
-			prefix = " "
-		default:
-			lineStyle = lipgloss.NewStyle().Foreground(m.theme.Text)
-			prefix = " "
-		}
+		lineStyle, prefix = diffLineStyle(line.Type, &m.theme)
 
 		gutterStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
 		switch line.Type {
@@ -157,37 +157,7 @@ func (m DiffModel) renderUnifiedView() string {
 		var lineStyle lipgloss.Style
 		var prefix string
 
-		switch line.Type {
-		case DiffAdded:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.DiffAdded).
-				Background(m.theme.DiffAddedBg)
-			prefix = "+"
-		case DiffDeleted:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.DiffRemoved).
-				Background(m.theme.DiffRemovedBg)
-			prefix = "-"
-		case DiffHunk:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.Thinking).
-				Italic(true)
-			prefix = " "
-		case DiffHeader:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.Brand).
-				Bold(true)
-			prefix = " "
-		case DiffContext:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.Text).
-				Background(m.theme.DiffContextBg)
-			prefix = " "
-		default:
-			lineStyle = lipgloss.NewStyle().
-				Foreground(m.theme.Text)
-			prefix = " "
-		}
+		lineStyle, prefix = diffLineStyle(line.Type, &m.theme)
 
 		gutterStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
 		switch line.Type {

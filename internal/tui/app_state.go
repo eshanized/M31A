@@ -26,6 +26,8 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
+const offlineModeMsg = "No providers available — offline mode. History is readable but no new messages."
+
 type FallbackNotification struct {
 	Event     FallbackEventMsg
 	Dismissed bool
@@ -389,9 +391,9 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 			if registry == nil || registry.ActiveProvider() == nil {
 				app.healthStatus = types.HealthStatus{
 					Status: "offline",
-					Error:  "No providers available — offline mode. History is readable but no new messages.",
+					Error:  offlineModeMsg,
 				}
-				app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
+				app.currentOperation = offlineModeMsg
 			} else {
 				app.healthStatus = types.HealthStatus{Status: "live"}
 			}
@@ -406,9 +408,9 @@ func NewApp(version string, registry *provider.Registry, configPath string) (*Ap
 		app.replModel.SetCommandRegistry(app.cmdRegistry)
 		app.healthStatus = types.HealthStatus{
 			Status:  "offline",
-			Error:   "No providers available — offline mode. History is readable but no new messages.",
+			Error:   offlineModeMsg,
 		}
-		app.currentOperation = "No providers available — offline mode. History is readable but no new messages."
+		app.currentOperation = offlineModeMsg
 	} else {
 		rp := NewReplModel(tm.Current(), version)
 		app.screen = ScreenREPL

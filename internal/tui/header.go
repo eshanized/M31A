@@ -65,7 +65,7 @@ func RenderHeader(t theme.Theme, provider string, model *types.ModelInfo,
 		switch {
 		case ratio >= 0.95:
 			color = t.Error
-		case ratio >= 0.80:
+		case ratio >= types.ContextWarningThreshold:
 			color = t.Warning
 		default:
 			color = t.TextSecondary

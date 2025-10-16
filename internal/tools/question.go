@@ -103,7 +103,7 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 		allowCustom = ac
 	}
 
-	timeoutSecs := 300
+	timeoutSecs := types.DefaultPermissionTimeout
 	if tRaw, ok := input.Params["timeout"].(float64); ok {
 		timeoutSecs = int(tRaw)
 	}

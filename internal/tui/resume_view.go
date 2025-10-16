@@ -7,6 +7,9 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -148,8 +151,8 @@ func (m *ResumeModel) renderTimeline() string {
 	var groupOrder []string
 
 	now := time.Now()
-	today := now.Format("2006-01-02")
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+	today := now.Format(types.DateFormat)
+	yesterday := now.AddDate(0, 0, -1).Format(types.DateFormat)
 
 	for _, item := range items {
 		si, ok := item.(sessionItem)
@@ -162,7 +165,7 @@ func (m *ResumeModel) renderTimeline() string {
 			dateKey = "unknown"
 			label = "UNKNOWN"
 		} else {
-			dateStr := si.startedAt.Format("2006-01-02")
+			dateStr := si.startedAt.Format(types.DateFormat)
 			switch dateStr {
 			case today:
 				dateKey = today
@@ -277,7 +280,7 @@ func (m *ResumeModel) renderSessionCard(si sessionItem) string {
 	}
 	stats := fmt.Sprintf("%d messages · %s", si.msgCount, provider)
 	if si.duration > 0 {
-		stats += fmt.Sprintf(" · %s", formatDuration(si.duration))
+		stats += fmt.Sprintf(" · %s", formatDurationHuman(si.duration))
 	}
 	lines = append(lines, "   "+lipgloss.NewStyle().
 		Foreground(m.theme.TextMuted).
@@ -336,19 +339,7 @@ func (m *ResumeModel) renderPhaseBadge(phase string) string {
 
 // renderSearchBar renders the search input with a label.
 func (m *ResumeModel) renderSearchBar() string {
-	label := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Render("> ")
-
-	searchRow := lipgloss.JoinHorizontal(lipgloss.Center, label, m.searchInput.View())
-
-	style := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Padding(0, 1).
-		Width(m.width - 2)
-
-	return style.Render(searchRow)
+	return components.RenderSearchBar("> ", m.searchInput.View(), m.width, m.theme.Brand, m.theme.TextSecondary)
 }
 
 // renderPreview renders the session preview pane.
@@ -434,15 +425,15 @@ func (m *ResumeModel) renderDeleteConfirmation() string {
 		Background(lipgloss.Color(m.theme.SurfaceElevated)).
 		Foreground(lipgloss.Color(m.theme.TextPrimary)).
 		Padding(1, 2).
-		Border(lipgloss.DoubleBorder()).
+		Border(theme.DoubleBorder).
 		BorderForeground(lipgloss.Color(m.theme.Warning))
 
 	rendered := confirmStyle.Render(prompt)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)
+	return centerScreen(rendered, m.width, m.height)
 }
 
 // formatDuration formats a duration as a human-readable string.
-func formatDuration(d time.Duration) string {
+func formatDurationHuman(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}

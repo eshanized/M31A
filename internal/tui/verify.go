@@ -384,5 +384,5 @@ func (m *VerifyModel) renderHealConfirmation() string {
 		Width(40).
 		Render(content)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return centerScreen(modal, m.width, m.height)
 }

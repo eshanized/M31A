@@ -35,10 +35,7 @@ func (m *ReplModel) View() string {
 	}
 
 	// Apply left border + background to the input frame
-	replWidth := m.width - m.sidebarWidth
-	if replWidth < 20 {
-		replWidth = 20
-	}
+	replWidth := m.replWidth()
 	borderStyle := lipgloss.NewStyle().
 		Border(theme.SplitBorder, true, false, false, false).
 		BorderForeground(borderColor).

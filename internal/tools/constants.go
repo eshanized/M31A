@@ -2,6 +2,10 @@ package tools
 
 import "time"
 
+// NOTE: Some constants below are intentionally duplicated from internal/types/constants.go
+// to avoid an import cycle. If you change a value here, update the corresponding value in
+// types/constants.go.
+
 const (
 	// Bash tool constants
 	BashKillGracePeriod = 5 * time.Second

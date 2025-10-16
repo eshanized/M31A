@@ -12,6 +12,7 @@ import (
 const (
 	dirPermission  = 0755
 	filePermission = 0644
+	dateFormat     = "2006-01-02"
 )
 
 var defaultLogger *slog.Logger
@@ -79,7 +80,7 @@ func rotateLogFiles(logDir, logFile string) error {
 	modDate := time.Date(info.ModTime().Year(), info.ModTime().Month(), info.ModTime().Day(), 0, 0, 0, 0, now.Location())
 
 	if modDate.Before(today) {
-		rotatedName := fmt.Sprintf("%s.%s", logFile, modDate.Format("2006-01-02"))
+		rotatedName := fmt.Sprintf("%s.%s", logFile, modDate.Format(dateFormat))
 		if err := os.Rename(logFile, rotatedName); err != nil {
 			return fmt.Errorf("cannot rotate log file: %w", err)
 		}
@@ -110,7 +111,7 @@ func removeOldRotatedFiles(logDir string) error {
 		}
 		name := entry.Name()
 		datePart := strings.TrimPrefix(name, "m31a.log.")
-		parsed, err := time.Parse("2006-01-02", datePart)
+		parsed, err := time.Parse(dateFormat, datePart)
 		if err != nil {
 			continue
 		}

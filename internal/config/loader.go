@@ -43,7 +43,7 @@ func DefaultConfig() *Config {
 		},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
-			TokenEMAAlpha:           0.3,
+			TokenEMAAlpha:           types.EMACorrectionAlpha,
 			DefaultContextLength:    types.DefaultContextLength,
 		},
 		Features: FeaturesConfig{
@@ -64,7 +64,7 @@ func DefaultConfig() *Config {
 			MaxBackupsPerFile:    types.DefaultMaxBackupsPerFile,
 			WebfetchMaxRedirects: types.DefaultWebfetchMaxRedirects,
 			WebfetchUserAgent:    "M31A/dev",
-			SkipDirs:             []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"},
+			SkipDirs:             types.SkipDirs,
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",
@@ -133,7 +133,7 @@ func Load(path string) (*Config, error) {
 				defined := make(map[string]bool)
 				for _, key := range meta.Undecoded() {
 					defined[key.String()] = true
-				}
+}
 				mergeConfig(cfg, &projectCfg, defined)
 			}
 		}
@@ -150,8 +150,8 @@ func Load(path string) (*Config, error) {
 
 	// M-12: TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
 	if cfg.Model.TokenEMAAlpha == 0 {
-		slog.Warn("token_ema_alpha is 0 (disabled), applying default 0.3")
-		cfg.Model.TokenEMAAlpha = 0.3
+		slog.Warn("token_ema_alpha is 0 (disabled), applying default")
+		cfg.Model.TokenEMAAlpha = types.EMACorrectionAlpha
 	}
 
 	return cfg, nil
@@ -677,4 +677,15 @@ func atomicWrite(path string, data []byte) error {
 	}
 
 	return nil
+}
+
+// DefaultGitConfig returns the default git configuration.
+func DefaultGitConfig() GitConfig {
+	return GitConfig{
+		CommitPrefix: "feat",
+		FixPrefix:    "fix",
+		ShipPrefix:   "chore",
+		UserName:     "M31A",
+		UserEmail:    "m31a@local",
+	}
 }
