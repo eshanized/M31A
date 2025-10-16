@@ -11,13 +11,20 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/log"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/provider/openrouter"
 	"github.com/eshanized/M31A/internal/provider/zen"
+	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/keychain"
+	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/pkg/rollback"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 var Version = "dev"
@@ -57,7 +64,7 @@ func main() {
 		"arch", runtime.GOARCH,
 	)
 
-	// Resolve config path: respect M31A_CONFIG env var, default to ~/.m31a/config.toml
+	// Resolve config path
 	configPath := os.Getenv("M31A_CONFIG")
 	if configPath == "" {
 		home, err := os.UserHomeDir()
@@ -68,13 +75,11 @@ func main() {
 		configPath = filepath.Join(home, ".m31a", "config.toml")
 	}
 
-	// Ensure config directory exists
 	if err := os.MkdirAll(filepath.Dir(configPath), types.DirPermission); err != nil {
 		logger.Error("cannot create config directory", "error", err)
 		os.Exit(1)
 	}
 
-	// Load config
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		logger.Error("failed to load config", "error", err)
@@ -84,7 +89,7 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
-	// Initialize keychain (may fail gracefully — keychain is optional)
+	// Keychain
 	kc, kcErr := keychain.New()
 	if kcErr != nil {
 		logger.Warn("keychain initialization failed", "error", kcErr)
@@ -95,10 +100,9 @@ func main() {
 		}
 	}
 
-	// Create provider registry
+	// Provider registry
 	registry := provider.NewRegistry()
 
-	// Register OpenRouter if API key available
 	if cfg.Provider.OpenRouter.APIKey != "" {
 		cacheTTL := types.ModelCacheTTL
 		if cfg.Features.ModelCacheTTLMinutes > 0 {
@@ -128,7 +132,6 @@ func main() {
 		}
 	}
 
-	// Register Zen if API key available
 	if cfg.Provider.Zen.APIKey != "" {
 		cacheTTL := types.ModelCacheTTL
 		if cfg.Features.ModelCacheTTLMinutes > 0 {
@@ -157,25 +160,70 @@ func main() {
 		}
 	}
 
-	// Set active provider based on config default (first registered if default empty)
 	if cfg.Provider.Default != "" {
 		if err := registry.SetActive(cfg.Provider.Default); err != nil {
-			logger.Warn("configured default provider not registered, using first registered provider", "default", cfg.Provider.Default, "error", err)
+			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", err)
 		}
 	}
 	if registry.Active() == "" {
 		logger.Warn("no active provider — TUI will start without LLM access")
 	}
 
-	// Create and launch TUI app
-	app, err := tui.NewApp(Version, registry, configPath)
+	// Session manager
+	sessionsDir := filepath.Join(filepath.Dir(configPath), "sessions")
+	sessionMgr := session.NewManager(sessionsDir, session.ManagerOpts{})
+
+	// Tools dispatcher
+	workDir, _ := os.Getwd()
+	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, sessionsDir, &cfg.Permissions)
 	if err != nil {
-		logger.Error("failed to initialize application", "error", err)
-		os.Exit(1)
+		logger.Warn("failed to create tools dispatcher", "error", err)
+		dispatcher, _ = tools.DefaultDispatcher(workDir, backupDir, sessionsDir, nil)
 	}
+
+	// Git client
+	gitClient := git.New(workDir)
+
+	// Ledger
+	ledgerPath := filepath.Join(filepath.Dir(configPath), "LEDGER.md")
+	ledgerClient := ledger.New(ledgerPath)
+
+	// Rollback
+	rollbackClient := rollback.New(gitClient)
+
+	// AutoDream (starts with empty messages; REPL injects messages later)
+	autoDreamClient := autodream.New(nil)
+
+	// Theme
+	themeMode := theme.ModeDark
+	switch cfg.UI.Theme {
+	case "light":
+		themeMode = theme.ModeLight
+	case "auto":
+		themeMode = theme.ModeAuto
+	}
+
+	// Build and launch TUI app
+	app := tui.NewApp(
+		cfg,
+		configPath,
+		registry,
+		sessionMgr,
+		dispatcher,
+		gitClient,
+		ledgerClient,
+		rollbackClient,
+		autoDreamClient,
+		Version,
+		themeMode,
+	)
+
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		logger.Error("TUI exited with error", "error", err)
 		os.Exit(1)
 	}
+
+	app.Shutdown()
 }
