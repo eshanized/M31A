@@ -18,6 +18,14 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
+// CommandInfo describes a slash command for autocomplete and help.
+type CommandInfo struct {
+	Name        string
+	Description string
+	Slash       string // e.g. "/help"
+	Execute     func() tea.Cmd // optional: used by command palette
+}
+
 // CommandResult is the result of executing a slash command.
 type CommandResult struct {
 	Success         bool
@@ -32,10 +40,10 @@ type CommandResult struct {
 	ResumeQuestions []string
 }
 
-// CommandHandler is a function that handles a slash command.
+// CommandHandler processes a slash command invocation.
 type CommandHandler func(args []string, ctx CommandContext) CommandResult
 
-// CommandContext carries shared components that command handlers need.
+// CommandContext carries shared resources that command handlers need.
 type CommandContext struct {
 	Registry       *provider.Registry
 	SessionManager *session.Manager
@@ -49,10 +57,10 @@ type CommandContext struct {
 	AutoDream      *autodream.Consolidator
 	WorkflowEngine workflowEngineInterface
 	CmdRegistry    *CommandRegistry
-	ClearMessages  func() // callback to clear REPL message history
+	ClearMessages  func()
 }
 
-// CommandRegistry holds a map of registered command handlers and their descriptions.
+// CommandRegistry maps slash command names to handlers and descriptions.
 type CommandRegistry struct {
 	handlers         map[string]CommandHandler
 	descriptions     map[string]string
@@ -67,7 +75,7 @@ func NewCommandRegistry() *CommandRegistry {
 	}
 }
 
-// Register adds a command handler with a description to the registry.
+// Register adds a command handler with description.
 func (r *CommandRegistry) Register(name string, handler CommandHandler, description string) {
 	r.handlers[name] = handler
 	r.descriptions[name] = description
@@ -103,14 +111,13 @@ func (r *CommandRegistry) AllCommands() []CommandInfo {
 	return cmds
 }
 
-// AllCommandsWithExecute returns all registered commands with Execute functions
-// wired to emit SlashCommandMsg. Used by the command palette so that pressing
-// Enter on a selected command routes through the standard slash-command flow.
+// AllCommandsWithExecute returns commands with Execute functions wired to emit SlashCommandMsg.
+// Used by the command palette.
 func (r *CommandRegistry) AllCommandsWithExecute() []CommandInfo {
 	names := r.List()
 	cmds := make([]CommandInfo, 0, len(names))
 	for _, name := range names {
-		cmdName := name // capture for closure
+		cmdName := name
 		cmds = append(cmds, CommandInfo{
 			Name:        cmdName,
 			Description: r.descriptions[cmdName],
@@ -125,7 +132,7 @@ func (r *CommandRegistry) AllCommandsWithExecute() []CommandInfo {
 	return cmds
 }
 
-// Execute parses input as a command, looks up the handler, and runs it.
+// Execute parses input as a slash command and runs the handler.
 func (r *CommandRegistry) Execute(input string, ctx CommandContext) (CommandResult, bool) {
 	name, args, ok := ParseCommand(input)
 	if !ok {
@@ -151,11 +158,23 @@ func (r *CommandRegistry) Execute(input string, ctx CommandContext) (CommandResu
 	return handler(args, ctx), true
 }
 
-// suggestCommand finds the closest command match using Levenshtein distance.
-// Returns "" if no command is within distance 1-2 (exact matches don't need suggestions).
+// ParseCommand splits a slash command input into name and args.
+func ParseCommand(input string) (name string, args []string, ok bool) {
+	if !strings.HasPrefix(input, "/") {
+		return "", nil, false
+	}
+	input = strings.TrimPrefix(input, "/")
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return "", nil, true
+	}
+	return parts[0], parts[1:], true
+}
+
+// suggestCommand returns the closest command by Levenshtein distance (threshold ≤ 2).
 func suggestCommand(r *CommandRegistry, input string) string {
 	var best string
-	bestDist := 3 // max distance threshold (<= 2)
+	bestDist := 3
 	for _, cmd := range r.List() {
 		d := levenshtein(input, cmd)
 		if d > 0 && d < bestDist {
@@ -175,14 +194,11 @@ func levenshtein(a, b string) int {
 	if lb == 0 {
 		return la
 	}
-
 	prev := make([]int, lb+1)
 	curr := make([]int, lb+1)
-
 	for j := 0; j <= lb; j++ {
 		prev[j] = j
 	}
-
 	for i := 1; i <= la; i++ {
 		curr[0] = i
 		for j := 1; j <= lb; j++ {
@@ -197,79 +213,68 @@ func levenshtein(a, b string) int {
 	return prev[lb]
 }
 
-// ParseCommand splits an input string into a command name and arguments.
-func ParseCommand(input string) (name string, args []string, ok bool) {
-	if !strings.HasPrefix(input, "/") {
-		return "", nil, false
-	}
-	input = strings.TrimPrefix(input, "/")
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
-		return "", nil, true
-	}
-	return parts[0], parts[1:], true
-}
-
 // DefaultCommands creates a CommandRegistry pre-populated with all slash commands.
 func DefaultCommands() *CommandRegistry {
 	r := NewCommandRegistry()
 
-	r.Register("help", handleHelp, "List all available commands")
-	r.Register("clear", handleClear, "Clear current conversation context")
-	r.Register("settings", handleSettings, "Open settings editor")
-	r.Register("status", handleStatus, "Show current session info")
-	r.Register("model", handleModel, "Show or switch model")
-	r.Register("provider", handleProvider, "Show or switch provider")
+	// Core
+	r.Register("help", handleHelp, "List available commands")
+	r.Register("clear", handleClear, "Clear conversation")
+	r.Register("status", handleStatus, "Show session info")
 	r.Register("reset", handleReset, "Reset to first-run screen")
 	r.Register("quit", handleQuit, "Exit the application")
-	r.Register("undo", handleUndo, "Show latest checkpoint info (restoration not yet implemented)")
-	r.Register("compress", handleCompress, "Trigger context consolidation")
-	r.Register("ledger", handleLedger, "Show recent session entries")
-	r.Register("rollback", handleRollback, "Show commit chain or reset to commit")
-	r.Register("sessions", handleSessions, "List recent sessions")
-	r.Register("goal", handleGoal, "Set or show session goal")
-	r.Register("phase", handlePhase, "Show or transition to phase")
-	r.Register("config", handleConfig, "Show or set config value")
-	r.Register("models", handleModels, "List all cached models")
-	r.Register("fallback", handleFallback, "Switch to alternative provider / show fallback status")
-	r.Register("tools", handleTools, "List available tools and their descriptions")
-	r.Register("workflow", handleWorkflow, "Show workflow status and phase progress")
-	r.Register("history", handleHistory, "Show conversation message history")
-	r.Register("diff", handleDiff, "Show git diff of uncommitted changes")
-	r.Register("theme", handleTheme, "Switch between dark and light theme")
-	r.Register("save", handleSave, "Save current session and conversation")
-	r.Register("key", handleKey, "Show API key status and source")
-	r.Register("log", handleLog, "Show recent log entries")
-	r.Register("tokens", handleTokens, "Estimate token count for text")
+	r.Register("undo", handleUndo, "Show latest checkpoint info")
+	r.Register("history", handleHistory, "Show conversation history")
 	r.Register("health", handleHealth, "Show system health status")
-	r.Register("fork", handleFork, "Fork current session into a new child session")
-	r.Register("prev", handlePrev, "Switch to previous sibling session")
-	r.Register("next", handleNext, "Switch to next sibling session")
+	r.Register("tools", handleTools, "List available tools")
 
-	// Workflow phase aliases
+	// Config/settings
+	r.Register("settings", handleSettings, "Open settings editor")
+	r.Register("config", handleConfig, "Show or set config value")
+	r.Register("theme", handleTheme, "Switch dark/light theme")
+	r.Register("cost", handleCost, "Toggle cost display")
+	r.Register("log", handleLog, "Show recent log entries")
+	r.Register("key", handleKey, "Show API key status")
+	r.Register("tokens", handleTokens, "Estimate token count")
+
+	// AI/model
+	r.Register("compress", handleCompress, "Trigger context consolidation")
+	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
+	r.Register("model", handleModel, "Show or switch model")
+	r.Register("models", handleModels, "List all cached models")
+	r.Register("fallback", handleFallback, "Switch provider / show fallback status")
+	r.Register("provider", handleProvider, "Show or switch provider")
+
+	// Git
+	r.Register("diff", handleDiff, "Show git diff")
+	r.Register("rollback", handleRollback, "Browse or reset to commit")
+
+	// Session
+	r.Register("sessions", handleSessions, "List recent sessions")
+	r.Register("fork", handleFork, "Fork current session")
+	r.Register("prev", handlePrev, "Switch to previous session")
+	r.Register("next", handleNext, "Switch to next session")
+	r.Register("save", handleSave, "Save current session")
+	r.Register("goal", handleGoal, "Set or show session goal")
+	r.Register("resume", handleResume, "Open session browser")
+	r.Register("ledger", handleLedger, "Show learning ledger")
+
+	// Workflow
+	r.Register("workflow", handleWorkflow, "Workflow control")
 	r.Register("plan", handlePhase, "Alias for /phase plan")
 	r.Register("execute", handlePhase, "Alias for /phase execute")
 	r.Register("verify", handlePhase, "Alias for /phase verify")
 	r.Register("ship", handlePhase, "Alias for /phase ship")
-
-	// Cost optimization
-	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
-	r.Register("cost", handleCost, "Toggle cost estimate display in header")
-	r.Register("metrics", handleMetrics, "Open session analytics dashboard")
-
-	// Workflow control
-	r.Register("pause", handlePause, "Show pause instructions (available on Execute screen)")
-	r.Register("resume-task", handleResumeTask, "Show workflow restart info (checkpoint resume not yet implemented)")
+	r.Register("phase", handlePhase, "Show or transition phase")
+	r.Register("pause", handlePause, "Pause workflow")
+	r.Register("resume-task", handleResumeTask, "Resume workflow")
+	r.Register("metrics", handleMetrics, "Open session analytics")
 
 	return r
 }
 
-// handleMetrics opens ScreenMetrics — the session analytics dashboard.
+// handleMetrics opens ScreenMetrics.
 func handleMetrics(_ []string, _ CommandContext) CommandResult {
 	screen := ScreenMetrics
-	return CommandResult{
-		Success: true,
-		Screen:  &screen,
-		Message: "Opening metrics dashboard...",
-	}
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening metrics..."}
 }
