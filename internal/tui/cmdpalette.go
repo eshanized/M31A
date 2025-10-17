@@ -1,290 +1,205 @@
 package tui
 
 import (
-	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-// CommandInfo represents a command available in the palette.
-type CommandInfo struct {
-	Name        string
-	Description string
-	Slash       string
-	Execute     func() tea.Cmd
-}
-
-// CommandPaletteModel provides a fuzzy-searchable command palette overlay.
+// CommandPaletteModel is the command palette overlay.
+// It shows a filtered list of slash commands and runs the selected one.
 type CommandPaletteModel struct {
-	input    textinput.Model
+	theme    theme.Theme
 	commands []CommandInfo
-	matches  []CommandInfo
+	filtered []CommandInfo
 	selected int
+	query    string
+	visible  bool
 	width    int
 	height   int
-	open     bool
-	theme    theme.Theme
 }
 
-func NewCommandPaletteModel(t theme.Theme) *CommandPaletteModel {
-	ti := textinput.New()
-	ti.Placeholder = "Search commands..."
-	ti.CharLimit = 64
-	ti.Prompt = "> "
-	ti.TextStyle = lipgloss.NewStyle().Foreground(t.Text)
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
-
+// NewCommandPalette creates a new command palette model.
+func NewCommandPalette(registry *CommandRegistry, t theme.Theme) *CommandPaletteModel {
+	cmds := []CommandInfo{}
+	if registry != nil {
+		cmds = registry.AllCommandsWithExecute()
+	}
 	return &CommandPaletteModel{
-		input:    ti,
-		selected: 0,
 		theme:    t,
+		commands: cmds,
+		filtered: cmds,
 	}
 }
 
-// Init satisfies tea.Model.
-func (m *CommandPaletteModel) Init() tea.Cmd {
-	return nil
+// SetTheme updates the command palette theme.
+func (cp *CommandPaletteModel) SetTheme(t theme.Theme) {
+	cp.theme = t
 }
 
-// SetCommands populates the palette with available commands.
-func (m *CommandPaletteModel) SetCommands(cmds []CommandInfo) {
-	m.commands = cmds
-	m.updateMatches()
+// SetDimensions updates the display dimensions.
+func (cp *CommandPaletteModel) SetDimensions(w, h int) {
+	cp.width = w
+	cp.height = h
 }
 
-// Open shows the palette and focuses the input.
-func (m *CommandPaletteModel) Open() {
-	m.open = true
-	m.input.Focus()
-	m.input.SetValue("")
-	m.selected = 0
-	m.updateMatches()
+// Open shows the command palette.
+func (cp *CommandPaletteModel) Open() {
+	cp.visible = true
+	cp.query = ""
+	cp.selected = 0
+	cp.filtered = cp.commands
 }
 
-// Close hides the palette.
-func (m *CommandPaletteModel) Close() {
-	m.open = false
-	m.input.Blur()
+// Close hides the command palette.
+func (cp *CommandPaletteModel) Close() {
+	cp.visible = false
+	cp.query = ""
 }
 
-// IsOpen returns whether the palette is visible.
-func (m *CommandPaletteModel) IsOpen() bool {
-	return m.open
+// IsOpen returns true when the palette is visible.
+func (cp *CommandPaletteModel) IsOpen() bool {
+	return cp.visible
 }
 
-// SelectedCommand returns the currently highlighted command.
-func (m *CommandPaletteModel) SelectedCommand() *CommandInfo {
-	if m.selected < 0 || m.selected >= len(m.matches) {
-		return nil
+// Update handles key events inside the command palette.
+func (cp *CommandPaletteModel) Update(msg tea.Msg) (*CommandPaletteModel, tea.Cmd) {
+	if !cp.visible {
+		return cp, nil
 	}
-	return &m.matches[m.selected]
-}
 
-// Update handles keyboard input for the palette.
-func (m *CommandPaletteModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEsc:
-			m.Close()
-			return nil
-		case tea.KeyUp:
-			if m.selected > 0 {
-				m.selected--
+		switch msg.String() {
+		case "esc", "ctrl+p":
+			cp.Close()
+		case "up":
+			if cp.selected > 0 {
+				cp.selected--
 			}
-			return nil
-		case tea.KeyDown:
-			if m.selected < len(m.matches)-1 {
-				m.selected++
+		case "down":
+			if cp.selected < len(cp.filtered)-1 {
+				cp.selected++
 			}
-			return nil
-		case tea.KeyEnter:
-			return nil
+		case "enter":
+			if cp.selected < len(cp.filtered) {
+				cmd := cp.filtered[cp.selected]
+				cp.Close()
+				if cmd.Execute != nil {
+					return cp, cmd.Execute()
+				}
+				// Fall back to emitting SlashCommandMsg
+				return cp, func() tea.Msg {
+					return SlashCommandMsg{Command: cmd.Slash}
+				}
+			}
+		case "backspace":
+			if len(cp.query) > 0 {
+				cp.query = cp.query[:len(cp.query)-1]
+				cp.filterCommands()
+			}
+		default:
+			if len(msg.Runes) > 0 {
+				cp.query += string(msg.Runes)
+				cp.filterCommands()
+			}
 		}
 	}
+	return cp, nil
+}
 
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	m.updateMatches()
-	return cmd
+// filterCommands filters the command list based on the current query.
+func (cp *CommandPaletteModel) filterCommands() {
+	cp.selected = 0
+	if cp.query == "" {
+		cp.filtered = cp.commands
+		return
+	}
+	q := strings.ToLower(cp.query)
+	var filtered []CommandInfo
+	for _, cmd := range cp.commands {
+		if strings.Contains(strings.ToLower(cmd.Name), q) ||
+			strings.Contains(strings.ToLower(cmd.Description), q) {
+			filtered = append(filtered, cmd)
+		}
+	}
+	cp.filtered = filtered
 }
 
 // View renders the command palette overlay.
-func (m *CommandPaletteModel) View() string {
-	if !m.open {
+func (cp *CommandPaletteModel) View() string {
+	if !cp.visible {
 		return ""
 	}
+	t := cp.theme
 
-	paletteWidth := m.width * 4 / 5
-	if paletteWidth > 120 {
-		paletteWidth = 120
+	// Palette box
+	paletteWidth := 60
+	if cp.width > 0 && cp.width < paletteWidth+4 {
+		paletteWidth = cp.width - 4
 	}
-	if paletteWidth < 50 {
-		paletteWidth = 50
-	}
-
-	paletteHeight := m.height * 3 / 5
-	if paletteHeight > 40 {
-		paletteHeight = 40
-	}
-	if paletteHeight < 8 {
-		paletteHeight = 8
-	}
-
-	// Build content
-	var lines []string
 
 	// Title
-	titleStyle := lipgloss.NewStyle().
+	title := lipgloss.NewStyle().
+		Foreground(t.Brand).
 		Bold(true).
-		Foreground(m.theme.Brand).
-		Padding(0, 1)
-	lines = append(lines, titleStyle.Render("Command Palette"))
+		Render("⌘ Command Palette")
 
-	// Separator
-	sep := lipgloss.NewStyle().
-		Foreground(m.theme.Border).
-		Render(strings.Repeat("─", paletteWidth-2))
-	lines = append(lines, sep)
+	// Search bar
+	searchLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("> ")
+	searchText := lipgloss.NewStyle().Foreground(t.Text).Render(cp.query)
+	cursor := lipgloss.NewStyle().Foreground(t.Brand).Render("█")
+	searchBar := searchLabel + searchText + cursor
 
-	// Search input
-	inputLine := m.input.View()
-	lines = append(lines, lipgloss.NewStyle().Padding(0, 1).Render(inputLine))
+	divider := strings.Repeat("─", paletteWidth)
 
-	// Separator
-	lines = append(lines, sep)
-
-	// Match results
-	maxResults := paletteHeight - 5 // title + 2 seps + input + padding
-	if maxResults < 1 {
-		maxResults = 1
+	// Command list
+	maxItems := 10
+	var items []string
+	start := 0
+	if cp.selected >= maxItems {
+		start = cp.selected - maxItems + 1
+	}
+	for i := start; i < len(cp.filtered) && i < start+maxItems; i++ {
+		cmd := cp.filtered[i]
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
+		descStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+		if i == cp.selected {
+			nameStyle = nameStyle.Background(t.Brand).Foreground(t.Background)
+			descStyle = descStyle.Background(t.Brand).Foreground(t.Background)
+		}
+		slash := lipgloss.NewStyle().Foreground(t.Brand).Render(cmd.Slash)
+		name := nameStyle.Render(" " + cmd.Name)
+		desc := descStyle.Render("  " + cmd.Description)
+		_ = slash
+		line := name + desc
+		if lipgloss.Width(line) > paletteWidth {
+			line = TruncateWithEllipsis(line, paletteWidth)
+		}
+		items = append(items, line)
 	}
 
-	for i := 0; i < len(m.matches) && i < maxResults; i++ {
-		cmd := m.matches[i]
-		style := lipgloss.NewStyle().Padding(0, 1)
-		if i == m.selected {
-			style = lipgloss.NewStyle().
-				Background(m.theme.Surface).
-				Foreground(m.theme.Text).
-				Padding(0, 1)
-		}
-
-		entry := cmd.Name
-		if cmd.Slash != "" {
-			entry = cmd.Slash + "  " + cmd.Name
-		}
-		if cmd.Description != "" {
-			entry += "    " + cmd.Description
-		}
-
-		// Truncate to palette width
-		entryWidth := paletteWidth - 2
-		maxLen := entryWidth - 3
-		if maxLen < 10 {
-			maxLen = 10
-		}
-		runes := []rune(entry)
-		if len(runes) > maxLen {
-			entry = string(runes[:maxLen]) + "..."
-		}
-
-		lines = append(lines, style.Render(entry))
+	if len(cp.filtered) == 0 {
+		items = append(items, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  No commands match"))
 	}
 
-	if len(m.matches) == 0 {
-		lines = append(lines, lipgloss.NewStyle().
-			Foreground(m.theme.TextSecondary).
-			Padding(0, 1).
-			Render("No matching commands"))
-	}
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		searchBar,
+		divider,
+		strings.Join(items, "\n"),
+	)
 
-	// Hint
-	hintStyle := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Padding(0, 1)
-	lines = append(lines, "")
-	lines = append(lines, hintStyle.Render("↑↓ navigate · enter execute · esc close"))
-
-	content := lipgloss.JoinVertical(lipgloss.Top, lines...)
-
-	panel := lipgloss.NewStyle().
-		Width(paletteWidth).
-		Height(paletteHeight).
+	palette := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Brand).
-		Background(m.theme.Background).
+		BorderForeground(t.Brand).
+		Padding(1, 2).
+		Width(paletteWidth).
 		Render(content)
 
-	// Center the panel
-	topPad := (m.height - paletteHeight) / 2
-	leftPad := (m.width - paletteWidth) / 2
-
-	var result strings.Builder
-	for i := 0; i < topPad; i++ {
-		result.WriteString("\n")
-	}
-	if leftPad > 0 {
-		padding := strings.Repeat(" ", leftPad)
-		for _, line := range strings.Split(panel, "\n") {
-			result.WriteString(padding)
-			result.WriteString(line)
-			result.WriteString("\n")
-		}
-	} else {
-		result.WriteString(panel)
-		result.WriteString("\n")
-	}
-
-	return result.String()
-}
-
-func (m *CommandPaletteModel) updateMatches() {
-	query := strings.TrimSpace(m.input.Value())
-	if query == "" {
-		m.matches = make([]CommandInfo, len(m.commands))
-		copy(m.matches, m.commands)
-		m.selected = 0
-		return
-	}
-
-	q := strings.ToLower(query)
-
-	// Score and sort commands by match quality
-	type scoredCmd struct {
-		cmd   CommandInfo
-		score int
-	}
-	var scored []scoredCmd
-	for _, cmd := range m.commands {
-		kw := strings.ToLower(cmd.Name + " " + cmd.Description + " " + cmd.Slash)
-		if strings.Contains(kw, q) {
-			// Higher score for matches at the start
-			score := 1
-			if strings.HasPrefix(kw, q) {
-				score = 10
-			}
-			if strings.HasPrefix(strings.ToLower(cmd.Slash), q) {
-				score = 20
-			}
-			scored = append(scored, scoredCmd{cmd: cmd, score: score})
-		}
-	}
-
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	m.matches = make([]CommandInfo, 0, len(scored))
-	for _, s := range scored {
-		m.matches = append(m.matches, s.cmd)
-	}
-	m.selected = 0
+	// Center in terminal
+	return centerScreen(palette, cp.width, cp.height)
 }
