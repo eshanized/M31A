@@ -1,173 +1,387 @@
 package tui
 
 import (
-	"fmt"
+	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 )
 
+// ─── AppState view rendering ──────────────────────────────────────────────────
+
+// View implements tea.Model. It renders the full terminal frame.
+// This is the top-level view function; it delegates to per-screen view methods.
 func (m *AppState) View() string {
-	if !m.initialized || m.width == 0 {
-		return "M31A — starting..."
+	if m.width == 0 || m.height == 0 {
+		return "Loading..."
 	}
 
-	if m.width < 40 || m.height < 10 {
-		return fmt.Sprintf("Terminal too small: %dx%d (minimum 40x10)", m.width, m.height)
+	t := m.themeManager.Current()
+
+	// Command palette overlay (rendered on top of everything)
+	if m.cmdPalette != nil && m.cmdPalette.IsOpen() {
+		return m.cmdPalette.View()
 	}
 
-	// H-2 fix: toast expiry is now handled in Update() via ToastExpiryMsg.
-	// View() is pure — no state mutation.
+	// Permission/question modal (top priority overlay)
+	if m.screen == ScreenPermission {
+		return m.renderPermissionModal()
+	}
 
+	// Toast notification (appended to any view)
+	toast := ""
+	if m.toastText != "" {
+		var toastColor lipgloss.Color
+		switch m.toastType {
+		case "success":
+			toastColor = t.Success
+		case "error":
+			toastColor = t.Error
+		case "warning":
+			toastColor = t.Warning
+		default:
+			toastColor = t.Brand
+		}
+		toast = "\n" + lipgloss.NewStyle().Foreground(toastColor).Bold(true).PaddingLeft(2).
+			Render("● "+m.toastText)
+	}
+
+	// Sidebar (shared component left of main content)
+	sidebar := ""
+	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible()
+	if hasSidebar {
+		sidebar = m.sidebarModel.View()
+	}
+
+	// Main content
+	main := m.renderActiveScreen()
+
+	if toast != "" {
+		main += toast
+	}
+
+	if hasSidebar {
+		return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
+	}
+
+	return main
+}
+
+// renderActiveScreen delegates to the active screen's view function.
+func (m *AppState) renderActiveScreen() string {
 	switch m.screen {
-	case ScreenFirstRun:
-		if m.firstRunModel != nil {
-			return m.firstRunModel.View()
-		}
-		return "Loading..."
-
-	case ScreenPermission:
-		if m.permissionModal != nil {
-			return m.permissionModal.Render(m.width, m.height)
-		}
-		return "Permission screen error"
-
 	case ScreenREPL:
-		if m.replModel == nil {
-			return "Loading..."
-		}
-
-		var mainContent string
-		replView := m.replModel.View()
-
-		// Show phase breadcrumb banner above REPL when a workflow is active
-		if m.showPhaseBreadcrumb && m.workflowRunning {
-			breadcrumb := RenderPhaseBreadcrumb(m.themeManager.Current(), m.currentPhase, m.width)
-			replView = lipgloss.JoinVertical(lipgloss.Top, breadcrumb, replView)
-		}
-
-		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
-			sidebar := m.sidebarModel.View()
-			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, replView, sidebar)
-		} else {
-			mainContent = replView
-		}
-
-		return m.renderWithPalette(mainContent)
-
+		return m.renderREPLScreen()
 	case ScreenSettings:
-		if m.settingsModel != nil {
-			return m.settingsModel.View()
-		}
-		return "Loading..."
-
-	case ScreenResume:
-		if m.resumeModel != nil {
-			return m.resumeModel.View()
-		}
-		return "Loading..."
-
+		return m.renderSettingsScreen()
 	case ScreenModelSelector:
-		return m.modelSelector.View()
-
+		return m.renderModelSelectorScreen()
 	case ScreenPlan:
-		if m.planModel != nil {
-			return m.planModel.View()
-		}
-		return centerScreen("Plan screen — driven by workflow engine", m.width, m.height)
-
+		return m.renderPlanScreen()
 	case ScreenExecute:
-		if m.executeModel != nil {
-			return m.executeModel.View()
-		}
-		return centerScreen("Execute screen — driven by workflow engine", m.width, m.height)
-
+		return m.renderExecuteScreen()
 	case ScreenVerify:
-		if m.verifyModel != nil {
-			return m.verifyModel.View()
-		}
-		return centerScreen("Verify screen — driven by workflow engine", m.width, m.height)
-
+		return m.renderVerifyScreen()
 	case ScreenShip:
-		if m.shipModel != nil {
-			return m.shipModel.View()
-		}
-		return centerScreen("Ship screen — driven by workflow engine", m.width, m.height)
-
-	case ScreenDiff:
-		if m.diffModel.lines != nil || m.diffModel.diff != "" {
-			return m.renderToast(m.diffModel.View())
-		}
-		return m.renderToast(centerScreen("Loading diff...", m.width, m.height))
-
-	// New screens from TUI redesign proposal
-	case ScreenMetrics:
-		if m.metricsModel != nil {
-			return m.metricsModel.View()
-		}
-		return centerScreen("Loading metrics...", m.width, m.height)
-
+		return m.renderShipScreen()
+	case ScreenResume:
+		return m.renderResumeScreen()
 	case ScreenGoalInput:
-		if m.goalInputModel != nil {
-			return m.goalInputModel.View()
-		}
-		return centerScreen("Loading goal input...", m.width, m.height)
-
+		return m.renderGoalInputScreen()
+	case ScreenFirstRun:
+		return m.renderFirstRunScreen()
 	case ScreenLedger:
-		if m.ledgerModel != nil {
-			return m.ledgerModel.View()
-		}
-		return centerScreen("Loading ledger...", m.width, m.height)
-
+		return m.renderLedgerScreen()
 	case ScreenRollback:
-		if m.rollbackModel != nil {
-			return m.rollbackModel.View()
-		}
-		return centerScreen("Loading rollback...", m.width, m.height)
-
+		return m.renderRollbackScreen()
+	case ScreenMetrics:
+		return m.renderMetricsScreen()
 	case ScreenDiscuss:
-		if m.discussModel != nil {
-			return m.discussModel.View()
-		}
-		return centerScreen("Loading discuss...", m.width, m.height)
-
+		return m.renderDiscussScreen()
+	case ScreenDiff:
+		return m.renderDiffScreen()
 	default:
-		return centerScreen("Unknown screen", m.width, m.height)
+		return m.renderREPLScreen()
 	}
 }
 
-func (m *AppState) renderToast(content string) string {
-	if m.toastText == "" {
-		return content
+// ─── Per-screen view helpers ──────────────────────────────────────────────────
+
+func (m *AppState) renderREPLScreen() string {
+	m.ensureReplModel()
+	m.syncReplSize()
+	return m.replModel.View()
+}
+
+func (m *AppState) renderSettingsScreen() string {
+	if m.settingsModel == nil {
+		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath)
+		m.settingsModel.width = m.width
+		m.settingsModel.height = m.height
 	}
-	var color lipgloss.Color
-	switch m.toastType {
-	case "success":
-		color = m.themeManager.Current().Success
-	case "warning":
-		color = m.themeManager.Current().Warning
-	case "error":
-		color = m.themeManager.Current().Error
-	default:
-		color = m.themeManager.Current().Thinking
+	return m.settingsModel.View()
+}
+
+func (m *AppState) renderModelSelectorScreen() string {
+	if m.msModel == nil {
+		return "Loading model selector..."
 	}
-	toastStyle := lipgloss.NewStyle().
-		Foreground(color).
-		Background(m.themeManager.Current().Surface).
-		Padding(0, 2).
-		Bold(true)
-	toast := toastStyle.Render(m.toastText)
-	return lipgloss.JoinVertical(lipgloss.Center,
-		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, toast),
-		content,
+	return m.msModel.View()
+}
+
+func (m *AppState) renderPlanScreen() string {
+	if m.planModel == nil {
+		return "Loading plan..."
+	}
+	return m.planModel.View()
+}
+
+func (m *AppState) renderExecuteScreen() string {
+	if m.executeModel == nil {
+		return "Loading execution..."
+	}
+	return m.executeModel.View()
+}
+
+func (m *AppState) renderVerifyScreen() string {
+	if m.verifyModel == nil {
+		return "Loading verification..."
+	}
+	return m.verifyModel.View()
+}
+
+func (m *AppState) renderShipScreen() string {
+	if m.shipModel == nil {
+		return "Loading ship summary..."
+	}
+	return m.shipModel.View()
+}
+
+func (m *AppState) renderResumeScreen() string {
+	if m.resumeModel == nil {
+		return "Loading sessions..."
+	}
+	return m.resumeModel.View()
+}
+
+func (m *AppState) renderGoalInputScreen() string {
+	if m.goalInput == nil {
+		return "Loading goal input..."
+	}
+	return m.goalInput.View()
+}
+
+func (m *AppState) renderFirstRunScreen() string {
+	if m.firstRunModel == nil {
+		return "Loading first-run wizard..."
+	}
+	return m.firstRunModel.View()
+}
+
+func (m *AppState) renderLedgerScreen() string {
+	if m.ledgerModel == nil {
+		return "Loading ledger..."
+	}
+	return m.ledgerModel.View()
+}
+
+func (m *AppState) renderRollbackScreen() string {
+	if m.rollbackModel == nil {
+		return "Loading rollback browser..."
+	}
+	return m.rollbackModel.View()
+}
+
+func (m *AppState) renderMetricsScreen() string {
+	if m.metricsModel == nil {
+		return "Loading metrics..."
+	}
+	return m.metricsModel.View()
+}
+
+func (m *AppState) renderDiscussScreen() string {
+	if m.discussModel == nil {
+		return "Loading discuss..."
+	}
+	return m.discussModel.View()
+}
+
+func (m *AppState) renderDiffScreen() string {
+	if m.diffModel == nil {
+		return "Loading diff..."
+	}
+	return m.diffModel.View()
+}
+
+// renderPermissionModal renders the permission or question overlay.
+func (m *AppState) renderPermissionModal() string {
+	t := m.themeManager.Current()
+
+	if m.questionRequest != nil {
+		return m.renderQuestionModal(t)
+	}
+	if m.permRequest == nil {
+		m.screen = ScreenREPL
+		return m.renderREPLScreen()
+	}
+
+	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, t)
+}
+
+// ─── REPL sync helpers ────────────────────────────────────────────────────────
+
+// ensureReplModel creates the REPL model if not yet initialized.
+func (m *AppState) ensureReplModel() {
+	if m.replModel != nil {
+		return
+	}
+	rm := NewReplModel(m.themeManager.Current(), m.version)
+	m.replModel = &rm
+	m.replModel.SetCommandRegistry(m.cmdRegistry)
+	m.replModel.SetKeyRegistry(m.keyRegistry)
+
+	if m.registry != nil {
+		cmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
+		_ = cmd // will be run on next Init call
+	}
+}
+
+// syncReplSize ensures the REPL model dimensions match the terminal.
+func (m *AppState) syncReplSize() {
+	if m.replModel == nil {
+		return
+	}
+	sw := 0
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+		sw = m.sidebarModel.GetWidth()
+	}
+	if m.replModel.width != m.width || m.replModel.height != m.height {
+		m.replModel.width = m.width
+		m.replModel.height = m.height
+		m.replModel.SetSidebarWidth(sw)
+	}
+}
+
+// syncReplProvider updates the REPL provider/model reference and returns
+// a tea.Cmd that fetches models.
+func (m *AppState) syncReplProvider(sessionID string) tea.Cmd {
+	if m.replModel == nil {
+		return nil
+	}
+	return m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+}
+
+// ─── Render helpers ───────────────────────────────────────────────────────────
+
+// renderQuestionModal renders the AskUserQuestion overlay.
+func (m *AppState) renderQuestionModal(t theme.Theme) string {
+	q := m.questionRequest
+	if q == nil {
+		return ""
+	}
+	width := m.permModalWidth
+	if width < 40 {
+		width = 60
+	}
+
+	title := q.Header
+	if title == "" {
+		title = "Question"
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(title),
+		"",
+		lipgloss.NewStyle().Foreground(t.Text).Render(q.Question),
+		"",
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type your answer and press ↵"),
+	)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
+			Padding(1, 2).
+			Width(width).
+			Render(content),
 	)
 }
 
-func (m *AppState) renderWithPalette(base string) string {
-	if m.cmdPaletteOpen && m.cmdPalette != nil {
-		palette := m.cmdPalette.View()
-		if palette != "" {
-			return centerScreen(palette, m.width, m.height)
-		}
+// ─── Header rendering (top chrome) ───────────────────────────────────────────
+
+// renderHeader renders the top header bar used in non-REPL screens.
+func (m *AppState) renderHeader(title string) string {
+	t := m.themeManager.Current()
+	modelID := ""
+	modelName := ""
+	if m.activeModel != nil {
+		modelID = m.activeModel.ID
+		modelName = m.activeModel.Name
 	}
-	return base
+	showCost := false
+	if m.config != nil {
+		showCost = m.config.UI.ShowCostEstimate
+	}
+	return RenderHeader(
+		t,
+		m.version,
+		m.activeProvider,
+		modelID,
+		modelName,
+		m.workflowPhase,
+		0, 0,
+		m.healthStatus.Status,
+		showCost,
+		m.width,
+	)
+}
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
+
+// errorf creates a simple error.
+func errorf(msg string) error {
+	return &simpleError{msg: msg}
+}
+
+type simpleError struct {
+	msg string
+}
+
+func (e *simpleError) Error() string { return e.msg }
+
+// RenderPermissionModal renders a full-screen permission modal.
+func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t theme.Theme) string {
+	if req == nil {
+		return ""
+	}
+
+	riskStyle := lipgloss.NewStyle().Foreground(t.Warning)
+	if req.RiskLevel == types.RiskDestructive {
+		riskStyle = lipgloss.NewStyle().Foreground(t.Error)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Permission Required"),
+		"",
+		"  Tool:  "+req.ToolName,
+		"  Command:  "+TruncateWithEllipsis(req.Command, width-12),
+		"  Risk:  "+riskStyle.Render(string(req.RiskLevel)),
+		"",
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny"),
+		"",
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  Timeout: "+formatSI(countdown)+"s"),
+	)
+
+	_ = strings.Repeat
+	return lipgloss.Place(0, 0, lipgloss.Center, lipgloss.Center,
+		lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
+			Padding(1, 2).
+			Width(width).
+			Render(content),
+	)
 }
