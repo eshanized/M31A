@@ -1,130 +1,162 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleHelp lists all registered commands with their descriptions, grouped by category.
-func handleHelp(args []string, ctx CommandContext) CommandResult {
-	// Per-command help
-	if len(args) > 0 {
-		cmd := strings.TrimPrefix(args[0], "/")
-		r := DefaultCommands()
-		if desc, ok := r.descriptions[cmd]; ok {
-			return CommandResult{Success: true, Message: fmt.Sprintf("/%s — %s", cmd, desc)}
-		}
-		return CommandResult{Success: true, Message: fmt.Sprintf("No additional help available for /%s", cmd)}
+// handleHelp lists all registered slash commands.
+func handleHelp(_ []string, ctx CommandContext) CommandResult {
+	if ctx.CmdRegistry == nil {
+		return CommandResult{Success: false, Message: "Command registry not available."}
 	}
-
-	r := DefaultCommands()
-
-	categories := []struct {
-		name    string
-		commands []string
-	}{
-		{"Session", []string{"sessions", "fork", "prev", "next", "save", "clear", "undo"}},
-		{"Workflow", []string{"workflow", "plan", "execute", "verify", "ship", "goal", "phase", "pause", "resume-task"}},
-		{"Config", []string{"settings", "provider", "model", "models", "fallback", "theme", "key", "config"}},
-		{"Git", []string{"rollback", "diff", "log", "ledger"}},
-		{"AI", []string{"compress", "optimize", "cost", "tokens"}},
-		{"System", []string{"help", "status", "health", "tools", "history", "quit", "reset"}},
+	cmds := ctx.CmdRegistry.AllCommands()
+	var sb strings.Builder
+	sb.WriteString("**Available commands:**\n\n")
+	for _, cmd := range cmds {
+		sb.WriteString(fmt.Sprintf("  %-18s — %s\n", cmd.Slash, cmd.Description))
 	}
-
-	var b strings.Builder
-	for _, cat := range categories {
-		b.WriteString(fmt.Sprintf("\n%s:\n", cat.name))
-		for _, name := range cat.commands {
-			if desc, ok := r.descriptions[name]; ok {
-				b.WriteString(fmt.Sprintf("  /%-18s %s\n", name, desc))
-			}
-		}
-	}
-
-	b.WriteString("\nShell Mode:\n")
-	b.WriteString("  !<command>       Run a shell command directly (e.g., !ls -la)\n")
-
-	b.WriteString("\nNote: command chaining with ';' is not supported. Use each command separately.")
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+	return CommandResult{Success: true, Message: sb.String()}
 }
 
-// handleSettings switches to the settings screen.
-func handleSettings(args []string, ctx CommandContext) CommandResult {
-	screen := ScreenSettings
-	return CommandResult{Success: true, Screen: &screen}
-}
-
-// handleClear clears the conversation context (message history).
-func handleClear(args []string, ctx CommandContext) CommandResult {
+// handleClear clears the current conversation messages.
+func handleClear(_ []string, ctx CommandContext) CommandResult {
 	if ctx.ClearMessages != nil {
 		ctx.ClearMessages()
-		return CommandResult{Success: true, Message: "Context cleared."}
 	}
-	return CommandResult{Success: true, Message: "No conversation to clear."}
+	return CommandResult{Success: true, Message: "Conversation cleared."}
 }
 
-// handleStatus returns current session information.
-func handleStatus(args []string, ctx CommandContext) CommandResult {
-	var b strings.Builder
-	b.WriteString("Session Info:\n")
-
-	if ctx.SessionID != "" {
-		b.WriteString(fmt.Sprintf("  Session ID:  %s\n", ctx.SessionID))
+// handleStatus shows the current session information.
+func handleStatus(_ []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
+	}
+	sess, err := ctx.SessionManager.LoadSession(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
 	}
 
-	if ctx.Registry != nil {
-		active := ctx.Registry.Active()
-		b.WriteString(fmt.Sprintf("  Provider:    %s\n", active))
-
-		if ap := ctx.Registry.ActiveProvider(); ap != nil {
-			models, err := ap.FetchModels(context.Background())
-			if err == nil && len(models) > 0 {
-				b.WriteString(fmt.Sprintf("  Models:      %d cached\n", len(models)))
-			}
-		}
-	}
-
-	if ctx.SessionManager != nil && ctx.SessionID != "" {
-		s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-		if err == nil {
-			b.WriteString(fmt.Sprintf("  Phase:       %s\n", s.WorkflowPhase))
-			b.WriteString(fmt.Sprintf("  Messages:    %d\n", s.MessageCount))
-		}
-	}
-
+	provider := "unknown"
+	model := "unknown"
+	phase := "idle"
 	if ctx.Config != nil {
-		b.WriteString(fmt.Sprintf("  Model:       %s\n", ctx.Config.Model.Default))
+		provider = ctx.Config.Provider.Default
+		model = ctx.Config.Model.Default
+	}
+	if sess != nil {
+		if sess.Provider != "" {
+			provider = sess.Provider
+		}
+		if sess.Model != "" {
+			model = sess.Model
+		}
+		phase = string(sess.WorkflowPhase)
 	}
 
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
+	msg := fmt.Sprintf(
+		"**Session:** %s\n**Provider:** %s\n**Model:** %s\n**Phase:** %s\n**Messages:** %d",
+		ctx.SessionID, provider, model, phase, sess.MessageCount,
+	)
+	return CommandResult{Success: true, Message: msg}
 }
 
-// handleQuit returns a goodbye message.
-func handleQuit(args []string, ctx CommandContext) CommandResult {
-	return CommandResult{Success: true, Message: "Goodbye!"}
+// handleReset navigates to the first-run screen, resetting the UI to initial state.
+func handleReset(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenFirstRun
+	return CommandResult{
+		Success: true,
+		Message: "Resetting to first-run screen...",
+		Screen:  &screen,
+	}
 }
 
-// handleTheme switches between dark and light themes.
-func handleTheme(args []string, ctx CommandContext) CommandResult {
-	if ctx.Config == nil {
-		return CommandResult{Success: false, Message: "Config not available."}
+// handleQuit exits the application.
+func handleQuit(_ []string, _ CommandContext) CommandResult {
+	return CommandResult{
+		Success: true,
+		Message: "Goodbye!",
+		Cmd: func() tea.Msg {
+			return tea.QuitMsg{}
+		},
 	}
+}
 
-	if len(args) == 0 {
-		return CommandResult{Success: true, Message: fmt.Sprintf("Current theme: %s. Use /theme dark or /theme light to switch.", ctx.Config.UI.Theme)}
+// handleUndo shows the latest checkpoint info for the current session.
+func handleUndo(_ []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
 	}
+	checkpoint, err := ctx.SessionManager.LatestCheckpoint(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("No checkpoint found: %v", err)}
+	}
+	msg := fmt.Sprintf(
+		"**Latest checkpoint:**\n  Phase: %s\n  Time: %s",
+		checkpoint.Phase,
+		checkpoint.Timestamp.Format("2006-01-02 15:04:05"),
+	)
+	return CommandResult{Success: true, Message: msg}
+}
 
-	switch args[0] {
-	case "dark", "light":
-		ctx.Config.UI.Theme = args[0]
-		ctx.Config.Save(ctx.ConfigPath)
-		return CommandResult{Success: true, Message: fmt.Sprintf("Theme switched to %s.", args[0]), Cmd: func() tea.Msg {
-			return ThemeChangedMsg{Theme: args[0]}
-		}}
-	default:
-		return CommandResult{Success: false, Message: "Invalid theme. Use 'dark' or 'light'."}
+// handleHistory shows conversation history entry count.
+func handleHistory(_ []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
 	}
+	sess, err := ctx.SessionManager.LoadSession(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
+	}
+	count := 0
+	if sess != nil {
+		count = sess.MessageCount
+	}
+	return CommandResult{
+		Success: true,
+		Message: fmt.Sprintf("Session **%s** has **%d** messages in history.", ctx.SessionID, count),
+	}
+}
+
+// handleHealth shows the system health status.
+func handleHealth(_ []string, ctx CommandContext) CommandResult {
+	if ctx.Registry == nil {
+		return CommandResult{Success: false, Message: "Provider registry not available."}
+	}
+	active := ctx.Registry.Active()
+	p, err := ctx.Registry.Get(active)
+	if err != nil || p == nil {
+		return CommandResult{Success: false, Message: "No active provider to check health."}
+	}
+	return CommandResult{
+		Success: true,
+		Message: fmt.Sprintf("Running health check for provider **%s**...", active),
+		Cmd: func() tea.Msg {
+			return HealthCheckTickMsg{}
+		},
+	}
+}
+
+// handleTools lists all registered tools in the dispatcher.
+func handleTools(_ []string, ctx CommandContext) CommandResult {
+	if ctx.Dispatcher == nil {
+		return CommandResult{Success: false, Message: "Tool dispatcher not available."}
+	}
+	names := ctx.Dispatcher.List()
+	if len(names) == 0 {
+		return CommandResult{Success: true, Message: "No tools registered."}
+	}
+	var sb strings.Builder
+	sb.WriteString("**Available tools:**\n\n")
+	for _, name := range names {
+		tool, ok := ctx.Dispatcher.GetTool(name)
+		if ok {
+			sb.WriteString(fmt.Sprintf("  %-20s — %s\n", name, tool.Description()))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s\n", name))
+		}
+	}
+	return CommandResult{Success: true, Message: sb.String()}
 }
