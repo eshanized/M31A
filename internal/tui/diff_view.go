@@ -1,207 +1,43 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-// diffLineStyle returns the style and prefix for a diff line type.
-func diffLineStyle(lineType DiffLineType, th *theme.Theme) (lipgloss.Style, string) {
-	switch lineType {
-	case DiffAdded:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.DiffAdded)).Background(lipgloss.Color(th.DiffAddedBg)), "+"
-	case DiffDeleted:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.DiffRemoved)).Background(lipgloss.Color(th.DiffRemovedBg)), "-"
-	case DiffHunk:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Thinking)).Italic(true), " "
-	case DiffHeader:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Brand)).Bold(true), " "
-	case DiffContext:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Text)).Background(lipgloss.Color(th.DiffContextBg)), " "
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(th.Text)), " "
-	}
-}
-
-// View implements tea.Model.View.
-func (m DiffModel) View() string {
-	if m.diff == "" {
-		return centerText("No diff to display. Run /diff with arguments.", m.width)
-	}
-	if len(m.lines) == 0 {
-		return "No changes in diff."
+// renderDiffView renders the full diff viewer screen.
+func renderDiffView(dm *DiffModel) string {
+	t := dm.theme
+	w := dm.width
+	if w < 20 {
+		w = 80
 	}
 
-	if m.splitView {
-		return m.renderSplitView()
+	titleText := "Git Diff"
+	if dm.title != "" {
+		titleText = dm.title
 	}
-	return m.renderUnifiedView()
-}
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
+		Render("  " + titleText)
+	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
 
-func (m DiffModel) renderSplitView() string {
-	leftWidth := m.width / 2
-	rightWidth := m.width - leftWidth - 1
-
-	var leftContent strings.Builder
-	leftContent.WriteString(lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render(" Files "))
-	leftContent.WriteString("\n")
-
-	for _, line := range m.lines {
-		if line.Type == DiffHeader && strings.HasPrefix(line.Content, "diff --git") {
-			parts := strings.SplitN(line.Content, " b/", 2)
-			if len(parts) == 2 {
-				leftContent.WriteString(lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render("  "+parts[1]))
-				leftContent.WriteString("\n")
-			}
-		}
+	body := ""
+	if dm.diff == "" {
+		body = lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+			Render("No diff to display.")
+	} else {
+		body = dm.viewport.View()
 	}
 
-	var rightContent strings.Builder
-	rightContent.WriteString(lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render(" Diff "))
-	rightContent.WriteString("\n")
+	// Legend
+	added := lipgloss.NewStyle().Foreground(t.DiffAdded).Render("+ added")
+	removed := lipgloss.NewStyle().Foreground(t.DiffRemoved).Render("- removed")
+	legend := "  " + added + "  " + removed
 
-	viewportHeight := m.height - 4
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-	end := m.scrollPos + viewportHeight
-	if end > len(m.lines) {
-		end = len(m.lines)
-	}
-	visible := m.lines[m.scrollPos:end]
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("j/k or ↑↓ scroll  esc close")
 
-	gutterWidth := 4
-	lineNum := m.scrollPos + 1
-
-	for _, line := range visible {
-		var lineStyle lipgloss.Style
-		var prefix string
-
-		lineStyle, prefix = diffLineStyle(line.Type, &m.theme)
-
-		gutterStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
-		switch line.Type {
-		case DiffAdded, DiffDeleted, DiffContext:
-			gutter := fmt.Sprintf("%*d ", gutterWidth, lineNum)
-			rightContent.WriteString(gutterStyle.Render(gutter))
-			rightContent.WriteString(lineStyle.Render(prefix+line.Content))
-			lineNum++
-		default:
-			gutter := strings.Repeat(" ", gutterWidth+1)
-			rightContent.WriteString(gutterStyle.Render(gutter))
-			rightContent.WriteString(lineStyle.Render(line.Content))
-		}
-		rightContent.WriteString("\n")
-	}
-
-	left := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Border).
-		Width(leftWidth).
-		Height(m.height - 2).
-		Render(leftContent.String())
-
-	right := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Border).
-		Width(rightWidth).
-		Height(m.height - 2).
-		Render(rightContent.String())
-
-	helpBar := "↑↓ scroll · V toggle split · Esc back"
-	helpStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right) + "\n" + helpStyle.Render(helpBar)
-}
-
-func (m DiffModel) renderUnifiedView() string {
-	var b strings.Builder
-	insertions, deletions, files := m.computeStats()
-	titleStr := fmt.Sprintf(" Diff: %s", m.title)
-	statsStr := ""
-	if files > 0 {
-		statsStr = fmt.Sprintf("  %d files changed, +%d insertions, -%d deletions", files, insertions, deletions)
-	}
-	headerContent := titleStr + statsStr
-
-	headerBorder := "╭─" + headerContent
-	remaining := m.width - len(headerBorder) - 1
-	if remaining > 0 {
-		headerBorder += strings.Repeat("─", remaining)
-	}
-	headerBorder += "╮"
-
-	headerStyle := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true)
-	b.WriteString(headerStyle.Render(headerBorder))
-	b.WriteString("\n")
-
-	viewportHeight := m.height - 4
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-	end := m.scrollPos + viewportHeight
-	if end > len(m.lines) {
-		end = len(m.lines)
-	}
-	visible := m.lines[m.scrollPos:end]
-
-	gutterWidth := 4
-	lineNum := m.scrollPos + 1
-
-	for _, line := range visible {
-		var lineStyle lipgloss.Style
-		var prefix string
-
-		lineStyle, prefix = diffLineStyle(line.Type, &m.theme)
-
-		gutterStyle := lipgloss.NewStyle().Foreground(m.theme.TextMuted)
-		switch line.Type {
-		case DiffAdded, DiffDeleted:
-			gutter := fmt.Sprintf("%*d ", gutterWidth, lineNum)
-			b.WriteString(gutterStyle.Render(gutter))
-			b.WriteString(lineStyle.Render(prefix + line.Content))
-			lineNum++
-		case DiffContext:
-			gutter := fmt.Sprintf("%*d ", gutterWidth, lineNum)
-			b.WriteString(gutterStyle.Render(gutter))
-			b.WriteString(lineStyle.Render(prefix + line.Content))
-			lineNum++
-		default:
-			gutter := strings.Repeat(" ", gutterWidth+1)
-			b.WriteString(gutterStyle.Render(gutter))
-			b.WriteString(lineStyle.Render(line.Content))
-		}
-		b.WriteString("\n")
-	}
-
-	helpBar := "↑↓ scroll  ·  V split view  ·  Esc back"
-	helpStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-	if m.width > 0 {
-		helpStyle = helpStyle.Width(m.width)
-	}
-	b.WriteString(helpStyle.Render(helpBar))
-
-	return b.String()
-}
-
-// centerText centers lines of text within the given width.
-func centerText(text string, width int) string {
-	if width <= 0 {
-		return text
-	}
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		if len(line) < width {
-			pad := (width - len(line)) / 2
-			if pad > 0 {
-				lines[i] = strings.Repeat(" ", pad) + line
-			}
-		}
-	}
-	return strings.Join(lines, "\n")
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title, divider, body, "", legend, divider, footer)
 }
