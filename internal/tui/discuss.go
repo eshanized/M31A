@@ -5,213 +5,200 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
 )
 
-// DiscussModel provides a dedicated Q&A flow for the discuss phase.
+// DiscussModel presents discuss Q&A questions one-by-one.
 type DiscussModel struct {
-	theme         theme.Theme
-	width         int
-	height        int
-	questions     []string
-	currentIndex  int
-	answers       map[int]string
-	textInput     textarea.Model
-	timer         int // seconds remaining (DefaultPermissionTimeout = 5 min)
-	timerActive   bool
-	questionCount int
+	theme     theme.Theme
+	questions []string
+	current   int
+	answers   []string
+	input     textinput.Model
+	timeout   int // seconds, 0 = no timeout
+	deadline  time.Time
+	hasDeadline bool
+	width     int
+	height    int
 }
 
-// NewDiscussModel creates a DiscussModel with the given questions.
-func NewDiscussModel(t theme.Theme, questions []string, width, height int) *DiscussModel {
-	ta := textarea.New()
-	ta.Placeholder = "Type your answer..."
-	ta.Focus()
-	ta.CharLimit = 500
-	ta.SetWidth(width/2 + width/4)
-	ta.SetHeight(4)
-	ta.ShowLineNumbers = false
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface))
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextPrimary))
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
+// NewDiscussModel creates a DiscussModel for the given questions.
+func NewDiscussModel(t theme.Theme, questions []string, w, h int) *DiscussModel {
+	ti := textinput.New()
+	ti.Placeholder = "Type your answer..."
+	ti.CharLimit = 500
+	ti.Focus()
+
+	answers := make([]string, len(questions))
 
 	return &DiscussModel{
-		theme:         t,
-		questions:     questions,
-		questionCount: len(questions),
-		currentIndex:  0,
-		answers:       make(map[int]string),
-		textInput:     ta,
-		timer:         types.DefaultPermissionTimeout,
-		timerActive:   true,
-		width:         width,
-		height:        height,
+		theme:     t,
+		questions: questions,
+		answers:   answers,
+		input:     ti,
+		width:     w,
+		height:    h,
 	}
 }
 
-// Init returns the textarea blink command.
-func (m *DiscussModel) Init() tea.Cmd {
-	return textarea.Blink
+// SetTheme updates the theme.
+func (dm *DiscussModel) SetTheme(t theme.Theme) {
+	dm.theme = t
 }
 
-// Update handles messages for the discuss screen.
-func (m *DiscussModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
+// SetDimensions updates the discuss model dimensions.
+func (dm *DiscussModel) SetDimensions(w, h int) {
+	dm.width = w
+	dm.height = h
+}
+
+// SetTimeout configures the per-question timeout.
+func (dm *DiscussModel) SetTimeout(secs int) {
+	dm.timeout = secs
+	if secs > 0 {
+		dm.hasDeadline = true
+		dm.deadline = time.Now().Add(time.Duration(secs) * time.Second)
+	}
+}
+
+// Init implements tea.Model.
+func (dm *DiscussModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+// Update implements tea.Model.
+func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.textInput.SetWidth(m.width/2 + m.width/4)
-		return nil, nil
+		dm.width = msg.Width
+		dm.height = msg.Height
+		return dm, nil
+
+	case DiscussAnswerTimeoutMsg:
+		if msg.QuestionIndex == dm.current {
+			return dm, dm.advanceQuestion("")
+		}
+		return dm, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "enter":
-			if m.textInput.Focused() {
-				answer := strings.TrimSpace(m.textInput.Value())
-				if answer != "" {
-					m.answers[m.currentIndex] = answer
-				}
-				m.currentIndex++
-				m.textInput.SetValue("")
-				m.timer = types.DefaultPermissionTimeout
-				if m.currentIndex >= m.questionCount {
-					return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_complete"}
-				}
-				return []tea.Cmd{textarea.Blink}, nil
-			}
-		case "tab":
-			if m.textInput.Focused() {
-				m.textInput.Blur()
-			} else {
-				m.textInput.Focus()
-				return []tea.Cmd{textarea.Blink}, nil
-			}
-			return nil, nil
 		case "esc":
-			// Skip all remaining questions
-			return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_complete"}
-		case "ctrl+c":
-			return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_cancelled"}
-		}
-
-	case timerTickMsg:
-		if m.timerActive && m.timer > 0 {
-			m.timer--
-			if m.timer == 0 {
-				// Auto-skip on timeout
-				m.currentIndex++
-				m.textInput.SetValue("")
-				m.timer = types.DefaultPermissionTimeout
-				if m.currentIndex >= m.questionCount {
-					return nil, &AppMsg{Screen: ScreenREPL, Action: "discuss_complete"}
-				}
-				return []tea.Cmd{textarea.Blink}, nil
+			// Skip current question
+			return dm, dm.advanceQuestion("")
+		case "ctrl+s":
+			// Skip all remaining
+			return dm, func() tea.Msg {
+				return AppMsg{Screen: ScreenREPL}
 			}
-			return []tea.Cmd{m.tickCmd()}, nil
+		case "enter":
+			ans := strings.TrimSpace(dm.input.Value())
+			return dm, dm.advanceQuestion(ans)
+		default:
+			var cmd tea.Cmd
+			dm.input, cmd = dm.input.Update(msg)
+			return dm, cmd
 		}
 	}
 
-	// Update text input
-	if m.textInput.Focused() {
-		var cmd tea.Cmd
-		m.textInput, cmd = m.textInput.Update(msg)
-		return []tea.Cmd{cmd}, nil
-	}
-
-	return nil, nil
+	var cmd tea.Cmd
+	dm.input, cmd = dm.input.Update(msg)
+	return dm, cmd
 }
 
-// timerTickMsg is a custom message for the timer countdown.
-type timerTickMsg struct{}
+// advanceQuestion records the answer and moves to next question or emits final msg.
+func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
+	if dm.current < len(dm.questions) {
+		dm.answers[dm.current] = answer
+	}
 
-// tickCmd returns a tea.Cmd that emits a timerTickMsg after 1 second.
-func (m *DiscussModel) tickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return timerTickMsg{}
-	})
+	qIdx := dm.current
+	ans := answer
+
+	// Emit answer message
+	answerCmd := func() tea.Msg {
+		return QuestionResponseMsg{Answer: ans}
+	}
+	_ = qIdx
+
+	dm.current++
+	dm.input.SetValue("")
+	dm.input.Focus()
+
+	if dm.hasDeadline {
+		dm.deadline = time.Now().Add(time.Duration(dm.timeout) * time.Second)
+	}
+
+	if dm.current >= len(dm.questions) {
+		// All done
+		return func() tea.Msg {
+			return AppMsg{Screen: ScreenREPL}
+		}
+	}
+	return answerCmd
 }
 
-// View renders the discuss screen.
-func (m *DiscussModel) View() string {
-	if m.currentIndex >= m.questionCount {
-		return centerScreen("All questions answered. Advancing to plan phase...", m.width, m.height)
+// View implements tea.Model.
+func (dm *DiscussModel) View() string {
+	t := dm.theme
+	w := dm.width
+	if w < 30 {
+		w = 80
 	}
 
-	var parts []string
-
-	// Header
-	headerStyle := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Padding(0, 1)
-	parts = append(parts, headerStyle.Render(fmt.Sprintf("Discuss — Question %d/%d", m.currentIndex+1, m.questionCount)))
-
-	// Progress bar
-	parts = append(parts, "")
-	parts = append(parts, m.renderProgressBar())
-	parts = append(parts, "")
-
-	// Timer
-	timerColor := m.theme.TextSecondary
-	if m.timer < 60 {
-		timerColor = m.theme.Error
+	if len(dm.questions) == 0 {
+		return lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render("No questions to answer.")
 	}
-	timerStr := fmt.Sprintf("⏱ %02d:%02d remaining", m.timer/60, m.timer%60)
-	parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(timerColor)).Render(timerStr))
-	parts = append(parts, "")
 
-	// Question
-	question := m.questions[m.currentIndex]
-	questionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.theme.Brand)).
-		Bold(true).
-		Padding(0, 2).
-		Width(m.width - 4)
-	parts = append(parts, questionStyle.Render(question))
-	parts = append(parts, "")
+	progress := fmt.Sprintf("Question %d of %d", dm.current+1, len(dm.questions))
+	progressBar := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
+		Render(progress)
 
-	// Text input
-	inputStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(m.theme.Border).
+	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
+
+	question := ""
+	if dm.current < len(dm.questions) {
+		question = dm.questions[dm.current]
+	}
+
+	qBox := lipgloss.NewStyle().
+		Foreground(t.Text).
+		PaddingLeft(2).
+		Width(w - 4).
+		Render(question)
+
+	inputBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
 		Padding(0, 1).
-		Width(m.width/2 + m.width/4 + 4)
-	parts = append(parts, inputStyle.Render(m.textInput.View()))
-	parts = append(parts, "")
+		MarginLeft(2).
+		Width(w - 6).
+		Render(dm.input.View())
 
-	// Footer
-	footerStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-	footer := footerStyle.Render("[Enter] Submit · [Tab] Skip question · [Esc] Skip all")
-	parts = append(parts, footer)
-
-	return centerScreen(strings.Join(parts, "\n"), m.width, m.height)
-}
-
-// renderProgressBar renders a progress indicator.
-func (m *DiscussModel) renderProgressBar() string {
-	total := 30 // max width of progress bar
-	filled := 0
-	if m.questionCount > 0 {
-		filled = (m.currentIndex * total) / m.questionCount
+	timeoutLine := ""
+	if dm.hasDeadline {
+		remaining := int(time.Until(dm.deadline).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(2).
+			Render(fmt.Sprintf("⏱ %ds remaining", remaining))
 	}
-	empty := total - filled
 
-	bar := lipgloss.NewStyle().Foreground(m.theme.Brand).Render(strings.Repeat("█", filled)) +
-		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(strings.Repeat("░", empty))
+	hints := "↵ answer  esc skip  ctrl+s skip all"
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(hints)
 
-	return fmt.Sprintf("  %s  %d/%d", bar, m.currentIndex, m.questionCount)
-}
-
-// GetAnswers returns the collected answers.
-func (m *DiscussModel) GetAnswers() map[int]string {
-	return m.answers
-}
-
-// Skipped returns whether the user skipped remaining questions.
-func (m *DiscussModel) Skipped() bool {
-	return m.currentIndex > 0 && m.currentIndex < m.questionCount
+	parts := []string{
+		progressBar, divider, "",
+		qBox, "",
+		inputBox,
+	}
+	if timeoutLine != "" {
+		parts = append(parts, timeoutLine)
+	}
+	parts = append(parts, "", divider, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
