@@ -4,232 +4,168 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// handleGoal shows or sets the session goal.
-func handleGoal(args []string, ctx CommandContext) CommandResult {
-	if len(args) == 0 {
-		if ctx.SessionManager != nil && ctx.SessionID != "" {
-			s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-			if err == nil && s.Project != nil && s.Project.Goal != "" {
-				return CommandResult{Success: true, Message: fmt.Sprintf("Session goal: %s", s.Project.Goal)}
-			}
-		}
-		return CommandResult{Success: true, Message: "No goal set. Use /goal <your goal> to set one."}
+
+// handleWorkflow shows the current workflow phase and status.
+func handleWorkflow(_ []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
 	}
 
-	goal := strings.Join(args, " ")
-
-	if ctx.SessionManager != nil && ctx.SessionID != "" {
-		s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-		if err == nil {
-			if s.Project == nil {
-				s.Project = &types.ProjectState{Goal: goal}
-			} else {
-				s.Project.Goal = goal
-			}
-			ctx.SessionManager.SaveProject(ctx.SessionID, s.Project)
-		}
+	goal, phase, questions, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load workflow state: %v", err)}
 	}
 
-	return CommandResult{Success: true, Message: fmt.Sprintf("Goal set: %s", goal)}
+	var sb strings.Builder
+	sb.WriteString("**Workflow status:**\n\n")
+	sb.WriteString(fmt.Sprintf("  Session: **%s**\n", ctx.SessionID))
+	if goal != "" {
+		sb.WriteString(fmt.Sprintf("  Goal:    %s\n", goal))
+	} else {
+		sb.WriteString("  Goal:    (none set)\n")
+	}
+	sb.WriteString(fmt.Sprintf("  Phase:   **%s**\n", phase))
+	if len(questions) > 0 {
+		sb.WriteString(fmt.Sprintf("  Pending questions: %d\n", len(questions)))
+	}
+
+	return CommandResult{Success: true, Message: sb.String()}
 }
 
-// handlePhase shows the current workflow phase or transitions to a new one.
+// handlePhase handles phase navigation commands: /plan, /execute, /verify, /ship, /phase.
+// It shows current phase info or transitions to the requested phase.
 func handlePhase(args []string, ctx CommandContext) CommandResult {
-	// Phase aliases (/plan, /execute, /verify, /ship) pass the phase name as the
-	// first arg. Detect bare alias usage (single arg matching a valid phase) and
-	// route to transition instead of showing status.
-	validPhases := map[string]bool{
-		"idle": true, "initialize": true, "discuss": true,
-		"plan": true, "execute": true, "verify": true, "ship": true,
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
 	}
 
-	if len(args) == 1 && validPhases[args[0]] {
-		// Bare phase alias — attempt transition
-		phase := args[0]
-		if ctx.WorkflowEngine != nil {
-			return CommandResult{
-				Success: true,
-				Message: fmt.Sprintf("Starting %s phase...", phase),
-				Cmd: func() tea.Msg {
-					return SlashCommandMsg{Command: fmt.Sprintf("/phase %s", phase)}
-				},
-			}
-		}
-		return CommandResult{
-			Success: false,
-			Message: fmt.Sprintf("Cannot start %s phase: no workflow engine available. Use /workflow <goal> to begin.", phase),
-		}
+	goal, currentPhase, _, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load workflow state: %v", err)}
 	}
 
-	if len(args) > 0 {
-		return CommandResult{
-			Success: false,
-			Message: "Use /phase <name> to start a workflow phase. Valid phases: idle, initialize, discuss, plan, execute, verify, ship",
-		}
-	}
-
-	if ctx.SessionManager != nil && ctx.SessionID != "" {
-		s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-		if err == nil {
-			return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", s.WorkflowPhase)}
-		}
-	}
-	return CommandResult{Success: true, Message: fmt.Sprintf("Current phase: %s", types.PhaseIdle)}
-}
-
-// handleTools lists all registered tools with their descriptions and risk levels.
-func handleTools(args []string, ctx CommandContext) CommandResult {
-	if ctx.Dispatcher == nil {
-		return CommandResult{Success: false, Message: "Dispatcher not available."}
-	}
-
-	names := ctx.Dispatcher.List()
-	if len(names) == 0 {
-		return CommandResult{Success: true, Message: "No tools registered."}
-	}
-
-	var b strings.Builder
-	b.WriteString("Available tools:\n")
-	for _, name := range names {
-		tool, ok := ctx.Dispatcher.GetTool(name)
-		if !ok {
-			continue
-		}
-		risk := "safe"
-		switch tool.RiskLevel() {
-		case types.RiskDangerous:
-			risk = "dangerous"
-		case types.RiskDestructive:
-			risk = "destructive"
-		}
-		b.WriteString(fmt.Sprintf("  %-15s [%-12s] %s\n", name, risk, tool.Description()))
-	}
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
-}
-
-// handleWorkflow shows the current workflow phase, tasks, and progress.
-func handleWorkflow(args []string, ctx CommandContext) CommandResult {
-	// /workflow start → open full-screen goal entry (ScreenGoalInput)
-	if len(args) > 0 && args[0] == "start" {
-		if ctx.WorkflowEngine == nil {
-			return CommandResult{
-				Success: false,
-				Message: "No workflow engine available. Configure an API key via /settings.",
-			}
-		}
-		screen := ScreenGoalInput
+	if len(args) == 0 {
+		// Show current phase
 		return CommandResult{
 			Success: true,
-			Screen:  &screen,
-			Message: "Opening goal entry...",
+			Message: fmt.Sprintf("**Current phase:** %s\n**Goal:** %s", currentPhase, goal),
 		}
 	}
 
-	if len(args) > 0 && args[0] == "resume" {
-		// BUG-2 fix: check for workflow engine first so the user gets an
-		// actionable error (no API key) rather than a confusing "No active session".
-		if ctx.WorkflowEngine == nil {
-			return CommandResult{
-				Success: false,
-				Message: "No workflow engine available. Configure an API key via /settings or restart M31A to run first-run setup.",
-			}
-		}
-		if ctx.SessionManager == nil {
-			return CommandResult{
-				Success: false,
-				Message: "No session manager available — cannot resume workflow.",
-			}
-		}
-		if ctx.SessionID == "" {
-			return CommandResult{
-				Success: false,
-				Message: "No active session. Start a workflow first.",
-			}
-		}
-		goal, phase, questions, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
-		if err != nil {
-			return CommandResult{
-				Success: false,
-				Message: fmt.Sprintf("Cannot load workflow state: %v", err),
-			}
-		}
-		if phase == types.PhaseIdle || phase == types.PhaseShip {
-			return CommandResult{
-				Success: false,
-				Message: "No workflow in progress. Use /workflow to start one.",
-			}
-		}
-		return CommandResult{
-			Success:         true,
-			Message:         fmt.Sprintf("Resuming workflow at phase: %s", phase),
-			WorkflowResume:  true,
-			ResumePhase:     phase,
-			ResumeGoal:      goal,
-			ResumeQuestions: questions,
-		}
-	}
-
-	// BUG-1 fix: check for workflow engine first so the user gets an
-	// actionable error (no API key) rather than a confusing "No active session".
-	if ctx.WorkflowEngine == nil {
+	// Determine target phase from the first argument (or command name).
+	target := strings.ToLower(args[0])
+	var targetPhase types.WorkflowPhase
+	switch target {
+	case "discuss":
+		targetPhase = types.PhaseDiscuss
+	case "plan":
+		targetPhase = types.PhasePlan
+	case "execute":
+		targetPhase = types.PhaseExecute
+	case "verify":
+		targetPhase = types.PhaseVerify
+	case "ship":
+		targetPhase = types.PhaseShip
+	case "idle":
+		targetPhase = types.PhaseIdle
+	default:
 		return CommandResult{
 			Success: false,
-			Message: "No workflow engine available. Configure an API key via /settings or restart M31A to run first-run setup.",
+			Message: fmt.Sprintf("Unknown phase %q. Valid: discuss, plan, execute, verify, ship.", target),
 		}
+	}
+
+	// Map phase to screen
+	var screen Screen
+	switch targetPhase {
+	case types.PhaseDiscuss:
+		screen = ScreenDiscuss
+	case types.PhasePlan:
+		screen = ScreenPlan
+	case types.PhaseExecute:
+		screen = ScreenExecute
+	case types.PhaseVerify:
+		screen = ScreenVerify
+	case types.PhaseShip:
+		screen = ScreenShip
+	default:
+		screen = ScreenREPL
+	}
+
+	return CommandResult{
+		Success:        true,
+		Message:        fmt.Sprintf("Transitioning to **%s** phase.", targetPhase),
+		Screen:         &screen,
+		WorkflowResume: true,
+		ResumePhase:    targetPhase,
+		ResumeGoal:     goal,
+	}
+}
+
+// handlePause pauses the current workflow / AutoDream consolidation.
+func handlePause(_ []string, ctx CommandContext) CommandResult {
+	if ctx.AutoDream != nil {
+		ctx.AutoDream.Pause()
+	}
+
+	return CommandResult{
+		Success: true,
+		Message: "Workflow paused. Use **/resume-task** to continue.",
+	}
+}
+
+// handleResumeTask resumes a paused workflow or opens the session browser.
+func handleResumeTask(_ []string, ctx CommandContext) CommandResult {
+	if ctx.AutoDream != nil && ctx.AutoDream.IsPaused() {
+		ctx.AutoDream.Resume()
 	}
 
 	if ctx.SessionManager == nil || ctx.SessionID == "" {
-		return CommandResult{Success: false, Message: "No active session. Start a workflow first."}
+		return CommandResult{Success: false, Message: "No active session."}
 	}
 
-	s, err := ctx.SessionManager.LoadSession(ctx.SessionID)
+	goal, phase, questions, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
 	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load workflow state: %v", err)}
 	}
 
-	var b strings.Builder
-	b.WriteString("Workflow STATUS:\n")
-	b.WriteString(fmt.Sprintf("  Session:  %s\n", ctx.SessionID))
-	b.WriteString(fmt.Sprintf("  Phase:    %s\n", s.WorkflowPhase))
-
-	if ctx.SessionManager != nil {
-		tasks, err := ctx.SessionManager.LoadTasks(ctx.SessionID)
-		if err == nil && len(tasks) > 0 {
-			total, done, failed, skipped := 0, 0, 0, 0
-			for _, t := range tasks {
-				total++
-				switch t.Status {
-				case types.StatusDone:
-					done++
-				case types.StatusFailed:
-					failed++
-				case types.StatusSkipped:
-					skipped++
-				}
-			}
-			b.WriteString(fmt.Sprintf("  Tasks:    %d total, %d done, %d failed, %d skipped\n", total, done, failed, skipped))
+	if phase == types.PhaseIdle || phase == "" {
+		// Nothing in progress, open session browser
+		screen := ScreenResume
+		return CommandResult{
+			Success: true,
+			Screen:  &screen,
+			Message: "No active workflow to resume. Opening session browser.",
 		}
 	}
 
-	return CommandResult{Success: true, Message: strings.TrimRight(b.String(), "\n")}
-}
-
-// handlePause informs the user that pause is available from the Execute screen.
-func handlePause(args []string, ctx CommandContext) CommandResult {
-	return CommandResult{
-		Success: true,
-		Message: "Pause is available from the Execute screen (press P during task execution).",
+	// Map the persisted phase to a screen and resume
+	var screen Screen
+	switch phase {
+	case types.PhaseDiscuss:
+		screen = ScreenDiscuss
+	case types.PhasePlan:
+		screen = ScreenPlan
+	case types.PhaseExecute:
+		screen = ScreenExecute
+	case types.PhaseVerify:
+		screen = ScreenVerify
+	case types.PhaseShip:
+		screen = ScreenShip
+	default:
+		screen = ScreenREPL
 	}
-}
 
-// handleResumeTask provides workflow restart information.
-func handleResumeTask(args []string, ctx CommandContext) CommandResult {
 	return CommandResult{
-		Success: true,
-		Message: "Workflow restart is not yet implemented. Use /workflow <goal> to start a new workflow, or /workflow resume to restart from a persisted phase.",
+		Success:         true,
+		Message:         fmt.Sprintf("Resuming **%s** phase for goal: %s", phase, goal),
+		Screen:          &screen,
+		WorkflowResume:  true,
+		ResumePhase:     phase,
+		ResumeGoal:      goal,
+		ResumeQuestions: questions,
 	}
 }
