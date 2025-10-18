@@ -1,171 +1,174 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// ExecuteModel displays task execution progress.
+// ExecuteModel displays real-time task execution progress.
 type ExecuteModel struct {
-	theme         theme.Theme
-	tasks         []types.Task
-	current       int
-	width         int
-	height        int
-	toolCard      string
-	startedAt     time.Time
-	taskStarted   time.Time
-	totalTokens   int
-	totalCost     float64
-	toolCalls     int
-	tasksCompleted int
-	tasksFailed    int
-	paused        bool
-	spinner       spinner.Model
-	allDone       bool
-	transitioning bool
-	transitionSec int
-	sessionID     string
+	tasks       []types.Task
+	theme       theme.Theme
+	sessionID   string
+	width       int
+	height      int
+	viewport    viewport.Model
+	toolCalls   int
+	totalTokens int
+	totalCost   float64
+	paused      bool
+	startedAt   time.Time
 }
 
-// recordTaskMetric records a task completion or failure metric.
-func (m *ExecuteModel) recordTaskMetric(metric string) {
-	switch metric {
-	case "completed":
-		m.tasksCompleted++
-	case "failed":
-		m.tasksFailed++
-	}
-}
-
-// NewExecuteModel creates an Execute screen model.
-func NewExecuteModel(tasks []types.Task, t theme.Theme, width, height int) *ExecuteModel {
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
-	return &ExecuteModel{
-		theme:     t,
+// NewExecuteModel creates an ExecuteModel.
+func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel {
+	em := &ExecuteModel{
 		tasks:     tasks,
-		width:     width,
-		height:    height,
+		theme:     t,
+		width:     w,
+		height:    h,
 		startedAt: time.Now(),
-		spinner:   sp,
 	}
+	em.initViewport()
+	return em
 }
 
-func (m *ExecuteModel) Init() tea.Cmd {
-	return m.spinner.Tick
+func (em *ExecuteModel) initViewport() {
+	h := em.height - 7
+	if h < 5 {
+		h = 5
+	}
+	em.viewport = viewport.New(em.width, h)
+	em.refreshContent()
 }
 
-// UpdateTaskStatus updates the status of a task by ID.
-func (m *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
-	for i := range m.tasks {
-		if m.tasks[i].ID == taskID {
-			m.tasks[i].Status = status
+func (em *ExecuteModel) refreshContent() {
+	em.viewport.SetContent(em.renderTasks())
+	em.viewport.GotoBottom()
+}
+
+// UpdateTaskStatus updates a task's status by ID.
+func (em *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
+	for i := range em.tasks {
+		if em.tasks[i].ID == taskID {
+			em.tasks[i].Status = status
 			break
 		}
 	}
+	em.refreshContent()
 }
 
-func (m *ExecuteModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
+// Update handles execute screen key events.
+func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return nil, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return []tea.Cmd{cmd}, nil
-
-	case TransitionTickMsg:
-		if m.transitioning {
-			m.transitionSec--
-			if m.transitionSec <= 0 {
-				return nil, &AppMsg{Screen: ScreenVerify}
-			}
-			return []tea.Cmd{m.transitionTick()}, nil
-		}
-
 	case tea.KeyMsg:
-		if m.transitioning {
-			switch msg.String() {
-			case "esc":
-				m.transitioning = false
-				m.transitionSec = 0
-				return nil, nil
-			}
-			return nil, nil
-		}
-
 		switch msg.String() {
-		case "up", "k":
-			if m.current > 0 {
-				m.current--
+		case "j", "down":
+			em.viewport.LineDown(1)
+		case "k", "up":
+			em.viewport.LineUp(1)
+		case "p":
+			em.paused = !em.paused
+			return em, func() tea.Msg {
+				return ExecutePauseMsg{Paused: em.paused}
 			}
-		case "down", "j":
-			if m.current < len(m.tasks)-1 {
-				m.current++
+		case "esc", "q":
+			return em, func() tea.Msg {
+				return AppMsg{Screen: ScreenREPL}
 			}
-		case "s", "S":
-			if m.current < len(m.tasks) && m.tasks[m.current].Status == types.StatusPending {
-				m.tasks[m.current].Status = types.StatusSkipped
-			}
-		case "p", "P":
-			m.paused = !m.paused
-			return []tea.Cmd{func() tea.Msg {
-				return ExecutePauseMsg{Paused: m.paused}
-			}}, nil
-		case "r", "R":
-			m.paused = false
-			return []tea.Cmd{func() tea.Msg {
-				return ExecutePauseMsg{Paused: false}
-			}}, nil
-		case "enter":
-			if m.allDone {
-				return nil, &AppMsg{Screen: ScreenVerify}
-			}
-		}
-
-		allDone := true
-		for _, t := range m.tasks {
-			if t.Status == types.StatusPending || t.Status == types.StatusRunning {
-				allDone = false
-				break
-			}
-		}
-		if allDone && !m.allDone {
-			m.allDone = true
-			m.transitioning = true
-			m.transitionSec = 3
-			return []tea.Cmd{m.transitionTick()}, nil
 		}
 	}
-	return nil, nil
+	return em, nil
 }
 
-// findRunningTask returns the currently running task, or nil.
-func (m *ExecuteModel) findRunningTask() *types.Task {
-	for i := range m.tasks {
-		if m.tasks[i].Status == types.StatusRunning {
-			return &m.tasks[i]
+// View renders the execute progress screen.
+func (em *ExecuteModel) View() string {
+	t := em.theme
+	w := em.width
+
+	// Header
+	elapsed := time.Since(em.startedAt)
+	elapsedStr := fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	done, total, failed := em.countTasks()
+
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
+		Render(fmt.Sprintf("⚡ Execute — %d/%d tasks", done, total))
+
+	if failed > 0 {
+		title += " " + lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf("(%d failed)", failed))
+	}
+
+	meta := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(fmt.Sprintf("  %s elapsed", elapsedStr))
+	if em.toolCalls > 0 {
+		meta += lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("  %d tool calls", em.toolCalls))
+	}
+
+	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
+
+	// Pause indicator
+	pauseHint := ""
+	if em.paused {
+		pauseHint = lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("  ⏸ PAUSED")
+	}
+
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("p pause/resume  j/k scroll  q back")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title+meta+pauseHint,
+		divider,
+		em.viewport.View(),
+		divider,
+		footer,
+	)
+}
+
+func (em *ExecuteModel) renderTasks() string {
+	t := em.theme
+	var lines []string
+	for i, task := range em.tasks {
+		icon, color := taskStatusIcon(task.Status, t)
+		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
+		statusIcon := lipgloss.NewStyle().Foreground(color).Render(icon)
+		action := lipgloss.NewStyle().Foreground(t.Text).Render(task.Action)
+		lines = append(lines, fmt.Sprintf("  %s %s %s", num, statusIcon, action))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (em *ExecuteModel) countTasks() (done, total, failed int) {
+	total = len(em.tasks)
+	for _, t := range em.tasks {
+		switch t.Status {
+		case types.StatusDone:
+			done++
+		case types.StatusFailed:
+			failed++
 		}
 	}
-	return nil
+	return
 }
 
-// transitionTick returns a tea.Cmd that emits a TransitionTickMsg after 1 second.
-func (m *ExecuteModel) transitionTick() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return TransitionTickMsg{}
-	})
+func taskStatusIcon(status types.TaskStatus, t theme.Theme) (string, lipgloss.Color) {
+	switch status {
+	case types.StatusDone:
+		return "✓", t.Success
+	case types.StatusFailed:
+		return "✗", t.Error
+	case types.StatusRunning:
+		return "▸", t.Brand
+	case types.StatusSkipped:
+		return "─", t.TextMuted
+	default:
+		return "○", t.TextMuted
+	}
 }
-
-// TransitionTickMsg is emitted every second during the transition countdown.
-type TransitionTickMsg struct{}
