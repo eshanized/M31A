@@ -8,10 +8,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
-// makeAssistantMsg creates a standard assistant message with content and segments.
-// Eliminates 9+ instances of duplicated Message construction pattern (M-3).
+// ─── Message helpers ──────────────────────────────────────────────────────────
+
+// makeAssistantMsg creates a standard assistant message with role, content, and segment.
 func makeAssistantMsg(content string) types.Message {
 	return types.Message{
 		Role:    "assistant",
@@ -25,90 +27,29 @@ func makeAssistantMsg(content string) types.Message {
 	}
 }
 
-// syncReplProvider synchronizes the REPL model's provider, dispatcher, and command registry.
-// Eliminates 12+ instances of the triple-call pattern (H-1).
-func (m *AppState) syncReplProvider(sessionID string) tea.Cmd {
-	if m.replModel == nil {
-		return nil
-	}
-	m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
-	m.replModel.SetDispatcher(m.dispatcher)
-	m.replModel.SetCommandRegistry(m.cmdRegistry)
-	return nil
-}
+// ─── AppState session helpers ─────────────────────────────────────────────────
 
-// listenerCmds returns the permission and question listener commands.
-// Eliminates 20+ instances of the dual-listener pattern (H-8).
-func (m *AppState) listenerCmds() []tea.Cmd {
-	return []tea.Cmd{
-		permissionListenerCmd(m.shutdownCtx, m.dispatcher),
-		questionListenerCmd(m.shutdownCtx, m.dispatcher),
-	}
-}
-
-// updateSlashSuggestions updates the slash command suggestions based on current input.
-// Eliminates duplicate 43-line blocks in repl.go and repl_keys.go (H-3).
-func (m *ReplModel) updateSlashSuggestions() {
-	if m.cmdRegistry == nil {
-		return
-	}
-
-	current := m.textarea.Value()
-	if !strings.HasPrefix(current, "/") {
-		m.slashVisible = false
-		m.slashSuggestions = nil
-		return
-	}
-
-	// Extract the partial command (first word after /)
-	parts := strings.Fields(current)
-	partial := ""
-	if len(parts) > 0 {
-		partial = strings.TrimPrefix(parts[0], "/")
-	}
-
-	// Generate matching commands
-	allCmds := m.cmdRegistry.AllCommands()
-	m.slashSuggestions = nil
-	if partial == "" {
-		// Show all commands when just "/" is typed
-		m.slashSuggestions = allCmds
-	} else {
-		// Filter by partial match
-		q := strings.ToLower(partial)
-		for _, cmd := range allCmds {
-			name := strings.ToLower(cmd.Name)
-			slash := strings.ToLower(cmd.Slash)
-			if strings.HasPrefix(name, q) || strings.HasPrefix(slash, q) || strings.Contains(name, q) {
-				m.slashSuggestions = append(m.slashSuggestions, cmd)
-			}
+// loadAndRestoreSession loads a session from disk and restores it to the REPL.
+func (m *AppState) loadAndRestoreSession(sessionID string, clearExisting bool) tea.Cmd {
+	return func() tea.Msg {
+		if m.sessionManager == nil {
+			return ErrorMsg{Err: fmt.Errorf("session manager not initialized")}
 		}
-	}
-
-	// Show suggestions if we have matches
-	if len(m.slashSuggestions) > 0 {
-		m.slashVisible = true
-		m.slashSelected = 0
-		// Limit to 8 suggestions
-		if len(m.slashSuggestions) > 8 {
-			m.slashSuggestions = m.slashSuggestions[:8]
+		sess, err := m.sessionManager.LoadSession(sessionID)
+		if err != nil {
+			return ErrorMsg{Err: fmt.Errorf("failed to load session: %w", err)}
 		}
-	} else {
-		m.slashVisible = false
+		return sessionRestoredMsg{sess: sess, clearExisting: clearExisting}
 	}
 }
 
-// ensureReplModel ensures the REPL model is initialized.
-// Eliminates 7+ nil-check+assignment blocks (H-6).
-func (m *AppState) ensureReplModel() {
-	if m.replModel == nil {
-		rp := NewReplModel(m.themeManager.Current(), m.version)
-		m.replModel = &rp
-	}
+// sessionRestoredMsg carries a restored session from loadAndRestoreSession.
+type sessionRestoredMsg struct {
+	sess          *session.Session
+	clearExisting bool
 }
 
-// ensureSidebarModel ensures the sidebar model is initialized.
-// Eliminates 2 identical nil-check blocks (H-5).
+// ensureSidebarModel creates the sidebar model if not yet initialized.
 func (m *AppState) ensureSidebarModel() {
 	if m.sidebarModel == nil {
 		m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
@@ -116,7 +57,6 @@ func (m *AppState) ensureSidebarModel() {
 }
 
 // propagateSessionID propagates the session ID to all workflow sub-models.
-// Eliminates 2 identical 4-line blocks (H-4).
 func (m *AppState) propagateSessionID(id string) {
 	if m.planModel != nil {
 		m.planModel.sessionID = id
@@ -132,40 +72,85 @@ func (m *AppState) propagateSessionID(id string) {
 	}
 }
 
-// loadAndRestoreSession loads a session and restores it to the REPL and workflow models.
-// Eliminates 2 near-identical session loading blocks (H-2).
-func (m *AppState) loadAndRestoreSession(sessionID string, clearExisting bool) tea.Cmd {
-	sess, err := m.sessionManager.LoadSession(sessionID)
-	if err != nil {
-		return func() tea.Msg { return ErrorMsg{Err: fmt.Errorf("failed to load session: %w", err)} }
-	}
-
+// applySessionRestored applies a sessionRestoredMsg to the REPL.
+func (m *AppState) applySessionRestored(msg sessionRestoredMsg) tea.Cmd {
+	sess := msg.sess
 	m.ensureReplModel()
 	providerCmd := m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
 	m.replModel.SetDispatcher(m.dispatcher)
-	m.replModel.SetSessionID(sessionID)
+	m.replModel.SetSessionID(sess.ID)
+	m.sessionID = sess.ID
 
-	if clearExisting {
+	if msg.clearExisting {
 		m.replModel.ClearMessages()
 		m.replModel.SetCommandRegistry(m.cmdRegistry)
 	}
 
-	for _, msg := range sess.Messages {
-		m.replModel.AddMessage(msg)
+	for _, message := range sess.Messages {
+		m.replModel.AddMessage(message)
 	}
-	m.propagateSessionID(sessionID)
+	m.propagateSessionID(sess.ID)
+	m.screen = ScreenREPL
 
 	return providerCmd
 }
 
-// centerScreen centers content in the terminal.
-// Eliminates 30+ identical centering calls (H-9).
+// ─── ReplModel helpers ────────────────────────────────────────────────────────
+
+// updateSlashSuggestions updates slash command autocomplete based on current input.
+func (m *ReplModel) updateSlashSuggestions() {
+	if m.cmdRegistry == nil {
+		return
+	}
+
+	current := m.textarea.Value()
+	if !strings.HasPrefix(current, "/") {
+		m.slashVisible = false
+		m.slashSuggestions = nil
+		return
+	}
+
+	parts := strings.Fields(current)
+	partial := ""
+	if len(parts) > 0 {
+		partial = strings.TrimPrefix(parts[0], "/")
+	}
+
+	allCmds := m.cmdRegistry.AllCommands()
+	m.slashSuggestions = nil
+
+	if partial == "" {
+		m.slashSuggestions = allCmds
+	} else {
+		q := strings.ToLower(partial)
+		for _, cmd := range allCmds {
+			name := strings.ToLower(cmd.Name)
+			slash := strings.ToLower(strings.TrimPrefix(cmd.Slash, "/"))
+			if strings.HasPrefix(slash, q) || strings.HasPrefix(name, q) || strings.Contains(name, q) {
+				m.slashSuggestions = append(m.slashSuggestions, cmd)
+			}
+		}
+	}
+
+	if len(m.slashSuggestions) > 0 {
+		m.slashVisible = true
+		m.slashSelected = 0
+		if len(m.slashSuggestions) > 8 {
+			m.slashSuggestions = m.slashSuggestions[:8]
+		}
+	} else {
+		m.slashVisible = false
+	}
+}
+
+// ─── Layout / rendering utilities ─────────────────────────────────────────────
+
+// centerScreen centers content both horizontally and vertically in the terminal.
 func centerScreen(content string, w, h int) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 }
 
-// renderSectionHeader renders a section header with dashed lines filling the width.
-// Eliminates 6+ header-bar patterns (M-12).
+// renderSectionHeader renders a titled divider line.
 func renderSectionHeader(title string, width int) string {
 	prefix := fmt.Sprintf("── %s ", title)
 	remaining := width - lipgloss.Width(prefix)
