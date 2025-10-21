@@ -1,334 +1,200 @@
 package tui
 
 import (
-	"context"
-	"fmt"
-	"net"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
 )
 
-type FirstRunState int
+// firstRunStep represents a step in the first-run wizard.
+type firstRunStep int
 
 const (
-	FirstRunWelcome FirstRunState = iota
-	FirstRunProviderSelect
-	FirstRunKeyInput
-	FirstRunValidating
-	FirstRunKeychainPrompt
-	FirstRunComplete
+	stepWelcome firstRunStep = iota
+	stepProviderSelect
+	stepAPIKey
+	stepModelPick
+	stepDone
 )
 
-type validationResultMsg struct {
-	valid bool
-	err   string
-}
-
-type FirstRunModel struct {
-	state              FirstRunState
-	theme              theme.Theme
-	version            string
-	cursor             int
-	providers          []string
-	apiKeyInput        textinput.Model
-	apiKeyValue        string
-	validating         bool
-	validationErr      string
-	statusMsg          string
-	width              int
-	height             int
-	configPath         string
-	openrouterBaseURL  string
-	zenBaseURL         string
-	openrouterReferer  string
-	openrouterTitle    string
-}
-
+// FirstRunOpts carries the data collected from the first-run wizard.
 type FirstRunOpts struct {
-	OpenRouterBaseURL string
-	ZenBaseURL        string
-	OpenRouterReferer string
-	OpenRouterTitle   string
+	Provider    string
+	APIKey      string
+	ModelID     string
+	SaveKeychain bool
 }
 
-func NewFirstRunModel(t theme.Theme, configPath string, version string, opts ...FirstRunOpts) FirstRunModel {
-	ti := textinput.New()
-	ti.Placeholder = "sk-or-v1-..."
-	ti.EchoMode = textinput.EchoPassword
-	ti.Focus()
-	ti.Width = 60
-	ti.CharLimit = 128
+// FirstRunModel is a multi-step setup wizard shown on first launch.
+type FirstRunModel struct {
+	theme theme.Theme
+	step  firstRunStep
 
-	m := FirstRunModel{
-		state:       FirstRunWelcome,
-		theme:       t,
-		version:     version,
-		providers:   make([]string, 0),
-		apiKeyInput: ti,
-		configPath:  configPath,
-	}
-	if len(opts) > 0 {
-		o := opts[0]
-		m.openrouterBaseURL = o.OpenRouterBaseURL
-		m.zenBaseURL = o.ZenBaseURL
-		m.openrouterReferer = o.OpenRouterReferer
-		m.openrouterTitle = o.OpenRouterTitle
-	}
-	return m
+	// Provider selection
+	providers      []string
+	providerCursor int
+
+	// API key entry
+	keyInput textinput.Model
+	keyErr   string
+
+	// Model selection (simplified: user types a model ID)
+	modelInput textinput.Model
+
+	// Collected values
+	opts FirstRunOpts
+
+	width  int
+	height int
 }
 
-func (m *FirstRunModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
+// NewFirstRunModel creates a FirstRunModel.
+func NewFirstRunModel(t theme.Theme) *FirstRunModel {
+	keyTI := textinput.New()
+	keyTI.Placeholder = "sk-or-..."
+	keyTI.EchoMode = textinput.EchoPassword
+	keyTI.CharLimit = 200
+
+	modelTI := textinput.New()
+	modelTI.Placeholder = "e.g. anthropic/claude-3-5-sonnet"
+	modelTI.CharLimit = 120
+
+	return &FirstRunModel{
+		theme:      t,
+		step:       stepWelcome,
+		providers:  []string{"openrouter", "zen"},
+		keyInput:   keyTI,
+		modelInput: modelTI,
+	}
+}
+
+// SetTheme updates the theme.
+func (fr *FirstRunModel) SetTheme(t theme.Theme) {
+	fr.theme = t
+}
+
+// SetDimensions updates the wizard dimensions.
+func (fr *FirstRunModel) SetDimensions(w, h int) {
+	fr.width = w
+	fr.height = h
+}
+
+// Init implements tea.Model.
+func (fr *FirstRunModel) Init() tea.Cmd {
+	return nil
+}
+
+// Update implements tea.Model.
+func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
+		fr.width = msg.Width
+		fr.height = msg.Height
+		return fr, nil
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			return []tea.Cmd{tea.Quit}, nil
-		}
+		return fr.handleKey(msg)
 	}
-
-	switch m.state {
-	case FirstRunWelcome:
-		return m.updateWelcome(msg)
-	case FirstRunProviderSelect:
-		return m.updateProviderSelect(msg)
-	case FirstRunKeyInput:
-		return m.updateKeyInput(msg)
-	case FirstRunValidating:
-		return m.updateValidating(msg)
-	case FirstRunKeychainPrompt:
-		return m.updateKeychainPrompt(msg)
-	case FirstRunComplete:
-		return m.updateComplete(msg)
+	// Delegate to focused input if applicable
+	var cmd tea.Cmd
+	switch fr.step {
+	case stepAPIKey:
+		fr.keyInput, cmd = fr.keyInput.Update(msg)
+	case stepModelPick:
+		fr.modelInput, cmd = fr.modelInput.Update(msg)
 	}
-
-	return nil, nil
+	return fr, cmd
 }
 
-func (m *FirstRunModel) updateWelcome(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+// handleKey routes key events per step.
+func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch fr.step {
+	case stepWelcome:
 		switch msg.String() {
 		case "enter", " ":
-			m.state = FirstRunProviderSelect
+			fr.step = stepProviderSelect
+		case "q", "ctrl+c":
+			return fr, tea.Quit
 		}
-	}
-	return nil, nil
-}
 
-func (m *FirstRunModel) updateProviderSelect(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case stepProviderSelect:
 		switch msg.String() {
-		case "up":
-			if m.cursor > 0 {
-				m.cursor--
-			} else {
-				m.cursor = 3
+		case "up", "k":
+			if fr.providerCursor > 0 {
+				fr.providerCursor--
 			}
-		case "down":
-			if m.cursor < 3 {
-				m.cursor++
-			} else {
-				m.cursor = 0
+		case "down", "j":
+			if fr.providerCursor < len(fr.providers)-1 {
+				fr.providerCursor++
 			}
-		case "1":
-			m.cursor = 0
-			return nil, m.selectOption()
-		case "2":
-			m.cursor = 1
-			return nil, m.selectOption()
-		case "3":
-			m.cursor = 2
-			return nil, m.selectOption()
-		case "4", "s":
-			m.cursor = 3
-			return nil, m.selectOption()
-		case "enter":
-			return nil, m.selectOption()
-		}
-	}
-	return nil, nil
-}
-
-func (m *FirstRunModel) selectOption() *AppMsg {
-	switch m.cursor {
-	case 0:
-		m.providers = []string{"openrouter"}
-		m.state = FirstRunKeyInput
-		m.apiKeyInput.Reset()
-		m.apiKeyInput.Focus()
-	case 1:
-		m.providers = []string{"zen"}
-		m.state = FirstRunKeyInput
-		m.apiKeyInput.Reset()
-		m.apiKeyInput.Focus()
-	case 2:
-		m.providers = []string{"openrouter", "zen"}
-		m.state = FirstRunKeyInput
-		m.apiKeyInput.Reset()
-		m.apiKeyInput.Focus()
-	case 3:
-		m.statusMsg = "No API key configured"
-		m.state = FirstRunComplete
-		return &AppMsg{Screen: ScreenREPL}
-	}
-	return nil
-}
-
-func (m *FirstRunModel) updateKeyInput(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+		case "enter", " ":
+			fr.opts.Provider = fr.providers[fr.providerCursor]
+			fr.step = stepAPIKey
+			fr.keyErr = ""
+			fr.keyInput.Focus()
 		case "esc":
-			m.state = FirstRunProviderSelect
-			m.validationErr = ""
-			return nil, nil
-		case "enter":
-			input := strings.TrimSpace(m.apiKeyInput.Value())
-			if input == "" {
-				return nil, nil
-			}
-			m.apiKeyValue = input
-			m.state = FirstRunValidating
-			m.validating = true
-			return []tea.Cmd{
-				func() tea.Msg {
-					if len(input) < 10 {
-						return validationResultMsg{valid: false, err: "API key too short"}
-					}
-					for _, provider := range m.providers {
-						if err := validateAPIKey(provider, input, m.openrouterBaseURL, m.zenBaseURL, m.openrouterReferer, m.openrouterTitle); err != nil {
-							return validationResultMsg{valid: false, err: fmt.Sprintf("%s: %v", provider, err)}
-						}
-					}
-					return validationResultMsg{valid: true}
-				},
-			}, nil
+			fr.step = stepWelcome
 		}
-	}
 
-	var cmd tea.Cmd
-	m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
-	return []tea.Cmd{cmd}, nil
-}
-
-func (m *FirstRunModel) updateValidating(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case validationResultMsg:
-		m.validating = false
-		if msg.valid {
-			m.state = FirstRunKeychainPrompt
-		} else {
-			m.validationErr = msg.err
-			m.state = FirstRunKeyInput
-			m.apiKeyInput.Focus()
-		}
-	}
-	return nil, nil
-}
-
-func (m *FirstRunModel) updateKeychainPrompt(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case stepAPIKey:
 		switch msg.String() {
-		case "y", "Y", "enter":
-			m.state = FirstRunComplete
-			return nil, &AppMsg{Screen: ScreenREPL, SaveKeychain: true}
-		case "n", "N":
-			m.state = FirstRunComplete
-			return nil, &AppMsg{Screen: ScreenREPL, SaveKeychain: false}
+		case "enter":
+			key := strings.TrimSpace(fr.keyInput.Value())
+			if key == "" {
+				fr.keyErr = "API key cannot be empty"
+				return fr, nil
+			}
+			fr.opts.APIKey = key
+			fr.keyErr = ""
+			fr.step = stepModelPick
+			fr.keyInput.Blur()
+			fr.modelInput.Focus()
+		case "tab":
+			// Toggle save-to-keychain
+			fr.opts.SaveKeychain = !fr.opts.SaveKeychain
+		case "esc":
+			fr.step = stepProviderSelect
+			fr.keyInput.Blur()
+		default:
+			var cmd tea.Cmd
+			fr.keyInput, cmd = fr.keyInput.Update(msg)
+			return fr, cmd
+		}
+
+	case stepModelPick:
+		switch msg.String() {
+		case "enter":
+			modelID := strings.TrimSpace(fr.modelInput.Value())
+			fr.opts.ModelID = modelID
+			fr.step = stepDone
+			fr.modelInput.Blur()
+			return fr, fr.completeSetup()
+		case "esc":
+			fr.step = stepAPIKey
+			fr.modelInput.Blur()
+			fr.keyInput.Focus()
+		default:
+			var cmd tea.Cmd
+			fr.modelInput, cmd = fr.modelInput.Update(msg)
+			return fr, cmd
 		}
 	}
-	return nil, nil
+	return fr, nil
 }
 
-func (m *FirstRunModel) updateComplete(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	return nil, nil
-}
-
-func (m *FirstRunModel) State() FirstRunState {
-	return m.state
-}
-
-func (m *FirstRunModel) SelectedProviders() []string {
-	return m.providers
-}
-
-func (m *FirstRunModel) APIKey() string {
-	return m.apiKeyValue
-}
-
-func (m *FirstRunModel) SetTheme(t theme.Theme) {
-	m.theme = t
-}
-
-// validateAPIKey makes a test HTTP request to verify the API key works.
-func validateAPIKey(provider, key, openrouterBaseURL, zenBaseURL, openrouterReferer, openrouterTitle string) error {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		},
-	}
-
-	var url string
-	switch provider {
-	case "openrouter":
-		baseURL := openrouterBaseURL
-		if baseURL == "" {
-			baseURL = types.DefaultOpenRouterBaseURL
+// completeSetup emits AppMsg to transition to the REPL.
+func (fr *FirstRunModel) completeSetup() tea.Cmd {
+	opts := fr.opts
+	return func() tea.Msg {
+		return AppMsg{
+			Screen:       ScreenREPL,
+			SaveKeychain: opts.SaveKeychain,
 		}
-		url = baseURL + "/auth/key"
-	case "zen":
-		baseURL := zenBaseURL
-		if baseURL == "" {
-			baseURL = types.DefaultZenBaseURL
-		}
-		url = baseURL + "/models"
-	default:
-		return fmt.Errorf("unknown provider: %s", provider)
 	}
+}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("User-Agent", types.DefaultUserAgent)
-	if provider == "openrouter" {
-		referer := openrouterReferer
-		if referer == "" {
-			referer = types.DefaultReferer
-		}
-		title := openrouterTitle
-		if title == "" {
-			title = types.DefaultXTitle
-		}
-		req.Header.Set("HTTP-Referer", referer)
-		req.Header.Set("X-Title", title)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("invalid API key")
-		}
-		return fmt.Errorf("server returned status %d", resp.StatusCode)
-	}
-	return nil
+// View implements tea.Model.
+func (fr *FirstRunModel) View() string {
+	return fr.renderFirstRun()
 }
