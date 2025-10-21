@@ -1,221 +1,114 @@
 package tui
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/eshanized/M31A/internal/types"
 )
 
-// HistoryEntry represents a single prompt history entry with frecency tracking.
-type HistoryEntry struct {
-	Text      string    `json:"text"`
-	LastUsed  time.Time `json:"last_used"`
-	Frequency int       `json:"frequency"`
-	FirstUsed time.Time `json:"first_used"`
-}
-
-// HistoryData is the JSON serialization wrapper for history entries.
-type HistoryData struct {
-	Entries []HistoryEntry `json:"entries"`
-}
-
-// FrecentHistory manages persistent prompt history with frecency scoring.
-// Frecency = frequency / (hours_since_last_use + 1)
+// FrecentHistory tracks prompt history by frecency (frequency + recency).
+// Entries are persisted as JSON in the user's session directory.
 type FrecentHistory struct {
-	entries  []HistoryEntry
-	maxSize  int
+	entries  []frecentEntry
 	filePath string
 }
 
-// NewFrecentHistory creates a new FrecentHistory with the given file path and max size.
-func NewFrecentHistory(filePath string, maxSize int) *FrecentHistory {
-	return &FrecentHistory{
-		entries:  []HistoryEntry{},
-		maxSize:  maxSize,
-		filePath: filePath,
-	}
+type frecentEntry struct {
+	Text      string    `json:"text"`
+	Score     float64   `json:"score"`
+	LastUsed  time.Time `json:"last_used"`
+	UseCount  int       `json:"use_count"`
 }
 
-// Load reads history from disk. If the file doesn't exist, starts with an empty history.
-func (h *FrecentHistory) Load() error {
-	data, err := os.ReadFile(h.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			h.entries = []HistoryEntry{}
-			return nil
-		}
-		return err
-	}
-
-	var hd HistoryData
-	if err := json.Unmarshal(data, &hd); err != nil {
-		return err
-	}
-
-	if hd.Entries == nil {
-		h.entries = []HistoryEntry{}
-	} else {
-		h.entries = hd.Entries
-	}
-	return nil
+// NewFrecentHistory creates a FrecentHistory backed by the given file path.
+// If the file exists it is loaded immediately; otherwise an empty history is created.
+func NewFrecentHistory(filePath string) *FrecentHistory {
+	fh := &FrecentHistory{filePath: filePath}
+	_ = fh.load()
+	return fh
 }
 
-// Save atomically writes history to disk. Before saving, enforces maxSize by evicting
-// lowest-frecency entries.
-func (h *FrecentHistory) Save() error {
-	// Evict low-frecency entries if over limit
-	if len(h.entries) > h.maxSize {
-		h.sortByFrecency(false, h.entries) // ascending — lowest first
-		h.entries = h.entries[len(h.entries)-h.maxSize:]
-	}
-
-	data := HistoryData{Entries: h.entries}
-	payload, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return h.atomicWrite(h.filePath, payload)
-}
-
-// Upsert inserts or updates a prompt entry. If the text already exists, increments
-// frequency and updates last_used. If new, appends with frequency=1.
-func (h *FrecentHistory) Upsert(text string) {
+// Upsert adds or updates an entry in the history.
+func (fh *FrecentHistory) Upsert(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
 	}
-
-	for i, entry := range h.entries {
-		if entry.Text == text {
-			h.entries[i].Frequency++
-			h.entries[i].LastUsed = time.Now()
+	now := time.Now()
+	for i := range fh.entries {
+		if fh.entries[i].Text == text {
+			fh.entries[i].UseCount++
+			fh.entries[i].LastUsed = now
+			fh.entries[i].Score = fh.computeScore(fh.entries[i])
 			return
 		}
 	}
+	entry := frecentEntry{
+		Text:     text,
+		UseCount: 1,
+		LastUsed: now,
+	}
+	entry.Score = fh.computeScore(entry)
+	fh.entries = append(fh.entries, entry)
+	// Keep at most 500 entries
+	if len(fh.entries) > 500 {
+		fh.sort()
+		fh.entries = fh.entries[:500]
+	}
+}
 
-	h.entries = append(h.entries, HistoryEntry{
-		Text:      text,
-		Frequency: 1,
-		FirstUsed: time.Now(),
-		LastUsed:  time.Now(),
+// Search returns entries matching the query, sorted by score descending.
+func (fh *FrecentHistory) Search(query string, limit int) []frecentEntry {
+	query = strings.ToLower(strings.TrimSpace(query))
+	var results []frecentEntry
+	for _, e := range fh.entries {
+		if strings.Contains(strings.ToLower(e.Text), query) {
+			results = append(results, e)
+		}
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
 	})
-}
-
-// Search returns up to `limit` entries matching the prefix, sorted by frecency descending.
-// If prefix is empty, returns top entries overall.
-func (h *FrecentHistory) Search(prefix string, limit int) []HistoryEntry {
-	var filtered []HistoryEntry
-
-	if prefix == "" {
-		filtered = make([]HistoryEntry, len(h.entries))
-		copy(filtered, h.entries)
-	} else {
-		for _, entry := range h.entries {
-			if strings.HasPrefix(entry.Text, prefix) || strings.Contains(entry.Text, prefix) {
-				filtered = append(filtered, entry)
-			}
-		}
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
 	}
+	return results
+}
 
-	h.sortByFrecency(true, filtered)
-
-	if len(filtered) > limit {
-		filtered = filtered[:limit]
+// Save persists the history to disk.
+func (fh *FrecentHistory) Save() error {
+	if fh.filePath == "" {
+		return nil
 	}
-
-	return filtered
-}
-
-// Frecency computes the frecency score for an entry:
-// score = frequency / (hours_since_last_use + 1)
-func (h *FrecentHistory) Frecency(entry HistoryEntry) float64 {
-	hoursSinceLastUse := time.Since(entry.LastUsed).Hours()
-	return float64(entry.Frequency) / (hoursSinceLastUse + 1.0)
-}
-
-// All returns all entries sorted by frecency descending.
-func (h *FrecentHistory) All() []HistoryEntry {
-	result := make([]HistoryEntry, len(h.entries))
-	copy(result, h.entries)
-	h.sortByFrecency(true, result)
-	return result
-}
-
-// Size returns the number of entries.
-func (h *FrecentHistory) Size() int {
-	return len(h.entries)
-}
-
-// Clear removes all entries.
-func (h *FrecentHistory) Clear() {
-	h.entries = []HistoryEntry{}
-}
-
-// frecency is the unexported helper for computing frecency scores.
-func (h *FrecentHistory) frecency(entry HistoryEntry) float64 {
-	return h.Frecency(entry)
-}
-
-// sortByFrecency sorts entries by frecency score. If descending is true, highest
-// scores come first.
-func (h *FrecentHistory) sortByFrecency(descending bool, entries []HistoryEntry) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		if descending {
-			return h.frecency(entries[i]) > h.frecency(entries[j])
-		}
-		return h.frecency(entries[i]) < h.frecency(entries[j])
-	})
-}
-
-// atomicWrite atomically writes data to path using a temp file + rename pattern.
-func (h *FrecentHistory) atomicWrite(path string, data []byte) (err error) {
-	dir := filepath.Dir(path)
-
-	// Generate random temp name in the same directory (cross-device safety)
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return err
-	}
-	tmpPath := filepath.Join(dir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-
-	// Clean up temp file on any error
-	cleanup := true
-	defer func() {
-		if cleanup {
-			os.Remove(tmpPath) // best-effort cleanup
-		}
-	}()
-
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, types.FilePermission)
+	_ = os.MkdirAll(filepath.Dir(fh.filePath), 0o700)
+	fh.sort()
+	data, err := json.Marshal(fh.entries)
 	if err != nil {
 		return err
 	}
+	return os.WriteFile(fh.filePath, data, 0o600)
+}
 
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+func (fh *FrecentHistory) load() error {
+	data, err := os.ReadFile(fh.filePath)
+	if err != nil {
 		return err
 	}
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return err
-	}
+	return json.Unmarshal(data, &fh.entries)
+}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
+func (fh *FrecentHistory) sort() {
+	sort.Slice(fh.entries, func(i, j int) bool {
+		return fh.entries[i].Score > fh.entries[j].Score
+	})
+}
 
-	cleanup = false
-	return nil
+func (fh *FrecentHistory) computeScore(e frecentEntry) float64 {
+	ageHours := time.Since(e.LastUsed).Hours()
+	// Combine recency (exponential decay) and frequency
+	recency := 1.0 / (1.0 + ageHours/24.0)
+	return recency*float64(e.UseCount)*10 + recency
 }
