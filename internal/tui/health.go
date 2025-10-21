@@ -9,41 +9,29 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-func HealthCheckTicker(ctx context.Context, interval time.Duration) tea.Cmd {
-
-	if ctx == nil {
-		return nil
-	}
-
-	if interval <= 0 {
-		interval = types.HealthCheckInterval
-	}
-
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
+// HealthCheckTicker returns a tea.Cmd that emits a HealthCheckTickMsg after the
+// given duration. The app re-schedules it in response to HealthCheckResultMsg.
+func HealthCheckTicker(ctx context.Context, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return HealthCheckTickMsg{Time: t}
 	})
 }
 
-func NextHealthTick(interval time.Duration) tea.Cmd {
-	if interval <= 0 {
-		interval = types.HealthCheckInterval
-	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return HealthCheckTickMsg{Time: t}
-	})
+// NextHealthTick returns a tea.Cmd for the next health check tick.
+func NextHealthTick(d time.Duration) tea.Cmd {
+	return HealthCheckTicker(context.Background(), d)
 }
 
-// HealthCheckCmd returns a tea.Cmd that performs the health check in a
-// goroutine and emits HealthCheckResultMsg when complete. C-1 fix: the
-// HTTP call no longer blocks Bubble Tea's Update() loop.
+// HealthCheckCmd runs a health check against the given provider in a goroutine
+// and emits a HealthCheckResultMsg when it completes.
 func HealthCheckCmd(p provider.LLMProvider, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		if timeout <= 0 {
-			timeout = 10 * time.Second
+			timeout = types.HealthCheckInterval
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		result := p.HealthCheck(ctx)
-		return HealthCheckResultMsg{Result: result}
+		status := p.HealthCheck(ctx)
+		return HealthCheckResultMsg{Result: status}
 	}
 }
