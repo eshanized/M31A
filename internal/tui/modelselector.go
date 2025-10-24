@@ -2,11 +2,8 @@ package tui
 
 import (
 	"context"
-	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
@@ -15,311 +12,236 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
-type providerFilter int
-
-const (
-	filterAll providerFilter = iota
-	filterOpenRouter
-	filterZen
-)
-
-func (f providerFilter) String() string {
-	switch f {
-	case filterAll:
-		return "All"
-	case filterOpenRouter:
-		return "OpenRouter"
-	case filterZen:
-		return "Zen"
-	default:
-		return "Unknown"
-	}
+// modelSelectorLoadedMsg carries models fetched asynchronously.
+type modelSelectorLoadedMsg struct {
+	providerName string
+	models       []types.ModelInfo
+	err          error
 }
 
-func (f providerFilter) Next() providerFilter {
-	return (f + 1) % 3
-}
-
-type modelFetchCompleteMsg struct {
-	models []types.ModelInfo
-	err    string
-}
-
+// ModelSelector is a full-screen model/provider picker with search, scroll, and pricing.
 type ModelSelector struct {
-	registry      *provider.Registry
-	list          list.Model
-	search        textinput.Model
-	filter        providerFilter
-	showDetail    bool
-	detailModel   *types.ModelInfo
-	ready         bool
-	width         int
-	height        int
-	err           string
-	allModels     []types.ModelInfo
-	searchFocused bool
-	manager       *session.Manager
-	spinner       spinner.Model
-	theme         theme.Theme
-	usageHistory  map[string][]float64 // model ID -> usage frequency data
+	registry       *provider.Registry
+	sessionManager *session.Manager
+	theme          theme.Theme
+
+	// Loaded models grouped by provider name.
+	providers    []string
+	modelsByProv map[string][]types.ModelInfo
+
+	// State.
+	searchInput  textinput.Model
+	activeProvider string
+	filtered     []types.ModelInfo // filtered results
+	cursor       int
+	offset       int  // scroll offset
+	loading      bool
+	errMsg       string
+
+	width  int
+	height int
 }
 
-func NewModelSelector(registry *provider.Registry, mgr *session.Manager, t theme.Theme) ModelSelector {
+// NewModelSelector creates a ModelSelector backed by the given registry.
+func NewModelSelector(registry *provider.Registry, sessionManager *session.Manager, t theme.Theme) *ModelSelector {
 	ti := textinput.New()
 	ti.Placeholder = "Search models..."
-	ti.CharLimit = 100
-	ti.Width = 40
+	ti.Focus()
+	ti.CharLimit = 80
 
-	items := []list.Item{}
-	delegate := newModelItemDelegate(t)
-	l := list.New(items, delegate, 0, 0)
-	l.Title = "Model Selector"
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.DisableQuitKeybindings()
-
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-
-	return ModelSelector{
-		registry:     registry,
-		list:         l,
-		search:       ti,
-		filter:       filterAll,
-		manager:      mgr,
-		spinner:      sp,
-		theme:        t,
-		usageHistory: make(map[string][]float64),
+	return &ModelSelector{
+		registry:       registry,
+		sessionManager: sessionManager,
+		theme:          t,
+		modelsByProv:   make(map[string][]types.ModelInfo),
+		searchInput:    ti,
+		loading:        true,
 	}
 }
 
-func (m ModelSelector) Init() tea.Cmd {
-	return tea.Batch(
-		textinput.Blink,
-		fetchModelsCmd(m.registry),
-		m.spinner.Tick,
-	)
+// SetTheme updates the theme.
+func (ms *ModelSelector) SetTheme(t theme.Theme) {
+	ms.theme = t
 }
 
-func fetchModelsCmd(registry *provider.Registry) tea.Cmd {
+// SetDimensions updates the model selector dimensions.
+func (ms *ModelSelector) SetDimensions(w, h int) {
+	ms.width = w
+	ms.height = h
+}
+
+// Init starts model fetch commands for all registered providers.
+func (ms *ModelSelector) Init() tea.Cmd {
+	provNames := ms.registry.ListAll()
+	if len(provNames) == 0 {
+		ms.loading = false
+		return nil
+	}
+	ms.providers = provNames
+	ms.activeProvider = ms.registry.Active()
+
+	cmds := make([]tea.Cmd, 0, len(provNames))
+	for _, name := range provNames {
+		cmds = append(cmds, ms.fetchModelsCmd(name))
+	}
+	return tea.Batch(cmds...)
+}
+
+// fetchModelsCmd fetches models for a single provider asynchronously.
+func (ms *ModelSelector) fetchModelsCmd(provName string) tea.Cmd {
 	return func() tea.Msg {
-		if registry == nil {
-			return modelFetchCompleteMsg{err: "provider registry not available"}
+		p, err := ms.registry.Get(provName)
+		if err != nil {
+			return modelSelectorLoadedMsg{providerName: provName, err: err}
 		}
-		providers := registry.List()
-		var allModels []types.ModelInfo
-		for _, name := range providers {
-			p, err := registry.Get(name)
-			if err != nil {
-				continue
-			}
-			models, err := p.FetchModels(context.Background())
-			if err != nil {
-				continue
-			}
-			for i := range models {
-				models[i].Provider = name
-			}
-			allModels = append(allModels, models...)
-		}
-		return modelFetchCompleteMsg{models: allModels}
+		models, err := p.FetchModels(context.Background())
+		return modelSelectorLoadedMsg{providerName: provName, models: models, err: err}
 	}
 }
 
-func (m ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles key events and async load messages.
+func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		h, v := 6, 4
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-		return m, nil
+		ms.width = msg.Width
+		ms.height = msg.Height
+		return ms, nil
 
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
-
-	case modelFetchCompleteMsg:
-		m.ready = true
-		m.allModels = msg.models
-		if msg.err != "" {
-			m.err = msg.err
+	case modelSelectorLoadedMsg:
+		if msg.err == nil && len(msg.models) > 0 {
+			ms.modelsByProv[msg.providerName] = msg.models
+		} else if msg.err != nil {
+			ms.errMsg = msg.err.Error()
 		}
-		m.refilterList()
-		return m, nil
+		// Check if all providers loaded
+		allDone := true
+		for _, name := range ms.providers {
+			if _, ok := ms.modelsByProv[name]; !ok {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			ms.loading = false
+			ms.applyFilter()
+		}
+		return ms, nil
 
 	case tea.KeyMsg:
-		if m.searchFocused {
-			switch msg.String() {
-			case "esc":
-				m.searchFocused = false
-				m.search.Blur()
-				return m, nil
-			case "enter":
-				m.searchFocused = false
-				m.search.Blur()
-				return m, nil
-			default:
-				var cmd tea.Cmd
-				m.search, cmd = m.search.Update(msg)
-				m.refilterList()
-				return m, cmd
-			}
-		}
-
 		switch msg.String() {
-		case "p", "P":
-			m.filter = m.filter.Next()
-			m.refilterList()
-			return m, nil
-
+		case "esc", "q":
+			return ms, func() tea.Msg {
+				return AppMsg{Screen: ScreenREPL}
+			}
+		case "up", "k":
+			if ms.cursor > 0 {
+				ms.cursor--
+				ms.clampScroll()
+			}
+			return ms, nil
+		case "down", "j":
+			if ms.cursor < len(ms.filtered)-1 {
+				ms.cursor++
+				ms.clampScroll()
+			}
+			return ms, nil
 		case "tab":
-			m.showDetail = !m.showDetail
-			if m.showDetail {
-				item := m.list.SelectedItem()
-				if item != nil {
-					mi, ok := item.(ModelItem)
-					if ok {
-						m.detailModel = &mi.Model
-					}
-				}
-			} else {
-				m.detailModel = nil
-			}
-			return m, nil
-
+			// Cycle provider filter
+			ms.cycleProvider()
+			return ms, nil
 		case "enter":
-			item := m.list.SelectedItem()
-			if item == nil {
-				return m, nil
-			}
-			mi, ok := item.(ModelItem)
-			if !ok {
-				return m, nil
-			}
-			return m, func() tea.Msg {
-				return AppMsg{
-					ModelSelected: &ModelSelectedMsg{
-						Model:    mi.Model,
-						Provider: mi.Provider,
-					},
-				}
-			}
-
-		case "f", "F":
-			item := m.list.SelectedItem()
-			if item != nil {
-				mi, ok := item.(ModelItem)
-				if ok && m.manager != nil {
-					if err := m.manager.ToggleFavorite(mi.Model.ID); err == nil {
-						m.refilterList()
-					}
-				}
-			}
-			return m, nil
-
-		case "ctrl+c":
-			return m, tea.Quit
-
-		case "/", "?":
-			m.searchFocused = true
-			m.search.Focus()
-			return m, nil
-
+			return ms, ms.selectCurrent()
 		default:
+			// Feed into search input
 			var cmd tea.Cmd
-			m.list, cmd = m.list.Update(msg)
-			return m, cmd
+			ms.searchInput, cmd = ms.searchInput.Update(msg)
+			ms.cursor = 0
+			ms.offset = 0
+			ms.applyFilter()
+			return ms, cmd
 		}
 	}
-
-	return m, nil
+	return ms, nil
 }
 
-func (m *ModelSelector) SetRegistry(registry *provider.Registry) {
-	m.registry = registry
+// View is delegated to modelselector_view.go.
+func (ms *ModelSelector) View() string {
+	return ms.renderView()
 }
 
-func (m *ModelSelector) SetTheme(t theme.Theme) {
-	m.theme = t
-}
+// applyFilter rebuilds filtered list based on current search and provider.
+func (ms *ModelSelector) applyFilter() {
+	query := strings.ToLower(strings.TrimSpace(ms.searchInput.Value()))
 
-func (m *ModelSelector) refilterList() {
-	if m.allModels == nil {
-		m.list.SetItems(nil)
+	var all []types.ModelInfo
+	if ms.activeProvider == "" {
+		for _, name := range ms.providers {
+			all = append(all, ms.modelsByProv[name]...)
+		}
+	} else {
+		all = ms.modelsByProv[ms.activeProvider]
+	}
+
+	if query == "" {
+		ms.filtered = all
 		return
 	}
-
-	var items []list.Item
-	searchText := strings.ToLower(m.search.Value())
-
-	var favorites map[string]bool
-	if m.manager != nil {
-		if data, err := m.manager.LoadRecentModels(); err == nil {
-			favorites = data.Favorites
+	ms.filtered = nil
+	for _, m := range all {
+		if strings.Contains(strings.ToLower(m.ID), query) ||
+			strings.Contains(strings.ToLower(m.Name), query) ||
+			strings.Contains(strings.ToLower(m.Provider), query) {
+			ms.filtered = append(ms.filtered, m)
 		}
 	}
-
-	for _, model := range m.allModels {
-		if m.filter == filterOpenRouter && model.Provider != "openrouter" {
-			continue
-		}
-		if m.filter == filterZen && model.Provider != "zen" {
-			continue
-		}
-
-		if searchText != "" {
-			searchTarget := strings.ToLower(model.Name + " " + model.ID + " " + model.Description + " " + model.Provider)
-			if !strings.Contains(searchTarget, searchText) {
-				continue
-			}
-		}
-
-		// Get or generate usage data for sparkline
-		usageData := m.usageHistory[model.ID]
-		if usageData == nil {
-			usageData = make([]float64, 7)
-			m.usageHistory[model.ID] = usageData
-		}
-
-		items = append(items, ModelItem{
-			Model:      model,
-			Provider:   model.Provider,
-			IsFavorite: favorites[model.ID],
-			UsageData:  usageData,
-		})
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		mi := items[i].(ModelItem)
-		mj := items[j].(ModelItem)
-		if mi.Provider != mj.Provider {
-			return mi.Provider < mj.Provider
-		}
-		return mi.Model.Name < mj.Model.Name
-	})
-
-	m.list.SetItems(items)
 }
 
-// generateMockUsageData creates deterministic mock usage data based on model ID.
-// In production, this would come from session history.
-func generateMockUsageData(modelID string) []float64 {
-	// Use a simple hash for deterministic but varied data
-	hash := 0
-	for _, ch := range modelID {
-		hash = hash*31 + int(ch)
+// cycleProvider rotates through "" (all) and each provider name.
+func (ms *ModelSelector) cycleProvider() {
+	all := append([]string{""}, ms.providers...)
+	for i, p := range all {
+		if p == ms.activeProvider {
+			ms.activeProvider = all[(i+1)%len(all)]
+			break
+		}
 	}
-	if hash < 0 {
-		hash = -hash
-	}
+	ms.cursor = 0
+	ms.offset = 0
+	ms.applyFilter()
+}
 
-	// Generate 7 days of mock usage data
-	data := make([]float64, 7)
-	for i := range data {
-		val := float64((hash>>(uint(i)*3))%8) / 7.0
-		data[i] = val
+// selectCurrent emits AppMsg for the highlighted model.
+func (ms *ModelSelector) selectCurrent() tea.Cmd {
+	if len(ms.filtered) == 0 {
+		return nil
 	}
-	return data
+	m := ms.filtered[ms.cursor]
+	return func() tea.Msg {
+		return AppMsg{
+			ModelSelected: &ModelSelectedMsg{
+				Model:    m,
+				Provider: m.Provider,
+			},
+		}
+	}
+}
+
+// clampScroll keeps the cursor visible in the viewport.
+func (ms *ModelSelector) clampScroll() {
+	listHeight := ms.visibleRows()
+	if ms.cursor < ms.offset {
+		ms.offset = ms.cursor
+	}
+	if ms.cursor >= ms.offset+listHeight {
+		ms.offset = ms.cursor - listHeight + 1
+	}
+}
+
+// visibleRows returns the number of list rows that fit in the terminal.
+func (ms *ModelSelector) visibleRows() int {
+	h := ms.height - 8 // header + search + footer
+	if h < 4 {
+		return 4
+	}
+	return h
 }
