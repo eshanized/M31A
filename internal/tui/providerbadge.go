@@ -1,37 +1,22 @@
 package tui
 
-import (
-	"strings"
+import "strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
-)
-
-// ProviderBadge returns the badge text and styled lipgloss.Style for a provider.
-func ProviderBadge(t theme.Theme, provider string) (text string, style lipgloss.Style) {
-	short := ProviderShortName(provider)
-	var color lipgloss.Color
-	switch provider {
-	case "openrouter":
-		color = t.Warning
-	case "zen":
-		color = t.Thinking
-	default:
-		color = t.TextSecondary
-	}
-	style = t.ModelBadge.Foreground(color)
-	text = short
-	return
-}
-
-// ProviderShortName returns a short uppercase identifier for a provider.
-func ProviderShortName(provider string) string {
-	switch provider {
+// ProviderShortName returns a short display name for a provider.
+func ProviderShortName(name string) string {
+	switch strings.ToLower(name) {
 	case "openrouter":
 		return "OR"
-	case "zen":
-		return "ZEN"
+	case "zen", "zen-gateway":
+		return "Zen"
+	case "openai":
+		return "OAI"
+	case "anthropic":
+		return "AC"
 	default:
-		return strings.ToUpper(provider[:min(len(provider), 3)])
+		if len(name) > 4 {
+			return name[:4]
+		}
+		return name
 	}
 }
