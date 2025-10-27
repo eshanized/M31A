@@ -1,48 +1,46 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
-// renderQuickActions shows clickable action tiles.
-func (m *ReplModel) renderQuickActions() string {
+// repl_quickactions.go — quick action panel shown below messages when no active workflow.
+
+// renderQuickActionsPanel renders a quick actions panel suggesting next steps.
+// Only shown when there are messages but no workflow is active.
+func (m *ReplModel) renderQuickActionsPanel(width int) string {
+	if m.streaming {
+		return ""
+	}
+	if len(m.messages) == 0 {
+		return ""
+	}
+
 	t := m.theme
-
-	type action struct {
-		key         string
-		label       string
-		description string
-		symbol      string
+	items := []struct {
+		key  string
+		desc string
+	}{
+		{"/workflow", "start workflow"},
+		{"/optimize", "suggest model"},
+		{"/compress", "compress context"},
+		{"/history", "conversation log"},
 	}
 
-	actions := []action{
-		{key: "/settings", label: "Settings", description: "Configure", symbol: ">"},
-		{key: "/models", label: "Models", description: "Browse", symbol: "*"},
-		{key: "/resume", label: "Sessions", description: "Resume", symbol: "~"},
-		{key: "/help", label: "Help", description: "Commands", symbol: "?"},
+	var parts []string
+	for _, item := range items {
+		keyS := lipgloss.NewStyle().Foreground(t.Brand).Render(item.key)
+		descS := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" " + item.desc)
+		parts = append(parts, "  "+keyS+descS)
 	}
 
-	cards := make([]string, len(actions))
-	for i, a := range actions {
-		cardStyle := lipgloss.NewStyle().
-			Background(t.SurfaceElevated).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
-			Padding(1, 1).
-			Width(20)
-
-		symbolStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-		keyStyle := lipgloss.NewStyle().Foreground(t.Brand)
-		labelStyle := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
-		descStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
-
-		header := symbolStyle.Render(a.symbol) + " " + keyStyle.Render(a.key)
-		label := labelStyle.Render(a.label)
-		desc := descStyle.Render(a.description)
-
-		content := lipgloss.JoinVertical(lipgloss.Left, header, "", label, desc)
-		cards[i] = cardStyle.Render(content)
+	joined := strings.Join(parts, "  ")
+	if lipgloss.Width(joined) > width {
+		// Show only first 3 if too wide
+		joined = strings.Join(parts[:3], "  ")
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
+	return lipgloss.NewStyle().Foreground(t.TextMuted).Render(joined)
 }
