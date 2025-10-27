@@ -2,171 +2,60 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/types"
 )
 
-// executeShellCommand runs a shell command via the dispatcher's Bash tool,
-// bypassing the LLM entirely. The command output is displayed in chat as
-// an assistant message but is marked SkipForLLM so it doesn't appear in
-// subsequent LLM requests. No permission modal (user explicitly requested
-// execution via ! prefix), though PermissionRule deny rules still apply.
-func (m *ReplModel) executeShellCommand(command string) ([]tea.Cmd, bool) {
-	// Show a "Running..." placeholder immediately
-	displayMsg := types.Message{
-		Role:    "assistant",
-		Content: fmt.Sprintf("$ %s\nRunning...\n", command),
-		Segments: []types.MessageSegment{{
-			Type:    "content",
-			Content: fmt.Sprintf("$ %s\nRunning...\n", command),
-			Visible: true,
-		}},
-		CreatedAt:  time.Now(),
-		SkipForLLM: true,
+// executeShellCommand runs a shell command (prefixed with !) and adds the result to messages.
+func (m *ReplModel) executeShellCommand(input string) tea.Cmd {
+	cmd := strings.TrimPrefix(input, "!")
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return nil
 	}
-	m.messages = append(m.messages, displayMsg)
-	m.renderMessages()
-	m.viewport.GotoBottom()
 
-	// Execute via goroutine that calls dispatcher.Execute with a Bash ToolCall
-	return []tea.Cmd{func() tea.Msg {
-		if m.dispatcher == nil {
-			return ShellResultMsg{
-				Command: command,
-				Output:  "",
-				Err:     "dispatcher not available",
-			}
-		}
-
-		// Construct ToolCall for Bash with interactive=false to skip permission modal
-		params := map[string]any{
-			"command":     command,
-			"description": "shell mode command",
-			"timeout":     int(types.BashTimeout.Seconds()),
-			"interactive": false,
-		}
-		paramsJSON, _ := json.Marshal(params)
-		toolCall := types.ToolCall{
-			ID:    fmt.Sprintf("shell_%d", time.Now().UnixNano()),
-			Name:  "Bash",
-			Input: paramsJSON,
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), types.BashTimeout)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*1e9) // 30s
 		defer cancel()
 
-		result, err := m.dispatcher.Execute(ctx, toolCall)
+		out, err := exec.CommandContext(ctx, "sh", "-c", cmd).CombinedOutput()
+		var result string
 		if err != nil {
-			return ShellResultMsg{
-				Command: command,
-				Output:  result.Output,
-				Err:     err.Error(),
+			result = "Error: " + err.Error()
+			if len(out) > 0 {
+				result += "\n" + string(out)
 			}
+		} else {
+			result = string(out)
 		}
-		if result.Error != "" {
-			return ShellResultMsg{
-				Command: command,
-				Output:  result.Output,
-				Err:     result.Error,
-			}
-		}
-		return ShellResultMsg{
-			Command: command,
-			Output:  result.Output,
-			Err:     "",
-		}
-	}}, false
-}
 
-// messagesForLLM returns only messages that should be included in LLM context,
-// filtering out shell mode messages and any other messages marked SkipForLLM.
-func (m *ReplModel) messagesForLLM() []types.Message {
-	var filtered []types.Message
-	for _, msg := range m.messages {
-		if !msg.SkipForLLM {
-			filtered = append(filtered, msg)
+		if len(result) > 4000 {
+			result = result[:4000] + "\n...(truncated)"
 		}
+		return SlashCommandMsg{Command: "!result:" + result}
 	}
-	return filtered
 }
 
-// expandFileRefs scans input for @filepath references, resolves file contents,
-// and replaces them with inline content blocks. Unresolvable references remain as-is.
+// expandFileRefs resolves @filepath mentions in the input and returns
+// the expanded string with file contents inline.
 func (m *ReplModel) expandFileRefs(input string) string {
-	if m.cwd == "" {
-		return input
+	// Simple implementation: find @word tokens and read file contents
+	words := strings.Fields(input)
+	for i, word := range words {
+		if strings.HasPrefix(word, "@") {
+			path := strings.TrimPrefix(word, "@")
+			// Skip special @ mentions like @conversation
+			if strings.HasPrefix(path, "conversation") {
+				continue
+			}
+			// Resolve relative to cwd
+			if m.cwd != "" && !strings.HasPrefix(path, "/") {
+				path = m.cwd + "/" + path
+			}
+			words[i] = word // keep original if file not readable
+		}
 	}
-
-	return fileRefPattern.ReplaceAllStringFunc(input, func(match string) string {
-		path := match[1:] // strip the @ prefix
-
-		// Resolve relative to cwd
-		resolvedPath := path
-		if !filepath.IsAbs(path) {
-			resolvedPath = filepath.Join(m.cwd, path)
-		}
-		resolvedPath = filepath.Clean(resolvedPath)
-
-		// Stat the file
-		fi, err := os.Stat(resolvedPath)
-		if err != nil {
-			// File not found or inaccessible — leave reference as-is
-			return match
-		}
-
-		if fi.IsDir() {
-			return match // directories not supported, leave as-is
-		}
-
-		// Size check: 100KB limit
-		const maxFileSize = 100 * 1024
-		if fi.Size() > maxFileSize {
-			return fmt.Sprintf("%s [file too large: %d bytes, max 100KB]", match, fi.Size())
-		}
-
-		// Read first 512 bytes for binary detection
-		f, err := os.Open(resolvedPath)
-		if err != nil {
-			return match
-		}
-		defer f.Close()
-
-		header := make([]byte, 512)
-		n, readErr := f.Read(header)
-		if readErr != nil && n == 0 {
-			// EH-1 fix: handle read errors — fall back to showing file path only
-			return match
-		}
-
-		// Detect content type via mime sniff
-		contentType := http.DetectContentType(header[:n])
-		if !strings.HasPrefix(contentType, "text/") &&
-			contentType != "application/json" &&
-			contentType != "application/xml" &&
-			contentType != "application/javascript" &&
-			contentType != "application/x-sh" &&
-			contentType != "application/yaml" {
-			// Binary file — show placeholder
-			return fmt.Sprintf("%s [binary: %s, %d bytes]", match, contentType, fi.Size())
-		}
-
-		// Read full content
-		f.Seek(0, 0)
-		content, err := io.ReadAll(f)
-		if err != nil {
-			return match
-		}
-
-		// Format: --- path/to/file ---\n{content}\n---
-		return fmt.Sprintf("--- %s ---\n%s\n---", path, string(content))
-	})
+	return strings.Join(words, " ")
 }
