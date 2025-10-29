@@ -1,234 +1,460 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/keychain"
-	"github.com/eshanized/M31A/pkg/ledger"
 )
 
-// settingsTab represents a tab in the settings screen.
-type settingsTab int
+// SettingsTab identifies which settings tab is active.
+type SettingsTab int
 
 const (
-	tabGeneral settingsTab = iota
-	tabProvider
-	tabModel
-	tabPermissions
-	tabFeatures
-	tabLedger
-	tabCount // = 6
+	TabProvider SettingsTab = iota
+	TabModel
+	TabUI
+	TabKeys
+	TabWorkflow
+	TabAbout
 )
 
-var tabNames = map[settingsTab]string{
-	tabGeneral:     "General",
-	tabProvider:    "Provider",
-	tabModel:       "Model",
-	tabPermissions: "Permissions",
-	tabFeatures:    "Features",
-	tabLedger:      "Ledger",
+var settingsTabNames = []string{
+	"Provider", "Model", "UI", "Keys", "Workflow", "About",
 }
 
-var tabIcons = map[settingsTab]string{
-	tabGeneral:     "⚙",
-	tabProvider:    "🔑",
-	tabModel:       "🤖",
-	tabPermissions: "🛡",
-	tabFeatures:    "📋",
-	tabLedger:      "📊",
-}
-
-var fieldDescriptions = map[string]string{
-	"ui.theme":                    "Controls the color scheme of M31A. Options: \"dark\", \"light\", \"auto\"",
-	"ui.compact_mode":             "Reduces spacing for more content on screen",
-	"ui.show_token_usage":         "Displays token count in the header bar",
-	"ui.show_cost_estimate":       "Shows estimated cost per request",
-	"ui.max_iterations":           "Maximum tool call iterations per response",
-	"provider.default":            "Which provider to use by default (openrouter or zen)",
-	"provider.auto_fallback":      "Automatically switch provider on rate limit or error",
-	"provider.openrouter.api_key": "API key for OpenRouter gateway. Stored in OS keychain on save.",
-	"provider.zen.api_key":        "API key for OpenCode Zen gateway. Stored in OS keychain on save.",
-	"model.default":               "Default model ID for chat completions",
-	"model.context_warning_threshold": "Context usage % that triggers a warning banner (0.0-1.0)",
-	"model.show_thinking_by_default":  "Show thinking/reasoning blocks by default",
-	"model.auto_collapse_tools":       "Automatically collapse tool call output in chat",
-	"model.auto_arbitrage":            "Automatically suggest cheaper models for simple tasks",
-	"model.arbitrage_threshold":       "Complexity threshold for auto-arbitrage suggestions (0.0-1.0)",
-	"permissions.default_mode":    "Permission mode: ask, auto, or deny",
-	"permissions.timeout_seconds": "Seconds to wait for permission response before auto-deny",
-	"features.auto_backup":        "Create backup before file writes",
-	"features.resume_on_startup":  "Offer to resume last session on startup",
-	"ledger.enabled":              "Enable cross-session learning ledger",
-	"ledger.max_entries":          "Maximum entries in the learning ledger",
-}
-
-// editableField represents a single config field that can be edited inline.
-type editableField struct {
-	label     string // display label
-	value     string // current displayed value
-	original  string // original value for cancel
-	editing   bool   // currently being edited inline
-	masked    bool   // whether to mask display (for API keys)
-	maskChar  string // masking character ("•")
-	fieldType string // "string", "int", "float", "bool"
-	key       string // config key path for save mapping
-}
-
-// SettingsModel provides a tabbed configuration editor with inline editing.
-// Follows Bubble Tea model pattern (value receiver, returns new model).
+// SettingsModel manages the settings editor (6-tab layout).
 type SettingsModel struct {
-	config            *config.Config
-	theme             theme.Theme
-	activeTab         settingsTab
-	fields            map[settingsTab][]*editableField
-	focusedField      int
-	width             int
-	height            int
-	dirty             bool
-	err               string
-	statusMsg         string
-	ledger            *ledger.Ledger
-	configPath        string
-	keychain          keychain.Keychain
-	spinner           spinner.Model
-	showUnsavedWarning bool
+	theme     theme.Theme
+	config    *config.Config
+	registry  *provider.Registry
+	activeTab SettingsTab
+	width     int
+	height    int
+
+	// Editing state
+	editing   bool
+	editField string
+	editValue textinput.Model
+
+	// Config path
+	configPath string
+
+	// Status message
+	statusMsg  string
+	statusTime time.Time
 }
 
-// NewSettingsModel creates a SettingsModel with the given config, theme, and optional ledger.
-func NewSettingsModel(cfg *config.Config, configPath string, t theme.Theme, l *ledger.Ledger, kc keychain.Keychain) SettingsModel {
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
-	m := SettingsModel{
-		config:     cfg,
-		configPath: configPath,
+// NewSettingsModel creates a SettingsModel.
+func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string) *SettingsModel {
+	ti := textinput.New()
+	ti.CharLimit = 512
+	ti.Width = 40
+
+	return &SettingsModel{
 		theme:      t,
-		activeTab:  tabGeneral,
-		fields:     make(map[settingsTab][]*editableField),
-		ledger:     l,
-		keychain:   kc,
-		spinner:    sp,
-	}
-	m.buildFields()
-	return m
-}
-
-func (m SettingsModel) Init() tea.Cmd {
-	return m.spinner.Tick
-}
-
-// buildFields populates editable fields from the current config.
-func (m *SettingsModel) buildFields() {
-	m.fields = make(map[settingsTab][]*editableField)
-
-	// General tab (5 fields)
-	m.fields[tabGeneral] = []*editableField{
-		{label: "Theme", value: m.config.UI.Theme, fieldType: "string", key: "ui.theme"},
-		{label: "Compact Mode", value: fmtBool(m.config.UI.CompactMode), fieldType: "bool", key: "ui.compact_mode"},
-		{label: "Show Token Usage", value: fmtBool(m.config.UI.ShowTokenUsage), fieldType: "bool", key: "ui.show_token_usage"},
-		{label: "Show Cost Estimate", value: fmtBool(m.config.UI.ShowCostEstimate), fieldType: "bool", key: "ui.show_cost_estimate"},
-		{label: "Max Iterations", value: fmt.Sprintf("%d", m.config.UI.MaxIterations), fieldType: "int", key: "ui.max_iterations"},
-	}
-	for _, f := range m.fields[tabGeneral] {
-		f.original = f.value
-	}
-
-	// Provider tab (4 fields)
-	orKey := m.config.Provider.OpenRouter.APIKey
-	zenKey := m.config.Provider.Zen.APIKey
-	m.fields[tabProvider] = []*editableField{
-		{label: "Default Provider", value: m.config.Provider.Default, fieldType: "string", key: "provider.default"},
-		{label: "Auto Fallback", value: fmtBool(m.config.Provider.AutoFallback), fieldType: "bool", key: "provider.auto_fallback"},
-		{label: "OpenRouter API Key", value: orKey, fieldType: "string", key: "provider.openrouter.api_key", masked: true, maskChar: "•"},
-		{label: "Zen API Key", value: zenKey, fieldType: "string", key: "provider.zen.api_key", masked: true, maskChar: "•"},
-	}
-	for _, f := range m.fields[tabProvider] {
-		f.original = f.value
-	}
-
-	// Model tab (6 fields)
-	m.fields[tabModel] = []*editableField{
-		{label: "Default Model", value: m.config.Model.Default, fieldType: "string", key: "model.default"},
-		{label: "Context Warning Threshold", value: fmt.Sprintf("%.2f", m.config.Model.ContextWarningThreshold), fieldType: "float", key: "model.context_warning_threshold"},
-		{label: "Show Thinking By Default", value: fmtBool(m.config.Model.ShowThinkingByDefault), fieldType: "bool", key: "model.show_thinking_by_default"},
-		{label: "Auto Collapse Tools", value: fmtBool(m.config.Model.AutoCollapseTools), fieldType: "bool", key: "model.auto_collapse_tools"},
-		{label: "Auto Arbitrage", value: fmtBool(m.config.Model.AutoArbitrage), fieldType: "bool", key: "model.auto_arbitrage"},
-		{label: "Arbitrage Threshold", value: fmt.Sprintf("%.2f", m.config.Model.ArbitrageThreshold), fieldType: "float", key: "model.arbitrage_threshold"},
-	}
-	for _, f := range m.fields[tabModel] {
-		f.original = f.value
-	}
-
-	// Permissions tab (2 fields + read-only rules count)
-	m.fields[tabPermissions] = []*editableField{
-		{label: "Default Mode", value: m.config.Permissions.DefaultMode, fieldType: "string", key: "permissions.default_mode"},
-		{label: "Timeout Seconds", value: fmt.Sprintf("%d", m.config.Permissions.TimeoutSeconds), fieldType: "int", key: "permissions.timeout_seconds"},
-	}
-	for _, f := range m.fields[tabPermissions] {
-		f.original = f.value
-	}
-
-	// Features tab (2 fields)
-	m.fields[tabFeatures] = []*editableField{
-		{label: "Auto Backup", value: fmtBool(m.config.Features.AutoBackup), fieldType: "bool", key: "features.auto_backup"},
-		{label: "Resume On Startup", value: fmtBool(m.config.Features.ResumeOnStartup), fieldType: "bool", key: "features.resume_on_startup"},
-	}
-	for _, f := range m.fields[tabFeatures] {
-		f.original = f.value
-	}
-
-	// Ledger tab (2 fields)
-	m.fields[tabLedger] = []*editableField{
-		{label: "Enabled", value: fmtBool(m.config.Ledger.Enabled), fieldType: "bool", key: "ledger.enabled"},
-		{label: "Max Entries", value: fmt.Sprintf("%d", m.config.Ledger.MaxEntries), fieldType: "int", key: "ledger.max_entries"},
-	}
-	for _, f := range m.fields[tabLedger] {
-		f.original = f.value
+		config:     cfg,
+		registry:   registry,
+		editValue:  ti,
+		configPath: configPath,
 	}
 }
 
-// fmtBool formats a boolean as "true" or "false".
-func fmtBool(v bool) string {
-	if v {
-		return "true"
-	}
-	return "false"
+// SetConfig updates the config reference.
+func (s *SettingsModel) SetConfig(cfg *config.Config) {
+	s.config = cfg
 }
 
-// SetConfig updates the config pointer (for theme changes from outside).
-func (m *SettingsModel) SetConfig(cfg *config.Config) {
-	m.config = cfg
-	m.buildFields()
-	// Re-mask API key fields after rebuild
-	for _, fields := range m.fields {
-		for _, f := range fields {
-			if f.key == "provider.openrouter.api_key" || f.key == "provider.zen.api_key" {
-				f.masked = true
+// SetTheme updates the settings theme.
+func (s *SettingsModel) SetTheme(t theme.Theme) {
+	s.theme = t
+}
+
+// Update handles settings screen key events.
+func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if s.editing {
+			return s.updateEditing(msg)
+		}
+
+		switch msg.String() {
+		case "esc", "q":
+			return s, func() tea.Msg {
+				return AppMsg{Screen: ScreenREPL}
 			}
+		case "tab", "right":
+			s.activeTab = SettingsTab((int(s.activeTab) + 1) % len(settingsTabNames))
+		case "shift+tab", "left":
+			s.activeTab = SettingsTab((int(s.activeTab) - 1 + len(settingsTabNames)) % len(settingsTabNames))
+		case "1":
+			s.activeTab = TabProvider
+		case "2":
+			s.activeTab = TabModel
+		case "3":
+			s.activeTab = TabUI
+		case "4":
+			s.activeTab = TabKeys
+		case "5":
+			s.activeTab = TabWorkflow
+		case "6":
+			s.activeTab = TabAbout
+		case "e", "enter":
+			return s.startEditing()
+		case "s":
+			return s.saveConfig()
 		}
 	}
+	return s, nil
 }
 
-// SetTheme updates the theme reference (for in-app theme changes).
-func (m *SettingsModel) SetTheme(t theme.Theme) {
-	m.theme = t
+func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		s.editing = false
+		s.editField = ""
+		return s, nil
+	case "enter":
+		return s.commitEdit()
+	}
+	var cmd tea.Cmd
+	s.editValue, cmd = s.editValue.Update(msg)
+	return s, cmd
 }
 
-// saveAPIKeysToKeychain persists API keys from the config to the OS keychain.
-// This ensures keys saved via settings override any stale keychain values on next load.
-func (m *SettingsModel) saveAPIKeysToKeychain() {
-	if m.keychain == nil {
-		return
+func (s *SettingsModel) startEditing() (*SettingsModel, tea.Cmd) {
+	s.editing = true
+	s.editValue.SetValue("")
+	s.editValue.Focus()
+	switch s.activeTab {
+	case TabProvider:
+		s.editField = "provider"
+		if s.config != nil {
+			s.editValue.SetValue(s.config.Provider.Default)
+		}
+		s.editValue.Placeholder = "openrouter or zen"
+	case TabModel:
+		s.editField = "model"
+		if s.config != nil {
+			s.editValue.SetValue(s.config.Model.Default)
+		}
+		s.editValue.Placeholder = "model ID"
+	case TabKeys:
+		s.editField = "apikey"
+		s.editValue.Placeholder = "API key (for current provider)"
+		s.editValue.EchoMode = textinput.EchoPassword
+	default:
+		s.editing = false
+		s.editField = ""
 	}
-	if key := m.config.Provider.OpenRouter.APIKey; key != "" {
-		m.keychain.Set("openrouter", key)
+	return s, textinput.Blink
+}
+
+func (s *SettingsModel) commitEdit() (*SettingsModel, tea.Cmd) {
+	val := strings.TrimSpace(s.editValue.Value())
+	s.editing = false
+	s.editValue.EchoMode = textinput.EchoNormal
+	if val == "" {
+		return s, nil
 	}
-	if key := m.config.Provider.Zen.APIKey; key != "" {
-		m.keychain.Set("zen", key)
+	if s.config == nil {
+		s.config = config.DefaultConfig()
 	}
+	switch s.editField {
+	case "provider":
+		s.config.Provider.Default = val
+	case "model":
+		s.config.Model.Default = val
+	case "apikey":
+		provName := s.config.Provider.Default
+		switch provName {
+		case "zen":
+			s.config.Provider.Zen.APIKey = val
+		default:
+			s.config.Provider.OpenRouter.APIKey = val
+		}
+	}
+	s.statusMsg = "Value updated. Press 's' to save."
+	s.statusTime = time.Now()
+	return s, nil
+}
+
+func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
+	if s.config != nil && s.configPath != "" {
+		s.statusMsg = "Config updated in memory (restart to reload)"
+		s.statusTime = time.Now()
+	}
+	return s, func() tea.Msg { return SettingsSavedMsg{} }
+}
+
+// View renders the settings screen.
+func (s *SettingsModel) View() string {
+	t := s.theme
+	w := s.width
+
+	if w < 30 {
+		return "Terminal too narrow for settings"
+	}
+
+	// Tab bar
+	tabBar := s.renderTabBar()
+
+	divider := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(strings.Repeat("─", w))
+
+	// Tab content
+	content := s.renderTabContent()
+
+	// Status bar
+	status := ""
+	if s.statusMsg != "" && time.Since(s.statusTime) < 5*time.Second {
+		status = lipgloss.NewStyle().Foreground(t.Success).PaddingLeft(2).Render(s.statusMsg)
+	}
+
+	// Edit overlay
+	if s.editing {
+		editBox := s.renderEditBox()
+		return lipgloss.JoinVertical(lipgloss.Left,
+			tabBar,
+			divider,
+			content,
+			"",
+			editBox,
+			"",
+			status,
+		)
+	}
+
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("tab next  1-6 jump  e edit  esc back")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		tabBar,
+		divider,
+		content,
+		divider,
+		status,
+		footer,
+	)
+}
+
+func (s *SettingsModel) renderTabBar() string {
+	t := s.theme
+	var tabs []string
+	for i, name := range settingsTabNames {
+		tab := SettingsTab(i)
+		if tab == s.activeTab {
+			tabs = append(tabs, lipgloss.NewStyle().
+				Foreground(t.Background).
+				Background(t.Brand).
+				Bold(true).
+				Padding(0, 2).
+				Render(name))
+		} else {
+			tabs = append(tabs, lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				Padding(0, 2).
+				Render(name))
+		}
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+}
+
+func (s *SettingsModel) renderTabContent() string {
+	switch s.activeTab {
+	case TabProvider:
+		return s.renderProviderTab()
+	case TabModel:
+		return s.renderModelTab()
+	case TabUI:
+		return s.renderUITab()
+	case TabKeys:
+		return s.renderKeysTab()
+	case TabWorkflow:
+		return s.renderWorkflowTab()
+	case TabAbout:
+		return s.renderAboutTab()
+	}
+	return ""
+}
+
+func (s *SettingsModel) renderProviderTab() string {
+	t := s.theme
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Provider Settings"))
+	lines = append(lines, "")
+
+	defaultProvider := "(not set)"
+	if s.config != nil && s.config.Provider.Default != "" {
+		defaultProvider = s.config.Provider.Default
+	}
+	lines = append(lines, settingRow("Default provider", defaultProvider, t))
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+		Render("Available: openrouter, zen"))
+
+	// Provider health
+	if s.registry != nil {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+			Render("Provider Status:"))
+		for _, name := range s.registry.List() {
+			p, err := s.registry.Get(name)
+			if err != nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			status := p.HealthCheck(ctx)
+			cancel()
+			icon := "✓"
+			color := t.Success
+			if status.Status != "ok" {
+				icon = "✗"
+				color = t.Error
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(color).PaddingLeft(4).
+				Render(fmt.Sprintf("%s %s", icon, name)))
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *SettingsModel) renderModelTab() string {
+	t := s.theme
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Model Settings"))
+	lines = append(lines, "")
+
+	defaultModel := "(not set)"
+	if s.config != nil && s.config.Model.Default != "" {
+		defaultModel = s.config.Model.Default
+	}
+	lines = append(lines, settingRow("Default model", defaultModel, t))
+	if s.config != nil {
+		lines = append(lines, settingRow("Auto-collapse tools", boolStr(s.config.Model.AutoCollapseTools), t))
+		lines = append(lines, settingRow("Show thinking by default", boolStr(s.config.Model.ShowThinkingByDefault), t))
+		lines = append(lines, settingRow("Auto-arbitrage", boolStr(s.config.Model.AutoArbitrage), t))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *SettingsModel) renderUITab() string {
+	t := s.theme
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("UI Settings"))
+	lines = append(lines, "")
+	if s.config != nil {
+		lines = append(lines, settingRow("Theme", s.config.UI.Theme, t))
+		lines = append(lines, settingRow("Show cost estimate", boolStr(s.config.UI.ShowCostEstimate), t))
+		lines = append(lines, settingRow("Show token usage", boolStr(s.config.UI.ShowTokenUsage), t))
+		lines = append(lines, settingRow("Discuss timeout", fmt.Sprintf("%ds", s.config.UI.DiscussTimeout), t))
+		lines = append(lines, settingRow("Sidebar width", fmt.Sprintf("%d cols", s.config.UI.SidebarWidth), t))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *SettingsModel) renderKeysTab() string {
+	t := s.theme
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("API Keys"))
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+		Render("Keys are stored in OS keychain or config file."))
+	lines = append(lines, "")
+	if s.config != nil {
+		for name, key := range map[string]string{
+			"openrouter": s.config.Provider.OpenRouter.APIKey,
+			"zen":        s.config.Provider.Zen.APIKey,
+		} {
+			keyDisplay := "(not set)"
+			if key != "" {
+				tail := key
+				if len(tail) > 4 {
+					tail = key[len(key)-4:]
+				}
+				keyDisplay = "●●●●●●●" + tail
+			}
+			lines = append(lines, settingRow(name+" API key", keyDisplay, t))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+		Render("Press 'e' to edit the active provider's API key."))
+	return strings.Join(lines, "\n")
+}
+
+func (s *SettingsModel) renderWorkflowTab() string {
+	t := s.theme
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Workflow Settings"))
+	lines = append(lines, "")
+	if s.config != nil {
+		lines = append(lines, settingRow("Permission timeout", fmt.Sprintf("%ds", s.config.Permissions.TimeoutSeconds), t))
+		lines = append(lines, settingRow("Max iterations", fmt.Sprintf("%d", s.config.UI.MaxIterations), t))
+		lines = append(lines, settingRow("Auto fallback", boolStr(s.config.Provider.AutoFallback), t))
+		lines = append(lines, settingRow("Auto backup", boolStr(s.config.Features.AutoBackup), t))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *SettingsModel) renderAboutTab() string {
+	t := s.theme
+	return lipgloss.JoinVertical(lipgloss.Left,
+		"",
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("About M31A"),
+		"",
+		lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(4).Render("M31A — Terminal AI Coding Agent"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Module: github.com/eshanized/M31A"),
+		"",
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Built with:"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbletea"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/lipgloss"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbles"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/glamour"),
+		"",
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Config: ~/.m31a/config.toml"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Sessions: ~/.m31a/sessions/"),
+	)
+}
+
+func (s *SettingsModel) renderEditBox() string {
+	t := s.theme
+	label := "Editing: " + s.editField
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Padding(0, 2).
+		Width(50).
+		PaddingLeft(4).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render(label),
+			s.editValue.View(),
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ save  esc cancel"),
+		))
+}
+
+func settingRow(label, value string, t theme.Theme) string {
+	labelS := lipgloss.NewStyle().Foreground(t.TextMuted).Width(28).PaddingLeft(4).Render(label)
+	valueS := lipgloss.NewStyle().Foreground(t.Text).Render(value)
+	return labelS + valueS
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
