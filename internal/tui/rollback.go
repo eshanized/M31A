@@ -5,302 +5,285 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/rollback"
 )
 
-// RollbackModel provides a commit browser with rollback actions.
+// RollbackModel shows the git commit timeline and allows resetting to any commit.
 type RollbackModel struct {
-	theme       theme.Theme
-	width       int
-	height      int
-	commits     []git.CommitInfo
-	selected    int
-	showDiff    bool
-	diffContent string
-	confirming  bool
-	confirmType string // "soft" or "hard"
-	git         *git.Git
-	rollback    *rollback.Rollback
-	sessionID   string
+	theme    theme.Theme
+	git      *git.Git
+	rollback *rollback.Rollback
+	entries  []rollback.RollbackEntry
+	cursor   int
+	offset   int
+	viewport viewport.Model // shows diff for selected commit
+	showDiff bool
+	errMsg   string
+	width    int
+	height   int
 }
 
-// NewRollbackModel creates a RollbackModel with the given dependencies.
-func NewRollbackModel(t theme.Theme, g *git.Git, rb *rollback.Rollback, width, height int) *RollbackModel {
-	return &RollbackModel{
+// NewRollbackModel creates a RollbackModel.
+func NewRollbackModel(t theme.Theme, g *git.Git, rb *rollback.Rollback, w, h int) *RollbackModel {
+	m := &RollbackModel{
 		theme:    t,
 		git:      g,
 		rollback: rb,
-		width:    width,
-		height:   height,
+		width:    w,
+		height:   h,
 	}
+	return m
 }
 
-// Init returns nil.
-func (m *RollbackModel) Init() tea.Cmd {
-	return nil
+// SetTheme updates the theme.
+func (rm *RollbackModel) SetTheme(t theme.Theme) {
+	rm.theme = t
 }
 
-// LoadCommits populates the commit list.
-func (m *RollbackModel) LoadCommits() error {
-	if m.rollback != nil {
-		entries, err := m.rollback.Chain(20)
-		if err != nil {
-			return err
-		}
-		m.commits = make([]git.CommitInfo, len(entries))
-		for i, e := range entries {
-			m.commits[i] = e.CommitInfo
-		}
-		return nil
-	}
-	if m.git != nil {
-		commits, err := m.git.Log(false, "")
-		if err != nil {
-			return err
-		}
-		if len(commits) > 20 {
-			commits = commits[:20]
-		}
-		m.commits = commits
-		return nil
-	}
-	return nil
+// SetDimensions updates the rollback model dimensions.
+func (rm *RollbackModel) SetDimensions(w, h int) {
+	rm.width = w
+	rm.height = h
 }
 
-// Update handles messages for the rollback screen.
-func (m *RollbackModel) Update(msg tea.Msg) ([]tea.Cmd, *AppMsg) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return nil, nil
-
-	case tea.KeyMsg:
-		if m.confirming {
-			switch msg.String() {
-			case "y", "Y", "enter":
-				return m.executeRollback()
-			case "n", "N", "esc":
-				m.confirming = false
-				m.confirmType = ""
-				return nil, nil
-			}
-			return nil, nil
-		}
-
-		switch msg.String() {
-		case "up", "k":
-			if m.selected > 0 {
-				m.selected--
-				m.diffContent = ""
-				m.showDiff = false
-			}
-			return nil, nil
-		case "down", "j":
-			if m.selected < len(m.commits)-1 {
-				m.selected++
-				m.diffContent = ""
-				m.showDiff = false
-			}
-			return nil, nil
-		case "d":
-			if len(m.commits) > 0 {
-				m.showDiff = !m.showDiff
-				if m.showDiff && m.diffContent == "" {
-					m.loadDiff()
-				}
-			}
-			return nil, nil
-		case "r":
-			if len(m.commits) > 0 {
-				m.confirming = true
-				m.confirmType = "soft"
-			}
-			return nil, nil
-		case "R":
-			if len(m.commits) > 0 {
-				m.confirming = true
-				m.confirmType = "hard"
-			}
-			return nil, nil
-		case "esc":
-			return nil, &AppMsg{Screen: ScreenREPL}
-		}
-	}
-	return nil, nil
-}
-
-// loadDiff fetches the diff for the selected commit.
-func (m *RollbackModel) loadDiff() {
-	if m.selected >= len(m.commits) {
+// LoadCommits fetches the commit chain from the rollback package.
+func (rm *RollbackModel) LoadCommits() {
+	if rm.rollback == nil {
 		return
 	}
-	commit := m.commits[m.selected]
-	if m.git != nil {
-		diff, err := m.git.Diff(commit.Hash+"^", commit.Hash)
-		if err != nil {
-			m.diffContent = fmt.Sprintf("[diff unavailable: %v]", err)
-		} else {
-			m.diffContent = diff
+	entries, err := rm.rollback.Chain(30)
+	if err != nil {
+		rm.errMsg = err.Error()
+		return
+	}
+	rm.entries = entries
+	rm.errMsg = ""
+	rm.cursor = 0
+	rm.offset = 0
+}
+
+// Init implements tea.Model.
+func (rm *RollbackModel) Init() tea.Cmd { return nil }
+
+// Update implements tea.Model.
+func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		rm.SetDimensions(msg.Width, msg.Height)
+		return rm, nil
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q":
+			if rm.showDiff {
+				rm.showDiff = false
+				return rm, nil
+			}
+			return rm, func() tea.Msg {
+				return AppMsg{Screen: ScreenREPL}
+			}
+		case "up", "k":
+			if rm.cursor > 0 {
+				rm.cursor--
+				rm.clampScroll()
+			}
+		case "down", "j":
+			if rm.cursor < len(rm.entries)-1 {
+				rm.cursor++
+				rm.clampScroll()
+			}
+		case "enter", " ":
+			// Show diff for current entry
+			if len(rm.entries) > 0 {
+				e := rm.entries[rm.cursor]
+				vpH := rm.height - 8
+				if vpH < 3 {
+					vpH = 3
+				}
+				rm.viewport = viewport.New(rm.width, vpH)
+				rm.viewport.SetContent(rm.renderDiffContent(e))
+				rm.showDiff = true
+			}
+		case "r":
+			// Soft reset to current entry
+			if len(rm.entries) > 0 && rm.rollback != nil {
+				e := rm.entries[rm.cursor]
+				_, err := rm.rollback.SoftReset(e.CommitInfo.Hash, nil)
+				if err != nil {
+					rm.errMsg = err.Error()
+				} else {
+					rm.errMsg = ""
+					rm.LoadCommits()
+				}
+			}
+		case "R":
+			// Hard reset to current entry
+			if len(rm.entries) > 0 && rm.rollback != nil {
+				e := rm.entries[rm.cursor]
+				_, err := rm.rollback.HardReset(e.CommitInfo.Hash)
+				if err != nil {
+					rm.errMsg = err.Error()
+				} else {
+					rm.errMsg = ""
+					rm.LoadCommits()
+				}
+			}
 		}
+		if rm.showDiff {
+			var cmd tea.Cmd
+			rm.viewport, cmd = rm.viewport.Update(msg)
+			return rm, cmd
+		}
+	}
+	return rm, nil
+}
+
+// View implements tea.Model.
+func (rm *RollbackModel) View() string {
+	t := rm.theme
+	w := rm.width
+	if w < 30 {
+		w = 80
+	}
+
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
+		Render("  Rollback — Commit Time Machine")
+	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
+
+	if rm.errMsg != "" {
+		errLine := lipgloss.NewStyle().Foreground(t.Error).PaddingLeft(2).
+			Render("! " + rm.errMsg)
+		return lipgloss.JoinVertical(lipgloss.Left, title, divider, errLine)
+	}
+
+	if len(rm.entries) == 0 {
+		empty := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+			Render("No commits found in this repository.")
+		footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+			Render("esc back")
+		return lipgloss.JoinVertical(lipgloss.Left, title, divider, "", empty, "", divider, footer)
+	}
+
+	if rm.showDiff {
+		return rm.renderDiffView(title, divider)
+	}
+	return rm.renderCommitList(title, divider, w)
+}
+
+// renderCommitList renders the list of commits.
+func (rm *RollbackModel) renderCommitList(title, divider string, w int) string {
+	t := rm.theme
+	listH := rm.listVisibleRows()
+	end := rm.offset + listH
+	if end > len(rm.entries) {
+		end = len(rm.entries)
+	}
+	visible := rm.entries[rm.offset:end]
+
+	var rows []string
+	for i, e := range visible {
+		globalIdx := rm.offset + i
+		selected := globalIdx == rm.cursor
+		rows = append(rows, rm.renderCommitRow(e, selected, w))
+	}
+
+	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render(fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.entries)))
+
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("↵ diff  r soft-reset  R hard-reset  ↑↓ navigate  esc back")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title, divider,
+		strings.Join(rows, "\n"),
+		"", scrollInfo, divider, footer)
+}
+
+// renderCommitRow renders a single commit entry.
+func (rm *RollbackModel) renderCommitRow(e rollback.RollbackEntry, selected bool, w int) string {
+	t := rm.theme
+	c := e.CommitInfo
+
+	prefix := "  "
+	hashStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	msgStyle := lipgloss.NewStyle().Foreground(t.Text)
+	if selected {
+		prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+		hashStyle = hashStyle.Foreground(t.Brand).Bold(true)
+		msgStyle = msgStyle.Bold(true)
+	}
+	if e.IsCurrent {
+		hashStyle = hashStyle.Foreground(t.Success)
+	}
+
+	ts := c.Timestamp.Format("2006-01-02 15:04")
+	msg := TruncateWithEllipsis(c.Message, w-30)
+
+	return prefix +
+		hashStyle.Render(c.ShortHash) + "  " +
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render(ts) + "  " +
+		msgStyle.Render(msg)
+}
+
+// renderDiffView renders the diff viewport for the selected commit.
+func (rm *RollbackModel) renderDiffView(title, divider string) string {
+	t := rm.theme
+	e := rm.entries[rm.cursor]
+	subTitle := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render(fmt.Sprintf("Diff for %s — %s", e.CommitInfo.ShortHash, TruncateWithEllipsis(e.CommitInfo.Message, 50)))
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("j/k scroll  esc close diff")
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title, divider, subTitle, rm.viewport.View(), divider, footer)
+}
+
+// renderDiffContent produces the colored diff string for a commit.
+func (rm *RollbackModel) renderDiffContent(e rollback.RollbackEntry) string {
+	if e.Diff == "" {
+		return lipgloss.NewStyle().Foreground(rm.theme.TextMuted).
+			Render("  (current HEAD — no diff)")
+	}
+	return colorizeDiff(e.Diff, rm.theme)
+}
+
+// colorizeDiff applies +/- line colors to a diff string.
+func colorizeDiff(diff string, t theme.Theme) string {
+	lines := strings.Split(diff, "\n")
+	var out []string
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			out = append(out, lipgloss.NewStyle().Foreground(t.DiffAdded).Render(line))
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			out = append(out, lipgloss.NewStyle().Foreground(t.DiffRemoved).Render(line))
+		case strings.HasPrefix(line, "@@"):
+			out = append(out, lipgloss.NewStyle().Foreground(t.Brand).Render(line))
+		default:
+			out = append(out, lipgloss.NewStyle().Foreground(t.Text).Render(line))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// clampScroll ensures the cursor is visible in the list.
+func (rm *RollbackModel) clampScroll() {
+	lh := rm.listVisibleRows()
+	if rm.cursor < rm.offset {
+		rm.offset = rm.cursor
+	}
+	if rm.cursor >= rm.offset+lh {
+		rm.offset = rm.cursor - lh + 1
 	}
 }
 
-// executeRollback performs the selected rollback action.
-func (m *RollbackModel) executeRollback() ([]tea.Cmd, *AppMsg) {
-	if m.selected >= len(m.commits) {
-		m.confirming = false
-		return nil, nil
+// listVisibleRows returns how many commit rows fit in the terminal.
+func (rm *RollbackModel) listVisibleRows() int {
+	h := rm.height - 6
+	if h < 3 {
+		return 3
 	}
-	commit := m.commits[m.selected]
-	hash := commit.Hash
-
-	if m.confirmType == "soft" && m.rollback != nil {
-		result, err := m.rollback.SoftReset(hash, nil)
-		if err != nil {
-			m.confirming = false
-			return nil, &AppMsg{Screen: ScreenREPL, Action: fmt.Sprintf("Rollback failed: %v", err)}
-		}
-		m.confirming = false
-		return nil, &AppMsg{Screen: ScreenREPL, Action: result.Message}
-	}
-	if m.confirmType == "hard" && m.rollback != nil {
-		result, err := m.rollback.HardReset(hash)
-		if err != nil {
-			m.confirming = false
-			return nil, &AppMsg{Screen: ScreenREPL, Action: fmt.Sprintf("Rollback failed: %v", err)}
-		}
-		m.confirming = false
-		return nil, &AppMsg{Screen: ScreenREPL, Action: result.Message}
-	}
-
-	m.confirming = false
-	return nil, &AppMsg{Screen: ScreenREPL, Action: "Rollback not available"}
-}
-
-// View renders the rollback screen.
-func (m *RollbackModel) View() string {
-	if m.confirming {
-		return m.renderConfirmation()
-	}
-
-	var parts []string
-
-	// Header
-	headerStyle := lipgloss.NewStyle().
-		Foreground(m.theme.Brand).
-		Bold(true).
-		Padding(0, 1)
-	parts = append(parts, headerStyle.Render("/rollback — Commit Time Machine"))
-
-	// Commit list
-	if len(m.commits) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(m.theme.TextSecondary).
-			Italic(true).
-			Padding(2, 4)
-		parts = append(parts, emptyStyle.Render("No commits found"))
-	} else {
-		for i, commit := range m.commits {
-			card := m.renderCommit(i, commit)
-			parts = append(parts, card)
-		}
-	}
-
-	// Diff preview
-	if m.showDiff && m.diffContent != "" {
-		parts = append(parts, "")
-		diffHeader := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true).Render("Diff Preview:")
-		parts = append(parts, diffHeader)
-		diffStyle := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(m.theme.Border).
-			Padding(0, 1).
-			Width(m.width - 4)
-		diff := m.diffContent
-		if len(diff) > 2000 {
-			diff = diff[:2000] + "\n... [truncated]"
-		}
-		parts = append(parts, diffStyle.Render(diff))
-	}
-
-	// Footer
-	footerStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
-	footer := footerStyle.Render("j/k: navigate  |  d: diff  |  r: soft rollback  |  R: hard rollback  |  Esc: back")
-	parts = append(parts, "", footer)
-
-	return strings.Join(parts, "\n")
-}
-
-// renderCommit renders a single commit entry.
-func (m *RollbackModel) renderCommit(idx int, commit git.CommitInfo) string {
-	indicator := "  "
-	if idx == m.selected {
-		indicator = lipgloss.NewStyle().Foreground(m.theme.Brand).Render("▶ ")
-	}
-
-	shortHash := commit.ShortHash
-	if shortHash == "" && len(commit.Hash) > 7 {
-		shortHash = commit.Hash[:7]
-	} else if shortHash == "" {
-		shortHash = commit.Hash
-	}
-
-	marker := ""
-	if idx == 0 {
-		marker = lipgloss.NewStyle().Foreground(m.theme.Warning).Render(" [HEAD]")
-	}
-
-	line := fmt.Sprintf("%s%s %s%s",
-		indicator,
-		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true).Render(shortHash),
-		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render(commit.Message),
-		marker,
-	)
-
-	if idx == m.selected {
-		cardStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(m.theme.Brand).
-			Padding(0, 1).
-			Width(m.width - 4)
-		return cardStyle.Render(line)
-	}
-
-	return line
-}
-
-// renderConfirmation renders the rollback confirmation dialog.
-func (m *RollbackModel) renderConfirmation() string {
-	commit := "unknown"
-	if m.selected < len(m.commits) {
-		shortHash := m.commits[m.selected].ShortHash
-		if shortHash == "" {
-			shortHash = m.commits[m.selected].Hash[:7]
-		}
-		commit = shortHash
-	}
-
-	prompt := fmt.Sprintf("Perform %s rollback to %s?", m.confirmType, commit)
-
-	confirmStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color(m.theme.SurfaceElevated)).
-		Foreground(lipgloss.Color(m.theme.TextPrimary)).
-		Padding(1, 2).
-		Border(theme.DoubleBorder).
-		BorderForeground(lipgloss.Color(m.theme.Warning))
-
-	hintStyle := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Padding(0, 2)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		confirmStyle.Render(prompt),
-		hintStyle.Render("Y: confirm  |  N: cancel"),
-	)
-
-	return centerScreen(content, m.width, m.height)
+	return h
 }
