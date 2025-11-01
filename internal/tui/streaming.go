@@ -1,26 +1,24 @@
-package tui
-
+// Package tui implements the Bubble Tea TUI for M31A.
+//
 // STREAMING PIPELINE — GOROUTINE OWNERSHIP MODEL
 //
 // Architecture: Bubble Tea is single-threaded. All state mutations go through Update().
 // The streaming pipeline uses one goroutine per active stream that reads SSE chunks
 // and sends typed tea.Msg values through a channel. The TUI's Update() loop receives
-// these messages and updates AppState.
+// these messages and updates state.
 //
 // Channel lifecycle (per stream):
-// 1. StartStreamCmd creates a buffered channel (chan tea.Msg, cap 256)
-// 2. A goroutine reads from the provider's StreamIterator and sends to the channel
-// 3. A tea.Cmd (streamListenerCmd) polls the channel and returns messages to Update()
-// 4. When the stream ends (EOF or error), the goroutine closes the channel
-// 5. streamListenerCmd detects the closed channel and stops polling
+//  1. StartStreamCmd creates a buffered channel (chan tea.Msg, cap 64)
+//  2. A goroutine reads from the provider's StreamIterator and sends to the channel
+//  3. A tea.Cmd (returned to Update()) reads from the channel and returns messages
+//  4. When the stream ends (EOF or error), the goroutine closes the channel
+//  5. The cmd detects the closed channel and returns nil to stop the chain
 //
 // CRITICAL RULES:
-// - The goroutine OWNS the channel; it creates and closes it
-// - The TUI only READS from the channel; never closes it
-// - safeCloseOnce is used as a defensive guard against double-close
-// - No AppState mutation happens in the goroutine; only tea.Msg emission
-//
-// Historical fixes: C-3 (double-close), M-21 (channel ownership), M-35-36 (race conditions)
+//   - The goroutine OWNS the channel; it creates and closes it
+//   - The TUI only READS from the channel; never closes it
+//   - No AppState mutation happens in the goroutine; only tea.Msg emission
+package tui
 
 import (
 	"context"
@@ -33,12 +31,16 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// ─── Stream message types ─────────────────────────────────────────────────────
+
+// StreamMsg carries a single streaming chunk from the LLM.
 type StreamMsg struct {
 	Chunk     *types.StreamChunk
 	ModelID   string
 	SessionID string
 }
 
+// StreamDoneMsg signals that the stream completed successfully.
 type StreamDoneMsg struct {
 	Message   types.Message
 	Usage     *types.Usage
@@ -46,37 +48,31 @@ type StreamDoneMsg struct {
 	SessionID string
 }
 
+// StreamErrorMsg signals that the stream terminated with an error.
 type StreamErrorMsg struct {
 	Err     error
 	ModelID string
 }
 
+// TickMsg drives streaming render ticks at ~10fps.
 type TickMsg struct {
 	Time time.Time
 }
 
-// Fix C-3: StartStreamCmd owns its channels internally. The caller (REPL)
-// never creates, holds, or disposes channels — they are allocated and closed
-// within this function. The goroutine owns the write side; the returned cmd
-// reads from the channel internally. Double-invocation is safe: each call
-// allocates fresh channels.
-//
-// Fix M-21: The goroutine closes streamCh when it exits. There is no
-// separate streamDone channel — closing streamCh IS the done signal.
-// The cmd reads from streamCh; when closed, reads return the zero value
-// (nil for tea.Msg interface), which we detect and return as nil to stop
-// the Bubble Tea continuation chain.
-//
-// The returned tea.Cmd reads one message per invocation from the internal
-// channel. The caller manages continuation by returning a new cmd from
-// Update() — but the channel reference never escapes this closure.
+// ─── Streaming commands ───────────────────────────────────────────────────────
+
+// StartStreamCmd starts a streaming LLM request in a goroutine.
+// The goroutine owns the channel; it creates it, writes to it, and closes it.
+// The returned tea.Cmd reads one message per invocation; continuation is
+// managed by the caller returning a new cmd from Update().
+// The returned read-only channel reference allows the REPL to issue
+// continuation reads in handleStreamMsg.
 func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) (tea.Cmd, <-chan tea.Msg) {
-	// Fix C-3: channels allocated locally — no caller creates or disposes them.
 	streamCh := make(chan tea.Msg, 64)
 
 	go func() {
-		// Fix M-21: close streamCh when the goroutine exits. The cmd reader
-		// detects closure and returns nil to stop the continuation chain.
+		// Goroutine owns streamCh: close it when the goroutine exits.
+		// The cmd reader detects closure and returns nil to stop the chain.
 		defer close(streamCh)
 
 		iterator, err := p.ChatCompletionStream(ctx, req)
@@ -85,28 +81,20 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			return
 		}
 
-		// Ensure the iterator is closed on context cancellation to unblock
-		// any pending Next() call and release the HTTP response body.
+		// Unblock iterator.Next() on context cancellation.
 		done := make(chan struct{})
 		go func() {
 			select {
 			case <-ctx.Done():
 				iterator.Close()
 			case <-done:
-				// Stream completed normally
 			}
 		}()
-
 		defer func() {
 			iterator.Close()
 			close(done)
 		}()
 
-		// M-35-36 fix: the goroutine only accumulates raw content for
-		// msg.Message.Content and tracks usage. Segment building is done
-		// exclusively by the REPL model (repl_stream.go) which has full
-		// visibility into segment boundaries. The goroutine's old segment
-		// building code was always overwritten by handleStreamDoneMsg.
 		var fullContent strings.Builder
 		var lastUsage *types.Usage
 
@@ -118,7 +106,6 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 					Content: fullContent.String(),
 					Usage:   lastUsage,
 				}
-
 				streamCh <- StreamDoneMsg{
 					Message:   msg,
 					Usage:     lastUsage,
@@ -148,22 +135,18 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			if chunk.Usage != nil {
 				lastUsage = chunk.Usage
 			}
-			switch chunk.Type {
-			case "content":
+			if chunk.Type == "content" {
 				fullContent.WriteString(chunk.Delta)
 			}
 		}
 	}()
 
-	// Fix C-3: the cmd reads from streamCh. When the goroutine closes
-	// streamCh, the channel read returns the zero value (nil for tea.Msg
-	// interface), which we return as nil to stop the Bubble Tea cmd chain.
-	// The channel reference is returned as a read-only hint; the caller
-	// stores it for continuation but never writes to or closes it.
+	// The initial cmd reads the first message from streamCh.
+	// When the goroutine closes streamCh, reads return nil (zero value),
+	// which we return as nil to stop the Bubble Tea cmd chain.
 	cmd := func() tea.Msg {
 		msg, ok := <-streamCh
 		if !ok {
-			// Fix M-21: channel closed — stream goroutine exited.
 			return nil
 		}
 		return msg
@@ -172,6 +155,8 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 	return cmd, streamCh
 }
 
+// StreamTickCmd returns a tea.Cmd that emits a TickMsg at ~10fps.
+// Used to drive streaming render updates.
 func StreamTickCmd() tea.Cmd {
 	return tea.Tick(time.Second/10, func(t time.Time) tea.Msg {
 		return TickMsg{Time: t}
