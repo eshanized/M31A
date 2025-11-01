@@ -11,107 +11,91 @@ import (
 	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
+// Screen identifies which full-screen view is active.
 type Screen int
 
 const (
-	ScreenFirstRun Screen = iota
-	ScreenREPL
-	ScreenModelSelector
-	ScreenSettings
-	ScreenResume
-	ScreenPermission
-	ScreenPlan
-	ScreenExecute
-	ScreenVerify
-	ScreenShip
-	ScreenDiff Screen = 10
-
-	// New screens added in TUI redesign (section 6.1 of tui_redesign_proposal.md)
-	ScreenLedger    Screen = 11 // /ledger command — browse the learning journal
-	ScreenRollback  Screen = 12 // /rollback command — commit time machine
-	ScreenGoalInput Screen = 13 // /workflow start — full-screen goal entry
-	ScreenDiscuss   Screen = 14 // Discuss phase — dedicated Q&A flow
-	ScreenMetrics   Screen = 15 // /metrics command — session analytics dashboard
+	ScreenFirstRun      Screen = iota // 0 — API key setup wizard
+	ScreenREPL                        // 1 — main chat REPL
+	ScreenModelSelector               // 2 — model/provider picker
+	ScreenSettings                    // 3 — settings editor (6 tabs)
+	ScreenResume                      // 4 — session browser
+	ScreenPermission                  // 5 — tool permission modal
+	ScreenPlan                        // 6 — plan review
+	ScreenExecute                     // 7 — task execution progress
+	ScreenVerify                      // 8 — verification results
+	ScreenShip                        // 9 — ship summary
+	ScreenDiff          Screen = 10   // diff viewer
+	ScreenLedger        Screen = 11   // learning ledger browser
+	ScreenRollback      Screen = 12   // commit time machine
+	ScreenGoalInput     Screen = 13   // full-screen goal entry
+	ScreenDiscuss       Screen = 14   // discuss Q&A
+	ScreenMetrics       Screen = 15   // session analytics
 )
 
+// ─── App-level messages ──────────────────────────────────────────────────────
+
+// AppMsg is the general routing message from sub-models to AppState.
 type AppMsg struct {
 	Screen        Screen
-	Action        string            // optional action identifier (e.g., "new_session")
-	SessionID     string            // populated by resume screen on selection
-	SaveKeychain  bool              // save API key to system keychain
-	ModelSelected *ModelSelectedMsg // model selection result
+	Action        string           // optional action identifier (e.g., "new_session")
+	SessionID     string           // populated by resume screen on selection
+	SaveKeychain  bool             // save API key to system keychain
+	ModelSelected *ModelSelectedMsg
 }
 
-type HealthCheckTickMsg struct {
-	Time time.Time
-}
-
-type ErrorMsg struct {
-	Err error
-}
-
-type PermissionRequestMsg struct {
-	Request tools.PermissionRequest
-}
-
-type PermissionResponseMsg struct {
-	Response tools.PermissionResponse
-}
-
-// PermissionTickMsg is emitted every 100ms while the permission modal is visible,
-// driving the countdown timer and triggering auto-deny on timeout.
-type PermissionTickMsg struct{}
-
-// FallbackEventMsg carries provider fallback information to the TUI.
-type FallbackEventMsg struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Reason string `json:"reason"`
-}
-
-// RefreshCacheMsg triggers a model cache refresh for the given provider.
-type RefreshCacheMsg struct {
-	ProviderName string `json:"provider_name"`
-}
-
-// ModelSelectedMsg carries the model selection result back to AppState.
+// ModelSelectedMsg carries the result of model selection back to AppState.
 type ModelSelectedMsg struct {
 	Model    types.ModelInfo
 	Provider string
 }
 
-// SettingsSavedMsg is emitted when the settings screen saves the config successfully.
-type SettingsSavedMsg struct{}
+// ─── Infrastructure messages ─────────────────────────────────────────────────
 
-// PhaseResultMsg carries the result of a workflow phase execution from the
-// engine goroutine to the TUI update loop.
-type PhaseResultMsg struct {
-	Phase               types.WorkflowPhase
-	Tasks               []types.Task
-	Messages            []types.Message
-	Success             bool
-	Error               string
-	NeedsAnswers        bool
-	RequiresManualInput bool
-	DurationMs          int64
-
-	// Execution metrics (from workflow.PhaseResult)
-	Usage     *types.Usage
-	Cost      float64
-	ToolCalls int
-	Commits   []git.CommitInfo
-	DiffStats workflow.DiffStats
+// HealthCheckTickMsg is emitted by the health check ticker.
+type HealthCheckTickMsg struct {
+	Time time.Time
 }
 
-// PlanReadyMsg is emitted from RunPhaseCmd when the plan phase completes
-// successfully with valid tasks.
-type PlanReadyMsg struct {
-	Tasks        []types.Task
-	CostEstimate string
-	TimeEstimate string
+// HealthCheckResultMsg carries an async health check result.
+type HealthCheckResultMsg struct {
+	Result types.HealthStatus
 }
 
-// QuestionRequestMsg is sent by the AskUserQuestion tool to request user input.
+// RefreshCacheMsg triggers a model cache refresh.
+type RefreshCacheMsg struct {
+	ProviderName string
+}
+
+// CacheRefreshResultMsg carries an async cache refresh result.
+type CacheRefreshResultMsg struct {
+	ErrMsg  string
+	NextCmd tea.Cmd
+}
+
+// ErrorMsg carries a generic error to the TUI update loop.
+type ErrorMsg struct {
+	Err error
+}
+
+// ─── Permission messages ──────────────────────────────────────────────────────
+
+// PermissionRequestMsg is sent when a tool needs user approval.
+type PermissionRequestMsg struct {
+	Request tools.PermissionRequest
+}
+
+// PermissionResponseMsg carries the user's permission decision.
+type PermissionResponseMsg struct {
+	Response tools.PermissionResponse
+}
+
+// PermissionTickMsg drives the countdown timer on the permission modal.
+type PermissionTickMsg struct{}
+
+// ─── Question messages ────────────────────────────────────────────────────────
+
+// QuestionRequestMsg is sent by the AskUserQuestion tool.
 type QuestionRequestMsg struct {
 	Question    string
 	Header      string
@@ -126,76 +110,115 @@ type QuestionResponseMsg struct {
 	Answer string
 }
 
-// DiscussAnswerTimeoutMsg is emitted by the discuss answer timer when
-// 5 minutes elapse without the user answering the current question.
-// The TUI handler calls engine.SkipDiscuss() and advances to Plan.
+// DiscussAnswerTimeoutMsg is emitted when the discuss answer timer expires.
 type DiscussAnswerTimeoutMsg struct {
 	QuestionIndex int
 }
 
-// StreamChunkMsg is emitted by workflow phases that stream LLM responses
-// (currently only the Discuss phase). The TUI renders each chunk in the
-// active screen via the REPL streaming infrastructure.
+// ─── Workflow messages ────────────────────────────────────────────────────────
+
+// PhaseResultMsg carries the result of a completed workflow phase.
+type PhaseResultMsg struct {
+	Phase               types.WorkflowPhase
+	Tasks               []types.Task
+	Messages            []types.Message
+	Success             bool
+	Error               string
+	NeedsAnswers        bool
+	RequiresManualInput bool
+	DurationMs          int64
+	Usage               *types.Usage
+	Cost                float64
+	ToolCalls           int
+	Commits             []git.CommitInfo
+	DiffStats           workflow.DiffStats
+}
+
+// PlanReadyMsg is emitted when the plan phase completes with valid tasks.
+type PlanReadyMsg struct {
+	Tasks        []types.Task
+	CostEstimate string
+	TimeEstimate string
+}
+
+// ExecutePauseMsg is emitted when the user toggles pause/resume on execute screen.
+type ExecutePauseMsg struct {
+	Paused bool
+}
+
+// HealResultMsg is emitted after a self-heal attempt.
+type HealResultMsg struct {
+	TaskID  int
+	Success bool
+}
+
+// GoalSubmittedMsg is emitted by GoalInputModel when the user confirms a goal.
+type GoalSubmittedMsg struct {
+	Goal string
+}
+
+// ─── Stream messages ──────────────────────────────────────────────────────────
+
+// StreamChunkMsg carries a streaming token chunk from a workflow phase.
+// It is an alias for types.StreamChunkMsg for compatibility.
 type StreamChunkMsg = types.StreamChunkMsg
 
-// HealthCheckResultMsg carries the result of an async health check back to
-// the TUI update loop. C-1 fix: health checks now run in a tea.Cmd goroutine
-// instead of blocking Update().
-type HealthCheckResultMsg struct {
-	Result types.HealthStatus
-}
+// ─── UI messages ─────────────────────────────────────────────────────────────
 
-// CacheRefreshResultMsg carries the result of an async cache refresh back to
-// the TUI update loop. C-2 fix: cache refreshes now run in a tea.Cmd goroutine
-// instead of blocking Update().
-type CacheRefreshResultMsg struct {
-	ErrMsg    string
-	NextCmd   tea.Cmd
-}
-
-// ThemeChangedMsg is emitted when the theme is switched at runtime.
-type ThemeChangedMsg struct {
-	Theme string // "dark" or "light"
-}
-
-// ToastExpiryMsg is emitted when a toast notification expires. H-2 fix:
-// toast expiry is now handled in Update() instead of View() to maintain
-// Bubble Tea's pure rendering contract.
-type ToastExpiryMsg struct{}
-
-// SlashCommandMsg is emitted by the REPL when the user enters a slash command.
-// It carries the raw command string for app-level processing.
+// SlashCommandMsg is emitted when the REPL user enters a slash command.
 type SlashCommandMsg struct {
 	Command string
 }
 
-// ToastMsg is a transient notification message.
+// ThemeChangedMsg is emitted when the theme is switched.
+type ThemeChangedMsg struct {
+	Theme string // "dark", "light", or "auto"
+}
+
+// ToastMsg displays a transient notification.
 type ToastMsg struct {
 	Text     string
 	Duration time.Duration
 	Type     string // "info", "success", "warning", "error"
 }
 
-// OptimizedMsg carries arbitrage recommendations back to the TUI.
-// H-19: wired from /optimize command and Plan screen "O" key.
+// ToastExpiryMsg clears an expired toast (H-2 fix: handled in Update, not View).
+type ToastExpiryMsg struct{}
+
+// FallbackEventMsg carries provider fallback information.
+type FallbackEventMsg struct {
+	From   string
+	To     string
+	Reason string
+}
+
+// SettingsSavedMsg is emitted when settings are saved.
+type SettingsSavedMsg struct{}
+
+// OptimizedMsg carries arbitrage optimization recommendations.
 type OptimizedMsg struct {
 	Recommendations []arbitrage.ArbitrageRecommendation
 	TaskID          int
 }
 
-// GoalSubmittedMsg is emitted by GoalInputModel when the user submits a goal.
-// The AppState routes this to PhaseInitialize before starting PhaseDiscuss.
-type GoalSubmittedMsg struct {
-	Goal string
+// DiffScreenMsg triggers the diff viewer screen.
+type DiffScreenMsg struct {
+	Diff    string
+	Title   string
+	Lines   []string
 }
 
-// ExecutePauseMsg is emitted by ExecuteModel when the user toggles pause/resume.
-type ExecutePauseMsg struct {
-	Paused bool
+// DiffCloseMsg closes the diff viewer.
+type DiffCloseMsg struct{}
+
+// SidebarRefreshMsg triggers a sidebar git status refresh.
+type SidebarRefreshMsg struct {
+	Files  []SidebarFile
+	Branch string
 }
 
-// HealResultMsg is emitted after a self-heal attempt completes.
-type HealResultMsg struct {
-	TaskID  int
-	Success bool
+// SidebarFile represents a file in the sidebar git status.
+type SidebarFile struct {
+	Path   string
+	Status string
 }
