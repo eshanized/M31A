@@ -15,36 +15,36 @@ type StatusBarInfo struct {
 	TotalTokens      int
 	Cost             float64
 	ShowCost         bool
-	WhichKey         string   // which-key hint text to show
-	LeaderActive     bool     // if true, show leader prompt instead of normal content
-	AgentName        string   // agent/model name for metadata row
-	ModelName        string   // model name
-	ProviderName     string   // provider short name
-	IsStreaming      bool     // currently streaming
-	IsThinking       bool     // currently in thinking mode
-	KeyboardHints    []string // e.g. ["ctrl+p commands", "ctrl+b sidebar"]
-	WorkflowPhase    string   // e.g. "discuss", "plan", "execute"
-	QuestionProgress string   // e.g. "question 2/4"
+	WhichKey         string
+	LeaderActive     bool
+	AgentName        string
+	ModelName        string
+	ProviderName     string
+	IsStreaming      bool
+	IsThinking       bool
+	KeyboardHints    []string
+	WorkflowPhase    string
+	QuestionProgress string
 }
 
+// RenderStatusBar renders the status bar line at the bottom of the terminal.
 func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, width int, info *StatusBarInfo) string {
 	if width < 10 {
 		return ""
 	}
 
-	// Build left side: operation status or streaming indicator
+	// Build left side
 	var leftText string
 	if info != nil && info.LeaderActive {
 		leftText = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("ctrl+x") +
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(" \u2500 waiting \u2500")
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ─ waiting ─")
+	} else if info != nil && info.IsThinking {
+		leftText = t.Spinner.Render("⋯") + " " +
+			lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render("thinking...")
 	} else if info != nil && info.IsStreaming {
-		spinner := t.Spinner.Render("\u22EF")
-		leftText = spinner + " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render("building...")
-		if info.IsThinking {
-			leftText = t.Spinner.Render("\u22EF") + " " + lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render("thinking...")
-		}
+		leftText = t.Spinner.Render("⋯") + " " +
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("building...")
 	} else if info != nil && info.WorkflowPhase != "" {
-		// Workflow state: show phase with context
 		phaseText := "▸ " + info.WorkflowPhase
 		if info.QuestionProgress != "" {
 			phaseText += " · " + info.QuestionProgress
@@ -56,14 +56,13 @@ func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, wi
 		leftText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(operation)
 	}
 
-	// Append which-key hints to left side if available
 	if info != nil && info.WhichKey != "" {
 		leftText = leftText + "  " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.WhichKey)
 	}
 
 	// Build right side: keyboard hints + usage
 	var rightParts []string
-	if info != nil && len(info.KeyboardHints) > 0 {
+	if info != nil {
 		for _, hint := range info.KeyboardHints {
 			rightParts = append(rightParts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(hint))
 		}
@@ -81,29 +80,23 @@ func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, wi
 
 	leftWidth := lipgloss.Width(leftText)
 	rightWidth := lipgloss.Width(rightText)
-
 	padding := width - leftWidth - rightWidth
+
 	if padding < 0 {
-		// Drop right side entirely if no room
 		rightText = ""
 		rightWidth = 0
 		padding = width - leftWidth
 		if padding < 0 {
-			// Left side too wide — truncate the styled leftText (which includes WhichKey hints)
-			maxLeftWidth := width - 2
-			if maxLeftWidth < 0 {
-				maxLeftWidth = 0
+			maxLeft := width - 2
+			if maxLeft < 0 {
+				maxLeft = 0
 			}
-			if lipgloss.Width(leftText) > maxLeftWidth {
-				leftText = TruncateWithEllipsis(leftText, maxLeftWidth)
-			}
+			leftText = TruncateWithEllipsis(leftText, maxLeft)
 			leftWidth = lipgloss.Width(leftText)
 			padding = width - leftWidth
 			if padding < 0 {
 				padding = 0
 			}
-			rightText = ""
-			rightWidth = 0
 		}
 	}
 
@@ -113,7 +106,7 @@ func RenderStatusBar(t theme.Theme, operation string, lastActivity time.Time, wi
 	return leftText + strings.Repeat(" ", padding)
 }
 
-// RenderPromptMetadata renders the agent · model · provider row inside the prompt area.
+// RenderPromptMetadata renders the agent · model · provider row above the textarea.
 func RenderPromptMetadata(agentName, modelName, providerName string, t theme.Theme, width int) string {
 	var parts []string
 	if agentName != "" {
@@ -130,12 +123,12 @@ func RenderPromptMetadata(agentName, modelName, providerName string, t theme.The
 		return ""
 	}
 
-	separator := lipgloss.NewStyle().Foreground(t.TextMuted).Render("\u00B7")
+	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render("·")
 	var result strings.Builder
 	for i, p := range parts {
 		if i > 0 {
 			result.WriteString(" ")
-			result.WriteString(separator)
+			result.WriteString(sep)
 			result.WriteString(" ")
 		}
 		result.WriteString(p)
@@ -148,13 +141,13 @@ func RenderPromptMetadata(agentName, modelName, providerName string, t theme.The
 		Render(result.String())
 }
 
-// RenderPromptBottomBorder renders the bottom border continuation line (╹▀▀▀...).
+// RenderPromptBottomBorder renders the border line below the input frame.
 func RenderPromptBottomBorder(color lipgloss.Color, width int) string {
 	if width < 1 {
 		return ""
 	}
-	left := lipgloss.NewStyle().Foreground(color).Render("\u2579")                          // ╹
-	fill := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("\u2580", width-1)) // ▀
+	left := lipgloss.NewStyle().Foreground(color).Render("╹")
+	fill := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("▀", width-1))
 	return left + fill
 }
 
