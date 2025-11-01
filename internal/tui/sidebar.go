@@ -3,239 +3,172 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-const defaultSidebarWidth = 42
+const (
+	sidebarDefaultWidth = 28
+	sidebarMinWidth     = 20
+)
 
-// sidebarStatusCacheTTL is how long the sidebar caches git status
-// to avoid hammering git on every TickMsg (60Hz).
-const sidebarStatusCacheTTL = 1 * time.Second
-
-type SidebarRefreshMsg struct {
-	Statuses  []git.FileStatus
-	Err       error
-	FromCache bool
-}
-
+// SidebarModel manages the collapsible sidebar panel that shows git status.
 type SidebarModel struct {
-	theme             theme.Theme
-	git               *git.Git
-	statuses          []git.FileStatus
-	err               string
-	loading           bool
-	width             int
-	height            int
-	visible           bool
-	lastStatusFetch   time.Time
-	gitStatusCache    []git.FileStatus
-	gitStatusCacheErr error
-	spinner           spinner.Model
+	git     *git.Git
+	theme   theme.Theme
+	files   []git.FileStatus
+	branch  string
+	visible bool
+	width   int
+
+	loading bool
+	err     string
 }
 
+// NewSidebarModel creates a new SidebarModel.
 func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(t.Brand)
 	return &SidebarModel{
-		theme:   t,
 		git:     g,
-		width:   defaultSidebarWidth,
-		loading: true,
-		spinner: sp,
+		theme:   t,
+		visible: true,
+		width:   sidebarDefaultWidth,
 	}
 }
 
-func (m *SidebarModel) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), m.spinner.Tick)
+// Toggle shows/hides the sidebar.
+func (s *SidebarModel) Toggle() {
+	s.visible = !s.visible
 }
 
-func (m *SidebarModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// IsVisible returns true if the sidebar is shown.
+func (s *SidebarModel) IsVisible() bool {
+	return s.visible
+}
+
+// GetWidth returns the sidebar display width (0 if hidden).
+func (s *SidebarModel) GetWidth() int {
+	if !s.visible {
+		return 0
+	}
+	return s.width
+}
+
+// SetTheme updates the sidebar theme.
+func (s *SidebarModel) SetTheme(t theme.Theme) {
+	s.theme = t
+}
+
+// refreshCmd returns a tea.Cmd that loads git status asynchronously.
+func (s *SidebarModel) refreshCmd() tea.Cmd {
+	g := s.git
+	return func() tea.Msg {
+		if g == nil || !g.IsRepo() {
+			return SidebarRefreshMsg{}
+		}
+		branch, _ := g.CurrentBranch()
+		files, err := g.StatusPorcelain()
+		if err != nil {
+			return SidebarRefreshMsg{Branch: branch}
+		}
+		sidebarFiles := make([]SidebarFile, 0, len(files))
+		for _, f := range files {
+			sidebarFiles = append(sidebarFiles, SidebarFile{
+				Path:   f.Path,
+				Status: f.Status,
+			})
+		}
+		return SidebarRefreshMsg{Files: sidebarFiles, Branch: branch}
+	}
+}
+
+// Update handles sidebar-specific messages.
+func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.height = msg.Height
-		if m.width == 0 {
-			m.width = defaultSidebarWidth
-		}
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
 	case SidebarRefreshMsg:
-		m.loading = false
-		if msg.Err != nil {
-			m.err = msg.Err.Error()
-			if !msg.FromCache {
-				m.gitStatusCacheErr = msg.Err
-			}
-		} else {
-			m.statuses = msg.Statuses
-			if !msg.FromCache {
-				m.gitStatusCache = msg.Statuses
-				m.gitStatusCacheErr = nil
-				m.lastStatusFetch = time.Now()
-			}
-			m.err = ""
+		s.branch = msg.Branch
+		files := make([]git.FileStatus, 0, len(msg.Files))
+		for _, f := range msg.Files {
+			files = append(files, git.FileStatus{Status: f.Status, Path: f.Path})
 		}
+		s.files = files
+		s.loading = false
 	}
-	return m, nil
+	return s, nil
 }
 
-func (m *SidebarModel) View() string {
-	if !m.visible {
+// View renders the sidebar.
+func (s *SidebarModel) View() string {
+	if !s.visible {
 		return ""
 	}
+	t := s.theme
+	w := s.width
 
-	w := m.width
-	if w <= 0 {
-		w = defaultSidebarWidth
-	}
+	title := lipgloss.NewStyle().
+		Foreground(t.Brand).
+		Bold(true).
+		Padding(0, 1).
+		Width(w).
+		Render("◈ Files")
+
+	divider := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render(strings.Repeat("─", w))
 
 	var lines []string
+	lines = append(lines, title)
+	lines = append(lines, divider)
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.TextPrimary).Padding(0, 1)
-	lines = append(lines, headerStyle.Render("MODIFIED"))
+	// Branch
+	if s.branch != "" {
+		branchLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Width(w).
+			Render("⎇ " + s.branch)
+		lines = append(lines, branchLine)
+		lines = append(lines, "")
+	}
 
-	sep := lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("─", w-2))
-	lines = append(lines, sep)
-
-	if m.loading {
-		lines = append(lines, "  "+m.spinner.View()+" loading...")
-	} else if m.err != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.Error).Padding(0, 1).Render(m.err))
-	} else if len(m.statuses) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Padding(0, 1).Render("no changes"))
+	// Files
+	if len(s.files) == 0 {
+		noFiles := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Italic(true).
+			PaddingLeft(1).
+			Width(w).
+			Render("no changes")
+		lines = append(lines, noFiles)
 	} else {
-		for _, fs := range m.statuses {
-			line := m.renderFileStatus(fs, w-2)
+		for _, f := range s.files {
+			icon, color := fileStatusIcon(f.Status, t)
+			name := TruncateWithEllipsis(f.Path, w-5)
+			line := lipgloss.NewStyle().Foreground(color).PaddingLeft(1).
+				Render(fmt.Sprintf("%s %s", icon, name))
 			lines = append(lines, line)
 		}
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Top, lines...)
-	panel := lipgloss.NewStyle().Width(w).Height(m.height).Background(m.theme.Surface).Padding(0, 1).Render(content)
-
-	return panel
+	content := strings.Join(lines, "\n")
+	return lipgloss.NewStyle().
+		Width(w).
+		Render(content)
 }
 
-func (m *SidebarModel) Toggle() {
-	m.visible = !m.visible
-}
-
-func (m *SidebarModel) SetVisible(v bool) {
-	m.visible = v
-}
-
-func (m *SidebarModel) IsVisible() bool {
-	return m.visible
-}
-
-func (m *SidebarModel) SetTheme(t theme.Theme) {
-	m.theme = t
-}
-
-// SetWidth sets the sidebar width in columns.
-func (m *SidebarModel) SetWidth(w int) {
-	if w > 0 {
-		m.width = w
+func fileStatusIcon(status string, t theme.Theme) (string, lipgloss.Color) {
+	switch {
+	case strings.Contains(status, "M"):
+		return "M", t.Warning
+	case strings.Contains(status, "A"):
+		return "+", t.Success
+	case strings.Contains(status, "D"):
+		return "-", t.Error
+	case strings.Contains(status, "?"):
+		return "?", t.TextMuted
+	default:
+		return "·", t.TextMuted
 	}
-}
-
-// GetWidth returns the current sidebar width in columns.
-func (m *SidebarModel) GetWidth() int {
-	return m.width
-}
-
-func (m *SidebarModel) refreshCmd() tea.Cmd {
-	// BUG-03 fix: capture cache values in closure for read-only access;
-	// cache writes happen in Update() on the main thread only.
-	lastFetch := m.lastStatusFetch
-	cachedStatuses := m.gitStatusCache
-	cachedErr := m.gitStatusCacheErr
-	return func() tea.Msg {
-		if m.git == nil || !m.git.IsRepo() {
-			return SidebarRefreshMsg{Statuses: nil, Err: nil}
-		}
-		// L-17: Use 1-second cache to avoid hammering git on every TickMsg
-		if !lastFetch.IsZero() && time.Since(lastFetch) < sidebarStatusCacheTTL {
-			return SidebarRefreshMsg{Statuses: cachedStatuses, Err: cachedErr, FromCache: true}
-		}
-		statuses, err := m.git.StatusPorcelain()
-		return SidebarRefreshMsg{Statuses: statuses, Err: err, FromCache: false}
-	}
-}
-
-func (m *SidebarModel) renderFileStatus(fs git.FileStatus, width int) string {
-	statusChar := fs.Status
-	statusColor := m.theme.TextSecondary
-	switch statusChar {
-	case "M":
-		statusColor = m.theme.Warning
-	case "A":
-		statusColor = m.theme.Success
-	case "D":
-		statusColor = m.theme.Error
-	case "R":
-		statusColor = m.theme.Thinking
-	case "?":
-		statusColor = m.theme.TextSecondary
-	}
-
-	statusStr := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(statusChar)
-
-	pathStr := fs.Path
-	if fs.Status == "R" && fs.OldPath != "" {
-		pathStr = fs.OldPath + " → " + fs.Path
-	}
-	maxPathLen := width - 4
-	pathStr = TruncateWithEllipsis(pathStr, maxPathLen)
-
-	pathStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
-
-	line := statusStr + " " + pathStyle.Render(pathStr)
-
-	if fs.Additions > 0 || fs.Deletions > 0 {
-		statsWidth := width - lipgloss.Width(line) - 2
-		if statsWidth > 0 {
-			statsStr := m.renderDiffStats(fs.Additions, fs.Deletions, statsWidth)
-			line += " " + statsStr
-		}
-	}
-
-	return lipgloss.NewStyle().Padding(0, 1).Render(line)
-}
-
-func (m *SidebarModel) renderDiffStats(add, del int, maxWidth int) string {
-	parts := []string{}
-	if add > 0 {
-		parts = append(parts, fmt.Sprintf("+%d", add))
-	}
-	if del > 0 {
-		parts = append(parts, fmt.Sprintf("-%d", del))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	result := strings.Join(parts, " ")
-	if len(result) > maxWidth {
-		return ""
-	}
-
-	addStyle := lipgloss.NewStyle().Foreground(m.theme.Success)
-	delStyle := lipgloss.NewStyle().Foreground(m.theme.Error)
-
-	var out []string
-	if add > 0 {
-		out = append(out, addStyle.Render(fmt.Sprintf("+%d", add)))
-	}
-	if del > 0 {
-		out = append(out, delStyle.Render(fmt.Sprintf("-%d", del)))
-	}
-	return strings.Join(out, " ")
 }
