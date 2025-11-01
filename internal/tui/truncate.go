@@ -1,54 +1,31 @@
 package tui
 
-import (
-	"strings"
+import "github.com/charmbracelet/lipgloss"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-)
-
-// TruncateWithEllipsis truncates a string containing ANSI escape codes to a
-// given display width, appending "...". It preserves ANSI codes up to the
-// truncation point and closes any open SGR sequences.
+// TruncateWithEllipsis truncates a string to maxWidth visible columns,
+// appending "..." if truncation occurred. Respects ANSI escape sequences
+// via lipgloss.Width so styled strings are measured correctly.
 func TruncateWithEllipsis(s string, maxWidth int) string {
-	if lipgloss.Width(s) <= maxWidth {
+	if maxWidth <= 0 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= maxWidth {
 		return s
 	}
-
-	ellips := "..."
-	ellipsWidth := runewidth.StringWidth(ellips)
-	maxVisible := maxWidth - ellipsWidth
-	if maxVisible < 0 {
-		maxVisible = 0
+	// Binary search for the cut point
+	runes := []rune(s)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if lipgloss.Width(string(runes[:mid])) <= maxWidth-3 {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
 	}
-
-	var result strings.Builder
-	visible := 0
-	inEscape := false
-
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b == '\x1b' {
-			inEscape = true
-			result.WriteByte(b)
-			continue
-		}
-		if inEscape {
-			result.WriteByte(b)
-			if b == 'm' {
-				inEscape = false
-			}
-			continue
-		}
-		charWidth := runewidth.RuneWidth(rune(b))
-		if visible+charWidth > maxVisible {
-			break
-		}
-		visible += charWidth
-		result.WriteByte(b)
+	if lo == 0 {
+		return "..."
 	}
-
-	result.WriteString("\x1b[0m")
-	result.WriteString(ellips)
-	return result.String()
+	return string(runes[:lo]) + "..."
 }
