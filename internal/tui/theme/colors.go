@@ -37,6 +37,13 @@ func Dark() Theme {
 		BadgeForeground:   lipgloss.Color("#000000"),  // keep
 		BadgeTextLight:    lipgloss.Color("#FFFFFF"),  // keep
 		BadgeTextDark:     lipgloss.Color("#000000"),  // keep
+
+		DividerChar:  "─",
+		HeaderHeight: 1,
+		ShadowColor:  lipgloss.Color("#00000040"),
+		CompactMode:  false,
+		SelectionBg:  lipgloss.Color("#3C4043"),
+		CardPadding:  1,
 	}
 	applyThemeStyles(&t)
 
@@ -78,6 +85,13 @@ func Light() Theme {
 		BadgeForeground:   lipgloss.Color("#000000"),  // keep
 		BadgeTextLight:    lipgloss.Color("#FFFFFF"),  // keep
 		BadgeTextDark:     lipgloss.Color("#000000"),  // keep
+
+		DividerChar:  "─",
+		HeaderHeight: 1,
+		ShadowColor:  lipgloss.Color("#00000040"),
+		CompactMode:  false,
+		SelectionBg:  lipgloss.Color("#DADCE0"),
+		CardPadding:  1,
 	}
 	applyThemeStyles(&t)
 

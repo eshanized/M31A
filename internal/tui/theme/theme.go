@@ -74,6 +74,24 @@ type Theme struct {
 	BadgeTextLight    lipgloss.Color // white text for dark-themed badges
 	BadgeTextDark     lipgloss.Color // black text for light-themed badges
 
+	// DividerChar is the unicode character used for horizontal dividers
+	DividerChar string
+
+	// HeaderHeight is the number of rows the header occupies
+	HeaderHeight int
+
+	// ShadowColor is used for modal drop shadows
+	ShadowColor lipgloss.Color
+
+	// CompactMode enables reduced spacing for dense terminals
+	CompactMode bool
+
+	// SelectionBg is the background color for selected/highlighted items
+	SelectionBg lipgloss.Color
+
+	// CardPadding is the default padding for all card-style components
+	CardPadding int
+
 	// Card border styles for panel/card rendering
 	CardBorder       lipgloss.Style // rounded card border, default brand color
 	CardBorderActive lipgloss.Style // focused card border, brand + bold
