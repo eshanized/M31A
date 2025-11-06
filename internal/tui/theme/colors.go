@@ -113,7 +113,7 @@ func buildBadgeStyles(t *Theme) {
 
 // applyThemeStyles sets all computed styles that depend on base colors.
 func applyThemeStyles(t *Theme) {
-	t.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 2).Bold(true)
+	t.Header = lipgloss.NewStyle().Bold(true)
 	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 1).Bold(true)
 	t.ContextBar = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextSecondary)).Padding(0, 1)
 	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
