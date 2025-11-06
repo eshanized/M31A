@@ -10,6 +10,26 @@ const (
 	ModeAuto
 )
 
+// Standard borders used across the TUI
+var (
+	NormalBorder = lipgloss.RoundedBorder() // ╭─╮ for cards, modals
+
+	// ThinBorder is a lighter border for compact cards and tool cards
+	ThinBorder = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "┌",
+		TopRight:    "┐",
+		BottomLeft:  "└",
+		BottomRight: "┘",
+	}
+
+	// DoubleBorder is reserved for important modals only
+	DoubleBorder = lipgloss.DoubleBorder()
+)
+
 var SplitBorder = lipgloss.Border{
 	Top:         "",
 	Bottom:      "",

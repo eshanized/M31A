@@ -169,5 +169,3 @@ func Auto() Theme {
 	return Light()
 }
 
-// DoubleBorder is a reusable double-line border style for modals and panels.
-var DoubleBorder = lipgloss.DoubleBorder()
