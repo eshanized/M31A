@@ -113,7 +113,7 @@ func buildBadgeStyles(t *Theme) {
 
 // applyThemeStyles sets all computed styles that depend on base colors.
 func applyThemeStyles(t *Theme) {
-	t.Header = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 2).Bold(true)
+	t.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 2).Bold(true)
 	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 1).Bold(true)
 	t.ContextBar = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextSecondary)).Padding(0, 1)
 	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
@@ -121,13 +121,13 @@ func applyThemeStyles(t *Theme) {
 	t.StatusOffline = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Bold(true)
 	t.UserBubble = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
 	t.AssistantBubble = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
-	t.InputArea = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color(t.Border))
+	t.InputArea = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1)
 	t.Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Thinking))
 	t.ThinkingBlock = lipgloss.NewStyle().Background(lipgloss.Color(t.CodeBG)).Foreground(lipgloss.Color(t.Thinking)).Padding(0, 1).Italic(true)
-	t.ToolCard = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
+	t.ToolCard = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(ThinBorder).BorderForeground(lipgloss.Color(t.Border))
 	buildBadgeStyles(t)
 	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
-	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(DoubleBorder).BorderForeground(lipgloss.Color(t.Brand))
+	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(NormalBorder).BorderForeground(lipgloss.Color(t.Brand))
 	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 
 	// New card border styles
