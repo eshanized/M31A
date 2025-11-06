@@ -10,6 +10,7 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+
 // ─── AppState view rendering ──────────────────────────────────────────────────
 
 // View implements tea.Model. It renders the full terminal frame.
@@ -218,17 +219,21 @@ func (m *AppState) renderDiffScreen() string {
 
 // renderPermissionModal renders the permission or question overlay.
 func (m *AppState) renderPermissionModal() string {
-	t := m.themeManager.Current()
-
 	if m.questionRequest != nil {
-		return m.renderQuestionModal(t)
+		return m.renderQuestionModal()
 	}
 	if m.permRequest == nil {
 		m.screen = ScreenREPL
 		return m.renderREPLScreen()
 	}
 
-	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, t)
+	// Use the rich components.PermissionModal if initialized
+	if m.permModal != nil {
+		return m.permModal.Render(m.width, m.height)
+	}
+
+	// Fallback to legacy renderer if modal was not yet initialized
+	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, m.themeManager.Current())
 }
 
 // ─── REPL sync helpers ────────────────────────────────────────────────────────
@@ -276,8 +281,8 @@ func (m *AppState) syncReplProvider(sessionID string) tea.Cmd {
 
 // ─── Render helpers ───────────────────────────────────────────────────────────
 
-// renderQuestionModal renders the AskUserQuestion overlay.
-func (m *AppState) renderQuestionModal(t theme.Theme) string {
+// renderQuestionModal renders the AskUserQuestion overlay using components.QuestionModel.
+func (m *AppState) renderQuestionModal() string {
 	q := m.questionRequest
 	if q == nil {
 		return ""
@@ -287,19 +292,29 @@ func (m *AppState) renderQuestionModal(t theme.Theme) string {
 		width = 60
 	}
 
-	title := q.Header
-	if title == "" {
-		title = "Question"
+	// Use rich QuestionModel if initialized
+	if m.questionModel != nil {
+		m.questionModel.SetWidth(width)
+		content := m.questionModel.View()
+		modal := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(m.themeManager.Current().Brand).
+			Background(m.themeManager.Current().SurfaceElevated).
+			Padding(1, 2).
+			Width(width).
+			Render(content)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	}
 
+	// Fallback: simple inline rendering
+	t := m.themeManager.Current()
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(title),
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(q.Header),
 		"",
 		lipgloss.NewStyle().Foreground(t.Text).Render(q.Question),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type your answer and press ↵"),
 	)
-
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 		lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -321,20 +336,23 @@ func (m *AppState) renderHeader(title string) string {
 		modelID = m.activeModel.ID
 		modelName = m.activeModel.Name
 	}
-	showCost := false
-	if m.config != nil {
-		showCost = m.config.UI.ShowCostEstimate
+
+	// Get git branch (non-fatal if not a git repo)
+	gitBranch := ""
+	if m.git != nil {
+		if b, err := m.git.CurrentBranch(); err == nil {
+			gitBranch = b
+		}
 	}
+
 	return RenderHeader(
 		t,
-		m.version,
 		m.activeProvider,
 		modelID,
 		modelName,
 		m.workflowPhase,
+		gitBranch,
 		0, 0,
-		m.healthStatus.Status,
-		showCost,
 		m.width,
 	)
 }
