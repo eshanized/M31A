@@ -146,7 +146,7 @@ func (c *ToolCard) Render(width int) string {
 		return c.renderInline(cardWidth)
 	}
 
-	// Expanded with output: render as double-border block
+	// Expanded with output: render as thin-border block
 	return c.renderBlock(cardWidth)
 }
 
@@ -168,7 +168,7 @@ func (c *ToolCard) renderInline(width int) string {
 			desc = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("completed (truncated)")
 		} else if c.collapsed && c.output != "" {
 			lineCount := strings.Count(c.output, "\n") + 1
-			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("completed [+%d lines — Space to expand]", lineCount))
+			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("[+%d lines]", lineCount))
 		} else {
 			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("completed")
 		}
@@ -199,54 +199,47 @@ func (c *ToolCard) renderInline(width int) string {
 		Render(line)
 }
 
-// renderBlock renders a tool as a double-border block with status and timing.
-// Uses ╔═╗ double-border to distinguish from panel borders (╭─╮).
+// renderBlock renders a tool as a thin-border block with status and timing.
+// Uses ThinBorder (┌─┐) — opencode-style compact tool cards.
 func (c *ToolCard) renderBlock(width int) string {
-	// Build header with status icon, tool label, elapsed time, and line count
-	header := c.renderDoubleBorderHeader(width)
+	// Build single-line header: status icon + tool badge + truncated input + timing
+	header := c.renderThinBorderHeader(width)
 
-	var contentParts []string
-	contentParts = append(contentParts, header)
+	// Content body: 2-char left padding, no inner border
+	var bodyLines []string
 
 	if c.input != "" {
-		inputStyle := lipgloss.NewStyle().
-			Foreground(c.theme.Text).
-			Width(width).
-			PaddingLeft(2)
-		contentParts = append(contentParts, inputStyle.Render(c.input))
+		inputStr := lipgloss.NewStyle().
+			Foreground(c.theme.TextMuted).
+			Render(c.input)
+		bodyLines = append(bodyLines, inputStr)
 	}
 
-	var result *types.ToolResult
-	if c.output != "" || c.state != ToolRunning {
-		result = &types.ToolResult{
+	if c.output != "" {
+		result := &types.ToolResult{
 			Output:     c.output,
 			DurationMs: c.durationMs,
+			Truncated:  c.truncated,
+		}
+		outputStr := c.renderer.RenderOutput(result, c.state, c.durationMs, c.truncated, c.collapsed, width-4)
+		if outputStr != "" {
+			bodyLines = append(bodyLines, outputStr)
 		}
 	}
 
-	outputBlock := c.renderer.RenderOutput(result, c.state, c.durationMs, c.truncated, c.collapsed, width)
-	if outputBlock != "" {
-		contentParts = append(contentParts, outputBlock)
+	var body string
+	if len(bodyLines) > 0 {
+		body = lipgloss.JoinVertical(lipgloss.Top, bodyLines...)
+		// Indent body with 2-char padding
+		body = lipgloss.NewStyle().PaddingLeft(2).Render(body)
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
+	content := lipgloss.JoinVertical(lipgloss.Top, header, body)
 
-	// Double-border style: ╔═╗ for tool cards (distinct from panel borders)
-	doubleBorder := lipgloss.Border{
-		Top:         "═",
-		Bottom:      "═",
-		Left:        "║",
-		Right:       "║",
-		TopLeft:     "╔",
-		TopRight:    "╗",
-		BottomLeft:  "╚",
-		BottomRight: "╝",
-	}
-
+	// ThinBorder: ┌─┐ for clean, compact appearance
 	blockStyle := lipgloss.NewStyle().
-		Border(doubleBorder).
+		Border(theme.ThinBorder).
 		BorderForeground(c.getBorderColor()).
-		Background(c.theme.BackgroundPanel).
 		Padding(0, 1).
 		MarginTop(1).
 		Width(width + 4)
@@ -254,24 +247,12 @@ func (c *ToolCard) renderBlock(width int) string {
 	return blockStyle.Render(content)
 }
 
-// renderDoubleBorderHeader renders the tool card header with status icon,
-// tool label, elapsed time, and line count.
-func (c *ToolCard) renderDoubleBorderHeader(width int) string {
-	statusIcon := ToolStatusIcons[c.state]
-	statusColor := c.theme.TextMuted
-	switch c.state {
-	case ToolSuccess:
-		statusColor = c.theme.Success
-	case ToolError:
-		statusColor = c.theme.Error
-	case ToolRunning:
-		statusColor = c.theme.Warning
-	}
-
-	// Status icon
-	statusStr := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-
-	// Tool label badge
+// renderThinBorderHeader renders a single-line tool card header:
+//
+//	┌─ Bash ── input ... ──────────────── ✓ 120ms ─┐
+//	(tool badge + truncated input on left, status icon + timing on right)
+func (c *ToolCard) renderThinBorderHeader(width int) string {
+	// Tool label badge (use the pre-existing per-tool label colors)
 	labelStyle, ok := c.theme.ToolLabel[c.toolName]
 	if !ok {
 		labelStyle = lipgloss.NewStyle().
@@ -282,39 +263,68 @@ func (c *ToolCard) renderDoubleBorderHeader(width int) string {
 	}
 	label := labelStyle.Render(fmt.Sprintf(" %s ", c.toolName))
 
-	// Right-aligned info: elapsed time + line count
+	// Input snippet (truncated for inline display)
+	inputSnippet := ""
+	if c.input != "" {
+		short := c.input
+		short = strings.ReplaceAll(short, "\n", " ")
+		if len(short) > 50 {
+			short = short[:47] + "..."
+		}
+		inputSnippet = " " + lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
+	}
+
+	// Status icon (right side)
+	statusIcon := ToolStatusIcons[c.state]
+	statusColor := c.theme.TextMuted
+	switch c.state {
+	case ToolSuccess:
+		statusColor = c.theme.Success
+	case ToolError:
+		statusColor = c.theme.Error
+	case ToolRunning:
+		statusColor = c.theme.Warning
+	}
+	statusStr := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
+
+	// Right-side info: timing + line count
 	var infoParts []string
 	if c.durationMs > 0 {
 		dur := fmt.Sprintf("%.0fms", float64(c.durationMs))
 		infoParts = append(infoParts, dur)
 	}
-	if c.lineCount > 0 {
+	if c.lineCount > 0 && !c.collapsed {
 		infoParts = append(infoParts, fmt.Sprintf("%d lines", c.lineCount))
 	}
 	if c.truncated {
 		infoParts = append(infoParts, "truncated")
 	}
-
 	infoStr := ""
 	if len(infoParts) > 0 {
-		infoStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(strings.Join(infoParts, "  "))
+		infoStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(strings.Join(infoParts, " · "))
 	}
 
-	// Join: status icon + label ... info
-	left := lipgloss.JoinHorizontal(lipgloss.Top, statusStr, " ", label)
-	right := infoStr
+	// Assemble left side: tool badge + input
+	left := lipgloss.JoinHorizontal(lipgloss.Top, label, inputSnippet)
+	// Assemble right side: status + timing
+	var rightParts []string
+	if infoStr != "" {
+		rightParts = append(rightParts, infoStr)
+	}
+	rightParts = append(rightParts, statusStr)
+	right := strings.Join(rightParts, " ")
 
-	// Calculate available width for spacing
+	// Calculate filler to push right side to the edge
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
-	spacing := width - leftWidth - rightWidth
-	if spacing < 2 {
-		spacing = 2
+	filler := width - leftWidth - rightWidth - 4 // -4 for border chars + padding
+	if filler < 0 {
+		filler = 0
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		left,
-		strings.Repeat(" ", spacing),
+		strings.Repeat(" ", filler),
 		right,
 	)
 }
