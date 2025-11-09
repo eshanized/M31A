@@ -26,13 +26,13 @@ func (m *ReplModel) renderWelcome() string {
 	availWidth := m.replWidth()
 	vpHeight := viewportHeight(m.height) // FIXED: use viewport height, not terminal height
 
-	// 1. Logo
+	// 1. Logo (no starfield row — compact welcome)
 	logo := m.renderLogo()
 
 	// 2. Provider status card
 	providerCard := m.renderProviderCard()
 
-	// 3. Keyboard hints
+	// 3. Keyboard hints as muted single-line list
 	hints := renderKeyboardHints(m.theme)
 
 	// Stack vertically, centered horizontally
@@ -54,7 +54,7 @@ func (m *ReplModel) renderProviderCard() string {
 
 	if m.activeModel == nil || m.activeProvider == "" {
 		style := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(theme.ThinBorder).
 			BorderForeground(t.Warning).
 			Padding(0, 2).
 			Width(42)
@@ -71,7 +71,7 @@ func (m *ReplModel) renderProviderCard() string {
 	}
 
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(theme.ThinBorder).
 		BorderForeground(t.Success).
 		Padding(0, 2).
 		Width(42)
@@ -117,28 +117,14 @@ func (m *ReplModel) renderLogo() string {
 	return components.RenderLogo(version, false, m.theme.Brand)
 }
 
-// renderKeyboardHints renders keyboard shortcut hints.
+// renderKeyboardHints renders keyboard shortcut hints as a muted single-line list.
 func renderKeyboardHints(t theme.Theme) string {
-	hints := []struct {
-		key   string
-		label string
-	}{
-		{"ctrl+p", "commands"},
-		{"ctrl+b", "sidebar"},
-		{"ctrl+x", "leader"},
-		{"/help", "help"},
-	}
-
-	var parts []string
+	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader", "/help"}
+	parts := make([]string, len(hints))
 	for i, h := range hints {
-		keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-		labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
-		parts = append(parts, keyStyle.Render(h.key)+" "+labelStyle.Render(h.label))
-		if i < len(hints)-1 {
-			parts = append(parts, "  ")
-		}
+		parts[i] = lipgloss.NewStyle().Foreground(t.TextMuted).Render(h)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Center, parts...)
+	return strings.Join(parts, "  ·  ")
 }
 
 // renderBottomBar renders a bottom bar with cwd and version.
