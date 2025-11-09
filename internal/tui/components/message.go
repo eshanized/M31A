@@ -11,9 +11,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// GutterWidth is the fixed width for the role gutter (│ + label + space).
-// "│ M31A" = 7 chars + 1 space = 8 chars total.
-const GutterWidth = 8
+// GutterWidth is the fixed width for the role gutter.
+// "┃  M31A  " ≈ 9 chars — enough for the brand label + split border.
+const GutterWidth = 9
 
 // calcContentWidth returns the available content width, clamped to a minimum of 20 columns.
 func calcContentWidth(width int) int {
@@ -93,55 +93,63 @@ func RenderTimestampBar(t theme.Theme, ts time.Time, width int) string {
 	}
 	dashes := strings.Repeat("─", dashCount)
 
-	barStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	barStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
 	return barStyle.Render(prefix + dashes)
 }
 
-// renderUserMessage renders a user message with a role gutter.
-// Format:
-// │ USER
-//   <content>
+// renderUserMessage renders a user message with an opencode-style right-leaning bubble.
+//
+// Layout:
+//
+//	┃ USER
+//	┃   <content in muted right-aligned style>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
-	gutterStyle := lipgloss.NewStyle().Foreground(r.theme.TextSecondary)
+	t := r.theme
 	contentWidth := calcContentWidth(width)
 
-	// Gutter line
-	gutter := gutterStyle.Render("│ USER")
+	// Gutter: thick split border + "user" role label (lowercase, muted, no bold)
+	gutterStyle := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Bold(false)
+	borderChar := lipgloss.NewStyle().
+		Foreground(t.TextSecondary).
+		Render("┃")
+	roleLabel := gutterStyle.Render(" user")
+	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
 
-	// Content with left padding
-	content := r.renderUserContent(msg.Content, contentWidth)
-
-	return lipgloss.JoinVertical(lipgloss.Top, gutter, content)
-}
-
-// renderUserContent renders user message content with a split-border left edge.
-func (r *MessageRenderer) renderUserContent(content string, width int) string {
-	if content == "" {
-		return ""
+	// Content: user input in a subtly styled block
+	if msg.Content == "" {
+		return lipgloss.JoinVertical(lipgloss.Top, gutter, "")
 	}
 
-	// Left gutter marker (│)
-	gutterChar := lipgloss.NewStyle().Foreground(r.theme.TextSecondary).Render("│")
-
-	// Content styled with padding
 	contentStyle := lipgloss.NewStyle().
-		Foreground(r.theme.Text).
+		Foreground(t.TextPrimary).
 		PaddingLeft(2).
-		Width(width - 4).
-		MaxWidth(width - 4)
+		Width(contentWidth - 2).
+		MaxWidth(contentWidth - 2)
 
-	renderedContent := contentStyle.Render(content)
+	contentLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Foreground(t.TextSecondary).Render("┃"),
+		contentStyle.Render(msg.Content),
+	)
 
-	// Join gutter + content
-	return lipgloss.JoinHorizontal(lipgloss.Top, gutterChar, renderedContent)
+	return lipgloss.JoinVertical(lipgloss.Top, gutter, contentLine, "")
 }
 
-// renderAssistantMessage renders assistant content with a role gutter.
-// Format:
-// │ M31A
-//   <content>
+// renderAssistantMessage renders assistant content with an opencode-style thick left border.
+//
+// Layout:
+//
+//	┃ M31A
+//	┃   <segments...>
 func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) string {
+	t := r.theme
 	contentWidth := calcContentWidth(width)
+
+	// Gutter header: thick brand-colored border + "M31A" label
+	borderChar := lipgloss.NewStyle().Foreground(t.Brand).Render("┃")
+	roleLabel := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(" M31A")
+	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
 
 	// Render segments
 	var rendered []string
@@ -153,12 +161,12 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 			case "content":
 				rendered = append(rendered, r.renderContentSegment(seg.Content, contentWidth))
 			case "thinking":
-				tb := NewThinkingBlock(seg, r.theme, false, 0)
+				tb := NewThinkingBlock(seg, t, false, 0)
 				rendered = append(rendered, tb.Render(contentWidth))
 			case "tool_use":
 				var tc types.ToolCall
 				if err := json.Unmarshal([]byte(seg.Content), &tc); err == nil {
-					card := NewToolCard(tc, nil, ToolRunning, r.theme)
+					card := NewToolCard(tc, nil, ToolRunning, t)
 					rendered = append(rendered, card.Render(contentWidth))
 				}
 			}
@@ -167,7 +175,7 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 
 	if len(msg.ToolCalls) > 0 {
 		for _, tc := range msg.ToolCalls {
-			card := NewToolCard(tc, nil, ToolRunning, r.theme)
+			card := NewToolCard(tc, nil, ToolRunning, t)
 			rendered = append(rendered, card.Render(contentWidth))
 		}
 	}
@@ -176,14 +184,18 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		rendered = append(rendered, "")
 	}
 
-	// Join gutter with content
+	// Join content lines with thick left border on each
 	content := lipgloss.JoinVertical(lipgloss.Top, rendered...)
-	gutterChar := lipgloss.NewStyle().Foreground(r.theme.Brand).Render("│")
+	contentLines := strings.Split(content, "\n")
+	borderedLines := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		borderedLines[i] = lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Foreground(t.Brand).Render("┃"),
+			lipgloss.NewStyle().PaddingLeft(2).Width(contentWidth-2).Render(line),
+		)
+	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		gutterChar,
-		lipgloss.NewStyle().PaddingLeft(2).Width(contentWidth-4).Render(content),
-	)
+	return lipgloss.JoinVertical(lipgloss.Top, gutter, strings.Join(borderedLines, "\n"), "")
 }
 
 func (r *MessageRenderer) renderContentSegment(content string, width int) string {
@@ -221,7 +233,7 @@ func WrapWithGutter(content string, gutterChar lipgloss.Style, width int) string
 	contentWidth := calcContentWidth(width)
 	for i, line := range lines {
 		result[i] = lipgloss.JoinHorizontal(lipgloss.Top,
-			gutterChar.Render("│"),
+			gutterChar.Render("┃"),
 			lipgloss.NewStyle().PaddingLeft(2).Width(contentWidth-4).Render(line),
 		)
 	}

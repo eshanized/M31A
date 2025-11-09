@@ -266,6 +266,12 @@ func (m *ReplModel) renderMessages() {
 			sb.WriteString("\n")
 			sb.WriteString(components.RenderTimestampBar(m.theme, msg.CreatedAt, rw))
 			sb.WriteString("\n")
+
+			// Add extra blank line between conversation turns (role switches)
+			prevRole := m.messages[i-1].Role
+			if prevRole != msg.Role {
+				sb.WriteString("\n")
+			}
 		}
 		sb.WriteString(m.msgRenderer.RenderMessage(msg, rw))
 		sb.WriteString("\n")
