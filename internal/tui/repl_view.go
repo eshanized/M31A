@@ -34,11 +34,11 @@ func viewportHeight(termHeight int) int {
 //
 // Layout (from top to bottom):
 //  1. [optional sidebar] | [viewport: messages OR welcome content]
-//  2. ─── input border ───────────────────────────────────────────
-//  3. M31A · model · provider  (metadata row)
+//  2. ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  (bottom half-block input separator — opencode style)
+//  3. M31A · model [provider]  (metadata row with badge)
 //  4. [textarea: user input]
-//  5. ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  (bottom border)
-//  6. status bar
+//  5. ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  (bottom border)
+//  6. status bar (cwd ⎇ branch  hints  cost)
 //  7. [slash suggestion dropdown overlay]
 //
 // IMPORTANT: The welcome screen (logo + provider card + hints) is set as
@@ -48,21 +48,22 @@ func (m *ReplModel) View() string {
 	t := m.theme
 	rw := m.replWidth()
 
-	// ── Welcome mode: set viewport content to welcome screen ─────────────────
+	// ── Welcome mode: set viewport content to welcome screen ─────────────────────
 	if len(m.messages) == 0 && !m.streaming {
 		welcomeContent := m.renderWelcome()
 		m.viewport.SetContent(welcomeContent)
 	}
 
-	// ── Viewport ──────────────────────────────────────────────────────────────
+	// ── Viewport ──────────────────────────────────────────────────────────────────
 	viewportContent := m.viewport.View()
 
-	// ── Input border (top) ────────────────────────────────────────────────────
-	inputBorder := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Render(strings.Repeat("─", rw))
+	// ── Input separator (opencode half-block style) ──────────────────────────────
+	// Top half-block row gives a visual "shelf" effect above the input area
+	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
+	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", rw-1))
+	inputBorder := shelfLeft + shelfFill
 
-	// ── Metadata row: M31A · model · [provider] ───────────────────────────────
+	// ── Metadata row: M31A · model [provider] ───────────────────────────────────
 	agentName := "M31A"
 	modelName := ""
 	providerName := ""
@@ -74,17 +75,24 @@ func (m *ReplModel) View() string {
 	}
 	metaRow := RenderPromptMetadata(agentName, modelName, providerName, t, rw)
 
-	// ── Textarea ──────────────────────────────────────────────────────────────
+	// ── Textarea ─────────────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
 
-	// ── Bottom border ─────────────────────────────────────────────────────────
+	// ── Bottom border ───────────────────────────────────────────────────────────
 	bottomBorder := RenderPromptBottomBorder(t.Brand, rw)
 
-	// ── Status bar ────────────────────────────────────────────────────────────
+	// ── Status bar ──────────────────────────────────────────────────────────────
 	info := &StatusBarInfo{
-		IsStreaming:  m.streaming,
+		IsStreaming:   m.streaming,
 		IsThinking:   m.thinking,
 		KeyboardHints: []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader"},
+	}
+	// Add cwd and git branch if available
+	if m.cwd != "" {
+		info.CwdName = pathBase(m.cwd)
+	}
+	if m.sidebarBranch != "" {
+		info.GitBranch = m.sidebarBranch
 	}
 	if m.lastUsage != nil && m.cfg != nil && m.cfg.UI.ShowCostEstimate {
 		info.TotalTokens = m.lastUsage.TotalTokens
@@ -94,7 +102,7 @@ func (m *ReplModel) View() string {
 	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
 		info.LeaderActive = true
 	}
-	statusBar := RenderStatusBar(t, m.GetStatusText(), m.lastActivity, rw, info)
+	statusBar := RenderStatusBar(t, rw, info)
 
 	// ── Slash suggestions overlay (above input) ───────────────────────────────
 	slashOverlay := ""
@@ -159,4 +167,21 @@ func (m *ReplModel) renderSlashSuggestions(width int) string {
 		Render(strings.Join(lines, "\n"))
 
 	return box
+}
+
+// pathBase returns the last path component of a file path.
+func pathBase(p string) string {
+	if p == "" {
+		return ""
+	}
+	// Trim trailing slashes
+	for len(p) > 0 && (p[len(p)-1] == '/' || p[len(p)-1] == '\\') {
+		p = p[:len(p)-1]
+	}
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '/' || p[i] == '\\' {
+			return p[i+1:]
+		}
+	}
+	return p
 }
