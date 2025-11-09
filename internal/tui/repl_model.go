@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -94,6 +95,9 @@ type ReplModel struct {
 	// Working directory for @filepath resolution
 	cwd string
 
+	// Git branch (from sidebar, displayed in status bar)
+	sidebarBranch string
+
 	// Shell command mode (starts with !)
 	shellMode bool
 }
@@ -106,6 +110,10 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.CharLimit = 0
 	ta.SetHeight(inputHeight)
 	ta.Focus()
+
+	// Remove textarea border — inherits terminal background (opencode style)
+	ta.FocusedStyle.Base = lipgloss.NewStyle()
+	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot

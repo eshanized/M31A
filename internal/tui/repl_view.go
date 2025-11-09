@@ -13,9 +13,10 @@ import (
 const viewportTopChrome = 2
 
 // viewportBottomChrome is the height of everything below the viewport.
-// This is: top-border (1) + metadata (1) + textarea (inputHeight) + bottom-border (1) + status (1) = inputHeight + 4.
+// This is: top-border (1) + metadata (1) + textarea (inputHeight) + status (1) = inputHeight + 3.
+// Bottom border was removed — status bar sits flush below textarea (opencode style).
 func viewportBottomChrome() int {
-	return inputHeight + 4
+	return inputHeight + 3
 }
 
 // viewportHeight computes the viewport height given terminal height.
@@ -37,9 +38,9 @@ func viewportHeight(termHeight int) int {
 //  2. ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  (bottom half-block input separator — opencode style)
 //  3. M31A · model [provider]  (metadata row with badge)
 //  4. [textarea: user input]
-//  5. ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  (bottom border)
-//  6. status bar (cwd ⎇ branch  hints  cost)
-//  7. [slash suggestion dropdown overlay]
+//  5. status bar (cwd ⎇ branch  hints  cost)
+//  6. [slash suggestion dropdown overlay]
+// NOTE: Bottom border (╹▀▀▀) was removed — status bar sits flush below textarea.
 //
 // IMPORTANT: The welcome screen (logo + provider card + hints) is set as
 // the viewport's content, NOT rendered outside the viewport. This prevents
@@ -78,9 +79,6 @@ func (m *ReplModel) View() string {
 	// ── Textarea ─────────────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
 
-	// ── Bottom border ───────────────────────────────────────────────────────────
-	bottomBorder := RenderPromptBottomBorder(t.Brand, rw)
-
 	// ── Status bar ──────────────────────────────────────────────────────────────
 	info := &StatusBarInfo{
 		IsStreaming:   m.streaming,
@@ -116,7 +114,6 @@ func (m *ReplModel) View() string {
 		inputBorder,
 		metaRow,
 		textareaView,
-		bottomBorder,
 		statusBar,
 	}
 	if slashOverlay != "" {
@@ -127,7 +124,6 @@ func (m *ReplModel) View() string {
 			inputBorder,
 			metaRow,
 			textareaView,
-			bottomBorder,
 			statusBar,
 		}
 	}
