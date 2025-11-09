@@ -101,7 +101,7 @@ func RenderTimestampBar(t theme.Theme, ts time.Time, width int) string {
 //
 // Layout:
 //
-//	┃ USER
+//	┃ user
 //	┃   <content in muted right-aligned style>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
 	t := r.theme
