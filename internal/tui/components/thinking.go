@@ -38,29 +38,44 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 	}
 }
 
+// Render renders the thinking block as a panel-style component:
+//
+//	┌─ ▾ Thinking 1.2s ──────────────────────────────────┐  (collapsed/expanded toggle)
+//	│ thinking content in italic blue                     │
+//	│ more thinking content...                             │
+//	└─ 1.2s ───────────────────────────────────────────────┘
 func (b *ThinkingBlock) Render(width int) string {
-	contentWidth := width - 4 // account for paddingLeft=2 paddingRight=2
-
-	header := b.Header(contentWidth)
+	contentWidth := width - 4 // account for padding
 
 	if !b.expanded {
-		// Collapsed: single-line with left border, muted text
-		style := lipgloss.NewStyle().
-			Border(theme.SplitBorder, true, false, false, false).
-			BorderForeground(b.theme.BorderSubtle).
-			Background(b.theme.BackgroundPanel).
-			Padding(0, 2).
-			Foreground(b.theme.TextMuted).
-			Width(width)
-		return style.Render(header)
+		// Collapsed: single-line panel-style with header only
+		header := b.Header(contentWidth)
+		panel := lipgloss.NewStyle().
+			Border(theme.ThinBorder).
+			BorderForeground(b.theme.Thinking).
+			Padding(0, 1).
+			Width(contentWidth + 2).
+			Render(header)
+		return panel
 	}
 
-	// Expanded: left-bordered block with content
-	maxContentLines := 20 // cap at ~50% of typical 40-line terminal
+	// Expanded: panel with header, body content, and footer
+
+	// Header line: toggle + "Thinking" + duration
+	headerText := b.Header(contentWidth)
+	header := lipgloss.NewStyle().
+		Border(theme.ThinBorder).
+		BorderForeground(b.theme.Thinking).
+		BorderTop(true).BorderBottom(false).BorderLeft(true).BorderRight(true).
+		Padding(0, 1).
+		Width(contentWidth + 2).
+		Render(headerText)
+
+	// Body: italic thinking content with scroll support
+	maxContentLines := 20
 	lines := strings.Split(b.segment.Content, "\n")
 	totalLines := len(lines)
 
-	// Apply scroll offset
 	startLine := b.scrollOffset
 	if startLine > totalLines-maxContentLines {
 		startLine = totalLines - maxContentLines
@@ -75,53 +90,53 @@ func (b *ThinkingBlock) Render(width int) string {
 
 	visibleContent := strings.Join(lines[startLine:endLine], "\n")
 
+	bodyContent := lipgloss.NewStyle().
+		Foreground(b.theme.Thinking).
+		Italic(true).
+		Padding(0, 2).
+		Width(contentWidth).
+		Render(visibleContent)
+
 	// Scroll indicators
-	scrollInfo := ""
 	if totalLines > maxContentLines {
-		scrollParts := []string{}
+		var scrollParts []string
 		if startLine > 0 {
 			scrollParts = append(scrollParts, fmt.Sprintf("↑ %d lines above", startLine))
 		}
 		if endLine < totalLines {
 			scrollParts = append(scrollParts, fmt.Sprintf("↓ %d lines below", totalLines-endLine))
 		}
-		scrollInfo = "  " + strings.Join(scrollParts, " · ")
+		if len(scrollParts) > 0 {
+			scrollInfo := lipgloss.NewStyle().
+				Foreground(b.theme.TextSecondary).
+				Padding(0, 2).
+				Render(strings.Join(scrollParts, " · "))
+			bodyContent += "\n" + scrollInfo
+		}
 	}
 
-	content := lipgloss.NewStyle().
-		Foreground(b.theme.TextMuted).
-		Italic(true).
-		Width(contentWidth).
-		Padding(0, 1).
-		Render(visibleContent)
-
-	if scrollInfo != "" {
-		content += "\n" + lipgloss.NewStyle().
-			Foreground(b.theme.TextSecondary).
+	// Body lines: each line padded
+	bodyLines := strings.Split(bodyContent, "\n")
+	bodyPadded := make([]string, len(bodyLines))
+	for i, line := range bodyLines {
+		bodyPadded[i] = lipgloss.NewStyle().
 			Padding(0, 1).
-			Render(scrollInfo)
+			Width(contentWidth + 2).
+			Render(line)
 	}
+	body := strings.Join(bodyPadded, "\n")
 
-	separator := lipgloss.NewStyle().
-		Foreground(b.theme.Border).
-		Render(strings.Repeat("─", contentWidth))
+	// Footer: duration
+	durStr := b.Duration()
+	footer := lipgloss.NewStyle().
+		Border(theme.ThinBorder).
+		BorderForeground(b.theme.Thinking).
+		BorderTop(false).BorderBottom(true).BorderLeft(true).BorderRight(true).
+		Padding(0, 1).
+		Width(contentWidth + 2).
+		Render(lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(durStr))
 
-	blockContent := lipgloss.JoinVertical(lipgloss.Top, header, separator, content)
-
-	borderColor := b.theme.BorderSubtle
-	if b.focused {
-		borderColor = b.theme.Thinking
-	}
-
-	style := lipgloss.NewStyle().
-		Border(theme.SplitBorder, true, false, false, false).
-		BorderForeground(borderColor).
-		Background(b.theme.BackgroundPanel).
-		Padding(0, 2).
-		MarginTop(1).
-		Width(width)
-
-	return style.Render(blockContent)
+	return header + "\n" + body + "\n" + footer
 }
 
 func (b *ThinkingBlock) Toggle() {
@@ -202,38 +217,33 @@ func (b *ThinkingBlock) Duration() string {
 	return result
 }
 
+// Header returns the toggle + label + duration text for the thinking block header.
 func (b *ThinkingBlock) Header(width int) string {
-	toggle := "+"
+	toggle := "▸"
+	hint := " [T] expand"
 	if b.expanded {
-		toggle = "−"
-	}
-
-	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Brand)
-	if b.focused {
-		toggleStyle = toggleStyle.Bold(true)
-	}
-
-	hint := " [T] to expand"
-	if b.expanded {
-		hint = " [T] to collapse"
-	}
-	label := fmt.Sprintf("[%s] Thinking (%s)%s", toggle, b.Duration(), hint)
-
-	if lipgloss.Width(label) > width-4 {
-		maxWidth := width - 7
-		if maxWidth < 10 {
-			maxWidth = 10
+		toggle = "▾"
+		hint = " [T] collapse"
+		if b.scrollOffset > 0 {
+			hint += " ↑↓ scroll"
 		}
-		label = label[:maxWidth] + "..."
 	}
 
-	beforeDur := fmt.Sprintf("[%s] Thinking (", toggle)
-	hintSuffix := fmt.Sprintf(")%s", hint)
 	durStr := b.Duration()
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		toggleStyle.Render(beforeDur),
-		lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(durStr),
-		toggleStyle.Render(hintSuffix),
-	)
+	label := fmt.Sprintf("%s Thinking · %s%s", toggle, durStr, hint)
+
+	if lipgloss.Width(label) > width-2 {
+		// Compact: just toggle + label + duration
+		label = fmt.Sprintf("%s Thinking · %s", toggle, durStr)
+	}
+
+	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+	if b.focused {
+		toggleStyle = toggleStyle.Foreground(b.theme.Brand).Bold(true)
+	}
+
+	return toggleStyle.Render(toggle) +
+		lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(fmt.Sprintf(" Thinking · %s", durStr)) +
+		lipgloss.NewStyle().Foreground(b.theme.BorderSubtle).Render(hint)
 }
