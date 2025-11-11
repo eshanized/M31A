@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -25,23 +26,28 @@ type ExecuteModel struct {
 	totalCost   float64
 	paused      bool
 	startedAt   time.Time
+
+	// Live output tracking for the currently running task
+	liveOutput  []string
+	currentTask int // index of the currently running task (-1 if none)
 }
 
 // NewExecuteModel creates an ExecuteModel.
 func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel {
 	em := &ExecuteModel{
-		tasks:     tasks,
-		theme:     t,
-		width:     w,
-		height:    h,
-		startedAt: time.Now(),
+		tasks:       tasks,
+		theme:       t,
+		width:       w,
+		height:      h,
+		startedAt:   time.Now(),
+		currentTask: -1,
 	}
 	em.initViewport()
 	return em
 }
 
 func (em *ExecuteModel) initViewport() {
-	h := em.height - 7
+	h := em.height - 6
 	if h < 5 {
 		h = 5
 	}
@@ -61,6 +67,23 @@ func (em *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
 			em.tasks[i].Status = status
 			break
 		}
+	}
+	em.refreshContent()
+}
+
+// SetCurrentTask marks which task is currently executing.
+func (em *ExecuteModel) SetCurrentTask(taskIdx int) {
+	em.currentTask = taskIdx
+	em.liveOutput = nil
+	em.refreshContent()
+}
+
+// AppendLiveOutput appends output lines for the currently running task.
+func (em *ExecuteModel) AppendLiveOutput(lines []string) {
+	em.liveOutput = append(em.liveOutput, lines...)
+	// Keep only last 50 lines
+	if len(em.liveOutput) > 50 {
+		em.liveOutput = em.liveOutput[len(em.liveOutput)-50:]
 	}
 	em.refreshContent()
 }
@@ -93,38 +116,48 @@ func (em *ExecuteModel) View() string {
 	t := em.theme
 	w := em.width
 
-	// Header
+	// Header with progress bar
 	elapsed := time.Since(em.startedAt)
 	elapsedStr := fmt.Sprintf("%ds", int(elapsed.Seconds()))
 	done, total, failed := em.countTasks()
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render(fmt.Sprintf("⚡ Execute — %d/%d tasks", done, total))
+		Render("⚡ Execute")
+
+	meta := lipgloss.NewStyle().Foreground(t.TextSecondary).
+		Render(fmt.Sprintf(" · %d/%d tasks", done, total))
 
 	if failed > 0 {
-		title += " " + lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf("(%d failed)", failed))
+		meta += " " + lipgloss.NewStyle().Foreground(t.Error).
+			Render(fmt.Sprintf("(%d failed)", failed))
 	}
 
-	meta := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf("  %s elapsed", elapsedStr))
-	if em.toolCalls > 0 {
-		meta += lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render(fmt.Sprintf("  %d tool calls", em.toolCalls))
+	// Progress bar
+	barWidth := 10
+	progressBar := renderProgressBar(t, done, total, barWidth)
+	pct := 0
+	if total > 0 {
+		pct = int(math.Round(float64(done) / float64(total) * 100))
 	}
+	progressInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(fmt.Sprintf(" · %s %d%%", progressBar, pct))
 
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
+	timeInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(fmt.Sprintf(" · %s elapsed", elapsedStr))
 
 	// Pause indicator
 	pauseHint := ""
 	if em.paused {
-		pauseHint = lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("  ⏸ PAUSED")
+		pauseHint = "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("⏸ PAUSED")
 	}
 
+	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
+
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("p pause/resume  j/k scroll  q back")
+		Render("p pause  j/k scroll  q back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title+meta+pauseHint,
+		"  "+title+meta+progressInfo+timeInfo+pauseHint,
 		divider,
 		em.viewport.View(),
 		divider,
@@ -137,10 +170,34 @@ func (em *ExecuteModel) renderTasks() string {
 	var lines []string
 	for i, task := range em.tasks {
 		icon, color := taskStatusIcon(task.Status, t)
-		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
-		statusIcon := lipgloss.NewStyle().Foreground(color).Render(icon)
-		action := lipgloss.NewStyle().Foreground(t.Text).Render(task.Action)
+
+		// Dim everything when paused
+		var lineStyle lipgloss.Style
+		if em.paused {
+			lineStyle = lipgloss.NewStyle().Faint(true)
+		} else {
+			lineStyle = lipgloss.NewStyle()
+		}
+
+		num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
+		statusIcon := lineStyle.Foreground(color).Render(icon)
+		action := lineStyle.Foreground(t.Text).Render(task.Action)
 		lines = append(lines, fmt.Sprintf("  %s %s %s", num, statusIcon, action))
+
+		// Show live output for the currently running task
+		if !em.paused && em.currentTask >= 0 && em.tasks[i].ID == em.tasks[em.currentTask].ID &&
+			task.Status == types.StatusRunning && len(em.liveOutput) > 0 {
+			showLines := em.liveOutput
+			if len(showLines) > 10 {
+				showLines = showLines[len(showLines)-10:]
+			}
+			for _, l := range showLines {
+				lines = append(lines, lipgloss.NewStyle().
+					Foreground(t.TextMuted).
+					PaddingLeft(6).
+					Render(l))
+			}
+		}
 	}
 	return strings.Join(lines, "\n")
 }
