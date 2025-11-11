@@ -1,4 +1,26 @@
 package tui
 
-// plan_view.go — view is already fully rendered in plan_model.go's View() method.
-// This file exists as a package anchor for plan-related view helpers.
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
+)
+
+// plan_view.go — view helpers for the Plan screen.
+// The main View() method is in plan_model.go.
+
+// renderPlanHeader builds the one-line plan header with task count,
+// cost estimate, and model/provider badge.
+func renderPlanHeader(t theme.Theme, taskCount int, cost float64, modelName, provider string) string {
+	header := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("📋 Plan") +
+		lipgloss.NewStyle().Foreground(t.TextSecondary).Render(fmt.Sprintf(" · %d tasks", taskCount))
+	if cost > 0 {
+		header += lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf(" · ~$%.4f", cost))
+	}
+	if modelName != "" {
+		prov := ProviderShortName(provider)
+		header += lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf(" · %s [%s]", modelName, prov))
+	}
+	return header
+}

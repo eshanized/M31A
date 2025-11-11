@@ -26,6 +26,8 @@ type PlanModel struct {
 	height       int
 	viewport     viewport.Model
 	selected     int
+	// Pre-computed wave groupings for visual display
+	waves [][]types.Task
 }
 
 // NewPlanModel creates a PlanModel.
@@ -48,22 +50,91 @@ func NewPlanModel(
 		width:        w,
 		height:       h,
 	}
+	pm.computeWaves()
 	pm.initViewport()
 	return pm
 }
 
-func (pm *PlanModel) initViewport() {
-	h := pm.height - 6 // leave room for header and footer
-	if h < 5 {
-		h = 5
+// computeWaves groups tasks into topological layers for visual display.
+// Tasks with no dependencies form wave 0, and each subsequent wave
+// contains tasks whose dependencies are all in earlier waves.
+func (pm *PlanModel) computeWaves() {
+	if len(pm.tasks) == 0 {
+		pm.waves = nil
+		return
 	}
-	pm.viewport = viewport.New(pm.width, h)
-	pm.viewport.SetContent(pm.renderTasks())
+
+	// Build task ID → index map
+	idToIdx := make(map[int]int, len(pm.tasks))
+	for i, t := range pm.tasks {
+		idToIdx[t.ID] = i
+	}
+
+	// Compute wave for each task via topological layering
+	waveOf := make([]int, len(pm.tasks))
+	for i := range waveOf {
+		waveOf[i] = -1
+	}
+
+	// Iteratively assign waves until all tasks have one
+	remaining := len(pm.tasks)
+	for remaining > 0 {
+		for i, t := range pm.tasks {
+			if waveOf[i] >= 0 {
+				continue
+			}
+			if len(t.Dependencies) == 0 {
+				waveOf[i] = 0
+				remaining--
+				continue
+			}
+			maxDepWave := -1
+			allResolved := true
+			for _, depID := range t.Dependencies {
+				depIdx, ok := idToIdx[depID]
+				if !ok {
+					continue // dep not in this set — treat as resolved
+				}
+				if waveOf[depIdx] < 0 {
+					allResolved = false
+					break
+				}
+				if waveOf[depIdx] > maxDepWave {
+					maxDepWave = waveOf[depIdx]
+				}
+			}
+			if allResolved {
+				if maxDepWave >= 0 {
+					waveOf[i] = maxDepWave + 1
+				} else {
+					waveOf[i] = 0
+				}
+				remaining--
+			}
+		}
+	}
+
+	// Group tasks into wave slices
+	maxWave := 0
+	for _, w := range waveOf {
+		if w > maxWave {
+			maxWave = w
+		}
+	}
+	pm.waves = make([][]types.Task, maxWave+1)
+	for i, t := range pm.tasks {
+		w := waveOf[i]
+		if w < 0 {
+			w = 0
+		}
+		pm.waves[w] = append(pm.waves[w], t)
+	}
 }
 
-// UpdateTasks replaces the task list.
+// UpdateTasks replaces the task list and recomputes waves.
 func (pm *PlanModel) UpdateTasks(tasks []types.Task) {
 	pm.tasks = tasks
+	pm.computeWaves()
 	pm.viewport.SetContent(pm.renderTasks())
 }
 
@@ -72,6 +143,15 @@ func (pm *PlanModel) SetDimensions(w, h int) {
 	pm.width = w
 	pm.height = h
 	pm.initViewport()
+}
+
+func (pm *PlanModel) initViewport() {
+	h := pm.height - 5 // leave room for header, divider, footer
+	if h < 5 {
+		h = 5
+	}
+	pm.viewport = viewport.New(pm.width, h)
+	pm.viewport.SetContent(pm.renderTasks())
 }
 
 // Update handles plan screen key events.
@@ -102,58 +182,134 @@ func (pm *PlanModel) View() string {
 	t := pm.theme
 	w := pm.width
 
-	// Header
+	// Header: 📋 Plan · N tasks · ~$0.0042 · model [OR]
 	title := lipgloss.NewStyle().
 		Foreground(t.Brand).
 		Bold(true).
 		PaddingLeft(2).
-		Render(fmt.Sprintf("📋  Plan — %d tasks", len(pm.tasks)))
+		Render("📋 Plan")
+
+	meta := lipgloss.NewStyle().
+		Foreground(t.TextSecondary).
+		Render(fmt.Sprintf(" · %d tasks", len(pm.tasks)))
 
 	if pm.estCost > 0 {
-		cost := lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("~$%.4f", pm.estCost))
-		title = title + "  " + cost
+		meta += lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render(fmt.Sprintf(" · ~$%.4f", pm.estCost))
 	} else if pm.costEstimate != "" {
-		cost := lipgloss.NewStyle().Foreground(t.Warning).Render(pm.costEstimate)
-		title = title + "  " + cost
+		meta += lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render(" · " + pm.costEstimate)
 	}
 
-	// Model badge
-	badge := ""
 	if pm.modelName != "" {
-		badge = lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  " + pm.modelName + " [" + ProviderShortName(pm.provider) + "]")
+		meta += lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render(fmt.Sprintf(" · %s [%s]", pm.modelName, ProviderShortName(pm.provider)))
 	}
 
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).
+	divider := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
 		Render(strings.Repeat("─", w))
 
+	// Content area
+	content := pm.viewport.View()
+	if len(pm.tasks) == 0 {
+		content = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Width(w).
+			Align(lipgloss.Center).
+			Render("No tasks generated yet")
+	}
+
 	// Footer
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("↵ approve  q back  j/k scroll")
+	footer := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		PaddingLeft(2).
+		Render("↵ approve  j/k scroll  q back  o optimize")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title+badge,
+		"  "+title+meta,
 		divider,
-		pm.viewport.View(),
+		content,
 		divider,
 		footer,
 	)
 }
 
+// waveColor returns the theme color for a given wave index.
+// Wave 0 uses brand, Wave 1 uses info/secondary, higher waves use muted.
+func (pm *PlanModel) waveColor(waveIdx int) lipgloss.Color {
+	t := pm.theme
+	switch waveIdx {
+	case 0:
+		return t.Brand
+	case 1:
+		return t.Info
+	default:
+		return t.TextMuted
+	}
+}
+
+// renderTasks renders the full task list grouped by wave.
 func (pm *PlanModel) renderTasks() string {
 	t := pm.theme
+	if len(pm.tasks) == 0 {
+		return ""
+	}
+
 	var lines []string
-	for i, task := range pm.tasks {
-		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
-		action := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(task.Action)
-		var desc string
-		if task.Description != "" {
-			desc = "\n     " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render(task.Description)
-		}
-		lines = append(lines, "  "+num+" "+action+desc)
-		if i < len(pm.tasks)-1 {
-			lines = append(lines, "")
+
+	// Render each wave group
+	for waveIdx, wave := range pm.waves {
+		color := pm.waveColor(waveIdx)
+		sectionHeader := lipgloss.NewStyle().
+			Foreground(color).
+			Bold(true).
+			Render(fmt.Sprintf("  Wave %d — %s", waveIdx+1, waveTitle(waveIdx)))
+		lines = append(lines, "", sectionHeader)
+
+		for _, task := range wave {
+			iconColor := color
+			icon := lipgloss.NewStyle().Foreground(iconColor).Render("○")
+			action := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(task.Action)
+
+			// Description
+			desc := ""
+			if task.Description != "" {
+				desc = " " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render("— "+task.Description)
+			}
+
+			// Dependency arrows
+			depStr := ""
+			if len(task.Dependencies) > 0 {
+				var depIDs []string
+				for _, d := range task.Dependencies {
+					depIDs = append(depIDs, fmt.Sprintf("task-%d", d))
+				}
+				depStr = " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render("⇢ "+strings.Join(depIDs, ", "))
+			}
+
+			line := fmt.Sprintf("    %s %s%s%s", icon, action, desc, depStr)
+			lines = append(lines, line)
 		}
 	}
+
 	return strings.Join(lines, "\n")
+}
+
+// waveTitle returns a descriptive title for a wave based on its index.
+func waveTitle(idx int) string {
+	titles := []string{
+		"Foundation",
+		"Core Features",
+		"Integration",
+		"Polish",
+		"Verification",
+	}
+	if idx < len(titles) {
+		return titles[idx]
+	}
+	return fmt.Sprintf("Phase %d", idx+1)
 }
