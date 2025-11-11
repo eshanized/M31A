@@ -194,23 +194,36 @@ func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
 	return s, func() tea.Msg { return SettingsSavedMsg{} }
 }
 
-// View renders the settings screen.
+// View renders the settings screen with a left sidebar and ThinBorder content card.
 func (s *SettingsModel) View() string {
 	t := s.theme
 	w := s.width
 
-	if w < 30 {
+	if w < 50 {
 		return "Terminal too narrow for settings"
 	}
 
-	// Tab bar
-	tabBar := s.renderTabBar()
+	// Left navigation sidebar
+	navWidth := 20
+	if w < 70 {
+		navWidth = 16
+	}
+	leftNav := s.renderLeftNav()
 
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(strings.Repeat("─", w))
-
-	// Tab content
+	// Content inside ThinBorder card
 	content := s.renderTabContent()
+	contentCard := lipgloss.NewStyle().
+		Border(theme.ThinBorder).
+		BorderForeground(t.Border).
+		Padding(0, 1).
+		Width(w-navWidth-6).
+		Render(content)
+
+	// Main layout
+	mainArea := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(navWidth).Padding(0, 1).Render(leftNav),
+		contentCard,
+	)
 
 	// Status bar
 	status := ""
@@ -218,13 +231,11 @@ func (s *SettingsModel) View() string {
 		status = lipgloss.NewStyle().Foreground(t.Success).PaddingLeft(2).Render(s.statusMsg)
 	}
 
-	// Edit overlay
+	// Edit overlay (shows below the main area)
 	if s.editing {
 		editBox := s.renderEditBox()
 		return lipgloss.JoinVertical(lipgloss.Left,
-			tabBar,
-			divider,
-			content,
+			mainArea,
 			"",
 			editBox,
 			"",
@@ -236,36 +247,13 @@ func (s *SettingsModel) View() string {
 		Render("tab next  1-6 jump  e edit  esc back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		tabBar,
-		divider,
-		content,
-		divider,
+		mainArea,
 		status,
 		footer,
 	)
 }
 
-func (s *SettingsModel) renderTabBar() string {
-	t := s.theme
-	var tabs []string
-	for i, name := range settingsTabNames {
-		tab := SettingsTab(i)
-		if tab == s.activeTab {
-			tabs = append(tabs, lipgloss.NewStyle().
-				Foreground(t.Background).
-				Background(t.Brand).
-				Bold(true).
-				Padding(0, 2).
-				Render(name))
-		} else {
-			tabs = append(tabs, lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				Padding(0, 2).
-				Render(name))
-		}
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
-}
+
 
 func (s *SettingsModel) renderTabContent() string {
 	switch s.activeTab {
