@@ -13,16 +13,16 @@ import (
 
 // DiscussModel presents discuss Q&A questions one-by-one.
 type DiscussModel struct {
-	theme     theme.Theme
-	questions []string
-	current   int
-	answers   []string
-	input     textinput.Model
-	timeout   int // seconds, 0 = no timeout
-	deadline  time.Time
+	theme      theme.Theme
+	questions  []string
+	current    int
+	answers    []string
+	input      textinput.Model
+	timeout    int // seconds, 0 = no timeout
+	deadline   time.Time
 	hasDeadline bool
-	width     int
-	height    int
+	width      int
+	height     int
 }
 
 // NewDiscussModel creates a DiscussModel for the given questions.
@@ -114,14 +114,10 @@ func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
 		dm.answers[dm.current] = answer
 	}
 
-	qIdx := dm.current
-	ans := answer
-
 	// Emit answer message
 	answerCmd := func() tea.Msg {
-		return QuestionResponseMsg{Answer: ans}
+		return QuestionResponseMsg{Answer: answer}
 	}
-	_ = qIdx
 
 	dm.current++
 	dm.input.SetValue("")
@@ -144,7 +140,7 @@ func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
 func (dm *DiscussModel) View() string {
 	t := dm.theme
 	w := dm.width
-	if w < 30 {
+	if w < 40 {
 		w = 80
 	}
 
@@ -153,52 +149,78 @@ func (dm *DiscussModel) View() string {
 			Render("No questions to answer.")
 	}
 
-	progress := fmt.Sprintf("Question %d of %d", dm.current+1, len(dm.questions))
-	progressBar := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render(progress)
+	// ── Dot progress indicators ─────────────────────────────────────────────
+	// ● = done/current, ○ = pending
+	var dots []string
+	for i := range dm.questions {
+		var dotStyle lipgloss.Style
+		if i <= dm.current {
+			// Done or current → filled dot in brand
+			dotStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+		} else {
+			// Pending → empty dot in muted
+			dotStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+		}
+		dots = append(dots, dotStyle.Render("●"))
+	}
+	dotLine := lipgloss.NewStyle().PaddingLeft(2).Render(
+		strings.Join(dots, " "))
 
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
+	progressText := lipgloss.NewStyle().Foreground(t.TextSecondary).PaddingLeft(2).
+		Render(fmt.Sprintf("Question %d of %d", dm.current+1, len(dm.questions)))
 
+	progress := lipgloss.JoinHorizontal(lipgloss.Left,
+		dotLine, "  ", progressText)
+
+	// ── Question in ThinBorder card with brand left border ───────────────────
 	question := ""
 	if dm.current < len(dm.questions) {
 		question = dm.questions[dm.current]
 	}
 
-	qBox := lipgloss.NewStyle().
-		Foreground(t.Text).
-		PaddingLeft(2).
-		Width(w - 4).
-		Render(question)
+	qCard := lipgloss.NewStyle().
+		Border(theme.ThinBorder).
+		BorderForeground(t.Brand).
+		Padding(0, 1).
+		Width(w - 6).
+		Render(lipgloss.NewStyle().Foreground(t.Text).Render(question))
 
+	// ── Input area ───────────────────────────────────────────────────────────
+	inputView := dm.input.View()
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 1).
 		MarginLeft(2).
-		Width(w - 6).
-		Render(dm.input.View())
+		Width(w - 8).
+		Render(inputView)
 
+	// ── Timer (only when < 30 seconds remaining) ────────────────────────────
 	timeoutLine := ""
-	if dm.hasDeadline {
+	if dm.hasDeadline && dm.timeout > 0 {
 		remaining := int(time.Until(dm.deadline).Seconds())
 		if remaining < 0 {
 			remaining = 0
 		}
-		timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(2).
-			Render(fmt.Sprintf("⏱ %ds remaining", remaining))
+		if remaining < 30 {
+			timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(2).
+				Render(fmt.Sprintf("%ds remaining", remaining))
+		}
 	}
 
-	hints := "↵ answer  esc skip  ctrl+s skip all"
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(hints)
+	// ── Footer ──────────────────────────────────────────────────────────────
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("↵ answer  esc skip  ctrl+s skip all")
 
+	// ── Assemble ────────────────────────────────────────────────────────────
 	parts := []string{
-		progressBar, divider, "",
-		qBox, "",
+		"", progress, "",
+		qCard, "",
 		inputBox,
 	}
 	if timeoutLine != "" {
 		parts = append(parts, timeoutLine)
 	}
-	parts = append(parts, "", divider, footer)
+	parts = append(parts, "", footer)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
