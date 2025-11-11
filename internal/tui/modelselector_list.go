@@ -8,7 +8,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// renderModelList renders the scrollable list of models with pricing columns.
+// modelselector_list.go — model list rendering for the Model Selector.
+
+// renderModelList renders the scrollable list of models with compact rows.
 func (ms *ModelSelector) renderModelList() string {
 	if ms.loading {
 		return lipgloss.NewStyle().
@@ -30,60 +32,76 @@ func (ms *ModelSelector) renderModelList() string {
 	}
 	visible := ms.filtered[ms.offset:end]
 
-	colWidths := ms.columnWidths()
 	var rows []string
 	for i, m := range visible {
 		globalIdx := ms.offset + i
 		selected := globalIdx == ms.cursor
-		rows = append(rows, ms.renderModelRow(m, selected, colWidths))
+		rows = append(rows, ms.renderModelRow(m, selected))
 	}
 	return strings.Join(rows, "\n")
 }
 
-// columnWidths returns [nameW, pricingW] based on terminal width.
-func (ms *ModelSelector) columnWidths() [2]int {
-	avail := ms.width - 6
-	if avail < 30 {
-		avail = 30
-	}
-	priceW := 20
-	nameW := avail - priceW
-	if nameW < 20 {
-		nameW = 20
-	}
-	return [2]int{nameW, priceW}
-}
-
-// renderModelRow renders a single model row.
-func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool, colWidths [2]int) string {
+// renderModelRow renders a single compact model row with name, pricing, context, and capabilities.
+func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string {
 	t := ms.theme
-	nameW := colWidths[0]
-	priceW := colWidths[1]
+	avail := ms.width - 10
+	if avail < 40 {
+		avail = 40
+	}
 
+	// Name + provider badge
 	displayName := m.Name
 	if displayName == "" {
 		displayName = m.ID
 	}
 	provBadge := " [" + ProviderShortName(m.Provider) + "]"
-	nameCell := TruncateWithEllipsis(displayName+provBadge, nameW)
 
-	pricing := ""
-	if m.Pricing.InputPerMToken > 0 || m.Pricing.OutputPerMToken > 0 {
-		pricing = lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render(formatModelPricing(m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken))
+	// Context length
+	ctxStr := ""
+	if m.ContextLength > 0 {
+		ctxStr = fmt.Sprintf("%dK ctx", m.ContextLength/1000)
 	}
-	pricingCell := lipgloss.NewStyle().Width(priceW).Render(pricing)
+
+	// Pricing
+	pricingStr := ""
+	if m.Pricing.InputPerMToken > 0 || m.Pricing.OutputPerMToken > 0 {
+		pricingStr = formatModelPricing(m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken)
+	}
+
+	// Capability badges
+	var capBadges []string
+	if m.Capabilities.Reasoning {
+		capBadges = append(capBadges, "⚡")
+	}
+	if m.Capabilities.Vision {
+		capBadges = append(capBadges, "👁")
+	}
+
+	// Build row parts
+	var parts []string
+	parts = append(parts, displayName+provBadge)
+	if ctxStr != "" {
+		parts = append(parts, ctxStr)
+	}
+	if pricingStr != "" {
+		parts = append(parts, pricingStr)
+	}
+	if len(capBadges) > 0 {
+		parts = append(parts, strings.Join(capBadges, " "))
+	}
+
+	rowContent := strings.Join(parts, "  ")
+
+	// Truncate to available width
+	if len(rowContent) > avail {
+		rowContent = rowContent[:avail-3] + "..."
+	}
 
 	var nameStyle lipgloss.Style
 	if selected {
-		nameStyle = lipgloss.NewStyle().
-			Foreground(t.Brand).
-			Bold(true).
-			Width(nameW)
+		nameStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
 	} else {
-		nameStyle = lipgloss.NewStyle().
-			Foreground(t.Text).
-			Width(nameW)
+		nameStyle = lipgloss.NewStyle().Foreground(t.Text)
 	}
 
 	prefix := "  "
@@ -91,7 +109,7 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool, colWid
 		prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
 	}
 
-	return prefix + nameStyle.Render(nameCell) + pricingCell
+	return prefix + nameStyle.Render(rowContent)
 }
 
 // renderProviderTabs renders provider filter pills at the top.
@@ -126,5 +144,5 @@ func formatModelPricing(inputPM, outputPM float64) string {
 	if inputPM == 0 && outputPM == 0 {
 		return "free"
 	}
-	return fmt.Sprintf("$%.2f/%.2f", inputPM, outputPM)
+	return fmt.Sprintf("$%.2f/%.2f/M", inputPM, outputPM)
 }
