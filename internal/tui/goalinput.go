@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -45,11 +46,11 @@ func (gi *GoalInputModel) SetTheme(t theme.Theme) {
 func (gi *GoalInputModel) SetDimensions(w, h int) {
 	gi.width = w
 	gi.height = h
-	taH := h - 12
+	taH := h - 10
 	if taH < 3 {
 		taH = 3
 	}
-	gi.textarea.SetWidth(w - 6)
+	gi.textarea.SetWidth(w - 4)
 	gi.textarea.SetHeight(taH)
 }
 
@@ -115,26 +116,26 @@ func (gi *GoalInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (gi *GoalInputModel) View() string {
 	t := gi.theme
 	w := gi.width
-	if w < 30 {
+	if w < 40 {
 		w = 80
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("  Enter Goal")
-	divider := lipgloss.NewStyle().Foreground(t.Border).
-		Render(strings.Repeat("─", w))
+	// Title — simple text in brand, no decorative symbols
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
+		Render("What should M31A do?")
 
+	// Description in muted
 	desc := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("Describe what you want M31A to build or fix in this session.")
+		Render("Describe the goal for this coding session.")
 
-	inputBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Brand).
-		Padding(0, 1).
-		MarginLeft(2).
-		Width(w - 4).
-		Render(gi.textarea.View())
+	// Textarea — no border, inherits terminal background
+	inputContent := gi.textarea.View()
+	textareaBox := lipgloss.NewStyle().
+		PaddingLeft(2).
+		Width(w - 2).
+		Render(inputContent)
 
+	// Footer
 	hintsLeft := "ctrl+↵ submit  esc cancel"
 	if len(gi.recentGoals) > 0 {
 		hintsLeft += "  ctrl+r recent"
@@ -142,7 +143,11 @@ func (gi *GoalInputModel) View() string {
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render(hintsLeft)
 
-	parts := []string{title, divider, "", desc, "", inputBox, ""}
+	// Divider
+	divider := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(strings.Repeat("─", w))
+
+	parts := []string{"", title, "", desc, "", textareaBox, ""}
 
 	if gi.showRecent && len(gi.recentGoals) > 0 {
 		parts = append(parts, gi.renderRecent())
@@ -152,7 +157,7 @@ func (gi *GoalInputModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// renderRecent renders the recent goals picker.
+// renderRecent renders the recent goals picker as a numbered list.
 func (gi *GoalInputModel) renderRecent() string {
 	t := gi.theme
 	title := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
@@ -162,11 +167,11 @@ func (gi *GoalInputModel) renderRecent() string {
 		prefix := "  "
 		style := lipgloss.NewStyle().Foreground(t.Text)
 		if i == gi.recentIdx {
-			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
 			style = style.Foreground(t.Brand).Bold(true)
 		}
-		rows = append(rows, prefix+style.Render(TruncateWithEllipsis(g, 60)))
+		rows = append(rows, fmt.Sprintf("%s%s. %s", prefix, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d", i+1)), style.Render(TruncateWithEllipsis(g, 60))))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title, strings.Join(rows, "\n"))
+		"  "+title, strings.Join(rows, "\n"))
 }
