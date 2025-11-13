@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -264,10 +265,22 @@ func (pm *PlanModel) renderTasks() string {
 	// Render each wave group
 	for waveIdx, wave := range pm.waves {
 		color := pm.waveColor(waveIdx)
-		sectionHeader := lipgloss.NewStyle().
-			Foreground(color).
-			Bold(true).
-			Render(fmt.Sprintf("  Wave %d — %s", waveIdx+1, waveTitle(waveIdx)))
+		badgeType := components.BadgeNeutral
+		switch waveIdx {
+		case 0:
+			badgeType = components.BadgeBrand
+		case 1:
+			badgeType = components.BadgeInfo
+		default:
+			badgeType = components.BadgeNeutral
+		}
+		badge := components.SimpleBadge{
+			Text:    fmt.Sprintf("Wave %d — %s", waveIdx+1, waveTitle(waveIdx)),
+			Type:    badgeType,
+			Compact: true,
+			Theme:   t,
+		}
+		sectionHeader := "  " + badge.Render()
 		lines = append(lines, "", sectionHeader)
 
 		for _, task := range wave {

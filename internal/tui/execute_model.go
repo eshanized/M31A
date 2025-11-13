@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -169,7 +170,7 @@ func (em *ExecuteModel) renderTasks() string {
 	t := em.theme
 	var lines []string
 	for i, task := range em.tasks {
-		icon, color := taskStatusIcon(task.Status, t)
+		statusBadge := taskStatusBadge(task.Status, t)
 
 		// Dim everything when paused
 		var lineStyle lipgloss.Style
@@ -180,9 +181,8 @@ func (em *ExecuteModel) renderTasks() string {
 		}
 
 		num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
-		statusIcon := lineStyle.Foreground(color).Render(icon)
 		action := lineStyle.Foreground(t.Text).Render(task.Action)
-		lines = append(lines, fmt.Sprintf("  %s %s %s", num, statusIcon, action))
+		lines = append(lines, fmt.Sprintf("  %s %s %s", num, statusBadge, action))
 
 		// Show live output for the currently running task
 		if !em.paused && em.currentTask >= 0 && em.tasks[i].ID == em.tasks[em.currentTask].ID &&
@@ -215,17 +215,30 @@ func (em *ExecuteModel) countTasks() (done, total, failed int) {
 	return
 }
 
-func taskStatusIcon(status types.TaskStatus, t theme.Theme) (string, lipgloss.Color) {
+func taskStatusBadge(status types.TaskStatus, t theme.Theme) string {
+	var badgeType components.BadgeType
+	var text string
 	switch status {
 	case types.StatusDone:
-		return "✓", t.Success
+		badgeType = components.BadgeSuccess
+		text = "done"
 	case types.StatusFailed:
-		return "✗", t.Error
+		badgeType = components.BadgeError
+		text = "failed"
 	case types.StatusRunning:
-		return "▸", t.Brand
+		badgeType = components.BadgeBrand
+		text = "running"
 	case types.StatusSkipped:
-		return "─", t.TextMuted
+		badgeType = components.BadgeNeutral
+		text = "skipped"
 	default:
-		return "○", t.TextMuted
+		badgeType = components.BadgeNeutral
+		text = "pending"
 	}
+	return components.SimpleBadge{
+		Text:    text,
+		Type:    badgeType,
+		Compact: true,
+		Theme:   t,
+	}.Render()
 }

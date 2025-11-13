@@ -78,7 +78,7 @@ func (m *ReplModel) renderProviderCard() string {
 
 	modelBadge := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).
 		Render(m.activeModel.Name)
-	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrand, m.theme).Render()
+	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrandPreset, m.theme).Render()
 
 	pricingText := ""
 	if m.activeModel.Pricing.InputPerMToken > 0 || m.activeModel.Pricing.OutputPerMToken > 0 {

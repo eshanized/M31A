@@ -7,13 +7,58 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
+// ─── BadgeType-based badge (plan 30-06) ─────────────────────────────────────
+// BadgeType represents the type/purpose of a badge.
+type BadgeType int
+
+const (
+	BadgeBrand   BadgeType = iota
+	BadgeSuccess
+	BadgeError
+	BadgeWarning
+	BadgeInfo
+	BadgeNeutral
+)
+
+// SimpleBadge is a lightweight badge that renders colored text without backgrounds.
+type SimpleBadge struct {
+	Text    string
+	Type    BadgeType
+	Compact bool // compact = no padding, for inline use
+	Theme   theme.Theme
+}
+
+// Render returns the badge as a styled string.
+func (b SimpleBadge) Render() string {
+	style := lipgloss.NewStyle().Bold(true)
+	if !b.Compact {
+		style = style.PaddingLeft(1).PaddingRight(1)
+	}
+	switch b.Type {
+	case BadgeBrand:
+		return style.Foreground(b.Theme.Brand).Render(b.Text)
+	case BadgeSuccess:
+		return style.Foreground(b.Theme.Success).Render("✓ " + b.Text)
+	case BadgeError:
+		return style.Foreground(b.Theme.Error).Render("✗ " + b.Text)
+	case BadgeWarning:
+		return style.Foreground(b.Theme.Warning).Render("⚠ " + b.Text)
+	case BadgeInfo:
+		return style.Foreground(b.Theme.Thinking).Render(b.Text)
+	default:
+		return style.Foreground(b.Theme.TextMuted).Render(b.Text)
+	}
+}
+
+// ─── Existing badge system (preserved for backward compat) ───────────────────
+
 // Badge renders a small colored pill label.
 type Badge struct {
 	Label string
 	Style lipgloss.Style
 }
 
-// Render returns the badge as a styled string.
+// Render returns the legacy badge as a styled string.
 // Format: [ Label ]
 func (b Badge) Render() string {
 	if b.Label == "" {
@@ -28,12 +73,12 @@ func (b Badge) Render() string {
 type BadgePreset int
 
 const (
-	BadgeSuccess BadgePreset = iota
-	BadgeWarning
-	BadgeError
-	BadgeInfo
-	BadgeBrand
-	BadgeMuted
+	BadgeSuccessPreset BadgePreset = iota
+	BadgeWarningPreset
+	BadgeErrorPreset
+	BadgeInfoPreset
+	BadgeBrandPreset
+	BadgeMutedPreset
 )
 
 // NewBadge creates a badge from a preset using the provided theme.
@@ -41,21 +86,21 @@ func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
 	var style lipgloss.Style
 
 	switch preset {
-	case BadgeSuccess:
+	case BadgeSuccessPreset:
 		style = t.SuccessBadge.Copy()
-	case BadgeWarning:
+	case BadgeWarningPreset:
 		style = t.WarningBadge.Copy()
-	case BadgeError:
+	case BadgeErrorPreset:
 		style = t.ErrorBadge.Copy()
-	case BadgeInfo:
+	case BadgeInfoPreset:
 		style = lipgloss.NewStyle().
 			Background(t.Thinking).
 			Foreground(t.BadgeForeground).
 			Padding(0, 1).
 			Bold(true)
-	case BadgeBrand:
+	case BadgeBrandPreset:
 		style = t.ModelBadge.Copy()
-	case BadgeMuted:
+	case BadgeMutedPreset:
 		style = lipgloss.NewStyle().
 			Background(t.Border).
 			Foreground(t.TextSecondary).
@@ -92,14 +137,14 @@ func CapabilityBadge(capability string, t theme.Theme) Badge {
 func StatusBadge(status string, t theme.Theme) Badge {
 	switch status {
 	case "done", "pass", "complete":
-		return NewBadge(status, BadgeSuccess, t)
+		return NewBadge(status, BadgeSuccessPreset, t)
 	case "running", "thinking", "pending":
-		return NewBadge(status, BadgeInfo, t)
+		return NewBadge(status, BadgeInfoPreset, t)
 	case "failed", "error":
-		return NewBadge(status, BadgeError, t)
+		return NewBadge(status, BadgeErrorPreset, t)
 	case "warning", "skipped":
-		return NewBadge(status, BadgeWarning, t)
+		return NewBadge(status, BadgeWarningPreset, t)
 	default:
-		return NewBadge(status, BadgeMuted, t)
+		return NewBadge(status, BadgeMutedPreset, t)
 	}
 }

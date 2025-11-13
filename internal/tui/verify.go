@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
@@ -184,23 +185,28 @@ func (vm *VerifyModel) renderResults() string {
 	for i, task := range vm.tasks {
 		result, hasResult := vm.results[task.ID]
 
-		// Determine icon and color
-		icon := "○"
-		color := t.TextMuted
+		// Determine badge type
+		badgeType := components.BadgeNeutral
+		badgeText := "pending"
 		if hasResult {
 			if result.FilesExist && result.SyntaxOK && result.TestsOK {
-				icon = "✓"
-				color = t.Success
+				badgeType = components.BadgeSuccess
+				badgeText = "pass"
 			} else {
-				icon = "✗"
-				color = t.Error
+				badgeType = components.BadgeError
+				badgeText = "fail"
 			}
 		}
+		statusBadge := components.SimpleBadge{
+			Text:    badgeText,
+			Type:    badgeType,
+			Compact: true,
+			Theme:   t,
+		}.Render()
 
 		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
-		statusIcon := lipgloss.NewStyle().Foreground(color).Render(icon)
 		action := lipgloss.NewStyle().Foreground(t.Text).Render(task.Action)
-		line := fmt.Sprintf("  %s %s %s", num, statusIcon, action)
+		line := fmt.Sprintf("  %s %s %s", num, statusBadge, action)
 		lines = append(lines, line)
 
 		// Heal spinner for the task being healed
