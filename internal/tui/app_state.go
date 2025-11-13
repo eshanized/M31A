@@ -8,6 +8,7 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
@@ -105,7 +106,9 @@ type AppState struct {
 	permRequest     *tools.PermissionRequest
 	permCountdown   int
 	permModalWidth  int
+	permModal       *components.PermissionModal // rich stateful modal
 	questionRequest *QuestionRequestMsg
+	questionModel   *components.QuestionModel // rich interactive question modal
 
 	// Session list (for resume screen)
 	sessionList []*session.Session
@@ -115,10 +118,9 @@ type AppState struct {
 	discussAnswers   []string
 	discussIndex     int
 
-	// Toast notification
-	toastText    string
-	toastExpiry  time.Time
-	toastType    string
+	// Toast notifications (up to 3 visible, queue overflow)
+	toasts      []Toast
+	toastTimers map[int]*time.Timer // index → auto-dismiss timer
 
 	// Arbitrage scorer
 	arbitrager *arbitrage.Scorer
@@ -187,6 +189,7 @@ func NewApp(
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		permModalWidth: 60,
+		toastTimers:    make(map[int]*time.Timer),
 	}
 
 	if cfg != nil {

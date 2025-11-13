@@ -6,10 +6,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
+
 
 // Update implements tea.Model. It is the single dispatch point for all messages.
 // CRITICAL: Never mutate AppState from a goroutine. All mutations go here.
@@ -110,6 +112,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PermissionRequestMsg:
 		m.permRequest = &msg.Request
 		m.permCountdown = msg.Request.TimeoutSecs
+		timeout := components.DefaultPermissionTimeout
+		if msg.Request.TimeoutSecs > 0 {
+			timeout = time.Duration(msg.Request.TimeoutSecs) * time.Second
+		}
+		m.permModal = components.NewPermissionModal(msg.Request, m.themeManager.Current(), timeout)
 		m.screen = ScreenPermission
 
 	case PermissionResponseMsg:
@@ -121,6 +128,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Question modal ────────────────────────────────────────────────────────
 	case QuestionRequestMsg:
 		m.questionRequest = &msg
+		qModel := components.NewQuestionModel(tools.QuestionRequest{
+			Question:    msg.Question,
+			Header:      msg.Header,
+			Options:     msg.Options,
+			AllowCustom: true,
+		}, m.themeManager.Current(), m.permModalWidth)
+		m.questionModel = &qModel
 		m.screen = ScreenPermission // reuse permission overlay
 
 	case QuestionResponseMsg:
@@ -151,16 +165,27 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Toast ─────────────────────────────────────────────────────────────────
 	case ToastMsg:
-		m.toastText = msg.Text
-		m.toastType = msg.Type
-		m.toastExpiry = time.Now().Add(msg.Duration)
-		cmds = append(cmds, tea.Tick(msg.Duration, func(time.Time) tea.Msg {
+		m.toasts = append(m.toasts, Toast{
+			Text:      msg.Text,
+			Type:      msg.Type,
+			CreatedAt: time.Now(),
+		})
+		// Keep only recent toasts (last 5 for overflow buffer)
+		if len(m.toasts) > maxVisibleToasts+2 {
+			m.toasts = m.toasts[len(m.toasts)-(maxVisibleToasts+2):]
+		}
+		duration := msg.Duration
+		if duration <= 0 {
+			duration = 3 * time.Second
+		}
+		cmds = append(cmds, tea.Tick(duration, func(time.Time) tea.Msg {
 			return ToastExpiryMsg{}
 		}))
 
 	case ToastExpiryMsg:
-		if time.Now().After(m.toastExpiry) {
-			m.toastText = ""
+		// Remove oldest toast
+		if len(m.toasts) > 0 {
+			m.toasts = m.toasts[1:]
 		}
 
 	// ── Settings saved ────────────────────────────────────────────────────────
@@ -211,6 +236,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SidebarRefreshMsg:
 		if m.sidebarModel != nil {
 			m.sidebarModel.Update(msg)
+		}
+		// Propagate git branch to REPL for status bar display
+		if m.replModel != nil && msg.Branch != "" {
+			m.replModel.sidebarBranch = msg.Branch
 		}
 
 	// ── Diff screen ───────────────────────────────────────────────────────────
@@ -734,6 +763,9 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 func (m *AppState) handlePermissionTick() tea.Cmd {
 	if m.permCountdown > 0 {
 		m.permCountdown--
+		if m.permModal != nil {
+			m.permModal.Tick()
+		}
 		if m.permCountdown == 0 {
 			// Auto-deny on timeout
 			return m.handlePermissionResponse(PermissionResponseMsg{
@@ -766,6 +798,15 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 				Allowed:   true,
 			},
 		})
+	case "a":
+		// Allow always (remember)
+		return m.handlePermissionResponse(PermissionResponseMsg{
+			Response: tools.PermissionResponse{
+				RequestID: m.permRequest.ID,
+				Allowed:   true,
+				Remember:  true,
+			},
+		})
 	case "n", "esc":
 		return m.handlePermissionResponse(PermissionResponseMsg{
 			Response: tools.PermissionResponse{
@@ -777,13 +818,15 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// handleQuestionKey processes keys in the question modal.
+// handleQuestionKey routes key events to the question model.
 func (m *AppState) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
-	if m.questionRequest == nil {
+	if m.questionModel == nil || m.questionRequest == nil {
 		m.screen = ScreenREPL
 		return nil
 	}
-	return m.handleQuestionResponse(QuestionResponseMsg{Answer: ""})
+	_, cmd := m.questionModel.Update(msg)
+	// QuestionModel emits tools.QuestionResponse via cmd
+	return cmd
 }
 
 // handleQuestionResponse processes the user's question answer.

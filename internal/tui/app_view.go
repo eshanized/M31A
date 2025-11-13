@@ -31,26 +31,10 @@ func (m *AppState) View() string {
 		return m.renderPermissionModal()
 	}
 
-	// Toast notification (appended to any view)
-	toast := ""
-	if m.toastText != "" {
-		var toastColor lipgloss.Color
-		switch m.toastType {
-		case "success":
-			toastColor = t.Success
-		case "error":
-			toastColor = t.Error
-		case "warning":
-			toastColor = t.Warning
-		default:
-			toastColor = t.Brand
-		}
-		divider := components.SectionDivider{
-			Width: m.width,
-			Theme: t,
-		}.Render()
-		toast = "\n" + divider + "\n" + lipgloss.NewStyle().Foreground(toastColor).Bold(true).PaddingLeft(2).
-			Render("● "+m.toastText)
+	// Toast stack (top-right overlay)
+	toastOverlay := ""
+	if len(m.toasts) > 0 {
+		toastOverlay = renderToastStack(m.toasts, t, m.width)
 	}
 
 	// Sidebar (shared component left of main content)
@@ -63,8 +47,12 @@ func (m *AppState) View() string {
 	// Main content
 	main := m.renderActiveScreen()
 
-	if toast != "" {
-		main += toast
+	// Overlay toasts on top-right of main content
+	if toastOverlay != "" {
+		main = lipgloss.JoinVertical(lipgloss.Left,
+			toastOverlay,
+			main,
+		)
 	}
 
 	if hasSidebar {
