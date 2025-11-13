@@ -20,7 +20,7 @@ func renderDiffView(dm *DiffModel) string {
 	}
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
 		Render("  " + titleText)
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
+	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
 
 	body := ""
 	if dm.diff == "" {
@@ -30,9 +30,15 @@ func renderDiffView(dm *DiffModel) string {
 		body = dm.viewport.View()
 	}
 
-	// Legend
-	added := lipgloss.NewStyle().Foreground(t.DiffAdded).Render("+ added")
-	removed := lipgloss.NewStyle().Foreground(t.DiffRemoved).Render("- removed")
+	// Legend with styled previews
+	added := lipgloss.NewStyle().
+		Background(t.DiffAddedBg).
+		Foreground(t.DiffAdded).
+		Render("+ added")
+	removed := lipgloss.NewStyle().
+		Background(t.DiffRemovedBg).
+		Foreground(t.DiffRemoved).
+		Render("- removed")
 	legend := "  " + added + "  " + removed
 
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
