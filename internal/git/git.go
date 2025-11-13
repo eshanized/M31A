@@ -327,6 +327,16 @@ func (g *Git) CurrentBranch() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// RemoteTracking returns the remote tracking branch, e.g. "origin/main".
+// Returns empty string if no upstream is configured.
+func (g *Git) RemoteTracking() (string, error) {
+	out, err := g.run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil {
+		return "", nil // no upstream configured — not an error
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // ResetSoft resets HEAD to the given commit, keeping changes staged.
 // Creates a backup branch for rollback safety.
 func (g *Git) ResetSoft(commit string) error {

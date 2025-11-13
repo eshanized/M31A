@@ -633,6 +633,24 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 			}
 		}
 		return nil
+	case "sidebar_wider":
+		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+			m.sidebarModel.IncreaseWidth()
+			if m.replModel != nil {
+				sw := m.sidebarModel.GetWidth()
+				m.replModel.SetSidebarWidth(sw)
+			}
+		}
+		return nil
+	case "sidebar_narrower":
+		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+			m.sidebarModel.DecreaseWidth()
+			if m.replModel != nil {
+				sw := m.sidebarModel.GetWidth()
+				m.replModel.SetSidebarWidth(sw)
+			}
+		}
+		return nil
 	case "new_session":
 		return m.startNewSession()
 	case "session_list":

@@ -215,6 +215,7 @@ type DiffCloseMsg struct{}
 type SidebarRefreshMsg struct {
 	Files  []SidebarFile
 	Branch string
+	Remote string
 }
 
 // SidebarFile represents a file in the sidebar git status.

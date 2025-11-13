@@ -23,6 +23,6 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 	r.Register(CtxREPL, "ctrl+x r", "Session list", emit("session_list"))
 	r.Register(CtxREPL, "ctrl+x m", "Select model", emit("cycle_model"))
 	r.Register(CtxREPL, "ctrl+x t", "Toggle theme", emit("toggle_theme"))
-	r.Register(CtxREPL, "ctrl+x [", "Prev model", emit("cycle_model_backward"))
-	r.Register(CtxREPL, "ctrl+x ]", "Next model", emit("cycle_model_forward"))
+	r.Register(CtxREPL, "ctrl+x [", "Widen sidebar", emit("sidebar_wider"))
+	r.Register(CtxREPL, "ctrl+x ]", "Narrow sidebar", emit("sidebar_narrower"))
 }
