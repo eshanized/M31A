@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tools"
@@ -313,21 +311,20 @@ func (m *AppState) renderQuestionModal() string {
 
 	// Fallback: simple inline rendering
 	t := m.themeManager.Current()
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(q.Header),
-		"",
+	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Foreground(t.Text).Render(q.Question),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type your answer and press ↵"),
 	)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Brand).
-			Padding(1, 2).
-			Width(width).
-			Render(content),
-	)
+	card := components.Card{
+		Title:   q.Header,
+		Content: bodyContent,
+		Width:   width,
+		Border:  lipgloss.RoundedBorder(),
+		Style:   components.CardBrand,
+		Theme:   t,
+	}.Render()
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
 }
 
 // ─── Header rendering (top chrome) ───────────────────────────────────────────
@@ -386,9 +383,7 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t
 		riskStyle = lipgloss.NewStyle().Foreground(t.Error)
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Permission Required"),
-		"",
+	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
 		"  Tool:  "+req.ToolName,
 		"  Command:  "+TruncateWithEllipsis(req.Command, width-12),
 		"  Risk:  "+riskStyle.Render(string(req.RiskLevel)),
@@ -398,13 +393,14 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  Timeout: "+formatSI(countdown)+"s"),
 	)
 
-	_ = strings.Repeat
-	return lipgloss.Place(0, 0, lipgloss.Center, lipgloss.Center,
-		lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Brand).
-			Padding(1, 2).
-			Width(width).
-			Render(content),
-	)
+	card := components.Card{
+		Title:   "Permission Required",
+		Content: bodyContent,
+		Width:   width,
+		Border:  lipgloss.RoundedBorder(),
+		Style:   components.CardBrand,
+		Theme:   t,
+	}.Render()
+
+	return lipgloss.Place(0, 0, lipgloss.Center, lipgloss.Center, card)
 }

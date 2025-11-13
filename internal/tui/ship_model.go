@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -173,12 +174,14 @@ func (sm *ShipModel) View() string {
 
 	// ── Wrapping Card ───────────────────────────────────────────────────────
 	content := strings.Join(cardContent, "\n")
-	card := lipgloss.NewStyle().
-		Border(theme.ThinBorder).
-		BorderForeground(t.Brand).
-		Padding(0, 1).
-		Width(w-4).
-		Render(content)
+	card := components.Card{
+		Title:   "Session Summary",
+		Content: content,
+		Width:   w - 4,
+		Border:  theme.ThinBorder,
+		Style:   components.CardBrand,
+		Theme:   t,
+	}.Render()
 
 	return "  " + card
 }

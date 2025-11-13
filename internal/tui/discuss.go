@@ -179,12 +179,13 @@ func (dm *DiscussModel) View() string {
 		question = dm.questions[dm.current]
 	}
 
-	qCard := lipgloss.NewStyle().
-		Border(theme.ThinBorder).
-		BorderForeground(t.Brand).
-		Padding(0, 1).
-		Width(w - 6).
-		Render(lipgloss.NewStyle().Foreground(t.Text).Render(question))
+	qCard := components.Card{
+		Content: lipgloss.NewStyle().Foreground(t.Text).Render(question),
+		Width:   w - 6,
+		Border:  theme.ThinBorder,
+		Style:   components.CardBrand,
+		Theme:   t,
+	}.Render()
 
 	// ── Input area ───────────────────────────────────────────────────────────
 	inputView := dm.input.View()

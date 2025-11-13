@@ -53,12 +53,6 @@ func (m *ReplModel) renderProviderCard() string {
 	t := m.theme
 
 	if m.activeModel == nil || m.activeProvider == "" {
-		style := lipgloss.NewStyle().
-			Border(theme.ThinBorder).
-			BorderForeground(t.Warning).
-			Padding(0, 2).
-			Width(42)
-
 		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Render("●")
 		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render("No provider configured")
 		subtitle := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("Run /settings to get started")
@@ -67,14 +61,14 @@ func (m *ReplModel) renderProviderCard() string {
 			warningDot+" "+title,
 			subtitle,
 		)
-		return style.Render(content)
+		return components.Card{
+			Content: content,
+			Width:   42,
+			Border:  theme.ThinBorder,
+			Style:   components.CardWarning,
+			Theme:   t,
+		}.Render()
 	}
-
-	style := lipgloss.NewStyle().
-		Border(theme.ThinBorder).
-		BorderForeground(t.Success).
-		Padding(0, 2).
-		Width(42)
 
 	modelBadge := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).
 		Render(m.activeModel.Name)
@@ -105,7 +99,13 @@ func (m *ReplModel) renderProviderCard() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextSecondary).Render(m.sessionSparkline))
 	}
 
-	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	return components.Card{
+		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
+		Width:   42,
+		Border:  theme.ThinBorder,
+		Style:   components.CardSuccess,
+		Theme:   t,
+	}.Render()
 }
 
 // renderLogo renders the M31A ASCII art logo.
