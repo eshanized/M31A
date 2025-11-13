@@ -210,9 +210,10 @@ func (pm *PlanModel) View() string {
 			Render(fmt.Sprintf(" · %s [%s]", pm.modelName, ProviderShortName(pm.provider)))
 	}
 
-	divider := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render(strings.Repeat("─", w))
+	divider := components.SectionDivider{
+		Width: w,
+		Theme: t,
+	}.Render()
 
 	// Content area
 	content := pm.viewport.View()

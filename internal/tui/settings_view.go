@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -12,9 +13,13 @@ import (
 
 // renderSettingCard wraps tab content in a ThinBorder card with the given title.
 func renderSettingCard(t theme.Theme, title string, content string, width int) string {
-	titleStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render(title)
+	divider := components.SectionDivider{
+		Title: title,
+		Width: width - 6,
+		Theme: t,
+	}.Render()
 	body := lipgloss.NewStyle().PaddingLeft(2).Render(content)
-	inner := lipgloss.JoinVertical(lipgloss.Left, "", titleStyle, "", body)
+	inner := lipgloss.JoinVertical(lipgloss.Left, "", divider, "", body)
 
 	return lipgloss.NewStyle().
 		Border(theme.ThinBorder).

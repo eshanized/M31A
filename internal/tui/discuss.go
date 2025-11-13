@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -212,9 +213,16 @@ func (dm *DiscussModel) View() string {
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render("↵ answer  esc skip  ctrl+s skip all")
 
+	// ── Question separator ─────────────────────────────────────────────────
+	qSep := components.SectionDivider{
+		Width: w - 4,
+		Theme: t,
+	}.Render()
+
 	// ── Assemble ────────────────────────────────────────────────────────────
 	parts := []string{
 		"", progress, "",
+		qSep,
 		qCard, "",
 		inputBox,
 	}

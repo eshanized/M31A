@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -46,7 +47,11 @@ func (m *AppState) View() string {
 		default:
 			toastColor = t.Brand
 		}
-		toast = "\n" + lipgloss.NewStyle().Foreground(toastColor).Bold(true).PaddingLeft(2).
+		divider := components.SectionDivider{
+			Width: m.width,
+			Theme: t,
+		}.Render()
+		toast = "\n" + divider + "\n" + lipgloss.NewStyle().Foreground(toastColor).Bold(true).PaddingLeft(2).
 			Render("● "+m.toastText)
 	}
 
