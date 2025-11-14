@@ -31,15 +31,22 @@ func (m *AppState) View() string {
 		return m.renderPermissionModal()
 	}
 
-	// Toast stack (top-right overlay)
+	// ── Responsive layout ─────────────────────────────────────────────────────
+	// Width < 40: ultra-compact — show only the active screen content with no
+	// chrome (no header, no sidebar, no status bar, no toasts, no transitions).
+	if m.width < WidthUltraCompact {
+		return m.renderActiveScreen()
+	}
+
+	// Toast stack (top-right overlay) — hidden below compact width
 	toastOverlay := ""
-	if len(m.toasts) > 0 {
+	if len(m.toasts) > 0 && m.width >= WidthCompact {
 		toastOverlay = renderToastStack(m.toasts, t, m.width)
 	}
 
-	// Sidebar (shared component left of main content)
+	// Sidebar — auto-hidden below full width (80 cols)
 	sidebar := ""
-	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible()
+	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull
 	if hasSidebar {
 		sidebar = m.sidebarModel.View()
 	}
@@ -61,7 +68,6 @@ func (m *AppState) View() string {
 		if hasSidebar {
 			w = m.width - m.sidebarModel.GetWidth()
 		}
-		t := m.themeManager.Current()
 		overlay := m.transition.renderTransitionOverlay(t, w, m.height)
 		main = lipgloss.JoinVertical(lipgloss.Left, overlay)
 	}
@@ -261,8 +267,9 @@ func (m *AppState) syncReplSize() {
 	if m.replModel == nil {
 		return
 	}
+	// Sidebar width is 0 when auto-hidden by responsive layout (< 80 cols)
 	sw := 0
-	if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull {
 		sw = m.sidebarModel.GetWidth()
 	}
 	if m.replModel.width != m.width || m.replModel.height != m.height {

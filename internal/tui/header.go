@@ -40,25 +40,28 @@ func RenderHeader(
 	}
 
 	// ── Right: Context meter + model/provider badge ──────────────────────────
+	// Hide right-side chrome at narrow widths (< 60) — compact header mode
 	var rightParts []string
 
-	// Context meter (visual bar)
-	if ctxTotal > 0 {
-		rightParts = append(rightParts, renderContextMeter(ctxUsed, ctxTotal, t))
-	}
-
-	// Model/provider badge
-	if modelName != "" || activeProvider != "" {
-		display := modelName
-		if display == "" {
-			display = modelID
+	if width >= WidthCompact {
+		// Context meter (visual bar)
+		if ctxTotal > 0 {
+			rightParts = append(rightParts, renderContextMeter(ctxUsed, ctxTotal, t))
 		}
-		modelStr := lipgloss.NewStyle().Foreground(t.TextMuted).Render(display)
-		if activeProvider != "" {
-			providerStr := renderProviderBadge(t, activeProvider)
-			rightParts = append(rightParts, modelStr+" "+providerStr)
-		} else {
-			rightParts = append(rightParts, modelStr)
+
+		// Model/provider badge
+		if modelName != "" || activeProvider != "" {
+			display := modelName
+			if display == "" {
+				display = modelID
+			}
+			modelStr := lipgloss.NewStyle().Foreground(t.TextMuted).Render(display)
+			if activeProvider != "" {
+				providerStr := renderProviderBadge(t, activeProvider)
+				rightParts = append(rightParts, modelStr+" "+providerStr)
+			} else {
+				rightParts = append(rightParts, modelStr)
+			}
 		}
 	}
 
