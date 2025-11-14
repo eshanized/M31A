@@ -55,6 +55,17 @@ func (m *AppState) View() string {
 		)
 	}
 
+	// Screen transition overlay (dim + screen name)
+	if m.transition != nil && m.transition.Active {
+		w := m.width
+		if hasSidebar {
+			w = m.width - m.sidebarModel.GetWidth()
+		}
+		t := m.themeManager.Current()
+		overlay := m.transition.renderTransitionOverlay(t, w, m.height)
+		main = lipgloss.JoinVertical(lipgloss.Left, overlay)
+	}
+
 	if hasSidebar {
 		return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
 	}

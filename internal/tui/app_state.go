@@ -129,6 +129,9 @@ type AppState struct {
 	healthStatus types.HealthStatus
 	lastHealth   time.Time
 
+	// Transition overlay
+	transition *ScreenTransition
+
 	// Status
 	lastActivity    time.Time
 	streamErrorTime time.Time

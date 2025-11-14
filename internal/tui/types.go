@@ -33,6 +33,46 @@ const (
 	ScreenMetrics       Screen = 15   // session analytics
 )
 
+// Label returns a human-readable name for the screen.
+func (s Screen) Label() string {
+	switch s {
+	case ScreenFirstRun:
+		return "Setup"
+	case ScreenREPL:
+		return "Chat"
+	case ScreenModelSelector:
+		return "Models"
+	case ScreenSettings:
+		return "Settings"
+	case ScreenResume:
+		return "Sessions"
+	case ScreenPermission:
+		return "Permission"
+	case ScreenPlan:
+		return "Plan"
+	case ScreenExecute:
+		return "Execute"
+	case ScreenVerify:
+		return "Verify"
+	case ScreenShip:
+		return "Ship"
+	case ScreenDiff:
+		return "Diff"
+	case ScreenLedger:
+		return "Ledger"
+	case ScreenRollback:
+		return "Rollback"
+	case ScreenGoalInput:
+		return "Goal"
+	case ScreenDiscuss:
+		return "Discuss"
+	case ScreenMetrics:
+		return "Metrics"
+	default:
+		return "Unknown"
+	}
+}
+
 // ─── App-level messages ──────────────────────────────────────────────────────
 
 // AppMsg is the general routing message from sub-models to AppState.

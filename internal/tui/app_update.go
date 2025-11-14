@@ -86,6 +86,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeModel = execM
 			cmds = append(cmds, cmd)
 		}
+		// Screen transition tick
+		if m.transition != nil && m.transition.Active {
+			if m.transition.TransitionTick() {
+				// Transition complete — switch to target screen
+				// Sub-model was already created in navigateToScreen → ensureSubModel
+				m.screen = m.transition.ToScreen
+				m.transition = nil
+			} else {
+				// Keep ticking
+				cmds = append(cmds, StreamTickCmd())
+			}
+		}
 
 	// ── Health ────────────────────────────────────────────────────────────────
 	case HealthCheckTickMsg:
@@ -574,7 +586,24 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 // navigateToScreen transitions to the given screen.
 func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	m.prevScreen = m.screen
+
+	// Start a brief transition overlay if this is a real screen change.
+	// Skip for overlays, first-run, and screens with async init.
+	skipTransition := screen == ScreenPermission || screen == ScreenDiff ||
+		screen == ScreenFirstRun || screen == ScreenResume
+	if m.screen != screen && !skipTransition {
+		// Eagerly ensure sub-model exists so it's ready when transition completes.
+		m.ensureSubModel(screen)
+		m.StartTransition(screen, "")
+		return nil
+	}
+
 	m.screen = screen
+	return m.ensureSubModel(screen)
+}
+
+// ensureSubModel creates or resizes the sub-model for the given screen.
+func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	switch screen {
 	case ScreenREPL:
 		m.ensureReplModel()
@@ -582,8 +611,8 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	case ScreenModelSelector:
 		if m.msModel == nil {
 			m.msModel = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
-			m.msModel.SetDimensions(m.width, m.height)
 		}
+		m.msModel.SetDimensions(m.width, m.height)
 		return m.msModel.Init()
 	case ScreenSettings:
 		if m.settingsModel == nil {
@@ -593,6 +622,7 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 		}
 		return nil
 	case ScreenResume:
+		// Resume screen loads sessions async; use the existing command.
 		return m.openResumeScreen()
 	case ScreenGoalInput:
 		if m.goalInput == nil {
@@ -601,6 +631,29 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 			m.goalInput.height = m.height
 		}
 		return m.goalInput.Init()
+	case ScreenPlan:
+		if m.planModel != nil {
+			m.planModel.SetDimensions(m.width, m.height)
+		}
+		return nil
+	case ScreenExecute:
+		if m.executeModel != nil {
+			m.executeModel.width = m.width
+			m.executeModel.height = m.height
+		}
+		return nil
+	case ScreenVerify:
+		if m.verifyModel != nil {
+			m.verifyModel.width = m.width
+			m.verifyModel.height = m.height
+		}
+		return nil
+	case ScreenShip:
+		if m.shipModel != nil {
+			m.shipModel.width = m.width
+			m.shipModel.height = m.height
+		}
+		return nil
 	case ScreenLedger:
 		if m.ledgerModel == nil {
 			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
