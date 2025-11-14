@@ -80,6 +80,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, cmd)
 		}
+		// Forward to execute screen for animated progress bar
+		if m.screen == ScreenExecute && m.executeModel != nil {
+			execM, cmd := m.executeModel.Update(msg)
+			m.executeModel = execM
+			cmds = append(cmds, cmd)
+		}
 
 	// ── Health ────────────────────────────────────────────────────────────────
 	case HealthCheckTickMsg:

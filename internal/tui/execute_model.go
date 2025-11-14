@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -33,7 +32,13 @@ type ExecuteModel struct {
 	currentTask  int // index of the currently running task (-1 if none)
 
 	// Animated spinner for task progress
-	spinner components.Spinner
+	spinner      components.Spinner
+
+	// Animated progress bar
+	animatedProg components.AnimatedProgressBar
+
+	// Previous done count for detecting changes
+	prevDone int
 }
 
 // NewExecuteModel creates an ExecuteModel.
@@ -46,6 +51,15 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 		startedAt:   time.Now(),
 		currentTask: -1,
 		spinner:     components.NewSpinner(),
+		animatedProg: components.AnimatedProgressBar{
+			Animated: components.AnimatedProgress{
+				Total: len(tasks),
+			},
+			Width:   10,
+			ShowPct: false,
+			Theme:   t,
+		},
+		prevDone: 0,
 	}
 	em.initViewport()
 	return em
@@ -67,12 +81,32 @@ func (em *ExecuteModel) refreshContent() {
 
 // UpdateTaskStatus updates a task's status by ID.
 func (em *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
+	oldDone, _, _ := em.countTasks()
+
 	for i := range em.tasks {
 		if em.tasks[i].ID == taskID {
 			em.tasks[i].Status = status
 			break
 		}
 	}
+
+	newDone, newFailed, newTotal := em.countTasks()
+
+	// Trigger progress animation on status changes
+	if newDone > oldDone {
+		em.animatedProg.Animated.UpdateProgress(em.prevDone, newDone, newTotal)
+		em.prevDone = newDone
+
+		// Flash green on full completion, red on failure
+		if newDone == newTotal {
+			em.animatedProg.Flash.StartFlash(em.theme.Success)
+		} else if newFailed > 0 {
+			em.animatedProg.Flash.StartFlash(em.theme.Error)
+		}
+	} else if newFailed > 0 {
+		em.animatedProg.Flash.StartFlash(em.theme.Error)
+	}
+
 	em.refreshContent()
 }
 
@@ -116,6 +150,9 @@ func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 		if em.currentTask >= 0 {
 			em.spinner.Next()
 		}
+		em.animatedProg.Animated.Tick()
+		em.animatedProg.Flash.Tick()
+		em.refreshContent()
 	}
 	return em, nil
 }
@@ -141,13 +178,10 @@ func (em *ExecuteModel) View() string {
 			Render(fmt.Sprintf("(%d failed)", failed))
 	}
 
-	// Progress bar
+	// Animated progress bar
 	barWidth := 10
-	progressBar := renderProgressBar(t, done, total, barWidth)
-	pct := 0
-	if total > 0 {
-		pct = int(math.Round(float64(done) / float64(total) * 100))
-	}
+	progressBar := renderAnimatedProgressBar(em, barWidth)
+	pct := renderAnimatedProgressPct(em)
 	progressInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render(fmt.Sprintf(" · %s %d%%", progressBar, pct))
 
