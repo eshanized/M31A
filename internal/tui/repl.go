@@ -12,7 +12,7 @@ import (
 
 // Init implements tea.Model; the REPL starts with a spinner tick.
 func (m *ReplModel) Init() tea.Cmd {
-	return m.spinner.Tick
+	return StreamTickCmd()
 }
 
 // Update processes messages for the REPL. Delegates to handleKeyMsg,
@@ -68,9 +68,7 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		if m.streaming || m.thinking {
-			sp, c := m.spinner.Update(msg)
-			m.spinner = sp
-			cmds = append(cmds, c)
+			m.spinner.Next()
 			cmds = append(cmds, StreamTickCmd())
 		}
 

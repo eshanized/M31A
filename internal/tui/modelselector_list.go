@@ -13,10 +13,11 @@ import (
 // renderModelList renders the scrollable list of models with compact rows.
 func (ms *ModelSelector) renderModelList() string {
 	if ms.loading {
+		spin := ms.spinner.Peek()
 		return lipgloss.NewStyle().
-			Foreground(ms.theme.TextMuted).
+			Foreground(ms.theme.Spinner.GetForeground()).
 			PaddingLeft(2).
-			Render("Loading models...")
+			Render(spin + " Loading models...")
 	}
 	if len(ms.filtered) == 0 {
 		return lipgloss.NewStyle().

@@ -29,8 +29,11 @@ type ExecuteModel struct {
 	startedAt   time.Time
 
 	// Live output tracking for the currently running task
-	liveOutput  []string
-	currentTask int // index of the currently running task (-1 if none)
+	liveOutput   []string
+	currentTask  int // index of the currently running task (-1 if none)
+
+	// Animated spinner for task progress
+	spinner components.Spinner
 }
 
 // NewExecuteModel creates an ExecuteModel.
@@ -42,6 +45,7 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 		height:      h,
 		startedAt:   time.Now(),
 		currentTask: -1,
+		spinner:     components.NewSpinner(),
 	}
 	em.initViewport()
 	return em
@@ -107,6 +111,10 @@ func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 			return em, func() tea.Msg {
 				return AppMsg{Screen: ScreenREPL}
 			}
+		}
+	case TickMsg:
+		if em.currentTask >= 0 {
+			em.spinner.Next()
 		}
 	}
 	return em, nil

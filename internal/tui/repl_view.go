@@ -83,6 +83,7 @@ func (m *ReplModel) View() string {
 	info := &StatusBarInfo{
 		IsStreaming:   m.streaming,
 		IsThinking:   m.thinking,
+		SpinnerFrame:  m.spinner.Peek(),
 		KeyboardHints: []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader"},
 	}
 	// Add cwd and git branch if available

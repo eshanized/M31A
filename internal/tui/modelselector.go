@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
@@ -40,6 +41,9 @@ type ModelSelector struct {
 
 	width  int
 	height int
+
+	// Loading spinner
+	spinner components.Spinner
 }
 
 // NewModelSelector creates a ModelSelector backed by the given registry.
@@ -56,6 +60,7 @@ func NewModelSelector(registry *provider.Registry, sessionManager *session.Manag
 		modelsByProv:   make(map[string][]types.ModelInfo),
 		searchInput:    ti,
 		loading:        true,
+		spinner:        components.NewSpinner(),
 	}
 }
 
@@ -80,7 +85,8 @@ func (ms *ModelSelector) Init() tea.Cmd {
 	ms.providers = provNames
 	ms.activeProvider = ms.registry.Active()
 
-	cmds := make([]tea.Cmd, 0, len(provNames))
+	cmds := make([]tea.Cmd, 0, len(provNames)+1)
+	cmds = append(cmds, StreamTickCmd())
 	for _, name := range provNames {
 		cmds = append(cmds, ms.fetchModelsCmd(name))
 	}
@@ -105,6 +111,13 @@ func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		ms.width = msg.Width
 		ms.height = msg.Height
+		return ms, nil
+
+	case TickMsg:
+		if ms.loading {
+			ms.spinner.Next()
+			return ms, StreamTickCmd()
+		}
 		return ms, nil
 
 	case modelSelectorLoadedMsg:

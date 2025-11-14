@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,7 +44,7 @@ type ReplModel struct {
 	// Bubble Tea components
 	viewport viewport.Model
 	textarea textarea.Model
-	spinner  spinner.Model
+	spinner  components.Spinner
 
 	// Message state
 	messages     []types.Message
@@ -115,15 +114,11 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = t.Spinner
-
 	m := ReplModel{
 		theme:         t,
 		version:       version,
 		textarea:      ta,
-		spinner:       sp,
+		spinner:       components.NewSpinner(),
 		thinkingBlocks: make(map[int]*components.ThinkingBlock),
 		toolCards:      make(map[int]*components.ToolCard),
 		modelValid:     true,

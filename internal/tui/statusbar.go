@@ -26,6 +26,7 @@ type StatusBarInfo struct {
 	QuestionProgress string
 	CwdName          string // basename of working directory
 	GitBranch        string // current git branch
+	SpinnerFrame     string // animated spinner frame (empty = use static char)
 }
 
 // RenderStatusBar renders the status bar line at the bottom of the terminal.
@@ -73,15 +74,19 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 
 	// ── Center zone: operation status ─────────────────────────────────────────
 	var centerText string
+	spinnerChar := info.SpinnerFrame
+	if spinnerChar == "" {
+		spinnerChar = "⋯"
+	}
 	switch {
 	case info.LeaderActive:
 		centerText = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("ctrl+x") +
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ─ waiting ─")
 	case info.IsThinking:
-		centerText = t.Spinner.Render("⋯") + " " +
+		centerText = t.Spinner.Render(spinnerChar) + " " +
 			lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render("thinking...")
 	case info.IsStreaming:
-		centerText = t.Spinner.Render("⋯") + " " +
+		centerText = t.Spinner.Render(spinnerChar) + " " +
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render("responding...")
 	case info.WorkflowPhase != "":
 		phaseText := "▸ " + info.WorkflowPhase

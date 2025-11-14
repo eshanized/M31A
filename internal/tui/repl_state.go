@@ -192,9 +192,9 @@ func (m *ReplModel) RefreshViewport() {
 
 // ─── Status getters ───────────────────────────────────────────────────────────
 
-// SpinnerTick returns a tea.Cmd that ticks the spinner.
+// SpinnerTick returns a tea.Cmd that ticks the spinner at 10fps.
 func (m *ReplModel) SpinnerTick() tea.Cmd {
-	return m.spinner.Tick
+	return StreamTickCmd()
 }
 
 // GetStatusText returns the current status text for the status bar.

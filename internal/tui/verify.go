@@ -27,7 +27,7 @@ type VerifyModel struct {
 	// Healing state
 	healingTaskID int // -1 if not healing
 	healAttempt   int // 0 = not healing, 1+ = current attempt number
-	spinnerIdx    int // spinner frame index for animation
+	spinner       components.Spinner
 }
 
 // NewVerifyModel creates a VerifyModel.
@@ -39,6 +39,7 @@ func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationRes
 		width:         w,
 		height:        h,
 		healingTaskID: -1,
+		spinner:       components.NewSpinner(),
 	}
 	vm.initViewport()
 	return vm
@@ -68,7 +69,7 @@ func (vm *VerifyModel) SetHealFunc(f func(taskID int) tea.Cmd) {
 func (vm *VerifyModel) StartHealing(taskID int, attempt int) {
 	vm.healingTaskID = taskID
 	vm.healAttempt = attempt
-	vm.spinnerIdx = 0
+	vm.spinner.Reset()
 	vm.viewport.SetContent(vm.renderResults())
 }
 
@@ -81,7 +82,7 @@ func (vm *VerifyModel) StopHealing() {
 
 // TickSpinner advances the spinner animation frame.
 func (vm *VerifyModel) TickSpinner() {
-	vm.spinnerIdx++
+	vm.spinner.Next()
 	vm.viewport.SetContent(vm.renderResults())
 }
 
@@ -176,9 +177,6 @@ func (vm *VerifyModel) View() string {
 	)
 }
 
-// spinnerFrames is the spinner animation sequence.
-var verifySpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
 func (vm *VerifyModel) renderResults() string {
 	t := vm.theme
 	var lines []string
@@ -211,7 +209,7 @@ func (vm *VerifyModel) renderResults() string {
 
 		// Heal spinner for the task being healed
 		if vm.healingTaskID >= 0 && task.ID == vm.healingTaskID {
-			frame := verifySpinnerFrames[vm.spinnerIdx%len(verifySpinnerFrames)]
+			frame := vm.spinner.Peek()
 			healLine := lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(6).
 				Render(fmt.Sprintf("%s Heal attempt %d/2...", frame, vm.healAttempt))
 			lines = append(lines, healLine)
