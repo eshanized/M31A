@@ -230,7 +230,7 @@ func (s *SidebarModel) View() string {
 
 			// Files in this group
 			for _, p := range paths {
-				name := TruncateWithEllipsis(p, contentW-6)
+				name := TruncateMiddle(p, contentW-6)
 				line := lipgloss.NewStyle().
 					Foreground(t.TextSecondary).
 					PaddingLeft(4).

@@ -183,10 +183,8 @@ func (c *ToolCard) renderInline(width int) string {
 	}
 	if c.input != "" {
 		short := c.input
-		if len(short) > 60 {
-			short = short[:57] + "..."
-		}
 		short = strings.ReplaceAll(short, "\n", " ")
+		short = truncateEnd(short, 60)
 		parts = append(parts, lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short))
 	}
 	parts = append(parts, desc)
@@ -268,9 +266,7 @@ func (c *ToolCard) renderThinBorderHeader(width int) string {
 	if c.input != "" {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
-		if len(short) > 50 {
-			short = short[:47] + "..."
-		}
+		short = truncateEnd(short, 50)
 		inputSnippet = " " + lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
 	}
 

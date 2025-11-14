@@ -289,10 +289,15 @@ func (pm *PlanModel) renderTasks() string {
 			icon := lipgloss.NewStyle().Foreground(iconColor).Render("○")
 			action := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(task.Action)
 
-			// Description
+			// Description (truncated to available width)
 			desc := ""
 			if task.Description != "" {
-				desc = " " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render("— "+task.Description)
+				maxDescLen := pm.width - 20
+				if maxDescLen < 20 {
+					maxDescLen = 20
+				}
+				descText := TruncateEnd(task.Description, maxDescLen)
+				desc = " " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render("— "+descText)
 			}
 
 			// Dependency arrows

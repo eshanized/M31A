@@ -93,9 +93,9 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string
 
 	rowContent := strings.Join(parts, "  ")
 
-	// Truncate to available width
+	// Truncate to available width using TruncateEnd
 	if len(rowContent) > avail {
-		rowContent = rowContent[:avail-3] + "..."
+		rowContent = TruncateEnd(rowContent, avail)
 	}
 
 	var nameStyle lipgloss.Style

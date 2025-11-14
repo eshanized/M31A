@@ -116,7 +116,8 @@ func (ms *ModelSelector) renderDetailPane() string {
 	t := ms.theme
 
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(m.Name))
+	truncatedName := TruncateMiddle(m.Name, 40)
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(truncatedName))
 	if m.Description != "" {
 		lines = append(lines, "")
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextSecondary).Render(m.Description))
