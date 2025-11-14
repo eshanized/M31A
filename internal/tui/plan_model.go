@@ -187,7 +187,6 @@ func (pm *PlanModel) View() string {
 	title := lipgloss.NewStyle().
 		Foreground(t.Brand).
 		Bold(true).
-		PaddingLeft(2).
 		Render("📋 Plan")
 
 	meta := lipgloss.NewStyle().
@@ -225,14 +224,13 @@ func (pm *PlanModel) View() string {
 			Render("No tasks generated yet")
 	}
 
-	// Footer
+	// Footer (0 padding — footer hints are flush left, last line)
 	footer := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
-		PaddingLeft(2).
 		Render("↵ approve  j/k scroll  q back  o optimize")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		"  "+title+meta,
+		title+meta,
 		divider,
 		content,
 		divider,

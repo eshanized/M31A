@@ -167,7 +167,7 @@ func (em *ExecuteModel) View() string {
 	elapsedStr := fmt.Sprintf("%ds", int(elapsed.Seconds()))
 	done, total, failed := em.countTasks()
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
 		Render("⚡ Execute")
 
 	meta := lipgloss.NewStyle().Foreground(t.TextSecondary).
@@ -196,11 +196,11 @@ func (em *ExecuteModel) View() string {
 
 	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("p pause  j/k scroll  q back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		"  "+title+meta+progressInfo+timeInfo+pauseHint,
+		title+meta+progressInfo+timeInfo+pauseHint,
 		divider,
 		em.viewport.View(),
 		divider,

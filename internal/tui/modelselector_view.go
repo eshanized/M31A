@@ -17,12 +17,11 @@ func (ms *ModelSelector) renderView() string {
 		w = 80
 	}
 
-	// ── Header ──────────────────────────────────────────────────────────────
+	// ── Header (0 left padding — screen title) ──────────────────────────────
 	header := lipgloss.NewStyle().
 		Foreground(t.Brand).
 		Bold(true).
-		PaddingLeft(1).
-		Render("  Model Selector")
+		Render("Model Selector")
 
 	divider := lipgloss.NewStyle().Foreground(t.Border).
 		Render(strings.Repeat("─", w))
@@ -57,7 +56,7 @@ func (ms *ModelSelector) renderView() string {
 	}
 
 	// ── Footer ───────────────────────────────────────────────────────────────
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("↵ select  tab filter  / search  esc back")
 
 	// ── Layout: list + detail side by side if wide enough ────────────────────

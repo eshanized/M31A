@@ -120,8 +120,8 @@ func (gi *GoalInputModel) View() string {
 		w = 80
 	}
 
-	// Title — simple text in brand, no decorative symbols
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
+	// Title — simple text in brand, no decorative symbols (0 left padding for header)
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
 		Render("What should M31A do?")
 
 	// Description in muted
@@ -140,7 +140,7 @@ func (gi *GoalInputModel) View() string {
 	if len(gi.recentGoals) > 0 {
 		hintsLeft += "  ctrl+r recent"
 	}
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render(hintsLeft)
 
 	// Divider
@@ -160,7 +160,7 @@ func (gi *GoalInputModel) View() string {
 // renderRecent renders the recent goals picker as a numbered list.
 func (gi *GoalInputModel) renderRecent() string {
 	t := gi.theme
-	title := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	title := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("Recent goals:")
 	var rows []string
 	for i, g := range gi.recentGoals {

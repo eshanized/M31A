@@ -154,7 +154,7 @@ func (vm *VerifyModel) View() string {
 		headerIcon = "✓"
 	}
 
-	title := lipgloss.NewStyle().Foreground(headerClr).Bold(true).PaddingLeft(2).
+	title := lipgloss.NewStyle().Foreground(headerClr).Bold(true).
 		Render(fmt.Sprintf("%s Verify · %d/%d passed", headerIcon, passed, total))
 
 	if failed > 0 {
@@ -164,8 +164,8 @@ func (vm *VerifyModel) View() string {
 
 	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
 
-	// Footer — hide heal if already healing
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	// Footer (0 padding — last line, no indent)
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("↵ continue  h heal  s skip  q back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,

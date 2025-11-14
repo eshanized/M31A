@@ -245,7 +245,7 @@ func (s *SettingsModel) View() string {
 		)
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("tab next  1-6 jump  e edit  esc back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -279,7 +279,7 @@ func (s *SettingsModel) renderProviderTab() string {
 	t := s.theme
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Provider Settings"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Provider Settings"))
 	lines = append(lines, "")
 
 	defaultProvider := "(not set)"
@@ -322,7 +322,7 @@ func (s *SettingsModel) renderModelTab() string {
 	t := s.theme
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Model Settings"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Model Settings"))
 	lines = append(lines, "")
 
 	defaultModel := "(not set)"
@@ -342,7 +342,7 @@ func (s *SettingsModel) renderUITab() string {
 	t := s.theme
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("UI Settings"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("UI Settings"))
 	lines = append(lines, "")
 	if s.config != nil {
 		lines = append(lines, settingRow("Theme", s.config.UI.Theme, t))
@@ -358,7 +358,7 @@ func (s *SettingsModel) renderKeysTab() string {
 	t := s.theme
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("API Keys"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("API Keys"))
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
 		Render("Keys are stored in OS keychain or config file."))
@@ -389,7 +389,7 @@ func (s *SettingsModel) renderWorkflowTab() string {
 	t := s.theme
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("Workflow Settings"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Workflow Settings"))
 	lines = append(lines, "")
 	if s.config != nil {
 		lines = append(lines, settingRow("Permission timeout", fmt.Sprintf("%ds", s.config.Permissions.TimeoutSeconds), t))
@@ -404,7 +404,7 @@ func (s *SettingsModel) renderAboutTab() string {
 	t := s.theme
 	return lipgloss.JoinVertical(lipgloss.Left,
 		"",
-		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).Render("About M31A"),
+		lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("About M31A"),
 		"",
 		lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(4).Render("M31A — Terminal AI Coding Agent"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Module: github.com/eshanized/M31A"),

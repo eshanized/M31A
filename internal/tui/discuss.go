@@ -164,10 +164,10 @@ func (dm *DiscussModel) View() string {
 		}
 		dots = append(dots, dotStyle.Render("●"))
 	}
-	dotLine := lipgloss.NewStyle().PaddingLeft(2).Render(
+	dotLine := lipgloss.NewStyle().Render(
 		strings.Join(dots, " "))
 
-	progressText := lipgloss.NewStyle().Foreground(t.TextSecondary).PaddingLeft(2).
+	progressText := lipgloss.NewStyle().Foreground(t.TextSecondary).
 		Render(fmt.Sprintf("Question %d of %d", dm.current+1, len(dm.questions)))
 
 	progress := lipgloss.JoinHorizontal(lipgloss.Left,
@@ -205,13 +205,13 @@ func (dm *DiscussModel) View() string {
 			remaining = 0
 		}
 		if remaining < 30 {
-			timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(2).
-				Render(fmt.Sprintf("%ds remaining", remaining))
+		timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).
+			Render(fmt.Sprintf("%ds remaining", remaining))
 		}
 	}
 
 	// ── Footer ──────────────────────────────────────────────────────────────
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("↵ answer  esc skip  ctrl+s skip all")
 
 	// ── Question separator ─────────────────────────────────────────────────
