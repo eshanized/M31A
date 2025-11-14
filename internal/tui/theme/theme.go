@@ -138,25 +138,43 @@ type Theme struct {
 type Manager struct {
 	current Theme
 	mode    Mode
+	profile ColorProfile
 }
 
 func NewManager(mode Mode) *Manager {
-	m := &Manager{mode: mode}
+	m := &Manager{
+		mode:    mode,
+		profile: DetectColorProfile(),
+	}
 	m.resolve()
 	return m
 }
 
 func (m *Manager) resolve() {
+	var base Theme
 	switch m.mode {
 	case ModeDark:
-		m.current = Dark()
+		base = Dark()
 	case ModeLight:
-		m.current = Light()
+		base = Light()
 	case ModeAuto:
-		m.current = Auto()
+		base = Auto()
 	default:
-		m.current = Dark()
+		base = Dark()
 	}
+
+	// Apply 16-color ANSI fallback if terminal doesn't support 256/truecolor
+	if m.profile == Profile16 {
+		// Copy base and override with ANSI colors
+		base.Brand = lipgloss.Color("208")
+		base.Success = lipgloss.Color("2")
+		base.Error = lipgloss.Color("1")
+		base.Warning = lipgloss.Color("3")
+		base.Thinking = lipgloss.Color("4")
+		applyThemeStyles(&base)
+	}
+
+	m.current = base
 }
 
 func (m *Manager) Cycle() Mode {

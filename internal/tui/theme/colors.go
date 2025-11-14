@@ -1,6 +1,59 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// ColorProfile represents terminal color capability.
+type ColorProfile int
+
+const (
+	ProfileTrueColor ColorProfile = iota
+	Profile256
+	Profile16
+)
+
+// DetectColorProfile determines terminal color capability from environment variables.
+func DetectColorProfile() ColorProfile {
+	ct := os.Getenv("COLORTERM")
+	if ct == "truecolor" || ct == "24bit" {
+		return ProfileTrueColor
+	}
+	term := os.Getenv("TERM")
+	if strings.Contains(term, "256") || strings.Contains(term, "256color") {
+		return Profile256
+	}
+	return Profile16
+}
+
+// PaletteForProfile returns a Theme suitable for the given color profile.
+// TrueColor and 256-color profiles use the full hex-based palette.
+// 16-color profiles use ANSI named colors for reliable rendering.
+func PaletteForProfile(profile ColorProfile) Theme {
+	switch profile {
+	case Profile16:
+		return ansiPalette()
+	default:
+		return Default()
+	}
+}
+
+// ansiPalette returns a Theme that uses ANSI 16-color names (0–7, 0–15)
+// for reliable rendering on terminals without 256-color or truecolor support.
+func ansiPalette() Theme {
+	t := Dark() // start from dark palette
+	// Override key color fields with ANSI color codes
+	t.Brand = lipgloss.Color("208")  // ANSI orange (256-color index)
+	t.Success = lipgloss.Color("2")  // ANSI green
+	t.Error = lipgloss.Color("1")    // ANSI red
+	t.Warning = lipgloss.Color("3")  // ANSI yellow
+	t.Thinking = lipgloss.Color("4") // ANSI blue
+	applyThemeStyles(&t)
+	return t
+}
 
 func Dark() Theme {
 	t := Theme{
