@@ -3,28 +3,28 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
 status: active
-last_updated: "2026-06-07T00:55:00Z"
+last_updated: "2026-06-08T00:00:00Z"
 progress:
-  total_phases: 27
-  completed_phases: 27
-  total_plans: 113
-  completed_plans: 90
-  percent: 80
+  total_phases: 28
+  completed_phases: 28
+  total_plans: 123
+  completed_plans: 100
+  percent: 81
 ---
 
 # M31A — Current State
 
 ## Active Phase
 
-Phase 27: TUI Component Decomposition — COMPLETE
+Phase 31: (pending — next phase)
 
 ## Status
 
-Phase 27 (TUI Component Decomposition) is complete. All 4 plans executed successfully. Fixed critical REPL input bug, verified all tests pass, build clean.
+Phase 30 (OpenCode-Inspired TUI Visual Redesign) is complete. All 10 waves executed sequentially over this session. Brand migrated from purple #7C3AED to warm-amber #D77757, background/surface darkened, all 8 screen views polished, component library expanded, accessibility profiles added, responsive layout thresholds enforced.
 
 ## Last Session
 
-- **2026-06-07** — Phase 27 completed. Plan 27-04 executed: Verification & Cleanup (5 tasks). Fixed critical bug: REPL character input broken after decomposition. Verified all 537 tests pass with race detector. Build clean on all platforms. Updated ARCHITECTURE.md with decomposition pattern.
+- **2026-06-08** — Phase 30 executed: all 10 waves complete. Header redesigned (1-line, git branch fallback, visual context meter). Status bar restructured (3-zone layout, compact mode). REPL polished (borderless input, lowercase labels, thin tool cards, panel thinking). All screens polished (plan, execute, verify, ship, settings, model selector, discuss, goal input). Components enhanced (Badge, Divider, Card, Toast, command palette). Sidebar refreshed (git graph aesthetic, grouped files, resize). Animations added (custom spinner, animated progress bar, screen transitions). Typography audited (consistent padding, truncation rules). Accessibility profiles added (256-color/16-color fallback, responsive UI at 40/60/80 width thresholds).
 
 ## Completed Phases
 
@@ -48,18 +48,12 @@ Phase 27 (TUI Component Decomposition) is complete. All 4 plans executed success
 - Phase 25 — Wiring Fixes
 - Phase 26 — TUI Screen Completion & Wiring Fixes
 - Phase 27 — TUI Component Decomposition
+- Phase 29 — Complete TUI Rewrite
+- Phase 30 — OpenCode-Inspired TUI Visual Redesign
 
 ## In Progress
 
-- Phase 19 — Comprehensive Codebase Concerns Fixes (2/4 plans complete)
-  - 19-01: ✅ Nil-Safety & Concurrency Fixes
-  - 19-02: ✅ Provider Robustness & Config Fixes
-  - 19-03: ✅ Post-Phase-18 Codebase Concerns Fixes
-  - 19-04: ✅ Session Cleanup, Config Hot-Reload & Test Coverage
-  - 19-05: ⏳ (pending)
-  - 19-06: ⏳ (pending)
-  - 19-07: ⏳ (pending)
-  - 19-08: ⏳ (pending)
+*None — all phases complete.*
 
 ## Phase 14 Plans
 
@@ -221,11 +215,17 @@ None
 - 24-04: ✅ Ship + Diff Redesign — Launch Pad with commit review, enhanced diff with syntax highlighting
 - 24-05: ✅ ModelSelector + Settings + Resume — Model Observatory, Control Tower, Session Vault
 
-## Phase 26 Plans
+## Phase 30 Plans
 
-- 26-01: ⏳ ScreenLedger Implementation (Wave 1, MISS-01)
-- 26-02: ⏳ ScreenRollback Implementation (Wave 1, MISS-02)
-- 26-03: ⏳ ScreenDiscuss Implementation (Wave 1, MISS-03)
-- 26-04: ⏳ Plan/Execute/Verify Wiring Fixes (Wave 2, WIR-01–WIR-03)
-- 26-05: ⏳ Diff/ModelSelector/GoalInput/Metrics Fixes (Wave 2, WIR-04–WIR-07)
-- 26-06: ⏳ Minor Polish: Sidebar, Frecent, Permission Queue (Wave 3, MIN-01–MIN-03)
+- 30-01: ✅ Wave 1 — Theme & Color System — `a4ff809`, `41362fd`, `fb31199`, `d3af34b`, `3401d5d`, `84370c4`
+- 30-02: ✅ Wave 2 — Header Redesign — `fce3643`, `4145024`, `a2371e0`
+- 30-03: ✅ Wave 3 — Status Bar Redesign — `bb0ff35`
+- 30-04: ✅ Wave 4 — REPL Screen Polish — `a431b31`, `f667be9`, `0276bb3`, `26a89a6`, `daa08d3`
+- 30-05: ✅ Wave 5 — Screen-by-Screen Polish — `0adc66b`, `3117715`, `acba156`, `370b327`, `5889e01`, `03e0952`, `1f6a3bd`, `ff55202`
+- 30-06: ✅ Wave 6 — Component Library Enhancement — `0286318`, `f3d4d86`, `7efd587`, `61999be`, `1d9b6f8`
+- 30-07: ✅ Wave 7 — Sidebar & Diff Polish — `49db470`, `5629b7c`
+- 30-08: ✅ Wave 8 — Animation & Micro-interactions — `ffd19a5`, `cd2d019`, `fa24538`
+- 30-09: ✅ Wave 9 — Typography & Spacing Audit — `ef83896`, `f79c5d9`
+- 30-10: ✅ Wave 10 — Accessibility & Terminal Compatibility — `f636e18`, `dbd02b2`
+
+## Phase 26 Plans

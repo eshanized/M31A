@@ -149,8 +149,9 @@ func TestThinkingBlock_Header_Collapsed(t *testing.T) {
 	}
 	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 	header := tb.Header(80)
-	if !strings.Contains(header, "[+]") {
-		t.Error("expected '[+]' in collapsed header")
+	// New opencode-style: ▸ for collapsed
+	if !strings.Contains(header, "Thinking") {
+		t.Error("expected 'Thinking' in collapsed header")
 	}
 }
 
@@ -161,8 +162,9 @@ func TestThinkingBlock_Header_Expanded(t *testing.T) {
 	}
 	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
 	header := tb.Header(80)
-	if !strings.Contains(header, "[−]") {
-		t.Error("expected '[−]' in expanded header")
+	// New opencode-style: ▾ for expanded, with collapse hint
+	if !strings.Contains(header, "Thinking") {
+		t.Error("expected 'Thinking' in expanded header")
 	}
 }
 
@@ -178,8 +180,9 @@ func TestThinkingBlock_AfterToggle(t *testing.T) {
 		t.Error("expected initially collapsed")
 	}
 	headerBefore := tb.Header(80)
-	if !strings.Contains(headerBefore, "[+]") {
-		t.Error("expected '[+]' before toggle")
+	// New format: contains Thinking + expand hint
+	if !strings.Contains(headerBefore, "Thinking") {
+		t.Error("expected 'Thinking' in collapsed header")
 	}
 
 	// Toggle to expanded
@@ -188,7 +191,8 @@ func TestThinkingBlock_AfterToggle(t *testing.T) {
 		t.Error("expected expanded after toggle")
 	}
 	headerAfter := tb.Header(80)
-	if !strings.Contains(headerAfter, "[−]") {
-		t.Error("expected '[−]' after toggle")
+	// New format: contains Thinking + collapse hint
+	if !strings.Contains(headerAfter, "Thinking") {
+		t.Error("expected 'Thinking' in expanded header")
 	}
 }
