@@ -35,6 +35,9 @@ func (m *ReplModel) renderWelcome() string {
 	// 3. Keyboard hints as muted single-line list
 	hints := renderKeyboardHints(m.theme)
 
+	// 4. Bottom bar with cwd and version
+	bottomBar := m.renderBottomBar()
+
 	// Stack vertically, centered horizontally
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		logo,
@@ -42,6 +45,8 @@ func (m *ReplModel) renderWelcome() string {
 		providerCard,
 		"",
 		hints,
+		"",
+		bottomBar,
 	)
 
 	// Center in VIEWPORT space (not full terminal height)
