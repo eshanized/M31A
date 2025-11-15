@@ -70,7 +70,8 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 		}
 		return msg
 	}
-	return []tea.Cmd{nextCmd}, false
+	// Append streaming tick to drive 10fps rendering
+	return []tea.Cmd{nextCmd, StreamTickCmd()}, false
 }
 
 // closeActiveSegment finalizes the current stream segment and appends it.
