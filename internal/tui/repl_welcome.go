@@ -32,10 +32,13 @@ func (m *ReplModel) renderWelcome() string {
 	// 2. Provider status card
 	providerCard := m.renderProviderCard()
 
-	// 3. Keyboard hints as muted single-line list
+	// 3. Quick action hints (shown only on welcome screen)
+	quickActions := m.renderQuickActions()
+
+	// 4. Keyboard hints as muted single-line list
 	hints := renderKeyboardHints(m.theme)
 
-	// 4. Bottom bar with cwd and version
+	// 5. Bottom bar with cwd and version
 	bottomBar := m.renderBottomBar()
 
 	// Stack vertically, centered horizontally
@@ -43,6 +46,8 @@ func (m *ReplModel) renderWelcome() string {
 		logo,
 		"",
 		providerCard,
+		"",
+		quickActions,
 		"",
 		hints,
 		"",
