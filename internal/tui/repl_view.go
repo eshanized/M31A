@@ -58,6 +58,12 @@ func (m *ReplModel) View() string {
 	// ── Viewport ──────────────────────────────────────────────────────────────────
 	viewportContent := m.viewport.View()
 
+	// ── Quick actions panel (below messages when idle) ───────────────────────────
+	quickActions := ""
+	if len(m.messages) > 0 && !m.streaming {
+		quickActions = m.renderQuickActionsPanel(rw)
+	}
+
 	// ── Input separator (opencode half-block style) ──────────────────────────────
 	// Top half-block row gives a visual "shelf" effect above the input area
 	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
@@ -110,24 +116,14 @@ func (m *ReplModel) View() string {
 	}
 
 	// ── Assemble all parts ────────────────────────────────────────────────────
-	parts := []string{
-		viewportContent,
-		inputBorder,
-		metaRow,
-		textareaView,
-		statusBar,
+	parts := []string{viewportContent}
+	if quickActions != "" {
+		parts = append(parts, quickActions)
 	}
 	if slashOverlay != "" {
-		// Prepend the overlay before the input border
-		parts = []string{
-			viewportContent,
-			slashOverlay,
-			inputBorder,
-			metaRow,
-			textareaView,
-			statusBar,
-		}
+		parts = append(parts, slashOverlay)
 	}
+	parts = append(parts, inputBorder, metaRow, textareaView, statusBar)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
