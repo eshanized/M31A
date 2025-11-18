@@ -131,7 +131,7 @@ func (m *AppState) renderSettingsScreen() string {
 		m.settingsModel.width = m.width
 		m.settingsModel.height = m.height
 	}
-	return m.settingsModel.View()
+	return m.renderHeader("") + "\n" + m.settingsModel.View()
 }
 
 func (m *AppState) renderModelSelectorScreen() string {
@@ -145,28 +145,28 @@ func (m *AppState) renderPlanScreen() string {
 	if m.planModel == nil {
 		return "Loading plan..."
 	}
-	return m.planModel.View()
+	return m.renderHeader("") + "\n" + m.planModel.View()
 }
 
 func (m *AppState) renderExecuteScreen() string {
 	if m.executeModel == nil {
 		return "Loading execution..."
 	}
-	return m.executeModel.View()
+	return m.renderHeader("") + "\n" + m.executeModel.View()
 }
 
 func (m *AppState) renderVerifyScreen() string {
 	if m.verifyModel == nil {
 		return "Loading verification..."
 	}
-	return m.verifyModel.View()
+	return m.renderHeader("") + "\n" + m.verifyModel.View()
 }
 
 func (m *AppState) renderShipScreen() string {
 	if m.shipModel == nil {
 		return "Loading ship summary..."
 	}
-	return m.shipModel.View()
+	return m.renderHeader("") + "\n" + m.shipModel.View()
 }
 
 func (m *AppState) renderResumeScreen() string {
