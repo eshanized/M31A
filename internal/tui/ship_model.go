@@ -74,7 +74,6 @@ func (sm *ShipModel) View() string {
 
 	// ── Stats Grid (2-column layout) ────────────────────────────────────────
 
-	// Left column
 	taskIcon := "✓"
 	taskColor := t.Success
 	if sm.summary.TaskFailed > 0 {
@@ -91,9 +90,6 @@ func (sm *ShipModel) View() string {
 		lipgloss.NewStyle().Foreground(t.Text).Render(
 			fmt.Sprintf("+%d ~%d -%d", sm.summary.FilesAdded, sm.summary.FilesModified, sm.summary.FilesDeleted))
 
-	leftCol := []string{taskStr, filesStr}
-
-	// Right column
 	tokensStr := ""
 	if sm.summary.TotalTokens > 0 {
 		tokensStr = lipgloss.NewStyle().Foreground(t.Text).Render("Tokens:") + " " +
@@ -112,32 +108,22 @@ func (sm *ShipModel) View() string {
 	commitsStr := lipgloss.NewStyle().Foreground(t.Text).Render("Commits:") + " " +
 		lipgloss.NewStyle().Foreground(t.Text).Render(fmt.Sprintf("%d", len(sm.summary.Commits)))
 
-	rightCol := []string{durationStr, commitsStr}
-	if tokensStr != "" {
-		rightCol = []string{tokensStr, costStr, durationStr, commitsStr}
-	}
-
-	// Build 2-column grid
 	colWidth := (w - 8) / 2 // account for border padding
-	var grid []string
-	maxRows := len(leftCol)
-	if len(rightCol) > maxRows {
-		maxRows = len(rightCol)
-	}
-	for i := 0; i < maxRows; i++ {
-		left := ""
-		if i < len(leftCol) {
-			left = leftCol[i]
+	var rows [][2]string
+	if tokensStr != "" {
+		rows = [][2]string{
+			{taskStr, tokensStr},
+			{filesStr, costStr},
+			{"", durationStr},
+			{"", commitsStr},
 		}
-		right := ""
-		if i < len(rightCol) {
-			right = rightCol[i]
+	} else {
+		rows = [][2]string{
+			{taskStr, durationStr},
+			{filesStr, commitsStr},
 		}
-		grid = append(grid, lipgloss.JoinHorizontal(lipgloss.Left,
-			lipgloss.NewStyle().Width(colWidth).Render(left),
-			lipgloss.NewStyle().Width(colWidth).Render(right),
-		))
 	}
+	grid := renderShipStatsGrid(t, rows, colWidth)
 
 	// ── Commit Log ──────────────────────────────────────────────────────────
 	var commitLines []string
@@ -163,7 +149,7 @@ func (sm *ShipModel) View() string {
 	// ── Card Content ────────────────────────────────────────────────────────
 	var cardContent []string
 	cardContent = append(cardContent, "")
-	cardContent = append(cardContent, strings.Join(grid, "\n"))
+	cardContent = append(cardContent, grid)
 	cardContent = append(cardContent, "")
 	if commitBlock != "" {
 		cardContent = append(cardContent, commitBlock)
