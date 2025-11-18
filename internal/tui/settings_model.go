@@ -368,14 +368,7 @@ func (s *SettingsModel) renderKeysTab() string {
 			"openrouter": s.config.Provider.OpenRouter.APIKey,
 			"zen":        s.config.Provider.Zen.APIKey,
 		} {
-			keyDisplay := "(not set)"
-			if key != "" {
-				tail := key
-				if len(tail) > 4 {
-					tail = key[len(key)-4:]
-				}
-				keyDisplay = "●●●●●●●" + tail
-			}
+			keyDisplay := maskedKey(key)
 			lines = append(lines, settingRow(name+" API key", keyDisplay, t))
 		}
 	}
