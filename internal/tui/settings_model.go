@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -213,13 +212,9 @@ func (s *SettingsModel) View() string {
 
 	// Content inside ThinBorder card
 	content := s.renderTabContent()
-	contentCard := components.Card{
-		Content: content,
-		Width:   w - navWidth - 6,
-		Border:  theme.ThinBorder,
-		Style:   components.CardDefault,
-		Theme:   t,
-	}.Render()
+	tabNames := []string{"Provider", "Model", "UI", "Keys", "Workflow", "About"}
+	title := tabNames[s.activeTab]
+	contentCard := renderSettingCard(t, title, content, w-navWidth)
 
 	// Main layout
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top,
