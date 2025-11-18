@@ -297,5 +297,16 @@ func (m *ReplModel) renderMessages() {
 		}
 	}
 
+	// Append thinking toggle hints after finalized thinking blocks
+	if len(m.thinkingBlocks) > 0 {
+		for idx := range m.thinkingBlocks {
+			hint := m.renderThinkingToggleHint(idx, 0)
+			if hint != "" {
+				sb.WriteString("\n")
+				sb.WriteString(hint)
+			}
+		}
+	}
+
 	m.viewport.SetContent(sb.String())
 }
