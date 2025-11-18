@@ -46,6 +46,7 @@ func (m *AppState) View() string {
 
 	// Sidebar — auto-hidden below full width (80 cols)
 	sidebar := ""
+	m.ensureSidebarModel()
 	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull
 	if hasSidebar {
 		sidebar = m.sidebarModel.View()
