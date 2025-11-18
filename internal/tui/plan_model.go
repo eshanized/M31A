@@ -184,30 +184,7 @@ func (pm *PlanModel) View() string {
 	w := pm.width
 
 	// Header: 📋 Plan · N tasks · ~$0.0042 · model [OR]
-	title := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Bold(true).
-		Render("📋 Plan")
-
-	meta := lipgloss.NewStyle().
-		Foreground(t.TextSecondary).
-		Render(fmt.Sprintf(" · %d tasks", len(pm.tasks)))
-
-	if pm.estCost > 0 {
-		meta += lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Render(fmt.Sprintf(" · ~$%.4f", pm.estCost))
-	} else if pm.costEstimate != "" {
-		meta += lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Render(" · " + pm.costEstimate)
-	}
-
-	if pm.modelName != "" {
-		meta += lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Render(fmt.Sprintf(" · %s [%s]", pm.modelName, ProviderShortName(pm.provider)))
-	}
+	header := renderPlanHeader(t, len(pm.tasks), pm.estCost, pm.costEstimate, pm.modelName, pm.provider)
 
 	divider := components.SectionDivider{
 		Width: w,
@@ -230,7 +207,7 @@ func (pm *PlanModel) View() string {
 		Render("↵ approve  j/k scroll  q back  o optimize")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title+meta,
+		header,
 		divider,
 		content,
 		divider,

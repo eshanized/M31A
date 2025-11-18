@@ -12,11 +12,13 @@ import (
 
 // renderPlanHeader builds the one-line plan header with task count,
 // cost estimate, and model/provider badge.
-func renderPlanHeader(t theme.Theme, taskCount int, cost float64, modelName, provider string) string {
+func renderPlanHeader(t theme.Theme, taskCount int, cost float64, costEstimate, modelName, provider string) string {
 	header := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("📋 Plan") +
 		lipgloss.NewStyle().Foreground(t.TextSecondary).Render(fmt.Sprintf(" · %d tasks", taskCount))
 	if cost > 0 {
 		header += lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf(" · ~$%.4f", cost))
+	} else if costEstimate != "" {
+		header += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · " + costEstimate)
 	}
 	if modelName != "" {
 		prov := ProviderShortName(provider)
