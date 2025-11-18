@@ -178,12 +178,13 @@ func (em *ExecuteModel) View() string {
 			Render(fmt.Sprintf("(%d failed)", failed))
 	}
 
-	// Animated progress bar
-	barWidth := 10
+	// Progress bars (animated + static)
+	barWidth := animatedProgressBarWidth(em)
 	progressBar := renderAnimatedProgressBar(em, barWidth)
+	staticBar := renderProgressBar(t, done, total, barWidth)
 	pct := renderAnimatedProgressPct(em)
 	progressInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf(" · %s %d%%", progressBar, pct))
+		Render(fmt.Sprintf(" · %s %s %d%%", staticBar, progressBar, pct))
 
 	timeInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render(fmt.Sprintf(" · %s elapsed", elapsedStr))
@@ -222,9 +223,13 @@ func (em *ExecuteModel) renderTasks() string {
 			lineStyle = lipgloss.NewStyle()
 		}
 
+		spinner := ""
+		if !em.paused && task.Status == types.StatusRunning {
+			spinner = " " + renderTaskSpinner(em)
+		}
 		num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
 		action := lineStyle.Foreground(t.Text).Render(task.Action)
-		lines = append(lines, fmt.Sprintf("  %s %s %s", num, statusBadge, action))
+		lines = append(lines, fmt.Sprintf("  %s %s %s%s", num, statusBadge, action, spinner))
 
 		// Show live output for the currently running task
 		if !em.paused && em.currentTask >= 0 && em.tasks[i].ID == em.tasks[em.currentTask].ID &&
