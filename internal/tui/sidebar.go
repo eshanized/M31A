@@ -113,7 +113,15 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 		}
 		s.files = files
 		s.loading = false
+		return s, s.refreshCmd() // chain periodic refreshes
 	}
+
+	// When sidebar is visible but has no data yet, trigger initial refresh
+	if s.visible && s.branch == "" && !s.loading {
+		s.loading = true
+		return s, s.refreshCmd()
+	}
+
 	return s, nil
 }
 
