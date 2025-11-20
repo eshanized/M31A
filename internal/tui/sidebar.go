@@ -212,28 +212,29 @@ func (s *SidebarModel) View() string {
 	} else {
 		// Group files by status
 		groups := groupFilesByStatus(s.files)
-		groupOrder := []struct {
-			key   string
-			icon  string
-			color lipgloss.Color
-		}{
-			{"modified", "●", t.Warning},
-			{"added", "+", t.Success},
-			{"deleted", "−", t.Error},
-			{"renamed", "→", t.TextSecondary},
-			{"untracked", "?", t.TextMuted},
-			{"other", "·", t.TextMuted},
+		type groupInfo struct {
+			key        string
+			statusChar string
+		}
+		groupOrder := []groupInfo{
+			{"modified", "M"},
+			{"added", "A"},
+			{"deleted", "D"},
+			{"renamed", "R"},
+			{"untracked", "?"},
+			{"other", ""},
 		}
 		for _, g := range groupOrder {
 			paths, ok := groups[g.key]
 			if !ok || len(paths) == 0 {
 				continue
 			}
+			icon, color := fileStatusIcon(g.statusChar, t)
 			// Group header
 			header := lipgloss.NewStyle().
-				Foreground(g.color).
+				Foreground(color).
 				PaddingLeft(1).
-				Render(g.icon + " " + g.key)
+				Render(icon + " " + g.key)
 			lines = append(lines, header)
 
 			// Files in this group
