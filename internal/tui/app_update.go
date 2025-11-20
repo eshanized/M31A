@@ -767,6 +767,7 @@ func (m *AppState) startNewSession() tea.Cmd {
 	}
 
 	m.sessionID = sess.ID
+	m.propagateSessionID(sess.ID)
 	m.ensureReplModel()
 	m.replModel.ClearMessages()
 	m.replModel.SetSessionID(sess.ID)
