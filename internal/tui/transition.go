@@ -22,9 +22,6 @@ type ScreenTransition struct {
 // transitionDuration is the duration of the screen dim effect.
 const transitionDuration = 200 * time.Millisecond
 
-// transitionOverlayWidth is the horizontal padding for the overlay text.
-const transitionOverlayWidth = 40
-
 // StartTransition begins a screen transition effect.
 // It captures the current view as the fading-out frame.
 func (m *AppState) StartTransition(to Screen, prevView string) {
