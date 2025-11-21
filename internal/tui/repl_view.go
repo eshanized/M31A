@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -86,9 +87,14 @@ func (m *ReplModel) View() string {
 	textareaView := m.textarea.View()
 
 	// ── Status bar ──────────────────────────────────────────────────────────────
+	var thinkingDur int64
+	if m.thinking && !m.thinkingStartAt.IsZero() {
+		thinkingDur = time.Since(m.thinkingStartAt).Milliseconds()
+	}
 	info := &StatusBarInfo{
 		IsStreaming:   m.streaming,
-		IsThinking:   m.thinking,
+		IsThinking:    m.thinking,
+		ThinkingDuration: thinkingDur,
 		SpinnerFrame:  m.spinner.Peek(),
 		KeyboardHints: []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader"},
 	}

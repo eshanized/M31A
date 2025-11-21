@@ -21,6 +21,7 @@ type StatusBarInfo struct {
 	ProviderName     string
 	IsStreaming      bool
 	IsThinking       bool
+	ThinkingDuration int64 // milliseconds of current thinking session
 	KeyboardHints    []string
 	WorkflowPhase    string
 	QuestionProgress string
@@ -83,8 +84,12 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		centerText = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("ctrl+x") +
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ─ waiting ─")
 	case info.IsThinking:
+		thinkingLabel := "thinking..."
+		if info.ThinkingDuration > 0 {
+			thinkingLabel = "thinking· " + formatDurationMs(info.ThinkingDuration)
+		}
 		centerText = t.Spinner.Render(spinnerChar) + " " +
-			lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render("thinking...")
+			lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render(thinkingLabel)
 	case info.IsStreaming:
 		centerText = t.Spinner.Render(spinnerChar) + " " +
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render("responding...")
