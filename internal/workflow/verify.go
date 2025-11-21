@@ -14,6 +14,7 @@ import (
 
 // runVerify checks task outputs for correctness and triggers self-heal/bisect on failure.
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
+	ctx = e.verifyTaskContext(ctx)
 	e.logger.Info("verify phase starting")
 
 	// Emit intermediate progress
