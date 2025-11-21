@@ -273,6 +273,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DiffCloseMsg:
 		m.screen = ScreenREPL
 
+	// ── Session restore ──────────────────────────────────────────────────────
+	case sessionRestoredMsg:
+		cmds = append(cmds, m.applySessionRestored(msg))
+
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
 		if m.replModel != nil {
