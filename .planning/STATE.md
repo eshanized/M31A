@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Release
 status: active
-last_updated: "2026-06-08T00:00:00Z"
+last_updated: "2026-06-08T08:21:00.000Z"
 progress:
-  total_phases: 28
-  completed_phases: 28
-  total_plans: 123
-  completed_plans: 100
-  percent: 81
+  total_phases: 30
+  completed_phases: 18
+  total_plans: 139
+  completed_plans: 116
+  percent: 60
 ---
 
 # M31A — Current State
@@ -54,6 +54,14 @@ Phase 30 (OpenCode-Inspired TUI Visual Redesign) is complete. All 10 waves execu
 ## In Progress
 
 *None — all phases complete.*
+
+## Completed Plans (Phase 3)
+
+- 03-01: ✅ Message Rendering Pipeline — 23 tasks across 4 waves, all 27 wire-in functions connected to call sites, 3 dead code items removed (truncateMiddle, transitionOverlayWidth, backup.go). Commits: `15ef481` `fc0b68f` `4a4222c` `41601f2` `8180e16` `1cdd078` `047cb53` `347da8d` `d2494c1` `95401d7` `8b0836a` `9044213` `a553d66` `7af2788` `d9e2364` `cc8d015` `1239043` `e854c72` `025e92f` `6f802a8` `35ef807` `7fd1614`
+
+## Last Session
+
+- **2026-06-08** — Phase 3 executed: 1 plan across 4 waves. 23 wire-in tasks connecting 27 unused functions to call sites across 9 TUI screens + 2 workflow phases. 3 dead code items removed. Session restore flows through AppState.Update(). Status bar shows live thinking duration. Verify phase wraps context with timeout.
 
 ## Phase 14 Plans
 
