@@ -20,3 +20,10 @@ coverage.out
 # Vendor
 /vendor/
 *.out
+
+# AI tool output directories
+/rush/
+/.planning/
+
+# Stray planning docs
+tui_plan.md
