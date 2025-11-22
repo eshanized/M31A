@@ -2,8 +2,6 @@ package config
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/eshanized/M31A/internal/fileutil"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
 )
@@ -207,12 +206,19 @@ func mergeStructs(base, overlay reflect.Value, defined map[string]bool, prefix s
 }
 
 // toTOMLKey converts a Go field name to a TOML key (snake_case).
+// Handles acronyms correctly: APIKey → api_key, BaseURL → base_url.
 func toTOMLKey(name string) string {
+	runes := []rune(name)
 	var result []byte
-	for i, ch := range name {
+	for i, ch := range runes {
 		if ch >= 'A' && ch <= 'Z' {
 			if i > 0 {
-				result = append(result, '_')
+				prev := runes[i-1]
+				prevIsLower := prev >= 'a' && prev <= 'z'
+				nextIsLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
+				if prevIsLower || nextIsLower {
+					result = append(result, '_')
+				}
 			}
 			result = append(result, byte(ch+32))
 		} else {
@@ -559,7 +565,7 @@ func (c *Config) Save(path string) error {
 	}
 
 	// Atomic write: write to temp file in same directory, then rename
-	if err := atomicWrite(path, data); err != nil {
+	if err := fileutil.AtomicWrite(path, data); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
@@ -637,46 +643,6 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 			}
 		}
 	}
-}
-
-// atomicWrite writes data to path atomically using a temp file and rename.
-// Temp file is created in the same directory to ensure atomic rename works
-// within the same filesystem mount point.
-func atomicWrite(path string, data []byte) error {
-	dir := filepath.Dir(path)
-
-	// Generate random temp name
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return fmt.Errorf("generate temp name: %w", err)
-	}
-	tmpPath := filepath.Join(dir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-
-	// Write to temp file with secure permissions
-	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	defer os.Remove(tmpPath) // cleanup on failure
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("sync temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename temp file: %w", err)
-	}
-
-	return nil
 }
 
 // DefaultGitConfig returns the default git configuration.
