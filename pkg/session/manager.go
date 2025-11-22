@@ -14,6 +14,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/fileutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -63,49 +64,9 @@ func (m *Manager) BaseDir() string {
 }
 
 // atomicWrite atomically writes data to path by writing to a temp file in the
-// same directory then renaming. The temp file uses crypto/rand for a unique name.
-func (m *Manager) atomicWrite(path string, data []byte) (err error) {
-	dir := filepath.Dir(path)
-
-	// Generate random temp name in the same directory (cross-device safety)
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return fmt.Errorf("cannot generate temp name: %w", err)
-	}
-	tmpPath := filepath.Join(dir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-
-	// Clean up temp file on any error
-	cleanup := true
-	defer func() {
-		if cleanup {
-			os.Remove(tmpPath) // best-effort cleanup
-		}
-	}()
-
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, types.FilePermission)
-	if err != nil {
-		return fmt.Errorf("cannot create temp file: %w", err)
-	}
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("temp write failed: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("temp fsync failed: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("temp close failed: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename failed: %w", err)
-	}
-
-	cleanup = false
-	return nil
+// same directory then renaming. Delegates to fileutil.AtomicWrite.
+func (m *Manager) atomicWrite(path string, data []byte) error {
+	return fileutil.AtomicWrite(path, data)
 }
 
 // ensureDir creates the directory at path (including parents) with DirPermission perms.
