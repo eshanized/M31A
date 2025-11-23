@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -84,10 +85,13 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 			dataParts = append(dataParts, payload)
 		} else if strings.HasPrefix(line, "event: ") {
 			eventType = strings.TrimPrefix(line, "event: ")
+		} else if strings.HasPrefix(line, "id: ") || strings.HasPrefix(line, "retry: ") {
+			// SSE spec fields not used by current LLM providers; logged for diagnostics.
+			slog.Debug("SSE parser ignoring field", "line", line)
 		}
 	}
 
-	data = strings.Join(dataParts, "")
+	data = strings.Join(dataParts, "\n")
 	if data == "" && len(dataParts) == 0 {
 		return "", "", fmt.Errorf("%w: stream chunk read interrupted", m31errors.ErrStreamTruncated)
 	}
