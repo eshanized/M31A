@@ -2,10 +2,6 @@ package types
 
 import "time"
 
-// NOTE: Some constants below are intentionally duplicated in internal/tools/constants.go
-// to avoid an import cycle (tools → types is allowed, but tools → types → tools is not).
-// If you change a value here, update the corresponding value in tools/constants.go.
-
 const (
 	ModelCacheTTL           = 5 * time.Minute
 	HealthCheckInterval     = 60 * time.Second
@@ -59,7 +55,7 @@ const (
 	// FilePermission is the default file permission (0644)
 	FilePermission = 0644
 
-	// Tool default values (duplicated from tools/constants.go to avoid import cycle)
+	// Tool default values (referenced by internal/tools/constants.go)
 	DefaultMaxGlobResults       = 1000
 	DefaultMaxGrepResults       = 100
 	DefaultBashKillGraceSecs    = 5
