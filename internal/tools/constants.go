@@ -1,40 +1,33 @@
 package tools
 
-import "time"
+import (
+	"time"
 
-// NOTE: Some constants below are intentionally duplicated from internal/types/constants.go
-// to avoid an import cycle. If you change a value here, update the corresponding value in
-// types/constants.go.
+	"github.com/eshanized/M31A/internal/types"
+)
 
 const (
-	// Bash tool constants
-	BashKillGracePeriod = 5 * time.Second
+	BashKillGracePeriod = time.Duration(types.DefaultBashKillGraceSecs) * time.Second
 	BashWaitTimeout     = 30 * time.Second
 
-	// FileWrite constants
-	MaxBackupsPerFile = 10
-	DirPermission     = 0755
-	FilePermission     = 0644
+	MaxBackupsPerFile = types.DefaultMaxBackupsPerFile
+	DirPermission     = types.DirPermission
+	FilePermission     = types.FilePermission
 
-	// Glob constants
-	MaxGlobResults = 1000
-	DateFormat      = "2006-01-02 15:04"
+	MaxGlobResults = types.DefaultMaxGlobResults
+	DateTimeFormat = "2006-01-02 15:04"
 
-	// Grep constants
 	MaxGrepPatternLength  = 1024
-	DefaultMaxGrepResults = 100
+	DefaultMaxGrepResults = types.DefaultMaxGrepResults
 
-	// WebFetch constants
-	MaxRedirects       = 5
+	MaxRedirects       = types.DefaultWebfetchMaxRedirects
 	DefaultTimeoutSecs = 30
 	MaxTimeoutSecs     = 120
 	DNSCacheTTL        = 5 * time.Minute
 
-	// Edit constants
 	MinLinesForFuzzy     = 3
 	LevenshteinThreshold = 0.7
 
-	// Dispatcher constants
 	PermissionChannelBuffer = 8
 	QuestionChannelBuffer   = 4
 	DefaultAgentName        = "default"
