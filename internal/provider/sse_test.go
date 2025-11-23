@@ -45,8 +45,8 @@ func TestSSEParser_MultiLineData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if data != "line1line2" {
-		t.Fatalf("expected %q, got %q", "line1line2", data)
+	if data != "line1\nline2" {
+		t.Fatalf("expected %q, got %q", "line1\nline2", data)
 	}
 }
 
