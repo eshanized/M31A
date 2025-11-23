@@ -131,16 +131,6 @@ func TestSSE_TruncatedStream_Typed(t *testing.T) {
 func TestModelCache_SingleFlight(t *testing.T) {
 	var requestCount int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&requestCount, 1)
-		time.Sleep(100 * time.Millisecond) // Simulate slow network
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[{"id":"test","name":"Test Model","context_length":128000}]`))
-	}))
-	defer server.Close()
-
-	_ = server // Would be used in a real test with HTTP fetch
-
 	cache := NewModelCache(5 * time.Minute)
 
 	// Simulate 10 concurrent refresh calls using singleflight
