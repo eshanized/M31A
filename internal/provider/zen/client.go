@@ -71,8 +71,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 		baseURL: opts.BaseURL,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
-				DialContext:           (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
-				ResponseHeaderTimeout: types.HTTPDialTimeout, // C-17 fix: was missing
+				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			},
 		},
 		cache:             cache,
@@ -239,8 +238,8 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
 	}
-	io.Copy(io.Discard, io.LimitReader(resp.Body, types.MaxLLMResponseBytes))
 	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, types.MaxLLMResponseBytes))
 
 	if resp.StatusCode != http.StatusOK {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: fmt.Sprintf("status %d", resp.StatusCode)}
