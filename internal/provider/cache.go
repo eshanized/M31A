@@ -48,7 +48,7 @@ func (c *ModelCache) Refresh(ctx context.Context, fetchFn func(ctx context.Conte
 
 	defer c.refreshing.Store(false)
 
-	v, err, _ := c.sfg.Do("refresh", func() (interface{}, error) {
+	v, err, _ := c.sfg.Do("refresh", func() (any, error) {
 		models, fetchErr := fetchFn(ctx)
 		if fetchErr != nil {
 			return nil, fetchErr
