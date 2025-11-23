@@ -101,6 +101,8 @@ func main() {
 	}
 
 	// Provider registry
+	openrouter.Version = Version
+	zen.Version = Version
 	registry := provider.NewRegistry()
 
 	if cfg.Provider.OpenRouter.APIKey != "" {
