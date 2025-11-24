@@ -332,16 +332,16 @@ func TestMatchesGitignore(t *testing.T) {
 	t.Parallel()
 	patterns := []string{"*.log", "*.tmp", "node_modules"}
 
-	if !matchesGitignore("test.log", patterns) {
+	if !matchesGitignore("test.log", patterns, ".") {
 		t.Error("expected test.log to match *.log")
 	}
-	if !matchesGitignore("data.tmp", patterns) {
+	if !matchesGitignore("data.tmp", patterns, ".") {
 		t.Error("expected data.tmp to match *.tmp")
 	}
-	if matchesGitignore("main.go", patterns) {
+	if matchesGitignore("main.go", patterns, ".") {
 		t.Error("expected main.go to not match any pattern")
 	}
-	if !matchesGitignore("node_modules", patterns) {
+	if !matchesGitignore("node_modules", patterns, ".") {
 		t.Error("expected node_modules to match")
 	}
 }
