@@ -14,7 +14,16 @@ import (
 )
 
 func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember bool) {
-	d.responseCh <- PermissionResponse{RequestID: requestID, Allowed: allowed, Remember: remember}
+	resp := PermissionResponse{RequestID: requestID, Allowed: allowed, Remember: remember}
+	if ch, ok := d.pendingResponses.Load(requestID); ok {
+		select {
+		case ch.(chan PermissionResponse) <- resp:
+		default:
+		}
+		return
+	}
+	// Fallback to shared channel for backwards compatibility
+	d.responseCh <- resp
 }
 
 func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
@@ -153,9 +162,8 @@ func matchValue(v any, pattern string) bool {
 }
 
 func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, risk types.RiskLevel, pctx *PermissionContext) error {
-	reqID := nextPermissionRequestID()
 	req := PermissionRequest{
-		ID:          reqID,
+		ID:          nextPermissionRequestID(),
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
@@ -164,104 +172,19 @@ func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, ris
 		RulePattern: pctx.RulePattern,
 		RuleAction:  pctx.RuleAction,
 	}
-
-	select {
-	case d.requestCh <- req:
-	default:
-		return m31errors.ErrPermissionDenied
-	}
-
-	// Create a timeout context for the permission request
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
-	defer cancel()
-
-	// RC-2 fix: match responses by request ID to prevent mix-ups
-	var resp PermissionResponse
-	for {
-		select {
-		case r := <-d.responseCh:
-			if r.RequestID == reqID {
-				resp = r
-				goto done
-			}
-			// Not ours — put it back and keep looking
-			select {
-			case d.responseCh <- r:
-			default:
-			}
-		case <-timeoutCtx.Done():
-			return m31errors.ErrPermissionDenied
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-done:
-
-	if !resp.Allowed {
-		return m31errors.ErrPermissionDenied
-	}
-
-	if resp.Remember {
-		d.mu.Lock()
-		d.permissions[call.Name] = resp.Allowed
-		d.mu.Unlock()
-	}
-
-	return nil
+	return d.sendAndWaitForPermission(ctx, req, call.Name)
 }
 
 func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
-	reqID := nextPermissionRequestID()
 	req := PermissionRequest{
-		ID:          reqID,
+		ID:          nextPermissionRequestID(),
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
 		TimeoutSecs: d.permissionTimeout,
 		RuleAction:  "ask",
 	}
-
-	select {
-	case d.requestCh <- req:
-	default:
-		return m31errors.ErrPermissionDenied
-	}
-
-	// Create a timeout context for the permission request
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
-	defer cancel()
-
-	var resp PermissionResponse
-	for {
-		select {
-		case r := <-d.responseCh:
-			if r.RequestID == reqID {
-				resp = r
-				goto done
-			}
-			select {
-			case d.responseCh <- r:
-			default:
-			}
-		case <-timeoutCtx.Done():
-			return m31errors.ErrPermissionDenied
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-done:
-
-	if !resp.Allowed {
-		return m31errors.ErrPermissionDenied
-	}
-
-	if resp.Remember {
-		d.mu.Lock()
-		d.permissions[call.Name] = resp.Allowed
-		d.mu.Unlock()
-	}
-
-	return nil
+	return d.sendAndWaitForPermission(ctx, req, call.Name)
 }
 
 func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
@@ -269,55 +192,57 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 	allowed, remembered := d.permissions[call.Name]
 	d.mu.RUnlock()
 
-	if !remembered || !allowed {
-		reqID := nextPermissionRequestID()
-		req := PermissionRequest{
-			ID:          reqID,
-			ToolName:    call.Name,
-			Command:     extractCommandString(call.Name, call.Input),
-			RiskLevel:   risk,
-			TimeoutSecs: d.permissionTimeout,
-		}
+	if remembered && allowed {
+		return nil
+	}
 
-		select {
-		case d.requestCh <- req:
-		default:
-			return m31errors.ErrPermissionDenied
-		}
+	req := PermissionRequest{
+		ID:          nextPermissionRequestID(),
+		ToolName:    call.Name,
+		Command:     extractCommandString(call.Name, call.Input),
+		RiskLevel:   risk,
+		TimeoutSecs: d.permissionTimeout,
+	}
+	return d.sendAndWaitForPermission(ctx, req, call.Name)
+}
 
-		// Create a timeout context for the permission request
-		timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
-		defer cancel()
+// sendAndWaitForPermission sends a permission request to the TUI and blocks
+// until a matching response arrives, the timeout expires, or the context is
+// cancelled. Uses per-request channels to avoid deadlock when multiple tools
+// request permission concurrently. If the user selects "remember", the
+// decision is cached for the tool name.
+func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req PermissionRequest, toolName string) error {
+	// Create per-request response channel
+	respCh := make(chan PermissionResponse, 1)
+	d.pendingResponses.Store(req.ID, respCh)
+	defer d.pendingResponses.Delete(req.ID)
 
-		var resp PermissionResponse
-		for {
-			select {
-			case r := <-d.responseCh:
-				if r.RequestID == reqID {
-					resp = r
-					goto done
-				}
-				select {
-				case d.responseCh <- r:
-				default:
-				}
-			case <-timeoutCtx.Done():
-				return m31errors.ErrPermissionDenied
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	done:
+	select {
+	case d.requestCh <- req:
+	default:
+		return m31errors.ErrPermissionDenied
+	}
 
-		if !resp.Allowed {
-			return m31errors.ErrPermissionDenied
-		}
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSecs)*time.Second)
+	defer cancel()
 
-		if resp.Remember {
-			d.mu.Lock()
-			d.permissions[call.Name] = resp.Allowed
-			d.mu.Unlock()
-		}
+	var resp PermissionResponse
+	select {
+	case resp = <-respCh:
+	case <-timeoutCtx.Done():
+		return m31errors.ErrPermissionDenied
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	if !resp.Allowed {
+		return m31errors.ErrPermissionDenied
+	}
+
+	if resp.Remember {
+		d.mu.Lock()
+		d.permissions[toolName] = resp.Allowed
+		d.mu.Unlock()
 	}
 
 	return nil
