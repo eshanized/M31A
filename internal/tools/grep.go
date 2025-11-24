@@ -131,7 +131,7 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var result types.ToolResult
 	var err error
 	if t.hasRg {
-		result, err = t.grepWithRG(pattern, searchPath, globFilter, maxResults)
+		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults)
 	} else {
 		result, err = t.grepPureGo(pattern, searchPath, globFilter, maxResults)
 	}
@@ -155,7 +155,7 @@ type rgDataMatch struct {
 	LineNumber int `json:"line_number"`
 }
 
-func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
+func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
 	args := []string{"--json", "--no-heading", "--line-number", "--max-count", fmt.Sprintf("%d", maxResults)}
 	if glob != "" {
 		args = append(args, "--glob", glob)
@@ -163,7 +163,7 @@ func (t *Grep) grepWithRG(pattern, searchPath, glob string, maxResults int) (typ
 	args = append(args, pattern)
 	args = append(args, searchPath)
 
-	cmd := exec.Command("rg", args...)
+	cmd := exec.CommandContext(ctx, "rg", args...)
 	cmd.Dir = t.workDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -260,7 +260,7 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 		}
 
 		// Check gitignore
-		if matchesGitignore(path, gitignorePatterns) {
+		if matchesGitignore(path, gitignorePatterns, t.workDir) {
 			return nil
 		}
 
@@ -339,9 +339,9 @@ func loadGitignore(dir string) []string {
 	return patterns
 }
 
-func matchesGitignore(path string, patterns []string) bool {
+func matchesGitignore(path string, patterns []string, workDir string) bool {
 	// Convert to relative path for matching
-	relPath, err := filepath.Rel(".", path)
+	relPath, err := filepath.Rel(workDir, path)
 	if err != nil {
 		relPath = path
 	}
