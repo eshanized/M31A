@@ -80,9 +80,13 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var matches []string
 	var err error
 	if useRG {
-		matches, err = t.globWithRG(pattern)
+		matches, err = t.globWithRG(ctx, pattern)
 		if err != nil {
-			return types.ToolResult{}, fmt.Errorf("invalid glob pattern: %w", err)
+			// rg failed at runtime — fall back to pure-Go doublestar
+			matches, err = t.globWithDoublestar(pattern)
+			if err != nil {
+				return types.ToolResult{}, fmt.Errorf("invalid glob pattern: %w", err)
+			}
 		}
 	} else {
 		matches, err = t.globWithDoublestar(pattern)
@@ -116,7 +120,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(DateFormat))
+		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(DateTimeFormat))
 	}
 	if truncated {
 		fmt.Fprintf(&b, "[... %d more files]", origCount-maxResults)
@@ -138,8 +142,8 @@ func (t *Glob) globWithDoublestar(pattern string) ([]string, error) {
 	return matches, nil
 }
 
-func (t *Glob) globWithRG(pattern string) ([]string, error) {
-	cmd := exec.Command("rg", "--files", "--sort", "path", "--glob", pattern)
+func (t *Glob) globWithRG(ctx context.Context, pattern string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "rg", "--files", "--sort", "path", "--glob", pattern)
 	cmd.Dir = t.workDir
 	out, err := cmd.Output()
 	if err != nil {
