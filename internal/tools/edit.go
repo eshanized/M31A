@@ -219,7 +219,7 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		return fmt.Errorf("cannot generate temp name: %w", err)
 	}
 	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	tmpFile, err := os.Create(tmpPath)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
@@ -323,11 +323,15 @@ func lineTrimmedReplace(content, oldString, newString string) (string, error) {
 			newLines = append(newLines, contentLines[:i]...)
 
 			newContentLines := strings.Split(newString, "\n")
-			// Try to preserve indentation from original lines
-			for k, ncLine := range newContentLines {
-				if k < len(oldLines) && i+k < len(contentLines) {
-					indent := leadingWhitespace(contentLines[i+k])
-					ncLine = indent + strings.TrimSpace(ncLine)
+			// Use the first matched line's indentation as the base indent for all new lines
+			baseIndent := ""
+			if i < len(contentLines) {
+				baseIndent = leadingWhitespace(contentLines[i])
+			}
+			for _, ncLine := range newContentLines {
+				trimmed := strings.TrimSpace(ncLine)
+				if trimmed != "" {
+					ncLine = baseIndent + trimmed
 				}
 				newLines = append(newLines, ncLine)
 			}
@@ -349,17 +353,34 @@ func whitespaceNormalizedReplace(content, oldString, newString string) (string, 
 		return strings.Join(fields, " ")
 	}
 
-	normalizedContent := normalize(content)
-	normalizedOld := normalize(oldString)
+	oldLines := strings.Split(oldString, "\n")
+	contentLines := strings.Split(content, "\n")
 
-	idx := strings.Index(normalizedContent, normalizedOld)
-	if idx < 0 {
-		return "", fmt.Errorf("no whitespace-normalized match found")
+	normalizedOldLines := make([]string, len(oldLines))
+	for i, line := range oldLines {
+		normalizedOldLines[i] = normalize(line)
 	}
 
-	// Map normalized index back to original content
-	// Find the original substring that corresponds to the match
-	return strings.Replace(content, oldString, newString, 1), nil
+	for i := 0; i <= len(contentLines)-len(oldLines); i++ {
+		match := true
+		for j := range normalizedOldLines {
+			if normalize(contentLines[i+j]) != normalizedOldLines[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			newLines := make([]string, 0, len(contentLines)-len(oldLines)+strings.Count(newString, "\n")+1)
+			newLines = append(newLines, contentLines[:i]...)
+			newLines = append(newLines, strings.Split(newString, "\n")...)
+			if i+len(oldLines) < len(contentLines) {
+				newLines = append(newLines, contentLines[i+len(oldLines):]...)
+			}
+			return strings.Join(newLines, "\n"), nil
+		}
+	}
+
+	return "", fmt.Errorf("no whitespace-normalized match found")
 }
 
 func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
@@ -459,12 +480,6 @@ func levenshteinDistance(a, b string) int {
 	return prev[len(b)]
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func leadingWhitespace(s string) string {
 	var indent strings.Builder
@@ -485,7 +500,7 @@ func detectLineEnding(content string) string {
 	return "\n"
 }
 
-func toInt(v interface{}) (int, bool) {
+func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
