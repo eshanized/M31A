@@ -161,10 +161,12 @@ func TestGlob_WithGitignoreAndRG(t *testing.T) {
 	if err != nil {
 		t.Skipf("skipping rg-based test: %v", err)
 	}
-	// Note: the rg code path has a known issue where os.Stat fails on relative
-	// paths when CWD != workDir. When this is fixed, this test should check
-	// that main.go appears in the output. For now, just verify it doesn't crash.
-	_ = result
+	// BUG(glob): rg code path has a known issue where os.Stat fails on relative
+	// paths when CWD != workDir. See: https://github.com/eshanized/M31A/issues/XXX
+	// When this is fixed, verify main.go appears in output. For now, just verify no crash.
+	if result.Output == "" {
+		t.Error("expected non-empty output from glob")
+	}
 }
 
 func TestGlob_RecursiveWithGitignore(t *testing.T) {
@@ -180,9 +182,11 @@ func TestGlob_RecursiveWithGitignore(t *testing.T) {
 	if err != nil {
 		t.Skipf("skipping rg-based test: %v", err)
 	}
-	// Note: same rg path issue as TestGlob_WithGitignoreAndRG.
-	// When the relative path bug in globWithRG is fixed, verify output here.
-	_ = result
+	// BUG(glob): same rg path issue as TestGlob_WithGitignoreAndRG.
+	// See: https://github.com/eshanized/M31A/issues/XXX
+	if result.Output == "" {
+		t.Error("expected non-empty output from recursive glob")
+	}
 }
 
 func TestGlob_GlobType(t *testing.T) {
