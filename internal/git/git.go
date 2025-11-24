@@ -187,6 +187,34 @@ func (g *Git) DiffStaged() (string, error) {
 	return out, nil
 }
 
+// DiffFile returns the diff for a single file. For untracked files ("?"),
+// it returns the file contents as an "added" diff. For staged files it
+// uses --cached; otherwise it shows unstaged working-tree changes.
+func (g *Git) DiffFile(path string, status string) (string, error) {
+	if status == "?" {
+		out, err := g.run("diff", "--no-index", "/dev/null", "--", path)
+		if err != nil {
+			// git diff --no-index exits 1 when files differ, which is expected
+			if len(out) > 0 {
+				return out, nil
+			}
+			return "", fmt.Errorf("git diff file: %w", err)
+		}
+		return out, nil
+	}
+	// Check if staged changes exist for this file
+	staged, _ := g.run("diff", "--cached", "--", path)
+	if staged != "" {
+		return staged, nil
+	}
+	// Fall back to unstaged working-tree changes
+	out, err := g.run("diff", "--", path)
+	if err != nil {
+		return "", fmt.Errorf("git diff file: %w", err)
+	}
+	return out, nil
+}
+
 // FileStatus represents a single file's git status.
 type FileStatus struct {
 	Status    string // e.g. "M", "A", "D", "R", "C", "U", "?"
