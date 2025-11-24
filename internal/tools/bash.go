@@ -101,7 +101,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		stdoutW.Close()
 		stderrW.Close()
 		stdoutR.Close()
-		errRead, _ := io.ReadAll(stderrR)
+		errRead, _ := io.ReadAll(io.LimitReader(stderrR, types.BashOutputLimit))
 		stderrR.Close()
 		extra := ""
 		if len(errRead) > 0 {
