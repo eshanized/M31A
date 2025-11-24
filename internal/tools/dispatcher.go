@@ -21,6 +21,7 @@ type Dispatcher struct {
 	permissions      map[string]bool
 	requestCh        chan PermissionRequest
 	responseCh       chan PermissionResponse
+	pendingResponses sync.Map // map[int64]chan PermissionResponse — per-request routing
 	todoWrite        *TodoWrite
 	questionReqCh    chan QuestionRequest
 	questionRespCh   chan QuestionResponse
