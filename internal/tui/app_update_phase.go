@@ -32,7 +32,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 	case types.PhaseInitialize:
 		m.setWorkflowPhase(types.PhaseDiscuss)
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.Transition(m.shutdownCtx, types.PhaseInitialize, types.PhaseDiscuss)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseInitialize, types.PhaseDiscuss); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseInitialize, "to", types.PhaseDiscuss, "error", err)
+			}
 		}
 		return m.RunPhaseCmd(types.PhaseDiscuss)
 
@@ -40,7 +42,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.setWorkflowPhase(types.PhasePlan)
 		m.screen = ScreenPlan
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", types.PhasePlan, "error", err)
+			}
 		}
 		if m.planModel == nil {
 			m.planModel = NewPlanModel(
@@ -57,7 +61,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.setWorkflowPhase(types.PhaseExecute)
 		m.screen = ScreenExecute
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.Transition(m.shutdownCtx, types.PhasePlan, types.PhaseExecute)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhasePlan, types.PhaseExecute); err != nil {
+				slog.Error("phase transition failed", "from", types.PhasePlan, "to", types.PhaseExecute, "error", err)
+			}
 		}
 		if m.executeModel == nil {
 			m.executeModel = NewExecuteModel(msg.Tasks, m.themeManager.Current(), m.width, m.height)
@@ -70,7 +76,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.setWorkflowPhase(types.PhaseVerify)
 		m.screen = ScreenVerify
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, types.PhaseVerify)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, types.PhaseVerify); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseExecute, "to", types.PhaseVerify, "error", err)
+			}
 		}
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
 		return m.RunPhaseCmd(types.PhaseVerify)
@@ -79,7 +87,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.setWorkflowPhase(types.PhaseShip)
 		m.screen = ScreenShip
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseShip)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseShip); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseVerify, "to", types.PhaseShip, "error", err)
+			}
 		}
 		summary := ShipSummary{
 			SessionID: m.sessionID,
