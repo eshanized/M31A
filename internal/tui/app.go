@@ -17,11 +17,15 @@ import (
 func (m *AppState) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.routeToScreen(),
-		NextHealthTick(types.HealthCheckInterval),
+		NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),
 	}
 	if m.dispatcher != nil {
 		cmds = append(cmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
 		cmds = append(cmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))
+	}
+	// Trigger initial sidebar git status refresh
+	if m.sidebarModel != nil {
+		cmds = append(cmds, m.sidebarModel.refreshCmd())
 	}
 	return tea.Batch(cmds...)
 }
