@@ -31,6 +31,7 @@ func (m *AppState) handleSlashCommand(input string) tea.Cmd {
 	if strings.HasPrefix(input, "/") {
 		if m.cmdRegistry != nil {
 			ctx := CommandContext{
+				Ctx:            m.shutdownCtx,
 				Registry:       m.registry,
 				SessionManager: m.sessionManager,
 				SessionID:      m.sessionID,
@@ -43,6 +44,9 @@ func (m *AppState) handleSlashCommand(input string) tea.Cmd {
 				AutoDream:      m.autoDream,
 				WorkflowEngine: m.workflowEngine,
 				CmdRegistry:    m.cmdRegistry,
+			}
+			if m.replModel != nil {
+				ctx.ClearMessages = m.replModel.ClearMessages
 			}
 			result, handled := m.cmdRegistry.Execute(input, ctx)
 			if handled {
