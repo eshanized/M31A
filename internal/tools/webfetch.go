@@ -111,11 +111,31 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 			if len(via) >= MaxRedirects {
 				return fmt.Errorf("stopped after %d redirects", MaxRedirects)
 			}
-			// SSRF protection: check each redirect target
-			if err := wf.resolveAndCheck(req.Context(), req.URL.String()); err != nil {
-				slog.Warn("WebFetch redirect blocked by SSRF protection",
+			// SSRF protection: resolve and cache DNS for redirect target,
+			// then check for private IPs. Using resolveAndCache ensures
+			// the same pinned IP is used for the redirect connection.
+			parsed, err := url.Parse(req.URL.String())
+			if err != nil {
+				return fmt.Errorf("invalid redirect URL: %w", err)
+			}
+			host := parsed.Hostname()
+			if host == "" {
+				return nil
+			}
+			addrs, err := wf.resolveAndCache(req.Context(), host)
+			if err != nil {
+				slog.Warn("WebFetch redirect DNS resolution failed",
 					"url", req.URL.String(), "error", err)
 				return err
+			}
+			if !wf.allowPrivateIPs {
+				for _, addr := range addrs {
+					if isPrivateIP(addr.IP) {
+						slog.Warn("WebFetch redirect blocked by SSRF protection",
+							"url", req.URL.String(), "ip", addr.IP)
+						return fmt.Errorf("redirect to private IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
+					}
+				}
 			}
 			return nil
 		},
@@ -467,22 +487,20 @@ func stripTags(html string, tags ...string) string {
 
 func replaceBlockTag(html, tag, replacement string) string {
 	lower := strings.ToLower(html)
+	openTag := "<" + tag
+	closeTag := "</" + tag + ">"
 	for {
-		openTag := "<" + tag
 		start := strings.Index(lower, openTag)
 		if start == -1 {
 			break
 		}
 
-		// Find end of opening tag
 		tagEnd := strings.Index(html[start:], ">")
 		if tagEnd == -1 {
 			break
 		}
 		tagEnd += start + 1
 
-		// Find closing tag
-		closeTag := "</" + tag + ">"
 		closeStart := strings.Index(lower[tagEnd:], closeTag)
 		if closeStart == -1 {
 			break
@@ -547,17 +565,35 @@ func convertLinks(html string) string {
 			lower = strings.ToLower(html)
 			continue
 		}
-		hrefStart += start + 6 // len("href=") = 5 + 1 for space
+		hrefStart += start + 5 // len("href=") = 5
 
-		// Extract URL (handle quotes)
-		quoteChar := html[hrefStart]
-		urlStart := hrefStart + 1
-		urlEnd := strings.Index(html[urlStart:], string(quoteChar))
-		if urlEnd == -1 {
+		// Bounds check before accessing the character after href=
+		if hrefStart >= len(html) {
 			break
 		}
-		urlEnd += urlStart
-		url := html[urlStart:urlEnd]
+
+		// Extract URL (handle quoted and unquoted)
+		var url string
+		quoteChar := html[hrefStart]
+		if quoteChar == '"' || quoteChar == '\'' {
+			urlStart := hrefStart + 1
+			if urlStart >= len(html) {
+				break
+			}
+			urlEnd := strings.Index(html[urlStart:], string(quoteChar))
+			if urlEnd == -1 {
+				break
+			}
+			urlEnd += urlStart
+			url = html[urlStart:urlEnd]
+		} else {
+			// Unquoted href — read until whitespace or >
+			urlEnd := hrefStart
+			for urlEnd < len(html) && html[urlEnd] != ' ' && html[urlEnd] != '>' && html[urlEnd] != '\t' && html[urlEnd] != '\n' {
+				urlEnd++
+			}
+			url = html[hrefStart:urlEnd]
+		}
 
 		// Find end of opening tag
 		tagEnd := strings.Index(html[start:], ">")
@@ -613,22 +649,27 @@ func stripAllTags(html string) string {
 }
 
 func normalizeWhitespace(s string) string {
-	// Collapse multiple newlines
-	for strings.Contains(s, "\n\n\n") {
-		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
-	}
-	// Collapse multiple spaces
 	var b strings.Builder
+	b.Grow(len(s))
+	prevNewlines := 0
 	inSpace := false
 	for _, ch := range s {
-		if ch == ' ' || ch == '\t' {
+		if ch == '\n' {
+			prevNewlines++
+			inSpace = false
+			if prevNewlines <= 2 {
+				b.WriteRune(ch)
+			}
+		} else if ch == ' ' || ch == '\t' {
+			prevNewlines = 0
 			if !inSpace {
 				b.WriteRune(' ')
 				inSpace = true
 			}
 		} else {
-			b.WriteRune(ch)
+			prevNewlines = 0
 			inSpace = false
+			b.WriteRune(ch)
 		}
 	}
 	return strings.TrimSpace(b.String())
