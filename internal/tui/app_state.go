@@ -97,6 +97,7 @@ type AppState struct {
 	discussModel  *DiscussModel
 	diffModel     *DiffModel
 	metricsModel  *MetricsModel
+	configModel   *ConfigModel
 
 	// Command system
 	cmdRegistry *CommandRegistry
@@ -138,6 +139,9 @@ type AppState struct {
 
 	// Stream cancellation
 	streamCancelFn context.CancelFunc
+
+	// Double ctrl+c exit tracking
+	lastCtrlCTime time.Time
 }
 
 // NewApp creates a new AppState.
