@@ -31,6 +31,7 @@ const (
 	ScreenGoalInput     Screen = 13   // full-screen goal entry
 	ScreenDiscuss       Screen = 14   // discuss Q&A
 	ScreenMetrics       Screen = 15   // session analytics
+	ScreenConfig        Screen = 16   // full config viewer
 )
 
 // Label returns a human-readable name for the screen.
@@ -68,6 +69,8 @@ func (s Screen) Label() string {
 		return "Discuss"
 	case ScreenMetrics:
 		return "Metrics"
+	case ScreenConfig:
+		return "Config"
 	default:
 		return "Unknown"
 	}
