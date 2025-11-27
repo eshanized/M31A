@@ -23,7 +23,7 @@ func NextCacheRefreshTick(d time.Duration) tea.Cmd {
 }
 
 // CacheRefreshCmd runs FetchModels in a goroutine and emits CacheRefreshResultMsg.
-func CacheRefreshCmd(registry *provider.Registry, providerName string) tea.Cmd {
+func CacheRefreshCmd(ctx context.Context, registry *provider.Registry, providerName string) tea.Cmd {
 	return func() tea.Msg {
 		if registry == nil {
 			return CacheRefreshResultMsg{ErrMsg: "no registry"}
@@ -32,9 +32,9 @@ func CacheRefreshCmd(registry *provider.Registry, providerName string) tea.Cmd {
 		if err != nil {
 			return CacheRefreshResultMsg{ErrMsg: err.Error()}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if _, err := p.FetchModels(ctx); err != nil {
+		if _, err := p.FetchModels(fetchCtx); err != nil {
 			return CacheRefreshResultMsg{
 				ErrMsg:  err.Error(),
 				NextCmd: NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
