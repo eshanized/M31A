@@ -32,8 +32,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.streamCancelFn != nil {
 				m.streamCancelFn()
 				m.streamCancelFn = nil
+				m.lastCtrlCTime = time.Time{}
+				return m, nil
 			}
-			return m, nil
+			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
+				return m, tea.Quit
+			}
+			m.lastCtrlCTime = time.Now()
+			m.toasts = append(m.toasts, Toast{
+				Text:      "Press ctrl+c again to exit",
+				Type:      "info",
+				CreatedAt: time.Now(),
+			})
+			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+				return ToastExpiryMsg{}
+			})
 		default:
 			cmds = append(cmds, m.routeKeyMsg(msg))
 		}
@@ -103,10 +116,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case HealthCheckTickMsg:
 		if m.activeProvider != "" && m.registry != nil {
 			if p, err := m.registry.Get(m.activeProvider); err == nil {
-				cmds = append(cmds, HealthCheckCmd(p, 10*time.Second))
+				cmds = append(cmds, HealthCheckCmd(m.shutdownCtx, p, 10*time.Second))
 			}
 		}
-		cmds = append(cmds, NextHealthTick(types.HealthCheckInterval))
+		cmds = append(cmds, NextHealthTick(m.shutdownCtx, types.HealthCheckInterval))
 
 	case HealthCheckResultMsg:
 		m.healthStatus = msg.Result
@@ -119,7 +132,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if provider == "" {
 				provider = m.activeProvider
 			}
-			cmds = append(cmds, CacheRefreshCmd(m.registry, provider))
+			cmds = append(cmds, CacheRefreshCmd(m.shutdownCtx, m.registry, provider))
 		}
 	case CacheRefreshResultMsg:
 		if msg.NextCmd != nil {
@@ -129,6 +142,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Permission modal ──────────────────────────────────────────────────────
 	case PermissionRequestMsg:
 		m.permRequest = &msg.Request
+		m.permCountdown = 0
 		m.permCountdown = msg.Request.TimeoutSecs
 		timeout := components.DefaultPermissionTimeout
 		if msg.Request.TimeoutSecs > 0 {
@@ -208,32 +222,23 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Settings saved ────────────────────────────────────────────────────────
 	case SettingsSavedMsg:
-		// Optionally reload config here
+		// Rebuild the config viewer content so /config reflects changes instantly.
+		// Since SettingsModel mutates m.config in-place (shared pointer), we only
+		// need to regenerate the rendered content — no need to pass a new cfg pointer.
+		if m.configModel != nil {
+			m.configModel.buildContent()
+		} else {
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+		}
 		m.screen = ScreenREPL
 
 	// ── Theme changed ─────────────────────────────────────────────────────────
 	case ThemeChangedMsg:
-		switch msg.Theme {
-		case "dark":
-			m.themeManager = theme.NewManager(theme.ModeDark)
-		case "light":
-			m.themeManager = theme.NewManager(theme.ModeLight)
-		case "auto":
-			m.themeManager = theme.NewManager(theme.ModeAuto)
-		}
-		t := m.themeManager.Current()
-		if m.replModel != nil {
-			m.replModel.SetTheme(t)
-		}
-		if m.sidebarModel != nil {
-			m.sidebarModel.SetTheme(t)
-		}
-		if m.cmdPalette != nil {
-			m.cmdPalette.SetTheme(t)
-		}
-		if m.settingsModel != nil {
-			m.settingsModel.SetTheme(t)
-		}
+		m.applyTheme(msg.Theme)
+
+	// ── Settings theme change (from settings screen) ────────────────────────
+	case settingsThemeChanged:
+		m.applyTheme(msg.ThemeName)
 
 	// ── Fallback event ────────────────────────────────────────────────────────
 	case FallbackEventMsg:
@@ -245,7 +250,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModel = &msg.Model
 		m.activeProvider = msg.Provider
 		if m.replModel != nil {
-			providerCmd := m.replModel.SetProvider(m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
+			providerCmd := m.replModel.SetProvider(m.shutdownCtx, m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
 			cmds = append(cmds, providerCmd)
 		}
 		m.screen = ScreenREPL
@@ -253,11 +258,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Sidebar refresh ───────────────────────────────────────────────────────
 	case SidebarRefreshMsg:
 		if m.sidebarModel != nil {
-			m.sidebarModel.Update(msg)
+			newSidebar, cmd := m.sidebarModel.Update(msg)
+			m.sidebarModel = newSidebar
+			cmds = append(cmds, cmd)
 		}
 		// Propagate git branch to REPL for status bar display
 		if m.replModel != nil && msg.Branch != "" {
 			m.replModel.sidebarBranch = msg.Branch
+		}
+		// Propagate changed-file count so the welcome screen project card is accurate
+		if m.replModel != nil {
+			m.replModel.SetChangedFiles(len(msg.Files))
 		}
 
 	// ── Diff screen ───────────────────────────────────────────────────────────
@@ -266,8 +277,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffModel = NewDiffModel(m.themeManager.Current())
 		}
 		m.diffModel.SetDiff(msg.Diff)
+		m.diffModel.SetTitle(msg.Title)
 		m.diffModel.width = m.width
 		m.diffModel.height = m.height
+		if m.sidebarModel != nil {
+			m.sidebarModel.Blur()
+		}
 		m.screen = ScreenDiff
 
 	case DiffCloseMsg:
@@ -306,6 +321,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenSettings:
+			if m.settingsModel != nil {
+				newSettings, cmd := m.settingsModel.Update(msg)
+				m.settingsModel = newSettings
+				cmds = append(cmds, cmd)
+			}
 		case ScreenResume:
 			if m.resumeModel != nil {
 				newResume, cmd := m.resumeModel.Update(msg)
@@ -335,7 +356,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	switch m.screen {
 	case ScreenFirstRun:
 		if m.firstRunModel == nil {
-			fm := NewFirstRunModel(m.themeManager.Current())
+			fm := NewFirstRunModel(m.themeManager.Current(), m.registry)
 			m.firstRunModel = fm
 		}
 		return m.firstRunModel.Init()
@@ -405,8 +426,21 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 
-	// Global leader key
-	if m.keyRegistry != nil {
+	// Sidebar focus toggle — works from any screen
+	if msg.String() == "ctrl+g" && m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+		m.sidebarModel.ToggleFocus()
+		return nil
+	}
+
+	// When sidebar is focused AND we're on the REPL, route keys to sidebar
+	if m.screen == ScreenREPL && m.sidebarModel != nil && m.sidebarModel.IsFocused() {
+		return m.sidebarModel.HandleKey(msg)
+	}
+
+	// Global leader key — only intercept leader ACTIVATION here.
+	// When leader is already active, let the key fall through to the
+	// screen-specific handler so REPL chords (ctrl+x b, etc.) work.
+	if m.keyRegistry != nil && !m.keyRegistry.IsLeaderActive() {
 		handled, cmd := m.keyRegistry.Handle(msg.String(), CtxGlobal)
 		if handled {
 			return cmd
@@ -518,6 +552,12 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			}
 			return cmd
 		}
+	case ScreenConfig:
+		if m.configModel != nil {
+			newCfg, cmd := m.configModel.Update(msg)
+			m.configModel = newCfg
+			return cmd
+		}
 	}
 	return nil
 }
@@ -561,6 +601,10 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 	case "toggle_sidebar":
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
+			if m.replModel != nil {
+				sw := m.sidebarModel.GetWidth()
+				m.replModel.SetSidebarWidth(sw)
+			}
 		}
 		return nil
 	case "toggle_theme":
@@ -572,9 +616,8 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 		case theme.ModeAuto:
 			themeName = "auto"
 		}
-		return func() tea.Msg {
-			return ThemeChangedMsg{Theme: themeName}
-		}
+		m.applyTheme(themeName)
+		return nil
 	case "cancel_stream":
 		if m.streamCancelFn != nil {
 			m.streamCancelFn()
@@ -594,12 +637,13 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	// Start a brief transition overlay if this is a real screen change.
 	// Skip for overlays, first-run, and screens with async init.
 	skipTransition := screen == ScreenPermission || screen == ScreenDiff ||
-		screen == ScreenFirstRun || screen == ScreenResume
+		screen == ScreenFirstRun || screen == ScreenResume ||
+		screen == ScreenConfig
 	if m.screen != screen && !skipTransition {
 		// Eagerly ensure sub-model exists so it's ready when transition completes.
 		m.ensureSubModel(screen)
 		m.StartTransition(screen, "")
-		return nil
+		return StreamTickCmd()
 	}
 
 	m.screen = screen
@@ -614,7 +658,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return nil
 	case ScreenModelSelector:
 		if m.msModel == nil {
-			m.msModel = NewModelSelector(m.registry, m.sessionManager, m.themeManager.Current())
+			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
 		}
 		m.msModel.SetDimensions(m.width, m.height)
 		return m.msModel.Init()
@@ -624,7 +668,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.settingsModel.width = m.width
 			m.settingsModel.height = m.height
 		}
-		return nil
+		return m.settingsModel.Init()
 	case ScreenResume:
 		// Resume screen loads sessions async; use the existing command.
 		return m.openResumeScreen()
@@ -675,6 +719,17 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.metricsModel = NewMetricsModel(m.themeManager.Current())
 			m.metricsModel.width = m.width
 			m.metricsModel.height = m.height
+		}
+		if m.sessionManager != nil {
+			m.metricsModel.LoadStats(m.sessionManager)
+		}
+		return nil
+	case ScreenConfig:
+		if m.configModel == nil {
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+		} else {
+			m.configModel.width = m.width
+			m.configModel.height = m.height
 		}
 		return nil
 	default:
@@ -738,9 +793,8 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		case theme.ModeAuto:
 			themeName = "auto"
 		}
-		return func() tea.Msg {
-			return ThemeChangedMsg{Theme: themeName}
-		}
+		m.applyTheme(themeName)
+		return nil
 	case "cancel_stream":
 		if m.streamCancelFn != nil {
 			m.streamCancelFn()
@@ -749,6 +803,33 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+// ─── Theme helpers ────────────────────────────────────────────────────────────
+
+// applyTheme switches the theme and propagates it to all sub-models.
+func (m *AppState) applyTheme(themeName string) {
+	switch themeName {
+	case "dark":
+		m.themeManager = theme.NewManager(theme.ModeDark)
+	case "light":
+		m.themeManager = theme.NewManager(theme.ModeLight)
+	case "auto":
+		m.themeManager = theme.NewManager(theme.ModeAuto)
+	}
+	t := m.themeManager.Current()
+	if m.replModel != nil {
+		m.replModel.SetTheme(t)
+	}
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetTheme(t)
+	}
+	if m.cmdPalette != nil {
+		m.cmdPalette.SetTheme(t)
+	}
+	if m.settingsModel != nil {
+		m.settingsModel.SetTheme(t)
+	}
 }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
