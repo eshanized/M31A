@@ -49,6 +49,7 @@ func (m *AppState) View() string {
 	m.ensureSidebarModel()
 	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull
 	if hasSidebar {
+		m.sidebarModel.SetHeight(m.height)
 		sidebar = m.sidebarModel.View()
 	}
 
@@ -111,6 +112,8 @@ func (m *AppState) renderActiveScreen() string {
 		return m.renderMetricsScreen()
 	case ScreenDiscuss:
 		return m.renderDiscussScreen()
+	case ScreenConfig:
+		return m.renderConfigScreen()
 	case ScreenDiff:
 		return m.renderDiffScreen()
 	default:
@@ -188,6 +191,11 @@ func (m *AppState) renderFirstRunScreen() string {
 	if m.firstRunModel == nil {
 		return "Loading first-run wizard..."
 	}
+	availWidth := m.width
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull {
+		availWidth -= m.sidebarModel.GetWidth()
+	}
+	m.firstRunModel.SetContentWidth(availWidth)
 	return m.firstRunModel.View()
 }
 
@@ -219,6 +227,16 @@ func (m *AppState) renderDiscussScreen() string {
 	return m.discussModel.View()
 }
 
+func (m *AppState) renderConfigScreen() string {
+	if m.configModel == nil {
+		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+	} else {
+		// Regenerate content so any in-flight config mutations are visible.
+		m.configModel.buildContent()
+	}
+	return m.renderHeader("") + "\n" + m.configModel.View()
+}
+
 func (m *AppState) renderDiffScreen() string {
 	if m.diffModel == nil {
 		return "Loading diff..."
@@ -232,7 +250,6 @@ func (m *AppState) renderPermissionModal() string {
 		return m.renderQuestionModal()
 	}
 	if m.permRequest == nil {
-		m.screen = ScreenREPL
 		return m.renderREPLScreen()
 	}
 
@@ -248,6 +265,7 @@ func (m *AppState) renderPermissionModal() string {
 // ─── REPL sync helpers ────────────────────────────────────────────────────────
 
 // ensureReplModel creates the REPL model if not yet initialized.
+// Provider setup is handled separately by callers via syncReplProvider() or direct SetProvider().
 func (m *AppState) ensureReplModel() {
 	if m.replModel != nil {
 		return
@@ -256,11 +274,6 @@ func (m *AppState) ensureReplModel() {
 	m.replModel = &rm
 	m.replModel.SetCommandRegistry(m.cmdRegistry)
 	m.replModel.SetKeyRegistry(m.keyRegistry)
-
-	if m.registry != nil {
-		cmd := m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, m.sessionID, m.config)
-		_ = cmd // will be run on next Init call
-	}
 }
 
 // syncReplSize ensures the REPL model dimensions match the terminal.
@@ -286,7 +299,7 @@ func (m *AppState) syncReplProvider(sessionID string) tea.Cmd {
 	if m.replModel == nil {
 		return nil
 	}
-	return m.replModel.SetProvider(m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+	return m.replModel.SetProvider(m.shutdownCtx, m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
 }
 
 // ─── Render helpers ───────────────────────────────────────────────────────────
