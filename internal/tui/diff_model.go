@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -11,9 +13,14 @@ type DiffModel struct {
 	theme    theme.Theme
 	diff     string
 	title    string
+	filePath string
 	viewport viewport.Model
 	width    int
 	height   int
+
+	// Stats
+	additions int
+	deletions int
 }
 
 // NewDiffModel creates a DiffModel.
@@ -26,11 +33,14 @@ func (dm *DiffModel) SetTheme(t theme.Theme) {
 	dm.theme = t
 }
 
+// diffChromeHeight is the total height of non-viewport chrome in the diff view.
+const diffChromeHeight = 8
+
 // SetDimensions updates the diff model dimensions and refreshes the viewport.
 func (dm *DiffModel) SetDimensions(w, h int) {
 	dm.width = w
 	dm.height = h
-	vpH := h - 4
+	vpH := h - diffChromeHeight
 	if vpH < 3 {
 		vpH = 3
 	}
@@ -40,10 +50,20 @@ func (dm *DiffModel) SetDimensions(w, h int) {
 	}
 }
 
-// SetDiff loads a new diff string into the model.
+// SetDiff loads a new diff string into the model and computes stats.
 func (dm *DiffModel) SetDiff(diff string) {
 	dm.diff = diff
-	vpH := dm.height - 4
+	dm.additions = 0
+	dm.deletions = 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			dm.additions++
+		}
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			dm.deletions++
+		}
+	}
+	vpH := dm.height - diffChromeHeight
 	if vpH < 3 {
 		vpH = 3
 	}
@@ -57,6 +77,12 @@ func (dm *DiffModel) SetDiff(diff string) {
 // SetTitle sets the optional title line shown above the diff.
 func (dm *DiffModel) SetTitle(title string) {
 	dm.title = title
+	if strings.Contains(title, " — ") {
+		parts := strings.SplitN(title, " — ", 2)
+		if len(parts) == 2 {
+			dm.filePath = parts[1]
+		}
+	}
 }
 
 // Init implements tea.Model.
