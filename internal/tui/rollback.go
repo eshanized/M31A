@@ -249,60 +249,6 @@ func (rm *RollbackModel) renderDiffContent(e rollback.RollbackEntry) string {
 	return colorizeDiff(e.Diff, rm.theme)
 }
 
-// colorizeDiff applies syntax coloring to a unified diff string.
-// Features: green/red backgrounds for +/- lines, dimmed context,
-// styled hunk headers, line numbers, and muted file headers.
-func colorizeDiff(diff string, t theme.Theme) string {
-	lines := strings.Split(diff, "\n")
-	const lineNumWidth = 4
-	var (
-		out           []string
-		lineNum       int
-		lineNumStyle  = lipgloss.NewStyle().Foreground(t.TextMuted).Width(lineNumWidth).Align(lipgloss.Right)
-		fileHeaderSty = lipgloss.NewStyle().Foreground(t.TextMuted)
-		hunkSty       = lipgloss.NewStyle().Foreground(t.Thinking).Bold(true)
-		contextSty    = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
-		addSty        = lipgloss.NewStyle().Background(t.DiffAddedBg).Foreground(t.DiffAdded)
-		delSty        = lipgloss.NewStyle().Background(t.DiffRemovedBg).Foreground(t.DiffRemoved)
-	)
-
-	for _, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "@@"):
-			// Hunk header — no line number
-			out = append(out, "    "+hunkSty.Render(line))
-			// Reset line number tracking — the @@ header tells us the new file
-			// starting line, but for our display we continue sequential numbering.
-			lineNum = 0
-
-		case strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ "):
-			// File header — no line number
-			out = append(out, "    "+fileHeaderSty.Render(line))
-
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-			lineNum++
-			ln := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
-			out = append(out, ln+"│"+addSty.Render(line))
-
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			// Deleted lines don't increment the new-file line number
-			ln := lineNumStyle.Render("")
-			out = append(out, ln+"│"+delSty.Render(line))
-
-		case strings.HasPrefix(line, "\\ "):
-			// Diff metadata (e.g. "\ No newline at end of file")
-			out = append(out, "    "+contextSty.Render(line))
-
-		default:
-			// Context line
-			lineNum++
-			ln := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
-			out = append(out, ln+"│"+contextSty.Render(line))
-		}
-	}
-	return strings.Join(out, "\n")
-}
-
 // clampScroll ensures the cursor is visible in the list.
 func (rm *RollbackModel) clampScroll() {
 	lh := rm.listVisibleRows()
