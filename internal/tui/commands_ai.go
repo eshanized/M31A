@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 // handleCompress triggers context consolidation via AutoDream.
@@ -49,7 +49,7 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "No active provider."}
 	}
 
-	// Build a dummy task to score
+	// Build a representative task for scoring
 	task := types.Task{
 		Description: "optimize model selection",
 		Action:      "implement",
@@ -59,7 +59,7 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 		Success: true,
 		Message: "Analyzing model alternatives...",
 		Cmd: func() tea.Msg {
-			models, err := activeProvider.FetchModels(context.Background())
+			models, err := activeProvider.FetchModels(ctx.Ctx)
 			if err != nil || len(models) == 0 {
 				return ToastMsg{
 					Text:     "Could not fetch model list for optimization.",
@@ -71,11 +71,35 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 			if ctx.Config != nil && ctx.Config.Model.ArbitrageThreshold > 0 {
 				threshold = ctx.Config.Model.ArbitrageThreshold
 			}
-			_ = task
-			_ = threshold
+
+			// Use arbitrage engine to recommend cheapest model
+			rec, err := arbitrage.Recommend(models, task, threshold)
+			if err != nil {
+				return ToastMsg{
+					Text:     fmt.Sprintf("Optimization analysis failed: %v", err),
+					Duration: 4 * time.Second,
+					Type:     "error",
+				}
+			}
+
+			// Build result message
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("**Optimization Analysis** (%s complexity):\n\n", rec.Complexity))
+			sb.WriteString(fmt.Sprintf("**Recommended:** %s ($%.6f)\n", rec.RecommendedModel.ModelID, rec.RecommendedModel.TotalCost))
+			sb.WriteString(fmt.Sprintf("**Reason:** %s\n", rec.Reason))
+			if rec.Savings > 0 {
+				sb.WriteString(fmt.Sprintf("**Potential savings:** $%.6f vs most expensive model\n", rec.Savings))
+			}
+			if len(rec.Alternatives) > 0 {
+				sb.WriteString("\n**Alternatives:**\n")
+				for _, alt := range rec.Alternatives {
+					sb.WriteString(fmt.Sprintf("  - %s ($%.6f)\n", alt.ModelID, alt.TotalCost))
+				}
+			}
+
 			return ToastMsg{
-				Text:     fmt.Sprintf("Fetched %d models — use /models to see the full list.", len(models)),
-				Duration: 4 * time.Second,
+				Text:     sb.String(),
+				Duration: 8 * time.Second,
 				Type:     "info",
 			}
 		},
@@ -123,7 +147,7 @@ func handleModels(_ []string, ctx CommandContext) CommandResult {
 		Success: true,
 		Message: fmt.Sprintf("Fetching models for **%s**...", active),
 		Cmd: func() tea.Msg {
-			models, err := p.FetchModels(context.Background())
+			models, err := p.FetchModels(ctx.Ctx)
 			if err != nil {
 				return ToastMsg{
 					Text:     fmt.Sprintf("Failed to list models: %v", err),
