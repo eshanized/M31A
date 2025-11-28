@@ -33,16 +33,15 @@ func (d SectionDivider) Render() string {
 	if remaining <= 0 {
 		return label
 	}
-	left := strings.Repeat(d.Theme.DividerChar, max(2, remaining/2-1))
-	right := strings.Repeat(d.Theme.DividerChar, remaining-len(left)-1)
-	return style.Render(
-		d.Theme.DividerChar + left + label + right + d.Theme.DividerChar,
-	)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
+	leftLen := remaining / 2
+	if leftLen < 2 {
+		leftLen = 2
 	}
-	return b
+	rightLen := remaining - leftLen
+	if rightLen < 0 {
+		rightLen = 0
+	}
+	left := strings.Repeat(d.Theme.DividerChar, leftLen)
+	right := strings.Repeat(d.Theme.DividerChar, rightLen)
+	return style.Render(left + label + right)
 }
