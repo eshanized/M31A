@@ -33,30 +33,10 @@ func handleSettings(_ []string, _ CommandContext) CommandResult {
 	return CommandResult{Success: true, Screen: &screen, Message: "Opening settings..."}
 }
 
-// handleConfig shows or describes the current config state.
-func handleConfig(args []string, ctx CommandContext) CommandResult {
-	if ctx.Config == nil {
-		return CommandResult{Success: false, Message: "Config not available."}
-	}
-	cfg := ctx.Config
-	if len(args) == 0 {
-		// Show summary
-		theme := cfg.UI.Theme
-		if theme == "" {
-			theme = "auto"
-		}
-		msg := fmt.Sprintf(
-			"**Config:** %s\n**Provider:** %s\n**Model:** %s\n**Theme:** %s\n**Session limit:** %d\n**Auto-fallback:** %v",
-			ctx.ConfigPath,
-			cfg.Provider.Default,
-			cfg.Model.Default,
-			theme,
-			cfg.UI.SessionListLimit,
-			cfg.Provider.AutoFallback,
-		)
-		return CommandResult{Success: true, Message: msg}
-	}
-	return CommandResult{Success: true, Message: fmt.Sprintf("Config path: %s", ctx.ConfigPath)}
+// handleConfig opens the full config viewer screen.
+func handleConfig(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenConfig
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening full config..."}
 }
 
 // handleTheme switches between dark and light themes.
