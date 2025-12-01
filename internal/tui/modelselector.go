@@ -22,6 +22,7 @@ type modelSelectorLoadedMsg struct {
 
 // ModelSelector is a full-screen model/provider picker with search, scroll, and pricing.
 type ModelSelector struct {
+	ctx            context.Context
 	registry       *provider.Registry
 	sessionManager *session.Manager
 	theme          theme.Theme
@@ -47,13 +48,14 @@ type ModelSelector struct {
 }
 
 // NewModelSelector creates a ModelSelector backed by the given registry.
-func NewModelSelector(registry *provider.Registry, sessionManager *session.Manager, t theme.Theme) *ModelSelector {
+func NewModelSelector(ctx context.Context, registry *provider.Registry, sessionManager *session.Manager, t theme.Theme) *ModelSelector {
 	ti := textinput.New()
 	ti.Placeholder = "Search models..."
 	ti.Focus()
 	ti.CharLimit = 80
 
 	return &ModelSelector{
+		ctx:            ctx,
 		registry:       registry,
 		sessionManager: sessionManager,
 		theme:          t,
@@ -100,7 +102,7 @@ func (ms *ModelSelector) fetchModelsCmd(provName string) tea.Cmd {
 		if err != nil {
 			return modelSelectorLoadedMsg{providerName: provName, err: err}
 		}
-		models, err := p.FetchModels(context.Background())
+		models, err := p.FetchModels(ms.ctx)
 		return modelSelectorLoadedMsg{providerName: provName, models: models, err: err}
 	}
 }
