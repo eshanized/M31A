@@ -89,6 +89,11 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "enter":
+		if m.mentionVisible && len(m.mentionEntries) > 0 {
+			m.completeMention()
+			m.updateMentionSuggestions()
+			return nil
+		}
 		if m.slashVisible && len(m.slashSuggestions) > 0 {
 			// Complete slash command
 			return m.handleSlashComplete()
@@ -96,11 +101,22 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return m.handleEnterKey()
 
 	case "tab":
+		if m.mentionVisible && len(m.mentionEntries) > 0 {
+			m.completeMention()
+			m.updateMentionSuggestions()
+			return nil
+		}
 		if m.slashVisible && len(m.slashSuggestions) > 0 {
 			return m.handleSlashComplete()
 		}
 
 	case "up":
+		if m.mentionVisible {
+			if m.mentionSelected > 0 {
+				m.mentionSelected--
+			}
+			return nil
+		}
 		if m.slashVisible {
 			if m.slashSelected > 0 {
 				m.slashSelected--
@@ -112,6 +128,12 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "down":
+		if m.mentionVisible {
+			if m.mentionSelected < len(m.mentionEntries)-1 {
+				m.mentionSelected++
+			}
+			return nil
+		}
 		if m.slashVisible {
 			if m.slashSelected < len(m.slashSuggestions)-1 {
 				m.slashSelected++
@@ -122,6 +144,11 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "esc":
+		if m.mentionVisible {
+			m.mentionVisible = false
+			m.mentionEntries = nil
+			return nil
+		}
 		if m.slashVisible {
 			m.slashVisible = false
 			m.slashSuggestions = nil
@@ -177,6 +204,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	m.updateSlashSuggestions()
+	m.updateMentionSuggestions()
 	return cmd
 }
 
@@ -212,6 +240,15 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.textarea.SetValue("")
 		m.slashVisible = false
 		m.slashSuggestions = nil
+
+		// Add user message so welcome screen is replaced by conversation
+		userMsg := makeAssistantMsg(input)
+		userMsg.Role = "user"
+		m.messages = append(m.messages, userMsg)
+		m.renderMessages()
+		m.viewport.GotoBottom()
+		m.userScrolled = false
+
 		return func() tea.Msg {
 			return SlashCommandMsg{Command: input}
 		}
@@ -221,6 +258,15 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 	if strings.HasPrefix(input, "!") {
 		m.textarea.SetValue("")
 		m.slashVisible = false
+
+		// Add user message so welcome screen is replaced by conversation
+		userMsg := makeAssistantMsg(input)
+		userMsg.Role = "user"
+		m.messages = append(m.messages, userMsg)
+		m.renderMessages()
+		m.viewport.GotoBottom()
+		m.userScrolled = false
+
 		return func() tea.Msg {
 			return SlashCommandMsg{Command: input}
 		}
@@ -234,22 +280,34 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.frecentHistory.Upsert(input)
 	}
 
-	userMsg := m.messages
-	_ = userMsg
-
-	// Build user message
+	// Display the original input (without injected file content)
 	newMsg := makeAssistantMsg(input)
 	newMsg.Role = "user"
-
-	// Add to messages
 	m.messages = append(m.messages, newMsg)
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
 
+	// Resolve @mentions: build enriched command with file content appended.
+	command := input
+	contexts := ResolveMentions(m.cwd, input)
+	if len(contexts) > 0 {
+		var sb strings.Builder
+		sb.WriteString(input)
+		sb.WriteString("\n\n--- Attached file context ---\n")
+		for _, ctx := range contexts {
+			sb.WriteString("\n**File: ")
+			sb.WriteString(ctx.Path)
+			sb.WriteString("**\n```\n")
+			sb.WriteString(ctx.Content)
+			sb.WriteString("\n```\n")
+		}
+		command = sb.String()
+	}
+
 	// Emit for routing
 	return func() tea.Msg {
-		return SlashCommandMsg{Command: input}
+		return SlashCommandMsg{Command: command}
 	}
 }
 
