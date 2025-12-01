@@ -76,7 +76,7 @@ func (m *AppState) propagateSessionID(id string) {
 func (m *AppState) applySessionRestored(msg sessionRestoredMsg) tea.Cmd {
 	sess := msg.sess
 	m.ensureReplModel()
-	providerCmd := m.replModel.SetProvider(m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
+	providerCmd := m.replModel.SetProvider(m.shutdownCtx, m.registry, sess.Provider, m.activeModel, sess.ID, m.config)
 	m.replModel.SetDispatcher(m.dispatcher)
 	m.replModel.SetSessionID(sess.ID)
 	m.sessionID = sess.ID
