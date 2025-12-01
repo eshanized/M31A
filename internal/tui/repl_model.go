@@ -99,6 +99,17 @@ type ReplModel struct {
 
 	// Shell command mode (starts with !)
 	shellMode bool
+
+	// @mention autocomplete state
+	mentionVisible  bool
+	mentionQuery    string
+	mentionEntries  []MentionEntry
+	mentionSelected int
+	mentionCompleter *MentionCompleter
+	mentionStartCol int
+
+	// Project info for the welcome screen (pushed from SidebarRefreshMsg)
+	changedFiles int
 }
 
 // NewReplModel creates a new ReplModel.
