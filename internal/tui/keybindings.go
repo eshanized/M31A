@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // KeyContext identifies which screen or layer is active for key binding lookups.
@@ -159,8 +161,66 @@ func (r *KeyRegistry) GetContextBindings(ctx KeyContext) []KeyBinding {
 	return result
 }
 
-// RenderWhichKey returns a short string of available key hints for display in the status bar.
-func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, t interface{ GetTextMuted() interface{ Render(string) string } }, maxWidth int) string {
-	// Minimal implementation: returns empty string (which-key display is optional UI sugar)
-	return ""
+// RenderWhichKey returns a formatted which-key overlay showing available leader
+// key bindings for the current context. Returns empty string if no bindings.
+func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, maxWidth int, brand, textSecondary, textMuted lipgloss.Color) string {
+	if !r.leaderActive {
+		return ""
+	}
+
+	// Collect chord bindings for this context + global
+	var bindings []KeyBinding
+	seen := make(map[string]bool)
+
+	// Context-specific chords
+	for _, b := range r.bindings[ctx] {
+		if strings.HasPrefix(b.Key, r.leaderKey+" ") {
+			shortKey := strings.TrimPrefix(b.Key, r.leaderKey+" ")
+			if !seen[shortKey] {
+				seen[shortKey] = true
+				bindings = append(bindings, KeyBinding{
+					Key:         shortKey,
+					Description: b.Description,
+				})
+			}
+		}
+	}
+
+	// Global chords
+	for _, b := range r.bindings[CtxGlobal] {
+		if strings.HasPrefix(b.Key, r.leaderKey+" ") {
+			shortKey := strings.TrimPrefix(b.Key, r.leaderKey+" ")
+			if !seen[shortKey] {
+				seen[shortKey] = true
+				bindings = append(bindings, KeyBinding{
+					Key:         shortKey,
+					Description: b.Description,
+				})
+			}
+		}
+	}
+
+	if len(bindings) == 0 {
+		return ""
+	}
+
+	// Build which-key display
+	var lines []string
+	for _, b := range bindings {
+		key := lipgloss.NewStyle().Foreground(brand).Bold(true).Render(b.Key)
+		desc := lipgloss.NewStyle().Foreground(textSecondary).Render(" → " + b.Description)
+		lines = append(lines, "  "+key+desc)
+	}
+
+	content := strings.Join(lines, "\n")
+
+	// Wrap in a bordered box
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(brand).
+		Padding(0, 1).
+		Width(maxWidth / 3).
+		Render(content)
+
+	return box
 }
