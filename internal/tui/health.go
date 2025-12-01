@@ -18,20 +18,20 @@ func HealthCheckTicker(ctx context.Context, d time.Duration) tea.Cmd {
 }
 
 // NextHealthTick returns a tea.Cmd for the next health check tick.
-func NextHealthTick(d time.Duration) tea.Cmd {
-	return HealthCheckTicker(context.Background(), d)
+func NextHealthTick(ctx context.Context, d time.Duration) tea.Cmd {
+	return HealthCheckTicker(ctx, d)
 }
 
 // HealthCheckCmd runs a health check against the given provider in a goroutine
 // and emits a HealthCheckResultMsg when it completes.
-func HealthCheckCmd(p provider.LLMProvider, timeout time.Duration) tea.Cmd {
+func HealthCheckCmd(ctx context.Context, p provider.LLMProvider, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		if timeout <= 0 {
 			timeout = types.HealthCheckInterval
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		hCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		status := p.HealthCheck(ctx)
+		status := p.HealthCheck(hCtx)
 		return HealthCheckResultMsg{Result: status}
 	}
 }
