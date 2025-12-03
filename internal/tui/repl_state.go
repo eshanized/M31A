@@ -51,7 +51,7 @@ func (m *ReplModel) SetSidebarWidth(sw int) {
 
 // SetProvider configures the active provider and returns a tea.Cmd that
 // asynchronously validates the model by fetching the provider's model catalog.
-func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) tea.Cmd {
+func (m *ReplModel) SetProvider(ctx context.Context, registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) tea.Cmd {
 	m.registry = registry
 	m.activeProvider = activeProvider
 	m.sessionID = sessionID
@@ -69,9 +69,9 @@ func (m *ReplModel) SetProvider(registry *provider.Registry, activeProvider stri
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		models, err := p.FetchModels(ctx)
+		models, err := p.FetchModels(fetchCtx)
 		return ProviderModelsFetchedMsg{Models: models, Model: model, Err: err}
 	}
 }
@@ -114,8 +114,17 @@ func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
 }
 
 // SetCwd sets the working directory for @filepath resolution.
+// Changing cwd also invalidates the cached mention completer.
 func (m *ReplModel) SetCwd(cwd string) {
+	if m.cwd != cwd {
+		m.mentionCompleter = nil // force re-scan on next @-mention
+	}
 	m.cwd = cwd
+}
+
+// SetChangedFiles updates the count of git-changed files shown on the welcome screen.
+func (m *ReplModel) SetChangedFiles(n int) {
+	m.changedFiles = n
 }
 
 // SetKeyRegistry sets the key registry.
