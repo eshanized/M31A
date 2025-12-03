@@ -10,55 +10,79 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-// renderWelcome renders the welcome screen content to be placed INSIDE the viewport.
+// renderWelcome renders the welcome screen content placed inside the viewport.
 //
-// CRITICAL FIX: The welcome content must be centered within the viewport height,
-// NOT the full terminal height. Using m.height (full terminal) causes the content
-// to overflow the viewport boundary, creating the visual double-input bug.
+// Layout adapts based on terminal width:
+//   - Wide (≥88 cols): two-column top row (provider card + project card)
+//   - Narrow: single-column stack (provider card only)
 //
-// The viewport height = termHeight - topChrome - bottomChrome.
-// We center content within viewportHeight(m.height), not m.height.
+// CRITICAL: content is centered within viewportHeight, NOT the full terminal height,
+// to prevent the double-input visual bug.
 func (m *ReplModel) renderWelcome() string {
 	if m.width == 0 || m.height == 0 {
 		return "Welcome to M31A"
 	}
 
 	availWidth := m.replWidth()
-	vpHeight := viewportHeight(m.height) // FIXED: use viewport height, not terminal height
+	vpHeight := viewportHeight(m.height)
 
-	// 1. Logo (no starfield row — compact welcome)
-	logo := m.renderLogo()
+	// 1. Logo with glow
+	logo := m.renderLogoWithGlow()
 
-	// 2. Provider status card
-	providerCard := m.renderProviderCard()
+	// 2. Top row — provider card always shown; project card when wide enough
+	var topRow string
+	if availWidth >= 88 {
+		provCard := m.renderProviderCard()
+		projCard := m.renderProjectCard()
+		topRow = lipgloss.JoinHorizontal(lipgloss.Top, provCard, "  ", projCard)
+	} else {
+		topRow = m.renderProviderCard()
+	}
 
-	// 3. Quick action hints (shown only on welcome screen)
-	quickActions := m.renderQuickActions()
+	// 3. Getting-started with context-aware prompts
+	gettingStarted := m.renderGettingStarted()
 
-	// 4. Keyboard hints as muted single-line list
+	// 4. Keyboard hints
 	hints := renderKeyboardHints(m.theme)
 
-	// 5. Bottom bar with cwd and version
+	// 5. Bottom bar (cwd + version)
 	bottomBar := m.renderBottomBar()
 
-	// Stack vertically, centered horizontally
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		logo,
 		"",
-		providerCard,
+		topRow,
 		"",
-		quickActions,
+		gettingStarted,
 		"",
 		hints,
 		"",
 		bottomBar,
 	)
 
-	// Center in VIEWPORT space (not full terminal height)
 	return lipgloss.Place(availWidth, vpHeight, lipgloss.Center, lipgloss.Center, content)
 }
 
-// renderProviderCard shows current model/provider status or setup prompt.
+// renderLogoWithGlow renders the M31A logo with a subtle gradient-block glow row.
+func (m *ReplModel) renderLogoWithGlow() string {
+	version := m.version
+	if version == "" {
+		version = "dev"
+	}
+	logoBlock := components.RenderLogo(version, false, m.theme.Brand)
+
+	glowChars := []string{"█", "▓", "▒", "░"}
+	var glow strings.Builder
+	for _, ch := range glowChars {
+		glow.WriteString(lipgloss.NewStyle().Foreground(m.theme.Brand).Render(ch))
+	}
+	centerFill := strings.Repeat(" ", 12)
+	glowRow := glow.String() + lipgloss.NewStyle().Foreground(m.theme.Border).Render(centerFill) + glow.String()
+
+	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowRow)
+}
+
+// renderProviderCard shows current model/provider status or a setup prompt.
 func (m *ReplModel) renderProviderCard() string {
 	t := m.theme
 
@@ -66,11 +90,7 @@ func (m *ReplModel) renderProviderCard() string {
 		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Render("●")
 		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render("No provider configured")
 		subtitle := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("Run /settings to get started")
-
-		content := lipgloss.JoinVertical(lipgloss.Left,
-			warningDot+" "+title,
-			subtitle,
-		)
+		content := lipgloss.JoinVertical(lipgloss.Left, warningDot+" "+title, subtitle)
 		return components.Card{
 			Content: content,
 			Width:   42,
@@ -80,8 +100,7 @@ func (m *ReplModel) renderProviderCard() string {
 		}.Render()
 	}
 
-	modelBadge := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).
-		Render(m.activeModel.Name)
+	modelBadge := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(m.activeModel.Name)
 	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrandPreset, m.theme).Render()
 
 	pricingText := ""
@@ -98,12 +117,41 @@ func (m *ReplModel) renderProviderCard() string {
 			Render("ctx " + components.FormatMetric(int(m.activeModel.ContextLength)))
 	}
 
+	var caps []string
+	if m.activeModel.Capabilities.Tools {
+		caps = append(caps, lipgloss.NewStyle().
+			Foreground(t.Success).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Success).
+			Padding(0, 1).
+			Render("tools"))
+	}
+	if m.activeModel.Capabilities.Vision {
+		caps = append(caps, lipgloss.NewStyle().
+			Foreground(t.Info).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Info).
+			Padding(0, 1).
+			Render("vision"))
+	}
+	if m.activeModel.Capabilities.Reasoning {
+		caps = append(caps, lipgloss.NewStyle().
+			Foreground(t.Secondary).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Secondary).
+			Padding(0, 1).
+			Render("reasoning"))
+	}
+
 	parts := []string{modelBadge + " " + providerBadge}
 	if pricingText != "" {
 		parts = append(parts, pricingText)
 	}
 	if contextText != "" {
 		parts = append(parts, contextText)
+	}
+	if len(caps) > 0 {
+		parts = append(parts, strings.Join(caps, " "))
 	}
 	if m.sessionSparkline != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextSecondary).Render(m.sessionSparkline))
@@ -118,26 +166,138 @@ func (m *ReplModel) renderProviderCard() string {
 	}.Render()
 }
 
-// renderLogo renders the M31A ASCII art logo.
-func (m *ReplModel) renderLogo() string {
-	version := m.version
-	if version == "" {
-		version = "dev"
+// renderProjectCard shows project name, git branch, changed-file count, and language.
+func (m *ReplModel) renderProjectCard() string {
+	t := m.theme
+
+	projectName := pathBase(m.cwd)
+	if projectName == "" {
+		projectName = "project"
 	}
-	return components.RenderLogo(version, false, m.theme.Brand)
+
+	// Project name row
+	nameRow := lipgloss.NewStyle().
+		Foreground(t.TextPrimary).Bold(true).
+		Render("▸ " + projectName)
+
+	// Git branch row
+	branchRow := ""
+	if m.sidebarBranch != "" {
+		branchRow = lipgloss.NewStyle().Foreground(t.TextSecondary).
+			Render("⎇  " + m.sidebarBranch)
+	}
+
+	// Changed files row
+	var changedRow string
+	if m.changedFiles > 0 {
+		changedRow = lipgloss.NewStyle().Foreground(t.Warning).
+			Render(fmt.Sprintf("● %d file(s) changed", m.changedFiles))
+	} else {
+		changedRow = lipgloss.NewStyle().Foreground(t.Success).Render("✓ working tree clean")
+	}
+
+	// Language detection
+	lang := detectProjectLanguage(m.cwd)
+	langRow := ""
+	if lang != "" {
+		langRow = lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + lang)
+	}
+
+	parts := []string{nameRow}
+	if branchRow != "" {
+		parts = append(parts, branchRow)
+	}
+	parts = append(parts, changedRow)
+	if langRow != "" {
+		parts = append(parts, langRow)
+	}
+
+	return components.Card{
+		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
+		Width:   42,
+		Border:  theme.ThinBorder,
+		Style:   components.CardDefault,
+		Theme:   t,
+	}.Render()
 }
 
-// renderKeyboardHints renders keyboard shortcut hints as a muted single-line list.
+// renderGettingStarted renders suggested prompts, context-aware when possible.
+func (m *ReplModel) renderGettingStarted() string {
+	t := m.theme
+
+	title := lipgloss.NewStyle().
+		Foreground(t.Brand).Bold(true).
+		Render("Getting started")
+
+	type suggestion struct {
+		prompt string
+		hint   string
+	}
+
+	prompts := []suggestion{
+		{"Fix the failing tests in this repo", "auto-fix"},
+		{"Add error handling to the API layer", "refactor"},
+		{"Explain this codebase architecture", "explore"},
+	}
+
+	// Context-aware substitution: highlight changed files if any
+	if m.changedFiles > 0 {
+		prompts[1] = suggestion{
+			fmt.Sprintf("Review recent changes (%d files)", m.changedFiles),
+			"review",
+		}
+	}
+
+	// Project-name substitution for the architecture prompt
+	if proj := pathBase(m.cwd); proj != "" {
+		prompts[2] = suggestion{
+			fmt.Sprintf("Explain the %s architecture", proj),
+			"explore",
+		}
+	}
+
+	var lines []string
+	for i, p := range prompts {
+		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d.", i+1))
+		text := lipgloss.NewStyle().Foreground(t.Text).Render(p.prompt)
+		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  " + p.hint)
+		lines = append(lines, "  "+num+" "+text+hint)
+	}
+
+	sep := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", 36))
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render("  Type a message, @file, /command, or goal…")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		strings.Join(lines, "\n"),
+		"",
+		sep,
+		footer,
+	)
+
+	return components.Card{
+		Content: content,
+		Width:   42,
+		Border:  theme.ThinBorder,
+		Style:   components.CardDefault,
+		Theme:   t,
+	}.Render()
+}
+
+// renderKeyboardHints renders keyboard shortcut hints as a muted separator-joined line.
 func renderKeyboardHints(t theme.Theme) string {
-	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader", "/help"}
+	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "@ files", "ctrl+x leader", "/help"}
 	parts := make([]string, len(hints))
 	for i, h := range hints {
 		parts[i] = lipgloss.NewStyle().Foreground(t.TextMuted).Render(h)
 	}
-	return strings.Join(parts, "  ·  ")
+	sep := lipgloss.NewStyle().Foreground(t.Brand).Render(" · ")
+	return strings.Join(parts, sep)
 }
 
-// renderBottomBar renders a bottom bar with cwd and version.
+// renderBottomBar renders a bottom bar showing cwd basename and version.
 func (m *ReplModel) renderBottomBar() string {
 	t := m.theme
 
