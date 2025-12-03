@@ -13,9 +13,13 @@ import (
 
 // renderSettingCard wraps tab content in a ThinBorder card with the given title.
 func renderSettingCard(t theme.Theme, title string, content string, width int) string {
+	divWidth := width - 6
+	if divWidth < 4 {
+		divWidth = 4
+	}
 	divider := components.SectionDivider{
 		Title: title,
-		Width: width - 6,
+		Width: divWidth,
 		Theme: t,
 	}.Render()
 	body := lipgloss.NewStyle().PaddingLeft(2).Render(content)
