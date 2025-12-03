@@ -92,11 +92,11 @@ func (m *ReplModel) View() string {
 		thinkingDur = time.Since(m.thinkingStartAt).Milliseconds()
 	}
 	info := &StatusBarInfo{
-		IsStreaming:   m.streaming,
-		IsThinking:    m.thinking,
+		IsStreaming:      m.streaming,
+		IsThinking:       m.thinking,
 		ThinkingDuration: thinkingDur,
-		SpinnerFrame:  m.spinner.Peek(),
-		KeyboardHints: []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+x leader"},
+		SpinnerFrame:     m.spinner.Peek(),
+		KeyboardHints:    []string{"ctrl+p commands", "ctrl+b sidebar", "@ files", "ctrl+x leader"},
 	}
 	// Add cwd and git branch if available
 	if m.cwd != "" {
@@ -115,10 +115,25 @@ func (m *ReplModel) View() string {
 	}
 	statusBar := RenderStatusBar(t, rw, info)
 
+	// ── Mention suggestions overlay (above slash overlay) ─────────────────────
+	mentionOverlay := ""
+	if m.mentionVisible && len(m.mentionEntries) > 0 {
+		mentionOverlay = m.renderMentionSuggestions(rw) + "\n"
+	}
+
 	// ── Slash suggestions overlay (above input) ───────────────────────────────
 	slashOverlay := ""
 	if m.slashVisible && len(m.slashSuggestions) > 0 {
 		slashOverlay = m.renderSlashSuggestions(rw) + "\n"
+	}
+
+	// ── Which-key overlay (leader key active) ─────────────────────────────────
+	whichKeyOverlay := ""
+	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
+		whichKeyOverlay = m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted)
+		if whichKeyOverlay != "" {
+			whichKeyOverlay += "\n"
+		}
 	}
 
 	// ── Assemble all parts ────────────────────────────────────────────────────
@@ -126,8 +141,14 @@ func (m *ReplModel) View() string {
 	if quickActions != "" {
 		parts = append(parts, quickActions)
 	}
+	if mentionOverlay != "" {
+		parts = append(parts, mentionOverlay)
+	}
 	if slashOverlay != "" {
 		parts = append(parts, slashOverlay)
+	}
+	if whichKeyOverlay != "" {
+		parts = append(parts, whichKeyOverlay)
 	}
 	parts = append(parts, inputBorder, metaRow, textareaView, statusBar)
 
