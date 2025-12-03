@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,30 @@ var settingsTabNames = []string{
 	"Provider", "Model", "UI", "Keys", "Workflow", "About",
 }
 
+// settingsField describes one editable row on a settings tab.
+type settingsField struct {
+	key         string // config key identifier
+	label       string // display label
+	fieldType   string // "choice", "bool", "text", "number", "password"
+	choices     []string
+}
+
+// providerHealthStatus tracks async health check results.
+type providerHealthStatus struct {
+	Name   string
+	Status string
+	Detail string
+}
+
+type settingsHealthMsg struct {
+	Results []providerHealthStatus
+}
+
+// settingsThemeChanged emits when the user toggles the theme.
+type settingsThemeChanged struct {
+	ThemeName string
+}
+
 // SettingsModel manages the settings editor (6-tab layout).
 type SettingsModel struct {
 	theme     theme.Theme
@@ -39,6 +64,10 @@ type SettingsModel struct {
 	width     int
 	height    int
 
+	// Field cursor
+	fields       []settingsField
+	fieldCursor  int
+
 	// Editing state
 	editing   bool
 	editField string
@@ -46,6 +75,10 @@ type SettingsModel struct {
 
 	// Config path
 	configPath string
+
+	// Async health check results
+	healthResults []providerHealthStatus
+	healthLoading bool
 
 	// Status message
 	statusMsg  string
@@ -58,28 +91,114 @@ func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.T
 	ti.CharLimit = 512
 	ti.Width = 40
 
-	return &SettingsModel{
+	s := &SettingsModel{
 		theme:      t,
 		config:     cfg,
 		registry:   registry,
 		editValue:  ti,
 		configPath: configPath,
 	}
+	s.buildFields()
+	return s
 }
 
-// SetConfig updates the config reference.
-func (s *SettingsModel) SetConfig(cfg *config.Config) {
-	s.config = cfg
+// buildFields rebuilds the field list for the active tab.
+func (s *SettingsModel) buildFields() {
+	switch s.activeTab {
+	case TabProvider:
+		s.fields = []settingsField{
+			{key: "provider", label: "Default provider", fieldType: "choice", choices: []string{"openrouter", "zen"}},
+			{key: "auto_fallback", label: "Auto fallback", fieldType: "bool"},
+		}
+	case TabModel:
+		s.fields = []settingsField{
+			{key: "model", label: "Default model", fieldType: "text"},
+			{key: "auto_collapse", label: "Auto-collapse tools", fieldType: "bool"},
+			{key: "show_thinking", label: "Show thinking by default", fieldType: "bool"},
+			{key: "auto_arbitrage", label: "Auto-arbitrage", fieldType: "bool"},
+			{key: "context_length", label: "Context length", fieldType: "number"},
+		}
+	case TabUI:
+		s.fields = []settingsField{
+			{key: "theme", label: "Theme", fieldType: "choice", choices: []string{"dark", "light", "auto"}},
+			{key: "show_cost", label: "Show cost estimate", fieldType: "bool"},
+			{key: "show_tokens", label: "Show token usage", fieldType: "bool"},
+			{key: "compact_mode", label: "Compact mode", fieldType: "bool"},
+			{key: "sidebar_width", label: "Sidebar width", fieldType: "number"},
+			{key: "leader_key", label: "Leader key", fieldType: "text"},
+			{key: "max_history", label: "Max message history", fieldType: "number"},
+		}
+	case TabKeys:
+		s.fields = []settingsField{
+			{key: "apikey_or", label: "OpenRouter API key", fieldType: "password"},
+			{key: "apikey_zen", label: "Zen API key", fieldType: "password"},
+		}
+	case TabWorkflow:
+		s.fields = []settingsField{
+			{key: "perm_mode", label: "Permission mode", fieldType: "choice", choices: []string{"prompt", "allow", "deny"}},
+			{key: "perm_timeout", label: "Permission timeout", fieldType: "number"},
+			{key: "max_iterations", label: "Max iterations", fieldType: "number"},
+			{key: "auto_backup", label: "Auto backup", fieldType: "bool"},
+		}
+	case TabAbout:
+		s.fields = nil
+	}
+	if s.fieldCursor >= len(s.fields) {
+		s.fieldCursor = 0
+	}
 }
 
-// SetTheme updates the settings theme.
-func (s *SettingsModel) SetTheme(t theme.Theme) {
-	s.theme = t
+func (s *SettingsModel) SetConfig(cfg *config.Config) { s.config = cfg }
+func (s *SettingsModel) SetTheme(t theme.Theme)       { s.theme = t }
+
+func (s *SettingsModel) Init() tea.Cmd {
+	return s.startHealthChecks()
+}
+
+func (s *SettingsModel) startHealthChecks() tea.Cmd {
+	if s.registry == nil {
+		return nil
+	}
+	s.healthLoading = true
+	names := s.registry.List()
+	s.healthResults = make([]providerHealthStatus, len(names))
+	for i, name := range names {
+		s.healthResults[i] = providerHealthStatus{Name: name, Status: "checking"}
+	}
+	reg := s.registry
+	return func() tea.Msg {
+		var results []providerHealthStatus
+		for _, name := range names {
+			p, err := reg.Get(name)
+			if err != nil {
+				results = append(results, providerHealthStatus{Name: name, Status: "error", Detail: err.Error()})
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			status := p.HealthCheck(ctx)
+			cancel()
+			hs := providerHealthStatus{Name: name}
+			if status.Status == "ok" {
+				hs.Status = "ok"
+				hs.Detail = fmt.Sprintf("%dms", status.LatencyMs)
+			} else {
+				hs.Status = "error"
+				hs.Detail = status.Error
+			}
+			results = append(results, hs)
+		}
+		return settingsHealthMsg{Results: results}
+	}
 }
 
 // Update handles settings screen key events.
 func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case settingsHealthMsg:
+		s.healthResults = msg.Results
+		s.healthLoading = false
+		return s, nil
+
 	case tea.KeyMsg:
 		if s.editing {
 			return s.updateEditing(msg)
@@ -87,32 +206,243 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc", "q":
-			return s, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
-			}
+			return s, func() tea.Msg { return AppMsg{Screen: ScreenREPL} }
 		case "tab", "right":
+			if len(s.fields) > 0 && s.isCurrentFieldChoice() {
+				return s.cycleChoice(1)
+			}
 			s.activeTab = SettingsTab((int(s.activeTab) + 1) % len(settingsTabNames))
+			s.fieldCursor = 0
+			s.buildFields()
 		case "shift+tab", "left":
+			if len(s.fields) > 0 && s.isCurrentFieldChoice() {
+				return s.cycleChoice(-1)
+			}
 			s.activeTab = SettingsTab((int(s.activeTab) - 1 + len(settingsTabNames)) % len(settingsTabNames))
+			s.fieldCursor = 0
+			s.buildFields()
+		case "up", "k":
+			if s.fieldCursor > 0 {
+				s.fieldCursor--
+			}
+		case "down", "j":
+			if len(s.fields) > 0 && s.fieldCursor < len(s.fields)-1 {
+				s.fieldCursor++
+			}
 		case "1":
 			s.activeTab = TabProvider
+			s.fieldCursor = 0
+			s.buildFields()
 		case "2":
 			s.activeTab = TabModel
+			s.fieldCursor = 0
+			s.buildFields()
 		case "3":
 			s.activeTab = TabUI
+			s.fieldCursor = 0
+			s.buildFields()
 		case "4":
 			s.activeTab = TabKeys
+			s.fieldCursor = 0
+			s.buildFields()
 		case "5":
 			s.activeTab = TabWorkflow
+			s.fieldCursor = 0
+			s.buildFields()
 		case "6":
 			s.activeTab = TabAbout
-		case "e", "enter":
-			return s.startEditing()
+			s.fieldCursor = 0
+			s.buildFields()
+		case "e", "enter", " ":
+			return s.activateField()
 		case "s":
 			return s.saveConfig()
+		case "r":
+			if s.activeTab == TabProvider {
+				return s, s.startHealthChecks()
+			}
 		}
 	}
 	return s, nil
+}
+
+func (s *SettingsModel) isCurrentFieldChoice() bool {
+	if len(s.fields) == 0 || s.fieldCursor >= len(s.fields) {
+		return false
+	}
+	return s.fields[s.fieldCursor].fieldType == "choice"
+}
+
+// cycleChoice changes the current choice field by delta.
+func (s *SettingsModel) cycleChoice(delta int) (*SettingsModel, tea.Cmd) {
+	if s.config == nil {
+		return s, nil
+	}
+	f := s.fields[s.fieldCursor]
+	current := s.getFieldValue(f)
+	idx := 0
+	for i, c := range f.choices {
+		if c == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta + len(f.choices)) % len(f.choices)
+	return s.setFieldValue(f, f.choices[idx])
+}
+
+// activateField starts editing or toggling the current field.
+func (s *SettingsModel) activateField() (*SettingsModel, tea.Cmd) {
+	if len(s.fields) == 0 || s.fieldCursor >= len(s.fields) {
+		return s, nil
+	}
+	f := s.fields[s.fieldCursor]
+
+	switch f.fieldType {
+	case "bool":
+		return s.toggleBool(f)
+	case "choice":
+		return s.cycleChoice(1)
+	case "text", "number", "password":
+		s.editing = true
+		s.editField = f.key
+		s.editValue.SetValue(s.getFieldValue(f))
+		s.editValue.Focus()
+		s.editValue.Placeholder = f.label
+		if f.fieldType == "password" {
+			s.editValue.EchoMode = textinput.EchoPassword
+		} else {
+			s.editValue.EchoMode = textinput.EchoNormal
+		}
+		return s, textinput.Blink
+	}
+	return s, nil
+}
+
+func (s *SettingsModel) toggleBool(f settingsField) (*SettingsModel, tea.Cmd) {
+	current := s.getFieldValue(f)
+	newVal := "no"
+	if current == "no" || current == "" {
+		newVal = "yes"
+	}
+	return s.setFieldValue(f, newVal)
+}
+
+// getFieldValue reads the current display value for a field from config.
+func (s *SettingsModel) getFieldValue(f settingsField) string {
+	if s.config == nil {
+		return ""
+	}
+	switch f.key {
+	case "provider":
+		return s.config.Provider.Default
+	case "auto_fallback":
+		return boolStr(s.config.Provider.AutoFallback)
+	case "model":
+		return s.config.Model.Default
+	case "auto_collapse":
+		return boolStr(s.config.Model.AutoCollapseTools)
+	case "show_thinking":
+		return boolStr(s.config.Model.ShowThinkingByDefault)
+	case "auto_arbitrage":
+		return boolStr(s.config.Model.AutoArbitrage)
+	case "context_length":
+		return fmt.Sprintf("%d", s.config.Model.DefaultContextLength)
+	case "theme":
+		if s.config.UI.Theme == "" {
+			return "dark"
+		}
+		return s.config.UI.Theme
+	case "show_cost":
+		return boolStr(s.config.UI.ShowCostEstimate)
+	case "show_tokens":
+		return boolStr(s.config.UI.ShowTokenUsage)
+	case "compact_mode":
+		return boolStr(s.config.UI.CompactMode)
+	case "sidebar_width":
+		return fmt.Sprintf("%d", s.config.UI.SidebarWidth)
+	case "leader_key":
+		return s.config.UI.LeaderKey
+	case "max_history":
+		return fmt.Sprintf("%d", s.config.UI.MaxMessageHistory)
+	case "apikey_or":
+		return s.config.Provider.OpenRouter.APIKey
+	case "apikey_zen":
+		return s.config.Provider.Zen.APIKey
+	case "perm_mode":
+		return s.config.Permissions.DefaultMode
+	case "perm_timeout":
+		return fmt.Sprintf("%d", s.config.Permissions.TimeoutSeconds)
+	case "max_iterations":
+		return fmt.Sprintf("%d", s.config.UI.MaxIterations)
+	case "auto_backup":
+		return boolStr(s.config.Features.AutoBackup)
+	}
+	return ""
+}
+
+// setFieldValue writes a new value to config and applies instant reload.
+func (s *SettingsModel) setFieldValue(f settingsField, val string) (*SettingsModel, tea.Cmd) {
+	if s.config == nil {
+		s.config = config.DefaultConfig()
+	}
+	var cmd tea.Cmd
+	switch f.key {
+	case "provider":
+		s.config.Provider.Default = val
+	case "auto_fallback":
+		s.config.Provider.AutoFallback = val == "yes"
+	case "model":
+		s.config.Model.Default = val
+	case "auto_collapse":
+		s.config.Model.AutoCollapseTools = val == "yes"
+	case "show_thinking":
+		s.config.Model.ShowThinkingByDefault = val == "yes"
+	case "auto_arbitrage":
+		s.config.Model.AutoArbitrage = val == "yes"
+	case "context_length":
+		if n, err := strconv.Atoi(val); err == nil {
+			s.config.Model.DefaultContextLength = n
+		}
+	case "theme":
+		s.config.UI.Theme = val
+		cmd = func() tea.Msg { return settingsThemeChanged{ThemeName: val} }
+	case "show_cost":
+		s.config.UI.ShowCostEstimate = val == "yes"
+	case "show_tokens":
+		s.config.UI.ShowTokenUsage = val == "yes"
+	case "compact_mode":
+		s.config.UI.CompactMode = val == "yes"
+	case "sidebar_width":
+		if n, err := strconv.Atoi(val); err == nil {
+			s.config.UI.SidebarWidth = n
+		}
+	case "leader_key":
+		s.config.UI.LeaderKey = val
+	case "max_history":
+		if n, err := strconv.Atoi(val); err == nil {
+			s.config.UI.MaxMessageHistory = n
+		}
+	case "apikey_or":
+		s.config.Provider.OpenRouter.APIKey = val
+	case "apikey_zen":
+		s.config.Provider.Zen.APIKey = val
+	case "perm_mode":
+		s.config.Permissions.DefaultMode = val
+	case "perm_timeout":
+		if n, err := strconv.Atoi(val); err == nil {
+			s.config.Permissions.TimeoutSeconds = n
+		}
+	case "max_iterations":
+		if n, err := strconv.Atoi(val); err == nil {
+			s.config.UI.MaxIterations = n
+		}
+	case "auto_backup":
+		s.config.Features.AutoBackup = val == "yes"
+	}
+	s.statusMsg = fmt.Sprintf("✓ %s updated", f.label)
+	s.statusTime = time.Now()
+	return s, cmd
 }
 
 func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
@@ -120,137 +450,86 @@ func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) 
 	case "esc":
 		s.editing = false
 		s.editField = ""
+		s.editValue.EchoMode = textinput.EchoNormal
 		return s, nil
 	case "enter":
-		return s.commitEdit()
+		val := strings.TrimSpace(s.editValue.Value())
+		s.editing = false
+		s.editValue.EchoMode = textinput.EchoNormal
+		if val == "" {
+			return s, nil
+		}
+		// Find the field and set its value
+		for _, f := range s.fields {
+			if f.key == s.editField {
+				return s.setFieldValue(f, val)
+			}
+		}
+		return s, nil
 	}
 	var cmd tea.Cmd
 	s.editValue, cmd = s.editValue.Update(msg)
 	return s, cmd
 }
 
-func (s *SettingsModel) startEditing() (*SettingsModel, tea.Cmd) {
-	s.editing = true
-	s.editValue.SetValue("")
-	s.editValue.Focus()
-	switch s.activeTab {
-	case TabProvider:
-		s.editField = "provider"
-		if s.config != nil {
-			s.editValue.SetValue(s.config.Provider.Default)
-		}
-		s.editValue.Placeholder = "openrouter or zen"
-	case TabModel:
-		s.editField = "model"
-		if s.config != nil {
-			s.editValue.SetValue(s.config.Model.Default)
-		}
-		s.editValue.Placeholder = "model ID"
-	case TabKeys:
-		s.editField = "apikey"
-		s.editValue.Placeholder = "API key (for current provider)"
-		s.editValue.EchoMode = textinput.EchoPassword
-	default:
-		s.editing = false
-		s.editField = ""
-	}
-	return s, textinput.Blink
-}
-
-func (s *SettingsModel) commitEdit() (*SettingsModel, tea.Cmd) {
-	val := strings.TrimSpace(s.editValue.Value())
-	s.editing = false
-	s.editValue.EchoMode = textinput.EchoNormal
-	if val == "" {
+func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
+	if s.config == nil || s.configPath == "" {
+		s.statusMsg = "No config path set."
+		s.statusTime = time.Now()
 		return s, nil
 	}
-	if s.config == nil {
-		s.config = config.DefaultConfig()
-	}
-	switch s.editField {
-	case "provider":
-		s.config.Provider.Default = val
-	case "model":
-		s.config.Model.Default = val
-	case "apikey":
-		provName := s.config.Provider.Default
-		switch provName {
-		case "zen":
-			s.config.Provider.Zen.APIKey = val
-		default:
-			s.config.Provider.OpenRouter.APIKey = val
-		}
-	}
-	s.statusMsg = "Value updated. Press 's' to save."
-	s.statusTime = time.Now()
-	return s, nil
-}
-
-func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
-	if s.config != nil && s.configPath != "" {
-		s.statusMsg = "Config updated in memory (restart to reload)"
+	if err := s.config.Save(s.configPath); err != nil {
+		s.statusMsg = fmt.Sprintf("Save failed: %v", err)
 		s.statusTime = time.Now()
+		return s, nil
 	}
+	s.statusMsg = "✓ Config saved to " + s.configPath
+	s.statusTime = time.Now()
 	return s, func() tea.Msg { return SettingsSavedMsg{} }
 }
 
-// View renders the settings screen with a left sidebar and ThinBorder content card.
+// View renders the settings screen.
 func (s *SettingsModel) View() string {
 	t := s.theme
 	w := s.width
-
 	if w < 50 {
 		return "Terminal too narrow for settings"
 	}
 
-	// Left navigation sidebar
 	navWidth := 20
 	if w < 70 {
 		navWidth = 16
 	}
 	leftNav := s.renderLeftNav()
-
-	// Content inside ThinBorder card
 	content := s.renderTabContent()
 	tabNames := []string{"Provider", "Model", "UI", "Keys", "Workflow", "About"}
 	title := tabNames[s.activeTab]
 	contentCard := renderSettingCard(t, title, content, w-navWidth)
 
-	// Main layout
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top,
 		lipgloss.NewStyle().Width(navWidth).Padding(0, 1).Render(leftNav),
 		contentCard,
 	)
 
-	// Status bar
 	status := ""
 	if s.statusMsg != "" && time.Since(s.statusTime) < 5*time.Second {
-		status = lipgloss.NewStyle().Foreground(t.Success).PaddingLeft(2).Render(s.statusMsg)
+		color := t.Success
+		if strings.Contains(s.statusMsg, "failed") || strings.Contains(s.statusMsg, "Failed") {
+			color = t.Error
+		}
+		status = lipgloss.NewStyle().Foreground(color).PaddingLeft(2).Render(s.statusMsg)
 	}
 
-	// Edit overlay (shows below the main area)
 	if s.editing {
 		editBox := s.renderEditBox()
-		return lipgloss.JoinVertical(lipgloss.Left,
-			mainArea,
-			"",
-			editBox,
-			"",
-			status,
-		)
+		return lipgloss.JoinVertical(lipgloss.Left, mainArea, "", editBox, "", status)
 	}
 
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("tab next  1-6 jump  e edit  esc back")
+		Render("  ↑↓/jk navigate  ←→/space/enter toggle  s save  r refresh  esc back")
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		mainArea,
-		status,
-		footer,
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, mainArea, status, footer)
 }
-
-
 
 func (s *SettingsModel) renderTabContent() string {
 	switch s.activeTab {
@@ -270,6 +549,64 @@ func (s *SettingsModel) renderTabContent() string {
 	return ""
 }
 
+// renderFieldRow renders a single settings field with cursor highlight.
+func (s *SettingsModel) renderFieldRow(f settingsField, idx int) string {
+	t := s.theme
+	val := s.getFieldValue(f)
+	selected := idx == s.fieldCursor && !s.editing
+
+	// Cursor indicator
+	cursor := "  "
+	if selected {
+		cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(28)
+	valStyle := lipgloss.NewStyle().Foreground(t.Text)
+
+	if selected {
+		labelStyle = labelStyle.Foreground(t.Text).Bold(true)
+		valStyle = valStyle.Foreground(t.Brand).Bold(true)
+	}
+
+	switch f.fieldType {
+	case "bool":
+		icon := "○"
+		color := t.TextMuted
+		if val == "yes" {
+			icon = "●"
+			color = t.Success
+		}
+		if selected {
+			color = t.Brand
+		}
+		toggle := lipgloss.NewStyle().Foreground(color).Render(icon)
+		return cursor + labelStyle.Render(f.label) + toggle + " " + valStyle.Render(val)
+
+	case "choice":
+		// Render choice as [ option1 | ○ option2 | option3 ]
+		var parts []string
+		for _, c := range f.choices {
+			if c == val {
+				parts = append(parts, lipgloss.NewStyle().
+					Foreground(t.Brand).Bold(true).
+					Render("● "+c))
+			} else {
+				parts = append(parts, lipgloss.NewStyle().
+					Foreground(t.TextMuted).
+					Render("○ "+c))
+			}
+		}
+		return cursor + labelStyle.Render(f.label) + strings.Join(parts, "  ")
+
+	case "password":
+		return cursor + labelStyle.Render(f.label) + valStyle.Render(maskedKey(val))
+
+	default:
+		return cursor + labelStyle.Render(f.label) + valStyle.Render(val)
+	}
+}
+
 func (s *SettingsModel) renderProviderTab() string {
 	t := s.theme
 	var lines []string
@@ -277,74 +614,72 @@ func (s *SettingsModel) renderProviderTab() string {
 	lines = append(lines, renderSectionHeader("Provider Settings", s.width))
 	lines = append(lines, "")
 
-	defaultProvider := "(not set)"
-	if s.config != nil && s.config.Provider.Default != "" {
-		defaultProvider = s.config.Provider.Default
+	for i, f := range s.fields {
+		lines = append(lines, s.renderFieldRow(f, i))
 	}
-	lines = append(lines, settingRow("Default provider", defaultProvider, t))
+
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
-		Render("Available: openrouter, zen"))
 
 	// Provider health
-	if s.registry != nil {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("Provider Status:"))
-		for _, name := range s.registry.List() {
-			p, err := s.registry.Get(name)
-			if err != nil {
-				continue
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextSecondary).Bold(true).PaddingLeft(2).
+		Render("Provider Status:"))
+
+	if len(s.healthResults) == 0 {
+		if s.config != nil {
+			for _, name := range []string{"openrouter", "zen"} {
+				hasKey := name == "openrouter" && s.config.Provider.OpenRouter.APIKey != "" ||
+					name == "zen" && s.config.Provider.Zen.APIKey != ""
+				if hasKey {
+					lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+						Render("● "+name+" (key set)"))
+				} else {
+					lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+						Render("○ "+name+" (no key)"))
+				}
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			status := p.HealthCheck(ctx)
-			cancel()
-			icon := "✓"
-			color := t.Success
-			if status.Status != "ok" {
-				icon = "✗"
-				color = t.Error
+		}
+	} else {
+		for _, hs := range s.healthResults {
+			icon, color := "⟳", t.Warning
+			if hs.Status == "ok" {
+				icon, color = "✓", t.Success
+			} else if hs.Status == "error" {
+				icon, color = "✗", t.Error
+			}
+			detail := ""
+			if hs.Detail != "" {
+				detail = lipgloss.NewStyle().Foreground(t.TextMuted).Render(" — " + hs.Detail)
 			}
 			lines = append(lines, lipgloss.NewStyle().Foreground(color).PaddingLeft(4).
-				Render(fmt.Sprintf("%s %s", icon, name)))
+				Render(icon+" "+hs.Name)+detail)
 		}
 	}
+
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
+		Render("Press 'r' to refresh health checks."))
 
 	return strings.Join(lines, "\n")
 }
 
 func (s *SettingsModel) renderModelTab() string {
-	t := s.theme
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, renderSectionHeader("Model Settings", s.width))
 	lines = append(lines, "")
-
-	defaultModel := "(not set)"
-	if s.config != nil && s.config.Model.Default != "" {
-		defaultModel = s.config.Model.Default
-	}
-	lines = append(lines, settingRow("Default model", defaultModel, t))
-	if s.config != nil {
-		lines = append(lines, settingRow("Auto-collapse tools", boolStr(s.config.Model.AutoCollapseTools), t))
-		lines = append(lines, settingRow("Show thinking by default", boolStr(s.config.Model.ShowThinkingByDefault), t))
-		lines = append(lines, settingRow("Auto-arbitrage", boolStr(s.config.Model.AutoArbitrage), t))
+	for i, f := range s.fields {
+		lines = append(lines, s.renderFieldRow(f, i))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (s *SettingsModel) renderUITab() string {
-	t := s.theme
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, renderSectionHeader("UI Settings", s.width))
 	lines = append(lines, "")
-	if s.config != nil {
-		lines = append(lines, settingRow("Theme", s.config.UI.Theme, t))
-		lines = append(lines, settingRow("Show cost estimate", boolStr(s.config.UI.ShowCostEstimate), t))
-		lines = append(lines, settingRow("Show token usage", boolStr(s.config.UI.ShowTokenUsage), t))
-		lines = append(lines, settingRow("Discuss timeout", fmt.Sprintf("%ds", s.config.UI.DiscussTimeout), t))
-		lines = append(lines, settingRow("Sidebar width", fmt.Sprintf("%d cols", s.config.UI.SidebarWidth), t))
+	for i, f := range s.fields {
+		lines = append(lines, s.renderFieldRow(f, i))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -356,34 +691,21 @@ func (s *SettingsModel) renderKeysTab() string {
 	lines = append(lines, renderSectionHeader("API Keys", s.width))
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
-		Render("Keys are stored in OS keychain or config file."))
+		Render("Keys are resolved: env var → OS keychain → config file."))
 	lines = append(lines, "")
-	if s.config != nil {
-		for name, key := range map[string]string{
-			"openrouter": s.config.Provider.OpenRouter.APIKey,
-			"zen":        s.config.Provider.Zen.APIKey,
-		} {
-			keyDisplay := maskedKey(key)
-			lines = append(lines, settingRow(name+" API key", keyDisplay, t))
-		}
+	for i, f := range s.fields {
+		lines = append(lines, s.renderFieldRow(f, i))
 	}
-	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
-		Render("Press 'e' to edit the active provider's API key."))
 	return strings.Join(lines, "\n")
 }
 
 func (s *SettingsModel) renderWorkflowTab() string {
-	t := s.theme
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, renderSectionHeader("Workflow Settings", s.width))
 	lines = append(lines, "")
-	if s.config != nil {
-		lines = append(lines, settingRow("Permission timeout", fmt.Sprintf("%ds", s.config.Permissions.TimeoutSeconds), t))
-		lines = append(lines, settingRow("Max iterations", fmt.Sprintf("%d", s.config.UI.MaxIterations), t))
-		lines = append(lines, settingRow("Auto fallback", boolStr(s.config.Provider.AutoFallback), t))
-		lines = append(lines, settingRow("Auto backup", boolStr(s.config.Features.AutoBackup), t))
+	for i, f := range s.fields {
+		lines = append(lines, s.renderFieldRow(f, i))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -394,17 +716,18 @@ func (s *SettingsModel) renderAboutTab() string {
 		"",
 		renderSectionHeader("About M31A", s.width),
 		"",
-		lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(4).Render("M31A — Terminal AI Coding Agent"),
+		lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(4).Bold(true).Render("M31A — Terminal AI Coding Agent"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Module: github.com/eshanized/M31A"),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Built with:"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbletea"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/lipgloss"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbles"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/glamour"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbletea  — TUI framework"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/lipgloss  — terminal styling"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/bubbles   — TUI components"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(6).Render("• charmbracelet/glamour   — markdown rendering"),
 		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Config: ~/.m31a/config.toml"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Config:   ~/.m31a/config.toml"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Sessions: ~/.m31a/sessions/"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Ledger:   ~/.m31a/LEDGER.md"),
 	)
 }
 
@@ -420,14 +743,8 @@ func (s *SettingsModel) renderEditBox() string {
 		Render(lipgloss.JoinVertical(lipgloss.Left,
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(label),
 			s.editValue.View(),
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ save  esc cancel"),
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ confirm  esc cancel"),
 		))
-}
-
-func settingRow(label, value string, t theme.Theme) string {
-	labelS := lipgloss.NewStyle().Foreground(t.TextMuted).Width(28).PaddingLeft(4).Render(label)
-	valueS := lipgloss.NewStyle().Foreground(t.Text).Render(value)
-	return labelS + valueS
 }
 
 func boolStr(b bool) string {
