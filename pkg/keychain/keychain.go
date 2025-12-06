@@ -33,7 +33,7 @@ var newFunc func() (Keychain, error)
 // New returns a platform-specific Keychain implementation.
 // On linux: returns a linuxKeychain backed by D-Bus Secret Service with pass CLI fallback.
 // On darwin: returns a macOSKeychain backed by /usr/bin/security CLI.
-// On windows: returns a windowsKeychain stub that returns ErrNotImplemented.
+// On windows: returns a windowsKeychain backed by Windows Credential Manager.
 func New() (Keychain, error) {
 	if newFunc == nil {
 		return nil, ErrKeychainUnavailable
