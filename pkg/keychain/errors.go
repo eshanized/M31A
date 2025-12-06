@@ -15,6 +15,6 @@ var (
 	ErrKeychainDecrypt = errors.New("keychain secret blob is corrupted or unreadable")
 
 	// ErrNotImplemented is returned on platforms where keychain operations
-	// are not supported (Windows V1 stub).
+	// are not supported.
 	ErrNotImplemented = errors.New("not implemented on this platform")
 )
