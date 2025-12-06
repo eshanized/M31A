@@ -181,10 +181,10 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		if count >= maxResults {
-			// Check if there are more results beyond the limit
-			if scanner.Scan() {
-				truncated = true
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
 			}
+			truncated = true
 			break
 		}
 		line := scanner.Text()
@@ -206,14 +206,29 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 
 	if err := cmd.Wait(); err != nil {
 		// rg exits with code 1 when no matches found
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return types.ToolResult{Output: "No results found for pattern"}, nil
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				if len(results) == 0 {
+					return types.ToolResult{Output: "No results found for pattern"}, nil
+				}
+			}
+			// rg may be killed when we hit maxResults — that's expected
+			if exitErr.ExitCode() == -1 || strings.Contains(err.Error(), "killed") {
+				// Process was killed, results are valid
+			} else {
+				stderrStr := strings.TrimSpace(stderr.String())
+				if stderrStr != "" {
+					return types.ToolResult{}, fmt.Errorf("rg execution failed: %w\nstderr: %s", err, stderrStr)
+				}
+				return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
+			}
+		} else {
+			stderrStr := strings.TrimSpace(stderr.String())
+			if stderrStr != "" {
+				return types.ToolResult{}, fmt.Errorf("rg execution failed: %w\nstderr: %s", err, stderrStr)
+			}
+			return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
 		}
-		stderrStr := strings.TrimSpace(stderr.String())
-		if stderrStr != "" {
-			return types.ToolResult{}, fmt.Errorf("rg execution failed: %w\nstderr: %s", err, stderrStr)
-		}
-		return types.ToolResult{}, fmt.Errorf("rg execution failed: %w", err)
 	}
 
 	if len(results) == 0 {
