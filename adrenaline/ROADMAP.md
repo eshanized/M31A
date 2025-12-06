@@ -15,7 +15,7 @@
 | **Estimated V1 Duration** | 21 weeks (1 senior Go developer) |
 | **Estimated V1 Duration (2-person team)** | 14-15 weeks (Phases 1/2 and 4/5 parallelized) |
 | **Estimated V1.1 Duration** | 6 weeks additional (week 27 total) |
-| **Total Phases** | 12 (9 for V1, 2 for V1.1+, 1 for adaptations) |
+| **Total Phases** | 13 (9 for V1, 2 for V1.1+, 1 for adaptations, 1 for codebase improvements) |
 | **Total Packages** | ~23 (internal + public) |
 | **TUI Screens** | 10+ |
 | **Core Tools** | 5 (V1) + 7 deferred (V1.1) |
@@ -769,6 +769,62 @@ Implement three OpenCode adaptations: session branching for exploration workflow
 
 ---
 
+## Phase 12 — Codebase Improvements
+
+**Duration:** 3 weeks  
+**Complexity:** 6/10  
+**Milestone:** All 46 issues from DEEP-IMPROVEMENT-REPORT resolved; testing coverage > 70%; CI modernized
+
+### Goals
+
+Address all 46 issues identified in the 2026-06-08 deep codebase improvement report (D-1 through D-46). These span critical data races, high-severity reliability problems, medium-severity code quality issues, architecture debt, performance concerns, testing gaps, build/CI improvements, and UX enhancements.
+
+### Requirements
+
+- **D-1 through D-4** — Critical fixes: View() mutation, discarded provider command, permission deadlock, health check timeout
+- **D-5 through D-10** — High severity: theme duplication, context.Background usage, exec context, version globals, provider retry, session loading
+- **D-11 through D-18** — Medium severity: DNS cache, SSE docs, HTML performance, temp permissions, indentation, pass check, stripTags docs, fsnotify
+- **D-19 through D-25** — Low severity: diff summary, gitignore path, atomicWrite extraction, stale comments, stray test, href parsing, sidebar persistence
+- **D-26 through D-30** — Architecture: AppState decomposition, screen routing, provider base client, PermissionRule move, workflow extraction
+- **D-31 through D-34** — Performance: grep binary detection, session index, git branch cache, var substitution
+- **D-35 through D-38** — Testing: TUI tests, benchmarks, integration tests, fuzz tests
+- **D-39 through D-42** — Build/CI: lint action update, goreleaser check, coverage enforcement, replace directive cleanup
+- **D-43 through D-46** — UX: model spinner, permission countdown, ctrl+c confirmation, help overlay
+
+### Plans
+
+- [x] 12-01-PLAN.md — Critical & High Severity Fixes (Wave 1)
+- [x] 12-02-PLAN.md — Medium & Low Severity Fixes (Wave 2)
+- [x] 12-03-PLAN.md — Architecture & Performance (Wave 3)
+- [x] 12-04-PLAN.md — Testing, Build, CI/CD & UX (Wave 4)
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Dependencies |
+|------|-------|------------|--------------|
+| 1 | 12-01 | yes | none |
+| 2 | 12-02 | yes | 12-01 |
+| 3 | 12-03 | yes | 12-01, 12-02 |
+| 4 | 12-04 | yes | 12-01, 12-02, 12-03 |
+
+### Deliverables
+
+- Zero data races (D-1 fixed, `go test -race` clean)
+- Zero deadlocks in permission system (D-3 fixed)
+- Zero context.Background() in TUI code (D-6 fixed)
+- Single applyTheme() method (D-5 fixed)
+- Provider base client extracting 80% shared code (D-28)
+- PermissionRule in internal/types/ (D-29 fixed)
+- TUI test coverage > 30% (D-35)
+- Benchmark tests for hot paths (D-36)
+- Workflow integration test (D-37)
+- Fuzz tests for input parsers (D-38)
+- CI uses golangci-lint-action@v6 (D-39)
+- Coverage threshold enforced at 70% (D-41)
+- Help overlay with keyboard shortcuts (D-46)
+
+---
+
 ## Deferred to Future (V1.2+)
 
 | Feature | Reason for Deferral | Notes |
@@ -791,6 +847,7 @@ Phase 0 (Foundation)
         → Phase 6 (Workflow Engine)
           → Phase 7 (Signature Features)
             → Phase 8 (Polish & Release)
+              → Phase 12 (Codebase Improvements)
 ```
 
 **Parallel tracks:**
@@ -901,3 +958,4 @@ cmd/m31a/
 | 2026-05-26 | Merged Claude roadmap improvements: complexity scores, LOC estimates, milestone versions, team multipliers, package dependency graph |
 | 2026-06-01 | Added Phase 10 (Provider & Message Layer Adaptations) and Phase 11 (Session & Config Adaptations) from OpenCode adaptation report |
 | 2026-06-01 | Phase 11 planned: 3 plans (Session Forking, Multi-Layer Config, Permission Ruleset Completion) |
+| 2026-06-08 | Added Phase 12 (Codebase Improvements) — 4 plans covering 46 issues from DEEP-IMPROVEMENT-REPORT |

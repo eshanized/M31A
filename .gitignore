@@ -27,3 +27,6 @@ coverage.out
 
 # Stray planning docs
 tui_plan.md
+
+# Design assets / screenshots (not part of the codebase)
+/images/
