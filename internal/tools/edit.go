@@ -422,8 +422,7 @@ func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
 
 		if avgSimilarity >= LevenshteinThreshold {
 			// Good enough match
-			newLines := make([]string, len(contentLines))
-			copy(newLines, contentLines[:i])
+			newLines := make([]string, 0, len(contentLines))
 			newLines = append(newLines, strings.Split(newString, "\n")...)
 			newLines = append(newLines, contentLines[endIdx+1:]...)
 			return strings.Join(newLines, "\n"), nil
