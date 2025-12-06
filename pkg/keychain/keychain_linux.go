@@ -172,7 +172,7 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 	call.Store(&sessionPath, nil)
 
 	secret := fmtSecret(conn, value)
-	props := map[string]interface{}{
+	props := map[string]any{
 		"org.freedesktop.Secret.Item.Label": label,
 		"org.freedesktop.Secret.Item.Attributes": map[string]string{
 			"service": servicePath,
@@ -264,9 +264,9 @@ func (k *linuxKeychain) passDelete(service string) error {
 }
 
 // Helper: construct a Secret struct for D-Bus
-func fmtSecret(conn *dbus.Conn, value string) map[string]interface{} {
+func fmtSecret(conn *dbus.Conn, value string) map[string]any {
 	var sessionPath dbus.ObjectPath // empty = first session
-	return map[string]interface{}{
+	return map[string]any{
 		"session":      sessionPath,
 		"value":        []byte(value),
 		"content_type": "text/plain",
@@ -290,14 +290,20 @@ func isDBusUnavailable(err error) bool {
 		strings.Contains(errStr, "dbus")
 }
 
-// isPassUnavailable returns true if the pass CLI is not installed.
+// isPassUnavailable returns true if the pass CLI is not installed or not available.
 func isPassUnavailable(err error) bool {
 	if err == nil {
 		return false
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
-		// pass exits with 1 for various errors; check stderr for "not found"
-		return len(exitErr.Stderr) > 0
+		stderr := string(exitErr.Stderr)
+		// Only treat as "unavailable" if stderr indicates pass isn't installed
+		// or the password store isn't initialized. Other errors (GPG failures,
+		// pinentry timeouts) mean pass IS available but the operation failed.
+		return strings.Contains(stderr, "not found") ||
+			strings.Contains(stderr, "not installed") ||
+			strings.Contains(stderr, "No password store") ||
+			strings.Contains(stderr, "password-store is empty")
 	}
 	// exec.Error means the binary wasn't found
 	_, isExecErr := err.(*exec.Error)
