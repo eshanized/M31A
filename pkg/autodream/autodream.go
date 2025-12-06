@@ -258,7 +258,7 @@ func (c *Consolidator) Messages() []types.Message {
 //   - paused (bool)
 //   - last_consolidation (string, ISO8601, empty if never)
 //   - estimated_tokens (int)
-func (c *Consolidator) Stats() map[string]interface{} {
+func (c *Consolidator) Stats() map[string]any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -272,7 +272,7 @@ func (c *Consolidator) Stats() map[string]interface{} {
 		estTokens += int(math.Ceil(float64(len(strings.Fields(msg.Content))) * 1.3))
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_messages":       len(c.messages),
 		"total_consolidations": c.totalConsolidations,
 		"paused":               c.paused,
