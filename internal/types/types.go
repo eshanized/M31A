@@ -91,6 +91,7 @@ type Message struct {
 	Content    string           `json:"content"`
 	Segments   []MessageSegment `json:"segments"`
 	ToolCalls  []ToolCall       `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Usage      *Usage           `json:"usage,omitempty"`
 	CreatedAt  time.Time        `json:"created_at"`
 	SkipForLLM bool             `json:"skip_for_llm,omitempty"`
