@@ -167,6 +167,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	}
 	if err != nil {
 		res.Error = err.Error()
+		return res, fmt.Errorf("tool %s: %w", call.Name, err)
 	}
 
 	return res, nil
