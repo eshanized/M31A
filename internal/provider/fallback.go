@@ -20,7 +20,7 @@ type FallbackEvent struct {
 const maxRetryAfter = types.MaxRetryAfterWait
 
 func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
-	names := registry.List()
+	names := registry.ListAll()
 
 	for _, name := range names {
 		if name == currentProvider {
