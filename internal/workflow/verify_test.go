@@ -90,7 +90,7 @@ func TestEngine_VerifyTask_FileExistence(t *testing.T) {
 		Status: m31types.StatusDone,
 	}
 
-	result := engine.verifyTask(task)
+	result := engine.verifyTask(context.Background(), task)
 	if !result.FilesExist {
 		t.Error("Expected files to exist")
 	}
@@ -108,7 +108,7 @@ func TestEngine_VerifyTask_MissingFile(t *testing.T) {
 		Status: m31types.StatusDone,
 	}
 
-	result := engine.verifyTask(task)
+	result := engine.verifyTask(context.Background(), task)
 	if result.FilesExist {
 		t.Error("Expected files to not exist")
 	}
@@ -126,7 +126,7 @@ func TestEngine_VerifyTask_NoFiles(t *testing.T) {
 		Status: m31types.StatusDone,
 	}
 
-	result := engine.verifyTask(task)
+	result := engine.verifyTask(context.Background(), task)
 	if !result.FilesExist {
 		t.Error("Expected files existence to pass with empty file list")
 	}
