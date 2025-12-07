@@ -295,7 +295,7 @@ func (e *Engine) SetMsgEmitter(em MsgEmitter) {
 
 // HealTask triggers self-healing for a specific task by ID.
 // Returns true if healing was attempted, false if the task cannot be healed.
-func (e *Engine) HealTask(taskID int) bool {
+func (e *Engine) HealTask(ctx context.Context, taskID int) bool {
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {
 		e.logger.Warn("failed to load tasks for heal", "error", err)
@@ -318,7 +318,7 @@ func (e *Engine) HealTask(taskID int) bool {
 					"Inspect the files listed above, identify any issues, and apply a fix.",
 				task.Description, task.Files, task.AcceptanceCriteria,
 			)
-			healResult := e.healTask(context.Background(), task, failure)
+			healResult := e.healTask(ctx, task, failure)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: tasks[i].HealsAttempted,
@@ -327,7 +327,7 @@ func (e *Engine) HealTask(taskID int) bool {
 				Error:   healResult.Error,
 			})
 			if healResult.Success {
-				newResult := e.verifyTask(task)
+				newResult := e.verifyTask(ctx, task)
 				if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
 					tasks[i].Status = m31types.StatusDone
 				} else {
