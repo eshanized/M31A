@@ -230,8 +230,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 
 			// Feed tool result back
 			messages = append(messages, m31types.Message{
-				Role:    "tool",
-				Content: result.Output,
+				Role:       "tool",
+				Content:    result.Output,
+				ToolCallID: tc.ID,
 			})
 		}
 
@@ -266,7 +267,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 
 		// Commit changes
 		var commitHash string
-		if len(task.Files) > 0 {
+		if len(task.Files) > 0 && e.git != nil {
 			if err := e.git.AddAll(); err != nil {
 				e.logger.Warn("git add failed", "task", task.ID, "error", err)
 			}
@@ -377,7 +378,7 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 
 	// Commit fix
 	var commitHash string
-	if len(task.Files) > 0 {
+	if len(task.Files) > 0 && e.git != nil {
 		if err := e.git.AddAll(); err != nil {
 			e.logger.Warn("git add failed during heal", "task", task.ID, "error", err)
 		}
