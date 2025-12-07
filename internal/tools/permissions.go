@@ -23,7 +23,10 @@ func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember b
 		return
 	}
 	// Fallback to shared channel for backwards compatibility
-	d.responseCh <- resp
+	select {
+	case d.responseCh <- resp:
+	default:
+	}
 }
 
 func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
