@@ -14,7 +14,8 @@ import (
 
 // runVerify checks task outputs for correctness and triggers self-heal/bisect on failure.
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
-	ctx = e.verifyTaskContext(ctx)
+	ctx, cancel := e.verifyTaskContext(ctx)
+	defer cancel()
 	e.logger.Info("verify phase starting")
 
 	// Emit intermediate progress
@@ -42,7 +43,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			continue
 		}
 
-		result := e.verifyTask(task)
+		result := e.verifyTask(ctx, task)
 
 		if result.FilesExist && result.SyntaxOK && result.TestsOK {
 			e.logger.Info("task verified", "id", task.ID)
@@ -77,7 +78,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 
 		if healResult.Success {
 			// Re-verify
-			newResult := e.verifyTask(task)
+			newResult := e.verifyTask(ctx, task)
 			if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
 				tasks[i].Status = m31types.StatusDone
 				e.logger.Info("task healed and verified", "id", task.ID)
@@ -193,7 +194,7 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 	b := bisect.New(e.workDir, e.logger)
 	b.SetGit(e.git)
 	checkFn := func() bool {
-		vr := e.verifyTask(task)
+		vr := e.verifyTask(ctx, task)
 		return vr.FilesExist && vr.SyntaxOK && vr.TestsOK
 	}
 	bisectResult, err := b.Run(goodHash, headHash, checkFn)
@@ -220,7 +221,7 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 	}
 
 	// Re-verify after bisect heal
-	newResult := e.verifyTask(task)
+	newResult := e.verifyTask(ctx, task)
 	if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
 		taskEntry.Status = m31types.StatusDone
 		e.logger.Info("task healed after bisect", "id", task.ID)
