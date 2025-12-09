@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tokens"
@@ -159,7 +160,7 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 		workDir = m.git.WorkDir()
 	}
 
-	planningDir := sessDir + "/" + m.sessionID + "/planning"
+	planningDir := filepath.Join(sessDir, m.sessionID, "planning")
 
 	tokenEst := tokens.NewEstimator(modelID)
 
@@ -184,8 +185,29 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 		engine.SetGit(m.git)
 	}
 
+	// Connect the MsgEmitter so workflow events reach the TUI
+	emitter := &channelEmitter{ch: make(chan tea.Msg, 128)}
+	engine.SetMsgEmitter(emitter)
+	m.emitterCh = emitter.ch
+
 	m.workflowEngine = engine
 	return nil
+}
+
+// drainEmitterCmd returns a tea.Cmd that reads one message from the workflow
+// emitter channel and forwards it to the Bubble Tea update loop.
+func (m *AppState) drainEmitterCmd() tea.Cmd {
+	if m.emitterCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case msg := <-m.emitterCh:
+			return msg
+		case <-m.shutdownCtx.Done():
+			return nil
+		}
+	}
 }
 
 // persistWorkflowState saves the current workflow state to disk.
