@@ -90,7 +90,7 @@ func (em *ExecuteModel) UpdateTaskStatus(taskID int, status types.TaskStatus) {
 		}
 	}
 
-	newDone, newFailed, newTotal := em.countTasks()
+	newDone, newTotal, newFailed := em.countTasks()
 
 	// Trigger progress animation on status changes
 	if newDone > oldDone {
