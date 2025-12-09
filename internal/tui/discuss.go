@@ -129,10 +129,10 @@ func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
 	}
 
 	if dm.current >= len(dm.questions) {
-		// All done
-		return func() tea.Msg {
+		// All done — emit the last answer along with navigation
+		return tea.Batch(answerCmd, func() tea.Msg {
 			return AppMsg{Screen: ScreenREPL}
-		}
+		})
 	}
 	return answerCmd
 }
