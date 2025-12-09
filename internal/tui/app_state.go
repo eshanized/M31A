@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
@@ -29,7 +30,7 @@ type workflowEngineInterface interface {
 	SetSessionID(id string)
 	SetGit(g *git.Git)
 	SessionID() string
-	HealTask(taskID int) bool
+	HealTask(ctx context.Context, taskID int) bool
 }
 
 // AppState is the top-level Bubble Tea model.
@@ -73,6 +74,7 @@ type AppState struct {
 	workflowCancel context.CancelFunc
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+	emitterCh      chan tea.Msg
 
 	// Optional packages
 	ledger    *ledger.Ledger
