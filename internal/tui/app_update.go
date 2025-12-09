@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -99,6 +101,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeModel = execM
 			cmds = append(cmds, cmd)
 		}
+		// Forward to verify screen for heal spinner animation
+		if m.screen == ScreenVerify && m.verifyModel != nil {
+			m.verifyModel.TickSpinner()
+		}
 		// Screen transition tick
 		if m.transition != nil && m.transition.Active {
 			if m.transition.TransitionTick() {
@@ -186,8 +192,82 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case HealResultMsg:
 		if m.verifyModel != nil {
-			m.verifyModel.Update(msg)
+			newVerify, cmd := m.verifyModel.Update(msg)
+			m.verifyModel = newVerify
+			cmds = append(cmds, cmd)
 		}
+
+	case workflow.TaskStartMsg:
+		if m.executeModel != nil {
+			for i, t := range m.executeModel.tasks {
+				if t.ID == msg.Task.ID {
+					m.executeModel.SetCurrentTask(i)
+					m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
+					break
+				}
+			}
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.TaskUpdateMsg:
+		if m.executeModel != nil {
+			var status types.TaskStatus
+			switch msg.Status {
+			case "done":
+				status = types.StatusDone
+			case "failed":
+				status = types.StatusFailed
+			default:
+				status = types.StatusRunning
+			}
+			m.executeModel.UpdateTaskStatus(msg.Task.ID, status)
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.ToolStartMsg:
+		if m.executeModel != nil {
+			m.executeModel.AppendLiveOutput([]string{
+				fmt.Sprintf("→ %s: %s", msg.ToolName, msg.Description),
+			})
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.ToolCompleteMsg:
+		if m.executeModel != nil {
+			status := "ok"
+			if !msg.Success {
+				status = "failed"
+			}
+			m.executeModel.AppendLiveOutput([]string{
+				fmt.Sprintf("  %s %s (%dms)", status, msg.ToolName, msg.DurationMs),
+			})
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.SelfHealStartMsg:
+		if m.executeModel != nil {
+			m.executeModel.AppendLiveOutput([]string{
+				fmt.Sprintf("⚠ Self-heal attempt %d/%d for task %d", msg.Attempt, msg.Max, msg.TaskID),
+			})
+		}
+		if m.verifyModel != nil {
+			m.verifyModel.StartHealing(msg.TaskID, msg.Attempt)
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.SelfHealCompleteMsg:
+		if m.executeModel != nil {
+			status := "ok"
+			if !msg.Success {
+				status = "failed"
+			}
+			m.executeModel.AppendLiveOutput([]string{
+				fmt.Sprintf("  Self-heal %s (attempt %d/%d)", status, msg.Attempt, msg.Max),
+			})
+		}
+		if m.verifyModel != nil {
+			m.verifyModel.StopHealing()
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.PhaseTransitionStartMsg, workflow.PhaseTransitionCompleteMsg,
+		workflow.IntermediateProgressMsg,
+		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
+		cmds = append(cmds, m.drainEmitterCmd())
 
 	// ── Goal submitted ────────────────────────────────────────────────────────
 	case GoalSubmittedMsg:
@@ -244,6 +324,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FallbackEventMsg:
 		m.activeProvider = msg.To
 		slog.Info("provider fallback", "from", msg.From, "to", msg.To, "reason", msg.Reason)
+		// Re-validate the active model against the new provider
+		if m.registry != nil && m.activeModel != nil {
+			if p, err := m.registry.Get(msg.To); err == nil && p != nil {
+				if info, err := p.GetModel(m.activeModel.ID); err == nil && info != nil {
+					m.activeModel = info
+				}
+			}
+		}
 
 	// ── Model selected ────────────────────────────────────────────────────────
 	case ModelSelectedMsg:
@@ -291,6 +379,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Session restore ──────────────────────────────────────────────────────
 	case sessionRestoredMsg:
 		cmds = append(cmds, m.applySessionRestored(msg))
+
+	case resumeScreenReadyMsg:
+		m.sessionList = nil
+		if m.resumeModel == nil {
+			rm := NewResumeModel(msg.sessions, m.themeManager.Current())
+			m.resumeModel = rm
+		} else {
+			m.resumeModel.Refresh(msg.sessions)
+		}
+		m.screen = ScreenResume
 
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
@@ -379,15 +477,16 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		sw = m.sidebarModel.GetWidth()
 	}
 
+	var cmd tea.Cmd
 	if m.replModel != nil {
 		m.replModel.width = msg.Width
 		m.replModel.height = msg.Height
 		m.replModel.SetSidebarWidth(sw)
-		replM, cmd := m.replModel.Update(msg)
+		replM, replCmd := m.replModel.Update(msg)
 		if r, ok := replM.(*ReplModel); ok {
 			m.replModel = r
 		}
-		return cmd
+		cmd = replCmd
 	}
 
 	if m.planModel != nil {
@@ -396,6 +495,14 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	if m.executeModel != nil {
 		m.executeModel.width = msg.Width
 		m.executeModel.height = msg.Height
+	}
+	if m.verifyModel != nil {
+		m.verifyModel.width = msg.Width
+		m.verifyModel.height = msg.Height
+	}
+	if m.metricsModel != nil {
+		m.metricsModel.width = msg.Width
+		m.metricsModel.height = msg.Height
 	}
 	if m.settingsModel != nil {
 		m.settingsModel.width = msg.Width
@@ -414,7 +521,7 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.diffModel.width = msg.Width
 		m.diffModel.height = msg.Height
 	}
-	return nil
+	return cmd
 }
 
 // routeKeyMsg routes key events to the active screen.
@@ -557,6 +664,12 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			newCfg, cmd := m.configModel.Update(msg)
 			m.configModel = newCfg
 			return cmd
+		}
+	case ScreenMetrics:
+		switch msg.String() {
+		case "esc", "q":
+			m.screen = ScreenREPL
+			return nil
 		}
 	}
 	return nil
@@ -830,6 +943,27 @@ func (m *AppState) applyTheme(themeName string) {
 	if m.settingsModel != nil {
 		m.settingsModel.SetTheme(t)
 	}
+	if m.planModel != nil {
+		m.planModel.theme = t
+	}
+	if m.executeModel != nil {
+		m.executeModel.theme = t
+	}
+	if m.verifyModel != nil {
+		m.verifyModel.theme = t
+	}
+	if m.shipModel != nil {
+		m.shipModel.theme = t
+	}
+	if m.discussModel != nil {
+		m.discussModel.SetTheme(t)
+	}
+	if m.metricsModel != nil {
+		m.metricsModel.SetTheme(t)
+	}
+	if m.resumeModel != nil {
+		m.resumeModel.SetTheme(t)
+	}
 }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -866,7 +1000,7 @@ func (m *AppState) startNewSession() tea.Cmd {
 // openResumeScreen loads session list and navigates to the resume screen.
 func (m *AppState) openResumeScreen() tea.Cmd {
 	return func() tea.Msg {
-		var sessions []*session.Session
+		var sessions []session.SessionInfo
 		if m.sessionManager != nil {
 			infos, err := m.sessionManager.ListSessions()
 			if err == nil {
@@ -874,10 +1008,7 @@ func (m *AppState) openResumeScreen() tea.Cmd {
 					if i >= 20 {
 						break
 					}
-					sess, err := m.sessionManager.LoadSession(info.ID)
-					if err == nil {
-						sessions = append(sessions, sess)
-					}
+					sessions = append(sessions, info)
 				}
 			}
 		}
@@ -887,7 +1018,7 @@ func (m *AppState) openResumeScreen() tea.Cmd {
 
 // resumeScreenReadyMsg carries loaded sessions for the resume screen.
 type resumeScreenReadyMsg struct {
-	sessions []*session.Session
+	sessions []session.SessionInfo
 }
 
 // openSettingsScreen transitions to the settings screen.
@@ -916,10 +1047,8 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 	remember := msg.Response.Remember
 	m.permRequest = nil
 	m.screen = ScreenREPL
-	if m.dispatcher != nil {
-		go m.dispatcher.ApprovePermission(reqID, allowed, remember)
-	}
-	return nil
+	m.dispatcher.ApprovePermission(reqID, allowed, remember)
+	return permListenerCmd(m.shutdownCtx, m.dispatcher)
 }
 
 // handlePermissionTick decrements the permission countdown.
@@ -1006,5 +1135,5 @@ func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) tea.Cmd {
 			respCh <- tools.QuestionResponse{Answer: msg.Answer}
 		}()
 	}
-	return nil
+	return questionListenerCmd(m.shutdownCtx, m.dispatcher)
 }
