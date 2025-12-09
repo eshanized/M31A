@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -157,7 +159,7 @@ func TestEngine_HealTask(t *testing.T) {
 
 	// Provide a response that contains a valid tool call
 	mp := engine.provider.(*mockProvider)
-	mp.response = `{"name":"FileWrite","input":{"path":"main.go","content":"package main"}}`
+	mp.response = `{"name":"FileWrite","input":{"name":"FileWrite","params":{"path":"main.go","content":"package main"}}}`
 
 	result := engine.healTask(context.Background(), task, "compilation error")
 	// Heal uses mock provider which returns content
@@ -228,6 +230,9 @@ func TestEngine_ExecuteTaskWithTools_EmptyResponse(t *testing.T) {
 func TestEngine_ExecuteTaskWithTools_MultipleToolCalls(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
+	// Create main.go so FileRead can find it
+	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main\n"), 0644)
+
 	task := m31types.Task{
 		ID:           1,
 		Action:       "Create",
@@ -239,7 +244,7 @@ func TestEngine_ExecuteTaskWithTools_MultipleToolCalls(t *testing.T) {
 
 	// Response with multiple tool calls
 	mp := engine.provider.(*mockProvider)
-	mp.response = `{"name":"Bash","input":{"command":"echo hello"}} and also {"name":"FileRead","input":{"path":"main.go"}}`
+	mp.response = `{"name":"Bash","input":{"name":"Bash","params":{"command":"echo hello"}}} and also {"name":"FileRead","input":{"name":"FileRead","params":{"path":"main.go"}}}`
 
 	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
 	// Should handle multiple tool calls
@@ -316,13 +321,16 @@ func (m *mockProviderWithCapture) ChatCompletionStream(ctx context.Context, req 
 func TestExecute_OneAssistantPerTurn(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
+	// Create main.go so FileRead can find it
+	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main\n"), 0644)
+
 	// Test that multiple tool calls all execute successfully.
 	// The CR-05 fix ensures only ONE assistant message is appended per
 	// tool-call loop iteration (instead of N duplicate messages).
 	toolCallResponse := "I'll use three tools:\n" +
-		"```json\n{\"name\":\"Glob\",\"input\":{\"pattern\":\"*.go\"}}\n```\n" +
-		"```json\n{\"name\":\"Grep\",\"input\":{\"pattern\":\"test\"}}\n```\n" +
-		"```json\n{\"name\":\"FileRead\",\"input\":{\"path\":\"main.go\"}}\n```"
+		"```json\n{\"name\":\"Glob\",\"input\":{\"name\":\"Glob\",\"params\":{\"pattern\":\"*.go\"}}}\n```\n" +
+		"```json\n{\"name\":\"Grep\",\"input\":{\"name\":\"Grep\",\"params\":{\"pattern\":\"test\"}}}\n```\n" +
+		"```json\n{\"name\":\"FileRead\",\"input\":{\"name\":\"FileRead\",\"params\":{\"path\":\"main.go\"}}}\n```"
 
 	mp := &mockProviderWithCapture{
 		mockProvider: mockProvider{
