@@ -676,7 +676,7 @@ func TestVerifyTask_ContextTimeout(t *testing.T) {
 		Files:       []string{"main.go"},
 	}
 
-	result := engine.verifyTask(task)
+	result := engine.verifyTask(context.Background(), task)
 	if !result.SyntaxOK {
 		t.Errorf("expected SyntaxOK=true, got errors: %v", result.Errors)
 	}
