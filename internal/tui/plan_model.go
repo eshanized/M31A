@@ -80,6 +80,7 @@ func (pm *PlanModel) computeWaves() {
 	// Iteratively assign waves until all tasks have one
 	remaining := len(pm.tasks)
 	for remaining > 0 {
+		assigned := 0
 		for i, t := range pm.tasks {
 			if waveOf[i] >= 0 {
 				continue
@@ -87,6 +88,7 @@ func (pm *PlanModel) computeWaves() {
 			if len(t.Dependencies) == 0 {
 				waveOf[i] = 0
 				remaining--
+				assigned++
 				continue
 			}
 			maxDepWave := -1
@@ -111,7 +113,19 @@ func (pm *PlanModel) computeWaves() {
 					waveOf[i] = 0
 				}
 				remaining--
+				assigned++
 			}
+		}
+		// Cycle detection: if no tasks were assigned this pass, break by
+		// assigning remaining tasks to wave 0
+		if assigned == 0 {
+			for i := range pm.tasks {
+				if waveOf[i] < 0 {
+					waveOf[i] = 0
+					remaining--
+				}
+			}
+			break
 		}
 	}
 
