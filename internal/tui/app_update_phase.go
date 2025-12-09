@@ -36,9 +36,22 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				slog.Error("phase transition failed", "from", types.PhaseInitialize, "to", types.PhaseDiscuss, "error", err)
 			}
 		}
+		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseDiscuss)
 
 	case types.PhaseDiscuss:
+		if msg.NeedsAnswers {
+			m.screen = ScreenDiscuss
+			if m.discussModel == nil {
+				m.discussModel = NewDiscussModel(
+					m.themeManager.Current(),
+					m.discussQuestions,
+					m.width, m.height,
+				)
+			}
+			m.persistWorkflowState()
+			return nil
+		}
 		m.setWorkflowPhase(types.PhasePlan)
 		m.screen = ScreenPlan
 		if m.workflowEngine != nil {
@@ -55,6 +68,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				m.width, m.height,
 			)
 		}
+		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhasePlan)
 
 	case types.PhasePlan:
@@ -70,6 +84,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		} else {
 			m.executeModel.tasks = msg.Tasks
 		}
+		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseExecute)
 
 	case types.PhaseExecute:
@@ -81,6 +96,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 		}
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
+		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseVerify)
 
 	case types.PhaseVerify:
@@ -103,6 +119,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		}
 		summary.TotalCost = msg.Cost
 		m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
+		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseShip)
 
 	case types.PhaseShip:
