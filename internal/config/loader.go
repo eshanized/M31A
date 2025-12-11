@@ -108,12 +108,24 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Step 4: Layer 3 — Environment variable overrides
+	// Step 3.5: Auto-load .env file from cwd (I1)
+	loadDotEnv()
+
+	// Step 4: Layer 3 — Environment variable overrides (C2)
 	if theme := os.Getenv("M31A_THEME"); theme != "" {
 		cfg.UI.Theme = theme
 	}
 	if model := os.Getenv("M31A_DEFAULT_MODEL"); model != "" {
 		cfg.Model.Default = model
+	}
+	if provider := os.Getenv("M31A_PROVIDER"); provider != "" {
+		cfg.Provider.Default = provider
+	}
+	if mode := os.Getenv("M31A_PERMISSION_MODE"); mode != "" {
+		cfg.Permissions.DefaultMode = mode
+	}
+	if compact := os.Getenv("M31A_COMPACT"); compact == "true" || compact == "1" {
+		cfg.UI.CompactMode = true
 	}
 
 	// Step 5: Layer 4 — Project-level config (m31a.toml in cwd)
@@ -653,5 +665,41 @@ func DefaultGitConfig() GitConfig {
 		ShipPrefix:   "chore",
 		UserName:     "M31A",
 		UserEmail:    "m31a@local",
+	}
+}
+
+// loadDotEnv reads a .env file from the current working directory and sets
+// environment variables. Does not override already-set variables.
+func loadDotEnv() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	envPath := filepath.Join(cwd, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		// Remove surrounding quotes
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, value)
+		}
 	}
 }
