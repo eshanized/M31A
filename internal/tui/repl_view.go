@@ -50,11 +50,8 @@ func (m *ReplModel) View() string {
 	t := m.theme
 	rw := m.replWidth()
 
-	// ── Welcome mode: set viewport content to welcome screen ─────────────────────
-	if len(m.messages) == 0 && !m.streaming {
-		welcomeContent := m.renderWelcome()
-		m.viewport.SetContent(welcomeContent)
-	}
+	// ── Welcome mode: viewport content is set by renderMessages() ────────────
+	// Welcome content is handled via renderMessages() → renderWelcome()
 
 	// ── Viewport ──────────────────────────────────────────────────────────────────
 	viewportContent := m.viewport.View()
