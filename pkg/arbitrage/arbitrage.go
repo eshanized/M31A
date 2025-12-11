@@ -193,14 +193,9 @@ func Recommend(models []types.ModelInfo, task types.Task, threshold float64) (*A
 	}
 
 	// Collect up to 3 alternatives cheaper than the recommended model.
-	pastRecommended := false
 	for _, est := range estimates {
 		if est.ModelID == recommended.ModelID {
-			pastRecommended = true
-			continue
-		}
-		if !pastRecommended {
-			continue
+			break
 		}
 		if len(alternatives) >= 3 {
 			break
