@@ -254,7 +254,7 @@ func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.Workflo
 	}
 	session, err := m.LoadSession(id)
 	if err != nil {
-		if errors.Is(err, m31errors.ErrSessionCorrupted) {
+		if errors.Is(err, m31errors.ErrSessionCorrupted) || errors.Is(err, m31errors.ErrSessionNotFound) {
 			// Session doesn't exist yet — return zero values with no error
 			return "", types.PhaseIdle, nil, nil
 		}
