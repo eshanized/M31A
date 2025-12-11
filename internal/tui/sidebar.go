@@ -293,7 +293,7 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 		s.files = files
 		s.rebuildFlatFiles()
 		s.loading = false
-		return s, s.refreshCmd()
+		return s, nil
 	}
 
 	if s.visible && s.branch == "" && !s.loading {
