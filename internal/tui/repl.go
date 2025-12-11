@@ -12,6 +12,7 @@ import (
 
 // Init implements tea.Model; the REPL starts with a spinner tick.
 func (m *ReplModel) Init() tea.Cmd {
+	m.renderMessages()
 	return StreamTickCmd()
 }
 
