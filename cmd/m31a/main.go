@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -220,6 +222,24 @@ func main() {
 		Version,
 		themeMode,
 	)
+
+	// Signal handler: save session state on SIGTERM/SIGINT before exit (SE8)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		slog.Info("received shutdown signal, saving session state...")
+		app.Shutdown()
+		os.Exit(0)
+	}()
+
+	// Resume on startup (C3): if configured, auto-resume the most recent session
+	if cfg.Features.ResumeOnStartup {
+		sessions, err := sessionMgr.ListSessions()
+		if err == nil && len(sessions) > 0 {
+			app.SetResumeSessionID(sessions[0].ID)
+		}
+	}
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
