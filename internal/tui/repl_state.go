@@ -163,7 +163,7 @@ func (m *ReplModel) SetSessionID(id string) {
 func (m *ReplModel) AddMessage(msg types.Message) {
 	m.messages = append(m.messages, msg)
 	if len(m.messages) > MaxMessageHistory {
-		m.messages = m.messages[len(m.messages)-500:]
+		m.messages = m.messages[len(m.messages)-MaxMessageHistory/2:]
 	}
 	m.renderMessages()
 	m.autoScrollConditionally()
@@ -252,9 +252,8 @@ func (m *ReplModel) autoScrollConditionally() {
 // renderMessages rebuilds the viewport content from the message list.
 func (m *ReplModel) renderMessages() {
 	if len(m.messages) == 0 && !m.streaming {
-		// Welcome screen is set when messages == 0 and not streaming.
-		// Content is set by the view loop; just clear the viewport here.
-		m.viewport.SetContent("")
+		// Render welcome screen content
+		m.viewport.SetContent(m.renderWelcome())
 		return
 	}
 
