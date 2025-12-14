@@ -429,3 +429,114 @@ func (g *Git) WorkDir() string {
 func (g *Git) AbsPath(rel string) string {
 	return filepath.Join(g.workDir, rel)
 }
+
+// Fetch fetches from a remote repository.
+func (g *Git) Fetch(remote string) error {
+	if remote == "" {
+		remote = "origin"
+	}
+	if _, err := g.run("fetch", remote); err != nil {
+		return fmt.Errorf("git fetch %s: %w", remote, err)
+	}
+	return nil
+}
+
+// Pull pulls from a remote, optionally rebasing.
+func (g *Git) Pull(remote, branch string, rebase bool) error {
+	if remote == "" {
+		remote = "origin"
+	}
+	args := []string{"pull", remote}
+	if branch != "" {
+		args = append(args, branch)
+	}
+	if rebase {
+		args = append(args, "--rebase")
+	}
+	if _, err := g.run(args...); err != nil {
+		return fmt.Errorf("git pull: %w", err)
+	}
+	return nil
+}
+
+// Push pushes to a remote repository.
+func (g *Git) Push(remote, branch string) error {
+	if remote == "" {
+		remote = "origin"
+	}
+	args := []string{"push", remote}
+	if branch != "" {
+		args = append(args, branch)
+	}
+	if _, err := g.run(args...); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
+}
+
+// CheckoutBranch checks out a branch, optionally creating it.
+func (g *Git) CheckoutBranch(name string, create bool) error {
+	args := []string{"checkout"}
+	if create {
+		args = append(args, "-b")
+	}
+	args = append(args, name)
+	if _, err := g.run(args...); err != nil {
+		return fmt.Errorf("git checkout: %w", err)
+	}
+	return nil
+}
+
+// StashList returns a list of stash entries.
+func (g *Git) StashList() ([]string, error) {
+	out, err := g.run("stash", "list")
+	if err != nil {
+		return nil, fmt.Errorf("git stash list: %w", err)
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
+}
+
+// StashApply applies a stash entry by index (0 = most recent).
+func (g *Git) StashApply(index int) error {
+	if _, err := g.run("stash", "apply", fmt.Sprintf("stash@{%d}", index)); err != nil {
+		return fmt.Errorf("git stash apply: %w", err)
+	}
+	return nil
+}
+
+// Merge merges a branch into the current branch.
+func (g *Git) Merge(branch string) error {
+	if _, err := g.run("merge", branch); err != nil {
+		return fmt.Errorf("git merge %s: %w", branch, err)
+	}
+	return nil
+}
+
+// Tag creates a lightweight or annotated tag.
+func (g *Git) Tag(name, msg string) error {
+	if msg != "" {
+		if _, err := g.run("tag", "-a", name, "-m", msg); err != nil {
+			return fmt.Errorf("git tag: %w", err)
+		}
+	} else {
+		if _, err := g.run("tag", name); err != nil {
+			return fmt.Errorf("git tag: %w", err)
+		}
+	}
+	return nil
+}
+
+// BranchList returns a list of local branches.
+func (g *Git) BranchList() ([]string, error) {
+	out, err := g.run("branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, fmt.Errorf("git branch: %w", err)
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
+}
