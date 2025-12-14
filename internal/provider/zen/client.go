@@ -258,3 +258,8 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 func (c *Client) GetModel(id string) (*types.ModelInfo, error) {
 	return provider.GetModel(id, c.cache)
 }
+
+// CachedModels returns all models from the cache without a network call.
+func (c *Client) CachedModels() []types.ModelInfo {
+	return provider.CachedModels(c.cache)
+}
