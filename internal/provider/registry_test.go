@@ -42,6 +42,10 @@ func (m *mockProvider) GetModel(id string) (*types.ModelInfo, error) {
 	return nil, nil
 }
 
+func (m *mockProvider) CachedModels() []types.ModelInfo {
+	return nil
+}
+
 func TestRegistry_RegisterAndActive(t *testing.T) {
 	r := NewRegistry()
 	r.Register("test", &mockProvider{name: "test"})
