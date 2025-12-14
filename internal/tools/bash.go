@@ -14,11 +14,48 @@ import (
 )
 
 type Bash struct {
-	workDir string
+	workDir   string
+	blacklist []string
 }
 
 func NewBash(workDir string) *Bash {
-	return &Bash{workDir: workDir}
+	return &Bash{
+		workDir: workDir,
+		blacklist: defaultBashBlacklist(),
+	}
+}
+
+// defaultBashBlacklist returns dangerous command patterns that are blocked by default.
+func defaultBashBlacklist() []string {
+	return []string{
+		"rm -rf /",
+		"rm -rf /*",
+		"mkfs",
+		"dd if=",
+		":(){:|:&};:",
+		"chmod -R 777 /",
+		"> /dev/sda",
+		"wget|sh",
+		"curl|sh",
+		"curl|bash",
+		"wget|bash",
+	}
+}
+
+// SetBlacklist replaces the command blacklist.
+func (t *Bash) SetBlacklist(patterns []string) {
+	t.blacklist = patterns
+}
+
+// isBlacklisted checks if a command matches any blacklist pattern.
+func (t *Bash) isBlacklisted(command string) bool {
+	lower := strings.ToLower(command)
+	for _, pattern := range t.blacklist {
+		if strings.Contains(lower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Bash) Name() string {
@@ -63,6 +100,13 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	command, ok := commandRaw.(string)
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("parameter command must be a string: %w", m31errors.ErrToolExecution)
+	}
+
+	if t.isBlacklisted(command) {
+		return types.ToolResult{
+			Output: "Command blocked by security blacklist",
+			Error:  "blocked: " + command,
+		}, fmt.Errorf("command blocked by security blacklist: %w", m31errors.ErrPermissionDenied)
 	}
 
 	timeoutSec := int(types.BashTimeout.Seconds())
