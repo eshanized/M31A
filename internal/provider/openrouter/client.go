@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -163,6 +164,46 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 }
 
 func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
+	const maxRetries = 2
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		iter, err := c.doChatStream(ctx, req)
+		if err == nil {
+			return iter, nil
+		}
+
+		// Retry on 5xx and connection errors
+		if attempt < maxRetries && isRetryable(err) {
+			delay := time.Duration(1<<uint(attempt)) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+				continue
+			}
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("max retries exceeded")
+}
+
+// isRetryable returns true for errors that warrant automatic retry.
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "500") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "unexpected EOF") ||
+		strings.Contains(msg, "server error") ||
+		strings.Contains(msg, "gateway error") ||
+		strings.Contains(msg, "temporarily unavailable")
+}
+
+func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
 	body := provider.BuildChatBody(req)
 
 	jsonBody, err := json.Marshal(body)
@@ -277,4 +318,9 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 
 func (c *Client) GetModel(id string) (*types.ModelInfo, error) {
 	return provider.GetModel(id, c.cache)
+}
+
+// CachedModels returns all models from the cache without a network call.
+func (c *Client) CachedModels() []types.ModelInfo {
+	return provider.CachedModels(c.cache)
 }
