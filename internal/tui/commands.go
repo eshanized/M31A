@@ -39,6 +39,8 @@ type CommandResult struct {
 	ResumePhase     types.WorkflowPhase
 	ResumeGoal      string
 	ResumeQuestions []string
+	ConfirmRequired bool
+	ConfirmPrompt   string
 }
 
 // CommandHandler processes a slash command invocation.
@@ -241,6 +243,7 @@ func DefaultCommands() *CommandRegistry {
 
 	// AI/model
 	r.Register("compress", handleCompress, "Trigger context consolidation")
+	r.Register("memory", handleMemory, "Manage context memory")
 	r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
 	r.Register("model", handleModel, "Show or switch model")
 	r.Register("models", handleModels, "List all cached models")
@@ -250,9 +253,11 @@ func DefaultCommands() *CommandRegistry {
 	// Git
 	r.Register("diff", handleDiff, "Show git diff")
 	r.Register("rollback", handleRollback, "Browse or reset to commit")
+	r.Register("bisect", handleBisect, "Git bisect info")
 
 	// Session
 	r.Register("sessions", handleSessions, "List recent sessions")
+	r.Register("export", handleExport, "Export session to file")
 	r.Register("fork", handleFork, "Fork current session")
 	r.Register("prev", handlePrev, "Switch to previous session")
 	r.Register("next", handleNext, "Switch to next session")
@@ -262,6 +267,7 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("ledger", handleLedger, "Show learning ledger")
 
 	// Workflow
+	r.Register("new", handleNew, "Start a new workflow")
 	r.Register("workflow", handleWorkflow, "Workflow control")
 	r.Register("plan", handlePhase, "Alias for /phase plan")
 	r.Register("execute", handlePhase, "Alias for /phase execute")
