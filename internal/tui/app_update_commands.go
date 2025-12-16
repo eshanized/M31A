@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
@@ -64,11 +66,36 @@ func (m *AppState) handleSlashCommand(input string) tea.Cmd {
 	}
 
 	// Regular chat message — route to the LLM
+	// Show toast for @-mention file attachments
+	if strings.Contains(input, "--- Attached file context ---") {
+		count := strings.Count(input, "**File: ")
+		if count > 0 {
+			m.toasts = append(m.toasts, Toast{
+				Text:      fmt.Sprintf("Attached %d file(s) via @-mention", count),
+				Type:      "info",
+				CreatedAt: time.Now(),
+			})
+		}
+	}
 	return m.sendChatMessage(input, t)
 }
 
 // processCommandResult converts a CommandResult into a tea.Cmd.
 func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
+	// Confirmation required — store pending and show prompt
+	if result.ConfirmRequired {
+		m.pendingConfirm = &result
+		prompt := result.ConfirmPrompt
+		if prompt == "" {
+			prompt = "Are you sure?"
+		}
+		m.confirmPrompt = prompt
+		if m.replModel != nil {
+			m.replModel.AddMessage(makeAssistantMsg(prompt + " (y/n)"))
+		}
+		return nil
+	}
+
 	// Show the result message in REPL if any
 	if result.Message != "" && m.replModel != nil {
 		m.replModel.AddMessage(makeAssistantMsg(result.Message))
