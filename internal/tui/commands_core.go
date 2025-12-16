@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -23,10 +24,17 @@ func handleHelp(_ []string, ctx CommandContext) CommandResult {
 
 // handleClear clears the current conversation messages.
 func handleClear(_ []string, ctx CommandContext) CommandResult {
-	if ctx.ClearMessages != nil {
-		ctx.ClearMessages()
+	return CommandResult{
+		Success:         true,
+		ConfirmRequired: true,
+		ConfirmPrompt:   "Clear entire conversation? This cannot be undone.",
+		Cmd: func() tea.Msg {
+			if ctx.ClearMessages != nil {
+				ctx.ClearMessages()
+			}
+			return ToastMsg{Text: "Conversation cleared", Duration: 3 * time.Second, Type: "success"}
+		},
 	}
-	return CommandResult{Success: true, Message: "Conversation cleared."}
 }
 
 // handleStatus shows the current session information.
@@ -67,9 +75,10 @@ func handleStatus(_ []string, ctx CommandContext) CommandResult {
 func handleReset(_ []string, _ CommandContext) CommandResult {
 	screen := ScreenFirstRun
 	return CommandResult{
-		Success: true,
-		Message: "Resetting to first-run screen...",
-		Screen:  &screen,
+		Success:         true,
+		ConfirmRequired: true,
+		ConfirmPrompt:   "Reset to first-run screen? Current session state will be lost.",
+		Screen:          &screen,
 	}
 }
 
