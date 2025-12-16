@@ -144,6 +144,18 @@ type AppState struct {
 
 	// Double ctrl+c exit tracking
 	lastCtrlCTime time.Time
+
+	// Confirmation dialog state (non-nil when awaiting y/n)
+	pendingConfirm *CommandResult
+	confirmPrompt  string
+
+	// Resume session ID set at startup (C3)
+	resumeSessionID string
+}
+
+// SetResumeSessionID configures the app to auto-resume a session on startup.
+func (a *AppState) SetResumeSessionID(id string) {
+	a.resumeSessionID = id
 }
 
 // NewApp creates a new AppState.
