@@ -33,5 +33,14 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewGrep(workDir)); err != nil {
 		return nil, err
 	}
+	if err := d.Register(NewFileList(workDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewFileDelete(workDir, backupDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(NewFileMove(workDir)); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
