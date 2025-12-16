@@ -35,7 +35,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.streamCancelFn()
 				m.streamCancelFn = nil
 				m.lastCtrlCTime = time.Time{}
-				return m, nil
+				m.toasts = append(m.toasts, Toast{
+					Text:      "Response cancelled",
+					Type:      "warning",
+					CreatedAt: time.Now(),
+				})
+				return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+					return ToastExpiryMsg{}
+				})
 			}
 			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
 				return m, tea.Quit
@@ -81,6 +88,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			cs, _ := m.replModel.handleStreamDoneMsg(msg)
 			cmds = append(cmds, cs...)
+			m.checkAutoDream()
 		}
 	case StreamErrorMsg:
 		if m.replModel != nil {
@@ -531,6 +539,26 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		newPalette, cmd := m.cmdPalette.Update(msg)
 		m.cmdPalette = newPalette
 		return cmd
+	}
+
+	// Confirmation dialog active — intercept y/n/esc
+	if m.pendingConfirm != nil {
+		switch msg.String() {
+		case "y", "Y":
+			pending := *m.pendingConfirm
+			m.pendingConfirm = nil
+			m.confirmPrompt = ""
+			pending.ConfirmRequired = false
+			return m.processCommandResult(pending)
+		case "n", "N", "esc":
+			m.pendingConfirm = nil
+			m.confirmPrompt = ""
+			if m.replModel != nil {
+				m.replModel.AddMessage(makeAssistantMsg("Cancelled."))
+			}
+			return nil
+		}
+		return nil
 	}
 
 	// Sidebar focus toggle — works from any screen
