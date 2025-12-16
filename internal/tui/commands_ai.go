@@ -10,6 +10,47 @@ import (
 	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
+// handleMemory manages context memory (AutoDream consolidation).
+func handleMemory(args []string, ctx CommandContext) CommandResult {
+	if ctx.AutoDream == nil {
+		return CommandResult{Success: false, Message: "Context memory not available."}
+	}
+
+	subcmd := "view"
+	if len(args) > 0 {
+		subcmd = strings.ToLower(args[0])
+	}
+
+	switch subcmd {
+	case "view":
+		stats := ctx.AutoDream.Stats()
+		paused := "no"
+		if stats["paused"] == true {
+			paused = "yes"
+		}
+		return CommandResult{
+			Success: true,
+			Message: fmt.Sprintf(
+				"**Context Memory:**\n  Messages: %v\n  Consolidations: %v\n  Paused: %s\n  Estimated tokens: %v\n  Last consolidation: %v",
+				stats["total_messages"], stats["total_consolidations"], paused, stats["estimated_tokens"], stats["last_consolidation"],
+			),
+		}
+	case "pause":
+		ctx.AutoDream.Pause()
+		return CommandResult{Success: true, Message: "Auto-compression paused. Use `/memory resume` to re-enable."}
+	case "resume":
+		ctx.AutoDream.Resume()
+		return CommandResult{Success: true, Message: "Auto-compression resumed."}
+	case "revert":
+		return CommandResult{Success: false, Message: "Revert not yet implemented — use `/clear` and re-start the session."}
+	default:
+		return CommandResult{
+			Success: false,
+			Message: "Usage: `/memory [view|pause|resume]`",
+		}
+	}
+}
+
 // handleCompress triggers context consolidation via AutoDream.
 func handleCompress(_ []string, ctx CommandContext) CommandResult {
 	if ctx.AutoDream == nil {
