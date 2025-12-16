@@ -2,14 +2,17 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 // ─── Bubble Tea Model interface ───────────────────────────────────────────────
@@ -70,6 +73,8 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 
 	ctx, cancel := context.WithCancel(m.shutdownCtx)
 	m.workflowCancel = cancel
+
+	m.checkAutoArbitrage()
 
 	engine := m.workflowEngine
 	goal := m.workflowGoal
@@ -221,4 +226,76 @@ func (m *AppState) persistWorkflowState() {
 		m.workflowPhase,
 		m.discussQuestions,
 	)
+}
+
+// checkAutoDream syncs REPL messages to the AutoDream consolidator and
+// triggers consolidation automatically when the context grows large enough.
+func (m *AppState) checkAutoDream() {
+	if m.autoDream == nil || m.replModel == nil {
+		return
+	}
+	msgs := m.replModel.Messages()
+	m.autoDream.SetMessages(msgs)
+	if !m.autoDream.CanConsolidate() {
+		return
+	}
+	result := m.autoDream.Consolidate()
+	if result.Success {
+		m.replModel.SetMessages(m.autoDream.Messages())
+		m.toasts = append(m.toasts, Toast{
+			Text:      fmt.Sprintf("Auto-compressed: %d messages removed, ~%d tokens saved", result.MessagesRemoved, result.TokensSaved),
+			Type:      "info",
+			CreatedAt: time.Now(),
+		})
+	}
+}
+
+// checkAutoArbitrage evaluates whether a cheaper model should be used for the
+// next workflow phase when the AutoArbitrage config flag is enabled.
+func (m *AppState) checkAutoArbitrage() {
+	if m.config == nil || !m.config.Model.AutoArbitrage {
+		return
+	}
+	if m.arbitrager == nil || m.registry == nil || m.workflowEngine == nil {
+		return
+	}
+	p := m.registry.ActiveProvider()
+	if p == nil {
+		return
+	}
+	models := p.CachedModels()
+	if len(models) == 0 {
+		return
+	}
+
+	task := types.Task{
+		Action:      "execute",
+		Description: m.workflowGoal,
+	}
+	threshold := m.config.Model.ArbitrageThreshold
+	if threshold == 0 {
+		threshold = 0.2
+	}
+
+	rec, err := arbitrage.Recommend(models, task, threshold)
+	if err != nil {
+		return
+	}
+	if m.activeModel != nil && rec.RecommendedModel.ModelID == m.activeModel.ID {
+		return
+	}
+
+	recommended := rec.RecommendedModel.ModelID
+	modelInfo, err := p.GetModel(recommended)
+	if err != nil {
+		return
+	}
+
+	m.workflowEngine.SetModel(recommended, p)
+	m.activeModel = modelInfo
+	m.toasts = append(m.toasts, Toast{
+		Text:      fmt.Sprintf("Auto-arbitrage: switched to %s (%s task, saving $%.4f)", recommended, rec.Complexity, rec.Savings),
+		Type:      "info",
+		CreatedAt: time.Now(),
+	})
 }
