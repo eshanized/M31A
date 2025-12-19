@@ -101,6 +101,12 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		}
 		return m.handleEnterKey()
 
+	case "shift+enter", "ctrl+j":
+		// Insert newline for multi-line input
+		m.textarea.InsertString("\n")
+		m.updateAutoExpandHeight()
+		return nil
+
 	case "tab":
 		if m.mentionVisible && len(m.mentionEntries) > 0 {
 			m.completeMention()
@@ -180,7 +186,12 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		// Scroll to bottom
 		m.viewport.GotoBottom()
 		m.userScrolled = false
+		m.newMessagesWhileScrolled = 0
 		return nil
+
+	case "ctrl+y":
+		// Copy last assistant message to clipboard
+		return m.copyLastAssistantMessage()
 
 	case "pgup", "ctrl+u":
 		m.viewport.ViewUp()
@@ -190,6 +201,20 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	case "pgdown", "ctrl+d":
 		m.viewport.ViewDown()
 		return nil
+
+	case "j":
+		// Scroll down when textarea is empty
+		if m.textarea.Value() == "" {
+			m.viewport.LineDown(1)
+			return nil
+		}
+
+	case "k":
+		// Scroll up when textarea is empty
+		if m.textarea.Value() == "" {
+			m.viewport.LineUp(1)
+			return nil
+		}
 
 	default:
 		// Leader key chord handling
@@ -204,6 +229,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	// Pass to textarea for typing
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	m.updateAutoExpandHeight()
 	m.updateSlashSuggestions()
 	m.updateMentionSuggestions()
 	return cmd
