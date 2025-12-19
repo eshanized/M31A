@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -95,6 +96,9 @@ func (m *ReplModel) View() string {
 		SpinnerFrame:     m.spinner.Peek(),
 		KeyboardHints:    []string{"ctrl+p commands", "ctrl+b sidebar", "@ files", "ctrl+x leader"},
 	}
+	if m.streaming || m.thinking {
+		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
+	}
 	// Add cwd and git branch if available
 	if m.cwd != "" {
 		info.CwdName = pathBase(m.cwd)
@@ -133,6 +137,17 @@ func (m *ReplModel) View() string {
 		}
 	}
 
+	// ── "New messages" indicator ────────────────────────────────────────────────
+	newMessagesIndicator := ""
+	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
+		newMessagesIndicator = lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(rw).
+			Render(fmt.Sprintf("↓ %d new message(s) — ctrl+l to scroll to bottom", m.newMessagesWhileScrolled))
+	}
+
 	// ── Assemble all parts ────────────────────────────────────────────────────
 	parts := []string{viewportContent}
 	if quickActions != "" {
@@ -146,6 +161,9 @@ func (m *ReplModel) View() string {
 	}
 	if whichKeyOverlay != "" {
 		parts = append(parts, whichKeyOverlay)
+	}
+	if newMessagesIndicator != "" {
+		parts = append(parts, newMessagesIndicator)
 	}
 	parts = append(parts, inputBorder, metaRow, textareaView, statusBar)
 
