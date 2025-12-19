@@ -165,6 +165,16 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 	if len(m.messages) > MaxMessageHistory {
 		m.messages = m.messages[len(m.messages)-MaxMessageHistory/2:]
 	}
+	if m.userScrolled {
+		m.newMessagesWhileScrolled++
+	}
+	m.renderMessages()
+	m.autoScrollConditionally()
+}
+
+// SetMessages replaces all messages and re-renders the viewport.
+func (m *ReplModel) SetMessages(msgs []types.Message) {
+	m.messages = msgs
 	m.renderMessages()
 	m.autoScrollConditionally()
 }
@@ -195,6 +205,25 @@ func (m *ReplModel) ClearMessages() {
 }
 
 // RefreshViewport forces a re-render of the viewport content.
+
+// maxTextareaHeight is the maximum number of rows the textarea can grow to.
+const maxTextareaHeight = 10
+
+// updateAutoExpandHeight grows the textarea height based on the number of lines
+// in the current input, up to maxTextareaHeight rows.
+func (m *ReplModel) updateAutoExpandHeight() {
+	lines := strings.Count(m.textarea.Value(), "\n") + 1
+	newHeight := lines
+	if newHeight < inputHeight {
+		newHeight = inputHeight
+	}
+	if newHeight > maxTextareaHeight {
+		newHeight = maxTextareaHeight
+	}
+	if m.textarea.Height() != newHeight {
+		m.textarea.SetHeight(newHeight)
+	}
+}
 func (m *ReplModel) RefreshViewport() {
 	m.renderMessages()
 }
