@@ -110,6 +110,9 @@ type ReplModel struct {
 
 	// Project info for the welcome screen (pushed from SidebarRefreshMsg)
 	changedFiles int
+
+	// "New messages" indicator: tracks messages received while user is scrolled up
+	newMessagesWhileScrolled int
 }
 
 // NewReplModel creates a new ReplModel.
