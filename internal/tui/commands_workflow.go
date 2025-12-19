@@ -8,6 +8,19 @@ import (
 )
 
 
+// handleNew starts a fresh workflow by resetting workflow state and opening the goal input.
+func handleNew(_ []string, ctx CommandContext) CommandResult {
+	if ctx.ClearMessages != nil {
+		ctx.ClearMessages()
+	}
+	screen := ScreenGoalInput
+	return CommandResult{
+		Success: true,
+		Message: "Starting new workflow...",
+		Screen:  &screen,
+	}
+}
+
 // handleWorkflow shows the current workflow phase and status.
 func handleWorkflow(_ []string, ctx CommandContext) CommandResult {
 	if ctx.SessionManager == nil || ctx.SessionID == "" {
