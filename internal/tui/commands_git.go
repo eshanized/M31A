@@ -100,3 +100,17 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 		},
 	}
 }
+
+// handleBisect provides git bisect information.
+func handleBisect(_ []string, ctx CommandContext) CommandResult {
+	if ctx.Git == nil {
+		return CommandResult{Success: false, Message: "Git not available in this context."}
+	}
+	if !ctx.Git.IsRepo() {
+		return CommandResult{Success: false, Message: "Not inside a git repository."}
+	}
+	return CommandResult{
+		Success: true,
+		Message: "**Git bisect** requires a known good and bad commit.\n\nUsage:\n  `git bisect start`\n  `git bisect bad HEAD`\n  `git bisect good <good-commit>`\n\nThen run your test and mark each commit as `good` or `bad`.",
+	}
+}
