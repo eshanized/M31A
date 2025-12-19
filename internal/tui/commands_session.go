@@ -215,4 +215,38 @@ func handleLedger(args []string, ctx CommandContext) CommandResult {
 	}
 }
 
+// handleExport exports the current session to a file.
+// Usage: /export [markdown|json] [path]
+func handleExport(args []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session to export."}
+	}
+
+	format := "markdown"
+	path := ctx.SessionID + ".md"
+	if len(args) > 0 {
+		format = strings.ToLower(args[0])
+	}
+	if len(args) > 1 {
+		path = args[1]
+	}
+
+	var err error
+	switch format {
+	case "json":
+		if !strings.HasSuffix(path, ".json") {
+			path = ctx.SessionID + ".json"
+		}
+		err = ctx.SessionManager.ExportSessionJSON(ctx.SessionID, path)
+	case "markdown", "md":
+		err = ctx.SessionManager.ExportSessionMarkdown(ctx.SessionID, path)
+	default:
+		return CommandResult{Success: false, Message: "Unknown format. Use `markdown` or `json`."}
+	}
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Export failed: %v", err)}
+	}
+	return CommandResult{Success: true, Message: fmt.Sprintf("Session exported to **%s**.", path)}
+}
+
 
