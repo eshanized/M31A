@@ -260,7 +260,7 @@ func TestConsolidate_SummaryMessageProperties(t *testing.T) {
 	}
 
 	msgsAfter := c.Messages()
-	summary := msgsAfter[len(msgsAfter)-1]
+	summary := msgsAfter[0]
 
 	if summary.Role != "system" {
 		t.Errorf("summary message Role = %q, want \"system\"", summary.Role)
@@ -297,12 +297,12 @@ func TestConsolidate_Idempotent(t *testing.T) {
 	if len(msgsAfter) == 0 {
 		t.Fatal("messages should not be empty after consolidation")
 	}
-	summary := msgsAfter[len(msgsAfter)-1]
+	summary := msgsAfter[0]
 	if summary.Role != "system" {
 		t.Errorf("summary message role = %q, want \"system\"", summary.Role)
 	}
 	if len(summary.Segments) == 0 || summary.Segments[0].Type != "memory" {
-		t.Error("last message should have memory segment type")
+		t.Error("first message should have memory segment type")
 	}
 
 	// Second consolidation — should not fail (may consolidate remaining candidates)
