@@ -256,21 +256,26 @@ func boostLevel(level ComplexityLevel, steps int) ComplexityLevel {
 func classifyText(action, description string) ComplexityLevel {
 	text := strings.ToLower(action + " " + description)
 
-	complexKeywords := []string{"design", "architect", "migrate", "rewrite", "system"}
+	complexKeywords := []string{"design", "architect", "migrate", "rewrite", "system",
+		"containerize", "deploy", "infrastructure", "microservice", "distributed",
+		"benchmark", "security audit"}
 	for _, kw := range complexKeywords {
 		if strings.Contains(text, kw) {
 			return ComplexityComplex
 		}
 	}
 
-	moderateKeywords := []string{"implement", "create", "refactor", "restructure"}
+	moderateKeywords := []string{"implement", "create", "refactor", "restructure",
+		"database", "api", "frontend", "backend", "authentication", "integration",
+		"test suite", "monitor", "pipeline"}
 	for _, kw := range moderateKeywords {
 		if strings.Contains(text, kw) {
 			return ComplexityModerate
 		}
 	}
 
-	simpleKeywords := []string{"fix", "add", "update", "change", "rename"}
+	simpleKeywords := []string{"fix", "add", "update", "change", "rename",
+		"typo", "format", "lint", "comment", "readme"}
 	for _, kw := range simpleKeywords {
 		if strings.Contains(text, kw) {
 			return ComplexitySimple
