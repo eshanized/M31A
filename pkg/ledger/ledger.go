@@ -147,15 +147,17 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 func formatEntry(entry LedgerEntry) string {
 	timestamp := entry.Timestamp.Format(time.RFC3339)
 	return fmt.Sprintf(
-		"| %s | %s | %s | %s | %d | %d | %.2f | %d |",
+		"| %s | %s | %s | %s | %d | %d | %d | %.2f | %d | %d |",
 		entry.SessionID,
 		timestamp,
 		entry.Model,
 		entry.ProjectType,
 		entry.TaskCount,
 		entry.FailedTasks,
+		entry.SkippedTasks,
 		entry.CostEstimate,
 		entry.DurationMinutes,
+		entry.CommitCount,
 	)
 }
 
@@ -359,10 +361,10 @@ func (l *Ledger) rewriteFile() error {
 		if _, err := fmt.Fprintln(f, ""); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Cost | Duration |"); err != nil {
+		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |"); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|"); err != nil {
+		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|---|---|"); err != nil {
 			return err
 		}
 		for _, entry := range l.entries {
@@ -461,8 +463,8 @@ func parseEntry(line string) (LedgerEntry, error) {
 		}
 	}
 
-	if len(fields) < 8 {
-		return LedgerEntry{}, fmt.Errorf("expected 8 fields, got %d: %s", len(fields), line)
+	if len(fields) < 10 {
+		return LedgerEntry{}, fmt.Errorf("expected 10 fields, got %d: %s", len(fields), line)
 	}
 
 	timestamp, err := time.Parse(time.RFC3339, fields[1])
@@ -478,13 +480,21 @@ func parseEntry(line string) (LedgerEntry, error) {
 	if err != nil {
 		return LedgerEntry{}, fmt.Errorf("parse failedTasks %q: %w", fields[5], err)
 	}
-	cost, err := parseFloat(fields[6])
+	skippedTasks, err := parseInt(fields[6])
 	if err != nil {
-		return LedgerEntry{}, fmt.Errorf("parse cost %q: %w", fields[6], err)
+		return LedgerEntry{}, fmt.Errorf("parse skippedTasks %q: %w", fields[6], err)
 	}
-	duration, err := parseInt(fields[7])
+	cost, err := parseFloat(fields[7])
 	if err != nil {
-		return LedgerEntry{}, fmt.Errorf("parse duration %q: %w", fields[7], err)
+		return LedgerEntry{}, fmt.Errorf("parse cost %q: %w", fields[7], err)
+	}
+	duration, err := parseInt(fields[8])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse duration %q: %w", fields[8], err)
+	}
+	commitCount, err := parseInt(fields[9])
+	if err != nil {
+		return LedgerEntry{}, fmt.Errorf("parse commitCount %q: %w", fields[9], err)
 	}
 
 	return LedgerEntry{
@@ -494,8 +504,10 @@ func parseEntry(line string) (LedgerEntry, error) {
 		ProjectType:     fields[3],
 		TaskCount:       taskCount,
 		FailedTasks:     failedTasks,
+		SkippedTasks:    skippedTasks,
 		CostEstimate:    cost,
 		DurationMinutes: duration,
+		CommitCount:     commitCount,
 	}, nil
 }
 
