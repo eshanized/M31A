@@ -106,6 +106,7 @@ func (m *mockProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
 	return m31types.HealthStatus{Status: "live"}
 }
 func (m *mockProvider) GetModel(id string) (*m31types.ModelInfo, error) { return nil, nil }
+func (m *mockProvider) CachedModels() []m31types.ModelInfo              { return nil }
 
 func TestEngine_Initialization(t *testing.T) {
 	engine, _ := setupTestEngine(t)
@@ -690,6 +691,12 @@ type mockProviderWithModel struct {
 
 func (m *mockProviderWithModel) GetModel(id string) (*m31types.ModelInfo, error) {
 	return m.model, nil
+}
+func (m *mockProviderWithModel) CachedModels() []m31types.ModelInfo {
+	if m.model != nil {
+		return []m31types.ModelInfo{*m.model}
+	}
+	return nil
 }
 
 func TestEngine_PreflightContextCheck(t *testing.T) {
