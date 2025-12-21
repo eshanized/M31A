@@ -53,6 +53,7 @@ func (m *multiTurnMockProvider) HealthCheck(ctx context.Context) m31types.Health
 func (m *multiTurnMockProvider) GetModel(id string) (*m31types.ModelInfo, error) {
 	return nil, nil
 }
+func (m *multiTurnMockProvider) CachedModels() []m31types.ModelInfo { return nil }
 
 func TestFullWorkflow(t *testing.T) {
 	dir := t.TempDir()
