@@ -208,7 +208,7 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 		}
 	}
 
-	c.messages = append(kept, summaryMsg)
+	c.messages = append([]types.Message{summaryMsg}, kept...)
 	c.totalConsolidations++
 	c.lastConsolidation = time.Now()
 
