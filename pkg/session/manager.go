@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -343,6 +344,7 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 		info.StartedAt = s.StartedAt
 		info.MessageCount = s.MessageCount
 		info.WorkflowPhase = s.WorkflowPhase
+		info.Label = s.Label
 		sessions = append(sessions, info)
 	}
 
@@ -699,4 +701,64 @@ func (m *Manager) SaveSession(s *Session) error {
 	}
 
 	return nil
+}
+
+// FilterSessions returns sessions matching a query string (searches ID, label, and model).
+func (m *Manager) FilterSessions(query string) ([]SessionInfo, error) {
+	all, err := m.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return all, nil
+	}
+	q := strings.ToLower(query)
+	var filtered []SessionInfo
+	for _, s := range all {
+		if strings.Contains(strings.ToLower(s.ID), q) ||
+			strings.Contains(strings.ToLower(s.Label), q) ||
+			strings.Contains(strings.ToLower(s.Model), q) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
+}
+
+// ExportSessionMarkdown exports a session's messages as a markdown file.
+func (m *Manager) ExportSessionMarkdown(id, path string) error {
+	sess, err := m.LoadSession(id)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# Session: %s\n\n", id))
+	sb.WriteString(fmt.Sprintf("**Model:** %s  \n**Provider:** %s  \n**Started:** %s  \n**Messages:** %d\n\n---\n\n",
+		sess.Model, sess.Provider, sess.StartedAt.Format(time.RFC3339), sess.MessageCount))
+	for _, msg := range sess.Messages {
+		sb.WriteString(fmt.Sprintf("## %s\n\n%s\n\n---\n\n", msg.Role, msg.Content))
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0644)
+}
+
+// ExportSessionJSON exports a session's full data as a JSON file.
+func (m *Manager) ExportSessionJSON(id, path string) error {
+	sess, err := m.LoadSession(id)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	data, err := json.MarshalIndent(sess, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// RenameSession updates a session's label.
+func (m *Manager) RenameSession(id, label string) error {
+	sess, err := m.LoadSession(id)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	sess.Label = label
+	return m.saveSessionAtomic(sess)
 }
