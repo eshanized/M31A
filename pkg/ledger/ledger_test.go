@@ -77,11 +77,11 @@ func TestNew_ParseExisting(t *testing.T) {
 	// Write pre-formatted content
 	content := `# Cross-Session Learning Ledger
 
-| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Cost | Duration |
-|---|---|---|---|---|---|---|---|
-| abc00001 | 2026-05-28T10:30:00Z | model-a | go | 10 | 1 | 0.42 | 45 |
-| abc00002 | 2026-05-28T11:00:00Z | model-b | node | 5 | 0 | 0.15 | 20 |
-| abc00003 | 2026-05-28T12:00:00Z | model-c | python | 8 | 2 | 0.35 | 30 |
+| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |
+|---|---|---|---|---|---|---|---|---|---|
+| abc00001 | 2026-05-28T10:30:00Z | model-a | go | 10 | 1 | 0 | 0.42 | 45 | 3 |
+| abc00002 | 2026-05-28T11:00:00Z | model-b | node | 5 | 0 | 0 | 0.15 | 20 | 1 |
+| abc00003 | 2026-05-28T12:00:00Z | model-c | python | 8 | 2 | 1 | 0.35 | 30 | 2 |
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
