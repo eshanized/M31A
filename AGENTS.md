@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-M31A is a Go 1.22+ terminal AI coding agent.
+M31A is a Go 1.24+ terminal AI coding agent.
 
 - Module: github.com/eshanized/M31A
 - Binary: CGO_ENABLED=0 static binary
@@ -29,8 +29,8 @@ Clean: rm -f m31a
 - No CGO. Binary must be static (CGO_ENABLED=0).
 - No telemetry. No analytics. No external calls except to OpenRouter/Zen APIs.
 - API keys: resolved in order: env var -> OS keychain -> config file. Never plaintext.
-- V1 tools (core): Bash, FileRead, FileWrite, Glob, Grep.
-  Additional tools available: FileEdit, WebFetch, TodoWrite, AskUserQuestion.
+- V1 tools (core): Bash, FileRead, FileWrite, Glob, Grep, Edit, TodoWrite, WebFetch, AskUserQuestion.
+  Additional tools: FileList, FileDelete, FileMove.
   AskUserQuestion is available for interactive sessions but MUST NOT be
   used in automated task execution flows.
 - V1 task execution is SEQUENTIAL. The dispatcher handles permission
