@@ -33,6 +33,8 @@ type Runner struct {
 	// TaskTimeout is the per-task timeout. Zero means no timeout.
 	// Defaults to 30 minutes to match the Bash tool's default timeout.
 	TaskTimeout time.Duration
+	// MaxRetries is the number of retry attempts for failed tasks. Default 0.
+	MaxRetries int
 }
 
 // New creates a Runner for the given tasks.
@@ -171,25 +173,34 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 			continue
 		}
 
-		// Execute the task
+		// Execute the task with retry support
 		r.status[task.ID] = types.StatusRunning
 		if r.OnTaskStart != nil {
 			r.OnTaskStart(task)
 		}
 
 		var result TaskResult
-		if fn != nil {
-			var cancel context.CancelFunc
-			var taskCtx context.Context
-			if r.TaskTimeout > 0 {
-				taskCtx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
+		maxAttempts := r.MaxRetries + 1
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			if fn != nil {
+				var cancel context.CancelFunc
+				var taskCtx context.Context
+				if r.TaskTimeout > 0 {
+					taskCtx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
+				} else {
+					taskCtx, cancel = context.Background(), func() {}
+				}
+				result = fn(taskCtx, task)
+				cancel()
 			} else {
-				taskCtx, cancel = context.Background(), func() {}
+				result = TaskResult{Success: true}
 			}
-			result = fn(taskCtx, task)
-			cancel()
-		} else {
-			result = TaskResult{Success: true}
+
+			if result.Success || attempt == maxAttempts-1 {
+				break
+			}
+			// Brief backoff before retry
+			time.Sleep(time.Duration(attempt+1) * time.Second)
 		}
 
 		r.results[task.ID] = result
