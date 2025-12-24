@@ -11,6 +11,7 @@ type SessionInfo struct {
 	ID            string               `json:"id"`
 	ParentID      string               `json:"parent_id,omitempty"`
 	ChildrenIDs   []string             `json:"children_ids,omitempty"`
+	Label         string               `json:"label,omitempty"`
 	Model         string               `json:"model"`
 	Provider      string               `json:"provider"`
 	StartedAt     time.Time            `json:"started_at"`
