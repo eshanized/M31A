@@ -18,9 +18,10 @@ require (
 	golang.org/x/sync v0.10.0
 )
 
+require github.com/atotto/clipboard v0.1.4
+
 require (
 	github.com/alecthomas/chroma v0.10.0 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
@@ -50,4 +51,3 @@ require (
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )
-
