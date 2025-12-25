@@ -92,7 +92,10 @@ func (c *Client) Name() string {
 }
 
 func (c *Client) APIKey() string {
-	return c.apiKey
+	if len(c.apiKey) <= 4 {
+		return "****"
+	}
+	return "****" + c.apiKey[len(c.apiKey)-4:]
 }
 
 type openRouterModel struct {
