@@ -2,6 +2,12 @@
 # M31A — Terminal AI Coding Agent
 # ==============================================================================
 
+# Terminal colors
+GREEN     := \033[0;32m
+YELLOW    := \033[0;33m
+RED       := \033[0;31m
+NC        := \033[0m
+
 BINARY      := m31a
 MODULE      := github.com/eshanized/M31A
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -42,10 +48,10 @@ build:
 	@$(GOFLAGS) $(GO) build $(LDFLAGS) -o $(BINARY) $(CMD_DIR)
 	@printf "\033[0;32m[build]\033[0m Done: $(BINARY) ($$(du -h $(BINARY) | cut -f1))\n"
 
-## debug             — Build with debug symbols (no strip)
+## debug             — Build with debug symbols (no strip, static)
 debug:
 	@printf "\033[0;32m[debug]\033[0m Building debug binary...\n"
-	@CGO_ENABLED=1 $(GO) build -gcflags "all=-N -l" -o $(BINARY)-debug $(CMD_DIR)
+	@CGO_ENABLED=0 $(GO) build -gcflags "all=-N -l" -o $(BINARY)-debug $(CMD_DIR)
 	@printf "\033[0;32m[debug]\033[0m Done: $(BINARY)-debug\n"
 
 ## dev               — Build and run immediately
@@ -209,13 +215,12 @@ nuke: clean
 	@echo "$(RED)[nuke]$(NC) Removing vendor, cache, and build cache..."
 	@rm -rf vendor
 	@$(GO) clean -cache -modcache -testcache
-	@$(GO) clean -cache -testcache -i -r
 	@echo "$(RED)[nuke]$(NC) Done"
 
-## install           — Install binary to GOPATH/bin
-install: build
-	@echo "$(GREEN)[install]$(NC) Installing to GOPATH/bin..."
-	@cp $(BINARY) $(GOPATH)/bin/$(BINARY) || cp $(BINARY) ~/go/bin/$(BINARY)
+## install           — Install binary to GOBIN
+install:
+	@echo "$(GREEN)[install]$(NC) Installing via go install..."
+	@CGO_ENABLED=0 $(GO) install $(LDFLAGS) $(CMD_DIR)
 	@echo "$(GREEN)[install]$(NC) Done"
 
 ## version           — Show version info
