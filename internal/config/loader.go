@@ -142,9 +142,9 @@ func Load(path string) (*Config, error) {
 				// Build set of explicitly defined keys to distinguish
 				// "not set" from "explicitly set to false" for bool fields.
 				defined := make(map[string]bool)
-				for _, key := range meta.Undecoded() {
+				for _, key := range meta.Keys() {
 					defined[key.String()] = true
-}
+				}
 				mergeConfig(cfg, &projectCfg, defined)
 			}
 		}
@@ -170,6 +170,8 @@ func Load(path string) (*Config, error) {
 
 // findProjectConfig walks up from cwd (max 3 parent directories) looking for
 // an m31a.toml file. Returns the path if found, or "" if none exists.
+// Note: this may load config from a parent project directory when running
+// in a nested subdirectory of another project.
 func findProjectConfig(cwd string) string {
 	dir := cwd
 	for i := 0; i < types.MaxProjectConfigDepth; i++ {
@@ -545,6 +547,7 @@ func substituteVars(s string) string {
 		if val, ok := os.LookupEnv(name); ok {
 			return val
 		}
+		slog.Warn("unresolved variable in config, substituting empty string", "variable", name)
 		return ""
 	})
 }
@@ -651,7 +654,11 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 			if info.ModTime().After(lastModTime) {
 				lastModTime = info.ModTime()
 				cfg, err := Load(path)
-				ch <- ConfigReloadMsg{Config: cfg, Error: err}
+				select {
+				case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}
@@ -676,6 +683,14 @@ func loadDotEnv() {
 		return
 	}
 	envPath := filepath.Join(cwd, ".env")
+	info, err := os.Stat(envPath)
+	if err != nil {
+		return
+	}
+	if info.Mode().Perm()&0o002 != 0 {
+		slog.Warn("skipping world-writable .env file", "path", envPath)
+		return
+	}
 	data, err := os.ReadFile(envPath)
 	if err != nil {
 		return
