@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,7 +16,10 @@ const (
 	dateFormat     = "2006-01-02"
 )
 
-var defaultLogger *slog.Logger
+var (
+	defaultLogger *slog.Logger
+	loggerOnce    sync.Once
+)
 
 func NewLogger(version string) (*slog.Logger, func(), error) {
 	homeDir, err := os.UserHomeDir()
@@ -53,7 +57,9 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	}
 
 	logger := slog.New(handler)
-	defaultLogger = logger
+	loggerOnce.Do(func() {
+		defaultLogger = logger
+	})
 
 	cleanup := func() {
 		f.Close()
