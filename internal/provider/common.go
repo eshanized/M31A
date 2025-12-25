@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -111,12 +112,25 @@ func stripHTMLTags(s string) string {
 	return b.String()
 }
 
+var apiKeyPattern = regexp.MustCompile(`(?i)(sk-[a-zA-Z0-9]{8,}|key-[a-zA-Z0-9]{8,}|api[_-]?key[_\s:=]+["']?)([a-zA-Z0-9]{4,})`)
+
+// maskAPIKeys redacts potential API keys from error messages to prevent leakage.
+func maskAPIKeys(s string) string {
+	return apiKeyPattern.ReplaceAllStringFunc(s, func(match string) string {
+		if len(match) > 8 {
+			return match[:4] + "****" + match[len(match)-4:]
+		}
+		return "****"
+	})
+}
+
 // SanitizeProviderError maps HTTP status codes to friendly messages and
 // truncates/strips the response body to prevent raw HTML/JSON leaking to users.
 // providerName controls minor behavioral differences: Zen appends body text for
 // 401/502 errors while OpenRouter does not.
 func SanitizeProviderError(statusCode int, body string, providerName string) string {
 	cleaned := stripHTMLTags(body)
+	cleaned = maskAPIKeys(cleaned)
 
 	// Truncate to MaxProviderErrorChars
 	if len(cleaned) > types.MaxProviderErrorChars {
