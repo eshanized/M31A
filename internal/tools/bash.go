@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -25,7 +24,11 @@ func NewBash(workDir string) *Bash {
 	}
 }
 
-// defaultBashBlacklist returns dangerous command patterns that are blocked by default.
+// defaultBashBlacklist returns dangerous command patterns blocked as a
+// convenience guard. This is NOT a security boundary — the permission
+// system (risk levels, ask/allow/deny rules) is the actual enforcement
+// mechanism. Substring matching can be trivially bypassed with flag
+// reordering, variable expansion, or command substitution.
 func defaultBashBlacklist() []string {
 	return []string{
 		"rm -rf /",
@@ -231,7 +234,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	output := outStr.String()
 
 	// Check if output was truncated
-	truncated := atomic.LoadInt64(&stdoutLimit.written) >= types.BashOutputLimit || atomic.LoadInt64(&stderrLimit.written) >= types.BashOutputLimit
+	truncated := stdoutLimit.Written() >= types.BashOutputLimit || stderrLimit.Written() >= types.BashOutputLimit
 	if truncated {
 		output += "\n[... output truncated by 50K char cap]"
 	}
@@ -299,20 +302,30 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 type limitWriter struct {
 	limit   int64
 	written int64
+	mu      sync.Mutex
 	w       io.Writer
 }
 
 func (lw *limitWriter) Write(p []byte) (int, error) {
-	remaining := atomic.LoadInt64(&lw.limit) - atomic.LoadInt64(&lw.written)
+	lw.mu.Lock()
+	remaining := lw.limit - lw.written
 	if remaining <= 0 {
+		lw.mu.Unlock()
 		return len(p), nil
 	}
 	if int64(len(p)) > remaining {
 		p = p[:remaining]
 	}
 	n, err := lw.w.Write(p)
-	atomic.AddInt64(&lw.written, int64(n))
+	lw.written += int64(n)
+	lw.mu.Unlock()
 	return n, err
+}
+
+func (lw *limitWriter) Written() int64 {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.written
 }
 
 // isBinary checks if a string contains null bytes (binary content).
