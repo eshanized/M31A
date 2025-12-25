@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
@@ -22,9 +23,10 @@ const DefaultWarningThreshold = 0.80
 // EMA calibration corrects estimates against actual usage from API responses.
 type Estimator struct {
 	modelID   string
-	tokenizer *tiktoken.Tiktoken // nil if model unsupported by tiktoken-go
+	tokenizer *tiktoken.Tiktoken
+	mu        sync.Mutex
 	emaAlpha  float64
-	emaFactor float64 // running calibration factor, starts at 1.0
+	emaFactor float64
 }
 
 // NewEstimator creates an Estimator for the given model ID.
@@ -69,14 +71,13 @@ func (e *Estimator) Estimate(text string) int {
 	if e.tokenizer != nil {
 		estimated = len(e.tokenizer.Encode(text, nil, nil))
 	} else {
-		// Fallback for unsupported models (Claude, etc.)
-		// Use rune count for multibyte character handling
-		// Add 1 to prevent zero-count for short strings, then apply 1.3 safety margin
 		estimated = int((float64(len([]rune(text)))/4.0 + 1.0) * 1.3)
 	}
 
-	// Apply EMA calibration factor
-	return int(float64(estimated) * e.emaFactor)
+	e.mu.Lock()
+	factor := e.emaFactor
+	e.mu.Unlock()
+	return int(float64(estimated) * factor)
 }
 
 // Calibrate updates the emaFactor using exponential moving average.
@@ -85,19 +86,20 @@ func (e *Estimator) Estimate(text string) int {
 // The factor is clamped to [0.1, 10.0] to prevent extreme values.
 func (e *Estimator) Calibrate(estimated, actual int) {
 	if estimated <= 0 {
-		return // avoid division by zero
+		return
 	}
 
 	ratio := float64(actual) / float64(estimated)
-	e.emaFactor = e.emaAlpha*ratio + (1-e.emaAlpha)*e.emaFactor
 
-	// Clamp to prevent extreme values
+	e.mu.Lock()
+	e.emaFactor = e.emaAlpha*ratio + (1-e.emaAlpha)*e.emaFactor
 	if e.emaFactor < 0.1 {
 		e.emaFactor = 0.1
 	}
 	if e.emaFactor > 10.0 {
 		e.emaFactor = 10.0
 	}
+	e.mu.Unlock()
 }
 
 // FormatUsage returns a formatted string showing used/total context with
