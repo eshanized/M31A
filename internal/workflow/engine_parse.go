@@ -67,7 +67,8 @@ func extractArrayFrom(s string) string {
 	inString := false
 	escaped := false
 
-	for i, c := range s {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
 		if escaped {
 			escaped = false
 			continue
@@ -229,14 +230,13 @@ func detectProjectType(workDir string) string {
 
 // parseQuestions extracts numbered questions from LLM response.
 func parseQuestions(content string) []string {
-	// Match numbered questions: "1. What..." or "2. How..."
-	re := regexp.MustCompile(`(\d+)\.\s+(.+)`)
+	// Match numbered questions that end with ?
+	re := regexp.MustCompile(`(\d+)\.\s+(.+\?)`)
 	matches := re.FindAllStringSubmatch(content, -1)
 	var questions []string
 	for _, m := range matches {
 		if len(m) > 2 {
 			q := strings.TrimSpace(m[2])
-			// Remove trailing content after newline
 			if idx := strings.Index(q, "\n"); idx > 0 {
 				q = strings.TrimSpace(q[:idx])
 			}
@@ -246,7 +246,23 @@ func parseQuestions(content string) []string {
 		}
 	}
 
-	// Fallback: look for question-like lines
+	// Fallback: match numbered items without ? if no questions found
+	if len(questions) == 0 {
+		reFallback := regexp.MustCompile(`(\d+)\.\s+(.+)`)
+		for _, m := range reFallback.FindAllStringSubmatch(content, -1) {
+			if len(m) > 2 {
+				q := strings.TrimSpace(m[2])
+				if idx := strings.Index(q, "\n"); idx > 0 {
+					q = strings.TrimSpace(q[:idx])
+				}
+				if len(q) > 10 {
+					questions = append(questions, q)
+				}
+			}
+		}
+	}
+
+	// Second fallback: lines containing ?
 	if len(questions) == 0 {
 		for _, line := range strings.Split(content, "\n") {
 			line = strings.TrimSpace(line)
@@ -256,7 +272,6 @@ func parseQuestions(content string) []string {
 		}
 	}
 
-	// Cap at 4
 	if len(questions) > 4 {
 		questions = questions[:4]
 	}
