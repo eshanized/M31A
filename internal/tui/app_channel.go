@@ -46,11 +46,11 @@ type channelEmitter struct {
 }
 
 // Emit sends a message into the channel. If the channel is full after a
-// short timeout, the message is dropped with a warning log.
+// timeout, the message is dropped with a warning log.
 func (ce *channelEmitter) Emit(msg tea.Msg) {
 	select {
 	case ce.ch <- msg:
-	case <-time.After(types.ChannelSendTimeout):
+	case <-time.After(types.ChannelSendTimeout * 2):
 		slog.Warn("workflow message dropped: channel full",
 			"msg_type", fmt.Sprintf("%T", msg))
 	}
