@@ -93,6 +93,20 @@ type ModelSelectedMsg struct {
 	Provider string
 }
 
+// ProviderEntry pairs a provider ID with its collected API key.
+type ProviderEntry struct {
+	ID     string
+	APIKey string
+}
+
+// FirstRunCompleteMsg carries the multi-provider wizard results to AppState.
+type FirstRunCompleteMsg struct {
+	Providers       []ProviderEntry
+	ModelID         string
+	SaveKeychain    bool
+	DefaultProvider string
+}
+
 // ─── Infrastructure messages ─────────────────────────────────────────────────
 
 // HealthCheckTickMsg is emitted by the health check ticker.
