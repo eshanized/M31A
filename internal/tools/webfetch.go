@@ -156,6 +156,12 @@ func isPrivateIP(ip net.IP) bool {
 	if ip.IsUnspecified() {
 		return true
 	}
+	// Explicit cloud metadata endpoint check (defense in depth)
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 169 && ip4[1] == 254 && ip4[2] == 169 && ip4[3] == 254 {
+			return true
+		}
+	}
 	// RFC1918 private ranges
 	if ip4 := ip.To4(); ip4 != nil {
 		return ip4[0] == 10 ||
@@ -451,6 +457,10 @@ func htmlToText(html string) string {
 	return normalizeWhitespace(html)
 }
 
+// stripTags removes all occurrences of the given HTML tags and their content.
+// Limitation: does not correctly handle nested same-type tags (e.g., nested
+// <script> blocks). This is acceptable for script/style stripping where such
+// nesting is extremely rare in practice.
 func stripTags(html string, tags ...string) string {
 	for _, tag := range tags {
 		for {
@@ -489,13 +499,16 @@ func replaceBlockTag(html, tag, replacement string) string {
 	lower := strings.ToLower(html)
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
+	var result strings.Builder
+	pos := 0
 	for {
-		start := strings.Index(lower, openTag)
+		start := strings.Index(lower[pos:], openTag)
 		if start == -1 {
 			break
 		}
+		start += pos
 
-		tagEnd := strings.Index(html[start:], ">")
+		tagEnd := strings.IndexByte(html[start:], '>')
 		if tagEnd == -1 {
 			break
 		}
@@ -508,11 +521,13 @@ func replaceBlockTag(html, tag, replacement string) string {
 		closeStart += tagEnd
 		closeEnd := closeStart + len(closeTag)
 
-		inner := html[tagEnd:closeStart]
-		html = html[:start] + replacement + inner + html[closeEnd:]
-		lower = strings.ToLower(html)
+		result.WriteString(html[pos:start])
+		result.WriteString(replacement)
+		result.WriteString(html[tagEnd:closeStart])
+		pos = closeEnd
 	}
-	return html
+	result.WriteString(html[pos:])
+	return result.String()
 }
 
 func replaceInlineTag(html, tag, marker string) string {
