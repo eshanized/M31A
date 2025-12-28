@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -304,6 +305,7 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 
 		// Reset reader to beginning for scanning
 		if _, err := f.Seek(0, 0); err != nil {
+			slog.Debug("grep: seek failed, skipping file", "path", path, "error", err)
 			return nil
 		}
 
