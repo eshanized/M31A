@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,7 @@ import (
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/autodream"
+	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
@@ -80,6 +82,7 @@ type AppState struct {
 	ledger    *ledger.Ledger
 	rollback  *rollback.Rollback
 	autoDream *autodream.Consolidator
+	keychain  keychain.Keychain
 
 	// Sub-models
 	replModel     *ReplModel
@@ -158,6 +161,11 @@ func (a *AppState) SetResumeSessionID(id string) {
 	a.resumeSessionID = id
 }
 
+// SetKeychain configures the OS keychain for secure API key storage.
+func (a *AppState) SetKeychain(kc keychain.Keychain) {
+	a.keychain = kc
+}
+
 // NewApp creates a new AppState.
 func NewApp(
 	cfg *config.Config,
@@ -224,4 +232,64 @@ func NewApp(
 	a.sidebarModel = NewSidebarModel(gitClient, tm.Current())
 
 	return a
+}
+
+// handleFirstRunComplete processes the wizard results: registers providers in
+// the registry, optionally saves API keys to the OS keychain, persists the
+// config, and starts a new session.
+func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
+	if m.config == nil {
+		m.config = config.DefaultConfig()
+	}
+
+	// Register each provider with its collected API key
+	for _, entry := range msg.Providers {
+		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey); err != nil {
+			slog.Warn("failed to register provider from wizard", "provider", entry.ID, "error", err)
+		}
+	}
+
+	// Set the default provider
+	if msg.DefaultProvider != "" {
+		if err := m.registry.SetActive(msg.DefaultProvider); err != nil {
+			slog.Warn("failed to set default provider", "provider", msg.DefaultProvider, "error", err)
+		}
+		m.activeProvider = msg.DefaultProvider
+		m.config.Provider.Default = msg.DefaultProvider
+	}
+
+	// Save API keys to keychain if requested
+	if msg.SaveKeychain && m.keychain != nil {
+		for _, entry := range msg.Providers {
+			if err := m.keychain.Set(entry.ID, entry.APIKey); err != nil {
+				slog.Warn("failed to save API key to keychain", "provider", entry.ID, "error", err)
+			}
+		}
+	}
+
+	// Set the model
+	if msg.ModelID != "" {
+		m.config.Model.Default = msg.ModelID
+		p := m.registry.ActiveProvider()
+		if p != nil {
+			if info, err := p.GetModel(msg.ModelID); err == nil && info != nil {
+				m.activeModel = info
+			} else {
+				m.activeModel = &types.ModelInfo{ID: msg.ModelID}
+			}
+		} else {
+			m.activeModel = &types.ModelInfo{ID: msg.ModelID}
+		}
+	}
+
+	// Persist config
+	if m.configPath != "" {
+		if err := m.config.Save(m.configPath); err != nil {
+			slog.Warn("failed to save config after wizard", "error", err)
+		}
+	}
+
+	// Start a new session
+	m.screen = ScreenREPL
+	return m.startNewSession()
 }
