@@ -100,11 +100,16 @@ const (
 // SkipDirs is the list of directories to skip during file traversal.
 var SkipDirs = []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"}
 
-// SkipDirsMap returns a map for O(1) lookup of skip directories.
-func SkipDirsMap() map[string]bool {
+// skipDirsCache is computed once at init time for O(1) lookups.
+var skipDirsCache = func() map[string]bool {
 	m := make(map[string]bool, len(SkipDirs))
 	for _, d := range SkipDirs {
 		m[d] = true
 	}
 	return m
+}()
+
+// SkipDirsMap returns a cached map for O(1) lookup of skip directories.
+func SkipDirsMap() map[string]bool {
+	return skipDirsCache
 }
