@@ -308,6 +308,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toasts = m.toasts[1:]
 		}
 
+	// ── First-run wizard complete ─────────────────────────────────────────────
+	case FirstRunCompleteMsg:
+		cmds = append(cmds, m.handleFirstRunComplete(msg))
+
 	// ── Settings saved ────────────────────────────────────────────────────────
 	case SettingsSavedMsg:
 		// Rebuild the config viewer content so /config reflects changes instantly.
