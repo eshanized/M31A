@@ -104,14 +104,12 @@ func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 	})
 
 	if len(checkpoints) > 2 {
-		pruned := checkpoints[2:]
 		checkpoints = checkpoints[:2]
 		// Rewrite the file to persist the pruned set
 		data, err := json.Marshal(checkpoints)
 		if err == nil {
 			_ = m.atomicWrite(path, data)
 		}
-		_ = pruned // pruned entries are discarded
 	}
 
 	return checkpoints, nil
