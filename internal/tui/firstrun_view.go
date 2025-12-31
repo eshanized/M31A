@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 )
 
 // renderFirstRun renders the appropriate wizard step.
@@ -28,7 +29,11 @@ func (fr *FirstRunModel) renderFirstRun() string {
 	var content string
 	switch fr.step {
 	case stepWelcome:
-		content = fr.renderWelcome()
+		// The welcome screen composes its own starfield + panel layout with
+		// its own vertical centering, so return it directly without wrapping
+		// in the outer rounded box (which adds an unpredictable border when
+		// the composed content is wider than Width(centerW-4)).
+		return fr.renderWelcome()
 	case stepProviderSelect:
 		content = fr.renderProviderSelect()
 	case stepAPIKey:
@@ -104,65 +109,308 @@ func keyBadge(key, desc string, brand lipgloss.Color, muted lipgloss.Color) stri
 
 // ─── Welcome step ────────────────────────────────────────────────────────────
 
+// renderWelcome renders the welcome step with a responsive layout.
+//
+// Wide terminals (≥60 cols, ≥10 rows) show the welcome panel floating over a
+// deterministic starfield backdrop. Narrow terminals show a clean bordered
+// panel stacked vertically. The panel always contains the brand logo,
+// tagline, step dots, and keyboard hints; feature cards appear only when
+// there is enough room (panel inner width ≥56).
 func (fr *FirstRunModel) renderWelcome() string {
+	availW := fr.effectiveWidth()
+	availH := fr.height
+	if availH < 1 {
+		availH = 24
+	}
+
+	// Panel width budget: cap at 68 so the starfield peeks through on wide
+	// terminals; shrink gracefully on narrow ones.
+	panelW := availW - 4
+	if panelW > 68 {
+		panelW = 68
+	}
+	if panelW < 20 {
+		panelW = 20
+	}
+	panelInnerW := panelW - 2
+	if panelInnerW < 1 {
+		panelInnerW = 18
+	}
+
+	panel := fr.renderWelcomePanel(panelInnerW, panelW)
+	panelLines := strings.Split(panel, "\n")
+	panelH := len(panelLines)
+
+	// Degenerate case: terminal too cramped for the starfield composition.
+	if availH < 8 || availW < 30 {
+		if panelH > availH {
+			panelLines = panelLines[:availH]
+		}
+		return centerScreen(strings.Join(panelLines, "\n"), availW, availH)
+	}
+
+	// Layout: starfield rows fill the space above and below the centered
+	// panel. The panel occupies the middle rows as-is, so its border is never
+	// spliced and any lipgloss-vs-rune-count width discrepancy is irrelevant.
+	topMargin := (availH - panelH) / 2
+	if topMargin < 0 {
+		topMargin = 0
+	}
+	bottomMargin := availH - panelH - topMargin
+	if bottomMargin < 0 {
+		bottomMargin = 0
+	}
+
+	var out []string
+	if topMargin > 0 {
+		starTop := components.RenderStarfieldPlain(availW, topMargin, 31)
+		out = append(out, strings.Split(starTop, "\n")...)
+	}
+	out = append(out, panelLines...)
+	if bottomMargin > 0 {
+		starBot := components.RenderStarfieldPlain(availW, bottomMargin, 31+int64(topMargin))
+		out = append(out, strings.Split(starBot, "\n")...)
+	}
+
+	// Trim any excess rows (defensive: panel may be taller than availH).
+	if len(out) > availH {
+		out = out[:availH]
+	}
+
+	// Center vertically by adding empty rows top/bottom. Skip horizontal
+	// centering entirely because lipgloss.Place has historically added
+	// unpredictable per-line padding that pushed the rendered width past availW.
+	topPad := (availH - len(out)) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	bottomPad := availH - len(out) - topPad
+	if bottomPad < 0 {
+		bottomPad = 0
+	}
+	var finalRows []string
+	for i := 0; i < topPad; i++ {
+		finalRows = append(finalRows, "")
+	}
+	finalRows = append(finalRows, out...)
+	for i := 0; i < bottomPad; i++ {
+		finalRows = append(finalRows, "")
+	}
+
+	result := strings.Join(finalRows, "\n")
+	return result
+}
+
+// renderWelcomePanel builds the welcome panel content (logo, tagline, step
+// dots, hints, and optional feature cards). panelW is the total panel width
+// including its own padding; innerW is the usable content width inside it.
+func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	t := fr.theme
-	w := fr.width
-	if w < 40 {
-		w = 70
-	}
-	if fr.contentWidth > 0 {
-		w = fr.contentWidth
-	}
-	contentW := w - 10
 
-	// Logo with brand color
-	logoLines := strings.Split(logo, "\n")
-	styledLogo := make([]string, len(logoLines))
-	for i, line := range logoLines {
-		styledLogo[i] = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(line)
-	}
-	logoBlock := lipgloss.JoinVertical(lipgloss.Center, styledLogo...)
+	// Brand logo, styled consistently with the rest of the app.
+	logoBlock := components.RenderLogo("", true, t.Brand)
 
-	// Tagline
+	// Gradient glow row beneath the logo — matches the REPL welcome aesthetic.
+	glow := fr.renderGlowRow(innerW)
+
+	// Italic tagline.
 	tagline := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
 		Italic(true).
 		Render("Your AI pair programmer in the terminal")
 
-	// Gradient divider
-	divider := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Render(renderBlockDivider(contentW))
-
-	// Feature cards row
-	card1 := fr.featureCard("⚡ Workflows", "Plan → Execute → Verify → Ship", contentW/3-2)
-	card2 := fr.featureCard("🔧 Tools", "Bash · FileRead · FileWrite · Glob · Grep", contentW/3-2)
-	card3 := fr.featureCard("⎇ Git Aware", "Live repo status in sidebar", contentW/3-2)
-
-	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top, card1, "  ", card2, "  ", card3)
-
-	// Step dots
+	// Step progress dots (4 total, first active).
 	dots := fr.renderStepDots(0, 4)
 
-	// Action hints
-	enterBadge := keyBadge("↵", "Continue", t.Brand, t.TextMuted)
-	quitBadge := keyBadge("q", "Quit", t.TextMuted, t.TextMuted)
-	hints := lipgloss.JoinHorizontal(lipgloss.Center, enterBadge, "   ", quitBadge)
+	// Keyboard hints row — bordered badges when there is room, plain text when
+	// the panel is very narrow (the badges add ~16 cells of decoration that
+	// cause the row to overflow and break the border via lipgloss wrapping).
+	var hints string
+	if innerW >= 38 {
+		enterBadge := keyBadge("↵", "Continue", t.Brand, t.TextMuted)
+		quitBadge := keyBadge("q", "Quit", t.TextMuted, t.TextMuted)
+		hints = lipgloss.JoinHorizontal(lipgloss.Center, enterBadge, "   ", quitBadge)
+	} else {
+		hints = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render("[enter] Continue   [q] Quit")
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Center,
-		logoBlock,
-		"",
-		tagline,
-		"",
-		divider,
-		"",
-		cardsRow,
-		"",
-		"",
-		dots,
-		"",
-		hints,
-	)
+	var body string
+	if innerW >= 56 {
+		// Wide layout: three feature cards laid out horizontally.
+		// (innerW - 4) / 3 accounts for the two 2-cell gaps between cards.
+		cardW := (innerW - 4) / 3
+		if cardW < 16 {
+			cardW = 16
+		}
+		c1 := fr.featureCard("⚡ Workflows", "Plan → Execute → Verify → Ship", cardW)
+		c2 := fr.featureCard("🔧 Tools", "Bash · FileRead · FileWrite · Grep", cardW)
+		c3 := fr.featureCard("⎇ Git Aware", "Live repo status in sidebar", cardW)
+		cards := lipgloss.JoinHorizontal(lipgloss.Top, c1, "  ", c2, "  ", c3)
+
+		body = lipgloss.JoinVertical(lipgloss.Center,
+			logoBlock, "", glow, "", tagline, "", cards, "", dots, "", hints,
+		)
+	} else {
+		// Narrow layout: cards collapse to short, border-safe bullets.
+		features := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Workflows"),
+			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Tools"),
+			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Git aware"),
+		)
+
+		body = lipgloss.JoinVertical(lipgloss.Center,
+			logoBlock, "", glow, "", tagline, "", features, "", dots, "", hints,
+		)
+	}
+
+	// Pad every body line to exactly innerW visible cells. JoinVertical leaves
+	// lines at their natural widths, which would produce a panel whose border
+	// tracks the widest line — an unpredictable value. Padding to a fixed
+	// width gives the panel a deterministic shape.
+	body = padLines(body, innerW)
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Padding(0, 1).
+		Width(panelW).
+		Render(body)
+}
+
+// padLines pads (or truncates) every line of s to exactly targetW visible
+// cells. ANSI escape sequences are preserved and do not count toward the
+// visible width.
+func padLines(s string, targetW int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if w < targetW {
+			lines[i] = line + strings.Repeat(" ", targetW-w)
+		} else if w > targetW {
+			// Truncate by visible cells, preserving ANSI resets.
+			lines[i] = truncateStyled(line, targetW)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// truncateStyled truncates styled text to at most maxW visible cells,
+// preserving escape sequences and appending a reset so the terminal does not
+// leak styling into subsequent output.
+func truncateStyled(s string, maxW int) string {
+	var out strings.Builder
+	visible := 0
+	inEsc := false
+	esc := strings.Builder{}
+	for _, r := range s {
+		if inEsc {
+			esc.WriteRune(r)
+			if r == 'm' {
+				out.WriteString(esc.String())
+				esc.Reset()
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEsc = true
+			esc.WriteRune(r)
+			continue
+		}
+		if visible >= maxW {
+			break
+		}
+		out.WriteRune(r)
+		visible++
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
+// renderGlowRow renders a horizontal gradient-bar glow row used beneath the logo.
+func (fr *FirstRunModel) renderGlowRow(width int) string {
+	t := fr.theme
+	chars := []string{"█", "▓", "▒", "░"}
+	var edge strings.Builder
+	for _, ch := range chars {
+		edge.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
+	}
+	edgeStr := edge.String()
+	edgeW := len(chars)
+	center := width - 2*edgeW
+	if center < 2 {
+		center = 2
+	}
+	fill := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", center))
+	return edgeStr + fill + edgeStr
+}
+
+// ─── Overlay helpers (starfield + panel composition) ────────────────────────
+
+// overlayOnPlainGrid composites a styled overlay panel on top of a plain
+// (ANSI-free) base grid of equal-width lines. The overlay is centered both
+// horizontally and vertically. Base lines outside the overlay region are
+// preserved verbatim so the starfield dots render around the panel.
+//
+// base lines must contain no ANSI escape sequences and must all be at least
+// totalW runes long; callers can use RenderStarfieldPlain to produce such a
+// grid. overlay lines may contain ANSI codes and are inserted as-is.
+//
+// Overlay rows that would fall above or below the base are clipped (skipped),
+// so a panel taller than the base still appears with its middle rows visible.
+func overlayOnPlainGrid(base, overlay []string, totalW int) []string {
+	baseH := len(base)
+	overlayH := len(overlay)
+	if overlayH <= 0 || baseH <= 0 {
+		return base
+	}
+
+	topY := (baseH - overlayH) / 2
+
+	overlayW := 0
+	if len(overlay) > 0 {
+		overlayW = runeWidth(overlay[0])
+	}
+	if overlayW > totalW {
+		overlayW = totalW
+	}
+	leftX := (totalW - overlayW) / 2
+	if leftX < 0 {
+		leftX = 0
+	}
+
+	out := make([]string, baseH)
+	copy(out, base)
+	for i, ovLine := range overlay {
+		y := topY + i
+		if y < 0 || y >= len(out) {
+			continue
+		}
+		runes := []rune(out[y])
+		left := string(runes[:min(leftX, len(runes))])
+		rightStart := leftX + overlayW
+		right := ""
+		if rightStart < len(runes) {
+			right = string(runes[rightStart:])
+		}
+		out[y] = left + ovLine + right
+	}
+	return out
+}
+
+// runeWidth returns the visible-cell width of a string, accounting for
+// multi-rune graphemes and ANSI escape codes.
+func runeWidth(s string) int {
+	return lipgloss.Width(s)
+}
+
+// min returns the smaller of two ints.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (fr *FirstRunModel) featureCard(title, desc string, w int) string {
@@ -198,9 +446,12 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 
 	// Title + step dots
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 1/3 — Choose your provider")
+		Render("Step 1/3 — Choose your providers")
 	dots := fr.renderStepDots(1, 4)
 	header := lipgloss.JoinVertical(lipgloss.Left, title, "", dots)
+
+	subtitle := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render("Select one or more providers. You can switch between them anytime.")
 
 	// Provider cards
 	var cards []string
@@ -211,13 +462,14 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 
 	// Navigation hints
 	navBadge := keyBadge("↑↓", "Navigate", t.Brand, t.TextMuted)
-	selBadge := keyBadge("↵", "Select", t.Brand, t.TextMuted)
+	toggleBadge := keyBadge("space", "Toggle", t.Brand, t.TextMuted)
+	selBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
 	skipBadge := keyBadge("s", "Skip", t.Warning, t.TextMuted)
 	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
-	hints := lipgloss.JoinHorizontal(lipgloss.Center, navBadge, "  ", selBadge, "  ", skipBadge, "  ", backBadge)
+	hints := lipgloss.JoinHorizontal(lipgloss.Center, navBadge, "  ", toggleBadge, "  ", selBadge, "  ", skipBadge, "  ", backBadge)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		header, "", cardsBlock, "", "", hints,
+		header, "", subtitle, "", cardsBlock, "", "", hints,
 	)
 }
 
@@ -225,6 +477,14 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 	t := fr.theme
 	if w < 20 {
 		w = 40
+	}
+
+	checked := fr.providerChecked[p.ID]
+
+	// Checkbox indicator
+	checkBox := "[ ] "
+	if checked {
+		checkBox = lipgloss.NewStyle().Foreground(t.Success).Render("[✓] ")
 	}
 
 	// Icon + Name row
@@ -249,12 +509,12 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 			Render("Recommended")
 	}
 
-	titleRow := icon + "  " + name + recBadge
+	titleRow := checkBox + icon + "  " + name + recBadge
 
 	// Description
 	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(p.Description)
 
-	// Selection indicator
+	// Selection indicator (cursor arrow)
 	prefix := "  "
 	if selected {
 		prefix = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▶ ")
@@ -265,6 +525,9 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 	borderColor := t.Border
 	if selected {
 		borderColor = t.Brand
+	}
+	if checked && !selected {
+		borderColor = t.Success
 	}
 
 	card := lipgloss.NewStyle().
@@ -282,8 +545,21 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 func (fr *FirstRunModel) renderAPIKeyStep() string {
 	t := fr.theme
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render(fmt.Sprintf("Step 2/3 — Enter %s API key", titleCase(fr.opts.Provider)))
+	total := len(fr.selectedProviders)
+	current := fr.keyProviderIndex + 1
+	provName := ""
+	if fr.keyProviderIndex < total {
+		provName = titleCase(fr.selectedProviders[fr.keyProviderIndex])
+	}
+
+	var title string
+	if total > 1 {
+		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
+			Render(fmt.Sprintf("Step 2/3 — Enter %s API key (%d/%d)", provName, current, total))
+	} else {
+		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
+			Render(fmt.Sprintf("Step 2/3 — Enter %s API key", provName))
+	}
 	dots := fr.renderStepDots(2, 4)
 
 	desc := lipgloss.NewStyle().Foreground(t.TextMuted).
@@ -356,7 +632,7 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	var parts []string
 	parts = append(parts, title, "", dots, "")
 
-	if fr.opts.Provider == "" {
+	if fr.opts.DefaultProvider == "" {
 		// Skipped provider — no suggestions, just text input
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render("No provider configured. Enter a model ID or leave blank.")
@@ -367,7 +643,7 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	} else if fr.modelsLoading {
 		// Fetching models from provider
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("Fetching models from " + titleCase(fr.opts.Provider) + "...")
+			Render("Fetching models from " + titleCase(fr.opts.DefaultProvider) + "...")
 		spinner := lipgloss.NewStyle().Foreground(t.Brand).Render("⠋")
 		parts = append(parts, spinner+" "+desc, "", inputLabel, "", inputBox, "")
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).
