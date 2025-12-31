@@ -59,10 +59,10 @@ var providerCatalog = []providerInfo{
 
 // FirstRunOpts carries the data collected from the first-run wizard.
 type FirstRunOpts struct {
-	Provider     string
-	APIKey       string
-	ModelID      string
-	SaveKeychain bool
+	Providers       []ProviderEntry
+	ModelID         string
+	SaveKeychain    bool
+	DefaultProvider string
 }
 
 // firstRunModelsMsg carries fetched models for the wizard.
@@ -77,13 +77,16 @@ type FirstRunModel struct {
 	registry *provider.Registry
 	step     firstRunStep
 
-	// Provider selection
-	providers      []string
-	providerCursor int
+	// Provider selection (multi-select)
+	providers       []string
+	providerCursor  int
+	providerChecked map[string]bool
+	selectedProviders []string
 
-	// API key entry
-	keyInput textinput.Model
-	keyErr   string
+	// API key entry (loops through selected providers)
+	keyInput         textinput.Model
+	keyErr           string
+	keyProviderIndex int
 
 	// Model selection
 	modelInput      textinput.Model
@@ -116,12 +119,13 @@ func NewFirstRunModel(t theme.Theme, registry *provider.Registry) *FirstRunModel
 	}
 
 	return &FirstRunModel{
-		theme:      t,
-		registry:   registry,
-		step:       stepWelcome,
-		providers:  providers,
-		keyInput:   keyTI,
-		modelInput: modelTI,
+		theme:           t,
+		registry:        registry,
+		step:            stepWelcome,
+		providers:       providers,
+		providerChecked: make(map[string]bool),
+		keyInput:        keyTI,
+		modelInput:      modelTI,
 	}
 }
 
@@ -140,6 +144,23 @@ func (fr *FirstRunModel) SetDimensions(w, h int) {
 // When set, the wizard centers within this width instead of the full terminal.
 func (fr *FirstRunModel) SetContentWidth(w int) {
 	fr.contentWidth = w
+}
+
+// effectiveWidth returns the usable terminal width for layout, accounting for
+// the sidebar and the parent-provided content width. Returns the actual
+// measured width so narrow terminals can collapse their layouts.
+func (fr *FirstRunModel) effectiveWidth() int {
+	w := fr.width
+	if w < 1 {
+		w = 80
+	}
+	if fr.contentWidth > 0 {
+		return fr.contentWidth
+	}
+	if w >= WidthFull {
+		return w - sidebarDefaultWidth
+	}
+	return w
 }
 
 // Init implements tea.Model.
@@ -182,7 +203,7 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // fetchModelsCmd returns a tea.Cmd that fetches models from the active provider.
 func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 	reg := fr.registry
-	providerName := fr.opts.Provider
+	providerName := fr.opts.DefaultProvider
 	if reg == nil || providerName == "" {
 		return func() tea.Msg {
 			return firstRunModelsMsg{}
@@ -274,14 +295,28 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if fr.providerCursor < len(fr.providers)-1 {
 				fr.providerCursor++
 			}
-		case "enter", " ":
-			fr.opts.Provider = fr.providers[fr.providerCursor]
+		case " ":
+			cur := fr.providers[fr.providerCursor]
+			fr.providerChecked[cur] = !fr.providerChecked[cur]
+		case "enter":
+			fr.selectedProviders = nil
+			for _, p := range fr.providers {
+				if fr.providerChecked[p] {
+					fr.selectedProviders = append(fr.selectedProviders, p)
+				}
+			}
+			if len(fr.selectedProviders) == 0 {
+				return fr, nil
+			}
+			fr.opts.DefaultProvider = fr.selectedProviders[0]
+			fr.keyProviderIndex = 0
 			fr.step = stepAPIKey
 			fr.keyErr = ""
+			fr.keyInput.SetValue("")
 			fr.keyInput.Focus()
 		case "s":
-			// Skip provider/API key — no models to fetch
-			fr.opts.Provider = ""
+			fr.selectedProviders = nil
+			fr.opts.DefaultProvider = ""
 			fr.suggestedModels = nil
 			fr.step = stepModelPick
 			fr.modelInput.Focus()
@@ -297,20 +332,36 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				fr.keyErr = "API key cannot be empty"
 				return fr, nil
 			}
-			fr.opts.APIKey = key
+			provID := fr.selectedProviders[fr.keyProviderIndex]
+			fr.opts.Providers = append(fr.opts.Providers, ProviderEntry{
+				ID:     provID,
+				APIKey: key,
+			})
 			fr.keyErr = ""
+			fr.keyInput.SetValue("")
+			fr.keyProviderIndex++
+			if fr.keyProviderIndex < len(fr.selectedProviders) {
+				return fr, nil
+			}
 			fr.step = stepModelPick
 			fr.keyInput.Blur()
 			fr.modelInput.Focus()
-			// Start fetching models in background
 			fr.modelsLoading = true
 			fr.suggestedModels = nil
 			return fr, fr.fetchModelsCmd()
 		case "tab":
 			fr.opts.SaveKeychain = !fr.opts.SaveKeychain
 		case "esc":
-			fr.step = stepProviderSelect
-			fr.keyInput.Blur()
+			if fr.keyProviderIndex > 0 {
+				fr.opts.Providers = fr.opts.Providers[:fr.keyProviderIndex]
+				fr.keyProviderIndex--
+				fr.keyInput.SetValue("")
+				fr.keyErr = ""
+			} else {
+				fr.opts.Providers = nil
+				fr.step = stepProviderSelect
+				fr.keyInput.Blur()
+			}
 		default:
 			var cmd tea.Cmd
 			fr.keyInput, cmd = fr.keyInput.Update(msg)
@@ -342,9 +393,17 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			fr.modelInput.Blur()
 			return fr, fr.completeSetup()
 		case "esc":
-			if fr.opts.Provider != "" {
+			if fr.opts.DefaultProvider != "" {
+				fr.keyProviderIndex = len(fr.selectedProviders) - 1
+				if fr.keyProviderIndex < 0 {
+					fr.keyProviderIndex = 0
+				}
+				if fr.keyProviderIndex < len(fr.opts.Providers) {
+					fr.opts.Providers = fr.opts.Providers[:fr.keyProviderIndex]
+				}
 				fr.step = stepAPIKey
 				fr.modelInput.Blur()
+				fr.keyInput.SetValue("")
 				fr.keyInput.Focus()
 			} else {
 				fr.step = stepProviderSelect
@@ -359,13 +418,15 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return fr, nil
 }
 
-// completeSetup emits AppMsg to transition to the REPL.
+// completeSetup emits FirstRunCompleteMsg to register providers and transition to the REPL.
 func (fr *FirstRunModel) completeSetup() tea.Cmd {
 	opts := fr.opts
 	return func() tea.Msg {
-		return AppMsg{
-			Screen:       ScreenREPL,
-			SaveKeychain: opts.SaveKeychain,
+		return FirstRunCompleteMsg{
+			Providers:       opts.Providers,
+			ModelID:         opts.ModelID,
+			SaveKeychain:    opts.SaveKeychain,
+			DefaultProvider: opts.DefaultProvider,
 		}
 	}
 }
