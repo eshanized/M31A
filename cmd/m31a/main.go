@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -105,62 +104,18 @@ func main() {
 	// Provider registry
 	openrouter.Version = Version
 	zen.Version = Version
+	tools.SetVersion(Version)
 	registry := provider.NewRegistry()
 
 	if cfg.Provider.OpenRouter.APIKey != "" {
-		cacheTTL := types.ModelCacheTTL
-		if cfg.Features.ModelCacheTTLMinutes > 0 {
-			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
-		}
-		cacheStaleTTL := types.StaleCacheTTL
-		if cfg.Features.ModelCacheStaleHours > 0 {
-			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
-		}
-		orClient, err := openrouter.New(cfg.Provider.OpenRouter.APIKey, openrouter.Options{
-			BaseURL:           cfg.Provider.OpenRouterBaseURL,
-			CacheTTL:          cacheTTL,
-			CacheStaleTTL:     cacheStaleTTL,
-			Referer:           cfg.Provider.OpenRouterReferer,
-			Title:             cfg.Provider.OpenRouterTitle,
-			HealthCheckLiveMs: int64(cfg.Features.HealthCheckLiveMs),
-			HealthCheckSlowMs: int64(cfg.Features.HealthCheckSlowMs),
-		})
-		if err != nil {
-			logger.Warn("failed to create OpenRouter client", "error", err)
-		} else {
-			if err := registry.Register("openrouter", orClient); err != nil {
-				logger.Warn("failed to register OpenRouter provider", "error", err)
-			} else {
-				logger.Info("OpenRouter provider registered")
-			}
+		if err := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey); err != nil {
+			logger.Warn("failed to register OpenRouter provider", "error", err)
 		}
 	}
 
 	if cfg.Provider.Zen.APIKey != "" {
-		cacheTTL := types.ModelCacheTTL
-		if cfg.Features.ModelCacheTTLMinutes > 0 {
-			cacheTTL = time.Duration(cfg.Features.ModelCacheTTLMinutes) * time.Minute
-		}
-		cacheStaleTTL := types.StaleCacheTTL
-		if cfg.Features.ModelCacheStaleHours > 0 {
-			cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
-		}
-		zenClient, err := zen.New(cfg.Provider.Zen.APIKey, zen.Options{
-			BaseURL:           cfg.Provider.ZenBaseURL,
-			CacheTTL:          cacheTTL,
-			CacheStaleTTL:     cacheStaleTTL,
-			HealthCheckLiveMs: int64(cfg.Features.HealthCheckLiveMs),
-			HealthCheckSlowMs: int64(cfg.Features.HealthCheckSlowMs),
-			DefaultContextLen: int64(cfg.Model.DefaultContextLength),
-		})
-		if err != nil {
-			logger.Warn("failed to create Zen client", "error", err)
-		} else {
-			if err := registry.Register("zen", zenClient); err != nil {
-				logger.Warn("failed to register Zen provider", "error", err)
-			} else {
-				logger.Info("Zen provider registered")
-			}
+		if err := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey); err != nil {
+			logger.Warn("failed to register Zen provider", "error", err)
 		}
 	}
 
@@ -222,6 +177,10 @@ func main() {
 		Version,
 		themeMode,
 	)
+
+	if kc != nil {
+		app.SetKeychain(kc)
+	}
 
 	// Signal handler: save session state on SIGTERM/SIGINT before exit (SE8)
 	sigCh := make(chan os.Signal, 1)
