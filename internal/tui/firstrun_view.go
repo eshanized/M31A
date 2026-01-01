@@ -163,7 +163,15 @@ func (fr *FirstRunModel) renderWelcome() string {
 
 	var out []string
 	if topMargin > 0 {
-		starTop := components.RenderStarfieldPlain(availW, topMargin, 31)
+		var starTop string
+		if fr.starfieldCacheW == availW && fr.starfieldCacheH == topMargin && fr.starfieldCache != "" {
+			starTop = fr.starfieldCache
+		} else {
+			starTop = components.RenderStarfieldPlain(availW, topMargin, 31)
+			fr.starfieldCache = starTop
+			fr.starfieldCacheW = availW
+			fr.starfieldCacheH = topMargin
+		}
 		out = append(out, strings.Split(starTop, "\n")...)
 	}
 	out = append(out, panelLines...)
@@ -509,7 +517,15 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 			Render("Recommended")
 	}
 
-	titleRow := checkBox + icon + "  " + name + recBadge
+	// Default badge for first checked provider
+	defaultBadge := ""
+	if checked && len(fr.selectedProviders) > 0 && fr.selectedProviders[0] == p.ID {
+		defaultBadge = " " + lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Render("(default)")
+	}
+
+	titleRow := checkBox + icon + "  " + name + recBadge + defaultBadge
 
 	// Description
 	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(p.Description)
@@ -571,17 +587,34 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 		Padding(0, 1).
 		Render(fr.keyInput.View())
 
-	saveLabel := "  [ ] Save to system keychain (tab to toggle)"
+	saveLabel := "  ○ Save to system keychain  "
 	if fr.opts.SaveKeychain {
-		saveLabel = lipgloss.NewStyle().Foreground(t.Success).
-			Render("  [✓] Save to system keychain (tab to toggle)")
+		saveLabel = "  " + lipgloss.NewStyle().
+			Foreground(t.Success).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Success).
+			Padding(0, 1).
+			Render("✓ Save to system keychain")
 	} else {
-		saveLabel = lipgloss.NewStyle().Foreground(t.TextMuted).Render(saveLabel)
+		saveLabel = "  " + lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(0, 1).
+			Render("○ Save to system keychain")
 	}
+	saveLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  (tab to toggle)")
 
 	errLine := ""
-	if fr.keyErr != "" {
+	if fr.keyValidationErr != "" {
+		errLine = lipgloss.NewStyle().Foreground(t.Error).Render("  ✗ " + fr.keyValidationErr)
+	} else if fr.keyErr != "" {
 		errLine = lipgloss.NewStyle().Foreground(t.Error).Render("  ⚠ " + fr.keyErr)
+	}
+
+	validatingLine := ""
+	if fr.keyValidating {
+		validatingLine = lipgloss.NewStyle().Foreground(t.Brand).Render("  ⠋ Validating API key...")
 	}
 
 	// Navigation hints
@@ -590,7 +623,12 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
 	hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", keychainBadge, "  ", backBadge)
 
-	parts := []string{title, "", dots, "", desc, "", keyBox, "", saveLabel}
+	parts := []string{title, "", dots, "", desc, "", keyBox, ""}
+	// UX-04: keychain toggle with focus highlight
+	parts = append(parts, saveLabel)
+	if validatingLine != "" {
+		parts = append(parts, validatingLine)
+	}
 	if errLine != "" {
 		parts = append(parts, errLine)
 	}
@@ -635,10 +673,10 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	if fr.opts.DefaultProvider == "" {
 		// Skipped provider — no suggestions, just text input
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("No provider configured. Enter a model ID or leave blank.")
+			Render("You can configure providers later via /settings.\nPress Enter to start without an LLM, or type a model ID.")
 		parts = append(parts, desc, "", inputLabel, "", inputBox, "")
 		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  ⓘ  You can choose a model later via /models."))
+			Render("  ⓘ  Choose a model later via /models or /settings."))
 		parts = append(parts, "", confirmBadge, "  ", backBadge)
 	} else if fr.modelsLoading {
 		// Fetching models from provider

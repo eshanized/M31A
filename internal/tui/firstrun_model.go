@@ -71,6 +71,12 @@ type firstRunModelsMsg struct {
 	Err    error
 }
 
+// firstRunKeyValidationMsg carries the result of an async API key health check.
+type firstRunKeyValidationMsg struct {
+	OK     bool
+	ErrStr string
+}
+
 // FirstRunModel is a multi-step setup wizard shown on first launch.
 type FirstRunModel struct {
 	theme    theme.Theme
@@ -78,15 +84,17 @@ type FirstRunModel struct {
 	step     firstRunStep
 
 	// Provider selection (multi-select)
-	providers       []string
-	providerCursor  int
-	providerChecked map[string]bool
+	providers         []string
+	providerCursor    int
+	providerChecked   map[string]bool
 	selectedProviders []string
 
 	// API key entry (loops through selected providers)
 	keyInput         textinput.Model
 	keyErr           string
 	keyProviderIndex int
+	keyValidating    bool   // true while async health check runs
+	keyValidationErr string // set when validation fails
 
 	// Model selection
 	modelInput      textinput.Model
@@ -100,6 +108,11 @@ type FirstRunModel struct {
 	width        int
 	height       int
 	contentWidth int // available width for content (accounts for sidebar)
+
+	// UX-05: starfield render cache — avoid regenerating on every frame
+	starfieldCache  string
+	starfieldCacheW int
+	starfieldCacheH int
 }
 
 // NewFirstRunModel creates a FirstRunModel.
@@ -186,7 +199,36 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return fr, nil
 
+	case firstRunKeyValidationMsg:
+		fr.keyValidating = false
+		if msg.OK {
+			// Validation passed — collect key and advance
+			provID := fr.selectedProviders[fr.keyProviderIndex]
+			fr.opts.Providers = append(fr.opts.Providers, ProviderEntry{
+				ID:     provID,
+				APIKey: fr.keyInput.Value(),
+			})
+			fr.keyErr = ""
+			fr.keyValidationErr = ""
+			fr.keyInput.SetValue("")
+			fr.keyProviderIndex++
+			if fr.keyProviderIndex < len(fr.selectedProviders) {
+				return fr, nil
+			}
+			fr.step = stepModelPick
+			fr.keyInput.Blur()
+			fr.modelInput.Focus()
+			fr.modelsLoading = true
+			fr.suggestedModels = nil
+			return fr, fr.fetchModelsCmd()
+		}
+		fr.keyValidationErr = msg.ErrStr
+		return fr, nil
+
 	case tea.KeyMsg:
+		if fr.keyValidating {
+			return fr, nil // block input during validation
+		}
 		return fr.handleKey(msg)
 	}
 	// Delegate to focused input if applicable
@@ -226,6 +268,31 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 
 		suggested := pickTopModels(models, 3)
 		return firstRunModelsMsg{Models: suggested}
+	}
+}
+
+// validateKeyCmd returns a tea.Cmd that validates an API key format.
+func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		// Basic format validation per provider
+		switch providerID {
+		case "openrouter":
+			if !strings.HasPrefix(apiKey, "sk-or-") && !strings.HasPrefix(apiKey, "sk-") {
+				return firstRunKeyValidationMsg{
+					OK:     false,
+					ErrStr: "OpenRouter API keys typically start with 'sk-or-'",
+				}
+			}
+		case "zen":
+			if len(apiKey) < 8 {
+				return firstRunKeyValidationMsg{
+					OK:     false,
+					ErrStr: "API key seems too short",
+				}
+			}
+		}
+		// Key looks valid
+		return firstRunKeyValidationMsg{OK: true}
 	}
 }
 
@@ -333,22 +400,9 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return fr, nil
 			}
 			provID := fr.selectedProviders[fr.keyProviderIndex]
-			fr.opts.Providers = append(fr.opts.Providers, ProviderEntry{
-				ID:     provID,
-				APIKey: key,
-			})
-			fr.keyErr = ""
-			fr.keyInput.SetValue("")
-			fr.keyProviderIndex++
-			if fr.keyProviderIndex < len(fr.selectedProviders) {
-				return fr, nil
-			}
-			fr.step = stepModelPick
-			fr.keyInput.Blur()
-			fr.modelInput.Focus()
-			fr.modelsLoading = true
-			fr.suggestedModels = nil
-			return fr, fr.fetchModelsCmd()
+			fr.keyValidating = true
+			fr.keyValidationErr = ""
+			return fr, fr.validateKeyCmd(provID, key)
 		case "tab":
 			fr.opts.SaveKeychain = !fr.opts.SaveKeychain
 		case "esc":
