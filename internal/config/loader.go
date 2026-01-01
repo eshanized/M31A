@@ -294,7 +294,7 @@ type ValidationError struct {
 }
 
 func (e ValidationError) Error() string {
-	return fmt.Sprintf("config: field %q expected %s, got %q", e.Field, e.ExpectedType, e.ActualValue)
+	return fmt.Sprintf("Invalid config value for '%s': expected %s, but got '%s'. Check your config file.", e.Field, e.ExpectedType, e.ActualValue)
 }
 
 // validateConfig checks all known Config fields for type/range correctness.
