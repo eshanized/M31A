@@ -52,15 +52,15 @@ type ReplModel struct {
 	userScrolled bool
 
 	// Streaming state
-	streaming        bool
-	thinking         bool
-	streamCh         <-chan tea.Msg
-	streamContent    strings.Builder
-	streamSegments   []types.MessageSegment
+	streaming         bool
+	thinking          bool
+	streamCh          <-chan tea.Msg
+	streamContent     strings.Builder
+	streamSegments    []types.MessageSegment
 	activeSegmentType string
-	thinkingStartAt  time.Time
-	thinkingBlocks   map[int]*components.ThinkingBlock
-	toolCards        map[int]*components.ToolCard
+	thinkingStartAt   time.Time
+	thinkingBlocks    map[int]*components.ThinkingBlock
+	toolCards         map[int]*components.ToolCard
 
 	// Provider state
 	registry       *provider.Registry
@@ -71,18 +71,22 @@ type ReplModel struct {
 	cfg            *config.Config
 
 	// Command state
-	dispatcher   *tools.Dispatcher
-	cmdRegistry  *CommandRegistry
-	keyRegistry  *KeyRegistry
+	dispatcher  *tools.Dispatcher
+	cmdRegistry *CommandRegistry
+	keyRegistry *KeyRegistry
 
 	// Slash command autocomplete
-	slashVisible    bool
+	slashVisible     bool
 	slashSuggestions []CommandInfo
-	slashSelected   int
+	slashSelected    int
 
 	// History
-	frecentHistory  *FrecentHistory
-	historyIndex    int
+	frecentHistory *FrecentHistory
+	historyIndex   int
+	savedInput     string // saves current input during history navigation
+
+	// Quick actions panel state
+	quickActionsCollapsed bool
 
 	// Activity tracking
 	lastActivity     time.Time
@@ -101,18 +105,21 @@ type ReplModel struct {
 	shellMode bool
 
 	// @mention autocomplete state
-	mentionVisible  bool
-	mentionQuery    string
-	mentionEntries  []MentionEntry
-	mentionSelected int
+	mentionVisible   bool
+	mentionQuery     string
+	mentionEntries   []MentionEntry
+	mentionSelected  int
 	mentionCompleter *MentionCompleter
-	mentionStartCol int
+	mentionStartCol  int
 
 	// Project info for the welcome screen (pushed from SidebarRefreshMsg)
 	changedFiles int
 
 	// "New messages" indicator: tracks messages received while user is scrolled up
 	newMessagesWhileScrolled int
+
+	// Typing indicator: true between user submit and first streaming token
+	awaitingResponse bool
 }
 
 // NewReplModel creates a new ReplModel.
@@ -129,10 +136,10 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
 	m := ReplModel{
-		theme:         t,
-		version:       version,
-		textarea:      ta,
-		spinner:       components.NewSpinner(),
+		theme:          t,
+		version:        version,
+		textarea:       ta,
+		spinner:        components.NewSpinner(),
 		thinkingBlocks: make(map[int]*components.ThinkingBlock),
 		toolCards:      make(map[int]*components.ToolCard),
 		modelValid:     true,

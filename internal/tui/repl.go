@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -174,6 +174,10 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			return KeyActionMsg{Action: "toggle_sidebar"}
 		}
 
+	case "ctrl+q":
+		m.quickActionsCollapsed = !m.quickActionsCollapsed
+		return nil
+
 	case "ctrl+x":
 		if m.keyRegistry != nil {
 			handled, cmd := m.keyRegistry.Handle("ctrl+x", CtxREPL)
@@ -201,20 +205,6 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	case "pgdown", "ctrl+d":
 		m.viewport.ViewDown()
 		return nil
-
-	case "j":
-		// Scroll down when textarea is empty
-		if m.textarea.Value() == "" {
-			m.viewport.LineDown(1)
-			return nil
-		}
-
-	case "k":
-		// Scroll up when textarea is empty
-		if m.textarea.Value() == "" {
-			m.viewport.LineUp(1)
-			return nil
-		}
 
 	default:
 		// Leader key chord handling
@@ -269,9 +259,7 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.slashSuggestions = nil
 
 		// Add user message so welcome screen is replaced by conversation
-		userMsg := makeAssistantMsg(input)
-		userMsg.Role = "user"
-		m.messages = append(m.messages, userMsg)
+		m.messages = append(m.messages, makeUserMsg(input))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -286,10 +274,9 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.textarea.SetValue("")
 		m.slashVisible = false
 
-		// Add user message so welcome screen is replaced by conversation
-		userMsg := makeAssistantMsg(input)
-		userMsg.Role = "user"
-		m.messages = append(m.messages, userMsg)
+		m.messages = append(m.messages, makeUserMsg(input))
+		// Add temporary "Running..." feedback
+		m.messages = append(m.messages, makeAssistantMsg("*Running shell command...*"))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -308,12 +295,11 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 	}
 
 	// Display the original input (without injected file content)
-	newMsg := makeAssistantMsg(input)
-	newMsg.Role = "user"
-	m.messages = append(m.messages, newMsg)
+	m.messages = append(m.messages, makeUserMsg(input))
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
+	m.awaitingResponse = true
 
 	// Resolve @mentions: build enriched command with file content appended.
 	command := input
@@ -360,6 +346,9 @@ func (m *ReplModel) navigateHistoryUp() {
 	if len(entries) == 0 {
 		return
 	}
+	if m.historyIndex == -1 {
+		m.savedInput = m.textarea.Value()
+	}
 	m.historyIndex++
 	if m.historyIndex >= len(entries) {
 		m.historyIndex = len(entries) - 1
@@ -372,7 +361,8 @@ func (m *ReplModel) navigateHistoryUp() {
 func (m *ReplModel) navigateHistoryDown() {
 	if m.historyIndex <= 0 {
 		m.historyIndex = -1
-		m.textarea.SetValue("")
+		m.textarea.SetValue(m.savedInput)
+		m.savedInput = ""
 		return
 	}
 	m.historyIndex--

@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -17,6 +18,20 @@ import (
 func makeAssistantMsg(content string) types.Message {
 	return types.Message{
 		Role:    "assistant",
+		Content: content,
+		Segments: []types.MessageSegment{{
+			Type:    "content",
+			Content: content,
+			Visible: true,
+		}},
+		CreatedAt: time.Now(),
+	}
+}
+
+// makeUserMsg creates a standard user message with proper rendering properties.
+func makeUserMsg(content string) types.Message {
+	return types.Message{
+		Role:    "user",
 		Content: content,
 		Segments: []types.MessageSegment{{
 			Type:    "content",
@@ -158,4 +173,12 @@ func renderSectionHeader(title string, width int) string {
 		remaining = 0
 	}
 	return prefix + strings.Repeat("─", remaining)
+}
+
+// renderLoading renders a branded loading indicator with a spinner and label.
+func renderLoading(label string, t theme.Theme) string {
+	spinner := t.Spinner.Render("⠋")
+	text := lipgloss.NewStyle().Foreground(t.TextMuted).Render(label)
+	content := spinner + " " + text
+	return lipgloss.Place(80, 10, lipgloss.Center, lipgloss.Center, content)
 }
