@@ -81,9 +81,9 @@ func (s Screen) Label() string {
 // AppMsg is the general routing message from sub-models to AppState.
 type AppMsg struct {
 	Screen        Screen
-	Action        string           // optional action identifier (e.g., "new_session")
-	SessionID     string           // populated by resume screen on selection
-	SaveKeychain  bool             // save API key to system keychain
+	Action        string // optional action identifier (e.g., "new_session")
+	SessionID     string // populated by resume screen on selection
+	SaveKeychain  bool   // save API key to system keychain
 	ModelSelected *ModelSelectedMsg
 }
 
@@ -240,7 +240,9 @@ type ToastMsg struct {
 }
 
 // ToastExpiryMsg clears an expired toast (H-2 fix: handled in Update, not View).
-type ToastExpiryMsg struct{}
+type ToastExpiryMsg struct {
+	ToastID int
+}
 
 // FallbackEventMsg carries provider fallback information.
 type FallbackEventMsg struct {
@@ -260,9 +262,9 @@ type OptimizedMsg struct {
 
 // DiffScreenMsg triggers the diff viewer screen.
 type DiffScreenMsg struct {
-	Diff    string
-	Title   string
-	Lines   []string
+	Diff  string
+	Title string
+	Lines []string
 }
 
 // DiffCloseMsg closes the diff viewer.

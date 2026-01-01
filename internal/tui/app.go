@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
@@ -49,6 +50,43 @@ func (m *AppState) Shutdown() {
 	}
 }
 
+// addToast appends a toast with a unique ID and returns the assigned ID.
+func (m *AppState) addToast(text, toastType string) int {
+	m.nextToastID++
+	id := m.nextToastID
+	m.toasts = append(m.toasts, Toast{
+		ID:        id,
+		Text:      text,
+		Type:      toastType,
+		CreatedAt: time.Now(),
+	})
+	if len(m.toasts) > maxVisibleToasts+2 {
+		m.toasts = m.toasts[len(m.toasts)-(maxVisibleToasts+2):]
+	}
+	return id
+}
+
+// addToastCmd appends a toast and returns a tea.Cmd that emits ToastExpiryMsg after the duration.
+func (m *AppState) addToastCmd(text, toastType string, duration time.Duration) tea.Cmd {
+	id := m.addToast(text, toastType)
+	if duration <= 0 {
+		duration = 3 * time.Second
+	}
+	return tea.Tick(duration, func(time.Time) tea.Msg {
+		return ToastExpiryMsg{ToastID: id}
+	})
+}
+
+// removeToastByID removes a toast by its unique ID.
+func (m *AppState) removeToastByID(id int) {
+	for i, t := range m.toasts {
+		if t.ID == id {
+			m.toasts = append(m.toasts[:i], m.toasts[i+1:]...)
+			return
+		}
+	}
+}
+
 // ─── Workflow ─────────────────────────────────────────────────────────────────
 
 // setWorkflowPhase transitions to a new workflow phase, updating state.
@@ -66,7 +104,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			return PhaseResultMsg{
 				Phase:   phase,
 				Success: false,
-				Error:   "workflow engine not initialized",
+				Error:   "Cannot start workflow — no provider configured. Run /settings to configure a provider.",
 			}
 		}
 	}
@@ -183,6 +221,7 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	)
 	if err != nil {
 		slog.Error("workflow engine init failed", "err", err)
+		m.addToast("Workflow engine failed to initialize: "+errors.UserMessage(err), "error")
 		return nil
 	}
 
@@ -242,11 +281,7 @@ func (m *AppState) checkAutoDream() {
 	result := m.autoDream.Consolidate()
 	if result.Success {
 		m.replModel.SetMessages(m.autoDream.Messages())
-		m.toasts = append(m.toasts, Toast{
-			Text:      fmt.Sprintf("Auto-compressed: %d messages removed, ~%d tokens saved", result.MessagesRemoved, result.TokensSaved),
-			Type:      "info",
-			CreatedAt: time.Now(),
-		})
+		m.addToast(fmt.Sprintf("Auto-compressed: %d messages removed, ~%d tokens saved", result.MessagesRemoved, result.TokensSaved), "info")
 	}
 }
 
@@ -293,9 +328,5 @@ func (m *AppState) checkAutoArbitrage() {
 
 	m.workflowEngine.SetModel(recommended, p)
 	m.activeModel = modelInfo
-	m.toasts = append(m.toasts, Toast{
-		Text:      fmt.Sprintf("Auto-arbitrage: switched to %s (%s task, saving $%.4f)", recommended, rec.Complexity, rec.Savings),
-		Type:      "info",
-		CreatedAt: time.Now(),
-	})
+	m.addToast(fmt.Sprintf("Auto-arbitrage: switched to %s (%s task, saving $%.4f)", recommended, rec.Complexity, rec.Savings), "info")
 }

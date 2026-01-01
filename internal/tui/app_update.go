@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -13,7 +14,6 @@ import (
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/session"
 )
-
 
 // Update implements tea.Model. It is the single dispatch point for all messages.
 // CRITICAL: Never mutate AppState from a goroutine. All mutations go here.
@@ -35,27 +35,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.streamCancelFn()
 				m.streamCancelFn = nil
 				m.lastCtrlCTime = time.Time{}
-				m.toasts = append(m.toasts, Toast{
-					Text:      "Response cancelled",
-					Type:      "warning",
-					CreatedAt: time.Now(),
-				})
-				return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-					return ToastExpiryMsg{}
-				})
+				cmds = append(cmds, m.addToastCmd("Response cancelled", "warning", 3*time.Second))
+				return m, tea.Batch(cmds...)
 			}
 			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
 				return m, tea.Quit
 			}
 			m.lastCtrlCTime = time.Now()
-			m.toasts = append(m.toasts, Toast{
-				Text:      "Press ctrl+c again to exit",
-				Type:      "info",
-				CreatedAt: time.Now(),
-			})
-			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-				return ToastExpiryMsg{}
-			})
+			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit", "info", 3*time.Second))
+			return m, tea.Batch(cmds...)
 		default:
 			cmds = append(cmds, m.routeKeyMsg(msg))
 		}
@@ -232,8 +220,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.ToolStartMsg:
 		if m.executeModel != nil {
+			detail := msg.Description
+			if detail == "" {
+				detail = msg.ToolName
+			}
 			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("→ %s: %s", msg.ToolName, msg.Description),
+				fmt.Sprintf("→ %s: %s", msg.ToolName, detail),
 			})
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
@@ -251,7 +243,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflow.SelfHealStartMsg:
 		if m.executeModel != nil {
 			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("⚠ Self-heal attempt %d/%d for task %d", msg.Attempt, msg.Max, msg.TaskID),
+				fmt.Sprintf("  [warn] Self-heal attempt %d/%d for task %d", msg.Attempt, msg.Max, msg.TaskID),
 			})
 		}
 		if m.verifyModel != nil {
@@ -285,28 +277,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Toast ─────────────────────────────────────────────────────────────────
 	case ToastMsg:
-		m.toasts = append(m.toasts, Toast{
-			Text:      msg.Text,
-			Type:      msg.Type,
-			CreatedAt: time.Now(),
-		})
-		// Keep only recent toasts (last 5 for overflow buffer)
-		if len(m.toasts) > maxVisibleToasts+2 {
-			m.toasts = m.toasts[len(m.toasts)-(maxVisibleToasts+2):]
-		}
+		id := m.addToast(msg.Text, msg.Type)
 		duration := msg.Duration
 		if duration <= 0 {
 			duration = 3 * time.Second
 		}
 		cmds = append(cmds, tea.Tick(duration, func(time.Time) tea.Msg {
-			return ToastExpiryMsg{}
+			return ToastExpiryMsg{ToastID: id}
 		}))
 
 	case ToastExpiryMsg:
-		// Remove oldest toast
-		if len(m.toasts) > 0 {
-			m.toasts = m.toasts[1:]
-		}
+		m.removeToastByID(msg.ToastID)
 
 	// ── First-run wizard complete ─────────────────────────────────────────────
 	case FirstRunCompleteMsg:
@@ -336,6 +317,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FallbackEventMsg:
 		m.activeProvider = msg.To
 		slog.Info("provider fallback", "from", msg.From, "to", msg.To, "reason", msg.Reason)
+		m.addToast(fmt.Sprintf("Switched from %s to %s (provider unavailable)", msg.From, msg.To), "warning")
 		// Re-validate the active model against the new provider
 		if m.registry != nil && m.activeModel != nil {
 			if p, err := m.registry.Get(msg.To); err == nil && p != nil {
@@ -387,6 +369,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case DiffCloseMsg:
 		m.screen = ScreenREPL
+		// Refresh sidebar git status after closing diff
+		if m.sidebarModel != nil {
+			cmds = append(cmds, m.sidebarModel.refreshCmd())
+		}
 
 	// ── Session restore ──────────────────────────────────────────────────────
 	case sessionRestoredMsg:
@@ -405,7 +391,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg("Error: " + msg.Err.Error()))
+			m.replModel.AddMessage(makeAssistantMsg("Error: " + errors.UserMessage(msg.Err)))
 		}
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
@@ -533,6 +519,17 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.diffModel.width = msg.Width
 		m.diffModel.height = msg.Height
 	}
+
+	// UX-38: Notify when sidebar auto-hides due to narrow terminal
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && msg.Width < WidthFull {
+		if !m.sidebarAutoHideNotified {
+			m.addToast("Sidebar hidden — resize wider or press ctrl+b to toggle", "info")
+			m.sidebarAutoHideNotified = true
+		}
+	} else if msg.Width >= WidthFull {
+		m.sidebarAutoHideNotified = false
+	}
+
 	return cmd
 }
 
@@ -779,11 +776,15 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	m.prevScreen = m.screen
 
+	// Push current screen to back-stack for esc-to-go-back navigation
+	if m.screen != screen && m.screen != ScreenPermission && screen != ScreenPermission {
+		m.screenStack = append(m.screenStack, m.screen)
+	}
+
 	// Start a brief transition overlay if this is a real screen change.
-	// Skip for overlays, first-run, and screens with async init.
+	// Skip for overlays and first-run.
 	skipTransition := screen == ScreenPermission || screen == ScreenDiff ||
-		screen == ScreenFirstRun || screen == ScreenResume ||
-		screen == ScreenConfig
+		screen == ScreenFirstRun
 	if m.screen != screen && !skipTransition {
 		// Eagerly ensure sub-model exists so it's ready when transition completes.
 		m.ensureSubModel(screen)
@@ -793,6 +794,18 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 
 	m.screen = screen
 	return m.ensureSubModel(screen)
+}
+
+// popScreen navigates back to the previous screen in the back-stack, or to REPL if empty.
+func (m *AppState) popScreen() tea.Cmd {
+	if len(m.screenStack) > 0 {
+		prev := m.screenStack[len(m.screenStack)-1]
+		m.screenStack = m.screenStack[:len(m.screenStack)-1]
+		m.screen = prev
+		return m.ensureSubModel(prev)
+	}
+	m.screen = ScreenREPL
+	return nil
 }
 
 // ensureSubModel creates or resizes the sub-model for the given screen.
@@ -809,7 +822,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return m.msModel.Init()
 	case ScreenSettings:
 		if m.settingsModel == nil {
-			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath)
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version)
 			m.settingsModel.width = m.width
 			m.settingsModel.height = m.height
 		}
@@ -946,6 +959,15 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 			m.streamCancelFn = nil
 		}
 		return nil
+	case "view_ship_diff":
+		if m.git != nil {
+			if diff, err := m.git.Diff("", ""); err == nil && diff != "" {
+				return func() tea.Msg {
+					return DiffScreenMsg{Diff: diff, Title: "Ship Diff"}
+				}
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -1014,6 +1036,7 @@ func (m *AppState) startNewSession() tea.Cmd {
 	sess, err := m.sessionManager.NewSession(modelID, m.activeProvider)
 	if err != nil {
 		slog.Error("new session failed", "err", err)
+		m.addToast("Failed to create session: "+errors.UserMessage(err), "error")
 		return nil
 	}
 

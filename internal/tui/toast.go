@@ -9,6 +9,7 @@ import (
 
 // Toast represents a transient notification overlay.
 type Toast struct {
+	ID        int
 	Text      string
 	Type      string // "success", "error", "warning", "info"
 	CreatedAt time.Time
