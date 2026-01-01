@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -60,11 +61,11 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 
 	// Shortcut map for common key bindings
 	shortcuts := map[string]string{
-		"help":       "?",
-		"model":      "ctrl+m",
-		"settings":   "ctrl+s",
-		"sidebar":    "ctrl+b",
-		"discuss":    "ctrl+d",
+		"help":        "?",
+		"model":       "ctrl+m",
+		"settings":    "ctrl+s",
+		"sidebar":     "ctrl+b",
+		"discuss":     "ctrl+d",
 		"new session": "ctrl+n",
 	}
 
@@ -185,7 +186,7 @@ func (cp *CommandPaletteModel) Update(msg tea.Msg) (*CommandPaletteModel, tea.Cm
 	return cp, nil
 }
 
-// filterCommands filters entries based on the current query.
+// filterCommands filters entries based on the current query using fuzzy matching.
 func (cp *CommandPaletteModel) filterCommands() {
 	cp.selected = 0
 	if cp.query == "" {
@@ -193,15 +194,67 @@ func (cp *CommandPaletteModel) filterCommands() {
 		return
 	}
 	q := strings.ToLower(cp.query)
-	var filtered []paletteEntry
+	type scoredEntry struct {
+		entry paletteEntry
+		score int
+	}
+	var scored []scoredEntry
 	for _, e := range cp.entries {
-		if strings.Contains(strings.ToLower(e.cmd.Name), q) ||
-			strings.Contains(strings.ToLower(e.cmd.Description), q) ||
-			strings.Contains(strings.ToLower(string(e.category)), q) {
-			filtered = append(filtered, e)
+		name := strings.ToLower(e.cmd.Name)
+		desc := strings.ToLower(e.cmd.Description)
+		cat := strings.ToLower(string(e.category))
+		nameScore, nameMatch := fuzzyScore(name, q)
+		descScore, descMatch := fuzzyScore(desc, q)
+		catScore, catMatch := fuzzyScore(cat, q)
+		if nameMatch || descMatch || catMatch {
+			best := nameScore
+			if descScore > best {
+				best = descScore
+			}
+			if catScore > best {
+				best = catScore
+			}
+			scored = append(scored, scoredEntry{entry: e, score: best})
 		}
 	}
-	cp.filtered = filtered
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+	cp.filtered = nil
+	for _, s := range scored {
+		cp.filtered = append(cp.filtered, s.entry)
+	}
+}
+
+// fuzzyScore returns a relevance score and whether the query matches the target.
+// Higher scores indicate better matches. Consecutive character matches and
+// word-boundary matches score higher.
+func fuzzyScore(target, query string) (int, bool) {
+	if query == "" {
+		return 0, true
+	}
+	qi := 0
+	score := 0
+	prevMatch := false
+	for ti := 0; ti < len(target) && qi < len(query); ti++ {
+		if target[ti] == query[qi] {
+			score++
+			if prevMatch {
+				score++ // bonus for consecutive match
+			}
+			if ti == 0 || target[ti-1] == ' ' || target[ti-1] == '_' || target[ti-1] == '-' {
+				score += 2 // bonus for word boundary match
+			}
+			prevMatch = true
+			qi++
+		} else {
+			prevMatch = false
+		}
+	}
+	if qi < len(query) {
+		return 0, false
+	}
+	return score, true
 }
 
 // View renders the command palette overlay, bottom-anchored above the status bar.
@@ -369,8 +422,24 @@ func (cp *CommandPaletteModel) renderHighlightedQuery(t theme.Theme) string {
 	if cp.query == "" {
 		return ""
 	}
-
-	// For simplicity, just render the query in primary color — full
-	// character-level highlighting is complex and may flicker during rapid typing.
-	return lipgloss.NewStyle().Foreground(t.Text).Render(cp.query)
+	if len(cp.filtered) == 0 {
+		return lipgloss.NewStyle().Foreground(t.Error).Render(cp.query)
+	}
+	bestTarget := strings.ToLower(cp.filtered[0].cmd.Name)
+	query := strings.ToLower(cp.query)
+	var sb strings.Builder
+	qi := 0
+	for i := 0; i < len(cp.query); i++ {
+		ch := string(cp.query[i])
+		if qi < len(bestTarget) && qi < len(query) {
+			idx := strings.IndexByte(bestTarget[qi:], query[qi])
+			if idx == 0 {
+				sb.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(ch))
+				qi++
+				continue
+			}
+		}
+		sb.WriteString(lipgloss.NewStyle().Foreground(t.Text).Render(ch))
+	}
+	return sb.String()
 }
