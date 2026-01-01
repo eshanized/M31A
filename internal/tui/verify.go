@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -27,6 +27,7 @@ type VerifyModel struct {
 	// Healing state
 	healingTaskID int // -1 if not healing
 	healAttempt   int // 0 = not healing, 1+ = current attempt number
+	healCursor    int // index into failed tasks list for heal selection
 	spinner       components.Spinner
 }
 
@@ -93,22 +94,30 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 		switch msg.String() {
 		case "j", "down":
 			vm.viewport.LineDown(1)
+			failedCount := vm.countFailedTasks()
+			if failedCount > 0 && vm.healCursor < failedCount-1 {
+				vm.healCursor++
+				vm.viewport.SetContent(vm.renderResults())
+			}
 		case "k", "up":
 			vm.viewport.LineUp(1)
+			if vm.healCursor > 0 {
+				vm.healCursor--
+				vm.viewport.SetContent(vm.renderResults())
+			}
 		case "enter":
 			// Continue → go to ship
 			return vm, func() tea.Msg {
 				return AppMsg{Screen: ScreenShip}
 			}
 		case "h":
-			// Trigger heal for the first failed task
+			// Trigger heal for the task at healCursor
 			if vm.healFunc != nil && vm.healingTaskID < 0 {
-				for _, task := range vm.tasks {
-					result, ok := vm.results[task.ID]
-					if ok && (!result.FilesExist || !result.SyntaxOK || !result.TestsOK) {
-						vm.StartHealing(task.ID, task.HealsAttempted+1)
-						return vm, vm.healFunc(task.ID)
-					}
+				failedTasks := vm.getFailedTasks()
+				if vm.healCursor >= 0 && vm.healCursor < len(failedTasks) {
+					task := failedTasks[vm.healCursor]
+					vm.StartHealing(task.ID, task.HealsAttempted+1)
+					return vm, vm.healFunc(task.ID)
 				}
 			}
 			return vm, nil
@@ -166,7 +175,7 @@ func (vm *VerifyModel) View() string {
 
 	// Footer (0 padding — last line, no indent)
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("↵ continue  h heal  s skip  q back")
+		Render("↵ continue  ↑↓/jk select  h heal  s skip  q back")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		title,
@@ -180,6 +189,7 @@ func (vm *VerifyModel) View() string {
 func (vm *VerifyModel) renderResults() string {
 	t := vm.theme
 	var lines []string
+	failedIdx := -1
 	for i, task := range vm.tasks {
 		result, hasResult := vm.results[task.ID]
 
@@ -193,6 +203,7 @@ func (vm *VerifyModel) renderResults() string {
 			} else {
 				badgeType = components.BadgeError
 				badgeText = "fail"
+				failedIdx++
 			}
 		}
 		statusBadge := components.SimpleBadge{
@@ -204,7 +215,15 @@ func (vm *VerifyModel) renderResults() string {
 
 		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
 		action := lipgloss.NewStyle().Foreground(t.Text).Render(task.Action)
-		line := fmt.Sprintf("  %s %s %s", num, statusBadge, action)
+
+		// Show cursor indicator on selected failed task
+		cursor := "  "
+		if hasResult && failedIdx >= 0 && failedIdx == vm.healCursor &&
+			(!result.FilesExist || !result.SyntaxOK || !result.TestsOK) {
+			cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+		}
+
+		line := fmt.Sprintf("%s%s %s %s", cursor, num, statusBadge, action)
 		lines = append(lines, line)
 
 		// Heal spinner for the task being healed
@@ -253,4 +272,28 @@ func (vm *VerifyModel) countResults() (passed, failed, total int) {
 		}
 	}
 	return
+}
+
+// countFailedTasks returns the number of tasks with failing verification results.
+func (vm *VerifyModel) countFailedTasks() int {
+	count := 0
+	for _, task := range vm.tasks {
+		result, ok := vm.results[task.ID]
+		if ok && (!result.FilesExist || !result.SyntaxOK || !result.TestsOK) {
+			count++
+		}
+	}
+	return count
+}
+
+// getFailedTasks returns the tasks with failing verification results.
+func (vm *VerifyModel) getFailedTasks() []types.Task {
+	var failed []types.Task
+	for _, task := range vm.tasks {
+		result, ok := vm.results[task.ID]
+		if ok && (!result.FilesExist || !result.SyntaxOK || !result.TestsOK) {
+			failed = append(failed, task)
+		}
+	}
+	return failed
 }
