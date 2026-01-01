@@ -169,3 +169,14 @@ func handleTools(_ []string, ctx CommandContext) CommandResult {
 	}
 	return CommandResult{Success: true, Message: sb.String()}
 }
+
+// handleCopyError copies the last error message to the clipboard.
+func handleCopyError(_ []string, ctx CommandContext) CommandResult {
+	if ctx.CopyError != nil {
+		return CommandResult{
+			Success: true,
+			Cmd:     ctx.CopyError(),
+		}
+	}
+	return CommandResult{Success: false, Message: "Copy error not available."}
+}

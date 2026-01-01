@@ -23,7 +23,7 @@ import (
 type CommandInfo struct {
 	Name        string
 	Description string
-	Slash       string // e.g. "/help"
+	Slash       string         // e.g. "/help"
 	Execute     func() tea.Cmd // optional: used by command palette
 }
 
@@ -62,6 +62,7 @@ type CommandContext struct {
 	WorkflowEngine workflowEngineInterface
 	CmdRegistry    *CommandRegistry
 	ClearMessages  func()
+	CopyError      func() tea.Cmd
 }
 
 // CommandRegistry maps slash command names to handlers and descriptions.
@@ -231,6 +232,7 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("history", handleHistory, "Show conversation history")
 	r.Register("health", handleHealth, "Show system health status")
 	r.Register("tools", handleTools, "List available tools")
+	r.Register("copy-error", handleCopyError, "Copy last error to clipboard")
 
 	// Config/settings
 	r.Register("settings", handleSettings, "Open settings editor")
