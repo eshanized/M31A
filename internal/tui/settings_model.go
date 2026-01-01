@@ -3,12 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
@@ -33,10 +34,10 @@ var settingsTabNames = []string{
 
 // settingsField describes one editable row on a settings tab.
 type settingsField struct {
-	key         string // config key identifier
-	label       string // display label
-	fieldType   string // "choice", "bool", "text", "number", "password"
-	choices     []string
+	key       string // config key identifier
+	label     string // display label
+	fieldType string // "choice", "bool", "text", "number", "password"
+	choices   []string
 }
 
 // providerHealthStatus tracks async health check results.
@@ -65,8 +66,8 @@ type SettingsModel struct {
 	height    int
 
 	// Field cursor
-	fields       []settingsField
-	fieldCursor  int
+	fields      []settingsField
+	fieldCursor int
 
 	// Editing state
 	editing   bool
@@ -83,10 +84,13 @@ type SettingsModel struct {
 	// Status message
 	statusMsg  string
 	statusTime time.Time
+
+	// Version
+	version string
 }
 
 // NewSettingsModel creates a SettingsModel.
-func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string) *SettingsModel {
+func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string) *SettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
 	ti.Width = 40
@@ -97,6 +101,7 @@ func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.T
 		registry:   registry,
 		editValue:  ti,
 		configPath: configPath,
+		version:    version,
 	}
 	s.buildFields()
 	return s
@@ -207,17 +212,19 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return s, func() tea.Msg { return AppMsg{Screen: ScreenREPL} }
-		case "tab", "right":
+		case "tab":
 			if len(s.fields) > 0 && s.isCurrentFieldChoice() {
 				return s.cycleChoice(1)
 			}
-			s.activeTab = SettingsTab((int(s.activeTab) + 1) % len(settingsTabNames))
-			s.fieldCursor = 0
-			s.buildFields()
-		case "shift+tab", "left":
+		case "shift+tab":
 			if len(s.fields) > 0 && s.isCurrentFieldChoice() {
 				return s.cycleChoice(-1)
 			}
+		case "]":
+			s.activeTab = SettingsTab((int(s.activeTab) + 1) % len(settingsTabNames))
+			s.fieldCursor = 0
+			s.buildFields()
+		case "[":
 			s.activeTab = SettingsTab((int(s.activeTab) - 1 + len(settingsTabNames)) % len(settingsTabNames))
 			s.fieldCursor = 0
 			s.buildFields()
@@ -600,7 +607,13 @@ func (s *SettingsModel) renderFieldRow(f settingsField, idx int) string {
 		return cursor + labelStyle.Render(f.label) + strings.Join(parts, "  ")
 
 	case "password":
-		return cursor + labelStyle.Render(f.label) + valStyle.Render(maskedKey(val))
+		source := s.keySource(f.key)
+		sourceBadge := ""
+		if source != "" {
+			sourceBadge = " " + lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).
+				Render("["+source+"]")
+		}
+		return cursor + labelStyle.Render(f.label) + sourceBadge + " " + valStyle.Render(maskedKey(val))
 
 	default:
 		return cursor + labelStyle.Render(f.label) + valStyle.Render(val)
@@ -712,11 +725,16 @@ func (s *SettingsModel) renderWorkflowTab() string {
 
 func (s *SettingsModel) renderAboutTab() string {
 	t := s.theme
+	versionLine := ""
+	if s.version != "" {
+		versionLine = lipgloss.NewStyle().Foreground(t.Brand).PaddingLeft(4).Bold(true).Render("Version: "+s.version) + "\n"
+	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		"",
 		renderSectionHeader("About M31A", s.width),
 		"",
 		lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(4).Bold(true).Render("M31A — Terminal AI Coding Agent"),
+		versionLine,
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Module: github.com/eshanized/M31A"),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).Render("Built with:"),
@@ -745,6 +763,27 @@ func (s *SettingsModel) renderEditBox() string {
 			s.editValue.View(),
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ confirm  esc cancel"),
 		))
+}
+
+// keySource returns a label indicating where an API key is sourced from.
+func (s *SettingsModel) keySource(fieldKey string) string {
+	switch fieldKey {
+	case "apikey_or":
+		if os.Getenv("OPENROUTER_API_KEY") != "" {
+			return "env"
+		}
+		if s.config != nil && s.config.Provider.OpenRouter.APIKey != "" {
+			return "config"
+		}
+	case "apikey_zen":
+		if os.Getenv("ZEN_API_KEY") != "" {
+			return "env"
+		}
+		if s.config != nil && s.config.Provider.Zen.APIKey != "" {
+			return "config"
+		}
+	}
+	return ""
 }
 
 func boolStr(b bool) string {
