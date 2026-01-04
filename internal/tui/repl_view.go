@@ -42,6 +42,7 @@ func viewportHeight(termHeight int) int {
 //  4. [textarea: user input]
 //  5. status bar (cwd ⎇ branch  hints  cost)
 //  6. [slash suggestion dropdown overlay]
+//
 // NOTE: Bottom border (╹▀▀▀) was removed — status bar sits flush below textarea.
 //
 // IMPORTANT: The welcome screen (logo + provider card + hints) is set as
@@ -141,11 +142,12 @@ func (m *ReplModel) View() string {
 	newMessagesIndicator := ""
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
 		newMessagesIndicator = lipgloss.NewStyle().
-			Foreground(t.Brand).
+			Foreground(t.Background).
+			Background(t.Brand).
 			Bold(true).
 			Align(lipgloss.Center).
 			Width(rw).
-			Render(fmt.Sprintf("↓ %d new message(s) — ctrl+l to scroll to bottom", m.newMessagesWhileScrolled))
+			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
 	}
 
 	// ── Assemble all parts ────────────────────────────────────────────────────
