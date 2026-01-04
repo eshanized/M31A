@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tools"
@@ -9,14 +11,14 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-
 // ─── AppState view rendering ──────────────────────────────────────────────────
 
 // View implements tea.Model. It renders the full terminal frame.
 // This is the top-level view function; it delegates to per-screen view methods.
 func (m *AppState) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "Loading..."
+		return lipgloss.Place(80, 24, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Bold(true).Render("M31A"))
 	}
 
 	t := m.themeManager.Current()
@@ -35,13 +37,24 @@ func (m *AppState) View() string {
 	// Width < 40: ultra-compact — show only the active screen content with no
 	// chrome (no header, no sidebar, no status bar, no toasts, no transitions).
 	if m.width < WidthUltraCompact {
-		return m.renderActiveScreen()
+		screen := m.renderActiveScreen()
+		hint := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666")).
+			Italic(true).
+			Render("Resize terminal for full UI")
+		return lipgloss.JoinVertical(lipgloss.Left, screen, hint)
 	}
 
 	// Toast stack (top-right overlay) — hidden below compact width
 	toastOverlay := ""
-	if len(m.toasts) > 0 && m.width >= WidthCompact {
-		toastOverlay = renderToastStack(m.toasts, t, m.width)
+	if len(m.toasts) > 0 {
+		if m.width >= WidthCompact {
+			toastOverlay = renderToastStack(m.toasts, t, m.width)
+		} else {
+			// Narrow terminal: show most recent toast inline
+			last := m.toasts[len(m.toasts)-1]
+			toastOverlay = renderSingleToast(last, t)
+		}
 	}
 
 	// Sidebar — auto-hidden below full width (80 cols)
@@ -131,7 +144,7 @@ func (m *AppState) renderREPLScreen() string {
 
 func (m *AppState) renderSettingsScreen() string {
 	if m.settingsModel == nil {
-		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath)
+		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version)
 		m.settingsModel.width = m.width
 		m.settingsModel.height = m.height
 	}
@@ -140,56 +153,56 @@ func (m *AppState) renderSettingsScreen() string {
 
 func (m *AppState) renderModelSelectorScreen() string {
 	if m.msModel == nil {
-		return "Loading model selector..."
+		return renderLoading("Loading model selector...", m.themeManager.Current())
 	}
 	return m.msModel.View()
 }
 
 func (m *AppState) renderPlanScreen() string {
 	if m.planModel == nil {
-		return "Loading plan..."
+		return renderLoading("Loading plan...", m.themeManager.Current())
 	}
 	return m.renderHeader("") + "\n" + m.planModel.View()
 }
 
 func (m *AppState) renderExecuteScreen() string {
 	if m.executeModel == nil {
-		return "Loading execution..."
+		return renderLoading("Loading execution...", m.themeManager.Current())
 	}
 	return m.renderHeader("") + "\n" + m.executeModel.View()
 }
 
 func (m *AppState) renderVerifyScreen() string {
 	if m.verifyModel == nil {
-		return "Loading verification..."
+		return renderLoading("Loading verification...", m.themeManager.Current())
 	}
 	return m.renderHeader("") + "\n" + m.verifyModel.View()
 }
 
 func (m *AppState) renderShipScreen() string {
 	if m.shipModel == nil {
-		return "Loading ship summary..."
+		return renderLoading("Loading ship summary...", m.themeManager.Current())
 	}
 	return m.renderHeader("") + "\n" + m.shipModel.View()
 }
 
 func (m *AppState) renderResumeScreen() string {
 	if m.resumeModel == nil {
-		return "Loading sessions..."
+		return renderLoading("Loading sessions...", m.themeManager.Current())
 	}
 	return m.resumeModel.View()
 }
 
 func (m *AppState) renderGoalInputScreen() string {
 	if m.goalInput == nil {
-		return "Loading goal input..."
+		return renderLoading("Loading goal input...", m.themeManager.Current())
 	}
 	return m.goalInput.View()
 }
 
 func (m *AppState) renderFirstRunScreen() string {
 	if m.firstRunModel == nil {
-		return "Loading first-run wizard..."
+		return renderLoading("Loading first-run wizard...", m.themeManager.Current())
 	}
 	availWidth := m.width
 	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull {
@@ -201,28 +214,28 @@ func (m *AppState) renderFirstRunScreen() string {
 
 func (m *AppState) renderLedgerScreen() string {
 	if m.ledgerModel == nil {
-		return "Loading ledger..."
+		return renderLoading("Loading ledger...", m.themeManager.Current())
 	}
 	return m.ledgerModel.View()
 }
 
 func (m *AppState) renderRollbackScreen() string {
 	if m.rollbackModel == nil {
-		return "Loading rollback browser..."
+		return renderLoading("Loading rollback browser...", m.themeManager.Current())
 	}
 	return m.rollbackModel.View()
 }
 
 func (m *AppState) renderMetricsScreen() string {
 	if m.metricsModel == nil {
-		return "Loading metrics..."
+		return renderLoading("Loading metrics...", m.themeManager.Current())
 	}
 	return m.metricsModel.View()
 }
 
 func (m *AppState) renderDiscussScreen() string {
 	if m.discussModel == nil {
-		return "Loading discuss..."
+		return renderLoading("Loading discuss...", m.themeManager.Current())
 	}
 	return m.discussModel.View()
 }
@@ -259,7 +272,7 @@ func (m *AppState) renderPermissionModal() string {
 	}
 
 	// Fallback to legacy renderer if modal was not yet initialized
-	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, m.themeManager.Current())
+	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, m.themeManager.Current(), m.permCountdown < 5)
 }
 
 // ─── REPL sync helpers ────────────────────────────────────────────────────────
@@ -319,6 +332,14 @@ func (m *AppState) renderQuestionModal() string {
 	if m.questionModel != nil {
 		m.questionModel.SetWidth(width)
 		content := m.questionModel.View()
+		// UX-43: Show timeout info if configured
+		if q.TimeoutSecs > 0 {
+			timeoutLine := lipgloss.NewStyle().
+				Foreground(m.themeManager.Current().TextMuted).
+				Italic(true).
+				Render(fmt.Sprintf("Timeout: %ds", q.TimeoutSecs))
+			content = content + "\n" + timeoutLine
+		}
 		modal := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(m.themeManager.Current().Brand).
@@ -393,7 +414,7 @@ type simpleError struct {
 func (e *simpleError) Error() string { return e.msg }
 
 // RenderPermissionModal renders a full-screen permission modal.
-func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t theme.Theme) string {
+func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t theme.Theme, urgent bool) string {
 	if req == nil {
 		return ""
 	}
@@ -405,22 +426,36 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t
 
 	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
 		"  Tool:  "+req.ToolName,
-		"  Command:  "+TruncateWithEllipsis(req.Command, width-12),
+		"  Command:",
+		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width-4).Render(req.Command),
 		"  Risk:  "+riskStyle.Render(string(req.RiskLevel)),
 		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny   a allow always"),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  Timeout: "+formatSI(countdown)+"s"),
 	)
+
+	borderStyle := lipgloss.RoundedBorder()
 
 	card := components.Card{
 		Title:   "Permission Required",
 		Content: bodyContent,
 		Width:   width,
-		Border:  lipgloss.RoundedBorder(),
+		Border:  borderStyle,
 		Style:   components.CardBrand,
 		Theme:   t,
 	}.Render()
+
+	// Override border color for urgency
+	if urgent {
+		card = lipgloss.NewStyle().
+			Border(borderStyle).
+			BorderForeground(t.Error).
+			Width(width).
+			Render(bodyContent)
+		card = lipgloss.Place(0, 0, lipgloss.Center, lipgloss.Center, card)
+		return card
+	}
 
 	return lipgloss.Place(0, 0, lipgloss.Center, lipgloss.Center, card)
 }

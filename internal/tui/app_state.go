@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -43,8 +44,9 @@ type AppState struct {
 	height int
 
 	// Screen routing
-	screen     Screen
-	prevScreen Screen
+	screen      Screen
+	prevScreen  Screen
+	screenStack []Screen
 
 	// Theme
 	themeManager *theme.Manager
@@ -127,6 +129,7 @@ type AppState struct {
 	// Toast notifications (up to 3 visible, queue overflow)
 	toasts      []Toast
 	toastTimers map[int]*time.Timer // index → auto-dismiss timer
+	nextToastID int
 
 	// Arbitrage scorer
 	arbitrager *arbitrage.Scorer
@@ -147,6 +150,9 @@ type AppState struct {
 
 	// Double ctrl+c exit tracking
 	lastCtrlCTime time.Time
+
+	// Sidebar auto-hide notification tracking (UX-38)
+	sidebarAutoHideNotified bool
 
 	// Confirmation dialog state (non-nil when awaiting y/n)
 	pendingConfirm *CommandResult
@@ -246,6 +252,7 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 	for _, entry := range msg.Providers {
 		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey); err != nil {
 			slog.Warn("failed to register provider from wizard", "provider", entry.ID, "error", err)
+			m.addToast(fmt.Sprintf("Failed to register provider %s", entry.ID), "warning")
 		}
 	}
 
@@ -286,6 +293,7 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 	if m.configPath != "" {
 		if err := m.config.Save(m.configPath); err != nil {
 			slog.Warn("failed to save config after wizard", "error", err)
+			m.addToast("Failed to save configuration", "warning")
 		}
 	}
 
