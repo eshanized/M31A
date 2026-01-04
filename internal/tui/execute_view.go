@@ -47,7 +47,7 @@ func renderAnimatedProgressBar(em *ExecuteModel, width int) string {
 
 // animatedProgressBarWidth computes the bar width based on the execute model.
 func animatedProgressBarWidth(em *ExecuteModel) int {
-	return 10
+	return 25
 }
 
 // renderTaskSpinner renders the current spinner frame for a running task.
