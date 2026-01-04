@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -22,6 +22,7 @@ type PlanModel struct {
 	provider     string
 	estCost      float64
 	costEstimate string
+	timeEstimate string
 	sessionID    string
 	width        int
 	height       int
@@ -198,7 +199,7 @@ func (pm *PlanModel) View() string {
 	w := pm.width
 
 	// Header: 📋 Plan · N tasks · ~$0.0042 · model [OR]
-	header := renderPlanHeader(t, len(pm.tasks), pm.estCost, pm.costEstimate, pm.modelName, pm.provider)
+	header := renderPlanHeader(t, len(pm.tasks), pm.estCost, pm.costEstimate, pm.timeEstimate, pm.modelName, pm.provider)
 
 	divider := components.SectionDivider{
 		Width: w,
