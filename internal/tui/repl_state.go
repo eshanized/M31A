@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -323,6 +324,13 @@ func (m *ReplModel) renderMessages() {
 				Content: streamContent,
 			}
 			if m.activeSegmentType == "thinking" {
+				// UX-44: Add visual separator before thinking content
+				thinkingHeader := lipgloss.NewStyle().
+					Foreground(m.theme.Thinking).
+					Italic(true).
+					Render("  ── thinking ──")
+				sb.WriteString("\n")
+				sb.WriteString(thinkingHeader)
 				streamMsg.Segments = []types.MessageSegment{{
 					Type:    "thinking",
 					Content: streamContent,

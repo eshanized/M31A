@@ -33,6 +33,7 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 	}
 
 	m.streaming = true
+	m.awaitingResponse = false
 
 	switch chunk.Type {
 	case "content":
