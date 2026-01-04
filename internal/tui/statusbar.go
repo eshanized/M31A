@@ -115,7 +115,12 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(tokStr))
 		if info.Cost > 0 {
-			costStr := fmt.Sprintf("$%.4f", info.Cost)
+			var costStr string
+			if info.Cost < 0.01 {
+				costStr = "<$0.01"
+			} else {
+				costStr = fmt.Sprintf("$%.2f", info.Cost)
+			}
 			rightParts = append(rightParts,
 				lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
 		}
