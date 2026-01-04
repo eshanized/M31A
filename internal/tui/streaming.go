@@ -1,6 +1,6 @@
 // Package tui implements the Bubble Tea TUI for M31A.
 //
-// STREAMING PIPELINE — GOROUTINE OWNERSHIP MODEL
+// # STREAMING PIPELINE — GOROUTINE OWNERSHIP MODEL
 //
 // Architecture: Bubble Tea is single-threaded. All state mutations go through Update().
 // The streaming pipeline uses one goroutine per active stream that reads SSE chunks
@@ -115,6 +115,21 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 				return
 			}
 			if err != nil {
+				// On cancellation, emit partial content instead of discarding it
+				if ctx.Err() != nil && fullContent.Len() > 0 {
+					msg := types.Message{
+						Role:    "assistant",
+						Content: fullContent.String() + "\n\n*[cancelled]*",
+						Usage:   lastUsage,
+					}
+					streamCh <- StreamDoneMsg{
+						Message:   msg,
+						Usage:     lastUsage,
+						ModelID:   req.Model,
+						SessionID: sessionID,
+					}
+					return
+				}
 				streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
 				return
 			}
