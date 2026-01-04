@@ -14,16 +14,16 @@ import (
 
 // DiscussModel presents discuss Q&A questions one-by-one.
 type DiscussModel struct {
-	theme      theme.Theme
-	questions  []string
-	current    int
-	answers    []string
-	input      textinput.Model
-	timeout    int // seconds, 0 = no timeout
-	deadline   time.Time
+	theme       theme.Theme
+	questions   []string
+	current     int
+	answers     []string
+	input       textinput.Model
+	timeout     int // seconds, 0 = no timeout
+	deadline    time.Time
 	hasDeadline bool
-	width      int
-	height     int
+	width       int
+	height      int
 }
 
 // NewDiscussModel creates a DiscussModel for the given questions.
@@ -197,7 +197,7 @@ func (dm *DiscussModel) View() string {
 		Width(w - 8).
 		Render(inputView)
 
-	// ── Timer (only when < 30 seconds remaining) ────────────────────────────
+	// ── Timer (always visible, changes style when urgent) ─────────────────
 	timeoutLine := ""
 	if dm.hasDeadline && dm.timeout > 0 {
 		remaining := int(time.Until(dm.deadline).Seconds())
@@ -205,8 +205,11 @@ func (dm *DiscussModel) View() string {
 			remaining = 0
 		}
 		if remaining < 30 {
-		timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).
-			Render(fmt.Sprintf("%ds remaining", remaining))
+			timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).
+				Render(fmt.Sprintf("%ds remaining", remaining))
+		} else {
+			timeoutLine = lipgloss.NewStyle().Foreground(t.TextMuted).
+				Render(fmt.Sprintf("%ds remaining", remaining))
 		}
 	}
 
