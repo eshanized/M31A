@@ -19,6 +19,13 @@ func (m *ReplModel) renderQuickActionsPanel(width int) string {
 	}
 
 	t := m.theme
+
+	// Collapsed state: single-line hint
+	if m.quickActionsCollapsed {
+		return lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).
+			Render("  Quick actions (ctrl+q to expand)")
+	}
+
 	items := []struct {
 		key  string
 		desc string
@@ -38,7 +45,6 @@ func (m *ReplModel) renderQuickActionsPanel(width int) string {
 
 	joined := strings.Join(parts, "  ")
 	if lipgloss.Width(joined) > width {
-		// Show only first 3 if too wide
 		joined = strings.Join(parts[:3], "  ")
 	}
 
