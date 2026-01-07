@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -13,10 +14,14 @@ type Toast struct {
 	Text      string
 	Type      string // "success", "error", "warning", "info"
 	CreatedAt time.Time
+	Frame     int    // animation frame (0, 1, 2)
 }
 
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
 const maxVisibleToasts = 3
+
+// toastSlideInFrames defines the slide-in animation frames
+var toastSlideInFrames = []int{0, 1, 2}
 
 // renderToastStack renders up to 3 most recent toasts stacked top-right.
 func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
@@ -30,8 +35,8 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	}
 
 	var rendered []string
-	for _, toast := range show {
-		rendered = append(rendered, renderSingleToast(toast, t))
+	for i, toast := range show {
+		rendered = append(rendered, renderSingleToast(toast, t, i))
 	}
 	stack := lipgloss.JoinVertical(lipgloss.Right, rendered...)
 
@@ -41,7 +46,7 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 }
 
 // renderSingleToast renders one toast with a ThinBorder and colored left border.
-func renderSingleToast(toast Toast, t theme.Theme) string {
+func renderSingleToast(toast Toast, t theme.Theme, index int) string {
 	var borderColor lipgloss.Color
 	switch toast.Type {
 	case "success":
@@ -67,10 +72,96 @@ func renderSingleToast(toast Toast, t theme.Theme) string {
 		icon = "● "
 	}
 
-	return lipgloss.NewStyle().
+	// Calculate slide-in offset based on frame
+	offset := 0
+	if toast.Frame < 2 {
+		offset = (2 - toast.Frame) * 10
+	}
+
+	// Create progress bar for auto-dismiss
+	progressBar := renderToastProgress(toast, t)
+
+	// Stack offset: each toast 2 cols narrower than one above
+	contentWidth := 40 - (index * 2)
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	content := icon + toast.Text
+	if len(content) > contentWidth {
+		content = content[:contentWidth-3] + "..."
+	}
+
+	toastContent := lipgloss.NewStyle().
 		Border(theme.ThinBorder).
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Foreground(t.TextPrimary).
-		Render(icon + toast.Text)
+		Width(contentWidth).
+		Render(content)
+
+	// Add progress bar below
+	if progressBar != "" {
+		toastContent += "\n" + progressBar
+	}
+
+	// Apply slide-in offset
+	if offset > 0 {
+		toastContent = lipgloss.NewStyle().PaddingLeft(offset).Render(toastContent)
+	}
+
+	return toastContent
+}
+
+// renderToastProgress renders a progress bar for auto-dismiss
+func renderToastProgress(toast Toast, t theme.Theme) string {
+	// Calculate elapsed time since creation
+	elapsed := time.Since(toast.CreatedAt)
+	duration := 5 * time.Second // default duration
+	
+	// Calculate progress (0 to 1)
+	progress := float64(elapsed) / float64(duration)
+	if progress > 1 {
+		progress = 1
+	}
+	if progress < 0 {
+		progress = 0
+	}
+
+	// Create progress bar
+	barWidth := 20
+	filledWidth := int(progress * float64(barWidth))
+	emptyWidth := barWidth - filledWidth
+
+	// Choose color based on toast type
+	var barColor lipgloss.Color
+	switch toast.Type {
+	case "success":
+		barColor = t.Success
+	case "error":
+		barColor = t.Error
+	case "warning":
+		barColor = t.Warning
+	default:
+		barColor = t.Brand
+	}
+
+	// Render progress bar
+	filled := lipgloss.NewStyle().
+		Foreground(barColor).
+		Render(strings.Repeat("━", filledWidth))
+	empty := lipgloss.NewStyle().
+		Foreground(t.Border).
+		Render(strings.Repeat("─", emptyWidth))
+
+	return lipgloss.NewStyle().
+		PaddingLeft(2).
+		Render(filled + empty)
+}
+
+// advanceToastFrame advances the animation frame for a toast
+func advanceToastFrame(toast *Toast) {
+	if toast.Frame < 2 {
+		toast.Frame++
+	}
 }

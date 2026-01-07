@@ -53,7 +53,7 @@ func (m *AppState) View() string {
 		} else {
 			// Narrow terminal: show most recent toast inline
 			last := m.toasts[len(m.toasts)-1]
-			toastOverlay = renderSingleToast(last, t)
+			toastOverlay = renderSingleToast(last, t, 0)
 		}
 	}
 

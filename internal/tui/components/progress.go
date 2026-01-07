@@ -82,15 +82,87 @@ func (p ProgressBar) Render() string {
 		bar = filled + empty
 	}
 
-	// Apply styling
-	progressStyle := lipgloss.NewStyle().Foreground(t.Brand)
-	if pct >= 1.0 {
-		progressStyle = progressStyle.Foreground(t.Success)
-	} else if pct == 0 {
-		progressStyle = progressStyle.Foreground(t.TextSecondary)
+	// Apply gradient fill for brand color
+	if pct > 0 && pct < 1.0 {
+		// Create gradient from brand to lighter shade
+		gradientStyle := lipgloss.NewStyle().Foreground(t.Brand)
+		bar = gradientStyle.Render(bar)
+	} else if pct >= 1.0 {
+		// Success color for completion
+		progressStyle := lipgloss.NewStyle().Foreground(t.Success)
+		bar = progressStyle.Render(bar)
+	} else {
+		// Empty state
+		progressStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
+		bar = progressStyle.Render(bar)
 	}
 
-	bar = progressStyle.Render(bar)
+	if p.ShowPct {
+		pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
+		pctStyle := lipgloss.NewStyle().
+			Foreground(t.TextSecondary)
+		bar = bar + " " + pctStyle.Render(pctStr)
+	}
+
+	return bar
+}
+
+// RenderWithLabel returns the progress bar with a label inside the filled portion
+func (p ProgressBar) RenderWithLabel(label string) string {
+	if p.Width <= 0 {
+		p.Width = 30
+	}
+
+	t := p.Theme
+	if t.Text == "" {
+		t = theme.Default()
+	}
+	pct := p.Progress
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+
+	filledWidth := int(math.Round(pct * float64(p.Width)))
+	if filledWidth > p.Width {
+		filledWidth = p.Width
+	}
+	emptyWidth := p.Width - filledWidth
+
+	// Only show label if bar is wide enough
+	showLabel := p.Width > 20 && label != ""
+
+	var bar string
+
+	// Create filled portion with optional label
+	filled := ""
+	if showLabel && filledWidth > len(label)+2 {
+		// Center label in filled portion
+		padding := (filledWidth - len(label)) / 2
+		if padding < 0 {
+			padding = 0
+		}
+		filled = strings.Repeat("█", padding) + label + strings.Repeat("█", filledWidth-padding-len(label))
+	} else {
+		filled = strings.Repeat("█", filledWidth)
+	}
+
+	empty := strings.Repeat("░", emptyWidth)
+	bar = filled + empty
+
+	// Apply gradient fill
+	if pct > 0 && pct < 1.0 {
+		gradientStyle := lipgloss.NewStyle().Foreground(t.Brand)
+		bar = gradientStyle.Render(bar)
+	} else if pct >= 1.0 {
+		progressStyle := lipgloss.NewStyle().Foreground(t.Success)
+		bar = progressStyle.Render(bar)
+	} else {
+		progressStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
+		bar = progressStyle.Render(bar)
+	}
 
 	if p.ShowPct {
 		pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))

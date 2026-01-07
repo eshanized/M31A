@@ -20,6 +20,27 @@ const (
 	BadgeNeutral
 )
 
+// BadgeVariant represents the visual variant of a badge
+type BadgeVariant int
+
+const (
+	BadgeFilled  BadgeVariant = iota // background color + contrasting text
+	BadgeOutline                     // border only + colored text
+	BadgeGhost                       // colored text only, no bg/border
+	BadgePill                        // rounded with horizontal padding
+	BadgeDot                         // small dot + text (status indicators)
+)
+
+// BadgeOptions holds optional parameters for badge rendering
+type BadgeOptions struct {
+	Text     string
+	Variant  BadgeVariant
+	Color    lipgloss.Color
+	Icon     string // optional prefix icon
+	Compact  bool
+	MaxWidth int // 0 = no limit
+}
+
 // SimpleBadge is a lightweight badge that renders colored text without backgrounds.
 type SimpleBadge struct {
 	Text    string
@@ -47,6 +68,73 @@ func (b SimpleBadge) Render() string {
 		return style.Foreground(b.Theme.Thinking).Render(b.Text)
 	default:
 		return style.Foreground(b.Theme.TextMuted).Render(b.Text)
+	}
+}
+
+// EnhancedBadge is a new badge system with variants
+type EnhancedBadge struct {
+	Options BadgeOptions
+	Theme   theme.Theme
+}
+
+// Render returns the enhanced badge as a styled string
+func (b EnhancedBadge) Render() string {
+	text := b.Options.Text
+	if b.Options.Icon != "" {
+		text = b.Options.Icon + " " + text
+	}
+
+	switch b.Options.Variant {
+	case BadgeOutline:
+		style := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(b.Options.Color).
+			Foreground(b.Options.Color).
+			Padding(0, 1).
+			Bold(true)
+		if b.Options.Compact {
+			style = style.Inline(true)
+		}
+		return style.Render(text)
+	case BadgeGhost:
+		style := lipgloss.NewStyle().
+			Foreground(b.Options.Color).
+			Bold(true)
+		if !b.Options.Compact {
+			style = style.PaddingLeft(1).PaddingRight(1)
+		}
+		return style.Render(text)
+	case BadgePill:
+		style := lipgloss.NewStyle().
+			Background(b.Options.Color).
+			Foreground(b.Theme.BadgeForeground).
+			Padding(0, 2).
+			Bold(true)
+		if b.Options.Compact {
+			style = style.Inline(true)
+		}
+		return style.Render(text)
+	case BadgeDot:
+		dotStyle := lipgloss.NewStyle().
+			Foreground(b.Options.Color).
+			Bold(true)
+		textStyle := lipgloss.NewStyle().
+			Foreground(b.Theme.TextPrimary)
+		if b.Options.Compact {
+			dotStyle = dotStyle.Inline(true)
+			textStyle = textStyle.Inline(true)
+		}
+		return dotStyle.Render("●") + " " + textStyle.Render(text)
+	default: // BadgeFilled
+		style := lipgloss.NewStyle().
+			Background(b.Options.Color).
+			Foreground(b.Theme.BadgeForeground).
+			Padding(0, 1).
+			Bold(true)
+		if b.Options.Compact {
+			style = style.Inline(true)
+		}
+		return style.Render(text)
 	}
 }
 
