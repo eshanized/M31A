@@ -97,6 +97,10 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		}
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
 		m.persistWorkflowState()
+		// Refresh sidebar git status after task execution
+		if m.sidebarModel != nil {
+			return tea.Batch(m.RunPhaseCmd(types.PhaseVerify), m.sidebarModel.refreshCmd())
+		}
 		return m.RunPhaseCmd(types.PhaseVerify)
 
 	case types.PhaseVerify:
@@ -136,6 +140,10 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 func (m *AppState) handlePlanReady(msg PlanReadyMsg) tea.Cmd {
 	if m.planModel != nil {
 		m.planModel.UpdateTasks(msg.Tasks)
+		m.planModel.timeEstimate = msg.TimeEstimate
+		if msg.CostEstimate != "" {
+			m.planModel.costEstimate = msg.CostEstimate
+		}
 	}
 	return nil
 }
