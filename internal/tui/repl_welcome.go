@@ -79,7 +79,27 @@ func (m *ReplModel) renderLogoWithGlow() string {
 	centerFill := strings.Repeat(" ", 12)
 	glowRow := glow.String() + lipgloss.NewStyle().Foreground(m.theme.Border).Render(centerFill) + glow.String()
 
-	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowRow)
+	// Add gradient separator
+	gradientSep := renderGradientSeparator(m.replWidth(), m.theme)
+
+	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowRow, gradientSep)
+}
+
+// renderGradientSeparator renders a gradient separator line
+func renderGradientSeparator(width int, t theme.Theme) string {
+	if width <= 0 {
+		return ""
+	}
+
+	// Create gradient from brand to border
+	gradientChars := []string{"█", "▓", "▒", "░", "─", "░", "▒", "▓", "█"}
+	var gradient strings.Builder
+	for i := 0; i < width; i++ {
+		charIdx := i % len(gradientChars)
+		gradient.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(gradientChars[charIdx]))
+	}
+
+	return gradient.String()
 }
 
 // renderProviderCard shows current model/provider status or a setup prompt.
@@ -257,11 +277,18 @@ func (m *ReplModel) renderGettingStarted() string {
 	}
 
 	var lines []string
-	for i, p := range prompts {
-		num := lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d.", i+1))
-		text := lipgloss.NewStyle().Foreground(t.Text).Render(p.prompt)
+	for _, p := range prompts {
+		// Render as pill instead of numbered list
+		pillStyle := lipgloss.NewStyle().
+			Background(t.Surface).
+			Foreground(t.TextPrimary).
+			Padding(0, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border)
+
+		pill := pillStyle.Render(p.prompt)
 		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  " + p.hint)
-		lines = append(lines, "  "+num+" "+text+hint)
+		lines = append(lines, "  "+pill+hint)
 	}
 
 	sep := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", 36))
