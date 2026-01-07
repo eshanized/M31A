@@ -30,7 +30,7 @@ type SidebarModel struct {
 	// File cursor for keyboard navigation
 	focused      bool
 	fileCursor   int
-	scrollOffset int             // first visible file index in the scrollable file section
+	scrollOffset int              // first visible file index in the scrollable file section
 	flatFiles    []git.FileStatus // flattened list for cursor navigation
 
 	// Optional fields for enhanced display
@@ -424,11 +424,11 @@ func (s *SidebarModel) View() string {
 		// groupFirstIdx stores the first flat-file index for each group row so we
 		// can decide whether to show the header during scrolling.
 		type fileRow struct {
-			text         string
-			isFile       bool // true = counts toward flat-file index
-			flatIdx      int  // index in s.flatFiles (-1 for group headers)
-			groupFirst   int  // first flat-file index in this group (headers only)
-			groupLast    int  // last flat-file index in this group (headers only)
+			text       string
+			isFile     bool // true = counts toward flat-file index
+			flatIdx    int  // index in s.flatFiles (-1 for group headers)
+			groupFirst int  // first flat-file index in this group (headers only)
+			groupLast  int  // last flat-file index in this group (headers only)
 		}
 		var allRows []fileRow
 
@@ -505,7 +505,7 @@ func (s *SidebarModel) View() string {
 		if visStart > 0 {
 			indicator := lipgloss.NewStyle().
 				Foreground(t.TextMuted).
-				PaddingLeft(contentW/2).
+				PaddingLeft(contentW / 2).
 				Render("▲")
 			lines = append(lines, indicator)
 		}
@@ -529,7 +529,7 @@ func (s *SidebarModel) View() string {
 		if visEnd < totalFiles-1 {
 			indicator := lipgloss.NewStyle().
 				Foreground(t.TextMuted).
-				PaddingLeft(contentW/2).
+				PaddingLeft(contentW / 2).
 				Render("▼")
 			lines = append(lines, indicator)
 		}
@@ -559,7 +559,7 @@ func (s *SidebarModel) View() string {
 			Foreground(t.TextMuted).
 			Italic(true).
 			PaddingLeft(2).
-			Render("No active session")
+			Render("Start typing to begin a session")
 		lines = append(lines, noSession)
 	}
 
