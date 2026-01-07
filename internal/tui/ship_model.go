@@ -59,6 +59,10 @@ func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 			return sm, func() tea.Msg {
 				return AppMsg{Screen: ScreenREPL}
 			}
+		case "d":
+			return sm, func() tea.Msg {
+				return AppMsg{Action: "view_ship_diff"}
+			}
 		}
 	}
 	return sm, nil
@@ -155,7 +159,7 @@ func (sm *ShipModel) View() string {
 		cardContent = append(cardContent, commitBlock)
 		cardContent = append(cardContent, "")
 	}
-	cardContent = append(cardContent, lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ start new session  q back to REPL"))
+	cardContent = append(cardContent, lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ new session  d view diff  q back"))
 	cardContent = append(cardContent, "")
 
 	// ── Wrapping Card ───────────────────────────────────────────────────────
