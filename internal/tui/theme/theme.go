@@ -136,18 +136,39 @@ type Theme struct {
 }
 
 type Manager struct {
-	current Theme
-	mode    Mode
-	profile ColorProfile
+	current    Theme
+	mode       Mode
+	profile    ColorProfile
+	borderStyle string
+	accentColor string
 }
 
 func NewManager(mode Mode) *Manager {
 	m := &Manager{
-		mode:    mode,
-		profile: DetectColorProfile(),
+		mode:        mode,
+		profile:     DetectColorProfile(),
+		borderStyle: "rounded",
+		accentColor: "",
 	}
 	m.resolve()
 	return m
+}
+
+// SetBorderStyle sets the border style for the theme manager
+func (m *Manager) SetBorderStyle(style string) {
+	m.borderStyle = style
+	m.resolve()
+}
+
+// SetAccentColor sets the accent color override for the theme manager
+func (m *Manager) SetAccentColor(hex string) {
+	m.accentColor = hex
+	m.resolve()
+}
+
+// CurrentBorder returns the current border style based on config
+func (m *Manager) CurrentBorder() lipgloss.Border {
+	return BorderByName(m.borderStyle)
 }
 
 func (m *Manager) resolve() {
@@ -172,6 +193,11 @@ func (m *Manager) resolve() {
 		base.Warning = lipgloss.Color("3")
 		base.Thinking = lipgloss.Color("4")
 		applyThemeStyles(&base)
+	}
+
+	// Apply accent color override if set
+	if m.accentColor != "" {
+		base = base.WithAccent(m.accentColor)
 	}
 
 	m.current = base

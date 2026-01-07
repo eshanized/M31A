@@ -22,6 +22,25 @@ type Spinner struct {
 // OpenCodeFrames is the 10-frame spinner set used across M31A.
 var OpenCodeFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
+// SpinnerSets provides multiple spinner frame sets for variety
+var SpinnerSets = map[string][]string{
+	"braille":  {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+	"dots":     {"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"},
+	"arc":      {"◜", "◠", "◝", "◞", "◡", "◟"},
+	"bouncing": {"⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"},
+	"line":     {"|", "/", "-", "\\"},
+	"grow":     {"▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"},
+	"pulse":    {"◐", "◓", "◑", "◒"},
+}
+
+// GetSpinnerFrames returns frames for the given style, defaulting to braille
+func GetSpinnerFrames(style string) []string {
+	if frames, ok := SpinnerSets[style]; ok {
+		return frames
+	}
+	return SpinnerSets["braille"]
+}
+
 // NewSpinner creates a Spinner with the opencode frame set at 100ms (10fps).
 func NewSpinner() Spinner {
 	return Spinner{

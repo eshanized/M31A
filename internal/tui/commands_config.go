@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // diskUsageFormatted returns a human-friendly disk usage string for the given path.
@@ -41,31 +42,36 @@ func handleConfig(_ []string, _ CommandContext) CommandResult {
 
 // handleTheme switches between dark and light themes.
 func handleTheme(args []string, ctx CommandContext) CommandResult {
-	theme := "dark"
+	themeName := "dark"
 	if len(args) > 0 {
 		t := strings.ToLower(args[0])
 		if t == "dark" || t == "light" || t == "auto" {
-			theme = t
+			themeName = t
 		} else {
-			return CommandResult{
-				Success: false,
-				Message: fmt.Sprintf("Unknown theme %q. Valid values: dark, light, auto.", args[0]),
+			// Check if it's a palette ID
+			if _, ok := theme.ByID(t); ok {
+				themeName = t
+			} else {
+				return CommandResult{
+					Success: false,
+					Message: fmt.Sprintf("Unknown theme %q. Valid values: dark, light, auto, or palette name (catppuccin, nord, tokyo, gruvbox, rose, dracula, solarized, monochrome).", args[0]),
+				}
 			}
 		}
 	} else if ctx.Config != nil {
 		// Toggle
 		if ctx.Config.UI.Theme == "dark" {
-			theme = "light"
+			themeName = "light"
 		} else {
-			theme = "dark"
+			themeName = "dark"
 		}
 	}
 
 	return CommandResult{
 		Success: true,
-		Message: fmt.Sprintf("Switching to **%s** theme.", theme),
+		Message: fmt.Sprintf("Switching to **%s** theme.", themeName),
 		Cmd: func() tea.Msg {
-			return ThemeChangedMsg{Theme: theme}
+			return ThemeChangedMsg{Theme: themeName}
 		},
 	}
 }

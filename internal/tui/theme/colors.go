@@ -58,9 +58,9 @@ func ansiPalette() Theme {
 func Dark() Theme {
 	t := Theme{
 		Mode:              ModeDark,
-		Background:        lipgloss.Color("#0D0D0D"),  // was #0F0F1A
-		Surface:           lipgloss.Color("#1A1A1A"),  // was #1E1E2E
-		SurfaceElevated:   lipgloss.Color("#252525"),  // was #2A2A3E
+		Background:        lipgloss.Color("#0d0f1a"),  // blue-tinted dark (~3% saturation)
+		Surface:           lipgloss.Color("#1a1c2a"),  // slightly lighter blue
+		SurfaceElevated:   lipgloss.Color("#252736"),  // lifted blue-purple
 		Border:            lipgloss.Color("#3C4043"),  // was #2E2E2E
 		Brand:             lipgloss.Color("#D77757"),  // was #7C3AED
 		TextPrimary:       lipgloss.Color("#E8EAED"),  // was #E2E8F0
@@ -106,9 +106,9 @@ func Dark() Theme {
 func Light() Theme {
 	t := Theme{
 		Mode:              ModeLight,
-		Background:        lipgloss.Color("#FFFFFF"),  // keep
-		Surface:           lipgloss.Color("#F8F9FA"),  // keep
-		SurfaceElevated:   lipgloss.Color("#E8EAED"),  // was #FFFFFF
+		Background:        lipgloss.Color("#fafaf8"),  // warm white
+		Surface:           lipgloss.Color("#f5f5f0"),  // warm surface
+		SurfaceElevated:   lipgloss.Color("#ffffff"),  // pure white for elevation
 		Border:            lipgloss.Color("#DADCE0"),  // was #E0E0E0
 		Brand:             lipgloss.Color("#D77757"),  // was #7C3AED (same as dark — brand is brand)
 		TextPrimary:       lipgloss.Color("#202124"),  // was #1E293B
@@ -220,5 +220,15 @@ func Auto() Theme {
 		return Dark()
 	}
 	return Light()
+}
+
+// WithAccent returns a new Theme with the accent color overridden
+func (t *Theme) WithAccent(hex string) Theme {
+	newTheme := *t
+	newTheme.Brand = lipgloss.Color(hex)
+	newTheme.Primary = lipgloss.Color(hex)
+	newTheme.BorderActive = lipgloss.Color(hex)
+	applyThemeStyles(&newTheme)
+	return newTheme
 }
 

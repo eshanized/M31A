@@ -825,6 +825,81 @@ Address all 46 issues identified in the 2026-06-08 deep codebase improvement rep
 
 ---
 
+## Phase 13 — TUI Design & Premium Visual Overhaul
+
+**Duration:** 4 weeks  
+**Complexity:** 7/10  
+**Milestone:** M31A transforms from functional to visually exceptional
+
+### Goals
+
+Transform M31A's terminal interface from a functional-but-bland developer tool to a premium, visually distinctive product. Implement 68 design improvements across 14 categories, organized into 4 waves by priority.
+
+### Requirements
+
+Based on `TUI-DESIGN-OVERHAUL-REPORT.md` (2026-06-09):
+
+- **TUI-01 through TUI-03** — Multi-Theme System: preset palette registry, runtime switching, theme file format
+- **TUI-04 through TUI-07** — Color Theory: hue-rich backgrounds, dynamic contrast, semantic tokens, color profile adaptation
+- **TUI-08 through TUI-11** — Typography: font weight hierarchy, spacing scale, Unicode library, tab normalization
+- **TUI-12 through TUI-16** — Lipgloss Techniques: gradient borders, custom borders, panel shadows, style inheritance
+- **TUI-17 through TUI-21** — Animation: physics transitions (Harmonica), spinner variety, breathing effects, screen transitions, animated logo
+- **TUI-22 through TUI-30** — Components: premium cards, enhanced badges, tool card redesign, toast animation, progress bars, sidebar, status bar, command palette, modal system
+- **TUI-31 through TUI-35** — Layout: responsive breakpoints, zen mode, split-pane, card grid, sticky elements
+- **TUI-36 through TUI-40** — Customization: expanded config, theme preview, accent color override, border style override, animation speed control
+- **TUI-41 through TUI-49** — Screen Redesigns: welcome, REPL, plan, execute, settings, first-run, diff, resume, metrics
+
+### Plans
+
+- [ ] 13-01-PLAN.md — Foundation & Theme System (Wave 1)
+- [ ] 13-02-PLAN.md — Component Upgrades (Wave 2)
+- [ ] 13-03-PLAN.md — Screen Redesigns (Wave 3)
+- [ ] 13-04-PLAN.md — Polish & Nice-to-Have (Wave 4)
+
+### Wave Structure
+
+| Wave | Plans | Autonomous | Dependencies |
+|------|-------|------------|--------------|
+| 1 | 13-01 | yes | none |
+| 2 | 13-02 | yes | 13-01 |
+| 3 | 13-03 | yes | 13-01, 13-02 |
+| 4 | 13-04 | yes | 13-01, 13-02, 13-03 |
+
+### Deliverables
+
+- 10 preset palettes (Dark, Light, Catppuccin, Nord, Tokyo, Gruvbox, Rosé Pine, Dracula, Solarized, Monochrome)
+- Gradient borders for focused elements
+- Custom border definitions (Heavy, Dashed, Shadow)
+- 7 spinner frame sets
+- Accent color override functionality
+- Border style override functionality
+- Animation speed control with AnimNone
+- Premium card system with 5 variants
+- Enhanced badge system with 5 variants
+- Tool card syntax highlighting and collapsible tree
+- Toast slide-in animation and auto-dismiss
+- Panel shadow rendering
+- Breathing effects with AnimNone support
+- Status bar powerline separators and icons
+- Sidebar tree-view with file icons
+- Welcome screen animated logo (7-frame, 800ms)
+- REPL message bubbles with avatars
+- Plan screen visual task graph
+- Execute screen progress ring
+- Command palette floating design
+- Modal system with backdrop and shadow
+- Zen mode toggle
+- 6 responsive breakpoints
+- Split-pane for ≥ 160 cols
+- Settings screen with theme preview
+- Theme file format (TOML)
+- Physics-based transitions (Harmonica)
+- Dynamic contrast adjustment
+- Semantic color tokens
+- Terminal color profile adaptation
+
+---
+
 ## Deferred to Future (V1.2+)
 
 | Feature | Reason for Deferral | Notes |
@@ -848,6 +923,7 @@ Phase 0 (Foundation)
           → Phase 7 (Signature Features)
             → Phase 8 (Polish & Release)
               → Phase 12 (Codebase Improvements)
+                → Phase 13 (TUI Design Overhaul)
 ```
 
 **Parallel tracks:**
@@ -959,3 +1035,4 @@ cmd/m31a/
 | 2026-06-01 | Added Phase 10 (Provider & Message Layer Adaptations) and Phase 11 (Session & Config Adaptations) from OpenCode adaptation report |
 | 2026-06-01 | Phase 11 planned: 3 plans (Session Forking, Multi-Layer Config, Permission Ruleset Completion) |
 | 2026-06-08 | Added Phase 12 (Codebase Improvements) — 4 plans covering 46 issues from DEEP-IMPROVEMENT-REPORT |
+| 2026-06-09 | Added Phase 13 (TUI Design & Premium Visual Overhaul) — 4 plans covering 68 improvements from TUI-DESIGN-OVERHAUL-REPORT |

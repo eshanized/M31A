@@ -95,6 +95,69 @@ type UIConfig struct {
 	ThinkingOpacity float64 `toml:"thinking_opacity"`
 	// Frecent history max entries. Default 100.
 	FrecentHistorySize int `toml:"frecent_history_size"`
+
+	// New - Theme & Colors
+	AccentColor      string `toml:"accent_color"`
+	CustomBackground string `toml:"custom_background"`
+	BorderStyle      string `toml:"border_style"`
+
+	// New - Typography
+	BoldHeaders    bool `toml:"bold_headers"`
+	ItalicThinking bool `toml:"italic_thinking"`
+	TabWidth       int  `toml:"tab_width"`
+
+	// New - Layout
+	SidebarPosition  string `toml:"sidebar_position"`
+	SidebarAutoShow  bool   `toml:"sidebar_auto_show"`
+	CardPadding      int    `toml:"card_padding"`
+	WelcomeScreen    bool   `toml:"welcome_screen"`
+	ZenModeKey       string `toml:"zen_mode_key"`
+
+	// New - Animation
+	AnimationSpeed   string `toml:"animation_speed"`
+	SpinnerStyle     string `toml:"spinner_style"`
+	TransitionStyle  string `toml:"transition_style"`
+	BreathingEffects bool   `toml:"breathing_effects"`
+	LogoAnimation    bool   `toml:"logo_animation"`
+
+	// New - Status Bar
+	StatusBarStyle      string `toml:"status_bar_style"`
+	StatusBarPosition   string `toml:"status_bar_position"`
+	ShowSpinnerInStatus bool   `toml:"show_spinner_in_status"`
+
+	// New - Tool Cards
+	ToolCardStyle      string `toml:"tool_card_style"`
+	ToolOutputMaxLines int    `toml:"tool_output_max_lines"`
+	SyntaxHighlight    bool   `toml:"syntax_highlight"`
+
+	// New - Toasts
+	ToastPosition     string `toml:"toast_position"`
+	ToastDurationSecs int    `toml:"toast_duration_secs"`
+	ToastMaxVisible   int    `toml:"toast_max_visible"`
+}
+
+// AnimationSpeed represents animation speed setting
+type AnimationSpeed int
+
+const (
+	AnimFast   AnimationSpeed = iota // 50% duration
+	AnimNormal                       // 100% duration
+	AnimSlow                        // 200% duration
+	AnimNone                        // all animations disabled
+)
+
+// ParseAnimationSpeed parses an animation speed string
+func ParseAnimationSpeed(s string) AnimationSpeed {
+	switch s {
+	case "fast":
+		return AnimFast
+	case "slow":
+		return AnimSlow
+	case "none":
+		return AnimNone
+	default:
+		return AnimNormal
+	}
 }
 
 type PermissionsConfig struct {

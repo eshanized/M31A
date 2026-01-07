@@ -49,15 +49,15 @@ func TestDetectColorProfile_NoEnv(t *testing.T) {
 
 func TestPaletteForProfile_Default(t *testing.T) {
 	d := PaletteForProfile(ProfileTrueColor)
-	if string(d.Background) != "#0D0D0D" {
-		t.Errorf("PaletteForProfile(TrueColor).Background = %q, want %q", string(d.Background), "#0D0D0D")
+	if string(d.Background) != "#0d0f1a" {
+		t.Errorf("PaletteForProfile(TrueColor).Background = %q, want %q", string(d.Background), "#0d0f1a")
 	}
 }
 
 func TestPaletteForProfile_256(t *testing.T) {
 	d := PaletteForProfile(Profile256)
-	if string(d.Background) != "#0D0D0D" {
-		t.Errorf("PaletteForProfile(256).Background = %q, want %q", string(d.Background), "#0D0D0D")
+	if string(d.Background) != "#0d0f1a" {
+		t.Errorf("PaletteForProfile(256).Background = %q, want %q", string(d.Background), "#0d0f1a")
 	}
 }
 
@@ -88,8 +88,8 @@ func TestManager_ProfileDetection(t *testing.T) {
 
 func TestDarkTheme_Background(t *testing.T) {
 	t.Run("Background", func(t *testing.T) {
-		if got := string(Dark().Background); got != "#0D0D0D" {
-			t.Errorf("Dark().Background = %q, want %q", got, "#0D0D0D")
+		if got := string(Dark().Background); got != "#0d0f1a" {
+			t.Errorf("Dark().Background = %q, want %q", got, "#0d0f1a")
 		}
 	})
 }
@@ -104,8 +104,8 @@ func TestDarkTheme_Brand(t *testing.T) {
 
 func TestLightTheme_Background(t *testing.T) {
 	t.Run("Background", func(t *testing.T) {
-		if got := string(Light().Background); got != "#FFFFFF" {
-			t.Errorf("Light().Background = %q, want %q", got, "#FFFFFF")
+		if got := string(Light().Background); got != "#fafaf8" {
+			t.Errorf("Light().Background = %q, want %q", got, "#fafaf8")
 		}
 	})
 }
@@ -140,15 +140,15 @@ func TestManager_Cycle(t *testing.T) {
 func TestManager_Current(t *testing.T) {
 	t.Run("AfterDarkConstruction", func(t *testing.T) {
 		m := NewManager(ModeDark)
-		if got := string(m.Current().Background); got != "#0D0D0D" {
-			t.Errorf("Current().Background = %q, want %q", got, "#0D0D0D")
+		if got := string(m.Current().Background); got != "#0d0f1a" {
+			t.Errorf("Current().Background = %q, want %q", got, "#0d0f1a")
 		}
 	})
 	t.Run("AfterCycle", func(t *testing.T) {
 		m := NewManager(ModeDark)
 		m.Cycle()
-		if got := string(m.Current().Background); got != "#FFFFFF" {
-			t.Errorf("After cycle, Current().Background = %q, want %q", got, "#FFFFFF")
+		if got := string(m.Current().Background); got != "#fafaf8" {
+			t.Errorf("After cycle, Current().Background = %q, want %q", got, "#fafaf8")
 		}
 	})
 }
@@ -165,7 +165,7 @@ func TestToolLabel_Keys(t *testing.T) {
 
 func TestDefault_Dark(t *testing.T) {
 	d := Default()
-	if got := string(d.Background); got != "#0D0D0D" {
-		t.Errorf("Default().Background = %q, want %q", got, "#0D0D0D")
+	if got := string(d.Background); got != "#0d0f1a" {
+		t.Errorf("Default().Background = %q, want %q", got, "#0d0f1a")
 	}
 }
