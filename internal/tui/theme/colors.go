@@ -97,6 +97,7 @@ func Dark() Theme {
 		CompactMode:  false,
 		SelectionBg:  lipgloss.Color("#3C4043"),
 		CardPadding:  1,
+		TabWidth:     4,
 	}
 	applyThemeStyles(&t)
 
@@ -145,6 +146,7 @@ func Light() Theme {
 		CompactMode:  false,
 		SelectionBg:  lipgloss.Color("#DADCE0"),
 		CardPadding:  1,
+		TabWidth:     4,
 	}
 	applyThemeStyles(&t)
 

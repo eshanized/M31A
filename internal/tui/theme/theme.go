@@ -133,6 +133,9 @@ type Theme struct {
 	BlockHigh string // "▓" high density
 	BlockMed  string // "▒" medium density
 	BlockLow  string // "░" low density
+
+	// TabWidth is the number of spaces a tab character represents
+	TabWidth int
 }
 
 type Manager struct {
