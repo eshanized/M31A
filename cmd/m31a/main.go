@@ -31,6 +31,12 @@ import (
 var Version = "dev"
 
 func main() {
+	os.Exit(run())
+}
+
+// run contains all application logic so that deferred cleanup functions
+// execute before os.Exit. Returns the exit code (0 for success, 1 for error).
+func run() int {
 	// Build command registry for usage and TUI
 	cmdRegistry := tui.DefaultCommands()
 
@@ -43,17 +49,18 @@ func main() {
 	flag.Parse()
 	if *helpFlag {
 		flag.Usage()
-		os.Exit(0)
+		return 0
 	}
 	if *versionFlag {
 		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
-		os.Exit(0)
+		return 0
 	}
 
 	logger, cleanup, err := log.NewLogger(Version)
 	if err != nil {
+		// Logger not yet initialized; use stderr as fallback.
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer cleanup()
 	slog.SetDefault(logger)
@@ -71,20 +78,20 @@ func main() {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			logger.Error("cannot determine home directory", "error", err)
-			os.Exit(1)
+			return 1
 		}
 		configPath = filepath.Join(home, ".m31a", "config.toml")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(configPath), types.DirPermission); err != nil {
 		logger.Error("cannot create config directory", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		logger.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -124,21 +131,29 @@ func main() {
 			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", err)
 		}
 	}
-	if registry.Active() == "" {
-		logger.Warn("no active provider — TUI will start without LLM access")
+
+	hasProvider := registry.Active() != ""
+	if !hasProvider {
+		logger.Warn("no active provider configured — LLM features will be unavailable")
 	}
 
 	// Session manager
 	sessionsDir := filepath.Join(filepath.Dir(configPath), "sessions")
 	sessionMgr := session.NewManager(sessionsDir, session.ManagerOpts{})
 
-	// Tools dispatcher
-	workDir, _ := os.Getwd()
+	// Working directory — fail fast if Getwd fails (WP-C03)
+	workDir, err := os.Getwd()
+	if err != nil {
+		logger.Error("cannot determine working directory", "error", err)
+		return 1
+	}
+
+	// Tools dispatcher — fail fast on permission config errors (WP-C04)
 	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
 	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, sessionsDir, &cfg.Permissions)
 	if err != nil {
-		logger.Warn("failed to create tools dispatcher", "error", err)
-		dispatcher, _ = tools.DefaultDispatcher(workDir, backupDir, sessionsDir, nil)
+		logger.Error("failed to create tools dispatcher — permission configuration is invalid", "error", err)
+		return 1
 	}
 
 	// Git client
@@ -182,16 +197,6 @@ func main() {
 		app.SetKeychain(kc)
 	}
 
-	// Signal handler: save session state on SIGTERM/SIGINT before exit (SE8)
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		<-sigCh
-		slog.Info("received shutdown signal, saving session state...")
-		app.Shutdown()
-		os.Exit(0)
-	}()
-
 	// Resume on startup (C3): if configured, auto-resume the most recent session
 	if cfg.Features.ResumeOnStartup {
 		sessions, err := sessionMgr.ListSessions()
@@ -201,10 +206,24 @@ func main() {
 	}
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
+
+	// Signal handler sends tea.Quit through the program channel
+	// instead of calling app.Shutdown() directly from a goroutine.
+	// This ensures all state mutations happen inside Update(), preserving
+	// Bubble Tea's single-threaded contract and preventing session corruption.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		slog.Info("received shutdown signal, sending quit to TUI...")
+		p.Send(tea.QuitMsg{})
+	}()
+
 	if _, err := p.Run(); err != nil {
 		logger.Error("TUI exited with error", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	app.Shutdown()
+	return 0
 }
