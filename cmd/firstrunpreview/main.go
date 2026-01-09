@@ -1,6 +1,10 @@
+// Package main provides a development/debugging tool for previewing the
+// first-run screen without launching the full TUI. It renders the setup
+// wizard to the terminal for visual verification during development.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -22,7 +26,7 @@ func main() {
 	// starfield overlay is composed.
 	for _, w := range widths {
 		fmt.Printf("\n--- panel only @ terminal width=%d ---\n", w)
-		fr := tui.NewFirstRunModel(t, nil)
+		fr := tui.NewFirstRunModel(t, nil, context.Background())
 		fr.SetDimensions(w, height)
 		v := fr.View()
 		viewW := 0
