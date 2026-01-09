@@ -23,15 +23,15 @@ var (
 	ErrTaskFailed          = errors.New("task failed")
 	ErrPhaseTransition     = errors.New("invalid phase transition")
 	ErrCheckpointNotFound  = errors.New("checkpoint not found")
-	// Fix C-4: Reject oversized LLM response payloads to prevent OOM.
+	// Reject oversized LLM response payloads to prevent OOM.
 	ErrToolInputTooLarge = errors.New("tool input exceeds size limit")
-	// Fix C-5: Bash timeout must be positive and <= 30 minutes.
+	// Bash timeout must be positive and <= 30 minutes.
 	ErrInvalidTimeout = errors.New("invalid timeout: must be > 0 and <= 30m")
-	// Fix C-7: WebFetch SSRF — block private/loopback/link-local IPs.
+	// WebFetch SSRF — block private/loopback/link-local IPs.
 	ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
-	// Fix M-13: SSE stream truncated before [DONE] sentinel.
+	// SSE stream truncated before [DONE] sentinel.
 	ErrStreamTruncated = errors.New("stream truncated before completion")
-	// Fix M-29: git bisect reset failed (e.g. no commits in range).
+	// git bisect reset failed (e.g. no commits in range).
 	ErrBisectResetFailed = errors.New("bisect reset failed")
 	ErrBisectFailed      = errors.New("bisect failed")
 
