@@ -52,6 +52,19 @@ jobs:
           name: coverage
           path: coverage.out
 
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
   build:
     strategy:
       matrix:
@@ -79,7 +92,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
 
   release:
-    needs: [lint, test, build]
+    needs: [lint, test, security, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
