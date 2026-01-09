@@ -40,7 +40,7 @@ Clean: rm -f m31a
 ## Package Layout
 
 ```
-cmd/m31a/          -- binary entry point only, no logic
+cmd/m31a/          -- binary entry point: init, provider setup, session manager, signal handling
 internal/config/   -- config parsing, env vars, keychain resolution
 internal/provider/ -- LLMProvider interface + OpenRouter + Zen clients
 internal/tui/      -- Bubble Tea app, all screens
