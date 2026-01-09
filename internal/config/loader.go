@@ -159,7 +159,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
-	// M-12: TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
+	// TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
 	if cfg.Model.TokenEMAAlpha == 0 {
 		slog.Warn("token_ema_alpha is 0 (disabled), applying default")
 		cfg.Model.TokenEMAAlpha = types.EMACorrectionAlpha
@@ -658,6 +658,8 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 				case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
 				case <-ctx.Done():
 					return
+				default:
+					slog.Warn("config reload message dropped: receiver not ready")
 				}
 			}
 		}
