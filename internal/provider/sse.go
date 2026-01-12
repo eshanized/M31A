@@ -42,7 +42,7 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	var lines []string
 
 	for p.scanner.Scan() {
-		// H-7: Check context cancellation between lines
+		// Check context cancellation between lines
 		if p.ctx != nil {
 			select {
 			case <-p.ctx.Done():
