@@ -175,7 +175,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, types.MaxLLMResponseBytes)) // C-16 fix: was unbounded io.ReadAll
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, types.MaxLLMResponseBytes)) // was unbounded io.ReadAll
 		resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
