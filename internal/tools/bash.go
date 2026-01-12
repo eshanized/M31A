@@ -13,52 +13,13 @@ import (
 )
 
 type Bash struct {
-	workDir   string
-	blacklist []string
+	workDir string
 }
 
 func NewBash(workDir string) *Bash {
 	return &Bash{
 		workDir: workDir,
-		blacklist: defaultBashBlacklist(),
 	}
-}
-
-// defaultBashBlacklist returns dangerous command patterns blocked as a
-// convenience guard. This is NOT a security boundary — the permission
-// system (risk levels, ask/allow/deny rules) is the actual enforcement
-// mechanism. Substring matching can be trivially bypassed with flag
-// reordering, variable expansion, or command substitution.
-func defaultBashBlacklist() []string {
-	return []string{
-		"rm -rf /",
-		"rm -rf /*",
-		"mkfs",
-		"dd if=",
-		":(){:|:&};:",
-		"chmod -R 777 /",
-		"> /dev/sda",
-		"wget|sh",
-		"curl|sh",
-		"curl|bash",
-		"wget|bash",
-	}
-}
-
-// SetBlacklist replaces the command blacklist.
-func (t *Bash) SetBlacklist(patterns []string) {
-	t.blacklist = patterns
-}
-
-// isBlacklisted checks if a command matches any blacklist pattern.
-func (t *Bash) isBlacklisted(command string) bool {
-	lower := strings.ToLower(command)
-	for _, pattern := range t.blacklist {
-		if strings.Contains(lower, strings.ToLower(pattern)) {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *Bash) Name() string {
@@ -103,13 +64,6 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	command, ok := commandRaw.(string)
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("parameter command must be a string: %w", m31errors.ErrToolExecution)
-	}
-
-	if t.isBlacklisted(command) {
-		return types.ToolResult{
-			Output: "Command blocked by security blacklist",
-			Error:  "blocked: " + command,
-		}, fmt.Errorf("command blocked by security blacklist: %w", m31errors.ErrPermissionDenied)
 	}
 
 	timeoutSec := int(types.BashTimeout.Seconds())
@@ -172,7 +126,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					termMu.Unlock()
 					processKill(cmd.Process.Pid, sigInt)
 				})
-				time.AfterFunc(BashKillGracePeriod, func() {
+				killTimer := time.AfterFunc(BashKillGracePeriod, func() {
 					killOnce.Do(func() {
 						termMu.Lock()
 						terminationMsg = "Force killing process..."
@@ -180,6 +134,10 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 						processKill(cmd.Process.Pid, sigKill)
 					})
 				})
+				// Wait for the process to finish so we can cancel the timer
+				// if it exits during the grace period
+				<-cmdDone
+				killTimer.Stop()
 			}
 		case <-cmdDone:
 			// Command finished — goroutine exits immediately
@@ -316,7 +274,11 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 	if int64(len(p)) > remaining {
 		p = p[:remaining]
 	}
+	lw.mu.Unlock()
+
 	n, err := lw.w.Write(p)
+
+	lw.mu.Lock()
 	lw.written += int64(n)
 	lw.mu.Unlock()
 	return n, err
