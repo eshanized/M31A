@@ -115,7 +115,7 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 
 	cfg, _ := GetReasoningConfig(modelID)
 
-	// Fix M-22: Extract usage from the final SSE chunk if present.
+	// Extract usage from the final SSE chunk if present.
 	var usage *types.Usage
 	if usageRaw, exists := raw["usage"]; exists {
 		if usageMap, ok := usageRaw.(map[string]any); ok {
@@ -135,7 +135,7 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 
 	choices, ok := getNestedField(raw, "choices")
 	if !ok {
-		// Fix M-22: Some providers send usage without choices in the final chunk.
+		// Some providers send usage without choices in the final chunk.
 		if usage != nil {
 			return &types.StreamChunk{Type: "usage", Usage: usage}, nil
 		}
