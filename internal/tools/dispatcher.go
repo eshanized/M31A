@@ -25,11 +25,16 @@ type Dispatcher struct {
 	todoWrite        *TodoWrite
 	questionReqCh    chan QuestionRequest
 	questionRespCh   chan QuestionResponse
+	pendingQuestions sync.Map // map[int64]chan QuestionResponse — per-request routing
 	rules            []config.PermissionRule
 	originalRules    []config.PermissionRule
 	agents           map[string]config.PermissionsAgentConfig
 	activeAgent      string
 	permissionTimeout int
+	// Rate limiter: token bucket for tool execution (WP-S04).
+	rateTokens chan struct{}
+	rateTicker  *time.Ticker
+	rateDone    chan struct{}
 }
 
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
@@ -45,7 +50,27 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		agents:           make(map[string]config.PermissionsAgentConfig),
 		activeAgent:      DefaultAgentName,
 		permissionTimeout: types.DefaultPermissionTimeout,
+		rateTokens:       make(chan struct{}, ToolRateLimitBurst),
+		rateDone:         make(chan struct{}),
 	}
+	// Initialize token bucket for rate limiting.
+	for i := 0; i < ToolRateLimitBurst; i++ {
+		d.rateTokens <- struct{}{}
+	}
+	d.rateTicker = time.NewTicker(time.Second / ToolRateLimitPerSec)
+	go func() {
+		for {
+			select {
+			case <-d.rateDone:
+				return
+			case <-d.rateTicker.C:
+				select {
+				case d.rateTokens <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
 	if cfg != nil {
 		if cfg.Rules != nil {
 			d.rules = make([]config.PermissionRule, len(cfg.Rules))
@@ -96,11 +121,20 @@ func (d *Dispatcher) Register(tool types.Tool) error {
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
 	start := time.Now()
 
+	// Rate limit tool execution to prevent resource exhaustion from
+	// malicious or buggy LLMs generating thousands of tool calls per second.
+	select {
+	case <-d.rateTokens:
+	case <-ctx.Done():
+		return types.ToolResult{}, ctx.Err()
+	}
+
+	// Check tool existence first for proper error messages
 	d.mu.RLock()
-	tool, ok := d.tools[call.Name]
+	_, toolExists := d.tools[call.Name]
 	d.mu.RUnlock()
 
-	if !ok {
+	if !toolExists {
 		available := d.List()
 		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
 	}
@@ -116,8 +150,19 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	input.Name = call.Name
 
 	d.mu.RLock()
-	allowedByRule, pctx, ruleErr := d.checkPermission(call.Name, input)
+	tool, ok := d.tools[call.Name]
+	var allowedByRule bool
+	var pctx *PermissionContext
+	var ruleErr error
+	if ok {
+		allowedByRule, pctx, ruleErr = d.checkPermission(call.Name, input)
+	}
 	d.mu.RUnlock()
+
+	if !ok {
+		available := d.List()
+		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
+	}
 
 	if ruleErr != nil {
 		return types.ToolResult{Error: ruleErr.Error()}, nil
@@ -206,5 +251,39 @@ func (d *Dispatcher) QuestionResponseCh() chan QuestionResponse {
 func (d *Dispatcher) SetSessionID(id string) {
 	if d.todoWrite != nil {
 		d.todoWrite.SetSessionID(id)
+	}
+}
+
+// Stop shuts down the rate limiter goroutine and ticker.
+// Should be called when the Dispatcher is no longer needed (e.g., during app shutdown).
+func (d *Dispatcher) Stop() {
+	select {
+	case <-d.rateDone:
+		// Already stopped
+	default:
+		close(d.rateDone)
+		d.rateTicker.Stop()
+	}
+}
+
+// RespondQuestion routes a question response to the per-request channel
+// for the given request ID. Falls back to the shared channel if no per-request
+// channel exists. This prevents cross-caller response routing (H-2).
+func (d *Dispatcher) RespondQuestion(requestID int64, answer string) {
+	resp := QuestionResponse{Answer: answer}
+	if ch, ok := d.pendingQuestions.Load(requestID); ok {
+		select {
+		case ch.(chan QuestionResponse) <- resp:
+		default:
+			slog.Warn("question response dropped: per-request channel full", "request_id", requestID)
+		}
+		d.pendingQuestions.Delete(requestID)
+		return
+	}
+	// Fallback to shared channel
+	select {
+	case d.questionRespCh <- resp:
+	case <-time.After(30 * time.Second):
+		slog.Warn("question response dropped: shared channel full")
 	}
 }
