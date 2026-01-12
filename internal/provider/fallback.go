@@ -51,6 +51,9 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 				Reason: reason,
 			}, nil
 		}
+
+		// Health check failed — rollback to the original provider
+		registry.RollbackActive(name, currentProvider)
 	}
 
 	return "", nil, m31errors.ErrProviderUnreachable
