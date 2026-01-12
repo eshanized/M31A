@@ -15,7 +15,6 @@ const (
 	FilePermission     = types.FilePermission
 
 	MaxGlobResults = types.DefaultMaxGlobResults
-	DateTimeFormat = "2006-01-02 15:04"
 
 	MaxGrepPatternLength  = 1024
 	DefaultMaxGrepResults = types.DefaultMaxGrepResults
@@ -31,4 +30,9 @@ const (
 	PermissionChannelBuffer = 8
 	QuestionChannelBuffer   = 4
 	DefaultAgentName        = "default"
+
+	// Rate limiting: token bucket for tool execution.
+	// Max 20 tools per second burst, sustained 10 tools/second.
+	ToolRateLimitBurst  = 20
+	ToolRateLimitPerSec = 10
 )
