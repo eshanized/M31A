@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember b
 		select {
 		case ch.(chan PermissionResponse) <- resp:
 		default:
+			slog.Warn("permission response dropped: per-request channel full",
+				"request_id", requestID, "allowed", allowed)
 		}
 		return
 	}
@@ -26,6 +29,8 @@ func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember b
 	select {
 	case d.responseCh <- resp:
 	default:
+		slog.Warn("permission response dropped: shared channel full",
+			"request_id", requestID, "allowed", allowed)
 	}
 }
 
@@ -165,28 +170,16 @@ func matchValue(v any, pattern string) bool {
 }
 
 func (d *Dispatcher) askPermission(ctx context.Context, call types.ToolCall, risk types.RiskLevel, pctx *PermissionContext) error {
-	req := PermissionRequest{
-		ID:          nextPermissionRequestID(),
-		ToolName:    call.Name,
-		Command:     extractCommandString(call.Name, call.Input),
-		RiskLevel:   risk,
-		TimeoutSecs: d.permissionTimeout,
-		RuleTool:    pctx.RuleTool,
-		RulePattern: pctx.RulePattern,
-		RuleAction:  pctx.RuleAction,
-	}
+	req := d.buildPermissionRequest(call, risk)
+	req.RuleTool = pctx.RuleTool
+	req.RulePattern = pctx.RulePattern
+	req.RuleAction = pctx.RuleAction
 	return d.sendAndWaitForPermission(ctx, req, call.Name)
 }
 
 func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
-	req := PermissionRequest{
-		ID:          nextPermissionRequestID(),
-		ToolName:    call.Name,
-		Command:     extractCommandString(call.Name, call.Input),
-		RiskLevel:   risk,
-		TimeoutSecs: d.permissionTimeout,
-		RuleAction:  "ask",
-	}
+	req := d.buildPermissionRequest(call, risk)
+	req.RuleAction = "ask"
 	return d.sendAndWaitForPermission(ctx, req, call.Name)
 }
 
@@ -199,14 +192,19 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 		return nil
 	}
 
-	req := PermissionRequest{
+	req := d.buildPermissionRequest(call, risk)
+	return d.sendAndWaitForPermission(ctx, req, call.Name)
+}
+
+// buildPermissionRequest constructs a PermissionRequest with common fields.
+func (d *Dispatcher) buildPermissionRequest(call types.ToolCall, risk types.RiskLevel) PermissionRequest {
+	return PermissionRequest{
 		ID:          nextPermissionRequestID(),
 		ToolName:    call.Name,
 		Command:     extractCommandString(call.Name, call.Input),
 		RiskLevel:   risk,
 		TimeoutSecs: d.permissionTimeout,
 	}
-	return d.sendAndWaitForPermission(ctx, req, call.Name)
 }
 
 // sendAndWaitForPermission sends a permission request to the TUI and blocks
