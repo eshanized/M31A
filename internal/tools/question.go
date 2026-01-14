@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -11,6 +13,7 @@ import (
 
 // QuestionRequest represents a question sent from the tool to the TUI.
 type QuestionRequest struct {
+	ID          int64
 	Question    string
 	Header      string
 	Options     []string
@@ -23,15 +26,23 @@ type QuestionResponse struct {
 	Answer string
 }
 
+var questionRequestIDCounter atomic.Int64
+
+func nextQuestionRequestID() int64 {
+	return questionRequestIDCounter.Add(1)
+}
+
 type AskUserQuestion struct {
 	requestCh  chan QuestionRequest
 	responseCh chan QuestionResponse
+	pending    *sync.Map // map[int64]chan QuestionResponse — per-request routing
 }
 
-func NewAskUserQuestion(requestCh chan QuestionRequest, responseCh chan QuestionResponse) *AskUserQuestion {
+func NewAskUserQuestion(requestCh chan QuestionRequest, responseCh chan QuestionResponse, pending *sync.Map) *AskUserQuestion {
 	return &AskUserQuestion{
 		requestCh:  requestCh,
 		responseCh: responseCh,
+		pending:    pending,
 	}
 }
 
@@ -108,13 +119,21 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 		timeoutSecs = int(tRaw)
 	}
 
-	// Send question to TUI
+	// Send question to TUI with a unique request ID
 	req := QuestionRequest{
+		ID:          nextQuestionRequestID(),
 		Question:    question,
 		Header:      header,
 		Options:     options,
 		AllowCustom: allowCustom,
 		TimeoutSecs: timeoutSecs,
+	}
+
+	// Create per-request response channel to avoid cross-caller routing
+	respCh := make(chan QuestionResponse, 1)
+	if t.pending != nil {
+		t.pending.Store(req.ID, respCh)
+		defer t.pending.Delete(req.ID)
 	}
 
 	select {
@@ -125,12 +144,21 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 		return types.ToolResult{}, fmt.Errorf("%w: question channel full", m31errors.ErrToolExecution)
 	}
 
-	// Wait for response
+	// Wait for response on per-request channel
 	var answer string
 	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
 	defer timer.Stop()
+
+	// Choose the response channel: per-request if available, else shared fallback
+	var responseSource <-chan QuestionResponse
+	if t.pending != nil {
+		responseSource = respCh
+	} else {
+		responseSource = t.responseCh
+	}
+
 	select {
-	case resp := <-t.responseCh:
+	case resp := <-responseSource:
 		answer = resp.Answer
 	case <-ctx.Done():
 		return types.ToolResult{}, ctx.Err()
