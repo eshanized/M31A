@@ -48,6 +48,9 @@ func (m *AppState) Shutdown() {
 	if m.streamCancelFn != nil {
 		m.streamCancelFn()
 	}
+	if m.dispatcher != nil {
+		m.dispatcher.Stop()
+	}
 }
 
 // addToast appends a toast with a unique ID and returns the assigned ID.
@@ -161,10 +164,10 @@ func questionListenerCmd(ctx context.Context, d *tools.Dispatcher) tea.Cmd {
 		select {
 		case req := <-d.QuestionRequestCh():
 			return QuestionRequestMsg{
-				Question:   req.Question,
-				Header:     req.Header,
-				Options:    req.Options,
-				ResponseCh: d.QuestionResponseCh(),
+				ID:          req.ID,
+				Question:    req.Question,
+				Header:      req.Header,
+				Options:     req.Options,
 			}
 		case <-ctx.Done():
 			return nil
