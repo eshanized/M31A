@@ -7,16 +7,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/types"
 )
 
-// CommitInfo represents metadata about a git commit.
-type CommitInfo struct {
-	Hash      string    `json:"hash"`
-	ShortHash string    `json:"short_hash"`
-	Author    string    `json:"author"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-}
+// CommitInfo is a type alias for the canonical definition in internal/types.
+type CommitInfo = types.CommitInfo
+
+// Compile-time check: *Git must satisfy types.GitClient.
+var _ types.GitClient = (*Git)(nil)
 
 // Git wraps git operations for a working directory.
 type Git struct {
@@ -106,24 +105,44 @@ func (g *Git) CommitWithFiles(message string, paths ...string) (string, error) {
 	return hash, nil
 }
 
-// Log returns commit history. If oneline is true, returns short format.
-// If since is non-empty, only commits since that date are returned.
-func (g *Git) Log(oneline bool, since string) ([]CommitInfo, error) {
+// LogAll returns full commit history (newest first).
+func (g *Git) LogAll() ([]CommitInfo, error) {
+	return g.logInternal(false, "")
+}
+
+// Log returns the lastN commits (newest first). If lastN <= 0, returns all.
+func (g *Git) Log(lastN int) ([]CommitInfo, error) {
+	if lastN <= 0 {
+		return g.LogAll()
+	}
+	args := []string{"log", "--format=%H|%h|%an|%s|%aI", "-n", strconv.Itoa(lastN)}
+	return g.runLog(args)
+}
+
+// LogSince returns commits since the given time (newest first).
+func (g *Git) LogSince(since time.Time) ([]CommitInfo, error) {
+	args := []string{"log", "--format=%H|%h|%an|%s|%aI", "--since=" + since.Format(time.RFC3339)}
+	return g.runLog(args)
+}
+
+// logInternal is the shared implementation for LogAll/LogSince.
+func (g *Git) logInternal(oneline bool, since string) ([]CommitInfo, error) {
 	args := []string{"log", "--format=%H|%h|%an|%s|%aI"}
 	if since != "" {
 		args = append(args, "--since="+since)
 	}
+	return g.runLog(args)
+}
 
+func (g *Git) runLog(args []string) ([]CommitInfo, error) {
 	out, err := g.run(args...)
 	if err != nil {
-		// git log fails with exit 1 if no commits yet
 		if strings.Contains(err.Error(), "exit status 1") && strings.Contains(err.Error(), "does not have any commits") {
 			return []CommitInfo{}, nil
 		}
 		return nil, fmt.Errorf("git log: %w", err)
 	}
-
-	return parseLog(out, oneline)
+	return parseLog(out, false)
 }
 
 func parseLog(out string, oneline bool) ([]CommitInfo, error) {
@@ -162,9 +181,9 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// Diff returns the diff between two refs. If both refs are empty, it runs
+// DiffRefs returns the diff between two refs. If both refs are empty, it runs
 // plain `git diff` to show unstaged working-tree changes.
-func (g *Git) Diff(ref1, ref2 string) (string, error) {
+func (g *Git) DiffRefs(ref1, ref2 string) (string, error) {
 	var args []string
 	if ref1 == "" && ref2 == "" {
 		args = []string{"diff"}
@@ -174,6 +193,39 @@ func (g *Git) Diff(ref1, ref2 string) (string, error) {
 	out, err := g.run(args...)
 	if err != nil {
 		return out, fmt.Errorf("git diff: %w", err)
+	}
+	return out, nil
+}
+
+// Diff returns git diff output based on the number of target refs provided:
+//   - 0 args: unstaged working-tree diff (plain `git diff`)
+//   - 1 arg:  diff between target and HEAD
+//   - 2 args: diff between the two refs
+func (g *Git) Diff(target ...string) (string, error) {
+	switch len(target) {
+	case 0:
+		return g.DiffRefs("", "")
+	case 1:
+		return g.DiffRefs(target[0], "HEAD")
+	default:
+		return g.DiffRefs(target[0], target[1])
+	}
+}
+
+// DiffStat returns diff stat (summary) based on the number of target refs provided.
+func (g *Git) DiffStat(target ...string) (string, error) {
+	var args []string
+	switch len(target) {
+	case 0:
+		args = []string{"diff", "--stat"}
+	case 1:
+		args = []string{"diff", "--stat", target[0], "HEAD"}
+	default:
+		args = []string{"diff", "--stat", target[0], target[1]}
+	}
+	out, err := g.run(args...)
+	if err != nil {
+		return out, fmt.Errorf("git diff --stat: %w", err)
 	}
 	return out, nil
 }
@@ -353,6 +405,34 @@ func (g *Git) CurrentBranch() (string, error) {
 		return "", fmt.Errorf("git branch --show-current: %w", err)
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// RevParse resolves a git ref to its full SHA hash.
+func (g *Git) RevParse(ref string) (string, error) {
+	out, err := g.run("rev-parse", ref)
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s: %w", ref, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// IsDirty returns true if the working tree has any uncommitted changes.
+func (g *Git) IsDirty() (bool, error) {
+	dirty, err := g.HasUncommittedChanges()
+	if err != nil {
+		return false, fmt.Errorf("is dirty: %w", err)
+	}
+	return dirty, nil
+}
+
+// HasUncommittedChanges returns true if the working tree has uncommitted changes
+// (modified, staged, untracked, or deleted files).
+func (g *Git) HasUncommittedChanges() (bool, error) {
+	status, err := g.run("status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("has uncommitted changes: %w", err)
+	}
+	return strings.TrimSpace(status) != "", nil
 }
 
 // RemoteTracking returns the remote tracking branch, e.g. "origin/main".
