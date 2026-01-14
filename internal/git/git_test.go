@@ -112,7 +112,7 @@ func TestGit_Log(t *testing.T) {
 		}
 	}
 
-	commits, err := g.Log(true, "")
+	commits, err := g.LogAll()
 	if err != nil {
 		t.Fatalf("Log failed: %v", err)
 	}
@@ -129,9 +129,9 @@ func TestGit_Log(t *testing.T) {
 func TestGit_LogEmpty(t *testing.T) {
 	g, _ := setupRepo(t)
 
-	commits, err := g.Log(true, "")
+	commits, err := g.LogAll()
 	if err != nil {
-		t.Fatalf("Log on empty repo should not error, got: %v", err)
+		t.Fatalf("LogAll on empty repo should not error, got: %v", err)
 	}
 	if len(commits) != 0 {
 		t.Errorf("Expected 0 commits, got %d", len(commits))
@@ -151,7 +151,7 @@ func TestGit_Diff(t *testing.T) {
 	g.Commit("v2")
 	hash2, _ := g.HeadHash()
 
-	diff, err := g.Diff(hash1, hash2)
+	diff, err := g.DiffRefs(hash1, hash2)
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
