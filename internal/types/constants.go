@@ -16,9 +16,12 @@ const (
 	BashTimeout             = 30 * time.Minute
 	BashOutputLimit         = 50_000
 	DefaultContextLength    = 128_000
-	// Fix C-4: Maximum allowed LLM response size (1 MB) to prevent OOM
-	// in parseToolCalls.
+	// MaxLLMResponseBytes = 1 << 20
 	MaxLLMResponseBytes = 1 << 20
+	// MaxSessionFileSize is the maximum allowed size for session files
+	// (session.json, messages.json, checkpoint.json) to prevent OOM from
+	// corrupted or maliciously crafted files (WP-H05).
+	MaxSessionFileSize = 50 * 1024 * 1024 // 50 MB
 	// DefaultPermissionTimeout is the default permission modal timeout in seconds.
 	// Used by both the TUI permission modal and the tool dispatcher.
 	DefaultPermissionTimeout = 300
@@ -29,22 +32,22 @@ const (
 	// DefaultHealthSlowMs is the default health check latency threshold for "slow" status.
 	DefaultHealthSlowMs = 2000
 
-	// Health status string constants (S-12)
+	// Health status string constants
 	HealthStatusLive     = "live"
 	HealthStatusSlow     = "slow"
 	HealthStatusOffline  = "offline"
 	HealthStatusDegraded = "degraded"
 
-	// MaxProviderErrorChars is the max chars for sanitized provider errors (C-27)
+	// MaxProviderErrorChars is the max chars for sanitized provider errors
 	MaxProviderErrorChars = 200
 
-	// DefaultOpenRouterBaseURL is the default OpenRouter API base URL (C-1)
+	// DefaultOpenRouterBaseURL is the default OpenRouter API base URL
 	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 
-	// DefaultZenBaseURL is the default Zen API base URL (C-1)
+	// DefaultZenBaseURL is the default Zen API base URL
 	DefaultZenBaseURL = "https://opencode.ai/zen/v1"
 
-	// DefaultReferer is the default HTTP-Referer header for OpenRouter (C-2)
+	// DefaultReferer is the default HTTP-Referer header for OpenRouter
 	DefaultReferer = "https://github.com/eshanized/M31A"
 
 	// DefaultMaxRecentModels is the default number of recent models to remember
@@ -89,12 +92,23 @@ const (
 	// MaxProjectConfigDepth is the max parent directory depth for project config discovery
 	MaxProjectConfigDepth = 3
 
+	// DefaultSessionCacheTTL is the default TTL for the session list cache.
+	DefaultSessionCacheTTL = 2 * time.Second
+
+	// DefaultVerifyTimeout is the default timeout for a single verify phase task.
+	DefaultVerifyTimeout = 5 * time.Minute
+
+	// DefaultFetchModelsTimeout is the timeout for fetching model catalogs.
+	DefaultFetchModelsTimeout = 15 * time.Second
+
 	// DefaultUserAgent is the default User-Agent header for API requests
 	DefaultUserAgent = "M31A/dev"
 	// DefaultXTitle is the default X-Title header for OpenRouter
 	DefaultXTitle = "M31A"
 	// DateFormat is the standard date format used across the application
 	DateFormat = "2006-01-02"
+	// DateTimeFormat is the date+time format used for file listings
+	DateTimeFormat = "2006-01-02 15:04"
 )
 
 // SkipDirs is the list of directories to skip during file traversal.
