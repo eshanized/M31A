@@ -19,13 +19,7 @@ import (
 
 // Version is the application version used in User-Agent headers.
 // Set via SetVersion() from cmd/m31a/main.go.
-//
-//nolint:gochecknoglobals // package-level singleton, set once at startup
 var Version atomic.Value
-
-func init() {
-	Version.Store("dev")
-}
 
 // SetVersion sets the application version for User-Agent headers.
 func SetVersion(v string) {
@@ -34,7 +28,7 @@ func SetVersion(v string) {
 	}
 }
 
-// getVersion returns the current version string.
+// getVersion returns the current version string, defaulting to "dev" if unset.
 func getVersion() string {
 	if v, ok := Version.Load().(string); ok {
 		return v
@@ -146,6 +140,8 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 // isPrivateIP returns true if the IP is loopback, link-local, RFC1918,
 // IPv6 ULA, IPv6 link-local, or cloud metadata. These should not be
 // reachable by an external agent.
+// Uses net.IP.IsPrivate() (Go 1.17+) for comprehensive coverage
+// including IPv4-mapped IPv6 addresses and IPv6 ULA ranges.
 func isPrivateIP(ip net.IP) bool {
 	if ip.IsLoopback() {
 		return true
@@ -156,35 +152,14 @@ func isPrivateIP(ip net.IP) bool {
 	if ip.IsUnspecified() {
 		return true
 	}
+	// Use Go's built-in IsPrivate for RFC1918, RFC4193 (ULA), and IPv4-mapped IPv6
+	if ip.IsPrivate() {
+		return true
+	}
 	// Explicit cloud metadata endpoint check (defense in depth)
 	if ip4 := ip.To4(); ip4 != nil {
 		if ip4[0] == 169 && ip4[1] == 254 && ip4[2] == 169 && ip4[3] == 254 {
 			return true
-		}
-	}
-	// RFC1918 private ranges
-	if ip4 := ip.To4(); ip4 != nil {
-		return ip4[0] == 10 ||
-			(ip4[0] == 172 && ip4[1]&0xf0 == 16) ||
-			(ip4[0] == 192 && ip4[1] == 168)
-	}
-	// IPv6: fc00::/7 unique local, fe80::/10 link-local
-	if ip16 := ip.To16(); ip16 != nil {
-		if ip16[0]&0xfe == 0xfc {
-			return true // fc00::/7 ULA
-		}
-		if ip16[0] == 0xfe && (ip16[1]&0xc0) == 0x80 {
-			return true // fe80::/10 link-local
-		}
-		// IPv4-mapped IPv6: ::ffff:0:0/96 — check lower 32 bits
-		if ip16[0] == 0 && ip16[1] == 0 && ip16[2] == 0 && ip16[12] == 0xff && ip16[13] == 0xff {
-			v4 := net.IP(ip16[12:16])
-			if v4.IsLoopback() || v4.IsLinkLocalUnicast() {
-				return true
-			}
-			if v4[0] == 10 || (v4[0] == 172 && v4[1]&0xf0 == 16) || (v4[0] == 192 && v4[1] == 168) {
-				return true
-			}
 		}
 	}
 	return false
