@@ -120,7 +120,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(DateTimeFormat))
+		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(types.DateTimeFormat))
 	}
 	if truncated {
 		fmt.Fprintf(&b, "[... %d more files]", origCount-maxResults)
