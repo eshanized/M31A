@@ -154,12 +154,12 @@ type PermissionTickMsg struct{}
 
 // QuestionRequestMsg is sent by the AskUserQuestion tool.
 type QuestionRequestMsg struct {
+	ID          int64
 	Question    string
 	Header      string
 	Options     []string
 	AllowCustom bool
 	TimeoutSecs int
-	ResponseCh  chan tools.QuestionResponse
 }
 
 // QuestionResponseMsg carries the user's answer back to the question tool.
