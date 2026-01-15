@@ -213,10 +213,6 @@ func (dm *DiscussModel) View() string {
 		}
 	}
 
-	// ── Footer ──────────────────────────────────────────────────────────────
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("↵ answer  esc skip  ctrl+s skip all")
-
 	// ── Question separator ─────────────────────────────────────────────────
 	qSep := components.SectionDivider{
 		Width: w - 4,
@@ -233,6 +229,5 @@ func (dm *DiscussModel) View() string {
 	if timeoutLine != "" {
 		parts = append(parts, timeoutLine)
 	}
-	parts = append(parts, "", footer)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
