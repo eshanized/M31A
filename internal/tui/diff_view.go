@@ -19,19 +19,6 @@ func renderDiffView(dm *DiffModel) string {
 
 	var parts []string
 
-	// ── Header ──────────────────────────────────────────────────────────────────
-	headerIcon := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("  DIFF")
-	headerSep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · ")
-
-	titleText := "Git Diff"
-	if dm.title != "" {
-		titleText = dm.title
-	}
-	headerTitle := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(titleText)
-
-	headerLine := headerIcon + headerSep + headerTitle
-	parts = append(parts, headerLine)
-
 	// ── File path bar ───────────────────────────────────────────────────────────
 	if dm.filePath != "" {
 		filePath := lipgloss.NewStyle().Foreground(t.TextSecondary).PaddingLeft(2).Render(dm.filePath)
@@ -41,10 +28,6 @@ func renderDiffView(dm *DiffModel) string {
 	// ── Stats row ───────────────────────────────────────────────────────────────
 	statsLine := renderDiffStats(dm, t, w)
 	parts = append(parts, statsLine)
-
-	// ── Separator ───────────────────────────────────────────────────────────────
-	sep := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
-	parts = append(parts, sep)
 
 	// ── Diff body ───────────────────────────────────────────────────────────────
 	if dm.diff == "" {
@@ -58,13 +41,6 @@ func renderDiffView(dm *DiffModel) string {
 	} else {
 		parts = append(parts, dm.viewport.View())
 	}
-
-	// ── Bottom separator ────────────────────────────────────────────────────────
-	parts = append(parts, sep)
-
-	// ── Legend + scroll info ────────────────────────────────────────────────────
-	legend := renderDiffLegend(dm, t)
-	parts = append(parts, legend)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
@@ -100,35 +76,6 @@ func renderDiffStats(dm *DiffModel, t theme.Theme, _ int) string {
 	ratioBar := addBar + delBar
 
 	return fmt.Sprintf("  %s  %s  %s  %d changes", addBadge, delBadge, ratioBar, total)
-}
-
-// renderDiffLegend renders the bottom legend with navigation hints and scroll position.
-func renderDiffLegend(dm *DiffModel, t theme.Theme) string {
-	added := lipgloss.NewStyle().
-		Background(t.DiffAddedBg).
-		Foreground(t.DiffAdded).
-		Render("+ added")
-	removed := lipgloss.NewStyle().
-		Background(t.DiffRemovedBg).
-		Foreground(t.DiffRemoved).
-		Render("- removed")
-
-	// Scroll position
-	scrollPct := 0
-	if dm.viewport.TotalLineCount() > 0 {
-		scrollPct = int(float64(dm.viewport.YOffset+dm.viewport.Height) /
-			float64(dm.viewport.TotalLineCount()) * 100)
-		if scrollPct > 100 {
-			scrollPct = 100
-		}
-	}
-	scrollLabel := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf("%d%%", scrollPct))
-
-	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("↑↓/jk scroll  pgup/pgdown page  esc/q close")
-
-	return "  " + added + "  " + removed + "    " + hints + "    " + scrollLabel
 }
 
 // colorizeDiff applies syntax coloring to a unified diff string.
