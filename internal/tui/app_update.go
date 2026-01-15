@@ -9,6 +9,7 @@ import (
 	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
@@ -452,7 +453,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	switch m.screen {
 	case ScreenFirstRun:
 		if m.firstRunModel == nil {
-			fm := NewFirstRunModel(m.themeManager.Current(), m.registry)
+			fm := NewFirstRunModel(m.themeManager.Current(), m.registry, m.shutdownCtx)
 			m.firstRunModel = fm
 		}
 		return m.firstRunModel.Init()
@@ -468,19 +469,35 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	}
 }
 
-// handleWindowResize resizes all sub-models.
+// handleWindowResize resizes all sub-models using content dimensions
+// (terminal minus unified chrome and sidebar).
 func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
-	sw := 0
-	if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
-		sw = m.sidebarModel.GetWidth()
+	// Compute content dimensions: terminal minus unified chrome (header+footer)
+	contentW := msg.Width
+	contentH := msg.Height - layout.ChromeHeight
+	if contentH < 1 {
+		contentH = 1
 	}
+
+	// Subtract sidebar width when visible at full breakpoint
+	sw := 0
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(msg.Width) {
+		sw = m.sidebarModel.GetWidth()
+		contentW -= sw
+	}
+	if contentW < 1 {
+		contentW = 1
+	}
+
+	// Build a content-sized WindowSizeMsg for sub-models
+	contentMsg := tea.WindowSizeMsg{Width: contentW, Height: contentH}
 
 	var cmd tea.Cmd
 	if m.replModel != nil {
-		m.replModel.width = msg.Width
-		m.replModel.height = msg.Height
+		m.replModel.width = contentW
+		m.replModel.height = contentH
 		m.replModel.SetSidebarWidth(sw)
-		replM, replCmd := m.replModel.Update(msg)
+		replM, replCmd := m.replModel.Update(contentMsg)
 		if r, ok := replM.(*ReplModel); ok {
 			m.replModel = r
 		}
@@ -488,36 +505,36 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 
 	if m.planModel != nil {
-		m.planModel.SetDimensions(msg.Width, msg.Height)
+		m.planModel.SetDimensions(contentW, contentH)
 	}
 	if m.executeModel != nil {
-		m.executeModel.width = msg.Width
-		m.executeModel.height = msg.Height
+		m.executeModel.width = contentW
+		m.executeModel.height = contentH
 	}
 	if m.verifyModel != nil {
-		m.verifyModel.width = msg.Width
-		m.verifyModel.height = msg.Height
+		m.verifyModel.width = contentW
+		m.verifyModel.height = contentH
 	}
 	if m.metricsModel != nil {
-		m.metricsModel.width = msg.Width
-		m.metricsModel.height = msg.Height
+		m.metricsModel.width = contentW
+		m.metricsModel.height = contentH
 	}
 	if m.settingsModel != nil {
-		m.settingsModel.width = msg.Width
-		m.settingsModel.height = msg.Height
+		m.settingsModel.width = contentW
+		m.settingsModel.height = contentH
 	}
 	if m.cmdPalette != nil {
-		m.cmdPalette.SetDimensions(msg.Width, msg.Height)
+		m.cmdPalette.SetDimensions(contentW, contentH)
 	}
 	if m.msModel != nil {
-		m.msModel.SetDimensions(msg.Width, msg.Height)
+		m.msModel.SetDimensions(contentW, contentH)
 	}
 	if m.resumeModel != nil {
-		m.resumeModel.SetDimensions(msg.Width, msg.Height)
+		m.resumeModel.SetDimensions(contentW, contentH)
 	}
 	if m.diffModel != nil {
-		m.diffModel.width = msg.Width
-		m.diffModel.height = msg.Height
+		m.diffModel.width = contentW
+		m.diffModel.height = contentH
 	}
 
 	// UX-38: Notify when sidebar auto-hides due to narrow terminal
@@ -822,7 +839,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return m.msModel.Init()
 	case ScreenSettings:
 		if m.settingsModel == nil {
-			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version)
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.shutdownCtx)
 			m.settingsModel.width = m.width
 			m.settingsModel.height = m.height
 		}
@@ -1181,14 +1198,10 @@ func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) tea.Cmd {
 	if m.dispatcher == nil || m.questionRequest == nil {
 		return nil
 	}
-	respCh := m.questionRequest.ResponseCh
+	reqID := m.questionRequest.ID
 	m.questionRequest = nil
 	m.screen = ScreenREPL
 
-	if respCh != nil {
-		go func() {
-			respCh <- tools.QuestionResponse{Answer: msg.Answer}
-		}()
-	}
+	m.dispatcher.RespondQuestion(reqID, msg.Answer)
 	return questionListenerCmd(m.shutdownCtx, m.dispatcher)
 }
