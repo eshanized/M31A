@@ -24,7 +24,7 @@ func (m *AppState) handleSlashCommand(input string) tea.Cmd {
 	// Shell command (! prefix)
 	if strings.HasPrefix(input, "!") {
 		if m.replModel != nil {
-			return m.replModel.executeShellCommand(input)
+			return m.replModel.executeShellCommand(input, m.shutdownCtx)
 		}
 		return nil
 	}
