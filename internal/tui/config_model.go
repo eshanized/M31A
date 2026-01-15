@@ -224,27 +224,8 @@ func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 }
 
 func (m *ConfigModel) View() string {
-	t := m.theme
 	m.viewport.SetContent(m.content)
-
-	header := lipgloss.NewStyle().
-		Foreground(t.Text).
-		Bold(true).
-		Padding(0, 2).
-		Render(fmt.Sprintf("Full Configuration — %s", m.cfgPath))
-
-	footer := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render("  ↑↓ scroll  e edit settings  esc/q back")
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		"",
-		header,
-		"",
-		m.viewport.View(),
-		"",
-		footer,
-	)
+	return m.viewport.View()
 }
 
 func orVal(vals ...string) string {
