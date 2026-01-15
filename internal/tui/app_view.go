@@ -2,19 +2,22 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
 // ─── AppState view rendering ──────────────────────────────────────────────────
 
-// View implements tea.Model. It renders the full terminal frame.
-// This is the top-level view function; it delegates to per-screen view methods.
+// View implements tea.Model. It renders the full terminal frame using the
+// unified PageLayout system: 1-line header + content viewport + 1-line footer.
 func (m *AppState) View() string {
 	if m.width == 0 || m.height == 0 {
 		return lipgloss.Place(80, 24, lipgloss.Center, lipgloss.Center,
@@ -33,224 +36,353 @@ func (m *AppState) View() string {
 		return m.renderPermissionModal()
 	}
 
-	// ── Responsive layout ─────────────────────────────────────────────────────
-	// Width < 40: ultra-compact — show only the active screen content with no
-	// chrome (no header, no sidebar, no status bar, no toasts, no transitions).
-	if m.width < WidthUltraCompact {
-		screen := m.renderActiveScreen()
-		hint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#666")).
-			Italic(true).
-			Render("Resize terminal for full UI")
-		return lipgloss.JoinVertical(lipgloss.Left, screen, hint)
+	// Minimum screen guard: refuse to render below 40 cols
+	bp := layout.Detect(m.width)
+	if bp == layout.UltraNarrow {
+		return layout.RenderTooNarrow(m.width, m.height, t)
 	}
 
-	// Toast stack (top-right overlay) — hidden below compact width
-	toastOverlay := ""
+	// Build unified chrome info
+	headerInfo := m.buildHeaderInfo()
+	footerInfo := m.buildFooterInfo()
+
+	// Sidebar composition
+	m.ensureSidebarModel()
+	sidebarVisible := m.sidebarModel != nil && m.sidebarModel.IsVisible()
+	hasSidebar := sidebarVisible && layout.ShowSidebar(m.width)
+	sidebarOverlay := sidebarVisible && !hasSidebar // narrow terminal, overlay mode
+	sidebarStr := ""
+
+	contentWidth := m.width
+	if hasSidebar {
+		m.sidebarModel.SetHeight(m.height)
+		sidebarStr = m.sidebarModel.View()
+		contentWidth = m.width - m.sidebarModel.GetWidth()
+	}
+
+	// PageChrome defines the dimensions for the unified layout
+	chrome := layout.PageChrome{
+		Width:  contentWidth,
+		Height: m.height,
+	}
+
+	// Render active screen content (content-only, no chrome)
+	content := m.renderActiveScreen(chrome)
+
+	// Toast overlay (rendered inside content area, top-right)
 	if len(m.toasts) > 0 {
+		toastOverlay := ""
 		if m.width >= WidthCompact {
-			toastOverlay = renderToastStack(m.toasts, t, m.width)
+			toastOverlay = renderToastStack(m.toasts, t, contentWidth)
 		} else {
-			// Narrow terminal: show most recent toast inline
 			last := m.toasts[len(m.toasts)-1]
 			toastOverlay = renderSingleToast(last, t, 0)
 		}
-	}
-
-	// Sidebar — auto-hidden below full width (80 cols)
-	sidebar := ""
-	m.ensureSidebarModel()
-	hasSidebar := m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull
-	if hasSidebar {
-		m.sidebarModel.SetHeight(m.height)
-		sidebar = m.sidebarModel.View()
-	}
-
-	// Main content
-	main := m.renderActiveScreen()
-
-	// Overlay toasts on top-right of main content
-	if toastOverlay != "" {
-		main = lipgloss.JoinVertical(lipgloss.Left,
-			toastOverlay,
-			main,
-		)
-	}
-
-	// Screen transition overlay (dim + screen name)
-	if m.transition != nil && m.transition.Active {
-		w := m.width
-		if hasSidebar {
-			w = m.width - m.sidebarModel.GetWidth()
+		if toastOverlay != "" {
+			content = overlayToastOnContent(content, toastOverlay, contentWidth)
 		}
-		overlay := m.transition.renderTransitionOverlay(t, w, m.height)
-		main = lipgloss.JoinVertical(lipgloss.Left, overlay)
 	}
 
+	// Screen transition overlay
+	if m.transition != nil && m.transition.Active {
+		overlay := m.transition.renderTransitionOverlay(t, contentWidth, chrome.ContentHeight())
+		content = overlay
+	}
+
+	// Compose the full page
+	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
+
 	if hasSidebar {
-		return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
+		return lipgloss.JoinHorizontal(lipgloss.Top, sidebarStr, main)
+	}
+
+	// Sidebar overlay mode: render sidebar on top of the page (narrow terminals)
+	if sidebarOverlay {
+		m.sidebarModel.SetHeight(m.height)
+		overlayContent := m.sidebarModel.View()
+		overlayW := m.sidebarModel.GetWidth()
+		if overlayW > m.width-10 {
+			overlayW = m.width - 10
+		}
+		return layout.RenderOverlay(main, overlayContent, m.width, m.height, overlayW, t)
 	}
 
 	return main
 }
 
-// renderActiveScreen delegates to the active screen's view function.
-func (m *AppState) renderActiveScreen() string {
+// buildHeaderInfo constructs the unified header data from AppState.
+func (m *AppState) buildHeaderInfo() layout.HeaderInfo {
+	info := layout.HeaderInfo{
+		Brand: "M31A",
+	}
+
+	// Breadcrumb: screen label, or phase breadcrumb, or git branch
+	if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
+		info.Breadcrumb = string(m.workflowPhase)
+	} else {
+		info.Breadcrumb = m.screen.Label()
+	}
+
+	if m.activeModel != nil {
+		info.ModelName = m.activeModel.Name
+		if info.ModelName == "" {
+			info.ModelName = m.activeModel.ID
+		}
+	}
+	info.Provider = m.activeProvider
+
+	return info
+}
+
+// buildFooterInfo constructs the unified footer data from AppState.
+func (m *AppState) buildFooterInfo() layout.FooterInfo {
+	info := layout.FooterInfo{}
+
+	// Working directory
+	if m.replModel != nil && m.replModel.cwd != "" {
+		info.Cwd = pathBase(m.replModel.cwd)
+	}
+
+	// Git branch
+	if m.sidebarModel != nil && m.sidebarModel.branch != "" {
+		info.GitBranch = m.sidebarModel.branch
+	}
+
+	// Operation status
+	if m.replModel != nil {
+		if m.replModel.thinking {
+			var dur int64
+			if !m.replModel.thinkingStartAt.IsZero() {
+				dur = time.Since(m.replModel.thinkingStartAt).Milliseconds()
+			}
+			if dur > 0 {
+				info.Operation = "thinking " + formatDurationMs(dur)
+			} else {
+				info.Operation = "thinking..."
+			}
+		} else if m.replModel.streaming {
+			info.Operation = "responding..."
+		}
+		info.SpinnerFrame = m.replModel.spinner.Peek()
+	}
+
+	if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
+		info.Operation = string(m.workflowPhase)
+	}
+
+	// Leader key
+	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
+		info.LeaderActive = true
+	}
+
+	// Keyboard hints
+	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+x leader"}
+	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
+		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
+	}
+
+	// Cost
+	if m.replModel != nil && m.replModel.lastUsage != nil &&
+		m.replModel.cfg != nil && m.replModel.cfg.UI.ShowCostEstimate {
+		info.TokenCount = m.replModel.lastUsage.TotalTokens
+		info.Cost = m.replModel.lastCost
+		info.ShowCost = true
+	}
+
+	return info
+}
+
+// overlayToastOnContent places toast notifications on the top-right of content.
+func overlayToastOnContent(content, toast string, width int) string {
+	contentLines := strings.Split(content, "\n")
+	toastLines := strings.Split(toast, "\n")
+
+	for i, tl := range toastLines {
+		if i >= len(contentLines) {
+			break
+		}
+		toastW := lipgloss.Width(tl)
+		contentW := lipgloss.Width(contentLines[i])
+		if contentW > width-toastW-1 {
+			// Overlay toast on right side of content line
+			base := contentLines[i]
+			// Truncate base to make room for toast
+			baseTruncated := truncateToVisibleWidth(base, width-toastW-1)
+			padding := width - lipgloss.Width(baseTruncated) - toastW
+			if padding < 0 {
+				padding = 0
+			}
+			contentLines[i] = baseTruncated + strings.Repeat(" ", padding) + tl
+		}
+	}
+
+	return strings.Join(contentLines, "\n")
+}
+
+// truncateToVisibleWidth truncates a styled string to max visible cells.
+func truncateToVisibleWidth(s string, maxW int) string {
+	w := lipgloss.Width(s)
+	if w <= maxW {
+		return s
+	}
+	// Simple truncation — for styled text we use the layout package helper
+	return s // TODO: use layout.TruncateToWidth when exported
+}
+
+// renderActiveScreen delegates to the active screen's content renderer.
+// Each screen returns ONLY its content area — no header, footer, or chrome.
+func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 	switch m.screen {
 	case ScreenREPL:
-		return m.renderREPLScreen()
+		return m.renderREPLContent(chrome)
 	case ScreenSettings:
-		return m.renderSettingsScreen()
+		return m.renderSettingsContent(chrome)
 	case ScreenModelSelector:
-		return m.renderModelSelectorScreen()
+		return m.renderModelSelectorContent(chrome)
 	case ScreenPlan:
-		return m.renderPlanScreen()
+		return m.renderPlanContent(chrome)
 	case ScreenExecute:
-		return m.renderExecuteScreen()
+		return m.renderExecuteContent(chrome)
 	case ScreenVerify:
-		return m.renderVerifyScreen()
+		return m.renderVerifyContent(chrome)
 	case ScreenShip:
-		return m.renderShipScreen()
+		return m.renderShipContent(chrome)
 	case ScreenResume:
-		return m.renderResumeScreen()
+		return m.renderResumeContent(chrome)
 	case ScreenGoalInput:
-		return m.renderGoalInputScreen()
+		return m.renderGoalInputContent(chrome)
 	case ScreenFirstRun:
-		return m.renderFirstRunScreen()
+		return m.renderFirstRunContent(chrome)
 	case ScreenLedger:
-		return m.renderLedgerScreen()
+		return m.renderLedgerContent(chrome)
 	case ScreenRollback:
-		return m.renderRollbackScreen()
+		return m.renderRollbackContent(chrome)
 	case ScreenMetrics:
-		return m.renderMetricsScreen()
+		return m.renderMetricsContent(chrome)
 	case ScreenDiscuss:
-		return m.renderDiscussScreen()
+		return m.renderDiscussContent(chrome)
 	case ScreenConfig:
-		return m.renderConfigScreen()
+		return m.renderConfigContent(chrome)
 	case ScreenDiff:
-		return m.renderDiffScreen()
+		return m.renderDiffContent(chrome)
 	default:
-		return m.renderREPLScreen()
+		return m.renderREPLContent(chrome)
 	}
 }
 
-// ─── Per-screen view helpers ──────────────────────────────────────────────────
+// ─── Per-screen content renderers ─────────────────────────────────────────────
+// Each renderer returns ONLY the content area. No header, footer, or chrome.
 
-func (m *AppState) renderREPLScreen() string {
+func (m *AppState) renderREPLContent(chrome layout.PageChrome) string {
 	m.ensureReplModel()
-	m.syncReplSize()
-	return m.replModel.View()
+	m.syncReplSize(chrome)
+	return m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
 }
 
-func (m *AppState) renderSettingsScreen() string {
+func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
 	if m.settingsModel == nil {
-		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version)
-		m.settingsModel.width = m.width
-		m.settingsModel.height = m.height
+		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.shutdownCtx)
 	}
-	return m.renderHeader("") + "\n" + m.settingsModel.View()
+	m.settingsModel.width = chrome.ContentWidth()
+	m.settingsModel.height = chrome.ContentHeight()
+	return m.settingsModel.View()
 }
 
-func (m *AppState) renderModelSelectorScreen() string {
+func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 	if m.msModel == nil {
 		return renderLoading("Loading model selector...", m.themeManager.Current())
 	}
 	return m.msModel.View()
 }
 
-func (m *AppState) renderPlanScreen() string {
+func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 	if m.planModel == nil {
 		return renderLoading("Loading plan...", m.themeManager.Current())
 	}
-	return m.renderHeader("") + "\n" + m.planModel.View()
+	return m.planModel.View()
 }
 
-func (m *AppState) renderExecuteScreen() string {
+func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
 	if m.executeModel == nil {
 		return renderLoading("Loading execution...", m.themeManager.Current())
 	}
-	return m.renderHeader("") + "\n" + m.executeModel.View()
+	return m.executeModel.View()
 }
 
-func (m *AppState) renderVerifyScreen() string {
+func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
 	if m.verifyModel == nil {
 		return renderLoading("Loading verification...", m.themeManager.Current())
 	}
-	return m.renderHeader("") + "\n" + m.verifyModel.View()
+	return m.verifyModel.View()
 }
 
-func (m *AppState) renderShipScreen() string {
+func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
 	if m.shipModel == nil {
 		return renderLoading("Loading ship summary...", m.themeManager.Current())
 	}
-	return m.renderHeader("") + "\n" + m.shipModel.View()
+	return m.shipModel.View()
 }
 
-func (m *AppState) renderResumeScreen() string {
+func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
 	if m.resumeModel == nil {
 		return renderLoading("Loading sessions...", m.themeManager.Current())
 	}
 	return m.resumeModel.View()
 }
 
-func (m *AppState) renderGoalInputScreen() string {
+func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
 	if m.goalInput == nil {
 		return renderLoading("Loading goal input...", m.themeManager.Current())
 	}
 	return m.goalInput.View()
 }
 
-func (m *AppState) renderFirstRunScreen() string {
+func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 	if m.firstRunModel == nil {
 		return renderLoading("Loading first-run wizard...", m.themeManager.Current())
 	}
-	availWidth := m.width
-	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull {
-		availWidth -= m.sidebarModel.GetWidth()
-	}
-	m.firstRunModel.SetContentWidth(availWidth)
+	m.firstRunModel.SetContentWidth(chrome.ContentWidth())
 	return m.firstRunModel.View()
 }
 
-func (m *AppState) renderLedgerScreen() string {
+func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 	if m.ledgerModel == nil {
 		return renderLoading("Loading ledger...", m.themeManager.Current())
 	}
 	return m.ledgerModel.View()
 }
 
-func (m *AppState) renderRollbackScreen() string {
+func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
 	if m.rollbackModel == nil {
 		return renderLoading("Loading rollback browser...", m.themeManager.Current())
 	}
 	return m.rollbackModel.View()
 }
 
-func (m *AppState) renderMetricsScreen() string {
+func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 	if m.metricsModel == nil {
 		return renderLoading("Loading metrics...", m.themeManager.Current())
 	}
 	return m.metricsModel.View()
 }
 
-func (m *AppState) renderDiscussScreen() string {
+func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
 	if m.discussModel == nil {
 		return renderLoading("Loading discuss...", m.themeManager.Current())
 	}
 	return m.discussModel.View()
 }
 
-func (m *AppState) renderConfigScreen() string {
+func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
 	if m.configModel == nil {
-		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, chrome.ContentWidth(), chrome.ContentHeight())
 	} else {
-		// Regenerate content so any in-flight config mutations are visible.
 		m.configModel.buildContent()
 	}
-	return m.renderHeader("") + "\n" + m.configModel.View()
+	return m.configModel.View()
 }
 
-func (m *AppState) renderDiffScreen() string {
+func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 	if m.diffModel == nil {
 		return "Loading diff..."
 	}
@@ -263,22 +395,19 @@ func (m *AppState) renderPermissionModal() string {
 		return m.renderQuestionModal()
 	}
 	if m.permRequest == nil {
-		return m.renderREPLScreen()
+		return m.renderREPLContent(layout.PageChrome{Width: m.width, Height: m.height})
 	}
 
-	// Use the rich components.PermissionModal if initialized
 	if m.permModal != nil {
 		return m.permModal.Render(m.width, m.height)
 	}
 
-	// Fallback to legacy renderer if modal was not yet initialized
 	return RenderPermissionModal(m.permRequest, m.permCountdown, m.permModalWidth, m.themeManager.Current(), m.permCountdown < 5)
 }
 
 // ─── REPL sync helpers ────────────────────────────────────────────────────────
 
 // ensureReplModel creates the REPL model if not yet initialized.
-// Provider setup is handled separately by callers via syncReplProvider() or direct SetProvider().
 func (m *AppState) ensureReplModel() {
 	if m.replModel != nil {
 		return
@@ -289,19 +418,20 @@ func (m *AppState) ensureReplModel() {
 	m.replModel.SetKeyRegistry(m.keyRegistry)
 }
 
-// syncReplSize ensures the REPL model dimensions match the terminal.
-func (m *AppState) syncReplSize() {
+// syncReplSize ensures the REPL model dimensions match the content area.
+func (m *AppState) syncReplSize(chrome layout.PageChrome) {
 	if m.replModel == nil {
 		return
 	}
-	// Sidebar width is 0 when auto-hidden by responsive layout (< 80 cols)
 	sw := 0
-	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.width >= WidthFull {
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(m.width) {
 		sw = m.sidebarModel.GetWidth()
 	}
-	if m.replModel.width != m.width || m.replModel.height != m.height {
-		m.replModel.width = m.width
-		m.replModel.height = m.height
+	cw := chrome.ContentWidth()
+	ch := chrome.ContentHeight()
+	if m.replModel.width != cw || m.replModel.height != ch {
+		m.replModel.width = cw
+		m.replModel.height = ch
 		m.replModel.SetSidebarWidth(sw)
 	}
 }
@@ -328,11 +458,9 @@ func (m *AppState) renderQuestionModal() string {
 		width = 60
 	}
 
-	// Use rich QuestionModel if initialized
 	if m.questionModel != nil {
 		m.questionModel.SetWidth(width)
 		content := m.questionModel.View()
-		// UX-43: Show timeout info if configured
 		if q.TimeoutSecs > 0 {
 			timeoutLine := lipgloss.NewStyle().
 				Foreground(m.themeManager.Current().TextMuted).
@@ -350,7 +478,6 @@ func (m *AppState) renderQuestionModal() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 	}
 
-	// Fallback: simple inline rendering
 	t := m.themeManager.Current()
 	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Foreground(t.Text).Render(q.Question),
@@ -366,38 +493,6 @@ func (m *AppState) renderQuestionModal() string {
 		Theme:   t,
 	}.Render()
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
-}
-
-// ─── Header rendering (top chrome) ───────────────────────────────────────────
-
-// renderHeader renders the top header bar used in non-REPL screens.
-func (m *AppState) renderHeader(title string) string {
-	t := m.themeManager.Current()
-	modelID := ""
-	modelName := ""
-	if m.activeModel != nil {
-		modelID = m.activeModel.ID
-		modelName = m.activeModel.Name
-	}
-
-	// Get git branch (non-fatal if not a git repo)
-	gitBranch := ""
-	if m.git != nil {
-		if b, err := m.git.CurrentBranch(); err == nil {
-			gitBranch = b
-		}
-	}
-
-	return RenderHeader(
-		t,
-		m.activeProvider,
-		modelID,
-		modelName,
-		m.workflowPhase,
-		gitBranch,
-		0, 0,
-		m.width,
-	)
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
@@ -446,7 +541,6 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t
 		Theme:   t,
 	}.Render()
 
-	// Override border color for urgency
 	if urgent {
 		card = lipgloss.NewStyle().
 			Border(borderStyle).
