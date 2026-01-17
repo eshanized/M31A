@@ -81,6 +81,7 @@ type firstRunKeyValidationMsg struct {
 type FirstRunModel struct {
 	theme    theme.Theme
 	registry *provider.Registry
+	ctx      context.Context
 	step     firstRunStep
 
 	// Provider selection (multi-select)
@@ -116,7 +117,8 @@ type FirstRunModel struct {
 }
 
 // NewFirstRunModel creates a FirstRunModel.
-func NewFirstRunModel(t theme.Theme, registry *provider.Registry) *FirstRunModel {
+// Accepts a context that is cancelled on app shutdown to prevent resource leaks.
+func NewFirstRunModel(t theme.Theme, registry *provider.Registry, ctx context.Context) *FirstRunModel {
 	keyTI := textinput.New()
 	keyTI.Placeholder = "sk-or-..."
 	keyTI.EchoMode = textinput.EchoPassword
@@ -134,6 +136,7 @@ func NewFirstRunModel(t theme.Theme, registry *provider.Registry) *FirstRunModel
 	return &FirstRunModel{
 		theme:           t,
 		registry:        registry,
+		ctx:             ctx,
 		step:            stepWelcome,
 		providers:       providers,
 		providerChecked: make(map[string]bool),
@@ -258,7 +261,7 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 			return firstRunModelsMsg{Err: err}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(fr.ctx, 15*time.Second)
 		defer cancel()
 
 		models, err := p.FetchModels(ctx)
