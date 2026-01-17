@@ -87,17 +87,9 @@ func (lm *LedgerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return lm, nil
 }
 
-// View implements tea.Model.
+// View implements tea.Model — content only, chrome handled by PageLayout.
 func (lm *LedgerModel) View() string {
 	t := lm.theme
-	w := lm.width
-	if w < 30 {
-		w = 80
-	}
-
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render("  Learning Ledger")
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
 
 	body := ""
 	if !lm.loaded {
@@ -117,11 +109,7 @@ func (lm *LedgerModel) View() string {
 				s.TotalSessions, s.AvgCost, int(s.AvgTaskCount)))
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("j/k scroll  r reload  esc back")
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		title, divider, body, "", stats, divider, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, body, "", stats)
 }
 
 // renderEntries converts ledger entries to a styled table.
