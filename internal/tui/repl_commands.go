@@ -4,12 +4,14 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // executeShellCommand runs a shell command (prefixed with !) and adds the result to messages.
-func (m *ReplModel) executeShellCommand(input string) tea.Cmd {
+// Accepts a context that is cancelled on app shutdown to prevent zombie processes.
+func (m *ReplModel) executeShellCommand(input string, ctx context.Context) tea.Cmd {
 	cmd := strings.TrimPrefix(input, "!")
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
@@ -17,7 +19,7 @@ func (m *ReplModel) executeShellCommand(input string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*1e9) // 30s
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		out, err := exec.CommandContext(ctx, "sh", "-c", cmd).CombinedOutput()
