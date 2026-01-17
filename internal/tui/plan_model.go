@@ -193,41 +193,20 @@ func (pm *PlanModel) Update(msg tea.Msg) (*PlanModel, tea.Cmd) {
 	return pm, nil
 }
 
-// View renders the plan review screen.
+// View renders the plan review screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (pm *PlanModel) View() string {
-	t := pm.theme
-	w := pm.width
-
-	// Header: 📋 Plan · N tasks · ~$0.0042 · model [OR]
-	header := renderPlanHeader(t, len(pm.tasks), pm.estCost, pm.costEstimate, pm.timeEstimate, pm.modelName, pm.provider)
-
-	divider := components.SectionDivider{
-		Width: w,
-		Theme: t,
-	}.Render()
-
-	// Content area
+	// Content area — viewport or empty state
 	content := pm.viewport.View()
 	if len(pm.tasks) == 0 {
 		content = lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Width(w).
+			Foreground(pm.theme.TextMuted).
+			Width(pm.width).
 			Align(lipgloss.Center).
 			Render("No tasks generated yet")
 	}
 
-	// Footer (0 padding — footer hints are flush left, last line)
-	footer := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render("↵ approve  j/k scroll  q back  o optimize")
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		divider,
-		content,
-		divider,
-		footer,
-	)
+	return content
 }
 
 // waveColor returns the theme color for a given wave index.
