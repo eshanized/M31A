@@ -112,21 +112,12 @@ func (gi *GoalInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return gi, cmd
 }
 
-// View implements tea.Model.
+// View implements tea.Model — content only, chrome handled by PageLayout.
 func (gi *GoalInputModel) View() string {
-	t := gi.theme
 	w := gi.width
 	if w < 40 {
 		w = 80
 	}
-
-	// Title — simple text in brand, no decorative symbols (0 left padding for header)
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("What should M31A do?")
-
-	// Description in muted
-	desc := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("Describe the goal for this coding session.")
 
 	// Textarea — no border, inherits terminal background
 	inputContent := gi.textarea.View()
@@ -135,25 +126,12 @@ func (gi *GoalInputModel) View() string {
 		Width(w - 2).
 		Render(inputContent)
 
-	// Footer
-	hintsLeft := "ctrl+↵ submit  esc cancel"
-	if len(gi.recentGoals) > 0 {
-		hintsLeft += "  ctrl+r recent"
-	}
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(hintsLeft)
-
-	// Divider
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(strings.Repeat("─", w))
-
-	parts := []string{"", title, "", desc, "", textareaBox, ""}
+	parts := []string{"", textareaBox}
 
 	if gi.showRecent && len(gi.recentGoals) > 0 {
 		parts = append(parts, gi.renderRecent())
 	}
 
-	parts = append(parts, divider, footer)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
