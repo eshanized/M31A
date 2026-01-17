@@ -10,19 +10,39 @@ import (
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-// viewportTopChrome is the height of everything above the viewport in the REPL.
-// This is: header (1) + divider (1) = 2 rows.
-const viewportTopChrome = 2
+// inputSeparatorHeight is the height of the half-block separator above the textarea.
+const inputSeparatorHeight = 1
 
-// viewportBottomChrome is the height of everything below the viewport.
-// This is: top-border (1) + metadata (1) + textarea (inputHeight) + status (1) = inputHeight + 3.
-// Bottom border was removed — status bar sits flush below textarea (opencode style).
+// replBottomChrome is the height of the separator + textarea below the viewport.
+func replBottomChrome() int {
+	return inputSeparatorHeight + inputHeight
+}
+
+// contentViewportHeight computes the viewport height given the content area height.
+// Content area = contentHeight (terminal - unified chrome).
+// Viewport = contentHeight - separator(1) - textarea(inputHeight).
+func contentViewportHeight(contentHeight int) int {
+	h := contentHeight - replBottomChrome()
+	if h < 4 {
+		h = 4
+	}
+	return h
+}
+
+// viewportTopChrome is the height of everything above the viewport in the REPL.
+// With unified chrome, the header/footer are handled by PageLayout. The viewport
+// sits at the top of the content area with no additional top chrome.
+const viewportTopChrome = 0
+
+// viewportBottomChrome is the height of everything below the viewport in the REPL.
+// This is: separator (1) + textarea (inputHeight) = inputHeight + 1.
 func viewportBottomChrome() int {
-	return inputHeight + 3
+	return inputSeparatorHeight + inputHeight
 }
 
 // viewportHeight computes the viewport height given terminal height.
-// It ensures there's always at least 4 rows for the viewport.
+// This is the legacy function for when the REPL managed its own chrome.
+// Prefer contentViewportHeight for the unified layout.
 func viewportHeight(termHeight int) int {
 	h := termHeight - viewportTopChrome - viewportBottomChrome()
 	if h < 4 {
@@ -168,6 +188,93 @@ func (m *ReplModel) View() string {
 		parts = append(parts, newMessagesIndicator)
 	}
 	parts = append(parts, inputBorder, metaRow, textareaView, statusBar)
+
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// ViewContent renders the REPL content area for the unified PageLayout system.
+// It returns ONLY the content: viewport + separator + textarea.
+// Header, footer, metadata row, and status bar are handled by PageChrome.
+func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
+	t := m.theme
+	rw := contentWidth
+	if rw < 20 {
+		rw = 20
+	}
+
+	// Resize viewport to fit content area
+	vpH := contentViewportHeight(contentHeight)
+	if m.viewport.Width != rw || m.viewport.Height != vpH {
+		m.viewport.Width = rw
+		m.viewport.Height = vpH
+		m.renderMessages()
+	}
+
+	// Viewport (messages or welcome content)
+	viewportContent := m.viewport.View()
+
+	// Quick actions panel (below messages when idle)
+	quickActions := ""
+	if len(m.messages) > 0 && !m.streaming {
+		quickActions = m.renderQuickActionsPanel(rw)
+	}
+
+	// Input separator (opencode half-block style)
+	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
+	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", rw-1))
+	inputBorder := shelfLeft + shelfFill
+
+	// Textarea
+	textareaView := m.textarea.View()
+
+	// Overlays (mention, slash, which-key, new messages)
+	mentionOverlay := ""
+	if m.mentionVisible && len(m.mentionEntries) > 0 {
+		mentionOverlay = m.renderMentionSuggestions(rw) + "\n"
+	}
+
+	slashOverlay := ""
+	if m.slashVisible && len(m.slashSuggestions) > 0 {
+		slashOverlay = m.renderSlashSuggestions(rw) + "\n"
+	}
+
+	whichKeyOverlay := ""
+	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
+		whichKeyOverlay = m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted)
+		if whichKeyOverlay != "" {
+			whichKeyOverlay += "\n"
+		}
+	}
+
+	newMessagesIndicator := ""
+	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
+		newMessagesIndicator = lipgloss.NewStyle().
+			Foreground(t.Background).
+			Background(t.Brand).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(rw).
+			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+	}
+
+	// Assemble content parts
+	parts := []string{viewportContent}
+	if quickActions != "" {
+		parts = append(parts, quickActions)
+	}
+	if mentionOverlay != "" {
+		parts = append(parts, mentionOverlay)
+	}
+	if slashOverlay != "" {
+		parts = append(parts, slashOverlay)
+	}
+	if whichKeyOverlay != "" {
+		parts = append(parts, whichKeyOverlay)
+	}
+	if newMessagesIndicator != "" {
+		parts = append(parts, newMessagesIndicator)
+	}
+	parts = append(parts, inputBorder, textareaView)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
