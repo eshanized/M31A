@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -157,55 +158,46 @@ func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 	return em, nil
 }
 
-// View renders the execute progress screen.
+// View renders the execute progress screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (em *ExecuteModel) View() string {
 	t := em.theme
 	w := em.width
 
-	// Header with progress bar
-	elapsed := time.Since(em.startedAt)
-	elapsedStr := fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	// Progress info row (inline with task content)
 	done, total, failed := em.countTasks()
+	pct := 0
+	if total > 0 {
+		pct = int(math.Round(float64(done) / float64(total) * 100))
+	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("⚡ Execute")
-
-	meta := lipgloss.NewStyle().Foreground(t.TextSecondary).
-		Render(fmt.Sprintf(" · %d/%d tasks", done, total))
+	progressLine := lipgloss.NewStyle().Foreground(t.TextSecondary).
+		Render(fmt.Sprintf("%d/%d tasks", done, total))
 
 	if failed > 0 {
-		meta += " " + lipgloss.NewStyle().Foreground(t.Error).
+		progressLine += " " + lipgloss.NewStyle().Foreground(t.Error).
 			Render(fmt.Sprintf("(%d failed)", failed))
 	}
 
-	// Progress bars (animated + static)
-	barWidth := animatedProgressBarWidth(em)
-	progressBar := renderAnimatedProgressBar(em, barWidth)
-	staticBar := renderProgressBar(t, done, total, barWidth)
-	pct := renderAnimatedProgressPct(em)
-	progressInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf(" · %s %s %d%%", staticBar, progressBar, pct))
+	progressLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(fmt.Sprintf("%d%%", pct))
 
-	timeInfo := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf(" · %s elapsed", elapsedStr))
+	elapsed := time.Since(em.startedAt)
+	progressLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render(fmt.Sprintf("· %ds elapsed", int(elapsed.Seconds())))
 
-	// Pause indicator
-	pauseHint := ""
 	if em.paused {
-		pauseHint = "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("⏸ PAUSED")
+		progressLine += "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("PAUSED")
 	}
 
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
-
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("p pause  j/k scroll  q back")
+	// Thin separator
+	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).
+		Render(strings.Repeat("─", w))
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title+meta+progressInfo+timeInfo+pauseHint,
-		divider,
+		progressLine,
+		sep,
 		em.viewport.View(),
-		divider,
-		footer,
 	)
 }
 
