@@ -124,7 +124,7 @@ func (mm *MetricsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return mm, nil
 }
 
-// View implements tea.Model.
+// View implements tea.Model — content only, chrome handled by PageLayout.
 func (mm *MetricsModel) View() string {
 	t := mm.theme
 	w := mm.width
@@ -132,15 +132,9 @@ func (mm *MetricsModel) View() string {
 		w = 80
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render("  Session Metrics")
-	divider := lipgloss.NewStyle().Foreground(t.Border).
-		Render(strings.Repeat("─", w))
-
 	if !mm.loaded {
-		body := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 			Render("Loading metrics...")
-		return lipgloss.JoinVertical(lipgloss.Left, title, divider, body)
 	}
 
 	s := mm.stats
@@ -231,16 +225,12 @@ func (mm *MetricsModel) View() string {
 				Render("Phases: "+strings.Join(parts, "  ")))
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("esc back")
-
 	var content []string
-	content = append(content, title, divider, "", "  "+row1, "", "  "+row2)
+	content = append(content, "", "  "+row1, "", "  "+row2)
 	if len(breakdowns) > 0 {
-		content = append(content, "", divider)
+		content = append(content, "")
 		content = append(content, breakdowns...)
 	}
-	content = append(content, "", divider, footer)
 
 	return lipgloss.JoinVertical(lipgloss.Left, content...)
 }
