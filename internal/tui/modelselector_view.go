@@ -10,21 +10,13 @@ import (
 // modelselector_view.go — view rendering for the Model Selector.
 
 // renderView is the full View() implementation for ModelSelector.
+// Returns content only — header, footer, and chrome are handled by PageLayout.
 func (ms *ModelSelector) renderView() string {
 	t := ms.theme
 	w := ms.width
 	if w < 40 {
 		w = 80
 	}
-
-	// ── Header (0 left padding — screen title) ──────────────────────────────
-	header := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Bold(true).
-		Render("Model Selector")
-
-	divider := lipgloss.NewStyle().Foreground(t.Border).
-		Render(strings.Repeat("─", w))
 
 	// ── Provider filter pills ────────────────────────────────────────────────
 	tabs := "  " + ms.renderProviderTabs()
@@ -55,21 +47,15 @@ func (ms *ModelSelector) renderView() string {
 			Render(fmt.Sprintf("%d/%d", ms.cursor+1, len(ms.filtered)))
 	}
 
-	// ── Footer ───────────────────────────────────────────────────────────────
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("↵ select  tab filter  / search  esc back")
-
 	// ── Layout: list + detail side by side if wide enough ────────────────────
 	var mainContent string
 	if detailPane != "" && w > 120 {
-		// Split screen: list on left, detail on right
 		listWidth := w * 3 / 5
 		detailWidth := w * 2 / 5
 		listPane := lipgloss.NewStyle().Width(listWidth).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				tabs,
 				searchBox,
-				divider,
 				list,
 			))
 		detailPane = lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(detailPane)
@@ -78,7 +64,6 @@ func (ms *ModelSelector) renderView() string {
 		mainContent = lipgloss.JoinVertical(lipgloss.Left,
 			tabs,
 			searchBox,
-			divider,
 			list,
 		)
 		if detailPane != "" {
@@ -90,18 +75,13 @@ func (ms *ModelSelector) renderView() string {
 		}
 	}
 
-	parts := []string{
-		header,
-		divider,
-		mainContent,
-	}
+	parts := []string{mainContent}
 	if errLine != "" {
 		parts = append(parts, errLine)
 	}
 	if scrollInfo != "" {
 		parts = append(parts, scrollInfo)
 	}
-	parts = append(parts, divider, footer)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
