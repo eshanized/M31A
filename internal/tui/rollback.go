@@ -141,7 +141,7 @@ func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return rm, nil
 }
 
-// View implements tea.Model.
+// View implements tea.Model — content only, chrome handled by PageLayout.
 func (rm *RollbackModel) View() string {
 	t := rm.theme
 	w := rm.width
@@ -149,32 +149,24 @@ func (rm *RollbackModel) View() string {
 		w = 80
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render("  Rollback — Commit Time Machine")
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
-
 	if rm.errMsg != "" {
-		errLine := lipgloss.NewStyle().Foreground(t.Error).PaddingLeft(2).
+		return lipgloss.NewStyle().Foreground(t.Error).PaddingLeft(2).
 			Render("! " + rm.errMsg)
-		return lipgloss.JoinVertical(lipgloss.Left, title, divider, errLine)
 	}
 
 	if len(rm.entries) == 0 {
-		empty := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 			Render("No commits found in this repository.")
-		footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("esc back")
-		return lipgloss.JoinVertical(lipgloss.Left, title, divider, "", empty, "", divider, footer)
 	}
 
 	if rm.showDiff {
-		return rm.renderDiffView(title, divider)
+		return rm.renderDiffView()
 	}
-	return rm.renderCommitList(title, divider, w)
+	return rm.renderCommitList(w)
 }
 
 // renderCommitList renders the list of commits.
-func (rm *RollbackModel) renderCommitList(title, divider string, w int) string {
+func (rm *RollbackModel) renderCommitList(w int) string {
 	t := rm.theme
 	listH := rm.listVisibleRows()
 	end := rm.offset + listH
@@ -193,13 +185,9 @@ func (rm *RollbackModel) renderCommitList(title, divider string, w int) string {
 	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render(fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.entries)))
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("↵ diff  r soft-reset  R hard-reset  ↑↓ navigate  esc back")
-
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title, divider,
 		strings.Join(rows, "\n"),
-		"", scrollInfo, divider, footer)
+		"", scrollInfo)
 }
 
 // renderCommitRow renders a single commit entry.
@@ -229,15 +217,13 @@ func (rm *RollbackModel) renderCommitRow(e rollback.RollbackEntry, selected bool
 }
 
 // renderDiffView renders the diff viewport for the selected commit.
-func (rm *RollbackModel) renderDiffView(title, divider string) string {
+func (rm *RollbackModel) renderDiffView() string {
 	t := rm.theme
 	e := rm.entries[rm.cursor]
 	subTitle := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render(fmt.Sprintf("Diff for %s — %s", e.CommitInfo.ShortHash, TruncateWithEllipsis(e.CommitInfo.Message, 50)))
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("j/k scroll  esc close diff")
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title, divider, subTitle, rm.viewport.View(), divider, footer)
+		subTitle, rm.viewport.View())
 }
 
 // renderDiffContent produces the colored diff string for a commit.
