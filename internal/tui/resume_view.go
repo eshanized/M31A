@@ -10,7 +10,8 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
-// renderResume renders the session browser screen.
+// renderResume renders the session browser screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (rm *ResumeModel) renderResume() string {
 	t := rm.theme
 	w := rm.width
@@ -18,17 +19,10 @@ func (rm *ResumeModel) renderResume() string {
 		w = 80
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render("  Resume Session")
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
-
 	if len(rm.sessions) == 0 {
 		empty := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 			Render("No sessions found. Press  n  to start a new one.")
-		footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("n new session  esc back")
-		return lipgloss.JoinVertical(lipgloss.Left,
-			title, divider, "", empty, "", divider, footer)
+		return empty
 	}
 
 	listH := rm.visibleRows()
@@ -47,17 +41,10 @@ func (rm *ResumeModel) renderResume() string {
 	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render(fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.sessions)))
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("↵ resume  n new  ↑↓/jk navigate  esc back")
-
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		divider,
 		strings.Join(rows, "\n"),
 		"",
 		scrollInfo,
-		divider,
-		footer,
 	)
 }
 
