@@ -61,6 +61,7 @@ type SettingsModel struct {
 	theme     theme.Theme
 	config    *config.Config
 	registry  *provider.Registry
+	ctx       context.Context
 	activeTab SettingsTab
 	width     int
 	height    int
@@ -90,7 +91,8 @@ type SettingsModel struct {
 }
 
 // NewSettingsModel creates a SettingsModel.
-func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string) *SettingsModel {
+// Accepts a context that is cancelled on app shutdown to prevent resource leaks.
+func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string, ctx context.Context) *SettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
 	ti.Width = 40
@@ -99,6 +101,7 @@ func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.T
 		theme:      t,
 		config:     cfg,
 		registry:   registry,
+		ctx:        ctx,
 		editValue:  ti,
 		configPath: configPath,
 		version:    version,
@@ -179,7 +182,7 @@ func (s *SettingsModel) startHealthChecks() tea.Cmd {
 				results = append(results, providerHealthStatus{Name: name, Status: "error", Detail: err.Error()})
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			status := p.HealthCheck(ctx)
 			cancel()
 			hs := providerHealthStatus{Name: name}
@@ -495,13 +498,11 @@ func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
 	return s, func() tea.Msg { return SettingsSavedMsg{} }
 }
 
-// View renders the settings screen.
+// View renders the settings screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (s *SettingsModel) View() string {
 	t := s.theme
 	w := s.width
-	if w < 50 {
-		return "Terminal too narrow for settings"
-	}
 
 	navWidth := 20
 	if w < 70 {
@@ -532,10 +533,7 @@ func (s *SettingsModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, mainArea, "", editBox, "", status)
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("  ↑↓/jk navigate  ←→/space/enter toggle  s save  r refresh  esc back")
-
-	return lipgloss.JoinVertical(lipgloss.Left, mainArea, status, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, mainArea, status)
 }
 
 func (s *SettingsModel) renderTabContent() string {
