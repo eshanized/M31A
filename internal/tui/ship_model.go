@@ -159,7 +159,6 @@ func (sm *ShipModel) View() string {
 		cardContent = append(cardContent, commitBlock)
 		cardContent = append(cardContent, "")
 	}
-	cardContent = append(cardContent, lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ new session  d view diff  q back"))
 	cardContent = append(cardContent, "")
 
 	// ── Wrapping Card ───────────────────────────────────────────────────────
@@ -173,5 +172,5 @@ func (sm *ShipModel) View() string {
 		Theme:   t,
 	}.Render()
 
-	return "  " + card
+	return card
 }
