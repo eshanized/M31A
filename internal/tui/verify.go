@@ -145,45 +145,10 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 	return vm, nil
 }
 
-// View renders the verify results screen.
+// View renders the verify results screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (vm *VerifyModel) View() string {
-	t := vm.theme
-	w := vm.width
-
-	passed, failed, total := vm.countResults()
-
-	// Header — color-coded by pass/fail
-	var headerClr lipgloss.Color
-	var headerIcon string
-	if failed > 0 {
-		headerClr = t.Error
-		headerIcon = "✗"
-	} else {
-		headerClr = t.Success
-		headerIcon = "✓"
-	}
-
-	title := lipgloss.NewStyle().Foreground(headerClr).Bold(true).
-		Render(fmt.Sprintf("%s Verify · %d/%d passed", headerIcon, passed, total))
-
-	if failed > 0 {
-		title += " " + lipgloss.NewStyle().Foreground(t.Error).
-			Render(fmt.Sprintf("(%d failed)", failed))
-	}
-
-	divider := lipgloss.NewStyle().Foreground(t.TextMuted).Render(strings.Repeat("─", w))
-
-	// Footer (0 padding — last line, no indent)
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("↵ continue  ↑↓/jk select  h heal  s skip  q back")
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		divider,
-		vm.viewport.View(),
-		divider,
-		footer,
-	)
+	return vm.viewport.View()
 }
 
 func (vm *VerifyModel) renderResults() string {
