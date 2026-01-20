@@ -62,7 +62,7 @@ type Engine struct {
 	sessionID        string
 	workDir          string
 	backupDir        string
-	sessionsRoot     string // BUG-08 fix: store sessions root for reliable planningDir recalculation
+	sessionsRoot     string // store sessions root for reliable planningDir recalculation
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
@@ -127,7 +127,7 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
-	// BUG-08 fix: derive sessionsRoot from planningDir reliably
+	// derive sessionsRoot from planningDir reliably
 	// planningDir = <sessionsRoot>/<sessionID>/planning
 	sessionsRoot := filepath.Dir(filepath.Dir(planningDir))
 
@@ -204,9 +204,9 @@ var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 }
 
 // Transition saves a checkpoint and writes STATE.md for the new phase.
-// H-6: validates the transition is allowed by the phase ordering guard.
+// Validates the transition is allowed by the phase ordering guard.
 func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase) error {
-	// H-6: Phase transition guard — reject out-of-order transitions.
+	// Phase transition guard — reject out-of-order transitions.
 	allowed, ok := validPhaseTransitions[from]
 	if !ok {
 		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
@@ -284,7 +284,7 @@ func (e *Engine) SessionID() string {
 // session-switching commands like /fork, /prev, /next.
 func (e *Engine) SetSessionID(id string) {
 	e.sessionID = id
-	// BUG-08 fix: use stored sessionsRoot instead of brittle .. navigation
+	// use stored sessionsRoot instead of brittle .. navigation
 	e.planningDir = filepath.Join(e.sessionsRoot, id, "planning")
 }
 
@@ -449,7 +449,7 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 			Description: tool.Description(),
 			Parameters:  "{}",
 		}
-		// BUG-09 fix: use SchemaProvider interface for real parameter schemas
+		// use SchemaProvider interface for real parameter schemas
 		if sp, ok := tool.(m31types.SchemaProvider); ok {
 			def.Parameters = sp.ParameterSchema()
 		}
@@ -470,6 +470,7 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 }
 
 // consumeStream reads all chunks from the iterator and returns the concatenated content.
+// Enforces MaxLLMResponseBytes limit to prevent OOM from pathological responses.
 func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error) {
 	var sb strings.Builder
 	defer iterator.Close()
@@ -488,6 +489,11 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 		}
 		if chunk != nil && chunk.Delta != "" {
 			sb.WriteString(chunk.Delta)
+			// Enforce max response size incrementally as chunks arrive
+			if sb.Len() > m31types.MaxLLMResponseBytes {
+				return sb.String(), fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
+					m31types.MaxLLMResponseBytes, m31errors.ErrContextExceeded)
+			}
 		}
 	}
 	return sb.String(), nil
@@ -495,7 +501,7 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 
 // streamLLM sends a chat request and returns the full response content.
 func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
-	// CR-03: preflight context check before sending to LLM
+	// preflight context check before sending to LLM
 	if err := e.preflightContextCheck(messages); err != nil {
 		return "", err
 	}
