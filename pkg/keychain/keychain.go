@@ -25,18 +25,9 @@ type Keychain interface {
 	Delete(service string) error
 }
 
-// newFunc is set by platform-specific init() functions in build-tag-guarded files.
-// Each platform file (keychain_linux.go, keychain_darwin.go, keychain_windows.go)
-// assigns its own constructor to this variable.
-var newFunc func() (Keychain, error)
-
 // New returns a platform-specific Keychain implementation.
 // On linux: returns a linuxKeychain backed by D-Bus Secret Service with pass CLI fallback.
 // On darwin: returns a macOSKeychain backed by /usr/bin/security CLI.
 // On windows: returns a windowsKeychain backed by Windows Credential Manager.
-func New() (Keychain, error) {
-	if newFunc == nil {
-		return nil, ErrKeychainUnavailable
-	}
-	return newFunc()
-}
+// Each platform file (keychain_linux.go, keychain_darwin.go, keychain_windows.go)
+// provides its own New() implementation via build tags.
