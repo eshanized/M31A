@@ -1,7 +1,3 @@
-// Package autodream provides context consolidation for M31A sessions.
-// When conversation context grows large, AutoDream summarizes older
-// messages into a single memory segment to stay within the model's
-// context window.
 package autodream
 
 import (
@@ -36,7 +32,7 @@ type Consolidator struct {
 	paused              bool
 	lastConsolidation   time.Time
 	totalConsolidations int
-	// M-7: Reentrancy guard — CAS prevents nested /compress calls from
+	// Reentrancy guard — CAS prevents nested /compress calls from
 	// entering a double-summary state.
 	consolidating atomic.Bool
 }
@@ -126,7 +122,7 @@ func (c *Consolidator) CanConsolidate() bool {
 func (c *Consolidator) Consolidate() *ConsolidationResult {
 	start := time.Now()
 
-	// M-7: Reentrancy guard — CAS prevents nested /compress calls.
+	// Reentrancy guard — CAS prevents nested /compress calls.
 	if !c.consolidating.CompareAndSwap(false, true) {
 		return &ConsolidationResult{
 			Success:    false,
