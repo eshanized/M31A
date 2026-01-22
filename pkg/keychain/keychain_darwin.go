@@ -18,11 +18,8 @@ var validServiceName = regexp.MustCompile(`^[a-z]+$`)
 
 type macOSKeychain struct{}
 
-func init() {
-	newFunc = newmacOSKeychain
-}
-
-func newmacOSKeychain() (Keychain, error) {
+// New returns a macOS keychain backed by /usr/bin/security CLI.
+func New() (Keychain, error) {
 	return &macOSKeychain{}, nil
 }
 
