@@ -53,7 +53,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	toolCallCount := 0
 	for _, group := range groups {
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
-			// H-15: Save checkpoint before each task for rollback on heal failure.
+			// Save checkpoint before each task for rollback on heal failure.
 			if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 				Phase:     m31types.PhaseExecute,
 				Timestamp: time.Now(),
@@ -70,7 +70,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			return result
 		}
 
-		if err := runner.ExecuteGroup(group, execFn); err != nil {
+		if err := runner.ExecuteGroup(ctx, group, execFn); err != nil {
 			execErrors = append(execErrors, fmt.Sprintf("group %v: %v", group, err))
 			e.logger.Error("execute group failed", "error", err)
 		}
