@@ -19,15 +19,12 @@ const (
 // validServiceName checks that the service parameter contains only lowercase
 // ASCII letters (a-z) after the m31a/ prefix. This prevents command injection
 // when passing the service name to the pass CLI.
-var validServiceName = regexp.MustCompile(`^[a-z]+$`)
+var validServiceName = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type linuxKeychain struct{}
 
-func init() {
-	newFunc = newLinuxKeychain
-}
-
-func newLinuxKeychain() (Keychain, error) {
+// New returns a Linux keychain backed by D-Bus Secret Service with pass CLI fallback.
+func New() (Keychain, error) {
 	return &linuxKeychain{}, nil
 }
 
