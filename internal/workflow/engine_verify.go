@@ -171,6 +171,14 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		for _, f := range task.Files {
 			if strings.HasSuffix(f, ".py") {
 				path := filepath.Join(e.workDir, f)
+				// Validate that the resolved path is within workDir
+				// to prevent path traversal via LLM-generated task files.
+				relPath, relErr := filepath.Rel(e.workDir, path)
+				if relErr != nil || strings.HasPrefix(relPath, "..") {
+					result.Errors = append(result.Errors, fmt.Sprintf("path traversal blocked: %s", f))
+					result.SyntaxOK = false
+					continue
+				}
 				vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 				defer cancel()
 				cmd := exec.CommandContext(vctx, "python3", "-m", "py_compile", path)
