@@ -63,7 +63,7 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 		b.logger.Info("bisect starting", "good", sessionStartHash, "bad", headHash)
 	}
 
-	// Ensure we always reset (M-29: wrap reset failure with typed error)
+	// Ensure we always reset (wrap reset failure with typed error)
 	defer func() {
 		if _, resetErr := b.run("bisect", "reset"); resetErr != nil {
 			if err == nil {
