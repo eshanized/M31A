@@ -64,7 +64,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	var commits []git.CommitInfo
 	if e.git != nil {
 		var err error
-		commits, err = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		commits, err = e.git.LogSince(e.startTime)
 		if err != nil {
 			e.logger.Warn("git log failed during ship summary", "error", err)
 		}
@@ -111,7 +111,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("ledger update skipped: cannot load session", "error", err)
 	}
 
-	// 5. Write final STATE.md and checkpoint before archiving (CR-10: fix write ordering)
+	// 5. Write final STATE.md and checkpoint before archiving (fix write ordering)
 	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseShip, "complete", "session shipped"); err != nil {
 		e.logger.Warn("save state failed", "error", err)
 	}
@@ -161,7 +161,7 @@ func (e *Engine) collectDiffStats() DiffStats {
 	}
 
 	// Use git diff --numstat to get per-file stats
-	diffOutput, err := e.git.Diff("HEAD", "")
+	diffOutput, err := e.git.DiffRefs("HEAD", "")
 	if err != nil {
 		return stats
 	}
@@ -218,7 +218,7 @@ func (e *Engine) BuildSummary() ShipSummary {
 	var commits []git.CommitInfo
 	if e.git != nil {
 		var err error
-		commits, err = e.git.Log(true, e.startTime.Format(time.RFC3339))
+		commits, err = e.git.LogSince(e.startTime)
 		if err != nil {
 			e.logger.Warn("git log failed during ship summary", "error", err)
 		}
