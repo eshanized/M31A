@@ -279,10 +279,10 @@ func parseQuestions(content string) []string {
 	return questions
 }
 
-// Fix C-4: Maximum number of tool calls to extract from a single response.
+// Maximum number of tool calls to extract from a single response.
 const maxToolsPerCall = m31types.MaxToolsPerCall
 
-// Fix C-4: Maximum bytes to scan when looking for a single JSON object.
+// Maximum bytes to scan when looking for a single JSON object.
 // Prevents unbounded scanning of very large LLM replies.
 const maxJSONScanBytes = 64 << 10 // 64 KB
 
@@ -292,7 +292,7 @@ const maxJSONScanBytes = 64 << 10 // 64 KB
 // tool call but cannot be parsed (H-1). Accepts both array and single-object
 // forms (M-3).
 func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
-	// Fix C-4: reject oversized LLM responses to prevent OOM.
+	// reject oversized LLM responses to prevent OOM.
 	if len(content) > m31types.MaxLLMResponseBytes {
 		slog.Warn("parseToolCalls: oversized LLM response rejected",
 			"bytes", len(content), "limit", m31types.MaxLLMResponseBytes)
@@ -360,12 +360,12 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 		}
 	}
 
-	// H-1: If we attempted to parse tool calls but all were malformed, return error.
+	// If we attempted to parse tool calls but all were malformed, return error.
 	if len(calls) == 0 && parseErrors > 0 && totalAttempts > 0 {
 		return nil, fmt.Errorf("parse tool calls: %d malformed JSON objects detected: %w", parseErrors, m31errors.ErrToolExecution)
 	}
 
-	// Fix C-4: cap tool count to detect model regression.
+	// cap tool count to detect model regression.
 	if len(calls) > maxToolsPerCall {
 		slog.Warn("parseToolCalls: tool count exceeded cap, truncating",
 			"count", len(calls), "cap", maxToolsPerCall)
@@ -391,7 +391,7 @@ type toolCallJSON struct {
 // Returns the parsed ToolCall, or an error if the JSON is malformed or
 // doesn't contain a valid tool call structure.
 func parseSingleToolCall(jsonStr string, callID int64) (*m31types.ToolCall, error) {
-	// M-3: Support single object form — if the string starts with '{' and
+	// Support single object form — if the string starts with '{' and
 	// does not start with '[', try wrapping it as a single-element array.
 	trimmed := strings.TrimSpace(jsonStr)
 	if strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
@@ -483,7 +483,7 @@ func normalizeToolName(name string) string {
 
 // stripJSONComments removes // line comments and /* ... */ block comments from
 // JSON text while preserving content inside double-quoted string literals.
-// Fix H-5: LLM responses may contain comments that cause json.Unmarshal to fail.
+// LLM responses may contain comments that cause json.Unmarshal to fail.
 func stripJSONComments(s string) string {
 	var out []rune
 	inString := false
@@ -561,7 +561,7 @@ func stripJSONComments(s string) string {
 // at the beginning of the string.
 // Uses json.NewDecoder for robust parsing without index drift issues.
 func extractJSONObject(s string) string {
-	// Fix H-5: strip comments before scanning for JSON structure.
+	// strip comments before scanning for JSON structure.
 	s = stripJSONComments(s)
 
 	// Find the first '{' or '[' to skip surrounding text
