@@ -1,5 +1,8 @@
 //go:build windows
 
+// Package keychain provides OS-specific secure credential storage.
+// On Windows, it uses the Windows Credential Manager via unsafe pointer
+// arithmetic required by the Win32 CredRead/CredWrite API.
 package keychain
 
 import (
@@ -14,11 +17,8 @@ var validServiceNameRe = regexp.MustCompile(`^[a-z]+$`)
 
 type windowsKeychain struct{}
 
-func init() {
-	newFunc = newWindowsKeychain
-}
-
-func newWindowsKeychain() (Keychain, error) {
+// New returns a Windows keychain backed by Windows Credential Manager.
+func New() (Keychain, error) {
 	return &windowsKeychain{}, nil
 }
 
@@ -40,12 +40,24 @@ func (k *windowsKeychain) Get(service string) (string, error) {
 	}
 
 	var cred *credential
-	ret, _, _ := credRead.Call(uintptr(unsafe.Pointer(targetPtr)), 1, 0, uintptr(unsafe.Pointer(&cred)))
+	// unsafe.Pointer(targetPtr): CredReadW expects LPCWSTR (uintptr); UTF16Ptr already
+	// points into a Go-managed []uint16 that the GC won't collect while targetPtr is live.
+	ret, _, _ := credRead.Call(uintptr(unsafe.Pointer(targetPtr)), 1, 0,
+		// unsafe.Pointer(&cred): CredReadW writes a PCREDENTIAL* into this pointer.
+		// We pass the address of a Go *credential; the Win32 API populates it with a pointer
+		// to a credential struct whose memory layout matches our credential struct exactly.
+		uintptr(unsafe.Pointer(&cred)))
 	if ret == 0 {
 		return "", ErrKeyNotFound
 	}
+	// unsafe.Pointer(cred): CredFree takes a PVOID pointing to the PCREDENTIAL
+	// allocated by CredReadW; this frees the Win32-allocated memory.
 	defer credFree.Call(uintptr(unsafe.Pointer(cred)))
 
+	// unsafe.Pointer(cred.credentialBlob): credentialBlob is *byte pointing to raw
+	// UTF-16LE bytes written by CredReadW. We reinterpret the pointer as a fixed-size
+	// [1 << 20]uint16 array (upper bound) and slice to credentialBlobSize/2 uint16s.
+	// Memory layout: the blob is contiguous uint16 code units, no padding.
 	return syscall.UTF16ToString((*[1 << 20]uint16)(unsafe.Pointer(cred.credentialBlob))[:cred.credentialBlobSize/2]), nil
 }
 
@@ -71,9 +83,17 @@ func (k *windowsKeychain) Set(service, value string) error {
 	cred.persist = 2  // CRED_PERSIST_LOCAL_MACHINE
 	cred.credType = 1 // CRED_TYPE_GENERIC
 	cred.targetName = targetPtr
+	// unsafe.Pointer(valuePtr): CredWrite expects credentialBlob as *BYTE pointing to
+	// the UTF-16LE encoded secret. valuePtr is *uint16 from UTF16PtrFromString; we cast
+	// through unsafe.Pointer to *byte because Go's type system won't allow the direct
+	// conversion. The pointer targets a Go-managed []uint16 that won't be GC'd during
+	// the CredWriteW call.
 	cred.credentialBlob = (*byte)(unsafe.Pointer(valuePtr))
 	cred.credentialBlobSize = uint32(len(value) * 2)
 
+	// unsafe.Pointer(&cred): CredWriteW takes PCREDENTIALA — a pointer to the struct
+	// whose fields are populated above. The memory layout of our credential struct must
+	// exactly match the Win32 CREDENTIAL struct; any field reordering would corrupt the call.
 	ret, _, _ := credWrite.Call(uintptr(unsafe.Pointer(&cred)), 0)
 	if ret == 0 {
 		return ErrKeychainUnavailable
@@ -94,6 +114,9 @@ func (k *windowsKeychain) Delete(service string) error {
 		return ErrKeychainUnavailable
 	}
 
+	// unsafe.Pointer(targetPtr): CredDeleteW expects LPCWSTR (uintptr) for the target
+	// name. Same pattern as CredReadW — Go-managed UTF16 pointer passed through unsafe
+	// conversion to match the Win32 calling convention.
 	ret, _, _ := credDelete.Call(uintptr(unsafe.Pointer(targetPtr)), 1, 0)
 	if ret == 0 {
 		return ErrKeyNotFound
