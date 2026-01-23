@@ -47,7 +47,7 @@ func (r *Rollback) Chain(limit int) ([]RollbackEntry, error) {
 		limit = 20
 	}
 
-	commits, err := r.git.Log(false, "")
+	commits, err := r.git.LogAll()
 	if err != nil {
 		return nil, fmt.Errorf("chain: %w", err)
 	}
@@ -71,7 +71,7 @@ func (r *Rollback) Chain(limit int) ([]RollbackEntry, error) {
 		isCurrent := c.Hash == head
 		var diff string
 		if !isCurrent {
-			d, err := r.git.Diff(c.Hash, "HEAD")
+			d, err := r.git.DiffRefs(c.Hash, "HEAD")
 			if err != nil {
 				diff = fmt.Sprintf("[diff unavailable: %v]", err)
 			} else {
@@ -97,7 +97,7 @@ func (r *Rollback) CurrentHead() (string, error) {
 // Preview returns the diff between the given commit hash and HEAD.
 // Output is capped at types.BashOutputLimit (50,000 characters).
 func (r *Rollback) Preview(hash string) (string, error) {
-	diff, err := r.git.Diff(hash, "HEAD")
+	diff, err := r.git.DiffRefs(hash, "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("preview: %w", err)
 	}
@@ -133,7 +133,7 @@ func (r *Rollback) SoftReset(hash string, onReset func(newHead string) error) (*
 		return nil, fmt.Errorf("soft reset: %w", err)
 	}
 
-	// M-28: Invoke callback to sync TASKS.md or other state
+	// Invoke callback to sync TASKS.md or other state
 	if onReset != nil {
 		if cbErr := onReset(newHead); cbErr != nil {
 			return nil, fmt.Errorf("soft reset callback: %w", cbErr)
@@ -252,7 +252,7 @@ func (r *Rollback) countCommitsBetween(startHash, endHash string) (int, error) {
 		return 0, nil
 	}
 
-	commits, err := r.git.Log(false, "")
+	commits, err := r.git.LogAll()
 	if err != nil {
 		return 0, err
 	}
