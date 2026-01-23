@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -24,17 +25,20 @@ type Manager struct {
 	baseDir         string // path to ~/.m31a/sessions
 	sessionIDBytes  int    // number of random bytes for session IDs (default 4 = 8 hex chars)
 	maxRecentModels int    // max recent models to track (default 10)
+	sessionCacheTTL time.Duration // TTL for session list cache
 
-	// Session list cache (2-second TTL to avoid repeated filesystem walks)
+	// Session list cache (configurable TTL to avoid repeated filesystem walks)
 	sessionCache     []SessionInfo
 	sessionCacheTime time.Time
 	cacheMu          sync.RWMutex
+	refreshMu        sync.Mutex // serializes cache refresh to prevent redundant walks
 }
 
 // ManagerOpts holds optional settings for the Manager.
 type ManagerOpts struct {
-	SessionIDBytes  int // Number of random bytes (4 = 8 hex chars). 0 = default.
-	MaxRecentModels int // Max recent models. 0 = default (10).
+	SessionIDBytes  int           // Number of random bytes (4 = 8 hex chars). 0 = default.
+	MaxRecentModels int           // Max recent models. 0 = default (10).
+	SessionCacheTTL time.Duration // TTL for session list cache. 0 = default (2s).
 }
 
 // NewManager creates a Manager with the given base directory and optional settings.
@@ -45,10 +49,14 @@ func NewManager(baseDir string, opts ManagerOpts) *Manager {
 	if opts.MaxRecentModels <= 0 {
 		opts.MaxRecentModels = types.DefaultMaxRecentModels
 	}
+	if opts.SessionCacheTTL <= 0 {
+		opts.SessionCacheTTL = types.DefaultSessionCacheTTL
+	}
 	return &Manager{
 		baseDir:         baseDir,
 		sessionIDBytes:  opts.SessionIDBytes,
 		maxRecentModels: opts.MaxRecentModels,
+		sessionCacheTTL: opts.SessionCacheTTL,
 	}
 }
 
@@ -73,6 +81,25 @@ func (m *Manager) atomicWrite(path string, data []byte) error {
 // ensureDir creates the directory at path (including parents) with DirPermission perms.
 func (m *Manager) ensureDir(path string) error {
 	return os.MkdirAll(path, types.DirPermission)
+}
+
+// readFileLimited reads a file with a size limit to prevent OOM from corrupted
+// or maliciously crafted session files. Returns the file contents or an error.
+func readFileLimited(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	limited := io.LimitReader(f, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds maximum size limit of %d bytes", path, maxBytes)
+	}
+	return data, nil
 }
 
 // sessionJSONPath returns the path to the session.json file for the given ID.
@@ -120,7 +147,7 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 		return nil, fmt.Errorf("failed to generate unique session ID after 10 attempts")
 	}
 
-	// L-13: Validate generated ID format
+	// Validate generated ID format
 	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
 		return nil, fmt.Errorf("generated invalid session ID: %w", err)
 	}
@@ -171,7 +198,7 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 
 	sessionPath := m.sessionJSONPath(id)
 
-	data, err := os.ReadFile(sessionPath)
+	data, err := readFileLimited(sessionPath, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("session %s not found at %s: %w", id, sessionPath, m31errors.ErrSessionNotFound)
@@ -187,7 +214,7 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 		return nil, fmt.Errorf("corrupt JSON in session.json for session %s: %w", id, m31errors.ErrSessionCorrupted)
 	}
 
-	// H-17: Validate required fields.
+	// Validate required fields.
 	if session.ID == "" {
 		return nil, fmt.Errorf("session %s has missing ID: %w", id, m31errors.ErrSessionCorrupted)
 	}
@@ -207,7 +234,7 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	}
 
 	// Try to load messages (graceful degradation if missing)
-	msgData, err := os.ReadFile(m.messagesJSONPath(id))
+	msgData, err := readFileLimited(m.messagesJSONPath(id), types.MaxSessionFileSize)
 	if err == nil {
 		var messages []types.Message
 		if err := json.Unmarshal(msgData, &messages); err == nil {
@@ -220,7 +247,7 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	}
 	session.MessageCount = len(session.Messages)
 
-	// M-6: Record resume timestamp. ResumedAt is nil for first load,
+	// Record resume timestamp. ResumedAt is nil for first load,
 	// updated to now on every subsequent load.
 	now := time.Now()
 	session.ResumedAt = &now
@@ -280,9 +307,23 @@ func (m *Manager) saveSessionAtomic(session *Session) error {
 // ListSessions returns all session directories sorted by last-modified descending.
 // Session directories with missing or corrupt session.json are marked Corrupted=true.
 func (m *Manager) ListSessions() ([]SessionInfo, error) {
-	// Check cache first (2-second TTL)
+	// Check cache first (configurable TTL)
 	m.cacheMu.RLock()
-	if time.Since(m.sessionCacheTime) < 2*time.Second && m.sessionCache != nil {
+	if time.Since(m.sessionCacheTime) < m.sessionCacheTTL && m.sessionCache != nil {
+		result := make([]SessionInfo, len(m.sessionCache))
+		copy(result, m.sessionCache)
+		m.cacheMu.RUnlock()
+		return result, nil
+	}
+	m.cacheMu.RUnlock()
+
+	// Serialize refreshes so concurrent callers don't all do filesystem walks
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+
+	// Re-check cache: another goroutine may have refreshed while we waited
+	m.cacheMu.RLock()
+	if time.Since(m.sessionCacheTime) < m.sessionCacheTTL && m.sessionCache != nil {
 		result := make([]SessionInfo, len(m.sessionCache))
 		copy(result, m.sessionCache)
 		m.cacheMu.RUnlock()
@@ -313,7 +354,7 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 
 		// Try to read session.json
 		sessionPath := m.sessionJSONPath(entry.Name())
-		data, err := os.ReadFile(sessionPath)
+		data, err := readFileLimited(sessionPath, types.MaxSessionFileSize)
 		if err != nil {
 			info.Corrupted = true
 			// Use directory modtime as fallback
@@ -541,7 +582,7 @@ func (m *Manager) recentModelsPath() string {
 // it returns an empty RecentModelsData with initialized fields.
 func (m *Manager) LoadRecentModels() (*RecentModelsData, error) {
 	path := m.recentModelsPath()
-	data, err := os.ReadFile(path)
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &RecentModelsData{
