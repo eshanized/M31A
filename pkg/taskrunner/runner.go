@@ -134,8 +134,17 @@ func (r *Runner) Schedule() ([][]int, error) {
 
 // ExecuteGroup runs all tasks in the group sequentially.
 // Dependencies must have been completed in prior groups.
-func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
+// The provided ctx is used as the parent context for all tasks, ensuring
+// that cancellation (e.g. from TUI shutdown) propagates to running tasks.
+func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) error {
 	for _, id := range group {
+		// Check parent context cancellation before starting each task
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		idx, ok := r.idToIdx[id]
 		if !ok {
 			return fmt.Errorf("task %d: not found in runner", id)
@@ -182,25 +191,38 @@ func (r *Runner) ExecuteGroup(group []int, fn ExecuteFunc) error {
 		var result TaskResult
 		maxAttempts := r.MaxRetries + 1
 		for attempt := 0; attempt < maxAttempts; attempt++ {
+			var taskCtx context.Context
+			var cancel context.CancelFunc
 			if fn != nil {
-				var cancel context.CancelFunc
-				var taskCtx context.Context
 				if r.TaskTimeout > 0 {
-					taskCtx, cancel = context.WithTimeout(context.Background(), r.TaskTimeout)
+					taskCtx, cancel = context.WithTimeout(ctx, r.TaskTimeout)
 				} else {
-					taskCtx, cancel = context.Background(), func() {}
+					taskCtx, cancel = context.WithCancel(ctx)
 				}
 				result = fn(taskCtx, task)
-				cancel()
 			} else {
+				taskCtx, cancel = context.WithCancel(ctx)
 				result = TaskResult{Success: true}
 			}
 
 			if result.Success || attempt == maxAttempts-1 {
+				cancel()
 				break
 			}
-			// Brief backoff before retry
-			time.Sleep(time.Duration(attempt+1) * time.Second)
+
+			// Use cancellable backoff instead of blocking time.Sleep
+			// so context cancellation takes effect immediately.
+			backoff := time.Duration(attempt+1) * time.Second
+			timer := time.NewTimer(backoff)
+			select {
+			case <-timer.C:
+				// Backoff completed, continue to next attempt
+			case <-taskCtx.Done():
+				timer.Stop()
+				cancel()
+				return taskCtx.Err()
+			}
+			cancel()
 		}
 
 		r.results[task.ID] = result
