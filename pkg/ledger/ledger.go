@@ -1,7 +1,3 @@
-// Package ledger implements a cross-session learning ledger that records
-// every shipped session's metadata to a persistent markdown file
-// (~/.m31a/LEDGER.md). The ledger supports append, filtered queries,
-// aggregate statistics, and automatic truncation.
 package ledger
 
 import (
@@ -41,7 +37,7 @@ type Ledger struct {
 	path    string
 	entries []LedgerEntry
 
-	// M-16: Stats cache with mtime-based invalidation.
+	// Stats cache with mtime-based invalidation.
 	statsCache      LedgerStats
 	statsCacheMtime time.Time
 }
@@ -130,7 +126,7 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// H-18: Dedup by SessionID — reject duplicates with typed error.
+	// Dedup by SessionID — reject duplicates with typed error.
 	for _, e := range l.entries {
 		if e.SessionID == entry.SessionID {
 			return fmt.Errorf("entry already exists for session %s: %w", entry.SessionID, m31errors.ErrTaskFailed)
@@ -139,7 +135,7 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 
 	l.entries = append(l.entries, entry)
 
-	// H-16: Atomic write via temp file + rename.
+	// Atomic write via temp file + rename.
 	return l.rewriteFile()
 }
 
@@ -240,7 +236,7 @@ func (l *Ledger) Stats() LedgerStats {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// M-16: Check mtime-based cache
+	// Check mtime-based cache
 	if info, err := os.Stat(l.path); err == nil {
 		if l.statsCacheMtime.Equal(info.ModTime()) && l.statsCache.TotalSessions == len(l.entries) {
 			return l.statsCache
@@ -287,7 +283,7 @@ func (l *Ledger) Stats() LedgerStats {
 	// Top frameworks
 	stats.TopFrameworks = topN(frameworkCounts, 5)
 
-	// M-16: Update stats cache
+	// Update stats cache
 	if info, err := os.Stat(l.path); err == nil {
 		l.statsCache = stats
 		l.statsCacheMtime = info.ModTime()
