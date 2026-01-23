@@ -51,7 +51,7 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 // Returns nil without error if the file does not exist (graceful degradation).
 func (m *Manager) LoadProject(sessionID string) (*types.ProjectState, error) {
 	path := filepath.Join(m.planningDirPath(sessionID), "PROJECT.md")
-	data, err := os.ReadFile(path)
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -137,7 +137,7 @@ func (m *Manager) SaveTasks(sessionID string, tasks []types.Task) error {
 // Returns an empty slice without error if the file does not exist.
 func (m *Manager) LoadTasks(sessionID string) ([]types.Task, error) {
 	path := filepath.Join(m.planningDirPath(sessionID), "TASKS.md")
-	data, err := os.ReadFile(path)
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []types.Task{}, nil
@@ -257,7 +257,7 @@ func (m *Manager) SaveState(sessionID string, phase types.WorkflowPhase, progres
 // Returns empty/default values without error if the file does not exist.
 func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progress, lastAction string, timestamp time.Time, err error) {
 	path := filepath.Join(m.planningDirPath(sessionID), "STATE.md")
-	data, readErr := os.ReadFile(path)
+	data, readErr := readFileLimited(path, types.MaxSessionFileSize)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
 			return types.PhaseIdle, "", "", time.Time{}, nil
