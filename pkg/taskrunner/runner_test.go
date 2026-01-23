@@ -176,7 +176,7 @@ func TestRunner_ExecuteFunction(t *testing.T) {
 	}
 
 	for _, group := range groups {
-		if err := r.ExecuteGroup(group, execFn); err != nil {
+		if err := r.ExecuteGroup(context.Background(), group, execFn); err != nil {
 			t.Fatalf("ExecuteGroup failed: %v", err)
 		}
 	}
@@ -214,7 +214,7 @@ func TestRunner_FailedDependencyBlocking(t *testing.T) {
 		return TaskResult{Success: true}
 	}
 
-	if err := r.ExecuteGroup(groups[0], failFn); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[0], failFn); err != nil {
 		t.Fatalf("ExecuteGroup 0 failed: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestRunner_FailedDependencyBlocking(t *testing.T) {
 	}
 
 	// Execute group 1 — task 2 should be skipped
-	if err := r.ExecuteGroup(groups[1], failFn); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[1], failFn); err != nil {
 		t.Fatalf("ExecuteGroup 1 failed: %v", err)
 	}
 
@@ -250,17 +250,17 @@ func TestRunner_SkipPropagation(t *testing.T) {
 	r.results[1] = TaskResult{Success: false, Error: "skipped"}
 
 	// Execute group 0 — task 1 already skipped, stays skipped
-	if err := r.ExecuteGroup(groups[0], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[0], nil); err != nil {
 		t.Fatalf("ExecuteGroup 0 failed: %v", err)
 	}
 
 	// Execute group 1 — task 2 should skip because dep 1 is skipped
-	if err := r.ExecuteGroup(groups[1], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[1], nil); err != nil {
 		t.Fatalf("ExecuteGroup 1 failed: %v", err)
 	}
 
 	// Execute group 2 — task 3 should skip because dep 2 is skipped
-	if err := r.ExecuteGroup(groups[2], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[2], nil); err != nil {
 		t.Fatalf("ExecuteGroup 2 failed: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestRunner_StatusTracking(t *testing.T) {
 	}
 
 	groups, _ := r.Schedule()
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		return TaskResult{Success: true, CommitHash: "abc123"}
 	})
 
@@ -306,7 +306,7 @@ func TestRunner_Summary(t *testing.T) {
 	groups, _ := r.Schedule()
 
 	// Execute with mixed results
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		switch task.ID {
 		case 1:
 			return TaskResult{Success: true}
@@ -346,7 +346,7 @@ func TestRunner_AllDone(t *testing.T) {
 	}
 
 	groups, _ := r.Schedule()
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		return TaskResult{Success: true}
 	})
 
@@ -399,7 +399,7 @@ func TestRunner_ComplexDAG(t *testing.T) {
 		return TaskResult{Success: true}
 	}
 	for _, group := range groups {
-		if err := r.ExecuteGroup(group, execFn); err != nil {
+		if err := r.ExecuteGroup(context.Background(), group, execFn); err != nil {
 			t.Fatalf("ExecuteGroup failed: %v", err)
 		}
 	}
@@ -428,7 +428,7 @@ func TestRunner_Tasks(t *testing.T) {
 
 	// Execute tasks
 	groups, _ := r.Schedule()
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		return TaskResult{Success: true}
 	})
 
@@ -482,7 +482,7 @@ func TestRunner_ExecuteGroupNilFn(t *testing.T) {
 	}
 
 	// Execute with nil function — should succeed with default TaskResult
-	if err := r.ExecuteGroup(groups[0], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[0], nil); err != nil {
 		t.Fatalf("ExecuteGroup with nil fn should not error: %v", err)
 	}
 
@@ -515,7 +515,7 @@ func TestRunner_ExecuteGroupTerminalStates(t *testing.T) {
 				return TaskResult{Success: true}
 			}
 
-			if err := r.ExecuteGroup(groups[0], execFn); err != nil {
+			if err := r.ExecuteGroup(context.Background(), groups[0], execFn); err != nil {
 				t.Fatalf("ExecuteGroup should not error: %v", err)
 			}
 
@@ -535,7 +535,7 @@ func TestRunner_ExecuteGroupTaskNotFound(t *testing.T) {
 
 	// Try to execute a task ID that doesn't exist
 	group := []int{999}
-	err := r.ExecuteGroup(group, nil)
+	err := r.ExecuteGroup(context.Background(), group, nil)
 	if err == nil {
 		t.Fatal("Expected error for non-existent task ID")
 	}
@@ -558,7 +558,7 @@ func TestRunner_ExecuteGroupDependencyNotDone(t *testing.T) {
 	r.status[1] = types.StatusPending
 
 	// Execute group 1 — task 2 should skip because dep 1 is not done
-	if err := r.ExecuteGroup(groups[1], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[1], nil); err != nil {
 		t.Fatalf("ExecuteGroup should not error: %v", err)
 	}
 
@@ -584,7 +584,7 @@ func TestRunner_ExecuteGroupUnrecoverableDependency(t *testing.T) {
 	r.status[1] = types.StatusUnrecoverable
 
 	// Execute group 1 — task 2 should skip
-	if err := r.ExecuteGroup(groups[1], nil); err != nil {
+	if err := r.ExecuteGroup(context.Background(), groups[1], nil); err != nil {
 		t.Fatalf("ExecuteGroup should not error: %v", err)
 	}
 
@@ -598,7 +598,7 @@ func TestRunner_ResultsReturnsCopy(t *testing.T) {
 	r := New(tasks)
 
 	groups, _ := r.Schedule()
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		return TaskResult{Success: true, Output: "hello"}
 	})
 
@@ -642,7 +642,7 @@ func TestRunner_Callbacks(t *testing.T) {
 	}
 
 	for _, group := range groups {
-		if err := r.ExecuteGroup(group, execFn); err != nil {
+		if err := r.ExecuteGroup(context.Background(), group, execFn); err != nil {
 			t.Fatalf("ExecuteGroup failed: %v", err)
 		}
 	}
@@ -667,7 +667,7 @@ func TestRunner_CallbacksNotCalledWhenNil(t *testing.T) {
 
 	// No callbacks set — should not panic
 	groups, _ := r.Schedule()
-	r.ExecuteGroup(groups[0], func(ctx context.Context, task types.Task) TaskResult {
+	r.ExecuteGroup(context.Background(), groups[0], func(ctx context.Context, task types.Task) TaskResult {
 		return TaskResult{Success: true}
 	})
 
