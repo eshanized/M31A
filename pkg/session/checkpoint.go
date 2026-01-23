@@ -54,7 +54,7 @@ func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
 // Used internally by SaveCheckpoint for read-trim-write without sorting.
 func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
 	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
-	data, err := os.ReadFile(path)
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Checkpoint{}, nil
@@ -72,18 +72,18 @@ func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
 
 // LoadCheckpoints reads all checkpoints from checkpoint.json for the given session.
 // Returns an empty slice without error if the file does not exist.
-// L-16: Prunes old checkpoints, keeping only the 2 most recent.
-// CR-10: Falls back to archived path if the primary session directory no longer exists.
+// Prunes old checkpoints, keeping only the 2 most recent.
+// Falls back to archived path if the primary session directory no longer exists.
 func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
-	data, err := os.ReadFile(path)
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
 		}
-		// CR-10: Try archived path if session was archived
+		// Try archived path if session was archived
 		archivedPath := filepath.Join(m.baseDir, "archived", sessionID, "checkpoint.json")
-		data, err = os.ReadFile(archivedPath)
+		data, err = readFileLimited(archivedPath, types.MaxSessionFileSize)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return []Checkpoint{}, nil
@@ -98,7 +98,7 @@ func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 		return nil, fmt.Errorf("cannot unmarshal checkpoints: %w", err)
 	}
 
-	// L-16: Sort by timestamp descending (newest first) and prune to max 2.
+	// Sort by timestamp descending (newest first) and prune to max 2.
 	sort.Slice(checkpoints, func(i, j int) bool {
 		return checkpoints[i].Timestamp.After(checkpoints[j].Timestamp)
 	})
