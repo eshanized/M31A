@@ -34,6 +34,10 @@ type workflowEngineInterface interface {
 	SetGit(g *git.Git)
 	SessionID() string
 	HealTask(ctx context.Context, taskID int) bool
+	SubmitDiscussAnswer(index int, answer string) error
+	FinalizeDiscuss() error
+	SkipDiscuss() error
+	DiscussState() workflow.DiscussState
 }
 
 // AppState is the top-level Bubble Tea model.
