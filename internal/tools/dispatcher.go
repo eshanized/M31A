@@ -147,6 +147,19 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		}
 		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %s. Raw input: %s", call.Name, err, rawInput)
 	}
+	// Normalize direct args vs nested params: if the model sent
+	// {"path":"..."} (direct) instead of {"params":{"path":"..."}} (nested),
+	// treat the whole input object as the params map.
+	if len(input.Params) == 0 {
+		var direct map[string]any
+		if err := json.Unmarshal(call.Input, &direct); err == nil {
+			delete(direct, "name")
+			delete(direct, "params")
+			if len(direct) > 0 {
+				input.Params = direct
+			}
+		}
+	}
 	input.Name = call.Name
 
 	d.mu.RLock()
