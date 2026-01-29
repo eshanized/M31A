@@ -172,6 +172,15 @@ type DiscussAnswerTimeoutMsg struct {
 	QuestionIndex int
 }
 
+// DiscussAnswerMsg carries a single discuss answer to the AppState for submission to the workflow engine.
+type DiscussAnswerMsg struct {
+	Index  int
+	Answer string
+}
+
+// DiscussCompleteMsg signals that all discuss questions have been answered and the engine should finalize.
+type DiscussCompleteMsg struct{}
+
 // ─── Workflow messages ────────────────────────────────────────────────────────
 
 // PhaseResultMsg carries the result of a completed workflow phase.
@@ -281,4 +290,14 @@ type SidebarRefreshMsg struct {
 type SidebarFile struct {
 	Path   string
 	Status string
+}
+
+// SessionRenameMsg is emitted when the user triggers a rename on a session in the browser.
+type SessionRenameMsg struct {
+	SessionID string
+}
+
+// SessionExportMsg is emitted when the user triggers an export on a session in the browser.
+type SessionExportMsg struct {
+	SessionID string
 }
