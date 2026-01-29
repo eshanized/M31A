@@ -20,6 +20,47 @@ import (
 
 // Init implements tea.Model. It starts the health ticker and permission listener.
 func (m *AppState) Init() tea.Cmd {
+	// Session retention cleanup: remove sessions older than configured retention.
+	if m.sessionManager != nil && m.config != nil {
+		retentionDays := m.config.Features.SessionRetentionDays
+		if retentionDays <= 0 {
+			retentionDays = 30
+		}
+		if removed, err := m.sessionManager.Cleanup(time.Duration(retentionDays) * 24 * time.Hour); err != nil {
+			slog.Warn("session cleanup failed", "removed", removed, "error", err)
+		} else if removed > 0 {
+			slog.Info("session cleanup completed", "removed", removed)
+		}
+	}
+
+	// Startup routing decision: skip first-run if provider is already configured.
+	hasProvider := m.registry != nil && m.activeProvider != ""
+	if hasProvider {
+		m.screen = ScreenREPL
+		m.ensureReplModel()
+
+		baseCmds := []tea.Cmd{
+			m.routeToScreen(),
+			NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),
+		}
+		if m.dispatcher != nil {
+			baseCmds = append(baseCmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
+			baseCmds = append(baseCmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))
+		}
+		if m.sidebarModel != nil {
+			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
+		}
+
+		if m.resumeSessionID != "" {
+			resumeID := m.resumeSessionID
+			m.resumeSessionID = ""
+			baseCmds = append(baseCmds, m.loadAndRestoreSession(resumeID, true))
+			return tea.Batch(baseCmds...)
+		}
+		baseCmds = append(baseCmds, m.startNewSession())
+		return tea.Batch(baseCmds...)
+	}
+
 	cmds := []tea.Cmd{
 		m.routeToScreen(),
 		NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),
@@ -28,7 +69,6 @@ func (m *AppState) Init() tea.Cmd {
 		cmds = append(cmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
 		cmds = append(cmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))
 	}
-	// Trigger initial sidebar git status refresh
 	if m.sidebarModel != nil {
 		cmds = append(cmds, m.sidebarModel.refreshCmd())
 	}
@@ -133,13 +173,19 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			return PhaseResultMsg{Phase: phase, Success: true}
 		}
 		return PhaseResultMsg{
-			Phase:    phase,
-			Tasks:    result.Tasks,
-			Messages: result.Messages,
-			Success:  result.Error == "",
-			Error:    result.Error,
-			Usage:    result.Usage,
-			Cost:     result.Cost,
+			Phase:               phase,
+			Tasks:               result.Tasks,
+			Messages:            result.Messages,
+			Success:             result.Error == "",
+			Error:               result.Error,
+			NeedsAnswers:        result.NeedsAnswers,
+			RequiresManualInput: result.RequiresManualInput,
+			DurationMs:          result.DurationMs,
+			Usage:               result.Usage,
+			Cost:                result.Cost,
+			ToolCalls:           result.ToolCalls,
+			Commits:             result.Commits,
+			DiffStats:           result.DiffStats,
 		}
 	}
 }
