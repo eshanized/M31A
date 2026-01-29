@@ -90,9 +90,9 @@ func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Skip current question
 			return dm, dm.advanceQuestion("")
 		case "ctrl+s":
-			// Skip all remaining
+			// Skip all remaining questions
 			return dm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return DiscussCompleteMsg{}
 			}
 		case "enter":
 			ans := strings.TrimSpace(dm.input.Value())
@@ -111,13 +111,14 @@ func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // advanceQuestion records the answer and moves to next question or emits final msg.
 func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
+	currentIndex := dm.current
 	if dm.current < len(dm.questions) {
 		dm.answers[dm.current] = answer
 	}
 
-	// Emit answer message
+	// Emit answer for this specific question
 	answerCmd := func() tea.Msg {
-		return QuestionResponseMsg{Answer: answer}
+		return DiscussAnswerMsg{Index: currentIndex, Answer: answer}
 	}
 
 	dm.current++
@@ -129,9 +130,9 @@ func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
 	}
 
 	if dm.current >= len(dm.questions) {
-		// All done — emit the last answer along with navigation
+		// All done — emit the last answer then signal completion
 		return tea.Batch(answerCmd, func() tea.Msg {
-			return AppMsg{Screen: ScreenREPL}
+			return DiscussCompleteMsg{}
 		})
 	}
 	return answerCmd
