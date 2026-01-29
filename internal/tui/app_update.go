@@ -1,12 +1,14 @@
 package tui
 
 import (
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
@@ -83,6 +85,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			cs, _ := m.replModel.handleStreamErrorMsg(msg)
 			cmds = append(cmds, cs...)
+		}
+		// Auto-fallback on rate limit or provider unreachable
+		if m.config != nil && m.config.Provider.AutoFallback && m.registry != nil {
+			if stderrors.Is(msg.Err, m31errors.ErrRateLimited) || stderrors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
+				cmds = append(cmds, m.attemptAutoFallback(msg.Err))
+			}
 		}
 	case TickMsg:
 		if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
@@ -174,6 +182,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case QuestionResponseMsg:
 		cmds = append(cmds, m.handleQuestionResponse(msg))
+
+	// ── Discuss Q&A ────────────────────────────────────────────────────────
+	case DiscussAnswerMsg:
+		cmds = append(cmds, m.handleDiscussAnswer(msg))
+
+	case DiscussCompleteMsg:
+		cmds = append(cmds, m.handleDiscussComplete())
 
 	// ── Workflow phase result ─────────────────────────────────────────────────
 	case PhaseResultMsg:
@@ -392,7 +407,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg("Error: " + errors.UserMessage(msg.Err)))
+			m.replModel.AddMessage(makeAssistantMsg("Error: " + m31errors.UserMessage(msg.Err)))
 		}
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
@@ -1053,7 +1068,7 @@ func (m *AppState) startNewSession() tea.Cmd {
 	sess, err := m.sessionManager.NewSession(modelID, m.activeProvider)
 	if err != nil {
 		slog.Error("new session failed", "err", err)
-		m.addToast("Failed to create session: "+errors.UserMessage(err), "error")
+		m.addToast("Failed to create session: "+m31errors.UserMessage(err), "error")
 		return nil
 	}
 
@@ -1204,4 +1219,64 @@ func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) tea.Cmd {
 
 	m.dispatcher.RespondQuestion(reqID, msg.Answer)
 	return questionListenerCmd(m.shutdownCtx, m.dispatcher)
+}
+
+// handleDiscussAnswer submits a single discuss answer to the workflow engine.
+func (m *AppState) handleDiscussAnswer(msg DiscussAnswerMsg) tea.Cmd {
+	if m.workflowEngine == nil {
+		return nil
+	}
+	if err := m.workflowEngine.SubmitDiscussAnswer(msg.Index, msg.Answer); err != nil {
+		slog.Warn("failed to submit discuss answer", "index", msg.Index, "error", err)
+	}
+	return nil
+}
+
+// handleDiscussComplete finalizes the discuss phase and transitions to planning.
+func (m *AppState) handleDiscussComplete() tea.Cmd {
+	if m.workflowEngine == nil {
+		return nil
+	}
+	if err := m.workflowEngine.FinalizeDiscuss(); err != nil {
+		slog.Error("failed to finalize discuss", "error", err)
+		m.addToast("Failed to save discuss answers", "error")
+		return nil
+	}
+	m.setWorkflowPhase(types.PhasePlan)
+	m.screen = ScreenPlan
+	if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan); err != nil {
+		slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", types.PhasePlan, "error", err)
+	}
+	m.persistWorkflowState()
+	return m.RunPhaseCmd(types.PhasePlan)
+}
+
+// attemptAutoFallback tries to switch to a fallback provider when the active one fails.
+func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
+	if m.registry == nil || m.activeProvider == "" {
+		return nil
+	}
+
+	result := provider.FindFallbackWithRetryAfter(m.registry, m.activeProvider, "")
+	if result.Err != nil {
+		slog.Warn("auto-fallback failed: no healthy fallback provider", "error", result.Err)
+		return m.addToastCmd("Auto-fallback failed: no healthy provider available", "error", 5*time.Second)
+	}
+	if result.Event == nil {
+		return nil
+	}
+
+	oldProvider := m.activeProvider
+	m.activeProvider = result.Event.To
+	m.addToast(fmt.Sprintf("Switched to %s (was %s: %s)", result.Event.To, oldProvider, result.Event.Reason), "warning")
+
+	// Update workflow engine if active
+	if m.workflowEngine != nil {
+		p := m.registry.ActiveProvider()
+		if p != nil && m.activeModel != nil {
+			m.workflowEngine.SetModel(m.activeModel.ID, p)
+		}
+	}
+
+	return nil
 }
