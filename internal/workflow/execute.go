@@ -265,20 +265,27 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			continue
 		}
 
-		// Commit changes
+		// Commit changes scoped to task files only
 		var commitHash string
 		if len(task.Files) > 0 && e.git != nil {
-			if err := e.git.AddAll(); err != nil {
-				e.logger.Warn("git add failed", "task", task.ID, "error", err)
-			}
-			if err := e.git.Commit(fmt.Sprintf("%s: %s", e.gitConfig().CommitPrefix, task.Description)); err != nil {
+			hash, err := e.git.CommitWithFiles(
+				fmt.Sprintf("%s: %s", e.gitConfig().CommitPrefix, task.Description),
+				task.Files...,
+			)
+			if err != nil {
 				e.logger.Warn("commit failed", "task", task.ID, "error", err)
 			} else {
-				var hashErr error
-				commitHash, hashErr = e.git.HeadHash()
-				if hashErr != nil {
-					e.logger.Warn("git HeadHash failed after commit", "task", task.ID, "error", hashErr)
-				}
+				commitHash = hash
+			}
+		}
+
+		// Guard: fail file-changing tasks that produced no tool calls
+		if toolCallCount == 0 && len(task.Files) > 0 {
+			return taskrunner.TaskResult{
+				Success:    false,
+				Error:      "no tool calls produced for file-changing task",
+				DurationMs: time.Since(start).Milliseconds(),
+				ToolCalls:  toolCallCount,
 			}
 		}
 
@@ -376,20 +383,17 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		}
 	}
 
-	// Commit fix
+	// Commit fix scoped to task files
 	var commitHash string
 	if len(task.Files) > 0 && e.git != nil {
-		if err := e.git.AddAll(); err != nil {
-			e.logger.Warn("git add failed during heal", "task", task.ID, "error", err)
-		}
-		if err := e.git.Commit(fmt.Sprintf("%s: %s", e.gitConfig().FixPrefix, task.Description)); err != nil {
+		hash, err := e.git.CommitWithFiles(
+			fmt.Sprintf("%s: %s", e.gitConfig().FixPrefix, task.Description),
+			task.Files...,
+		)
+		if err != nil {
 			e.logger.Warn("heal commit failed", "task", task.ID, "error", err)
 		} else {
-			var hashErr error
-			commitHash, hashErr = e.git.HeadHash()
-			if hashErr != nil {
-				e.logger.Warn("git HeadHash failed after heal commit", "task", task.ID, "error", hashErr)
-			}
+			commitHash = hash
 		}
 	}
 
