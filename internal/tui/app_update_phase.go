@@ -41,16 +41,23 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 
 	case types.PhaseDiscuss:
 		if msg.NeedsAnswers {
-			m.screen = ScreenDiscuss
-			if m.discussModel == nil {
-				m.discussModel = NewDiscussModel(
-					m.themeManager.Current(),
-					m.discussQuestions,
-					m.width, m.height,
-				)
+			// Read questions from the workflow engine's discuss state
+			if m.workflowEngine != nil {
+				ds := m.workflowEngine.DiscussState()
+				m.discussQuestions = ds.Questions
 			}
+			m.screen = ScreenDiscuss
+			m.discussModel = NewDiscussModel(
+				m.themeManager.Current(),
+				m.discussQuestions,
+				m.width, m.height,
+			)
 			m.persistWorkflowState()
 			return nil
+		}
+		// No questions — skip directly to plan
+		if m.workflowEngine != nil {
+			_ = m.workflowEngine.SkipDiscuss()
 		}
 		m.setWorkflowPhase(types.PhasePlan)
 		m.screen = ScreenPlan
