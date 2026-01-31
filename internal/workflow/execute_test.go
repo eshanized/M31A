@@ -38,9 +38,9 @@ func TestEngine_RunExecute_WithTasks(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	// Save a task
+	// Save an analysis-only task (no Files) so prose response succeeds
 	tasks := []m31types.Task{
-		{ID: 1, Action: "Create", Description: "Create main.go", Dependencies: []int{}, Files: []string{"main.go"}, AcceptanceCriteria: []string{"compiles"}, Status: m31types.StatusPending},
+		{ID: 1, Action: "Analyze", Description: "Review codebase", Dependencies: []int{}, AcceptanceCriteria: []string{"report"}, Status: m31types.StatusPending},
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
@@ -122,9 +122,9 @@ func TestEngine_ExecuteTaskWithTools_ToolDispatch(t *testing.T) {
 	mp.response = "Done"
 
 	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
-	// With no tool calls parsed, the task should still succeed
-	if !result.Success {
-		t.Errorf("Expected execute to succeed, got error: %s", result.Error)
+	// File-changing task with no tool calls should fail (G05 guard)
+	if result.Success {
+		t.Errorf("Expected file-changing task to fail with no tool calls")
 	}
 }
 
@@ -217,13 +217,13 @@ func TestEngine_ExecuteTaskWithTools_EmptyResponse(t *testing.T) {
 	}
 	allTasks := []m31types.Task{task}
 
-	// Empty response — should not crash
+	// Empty response — should fail for file-changing task (G05 guard)
 	mp := engine.provider.(*mockProvider)
 	mp.response = ""
 
 	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
-	if !result.Success {
-		t.Errorf("Expected execute to succeed with empty response, got error: %s", result.Error)
+	if result.Success {
+		t.Errorf("Expected execute to fail with empty response for file-changing task")
 	}
 }
 
