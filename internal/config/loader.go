@@ -602,6 +602,8 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 	// OpenRouter
 	if key := os.Getenv("M31A_OPENROUTER_API_KEY"); key != "" {
 		c.Provider.OpenRouter.APIKey = key
+	} else if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
+		c.Provider.OpenRouter.APIKey = key
 	} else if kc != nil {
 		if k, err := kc.Get("openrouter"); err == nil {
 			c.Provider.OpenRouter.APIKey = k
@@ -615,6 +617,8 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 
 	// Zen
 	if key := os.Getenv("M31A_ZEN_API_KEY"); key != "" {
+		c.Provider.Zen.APIKey = key
+	} else if key := os.Getenv("ZEN_API_KEY"); key != "" {
 		c.Provider.Zen.APIKey = key
 	} else if kc != nil {
 		if k, err := kc.Get("zen"); err == nil {
