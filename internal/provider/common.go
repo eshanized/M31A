@@ -36,6 +36,8 @@ func IsContextExceeded(statusCode int, body string) bool {
 }
 
 // BuildChatBody constructs the standard chat completion request body.
+// Tool definitions are NOT sent as native provider tools in V1 — they are
+// included in the system prompt text and parsed via text JSON extraction.
 func BuildChatBody(req ChatRequest) map[string]any {
 	body := map[string]any{
 		"model":    req.Model,
@@ -44,9 +46,6 @@ func BuildChatBody(req ChatRequest) map[string]any {
 	}
 	if req.MaxTokens > 0 {
 		body["max_tokens"] = req.MaxTokens
-	}
-	if len(req.Tools) > 0 {
-		body["tools"] = req.Tools
 	}
 	if req.ReasoningEnabled {
 		body = ApplyReasoningParams(req.Model, body)
