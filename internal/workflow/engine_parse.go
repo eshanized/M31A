@@ -476,6 +476,12 @@ func normalizeToolName(name string) string {
 		return "AskUserQuestion"
 	case "web_fetch", "fetch", "http_get":
 		return "WebFetch"
+	case "filelist", "list_files", "ls", "list_dir":
+		return "FileList"
+	case "filedelete", "delete_file", "rm_file", "remove_file":
+		return "FileDelete"
+	case "filemove", "move_file", "rename", "rename_file":
+		return "FileMove"
 	default:
 		return name
 	}
