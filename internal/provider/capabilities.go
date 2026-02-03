@@ -9,14 +9,26 @@ import (
 // defaultReasoningPatterns are the default ID patterns that indicate reasoning/thinking models.
 var defaultReasoningPatterns = []string{"/o1", "/o3", "/o4"}
 
+// toolCapablePatterns are model ID patterns known to support function calling / tool use.
+var toolCapablePatterns = []string{
+	"claude", "gpt", "gemini", "deepseek", "qwen",
+	"llama", "mistral", "command-r", "command-a",
+}
+
 // ParseModelCapabilities infers capability flags from the model ID using heuristics.
 // extraReasoningPatterns are additional patterns to check for reasoning detection
 // (e.g., Zen uses "-r1" which OpenRouter does not).
-// Tools capability defaults to true for all models since most modern LLMs support function calling.
+// Tools capability defaults to false and is only set true for known tool-capable model families.
 func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) types.CapFlags {
 	id := strings.ToLower(modelID)
-	caps := types.CapFlags{
-		Tools: true,
+	caps := types.CapFlags{}
+
+	// Check tool capability against known tool-capable model families
+	for _, p := range toolCapablePatterns {
+		if strings.Contains(id, p) {
+			caps.Tools = true
+			break
+		}
 	}
 
 	// Build combined reasoning patterns
