@@ -82,6 +82,27 @@ last_reviewed: 2026-06-06
 - Parameters: `question` (required), `header`, `options`, `allow_custom`, `timeout`
 - The tool blocks until the user answers or the timeout expires
 
+## FileList
+
+- Use for: listing files and directories in a path with metadata (size, type)
+- Parameters: `path` (directory to list, default ".")
+- Returns: file names, sizes, and whether each entry is a directory
+- Prefer over: `ls` in Bash for structured directory listings
+
+## FileDelete
+
+- Use for: safely deleting a file with automatic backup before removal
+- Parameters: `path` (required) — the file to delete
+- Backup: the file is backed up before deletion for recovery
+- Never use for: deleting directories (use Bash `rm -r` instead)
+
+## FileMove
+
+- Use for: renaming or moving a file to a new path
+- Parameters: `source` (required), `destination` (required)
+- Creates parent directories for the destination if they don't exist
+- Prefer over: `mv` in Bash for single-file moves
+
 ## General Rules
 
 - If a tool fails, diagnose the issue before retrying.
