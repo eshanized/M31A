@@ -48,8 +48,16 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	runner := taskrunner.New(tasks)
 	total, done, failed, skipped := runner.Summary()
 
-	// 2. Final git commit
+	// 2. Final git commit — ship intentionally commits all remaining changes,
+	// but warn if there are pre-existing dirty files unrelated to the workflow.
 	if e.git != nil {
+		if dirty, _ := e.git.HasUncommittedChanges(); dirty {
+			statusOut, _ := e.git.StatusPorcelain()
+			if len(statusOut) > 0 {
+				e.logger.Warn("ship commit will include uncommitted changes",
+					"dirty_files", len(statusOut))
+			}
+		}
 		if err := e.git.AddAll(); err != nil {
 			e.logger.Warn("git add all before ship commit failed", "error", err)
 		}
