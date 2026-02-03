@@ -124,7 +124,38 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		}
 	}
 
-	// Project-type-specific validation
+	// Configured build/test commands take precedence over auto-detection
+	hasCustomBuild := e.cfg != nil && e.cfg.Verify.BuildCommand != ""
+	hasCustomTest := e.cfg != nil && e.cfg.Verify.TestCommand != ""
+
+	if hasCustomBuild {
+		vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(vctx, "sh", "-c", e.cfg.Verify.BuildCommand)
+		cmd.Dir = e.workDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("configured build command failed: %s", string(out)))
+			result.SyntaxOK = false
+		}
+	}
+
+	if hasCustomTest {
+		vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(vctx, "sh", "-c", e.cfg.Verify.TestCommand)
+		cmd.Dir = e.workDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("configured test command failed: %s", string(out)))
+			result.TestsOK = false
+		}
+	}
+
+	// Skip auto-detection if custom commands were configured
+	if hasCustomBuild && hasCustomTest {
+		return result
+	}
+
+	// Project-type-specific validation (only if not overridden by config)
 	projectType := detectProjectType(e.workDir)
 	switch projectType {
 	case "go":
@@ -135,7 +166,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				break
 			}
 		}
-		if hasGo {
+		if hasGo && !hasCustomBuild {
 			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 			defer cancel()
 			cmd := exec.CommandContext(vctx, "go", "build", "./...")
@@ -154,16 +185,26 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				break
 			}
 		}
-		if hasJS {
-			// Check for package.json and try npm test or tsc
+		if hasJS && !hasCustomBuild {
+			// Check for package.json and try npm build or tsc
 			if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
 				vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 				defer cancel()
-				cmd := exec.CommandContext(vctx, "sh", "-c", "npm run build 2>&1 || tsc --noEmit 2>&1 || true")
+				// Try npm run build first, fall back to tsc --noEmit
+				cmd := exec.CommandContext(vctx, "sh", "-c", "npm run build 2>&1")
 				cmd.Dir = e.workDir
-				if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
-					// Log but don't fail — build may have warnings
-					e.logger.Info("nodejs build output", "output", string(out))
+				out, buildErr := cmd.CombinedOutput()
+				if buildErr != nil {
+					// Try tsc as fallback
+					tscCtx, tscCancel := context.WithTimeout(ctx, verifyTaskTimeout)
+					defer tscCancel()
+					tscCmd := exec.CommandContext(tscCtx, "sh", "-c", "tsc --noEmit 2>&1")
+					tscCmd.Dir = e.workDir
+					tscOut, tscErr := tscCmd.CombinedOutput()
+					if tscErr != nil {
+						result.Errors = append(result.Errors, fmt.Sprintf("nodejs build failed: %s; tsc fallback: %s", string(out), string(tscOut)))
+						result.SyntaxOK = false
+					}
 				}
 			}
 		}
@@ -197,7 +238,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				break
 			}
 		}
-		if hasRust {
+		if hasRust && !hasCustomBuild {
 			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 			defer cancel()
 			cmd := exec.CommandContext(vctx, "cargo", "check")
@@ -210,7 +251,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	}
 
 	// Test execution
-	if hasTestFiles(e.workDir, task.Files) {
+	if hasTestFiles(e.workDir, task.Files) && !hasCustomTest {
 		switch projectType {
 		case "go":
 			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
@@ -224,18 +265,20 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		case "nodejs":
 			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 			defer cancel()
-			cmd := exec.CommandContext(vctx, "sh", "-c", "npm test 2>&1 || true")
+			cmd := exec.CommandContext(vctx, "sh", "-c", "npm test 2>&1")
 			cmd.Dir = e.workDir
-			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
-				e.logger.Info("npm test output", "output", string(out))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("npm test failed: %s", string(out)))
+				result.TestsOK = false
 			}
 		case "python":
 			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
 			defer cancel()
-			cmd := exec.CommandContext(vctx, "sh", "-c", "python3 -m pytest 2>&1 || true")
+			cmd := exec.CommandContext(vctx, "sh", "-c", "python3 -m pytest 2>&1")
 			cmd.Dir = e.workDir
-			if out, err := cmd.CombinedOutput(); err == nil && len(out) > 0 {
-				e.logger.Info("pytest output", "output", string(out))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("pytest failed: %s", string(out)))
+				result.TestsOK = false
 			}
 		}
 	}
