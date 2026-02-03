@@ -68,8 +68,10 @@ max_entries = 100             # Maximum ledger entries
 | Variable | Description |
 |----------|-------------|
 | `M31A_CONFIG` | Override config file path (default: `~/.m31a/config.toml`) |
-| `OPENROUTER_API_KEY` | OpenRouter API key (highest priority) |
-| `ZEN_API_KEY` | Zen API key (highest priority) |
+| `M31A_OPENROUTER_API_KEY` | OpenRouter API key (highest priority) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (fallback if M31A_ prefix not set) |
+| `M31A_ZEN_API_KEY` | Zen API key (highest priority) |
+| `ZEN_API_KEY` | Zen API key (fallback if M31A_ prefix not set) |
 | `M31A_LOG_FORMAT` | Log format: `json` or `text` (default: `json`) |
 | `M31A_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` (default: `info`) |
 
@@ -77,7 +79,7 @@ max_entries = 100             # Maximum ledger entries
 
 API keys are resolved in the following order (first match wins):
 
-1. **Environment variable** (`OPENROUTER_API_KEY` or `ZEN_API_KEY`)
+1. **Environment variable** — `M31A_OPENROUTER_API_KEY` / `M31A_ZEN_API_KEY` (preferred), or `OPENROUTER_API_KEY` / `ZEN_API_KEY` (standard fallback)
 2. **OS keychain** (`m31a/openrouter` or `m31a/zen` service entries)
 3. **Config file** (`provider.openrouter.api_key` or `provider.zen.api_key`)
 
