@@ -79,6 +79,8 @@ func (g *Git) AddAll() error {
 }
 
 // Commit stages all changes and creates a commit with the given message.
+// WARNING: This stages the entire worktree. Use CommitWithFiles or
+// CommitStaged for scoped commits.
 func (g *Git) Commit(message string) error {
 	if err := g.AddAll(); err != nil {
 		return err
@@ -88,6 +90,17 @@ func (g *Git) Commit(message string) error {
 		return fmt.Errorf("git commit: %w", err)
 	}
 	return nil
+}
+
+// CommitStaged creates a commit from already-staged changes only.
+// Does not stage any additional files.
+func (g *Git) CommitStaged(message string) (string, error) {
+	_, err := g.run("commit", "-m", message)
+	if err != nil {
+		return "", fmt.Errorf("git commit: %w", err)
+	}
+	hash, _ := g.HeadHash()
+	return hash, nil
 }
 
 // CommitWithFiles stages and commits only the given paths with the given message.
