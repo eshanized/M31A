@@ -80,6 +80,7 @@ type Engine struct {
 	execCommand      func(name string, args ...string) *exec.Cmd
 	msgEmitter       MsgEmitter
 	callCounter      int64
+	totalCost        float64 // cumulative cost for budget tracking
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -160,6 +161,17 @@ func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
 
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
+	// Budget guardrail: check cumulative cost before each phase
+	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
+		if e.totalCost >= e.cfg.Features.BudgetLimitUSD {
+			return &PhaseResult{
+				Phase:   phase,
+				Success: false,
+				Error:   fmt.Sprintf("budget limit exceeded: $%.4f spent of $%.4f limit", e.totalCost, e.cfg.Features.BudgetLimitUSD),
+			}, fmt.Errorf("budget limit exceeded: $%.4f of $%.4f", e.totalCost, e.cfg.Features.BudgetLimitUSD)
+		}
+	}
+
 	start := time.Now()
 	e.activePhase = phase
 
@@ -186,6 +198,10 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	if result != nil {
 		result.DurationMs = time.Since(start).Milliseconds()
 		result.Phase = phase
+		// Accumulate cost for budget tracking
+		if result.Cost > 0 {
+			e.totalCost += result.Cost
+		}
 	}
 
 	return result, err
