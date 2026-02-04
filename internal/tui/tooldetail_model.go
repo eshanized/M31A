@@ -1,0 +1,91 @@
+package tui
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
+)
+
+// ToolDetailModel shows expanded tool output with full content and scrolling.
+type ToolDetailModel struct {
+	theme    theme.Theme
+	title    string
+	content  string
+	viewport viewport.Model
+	width    int
+	height   int
+}
+
+// NewToolDetailModel creates a ToolDetailModel.
+func NewToolDetailModel(t theme.Theme, w, h int) *ToolDetailModel {
+	vp := viewport.New(w-4, h-8)
+	return &ToolDetailModel{
+		theme:    t,
+		viewport: vp,
+		width:    w,
+		height:   h,
+	}
+}
+
+// SetContent sets the tool output content.
+func (td *ToolDetailModel) SetContent(title, content string) {
+	td.title = title
+	td.content = content
+	td.viewport.SetContent(content)
+}
+
+// SetTheme updates the theme.
+func (td *ToolDetailModel) SetTheme(t theme.Theme) {
+	td.theme = t
+}
+
+// SetDimensions updates dimensions.
+func (td *ToolDetailModel) SetDimensions(w, h int) {
+	td.width = w
+	td.height = h
+	td.viewport = viewport.New(w-4, h-8)
+	if td.content != "" {
+		td.viewport.SetContent(td.content)
+	}
+}
+
+// Init implements tea.Model.
+func (td *ToolDetailModel) Init() tea.Cmd { return nil }
+
+// Update implements tea.Model.
+func (td *ToolDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		td.SetDimensions(msg.Width, msg.Height)
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q":
+			return td, func() tea.Msg { return PopScreenMsg{} }
+		case "g":
+			td.viewport.GotoTop()
+			return td, nil
+		case "G":
+			td.viewport.GotoBottom()
+			return td, nil
+		}
+	}
+	var cmd tea.Cmd
+	td.viewport, cmd = td.viewport.Update(msg)
+	return td, cmd
+}
+
+// View implements tea.Model.
+func (td *ToolDetailModel) View() string {
+	t := td.theme
+
+	header := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
+		Render(td.title)
+
+	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("[g/G] Top/Bottom   [esc] Back")
+
+	return strings.Join([]string{"", header, "", td.viewport.View(), "", footer}, "\n")
+}
