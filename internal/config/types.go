@@ -202,6 +202,9 @@ type FeaturesConfig struct {
 	HealthCheckTimeoutSecs int `toml:"health_check_timeout_secs"`
 	// Rate limit backoff in seconds. Default 120.
 	RateLimitBackoffSecs int `toml:"rate_limit_backoff_secs"`
+	// Optional per-session budget limit in USD. 0 means no limit.
+	// When set, workflow phases check cumulative cost before proceeding.
+	BudgetLimitUSD float64 `toml:"budget_limit_usd"`
 }
 
 type LedgerConfig struct {
