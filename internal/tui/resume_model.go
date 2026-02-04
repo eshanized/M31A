@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/session"
@@ -8,19 +11,28 @@ import (
 
 // ResumeModel shows the session browser so the user can resume a past session.
 type ResumeModel struct {
-	theme    theme.Theme
-	sessions []session.SessionInfo
-	cursor   int
-	offset   int
-	width    int
-	height   int
+	theme        theme.Theme
+	sessions     []session.SessionInfo
+	allSessions  []session.SessionInfo // unfiltered list for search reset
+	cursor       int
+	offset       int
+	width        int
+	height       int
+	searchInput  textinput.Model
+	searching    bool
 }
 
 // NewResumeModel creates a ResumeModel.
 func NewResumeModel(sessions []session.SessionInfo, t theme.Theme) *ResumeModel {
+	ti := textinput.New()
+	ti.Placeholder = "Search sessions..."
+	ti.CharLimit = 100
+
 	return &ResumeModel{
-		theme:    t,
-		sessions: sessions,
+		theme:       t,
+		sessions:    sessions,
+		allSessions: sessions,
+		searchInput: ti,
 	}
 }
 
@@ -37,10 +49,34 @@ func (rm *ResumeModel) SetDimensions(w, h int) {
 
 // Refresh replaces the session list (called after re-fetching).
 func (rm *ResumeModel) Refresh(sessions []session.SessionInfo) {
-	rm.sessions = sessions
-	if rm.cursor >= len(sessions) {
-		rm.cursor = max(0, len(sessions)-1)
+	rm.allSessions = sessions
+	if rm.searching {
+		rm.filterSessions()
+	} else {
+		rm.sessions = sessions
 	}
+	if rm.cursor >= len(rm.sessions) {
+		rm.cursor = max(0, len(rm.sessions)-1)
+	}
+}
+
+// filterSessions applies the current search text to filter the session list.
+func (rm *ResumeModel) filterSessions() {
+	query := strings.ToLower(rm.searchInput.Value())
+	if query == "" {
+		rm.sessions = rm.allSessions
+		return
+	}
+	var filtered []session.SessionInfo
+	for _, s := range rm.allSessions {
+		if strings.Contains(strings.ToLower(s.ID), query) ||
+			strings.Contains(strings.ToLower(s.Label), query) {
+			filtered = append(filtered, s)
+		}
+	}
+	rm.sessions = filtered
+	rm.cursor = 0
+	rm.offset = 0
 }
 
 // Init implements tea.Model.
@@ -56,11 +92,34 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		rm.height = msg.Height
 		return rm, nil
 	case tea.KeyMsg:
+		if rm.searching {
+			switch msg.String() {
+			case "esc":
+				rm.searching = false
+				rm.searchInput.SetValue("")
+				rm.sessions = rm.allSessions
+				rm.cursor = 0
+				rm.offset = 0
+				return rm, nil
+			case "enter":
+				rm.searching = false
+				return rm, nil
+			default:
+				var cmd tea.Cmd
+				rm.searchInput, cmd = rm.searchInput.Update(msg)
+				rm.filterSessions()
+				return rm, cmd
+			}
+		}
 		switch msg.String() {
 		case "esc", "q":
 			return rm, func() tea.Msg {
 				return AppMsg{Screen: ScreenREPL}
 			}
+		case "/":
+			rm.searching = true
+			rm.searchInput.Focus()
+			return rm, textinput.Blink
 		case "up", "k":
 			if rm.cursor > 0 {
 				rm.cursor--
@@ -82,11 +141,26 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "n":
-			// New session
 			return rm, func() tea.Msg {
 				return AppMsg{
 					Screen: ScreenREPL,
 					Action: "new_session",
+				}
+			}
+		case "r":
+			// Rename selected session (emitted to AppState for handling)
+			if len(rm.sessions) > 0 {
+				id := rm.sessions[rm.cursor].ID
+				return rm, func() tea.Msg {
+					return SessionRenameMsg{SessionID: id}
+				}
+			}
+		case "e":
+			// Export selected session
+			if len(rm.sessions) > 0 {
+				id := rm.sessions[rm.cursor].ID
+				return rm, func() tea.Msg {
+					return SessionExportMsg{SessionID: id}
 				}
 			}
 		}
