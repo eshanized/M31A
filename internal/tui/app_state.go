@@ -38,6 +38,9 @@ type workflowEngineInterface interface {
 	FinalizeDiscuss() error
 	SkipDiscuss() error
 	DiscussState() workflow.DiscussState
+	PlanContent() string
+	PlanVersion() int
+	SetRefinementFeedback(feedback string)
 }
 
 // AppState is the top-level Bubble Tea model.
@@ -109,6 +112,16 @@ type AppState struct {
 	diffModel     *DiffModel
 	metricsModel  *MetricsModel
 	configModel   *ConfigModel
+	helpModel     *HelpModel
+
+	// New screens (Phase 3)
+	bisectModel       *BisectModel
+	themePickerModel  *ThemePickerModel
+	notifModel        *NotificationModel
+	dashboardModel    *DashboardModel
+	sessionDetailModel *SessionDetailModel
+	fileExplorerModel *FileExplorerModel
+	toolDetailModel   *ToolDetailModel
 
 	// Command system
 	cmdRegistry *CommandRegistry
