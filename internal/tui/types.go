@@ -32,6 +32,14 @@ const (
 	ScreenDiscuss       Screen = 14   // discuss Q&A
 	ScreenMetrics       Screen = 15   // session analytics
 	ScreenConfig        Screen = 16   // full config viewer
+	ScreenHelp          Screen = 17   // keybinding help overlay
+	ScreenBisect        Screen = 18   // git bisect interactive
+	ScreenThemePicker   Screen = 19   // theme browser/preview
+	ScreenNotifications Screen = 20   // notification history
+	ScreenDashboard     Screen = 21   // workflow pipeline overview
+	ScreenSessionDetail Screen = 22   // session detail preview
+	ScreenFileExplorer  Screen = 23   // file tree browser
+	ScreenToolDetail    Screen = 24   // expandable tool output
 )
 
 // Label returns a human-readable name for the screen.
@@ -71,6 +79,22 @@ func (s Screen) Label() string {
 		return "Metrics"
 	case ScreenConfig:
 		return "Config"
+	case ScreenHelp:
+		return "Help"
+	case ScreenBisect:
+		return "Bisect"
+	case ScreenThemePicker:
+		return "Themes"
+	case ScreenNotifications:
+		return "Notifications"
+	case ScreenDashboard:
+		return "Dashboard"
+	case ScreenSessionDetail:
+		return "Session"
+	case ScreenFileExplorer:
+		return "Files"
+	case ScreenToolDetail:
+		return "Tool Output"
 	default:
 		return "Unknown"
 	}
@@ -198,6 +222,8 @@ type PhaseResultMsg struct {
 	ToolCalls           int
 	Commits             []git.CommitInfo
 	DiffStats           workflow.DiffStats
+	Demonstration       string
+	ManualVerificationSteps []string
 }
 
 // PlanReadyMsg is emitted when the plan phase completes with valid tasks.
@@ -205,6 +231,19 @@ type PlanReadyMsg struct {
 	Tasks        []types.Task
 	CostEstimate string
 	TimeEstimate string
+}
+
+// PlanApproveMsg is emitted when the user approves the plan for execution.
+type PlanApproveMsg struct{}
+
+// PlanRefineMsg is emitted when the user submits refinement feedback for the plan.
+type PlanRefineMsg struct {
+	Feedback string
+}
+
+// DemonstrationReadyMsg carries the generated demonstration content to the TUI.
+type DemonstrationReadyMsg struct {
+	Content string
 }
 
 // ExecutePauseMsg is emitted when the user toggles pause/resume on execute screen.
@@ -301,3 +340,6 @@ type SessionRenameMsg struct {
 type SessionExportMsg struct {
 	SessionID string
 }
+
+// PopScreenMsg navigates back to the previous screen in the back-stack.
+type PopScreenMsg struct{}
