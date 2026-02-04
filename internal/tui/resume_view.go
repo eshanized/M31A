@@ -19,10 +19,24 @@ func (rm *ResumeModel) renderResume() string {
 		w = 80
 	}
 
+	// Search input bar
+	searchBar := ""
+	if rm.searching {
+		searchBar = lipgloss.NewStyle().Foreground(t.Brand).PaddingLeft(2).
+			Render("🔍 " + rm.searchInput.View())
+	}
+
 	if len(rm.sessions) == 0 {
-		empty := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("No sessions found. Press  n  to start a new one.")
-		return empty
+		emptyMsg := "No sessions found. Press  n  to start a new one."
+		if rm.searching && rm.searchInput.Value() != "" {
+			emptyMsg = "No sessions match your search."
+		}
+		empty := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(emptyMsg)
+		parts := []string{empty}
+		if searchBar != "" {
+			parts = append([]string{searchBar, ""}, parts...)
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	listH := rm.visibleRows()
@@ -38,14 +52,26 @@ func (rm *ResumeModel) renderResume() string {
 		rows = append(rows, renderSessionInfoRow(info, globalIdx == rm.cursor, w, t))
 	}
 
-	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render(fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.sessions)))
+	countInfo := fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.sessions))
+	if rm.searching || rm.searchInput.Value() != "" {
+		countInfo += fmt.Sprintf(" (filtered from %d)", len(rm.allSessions))
+	}
+	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(countInfo)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	hints := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+		Render("↑↓ navigate · enter resume · / search · r rename · e export · n new · q back")
+
+	parts := []string{
 		strings.Join(rows, "\n"),
 		"",
 		scrollInfo,
-	)
+		hints,
+	}
+	if searchBar != "" {
+		parts = append([]string{searchBar, ""}, parts...)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // renderSessionInfoRow renders a single session row from a SessionInfo.
