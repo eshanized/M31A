@@ -55,6 +55,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AppMsg:
 		cmds = append(cmds, m.handleAppMsg(msg))
 
+	// ── Pop screen (esc back navigation) ──────────────────────────────────────
+	case PopScreenMsg:
+		cmds = append(cmds, m.popScreen())
+
 	// ── Key action ────────────────────────────────────────────────────────────
 	case KeyActionMsg:
 		cmds = append(cmds, m.handleKeyAction(msg.Action))
@@ -183,6 +187,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case QuestionResponseMsg:
 		cmds = append(cmds, m.handleQuestionResponse(msg))
 
+	case tools.QuestionResponse:
+		cmds = append(cmds, m.handleQuestionResponse(QuestionResponseMsg{Answer: msg.Answer}))
+
 	// ── Discuss Q&A ────────────────────────────────────────────────────────
 	case DiscussAnswerMsg:
 		cmds = append(cmds, m.handleDiscussAnswer(msg))
@@ -196,6 +203,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PlanReadyMsg:
 		cmds = append(cmds, m.handlePlanReady(msg))
+
+	case PlanApproveMsg:
+		cmds = append(cmds, m.handlePlanApprove())
+
+	case PlanRefineMsg:
+		cmds = append(cmds, m.handlePlanRefine(msg))
+
+	case DemonstrationReadyMsg:
+		if m.shipModel != nil {
+			m.shipModel.SetDemonstration(msg.Content)
+		}
 
 	case ExecutePauseMsg:
 		if m.executeModel != nil {
@@ -374,10 +392,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.diffModel == nil {
 			m.diffModel = NewDiffModel(m.themeManager.Current())
 		}
-		m.diffModel.SetDiff(msg.Diff)
-		m.diffModel.SetTitle(msg.Title)
 		m.diffModel.width = m.width
 		m.diffModel.height = m.height
+		m.diffModel.SetDiff(msg.Diff)
+		m.diffModel.SetTitle(msg.Title)
 		if m.sidebarModel != nil {
 			m.sidebarModel.Blur()
 		}
@@ -452,6 +470,140 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				newDiscuss, cmd := m.discussModel.Update(msg)
 				if nd, ok := newDiscuss.(*DiscussModel); ok {
 					m.discussModel = nd
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenMetrics:
+			if m.metricsModel != nil {
+				newMetrics, cmd := m.metricsModel.Update(msg)
+				if nm, ok := newMetrics.(*MetricsModel); ok {
+					m.metricsModel = nm
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenGoalInput:
+			if m.goalInput != nil {
+				newGoal, cmd := m.goalInput.Update(msg)
+				if ng, ok := newGoal.(*GoalInputModel); ok {
+					m.goalInput = ng
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenLedger:
+			if m.ledgerModel != nil {
+				newLedger, cmd := m.ledgerModel.Update(msg)
+				if nl, ok := newLedger.(*LedgerModel); ok {
+					m.ledgerModel = nl
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenRollback:
+			if m.rollbackModel != nil {
+				newRB, cmd := m.rollbackModel.Update(msg)
+				if nr, ok := newRB.(*RollbackModel); ok {
+					m.rollbackModel = nr
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenConfig:
+			if m.configModel != nil {
+				newCfg, cmd := m.configModel.Update(msg)
+				m.configModel = newCfg
+				cmds = append(cmds, cmd)
+			}
+		case ScreenDiff:
+			if m.diffModel != nil {
+				newDiff, cmd := m.diffModel.Update(msg)
+				if nd, ok := newDiff.(*DiffModel); ok {
+					m.diffModel = nd
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenShip:
+			if m.shipModel != nil {
+				newShip, cmd := m.shipModel.Update(msg)
+				m.shipModel = newShip
+				cmds = append(cmds, cmd)
+			}
+		case ScreenPlan:
+			if m.planModel != nil {
+				newPlan, cmd := m.planModel.Update(msg)
+				m.planModel = newPlan
+				cmds = append(cmds, cmd)
+			}
+		case ScreenExecute:
+			if m.executeModel != nil {
+				newExec, cmd := m.executeModel.Update(msg)
+				m.executeModel = newExec
+				cmds = append(cmds, cmd)
+			}
+		case ScreenVerify:
+			if m.verifyModel != nil {
+				newVerify, cmd := m.verifyModel.Update(msg)
+				m.verifyModel = newVerify
+				cmds = append(cmds, cmd)
+			}
+		case ScreenHelp:
+			if m.helpModel != nil {
+				newHelp, cmd := m.helpModel.Update(msg)
+				if nh, ok := newHelp.(*HelpModel); ok {
+					m.helpModel = nh
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenBisect:
+			if m.bisectModel != nil {
+				newBisect, cmd := m.bisectModel.Update(msg)
+				if nb, ok := newBisect.(*BisectModel); ok {
+					m.bisectModel = nb
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenThemePicker:
+			if m.themePickerModel != nil {
+				newTP, cmd := m.themePickerModel.Update(msg)
+				if nt, ok := newTP.(*ThemePickerModel); ok {
+					m.themePickerModel = nt
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenNotifications:
+			if m.notifModel != nil {
+				newNotif, cmd := m.notifModel.Update(msg)
+				if nn, ok := newNotif.(*NotificationModel); ok {
+					m.notifModel = nn
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenDashboard:
+			if m.dashboardModel != nil {
+				newDash, cmd := m.dashboardModel.Update(msg)
+				if nd, ok := newDash.(*DashboardModel); ok {
+					m.dashboardModel = nd
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenSessionDetail:
+			if m.sessionDetailModel != nil {
+				newSD, cmd := m.sessionDetailModel.Update(msg)
+				if ns, ok := newSD.(*SessionDetailModel); ok {
+					m.sessionDetailModel = ns
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenFileExplorer:
+			if m.fileExplorerModel != nil {
+				newFE, cmd := m.fileExplorerModel.Update(msg)
+				if nf, ok := newFE.(*FileExplorerModel); ok {
+					m.fileExplorerModel = nf
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenToolDetail:
+			if m.toolDetailModel != nil {
+				newTD, cmd := m.toolDetailModel.Update(msg)
+				if nt, ok := newTD.(*ToolDetailModel); ok {
+					m.toolDetailModel = nt
 				}
 				cmds = append(cmds, cmd)
 			}
@@ -550,6 +702,53 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	if m.diffModel != nil {
 		m.diffModel.width = contentW
 		m.diffModel.height = contentH
+	}
+	if m.goalInput != nil {
+		m.goalInput.SetDimensions(contentW, contentH)
+	}
+	if m.ledgerModel != nil {
+		m.ledgerModel.SetDimensions(contentW, contentH)
+	}
+	if m.rollbackModel != nil {
+		m.rollbackModel.SetDimensions(contentW, contentH)
+	}
+	if m.shipModel != nil {
+		m.shipModel.width = contentW
+		m.shipModel.height = contentH
+	}
+	if m.firstRunModel != nil {
+		m.firstRunModel.SetContentWidth(contentW)
+	}
+	if m.configModel != nil {
+		m.configModel.width = contentW
+		m.configModel.height = contentH
+	}
+	if m.discussModel != nil {
+		m.discussModel.SetDimensions(contentW, contentH)
+	}
+	if m.helpModel != nil {
+		m.helpModel.SetDimensions(contentW, contentH)
+	}
+	if m.bisectModel != nil {
+		m.bisectModel.SetDimensions(contentW, contentH)
+	}
+	if m.themePickerModel != nil {
+		m.themePickerModel.SetDimensions(contentW, contentH)
+	}
+	if m.notifModel != nil {
+		m.notifModel.SetDimensions(contentW, contentH)
+	}
+	if m.dashboardModel != nil {
+		m.dashboardModel.SetDimensions(contentW, contentH)
+	}
+	if m.sessionDetailModel != nil {
+		m.sessionDetailModel.SetDimensions(contentW, contentH)
+	}
+	if m.fileExplorerModel != nil {
+		m.fileExplorerModel.SetDimensions(contentW, contentH)
+	}
+	if m.toolDetailModel != nil {
+		m.toolDetailModel.SetDimensions(contentW, contentH)
 	}
 
 	// UX-38: Notify when sidebar auto-hides due to narrow terminal
@@ -727,10 +926,76 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			return cmd
 		}
 	case ScreenMetrics:
-		switch msg.String() {
-		case "esc", "q":
-			m.screen = ScreenREPL
-			return nil
+		if m.metricsModel != nil {
+			newMetrics, cmd := m.metricsModel.Update(msg)
+			if nm, ok := newMetrics.(*MetricsModel); ok {
+				m.metricsModel = nm
+			}
+			return cmd
+		}
+	case ScreenHelp:
+		if m.helpModel != nil {
+			newHelp, cmd := m.helpModel.Update(msg)
+			if nh, ok := newHelp.(*HelpModel); ok {
+				m.helpModel = nh
+			}
+			return cmd
+		}
+	case ScreenBisect:
+		if m.bisectModel != nil {
+			newBisect, cmd := m.bisectModel.Update(msg)
+			if nb, ok := newBisect.(*BisectModel); ok {
+				m.bisectModel = nb
+			}
+			return cmd
+		}
+	case ScreenThemePicker:
+		if m.themePickerModel != nil {
+			newTP, cmd := m.themePickerModel.Update(msg)
+			if nt, ok := newTP.(*ThemePickerModel); ok {
+				m.themePickerModel = nt
+			}
+			return cmd
+		}
+	case ScreenNotifications:
+		if m.notifModel != nil {
+			newNotif, cmd := m.notifModel.Update(msg)
+			if nn, ok := newNotif.(*NotificationModel); ok {
+				m.notifModel = nn
+			}
+			return cmd
+		}
+	case ScreenDashboard:
+		if m.dashboardModel != nil {
+			newDash, cmd := m.dashboardModel.Update(msg)
+			if nd, ok := newDash.(*DashboardModel); ok {
+				m.dashboardModel = nd
+			}
+			return cmd
+		}
+	case ScreenSessionDetail:
+		if m.sessionDetailModel != nil {
+			newSD, cmd := m.sessionDetailModel.Update(msg)
+			if ns, ok := newSD.(*SessionDetailModel); ok {
+				m.sessionDetailModel = ns
+			}
+			return cmd
+		}
+	case ScreenFileExplorer:
+		if m.fileExplorerModel != nil {
+			newFE, cmd := m.fileExplorerModel.Update(msg)
+			if nf, ok := newFE.(*FileExplorerModel); ok {
+				m.fileExplorerModel = nf
+			}
+			return cmd
+		}
+	case ScreenToolDetail:
+		if m.toolDetailModel != nil {
+			newTD, cmd := m.toolDetailModel.Update(msg)
+			if nt, ok := newTD.(*ToolDetailModel); ok {
+				m.toolDetailModel = nt
+			}
+			return cmd
 		}
 	}
 	return nil
@@ -745,12 +1010,14 @@ func (m *AppState) handleAppMsg(msg AppMsg) tea.Cmd {
 		return nil
 	}
 
-	if msg.Screen != 0 || msg.Action != "" {
-		return m.routeAppMsgAction(msg)
-	}
-
+	// Check SessionID first — resume screen sends Screen=REPL + SessionID,
+	// and the session restore must take priority over screen routing.
 	if msg.SessionID != "" {
 		return m.loadAndRestoreSession(msg.SessionID, true)
+	}
+
+	if msg.Screen != 0 || msg.Action != "" {
+		return m.routeAppMsgAction(msg)
 	}
 
 	return nil
@@ -897,11 +1164,13 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
 			m.ledgerModel.width = m.width
 			m.ledgerModel.height = m.height
+			m.ledgerModel.LoadEntries()
 		}
 		return nil
 	case ScreenRollback:
 		if m.rollbackModel == nil {
 			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, m.width, m.height)
+			m.rollbackModel.LoadCommits()
 		}
 		return nil
 	case ScreenMetrics:
@@ -922,6 +1191,55 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.configModel.height = m.height
 		}
 		return nil
+	case ScreenHelp:
+		if m.helpModel == nil {
+			m.helpModel = NewHelpModel(m.themeManager.Current())
+		}
+		m.helpModel.SetDimensions(m.width, m.height)
+		return m.helpModel.Init()
+	case ScreenDiscuss:
+		if m.discussModel == nil {
+			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, m.width, m.height)
+		}
+		return m.discussModel.Init()
+	case ScreenBisect:
+		if m.bisectModel == nil {
+			m.bisectModel = NewBisectModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
+	case ScreenThemePicker:
+		if m.themePickerModel == nil {
+			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
+	case ScreenNotifications:
+		if m.notifModel == nil {
+			m.notifModel = NewNotificationModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
+	case ScreenDashboard:
+		if m.dashboardModel == nil {
+			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), m.width, m.height)
+		}
+		if m.workflowEngine != nil {
+			m.dashboardModel.SetWorkflowState(m.workflowPhase, m.workflowGoal, "", m.activeProvider)
+		}
+		return nil
+	case ScreenSessionDetail:
+		if m.sessionDetailModel == nil {
+			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
+	case ScreenFileExplorer:
+		if m.fileExplorerModel == nil {
+			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
+	case ScreenToolDetail:
+		if m.toolDetailModel == nil {
+			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), m.width, m.height)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -932,6 +1250,20 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 	switch action {
 	case "open_settings":
 		return m.navigateToScreen(ScreenSettings)
+	case "open_help":
+		return m.navigateToScreen(ScreenHelp)
+	case "open_ledger":
+		return m.navigateToScreen(ScreenLedger)
+	case "open_rollback":
+		return m.navigateToScreen(ScreenRollback)
+	case "open_dashboard":
+		return m.navigateToScreen(ScreenDashboard)
+	case "open_themes":
+		return m.navigateToScreen(ScreenThemePicker)
+	case "open_notifications":
+		return m.navigateToScreen(ScreenNotifications)
+	case "open_files":
+		return m.navigateToScreen(ScreenFileExplorer)
 	case "toggle_sidebar":
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
@@ -1050,6 +1382,51 @@ func (m *AppState) applyTheme(themeName string) {
 	if m.resumeModel != nil {
 		m.resumeModel.SetTheme(t)
 	}
+	if m.diffModel != nil {
+		m.diffModel.SetTheme(t)
+	}
+	if m.goalInput != nil {
+		m.goalInput.SetTheme(t)
+	}
+	if m.ledgerModel != nil {
+		m.ledgerModel.SetTheme(t)
+	}
+	if m.rollbackModel != nil {
+		m.rollbackModel.SetTheme(t)
+	}
+	if m.firstRunModel != nil {
+		m.firstRunModel.SetTheme(t)
+	}
+	if m.msModel != nil {
+		m.msModel.SetTheme(t)
+	}
+	if m.helpModel != nil {
+		m.helpModel.SetTheme(t)
+	}
+	if m.configModel != nil {
+		m.configModel.theme = t
+	}
+	if m.bisectModel != nil {
+		m.bisectModel.SetTheme(t)
+	}
+	if m.themePickerModel != nil {
+		m.themePickerModel.SetTheme(t)
+	}
+	if m.notifModel != nil {
+		m.notifModel.SetTheme(t)
+	}
+	if m.dashboardModel != nil {
+		m.dashboardModel.SetTheme(t)
+	}
+	if m.sessionDetailModel != nil {
+		m.sessionDetailModel.SetTheme(t)
+	}
+	if m.fileExplorerModel != nil {
+		m.fileExplorerModel.SetTheme(t)
+	}
+	if m.toolDetailModel != nil {
+		m.toolDetailModel.SetTheme(t)
+	}
 }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -1114,11 +1491,17 @@ func (m *AppState) openSettingsScreen() tea.Cmd {
 }
 
 // runWorkflowFromGoal starts the discuss → plan → execute workflow.
+// If m.workflowPhase is already set (e.g., from /resume-task), it resumes from that phase.
 func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 	m.workflowGoal = goal
 	cmds := []tea.Cmd{m.initWorkflowEngine()}
-	m.workflowPhase = types.PhaseInitialize
-	cmds = append(cmds, m.RunPhaseCmd(types.PhaseInitialize))
+	// Resume from existing phase if set, otherwise start from Initialize
+	startPhase := m.workflowPhase
+	if startPhase == types.PhaseIdle || startPhase == "" {
+		startPhase = types.PhaseInitialize
+	}
+	m.workflowPhase = startPhase
+	cmds = append(cmds, m.RunPhaseCmd(startPhase))
 	return tea.Batch(cmds...)
 }
 
