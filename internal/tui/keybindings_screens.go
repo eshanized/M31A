@@ -16,6 +16,13 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 
 	// Global bindings (available from any screen)
 	r.Register(CtxGlobal, "ctrl+x s", "Open settings", emit("open_settings"))
+	r.Register(CtxGlobal, "ctrl+x h", "Help", emit("open_help"))
+	r.Register(CtxGlobal, "ctrl+x l", "Ledger", emit("open_ledger"))
+	r.Register(CtxGlobal, "ctrl+x k", "Rollback", emit("open_rollback"))
+	r.Register(CtxGlobal, "ctrl+x d", "Dashboard", emit("open_dashboard"))
+	r.Register(CtxGlobal, "ctrl+x p", "Theme picker", emit("open_themes"))
+	r.Register(CtxGlobal, "ctrl+x !", "Notifications", emit("open_notifications"))
+	r.Register(CtxGlobal, "ctrl+x f", "File explorer", emit("open_files"))
 
 	// REPL bindings
 	r.Register(CtxREPL, "ctrl+x b", "Toggle sidebar", emit("toggle_sidebar"))

@@ -12,15 +12,27 @@ import (
 type KeyContext string
 
 const (
-	CtxGlobal    KeyContext = "global"
-	CtxREPL      KeyContext = "repl"
-	CtxPalette   KeyContext = "palette"
-	CtxSidebar   KeyContext = "sidebar"
-	CtxSettings  KeyContext = "settings"
-	CtxModelSel  KeyContext = "modelselector"
-	CtxResume    KeyContext = "resume"
-	CtxPermModal KeyContext = "permission"
-	CtxFirstRun  KeyContext = "firstrun"
+	CtxGlobal     KeyContext = "global"
+	CtxREPL       KeyContext = "repl"
+	CtxPalette    KeyContext = "palette"
+	CtxSidebar    KeyContext = "sidebar"
+	CtxSettings   KeyContext = "settings"
+	CtxModelSel   KeyContext = "modelselector"
+	CtxResume     KeyContext = "resume"
+	CtxPermModal  KeyContext = "permission"
+	CtxFirstRun   KeyContext = "firstrun"
+	CtxPlan       KeyContext = "plan"
+	CtxExecute    KeyContext = "execute"
+	CtxVerify     KeyContext = "verify"
+	CtxShip       KeyContext = "ship"
+	CtxDiscuss    KeyContext = "discuss"
+	CtxDiff       KeyContext = "diff"
+	CtxLedger     KeyContext = "ledger"
+	CtxRollback   KeyContext = "rollback"
+	CtxMetrics    KeyContext = "metrics"
+	CtxGoalInput  KeyContext = "goalinput"
+	CtxConfig     KeyContext = "config"
+	CtxHelp       KeyContext = "help"
 )
 
 // KeyAction is a callback that produces a tea.Cmd when a key chord fires.
