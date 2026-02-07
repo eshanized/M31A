@@ -265,6 +265,22 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderConfigContent(chrome)
 	case ScreenDiff:
 		return m.renderDiffContent(chrome)
+	case ScreenHelp:
+		return m.renderHelpContent(chrome)
+	case ScreenBisect:
+		return m.renderBisectContent(chrome)
+	case ScreenThemePicker:
+		return m.renderThemePickerContent(chrome)
+	case ScreenNotifications:
+		return m.renderNotificationsContent(chrome)
+	case ScreenDashboard:
+		return m.renderDashboardContent(chrome)
+	case ScreenSessionDetail:
+		return m.renderSessionDetailContent(chrome)
+	case ScreenFileExplorer:
+		return m.renderFileExplorerContent(chrome)
+	case ScreenToolDetail:
+		return m.renderToolDetailContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -387,6 +403,62 @@ func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 		return "Loading diff..."
 	}
 	return m.diffModel.View()
+}
+
+func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
+	if m.helpModel == nil {
+		return renderLoading("Loading help...", m.themeManager.Current())
+	}
+	return m.helpModel.View()
+}
+
+func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
+	if m.bisectModel == nil {
+		return renderLoading("Loading bisect...", m.themeManager.Current())
+	}
+	return m.bisectModel.View()
+}
+
+func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
+	if m.themePickerModel == nil {
+		return renderLoading("Loading themes...", m.themeManager.Current())
+	}
+	return m.themePickerModel.View()
+}
+
+func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
+	if m.notifModel == nil {
+		return renderLoading("Loading notifications...", m.themeManager.Current())
+	}
+	return m.notifModel.View()
+}
+
+func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
+	if m.dashboardModel == nil {
+		return renderLoading("Loading dashboard...", m.themeManager.Current())
+	}
+	return m.dashboardModel.View()
+}
+
+func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
+	if m.sessionDetailModel == nil {
+		return renderLoading("Loading session...", m.themeManager.Current())
+	}
+	return m.sessionDetailModel.View()
+}
+
+func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
+	if m.fileExplorerModel == nil {
+		return renderLoading("Loading files...", m.themeManager.Current())
+	}
+	return m.fileExplorerModel.View()
+}
+
+func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
+	if m.toolDetailModel == nil {
+		return renderLoading("Loading tool output...", m.themeManager.Current())
+	}
+	return m.toolDetailModel.View()
 }
 
 // renderPermissionModal renders the permission or question overlay.
