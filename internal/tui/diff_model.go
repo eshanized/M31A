@@ -96,7 +96,7 @@ func (dm *DiffModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return dm, nil
 	case DiffCloseMsg:
 		return dm, func() tea.Msg {
-			return AppMsg{Screen: ScreenREPL}
+			return PopScreenMsg{}
 		}
 	case tea.KeyMsg:
 		switch msg.String() {

@@ -14,17 +14,18 @@ import (
 
 // RollbackModel shows the git commit timeline and allows resetting to any commit.
 type RollbackModel struct {
-	theme    theme.Theme
-	git      *git.Git
-	rollback *rollback.Rollback
-	entries  []rollback.RollbackEntry
-	cursor   int
-	offset   int
-	viewport viewport.Model // shows diff for selected commit
-	showDiff bool
-	errMsg   string
-	width    int
-	height   int
+	theme        theme.Theme
+	git          *git.Git
+	rollback     *rollback.Rollback
+	entries      []rollback.RollbackEntry
+	cursor       int
+	offset       int
+	viewport     viewport.Model // shows diff for selected commit
+	showDiff     bool
+	errMsg       string
+	confirmReset string // "soft" or "hard" when awaiting confirmation
+	width        int
+	height       int
 }
 
 // NewRollbackModel creates a RollbackModel.
@@ -78,25 +79,31 @@ func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc", "q":
+			if rm.confirmReset != "" {
+				rm.confirmReset = ""
+				return rm, nil
+			}
 			if rm.showDiff {
 				rm.showDiff = false
 				return rm, nil
 			}
 			return rm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
 			}
 		case "up", "k":
+			rm.confirmReset = ""
 			if rm.cursor > 0 {
 				rm.cursor--
 				rm.clampScroll()
 			}
 		case "down", "j":
+			rm.confirmReset = ""
 			if rm.cursor < len(rm.entries)-1 {
 				rm.cursor++
 				rm.clampScroll()
 			}
 		case "enter", " ":
-			// Show diff for current entry
+			rm.confirmReset = ""
 			if len(rm.entries) > 0 {
 				e := rm.entries[rm.cursor]
 				vpH := rm.height - 8
@@ -108,29 +115,39 @@ func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				rm.showDiff = true
 			}
 		case "r":
-			// Soft reset to current entry
 			if len(rm.entries) > 0 && rm.rollback != nil {
-				e := rm.entries[rm.cursor]
-				_, err := rm.rollback.SoftReset(e.CommitInfo.Hash, nil)
-				if err != nil {
-					rm.errMsg = err.Error()
+				if rm.confirmReset == "soft" {
+					e := rm.entries[rm.cursor]
+					_, err := rm.rollback.SoftReset(e.CommitInfo.Hash, nil)
+					if err != nil {
+						rm.errMsg = err.Error()
+					} else {
+						rm.errMsg = ""
+						rm.LoadCommits()
+					}
+					rm.confirmReset = ""
 				} else {
-					rm.errMsg = ""
-					rm.LoadCommits()
+					rm.confirmReset = "soft"
 				}
 			}
 		case "R":
-			// Hard reset to current entry
 			if len(rm.entries) > 0 && rm.rollback != nil {
-				e := rm.entries[rm.cursor]
-				_, err := rm.rollback.HardReset(e.CommitInfo.Hash)
-				if err != nil {
-					rm.errMsg = err.Error()
+				if rm.confirmReset == "hard" {
+					e := rm.entries[rm.cursor]
+					_, err := rm.rollback.HardReset(e.CommitInfo.Hash)
+					if err != nil {
+						rm.errMsg = err.Error()
+					} else {
+						rm.errMsg = ""
+						rm.LoadCommits()
+					}
+					rm.confirmReset = ""
 				} else {
-					rm.errMsg = ""
-					rm.LoadCommits()
+					rm.confirmReset = "hard"
 				}
 			}
+		default:
+			rm.confirmReset = ""
 		}
 		if rm.showDiff {
 			var cmd tea.Cmd
@@ -162,7 +179,18 @@ func (rm *RollbackModel) View() string {
 	if rm.showDiff {
 		return rm.renderDiffView()
 	}
-	return rm.renderCommitList(w)
+
+	content := rm.renderCommitList(w)
+	if rm.confirmReset != "" {
+		action := "soft reset"
+		if rm.confirmReset == "hard" {
+			action = "HARD reset"
+		}
+		prompt := lipgloss.NewStyle().Foreground(t.Warning).Bold(true).PaddingLeft(2).
+			Render(fmt.Sprintf("Press %s again to confirm %s (any other key to cancel)", rm.confirmReset, action))
+		content = lipgloss.JoinVertical(lipgloss.Left, content, "", prompt)
+	}
+	return content
 }
 
 // renderCommitList renders the list of commits.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
@@ -33,35 +34,69 @@ type ShipSummary struct {
 
 // ShipModel displays the workflow completion summary.
 type ShipModel struct {
-	summary   ShipSummary
-	theme     theme.Theme
-	sessionID string
-	width     int
-	height    int
+	summary        ShipSummary
+	theme          theme.Theme
+	sessionID      string
+	width          int
+	height         int
+	demonstration  string
+	demoViewport   viewport.Model
+	showDemo       bool
 }
 
 // NewShipModel creates a ShipModel.
 func NewShipModel(summary ShipSummary, t theme.Theme, w, h int) *ShipModel {
-	return &ShipModel{
+	sm := &ShipModel{
 		summary: summary,
 		theme:   t,
 		width:   w,
 		height:  h,
 	}
+	sm.demoViewport = viewport.New(w-4, h-8)
+	return sm
+}
+
+// SetDemonstration sets the demonstration walkthrough content.
+func (sm *ShipModel) SetDemonstration(content string) {
+	sm.demonstration = content
+	sm.demoViewport.SetContent(content)
 }
 
 // Update handles ship screen key events.
 func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if sm.showDemo {
+			switch msg.String() {
+			case "j", "down":
+				sm.demoViewport.LineDown(1)
+			case "k", "up":
+				sm.demoViewport.LineUp(1)
+			case "d", "esc", "q":
+				sm.showDemo = false
+			case "enter", "n":
+				return sm, func() tea.Msg {
+					return PopScreenMsg{}
+				}
+			}
+			return sm, nil
+		}
 		switch msg.String() {
 		case "enter", "n":
 			return sm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
+			}
+		case "esc", "q":
+			return sm, func() tea.Msg {
+				return PopScreenMsg{}
 			}
 		case "d":
-			return sm, func() tea.Msg {
-				return AppMsg{Action: "view_ship_diff"}
+			if sm.demonstration != "" {
+				sm.showDemo = true
+			} else {
+				return sm, func() tea.Msg {
+					return AppMsg{Action: "view_ship_diff"}
+				}
 			}
 		}
 	}
@@ -70,6 +105,11 @@ func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 
 // View renders the ship summary screen inside a branded ThinBorder card.
 func (sm *ShipModel) View() string {
+	if sm.showDemo && sm.demonstration != "" {
+		header := lipgloss.NewStyle().Foreground(sm.theme.Brand).Bold(true).Render("Walkthrough") +
+			lipgloss.NewStyle().Foreground(sm.theme.TextMuted).Render("  [d] Stats  [Esc] Close")
+		return lipgloss.JoinVertical(lipgloss.Left, header, sm.demoViewport.View())
+	}
 	t := sm.theme
 	w := sm.width
 	if w < 50 {

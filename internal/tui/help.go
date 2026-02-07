@@ -67,12 +67,19 @@ func defaultHelpSections() []helpSection {
 		{
 			title: "Leader Key (ctrl+x ...)",
 			items: [][2]string{
-				{"x h", "Toggle help"},
-				{"x s", "Toggle sidebar"},
-				{"x p", "Command palette"},
+				{"x h", "Help screen"},
+				{"x s", "Settings"},
+				{"x b", "Toggle sidebar"},
+				{"x p", "Theme picker"},
 				{"x m", "Model selector"},
 				{"x r", "Resume session"},
 				{"x n", "New workflow"},
+				{"x l", "Learning ledger"},
+				{"x k", "Rollback browser"},
+				{"x t", "Toggle theme"},
+				{"x d", "Workflow dashboard"},
+				{"x f", "File explorer"},
+				{"x !", "Notifications"},
 			},
 		},
 		{
@@ -174,7 +181,7 @@ func (hm *HelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q", "?":
 			return hm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
 			}
 		case "g":
 			hm.viewport.GotoTop()

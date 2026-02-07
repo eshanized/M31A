@@ -74,7 +74,7 @@ func (lm *LedgerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return lm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
 			}
 		case "j", "down":
 			lm.viewport.LineDown(1)

@@ -206,7 +206,7 @@ func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc", "q":
-			return m, func() tea.Msg { return AppMsg{Screen: ScreenREPL} }
+			return m, func() tea.Msg { return PopScreenMsg{} }
 		case "e":
 			// Jump to the editable settings screen
 			return m, func() tea.Msg { return AppMsg{Screen: ScreenSettings} }
