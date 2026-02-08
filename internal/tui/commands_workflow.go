@@ -68,6 +68,14 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 		}
 	}
 
+	// Guard: don't navigate to phase screens if no workflow is active
+	if currentPhase == types.PhaseIdle || currentPhase == "" {
+		return CommandResult{
+			Success: false,
+			Message: "No active workflow. Use /new to start a workflow first.",
+		}
+	}
+
 	// Determine target phase from the first argument (or command name).
 	target := strings.ToLower(args[0])
 	var targetPhase types.WorkflowPhase
@@ -115,6 +123,29 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 		WorkflowResume: true,
 		ResumePhase:    targetPhase,
 		ResumeGoal:     goal,
+	}
+}
+
+// handleRefine opens the plan refinement input when in the Plan phase.
+func handleRefine(args []string, ctx CommandContext) CommandResult {
+	if ctx.SessionManager == nil || ctx.SessionID == "" {
+		return CommandResult{Success: false, Message: "No active session."}
+	}
+
+	_, phase, _, err := ctx.SessionManager.LoadWorkflowState(ctx.SessionID)
+	if err != nil {
+		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load workflow state: %v", err)}
+	}
+
+	if phase != types.PhasePlan {
+		return CommandResult{Success: false, Message: "Refine is only available during the Plan phase. Current phase: " + string(phase)}
+	}
+
+	screen := ScreenPlan
+	return CommandResult{
+		Success: true,
+		Message: "Opening plan refinement. Press `r` on the plan screen to enter refine mode.",
+		Screen:  &screen,
 	}
 }
 

@@ -272,6 +272,7 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("new", handleNew, "Start a new workflow")
 	r.Register("workflow", handleWorkflow, "Workflow control")
 	r.Register("plan", handlePhase, "Alias for /phase plan")
+	r.Register("refine", handleRefine, "Refine the current plan with feedback")
 	r.Register("execute", handlePhase, "Alias for /phase execute")
 	r.Register("verify", handlePhase, "Alias for /phase verify")
 	r.Register("ship", handlePhase, "Alias for /phase ship")
@@ -279,6 +280,10 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("pause", handlePause, "Pause workflow")
 	r.Register("resume-task", handleResumeTask, "Resume workflow")
 	r.Register("metrics", handleMetrics, "Open session analytics")
+	r.Register("dashboard", handleDashboard, "Open workflow dashboard")
+	r.Register("themes", handleThemes, "Open theme picker")
+	r.Register("notifications", handleNotifications, "Open notification center")
+	r.Register("files", handleFiles, "Open file explorer")
 
 	return r
 }
@@ -287,4 +292,28 @@ func DefaultCommands() *CommandRegistry {
 func handleMetrics(_ []string, _ CommandContext) CommandResult {
 	screen := ScreenMetrics
 	return CommandResult{Success: true, Screen: &screen, Message: "Opening metrics..."}
+}
+
+// handleDashboard opens ScreenDashboard.
+func handleDashboard(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenDashboard
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening workflow dashboard..."}
+}
+
+// handleThemes opens ScreenThemePicker.
+func handleThemes(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenThemePicker
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening theme picker..."}
+}
+
+// handleNotifications opens ScreenNotifications.
+func handleNotifications(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenNotifications
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening notifications..."}
+}
+
+// handleFiles opens ScreenFileExplorer.
+func handleFiles(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenFileExplorer
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening file explorer..."}
 }

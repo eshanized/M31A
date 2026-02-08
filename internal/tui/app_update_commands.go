@@ -113,7 +113,7 @@ func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
 	}
 
 	// Workflow resume
-	if result.WorkflowResume && result.ResumeGoal != "" {
+	if result.WorkflowResume && result.ResumePhase != "" {
 		m.workflowGoal = result.ResumeGoal
 		m.workflowPhase = result.ResumePhase
 		return m.runWorkflowFromGoal(result.ResumeGoal)

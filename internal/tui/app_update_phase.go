@@ -79,20 +79,26 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		return m.RunPhaseCmd(types.PhasePlan)
 
 	case types.PhasePlan:
-		m.setWorkflowPhase(types.PhaseExecute)
-		m.screen = ScreenExecute
-		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhasePlan, types.PhaseExecute); err != nil {
-				slog.Error("phase transition failed", "from", types.PhasePlan, "to", types.PhaseExecute, "error", err)
-			}
-		}
-		if m.executeModel == nil {
-			m.executeModel = NewExecuteModel(msg.Tasks, m.themeManager.Current(), m.width, m.height)
+		// Show plan screen and wait for user approval (do NOT auto-advance to Execute)
+		m.screen = ScreenPlan
+		if m.planModel == nil {
+			m.planModel = NewPlanModel(
+				msg.Tasks,
+				m.themeManager.Current(),
+				modelID, modelName, m.activeProvider,
+				0, "",
+				m.width, m.height,
+			)
 		} else {
-			m.executeModel.tasks = msg.Tasks
+			m.planModel.UpdateTasks(msg.Tasks)
+		}
+		// Load and set the rich plan markdown content
+		if m.workflowEngine != nil {
+			m.planModel.SetPlanContent(m.workflowEngine.PlanContent())
+			m.planModel.SetPlanVersion(m.workflowEngine.PlanVersion())
 		}
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(types.PhaseExecute)
+		return nil
 
 	case types.PhaseExecute:
 		m.setWorkflowPhase(types.PhaseVerify)
@@ -103,6 +109,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 		}
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
+		if len(msg.ManualVerificationSteps) > 0 {
+			m.verifyModel.SetManualSteps(msg.ManualVerificationSteps)
+		}
 		m.persistWorkflowState()
 		// Refresh sidebar git status after task execution
 		if m.sidebarModel != nil {
@@ -137,6 +146,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.setWorkflowPhase(types.PhaseIdle)
 		m.persistWorkflowState()
 		m.screen = ScreenShip
+		if m.shipModel != nil && msg.Demonstration != "" {
+			m.shipModel.SetDemonstration(msg.Demonstration)
+		}
 		return nil
 	}
 
@@ -153,6 +165,36 @@ func (m *AppState) handlePlanReady(msg PlanReadyMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// handlePlanApprove handles plan acceptance — transitions from Plan to Execute.
+func (m *AppState) handlePlanApprove() tea.Cmd {
+	m.setWorkflowPhase(types.PhaseExecute)
+	m.screen = ScreenExecute
+	if m.workflowEngine != nil {
+		if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhasePlan, types.PhaseExecute); err != nil {
+			slog.Error("phase transition failed", "from", types.PhasePlan, "to", types.PhaseExecute, "error", err)
+		}
+	}
+	tasks := []types.Task{}
+	if m.planModel != nil {
+		tasks = m.planModel.tasks
+	}
+	if m.executeModel == nil {
+		m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+	} else {
+		m.executeModel.tasks = tasks
+	}
+	m.persistWorkflowState()
+	return m.RunPhaseCmd(types.PhaseExecute)
+}
+
+// handlePlanRefine handles plan refinement — re-runs Plan with user feedback.
+func (m *AppState) handlePlanRefine(msg PlanRefineMsg) tea.Cmd {
+	if m.workflowEngine != nil {
+		m.workflowEngine.SetRefinementFeedback(msg.Feedback)
+	}
+	return m.RunPhaseCmd(types.PhasePlan)
 }
 
 // countDone counts done tasks.

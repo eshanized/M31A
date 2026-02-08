@@ -8,18 +8,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleHelp lists all registered slash commands.
-func handleHelp(_ []string, ctx CommandContext) CommandResult {
-	if ctx.CmdRegistry == nil {
-		return CommandResult{Success: false, Message: "Command registry not available."}
-	}
-	cmds := ctx.CmdRegistry.AllCommands()
-	var sb strings.Builder
-	sb.WriteString("**Available commands:**\n\n")
-	for _, cmd := range cmds {
-		sb.WriteString(fmt.Sprintf("  %-18s — %s\n", cmd.Slash, cmd.Description))
-	}
-	return CommandResult{Success: true, Message: sb.String()}
+// handleHelp navigates to the Help screen with scrollable keybinding reference.
+func handleHelp(_ []string, _ CommandContext) CommandResult {
+	screen := ScreenHelp
+	return CommandResult{Success: true, Screen: &screen}
 }
 
 // handleClear clears the current conversation messages.
