@@ -15,13 +15,14 @@ import (
 
 // VerifyModel displays task verification results and provides self-healing.
 type VerifyModel struct {
-	tasks     []types.Task
-	results   map[int]workflow.VerificationResult
-	theme     theme.Theme
-	sessionID string
-	width     int
-	height    int
-	viewport  viewport.Model
+	tasks       []types.Task
+	results     map[int]workflow.VerificationResult
+	theme       theme.Theme
+	sessionID   string
+	width       int
+	height      int
+	viewport    viewport.Model
+	manualSteps []string
 	healFunc  func(taskID int) tea.Cmd
 
 	// Healing state
@@ -58,6 +59,12 @@ func (vm *VerifyModel) initViewport() {
 // UpdateResults replaces the verification results.
 func (vm *VerifyModel) UpdateResults(results map[int]workflow.VerificationResult) {
 	vm.results = results
+	vm.viewport.SetContent(vm.renderResults())
+}
+
+// SetManualSteps sets manual verification steps from the plan for display.
+func (vm *VerifyModel) SetManualSteps(steps []string) {
+	vm.manualSteps = steps
 	vm.viewport.SetContent(vm.renderResults())
 }
 
@@ -220,6 +227,16 @@ func (vm *VerifyModel) renderResults() string {
 			lines = append(lines, detail)
 		}
 	}
+
+	// Manual verification steps from the plan
+	if len(vm.manualSteps) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("Manual Verification Steps:"))
+		for _, step := range vm.manualSteps {
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextSecondary).PaddingLeft(2).Render("• "+step))
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 
