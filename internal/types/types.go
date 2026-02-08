@@ -129,6 +129,8 @@ type Task struct {
 	ID                 int        `json:"id"`
 	Description        string     `json:"description"`
 	Action             string     `json:"action"`
+	Category           string     `json:"category,omitempty"`
+	PlanSection        string     `json:"plan_section,omitempty"`
 	Dependencies       []int      `json:"dependencies"`
 	Files              []string   `json:"files"`
 	AcceptanceCriteria []string   `json:"acceptance_criteria"`

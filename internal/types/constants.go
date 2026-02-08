@@ -9,6 +9,7 @@ const (
 	MaxToolOutputChars      = 10_000
 	MaxHealAttempts         = 2
 	MaxPlanRetries          = 3
+	MaxPlanRefinements      = 5
 	SessionIDLength         = 8
 	AutoDreamThreshold      = 0.60
 	ContextWarningThreshold = 0.80
