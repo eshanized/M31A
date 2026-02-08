@@ -186,6 +186,8 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			ToolCalls:           result.ToolCalls,
 			Commits:             result.Commits,
 			DiffStats:           result.DiffStats,
+			Demonstration:       result.Demonstration,
+			ManualVerificationSteps: result.ManualVerificationSteps,
 		}
 	}
 }
