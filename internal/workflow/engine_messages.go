@@ -101,6 +101,31 @@ type PhaseResult struct {
 	ToolCalls int              // number of tool calls made
 	Commits   []git.CommitInfo // commits created during phase
 	DiffStats DiffStats        // file change statistics (Ship phase)
+
+	// Manual verification steps from the plan (populated by Verify phase)
+	ManualVerificationSteps []string
+
+	// Demonstration content (populated by Ship phase)
+	Demonstration string
+}
+
+// PlanApproveMsg is emitted when the user approves the plan and execution should begin.
+type PlanApproveMsg struct{}
+
+// PlanRefineMsg is emitted when the user submits refinement feedback for the plan.
+type PlanRefineMsg struct {
+	Feedback string
+}
+
+// DemonstrationReadyMsg carries the generated demonstration content to the TUI.
+type DemonstrationReadyMsg struct {
+	Content string
+}
+
+// PlanProgressMsg reports plan generation progress with version info.
+type PlanProgressMsg struct {
+	Version int
+	Message string
 }
 
 // DiffStats holds file change statistics from git diff.

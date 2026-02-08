@@ -317,11 +317,34 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) 
 			project.Goal, project.ProjectType, project.Framework)
 	}
 
+	// Load plan narrative for implementation context
+	planCtx := ""
+	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
+	if planMarkdown == "" {
+		planMarkdown = e.planMarkdown
+	}
+	if planMarkdown != "" {
+		plan, _ := ParsePlan(planMarkdown)
+		if plan != nil {
+			planCtx = "## Implementation Plan Context\n"
+			if plan.Summary != "" {
+				planCtx += plan.Summary + "\n\n"
+			}
+			for _, group := range plan.ProposedChanges {
+				planCtx += fmt.Sprintf("### %s\n", group.Category)
+				for _, change := range group.Changes {
+					planCtx += fmt.Sprintf("- [%s] %s: %s\n", change.Action, change.File, change.Description)
+				}
+				planCtx += "\n"
+			}
+		}
+	}
+
 	// Task list
 	taskSummary := formatTaskSummary(tasks)
 	messages = append(messages, m31types.Message{
 		Role:    "user",
-		Content: projectCtx + "Task list:\n" + taskSummary,
+		Content: projectCtx + planCtx + "Task list:\n" + taskSummary,
 	})
 
 	// Current task spec

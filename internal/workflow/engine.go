@@ -28,24 +28,26 @@ var promptFS embed.FS
 
 // PromptRegistry holds all loaded prompt templates.
 type PromptRegistry struct {
-	Base        string
-	ToolUse     string
-	PlanFormat  string
-	ExecuteTask string
-	Discuss     string
-	SelfHeal    string
+	Base          string
+	ToolUse       string
+	PlanFormat    string
+	ExecuteTask   string
+	Discuss       string
+	SelfHeal      string
+	Demonstration string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
 func LoadPrompts() (*PromptRegistry, error) {
 	r := &PromptRegistry{}
 	files := map[string]*string{
-		"prompts/base.md":              &r.Base,
-		"prompts/tool-use.md":          &r.ToolUse,
-		"prompts/plan-format.md":       &r.PlanFormat,
-		"prompts/execute-task.md":      &r.ExecuteTask,
-		"prompts/discuss-questions.md": &r.Discuss,
-		"prompts/self-heal.md":         &r.SelfHeal,
+		"prompts/base.md":                  &r.Base,
+		"prompts/tool-use.md":              &r.ToolUse,
+		"prompts/plan-format.md":           &r.PlanFormat,
+		"prompts/execute-task.md":          &r.ExecuteTask,
+		"prompts/discuss-questions.md":     &r.Discuss,
+		"prompts/self-heal.md":             &r.SelfHeal,
+		"prompts/demonstration-format.md":  &r.Demonstration,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -81,6 +83,9 @@ type Engine struct {
 	msgEmitter       MsgEmitter
 	callCounter      int64
 	totalCost        float64 // cumulative cost for budget tracking
+	planMarkdown     string  // current plan content for refinement context
+	planVersion      int     // current plan version (increments on refine)
+	refineFeedback   string  // pending refinement feedback from user
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -213,7 +218,7 @@ var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 	m31types.PhaseIdle:       {m31types.PhaseInitialize},
 	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseIdle},
 	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseIdle},
-	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhaseIdle},
+	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhasePlan, m31types.PhaseDiscuss, m31types.PhaseIdle},
 	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseIdle},
 	m31types.PhaseVerify:     {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhaseShip:       {m31types.PhaseIdle},
@@ -450,6 +455,26 @@ func (e *Engine) FinalizeDiscuss() error {
 		return fmt.Errorf("save discuss answers: %w", err)
 	}
 	return nil
+}
+
+// SetRefinementFeedback stores user feedback for the next plan regeneration.
+// The plan phase reads this field to inject feedback into the LLM context.
+func (e *Engine) SetRefinementFeedback(feedback string) {
+	e.refineFeedback = feedback
+	if feedback != "" {
+		e.planVersion++
+	}
+}
+
+// PlanContent returns the current plan markdown content.
+func (e *Engine) PlanContent() string {
+	return e.planMarkdown
+}
+
+// PlanVersion returns the current plan version number.
+// Version 1 is the initial plan; each refinement increments it.
+func (e *Engine) PlanVersion() int {
+	return e.planVersion
 }
 
 // buildToolDefinitions returns the tool definitions for the LLM.

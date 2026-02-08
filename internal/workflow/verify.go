@@ -132,10 +132,20 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 
 	e.logger.Info("verify phase complete", "all_ok", allOK)
 
+	// Load manual verification steps from the plan
+	var manualSteps []string
+	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
+	if planMarkdown != "" {
+		if plan, parseErr := ParsePlan(planMarkdown); parseErr == nil && plan != nil {
+			manualSteps = plan.Verification.Manual
+		}
+	}
+
 	result := &PhaseResult{
-		Phase:   m31types.PhaseVerify,
-		Success: allOK,
-		Tasks:   tasks,
+		Phase:                   m31types.PhaseVerify,
+		Success:                 allOK,
+		Tasks:                   tasks,
+		ManualVerificationSteps: manualSteps,
 	}
 	if !allOK && len(failedTasks) > 0 {
 		result.Error = strings.Join(failedTasks, "; ")

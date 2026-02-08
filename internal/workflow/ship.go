@@ -132,7 +132,24 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("save checkpoint failed", "error", err)
 	}
 
-	// 7. Archive session (after all state is persisted)
+	// 7. Generate demonstration document via LLM
+	var demonstration string
+	e.emit(IntermediateProgressMsg{
+		Phase:   "ship",
+		Message: "Generating walkthrough...",
+	})
+	demonstration = e.generateDemonstration(ctx, tasks, done, failed, commits)
+	if demonstration != "" {
+		if err := e.sessionMgr.SaveDemonstration(e.sessionID, demonstration); err != nil {
+			e.logger.Warn("save demonstration failed", "error", err)
+		}
+		e.emit(DemonstrationReadyMsg{Content: demonstration})
+	}
+
+	// Update checkbox tasks.md with final statuses
+	_ = e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks)
+
+	// 8. Archive session (after all state is persisted)
 	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
 		e.logger.Warn("archive session failed", "error", err)
 	}
@@ -146,11 +163,12 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	}
 
 	result := &PhaseResult{
-		Phase:      m31types.PhaseShip,
-		Success:    true,
-		Commits:    commits,
-		DiffStats:  diffStats,
-		DurationMs: duration.Milliseconds(),
+		Phase:         m31types.PhaseShip,
+		Success:       true,
+		Commits:       commits,
+		DiffStats:     diffStats,
+		DurationMs:    duration.Milliseconds(),
+		Demonstration: demonstration,
 	}
 	if failed > 0 {
 		result.Error = fmt.Sprintf("%d tasks failed", failed)
@@ -241,4 +259,62 @@ func (e *Engine) BuildSummary() ShipSummary {
 		Duration:    time.Since(e.startTime),
 		SessionID:   e.sessionID,
 	}
+}
+
+// generateDemonstration creates a post-completion walkthrough document using the LLM.
+// It combines the implementation plan, completed tasks, and git diff stats to produce
+// a narrative describing what was built and how to run it.
+func (e *Engine) generateDemonstration(ctx context.Context, tasks []m31types.Task, done, failed int, commits []git.CommitInfo) string {
+	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
+	if planMarkdown == "" {
+		planMarkdown = e.planMarkdown
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Implementation Plan\n")
+	if planMarkdown != "" {
+		summary := planMarkdown
+		if len(summary) > 3000 {
+			summary = summary[:3000] + "\n... (truncated)"
+		}
+		sb.WriteString(summary)
+	}
+	sb.WriteString("\n\n## Completed Tasks\n")
+	sb.WriteString(formatTaskSummary(tasks))
+
+	if len(commits) > 0 {
+		sb.WriteString("\n## Commits\n")
+		for _, c := range commits {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", c.Hash[:min(len(c.Hash), 7)], c.Message))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("\n## Summary\n- Tasks completed: %d/%d\n- Tasks failed: %d\n", done, len(tasks), failed))
+
+	if e.git != nil {
+		if diffOut, err := e.git.DiffRefs(e.sessionStartHash, ""); err == nil && diffOut != "" {
+			lines := strings.Split(diffOut, "\n")
+			if len(lines) > 20 {
+				lines = lines[:20]
+			}
+			sb.WriteString("\n## File Changes\n")
+			for _, line := range lines {
+				if line != "" {
+					sb.WriteString("- " + line + "\n")
+				}
+			}
+		}
+	}
+
+	messages := []m31types.Message{
+		{Role: "system", Content: e.buildSystemPrompt(e.prompts.Demonstration)},
+		{Role: "user", Content: sb.String()},
+	}
+
+	content, err := e.streamLLM(ctx, messages, false)
+	if err != nil {
+		e.logger.Warn("demonstration generation failed", "error", err)
+		return ""
+	}
+	return content
 }
