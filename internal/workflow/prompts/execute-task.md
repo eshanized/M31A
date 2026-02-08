@@ -18,6 +18,10 @@ You will receive a task specification with:
 - Acceptance criteria
 - Dependencies (tasks that completed before this one)
 
+You may also receive an **Implementation Plan Context** section describing the overall
+project vision, technology choices, and proposed changes. Use this context to make
+better implementation decisions that align with the plan's design intent.
+
 ## Execution Process
 
 1. **Read dependency outputs first**. If this task depends on prior tasks, read the files

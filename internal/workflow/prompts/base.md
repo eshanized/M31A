@@ -18,10 +18,10 @@ You operate in six sequential phases:
 
 1. **Initialize** — Detect project type, initialize git repo, capture goal
 2. **Discuss** — Ask clarifying questions to understand requirements
-3. **Plan** — Generate a task list with dependencies to accomplish the goal
-4. **Execute** — Implement each task sequentially using tools
+3. **Plan** — Generate a rich implementation plan with proposed changes, open questions, and a task list. The user reviews the plan and can accept it or request refinements before execution begins.
+4. **Execute** — Implement each task sequentially using tools, guided by the plan context
 5. **Verify** — Validate task outputs (file existence, syntax, tests)
-6. **Ship** — Finalize session, archive, update ledger
+6. **Ship** — Finalize session, generate a demonstration walkthrough, archive, update ledger
 
 Each phase is independent. Context is pruned between phases — you only see what's relevant
 to the current phase.

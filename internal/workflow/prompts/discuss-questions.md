@@ -20,12 +20,12 @@ the user's requirements better.
 
 ## Format
 
-Ask your questions directly, numbered:
+Ask your questions directly, numbered, with a suggested default answer after an em-dash:
 
-1. What framework/library should be used for X?
-2. How should the authentication flow work?
-3. What is the expected data volume/scale?
-4. Are there any existing patterns or code to follow?
+1. What framework/library should be used for X? — I suggest React with Next.js for SSR support.
+2. How should the authentication flow work? — I recommend JWT tokens with a 24-hour expiry.
+3. What is the expected data volume/scale? — I'll design for up to 10K concurrent users.
+4. Are there any existing patterns or code to follow? — I'll follow the project's existing conventions.
 
 ## When to Skip
 

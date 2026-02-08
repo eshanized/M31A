@@ -1,59 +1,117 @@
 ---
-version: 1.1
+version: 2.0
 phase: plan
 injected_in: plan.go/buildPlanContext
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-10
 ---
 
 # Plan Phase Output Format
 
-You are in the Plan phase. Your job is to generate a task list to accomplish the user's goal.
+You are in the Plan phase. Your job is to generate a comprehensive implementation plan to accomplish the user's goal.
 
 ## Output Format
 
-Return ONLY a JSON array of tasks. Do not include any text outside the JSON array.
-Do not use markdown code fences. Do not add explanations before or after the array.
+Return a structured markdown document with the sections described below. This document will be shown to the user for review before execution begins.
 
-## Task Schema
+## Required Sections
 
-Each task must have these fields:
+### 1. Title (H1)
 
-- **id** (int, required): Unique task identifier. Start from 1, increment sequentially.
-- **action** (string, required): One of: Create, Add, Modify, Delete.
-- **description** (string, required): What the task does. Be specific.
-- **dependencies** (array of int, required): Task IDs that must complete first. Empty array if none.
-- **files** (array of string, required): Files this task creates or modifies.
-- **acceptance_criteria** (array of string, required): Conditions that determine task completion.
+A clear, descriptive title for the implementation plan.
 
-## Rules
+Example: `# Build Eshan's Cafe and Coffee Bar Website`
 
-1. No circular dependencies. Task A cannot depend on Task B if Task B depends on Task A.
-2. No self-references. A task cannot depend on itself.
-3. All dependency IDs must reference existing task IDs in the array.
-4. IDs must be unique.
-5. Every task must have a non-empty description and action.
-6. Order tasks by dependency depth (independent tasks first).
-7. Do NOT include a `status` field — the engine sets it automatically after parsing.
+### 2. Summary
 
-## Example
+A 2-4 sentence narrative describing the overall approach, technology choices, and design philosophy. Explain WHY you chose this approach.
+
+### 3. User Review Required
+
+Highlight opinionated decisions the user should be aware of. Use GitHub-style admonition blocks:
+
+```
+> [!IMPORTANT]
+> Description of a key decision or assumption.
+
+> [!WARNING]
+> Description of something that could be a concern.
+```
+
+Include decisions about: frameworks, CSS approach, architecture patterns, default configurations, or anything the user might want to override.
+
+### 4. Open Questions
+
+Numbered questions about decisions that affect implementation. For each question, suggest a sensible default answer after an em-dash.
+
+Format:
+```
+1. What color palette should be used? — I suggest a dark theme with espresso browns and gold accents.
+2. Should the API include pagination? — I recommend cursor-based pagination with 20 items per page.
+```
+
+If the goal is clear and no questions remain, write: "No open questions — the goal is clear."
+
+### 5. Proposed Changes
+
+Group changes by category (e.g., "Setup & Configuration", "Core Components", "Styles", "Assembly & Polish"). Within each category, list each file with a `[NEW]` or `[MODIFY]` tag and a description.
+
+Format:
+```
+### Setup & Configuration
+#### [NEW] package.json
+- Initialize the project with required dependencies.
+
+#### [NEW] app/globals.css
+- Implement a CSS variables design system with premium tokens.
+
+### Core Components
+#### [MODIFY] app/layout.js
+- Add Google Fonts and document structure.
+
+#### [NEW] components/Navbar.js
+- Sticky header with glassmorphic transparency and smooth reveal animations.
+```
+
+### 6. Task List
+
+Embed a JSON array of tasks inside a fenced code block. This is used by the execution engine. Each task follows this schema:
 
 ```json
 [
   {
     "id": 1,
     "action": "Create",
-    "description": "Initialize Go module and create main.go",
+    "description": "Initialize project and install dependencies",
+    "category": "Setup & Configuration",
     "dependencies": [],
-    "files": ["go.mod", "main.go"],
-    "acceptance_criteria": ["go mod init succeeds", "main.go compiles"]
-  },
-  {
-    "id": 2,
-    "action": "Add",
-    "description": "Add HTTP server with health endpoint",
-    "dependencies": [1],
-    "files": ["main.go", "server.go"],
-    "acceptance_criteria": ["server starts on port 8080", "/health returns 200"]
+    "files": ["package.json", "app/globals.css"],
+    "acceptance_criteria": ["npm install succeeds", "dev server starts"]
   }
 ]
+```
+
+Task rules:
+- `id`: Unique integer, starting from 1, sequential.
+- `action`: One of: Create, Add, Modify, Delete.
+- `category`: Must match one of the Proposed Changes category headings.
+- `dependencies`: Array of task IDs that must complete first. Empty array if none.
+- `files`: Array of file paths this task creates or modifies.
+- `acceptance_criteria`: Array of conditions for task completion.
+- No circular dependencies. No self-references. All dependency IDs must exist.
+- Order by dependency depth (independent tasks first).
+- Do NOT include a `status` field — the engine sets it automatically.
+
+### 7. Verification Plan
+
+Describe how the implementation will be validated after execution:
+
+```
+### Automated
+- Run `npm run build` to verify compilation.
+- Run `npm test` to execute the test suite.
+
+### Manual
+- Start the dev server and verify the landing page renders correctly.
+- Test responsive layout on mobile, tablet, and desktop viewports.
+- Verify animations run smoothly at 60fps.
 ```
