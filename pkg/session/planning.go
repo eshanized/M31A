@@ -295,3 +295,124 @@ func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progre
 
 	return
 }
+
+// ---------------------------------------------------------------------------
+// plan.md — rich implementation plan (versioned)
+// ---------------------------------------------------------------------------
+
+// SavePlan writes the plan markdown to planning/plan.md and a versioned copy
+// to planning/plan_v{version}.md for refinement history.
+func (m *Manager) SavePlan(sessionID string, version int, markdown string) error {
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+
+	path := filepath.Join(planningDir, "plan.md")
+	if err := m.atomicWrite(path, []byte(markdown)); err != nil {
+		return err
+	}
+
+	if version > 0 {
+		versionedPath := filepath.Join(planningDir, fmt.Sprintf("plan_v%d.md", version))
+		return m.atomicWrite(versionedPath, []byte(markdown))
+	}
+	return nil
+}
+
+// LoadPlan reads planning/plan.md for the given session.
+// Returns empty string without error if the file does not exist.
+func (m *Manager) LoadPlan(sessionID string) (string, error) {
+	path := filepath.Join(m.planningDirPath(sessionID), "plan.md")
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("cannot read plan.md: %w", err)
+	}
+	return string(data), nil
+}
+
+// ---------------------------------------------------------------------------
+// DEMONSTRATION.md — post-completion walkthrough
+// ---------------------------------------------------------------------------
+
+// SaveDemonstration writes the demonstration markdown to planning/DEMONSTRATION.md.
+func (m *Manager) SaveDemonstration(sessionID string, markdown string) error {
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+	path := filepath.Join(planningDir, "DEMONSTRATION.md")
+	return m.atomicWrite(path, []byte(markdown))
+}
+
+// LoadDemonstration reads planning/DEMONSTRATION.md for the given session.
+// Returns empty string without error if the file does not exist.
+func (m *Manager) LoadDemonstration(sessionID string) (string, error) {
+	path := filepath.Join(m.planningDirPath(sessionID), "DEMONSTRATION.md")
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("cannot read DEMONSTRATION.md: %w", err)
+	}
+	return string(data), nil
+}
+
+// ---------------------------------------------------------------------------
+// tasks.md — checkbox-style task list grouped by category
+// ---------------------------------------------------------------------------
+
+// SaveTasksCheckbox writes a checkbox-style task list grouped by category
+// to planning/tasks.md. Tasks are grouped by their Category field; tasks
+// without a category go under "General".
+func (m *Manager) SaveTasksCheckbox(sessionID string, tasks []types.Task) error {
+	grouped := make(map[string][]types.Task)
+	var categories []string
+	seen := make(map[string]bool)
+	for _, t := range tasks {
+		cat := t.Category
+		if cat == "" {
+			cat = "General"
+		}
+		if !seen[cat] {
+			seen[cat] = true
+			categories = append(categories, cat)
+		}
+		grouped[cat] = append(grouped[cat], t)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Task List\n\n")
+	for _, cat := range categories {
+		allDone := true
+		for _, t := range grouped[cat] {
+			if t.Status != types.StatusDone && t.Status != types.StatusSkipped {
+				allDone = false
+				break
+			}
+		}
+		check := " "
+		if allDone {
+			check = "x"
+		}
+		b.WriteString(fmt.Sprintf("- [%s] **%s**\n", check, cat))
+		for _, t := range grouped[cat] {
+			taskCheck := " "
+			if t.Status == types.StatusDone || t.Status == types.StatusSkipped {
+				taskCheck = "x"
+			}
+			b.WriteString(fmt.Sprintf("  - [%s] %s\n", taskCheck, t.Description))
+		}
+	}
+
+	planningDir := m.planningDirPath(sessionID)
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+	path := filepath.Join(planningDir, "tasks.md")
+	return m.atomicWrite(path, []byte(b.String()))
+}
