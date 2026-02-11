@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -85,7 +86,7 @@ func (g *Git) Commit(message string) error {
 	if err := g.AddAll(); err != nil {
 		return err
 	}
-	_, err := g.run("commit", "-m", message)
+	_, err := g.run("commit", "--message="+message)
 	if err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
@@ -95,7 +96,7 @@ func (g *Git) Commit(message string) error {
 // CommitStaged creates a commit from already-staged changes only.
 // Does not stage any additional files.
 func (g *Git) CommitStaged(message string) (string, error) {
-	_, err := g.run("commit", "-m", message)
+	_, err := g.run("commit", "--message="+message)
 	if err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
@@ -111,7 +112,7 @@ func (g *Git) CommitWithFiles(message string, paths ...string) (string, error) {
 			return "", err
 		}
 	}
-	if _, err := g.run("commit", "-m", message); err != nil {
+	if _, err := g.run("commit", "--message="+message); err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
 	hash, _ := g.HeadHash()
@@ -140,14 +141,22 @@ func (g *Git) LogSince(since time.Time) ([]CommitInfo, error) {
 
 // logInternal is the shared implementation for LogAll/LogSince.
 func (g *Git) logInternal(oneline bool, since string) ([]CommitInfo, error) {
-	args := []string{"log", "--format=%H|%h|%an|%s|%aI"}
+	format := "--format=%H|%h|%an|%s|%aI"
+	if oneline {
+		format = "--format=%h|%s"
+	}
+	args := []string{"log", format}
 	if since != "" {
 		args = append(args, "--since="+since)
 	}
-	return g.runLog(args)
+	return g.runLogWithOneline(args, oneline)
 }
 
 func (g *Git) runLog(args []string) ([]CommitInfo, error) {
+	return g.runLogWithOneline(args, false)
+}
+
+func (g *Git) runLogWithOneline(args []string, oneline bool) ([]CommitInfo, error) {
 	out, err := g.run(args...)
 	if err != nil {
 		if strings.Contains(err.Error(), "exit status 1") && strings.Contains(err.Error(), "does not have any commits") {
@@ -155,7 +164,7 @@ func (g *Git) runLog(args []string) ([]CommitInfo, error) {
 		}
 		return nil, fmt.Errorf("git log: %w", err)
 	}
-	return parseLog(out, false)
+	return parseLog(out, oneline)
 }
 
 func parseLog(out string, oneline bool) ([]CommitInfo, error) {
@@ -171,6 +180,19 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 			continue
 		}
 
+		if oneline {
+			parts := strings.SplitN(line, "|", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			commits = append(commits, CommitInfo{
+				ShortHash: parts[0],
+				Hash:      parts[0],
+				Message:   parts[1],
+			})
+			continue
+		}
+
 		parts := strings.SplitN(line, "|", 5)
 		if len(parts) < 5 {
 			continue
@@ -178,7 +200,7 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 
 		ts, err := time.Parse(time.RFC3339, parts[4])
 		if err != nil {
-			// Malformed timestamp — use zero time and continue
+			slog.Warn("git log: malformed timestamp, using zero time", "raw", parts[4], "error", err)
 		}
 
 		ci := CommitInfo{
@@ -404,7 +426,7 @@ func (g *Git) HeadHash() (string, error) {
 
 // CreateBranch creates a new branch with the given name.
 func (g *Git) CreateBranch(name string) error {
-	_, err := g.run("branch", name)
+	_, err := g.run("branch", "--", name)
 	if err != nil {
 		return fmt.Errorf("git branch: %w", err)
 	}
@@ -422,7 +444,7 @@ func (g *Git) CurrentBranch() (string, error) {
 
 // RevParse resolves a git ref to its full SHA hash.
 func (g *Git) RevParse(ref string) (string, error) {
-	out, err := g.run("rev-parse", ref)
+	out, err := g.run("rev-parse", "--", ref)
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse %s: %w", ref, err)
 	}
@@ -486,7 +508,7 @@ func (g *Git) ResetHard(commit string) error {
 
 // StashPush saves current changes to the stash with the given message.
 func (g *Git) StashPush(message string) error {
-	_, err := g.run("stash", "push", "-m", message)
+	_, err := g.run("stash", "push", "--message="+message)
 	if err != nil {
 		return fmt.Errorf("git stash push: %w", err)
 	}
@@ -573,7 +595,7 @@ func (g *Git) CheckoutBranch(name string, create bool) error {
 	if create {
 		args = append(args, "-b")
 	}
-	args = append(args, name)
+	args = append(args, "--", name)
 	if _, err := g.run(args...); err != nil {
 		return fmt.Errorf("git checkout: %w", err)
 	}
@@ -602,7 +624,7 @@ func (g *Git) StashApply(index int) error {
 
 // Merge merges a branch into the current branch.
 func (g *Git) Merge(branch string) error {
-	if _, err := g.run("merge", branch); err != nil {
+	if _, err := g.run("merge", "--", branch); err != nil {
 		return fmt.Errorf("git merge %s: %w", branch, err)
 	}
 	return nil
@@ -611,11 +633,11 @@ func (g *Git) Merge(branch string) error {
 // Tag creates a lightweight or annotated tag.
 func (g *Git) Tag(name, msg string) error {
 	if msg != "" {
-		if _, err := g.run("tag", "-a", name, "-m", msg); err != nil {
+		if _, err := g.run("tag", "-a", "--", name, "--message="+msg); err != nil {
 			return fmt.Errorf("git tag: %w", err)
 		}
 	} else {
-		if _, err := g.run("tag", name); err != nil {
+		if _, err := g.run("tag", "--", name); err != nil {
 			return fmt.Errorf("git tag: %w", err)
 		}
 	}
