@@ -210,17 +210,17 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 				break
 			}
 
-			// Use cancellable backoff instead of blocking time.Sleep
-			// so context cancellation takes effect immediately.
+			// Use parent ctx for backoff so context cancellation takes effect
+			// but isn't affected by per-attempt taskCtx cancellation.
 			backoff := time.Duration(attempt+1) * time.Second
 			timer := time.NewTimer(backoff)
 			select {
 			case <-timer.C:
 				// Backoff completed, continue to next attempt
-			case <-taskCtx.Done():
+			case <-ctx.Done():
 				timer.Stop()
 				cancel()
-				return taskCtx.Err()
+				return ctx.Err()
 			}
 			cancel()
 		}
