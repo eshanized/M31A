@@ -213,17 +213,23 @@ func run() int {
 	// Bubble Tea's single-threaded contract and preventing session corruption.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	sigDone := make(chan struct{})
 	go func() {
-		<-sigCh
-		slog.Info("received shutdown signal, sending quit to TUI...")
-		p.Send(tea.QuitMsg{})
+		select {
+		case <-sigCh:
+			slog.Info("received shutdown signal, sending quit to TUI...")
+			p.Send(tea.QuitMsg{})
+		case <-sigDone:
+		}
 	}()
 
 	if _, err := p.Run(); err != nil {
 		logger.Error("TUI exited with error", "error", err)
+		close(sigDone)
 		return 1
 	}
 
+	close(sigDone)
 	app.Shutdown()
 	return 0
 }
