@@ -20,9 +20,19 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 		CreatedAt: time.Now(),
 	}
 
+	// Check for cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("initialize cancelled: %w", err)
+	}
+
 	// 2. Project type detection
 	project.ProjectType = detectProjectType(e.workDir)
 	e.logger.Info("detected project type", "type", project.ProjectType)
+
+	// Check for cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("initialize cancelled: %w", err)
+	}
 
 	// 3. Init git if not a repo
 	if !e.git.IsRepo() {

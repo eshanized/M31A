@@ -86,6 +86,10 @@ type Engine struct {
 	planMarkdown     string  // current plan content for refinement context
 	planVersion      int     // current plan version (increments on refine)
 	refineFeedback   string  // pending refinement feedback from user
+	// perPhaseModels holds per-phase model overrides set by the TUI via SetPhaseModel.
+	// Keys are WorkflowPhase values; values are model ID strings.
+	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
+	perPhaseModels map[m31types.WorkflowPhase]string
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -96,12 +100,20 @@ func (e *Engine) gitConfig() config.GitConfig {
 	return config.DefaultGitConfig()
 }
 
-// modelForPhase returns the per-phase model ID from AgentsConfig,
-// falling back to cfg.Model.Default when the phase field is empty.
+// modelForPhase returns the per-phase model ID, checked in priority order:
+//  1. perPhaseModels (set interactively by the TUI at workflow start)
+//  2. AgentsConfig from config.toml
+//  3. cfg.Model.Default
+//  4. the engine's active modelID
 func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
+	// 1. Interactive per-phase override (highest priority)
+	if id, ok := e.perPhaseModels[phase]; ok && id != "" {
+		return id
+	}
 	if e.cfg == nil {
 		return e.modelID
 	}
+	// 2. AgentsConfig from config.toml
 	var override string
 	switch phase {
 	case m31types.PhasePlan:
@@ -118,10 +130,24 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 	if override != "" {
 		return override
 	}
+	// 3. Global agent default
 	if e.cfg.Agents.Default != "" {
 		return e.cfg.Agents.Default
 	}
+	// 4. Engine model ID
 	return e.modelID
+}
+
+// SetPhaseModel assigns a model ID to a specific workflow phase.
+// This takes the highest priority over AgentsConfig and cfg.Model.Default.
+// Called by the TUI after the user selects Planning/Coding models in the picker.
+func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
+	if e.perPhaseModels == nil {
+		e.perPhaseModels = make(map[m31types.WorkflowPhase]string)
+	}
+	if modelID != "" {
+		e.perPhaseModels[phase] = modelID
+	}
 }
 
 // NewEngine creates a workflow engine.
@@ -339,7 +365,7 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) bool {
 					"Inspect the files listed above, identify any issues, and apply a fix.",
 				task.Description, task.Files, task.AcceptanceCriteria,
 			)
-			healResult := e.healTask(ctx, task, failure)
+			healResult := e.healTask(ctx, task, failure, "")
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: tasks[i].HealsAttempted,

@@ -70,7 +70,7 @@ func TestEngine_BuildExecuteContext(t *testing.T) {
 	}
 	allTasks := []m31types.Task{task}
 
-	messages := engine.buildExecuteContext(task, allTasks)
+	messages := engine.buildExecuteContext(task, allTasks, "")
 	if len(messages) == 0 {
 		t.Fatal("Expected non-empty messages")
 	}
@@ -121,7 +121,7 @@ func TestEngine_ExecuteTaskWithTools_ToolDispatch(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.response = "Done"
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	// File-changing task with no tool calls should fail (G05 guard)
 	if result.Success {
 		t.Errorf("Expected file-changing task to fail with no tool calls")
@@ -138,7 +138,7 @@ func TestEngine_ExecuteTaskWithTools_LLMError(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.err = context.Canceled
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	if result.Success {
 		t.Error("Expected execute to fail when LLM errors")
 	}
@@ -161,7 +161,7 @@ func TestEngine_HealTask(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.response = `{"name":"FileWrite","input":{"name":"FileWrite","params":{"path":"main.go","content":"package main"}}}`
 
-	result := engine.healTask(context.Background(), task, "compilation error")
+	result := engine.healTask(context.Background(), task, "compilation error", "")
 	// Heal uses mock provider which returns content
 	if !result.Success {
 		t.Errorf("Expected heal to succeed, got error: %s", result.Error)
@@ -176,7 +176,7 @@ func TestEngine_HealTask_LLMError(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.err = context.Canceled
 
-	result := engine.healTask(context.Background(), task, "compilation error")
+	result := engine.healTask(context.Background(), task, "compilation error", "")
 	if result.Success {
 		t.Error("Expected heal to fail when LLM errors")
 	}
@@ -221,7 +221,7 @@ func TestEngine_ExecuteTaskWithTools_EmptyResponse(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.response = ""
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	if result.Success {
 		t.Errorf("Expected execute to fail with empty response for file-changing task")
 	}
@@ -246,7 +246,7 @@ func TestEngine_ExecuteTaskWithTools_MultipleToolCalls(t *testing.T) {
 	mp := engine.provider.(*mockProvider)
 	mp.response = `{"name":"Bash","input":{"name":"Bash","params":{"command":"echo hello"}}} and also {"name":"FileRead","input":{"name":"FileRead","params":{"path":"main.go"}}}`
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	// Should handle multiple tool calls
 	if !result.Success {
 		t.Errorf("Expected execute to succeed with multiple tool calls, got error: %s", result.Error)
@@ -270,7 +270,7 @@ func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 	mp.response = "Done"
 	mp.err = context.Canceled
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	// With constant LLM error, heal attempts should exhaust and fail
 	if result.Success {
 		t.Error("Expected task to fail when LLM consistently errors")
@@ -352,7 +352,7 @@ func TestExecute_OneAssistantPerTurn(t *testing.T) {
 	}
 	allTasks := []m31types.Task{task}
 
-	result := engine.executeTaskWithTools(context.Background(), task, allTasks)
+	result := engine.executeTaskWithTools(context.Background(), task, allTasks, "")
 	t.Logf("result: success=%v error=%q toolCalls=%d", result.Success, result.Error, result.ToolCalls)
 
 	if !result.Success {

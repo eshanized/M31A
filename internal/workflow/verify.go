@@ -16,7 +16,7 @@ import (
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
 	ctx, cancel := e.verifyTaskContext(ctx)
 	defer cancel()
-	e.logger.Info("verify phase starting")
+	e.logger.Info("verify phase starting", "goal", goal)
 
 	// Emit intermediate progress
 	e.emit(IntermediateProgressMsg{
@@ -67,7 +67,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			Attempt: tasks[i].HealsAttempted,
 			Max:     m31types.MaxHealAttempts,
 		})
-		healResult := e.healTask(ctx, task, failure)
+		healResult := e.healTask(ctx, task, failure, goal)
 		e.emit(SelfHealCompleteMsg{
 			TaskID:  task.ID,
 			Attempt: tasks[i].HealsAttempted,
@@ -85,7 +85,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			} else {
 				e.logger.Warn("heal did not fix task", "id", task.ID)
 				// Try bisect as fallback before giving up
-				if healed := e.tryBisectHeal(ctx, &tasks[i], task, result); healed {
+				if healed := e.tryBisectHeal(ctx, &tasks[i], task, result, goal); healed {
 					continue
 				}
 				tasks[i].Status = m31types.StatusFailed
@@ -93,7 +93,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		} else {
 			e.logger.Warn("self-heal failed", "id", task.ID, "error", healResult.Error)
 			// Try bisect as fallback before marking unrecoverable
-			if healed := e.tryBisectHeal(ctx, &tasks[i], task, result); healed {
+			if healed := e.tryBisectHeal(ctx, &tasks[i], task, result, goal); healed {
 				continue
 			}
 			if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
@@ -179,7 +179,7 @@ func (e *Engine) findRootCommit() (string, error) {
 // tryBisectHeal attempts to heal a failed task using git bisect to find
 // the offending commit, then re-healing with that context. Returns true
 // if the task was successfully healed and re-verified.
-func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, task m31types.Task, verifyResult VerificationResult) bool {
+func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, task m31types.Task, verifyResult VerificationResult, goal string) bool {
 	if e.git == nil {
 		return false
 	}
@@ -219,7 +219,7 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 	// Targeted heal using bisect context
 	failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",
 		bisectResult.OffendingCommit.ShortHash, bisectResult.Diff, verifyResult.Errors)
-	healResult := e.healTask(ctx, task, failure)
+	healResult := e.healTask(ctx, task, failure, goal)
 	taskEntry.HealsAttempted++
 
 	if !healResult.Success {

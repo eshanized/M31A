@@ -29,7 +29,7 @@ type ShipSummary struct {
 
 // runShip finalizes the session, writes ledger entry, and archives.
 func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error) {
-	e.logger.Info("ship phase starting")
+	e.logger.Info("ship phase starting", "goal", goal)
 
 	// Emit intermediate progress
 	e.emit(IntermediateProgressMsg{
@@ -48,18 +48,47 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	runner := taskrunner.New(tasks)
 	total, done, failed, skipped := runner.Summary()
 
-	// 2. Final git commit — ship intentionally commits all remaining changes,
-	// but warn if there are pre-existing dirty files unrelated to the workflow.
+	// 2. Final git commit — ship commits files touched by the workflow.
+	// Collect file paths from tasks to scope the commit.
 	if e.git != nil {
+		// Collect files touched by tasks
+		var taskFiles []string
+		for _, task := range tasks {
+			taskFiles = append(taskFiles, task.Files...)
+		}
+
 		if dirty, _ := e.git.HasUncommittedChanges(); dirty {
 			statusOut, _ := e.git.StatusPorcelain()
 			if len(statusOut) > 0 {
-				e.logger.Warn("ship commit will include uncommitted changes",
+				// Log unrelated dirty files as a warning
+				e.logger.Warn("ship commit: found uncommitted changes in working tree",
 					"dirty_files", len(statusOut))
+				for _, fs := range statusOut {
+					related := false
+					for _, tf := range taskFiles {
+						if fs.Path == tf {
+							related = true
+							break
+						}
+					}
+					if !related {
+						e.logger.Warn("ship commit: file not related to any task", "path", fs.Path, "status", fs.Status)
+					}
+				}
 			}
 		}
-		if err := e.git.AddAll(); err != nil {
-			e.logger.Warn("git add all before ship commit failed", "error", err)
+
+		if len(taskFiles) > 0 {
+			if err := e.git.Add(taskFiles...); err != nil {
+				e.logger.Warn("git add task files failed, falling back to add all", "error", err)
+				if err := e.git.AddAll(); err != nil {
+					e.logger.Warn("git add all before ship commit failed", "error", err)
+				}
+			}
+		} else {
+			if err := e.git.AddAll(); err != nil {
+				e.logger.Warn("git add all before ship commit failed", "error", err)
+			}
 		}
 		if err := e.git.Commit(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); err != nil {
 			return nil, fmt.Errorf("ship commit: %w", err)
@@ -138,7 +167,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		Phase:   "ship",
 		Message: "Generating walkthrough...",
 	})
-	demonstration = e.generateDemonstration(ctx, tasks, done, failed, commits)
+	demonstration = e.generateDemonstration(ctx, goal, tasks, done, failed, commits)
 	if demonstration != "" {
 		if err := e.sessionMgr.SaveDemonstration(e.sessionID, demonstration); err != nil {
 			e.logger.Warn("save demonstration failed", "error", err)
@@ -264,13 +293,18 @@ func (e *Engine) BuildSummary() ShipSummary {
 // generateDemonstration creates a post-completion walkthrough document using the LLM.
 // It combines the implementation plan, completed tasks, and git diff stats to produce
 // a narrative describing what was built and how to run it.
-func (e *Engine) generateDemonstration(ctx context.Context, tasks []m31types.Task, done, failed int, commits []git.CommitInfo) string {
+func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks []m31types.Task, done, failed int, commits []git.CommitInfo) string {
 	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
 	if planMarkdown == "" {
 		planMarkdown = e.planMarkdown
 	}
 
 	var sb strings.Builder
+	if goal != "" {
+		sb.WriteString("## Original Goal\n")
+		sb.WriteString(goal)
+		sb.WriteString("\n\n")
+	}
 	sb.WriteString("## Implementation Plan\n")
 	if planMarkdown != "" {
 		summary := planMarkdown

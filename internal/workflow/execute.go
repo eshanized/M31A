@@ -16,7 +16,7 @@ import (
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.
 func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, error) {
-	e.logger.Info("execute phase starting")
+	e.logger.Info("execute phase starting", "goal", goal)
 
 	// 1. Load tasks
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
@@ -62,7 +62,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 				e.logger.Warn("pre-task checkpoint failed", "task", task.ID, "error", err)
 			}
 
-			result := e.executeTaskWithTools(ctx, task, tasks)
+			result := e.executeTaskWithTools(ctx, task, tasks, goal)
 			// Count tool calls from task result
 			if result.ToolCalls > 0 {
 				toolCallCount += result.ToolCalls
@@ -119,12 +119,12 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 }
 
 // executeTaskWithTools runs a single task with tool dispatch and self-heal.
-func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, allTasks []m31types.Task) taskrunner.TaskResult {
+func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, allTasks []m31types.Task, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
 	for task.HealsAttempted < m31types.MaxHealAttempts {
 		// Build context
-		messages := e.buildExecuteContext(task, allTasks)
+		messages := e.buildExecuteContext(task, allTasks, goal)
 
 		// Stream LLM
 		content, err := e.streamLLM(ctx, messages, true)
@@ -140,7 +140,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason)
+			healResult := e.healTask(ctx, task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -168,7 +168,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason)
+			healResult := e.healTask(ctx, task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -251,7 +251,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason)
+			healResult := e.healTask(ctx, task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -305,9 +305,13 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 }
 
 // buildExecuteContext creates messages for task execution.
-func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) []m31types.Message {
+func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask)})
+	systemPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask)
+	if goal != "" {
+		systemPrompt += "\n\n## Original Goal\n" + goal
+	}
+	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	// Load PROJECT.md for project context
 	project, _ := e.sessionMgr.LoadProject(e.sessionID)
@@ -362,11 +366,16 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task) 
 }
 
 // healTask attempts to fix a failed task via LLM.
-func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string) taskrunner.TaskResult {
+func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
+	healPrompt := e.buildSystemPrompt(e.prompts.SelfHeal)
+	if goal != "" {
+		healPrompt += "\n\n## Original Goal\n" + goal
+	}
+
 	messages := []m31types.Message{
-		{Role: "system", Content: e.buildSystemPrompt(e.prompts.SelfHeal)},
+		{Role: "system", Content: healPrompt},
 		{Role: "user", Content: fmt.Sprintf(
 			"## Self-Heal Request\n\nTask %d failed with the following error:\n\n%s\n\n## Current File State\n\n%s\n\n"+
 				"Diagnose the root cause using the diagnostic steps in your instructions, then apply a fix using your available tools."+
