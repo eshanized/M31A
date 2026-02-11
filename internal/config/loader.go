@@ -547,8 +547,8 @@ func substituteVars(s string) string {
 		if val, ok := os.LookupEnv(name); ok {
 			return val
 		}
-		slog.Warn("unresolved variable in config, substituting empty string", "variable", name)
-		return ""
+		slog.Warn("unresolved variable in config, preserving pattern", "variable", name)
+		return match
 	})
 }
 
