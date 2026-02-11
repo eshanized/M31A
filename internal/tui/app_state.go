@@ -29,6 +29,7 @@ type workflowEngineInterface interface {
 	RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*workflow.PhaseResult, error)
 	Transition(ctx context.Context, from, to types.WorkflowPhase) error
 	SetModel(modelID string, p provider.LLMProvider)
+	SetPhaseModel(phase types.WorkflowPhase, modelID string)
 	SetMsgEmitter(em workflow.MsgEmitter)
 	SetSessionID(id string)
 	SetGit(g *git.Git)
@@ -123,6 +124,11 @@ type AppState struct {
 	fileExplorerModel *FileExplorerModel
 	toolDetailModel   *ToolDetailModel
 
+	// Dual-model picker (Planning vs Coding phase selection)
+	phaseModelPicker *PhaseModelPickerModel
+	planningModelID  string // model ID assigned to Discuss/Plan/Verify phases
+	codingModelID    string // model ID assigned to Execute/Ship phases
+
 	// Command system
 	cmdRegistry *CommandRegistry
 	keyRegistry *KeyRegistry
@@ -138,10 +144,8 @@ type AppState struct {
 	// Session list (for resume screen)
 	sessionList []*session.Session
 
-	// Workflow discuss questions + answers
+	// Workflow discuss questions
 	discussQuestions []string
-	discussAnswers   []string
-	discussIndex     int
 
 	// Toast notifications (up to 3 visible, queue overflow)
 	toasts      []Toast
@@ -157,10 +161,6 @@ type AppState struct {
 
 	// Transition overlay
 	transition *ScreenTransition
-
-	// Status
-	lastActivity    time.Time
-	streamErrorTime time.Time
 
 	// Stream cancellation
 	streamCancelFn context.CancelFunc

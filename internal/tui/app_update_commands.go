@@ -193,10 +193,3 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	return cmd
 }
 
-// ─── Session restore ──────────────────────────────────────────────────────────
-
-// sessionLoadedMsg carries a restored session.
-type sessionLoadedMsg struct {
-	sessionID string
-	navigate  bool
-}

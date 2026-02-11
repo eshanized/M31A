@@ -20,7 +20,6 @@ type DashboardModel struct {
 	goal      string
 	modelName string
 	provider  string
-	elapsed   string
 	cost      float64
 	activity  []components.TimelineEntry
 	width     int

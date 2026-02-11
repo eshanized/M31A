@@ -13,7 +13,6 @@ type ThemePickerModel struct {
 	theme    theme.Theme
 	themes   []themePreset
 	cursor   int
-	offset   int
 	width    int
 	height   int
 }

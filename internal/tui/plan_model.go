@@ -27,7 +27,6 @@ type PlanModel struct {
 	width        int
 	height       int
 	viewport     viewport.Model
-	selected     int
 	// Pre-computed wave groupings for visual display
 	waves [][]types.Task
 	// Rich plan content (markdown) for review

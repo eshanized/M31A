@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -15,11 +14,8 @@ type BisectModel struct {
 	theme    theme.Theme
 	commits  []bisectCommit
 	current  int
-	good     int
-	bad      int
 	total    int
 	status   string
-	viewport viewport.Model
 	errMsg   string
 	width    int
 	height   int

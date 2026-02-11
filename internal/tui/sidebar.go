@@ -38,7 +38,6 @@ type SidebarModel struct {
 	sessionID string
 
 	loading bool
-	err     string
 }
 
 // NewSidebarModel creates a new SidebarModel.

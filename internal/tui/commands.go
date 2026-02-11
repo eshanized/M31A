@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -69,7 +68,6 @@ type CommandContext struct {
 type CommandRegistry struct {
 	handlers         map[string]CommandHandler
 	descriptions     map[string]string
-	lastCompressTime time.Time
 }
 
 // NewCommandRegistry creates an empty CommandRegistry.

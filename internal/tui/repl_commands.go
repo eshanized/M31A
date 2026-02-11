@@ -39,25 +39,3 @@ func (m *ReplModel) executeShellCommand(input string, ctx context.Context) tea.C
 		return SlashCommandMsg{Command: "!result:" + result}
 	}
 }
-
-// expandFileRefs resolves @filepath mentions in the input and returns
-// the expanded string with file contents inline.
-func (m *ReplModel) expandFileRefs(input string) string {
-	// Simple implementation: find @word tokens and read file contents
-	words := strings.Fields(input)
-	for i, word := range words {
-		if strings.HasPrefix(word, "@") {
-			path := strings.TrimPrefix(word, "@")
-			// Skip special @ mentions like @conversation
-			if strings.HasPrefix(path, "conversation") {
-				continue
-			}
-			// Resolve relative to cwd
-			if m.cwd != "" && !strings.HasPrefix(path, "/") {
-				path = m.cwd + "/" + path
-			}
-			words[i] = word // keep original if file not readable
-		}
-	}
-	return strings.Join(words, " ")
-}

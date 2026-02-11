@@ -240,22 +240,6 @@ func (vm *VerifyModel) renderResults() string {
 	return strings.Join(lines, "\n")
 }
 
-func (vm *VerifyModel) countResults() (passed, failed, total int) {
-	total = len(vm.tasks)
-	for _, task := range vm.tasks {
-		result, ok := vm.results[task.ID]
-		if !ok {
-			continue
-		}
-		if result.FilesExist && result.SyntaxOK && result.TestsOK {
-			passed++
-		} else {
-			failed++
-		}
-	}
-	return
-}
-
 // countFailedTasks returns the number of tasks with failing verification results.
 func (vm *VerifyModel) countFailedTasks() int {
 	count := 0

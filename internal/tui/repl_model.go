@@ -101,9 +101,6 @@ type ReplModel struct {
 	// Git branch (from sidebar, displayed in status bar)
 	sidebarBranch string
 
-	// Shell command mode (starts with !)
-	shellMode bool
-
 	// @mention autocomplete state
 	mentionVisible   bool
 	mentionQuery     string

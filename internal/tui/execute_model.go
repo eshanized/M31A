@@ -22,9 +22,6 @@ type ExecuteModel struct {
 	width       int
 	height      int
 	viewport    viewport.Model
-	toolCalls   int
-	totalTokens int
-	totalCost   float64
 	paused      bool
 	startedAt   time.Time
 

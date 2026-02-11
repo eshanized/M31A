@@ -20,9 +20,6 @@ type Toast struct {
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
 const maxVisibleToasts = 3
 
-// toastSlideInFrames defines the slide-in animation frames
-var toastSlideInFrames = []int{0, 1, 2}
-
 // renderToastStack renders up to 3 most recent toasts stacked top-right.
 func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	if len(toasts) == 0 {
@@ -159,9 +156,3 @@ func renderToastProgress(toast Toast, t theme.Theme) string {
 		Render(filled + empty)
 }
 
-// advanceToastFrame advances the animation frame for a toast
-func advanceToastFrame(toast *Toast) {
-	if toast.Frame < 2 {
-		toast.Frame++
-	}
-}
