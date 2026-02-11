@@ -40,6 +40,7 @@ const (
 	ScreenSessionDetail Screen = 22   // session detail preview
 	ScreenFileExplorer  Screen = 23   // file tree browser
 	ScreenToolDetail    Screen = 24   // expandable tool output
+	ScreenPhaseModelPicker Screen = 25 // dual-model picker (planning vs coding)
 )
 
 // Label returns a human-readable name for the screen.
@@ -95,6 +96,8 @@ func (s Screen) Label() string {
 		return "Files"
 	case ScreenToolDetail:
 		return "Tool Output"
+	case ScreenPhaseModelPicker:
+		return "Model Setup"
 	default:
 		return "Unknown"
 	}
@@ -260,6 +263,15 @@ type HealResultMsg struct {
 // GoalSubmittedMsg is emitted by GoalInputModel when the user confirms a goal.
 type GoalSubmittedMsg struct {
 	Goal string
+}
+
+// PhaseModelPickedMsg is emitted by PhaseModelPickerModel when the user confirms
+// their model selections (or skips). Empty model IDs mean "use default".
+type PhaseModelPickedMsg struct {
+	PlanningModelID  string // model for Discuss, Plan, Verify phases
+	PlanningProvider string
+	CodingModelID    string // model for Execute, Ship phases
+	CodingProvider   string
 }
 
 // ─── Stream messages ──────────────────────────────────────────────────────────

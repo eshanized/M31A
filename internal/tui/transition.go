@@ -82,17 +82,13 @@ func (t *ScreenTransition) renderTransitionOverlay(th theme.Theme, width, height
 		opacity = 0
 	}
 
-	// Build a dim overlay
+	// Build a dim overlay using the theme's surface color as the base
 	dimChar := "░"
-
-	// The dim overlay uses the opacity to create a fade effect
-	// We use ANSI 24-bit color blending approximation
-	dimIntensity := int(opacity * 30) // 0-30 range for dimming
-	dimColor := fmt.Sprintf("#%02x%02x%02x", dimIntensity, dimIntensity, dimIntensity)
+	dimColor := lipgloss.Color(th.Surface)
 
 	overlayStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(dimColor)).
-		Background(lipgloss.Color(dimColor))
+		Foreground(dimColor).
+		Background(dimColor)
 
 	overlayLines := height
 	if overlayLines > 40 {

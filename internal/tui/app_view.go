@@ -131,8 +131,30 @@ func (m *AppState) buildHeaderInfo() layout.HeaderInfo {
 	}
 	info.Provider = m.activeProvider
 
+	// When per-phase model overrides are active, show a compact badge
+	// indicating which models handle Planning vs Coding work.
+	if m.planningModelID != "" || m.codingModelID != "" {
+		pName := m.planningModelID
+		cName := m.codingModelID
+		if pName == "" {
+			pName = "default"
+		}
+		if cName == "" {
+			cName = "default"
+		}
+		// Truncate long model IDs to keep the header readable.
+		if len(pName) > 20 {
+			pName = pName[len(pName)-20:]
+		}
+		if len(cName) > 20 {
+			cName = cName[len(cName)-20:]
+		}
+		info.ModelName = "P:" + pName + "  C:" + cName
+	}
+
 	return info
 }
+
 
 // buildFooterInfo constructs the unified footer data from AppState.
 func (m *AppState) buildFooterInfo() layout.FooterInfo {
@@ -281,6 +303,8 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderFileExplorerContent(chrome)
 	case ScreenToolDetail:
 		return m.renderToolDetailContent(chrome)
+	case ScreenPhaseModelPicker:
+		return m.renderPhaseModelPickerContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -461,6 +485,13 @@ func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 	return m.toolDetailModel.View()
 }
 
+func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
+	if m.phaseModelPicker == nil {
+		return renderLoading("Loading model picker...", m.themeManager.Current())
+	}
+	return m.phaseModelPicker.View()
+}
+
 // renderPermissionModal renders the permission or question overlay.
 func (m *AppState) renderPermissionModal() string {
 	if m.questionRequest != nil {
@@ -568,17 +599,6 @@ func (m *AppState) renderQuestionModal() string {
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
-
-// errorf creates a simple error.
-func errorf(msg string) error {
-	return &simpleError{msg: msg}
-}
-
-type simpleError struct {
-	msg string
-}
-
-func (e *simpleError) Error() string { return e.msg }
 
 // RenderPermissionModal renders a full-screen permission modal.
 func RenderPermissionModal(req *tools.PermissionRequest, countdown, width int, t theme.Theme, urgent bool) string {

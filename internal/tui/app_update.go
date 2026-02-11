@@ -76,19 +76,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Streaming ─────────────────────────────────────────────────────────────
 	case StreamMsg:
 		if m.replModel != nil {
-			cs, _ := m.replModel.handleStreamMsg(msg)
+			cs := m.replModel.handleStreamMsg(msg)
 			cmds = append(cmds, cs...)
 		}
 	case StreamDoneMsg:
 		if m.replModel != nil {
-			cs, _ := m.replModel.handleStreamDoneMsg(msg)
-			cmds = append(cmds, cs...)
+			m.replModel.handleStreamDoneMsg(msg)
 			m.checkAutoDream()
 		}
 	case StreamErrorMsg:
 		if m.replModel != nil {
-			cs, _ := m.replModel.handleStreamErrorMsg(msg)
-			cmds = append(cmds, cs...)
+			m.replModel.handleStreamErrorMsg(msg)
 		}
 		// Auto-fallback on rate limit or provider unreachable
 		if m.config != nil && m.config.Provider.AutoFallback && m.registry != nil {
@@ -108,6 +106,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenExecute && m.executeModel != nil {
 			execM, cmd := m.executeModel.Update(msg)
 			m.executeModel = execM
+			cmds = append(cmds, cmd)
+		}
+		// Forward to phase model picker for spinner animation
+		if m.screen == ScreenPhaseModelPicker && m.phaseModelPicker != nil {
+			newPMP, cmd := m.phaseModelPicker.Update(msg)
+			m.phaseModelPicker = newPMP
 			cmds = append(cmds, cmd)
 		}
 		// Forward to verify screen for heal spinner animation
@@ -306,8 +310,30 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Goal submitted ────────────────────────────────────────────────────────
 	case GoalSubmittedMsg:
 		m.workflowGoal = msg.Goal
+		// Show the dual-model picker before starting the workflow.
+		// The picker emits PhaseModelPickedMsg when done (or skipped).
+		picker := NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), m.width, m.height)
+		m.phaseModelPicker = picker
+		m.screen = ScreenPhaseModelPicker
+		cmds = append(cmds, picker.Init())
+
+	// ── Phase model picked (from dual-model picker) ────────────────────────────
+	case PhaseModelPickedMsg:
+		m.planningModelID = msg.PlanningModelID
+		m.codingModelID = msg.CodingModelID
+		// Inject per-phase model overrides into the workflow engine.
+		if m.workflowEngine != nil && msg.PlanningModelID != "" {
+			m.workflowEngine.SetPhaseModel(types.PhaseDiscuss, msg.PlanningModelID)
+			m.workflowEngine.SetPhaseModel(types.PhasePlan, msg.PlanningModelID)
+			m.workflowEngine.SetPhaseModel(types.PhaseVerify, msg.PlanningModelID)
+		}
+		if m.workflowEngine != nil && msg.CodingModelID != "" {
+			m.workflowEngine.SetPhaseModel(types.PhaseExecute, msg.CodingModelID)
+			m.workflowEngine.SetPhaseModel(types.PhaseShip, msg.CodingModelID)
+		}
+		// Resume the workflow from the REPL screen.
 		m.screen = ScreenREPL
-		cmds = append(cmds, m.runWorkflowFromGoal(msg.Goal))
+		cmds = append(cmds, m.runWorkflowFromGoal(m.workflowGoal))
 
 	// ── Toast ─────────────────────────────────────────────────────────────────
 	case ToastMsg:
@@ -599,6 +625,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenPhaseModelPicker:
+			if m.phaseModelPicker != nil {
+				newPMP, cmd := m.phaseModelPicker.Update(msg)
+				m.phaseModelPicker = newPMP
+				cmds = append(cmds, cmd)
+			}
 		case ScreenToolDetail:
 			if m.toolDetailModel != nil {
 				newTD, cmd := m.toolDetailModel.Update(msg)
@@ -749,6 +781,9 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	if m.toolDetailModel != nil {
 		m.toolDetailModel.SetDimensions(contentW, contentH)
+	}
+	if m.phaseModelPicker != nil {
+		m.phaseModelPicker.SetDimensions(contentW, contentH)
 	}
 
 	// UX-38: Notify when sidebar auto-hides due to narrow terminal
@@ -1636,6 +1671,9 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 
 // attemptAutoFallback tries to switch to a fallback provider when the active one fails.
 func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
+	if origErr != nil {
+		slog.Warn("attempting auto-fallback due to error", "error", origErr)
+	}
 	if m.registry == nil || m.activeProvider == "" {
 		return nil
 	}
