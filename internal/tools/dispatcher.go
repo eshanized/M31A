@@ -129,16 +129,6 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		return types.ToolResult{}, ctx.Err()
 	}
 
-	// Check tool existence first for proper error messages
-	d.mu.RLock()
-	_, toolExists := d.tools[call.Name]
-	d.mu.RUnlock()
-
-	if !toolExists {
-		available := d.List()
-		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
-	}
-
 	var input types.ToolInput
 	if err := json.Unmarshal(call.Input, &input); err != nil {
 		rawInput := string(call.Input)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -27,7 +28,7 @@ func (t *FileMove) Description() string {
 }
 
 func (t *FileMove) RiskLevel() types.RiskLevel {
-	return types.RiskSafe
+	return types.RiskDangerous
 }
 
 func (t *FileMove) ParameterSchema() string {
@@ -77,19 +78,39 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 		dstAbs = filepath.Join(t.workDir, dst)
 	}
 
-	// Security: both paths must be within workDir
-	srcRel, err := filepath.Rel(t.workDir, srcAbs)
-	if err != nil || len(srcRel) > 1 && srcRel[:2] == ".." {
-		return types.ToolResult{}, fmt.Errorf("source path is outside working directory")
-	}
-	dstRel, err := filepath.Rel(t.workDir, dstAbs)
-	if err != nil || len(dstRel) > 1 && dstRel[:2] == ".." {
-		return types.ToolResult{}, fmt.Errorf("destination path is outside working directory")
+	// Security: resolve symlinks and verify both paths are within workDir
+	workDirPrefix := t.workDir
+	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
+		workDirPrefix += string(filepath.Separator)
 	}
 
-	if _, err := os.Stat(srcAbs); err != nil {
-		return types.ToolResult{}, fmt.Errorf("source file not found: %s", srcAbs)
+	// Source must exist and resolve within workDir
+	srcResolved, err := filepath.EvalSymlinks(srcAbs)
+	if err != nil {
+		return types.ToolResult{}, fmt.Errorf("source file not found: %s", src)
 	}
+	if srcResolved != t.workDir && !strings.HasPrefix(srcResolved, workDirPrefix) {
+		return types.ToolResult{}, fmt.Errorf("source path resolves outside working directory")
+	}
+	srcAbs = srcResolved
+
+	// Destination: resolve parent directory through symlinks if file doesn't exist
+	dstResolved := dstAbs
+	if _, err := os.Stat(dstAbs); err == nil {
+		dstResolved, err = filepath.EvalSymlinks(dstAbs)
+		if err != nil {
+			return types.ToolResult{}, fmt.Errorf("cannot resolve destination: %w", err)
+		}
+	} else {
+		parentDir := filepath.Dir(dstAbs)
+		if resolvedParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+			dstResolved = filepath.Join(resolvedParent, filepath.Base(dstAbs))
+		}
+	}
+	if dstResolved != t.workDir && !strings.HasPrefix(dstResolved, workDirPrefix) {
+		return types.ToolResult{}, fmt.Errorf("destination path resolves outside working directory")
+	}
+	dstAbs = dstResolved
 
 	// Ensure destination directory exists
 	dstDir := filepath.Dir(dstAbs)

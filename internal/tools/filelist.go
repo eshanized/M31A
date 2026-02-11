@@ -63,6 +63,27 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 		}
 	}
 
+	// Security: verify target directory is within workDir
+	absTarget, err := filepath.Abs(targetDir)
+	if err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(absTarget)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return types.ToolResult{}, fmt.Errorf("directory not found: %s", targetDir)
+		}
+		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+	}
+	workDirPrefix := t.workDir
+	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
+		workDirPrefix += string(filepath.Separator)
+	}
+	if resolvedTarget != t.workDir && !strings.HasPrefix(resolvedTarget, workDirPrefix) {
+		return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
+	}
+	targetDir = resolvedTarget
+
 	maxDepth := 3
 	if depthRaw, ok := input.Params["depth"]; ok {
 		if d, ok := depthRaw.(float64); ok && d > 0 {
@@ -149,5 +170,13 @@ func humanSize(b int64) string {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+	units := "KMGTPE"
+	if exp >= len(units) {
+		exp = len(units) - 1
+		div = int64(unit)
+		for i := 1; i <= exp; i++ {
+			div *= unit
+		}
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), units[exp])
 }

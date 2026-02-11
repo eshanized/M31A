@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,6 +88,15 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	targetPath, err := t.resolvePath(path)
 	if err != nil {
 		return types.ToolResult{}, err
+	}
+
+	// Check file size before reading to prevent OOM
+	fi, err := os.Stat(targetPath)
+	if err != nil {
+		return types.ToolResult{}, fmt.Errorf("cannot stat file: %w", err)
+	}
+	if fi.Size() > int64(types.MaxFileSize) {
+		return types.ToolResult{}, fmt.Errorf("file %s exceeds size limit (%d bytes)", path, fi.Size())
 	}
 
 	// Read existing content
@@ -178,7 +189,13 @@ func (t *Edit) resolvePath(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("cannot resolve symlinks: %w", err)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if os.IsNotExist(err) {
+		// File doesn't exist — resolve parent directory through symlinks
+		parentDir := filepath.Dir(targetPath)
+		if resolvedParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+			resolved = filepath.Join(resolvedParent, filepath.Base(targetPath))
+		}
+	} else {
 		return "", fmt.Errorf("cannot stat path: %w", err)
 	}
 
@@ -206,6 +223,7 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		if err := os.WriteFile(backupPath, oldContent, FilePermission); err != nil {
 			return fmt.Errorf("cannot write backup: %w", err)
 		}
+		t.pruneBackups(sanitized)
 	}
 
 	// Create parent directories if needed
@@ -243,6 +261,35 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 	}
 
 	return nil
+}
+
+func (t *Edit) pruneBackups(sanitizedPrefix string) {
+	entries, err := os.ReadDir(t.backupDir)
+	if err != nil {
+		slog.Warn("edit: cannot read backup directory for pruning", "dir", t.backupDir, "error", err)
+		return
+	}
+
+	var matches []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), sanitizedPrefix+".") && strings.HasSuffix(e.Name(), ".bak") {
+			matches = append(matches, e.Name())
+		}
+	}
+
+	if len(matches) <= MaxBackupsPerFile {
+		return
+	}
+
+	sort.Strings(matches)
+
+	toDelete := matches[:len(matches)-MaxBackupsPerFile]
+	for _, name := range toDelete {
+		path := filepath.Join(t.backupDir, name)
+		if err := os.Remove(path); err != nil {
+			slog.Warn("edit: failed to prune old backup", "path", path, "error", err)
+		}
+	}
 }
 
 func replaceByLineRange(content string, startLine, endLine int, newContent string) (string, error) {
@@ -323,15 +370,25 @@ func lineTrimmedReplace(content, oldString, newString string) (string, error) {
 			newLines = append(newLines, contentLines[:i]...)
 
 			newContentLines := strings.Split(newString, "\n")
-			// Use the first matched line's indentation as the base indent for all new lines
+			// Compute base indent from first matched line and first new line
 			baseIndent := ""
 			if i < len(contentLines) {
 				baseIndent = leadingWhitespace(contentLines[i])
 			}
+			newBaseIndent := ""
+			if len(newContentLines) > 0 {
+				newBaseIndent = leadingWhitespace(newContentLines[0])
+			}
 			for _, ncLine := range newContentLines {
 				trimmed := strings.TrimSpace(ncLine)
 				if trimmed != "" {
-					ncLine = baseIndent + trimmed
+					ncIndent := leadingWhitespace(ncLine)
+					// Compute relative indent: remove new content's base indent, add matched line's indent
+					relativeIndent := ""
+					if len(ncIndent) >= len(newBaseIndent) {
+						relativeIndent = ncIndent[len(newBaseIndent):]
+					}
+					ncLine = baseIndent + relativeIndent + trimmed
 				}
 				newLines = append(newLines, ncLine)
 			}
@@ -423,6 +480,7 @@ func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
 		if avgSimilarity >= LevenshteinThreshold {
 			// Good enough match
 			newLines := make([]string, 0, len(contentLines))
+			newLines = append(newLines, contentLines[:i]...)
 			newLines = append(newLines, strings.Split(newString, "\n")...)
 			newLines = append(newLines, contentLines[endIdx+1:]...)
 			return strings.Join(newLines, "\n"), nil

@@ -174,7 +174,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
 
-	tmpFile, err := os.Create(tmpPath)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, FilePermission)
 	if err != nil {
 		return types.ToolResult{}, m31errors.ErrPermissionDenied
 	}

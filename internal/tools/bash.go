@@ -274,11 +274,7 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 	if int64(len(p)) > remaining {
 		p = p[:remaining]
 	}
-	lw.mu.Unlock()
-
 	n, err := lw.w.Write(p)
-
-	lw.mu.Lock()
 	lw.written += int64(n)
 	lw.mu.Unlock()
 	return n, err

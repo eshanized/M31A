@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -19,15 +20,24 @@ var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type TodoWrite struct {
 	sessionsDir string
-	sessionID   string
+	sessionID   atomic.Value // stores string
 }
 
 func NewTodoWrite(sessionsDir, sessionID string) *TodoWrite {
-	return &TodoWrite{sessionsDir: sessionsDir, sessionID: sessionID}
+	t := &TodoWrite{sessionsDir: sessionsDir}
+	t.sessionID.Store(sessionID)
+	return t
 }
 
 func (t *TodoWrite) SetSessionID(id string) {
-	t.sessionID = id
+	t.sessionID.Store(id)
+}
+
+func (t *TodoWrite) getSessionID() string {
+	if v, ok := t.sessionID.Load().(string); ok {
+		return v
+	}
+	return ""
 }
 
 func (t *TodoWrite) Name() string {
@@ -133,10 +143,11 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 
 	// Write to session directory
-	if !sessionIDRe.MatchString(t.sessionID) {
+	sid := t.getSessionID()
+	if !sessionIDRe.MatchString(sid) {
 		return types.ToolResult{}, fmt.Errorf("%w: invalid session ID: must be alphanumeric", m31errors.ErrToolExecution)
 	}
-	sessionDir := filepath.Join(t.sessionsDir, t.sessionID)
+	sessionDir := filepath.Join(t.sessionsDir, sid)
 	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
 		return types.ToolResult{}, fmt.Errorf("%w: cannot create session directory: %v", m31errors.ErrToolExecution, err)
 	}

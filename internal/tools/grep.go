@@ -322,6 +322,9 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 				results = append(results, fmt.Sprintf("%s:%d: %s", relPath, lineNum, scanner.Text()))
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			slog.Debug("grep: scanner error", "path", path, "error", err)
+		}
 		return nil
 	})
 	if err != nil {
