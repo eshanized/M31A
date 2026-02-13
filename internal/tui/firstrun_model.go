@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"time"
 
@@ -24,11 +23,51 @@ const (
 	stepDone
 )
 
-// suggestedModel is a quick-pick model option shown on the model step.
+// suggestedModel is kept for backward compat but the first-run wizard now
+// uses a richer categorized browser. See modelBrowserEntry.
 type suggestedModel struct {
 	ID    string
 	Label string
 	Tag   string
+}
+
+// modelCategory is a named group of models in the browser.
+type modelCategory struct {
+	Title  string
+	Icon   string
+	Models []types.ModelInfo
+}
+
+// modelBrowserState holds the full categorized model list and cursor state
+// for the first-run wizard's model-pick step.
+type modelBrowserState struct {
+	categories   []modelCategory
+	catCursor    int // which category is active (tab-selectable)
+	modelCursor  int // row cursor within the active category
+	scrollOffset int // scroll offset within the active category list
+}
+
+// activeCat returns a pointer to the currently focused category, or nil.
+func (b *modelBrowserState) activeCat() *modelCategory {
+	if b == nil || len(b.categories) == 0 {
+		return nil
+	}
+	if b.catCursor < 0 || b.catCursor >= len(b.categories) {
+		return nil
+	}
+	return &b.categories[b.catCursor]
+}
+
+// selectedModel returns the ModelInfo for the current cursor position, or the zero value.
+func (b *modelBrowserState) selectedModel() (types.ModelInfo, bool) {
+	cat := b.activeCat()
+	if cat == nil || len(cat.Models) == 0 {
+		return types.ModelInfo{}, false
+	}
+	if b.modelCursor < 0 || b.modelCursor >= len(cat.Models) {
+		return types.ModelInfo{}, false
+	}
+	return cat.Models[b.modelCursor], true
 }
 
 // providerInfo holds display metadata for a provider.
@@ -67,8 +106,9 @@ type FirstRunOpts struct {
 
 // firstRunModelsMsg carries fetched models for the wizard.
 type firstRunModelsMsg struct {
-	Models []suggestedModel
-	Err    error
+	Models    []suggestedModel // legacy field, kept for compat
+	AllModels []types.ModelInfo // full model list for the categorized browser
+	Err       error
 }
 
 // firstRunKeyValidationMsg carries the result of an async API key health check.
@@ -97,11 +137,11 @@ type FirstRunModel struct {
 	keyValidating    bool   // true while async health check runs
 	keyValidationErr string // set when validation fails
 
-	// Model selection
+	// Model browser (replaces 3-chip quick-pick)
 	modelInput      textinput.Model
-	suggestedModels []suggestedModel
-	suggestedCursor int
+	suggestedModels []suggestedModel // kept for compat — not used in new browser
 	modelsLoading   bool
+	browser         *modelBrowserState // nil until models load
 
 	// Collected values
 	opts FirstRunOpts
@@ -194,11 +234,19 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case firstRunModelsMsg:
 		fr.modelsLoading = false
-		if msg.Err == nil && len(msg.Models) > 0 {
-			fr.suggestedModels = msg.Models
-			if fr.suggestedCursor >= len(fr.suggestedModels) {
-				fr.suggestedCursor = 0
+		if msg.Err == nil && len(msg.AllModels) > 0 {
+			// Build categorized browser from the full model list.
+			cats := categorizeModels(msg.AllModels)
+			fr.browser = &modelBrowserState{categories: cats}
+			// Pre-fill the text input with the first free model if available.
+			if len(cats) > 0 && len(cats[0].Models) > 0 {
+				if fr.modelInput.Value() == "" {
+					fr.modelInput.SetValue(cats[0].Models[0].ID)
+				}
 			}
+		} else if msg.Err == nil && len(msg.Models) > 0 {
+			// Legacy path (shouldn't be hit in new code).
+			fr.suggestedModels = msg.Models
 		}
 		return fr, nil
 
@@ -245,7 +293,7 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return fr, cmd
 }
 
-// fetchModelsCmd returns a tea.Cmd that fetches models from the active provider.
+// fetchModelsCmd returns a tea.Cmd that fetches all models from the active provider.
 func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 	reg := fr.registry
 	providerName := fr.opts.DefaultProvider
@@ -261,7 +309,7 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 			return firstRunModelsMsg{Err: err}
 		}
 
-		ctx, cancel := context.WithTimeout(fr.ctx, 15*time.Second)
+		ctx, cancel := context.WithTimeout(fr.ctx, 20*time.Second)
 		defer cancel()
 
 		models, err := p.FetchModels(ctx)
@@ -269,10 +317,48 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 			return firstRunModelsMsg{Err: err}
 		}
 
-		suggested := pickTopModels(models, 3)
-		return firstRunModelsMsg{Models: suggested}
+		// Return all models; the TUI categorizes them for display.
+		return firstRunModelsMsg{Models: nil, AllModels: models}
 	}
 }
+
+// categorizeModels groups all models into display categories.
+func categorizeModels(models []types.ModelInfo) []modelCategory {
+	var free, reasoning, toolUse, vision, other []types.ModelInfo
+	for _, m := range models {
+		switch {
+		case m.Pricing.InputPerMToken == 0 && m.Pricing.OutputPerMToken == 0:
+			free = append(free, m)
+		case m.Capabilities.Reasoning:
+			reasoning = append(reasoning, m)
+		case m.Capabilities.Tools && !m.Capabilities.Reasoning:
+			toolUse = append(toolUse, m)
+		case m.Capabilities.Vision:
+			vision = append(vision, m)
+		default:
+			other = append(other, m)
+		}
+	}
+
+	var cats []modelCategory
+	if len(free) > 0 {
+		cats = append(cats, modelCategory{Title: "Free Models", Icon: "🆓", Models: free})
+	}
+	if len(reasoning) > 0 {
+		cats = append(cats, modelCategory{Title: "Reasoning", Icon: "💡", Models: reasoning})
+	}
+	if len(toolUse) > 0 {
+		cats = append(cats, modelCategory{Title: "Tool-Use", Icon: "🔧", Models: toolUse})
+	}
+	if len(vision) > 0 {
+		cats = append(cats, modelCategory{Title: "Vision", Icon: "👁", Models: vision})
+	}
+	if len(other) > 0 {
+		cats = append(cats, modelCategory{Title: "All Models", Icon: "⚡", Models: other})
+	}
+	return cats
+}
+
 
 // validateKeyCmd returns a tea.Cmd that validates an API key format.
 func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
@@ -299,50 +385,6 @@ func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 	}
 }
 
-// pickTopModels selects up to n models from the list, preferring popular ones.
-func pickTopModels(models []types.ModelInfo, n int) []suggestedModel {
-	// Filter to models with names and sort by context length (proxy for quality)
-	var candidates []types.ModelInfo
-	for _, m := range models {
-		if m.Name != "" && m.ContextLength > 0 {
-			candidates = append(candidates, m)
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].ContextLength > candidates[j].ContextLength
-	})
-
-	var result []suggestedModel
-	seen := make(map[string]bool)
-	for _, m := range candidates {
-		if len(result) >= n {
-			break
-		}
-		if seen[m.ID] {
-			continue
-		}
-		seen[m.ID] = true
-		tag := ""
-		switch {
-		case m.ContextLength >= 1000000:
-			tag = "Large ctx"
-		case m.Capabilities.Tools:
-			tag = "Tools"
-		case m.Capabilities.Vision:
-			tag = "Vision"
-		case m.Capabilities.Reasoning:
-			tag = "Reasoning"
-		default:
-			tag = "Popular"
-		}
-		result = append(result, suggestedModel{
-			ID:    m.ID,
-			Label: m.Name,
-			Tag:   tag,
-		})
-	}
-	return result
-}
 
 // handleKey routes key events per step.
 func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -426,22 +468,51 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case stepModelPick:
+		b := fr.browser
 		switch msg.String() {
-		case "1", "2", "3":
-			idx := int(msg.String()[0] - '1')
-			if idx >= 0 && idx < len(fr.suggestedModels) {
-				fr.suggestedCursor = idx
-				fr.modelInput.SetValue(fr.suggestedModels[idx].ID)
+		case "up", "k":
+			if b != nil {
+				if b.modelCursor > 0 {
+					b.modelCursor--
+					// Scroll up
+					if b.modelCursor < b.scrollOffset {
+						b.scrollOffset = b.modelCursor
+					}
+				}
+				// Sync text input to highlighted model
+				if m, ok := b.selectedModel(); ok {
+					fr.modelInput.SetValue(m.ID)
+				}
 			}
-		case "left", "h":
-			if fr.suggestedCursor > 0 {
-				fr.suggestedCursor--
-				fr.modelInput.SetValue(fr.suggestedModels[fr.suggestedCursor].ID)
+		case "down", "j":
+			if b != nil {
+				cat := b.activeCat()
+				if cat != nil && b.modelCursor < len(cat.Models)-1 {
+					b.modelCursor++
+					// Scroll down (visible rows handled in view)
+				}
+				if m, ok := b.selectedModel(); ok {
+					fr.modelInput.SetValue(m.ID)
+				}
 			}
-		case "right", "l":
-			if len(fr.suggestedModels) > 0 && fr.suggestedCursor < len(fr.suggestedModels)-1 {
-				fr.suggestedCursor++
-				fr.modelInput.SetValue(fr.suggestedModels[fr.suggestedCursor].ID)
+		case "tab":
+			// Switch category
+			if b != nil && len(b.categories) > 1 {
+				b.catCursor = (b.catCursor + 1) % len(b.categories)
+				b.modelCursor = 0
+				b.scrollOffset = 0
+				if m, ok := b.selectedModel(); ok {
+					fr.modelInput.SetValue(m.ID)
+				}
+			}
+		case "shift+tab":
+			if b != nil && len(b.categories) > 1 {
+				b.catCursor = (b.catCursor - 1 + len(b.categories)) % len(b.categories)
+				b.modelCursor = 0
+				b.scrollOffset = 0
+				if m, ok := b.selectedModel(); ok {
+					fr.modelInput.SetValue(m.ID)
+				}
 			}
 		case "enter":
 			modelID := strings.TrimSpace(fr.modelInput.Value())
@@ -467,10 +538,12 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				fr.modelInput.Blur()
 			}
 		default:
+			// Typing in the model ID input — allows manual override
 			var cmd tea.Cmd
 			fr.modelInput, cmd = fr.modelInput.Update(msg)
 			return fr, cmd
 		}
+
 	}
 	return fr, nil
 }

@@ -7,7 +7,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/types"
 )
+
 
 // renderFirstRun renders the appropriate wizard step.
 func (fr *FirstRunModel) renderFirstRun() string {
@@ -56,10 +58,12 @@ func (fr *FirstRunModel) renderFirstRun() string {
 
 // ─── Step progress indicator ─────────────────────────────────────────────────
 
-func (fr *FirstRunModel) renderStepDots(current int, total int) string {
+const firstRunStepCount = 4
+
+func (fr *FirstRunModel) renderStepDots(current int) string {
 	t := fr.theme
 	var parts []string
-	for i := 0; i < total; i++ {
+	for i := 0; i < firstRunStepCount; i++ {
 		if i == current {
 			parts = append(parts, lipgloss.NewStyle().Foreground(t.Brand).Render("●"))
 		} else {
@@ -67,31 +71,6 @@ func (fr *FirstRunModel) renderStepDots(current int, total int) string {
 		}
 	}
 	return strings.Join(parts, " ")
-}
-
-// ─── Decorative gradient divider ─────────────────────────────────────────────
-
-func renderBlockDivider(width int) string {
-	if width < 10 {
-		return strings.Repeat("─", width)
-	}
-	half := width / 2
-	if half > 4 {
-		half = 4
-	}
-	chars := []string{"░", "▒", "▓", "█"}
-	var b strings.Builder
-	for i := 0; i < half && i < len(chars); i++ {
-		b.WriteString(chars[i])
-	}
-	center := strings.Repeat("█", width-2*half)
-	b.WriteString(center)
-	for i := half - 1; i >= 0; i-- {
-		if i < len(chars) {
-			b.WriteString(chars[i])
-		}
-	}
-	return b.String()
 }
 
 // ─── Styled key badge ────────────────────────────────────────────────────────
@@ -228,7 +207,7 @@ func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 		Render("Your AI pair programmer in the terminal")
 
 	// Step progress dots (4 total, first active).
-	dots := fr.renderStepDots(0, 4)
+	dots := fr.renderStepDots(0)
 
 	// Keyboard hints row — bordered badges when there is room, plain text when
 	// the panel is very narrow (the badges add ~16 cells of decoration that
@@ -356,71 +335,6 @@ func (fr *FirstRunModel) renderGlowRow(width int) string {
 
 // ─── Overlay helpers (starfield + panel composition) ────────────────────────
 
-// overlayOnPlainGrid composites a styled overlay panel on top of a plain
-// (ANSI-free) base grid of equal-width lines. The overlay is centered both
-// horizontally and vertically. Base lines outside the overlay region are
-// preserved verbatim so the starfield dots render around the panel.
-//
-// base lines must contain no ANSI escape sequences and must all be at least
-// totalW runes long; callers can use RenderStarfieldPlain to produce such a
-// grid. overlay lines may contain ANSI codes and are inserted as-is.
-//
-// Overlay rows that would fall above or below the base are clipped (skipped),
-// so a panel taller than the base still appears with its middle rows visible.
-func overlayOnPlainGrid(base, overlay []string, totalW int) []string {
-	baseH := len(base)
-	overlayH := len(overlay)
-	if overlayH <= 0 || baseH <= 0 {
-		return base
-	}
-
-	topY := (baseH - overlayH) / 2
-
-	overlayW := 0
-	if len(overlay) > 0 {
-		overlayW = runeWidth(overlay[0])
-	}
-	if overlayW > totalW {
-		overlayW = totalW
-	}
-	leftX := (totalW - overlayW) / 2
-	if leftX < 0 {
-		leftX = 0
-	}
-
-	out := make([]string, baseH)
-	copy(out, base)
-	for i, ovLine := range overlay {
-		y := topY + i
-		if y < 0 || y >= len(out) {
-			continue
-		}
-		runes := []rune(out[y])
-		left := string(runes[:min(leftX, len(runes))])
-		rightStart := leftX + overlayW
-		right := ""
-		if rightStart < len(runes) {
-			right = string(runes[rightStart:])
-		}
-		out[y] = left + ovLine + right
-	}
-	return out
-}
-
-// runeWidth returns the visible-cell width of a string, accounting for
-// multi-rune graphemes and ANSI escape codes.
-func runeWidth(s string) int {
-	return lipgloss.Width(s)
-}
-
-// min returns the smaller of two ints.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (fr *FirstRunModel) featureCard(title, desc string, w int) string {
 	t := fr.theme
 	if w < 12 {
@@ -455,7 +369,7 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 	// Title + step dots
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
 		Render("Step 1/3 — Choose your providers")
-	dots := fr.renderStepDots(1, 4)
+	dots := fr.renderStepDots(1)
 	header := lipgloss.JoinVertical(lipgloss.Left, title, "", dots)
 
 	subtitle := lipgloss.NewStyle().Foreground(t.TextMuted).
@@ -576,7 +490,7 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
 			Render(fmt.Sprintf("Step 2/3 — Enter %s API key", provName))
 	}
-	dots := fr.renderStepDots(2, 4)
+	dots := fr.renderStepDots(2)
 
 	desc := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("Your key is stored securely and never sent anywhere else.")
@@ -636,7 +550,7 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// ─── Model pick step ─────────────────────────────────────────────────────────
+// ─── Model pick step ────────────────────────────────────────────────────────
 
 func (fr *FirstRunModel) renderModelPickStep() string {
 	t := fr.theme
@@ -647,118 +561,205 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	if fr.contentWidth > 0 {
 		w = fr.contentWidth
 	}
-	contentW := w - 10
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 3/3 — Default model")
-	dots := fr.renderStepDots(3, 4)
+		Render("Step 3/3 — Choose your default model")
+	dots := fr.renderStepDots(3)
 
-	// Custom input (always shown)
-	inputLabel := lipgloss.NewStyle().Foreground(t.TextSecondary).Bold(true).
-		Render("Model ID")
-	inputBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border).
-		Padding(0, 1).
-		Render(fr.modelInput.View())
-
-	// Navigation hints
 	confirmBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
 	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
 
-	// Build the content based on state
 	var parts []string
 	parts = append(parts, title, "", dots, "")
 
-	if fr.opts.DefaultProvider == "" {
-		// Skipped provider — no suggestions, just text input
-		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("You can configure providers later via /settings.\nPress Enter to start without an LLM, or type a model ID.")
-		parts = append(parts, desc, "", inputLabel, "", inputBox, "")
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  ⓘ  Choose a model later via /models or /settings."))
-		parts = append(parts, "", confirmBadge, "  ", backBadge)
-	} else if fr.modelsLoading {
-		// Fetching models from provider
-		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("Fetching models from " + titleCase(fr.opts.DefaultProvider) + "...")
+	// ── Loading ───────────────────────────────────────────────────────────────
+	if fr.modelsLoading {
 		spinner := lipgloss.NewStyle().Foreground(t.Brand).Render("⠋")
-		parts = append(parts, spinner+" "+desc, "", inputLabel, "", inputBox, "")
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  ⓘ  Type a model ID while models are loading."))
-		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
-		parts = append(parts, "", hints)
-	} else if len(fr.suggestedModels) > 0 {
-		// Dynamic suggestions available
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("Pick a model or type a custom model ID.")
-		parts = append(parts, desc, "")
-
-		// Quick-pick chips
-		var chips []string
-		for i, s := range fr.suggestedModels {
-			chips = append(chips, fr.renderModelChip(s, i == fr.suggestedCursor, contentW))
-		}
-		chipsRow := lipgloss.JoinHorizontal(lipgloss.Top, chips[0], "  ", chips[1], "  ", chips[2])
-		parts = append(parts, chipsRow, "")
-
-		parts = append(parts, inputLabel, "", inputBox, "")
-
-		quickBadge := keyBadge("1-3", "Quick pick", t.Brand, t.TextMuted)
-		hints := lipgloss.JoinHorizontal(lipgloss.Center, quickBadge, "  ", confirmBadge, "  ", backBadge)
-		parts = append(parts, hints)
-	} else {
-		// Provider configured but no models fetched (error or empty)
-		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("Could not fetch models. Enter a model ID manually.")
-		parts = append(parts, desc, "", inputLabel, "", inputBox, "")
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  ⓘ  Leave blank to choose later via /models."))
-		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
-		parts = append(parts, "", hints)
+			Render("Fetching all models from " + titleCase(fr.opts.DefaultProvider) + "...")
+		parts = append(parts, spinner+" "+desc)
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
+
+	// ── No provider configured ────────────────────────────────────────────────
+	if fr.opts.DefaultProvider == "" {
+		inputBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(0, 1).
+			Render(fr.modelInput.View())
+		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render("No provider configured. Enter a model ID or press ↵ to continue.")
+		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
+		parts = append(parts, desc, "", inputBox, "", hints)
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	}
+
+	// ── Full categorized browser ──────────────────────────────────────────────
+	b := fr.browser
+	if b == nil || len(b.categories) == 0 {
+		inputBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(0, 1).
+			Render(fr.modelInput.View())
+		warnLine := lipgloss.NewStyle().Foreground(t.Warning).
+			Render("⚠  Could not fetch models. Enter a model ID manually.")
+		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
+		parts = append(parts, warnLine, "", inputBox, "", hints)
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	}
+
+	// Category tab bar
+	var tabParts []string
+	for i, cat := range b.categories {
+		count := fmt.Sprintf("%d", len(cat.Models))
+		label := cat.Icon + " " + cat.Title + " (" + count + ")"
+		if i == b.catCursor {
+			tabParts = append(tabParts, lipgloss.NewStyle().
+				Foreground(t.Brand).Bold(true).
+				Border(lipgloss.RoundedBorder()).BorderForeground(t.Brand).
+				Padding(0, 1).Render(label))
+		} else {
+			tabParts = append(tabParts, lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				Border(lipgloss.RoundedBorder()).BorderForeground(t.Border).
+				Padding(0, 1).Render(label))
+		}
+		if i < len(b.categories)-1 {
+			tabParts = append(tabParts, " ")
+		}
+	}
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
+	parts = append(parts, tabBar, "")
+
+	// Model list
+	cat := b.activeCat()
+	listW := w - 8
+	if listW < 30 {
+		listW = 30
+	}
+	if cat != nil && len(cat.Models) > 0 {
+		listH := fr.height - 22
+		if listH < 5 {
+			listH = 5
+		}
+		// Clamp scroll
+		if b.modelCursor >= b.scrollOffset+listH {
+			b.scrollOffset = b.modelCursor - listH + 1
+		}
+		if b.scrollOffset < 0 {
+			b.scrollOffset = 0
+		}
+		end := b.scrollOffset + listH
+		if end > len(cat.Models) {
+			end = len(cat.Models)
+		}
+
+		var rows []string
+		for i := b.scrollOffset; i < end; i++ {
+			rows = append(rows, fr.renderModelRow(cat.Models[i], i == b.modelCursor, listW))
+		}
+		if len(cat.Models) > listH {
+			rows = append(rows, lipgloss.NewStyle().Foreground(t.TextMuted).
+				Render(fmt.Sprintf("  %d–%d of %d  (↑/↓ scroll)",
+					b.scrollOffset+1, end, len(cat.Models))))
+		}
+		listBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Width(listW).
+			Render(strings.Join(rows, "\n"))
+		parts = append(parts, listBox)
+	}
+
+	// Selected model ID input
+	inputLabel := lipgloss.NewStyle().Foreground(t.TextSecondary).
+		Render("Selected model (edit to override):")
+	inputBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Padding(0, 1).
+		Render(fr.modelInput.View())
+	parts = append(parts, "", inputLabel, inputBox)
+
+	// Hints
+	navBadge := keyBadge("↑↓", "Navigate", t.Brand, t.TextMuted)
+	tabNavBadge := keyBadge("tab", "Category", t.Brand, t.TextMuted)
+	hints := lipgloss.JoinHorizontal(lipgloss.Center,
+		navBadge, "  ", tabNavBadge, "  ", confirmBadge, "  ", backBadge)
+	parts = append(parts, "", hints)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-func (fr *FirstRunModel) renderModelChip(s suggestedModel, selected bool, totalW int) string {
+// renderModelRow renders a single model row in the categorized browser list.
+func (fr *FirstRunModel) renderModelRow(m types.ModelInfo, selected bool, maxW int) string {
 	t := fr.theme
-	chipW := totalW/3 - 3
-	if chipW < 14 {
-		chipW = 14
-	}
 
-	numLabel := ""
-	for i, sm := range fr.suggestedModels {
-		if sm.ID == s.ID {
-			numLabel = fmt.Sprintf("%d", i+1)
-			break
-		}
-	}
-
-	name := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(s.Label)
-	tag := lipgloss.NewStyle().Foreground(t.Success).Render(s.Tag)
-	num := lipgloss.NewStyle().Foreground(t.TextMuted).Render("[" + numLabel + "]")
-
-	header := num + " " + name
-	content := lipgloss.JoinVertical(lipgloss.Left, header, tag)
-
-	borderColor := t.Border
+	cursor := "  "
+	nameStyle := lipgloss.NewStyle().Foreground(t.Text)
 	if selected {
-		borderColor = t.Brand
-		content = lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▶ "+s.Label+" "+num),
-			lipgloss.NewStyle().Foreground(t.Success).Render(s.Tag),
-		)
+		cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
+		nameStyle = nameStyle.Bold(true).Foreground(t.Brand)
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1).
-		Width(chipW).
-		Render(content)
+	name := m.Name
+	if name == "" {
+		name = m.ID
+	}
+	maxName := maxW - 38
+	if maxName < 12 {
+		maxName = 12
+	}
+	nameStr := nameStyle.Render(TruncateWithEllipsis(name, maxName))
+
+	// Pricing badge
+	var priceBadge string
+	if m.Pricing.InputPerMToken == 0 && m.Pricing.OutputPerMToken == 0 {
+		priceBadge = lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("FREE")
+	} else {
+		priceBadge = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("$%.2f/M", m.Pricing.InputPerMToken))
+	}
+
+	// Capability icons
+	var caps []string
+	if m.Capabilities.Reasoning {
+		caps = append(caps, lipgloss.NewStyle().Foreground(t.Warning).Render("💡"))
+	}
+	if m.Capabilities.Tools {
+		caps = append(caps, lipgloss.NewStyle().Foreground(t.Brand).Render("🔧"))
+	}
+	if m.Capabilities.Vision {
+		caps = append(caps, lipgloss.NewStyle().Foreground(t.Brand).Render("👁"))
+	}
+	capsStr := strings.Join(caps, " ")
+
+	// Context window
+	ctxStr := ""
+	if m.ContextLength >= 1000000 {
+		ctxStr = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("%dM", m.ContextLength/1000000))
+	} else if m.ContextLength >= 1000 {
+		ctxStr = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("%dK", m.ContextLength/1000))
+	}
+
+	row := cursor + nameStr
+	if priceBadge != "" {
+		row += "  " + priceBadge
+	}
+	if ctxStr != "" {
+		row += "  " + ctxStr
+	}
+	if capsStr != "" {
+		row += "  " + capsStr
+	}
+	return row
 }
+
+
 
 // ─── Done step ───────────────────────────────────────────────────────────────
 
@@ -770,13 +771,6 @@ func (fr *FirstRunModel) renderDone() string {
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Starting M31A..."),
 	)
 }
-
-// ─── Logo constant (duplicated from components for wizard use) ───────────────
-
-const logo = `  __  _______  __
- /  |/  / __ \/ _/
- / /|_/ / /_/ / _/
- /_/  /_/\____/_/ `
 
 // titleCase uppercases the first rune of s.
 func titleCase(s string) string {
