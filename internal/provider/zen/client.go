@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -17,18 +15,11 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-var Version = "dev"
-
 // Compile-time interface check
 var _ provider.LLMProvider = (*Client)(nil)
 
 type Client struct {
-	apiKey            string
-	baseURL           string
-	httpClient        *http.Client
-	cache             *provider.ModelCache
-	healthCheckLiveMs int64
-	healthCheckSlowMs int64
+	provider.BaseClient
 	defaultContextLen int64
 }
 
@@ -40,6 +31,7 @@ type Options struct {
 	HealthCheckLiveMs int64
 	HealthCheckSlowMs int64
 	DefaultContextLen int64
+	Version           string
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -49,47 +41,21 @@ func New(apiKey string, opts Options) (*Client, error) {
 	if opts.BaseURL == "" {
 		opts.BaseURL = types.DefaultZenBaseURL
 	}
-	if opts.CacheTTL == 0 {
-		opts.CacheTTL = types.ModelCacheTTL
-	}
-	if opts.CacheStaleTTL == 0 {
-		opts.CacheStaleTTL = types.StaleCacheTTL
-	}
-	if opts.HealthCheckLiveMs == 0 {
-		opts.HealthCheckLiveMs = types.DefaultHealthLiveMs
-	}
-	if opts.HealthCheckSlowMs == 0 {
-		opts.HealthCheckSlowMs = types.DefaultHealthSlowMs
-	}
 	if opts.DefaultContextLen == 0 {
 		opts.DefaultContextLen = types.DefaultContextLength
 	}
+	if opts.Version == "" {
+		opts.Version = "dev"
+	}
 
-	cache := provider.NewModelCacheWithStale(opts.CacheTTL, opts.CacheStaleTTL)
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: opts.BaseURL,
-		httpClient: &http.Client{
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
-			},
-		},
-		cache:             cache,
-		healthCheckLiveMs: opts.HealthCheckLiveMs,
-		healthCheckSlowMs: opts.HealthCheckSlowMs,
+		BaseClient:        provider.NewBaseClient(apiKey, opts.BaseURL, opts.Version, opts.CacheTTL, opts.CacheStaleTTL, opts.HealthCheckLiveMs, opts.HealthCheckSlowMs),
 		defaultContextLen: opts.DefaultContextLen,
 	}, nil
 }
 
 func (c *Client) Name() string {
 	return "zen"
-}
-
-func (c *Client) APIKey() string {
-	if len(c.apiKey) <= 4 {
-		return "****"
-	}
-	return "****" + c.apiKey[len(c.apiKey)-4:]
 }
 
 type zenModel struct {
@@ -105,17 +71,17 @@ type zenModelsResp struct {
 }
 
 func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
-	if !c.cache.IsExpired() && c.cache.Len() > 0 {
-		return provider.CachedModels(c.cache), nil
+	if !c.Cache.IsExpired() && c.Cache.Len() > 0 {
+		return provider.CachedModels(c.Cache), nil
 	}
 
-	models, err := c.cache.Refresh(ctx, func(ctx context.Context) ([]types.ModelInfo, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	models, err := c.Cache.Refresh(ctx, func(ctx context.Context) ([]types.ModelInfo, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURLField+"/models", nil)
 		if err != nil {
 			return nil, err
 		}
-		provider.SetCommonHeaders(req, c.apiKey, Version)
-		resp, err := c.httpClient.Do(req)
+		provider.SetCommonHeaders(req, c.APIKeyField, c.Version)
+		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +113,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 	})
 	if err != nil {
 		slog.Warn("zen failed to refresh models", "error", err)
-		return provider.StaleFallback(c.cache)
+		return provider.StaleFallback(c.Cache)
 	}
 	return models, nil
 }
@@ -160,29 +126,28 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURLField+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	provider.SetCommonHeaders(httpReq, c.apiKey, Version)
+	provider.SetCommonHeaders(httpReq, c.APIKeyField, c.Version)
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, types.MaxLLMResponseBytes)) // was unbounded io.ReadAll
+		bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
 		resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
 		case http.StatusTooManyRequests:
 			return nil, m31errors.ErrRateLimited
 		case http.StatusUnauthorized:
-			// Check if it's a credits/billing issue vs actual invalid key
 			if strings.Contains(bodyStr, "CreditsError") || strings.Contains(bodyStr, "payment") || strings.Contains(bodyStr, "billing") || strings.Contains(bodyStr, "credit") {
 				return nil, fmt.Errorf("no credits: %s: %w", provider.SanitizeProviderError(resp.StatusCode, bodyStr, "zen"), m31errors.ErrNoCredits)
 			}
@@ -198,71 +163,36 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)
-	return c.makeIterator(sse, req.Model), nil
-}
-
-func (c *Client) makeIterator(sse *provider.SSEParser, modelID string) *types.StreamIterator {
-	return &types.StreamIterator{
-		Next: func() (*types.StreamChunk, error) {
-			_, data, err := sse.Next()
-			if err != nil {
-				return nil, err
-			}
-			if data == "" {
-				return nil, nil
-			}
-			chunk, err := provider.ParseSSEChunk(data, modelID)
-			if err != nil {
-				return nil, err
-			}
-			return chunk, nil
-		},
-		Close: func() error {
-			return sse.Close()
-		},
-	}
-}
-
-func (c *Client) EstimateCost(modelID string, usage types.Usage) float64 {
-	return provider.EstimateCost(modelID, usage, c.cache)
+	return c.MakeIterator(sse, req.Model), nil
 }
 
 func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	start := time.Now()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURLField+"/models", nil)
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, Error: err.Error()}
 	}
-	provider.SetCommonHeaders(req, c.apiKey, Version)
+	provider.SetCommonHeaders(req, c.APIKeyField, c.Version)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.HTTPClient.Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, types.MaxLLMResponseBytes))
+	_, _ = provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
 
 	if resp.StatusCode != http.StatusOK {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: fmt.Sprintf("status %d", resp.StatusCode)}
 	}
 
 	switch {
-	case latency < c.healthCheckLiveMs:
+	case latency < c.HealthLiveMs:
 		return types.HealthStatus{Status: types.HealthStatusLive, LatencyMs: latency}
-	case latency < c.healthCheckSlowMs:
+	case latency < c.HealthSlowMs:
 		return types.HealthStatus{Status: types.HealthStatusSlow, LatencyMs: latency}
 	default:
 		return types.HealthStatus{Status: types.HealthStatusDegraded, LatencyMs: latency}
 	}
-}
-
-func (c *Client) GetModel(id string) (*types.ModelInfo, error) {
-	return provider.GetModel(id, c.cache)
-}
-
-// CachedModels returns all models from the cache without a network call.
-func (c *Client) CachedModels() []types.ModelInfo {
-	return provider.CachedModels(c.cache)
 }

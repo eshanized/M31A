@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -50,6 +52,30 @@ func BuildChatBody(req ChatRequest) map[string]any {
 	if req.ReasoningEnabled {
 		body = ApplyReasoningParams(req.Model, body)
 	}
+	if len(req.Tools) > 0 {
+		tools := make([]map[string]any, 0, len(req.Tools))
+		for _, td := range req.Tools {
+			fn := map[string]any{
+				"name":        td.Name,
+				"description": td.Description,
+			}
+			if td.Parameters != "" {
+				var params any
+				if err := json.Unmarshal([]byte(td.Parameters), &params); err == nil {
+					fn["parameters"] = params
+				} else {
+					fn["parameters"] = map[string]any{}
+				}
+			} else {
+				fn["parameters"] = map[string]any{}
+			}
+			tools = append(tools, map[string]any{
+				"type":     "function",
+				"function": fn,
+			})
+		}
+		body["tools"] = tools
+	}
 	return body
 }
 
@@ -80,6 +106,16 @@ func CachedModels(cache *ModelCache) []types.ModelInfo {
 		models = append(models, *m)
 	}
 	return models
+}
+
+// ReadBodyLimited reads an HTTP response body up to maxBytes, preventing OOM
+// from unbounded responses. Returns the body bytes and any error.
+func ReadBodyLimited(resp *http.Response, maxBytes int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // StaleFallback returns cached models if the cache is not yet stale,
