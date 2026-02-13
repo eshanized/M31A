@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -229,6 +230,13 @@ func detectProjectType(workDir string) string {
 }
 
 // parseQuestions extracts numbered questions from LLM response.
+// Uses three cascading strategies with decreasing specificity:
+//  1. Numbered items ending with "?" (most reliable)
+//  2. Numbered items without "?" (fallback for statements phrased as questions)
+//  3. Any line containing "?" (last resort for non-numbered formats)
+//
+// Results are capped at 4 questions to keep the discuss phase focused
+// and prevent overwhelming the user with too many prompts at once.
 func parseQuestions(content string) []string {
 	// Match numbered questions that end with ?
 	re := regexp.MustCompile(`(\d+)\.\s+(.+\?)`)
@@ -454,37 +462,43 @@ func parseSingleToolCall(jsonStr string, callID int64) (*m31types.ToolCall, erro
 	}, nil
 }
 
-// normalizeToolName maps common LLM tool names to registered tool names.
+// toolNameAliases maps common LLM-generated tool name variations to canonical names.
+var toolNameAliases map[string]string
+var toolNameAliasesOnce sync.Once
+
+func getToolNameAliases() map[string]string {
+	toolNameAliasesOnce.Do(func() {
+		aliases := map[string][]string{
+			"Bash":           {"bash", "shell", "exec", "run"},
+			"FileRead":       {"fileread", "read_file", "read", "cat"},
+			"FileWrite":      {"filewrite", "write_file", "write", "save"},
+			"Glob":           {"glob", "find_files", "find"},
+			"Grep":           {"grep", "search", "search_files"},
+			"Edit":           {"fileedit", "file_edit", "edit", "search_replace"},
+			"TodoWrite":      {"todowrite", "todo_write"},
+			"AskUserQuestion": {"askuserquestion", "ask_user_question", "ask_user"},
+			"WebFetch":       {"web_fetch", "fetch", "http_get"},
+			"FileList":       {"filelist", "list_files", "ls", "list_dir"},
+			"FileDelete":     {"filedelete", "delete_file", "rm_file", "remove_file"},
+			"FileMove":       {"filemove", "move_file", "rename", "rename_file"},
+		}
+		m := make(map[string]string, 40)
+		for canonical, variants := range aliases {
+			for _, v := range variants {
+				m[v] = canonical
+			}
+		}
+		toolNameAliases = m
+	})
+	return toolNameAliases
+}
+
+// normalizeToolName maps common LLM tool name variations to canonical names.
 func normalizeToolName(name string) string {
-	lower := strings.ToLower(name)
-	switch lower {
-	case "bash", "shell", "exec", "run":
-		return "Bash"
-	case "fileread", "read_file", "read", "cat":
-		return "FileRead"
-	case "filewrite", "write_file", "write", "save":
-		return "FileWrite"
-	case "glob", "find_files", "find":
-		return "Glob"
-	case "grep", "search", "search_files":
-		return "Grep"
-	case "fileedit", "file_edit", "edit", "search_replace":
-		return "Edit"
-	case "todowrite", "todo_write":
-		return "TodoWrite"
-	case "askuserquestion", "ask_user_question", "ask_user":
-		return "AskUserQuestion"
-	case "web_fetch", "fetch", "http_get":
-		return "WebFetch"
-	case "filelist", "list_files", "ls", "list_dir":
-		return "FileList"
-	case "filedelete", "delete_file", "rm_file", "remove_file":
-		return "FileDelete"
-	case "filemove", "move_file", "rename", "rename_file":
-		return "FileMove"
-	default:
-		return name
+	if canonical, ok := getToolNameAliases()[strings.ToLower(name)]; ok {
+		return canonical
 	}
+	return name
 }
 
 // stripJSONComments removes // line comments and /* ... */ block comments from
