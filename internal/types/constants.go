@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 const (
 	ModelCacheTTL           = 5 * time.Minute
@@ -115,16 +118,20 @@ const (
 // SkipDirs is the list of directories to skip during file traversal.
 var SkipDirs = []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"}
 
-// skipDirsCache is computed once at init time for O(1) lookups.
-var skipDirsCache = func() map[string]bool {
-	m := make(map[string]bool, len(SkipDirs))
-	for _, d := range SkipDirs {
-		m[d] = true
-	}
-	return m
-}()
+var (
+	skipDirsCache map[string]bool
+	skipDirsOnce  sync.Once
+)
 
 // SkipDirsMap returns a cached map for O(1) lookup of skip directories.
+// Computed lazily on first access via sync.Once.
 func SkipDirsMap() map[string]bool {
+	skipDirsOnce.Do(func() {
+		m := make(map[string]bool, len(SkipDirs))
+		for _, d := range SkipDirs {
+			m[d] = true
+		}
+		skipDirsCache = m
+	})
 	return skipDirsCache
 }
