@@ -46,7 +46,7 @@ func TestHealthCheck_Live(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "live" {
@@ -68,7 +68,7 @@ func TestHealthCheck_Slow(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "slow" {
@@ -85,7 +85,7 @@ func TestHealthCheck_Offline(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "offline" {
@@ -114,7 +114,7 @@ func TestFetchModels_PopulatesCache(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	models, err := c.FetchModels(context.Background())
 	if err != nil {
@@ -158,7 +158,7 @@ func TestFetchModels_StaleFallback(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.FetchModels(context.Background())
 	if err != nil {
@@ -187,7 +187,7 @@ func TestEstimateCost_KnownModel(t *testing.T) {
 	c, _ := New("test-key", Options{})
 
 	// Manually populate cache with a model that has pricing data
-	c.cache.Set([]types.ModelInfo{
+	c.Cache.Set([]types.ModelInfo{
 		{
 			ID:   "test/model",
 			Name: "Test Model",
@@ -229,7 +229,7 @@ func TestFetchModels_CacheHit(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	// First call populates cache
 	_, err := c.FetchModels(context.Background())
@@ -276,7 +276,7 @@ func TestFetchModels_CacheExpired(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	// First call populates cache
 	_, err := c.FetchModels(context.Background())
@@ -308,7 +308,7 @@ func TestChatCompletionStream_ContentOnly(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -347,7 +347,7 @@ func TestChatCompletionStream_WithThinking(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "deepseek/deepseek-r1",
@@ -378,7 +378,7 @@ func TestChatCompletionStream_Done(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -405,7 +405,7 @@ func TestChatCompletionStream_ContextExceeded(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -430,7 +430,7 @@ func TestChatCompletionStream_ReasoningEnabled(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:            "openai/o3-mini",
@@ -482,7 +482,7 @@ func TestChatCompletionStream_Headers(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -550,7 +550,7 @@ func TestHTTP402_NoCredits(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -590,5 +590,60 @@ func TestIsContextExceeded(t *testing.T) {
 				t.Errorf("IsContextExceeded(%d, %q) = %v, want %v", tt.statusCode, tt.body, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAPIKey_Masking(t *testing.T) {
+	c, _ := New("sk-or-v1-abcdefgh", Options{})
+	got := c.APIKey()
+	if got != "****efgh" {
+		t.Errorf("APIKey() = %q, want '****efgh'", got)
+	}
+}
+
+func TestAPIKey_ShortKey(t *testing.T) {
+	c, _ := New("sk-a", Options{})
+	got := c.APIKey()
+	if got != "****" {
+		t.Errorf("APIKey() = %q, want '****' for short key", got)
+	}
+}
+
+func TestCachedModels_Empty(t *testing.T) {
+	c, _ := New("sk-or-v1-testkey", Options{})
+	models := c.CachedModels()
+	if len(models) != 0 {
+		t.Errorf("expected 0 cached models, got %d", len(models))
+	}
+}
+
+func TestCachedModels_AfterFetch(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			resp := map[string]any{
+				"data": []map[string]any{
+					{"id": "test/model", "name": "Test", "context_length": 4096,
+						"pricing": map[string]any{"prompt_token": 0.000001, "completion_token": 0.000002}},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key", Options{})
+	c.BaseURLField = ts.URL
+
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels failed: %v", err)
+	}
+
+	models := c.CachedModels()
+	if len(models) != 1 {
+		t.Fatalf("expected 1 cached model, got %d", len(models))
+	}
+	if models[0].ID != "test/model" {
+		t.Errorf("cached model ID = %q, want 'test/model'", models[0].ID)
 	}
 }

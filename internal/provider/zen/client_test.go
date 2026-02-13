@@ -45,7 +45,7 @@ func TestHealthCheck_Live(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "live" {
@@ -70,7 +70,7 @@ func TestFetchModels_PopulatesCache(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	models, err := c.FetchModels(context.Background())
 	if err != nil {
@@ -113,7 +113,7 @@ func TestFetchModels_CacheHit(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	// First call populates cache
 	_, err := c.FetchModels(context.Background())
@@ -148,7 +148,7 @@ func TestChatCompletionStream_ContentOnly(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -188,7 +188,7 @@ func TestEstimateCost_KnownModel(t *testing.T) {
 	c, _ := New("test-key", Options{})
 
 	// Manually populate cache with a model that has pricing data
-	c.cache.Set([]types.ModelInfo{
+	c.Cache.Set([]types.ModelInfo{
 		{
 			ID:   "test/model",
 			Name: "Test Model",
@@ -222,7 +222,7 @@ func TestChatCompletionStream_Headers(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -263,7 +263,7 @@ func TestFetchModels_StaleFallback(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	// First call populates cache
 	_, err := c.FetchModels(context.Background())
@@ -291,7 +291,7 @@ func TestFetchModels_StaleFallbackNoCache(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	// No cache, API fails - should return error
 	_, err := c.FetchModels(context.Background())
@@ -302,7 +302,7 @@ func TestFetchModels_StaleFallbackNoCache(t *testing.T) {
 
 func TestFetchModels_NetworkError(t *testing.T) {
 	c, _ := New("test-key", Options{})
-	c.baseURL = "http://127.0.0.1:1" // unreachable port
+	c.BaseURLField = "http://127.0.0.1:1" // unreachable port
 
 	_, err := c.FetchModels(context.Background())
 	if err != m31errors.ErrProviderUnreachable {
@@ -317,7 +317,7 @@ func TestChatCompletionStream_RateLimited(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -336,7 +336,7 @@ func TestChatCompletionStream_Unauthorized(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -355,7 +355,7 @@ func TestChatCompletionStream_NoCredits(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -377,7 +377,7 @@ func TestChatCompletionStream_PaymentError(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -398,7 +398,7 @@ func TestChatCompletionStream_ServiceUnavailable(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -417,7 +417,7 @@ func TestChatCompletionStream_ContextExceeded(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -436,7 +436,7 @@ func TestChatCompletionStream_ContextError(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -455,7 +455,7 @@ func TestChatCompletionStream_UnexpectedStatus(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -471,7 +471,7 @@ func TestChatCompletionStream_UnexpectedStatus(t *testing.T) {
 
 func TestChatCompletionStream_NetworkError(t *testing.T) {
 	c, _ := New("test-key", Options{})
-	c.baseURL = "http://127.0.0.1:1" // unreachable port
+	c.BaseURLField = "http://127.0.0.1:1" // unreachable port
 
 	_, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -497,7 +497,7 @@ func TestChatCompletionStream_WithMaxTokens(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:     "test/model",
@@ -533,7 +533,7 @@ func TestChatCompletionStream_WithTools(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	tools := []provider.ToolDefinition{
 		{
@@ -569,7 +569,7 @@ func TestHealthCheck_Offline(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "offline" {
@@ -590,7 +590,7 @@ func TestHealthCheck_Slow(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "slow" {
@@ -611,7 +611,7 @@ func TestHealthCheck_Degraded(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "degraded" {
@@ -624,7 +624,7 @@ func TestHealthCheck_Degraded(t *testing.T) {
 
 func TestHealthCheck_NetworkError(t *testing.T) {
 	c, _ := New("test-key", Options{})
-	c.baseURL = "http://127.0.0.1:1" // unreachable port
+	c.BaseURLField = "http://127.0.0.1:1" // unreachable port
 
 	status := c.HealthCheck(context.Background())
 	if status.Status != "offline" {
@@ -655,7 +655,7 @@ func TestChatCompletionStream_WithThinking(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "deepseek/deepseek-r1",
@@ -686,7 +686,7 @@ func TestChatCompletionStream_Done(t *testing.T) {
 	defer ts.Close()
 
 	c, _ := New("test-key", Options{})
-	c.baseURL = ts.URL
+	c.BaseURLField = ts.URL
 
 	it, err := c.ChatCompletionStream(context.Background(), provider.ChatRequest{
 		Model:    "test/model",
@@ -700,5 +700,60 @@ func TestChatCompletionStream_Done(t *testing.T) {
 	_, err = it.Next()
 	if err != io.EOF {
 		t.Fatalf("expected EOF, got %v", err)
+	}
+}
+
+func TestAPIKey_Masking(t *testing.T) {
+	c, _ := New("sk-zen-v1-abcdefgh", Options{})
+	got := c.APIKey()
+	if got != "****efgh" {
+		t.Errorf("APIKey() = %q, want '****efgh'", got)
+	}
+}
+
+func TestAPIKey_ShortKey_Zen(t *testing.T) {
+	c, _ := New("sk-a", Options{})
+	got := c.APIKey()
+	if got != "****" {
+		t.Errorf("APIKey() = %q, want '****' for short key", got)
+	}
+}
+
+func TestCachedModels_Empty_Zen(t *testing.T) {
+	c, _ := New("test-key", Options{})
+	models := c.CachedModels()
+	if len(models) != 0 {
+		t.Errorf("expected 0 cached models, got %d", len(models))
+	}
+}
+
+func TestCachedModels_AfterFetch_Zen(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			resp := map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{"id": "test/zen-model"},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer ts.Close()
+
+	c, _ := New("test-key", Options{})
+	c.BaseURLField = ts.URL
+
+	_, err := c.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels failed: %v", err)
+	}
+
+	models := c.CachedModels()
+	if len(models) != 1 {
+		t.Fatalf("expected 1 cached model, got %d", len(models))
+	}
+	if models[0].ID != "test/zen-model" {
+		t.Errorf("cached model ID = %q, want 'test/zen-model'", models[0].ID)
 	}
 }
