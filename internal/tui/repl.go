@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ─── REPL keyboard handling ───────────────────────────────────────────────────
@@ -56,16 +55,14 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case StreamMsg:
-		cs, _ := m.handleStreamMsg(msg)
+		cs := m.handleStreamMsg(msg)
 		cmds = append(cmds, cs...)
 
 	case StreamDoneMsg:
-		cs, _ := m.handleStreamDoneMsg(msg)
-		cmds = append(cmds, cs...)
+		m.handleStreamDoneMsg(msg)
 
 	case StreamErrorMsg:
-		cs, _ := m.handleStreamErrorMsg(msg)
-		cmds = append(cmds, cs...)
+		m.handleStreamErrorMsg(msg)
 
 	case TickMsg:
 		if m.streaming || m.thinking {
@@ -380,11 +377,3 @@ type ThinkingBlockToggleMsg struct {
 	Index int
 }
 
-// renderQuickActions renders the quick action hints if no messages.
-func (m *ReplModel) renderQuickActions() string {
-	t := m.theme
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Italic(true).
-		Render("Quick actions: /help  /settings  /models  /workflow")
-}

@@ -107,7 +107,11 @@ func renderSessionInfoRow(info session.SessionInfo, selected bool, w int, t them
 		label = " " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render(info.Label)
 	}
 
-	return prefix + idStyle.Render(shortID) + label + "  " + meta
+	row := prefix + idStyle.Render(shortID) + label + "  " + meta
+	if w > 0 && lipgloss.Width(row) > w {
+		row = lipgloss.NewStyle().MaxWidth(w).Render(row)
+	}
+	return row
 }
 
 // sessionAge returns a human-readable age string.

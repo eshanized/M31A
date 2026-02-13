@@ -26,10 +26,10 @@ func (m *ReplModel) AppendStreamChunk(chunk *types.StreamChunk) {
 
 // handleStreamMsg processes a StreamMsg (token chunk) from the stream goroutine.
 // Returns commands to continue the stream and a bool indicating "done".
-func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
+func (m *ReplModel) handleStreamMsg(msg StreamMsg) []tea.Cmd {
 	chunk := msg.Chunk
 	if chunk == nil {
-		return nil, false
+		return nil
 	}
 
 	m.streaming = true
@@ -72,7 +72,7 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) ([]tea.Cmd, bool) {
 		return msg
 	}
 	// Append streaming tick to drive 10fps rendering
-	return []tea.Cmd{nextCmd, StreamTickCmd()}, false
+	return []tea.Cmd{nextCmd, StreamTickCmd()}
 }
 
 // closeActiveSegment finalizes the current stream segment and appends it.
@@ -93,7 +93,7 @@ func (m *ReplModel) closeActiveSegment() {
 }
 
 // handleStreamDoneMsg finalizes the completed stream.
-func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
+func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) {
 	m.closeActiveSegment()
 
 	msg.Message.Segments = m.streamSegments
@@ -143,8 +143,6 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) ([]tea.Cmd, bool) {
 
 	m.renderMessages()
 	m.autoScrollConditionally()
-
-	return nil, true
 }
 
 // renderErrorBanner returns a styled error message based on the typed sentinel.
@@ -188,7 +186,7 @@ func typedErrorName(err error) string {
 }
 
 // handleStreamErrorMsg processes a StreamErrorMsg.
-func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
+func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) {
 	if os.Getenv("M31A_LOG_LEVEL") == "debug" {
 		slog.Debug("stream error",
 			"typed", typedErrorName(msg.Err),
@@ -209,13 +207,6 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) ([]tea.Cmd, bool) {
 
 	m.renderMessages()
 	m.viewport.GotoBottom()
-
-	return nil, true
-}
-
-// streamTickCmds returns the streaming tick command.
-func (m *ReplModel) streamTickCmds() ([]tea.Cmd, bool) {
-	return []tea.Cmd{StreamTickCmd()}, false
 }
 
 // getToolCallsFromSegments extracts tool calls from the segments list.

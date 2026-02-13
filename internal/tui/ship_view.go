@@ -13,9 +13,11 @@ import (
 // renderShipStatsGrid renders a 2-column stats layout for the ship summary.
 func renderShipStatsGrid(t theme.Theme, rows [][2]string, colWidth int) string {
 	var grid []string
+	labelStyle := lipgloss.NewStyle().Foreground(t.TextSecondary).Width(colWidth)
+	valueStyle := lipgloss.NewStyle().Foreground(t.Text).Width(colWidth)
 	for _, row := range rows {
-		left := lipgloss.NewStyle().Width(colWidth).Render(row[0])
-		right := lipgloss.NewStyle().Width(colWidth).Render(row[1])
+		left := labelStyle.Render(row[0])
+		right := valueStyle.Render(row[1])
 		grid = append(grid, lipgloss.JoinHorizontal(lipgloss.Left, left, right))
 	}
 	return strings.Join(grid, "\n")
