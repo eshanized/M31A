@@ -1,8 +1,13 @@
 package provider
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestMaskAPIKeys(t *testing.T) {
@@ -116,6 +121,234 @@ func TestMaskAPIKeys_PreservesNonKeyContent(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "GET /v1/chat/completions returned 401 for model ") {
 		t.Errorf("non-key content was altered: %q", got)
+	}
+}
+
+func TestUserAgent(t *testing.T) {
+	t.Parallel()
+	got := UserAgent("1.2.3")
+	if got != "M31A/1.2.3" {
+		t.Errorf("UserAgent('1.2.3') = %q, want %q", got, "M31A/1.2.3")
+	}
+}
+
+func TestSetCommonHeaders(t *testing.T) {
+	t.Parallel()
+	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	SetCommonHeaders(req, "sk-test123", "1.0")
+
+	if got := req.Header.Get("Authorization"); got != "Bearer sk-test123" {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer sk-test123")
+	}
+	if got := req.Header.Get("User-Agent"); got != "M31A/1.0" {
+		t.Errorf("User-Agent = %q, want %q", got, "M31A/1.0")
+	}
+}
+
+func TestBuildChatBody_Basic(t *testing.T) {
+	t.Parallel()
+	body := BuildChatBody(ChatRequest{Model: "gpt-4"})
+	if body["model"] != "gpt-4" {
+		t.Errorf("model = %v, want gpt-4", body["model"])
+	}
+	if body["stream"] != true {
+		t.Error("expected stream=true")
+	}
+	if _, ok := body["max_tokens"]; ok {
+		t.Error("max_tokens should be absent when 0")
+	}
+	if _, ok := body["tools"]; ok {
+		t.Error("tools should be absent when empty")
+	}
+}
+
+func TestBuildChatBody_WithMaxTokens(t *testing.T) {
+	t.Parallel()
+	body := BuildChatBody(ChatRequest{Model: "gpt-4", MaxTokens: 1024})
+	if body["max_tokens"] != 1024 {
+		t.Errorf("max_tokens = %v, want 1024", body["max_tokens"])
+	}
+}
+
+func TestBuildChatBody_WithTools(t *testing.T) {
+	t.Parallel()
+	tools := []ToolDefinition{
+		{Name: "get_weather", Description: "Get weather", Parameters: `{"type":"object","properties":{"city":{"type":"string"}}}`},
+		{Name: "no_params", Description: "No params", Parameters: ""},
+		{Name: "bad_json", Description: "Bad JSON", Parameters: "not-json"},
+	}
+	body := BuildChatBody(ChatRequest{Model: "gpt-4", Tools: tools})
+	toolsArr, ok := body["tools"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected tools to be []map[string]any")
+	}
+	if len(toolsArr) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(toolsArr))
+	}
+	// First tool: valid parameters
+	fn0 := toolsArr[0]["function"].(map[string]any)
+	if fn0["name"] != "get_weather" {
+		t.Errorf("tool[0].name = %v, want get_weather", fn0["name"])
+	}
+	if fn0["parameters"] == nil {
+		t.Error("tool[0].parameters should not be nil")
+	}
+	// Second tool: empty parameters → empty object
+	fn1 := toolsArr[1]["function"].(map[string]any)
+	params1, ok := fn1["parameters"].(map[string]any)
+	if !ok || len(params1) != 0 {
+		t.Errorf("tool[1].parameters = %v, want empty map", fn1["parameters"])
+	}
+	// Third tool: bad JSON → empty object
+	fn2 := toolsArr[2]["function"].(map[string]any)
+	params2, ok := fn2["parameters"].(map[string]any)
+	if !ok || len(params2) != 0 {
+		t.Errorf("tool[2].parameters = %v, want empty map", fn2["parameters"])
+	}
+}
+
+func TestSanitizeProviderError_AllStatusCodes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		provider   string
+		wantSubstr string
+	}{
+		{"400", 400, "bad param", "openrouter", "Bad request"},
+		{"401 openrouter", 401, "invalid key", "openrouter", "Invalid API key"},
+		{"401 zen with body", 401, "CreditsError", "zen", "Invalid API key"},
+		{"402", 402, "", "openrouter", "Payment required"},
+		{"429", 429, "", "openrouter", "Rate limited"},
+		{"500", 500, "", "openrouter", "server error"},
+		{"502 openrouter", 502, "gw error", "openrouter", "gateway error"},
+		{"502 zen", 502, "gw error", "zen", "HTTP 502"},
+		{"503", 503, "", "openrouter", "temporarily unavailable"},
+		{"default 418", 418, "teapot", "openrouter", "HTTP 418"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeProviderError(tt.status, tt.body, tt.provider)
+			if !strings.Contains(got, tt.wantSubstr) {
+				t.Errorf("SanitizeProviderError(%d, %q, %q) = %q, want substring %q", tt.status, tt.body, tt.provider, got, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestSanitizeProviderError_ScrubsAPIKeys(t *testing.T) {
+	t.Parallel()
+	got := SanitizeProviderError(400, "error: sk-abc123def456ghi7 rejected", "openrouter")
+	if strings.Contains(got, "sk-abc123def456ghi7") {
+		t.Errorf("API key leaked in sanitized output: %q", got)
+	}
+}
+
+func TestSanitizeProviderError_TruncatesLongBody(t *testing.T) {
+	t.Parallel()
+	longBody := strings.Repeat("x", 500)
+	got := SanitizeProviderError(400, longBody, "openrouter")
+	if len(got) > 300 {
+		t.Errorf("sanitized output too long: %d chars", len(got))
+	}
+}
+
+func TestEstimateCost_CacheHit(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute)
+	cache.Set([]types.ModelInfo{
+		{ID: "m1", Pricing: types.Pricing{InputPerMToken: 1.0, OutputPerMToken: 2.0}},
+	})
+	cost := EstimateCost("m1", types.Usage{PromptTokens: 1000, CompletionTokens: 500}, cache)
+	expected := (1000.0/1_000_000)*1.0 + (500.0/1_000_000)*2.0
+	if cost != expected {
+		t.Errorf("EstimateCost = %f, want %f", cost, expected)
+	}
+}
+
+func TestEstimateCost_CacheMiss(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute)
+	cost := EstimateCost("nonexistent", types.Usage{PromptTokens: 1000}, cache)
+	if cost != 0 {
+		t.Errorf("EstimateCost for missing model = %f, want 0", cost)
+	}
+}
+
+func TestGetModel_Found(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute)
+	cache.Set([]types.ModelInfo{{ID: "m1", Name: "Model 1"}})
+	m, err := GetModel("m1", cache)
+	if err != nil {
+		t.Fatalf("GetModel failed: %v", err)
+	}
+	if m.Name != "Model 1" {
+		t.Errorf("Name = %q, want Model 1", m.Name)
+	}
+}
+
+func TestGetModel_NotFound(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute)
+	_, err := GetModel("nonexistent", cache)
+	if err != m31errors.ErrModelNotFound {
+		t.Errorf("expected ErrModelNotFound, got %v", err)
+	}
+}
+
+func TestCachedModels(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute)
+	cache.Set([]types.ModelInfo{{ID: "a"}, {ID: "b"}})
+	models := CachedModels(cache)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+}
+
+func TestStaleFallback_FreshCache(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCacheWithStale(5*time.Minute, 24*time.Hour)
+	cache.Set([]types.ModelInfo{{ID: "m1"}})
+	models, err := StaleFallback(cache)
+	if err != nil {
+		t.Fatalf("StaleFallback failed: %v", err)
+	}
+	if len(models) != 1 {
+		t.Errorf("expected 1 model, got %d", len(models))
+	}
+}
+
+func TestStaleFallback_EmptyCache(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCacheWithStale(5*time.Minute, 24*time.Hour)
+	_, err := StaleFallback(cache)
+	if err != m31errors.ErrProviderUnreachable {
+		t.Errorf("expected ErrProviderUnreachable, got %v", err)
+	}
+}
+
+func TestStripHTMLTags(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"<p>hello</p>", "hello"},
+		{"no tags", "no tags"},
+		{"<b>bold</b> and <i>italic</i>", "bold and italic"},
+		{"<div><p>nested</p></div>", "nested"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := stripHTMLTags(tt.input)
+			if got != tt.want {
+				t.Errorf("stripHTMLTags(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
