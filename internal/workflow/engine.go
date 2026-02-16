@@ -19,8 +19,6 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 //go:embed prompts/*.md
@@ -150,9 +148,39 @@ func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
 	}
 }
 
+// EngineOptions holds all parameters for creating a new Engine.
+type EngineOptions struct {
+	SessionID    string
+	WorkDir      string
+	BackupDir    string
+	PlanningDir  string
+	Provider     provider.LLMProvider
+	ModelID      string
+	Dispatcher   *tools.Dispatcher
+	TokenEst     *tokens.Estimator
+	SessionMgr   *session.Manager
+	Config       *config.Config
+}
+
 // NewEngine creates a workflow engine.
 func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLMProvider, modelID string,
 	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager, cfg *config.Config) (*Engine, error) {
+	return NewEngineFromOptions(EngineOptions{
+		SessionID:  sessionID,
+		WorkDir:    workDir,
+		BackupDir:  backupDir,
+		PlanningDir: planningDir,
+		Provider:   p,
+		ModelID:    modelID,
+		Dispatcher: dispatcher,
+		TokenEst:   tokenEst,
+		SessionMgr: sessionMgr,
+		Config:     cfg,
+	})
+}
+
+// NewEngineFromOptions creates a workflow engine from an EngineOptions struct.
+func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 
 	prompts, err := LoadPrompts()
 	if err != nil {
@@ -161,20 +189,20 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 
 	// derive sessionsRoot from planningDir reliably
 	// planningDir = <sessionsRoot>/<sessionID>/planning
-	sessionsRoot := filepath.Dir(filepath.Dir(planningDir))
+	sessionsRoot := filepath.Dir(filepath.Dir(opts.PlanningDir))
 
 	return &Engine{
-		sessionID:    sessionID,
-		workDir:      workDir,
-		backupDir:    backupDir,
+		sessionID:    opts.SessionID,
+		workDir:      opts.WorkDir,
+		backupDir:    opts.BackupDir,
 		sessionsRoot: sessionsRoot,
-		planningDir:  planningDir,
-		provider:     p,
-		modelID:      modelID,
-		cfg:          cfg,
-		dispatcher:   dispatcher,
-		tokens:       tokenEst,
-		sessionMgr:   sessionMgr,
+		planningDir:  opts.PlanningDir,
+		provider:     opts.Provider,
+		modelID:      opts.ModelID,
+		cfg:          opts.Config,
+		dispatcher:   opts.Dispatcher,
+		tokens:       opts.TokenEst,
+		sessionMgr:   opts.SessionMgr,
 		prompts:      prompts,
 		logger:       slog.Default(),
 		startTime:    time.Now(),
@@ -393,7 +421,7 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) bool {
 }
 
 // emit sends a message to the TUI if an emitter is configured.
-func (e *Engine) emit(msg tea.Msg) {
+func (e *Engine) emit(msg any) {
 	if e.msgEmitter != nil {
 		e.msgEmitter.Emit(msg)
 	}

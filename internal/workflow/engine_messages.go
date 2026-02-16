@@ -3,13 +3,12 @@ package workflow
 import (
 	"github.com/eshanized/M31A/internal/git"
 	m31types "github.com/eshanized/M31A/internal/types"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-// MsgEmitter is a callback interface for emitting messages back to the TUI.
+// MsgEmitter is a callback interface for emitting events back to the TUI.
+// Uses `any` to avoid coupling the workflow to the Bubble Tea framework.
 type MsgEmitter interface {
-	Emit(msg tea.Msg)
+	Emit(msg any)
 }
 
 // TaskStartMsg is emitted when a task begins execution.
@@ -107,14 +106,6 @@ type PhaseResult struct {
 
 	// Demonstration content (populated by Ship phase)
 	Demonstration string
-}
-
-// PlanApproveMsg is emitted when the user approves the plan and execution should begin.
-type PlanApproveMsg struct{}
-
-// PlanRefineMsg is emitted when the user submits refinement feedback for the plan.
-type PlanRefineMsg struct {
-	Feedback string
 }
 
 // DemonstrationReadyMsg carries the generated demonstration content to the TUI.
