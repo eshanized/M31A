@@ -14,7 +14,7 @@ import (
 // RegisterProvider creates and registers a provider client in the registry
 // using the given API key and configuration. If the provider is already
 // registered, it is replaced with the new client.
-func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerID, apiKey string) error {
+func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerID, apiKey, version string) error {
 	if registry == nil || apiKey == "" {
 		return nil
 	}
@@ -49,6 +49,7 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			Title:             title,
 			HealthCheckLiveMs: int64(healthLiveMs),
 			HealthCheckSlowMs: int64(healthSlowMs),
+			Version:           version,
 		})
 		if err != nil {
 			return err
@@ -75,6 +76,7 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			HealthCheckLiveMs: int64(healthLiveMs),
 			HealthCheckSlowMs: int64(healthSlowMs),
 			DefaultContextLen: int64(defaultCtxLen),
+			Version:           version,
 		})
 		if err != nil {
 			return err

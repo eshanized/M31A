@@ -267,7 +267,7 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 
 	// Register each provider with its collected API key
 	for _, entry := range msg.Providers {
-		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey); err != nil {
+		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey, m.version); err != nil {
 			slog.Warn("failed to register provider from wizard", "provider", entry.ID, "error", err)
 			m.addToast(fmt.Sprintf("Failed to register provider %s", entry.ID), "warning")
 		}

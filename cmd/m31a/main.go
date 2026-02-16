@@ -15,8 +15,6 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/log"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/provider/openrouter"
-	"github.com/eshanized/M31A/internal/provider/zen"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -109,19 +107,17 @@ func run() int {
 	}
 
 	// Provider registry
-	openrouter.Version = Version
-	zen.Version = Version
 	tools.SetVersion(Version)
 	registry := provider.NewRegistry()
 
 	if cfg.Provider.OpenRouter.APIKey != "" {
-		if err := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey); err != nil {
+		if err := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey, Version); err != nil {
 			logger.Warn("failed to register OpenRouter provider", "error", err)
 		}
 	}
 
 	if cfg.Provider.Zen.APIKey != "" {
-		if err := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey); err != nil {
+		if err := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey, Version); err != nil {
 			logger.Warn("failed to register Zen provider", "error", err)
 		}
 	}
