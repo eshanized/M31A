@@ -129,9 +129,26 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		return types.ToolResult{}, ctx.Err()
 	}
 
+	// Look up the tool BEFORE parsing input — unknown tools should be
+	// reported immediately regardless of whether Input is valid JSON.
+	d.mu.RLock()
+	tool, ok := d.tools[call.Name]
+	d.mu.RUnlock()
+
+	if !ok {
+		available := d.List()
+		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
+	}
+
+	// Tolerate nil or empty Input by treating it as an empty JSON object.
+	inputBytes := call.Input
+	if len(inputBytes) == 0 {
+		inputBytes = []byte("{}")
+	}
+
 	var input types.ToolInput
-	if err := json.Unmarshal(call.Input, &input); err != nil {
-		rawInput := string(call.Input)
+	if err := json.Unmarshal(inputBytes, &input); err != nil {
+		rawInput := string(inputBytes)
 		if len(rawInput) > 200 {
 			rawInput = rawInput[:200] + "…"
 		}
@@ -142,7 +159,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	// treat the whole input object as the params map.
 	if len(input.Params) == 0 {
 		var direct map[string]any
-		if err := json.Unmarshal(call.Input, &direct); err == nil {
+		if err := json.Unmarshal(inputBytes, &direct); err == nil {
 			delete(direct, "name")
 			delete(direct, "params")
 			if len(direct) > 0 {
@@ -152,54 +169,11 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	}
 	input.Name = call.Name
 
-	d.mu.RLock()
-	tool, ok := d.tools[call.Name]
-	var allowedByRule bool
-	var pctx *PermissionContext
-	var ruleErr error
-	if ok {
-		allowedByRule, pctx, ruleErr = d.checkPermission(call.Name, input)
-	}
-	d.mu.RUnlock()
-
-	if !ok {
-		available := d.List()
-		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
-	}
-
-	if ruleErr != nil {
-		return types.ToolResult{Error: ruleErr.Error()}, nil
-	}
-
-	risk := tool.RiskLevel()
-
-	if !allowedByRule {
-		interactive := true
-		if val, ok := input.Params["interactive"]; ok {
-			if iv, isBool := val.(bool); isBool {
-				interactive = iv
-			}
+	if err := d.ensurePermission(ctx, call, tool, input); err != nil {
+		if errResult, ok := err.(toolResultError); ok {
+			return errResult.result, nil
 		}
-
-		if !interactive {
-			if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
-				return types.ToolResult{}, fmt.Errorf("tool %s (risk: %s) blocked in shell mode: %w", call.Name, risk, m31errors.ErrPermissionDenied)
-			}
-		} else if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
-			if err := d.askPermission(ctx, call, risk, pctx); err != nil {
-				return types.ToolResult{}, err
-			}
-		} else if pctx != nil && pctx.Source == "agent_default" && pctx.RuleAction == "ask" {
-			if err := d.askPermissionWithAgentDefault(ctx, call, risk); err != nil {
-				return types.ToolResult{}, err
-			}
-		} else {
-			if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
-				if err := d.askPermissionFallback(ctx, call, risk); err != nil {
-					return types.ToolResult{}, err
-				}
-			}
-		}
+		return types.ToolResult{}, err
 	}
 
 	result, err := tool.Execute(ctx, input)
@@ -267,6 +241,59 @@ func (d *Dispatcher) Stop() {
 		close(d.rateDone)
 		d.rateTicker.Stop()
 	}
+}
+
+// toolResultError wraps a ToolResult to distinguish "permission rule error
+// returns a ToolResult with Error field" from "real Go error that should propagate".
+type toolResultError struct {
+	result types.ToolResult
+}
+
+func (e toolResultError) Error() string { return e.result.Error }
+
+// ensurePermission evaluates permission rules and prompts the user if needed.
+// Returns nil if the tool is allowed to proceed.
+// Returns toolResultError for rule-level errors (logged in ToolResult.Error).
+// Returns a regular error for permission denials or prompt failures.
+func (d *Dispatcher) ensurePermission(ctx context.Context, call types.ToolCall, tool types.Tool, input types.ToolInput) error {
+	d.mu.RLock()
+	allowedByRule, pctx, ruleErr := d.checkPermission(call.Name, input)
+	d.mu.RUnlock()
+
+	if ruleErr != nil {
+		return toolResultError{result: types.ToolResult{Error: ruleErr.Error()}}
+	}
+
+	if allowedByRule {
+		return nil
+	}
+
+	risk := tool.RiskLevel()
+
+	interactive := true
+	if val, ok := input.Params["interactive"]; ok {
+		if iv, isBool := val.(bool); isBool {
+			interactive = iv
+		}
+	}
+
+	if !interactive {
+		if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
+			return fmt.Errorf("tool %s (risk: %s) blocked in shell mode: %w", call.Name, risk, m31errors.ErrPermissionDenied)
+		}
+		return nil
+	}
+
+	if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
+		return d.askPermission(ctx, call, risk, pctx)
+	}
+	if pctx != nil && pctx.Source == "agent_default" && pctx.RuleAction == "ask" {
+		return d.askPermissionWithAgentDefault(ctx, call, risk)
+	}
+	if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
+		return d.askPermissionFallback(ctx, call, risk)
+	}
+	return nil
 }
 
 // RespondQuestion routes a question response to the per-request channel
