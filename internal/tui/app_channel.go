@@ -18,7 +18,7 @@ type channelEmitter struct {
 
 // Emit sends a message into the channel. If the channel is full after a
 // timeout, the message is dropped with a warning log.
-func (ce *channelEmitter) Emit(msg tea.Msg) {
+func (ce *channelEmitter) Emit(msg any) {
 	select {
 	case ce.ch <- msg:
 	case <-time.After(types.ChannelSendTimeout * 2):
