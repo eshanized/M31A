@@ -97,11 +97,6 @@ func (r *Registry) List() []string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	for i, name := range names {
-		if name == r.active {
-			names[i] = name + " (active)"
-		}
-	}
 	return names
 }
 
