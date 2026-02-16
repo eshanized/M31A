@@ -214,7 +214,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PlanRefineMsg:
 		cmds = append(cmds, m.handlePlanRefine(msg))
 
-	case DemonstrationReadyMsg:
+	case workflow.DemonstrationReadyMsg:
 		if m.shipModel != nil {
 			m.shipModel.SetDemonstration(msg.Content)
 		}

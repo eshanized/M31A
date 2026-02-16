@@ -244,11 +244,6 @@ type PlanRefineMsg struct {
 	Feedback string
 }
 
-// DemonstrationReadyMsg carries the generated demonstration content to the TUI.
-type DemonstrationReadyMsg struct {
-	Content string
-}
-
 // ExecutePauseMsg is emitted when the user toggles pause/resume on execute screen.
 type ExecutePauseMsg struct {
 	Paused bool
