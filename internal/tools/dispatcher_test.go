@@ -863,3 +863,144 @@ func TestToolInputJSON(t *testing.T) {
 		t.Errorf("expected 'Raw input' in error, got: %v", err)
 	}
 }
+
+func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+
+	result, err := d.Execute(context.Background(), types.ToolCall{
+		ID:    "call1",
+		Name:  "test",
+		Input: nil,
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for empty input on known tool, got: %v", err)
+	}
+	if result.Output != "ok" {
+		t.Errorf("expected 'ok', got %q", result.Output)
+	}
+}
+
+func TestDispatcher_EmptyBytesInput(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+
+	result, err := d.Execute(context.Background(), types.ToolCall{
+		ID:    "call1",
+		Name:  "test",
+		Input: []byte(""),
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for empty bytes input, got: %v", err)
+	}
+	if result.Output != "ok" {
+		t.Errorf("expected 'ok', got %q", result.Output)
+	}
+}
+
+func TestDispatcher_NullInput(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+
+	result, err := d.Execute(context.Background(), types.ToolCall{
+		ID:    "call1",
+		Name:  "test",
+		Input: []byte("null"),
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for null input, got: %v", err)
+	}
+	_ = result
+}
+
+func TestDispatcher_UpdatePermissions(t *testing.T) {
+	d := NewDispatcher(nil)
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+
+	cfg := &config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Pattern: "**", Action: "allow"},
+		},
+	}
+	d.UpdatePermissions(cfg)
+
+	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "echo test"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !allowed {
+		t.Error("expected allowed=true after UpdatePermissions")
+	}
+	if pctx == nil || pctx.RuleAction != "allow" {
+		t.Error("expected RuleAction 'allow' after update")
+	}
+}
+
+func TestDispatcher_UpdatePermissions_Nil(t *testing.T) {
+	d := NewDispatcher(nil)
+	d.UpdatePermissions(nil) // should not panic
+}
+
+func TestDispatcher_Stop_Idempotent(t *testing.T) {
+	d := NewDispatcher(nil)
+	d.Stop()
+	d.Stop() // second call should not panic
+}
+
+func TestDispatcher_QuestionChannels(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+
+	if d.QuestionRequestCh() == nil {
+		t.Error("QuestionRequestCh should not be nil")
+	}
+	if d.QuestionResponseCh() == nil {
+		t.Error("QuestionResponseCh should not be nil")
+	}
+}
+
+func TestDispatcher_RespondQuestion_Routing(t *testing.T) {
+	d := NewDispatcher(nil)
+
+	// Register a per-request channel
+	reqID := int64(42)
+	respCh := make(chan QuestionResponse, 1)
+	d.pendingQuestions.Store(reqID, respCh)
+
+	d.RespondQuestion(reqID, "yes")
+
+	select {
+	case resp := <-respCh:
+		if resp.Answer != "yes" {
+			t.Errorf("expected answer 'yes', got %q", resp.Answer)
+		}
+	default:
+		t.Error("expected response on per-request channel")
+	}
+
+	// Verify cleanup
+	if _, ok := d.pendingQuestions.Load(reqID); ok {
+		t.Error("expected pending question to be deleted after response")
+	}
+}
+
+func TestDispatcher_RespondQuestion_FallbackToShared(t *testing.T) {
+	d := NewDispatcher(nil)
+
+	go d.RespondQuestion(999, "fallback")
+
+	select {
+	case resp := <-d.questionRespCh:
+		if resp.Answer != "fallback" {
+			t.Errorf("expected 'fallback', got %q", resp.Answer)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fallback response")
+	}
+}
