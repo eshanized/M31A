@@ -585,3 +585,51 @@ func TestAutoDream_ErrAlreadyConsolidating_IsSentinel(t *testing.T) {
 		t.Errorf("Expected error %q, got %q", ErrAlreadyConsolidating.Error(), r.Error)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SetMessages tests
+// ---------------------------------------------------------------------------
+
+func TestSetMessages_ReplacesMessageList(t *testing.T) {
+	c := New(makeMessages(5))
+	if len(c.Messages()) != 5 {
+		t.Fatalf("expected 5 messages initially, got %d", len(c.Messages()))
+	}
+
+	newMsgs := makeMessages(3)
+	c.SetMessages(newMsgs)
+	if len(c.Messages()) != 3 {
+		t.Errorf("expected 3 messages after SetMessages, got %d", len(c.Messages()))
+	}
+}
+
+func TestSetMessages_DefensiveCopy(t *testing.T) {
+	c := New(nil)
+	msgs := makeMessages(3)
+	c.SetMessages(msgs)
+
+	// Mutate original — should not affect internal state
+	msgs[0].Content = "MUTATED"
+	internal := c.Messages()
+	if internal[0].Content == "MUTATED" {
+		t.Error("SetMessages should make a defensive copy")
+	}
+}
+
+func TestSetMessages_Nil(t *testing.T) {
+	c := New(makeMessages(5))
+	c.SetMessages(nil)
+	if len(c.Messages()) != 0 {
+		t.Errorf("expected 0 messages after SetMessages(nil), got %d", len(c.Messages()))
+	}
+}
+
+func TestNew_NilMessages(t *testing.T) {
+	c := New(nil)
+	if c == nil {
+		t.Fatal("New(nil) should not return nil")
+	}
+	if len(c.Messages()) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(c.Messages()))
+	}
+}
