@@ -34,6 +34,14 @@ func TestUserMessage(t *testing.T) {
 		{"ErrStreamTruncated", ErrStreamTruncated, "Stream interrupted — try again"},
 		{"ErrBisectResetFailed", ErrBisectResetFailed, "Git bisect reset failed — try `git bisect reset` manually"},
 
+		// Additional uncovered sentinels
+		{"ErrProviderNotFound", ErrProviderNotFound, "Provider not found — use /settings to configure providers"},
+		{"ErrInvalidProvider", ErrInvalidProvider, "Invalid provider name — cannot be empty"},
+		{"ErrNoCredits", ErrNoCredits, "No credits remaining — please top up your account"},
+		{"ErrBisectFailed", ErrBisectFailed, "Git bisect failed — check bisect state and retry"},
+		{"ErrSessionNotFound", ErrSessionNotFound, "Session not found — check the session ID or start a new session"},
+		{"ErrSessionPermission", ErrSessionPermission, "Cannot access session — check file permissions"},
+
 		// Wrapped sentinel errors
 		{"wrapped ErrInvalidKey", fmt.Errorf("auth failed: %w", ErrInvalidKey), "Invalid API key — run /settings to update"},
 
