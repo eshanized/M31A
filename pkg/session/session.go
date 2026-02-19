@@ -8,12 +8,17 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// CurrentSchemaVersion is the current session schema version.
+// Increment when adding/removing fields that require migration.
+const CurrentSchemaVersion = 1
+
 // Session wraps types.Session with additional runtime state fields.
 type Session struct {
 	types.Session
-	Messages []types.Message     `json:"messages"`
-	Tasks    []types.Task        `json:"tasks"`
-	Project  *types.ProjectState `json:"project"`
+	SchemaVersion int                 `json:"schema_version"`
+	Messages      []types.Message     `json:"messages"`
+	Tasks         []types.Task        `json:"tasks"`
+	Project       *types.ProjectState `json:"project"`
 
 	// ResumedAt records the time of the most recent resume. Nil for
 	// never-resumed sessions. Updated on every Manager.LoadSession call.
@@ -28,6 +33,7 @@ type Session struct {
 // NewSession creates a new Session with default values.
 func NewSession(id, model, provider string) *Session {
 	return &Session{
+		SchemaVersion: CurrentSchemaVersion,
 		Session: types.Session{
 			ID:            id,
 			ChildrenIDs:   make([]string, 0),

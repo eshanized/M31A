@@ -778,7 +778,7 @@ func (m *Manager) ExportSessionMarkdown(id, path string) error {
 	for _, msg := range sess.Messages {
 		sb.WriteString(fmt.Sprintf("## %s\n\n%s\n\n---\n\n", msg.Role, msg.Content))
 	}
-	return os.WriteFile(path, []byte(sb.String()), 0644)
+	return m.atomicWrite(path, []byte(sb.String()))
 }
 
 // ExportSessionJSON exports a session's full data as a JSON file.
@@ -791,7 +791,7 @@ func (m *Manager) ExportSessionJSON(id, path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return m.atomicWrite(path, data)
 }
 
 // RenameSession updates a session's label.
