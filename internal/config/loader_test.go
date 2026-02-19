@@ -1,11 +1,13 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -652,8 +654,9 @@ func TestVarSubstitution_UnsetVar(t *testing.T) {
 
 	applyVarSubstitution(cfg)
 
-	if cfg.Model.Default != "" {
-		t.Errorf("expected empty string (unset var replaced), got %q", cfg.Model.Default)
+	// Unresolved variables are preserved as-is so users can debug typos
+	if cfg.Model.Default != "${UNSET_VAR}" {
+		t.Errorf("expected preserved pattern '${UNSET_VAR}', got %q", cfg.Model.Default)
 	}
 }
 
@@ -772,5 +775,199 @@ func TestDefaultConfig_SidebarWidthThresholdIs120(t *testing.T) {
 	c := DefaultConfig()
 	if c.UI.SidebarWidthThreshold != 120 {
 		t.Errorf("expected SidebarWidthThreshold=120, got %d", c.UI.SidebarWidthThreshold)
+	}
+}
+
+// ── DefaultGitConfig Tests ──────────────────────────────────────────────────
+
+func TestDefaultGitConfig(t *testing.T) {
+	t.Parallel()
+	gc := DefaultGitConfig()
+	if gc.CommitPrefix != "feat" {
+		t.Errorf("CommitPrefix = %q, want 'feat'", gc.CommitPrefix)
+	}
+	if gc.FixPrefix != "fix" {
+		t.Errorf("FixPrefix = %q, want 'fix'", gc.FixPrefix)
+	}
+	if gc.ShipPrefix != "chore" {
+		t.Errorf("ShipPrefix = %q, want 'chore'", gc.ShipPrefix)
+	}
+	if gc.UserName != "M31A" {
+		t.Errorf("UserName = %q, want 'M31A'", gc.UserName)
+	}
+	if gc.UserEmail != "m31a@local" {
+		t.Errorf("UserEmail = %q, want 'm31a@local'", gc.UserEmail)
+	}
+}
+
+// ── ParseAnimationSpeed Tests ───────────────────────────────────────────────
+
+func TestParseAnimationSpeed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  AnimationSpeed
+	}{
+		{"fast", AnimFast},
+		{"slow", AnimSlow},
+		{"none", AnimNone},
+		{"normal", AnimNormal},
+		{"", AnimNormal},
+		{"unknown", AnimNormal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseAnimationSpeed(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseAnimationSpeed(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ── WatchConfig Tests ────────────────────────────────────────────────────────
+
+func TestWatchConfig_DetectsChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(path, []byte("[ui]\ntheme = \"dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := make(chan ConfigReloadMsg, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go WatchConfig(ctx, path, ch)
+
+	// Wait a moment for the watcher to start, then modify the file
+	time.Sleep(100 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("[ui]\ntheme = \"light\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Error != nil {
+			t.Fatalf("WatchConfig reported error: %v", msg.Error)
+		}
+		if msg.Config == nil {
+			t.Fatal("expected non-nil config in reload message")
+		}
+		if msg.Config.UI.Theme != "light" {
+			t.Errorf("expected theme 'light', got %q", msg.Config.UI.Theme)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for config reload")
+	}
+}
+
+func TestWatchConfig_Cancellation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(path, []byte("[ui]\ntheme = \"dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := make(chan ConfigReloadMsg, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		WatchConfig(ctx, path, ch)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// success — WatchConfig exited
+	case <-time.After(2 * time.Second):
+		t.Fatal("WatchConfig did not exit after context cancellation")
+	}
+}
+
+// ── toTOMLKey Tests ─────────────────────────────────────────────────────────
+
+func TestToTOMLKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Theme", "theme"},
+		{"CompactMode", "compact_mode"},
+		{"APIKey", "api_key"},
+		{"BaseURL", "base_url"},
+		{"MaxIterations", "max_iterations"},
+		{"UI", "ui"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := toTOMLKey(tt.input)
+			if got != tt.want {
+				t.Errorf("toTOMLKey(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ── Validation Edge Cases ───────────────────────────────────────────────────
+
+func TestValidateConfig_NegativeMaxIterations(t *testing.T) {
+	cfg := &Config{UI: UIConfig{MaxIterations: -1}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for negative max_iterations")
+	}
+	if !strings.Contains(err.Error(), "max_iterations") {
+		t.Errorf("expected error to mention 'max_iterations', got: %v", err)
+	}
+}
+
+func TestValidateConfig_NegativeSessionIDLength(t *testing.T) {
+	cfg := &Config{Features: FeaturesConfig{SessionIDLength: 2}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for session_id_length < 4")
+	}
+}
+
+func TestValidateConfig_SessionIDLengthTooLarge(t *testing.T) {
+	cfg := &Config{Features: FeaturesConfig{SessionIDLength: 20}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for session_id_length > 16")
+	}
+}
+
+func TestValidateConfig_SlowMsLessThanLiveMs(t *testing.T) {
+	cfg := &Config{Features: FeaturesConfig{HealthCheckLiveMs: 1000, HealthCheckSlowMs: 500}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for healthcheck_slow_ms < healthcheck_live_ms")
+	}
+}
+
+func TestValidateConfig_EmptyRuleTool(t *testing.T) {
+	cfg := &Config{Permissions: PermissionsConfig{Rules: []PermissionRule{{Tool: "", Action: "allow"}}}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for empty rule tool")
+	}
+}
+
+func TestValidateConfig_AutoFallbackWithoutDefault(t *testing.T) {
+	cfg := &Config{Provider: ProviderConfig{AutoFallback: true, Default: ""}}
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for auto_fallback without default provider")
 	}
 }
