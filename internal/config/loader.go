@@ -220,7 +220,8 @@ func mergeStructs(base, overlay reflect.Value, defined map[string]bool, prefix s
 }
 
 // toTOMLKey converts a Go field name to a TOML key (snake_case).
-// Handles acronyms correctly: APIKey → api_key, BaseURL → base_url.
+// Handles acronyms correctly: APIKey → api_key, BaseURL → base_url,
+// HTTPSProxy → https_proxy.
 func toTOMLKey(name string) string {
 	runes := []rune(name)
 	var result []byte
@@ -229,8 +230,9 @@ func toTOMLKey(name string) string {
 			if i > 0 {
 				prev := runes[i-1]
 				prevIsLower := prev >= 'a' && prev <= 'z'
+				prevIsDigit := prev >= '0' && prev <= '9'
 				nextIsLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
-				if prevIsLower || nextIsLower {
+				if prevIsLower || prevIsDigit || nextIsLower {
 					result = append(result, '_')
 				}
 			}
