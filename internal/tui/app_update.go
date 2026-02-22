@@ -310,9 +310,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Goal submitted ────────────────────────────────────────────────────────
 	case GoalSubmittedMsg:
 		m.workflowGoal = msg.Goal
-		// Show the dual-model picker before starting the workflow.
-		// The picker emits PhaseModelPickedMsg when done (or skipped).
-		picker := NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), m.width, m.height)
+		cw, ch := m.contentDimensions()
+		picker := NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
 		m.phaseModelPicker = picker
 		m.screen = ScreenPhaseModelPicker
 		cmds = append(cmds, picker.Init())
@@ -355,13 +354,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Settings saved ────────────────────────────────────────────────────────
 	case SettingsSavedMsg:
-		// Rebuild the config viewer content so /config reflects changes instantly.
-		// Since SettingsModel mutates m.config in-place (shared pointer), we only
-		// need to regenerate the rendered content — no need to pass a new cfg pointer.
 		if m.configModel != nil {
 			m.configModel.buildContent()
 		} else {
-			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
 		}
 		m.screen = ScreenREPL
 
@@ -418,8 +415,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.diffModel == nil {
 			m.diffModel = NewDiffModel(m.themeManager.Current())
 		}
-		m.diffModel.width = m.width
-		m.diffModel.height = m.height
+		cw, ch := m.contentDimensions()
+		m.diffModel.SetDimensions(cw, ch)
 		m.diffModel.SetDiff(msg.Diff)
 		m.diffModel.SetTitle(msg.Title)
 		if m.sidebarModel != nil {
@@ -659,8 +656,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	case ScreenREPL:
 		m.ensureReplModel()
 		if m.replModel.width == 0 {
-			m.replModel.width = m.width
-			m.replModel.height = m.height
+			cw, ch := m.contentDimensions()
+			m.replModel.width = cw
+			m.replModel.height = ch
 		}
 		return m.replModel.Init()
 	default:
@@ -695,7 +693,8 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	if m.replModel != nil {
 		m.replModel.width = contentW
 		m.replModel.height = contentH
-		m.replModel.SetSidebarWidth(sw)
+		// contentW already accounts for the sidebar; pass 0 to avoid double-subtracting.
+		m.replModel.SetSidebarWidth(0)
 		replM, replCmd := m.replModel.Update(contentMsg)
 		if r, ok := replM.(*ReplModel); ok {
 			m.replModel = r
@@ -1070,7 +1069,8 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 	case "open_palette":
 		if m.cmdPalette == nil {
 			m.cmdPalette = NewCommandPalette(m.cmdRegistry, m.themeManager.Current())
-			m.cmdPalette.SetDimensions(m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.cmdPalette.SetDimensions(cw, ch)
 		}
 		m.cmdPalette.Open()
 		return nil
@@ -1078,8 +1078,8 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
 			if m.replModel != nil {
-				sw := m.sidebarModel.GetWidth()
-				m.replModel.SetSidebarWidth(sw)
+				// REPL width is already content-area; pass 0 to avoid double-subtracting.
+				m.replModel.SetSidebarWidth(0)
 			}
 		}
 		return nil
@@ -1142,8 +1142,26 @@ func (m *AppState) popScreen() tea.Cmd {
 	return nil
 }
 
+// contentDimensions returns the content-area width and height, accounting for
+// the unified chrome (header+footer) and the sidebar when visible.
+func (m *AppState) contentDimensions() (w, h int) {
+	w = m.width
+	h = m.height - layout.ChromeHeight
+	if h < 1 {
+		h = 1
+	}
+	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(m.width) {
+		w -= m.sidebarModel.GetWidth()
+	}
+	if w < 1 {
+		w = 1
+	}
+	return w, h
+}
+
 // ensureSubModel creates or resizes the sub-model for the given screen.
 func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
+	cw, ch := m.contentDimensions()
 	switch screen {
 	case ScreenREPL:
 		m.ensureReplModel()
@@ -1152,14 +1170,14 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		if m.msModel == nil {
 			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
 		}
-		m.msModel.SetDimensions(m.width, m.height)
+		m.msModel.SetDimensions(cw, ch)
 		return m.msModel.Init()
 	case ScreenSettings:
 		if m.settingsModel == nil {
 			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.shutdownCtx)
-			m.settingsModel.width = m.width
-			m.settingsModel.height = m.height
 		}
+		m.settingsModel.width = cw
+		m.settingsModel.height = ch
 		return m.settingsModel.Init()
 	case ScreenResume:
 		// Resume screen loads sessions async; use the existing command.
@@ -1167,94 +1185,101 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenGoalInput:
 		if m.goalInput == nil {
 			m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
-			m.goalInput.width = m.width
-			m.goalInput.height = m.height
 		}
+		m.goalInput.SetDimensions(cw, ch)
 		return m.goalInput.Init()
 	case ScreenPlan:
 		if m.planModel != nil {
-			m.planModel.SetDimensions(m.width, m.height)
+			m.planModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenExecute:
 		if m.executeModel != nil {
-			m.executeModel.width = m.width
-			m.executeModel.height = m.height
+			m.executeModel.width = cw
+			m.executeModel.height = ch
 		}
 		return nil
 	case ScreenVerify:
 		if m.verifyModel != nil {
-			m.verifyModel.width = m.width
-			m.verifyModel.height = m.height
+			m.verifyModel.width = cw
+			m.verifyModel.height = ch
 		}
 		return nil
 	case ScreenShip:
 		if m.shipModel != nil {
-			m.shipModel.width = m.width
-			m.shipModel.height = m.height
+			m.shipModel.width = cw
+			m.shipModel.height = ch
 		}
 		return nil
 	case ScreenLedger:
 		if m.ledgerModel == nil {
 			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
-			m.ledgerModel.width = m.width
-			m.ledgerModel.height = m.height
+			m.ledgerModel.SetDimensions(cw, ch)
 			m.ledgerModel.LoadEntries()
 		}
 		return nil
 	case ScreenRollback:
 		if m.rollbackModel == nil {
-			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, m.width, m.height)
+			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
 			m.rollbackModel.LoadCommits()
 		}
 		return nil
 	case ScreenMetrics:
 		if m.metricsModel == nil {
 			m.metricsModel = NewMetricsModel(m.themeManager.Current())
-			m.metricsModel.width = m.width
-			m.metricsModel.height = m.height
 		}
+		m.metricsModel.SetDimensions(cw, ch)
 		if m.sessionManager != nil {
 			m.metricsModel.LoadStats(m.sessionManager)
 		}
 		return nil
 	case ScreenConfig:
 		if m.configModel == nil {
-			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, m.width, m.height)
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
 		} else {
-			m.configModel.width = m.width
-			m.configModel.height = m.height
+			m.configModel.width = cw
+			m.configModel.height = ch
 		}
 		return nil
 	case ScreenHelp:
 		if m.helpModel == nil {
 			m.helpModel = NewHelpModel(m.themeManager.Current())
 		}
-		m.helpModel.SetDimensions(m.width, m.height)
+		m.helpModel.SetDimensions(cw, ch)
 		return m.helpModel.Init()
 	case ScreenDiscuss:
 		if m.discussModel == nil {
-			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, m.width, m.height)
+			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+		} else {
+			m.discussModel.SetDimensions(cw, ch)
 		}
 		return m.discussModel.Init()
 	case ScreenBisect:
 		if m.bisectModel == nil {
-			m.bisectModel = NewBisectModel(m.themeManager.Current(), m.width, m.height)
+			m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.bisectModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenThemePicker:
 		if m.themePickerModel == nil {
-			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), m.width, m.height)
+			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.themePickerModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenNotifications:
 		if m.notifModel == nil {
-			m.notifModel = NewNotificationModel(m.themeManager.Current(), m.width, m.height)
+			m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.notifModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenDashboard:
 		if m.dashboardModel == nil {
-			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), m.width, m.height)
+			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.dashboardModel.SetDimensions(cw, ch)
 		}
 		if m.workflowEngine != nil {
 			m.dashboardModel.SetWorkflowState(m.workflowPhase, m.workflowGoal, "", m.activeProvider)
@@ -1262,17 +1287,23 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return nil
 	case ScreenSessionDetail:
 		if m.sessionDetailModel == nil {
-			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), m.width, m.height)
+			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.sessionDetailModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenFileExplorer:
 		if m.fileExplorerModel == nil {
-			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), m.width, m.height)
+			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.fileExplorerModel.SetDimensions(cw, ch)
 		}
 		return nil
 	case ScreenToolDetail:
 		if m.toolDetailModel == nil {
-			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), m.width, m.height)
+			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.toolDetailModel.SetDimensions(cw, ch)
 		}
 		return nil
 	default:
@@ -1303,8 +1334,8 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()
 			if m.replModel != nil {
-				sw := m.sidebarModel.GetWidth()
-				m.replModel.SetSidebarWidth(sw)
+				// REPL width is already content-area; pass 0 to avoid double-subtracting.
+				m.replModel.SetSidebarWidth(0)
 			}
 		}
 		return nil
@@ -1312,8 +1343,7 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
 			m.sidebarModel.IncreaseWidth()
 			if m.replModel != nil {
-				sw := m.sidebarModel.GetWidth()
-				m.replModel.SetSidebarWidth(sw)
+				m.replModel.SetSidebarWidth(0)
 			}
 		}
 		return nil
@@ -1321,8 +1351,7 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
 			m.sidebarModel.DecreaseWidth()
 			if m.replModel != nil {
-				sw := m.sidebarModel.GetWidth()
-				m.replModel.SetSidebarWidth(sw)
+				m.replModel.SetSidebarWidth(0)
 			}
 		}
 		return nil
@@ -1333,7 +1362,8 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 	case "open_palette":
 		if m.cmdPalette == nil {
 			m.cmdPalette = NewCommandPalette(m.cmdRegistry, m.themeManager.Current())
-			m.cmdPalette.SetDimensions(m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.cmdPalette.SetDimensions(cw, ch)
 		}
 		m.cmdPalette.Open()
 		return nil
