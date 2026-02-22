@@ -27,7 +27,7 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		rw := m.replWidth()
-		vpH := viewportHeight(msg.Height)
+		vpH := contentViewportHeight(msg.Height)
 
 		if m.viewport.Width == 0 {
 			m.viewport = viewport.New(rw, vpH)
@@ -376,4 +376,3 @@ func (m *ReplModel) navigateHistoryDown() {
 type ThinkingBlockToggleMsg struct {
 	Index int
 }
-
