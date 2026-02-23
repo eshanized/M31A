@@ -68,6 +68,7 @@ type sessionRestoredMsg struct {
 func (m *AppState) ensureSidebarModel() {
 	if m.sidebarModel == nil {
 		m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
+		m.sidebarModel.SetHeight(m.height)
 	}
 }
 
@@ -175,10 +176,17 @@ func renderSectionHeader(title string, width int) string {
 	return prefix + strings.Repeat("─", remaining)
 }
 
-// renderLoading renders a branded loading indicator with a spinner and label.
-func renderLoading(label string, t theme.Theme) string {
+// renderLoading renders a branded loading indicator with a spinner and label,
+// centered within the given dimensions.
+func renderLoading(label string, w, h int, t theme.Theme) string {
 	spinner := t.Spinner.Render("⠋")
 	text := lipgloss.NewStyle().Foreground(t.TextMuted).Render(label)
 	content := spinner + " " + text
-	return lipgloss.Place(80, 10, lipgloss.Center, lipgloss.Center, content)
+	if w < 1 {
+		w = 40
+	}
+	if h < 1 {
+		h = 3
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 }
