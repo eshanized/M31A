@@ -278,6 +278,15 @@ func (cp *CommandPaletteModel) View() string {
 
 	// ── Commands grouped by category ─────────────────────────────────────────
 	maxItems := 12
+	if cp.height > 0 {
+		maxItems = cp.height - 8
+		if maxItems < 6 {
+			maxItems = 6
+		}
+		if maxItems > 20 {
+			maxItems = 20
+		}
+	}
 	var items []string
 	start := 0
 	if cp.selected >= maxItems {
