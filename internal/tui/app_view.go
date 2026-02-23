@@ -322,7 +322,7 @@ func (m *AppState) renderREPLContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
 	if m.settingsModel == nil {
-		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.shutdownCtx)
+		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
 	}
 	m.settingsModel.width = chrome.ContentWidth()
 	m.settingsModel.height = chrome.ContentHeight()

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/pkg/keychain"
 )
 
 // SettingsTab identifies which settings tab is active.
@@ -61,6 +63,7 @@ type SettingsModel struct {
 	theme     theme.Theme
 	config    *config.Config
 	registry  *provider.Registry
+	keychain  keychain.Keychain
 	ctx       context.Context
 	activeTab SettingsTab
 	width     int
@@ -92,7 +95,7 @@ type SettingsModel struct {
 
 // NewSettingsModel creates a SettingsModel.
 // Accepts a context that is cancelled on app shutdown to prevent resource leaks.
-func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string, ctx context.Context) *SettingsModel {
+func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string, kc keychain.Keychain, ctx context.Context) *SettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
 	ti.Width = 40
@@ -101,6 +104,7 @@ func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.T
 		theme:      t,
 		config:     cfg,
 		registry:   registry,
+		keychain:   kc,
 		ctx:        ctx,
 		editValue:  ti,
 		configPath: configPath,
@@ -487,6 +491,18 @@ func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
 		s.statusMsg = "No config path set."
 		s.statusTime = time.Now()
 		return s, nil
+	}
+	if s.keychain != nil {
+		if key := s.config.Provider.OpenRouter.APIKey; key != "" {
+			if err := s.keychain.Set("openrouter", key); err != nil {
+				slog.Warn("failed to save OpenRouter key to keychain", "error", err)
+			}
+		}
+		if key := s.config.Provider.Zen.APIKey; key != "" {
+			if err := s.keychain.Set("zen", key); err != nil {
+				slog.Warn("failed to save Zen key to keychain", "error", err)
+			}
+		}
 	}
 	if err := s.config.Save(s.configPath); err != nil {
 		s.statusMsg = fmt.Sprintf("Save failed: %v", err)
