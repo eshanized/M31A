@@ -40,17 +40,6 @@ func viewportBottomChrome() int {
 	return inputSeparatorHeight + inputHeight
 }
 
-// viewportHeight computes the viewport height given terminal height.
-// This is the legacy function for when the REPL managed its own chrome.
-// Prefer contentViewportHeight for the unified layout.
-func viewportHeight(termHeight int) int {
-	h := termHeight - viewportTopChrome - viewportBottomChrome()
-	if h < 4 {
-		h = 4
-	}
-	return h
-}
-
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 // View renders the REPL screen.
