@@ -24,7 +24,12 @@ func (m *ReplModel) renderWelcome() string {
 	}
 
 	availWidth := m.replWidth()
-	vpHeight := viewportHeight(m.height)
+	vpHeight := m.viewport.Height
+	if vpHeight < 4 {
+		vpHeight = contentViewportHeight(m.height)
+	}
+
+	cardW := welcomeCardWidth(availWidth)
 
 	// 1. Logo with glow
 	logo := m.renderLogoWithGlow()
@@ -32,15 +37,15 @@ func (m *ReplModel) renderWelcome() string {
 	// 2. Top row — provider card always shown; project card when wide enough
 	var topRow string
 	if availWidth >= 88 {
-		provCard := m.renderProviderCard()
-		projCard := m.renderProjectCard()
+		provCard := m.renderProviderCard(cardW)
+		projCard := m.renderProjectCard(cardW)
 		topRow = lipgloss.JoinHorizontal(lipgloss.Top, provCard, "  ", projCard)
 	} else {
-		topRow = m.renderProviderCard()
+		topRow = m.renderProviderCard(cardW)
 	}
 
 	// 3. Getting-started with context-aware prompts
-	gettingStarted := m.renderGettingStarted()
+	gettingStarted := m.renderGettingStarted(cardW)
 
 	// 4. Keyboard hints
 	hints := renderKeyboardHints(m.theme)
@@ -61,6 +66,29 @@ func (m *ReplModel) renderWelcome() string {
 	)
 
 	return lipgloss.Place(availWidth, vpHeight, lipgloss.Center, lipgloss.Center, content)
+}
+
+// welcomeCardWidth computes the responsive card width for the welcome screen.
+// Two-column layout requires availWidth >= 88 (2*cardW + spacing).
+func welcomeCardWidth(availWidth int) int {
+	if availWidth >= 88 {
+		w := (availWidth - 6) / 2
+		if w > 42 {
+			w = 42
+		}
+		if w < 20 {
+			w = 20
+		}
+		return w
+	}
+	w := availWidth - 4
+	if w > 42 {
+		w = 42
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
 }
 
 // renderLogoWithGlow renders the M31A logo with a subtle gradient-block glow row.
@@ -103,7 +131,7 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 }
 
 // renderProviderCard shows current model/provider status or a setup prompt.
-func (m *ReplModel) renderProviderCard() string {
+func (m *ReplModel) renderProviderCard(cardWidth int) string {
 	t := m.theme
 
 	if m.activeModel == nil || m.activeProvider == "" {
@@ -113,7 +141,7 @@ func (m *ReplModel) renderProviderCard() string {
 		content := lipgloss.JoinVertical(lipgloss.Left, warningDot+" "+title, subtitle)
 		return components.Card{
 			Content: content,
-			Width:   42,
+			Width:   cardWidth,
 			Border:  theme.ThinBorder,
 			Style:   components.CardWarning,
 			Theme:   t,
@@ -179,7 +207,7 @@ func (m *ReplModel) renderProviderCard() string {
 
 	return components.Card{
 		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
-		Width:   42,
+		Width:   cardWidth,
 		Border:  theme.ThinBorder,
 		Style:   components.CardSuccess,
 		Theme:   t,
@@ -187,7 +215,7 @@ func (m *ReplModel) renderProviderCard() string {
 }
 
 // renderProjectCard shows project name, git branch, changed-file count, and language.
-func (m *ReplModel) renderProjectCard() string {
+func (m *ReplModel) renderProjectCard(cardWidth int) string {
 	t := m.theme
 
 	projectName := pathBase(m.cwd)
@@ -234,7 +262,7 @@ func (m *ReplModel) renderProjectCard() string {
 
 	return components.Card{
 		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
-		Width:   42,
+		Width:   cardWidth,
 		Border:  theme.ThinBorder,
 		Style:   components.CardDefault,
 		Theme:   t,
@@ -242,7 +270,7 @@ func (m *ReplModel) renderProjectCard() string {
 }
 
 // renderGettingStarted renders suggested prompts, context-aware when possible.
-func (m *ReplModel) renderGettingStarted() string {
+func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 	t := m.theme
 
 	title := lipgloss.NewStyle().
@@ -306,7 +334,7 @@ func (m *ReplModel) renderGettingStarted() string {
 
 	return components.Card{
 		Content: content,
-		Width:   42,
+		Width:   cardWidth,
 		Border:  theme.ThinBorder,
 		Style:   components.CardDefault,
 		Theme:   t,
@@ -337,7 +365,7 @@ func (m *ReplModel) renderBottomBar() string {
 	}
 	versionLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render(version)
 
-	spacer := m.width - lipgloss.Width(cwdLabel) - lipgloss.Width(versionLabel) - 4
+	spacer := m.replWidth() - lipgloss.Width(cwdLabel) - lipgloss.Width(versionLabel) - 4
 	if spacer < 0 {
 		spacer = 0
 	}
