@@ -324,7 +324,6 @@ func (m *ReplModel) renderMessages() {
 				Content: streamContent,
 			}
 			if m.activeSegmentType == "thinking" {
-				// UX-44: Add visual separator before thinking content
 				thinkingHeader := lipgloss.NewStyle().
 					Foreground(m.theme.Thinking).
 					Italic(true).
@@ -332,13 +331,21 @@ func (m *ReplModel) renderMessages() {
 				sb.WriteString("\n")
 				sb.WriteString(thinkingHeader)
 				streamMsg.Segments = []types.MessageSegment{{
-					Type:    "thinking",
-					Content: streamContent,
-					Visible: true,
+					Type:      "thinking",
+					Content:   streamContent,
+					Visible:   true,
+					StartedAt: m.thinkingStartAt,
 				}}
 			}
 			sb.WriteString("\n")
 			sb.WriteString(m.msgRenderer.RenderMessage(streamMsg, rw))
+		} else if m.streaming && !m.thinking {
+			generating := lipgloss.NewStyle().
+				Foreground(m.theme.TextMuted).
+				Italic(true).
+				Render("  generating response…")
+			sb.WriteString("\n")
+			sb.WriteString(generating)
 		}
 	}
 
