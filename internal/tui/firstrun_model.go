@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -83,14 +84,14 @@ var providerCatalog = []providerInfo{
 	{
 		ID:          "openrouter",
 		Name:        "OpenRouter",
-		Icon:        "◈",
+		Icon:        "⬡",
 		Description: "Unified access to 200+ models from all major labs.",
 		Recommended: true,
 	},
 	{
 		ID:          "zen",
 		Name:        "Zen",
-		Icon:        "◆",
+		Icon:        "◉",
 		Description: "Zen gateway with built-in cost controls.",
 		Recommended: false,
 	},
@@ -121,6 +122,8 @@ type firstRunKeyValidationMsg struct {
 type FirstRunModel struct {
 	theme    theme.Theme
 	registry *provider.Registry
+	config   *config.Config
+	version  string
 	ctx      context.Context
 	step     firstRunStep
 
@@ -129,6 +132,7 @@ type FirstRunModel struct {
 	providerCursor    int
 	providerChecked   map[string]bool
 	selectedProviders []string
+	providerScroll    int // vertical scroll offset for provider card list
 
 	// API key entry (loops through selected providers)
 	keyInput         textinput.Model
@@ -158,7 +162,7 @@ type FirstRunModel struct {
 
 // NewFirstRunModel creates a FirstRunModel.
 // Accepts a context that is cancelled on app shutdown to prevent resource leaks.
-func NewFirstRunModel(t theme.Theme, registry *provider.Registry, ctx context.Context) *FirstRunModel {
+func NewFirstRunModel(t theme.Theme, registry *provider.Registry, cfg *config.Config, version string, ctx context.Context) *FirstRunModel {
 	keyTI := textinput.New()
 	keyTI.Placeholder = "sk-or-..."
 	keyTI.EchoMode = textinput.EchoPassword
@@ -176,6 +180,8 @@ func NewFirstRunModel(t theme.Theme, registry *provider.Registry, ctx context.Co
 	return &FirstRunModel{
 		theme:           t,
 		registry:        registry,
+		config:          cfg,
+		version:         version,
 		ctx:             ctx,
 		step:            stepWelcome,
 		providers:       providers,
@@ -303,7 +309,24 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 		}
 	}
 
+	// Find the API key collected in the wizard for this provider.
+	var apiKey string
+	for _, entry := range fr.opts.Providers {
+		if entry.ID == providerName {
+			apiKey = entry.APIKey
+			break
+		}
+	}
+
 	return func() tea.Msg {
+		// Register (or re-register) the provider with the wizard-collected API key
+		// so that FetchModels can authenticate. On first run the registry is empty.
+		if apiKey != "" {
+			if err := RegisterProvider(reg, fr.config, providerName, apiKey, fr.version); err != nil {
+				return firstRunModelsMsg{Err: err}
+			}
+		}
+
 		p, err := reg.Get(providerName)
 		if err != nil || p == nil {
 			return firstRunModelsMsg{Err: err}
@@ -402,38 +425,43 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if fr.providerCursor > 0 {
 				fr.providerCursor--
+				fr.clampProviderScroll()
 			}
 		case "down", "j":
 			if fr.providerCursor < len(fr.providers)-1 {
 				fr.providerCursor++
+				fr.clampProviderScroll()
 			}
 		case " ":
 			cur := fr.providers[fr.providerCursor]
 			fr.providerChecked[cur] = !fr.providerChecked[cur]
+			fr.rebuildSelectedProviders()
 		case "enter":
-			fr.selectedProviders = nil
-			for _, p := range fr.providers {
-				if fr.providerChecked[p] {
-					fr.selectedProviders = append(fr.selectedProviders, p)
-				}
-			}
+			fr.rebuildSelectedProviders()
 			if len(fr.selectedProviders) == 0 {
+				fr.keyErr = "Select at least one provider (space to toggle)"
 				return fr, nil
 			}
+			fr.keyErr = ""
 			fr.opts.DefaultProvider = fr.selectedProviders[0]
 			fr.keyProviderIndex = 0
+			fr.providerScroll = 0
 			fr.step = stepAPIKey
-			fr.keyErr = ""
 			fr.keyInput.SetValue("")
 			fr.keyInput.Focus()
 		case "s":
-			fr.selectedProviders = nil
+			fr.rebuildSelectedProviders()
 			fr.opts.DefaultProvider = ""
+			fr.providerScroll = 0
 			fr.suggestedModels = nil
 			fr.step = stepModelPick
 			fr.modelInput.Focus()
 		case "esc":
+			fr.keyErr = ""
+			fr.providerScroll = 0
 			fr.step = stepWelcome
+		case "q", "ctrl+c":
+			return fr, tea.Quit
 		}
 
 	case stepAPIKey:
@@ -451,13 +479,15 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "tab":
 			fr.opts.SaveKeychain = !fr.opts.SaveKeychain
 		case "esc":
+			fr.keyErr = ""
+			fr.keyValidationErr = ""
 			if fr.keyProviderIndex > 0 {
 				fr.opts.Providers = fr.opts.Providers[:fr.keyProviderIndex]
 				fr.keyProviderIndex--
 				fr.keyInput.SetValue("")
-				fr.keyErr = ""
 			} else {
 				fr.opts.Providers = nil
+				fr.rebuildSelectedProviders()
 				fr.step = stepProviderSelect
 				fr.keyInput.Blur()
 			}
@@ -546,6 +576,76 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	}
 	return fr, nil
+}
+
+// rebuildSelectedProviders syncs selectedProviders from providerChecked,
+// preserving the catalog order. Call after any toggle or when returning to the
+// provider-select step so summary UI (count badge, default marker) is live.
+func (fr *FirstRunModel) rebuildSelectedProviders() {
+	fr.selectedProviders = fr.selectedProviders[:0]
+	for _, p := range fr.providers {
+		if fr.providerChecked[p] {
+			fr.selectedProviders = append(fr.selectedProviders, p)
+		}
+	}
+}
+
+// providerVisibleCount returns the maximum number of provider cards that fit
+// in the current terminal height, given the fixed chrome (header, dots,
+// subtitle, summary, hints, and outer box padding/border). Always returns at
+// least 2 so the user can compare adjacent cards on reasonably-sized terminals.
+func (fr *FirstRunModel) providerVisibleCount() int {
+	// Chrome budget: outer rounded box (border+padding) ≈ 4 lines + inner
+	// header row (1) + blank (1) + step line (1) + blank (1) + subtitle (1) +
+	// blank (1) + summary (1) + blank (1) + blank (1) + hints (1) + outer
+	// bottom border (1) ≈ 18 lines total.
+	chrome := 18
+	avail := fr.height - chrome
+	if avail < 10 {
+		avail = 10
+	}
+	// Each rendered card is ~6 lines tall (1 blank prefix + 4 card body incl.
+	// border + 1 blank gap). Use 6 as a conservative estimate.
+	n := avail / 6
+	if n < 2 {
+		n = 2
+	}
+	return n
+}
+
+// clampProviderScroll adjusts providerScroll so that the cursor falls within
+// the visible window [providerScroll, providerScroll + visible). Uses the
+// heuristic visible count from providerVisibleCount.
+func (fr *FirstRunModel) clampProviderScroll() {
+	fr.clampProviderScrollWithVisible(fr.providerVisibleCount())
+}
+
+// clampProviderScrollWithVisible is like clampProviderScroll but accepts an
+// externally-measured visible count (used by the renderer, which knows the
+// exact available height).
+func (fr *FirstRunModel) clampProviderScrollWithVisible(visible int) {
+	if visible > len(fr.providers) {
+		visible = len(fr.providers)
+	}
+	if visible < 1 {
+		visible = 1
+	}
+	if fr.providerCursor < fr.providerScroll {
+		fr.providerScroll = fr.providerCursor
+	}
+	if fr.providerCursor >= fr.providerScroll+visible {
+		fr.providerScroll = fr.providerCursor - visible + 1
+	}
+	if fr.providerScroll < 0 {
+		fr.providerScroll = 0
+	}
+	maxScroll := len(fr.providers) - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if fr.providerScroll > maxScroll {
+		fr.providerScroll = maxScroll
+	}
 }
 
 // completeSetup emits FirstRunCompleteMsg to register providers and transition to the REPL.

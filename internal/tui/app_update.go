@@ -360,6 +360,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cw, ch := m.contentDimensions()
 			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
 		}
+		// Re-register providers with updated API keys from settings
+		if m.registry != nil && m.config != nil {
+			if m.config.Provider.OpenRouter.APIKey != "" {
+				if err := RegisterProvider(m.registry, m.config, "openrouter", m.config.Provider.OpenRouter.APIKey, m.version); err != nil {
+					slog.Warn("failed to re-register OpenRouter after settings save", "error", err)
+				}
+			}
+			if m.config.Provider.Zen.APIKey != "" {
+				if err := RegisterProvider(m.registry, m.config, "zen", m.config.Provider.Zen.APIKey, m.version); err != nil {
+					slog.Warn("failed to re-register Zen after settings save", "error", err)
+				}
+			}
+		}
 		m.screen = ScreenREPL
 
 	// ── Theme changed ─────────────────────────────────────────────────────────
@@ -636,6 +649,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenFirstRun:
+			if m.firstRunModel != nil {
+				newFR, cmd := m.firstRunModel.Update(msg)
+				if nfr, ok := newFR.(*FirstRunModel); ok {
+					m.firstRunModel = nfr
+				}
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 
@@ -649,7 +670,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	switch m.screen {
 	case ScreenFirstRun:
 		if m.firstRunModel == nil {
-			fm := NewFirstRunModel(m.themeManager.Current(), m.registry, m.shutdownCtx)
+			fm := NewFirstRunModel(m.themeManager.Current(), m.registry, m.config, m.version, m.shutdownCtx)
+			cw, ch := m.contentDimensions()
+			fm.SetDimensions(cw, ch)
 			m.firstRunModel = fm
 		}
 		return m.firstRunModel.Init()
@@ -748,7 +771,7 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.shipModel.height = contentH
 	}
 	if m.firstRunModel != nil {
-		m.firstRunModel.SetContentWidth(contentW)
+		m.firstRunModel.SetDimensions(contentW, contentH)
 	}
 	if m.configModel != nil {
 		m.configModel.width = contentW
@@ -1174,7 +1197,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return m.msModel.Init()
 	case ScreenSettings:
 		if m.settingsModel == nil {
-			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.shutdownCtx)
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
 		}
 		m.settingsModel.width = cw
 		m.settingsModel.height = ch
@@ -1306,6 +1329,11 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.toolDetailModel.SetDimensions(cw, ch)
 		}
 		return nil
+	case ScreenFirstRun:
+		fm := NewFirstRunModel(m.themeManager.Current(), m.registry, m.config, m.version, m.shutdownCtx)
+		fm.SetDimensions(cw, ch)
+		m.firstRunModel = fm
+		return fm.Init()
 	default:
 		return nil
 	}

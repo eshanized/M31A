@@ -118,19 +118,24 @@ func (fr *FirstRunModel) renderWelcome() string {
 
 	panel := fr.renderWelcomePanel(panelInnerW, panelW)
 	panelLines := strings.Split(panel, "\n")
-	panelH := len(panelLines)
+
+	// Compose branded header tab above the panel's top border edge.
+	tabContent := fr.renderWelcomeHeaderRow(panelW)
+	tabCentered := lipgloss.Place(panelW, 1, lipgloss.Center, lipgloss.Center, tabContent)
+	allLines := append([]string{tabCentered}, panelLines...)
+	panelH := len(allLines)
 
 	// Degenerate case: terminal too cramped for the starfield composition.
 	if availH < 8 || availW < 30 {
 		if panelH > availH {
-			panelLines = panelLines[:availH]
+			allLines = allLines[:availH]
 		}
-		return centerScreen(strings.Join(panelLines, "\n"), availW, availH)
+		return centerScreen(strings.Join(allLines, "\n"), availW, availH)
 	}
 
 	// Layout: starfield rows fill the space above and below the centered
-	// panel. The panel occupies the middle rows as-is, so its border is never
-	// spliced and any lipgloss-vs-rune-count width discrepancy is irrelevant.
+	// panel. allLines includes the branded header tab followed by the panel
+	// border, so the tab appears to float above the double-bordered frame.
 	topMargin := (availH - panelH) / 2
 	if topMargin < 0 {
 		topMargin = 0
@@ -153,7 +158,7 @@ func (fr *FirstRunModel) renderWelcome() string {
 		}
 		out = append(out, strings.Split(starTop, "\n")...)
 	}
-	out = append(out, panelLines...)
+	out = append(out, allLines...)
 	if bottomMargin > 0 {
 		starBot := components.RenderStarfieldPlain(availW, bottomMargin, 31+int64(topMargin))
 		out = append(out, strings.Split(starBot, "\n")...)
@@ -188,77 +193,93 @@ func (fr *FirstRunModel) renderWelcome() string {
 	return result
 }
 
-// renderWelcomePanel builds the welcome panel content (logo, tagline, step
-// dots, hints, and optional feature cards). panelW is the total panel width
-// including its own padding; innerW is the usable content width inside it.
+// renderWelcomePanel builds the redesigned "Command Center" welcome panel.
+//
+// Layout (wide ≥56 inner width):
+//
+//	╭──────── M 3 1 A ────────╮  ← double border + branded header tab
+//	│                          │
+//	│      ▂▃▅▆▇▇▆▅▃▂         │  ← accent line above logo
+//	│      [  M31A logo  ]     │
+//	│      ▂▃▅▆▇▇▆▅▃▂         │  ← accent line below logo
+//	│   ░▒▓████████████▓▒░    │  ← gradient separator
+//	│                          │
+//	│   AI pair programmer     │  ← tagline
+//	│   in the terminal        │
+//	│                          │
+//	│   ⚡          🔧        ⎇│  ← feature pipeline
+//	│   Workflows──▶Tools──▶Git│
+//	│   Plan→Ship   Bash   Live│
+//	│                          │
+//	│   [ 1 ] Fix tests        │  ← quick-start prompts
+//	│   [ 2 ] Refactor API     │
+//	│   [ 3 ] Explain arch     │
+//	│                          │
+//	│   ●○○○          [↵] [q] │  ← step dots + key hints
+//	╰──────────────────────────╯
+//
+// Narrow (<56): features collapse to compact labeled rows.
 func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	t := fr.theme
 
-	// Brand logo, styled consistently with the rest of the app.
 	logoBlock := components.RenderLogo("", true, t.Brand)
+	accent := fr.renderAccentLine(innerW)
+	separator := fr.renderGradientSeparator(innerW)
 
-	// Gradient glow row beneath the logo — matches the REPL welcome aesthetic.
-	glow := fr.renderGlowRow(innerW)
-
-	// Italic tagline.
 	tagline := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
+		Foreground(t.TextSecondary).
 		Italic(true).
 		Render("Your AI pair programmer in the terminal")
 
-	// Step progress dots (4 total, first active).
-	dots := fr.renderStepDots(0)
-
-	// Keyboard hints row — bordered badges when there is room, plain text when
-	// the panel is very narrow (the badges add ~16 cells of decoration that
-	// cause the row to overflow and break the border via lipgloss wrapping).
-	var hints string
-	if innerW >= 38 {
-		enterBadge := keyBadge("↵", "Continue", t.Brand, t.TextMuted)
-		quitBadge := keyBadge("q", "Quit", t.TextMuted, t.TextMuted)
-		hints = lipgloss.JoinHorizontal(lipgloss.Center, enterBadge, "   ", quitBadge)
+	var features string
+	if innerW >= 56 {
+		features = fr.renderFeaturePipeline(innerW)
 	} else {
-		hints = lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("[enter] Continue   [q] Quit")
+		features = fr.renderCompactFeatures()
 	}
+
+	quickStart := fr.renderQuickStart(innerW)
+	hints := fr.renderWelcomeHints()
 
 	var body string
 	if innerW >= 56 {
-		// Wide layout: three feature cards laid out horizontally.
-		// (innerW - 4) / 3 accounts for the two 2-cell gaps between cards.
-		cardW := (innerW - 4) / 3
-		if cardW < 16 {
-			cardW = 16
-		}
-		c1 := fr.featureCard("⚡ Workflows", "Plan → Execute → Verify → Ship", cardW)
-		c2 := fr.featureCard("🔧 Tools", "Bash · FileRead · FileWrite · Grep", cardW)
-		c3 := fr.featureCard("⎇ Git Aware", "Live repo status in sidebar", cardW)
-		cards := lipgloss.JoinHorizontal(lipgloss.Top, c1, "  ", c2, "  ", c3)
-
 		body = lipgloss.JoinVertical(lipgloss.Center,
-			logoBlock, "", glow, "", tagline, "", cards, "", dots, "", hints,
+			accent,
+			"",
+			logoBlock,
+			"",
+			accent,
+			"",
+			separator,
+			"",
+			tagline,
+			"",
+			features,
+			"",
+			quickStart,
+			"",
+			hints,
 		)
 	} else {
-		// Narrow layout: cards collapse to short, border-safe bullets.
-		features := lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Workflows"),
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Tools"),
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("- Git aware"),
-		)
-
 		body = lipgloss.JoinVertical(lipgloss.Center,
-			logoBlock, "", glow, "", tagline, "", features, "", dots, "", hints,
+			logoBlock,
+			"",
+			separator,
+			"",
+			tagline,
+			"",
+			features,
+			"",
+			quickStart,
+			"",
+			hints,
 		)
 	}
 
-	// Pad every body line to exactly innerW visible cells. JoinVertical leaves
-	// lines at their natural widths, which would produce a panel whose border
-	// tracks the widest line — an unpredictable value. Padding to a fixed
-	// width gives the panel a deterministic shape.
 	body = padLines(body, innerW)
 
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.DoubleBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 1).
 		Width(panelW).
@@ -335,16 +356,99 @@ func (fr *FirstRunModel) renderGlowRow(width int) string {
 
 // ─── Overlay helpers (starfield + panel composition) ────────────────────────
 
-func (fr *FirstRunModel) featureCard(title, desc string, w int) string {
+// ─── Welcome panel section renderers ────────────────────────────────────────
+
+// renderWelcomeHeaderRow builds a branded tab that sits on the top border edge.
+// Result: ══╡ M 3 1 A ╞═════════════════════
+func (fr *FirstRunModel) renderWelcomeHeaderRow(panelW int) string {
 	t := fr.theme
-	if w < 12 {
-		w = 18
+	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(" M 3 1 A ")
+	leftW := (panelW - lipgloss.Width(title)) / 2
+	if leftW < 2 {
+		leftW = 2
 	}
-	titleS := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(title)
-	descS := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(desc)
+	rightW := panelW - lipgloss.Width(title) - leftW
+	if rightW < 2 {
+		rightW = 2
+	}
+	barStyle := lipgloss.NewStyle().Foreground(t.Brand)
+	left := barStyle.Render(strings.Repeat("═", leftW-1) + "╡")
+	right := barStyle.Render("╞" + strings.Repeat("═", rightW-1))
+	return left + title + right
+}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, titleS, "", descS)
+// renderAccentLine renders a thin decorative line using tapered block characters.
+// Used above and below the logo for a subtle glow frame.
+func (fr *FirstRunModel) renderAccentLine(width int) string {
+	t := fr.theme
+	if width < 12 {
+		return lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("▂", width))
+	}
+	chars := []string{"▂", "▃", "▅", "▆", "▇"}
+	var left, right strings.Builder
+	for _, ch := range chars {
+		styled := lipgloss.NewStyle().Foreground(t.Brand).Render(ch)
+		left.WriteString(styled)
+		right.WriteString(styled)
+	}
+	centerW := width - 2*len(chars)
+	if centerW < 2 {
+		centerW = 2
+	}
+	center := lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("▇", centerW))
+	return left.String() + center + right.String()
+}
 
+// renderGradientSeparator renders a flowing gradient bar using ░▒▓█ characters.
+func (fr *FirstRunModel) renderGradientSeparator(width int) string {
+	t := fr.theme
+	if width <= 0 {
+		return ""
+	}
+	if width <= 8 {
+		return lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("█", width))
+	}
+	edge := []string{"░", "▒", "▓"}
+	var b strings.Builder
+	for _, ch := range edge {
+		b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
+	}
+	centerW := width - 2*len(edge)
+	if centerW < 1 {
+		centerW = 1
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("█", centerW)))
+	for i := len(edge) - 1; i >= 0; i-- {
+		b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(edge[i]))
+	}
+	return b.String()
+}
+
+// renderFeaturePipeline renders three feature blocks connected with ──▶ arrows.
+func (fr *FirstRunModel) renderFeaturePipeline(width int) string {
+	t := fr.theme
+	arrowW := 3
+	cardW := (width - 2*arrowW) / 3
+	if cardW < 12 {
+		cardW = 12
+	}
+
+	c1 := fr.renderFeatureBlock("⚡", "Workflows", "Plan → Execute → Ship", cardW)
+	c2 := fr.renderFeatureBlock("🔧", "Tools", "Bash · Read · Write · Grep", cardW)
+	c3 := fr.renderFeatureBlock("⎇", "Git Aware", "Live repo status", cardW)
+
+	arrow := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("─▶")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, c1, " "+arrow+" ", c2, " "+arrow+" ", c3)
+}
+
+// renderFeatureBlock renders a single feature block: icon header, bold title, muted desc.
+func (fr *FirstRunModel) renderFeatureBlock(icon, title, desc string, w int) string {
+	t := fr.theme
+	iconRow := lipgloss.NewStyle().Foreground(t.Brand).Render(icon)
+	titleRow := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(title)
+	descRow := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(desc)
+	content := lipgloss.JoinVertical(lipgloss.Left, iconRow, titleRow, descRow)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Border).
@@ -353,46 +457,255 @@ func (fr *FirstRunModel) featureCard(title, desc string, w int) string {
 		Render(content)
 }
 
+// renderQuickStart renders numbered suggestion prompts.
+func (fr *FirstRunModel) renderQuickStart(width int) string {
+	t := fr.theme
+
+	title := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Bold(true).
+		Render("QUICK START")
+
+	type prompt struct {
+		num  int
+		text string
+	}
+	prompts := []prompt{
+		{1, "Fix the failing tests in this repo"},
+		{2, "Add error handling to the API layer"},
+		{3, "Explain this codebase architecture"},
+	}
+
+	var lines []string
+	for _, p := range prompts {
+		numBadge := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
+			Padding(0, 1).
+			Render(fmt.Sprintf("%d", p.num))
+		text := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.text)
+		lines = append(lines, numBadge+text)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, "", strings.Join(lines, "\n"))
+}
+
+// renderCompactFeatures renders features as compact labeled rows for narrow terminals.
+func (fr *FirstRunModel) renderCompactFeatures() string {
+	t := fr.theme
+	type feat struct {
+		icon  string
+		label string
+	}
+	feats := []feat{
+		{"⚡", "Workflows: Plan → Execute → Ship"},
+		{"🔧", "Tools: Bash · Read · Write · Grep"},
+		{"⎇", "Git Aware: Live repo status"},
+	}
+	var lines []string
+	for _, f := range feats {
+		icon := lipgloss.NewStyle().Foreground(t.Brand).Render(f.icon)
+		label := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(" " + f.label)
+		lines = append(lines, icon+label)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// renderWelcomeHints renders a dual-section footer: step dots + separator + key badges.
+func (fr *FirstRunModel) renderWelcomeHints() string {
+	t := fr.theme
+	dots := fr.renderStepDots(0)
+
+	enterBadge := keyBadge("↵", "Continue", t.Brand, t.TextMuted)
+	quitBadge := keyBadge("q", "Quit", t.TextMuted, t.TextMuted)
+
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		dots,
+		lipgloss.NewStyle().Foreground(t.Border).Render("   │   "),
+		enterBadge,
+		"  ",
+		quitBadge,
+	)
+}
+
 // ─── Provider selection step ─────────────────────────────────────────────────
 
 func (fr *FirstRunModel) renderProviderSelect() string {
 	t := fr.theme
-	w := fr.width
-	if w < 40 {
+	// Use effectiveWidth (which accounts for the sidebar and the parent's
+	// contentWidth) rather than fr.width directly. The parent wraps this
+	// output in a rounded box with Width(w - 4) and Padding(1, 3), so the
+	// visible inner content area is (w - 4) - 2 (border) - 6 (pad) = w - 12.
+	// Add 2 back because lipgloss's Width includes the border in its outer
+	// measurement, giving a practical inner budget of w - 10.
+	w := fr.effectiveWidth()
+	if w < 32 {
 		w = 70
 	}
-	if fr.contentWidth > 0 {
-		w = fr.contentWidth
+	innerW := w - 10
+	if innerW < 22 {
+		innerW = 60
 	}
-	contentW := w - 10
+	// Vertical budget: outer box adds border (2) + vertical padding (1+1) = 4,
+	// plus a 2-row safety margin for centerScreen.
+	h := fr.height
+	if h < 1 {
+		h = 24 // sane default if dimensions haven't been pushed yet
+	}
+	availH := h - 6
+	if availH < 10 {
+		availH = 10
+	}
 
-	// Title + step dots
+	// ── Row 1: step title + progress dots ─────────────────────────────────
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 1/3 — Choose your providers")
+		Render("Step 1 of 4 — Choose your providers")
 	dots := fr.renderStepDots(1)
-	header := lipgloss.JoinVertical(lipgloss.Left, title, "", dots)
+	stepLine := lipgloss.JoinHorizontal(lipgloss.Center,
+		title,
+		lipgloss.NewStyle().Foreground(t.Border).Render("   "),
+		dots,
+	)
 
-	subtitle := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("Select one or more providers. You can switch between them anytime.")
+	// ── Row 2: subtitle or validation error (single status row) ───────────
+	var statusRow string
+	if fr.keyErr != "" {
+		statusRow = lipgloss.NewStyle().Foreground(t.Error).
+			Render("⚠ " + fr.keyErr)
+	} else {
+		statusRow = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render("Select one or more providers. You can switch between them anytime.")
+	}
 
-	// Provider cards
+	// ── Provider cards ────────────────────────────────────────────────────
+	// Always render the full catalog. The catalog is small (2 providers in
+	// V1), so the viewport heuristic is premature optimization — and it was
+	// silently dropping cards on some terminal sizes. The hard line clamp
+	// below handles overflow on genuinely tiny terminals.
+	fr.clampProviderScroll()
 	var cards []string
 	for i, p := range providerCatalog {
-		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, contentW))
+		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, innerW-2))
 	}
 	cardsBlock := strings.Join(cards, "\n\n")
 
-	// Navigation hints
+	// ── Summary row: count + selected chips ──────────────────────────────
+	summary := fr.renderProviderSummary(innerW)
+
+	// ── Hints row ─────────────────────────────────────────────────────────
 	navBadge := keyBadge("↑↓", "Navigate", t.Brand, t.TextMuted)
 	toggleBadge := keyBadge("space", "Toggle", t.Brand, t.TextMuted)
 	selBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
 	skipBadge := keyBadge("s", "Skip", t.Warning, t.TextMuted)
 	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
-	hints := lipgloss.JoinHorizontal(lipgloss.Center, navBadge, "  ", toggleBadge, "  ", selBadge, "  ", skipBadge, "  ", backBadge)
+	hints := lipgloss.JoinHorizontal(lipgloss.Center,
+		navBadge, "  ", toggleBadge, "  ", selBadge, "  ", skipBadge, "  ", backBadge)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header, "", subtitle, "", cardsBlock, "", "", hints,
-	)
+	// Compose, pad each line to innerW, and hard-clamp to availH rows so the
+	// outer box never overflows the terminal — even on very small sizes.
+	parts := []string{stepLine, "", statusRow, "", cardsBlock, "", summary, "", hints}
+	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	body = padLines(body, innerW)
+
+	lines := strings.Split(body, "\n")
+	if len(lines) > availH {
+		lines = lines[:availH]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// plural returns "s" when n != 1, for use in count-bearing status strings.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// renderProviderSummary renders a single-line summary showing selected count
+// and chip row for chosen providers. The output is truncated to innerW so it
+// never breaks the layout.
+func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
+	t := fr.theme
+
+	n := len(fr.selectedProviders)
+	var countBadge string
+	switch {
+	case n == 0:
+		countBadge = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(0, 1).
+			Render("none selected")
+	case n == 1:
+		countBadge = lipgloss.NewStyle().
+			Foreground(t.Success).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Success).
+			Padding(0, 1).
+			Render("1 selected")
+	default:
+		countBadge = lipgloss.NewStyle().
+			Foreground(t.Success).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Success).
+			Padding(0, 1).
+			Render(fmt.Sprintf("%d selected", n))
+	}
+
+	if n == 0 {
+		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  press space to select")
+		return truncateStyled(countBadge+hint, innerW)
+	}
+
+	// Build chip row. Stop appending chips once we'd exceed innerW.
+	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" ")
+	prefix := countBadge + lipgloss.NewStyle().Foreground(t.Border).Render(" │")
+	used := lipgloss.Width(prefix)
+	var chips []string
+	for i, pid := range fr.selectedProviders {
+		info := lookupProviderInfo(pid)
+		label := info.Icon + " " + info.Name
+		var chip string
+		if i == 0 {
+			chip = lipgloss.NewStyle().
+				Foreground(t.Brand).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(t.Brand).
+				Padding(0, 1).
+				Render("★ " + label)
+		} else {
+			chip = lipgloss.NewStyle().
+				Foreground(t.TextSecondary).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(t.Border).
+				Padding(0, 1).
+				Render(label)
+		}
+		chipW := lipgloss.Width(chip) + lipgloss.Width(sep)
+		if used+chipW+4 > innerW { // leave 4 cells headroom
+			chips = append(chips, lipgloss.NewStyle().Foreground(t.TextMuted).Render("…"))
+			break
+		}
+		chips = append(chips, chip)
+		used += chipW
+	}
+
+	row := prefix + sep + strings.Join(chips, sep)
+	return truncateStyled(row, innerW)
+}
+
+// lookupProviderInfo returns catalog metadata for a provider ID, falling back
+// to a minimal entry if the ID isn't in the catalog.
+func lookupProviderInfo(id string) providerInfo {
+	for _, p := range providerCatalog {
+		if p.ID == id {
+			return p
+		}
+	}
+	return providerInfo{ID: id, Name: id, Icon: "◆"}
 }
 
 func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int) string {
@@ -403,60 +716,68 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 
 	checked := fr.providerChecked[p.ID]
 
-	// Checkbox indicator
-	checkBox := "[ ] "
+	// Checkbox — always rendered with an explicit color so it's visible on
+	// both light and dark terminal themes.
+	var checkBox string
 	if checked {
-		checkBox = lipgloss.NewStyle().Foreground(t.Success).Render("[✓] ")
+		box := lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("▣")
+		checkBox = lipgloss.NewStyle().Foreground(t.Success).Render("[") +
+			box +
+			lipgloss.NewStyle().Foreground(t.Success).Render("] ")
+	} else {
+		checkBox = lipgloss.NewStyle().Foreground(t.TextMuted).Render("[ ] ")
 	}
 
 	// Icon + Name row
-	iconStyle := lipgloss.NewStyle().Foreground(t.Brand)
-	nameStyle := lipgloss.NewStyle().Foreground(t.Text).Bold(true)
+	var iconStyle, nameStyle lipgloss.Style
+	if checked {
+		iconStyle = lipgloss.NewStyle().Foreground(t.Success).Bold(true)
+	} else if selected {
+		iconStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	} else {
+		iconStyle = lipgloss.NewStyle().Foreground(t.Brand)
+	}
 	if selected {
-		iconStyle = iconStyle.Foreground(t.Brand)
-		nameStyle = nameStyle.Foreground(t.Brand)
+		nameStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	} else {
+		nameStyle = lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
 	}
 
 	icon := iconStyle.Render(p.Icon)
 	name := nameStyle.Render(p.Name)
 
-	// Recommended badge
-	recBadge := ""
+	// Badges
+	var badges string
 	if p.Recommended {
-		recBadge = " " + lipgloss.NewStyle().
+		badges += " " + lipgloss.NewStyle().
 			Foreground(t.Success).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Success).
 			Padding(0, 1).
 			Render("Recommended")
 	}
-
-	// Default badge for first checked provider
-	defaultBadge := ""
 	if checked && len(fr.selectedProviders) > 0 && fr.selectedProviders[0] == p.ID {
-		defaultBadge = " " + lipgloss.NewStyle().
+		badges += " " + lipgloss.NewStyle().
 			Foreground(t.Brand).
-			Render("(default)")
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
+			Padding(0, 1).
+			Render("★ default")
 	}
 
-	titleRow := checkBox + icon + "  " + name + recBadge + defaultBadge
-
-	// Description
+	titleRow := checkBox + icon + "  " + name + badges
 	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(p.Description)
 
-	// Selection indicator (cursor arrow)
-	prefix := "  "
-	if selected {
-		prefix = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▶ ")
-	}
-
+	// Fixed-height body: exactly 3 content rows (title, blank, desc). No
+	// conditional footer — selected/checked state is conveyed by prefix +
+	// border + color only. This keeps every card the same height.
 	content := lipgloss.JoinVertical(lipgloss.Left, titleRow, "", desc)
 
+	// Border reflects state: brand = focused, success = checked, muted = idle.
 	borderColor := t.Border
 	if selected {
 		borderColor = t.Brand
-	}
-	if checked && !selected {
+	} else if checked {
 		borderColor = t.Success
 	}
 
@@ -466,6 +787,15 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 		Padding(0, 1).
 		Width(w - 4).
 		Render(content)
+
+	// Cursor prefix — bold arrow on the focused card, subtle tick on checked
+	// cards. Both are a single character so card height is unaffected.
+	prefix := "  "
+	if selected {
+		prefix = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▶ ")
+	} else if checked {
+		prefix = lipgloss.NewStyle().Foreground(t.Success).Render("✓ ")
+	}
 
 	return prefix + card
 }

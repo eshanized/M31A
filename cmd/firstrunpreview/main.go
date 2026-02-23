@@ -26,7 +26,7 @@ func main() {
 	// starfield overlay is composed.
 	for _, w := range widths {
 		fmt.Printf("\n--- panel only @ terminal width=%d ---\n", w)
-		fr := tui.NewFirstRunModel(t, nil, context.Background())
+		fr := tui.NewFirstRunModel(t, nil, nil, "", context.Background())
 		fr.SetDimensions(w, height)
 		v := fr.View()
 		viewW := 0
