@@ -79,6 +79,17 @@ func (g *Git) AddAll() error {
 	return nil
 }
 
+// sanitizeCommitMessage removes newlines that could create fake trailers
+// and caps length to prevent malformed git history.
+func sanitizeCommitMessage(msg string) string {
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", "")
+	if len(msg) > 200 {
+		msg = msg[:197] + "..."
+	}
+	return strings.TrimSpace(msg)
+}
+
 // Commit stages all changes and creates a commit with the given message.
 // WARNING: This stages the entire worktree. Use CommitWithFiles or
 // CommitStaged for scoped commits.
@@ -86,7 +97,7 @@ func (g *Git) Commit(message string) error {
 	if err := g.AddAll(); err != nil {
 		return err
 	}
-	_, err := g.run("commit", "--message="+message)
+	_, err := g.run("commit", "--message="+sanitizeCommitMessage(message))
 	if err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
@@ -96,7 +107,7 @@ func (g *Git) Commit(message string) error {
 // CommitStaged creates a commit from already-staged changes only.
 // Does not stage any additional files.
 func (g *Git) CommitStaged(message string) (string, error) {
-	_, err := g.run("commit", "--message="+message)
+	_, err := g.run("commit", "--message="+sanitizeCommitMessage(message))
 	if err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
@@ -112,7 +123,7 @@ func (g *Git) CommitWithFiles(message string, paths ...string) (string, error) {
 			return "", err
 		}
 	}
-	if _, err := g.run("commit", "--message="+message); err != nil {
+	if _, err := g.run("commit", "--message="+sanitizeCommitMessage(message)); err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
 	hash, _ := g.HeadHash()
@@ -129,21 +140,21 @@ func (g *Git) Log(lastN int) ([]CommitInfo, error) {
 	if lastN <= 0 {
 		return g.LogAll()
 	}
-	args := []string{"log", "--format=%H|%h|%an|%s|%aI", "-n", strconv.Itoa(lastN)}
+	args := []string{"log", "--format=%H§%h§%an§%s§%aI", "-n", strconv.Itoa(lastN)}
 	return g.runLog(args)
 }
 
 // LogSince returns commits since the given time (newest first).
 func (g *Git) LogSince(since time.Time) ([]CommitInfo, error) {
-	args := []string{"log", "--format=%H|%h|%an|%s|%aI", "--since=" + since.Format(time.RFC3339)}
+	args := []string{"log", "--format=%H§%h§%an§%s§%aI", "--since=" + since.Format(time.RFC3339)}
 	return g.runLog(args)
 }
 
 // logInternal is the shared implementation for LogAll/LogSince.
 func (g *Git) logInternal(oneline bool, since string) ([]CommitInfo, error) {
-	format := "--format=%H|%h|%an|%s|%aI"
+	format := "--format=%H§%h§%an§%s§%aI"
 	if oneline {
-		format = "--format=%h|%s"
+		format = "--format=%h§%s"
 	}
 	args := []string{"log", format}
 	if since != "" {
@@ -181,7 +192,7 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 		}
 
 		if oneline {
-			parts := strings.SplitN(line, "|", 2)
+			parts := strings.SplitN(line, "§", 2)
 			if len(parts) < 2 {
 				continue
 			}
@@ -193,7 +204,7 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 			continue
 		}
 
-		parts := strings.SplitN(line, "|", 5)
+		parts := strings.SplitN(line, "§", 5)
 		if len(parts) < 5 {
 			continue
 		}
@@ -216,6 +227,23 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 	return commits, nil
 }
 
+// validateGitRef checks that a string is a safe git ref name.
+func validateGitRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	if strings.HasPrefix(ref, "--") {
+		return false
+	}
+	if strings.Contains(ref, "..") {
+		return false
+	}
+	if strings.ContainsAny(ref, "\x00\n\r") {
+		return false
+	}
+	return true
+}
+
 // DiffRefs returns the diff between two refs. If both refs are empty, it runs
 // plain `git diff` to show unstaged working-tree changes.
 func (g *Git) DiffRefs(ref1, ref2 string) (string, error) {
@@ -223,6 +251,9 @@ func (g *Git) DiffRefs(ref1, ref2 string) (string, error) {
 	if ref1 == "" && ref2 == "" {
 		args = []string{"diff"}
 	} else {
+		if !validateGitRef(ref1) || !validateGitRef(ref2) {
+			return "", fmt.Errorf("git diff: invalid ref name")
+		}
 		args = []string{"diff", ref1 + ".." + ref2}
 	}
 	out, err := g.run(args...)
@@ -335,8 +366,11 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 		}
 		add := 0
 		del := 0
-		fmt.Sscanf(parts[0], "%d", &add)
-		fmt.Sscanf(parts[1], "%d", &del)
+		n1, _ := fmt.Sscanf(parts[0], "%d", &add)
+		n2, _ := fmt.Sscanf(parts[1], "%d", &del)
+		if n1 != 1 || n2 != 1 {
+			continue // skip malformed line
+		}
 		numstatMap[parts[2]] = struct{ add, del int }{add, del}
 	}
 
