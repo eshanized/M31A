@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
@@ -215,6 +216,13 @@ func run() int {
 		case <-sigCh:
 			slog.Info("received shutdown signal, sending quit to TUI...")
 			p.Send(tea.QuitMsg{})
+			// H-24: Hard fallback — force exit after 5 seconds if TUI doesn't quit
+			select {
+			case <-sigDone:
+			case <-time.After(5 * time.Second):
+				slog.Warn("TUI did not exit within timeout, forcing exit")
+				os.Exit(1)
+			}
 		case <-sigDone:
 		}
 	}()
