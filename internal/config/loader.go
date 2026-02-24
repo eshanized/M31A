@@ -567,6 +567,28 @@ func (c *Config) Save(path string) error {
 	// Copy the config to avoid mutating the original
 	cfgCopy := *c
 
+	// H-12: Deep-copy slice and map fields to prevent data races with WatchConfig
+	if c.Permissions.Rules != nil {
+		rulesCopy := make([]PermissionRule, len(c.Permissions.Rules))
+		copy(rulesCopy, c.Permissions.Rules)
+		cfgCopy.Permissions.Rules = rulesCopy
+	}
+	if c.Permissions.Agents != nil {
+		agentsCopy := make(map[string]PermissionsAgentConfig, len(c.Permissions.Agents))
+		for k, v := range c.Permissions.Agents {
+			agentRulesCopy := make([]PermissionRule, len(v.Rules))
+			copy(agentRulesCopy, v.Rules)
+			v.Rules = agentRulesCopy
+			agentsCopy[k] = v
+		}
+		cfgCopy.Permissions.Agents = agentsCopy
+	}
+	if c.Tools.SkipDirs != nil {
+		skipDirsCopy := make([]string, len(c.Tools.SkipDirs))
+		copy(skipDirsCopy, c.Tools.SkipDirs)
+		cfgCopy.Tools.SkipDirs = skipDirsCopy
+	}
+
 	// Don't persist API keys — they came from env vars or keychain
 	cfgCopy.Provider.OpenRouter.APIKey = ""
 	cfgCopy.Provider.Zen.APIKey = ""
@@ -685,6 +707,9 @@ func DefaultGitConfig() GitConfig {
 
 // loadDotEnv reads a .env file from the current working directory and sets
 // environment variables. Does not override already-set variables.
+//
+// NOTE: os.Setenv is not goroutine-safe. This is safe because it is called
+// once during Load() at startup, before any concurrent access begins.
 func loadDotEnv() {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -695,8 +720,8 @@ func loadDotEnv() {
 	if err != nil {
 		return
 	}
-	if info.Mode().Perm()&0o002 != 0 {
-		slog.Warn("skipping world-writable .env file", "path", envPath)
+	if info.Mode().Perm()&0o022 != 0 {
+		slog.Warn("skipping group/world-writable .env file", "path", envPath)
 		return
 	}
 	data, err := os.ReadFile(envPath)
@@ -705,6 +730,10 @@ func loadDotEnv() {
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
+		if len(line) > 4096 {
+			slog.Warn("skipping overly long .env line", "path", envPath)
+			continue
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
