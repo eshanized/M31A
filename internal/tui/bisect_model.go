@@ -11,14 +11,14 @@ import (
 
 // BisectModel provides an interactive git bisect interface.
 type BisectModel struct {
-	theme    theme.Theme
-	commits  []bisectCommit
-	current  int
-	total    int
-	status   string
-	errMsg   string
-	width    int
-	height   int
+	theme   theme.Theme
+	commits []bisectCommit
+	current int
+	total   int
+	status  string
+	errMsg  string
+	width   int
+	height  int
 }
 
 type bisectCommit struct {

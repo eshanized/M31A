@@ -39,6 +39,25 @@ func (m *AppState) Init() tea.Cmd {
 		m.screen = ScreenREPL
 		m.ensureReplModel()
 
+		// Populate activeModel from config.Model.Default so the REPL can
+		// send messages immediately without requiring /model first.
+		// We set a stub now and kick off an async fetch to enrich it with
+		// full metadata (pricing, context length, capabilities).
+		if m.activeModel == nil && m.config != nil && m.config.Model.Default != "" {
+			defaultModelID := m.config.Model.Default
+			// Try the provider's cached model list first (zero-cost lookup)
+			if p := m.registry.ActiveProvider(); p != nil {
+				if info, err := p.GetModel(defaultModelID); err == nil && info != nil {
+					m.activeModel = info
+				}
+			}
+			// If not found in cache, use a stub — the async SetProvider fetch
+			// will replace it with full metadata once it completes.
+			if m.activeModel == nil {
+				m.activeModel = &types.ModelInfo{ID: defaultModelID}
+			}
+		}
+
 		baseCmds := []tea.Cmd{
 			m.routeToScreen(),
 			NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),
@@ -49,6 +68,12 @@ func (m *AppState) Init() tea.Cmd {
 		}
 		if m.sidebarModel != nil {
 			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
+		}
+
+		// Async provider+model enrichment: fetches the model catalog so the REPL
+		// has full model metadata (pricing, context, capabilities) for display.
+		if providerCmd := m.syncReplProvider(m.sessionID); providerCmd != nil {
+			baseCmds = append(baseCmds, providerCmd)
 		}
 
 		if m.resumeSessionID != "" {
@@ -173,20 +198,20 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			return PhaseResultMsg{Phase: phase, Success: true}
 		}
 		return PhaseResultMsg{
-			Phase:               phase,
-			Tasks:               result.Tasks,
-			Messages:            result.Messages,
-			Success:             result.Error == "",
-			Error:               result.Error,
-			NeedsAnswers:        result.NeedsAnswers,
-			RequiresManualInput: result.RequiresManualInput,
-			DurationMs:          result.DurationMs,
-			Usage:               result.Usage,
-			Cost:                result.Cost,
-			ToolCalls:           result.ToolCalls,
-			Commits:             result.Commits,
-			DiffStats:           result.DiffStats,
-			Demonstration:       result.Demonstration,
+			Phase:                   phase,
+			Tasks:                   result.Tasks,
+			Messages:                result.Messages,
+			Success:                 result.Error == "",
+			Error:                   result.Error,
+			NeedsAnswers:            result.NeedsAnswers,
+			RequiresManualInput:     result.RequiresManualInput,
+			DurationMs:              result.DurationMs,
+			Usage:                   result.Usage,
+			Cost:                    result.Cost,
+			ToolCalls:               result.ToolCalls,
+			Commits:                 result.Commits,
+			DiffStats:               result.DiffStats,
+			Demonstration:           result.Demonstration,
 			ManualVerificationSteps: result.ManualVerificationSteps,
 		}
 	}
@@ -212,10 +237,10 @@ func questionListenerCmd(ctx context.Context, d *tools.Dispatcher) tea.Cmd {
 		select {
 		case req := <-d.QuestionRequestCh():
 			return QuestionRequestMsg{
-				ID:          req.ID,
-				Question:    req.Question,
-				Header:      req.Header,
-				Options:     req.Options,
+				ID:       req.ID,
+				Question: req.Question,
+				Header:   req.Header,
+				Options:  req.Options,
 			}
 		case <-ctx.Done():
 			return nil

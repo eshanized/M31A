@@ -9,10 +9,10 @@ import (
 
 // TimelineEntry represents a single event in a timeline.
 type TimelineEntry struct {
-	Time    string
-	Title   string
-	Detail  string
-	Status  string // "done", "active", "pending", "error"
+	Time   string
+	Title  string
+	Detail string
+	Status string // "done", "active", "pending", "error"
 }
 
 // TimelineView renders a vertical timeline of events.

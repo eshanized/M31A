@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -16,21 +16,21 @@ import (
 
 // ExecuteModel displays real-time task execution progress.
 type ExecuteModel struct {
-	tasks       []types.Task
-	theme       theme.Theme
-	sessionID   string
-	width       int
-	height      int
-	viewport    viewport.Model
-	paused      bool
-	startedAt   time.Time
+	tasks     []types.Task
+	theme     theme.Theme
+	sessionID string
+	width     int
+	height    int
+	viewport  viewport.Model
+	paused    bool
+	startedAt time.Time
 
 	// Live output tracking for the currently running task
-	liveOutput   []string
-	currentTask  int // index of the currently running task (-1 if none)
+	liveOutput  []string
+	currentTask int // index of the currently running task (-1 if none)
 
 	// Animated spinner for task progress
-	spinner      components.Spinner
+	spinner components.Spinner
 
 	// Animated progress bar
 	animatedProg components.AnimatedProgressBar

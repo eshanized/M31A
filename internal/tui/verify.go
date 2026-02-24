@@ -23,7 +23,7 @@ type VerifyModel struct {
 	height      int
 	viewport    viewport.Model
 	manualSteps []string
-	healFunc  func(taskID int) tea.Cmd
+	healFunc    func(taskID int) tea.Cmd
 
 	// Healing state
 	healingTaskID int // -1 if not healing

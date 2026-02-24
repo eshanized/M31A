@@ -11,15 +11,15 @@ import (
 
 // ResumeModel shows the session browser so the user can resume a past session.
 type ResumeModel struct {
-	theme        theme.Theme
-	sessions     []session.SessionInfo
-	allSessions  []session.SessionInfo // unfiltered list for search reset
-	cursor       int
-	offset       int
-	width        int
-	height       int
-	searchInput  textinput.Model
-	searching    bool
+	theme       theme.Theme
+	sessions    []session.SessionInfo
+	allSessions []session.SessionInfo // unfiltered list for search reset
+	cursor      int
+	offset      int
+	width       int
+	height      int
+	searchInput textinput.Model
+	searching   bool
 }
 
 // NewResumeModel creates a ResumeModel.
@@ -192,4 +192,3 @@ func (rm *ResumeModel) visibleRows() int {
 	}
 	return h
 }
-

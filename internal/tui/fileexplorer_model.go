@@ -11,8 +11,8 @@ import (
 
 // FileExplorerModel shows a file tree browser for the project.
 type FileExplorerModel struct {
-	theme theme.Theme
-	tree  *components.FileTree
+	theme  theme.Theme
+	tree   *components.FileTree
 	width  int
 	height int
 }
@@ -21,8 +21,8 @@ type FileExplorerModel struct {
 func NewFileExplorerModel(t theme.Theme, w, h int) *FileExplorerModel {
 	root := &components.FileNode{Name: ".", Path: ".", IsDir: true}
 	return &FileExplorerModel{
-		theme: t,
-		tree:  components.NewFileTree(root, t, w-4, h-6),
+		theme:  t,
+		tree:   components.NewFileTree(root, t, w-4, h-6),
 		width:  w,
 		height: h,
 	}

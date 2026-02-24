@@ -11,9 +11,9 @@ import (
 
 // NotificationModel shows the notification history.
 type NotificationModel struct {
-	theme theme.Theme
-	list  components.NotificationList
-	width int
+	theme  theme.Theme
+	list   components.NotificationList
+	width  int
 	height int
 }
 

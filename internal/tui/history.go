@@ -17,10 +17,10 @@ type FrecentHistory struct {
 }
 
 type frecentEntry struct {
-	Text      string    `json:"text"`
-	Score     float64   `json:"score"`
-	LastUsed  time.Time `json:"last_used"`
-	UseCount  int       `json:"use_count"`
+	Text     string    `json:"text"`
+	Score    float64   `json:"score"`
+	LastUsed time.Time `json:"last_used"`
+	UseCount int       `json:"use_count"`
 }
 
 // NewFrecentHistory creates a FrecentHistory backed by the given file path.

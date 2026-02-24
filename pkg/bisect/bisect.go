@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/eshanized/M31A/internal/git"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/git"
 )
 
 // BisectResult holds the offending commit and its diff.

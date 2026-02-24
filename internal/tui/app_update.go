@@ -84,10 +84,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.handleStreamDoneMsg(msg)
 			m.checkAutoDream()
 		}
+		m.streamCancelFn = nil
 	case StreamErrorMsg:
 		if m.replModel != nil {
 			m.replModel.handleStreamErrorMsg(msg)
 		}
+		m.streamCancelFn = nil
 		// Auto-fallback on rate limit or provider unreachable
 		if m.config != nil && m.config.Provider.AutoFallback && m.registry != nil {
 			if stderrors.Is(msg.Err, m31errors.ErrRateLimited) || stderrors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
@@ -361,19 +363,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
 		}
 		// Re-register providers with updated API keys from settings
-		if m.registry != nil && m.config != nil {
-			if m.config.Provider.OpenRouter.APIKey != "" {
-				if err := RegisterProvider(m.registry, m.config, "openrouter", m.config.Provider.OpenRouter.APIKey, m.version); err != nil {
-					slog.Warn("failed to re-register OpenRouter after settings save", "error", err)
-				}
-			}
-			if m.config.Provider.Zen.APIKey != "" {
-				if err := RegisterProvider(m.registry, m.config, "zen", m.config.Provider.Zen.APIKey, m.version); err != nil {
-					slog.Warn("failed to re-register Zen after settings save", "error", err)
-				}
-			}
-		}
+		m.reRegisterProvidersFromConfig()
 		m.screen = ScreenREPL
+
+	// ── Config editor saved (stays on ScreenConfig) ────────────────────────
+	case ConfigSavedMsg:
+		// Re-register providers so new API keys take effect immediately
+		m.reRegisterProvidersFromConfig()
+		cmds = append(cmds, m.addToastCmd("Config saved to disk", "success", 3*time.Second))
 
 	// ── Theme changed ─────────────────────────────────────────────────────────
 	case ThemeChangedMsg:
@@ -402,6 +399,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModel = &msg.Model
 		m.activeProvider = msg.Provider
 		if m.replModel != nil {
+			// Immediately sync the model to replModel to avoid split-brain
+			// between AppState.activeModel and replModel.activeModel.
+			m.replModel.activeModel = &msg.Model
+			m.replModel.activeProvider = msg.Provider
 			providerCmd := m.replModel.SetProvider(m.shutdownCtx, m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
 			cmds = append(cmds, providerCmd)
 		}
@@ -468,6 +469,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProviderModelsFetchedMsg:
 		if m.replModel != nil {
 			m.replModel.handleProviderModelsFetched(msg)
+			// Sync enriched model info back to AppState so sendChatMessage
+			// uses the fully-populated ModelInfo (pricing, context, capabilities).
+			if m.replModel.activeModel != nil {
+				m.activeModel = m.replModel.activeModel
+			} else if msg.Err == nil && msg.Model != nil && m.activeModel != nil && m.activeModel.ID == msg.Model.ID {
+				// Fetch succeeded but model wasn't in catalog — keep the stub
+				// so the user can still chat; the model ID is valid.
+			}
 		}
 
 	// ── ThinkingBlockToggle ───────────────────────────────────────────────────
@@ -1260,8 +1269,13 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		if m.configModel == nil {
 			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
 		} else {
+			// Sync live config pointer so edits made in settings are visible
+			m.configModel.cfg = m.config
+			m.configModel.cfgPath = m.configPath
 			m.configModel.width = cw
 			m.configModel.height = ch
+			m.configModel.theme = m.themeManager.Current()
+			m.configModel.buildSections()
 		}
 		return nil
 	case ScreenHelp:
@@ -1605,6 +1619,9 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 	if m.dispatcher == nil {
 		return nil
 	}
+	if m.permRequest == nil {
+		return nil
+	}
 	reqID := m.permRequest.ID
 	allowed := msg.Response.Allowed
 	remember := msg.Response.Remember
@@ -1622,7 +1639,10 @@ func (m *AppState) handlePermissionTick() tea.Cmd {
 			m.permModal.Tick()
 		}
 		if m.permCountdown == 0 {
-			// Auto-deny on timeout
+			// Auto-deny on timeout — guard against permRequest already cleared
+			if m.permRequest == nil {
+				return nil
+			}
 			return m.handlePermissionResponse(PermissionResponseMsg{
 				Response: tools.PermissionResponse{
 					RequestID: m.permRequest.ID,
@@ -1722,6 +1742,8 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 	m.screen = ScreenPlan
 	if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan); err != nil {
 		slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", types.PhasePlan, "error", err)
+		m.addToast("Phase transition failed — session may not resume correctly", "error")
+		return nil
 	}
 	m.persistWorkflowState()
 	return m.RunPhaseCmd(types.PhasePlan)
@@ -1749,6 +1771,12 @@ func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
 	m.activeProvider = result.Event.To
 	m.addToast(fmt.Sprintf("Switched to %s (was %s: %s)", result.Event.To, oldProvider, result.Event.Reason), "warning")
 
+	// Sync the new provider to replModel so the next manual chat uses the
+	// fallback provider instead of the old (failed) one.
+	if m.replModel != nil {
+		m.replModel.activeProvider = result.Event.To
+	}
+
 	// Update workflow engine if active
 	if m.workflowEngine != nil {
 		p := m.registry.ActiveProvider()
@@ -1758,4 +1786,22 @@ func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
 	}
 
 	return nil
+}
+
+// reRegisterProvidersFromConfig re-registers OpenRouter and Zen with the current
+// API keys from m.config. Called after both SettingsSavedMsg and ConfigSavedMsg.
+func (m *AppState) reRegisterProvidersFromConfig() {
+	if m.registry == nil || m.config == nil {
+		return
+	}
+	if m.config.Provider.OpenRouter.APIKey != "" {
+		if err := RegisterProvider(m.registry, m.config, "openrouter", m.config.Provider.OpenRouter.APIKey, m.version); err != nil {
+			slog.Warn("failed to re-register OpenRouter after config save", "error", err)
+		}
+	}
+	if m.config.Provider.Zen.APIKey != "" {
+		if err := RegisterProvider(m.registry, m.config, "zen", m.config.Provider.Zen.APIKey, m.version); err != nil {
+			slog.Warn("failed to re-register Zen after config save", "error", err)
+		}
+	}
 }

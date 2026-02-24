@@ -58,38 +58,38 @@ func ansiPalette() Theme {
 func Dark() Theme {
 	t := Theme{
 		Mode:              ModeDark,
-		Background:        lipgloss.Color("#0d0f1a"),  // blue-tinted dark (~3% saturation)
-		Surface:           lipgloss.Color("#1a1c2a"),  // slightly lighter blue
-		SurfaceElevated:   lipgloss.Color("#252736"),  // lifted blue-purple
-		Border:            lipgloss.Color("#3C4043"),  // was #2E2E2E
-		Brand:             lipgloss.Color("#D77757"),  // was #7C3AED
-		TextPrimary:       lipgloss.Color("#E8EAED"),  // was #E2E8F0
-		TextSecondary:     lipgloss.Color("#9AA0A6"),  // was #94A3B8
-		Thinking:          lipgloss.Color("#8AB4F8"),  // was #8B5CF6
-		Success:           lipgloss.Color("#81C995"),  // was #10B981
-		Error:             lipgloss.Color("#F28B82"),  // was #EF4444
-		Warning:           lipgloss.Color("#FDD663"),  // was #F59E0B
-		CodeBG:            lipgloss.Color("#2D2D2D"),  // keep
+		Background:        lipgloss.Color("#0d0f1a"), // blue-tinted dark (~3% saturation)
+		Surface:           lipgloss.Color("#1a1c2a"), // slightly lighter blue
+		SurfaceElevated:   lipgloss.Color("#252736"), // lifted blue-purple
+		Border:            lipgloss.Color("#3C4043"), // was #2E2E2E
+		Brand:             lipgloss.Color("#D77757"), // was #7C3AED
+		TextPrimary:       lipgloss.Color("#E8EAED"), // was #E2E8F0
+		TextSecondary:     lipgloss.Color("#9AA0A6"), // was #94A3B8
+		Thinking:          lipgloss.Color("#8AB4F8"), // was #8B5CF6
+		Success:           lipgloss.Color("#81C995"), // was #10B981
+		Error:             lipgloss.Color("#F28B82"), // was #EF4444
+		Warning:           lipgloss.Color("#FDD663"), // was #F59E0B
+		CodeBG:            lipgloss.Color("#2D2D2D"), // keep
 		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#1A1A1A"),  // was #1E1E2E
-		BackgroundElement: lipgloss.Color("#252525"),  // was #2A2A3E
-		Text:              lipgloss.Color("#E8EAED"),  // was #E2E8F0
-		TextMuted:         lipgloss.Color("#9AA0A6"),  // was #475569
-		BorderActive:      lipgloss.Color("#D77757"),  // was #484848 (brand color)
-		BorderSubtle:      lipgloss.Color("#3C4043"),  // was #3C3C3C
-		Primary:           lipgloss.Color("#D77757"),  // was #7C3AED
-		Secondary:         lipgloss.Color("#8AB4F8"),  // was #06B6D4
-		Accent:            lipgloss.Color("#8AB4F8"),  // was #06B6D4
-		Info:              lipgloss.Color("#8AB4F8"),  // was #06B6D4
-		ThinkingOpacity:   0.6,  // keep
-		DiffAdded:         lipgloss.Color("#81C995"),  // keep
-		DiffRemoved:       lipgloss.Color("#F28B82"),  // keep
-		DiffAddedBg:       lipgloss.Color("#81C99520"),  // keep
-		DiffRemovedBg:     lipgloss.Color("#F28B8220"),  // keep
-		DiffContextBg:     lipgloss.Color("#2A2A3E"),  // keep
-		BadgeForeground:   lipgloss.Color("#000000"),  // keep
-		BadgeTextLight:    lipgloss.Color("#FFFFFF"),  // keep
-		BadgeTextDark:     lipgloss.Color("#000000"),  // keep
+		BackgroundPanel:   lipgloss.Color("#1A1A1A"),   // was #1E1E2E
+		BackgroundElement: lipgloss.Color("#252525"),   // was #2A2A3E
+		Text:              lipgloss.Color("#E8EAED"),   // was #E2E8F0
+		TextMuted:         lipgloss.Color("#9AA0A6"),   // was #475569
+		BorderActive:      lipgloss.Color("#D77757"),   // was #484848 (brand color)
+		BorderSubtle:      lipgloss.Color("#3C4043"),   // was #3C3C3C
+		Primary:           lipgloss.Color("#D77757"),   // was #7C3AED
+		Secondary:         lipgloss.Color("#8AB4F8"),   // was #06B6D4
+		Accent:            lipgloss.Color("#8AB4F8"),   // was #06B6D4
+		Info:              lipgloss.Color("#8AB4F8"),   // was #06B6D4
+		ThinkingOpacity:   0.6,                         // keep
+		DiffAdded:         lipgloss.Color("#81C995"),   // keep
+		DiffRemoved:       lipgloss.Color("#F28B82"),   // keep
+		DiffAddedBg:       lipgloss.Color("#81C99520"), // keep
+		DiffRemovedBg:     lipgloss.Color("#F28B8220"), // keep
+		DiffContextBg:     lipgloss.Color("#2A2A3E"),   // keep
+		BadgeForeground:   lipgloss.Color("#000000"),   // keep
+		BadgeTextLight:    lipgloss.Color("#FFFFFF"),   // keep
+		BadgeTextDark:     lipgloss.Color("#000000"),   // keep
 
 		DividerChar:  "─",
 		HeaderHeight: 1,
@@ -107,38 +107,38 @@ func Dark() Theme {
 func Light() Theme {
 	t := Theme{
 		Mode:              ModeLight,
-		Background:        lipgloss.Color("#fafaf8"),  // warm white
-		Surface:           lipgloss.Color("#f5f5f0"),  // warm surface
-		SurfaceElevated:   lipgloss.Color("#ffffff"),  // pure white for elevation
-		Border:            lipgloss.Color("#DADCE0"),  // was #E0E0E0
-		Brand:             lipgloss.Color("#D77757"),  // was #7C3AED (same as dark — brand is brand)
-		TextPrimary:       lipgloss.Color("#202124"),  // was #1E293B
-		TextSecondary:     lipgloss.Color("#5F6368"),  // was #64748B
-		Thinking:          lipgloss.Color("#1A73E8"),  // was #7C3AED
-		Success:           lipgloss.Color("#137333"),  // was #059669
-		Error:             lipgloss.Color("#C5221F"),  // was #DC2626
-		Warning:           lipgloss.Color("#EA8600"),  // was #D97706
-		CodeBG:            lipgloss.Color("#F1F3F4"),  // keep
+		Background:        lipgloss.Color("#fafaf8"), // warm white
+		Surface:           lipgloss.Color("#f5f5f0"), // warm surface
+		SurfaceElevated:   lipgloss.Color("#ffffff"), // pure white for elevation
+		Border:            lipgloss.Color("#DADCE0"), // was #E0E0E0
+		Brand:             lipgloss.Color("#D77757"), // was #7C3AED (same as dark — brand is brand)
+		TextPrimary:       lipgloss.Color("#202124"), // was #1E293B
+		TextSecondary:     lipgloss.Color("#5F6368"), // was #64748B
+		Thinking:          lipgloss.Color("#1A73E8"), // was #7C3AED
+		Success:           lipgloss.Color("#137333"), // was #059669
+		Error:             lipgloss.Color("#C5221F"), // was #DC2626
+		Warning:           lipgloss.Color("#EA8600"), // was #D97706
+		CodeBG:            lipgloss.Color("#F1F3F4"), // keep
 		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#F8F9FA"),  // keep
-		BackgroundElement: lipgloss.Color("#FFFFFF"),  // keep
-		Text:              lipgloss.Color("#202124"),  // was #1E293B
-		TextMuted:         lipgloss.Color("#9AA0A6"),  // was #94A3B8
-		BorderActive:      lipgloss.Color("#D77757"),  // was #C0C0C0
-		BorderSubtle:      lipgloss.Color("#E8E8E8"),  // keep
-		Primary:           lipgloss.Color("#D77757"),  // was #7C3AED
-		Secondary:         lipgloss.Color("#1A73E8"),  // was #0891B2
-		Accent:            lipgloss.Color("#1A73E8"),  // was #0891B2
-		Info:              lipgloss.Color("#1A73E8"),  // was #0891B2
-		ThinkingOpacity:   0.6,  // keep
-		DiffAdded:         lipgloss.Color("#137333"),  // was #059669
-		DiffRemoved:       lipgloss.Color("#C5221F"),  // was #DC2626
-		DiffAddedBg:       lipgloss.Color("#13733320"),  // was #05966920
-		DiffRemovedBg:     lipgloss.Color("#C5221F20"),  // was #DC262620
-		DiffContextBg:     lipgloss.Color("#F8F9FA"),  // keep
-		BadgeForeground:   lipgloss.Color("#000000"),  // keep
-		BadgeTextLight:    lipgloss.Color("#FFFFFF"),  // keep
-		BadgeTextDark:     lipgloss.Color("#000000"),  // keep
+		BackgroundPanel:   lipgloss.Color("#F8F9FA"),   // keep
+		BackgroundElement: lipgloss.Color("#FFFFFF"),   // keep
+		Text:              lipgloss.Color("#202124"),   // was #1E293B
+		TextMuted:         lipgloss.Color("#9AA0A6"),   // was #94A3B8
+		BorderActive:      lipgloss.Color("#D77757"),   // was #C0C0C0
+		BorderSubtle:      lipgloss.Color("#E8E8E8"),   // keep
+		Primary:           lipgloss.Color("#D77757"),   // was #7C3AED
+		Secondary:         lipgloss.Color("#1A73E8"),   // was #0891B2
+		Accent:            lipgloss.Color("#1A73E8"),   // was #0891B2
+		Info:              lipgloss.Color("#1A73E8"),   // was #0891B2
+		ThinkingOpacity:   0.6,                         // keep
+		DiffAdded:         lipgloss.Color("#137333"),   // was #059669
+		DiffRemoved:       lipgloss.Color("#C5221F"),   // was #DC2626
+		DiffAddedBg:       lipgloss.Color("#13733320"), // was #05966920
+		DiffRemovedBg:     lipgloss.Color("#C5221F20"), // was #DC262620
+		DiffContextBg:     lipgloss.Color("#F8F9FA"),   // keep
+		BadgeForeground:   lipgloss.Color("#000000"),   // keep
+		BadgeTextLight:    lipgloss.Color("#FFFFFF"),   // keep
+		BadgeTextDark:     lipgloss.Color("#000000"),   // keep
 
 		DividerChar:  "─",
 		HeaderHeight: 1,
@@ -233,4 +233,3 @@ func (t *Theme) WithAccent(hex string) Theme {
 	applyThemeStyles(&newTheme)
 	return newTheme
 }
-

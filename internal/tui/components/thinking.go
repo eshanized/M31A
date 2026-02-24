@@ -11,13 +11,13 @@ import (
 )
 
 type ThinkingBlock struct {
-	id              int
-	segment         types.MessageSegment
-	theme           theme.Theme
-	expanded        bool
-	focused         bool
-	startedAt       time.Time
-	scrollOffset    int
+	id           int
+	segment      types.MessageSegment
+	theme        theme.Theme
+	expanded     bool
+	focused      bool
+	startedAt    time.Time
+	scrollOffset int
 	// Cached duration to avoid recalculating every render
 	lastDurationStr string
 	lastDurationAt  time.Time

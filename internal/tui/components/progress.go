@@ -237,14 +237,14 @@ func (s SegmentedBar) Render() string {
 // When progress advances, it smoothly ramps the displayed fill over 500ms.
 // It also provides flash effects for completion (green) and failure (red).
 type AnimatedProgress struct {
-	Current   int               // actual current value
-	Total     int               // total target value
-	Displayed int               // animated display value (ramps from old→new)
-	Animating bool              // true while animation is in progress
-	Color     lipgloss.Color    // current bar color
-	StartAt   time.Time         // timestamp when animation started
-	fromVal   int               // displayed value at animation start
-	toVal     int               // target value for current animation
+	Current   int            // actual current value
+	Total     int            // total target value
+	Displayed int            // animated display value (ramps from old→new)
+	Animating bool           // true while animation is in progress
+	Color     lipgloss.Color // current bar color
+	StartAt   time.Time      // timestamp when animation started
+	fromVal   int            // displayed value at animation start
+	toVal     int            // target value for current animation
 }
 
 // AnimatedProgressFlash tracks a transient color flash (e.g., green on completion).
@@ -257,11 +257,11 @@ type flashState struct {
 
 // AnimatedProgressBar wraps AnimatedProgress with a render method.
 type AnimatedProgressBar struct {
-	Animated  AnimatedProgress
-	Flash     flashState
-	Width     int
-	ShowPct   bool
-	Theme     theme.Theme
+	Animated AnimatedProgress
+	Flash    flashState
+	Width    int
+	ShowPct  bool
+	Theme    theme.Theme
 }
 
 // UpdateProgress starts an animation from oldCurrent to newCurrent.

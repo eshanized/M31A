@@ -26,15 +26,15 @@ type Column struct {
 
 // DataTable is a sortable, scrollable table.
 type DataTable struct {
-	Columns    []Column
-	Rows       [][]string
-	SortCol    int
-	SortAsc    bool
-	Cursor     int
-	Offset     int
-	VisibleH   int
-	Theme      theme.Theme
-	Width      int
+	Columns  []Column
+	Rows     [][]string
+	SortCol  int
+	SortAsc  bool
+	Cursor   int
+	Offset   int
+	VisibleH int
+	Theme    theme.Theme
+	Width    int
 }
 
 // NewDataTable creates a DataTable.

@@ -107,7 +107,7 @@ type FirstRunOpts struct {
 
 // firstRunModelsMsg carries fetched models for the wizard.
 type firstRunModelsMsg struct {
-	Models    []suggestedModel // legacy field, kept for compat
+	Models    []suggestedModel  // legacy field, kept for compat
 	AllModels []types.ModelInfo // full model list for the categorized browser
 	Err       error
 }
@@ -382,7 +382,6 @@ func categorizeModels(models []types.ModelInfo) []modelCategory {
 	return cats
 }
 
-
 // validateKeyCmd returns a tea.Cmd that validates an API key format.
 func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
@@ -407,7 +406,6 @@ func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 		return firstRunKeyValidationMsg{OK: true}
 	}
 }
-
 
 // handleKey routes key events per step.
 func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

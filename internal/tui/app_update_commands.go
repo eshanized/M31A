@@ -192,4 +192,3 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 
 	return cmd
 }
-

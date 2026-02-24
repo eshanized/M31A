@@ -84,6 +84,7 @@ func (m *ReplModel) handleProviderModelsFetched(msg ProviderModelsFetchedMsg) {
 	}
 	for _, model := range msg.Models {
 		if model.ID == msg.Model.ID {
+			// Model exists in the catalog — try to enrich from provider cache.
 			if m.registry != nil {
 				p := m.registry.ActiveProvider()
 				if p != nil {
@@ -93,6 +94,11 @@ func (m *ReplModel) handleProviderModelsFetched(msg ProviderModelsFetchedMsg) {
 					}
 				}
 			}
+			// Cache miss — the model is in the catalog but the provider's local
+			// cache isn't warm yet. Use the model info from the fetched list
+			// directly so pricing/context are populated.
+			enriched := model
+			m.activeModel = &enriched
 			return
 		}
 	}

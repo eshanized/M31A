@@ -152,12 +152,14 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("%w: cannot read original for backup: %v", m31errors.ErrToolExecution, err)
 		}
+
+		// Prune old backups for this file BEFORE writing the new one to prevent
+		// the new backup from being accidentally pruned on fast disks.
+		t.pruneBackups(sanitized)
+
 		if err := os.WriteFile(backupPath, existingContent, FilePermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("%w: cannot write backup: %v", m31errors.ErrToolExecution, err)
 		}
-
-		// Prune old backups for this file to prevent unbounded accumulation
-		t.pruneBackups(sanitized)
 	}
 
 	// Create parent directories
@@ -215,6 +217,9 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 // count exceeds MaxBackupsPerFile. Backups are sorted lexicographically
 // (timestamp in the name ensures chronological order). Logs but does not
 // fail on removal errors.
+//
+// Called BEFORE writing the new backup so that the just-written backup is
+// never accidentally pruned by lexicographic ordering on fast disks.
 func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
 	entries, err := os.ReadDir(t.backupDir)
 	if err != nil {
@@ -230,15 +235,16 @@ func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
 		}
 	}
 
-	if len(matches) <= MaxBackupsPerFile {
+	// Leave room for one new backup: prune when at or above the limit.
+	if len(matches) < MaxBackupsPerFile {
 		return
 	}
 
 	// Sort lexicographically — timestamp in the name ensures chronological order
 	sort.Strings(matches)
 
-	// Delete oldest entries (lowest sort order) to keep exactly MaxBackupsPerFile
-	toDelete := matches[:len(matches)-MaxBackupsPerFile]
+	// Delete oldest entries (lowest sort order) to keep room for the new backup
+	toDelete := matches[:len(matches)-MaxBackupsPerFile+1]
 	for _, name := range toDelete {
 		path := filepath.Join(t.backupDir, name)
 		if err := os.Remove(path); err != nil {

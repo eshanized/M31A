@@ -14,16 +14,16 @@ import (
 
 // pickerPanel is one of the two model-selection panels (Planning or Coding).
 type pickerPanel struct {
-	label        string // e.g. "Planning Model"
-	description  string // one-liner about which phases this covers
-	searchInput  textinput.Model
-	models       []types.ModelInfo
-	filtered     []types.ModelInfo
-	cursor       int
-	offset       int
-	selected     *types.ModelInfo // nil = use default
-	loading      bool
-	spinner      components.Spinner
+	label       string // e.g. "Planning Model"
+	description string // one-liner about which phases this covers
+	searchInput textinput.Model
+	models      []types.ModelInfo
+	filtered    []types.ModelInfo
+	cursor      int
+	offset      int
+	selected    *types.ModelInfo // nil = use default
+	loading     bool
+	spinner     components.Spinner
 }
 
 func newPickerPanel(label, description string) pickerPanel {
@@ -72,8 +72,8 @@ type PhaseModelPickerModel struct {
 	registry *provider.Registry
 	theme    theme.Theme
 
-	panels    [2]pickerPanel // 0 = planning, 1 = coding
-	focus     int            // 0 or 1 — which panel has keyboard focus
+	panels [2]pickerPanel // 0 = planning, 1 = coding
+	focus  int            // 0 or 1 — which panel has keyboard focus
 
 	width  int
 	height int

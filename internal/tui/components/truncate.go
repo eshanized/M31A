@@ -13,5 +13,3 @@ func truncateEnd(s string, maxLen int) string {
 	}
 	return string([]rune(s)[:maxLen-1]) + "…"
 }
-
-

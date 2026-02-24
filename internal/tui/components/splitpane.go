@@ -7,13 +7,13 @@ import (
 
 // SplitPane renders a side-by-side layout for wide terminals.
 type SplitPane struct {
-	Left     string
-	Right    string
-	Ratio    float64 // 0.0 to 1.0, portion for left pane
-	Theme    theme.Theme
-	Width    int
-	Height   int
-	Divider  bool
+	Left    string
+	Right   string
+	Ratio   float64 // 0.0 to 1.0, portion for left pane
+	Theme   theme.Theme
+	Width   int
+	Height  int
+	Divider bool
 }
 
 // View renders the split pane.

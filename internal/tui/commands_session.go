@@ -248,5 +248,3 @@ func handleExport(args []string, ctx CommandContext) CommandResult {
 	}
 	return CommandResult{Success: true, Message: fmt.Sprintf("Session exported to **%s**.", path)}
 }
-
-

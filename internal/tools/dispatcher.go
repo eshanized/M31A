@@ -16,42 +16,45 @@ import (
 )
 
 type Dispatcher struct {
-	mu               sync.RWMutex
-	tools            map[string]types.Tool
-	permissions      map[string]bool
-	requestCh        chan PermissionRequest
-	responseCh       chan PermissionResponse
-	pendingResponses sync.Map // map[int64]chan PermissionResponse — per-request routing
-	todoWrite        *TodoWrite
-	questionReqCh    chan QuestionRequest
-	questionRespCh   chan QuestionResponse
-	pendingQuestions sync.Map // map[int64]chan QuestionResponse — per-request routing
-	rules            []config.PermissionRule
-	originalRules    []config.PermissionRule
-	agents           map[string]config.PermissionsAgentConfig
-	activeAgent      string
+	mu                sync.RWMutex
+	tools             map[string]types.Tool
+	permissions       map[string]bool
+	requestCh         chan PermissionRequest
+	responseCh        chan PermissionResponse
+	pendingResponses  sync.Map // map[int64]chan PermissionResponse — per-request routing
+	todoWrite         *TodoWrite
+	questionReqCh     chan QuestionRequest
+	questionRespCh    chan QuestionResponse
+	pendingQuestions  sync.Map // map[int64]chan QuestionResponse — per-request routing
+	rules             []config.PermissionRule
+	originalRules     []config.PermissionRule
+	agents            map[string]config.PermissionsAgentConfig
+	activeAgent       string
 	permissionTimeout int
 	// Rate limiter: token bucket for tool execution (WP-S04).
 	rateTokens chan struct{}
-	rateTicker  *time.Ticker
-	rateDone    chan struct{}
+	rateTicker *time.Ticker
+	rateDone   chan struct{}
 }
 
+// NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
+// The caller MUST call Stop() when the Dispatcher is no longer needed to prevent
+// goroutine leaks (e.g., during session restart or app shutdown).
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
-		tools:            make(map[string]types.Tool),
-		permissions:      make(map[string]bool),
-		requestCh:        make(chan PermissionRequest, PermissionChannelBuffer),
-		responseCh:       make(chan PermissionResponse, PermissionChannelBuffer),
-		questionReqCh:    make(chan QuestionRequest, QuestionChannelBuffer),
-		questionRespCh:   make(chan QuestionResponse, QuestionChannelBuffer),
-		rules:            []config.PermissionRule{},
-		originalRules:    []config.PermissionRule{},
-		agents:           make(map[string]config.PermissionsAgentConfig),
-		activeAgent:      DefaultAgentName,
+		tools:             make(map[string]types.Tool),
+		permissions:       make(map[string]bool),
+		requestCh:         make(chan PermissionRequest, PermissionChannelBuffer),
+		responseCh:        make(chan PermissionResponse, PermissionChannelBuffer),
+		questionReqCh:     make(chan QuestionRequest, QuestionChannelBuffer),
+		questionRespCh:    make(chan QuestionResponse, QuestionChannelBuffer),
+		rules:             []config.PermissionRule{},
+		originalRules:     []config.PermissionRule{},
+		agents:            make(map[string]config.PermissionsAgentConfig),
+		activeAgent:       DefaultAgentName,
 		permissionTimeout: types.DefaultPermissionTimeout,
-		rateTokens:       make(chan struct{}, ToolRateLimitBurst),
-		rateDone:         make(chan struct{}),
+		rateTokens:        make(chan struct{}, ToolRateLimitBurst),
+		rateDone:          make(chan struct{}),
 	}
 	// Initialize token bucket for rate limiting.
 	for i := 0; i < ToolRateLimitBurst; i++ {

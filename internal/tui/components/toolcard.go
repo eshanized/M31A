@@ -26,13 +26,13 @@ func SanitizeOutput(s string) string {
 
 // ToolIcons maps tool names to icon characters for inline rendering.
 var ToolIcons = map[string]string{
-	"Bash":      "$",
-	"Edit":      "\u2190",
-	"FileRead":  "\u2192",
-	"FileWrite": "\u2190",
-	"Glob":      "\u2731",
-	"Grep":      "\u2731",
-	"TodoWrite": "\u2699",
+	"Bash":            "$",
+	"Edit":            "\u2190",
+	"FileRead":        "\u2192",
+	"FileWrite":       "\u2190",
+	"Glob":            "\u2731",
+	"Grep":            "\u2731",
+	"TodoWrite":       "\u2699",
 	"AskUserQuestion": "?",
 }
 

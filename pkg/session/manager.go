@@ -22,9 +22,9 @@ import (
 
 // Manager provides CRUD operations for sessions stored on disk.
 type Manager struct {
-	baseDir         string // path to ~/.m31a/sessions
-	sessionIDBytes  int    // number of random bytes for session IDs (default 4 = 8 hex chars)
-	maxRecentModels int    // max recent models to track (default 10)
+	baseDir         string        // path to ~/.m31a/sessions
+	sessionIDBytes  int           // number of random bytes for session IDs (default 4 = 8 hex chars)
+	maxRecentModels int           // max recent models to track (default 10)
 	sessionCacheTTL time.Duration // TTL for session list cache
 
 	// Session list cache (configurable TTL to avoid repeated filesystem walks)

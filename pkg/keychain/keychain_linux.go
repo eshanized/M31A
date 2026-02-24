@@ -63,17 +63,34 @@ func (k *linuxKeychain) dbusGet(service string) (string, error) {
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service
 
-	// SearchItems returns the object paths of matching items
-	var items []dbus.ObjectPath
+	// Open a session for the GetSecret call
+	var sessionPath dbus.ObjectPath
+	sessionCall := obj.Call("org.freedesktop.Secret.Service.OpenSession", 0, "plain", dbus.MakeVariant(""))
+	if sessionCall.Err == nil {
+		// Store ignores the first output (algorithm output); we only need the session path.
+		var ignore dbus.Variant
+		_ = sessionCall.Store(&ignore, &sessionPath)
+	}
+	defer func() {
+		if sessionPath != "" {
+			conn.Object(secretServiceName, sessionPath).Call("org.freedesktop.Secret.Session.Close", 0)
+		}
+	}()
+
+	// SearchItems returns two arrays: unlocked items, locked items
+	var unlocked, locked []dbus.ObjectPath
 	call := obj.Call("org.freedesktop.Secret.Service.SearchItems", 0, map[string]string{
 		"service": servicePath,
 	})
 	if call.Err != nil {
 		return "", call.Err
 	}
-	if err := call.Store(&items); err != nil {
+	if err := call.Store(&unlocked, &locked); err != nil {
 		return "", err
 	}
+
+	// Prefer unlocked items; fall back to locked
+	items := append(unlocked, locked...)
 	if len(items) == 0 {
 		return "", ErrKeyNotFound
 	}
@@ -82,10 +99,11 @@ func (k *linuxKeychain) dbusGet(service string) (string, error) {
 	itemObj := conn.Object(secretServiceName, items[0])
 	var secret struct {
 		Session     dbus.ObjectPath
+		Parameters  []byte
 		Value       []byte
 		ContentType string
 	}
-	call = itemObj.Call("org.freedesktop.Secret.Item.GetSecret", 0, dbus.MakeVariant(""))
+	call = itemObj.Call("org.freedesktop.Secret.Item.GetSecret", 0, sessionPath)
 	if call.Err != nil {
 		return "", call.Err
 	}
@@ -142,33 +160,40 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 	servicePath := servicePrefix + service
 	label := "M31A API Key: " + service
 
+	// Open a plain-text session — this is required before creating/updating items.
+	var sessionPath dbus.ObjectPath
+	sessionCall := obj.Call("org.freedesktop.Secret.Service.OpenSession", 0, "plain", dbus.MakeVariant(""))
+	if sessionCall.Err != nil {
+		return sessionCall.Err
+	}
+	// Store ignores the first output (algorithm output); we only need the session path.
+	var ignore dbus.Variant
+	if err := sessionCall.Store(&ignore, &sessionPath); err != nil {
+		return fmt.Errorf("open session: %w", err)
+	}
+	defer conn.Object(secretServiceName, sessionPath).Call("org.freedesktop.Secret.Session.Close", 0)
+
 	// Try to find existing item first
-	var items []dbus.ObjectPath
+	var unlocked, locked []dbus.ObjectPath
 	call := obj.Call("org.freedesktop.Secret.Service.SearchItems", 0, map[string]string{
 		"service": servicePath,
 	})
 	if call.Err == nil {
-		call.Store(&items)
+		call.Store(&unlocked, &locked)
 	}
+	items := append(unlocked, locked...)
 
 	if len(items) > 0 {
-		// Update existing item
+		// Update existing item using the opened session
 		itemObj := conn.Object(secretServiceName, items[0])
-		newSecret := fmtSecret(conn, value)
+		newSecret := fmtSecret(sessionPath, value)
 		call = itemObj.Call("org.freedesktop.Secret.Item.SetSecret", 0, newSecret)
 		return call.Err
 	}
 
 	// Create a new item in the default collection
 	collection := dbus.ObjectPath("/org/freedesktop/secrets/aliases/default")
-	var sessionPath dbus.ObjectPath
-	call = obj.Call("org.freedesktop.Secret.Service.OpenSession", 0, "plain", dbus.MakeVariant(""))
-	if call.Err != nil {
-		return call.Err
-	}
-	call.Store(&sessionPath, nil)
-
-	secret := fmtSecret(conn, value)
+	secret := fmtSecret(sessionPath, value)
 	props := map[string]any{
 		"org.freedesktop.Secret.Item.Label": label,
 		"org.freedesktop.Secret.Item.Attributes": map[string]string{
@@ -260,11 +285,12 @@ func (k *linuxKeychain) passDelete(service string) error {
 	return nil
 }
 
-// Helper: construct a Secret struct for D-Bus
-func fmtSecret(conn *dbus.Conn, value string) map[string]any {
-	var sessionPath dbus.ObjectPath // empty = first session
+// Helper: construct a Secret struct for D-Bus using the provided session path.
+// sessionPath must be the path returned by OpenSession — never pass an empty path.
+func fmtSecret(sessionPath dbus.ObjectPath, value string) map[string]any {
 	return map[string]any{
 		"session":      sessionPath,
+		"parameters":   []byte{},
 		"value":        []byte(value),
 		"content_type": "text/plain",
 	}

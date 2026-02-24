@@ -21,25 +21,25 @@ type CardVariant int
 
 const (
 	CardPlain    CardVariant = iota // current: border only
-	CardElevated                   // border + background + shadow
-	CardHeader                     // filled header bar + border body
-	CardMinimal                    // top gradient line only, no side borders
-	CardInline                     // no borders, just background tint
+	CardElevated                    // border + background + shadow
+	CardHeader                      // filled header bar + border body
+	CardMinimal                     // top gradient line only, no side borders
+	CardInline                      // no borders, just background tint
 )
 
 // Card renders a reusable bordered panel with optional title.
 // Width is required; if 0, the card may render at 0 width.
 type Card struct {
-	Title     string
-	Content   string
-	Width     int
-	Border    lipgloss.Border // theme.ThinBorder, theme.NormalBorder, theme.DoubleBorder
-	Style     CardStyle
-	Variant   CardVariant
-	Icon      string // optional prefix icon
-	Footer    string // optional footer
-	Focused   bool   // hover/focus state
-	Theme     theme.Theme
+	Title   string
+	Content string
+	Width   int
+	Border  lipgloss.Border // theme.ThinBorder, theme.NormalBorder, theme.DoubleBorder
+	Style   CardStyle
+	Variant CardVariant
+	Icon    string // optional prefix icon
+	Footer  string // optional footer
+	Focused bool   // hover/focus state
+	Theme   theme.Theme
 }
 
 // Render returns the card as a styled string.

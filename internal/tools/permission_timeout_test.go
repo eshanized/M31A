@@ -14,8 +14,8 @@ type mockToolTimeout struct {
 	riskLevel types.RiskLevel
 }
 
-func (m *mockToolTimeout) Name() string             { return m.name }
-func (m *mockToolTimeout) Description() string      { return "mock tool for timeout test" }
+func (m *mockToolTimeout) Name() string               { return m.name }
+func (m *mockToolTimeout) Description() string        { return "mock tool for timeout test" }
 func (m *mockToolTimeout) RiskLevel() types.RiskLevel { return m.riskLevel }
 func (m *mockToolTimeout) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	return types.ToolResult{Output: "success"}, nil

@@ -124,7 +124,7 @@ func GetFileTypeIcon(ext string) string {
 		return FileYAML
 	default:
 		return FileDefault
-	 }
+	}
 }
 
 // GetPhaseIcon returns the icon for a workflow phase

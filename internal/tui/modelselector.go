@@ -32,13 +32,13 @@ type ModelSelector struct {
 	modelsByProv map[string][]types.ModelInfo
 
 	// State.
-	searchInput  textinput.Model
+	searchInput    textinput.Model
 	activeProvider string
-	filtered     []types.ModelInfo // filtered results
-	cursor       int
-	offset       int  // scroll offset
-	loading      bool
-	errMsg       string
+	filtered       []types.ModelInfo // filtered results
+	cursor         int
+	offset         int // scroll offset
+	loading        bool
+	errMsg         string
 
 	width  int
 	height int

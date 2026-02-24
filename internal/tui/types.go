@@ -15,32 +15,32 @@ import (
 type Screen int
 
 const (
-	ScreenFirstRun      Screen = iota // 0 — API key setup wizard
-	ScreenREPL                        // 1 — main chat REPL
-	ScreenModelSelector               // 2 — model/provider picker
-	ScreenSettings                    // 3 — settings editor (6 tabs)
-	ScreenResume                      // 4 — session browser
-	ScreenPermission                  // 5 — tool permission modal
-	ScreenPlan                        // 6 — plan review
-	ScreenExecute                     // 7 — task execution progress
-	ScreenVerify                      // 8 — verification results
-	ScreenShip                        // 9 — ship summary
-	ScreenDiff          Screen = 10   // diff viewer
-	ScreenLedger        Screen = 11   // learning ledger browser
-	ScreenRollback      Screen = 12   // commit time machine
-	ScreenGoalInput     Screen = 13   // full-screen goal entry
-	ScreenDiscuss       Screen = 14   // discuss Q&A
-	ScreenMetrics       Screen = 15   // session analytics
-	ScreenConfig        Screen = 16   // full config viewer
-	ScreenHelp          Screen = 17   // keybinding help overlay
-	ScreenBisect        Screen = 18   // git bisect interactive
-	ScreenThemePicker   Screen = 19   // theme browser/preview
-	ScreenNotifications Screen = 20   // notification history
-	ScreenDashboard     Screen = 21   // workflow pipeline overview
-	ScreenSessionDetail Screen = 22   // session detail preview
-	ScreenFileExplorer  Screen = 23   // file tree browser
-	ScreenToolDetail    Screen = 24   // expandable tool output
-	ScreenPhaseModelPicker Screen = 25 // dual-model picker (planning vs coding)
+	ScreenFirstRun         Screen = iota // 0 — API key setup wizard
+	ScreenREPL                           // 1 — main chat REPL
+	ScreenModelSelector                  // 2 — model/provider picker
+	ScreenSettings                       // 3 — settings editor (6 tabs)
+	ScreenResume                         // 4 — session browser
+	ScreenPermission                     // 5 — tool permission modal
+	ScreenPlan                           // 6 — plan review
+	ScreenExecute                        // 7 — task execution progress
+	ScreenVerify                         // 8 — verification results
+	ScreenShip                           // 9 — ship summary
+	ScreenDiff             Screen = 10   // diff viewer
+	ScreenLedger           Screen = 11   // learning ledger browser
+	ScreenRollback         Screen = 12   // commit time machine
+	ScreenGoalInput        Screen = 13   // full-screen goal entry
+	ScreenDiscuss          Screen = 14   // discuss Q&A
+	ScreenMetrics          Screen = 15   // session analytics
+	ScreenConfig           Screen = 16   // full config viewer
+	ScreenHelp             Screen = 17   // keybinding help overlay
+	ScreenBisect           Screen = 18   // git bisect interactive
+	ScreenThemePicker      Screen = 19   // theme browser/preview
+	ScreenNotifications    Screen = 20   // notification history
+	ScreenDashboard        Screen = 21   // workflow pipeline overview
+	ScreenSessionDetail    Screen = 22   // session detail preview
+	ScreenFileExplorer     Screen = 23   // file tree browser
+	ScreenToolDetail       Screen = 24   // expandable tool output
+	ScreenPhaseModelPicker Screen = 25   // dual-model picker (planning vs coding)
 )
 
 // Label returns a human-readable name for the screen.
@@ -212,20 +212,20 @@ type DiscussCompleteMsg struct{}
 
 // PhaseResultMsg carries the result of a completed workflow phase.
 type PhaseResultMsg struct {
-	Phase               types.WorkflowPhase
-	Tasks               []types.Task
-	Messages            []types.Message
-	Success             bool
-	Error               string
-	NeedsAnswers        bool
-	RequiresManualInput bool
-	DurationMs          int64
-	Usage               *types.Usage
-	Cost                float64
-	ToolCalls           int
-	Commits             []git.CommitInfo
-	DiffStats           workflow.DiffStats
-	Demonstration       string
+	Phase                   types.WorkflowPhase
+	Tasks                   []types.Task
+	Messages                []types.Message
+	Success                 bool
+	Error                   string
+	NeedsAnswers            bool
+	RequiresManualInput     bool
+	DurationMs              int64
+	Usage                   *types.Usage
+	Cost                    float64
+	ToolCalls               int
+	Commits                 []git.CommitInfo
+	DiffStats               workflow.DiffStats
+	Demonstration           string
 	ManualVerificationSteps []string
 }
 

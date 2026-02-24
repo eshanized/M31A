@@ -112,7 +112,6 @@ func (r *Registry) ListAll() []string {
 	return names
 }
 
-
 func (r *Registry) ActiveProvider() LLMProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

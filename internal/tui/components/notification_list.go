@@ -19,13 +19,13 @@ type Notification struct {
 
 // NotificationList renders a scrollable notification history.
 type NotificationList struct {
-	Items    []Notification
-	Cursor   int
-	Offset   int
-	Height   int
-	Theme    theme.Theme
-	Width    int
-	NextID   int
+	Items  []Notification
+	Cursor int
+	Offset int
+	Height int
+	Theme  theme.Theme
+	Width  int
+	NextID int
 }
 
 // Add appends a notification.

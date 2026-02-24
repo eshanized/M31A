@@ -39,13 +39,13 @@ type PromptRegistry struct {
 func LoadPrompts() (*PromptRegistry, error) {
 	r := &PromptRegistry{}
 	files := map[string]*string{
-		"prompts/base.md":                  &r.Base,
-		"prompts/tool-use.md":              &r.ToolUse,
-		"prompts/plan-format.md":           &r.PlanFormat,
-		"prompts/execute-task.md":          &r.ExecuteTask,
-		"prompts/discuss-questions.md":     &r.Discuss,
-		"prompts/self-heal.md":             &r.SelfHeal,
-		"prompts/demonstration-format.md":  &r.Demonstration,
+		"prompts/base.md":                 &r.Base,
+		"prompts/tool-use.md":             &r.ToolUse,
+		"prompts/plan-format.md":          &r.PlanFormat,
+		"prompts/execute-task.md":         &r.ExecuteTask,
+		"prompts/discuss-questions.md":    &r.Discuss,
+		"prompts/self-heal.md":            &r.SelfHeal,
+		"prompts/demonstration-format.md": &r.Demonstration,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -150,32 +150,32 @@ func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
 
 // EngineOptions holds all parameters for creating a new Engine.
 type EngineOptions struct {
-	SessionID    string
-	WorkDir      string
-	BackupDir    string
-	PlanningDir  string
-	Provider     provider.LLMProvider
-	ModelID      string
-	Dispatcher   *tools.Dispatcher
-	TokenEst     *tokens.Estimator
-	SessionMgr   *session.Manager
-	Config       *config.Config
+	SessionID   string
+	WorkDir     string
+	BackupDir   string
+	PlanningDir string
+	Provider    provider.LLMProvider
+	ModelID     string
+	Dispatcher  *tools.Dispatcher
+	TokenEst    *tokens.Estimator
+	SessionMgr  *session.Manager
+	Config      *config.Config
 }
 
 // NewEngine creates a workflow engine.
 func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLMProvider, modelID string,
 	dispatcher *tools.Dispatcher, tokenEst *tokens.Estimator, sessionMgr *session.Manager, cfg *config.Config) (*Engine, error) {
 	return NewEngineFromOptions(EngineOptions{
-		SessionID:  sessionID,
-		WorkDir:    workDir,
-		BackupDir:  backupDir,
+		SessionID:   sessionID,
+		WorkDir:     workDir,
+		BackupDir:   backupDir,
 		PlanningDir: planningDir,
-		Provider:   p,
-		ModelID:    modelID,
-		Dispatcher: dispatcher,
-		TokenEst:   tokenEst,
-		SessionMgr: sessionMgr,
-		Config:     cfg,
+		Provider:    p,
+		ModelID:     modelID,
+		Dispatcher:  dispatcher,
+		TokenEst:    tokenEst,
+		SessionMgr:  sessionMgr,
+		Config:      cfg,
 	})
 }
 

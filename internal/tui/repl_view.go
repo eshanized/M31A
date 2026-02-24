@@ -76,7 +76,11 @@ func (m *ReplModel) View() string {
 	// ── Input separator (opencode half-block style) ──────────────────────────────
 	// Top half-block row gives a visual "shelf" effect above the input area
 	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", rw-1))
+	shelfFillWidth := rw - 1
+	if shelfFillWidth < 0 {
+		shelfFillWidth = 0
+	}
+	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
 	inputBorder := shelfLeft + shelfFill
 
 	// ── Metadata row: M31A · model [provider] ───────────────────────────────────
@@ -196,7 +200,8 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 	if m.viewport.Width != rw || m.viewport.Height != vpH {
 		m.viewport.Width = rw
 		m.viewport.Height = vpH
-		m.renderMessages()
+		// Note: renderMessages() is called from Update() on WindowSizeMsg,
+		// not here, to avoid state mutation in the View path.
 	}
 
 	// Viewport (messages or welcome content)
@@ -210,7 +215,11 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 
 	// Input separator (opencode half-block style)
 	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", rw-1))
+	shelfFillWidth := rw - 1
+	if shelfFillWidth < 0 {
+		shelfFillWidth = 0
+	}
+	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
 	inputBorder := shelfLeft + shelfFill
 
 	// Textarea

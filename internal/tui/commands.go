@@ -66,8 +66,8 @@ type CommandContext struct {
 
 // CommandRegistry maps slash command names to handlers and descriptions.
 type CommandRegistry struct {
-	handlers         map[string]CommandHandler
-	descriptions     map[string]string
+	handlers     map[string]CommandHandler
+	descriptions map[string]string
 }
 
 // NewCommandRegistry creates an empty CommandRegistry.
@@ -234,7 +234,7 @@ func DefaultCommands() *CommandRegistry {
 
 	// Config/settings
 	r.Register("settings", handleSettings, "Open settings editor")
-	r.Register("config", handleConfig, "Show or set config value")
+	r.Register("config", handleConfig, "Open full config editor (all sections, editable)")
 	r.Register("theme", handleTheme, "Switch dark/light theme")
 	r.Register("cost", handleCost, "Toggle cost display")
 	r.Register("log", handleLog, "Show recent log entries")

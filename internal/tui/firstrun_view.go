@@ -10,7 +10,6 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-
 // renderFirstRun renders the appropriate wizard step.
 func (fr *FirstRunModel) renderFirstRun() string {
 	t := fr.theme
@@ -1088,8 +1087,6 @@ func (fr *FirstRunModel) renderModelRow(m types.ModelInfo, selected bool, maxW i
 	}
 	return row
 }
-
-
 
 // ─── Done step ───────────────────────────────────────────────────────────────
 

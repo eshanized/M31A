@@ -10,11 +10,11 @@ import (
 
 // ThemePickerModel lets users browse and preview theme presets.
 type ThemePickerModel struct {
-	theme    theme.Theme
-	themes   []themePreset
-	cursor   int
-	width    int
-	height   int
+	theme  theme.Theme
+	themes []themePreset
+	cursor int
+	width  int
+	height int
 }
 
 type themePreset struct {

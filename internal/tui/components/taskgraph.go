@@ -10,11 +10,11 @@ import (
 
 // TaskNode represents a task in a dependency graph.
 type TaskNode struct {
-	ID       int
-	Label    string
-	Status   string // "pending", "running", "done", "failed"
-	Deps     []int
-	X, Y     int // layout position
+	ID     int
+	Label  string
+	Status string // "pending", "running", "done", "failed"
+	Deps   []int
+	X, Y   int // layout position
 }
 
 // TaskGraph renders an ASCII dependency graph.

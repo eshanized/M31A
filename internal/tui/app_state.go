@@ -116,13 +116,13 @@ type AppState struct {
 	helpModel     *HelpModel
 
 	// New screens (Phase 3)
-	bisectModel       *BisectModel
-	themePickerModel  *ThemePickerModel
-	notifModel        *NotificationModel
-	dashboardModel    *DashboardModel
+	bisectModel        *BisectModel
+	themePickerModel   *ThemePickerModel
+	notifModel         *NotificationModel
+	dashboardModel     *DashboardModel
 	sessionDetailModel *SessionDetailModel
-	fileExplorerModel *FileExplorerModel
-	toolDetailModel   *ToolDetailModel
+	fileExplorerModel  *FileExplorerModel
+	toolDetailModel    *ToolDetailModel
 
 	// Dual-model picker (Planning vs Coding phase selection)
 	phaseModelPicker *PhaseModelPickerModel

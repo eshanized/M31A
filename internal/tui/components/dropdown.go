@@ -15,11 +15,11 @@ type DropdownItem struct {
 
 // Dropdown renders a selection dropdown.
 type Dropdown struct {
-	Items    []DropdownItem
-	Cursor   int
-	Open     bool
-	Theme    theme.Theme
-	Width    int
+	Items  []DropdownItem
+	Cursor int
+	Open   bool
+	Theme  theme.Theme
+	Width  int
 }
 
 // Selected returns the currently selected item.

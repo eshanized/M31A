@@ -14,7 +14,7 @@ type Toast struct {
 	Text      string
 	Type      string // "success", "error", "warning", "info"
 	CreatedAt time.Time
-	Frame     int    // animation frame (0, 1, 2)
+	Frame     int // animation frame (0, 1, 2)
 }
 
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
@@ -115,7 +115,7 @@ func renderToastProgress(toast Toast, t theme.Theme) string {
 	// Calculate elapsed time since creation
 	elapsed := time.Since(toast.CreatedAt)
 	duration := 5 * time.Second // default duration
-	
+
 	// Calculate progress (0 to 1)
 	progress := float64(elapsed) / float64(duration)
 	if progress > 1 {
@@ -155,4 +155,3 @@ func renderToastProgress(toast Toast, t theme.Theme) string {
 		PaddingLeft(2).
 		Render(filled + empty)
 }
-

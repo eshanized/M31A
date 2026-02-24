@@ -307,7 +307,13 @@ func replaceByLineRange(content string, startLine, endLine int, newContent strin
 	endIdx := endLine - 1
 
 	// Replace lines[startIdx..endIdx] inclusive
-	newLines := append(lines[:startIdx], append(strings.Split(newContent, "\n"), lines[endIdx+1:]...)...)
+	// Use explicit copies to avoid Go slice-append aliasing bugs where
+	// appending to a sub-slice mutates the underlying array.
+	newContentLines := strings.Split(newContent, "\n")
+	newLines := make([]string, 0, startIdx+len(newContentLines)+len(lines)-endIdx-1)
+	newLines = append(newLines, lines[:startIdx]...)
+	newLines = append(newLines, newContentLines...)
+	newLines = append(newLines, lines[endIdx+1:]...)
 
 	return strings.Join(newLines, "\n"), nil
 }
@@ -470,6 +476,16 @@ func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
 			continue
 		}
 
+		// When there are no middle lines (first+last match is sufficient),
+		// accept the match directly to avoid 0/0 NaN from the similarity check.
+		if len(middleOld) == 0 {
+			newLines := make([]string, 0, len(contentLines))
+			newLines = append(newLines, contentLines[:i]...)
+			newLines = append(newLines, strings.Split(newString, "\n")...)
+			newLines = append(newLines, contentLines[endIdx+1:]...)
+			return strings.Join(newLines, "\n"), nil
+		}
+
 		totalSimilarity := 0.0
 		for j := range middleOld {
 			sim := levenshteinSimilarity(strings.TrimSpace(middleOld[j]), strings.TrimSpace(middleContent[j]))
@@ -536,7 +552,6 @@ func levenshteinDistance(a, b string) int {
 
 	return prev[len(b)]
 }
-
 
 func leadingWhitespace(s string) string {
 	var indent strings.Builder

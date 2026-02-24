@@ -469,18 +469,18 @@ var toolNameAliasesOnce sync.Once
 func getToolNameAliases() map[string]string {
 	toolNameAliasesOnce.Do(func() {
 		aliases := map[string][]string{
-			"Bash":           {"bash", "shell", "exec", "run"},
-			"FileRead":       {"fileread", "read_file", "read", "cat"},
-			"FileWrite":      {"filewrite", "write_file", "write", "save"},
-			"Glob":           {"glob", "find_files", "find"},
-			"Grep":           {"grep", "search", "search_files"},
-			"Edit":           {"fileedit", "file_edit", "edit", "search_replace"},
-			"TodoWrite":      {"todowrite", "todo_write"},
+			"Bash":            {"bash", "shell", "exec", "run"},
+			"FileRead":        {"fileread", "read_file", "read", "cat"},
+			"FileWrite":       {"filewrite", "write_file", "write", "save"},
+			"Glob":            {"glob", "find_files", "find"},
+			"Grep":            {"grep", "search", "search_files"},
+			"Edit":            {"fileedit", "file_edit", "edit", "search_replace"},
+			"TodoWrite":       {"todowrite", "todo_write"},
 			"AskUserQuestion": {"askuserquestion", "ask_user_question", "ask_user"},
-			"WebFetch":       {"web_fetch", "fetch", "http_get"},
-			"FileList":       {"filelist", "list_files", "ls", "list_dir"},
-			"FileDelete":     {"filedelete", "delete_file", "rm_file", "remove_file"},
-			"FileMove":       {"filemove", "move_file", "rename", "rename_file"},
+			"WebFetch":        {"web_fetch", "fetch", "http_get"},
+			"FileList":        {"filelist", "list_files", "ls", "list_dir"},
+			"FileDelete":      {"filedelete", "delete_file", "rm_file", "remove_file"},
+			"FileMove":        {"filemove", "move_file", "rename", "rename_file"},
 		}
 		m := make(map[string]string, 40)
 		for canonical, variants := range aliases {

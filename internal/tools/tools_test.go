@@ -38,4 +38,3 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		})
 	}
 }
-

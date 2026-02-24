@@ -12,7 +12,7 @@ const (
 
 	MaxBackupsPerFile = types.DefaultMaxBackupsPerFile
 	DirPermission     = types.DirPermission
-	FilePermission     = types.FilePermission
+	FilePermission    = types.FilePermission
 
 	MaxGlobResults = types.DefaultMaxGlobResults
 

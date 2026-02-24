@@ -50,8 +50,8 @@ func TestParseModelCapabilities_Reasoning(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		id       string
-		extra    []string
+		id        string
+		extra     []string
 		reasoning bool
 	}{
 		{"openai/o1-preview", nil, true},

@@ -83,6 +83,7 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 
 		// Unblock iterator.Next() on context cancellation.
 		done := make(chan struct{})
+		defer close(done)
 		go func() {
 			select {
 			case <-ctx.Done():
@@ -92,7 +93,6 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 		}()
 		defer func() {
 			iterator.Close()
-			close(done)
 		}()
 
 		var fullContent strings.Builder

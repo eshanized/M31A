@@ -76,7 +76,7 @@ func (m *PhaseModelPickerModel) renderPanel(idx, width int, t theme.Theme) strin
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Width(width - 2).
+		Width(width-2).
 		Padding(0, 1)
 
 	var sb strings.Builder

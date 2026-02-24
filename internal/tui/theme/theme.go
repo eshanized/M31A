@@ -139,9 +139,9 @@ type Theme struct {
 }
 
 type Manager struct {
-	current    Theme
-	mode       Mode
-	profile    ColorProfile
+	current     Theme
+	mode        Mode
+	profile     ColorProfile
 	borderStyle string
 	accentColor string
 }

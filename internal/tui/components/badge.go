@@ -12,7 +12,7 @@ import (
 type BadgeType int
 
 const (
-	BadgeBrand   BadgeType = iota
+	BadgeBrand BadgeType = iota
 	BadgeSuccess
 	BadgeError
 	BadgeWarning

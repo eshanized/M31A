@@ -7,7 +7,6 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-
 // handleNew starts a fresh workflow by resetting workflow state and opening the goal input.
 func handleNew(_ []string, ctx CommandContext) CommandResult {
 	if ctx.ClearMessages != nil {

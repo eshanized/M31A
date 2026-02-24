@@ -12,10 +12,10 @@ import (
 
 // SessionDetailModel shows detailed info about a session before loading it.
 type SessionDetailModel struct {
-	theme   theme.Theme
-	sess    *session.Session
-	width   int
-	height  int
+	theme  theme.Theme
+	sess   *session.Session
+	width  int
+	height int
 }
 
 // NewSessionDetailModel creates a SessionDetailModel.

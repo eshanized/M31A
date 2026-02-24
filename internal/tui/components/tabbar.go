@@ -9,10 +9,10 @@ import (
 
 // TabBar renders a horizontal tab bar.
 type TabBar struct {
-	Tabs     []string
-	Active   int
-	Theme    theme.Theme
-	Width    int
+	Tabs   []string
+	Active int
+	Theme  theme.Theme
+	Width  int
 }
 
 // View renders the tab bar.

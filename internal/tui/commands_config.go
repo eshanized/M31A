@@ -186,5 +186,3 @@ func handleTokens(_ []string, ctx CommandContext) CommandResult {
 		),
 	}
 }
-
-

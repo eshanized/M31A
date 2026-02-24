@@ -34,14 +34,14 @@ type ShipSummary struct {
 
 // ShipModel displays the workflow completion summary.
 type ShipModel struct {
-	summary        ShipSummary
-	theme          theme.Theme
-	sessionID      string
-	width          int
-	height         int
-	demonstration  string
-	demoViewport   viewport.Model
-	showDemo       bool
+	summary       ShipSummary
+	theme         theme.Theme
+	sessionID     string
+	width         int
+	height        int
+	demonstration string
+	demoViewport  viewport.Model
+	showDemo      bool
 }
 
 // NewShipModel creates a ShipModel.

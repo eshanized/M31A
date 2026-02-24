@@ -9,25 +9,25 @@ import (
 
 // HeaderInfo carries the data needed to render the unified header.
 type HeaderInfo struct {
-	Brand       string // "M31A"
-	Breadcrumb  string // screen name, phase breadcrumb, or git branch
-	ModelName   string // active model name
-	Provider    string // provider short name (OR, ZEN)
-	CtxUsed     int    // context tokens used
-	CtxTotal    int    // context tokens total
+	Brand      string // "M31A"
+	Breadcrumb string // screen name, phase breadcrumb, or git branch
+	ModelName  string // active model name
+	Provider   string // provider short name (OR, ZEN)
+	CtxUsed    int    // context tokens used
+	CtxTotal   int    // context tokens total
 }
 
 // FooterInfo carries the data needed to render the unified footer.
 type FooterInfo struct {
-	Cwd             string   // working directory basename
-	GitBranch       string   // current git branch
-	Operation       string   // "thinking...", "responding...", phase name
-	LeaderActive    bool     // leader key mode active
-	KeyboardHints   []string // e.g. "ctrl+p commands"
-	TokenCount      int      // total tokens used
-	Cost            float64  // session cost
-	ShowCost        bool     // whether to display cost
-	SpinnerFrame    string   // animated spinner character
+	Cwd           string   // working directory basename
+	GitBranch     string   // current git branch
+	Operation     string   // "thinking...", "responding...", phase name
+	LeaderActive  bool     // leader key mode active
+	KeyboardHints []string // e.g. "ctrl+p commands"
+	TokenCount    int      // total tokens used
+	Cost          float64  // session cost
+	ShowCost      bool     // whether to display cost
+	SpinnerFrame  string   // animated spinner character
 }
 
 // PageChrome holds the computed header and footer strings along with

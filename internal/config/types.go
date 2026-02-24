@@ -107,11 +107,11 @@ type UIConfig struct {
 	TabWidth       int  `toml:"tab_width"`
 
 	// New - Layout
-	SidebarPosition  string `toml:"sidebar_position"`
-	SidebarAutoShow  bool   `toml:"sidebar_auto_show"`
-	CardPadding      int    `toml:"card_padding"`
-	WelcomeScreen    bool   `toml:"welcome_screen"`
-	ZenModeKey       string `toml:"zen_mode_key"`
+	SidebarPosition string `toml:"sidebar_position"`
+	SidebarAutoShow bool   `toml:"sidebar_auto_show"`
+	CardPadding     int    `toml:"card_padding"`
+	WelcomeScreen   bool   `toml:"welcome_screen"`
+	ZenModeKey      string `toml:"zen_mode_key"`
 
 	// New - Animation
 	AnimationSpeed   string `toml:"animation_speed"`
@@ -142,8 +142,8 @@ type AnimationSpeed int
 const (
 	AnimFast   AnimationSpeed = iota // 50% duration
 	AnimNormal                       // 100% duration
-	AnimSlow                        // 200% duration
-	AnimNone                        // all animations disabled
+	AnimSlow                         // 200% duration
+	AnimNone                         // all animations disabled
 )
 
 // ParseAnimationSpeed parses an animation speed string

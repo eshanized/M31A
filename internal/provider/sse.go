@@ -3,15 +3,12 @@ package provider
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
-
-	m31errors "github.com/eshanized/M31A/internal/errors"
 )
 
 type SSEParser struct {
@@ -92,8 +89,10 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	}
 
 	data = strings.Join(dataParts, "\n")
-	if data == "" && len(dataParts) == 0 {
-		return "", "", fmt.Errorf("%w: stream chunk read interrupted", m31errors.ErrStreamTruncated)
+	if strings.TrimSpace(data) == "" {
+		// Empty data line (keep-alive or empty event) — skip to next SSE event
+		// instead of returning an error or empty string that would fail JSON parsing.
+		return "", "", nil
 	}
 	return eventType, data, nil
 }
