@@ -2,10 +2,14 @@ package errors
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
 var (
+	reHTTP401 = regexp.MustCompile(`\b401\b`)
+	reHTTP429 = regexp.MustCompile(`\b429\b`)
+	reHTTP503 = regexp.MustCompile(`\b503\b`)
 	ErrProviderUnreachable = errors.New("provider unreachable")
 	ErrProviderNotFound    = errors.New("provider not found")
 	ErrInvalidProvider     = errors.New("invalid provider name")
@@ -110,11 +114,11 @@ func UserMessage(e error) string {
 		return "Request cancelled"
 	case strings.Contains(errStr, "eof") || strings.Contains(errStr, "unexpected end of json"):
 		return "Connection lost — try again"
-	case strings.Contains(errStr, "401"):
+	case reHTTP401.MatchString(errStr):
 		return "Invalid API key — run /settings to update"
-	case strings.Contains(errStr, "429"):
+	case reHTTP429.MatchString(errStr):
 		return "Rate limited — retry in a moment"
-	case strings.Contains(errStr, "503"):
+	case reHTTP503.MatchString(errStr):
 		return "Provider temporarily unavailable — try again later"
 	}
 
