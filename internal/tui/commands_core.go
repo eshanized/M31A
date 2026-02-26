@@ -36,7 +36,7 @@ func handleStatus(_ []string, ctx CommandContext) CommandResult {
 	}
 	sess, err := ctx.SessionManager.LoadSession(ctx.SessionID)
 	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
+		return CommandResult{Success: false, Message: "Failed to load session."}
 	}
 
 	provider := "unknown"
@@ -92,7 +92,7 @@ func handleUndo(_ []string, ctx CommandContext) CommandResult {
 	}
 	checkpoint, err := ctx.SessionManager.LatestCheckpoint(ctx.SessionID)
 	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("No checkpoint found: %v", err)}
+		return CommandResult{Success: false, Message: "No checkpoint found."}
 	}
 	msg := fmt.Sprintf(
 		"**Latest checkpoint:**\n  Phase: %s\n  Time: %s",
@@ -109,7 +109,7 @@ func handleHistory(_ []string, ctx CommandContext) CommandResult {
 	}
 	sess, err := ctx.SessionManager.LoadSession(ctx.SessionID)
 	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
+		return CommandResult{Success: false, Message: "Failed to load session."}
 	}
 	count := 0
 	if sess != nil {
