@@ -163,7 +163,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Permission modal ──────────────────────────────────────────────────────
 	case PermissionRequestMsg:
 		m.permRequest = &msg.Request
-		m.permCountdown = 0
 		m.permCountdown = msg.Request.TimeoutSecs
 		timeout := components.DefaultPermissionTimeout
 		if msg.Request.TimeoutSecs > 0 {
