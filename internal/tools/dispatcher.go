@@ -35,6 +35,8 @@ type Dispatcher struct {
 	rateTokens chan struct{}
 	rateTicker *time.Ticker
 	rateDone   chan struct{}
+	// C-12: sync.Once prevents TOCTOU race in Stop().
+	stopOnce sync.Once
 }
 
 // NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
@@ -155,7 +157,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		if len(rawInput) > 200 {
 			rawInput = rawInput[:200] + "…"
 		}
-		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %s. Raw input: %s", call.Name, err, rawInput)
+		return types.ToolResult{}, fmt.Errorf("tool %s: invalid input JSON: %w. Raw input: %s", call.Name, err, rawInput)
 	}
 	// Normalize direct args vs nested params: if the model sent
 	// {"path":"..."} (direct) instead of {"params":{"path":"..."}} (nested),
@@ -171,6 +173,10 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 		}
 	}
 	input.Name = call.Name
+
+	if len(input.Params) > 1000 {
+		return types.ToolResult{}, fmt.Errorf("tool %s: too many parameters (%d > 1000)", call.Name, len(input.Params))
+	}
 
 	if err := d.ensurePermission(ctx, call, tool, input); err != nil {
 		if errResult, ok := err.(toolResultError); ok {
@@ -236,14 +242,12 @@ func (d *Dispatcher) SetSessionID(id string) {
 
 // Stop shuts down the rate limiter goroutine and ticker.
 // Should be called when the Dispatcher is no longer needed (e.g., during app shutdown).
+// C-12: Uses sync.Once to prevent TOCTOU race on concurrent calls.
 func (d *Dispatcher) Stop() {
-	select {
-	case <-d.rateDone:
-		// Already stopped
-	default:
+	d.stopOnce.Do(func() {
 		close(d.rateDone)
 		d.rateTicker.Stop()
-	}
+	})
 }
 
 // toolResultError wraps a ToolResult to distinguish "permission rule error
