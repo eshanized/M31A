@@ -17,6 +17,7 @@ type SSEParser struct {
 	closeOnce sync.Once
 	ctx       context.Context
 	cancel    context.CancelFunc
+	watchdog  *time.Timer
 }
 
 func NewSSEParser(resp *http.Response) *SSEParser {
@@ -27,11 +28,19 @@ func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParse
 	ctx, cancel := context.WithCancel(ctx)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, sseMaxLineLength), sseMaxLineLength)
+
+	// C-2: Start a watchdog that closes the body if no data arrives
+	// within DefaultStreamTimeout. This prevents indefinite blocking.
+	watchdog := time.AfterFunc(DefaultStreamTimeout, func() {
+		resp.Body.Close()
+	})
+
 	return &SSEParser{
-		scanner: scanner,
-		resp:    resp,
-		ctx:     ctx,
-		cancel:  cancel,
+		scanner:  scanner,
+		resp:     resp,
+		ctx:      ctx,
+		cancel:   cancel,
+		watchdog: watchdog,
 	}
 }
 
@@ -39,6 +48,12 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	var lines []string
 
 	for p.scanner.Scan() {
+		// C-2: Reset watchdog on each successful read to prevent timeout
+		// while data is still flowing.
+		if p.watchdog != nil {
+			p.watchdog.Reset(DefaultStreamTimeout)
+		}
+
 		// Check context cancellation between lines
 		if p.ctx != nil {
 			select {
@@ -102,6 +117,9 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 func (p *SSEParser) Close() error {
 	var closeErr error
 	p.closeOnce.Do(func() {
+		if p.watchdog != nil {
+			p.watchdog.Stop()
+		}
 		if p.cancel != nil {
 			p.cancel()
 		}
