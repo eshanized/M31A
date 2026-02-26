@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,7 @@ func handleCost(_ []string, ctx CommandContext) CommandResult {
 }
 
 // handleLog shows recent log entries from the m31a log file.
+// Uses reverse scan to read only the last N lines without loading the entire file.
 func handleLog(args []string, ctx CommandContext) CommandResult {
 	lines := 20
 	if ctx.Config != nil && ctx.Config.UI.DefaultLogLines > 0 {
@@ -104,26 +106,89 @@ func handleLog(args []string, ctx CommandContext) CommandResult {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Cannot determine home dir: %v", err)}
+		return CommandResult{Success: false, Message: "Cannot determine home directory."}
 	}
 	logPath := filepath.Join(homeDir, ".m31a", "m31a.log")
-	data, err := os.ReadFile(logPath)
+
+	tail, err := readTailLines(logPath, lines)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return CommandResult{Success: true, Message: "No log file found yet."}
 		}
-		return CommandResult{Success: false, Message: fmt.Sprintf("Cannot read log: %v", err)}
-	}
-
-	logLines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(logLines) > lines {
-		logLines = logLines[len(logLines)-lines:]
+		return CommandResult{Success: false, Message: "Cannot read log file."}
 	}
 
 	return CommandResult{
 		Success: true,
-		Message: fmt.Sprintf("**Last %d log lines:**\n```\n%s\n```", lines, strings.Join(logLines, "\n")),
+		Message: fmt.Sprintf("**Last %d log lines:**\n```\n%s\n```", lines, strings.Join(tail, "\n")),
 	}
+}
+
+// readTailLines reads the last n lines from path using a reverse scan,
+// avoiding loading the entire file into memory.
+func readTailLines(path string, n int) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	fileSize := stat.Size()
+	if fileSize == 0 {
+		return nil, nil
+	}
+
+	// Read backwards from end of file collecting complete lines.
+	const chunkSize int64 = 8192
+	offset := fileSize
+	var tail []string
+	pending := ""
+
+	for offset > 0 && len(tail) < n {
+		readSize := chunkSize
+		if readSize > offset {
+			readSize = offset
+		}
+		offset -= readSize
+
+		buf := make([]byte, readSize)
+		if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
+			return nil, err
+		}
+
+		text := string(buf) + pending
+		parts := strings.Split(text, "\n")
+		// Last element is the partial line before this chunk (carry to next iteration)
+		pending = parts[0]
+		for i := len(parts) - 1; i >= 1; i-- {
+			if len(tail) >= n {
+				break
+			}
+			tail = append(tail, parts[i])
+		}
+	}
+
+	// If there are still fewer than n lines, the first line may be the remainder
+	if len(tail) < n && pending != "" {
+		tail = append(tail, pending)
+	}
+
+	// Reverse to chronological order
+	for i, j := 0, len(tail)-1; i < j; i, j = i+1, j-1 {
+		tail[i], tail[j] = tail[j], tail[i]
+	}
+
+	// Strip empty trailing lines
+	for len(tail) > 0 && tail[len(tail)-1] == "" {
+		tail = tail[:len(tail)-1]
+	}
+
+	return tail, nil
 }
 
 // handleKey shows the API key status for configured providers.
@@ -140,16 +205,14 @@ func handleKey(_ []string, ctx CommandContext) CommandResult {
 	if orKey == "" {
 		sb.WriteString("  OpenRouter: ❌ not set\n")
 	} else {
-		masked := "sk-or-..." + orKey[max(0, len(orKey)-4):]
-		sb.WriteString(fmt.Sprintf("  OpenRouter: ✅ set (%s)\n", masked))
+		sb.WriteString("  OpenRouter: ✅ set\n")
 	}
 
 	zenKey := cfg.Provider.Zen.APIKey
 	if zenKey == "" {
 		sb.WriteString("  Zen:        ❌ not set\n")
 	} else {
-		masked := "***" + zenKey[max(0, len(zenKey)-4):]
-		sb.WriteString(fmt.Sprintf("  Zen:        ✅ set (%s)\n", masked))
+		sb.WriteString("  Zen:        ✅ set\n")
 	}
 
 	return CommandResult{Success: true, Message: sb.String()}
