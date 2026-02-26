@@ -101,15 +101,9 @@ func (r *Registry) List() []string {
 }
 
 // ListAll returns all registered provider names without any decoration.
+// It delegates to List() to avoid code duplication.
 func (r *Registry) ListAll() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	names := make([]string, 0, len(r.providers))
-	for name := range r.providers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return r.List()
 }
 
 func (r *Registry) ActiveProvider() LLMProvider {
