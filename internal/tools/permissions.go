@@ -89,6 +89,10 @@ func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bo
 			return false, pctx, m31errors.ErrPermissionDenied
 		case "ask":
 			return false, pctx, nil
+		default:
+			// Empty or unrecognized action defaults to "ask" — prompt the user
+			// rather than silently allowing or denying.
+			return false, pctx, nil
 		}
 	}
 
@@ -184,8 +188,14 @@ func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call typ
 }
 
 func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
+	cmd := extractCommandString(call.Name, call.Input)
+	cacheKey := call.Name + ":" + cmd
+
 	d.mu.RLock()
-	allowed, remembered := d.permissions[call.Name]
+	allowed, remembered := d.permissions[cacheKey]
+	if !remembered {
+		allowed, remembered = d.permissions[call.Name]
+	}
 	d.mu.RUnlock()
 
 	if remembered && allowed {
@@ -241,8 +251,9 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 	}
 
 	if resp.Remember {
+		cacheKey := toolName + ":" + req.Command
 		d.mu.Lock()
-		d.permissions[toolName] = resp.Allowed
+		d.permissions[cacheKey] = resp.Allowed
 		d.mu.Unlock()
 	}
 
