@@ -196,7 +196,7 @@ func (m *PermissionModal) Deny() tools.PermissionResponse {
 }
 
 func (m *PermissionModal) Tick() {
-	m.elapsed += time.Second / 10
+	m.elapsed += time.Second
 }
 
 func (m *PermissionModal) Remaining() time.Duration {
