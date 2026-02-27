@@ -105,13 +105,9 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		tc.collapsed = true
 	}
 
-	if len(output) > types.MaxToolOutputChars {
-		runeCount := utf8.RuneCountInString(output)
-		if runeCount > types.MaxToolOutputChars {
-			tc.output = string([]rune(output)[:types.MaxToolOutputChars])
-		} else {
-			tc.output = output
-		}
+	runeCount := utf8.RuneCountInString(output)
+	if runeCount > types.MaxToolOutputChars {
+		tc.output = string([]rune(output)[:types.MaxToolOutputChars])
 		tc.truncated = true
 	}
 
