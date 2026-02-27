@@ -20,7 +20,6 @@ const (
 	BashTimeout             = 30 * time.Minute
 	BashOutputLimit         = 50_000
 	DefaultContextLength    = 128_000
-	// MaxLLMResponseBytes = 1 << 20
 	MaxLLMResponseBytes = 1 << 20
 	// MaxSessionFileSize is the maximum allowed size for session files
 	// (session.json, messages.json, checkpoint.json) to prevent OOM from
@@ -102,8 +101,8 @@ const (
 	// DefaultVerifyTimeout is the default timeout for a single verify phase task.
 	DefaultVerifyTimeout = 5 * time.Minute
 
-	// DefaultFetchModelsTimeout is the timeout for fetching model catalogs.
-	DefaultFetchModelsTimeout = 15 * time.Second
+	// DefaultFetchModelsTimeout is an alias for FetchModelsTimeout (M-32: removed duplicate constant).
+	DefaultFetchModelsTimeout = FetchModelsTimeout
 
 	// DefaultUserAgent is the default User-Agent header for API requests
 	DefaultUserAgent = "M31A/dev"
@@ -133,5 +132,10 @@ func SkipDirsMap() map[string]bool {
 		}
 		skipDirsCache = m
 	})
-	return skipDirsCache
+	// Return a copy to prevent callers from mutating the cached map.
+	out := make(map[string]bool, len(skipDirsCache))
+	for k, v := range skipDirsCache {
+		out[k] = v
+	}
+	return out
 }
