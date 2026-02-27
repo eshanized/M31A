@@ -97,6 +97,16 @@ type Message struct {
 	SkipForLLM bool             `json:"skip_for_llm,omitempty"`
 }
 
+// MarshalJSON ensures Segments is never serialized as null by initializing
+// a nil slice to an empty slice before default marshaling.
+func (m Message) MarshalJSON() ([]byte, error) {
+	if m.Segments == nil {
+		m.Segments = []MessageSegment{}
+	}
+	type msgAlias Message
+	return json.Marshal(msgAlias(m))
+}
+
 type ToolInput struct {
 	Name   string         `json:"name"`
 	Params map[string]any `json:"params"`
@@ -137,6 +147,14 @@ type Task struct {
 	Status             TaskStatus `json:"status"`
 	HealsAttempted     int        `json:"heals_attempted"`
 	CommitHash         string     `json:"commit_hash,omitempty"`
+}
+
+// ClampHealsAttempted ensures HealsAttempted does not exceed MaxHealAttempts.
+// Call this after incrementing HealsAttempted to enforce the type-level bound.
+func (t *Task) ClampHealsAttempted() {
+	if t.HealsAttempted > MaxHealAttempts {
+		t.HealsAttempted = MaxHealAttempts
+	}
 }
 
 // FilePrediction action constants for consistent action values.
