@@ -83,8 +83,10 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 	// Perform soft reset to the given commit hash
 	hash := args[0]
 	return CommandResult{
-		Success: true,
-		Message: fmt.Sprintf("Rolling back to commit **%s**...", hash),
+		Success:         true,
+		ConfirmRequired: true,
+		ConfirmPrompt:   fmt.Sprintf("Soft reset to commit %s? This cannot be undone.", hash),
+		Message:         fmt.Sprintf("Rolling back to commit **%s**...", hash),
 		Cmd: func() tea.Msg {
 			result, err := ctx.Rollback.SoftReset(hash, nil)
 			if err != nil {
