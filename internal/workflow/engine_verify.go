@@ -19,6 +19,11 @@ func (e *Engine) readTaskFiles(files []string) string {
 	var sb strings.Builder
 	for _, f := range files {
 		path := filepath.Join(e.workDir, f)
+		relPath, relErr := filepath.Rel(e.workDir, path)
+		if relErr != nil || strings.HasPrefix(relPath, "..") {
+			sb.WriteString(fmt.Sprintf("=== %s: (path traversal blocked) ===\n", f))
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("=== %s: (not found) ===\n", f))
@@ -128,10 +133,11 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	hasCustomBuild := e.cfg != nil && e.cfg.Verify.BuildCommand != ""
 	hasCustomTest := e.cfg != nil && e.cfg.Verify.TestCommand != ""
 
+	// C-7: Use the parent context directly — it already has a deadline
+	// from verifyTaskContext(). Creating nested WithTimeout calls causes
+	// confusing overlapping deadlines.
 	if hasCustomBuild {
-		vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-		defer cancel()
-		cmd := exec.CommandContext(vctx, "sh", "-c", e.cfg.Verify.BuildCommand)
+		cmd := exec.CommandContext(ctx, "sh", "-c", e.cfg.Verify.BuildCommand)
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("configured build command failed: %s", string(out)))
@@ -140,9 +146,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	}
 
 	if hasCustomTest {
-		vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-		defer cancel()
-		cmd := exec.CommandContext(vctx, "sh", "-c", e.cfg.Verify.TestCommand)
+		cmd := exec.CommandContext(ctx, "sh", "-c", e.cfg.Verify.TestCommand)
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("configured test command failed: %s", string(out)))
@@ -167,9 +171,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 			}
 		}
 		if hasGo && !hasCustomBuild {
-			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(vctx, "go", "build", "./...")
+			cmd := exec.CommandContext(ctx, "go", "build", "./...")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("go build failed: %s", string(out)))
@@ -188,17 +190,13 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		if hasJS && !hasCustomBuild {
 			// Check for package.json and try npm build or tsc
 			if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
-				vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-				defer cancel()
 				// Try npm run build first, fall back to tsc --noEmit
-				cmd := exec.CommandContext(vctx, "sh", "-c", "npm run build 2>&1")
+				cmd := exec.CommandContext(ctx, "sh", "-c", "npm run build 2>&1")
 				cmd.Dir = e.workDir
 				out, buildErr := cmd.CombinedOutput()
 				if buildErr != nil {
-					// Try tsc as fallback
-					tscCtx, tscCancel := context.WithTimeout(ctx, verifyTaskTimeout)
-					defer tscCancel()
-					tscCmd := exec.CommandContext(tscCtx, "sh", "-c", "tsc --noEmit 2>&1")
+					// Try tsc as fallback (uses same parent context, C-7)
+					tscCmd := exec.CommandContext(ctx, "sh", "-c", "tsc --noEmit 2>&1")
 					tscCmd.Dir = e.workDir
 					tscOut, tscErr := tscCmd.CombinedOutput()
 					if tscErr != nil {
@@ -220,9 +218,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 					result.SyntaxOK = false
 					continue
 				}
-				vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-				defer cancel()
-				cmd := exec.CommandContext(vctx, "python3", "-m", "py_compile", path)
+				cmd := exec.CommandContext(ctx, "python3", "-m", "py_compile", path)
 				cmd.Dir = e.workDir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					result.Errors = append(result.Errors, fmt.Sprintf("python syntax error in %s: %s", f, string(out)))
@@ -239,9 +235,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 			}
 		}
 		if hasRust && !hasCustomBuild {
-			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(vctx, "cargo", "check")
+			cmd := exec.CommandContext(ctx, "cargo", "check")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("cargo check failed: %s", string(out)))
@@ -254,27 +248,21 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	if hasTestFiles(e.workDir, task.Files) && !hasCustomTest {
 		switch projectType {
 		case "go":
-			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(vctx, "go", "test", "./...")
+			cmd := exec.CommandContext(ctx, "go", "test", "./...")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("go test failed: %s", string(out)))
 				result.TestsOK = false
 			}
 		case "nodejs":
-			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(vctx, "sh", "-c", "npm test 2>&1")
+			cmd := exec.CommandContext(ctx, "sh", "-c", "npm test 2>&1")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("npm test failed: %s", string(out)))
 				result.TestsOK = false
 			}
 		case "python":
-			vctx, cancel := context.WithTimeout(ctx, verifyTaskTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(vctx, "sh", "-c", "python3 -m pytest 2>&1")
+			cmd := exec.CommandContext(ctx, "sh", "-c", "python3 -m pytest 2>&1")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("pytest failed: %s", string(out)))
