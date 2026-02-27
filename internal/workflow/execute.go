@@ -62,7 +62,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 				e.logger.Warn("pre-task checkpoint failed", "task", task.ID, "error", err)
 			}
 
-			result := e.executeTaskWithTools(ctx, task, tasks, goal)
+			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
 			// Count tool calls from task result
 			if result.ToolCalls > 0 {
 				toolCallCount += result.ToolCalls
@@ -119,12 +119,12 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 }
 
 // executeTaskWithTools runs a single task with tool dispatch and self-heal.
-func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, allTasks []m31types.Task, goal string) taskrunner.TaskResult {
+func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, allTasks []m31types.Task, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
 	for task.HealsAttempted < m31types.MaxHealAttempts {
 		// Build context
-		messages := e.buildExecuteContext(task, allTasks, goal)
+		messages := e.buildExecuteContext(*task, allTasks, goal)
 
 		// Stream LLM
 		content, err := e.streamLLM(ctx, messages, true)
@@ -140,7 +140,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason, goal)
+			healResult := e.healTask(ctx, *task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -168,7 +168,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason, goal)
+			healResult := e.healTask(ctx, *task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -182,11 +182,13 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			continue
 		}
 
-		// Dispatch tool calls
-		toolErr := false
-		var toolErrMsg error
-		var toolErrName string
-		toolCallCount := len(toolCalls)
+		// Dispatch tool calls — C-6: execute ALL tool calls and collect results
+		var toolExecResults []struct {
+			call     m31types.ToolCall
+			result   m31types.ToolResult
+			err      error
+			duration int64
+		}
 
 		// CR-05 fix: add ONE assistant message outside the tool-call loop
 		// to prevent N duplicate assistant messages for N tool calls.
@@ -207,43 +209,64 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 			result, err := e.dispatcher.Execute(ctx, tc)
 			toolDuration := time.Since(toolStart).Milliseconds()
 
+			toolExecResults = append(toolExecResults, struct {
+				call     m31types.ToolCall
+				result   m31types.ToolResult
+				err      error
+				duration int64
+			}{
+				call:     tc,
+				result:   result,
+				err:      err,
+				duration: toolDuration,
+			})
+
 			if err != nil {
-				// Emit tool failure
 				e.emit(ToolCompleteMsg{
 					ToolName:   tc.Name,
 					Success:    false,
 					DurationMs: toolDuration,
 					Error:      err.Error(),
 				})
-				toolErr = true
-				toolErrMsg = err
-				toolErrName = tc.Name
-				break
+			} else {
+				e.emit(ToolCompleteMsg{
+					ToolName:   tc.Name,
+					Success:    true,
+					DurationMs: toolDuration,
+				})
 			}
-
-			// Emit tool success
-			e.emit(ToolCompleteMsg{
-				ToolName:   tc.Name,
-				Success:    true,
-				DurationMs: toolDuration,
-			})
-
-			// Feed tool result back
-			messages = append(messages, m31types.Message{
-				Role:       "tool",
-				Content:    result.Output,
-				ToolCallID: tc.ID,
-			})
 		}
+
+		// Feed ALL tool results back to the LLM, including errors
+		var toolErrMessages []string
+		for _, tr := range toolExecResults {
+			if tr.err != nil {
+				toolErrMessages = append(toolErrMessages, fmt.Sprintf("tool %s failed: %v", tr.call.Name, tr.err))
+				messages = append(messages, m31types.Message{
+					Role:       "tool",
+					Content:    fmt.Sprintf("Error: %v", tr.err),
+					ToolCallID: tr.call.ID,
+				})
+			} else {
+				messages = append(messages, m31types.Message{
+					Role:       "tool",
+					Content:    tr.result.Output,
+					ToolCallID: tr.call.ID,
+				})
+			}
+		}
+
+		toolErr := len(toolErrMessages) > 0
+		toolCallCount := len(toolExecResults)
 
 		if toolErr {
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
 				return taskrunner.TaskResult{
 					Success: false,
-					Error:   fmt.Sprintf("tool %s: %v", toolErrName, toolErrMsg),
+					Error:   strings.Join(toolErrMessages, "; "),
 				}
 			}
-			failureReason := fmt.Sprintf("tool %s failed: %v", toolErrName, toolErrMsg)
+			failureReason := strings.Join(toolErrMessages, "; ")
 			task.HealsAttempted++
 			e.logger.Info("self-healing task after tool failure", "task", task.ID, "attempt", task.HealsAttempted)
 			e.emit(SelfHealStartMsg{
@@ -251,7 +274,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task m31types.Task, a
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
-			healResult := e.healTask(ctx, task, failureReason, goal)
+			healResult := e.healTask(ctx, *task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
