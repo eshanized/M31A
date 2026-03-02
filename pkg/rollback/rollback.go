@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/types"
@@ -145,6 +146,7 @@ func (r *Rollback) SoftReset(hash string, onReset func(newHead string) error) (*
 
 // HardReset performs a git reset --hard to the given commit.
 // If uncommitted changes exist, they are stashed first.
+// C-11: Creates a timestamped backup branch before the destructive reset.
 func (r *Rollback) HardReset(hash string) (*RollbackResult, error) {
 	prevHead, err := r.git.HeadHash()
 	if err != nil {
@@ -156,6 +158,12 @@ func (r *Rollback) HardReset(hash string) (*RollbackResult, error) {
 		return nil, fmt.Errorf("hard reset: %w", err)
 	}
 
+	// C-11: Create timestamped backup branch before destructive reset
+	backupBranch := fmt.Sprintf("m31a/rollback-backup-%d", time.Now().Unix())
+	if _, err := r.git.Run("branch", "--force", backupBranch); err != nil {
+		return nil, fmt.Errorf("create backup branch: %w", err)
+	}
+
 	if err := r.git.ResetHard(hash); err != nil {
 		return nil, fmt.Errorf("hard reset: %w", err)
 	}
@@ -165,7 +173,9 @@ func (r *Rollback) HardReset(hash string) (*RollbackResult, error) {
 		return nil, fmt.Errorf("hard reset: %w", err)
 	}
 
-	return r.buildResult(prevHead, newHead, stashed, "stashed"), nil
+	result := r.buildResult(prevHead, newHead, stashed, "stashed")
+	result.Message += fmt.Sprintf(" Backup branch: %s", backupBranch)
+	return result, nil
 }
 
 // SafeReset performs a git reset --hard to the given commit and then
