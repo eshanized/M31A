@@ -495,12 +495,46 @@ func (m *Manager) ForkSession(parentID string) (*Session, error) {
 		parent.ChildrenIDs = append(parent.ChildrenIDs, newID)
 	}
 
-	// Save both sessions atomically
-	if err := m.SaveSession(newSession); err != nil {
+	// C-4: Marshal both sessions before writing either to avoid orphaned child
+	// if a crash occurs between the two writes.
+	if newSession.Messages == nil {
+		newSession.Messages = make([]types.Message, 0)
+	}
+	childMsgData, err := json.Marshal(newSession.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal child messages: %w", err)
+	}
+	childData, err := json.Marshal(newSession)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal child session: %w", err)
+	}
+
+	if parent.Messages == nil {
+		parent.Messages = make([]types.Message, 0)
+	}
+	parentMsgData, err := json.Marshal(parent.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal parent messages: %w", err)
+	}
+	parentData, err := json.Marshal(parent)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal parent session: %w", err)
+	}
+
+	// Write child session files
+	if err := m.atomicWrite(m.sessionJSONPath(newSession.ID), childData); err != nil {
 		return nil, fmt.Errorf("cannot save child session: %w", err)
 	}
-	if err := m.SaveSession(parent); err != nil {
+	if err := m.atomicWrite(m.messagesJSONPath(newSession.ID), childMsgData); err != nil {
+		return nil, fmt.Errorf("cannot save child messages: %w", err)
+	}
+
+	// Write parent session files
+	if err := m.atomicWrite(m.sessionJSONPath(parent.ID), parentData); err != nil {
 		return nil, fmt.Errorf("cannot save parent session: %w", err)
+	}
+	if err := m.atomicWrite(m.messagesJSONPath(parent.ID), parentMsgData); err != nil {
+		return nil, fmt.Errorf("cannot save parent messages: %w", err)
 	}
 
 	return newSession, nil
@@ -719,23 +753,26 @@ func (m *Manager) Cleanup(maxAge time.Duration) (int, error) {
 }
 
 // SaveSession writes session.json and messages.json to disk atomically.
+// C-3: Both payloads are marshalled before any writes so a crash between
+// writes never leaves session.json with a stale messages.json.
 func (m *Manager) SaveSession(s *Session) error {
-	// Save session metadata
-	data, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("cannot marshal session: %w", err)
-	}
-	if err := m.atomicWrite(m.sessionJSONPath(s.ID), data); err != nil {
-		return fmt.Errorf("cannot write session.json: %w", err)
-	}
-
-	// Save messages
 	if s.Messages == nil {
 		s.Messages = make([]types.Message, 0)
 	}
 	msgData, err := json.Marshal(s.Messages)
 	if err != nil {
 		return fmt.Errorf("cannot marshal messages: %w", err)
+	}
+
+	// Marshal session metadata (contains MessageCount derived from Messages)
+	data, err := json.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("cannot marshal session: %w", err)
+	}
+
+	// Write both atomically: temp files first, then rename
+	if err := m.atomicWrite(m.sessionJSONPath(s.ID), data); err != nil {
+		return fmt.Errorf("cannot write session.json: %w", err)
 	}
 	if err := m.atomicWrite(m.messagesJSONPath(s.ID), msgData); err != nil {
 		return fmt.Errorf("cannot write messages.json: %w", err)
