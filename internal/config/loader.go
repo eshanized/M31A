@@ -559,6 +559,14 @@ func substituteVars(s string) string {
 // API keys are never persisted to the config file — they must be set via
 // environment variables or the OS keychain.
 func (c *Config) Save(path string) error {
+	return c.SaveWithKeychain(path, nil)
+}
+
+// SaveWithKeychain writes the config to a TOML file atomically.
+// If a keychain is provided and available, API keys are saved to the keychain
+// and cleared from the config file. If the keychain is unavailable or nil,
+// API keys are persisted to the config file as a fallback (with a warning).
+func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 	// M31A_CONFIG env var overrides path
 	if envPath := os.Getenv("M31A_CONFIG"); envPath != "" {
 		path = envPath
@@ -589,9 +597,54 @@ func (c *Config) Save(path string) error {
 		cfgCopy.Tools.SkipDirs = skipDirsCopy
 	}
 
-	// Don't persist API keys — they came from env vars or keychain
-	cfgCopy.Provider.OpenRouter.APIKey = ""
-	cfgCopy.Provider.Zen.APIKey = ""
+	// Determine if we should persist API keys to the config file.
+	// We persist keys if:
+	// 1. No keychain is provided, OR
+	// 2. Keychain is provided but unavailable (ErrKeychainUnavailable)
+	// We clear keys from the config file only if keychain is available and saves succeed.
+	persistKeys := true
+	if kc != nil {
+		// Try to save keys to keychain to test availability
+		openRouterKey := c.Provider.OpenRouter.APIKey
+		zenKey := c.Provider.Zen.APIKey
+		openRouterSaved := openRouterKey == ""
+		zenSaved := zenKey == ""
+
+		if openRouterKey != "" {
+			if err := kc.Set("openrouter", openRouterKey); err == nil {
+				openRouterSaved = true
+			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
+				// Keychain unavailable - will persist to config file
+			} else {
+				slog.Warn("failed to save OpenRouter key to keychain", "error", err)
+			}
+		}
+		if zenKey != "" {
+			if err := kc.Set("zen", zenKey); err == nil {
+				zenSaved = true
+			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
+				// Keychain unavailable - will persist to config file
+			} else {
+				slog.Warn("failed to save Zen key to keychain", "error", err)
+			}
+		}
+
+		// Only clear keys from config file if both keys were saved to keychain (or were empty)
+		if openRouterSaved && zenSaved {
+			persistKeys = false
+		} else {
+			slog.Warn("keychain unavailable or save failed; persisting API keys to config file as fallback")
+		}
+	}
+
+	if !persistKeys {
+		// Don't persist API keys — they're in the keychain
+		cfgCopy.Provider.OpenRouter.APIKey = ""
+		cfgCopy.Provider.Zen.APIKey = ""
+	} else {
+		// Keys will be persisted to config file as fallback
+		slog.Info("API keys will be stored in config file (keychain unavailable)")
+	}
 
 	data, err := toml.Marshal(&cfgCopy)
 	if err != nil {
