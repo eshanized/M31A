@@ -86,6 +86,9 @@ func (m *AppState) propagateSessionID(id string) {
 	if m.shipModel != nil {
 		m.shipModel.sessionID = id
 	}
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetSessionID(id)
+	}
 }
 
 // applySessionRestored applies a sessionRestoredMsg to the REPL.
