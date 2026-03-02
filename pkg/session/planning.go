@@ -217,15 +217,19 @@ func parseDeps(s string) []int {
 }
 
 // parseFileList converts a comma-separated file list to []string.
+// Empty strings from consecutive or trailing commas are filtered out.
 func parseFileList(s string) []string {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "-" {
 		return nil
 	}
 	parts := strings.Split(s, ",")
-	files := make([]string, len(parts))
-	for i, p := range parts {
-		files[i] = strings.TrimSpace(p)
+	files := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			files = append(files, p)
+		}
 	}
 	return files
 }
