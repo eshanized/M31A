@@ -25,7 +25,7 @@ func New() (Keychain, error) {
 
 func validateService(service string) error {
 	if !validServiceName.MatchString(service) {
-		return ErrNotImplemented
+		return ErrKeychainUnavailable
 	}
 	return nil
 }
@@ -61,11 +61,12 @@ func (k *macOSKeychain) Set(service, value string) error {
 	cmd := exec.Command(
 		"/usr/bin/security",
 		"add-generic-password",
-		"-U", // update if exists
+		"-U",
 		"-s", servicePrefix+service,
 		"-a", accountName,
-		"-w", value,
+		"-w", "-",
 	)
+	cmd.Stdin = strings.NewReader(value)
 	return cmd.Run()
 }
 
