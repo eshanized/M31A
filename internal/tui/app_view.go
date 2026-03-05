@@ -430,7 +430,7 @@ func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
 	if m.configModel == nil {
-		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, chrome.ContentWidth(), chrome.ContentHeight())
+		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, chrome.ContentWidth(), chrome.ContentHeight(), m.keychain)
 	} else {
 		m.configModel.cfg = m.config
 		m.configModel.width = chrome.ContentWidth()
