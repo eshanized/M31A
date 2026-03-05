@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/pkg/keychain"
 )
 
 // ─── Field types ──────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ type ConfigModel struct {
 	width    int
 	height   int
 	viewport viewport.Model
+	keychain keychain.Keychain
 
 	// Navigation
 	sections   []cfgSection
@@ -79,7 +81,7 @@ type ConfigModel struct {
 }
 
 // NewConfigModel creates a ConfigModel.
-func NewConfigModel(t theme.Theme, cfg *config.Config, cfgPath string, w, h int) *ConfigModel {
+func NewConfigModel(t theme.Theme, cfg *config.Config, cfgPath string, w, h int, kc keychain.Keychain) *ConfigModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
 	ti.Width = 50
@@ -95,6 +97,7 @@ func NewConfigModel(t theme.Theme, cfg *config.Config, cfgPath string, w, h int)
 		height:    h,
 		editInput: ti,
 		viewport:  vp,
+		keychain:  kc,
 	}
 	m.buildSections()
 	return m
@@ -775,7 +778,7 @@ func (m *ConfigModel) saveConfig() (*ConfigModel, tea.Cmd) {
 		m.statusTime = time.Now()
 		return m, nil
 	}
-	if err := m.cfg.Save(m.cfgPath); err != nil {
+	if err := m.cfg.SaveWithKeychain(m.cfgPath, m.keychain); err != nil {
 		m.saveErr = err.Error()
 		m.statusMsg = "✗ Save failed: " + err.Error()
 		m.statusTime = time.Now()
