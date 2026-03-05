@@ -253,6 +253,7 @@ func NewApp(
 
 	// Initialize sidebar
 	a.sidebarModel = NewSidebarModel(gitClient, tm.Current())
+	a.sidebarModel.SetShutdownContext(a.shutdownCtx)
 
 	return a
 }
@@ -308,7 +309,7 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 
 	// Persist config
 	if m.configPath != "" {
-		if err := m.config.Save(m.configPath); err != nil {
+		if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
 			slog.Warn("failed to save config after wizard", "error", err)
 			m.addToast("Failed to save configuration", "warning")
 		}
