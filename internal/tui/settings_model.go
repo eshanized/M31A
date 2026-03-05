@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -492,19 +491,7 @@ func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
 		s.statusTime = time.Now()
 		return s, nil
 	}
-	if s.keychain != nil {
-		if key := s.config.Provider.OpenRouter.APIKey; key != "" {
-			if err := s.keychain.Set("openrouter", key); err != nil {
-				slog.Warn("failed to save OpenRouter key to keychain", "error", err)
-			}
-		}
-		if key := s.config.Provider.Zen.APIKey; key != "" {
-			if err := s.keychain.Set("zen", key); err != nil {
-				slog.Warn("failed to save Zen key to keychain", "error", err)
-			}
-		}
-	}
-	if err := s.config.Save(s.configPath); err != nil {
+	if err := s.config.SaveWithKeychain(s.configPath, s.keychain); err != nil {
 		s.statusMsg = fmt.Sprintf("Save failed: %v", err)
 		s.statusTime = time.Now()
 		return s, nil
