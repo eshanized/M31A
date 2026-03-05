@@ -338,6 +338,9 @@ type SidebarFile struct {
 	Status string
 }
 
+// SidebarRefreshTickMsg is emitted periodically to trigger sidebar git status refresh.
+type SidebarRefreshTickMsg struct{}
+
 // SessionRenameMsg is emitted when the user triggers a rename on a session in the browser.
 type SessionRenameMsg struct {
 	SessionID string

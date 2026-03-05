@@ -1,5 +1,7 @@
 package tui
 
+import "time"
+
 // Width thresholds for responsive layout
 const (
 	// WidthUltraCompact is the minimum width for which only the REPL viewport
@@ -14,3 +16,6 @@ const (
 	// all keyboard hints, cost display, and all chrome elements.
 	WidthFull = 80
 )
+
+// SidebarRefreshInterval is the interval at which the sidebar polls for git status updates.
+const SidebarRefreshInterval = 5 * time.Second

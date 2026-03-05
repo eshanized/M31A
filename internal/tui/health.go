@@ -35,3 +35,16 @@ func HealthCheckCmd(ctx context.Context, p provider.LLMProvider, timeout time.Du
 		return HealthCheckResultMsg{Result: status}
 	}
 }
+
+// SidebarRefreshTicker returns a tea.Cmd that emits a SidebarRefreshTickMsg after the
+// given duration. The sidebar re-schedules it in response to the tick.
+func SidebarRefreshTicker(ctx context.Context, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return SidebarRefreshTickMsg{}
+	})
+}
+
+// NextSidebarRefreshTick returns a tea.Cmd for the next sidebar refresh tick.
+func NextSidebarRefreshTick(ctx context.Context, d time.Duration) tea.Cmd {
+	return SidebarRefreshTicker(ctx, d)
+}

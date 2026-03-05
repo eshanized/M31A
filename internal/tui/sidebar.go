@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -38,6 +39,9 @@ type SidebarModel struct {
 	sessionID string
 
 	loading bool
+
+	// Periodic refresh
+	shutdownCtx context.Context
 }
 
 // NewSidebarModel creates a new SidebarModel.
@@ -58,6 +62,11 @@ func (s *SidebarModel) SetVersion(v string) {
 // SetSessionID sets the active session ID for display.
 func (s *SidebarModel) SetSessionID(id string) {
 	s.sessionID = id
+}
+
+// SetShutdownContext sets the context for the periodic refresh ticker.
+func (s *SidebarModel) SetShutdownContext(ctx context.Context) {
+	s.shutdownCtx = ctx
 }
 
 // Toggle shows/hides the sidebar.
@@ -293,11 +302,26 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 		s.rebuildFlatFiles()
 		s.loading = false
 		return s, nil
+
+	case SidebarRefreshTickMsg:
+		if s.visible && s.shutdownCtx != nil {
+			select {
+			case <-s.shutdownCtx.Done():
+				return s, nil
+			default:
+			}
+			return s, tea.Batch(s.refreshCmd(), NextSidebarRefreshTick(s.shutdownCtx, SidebarRefreshInterval))
+		}
+		return s, nil
 	}
 
 	if s.visible && s.branch == "" && !s.loading {
 		s.loading = true
 		return s, s.refreshCmd()
+	}
+
+	if s.visible && s.shutdownCtx != nil && !s.loading {
+		return s, NextSidebarRefreshTick(s.shutdownCtx, SidebarRefreshInterval)
 	}
 
 	return s, nil
