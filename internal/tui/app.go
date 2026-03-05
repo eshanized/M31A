@@ -68,6 +68,7 @@ func (m *AppState) Init() tea.Cmd {
 		}
 		if m.sidebarModel != nil {
 			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
+			baseCmds = append(baseCmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
 		}
 
 		// Async provider+model enrichment: fetches the model catalog so the REPL
@@ -96,6 +97,7 @@ func (m *AppState) Init() tea.Cmd {
 	}
 	if m.sidebarModel != nil {
 		cmds = append(cmds, m.sidebarModel.refreshCmd())
+		cmds = append(cmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
 	}
 	return tea.Batch(cmds...)
 }
