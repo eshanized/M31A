@@ -359,7 +359,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.configModel.buildContent()
 		} else {
 			cw, ch := m.contentDimensions()
-			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
 		}
 		// Re-register providers with updated API keys from settings
 		m.reRegisterProvidersFromConfig()
@@ -1266,7 +1266,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		return nil
 	case ScreenConfig:
 		if m.configModel == nil {
-			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch)
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
 		} else {
 			// Sync live config pointer so edits made in settings are visible
 			m.configModel.cfg = m.config
