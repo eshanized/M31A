@@ -30,9 +30,18 @@ func makeAssistantMsg(content string) types.Message {
 
 // makeUserMsg creates a standard user message with proper rendering properties.
 func makeUserMsg(content string) types.Message {
+	return makeUserMsgWithSkip(content, false)
+}
+
+// makeUserMsgWithSkip creates a user message with an optional SkipForLLM flag.
+// When skipForLLM is true, the message is displayed in the REPL but excluded
+// from the LLM chat history. This prevents double-sending when sendChatMessage
+// replaces the display message with an enriched (or plain) version.
+func makeUserMsgWithSkip(content string, skipForLLM bool) types.Message {
 	return types.Message{
-		Role:    "user",
-		Content: content,
+		Role:       "user",
+		Content:    content,
+		SkipForLLM: skipForLLM,
 		Segments: []types.MessageSegment{{
 			Type:    "content",
 			Content: content,
