@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -9,14 +10,41 @@ import (
 
 // ─── Mention suggestion management ───────────────────────────────────────────
 
+// cursorPosition returns the absolute character offset of the cursor in the
+// textarea value. It computes this from the public Line()/LineInfo() API.
+func (m *ReplModel) cursorPosition() int {
+	val := m.textarea.Value()
+	row := m.textarea.Line()
+	info := m.textarea.LineInfo()
+
+	lines := strings.Split(val, "\n")
+	pos := 0
+	for i := 0; i < row && i < len(lines); i++ {
+		pos += len(lines[i]) + 1 // +1 for the '\n'
+	}
+	if row < len(lines) {
+		charOffset := info.CharOffset
+		if charOffset > len(lines[row]) {
+			charOffset = len(lines[row])
+		}
+		pos += charOffset
+	}
+	if pos > len(val) {
+		pos = len(val)
+	}
+	return pos
+}
+
 // updateMentionSuggestions inspects the current textarea value for an active
-// @-mention (the last unspaced "@" in the text) and updates mentionEntries.
+// @-mention and updates mentionEntries. The detection is cursor-aware: it finds
+// the last '@' at or before the cursor that is not separated by whitespace.
 func (m *ReplModel) updateMentionSuggestions() {
 	val := m.textarea.Value()
+	cursorPos := m.cursorPosition()
 
-	// Walk backwards from end to find "@" not separated by whitespace.
+	// Walk backwards from cursor position to find "@" not separated by whitespace.
 	atIdx := -1
-	for i := len(val) - 1; i >= 0; i-- {
+	for i := cursorPos - 1; i >= 0; i-- {
 		ch := val[i]
 		if ch == '@' {
 			atIdx = i
@@ -43,7 +71,7 @@ func (m *ReplModel) updateMentionSuggestions() {
 	}
 
 	m.mentionQuery = query
-	m.mentionStartCol = atIdx
+	m.mentionAtPos = atIdx
 
 	// Create or invalidate the completer if the cwd has changed.
 	if m.mentionCompleter == nil || m.mentionCompleter.cwd != m.cwd {
@@ -72,19 +100,9 @@ func (m *ReplModel) completeMention() {
 	entry := m.mentionEntries[m.mentionSelected]
 	val := m.textarea.Value()
 
-	// Locate the same "@" position we found during update.
-	atIdx := -1
-	for i := len(val) - 1; i >= 0; i-- {
-		ch := val[i]
-		if ch == '@' {
-			atIdx = i
-			break
-		}
-		if ch == ' ' || ch == '\t' || ch == '\n' {
-			break
-		}
-	}
-	if atIdx < 0 {
+	// Use the stored '@' position from updateMentionSuggestions.
+	atIdx := m.mentionAtPos
+	if atIdx < 0 || atIdx >= len(val) || val[atIdx] != '@' {
 		m.mentionVisible = false
 		return
 	}
@@ -130,12 +148,14 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 		pathStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
 		atStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+		metaStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 
 		if i == m.mentionSelected {
 			bg := t.Brand
 			nameStyle = nameStyle.Background(bg).Foreground(t.Background)
 			pathStyle = pathStyle.Background(bg).Foreground(t.Background)
 			atStyle = atStyle.Background(bg).Foreground(t.Background)
+			metaStyle = metaStyle.Background(bg).Foreground(t.Background)
 		}
 
 		// Render dir prefix (e.g. "internal/tui/") separately in muted colour.
@@ -145,9 +165,19 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 			dirPart = pathStyle.Render(dir + string(filepath.Separator))
 		}
 
+		// File metadata: size or line count
+		metaPart := ""
+		if !entry.IsDir {
+			if entry.LineCount > 0 {
+				metaPart = metaStyle.Render(fmt.Sprintf("  %dL", entry.LineCount))
+			} else if entry.Size > 0 {
+				metaPart = metaStyle.Render(fmt.Sprintf("  %s", humanSize(entry.Size)))
+			}
+		}
+
 		name := nameStyle.Render(icon + entry.DisplayName)
 		at := atStyle.Render("@")
-		line := "  " + at + dirPart + name
+		line := "  " + at + dirPart + name + metaPart
 
 		if lipgloss.Width(line) > width-4 {
 			line = TruncateWithEllipsis(line, width-4)
@@ -155,9 +185,31 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 		lines = append(lines, line)
 	}
 
+	// Footer with keyboard hints
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	footer := hintStyle.Render("  tab select · ↑↓ navigate · esc cancel")
+
+	content := strings.Join(lines, "\n") + "\n" + footer
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Width(width - 2).
-		Render(strings.Join(lines, "\n"))
+		Render(content)
+}
+
+// humanSize formats bytes into a human-readable string.
+func humanSize(b int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+	)
+	switch {
+	case b >= MB:
+		return fmt.Sprintf("%.1fMB", float64(b)/float64(MB))
+	case b >= KB:
+		return fmt.Sprintf("%.1fKB", float64(b)/float64(KB))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }
