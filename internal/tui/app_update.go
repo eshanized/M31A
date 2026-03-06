@@ -71,7 +71,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Slash command ─────────────────────────────────────────────────────────
 	case SlashCommandMsg:
-		cmds = append(cmds, m.handleSlashCommand(msg.Command))
+		cmds = append(cmds, m.handleSlashCommand(msg.Command, msg.AttachedFiles))
 
 	// ── Streaming ─────────────────────────────────────────────────────────────
 	case StreamMsg:
