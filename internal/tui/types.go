@@ -279,7 +279,8 @@ type StreamChunkMsg = types.StreamChunkMsg
 
 // SlashCommandMsg is emitted when the REPL user enters a slash command.
 type SlashCommandMsg struct {
-	Command string
+	Command       string
+	AttachedFiles int // number of files attached via @-mention (0 if none)
 }
 
 // ThemeChangedMsg is emitted when the theme is switched.
