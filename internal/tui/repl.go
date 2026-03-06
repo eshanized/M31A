@@ -291,8 +291,9 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.frecentHistory.Upsert(input)
 	}
 
-	// Display the original input (without injected file content)
-	m.messages = append(m.messages, makeUserMsg(input))
+	// Display the original input (without injected file content).
+	// Mark SkipForLLM so sendChatMessage replaces it instead of duplicating.
+	m.messages = append(m.messages, makeUserMsgWithSkip(input, true))
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
@@ -316,8 +317,9 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 	}
 
 	// Emit for routing
+	attachedCount := len(contexts)
 	return func() tea.Msg {
-		return SlashCommandMsg{Command: command}
+		return SlashCommandMsg{Command: command, AttachedFiles: attachedCount}
 	}
 }
 
