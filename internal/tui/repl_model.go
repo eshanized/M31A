@@ -107,7 +107,7 @@ type ReplModel struct {
 	mentionEntries   []MentionEntry
 	mentionSelected  int
 	mentionCompleter *MentionCompleter
-	mentionStartCol  int
+	mentionAtPos     int // absolute position of the '@' trigger in the textarea value
 
 	// Project info for the welcome screen (pushed from SidebarRefreshMsg)
 	changedFiles int
