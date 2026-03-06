@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // MentionEntry represents a file or directory that can be @-mentioned in the chat.
@@ -12,6 +13,8 @@ type MentionEntry struct {
 	Path        string // relative path from cwd
 	IsDir       bool
 	DisplayName string // last path component (filename or dir name)
+	Size        int64  // file size in bytes (0 for directories)
+	LineCount   int    // approximate line count (0 for directories)
 }
 
 // MentionContext holds a resolved @-mention path and the file's content.
@@ -23,10 +26,14 @@ type MentionContext struct {
 // MentionCompleter scans the working directory and provides fuzzy-filtered completions
 // for @-mention autocomplete in the REPL textarea.
 type MentionCompleter struct {
-	cwd     string
-	entries []MentionEntry
-	scanned bool
+	cwd      string
+	entries  []MentionEntry
+	scanned  bool
+	lastScan time.Time
 }
+
+// mentionCacheTTL is how long the completer cache is considered fresh.
+const mentionCacheTTL = 30 * time.Second
 
 // NewMentionCompleter creates a new completer rooted at the given directory.
 func NewMentionCompleter(cwd string) *MentionCompleter {
@@ -74,20 +81,28 @@ func (c *MentionCompleter) Scan() {
 		if info.IsDir() && mentionSkipDirs[base] {
 			return filepath.SkipDir
 		}
-		c.entries = append(c.entries, MentionEntry{
+		entry := MentionEntry{
 			Path:        rel,
 			IsDir:       info.IsDir(),
 			DisplayName: base,
-		})
+			Size:        info.Size(),
+		}
+		if !info.IsDir() && info.Size() < 100_000 {
+			if data, err := os.ReadFile(path); err == nil {
+				entry.LineCount = strings.Count(string(data), "\n") + 1
+			}
+		}
+		c.entries = append(c.entries, entry)
 		return nil
 	})
 	c.scanned = true
+	c.lastScan = time.Now()
 }
 
 // Filter returns up to 8 entries whose path/name matches query (fuzzy prefix + contains).
 // If query is empty, returns the first 8 top-level entries.
 func (c *MentionCompleter) Filter(query string) []MentionEntry {
-	if !c.scanned {
+	if !c.scanned || time.Since(c.lastScan) > mentionCacheTTL {
 		c.Scan()
 	}
 	if query == "" {
