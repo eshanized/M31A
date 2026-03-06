@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -28,11 +29,9 @@ type SidebarModel struct {
 	width   int
 	height  int // total terminal height passed from AppState
 
-	// File cursor for keyboard navigation
-	focused      bool
-	fileCursor   int
-	scrollOffset int              // first visible file index in the scrollable file section
-	flatFiles    []git.FileStatus // flattened list for cursor navigation
+	// File tree for navigation
+	focused bool
+	tree    *components.FileTree
 
 	// Optional fields for enhanced display
 	version   string
@@ -46,11 +45,13 @@ type SidebarModel struct {
 
 // NewSidebarModel creates a new SidebarModel.
 func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
+	root := &components.FileNode{Name: ".", Path: ".", IsDir: true}
 	return &SidebarModel{
 		git:     g,
 		theme:   t,
 		visible: true,
 		width:   sidebarDefaultWidth,
+		tree:    components.NewFileTree(root, t, sidebarDefaultWidth-4, 10),
 	}
 }
 
@@ -97,8 +98,8 @@ func (s *SidebarModel) Blur() {
 // ToggleFocus toggles sidebar keyboard focus.
 func (s *SidebarModel) ToggleFocus() {
 	s.focused = !s.focused
-	if s.focused && len(s.flatFiles) > 0 && s.fileCursor >= len(s.flatFiles) {
-		s.fileCursor = 0
+	if s.focused && s.tree != nil && s.tree.Cursor < 0 {
+		s.tree.Cursor = 0
 	}
 }
 
@@ -112,10 +113,20 @@ func (s *SidebarModel) GetWidth() int {
 
 // SelectedFile returns the currently selected file, or nil if none.
 func (s *SidebarModel) SelectedFile() *git.FileStatus {
-	if len(s.flatFiles) == 0 || s.fileCursor >= len(s.flatFiles) {
+	if s.tree == nil {
 		return nil
 	}
-	return &s.flatFiles[s.fileCursor]
+	node := s.tree.SelectedNode()
+	if node == nil || node.IsDir {
+		return nil
+	}
+	// Find the git status for this file
+	for _, f := range s.files {
+		if f.Path == node.Path {
+			return &f
+		}
+	}
+	return nil
 }
 
 // IncreaseWidth grows the sidebar width by 2, up to the max.
@@ -141,128 +152,42 @@ func (s *SidebarModel) SetTheme(t theme.Theme) {
 // constrain the file list and enable scrolling.
 func (s *SidebarModel) SetHeight(h int) {
 	s.height = h
+	if s.tree != nil {
+		treeHeight := h - sidebarFixedOverhead
+		if treeHeight < 3 {
+			treeHeight = 3
+		}
+		s.tree.Height = treeHeight
+	}
 }
 
 // HandleKey processes a key event when the sidebar is focused.
 // Returns a command to execute (e.g., show diff) or nil.
 func (s *SidebarModel) HandleKey(msg tea.KeyMsg) tea.Cmd {
+	if s.tree == nil {
+		return nil
+	}
 	switch msg.String() {
 	case "up", "k":
-		if s.fileCursor > 0 {
-			s.fileCursor--
-			s.clampScroll()
-		}
+		s.tree.MoveCursor(-1)
 	case "down", "j":
-		if s.fileCursor < len(s.flatFiles)-1 {
-			s.fileCursor++
-			s.clampScroll()
-		}
+		s.tree.MoveCursor(1)
 	case "home", "g":
-		s.fileCursor = 0
-		s.scrollOffset = 0
+		s.tree.Cursor = 0
 	case "end", "G":
-		if len(s.flatFiles) > 0 {
-			s.fileCursor = len(s.flatFiles) - 1
-			s.clampScroll()
-		}
-	case "enter":
-		if f := s.SelectedFile(); f != nil && s.git != nil {
-			file := *f
-			g := s.git
-			return func() tea.Msg {
-				diff, err := g.DiffFile(file.Path, file.Status)
-				if err != nil {
-					return ToastMsg{
-						Text: fmt.Sprintf("Cannot show diff for %s: %v", file.Path, err),
-						Type: "error",
-					}
-				}
-				if strings.TrimSpace(diff) == "" {
-					return ToastMsg{
-						Text: fmt.Sprintf("No diff available for %s", file.Path),
-						Type: "info",
-					}
-				}
-				return DiffScreenMsg{
-					Diff:  diff,
-					Title: fmt.Sprintf("git diff — %s", file.Path),
-					Lines: strings.Split(diff, "\n"),
-				}
-			}
-		}
+		s.tree.Cursor = len(s.tree.FlatList()) - 1
+	case "enter", " ":
+		s.tree.Toggle()
 	case "esc":
 		s.focused = false
 	}
 	return nil
 }
 
-// fileListViewport returns the number of lines available for the scrollable
-// file list area. Fixed chrome: header(2) + sep(1) + git-section(≈5) +
+// sidebarFixedOverhead is the number of non-file-list lines in the sidebar.
+// Fixed chrome: header(2) + sep(1) + git-section(≈5) +
 // files-label(2) + session-section(3) + shortcuts-section(6) = ~19 lines.
-// We use a conservative fixed overhead and fall back to showing all files
-// if height has not been set yet.
 const sidebarFixedOverhead = 20
-
-func (s *SidebarModel) fileListViewport() int {
-	if s.height <= sidebarFixedOverhead {
-		return 999 // height not set yet — show everything
-	}
-	vp := s.height - sidebarFixedOverhead
-	if vp < 3 {
-		vp = 3
-	}
-	return vp
-}
-
-// clampScroll adjusts scrollOffset so the cursor is always visible.
-func (s *SidebarModel) clampScroll() {
-	vp := s.fileListViewport()
-	if s.fileCursor < s.scrollOffset {
-		s.scrollOffset = s.fileCursor
-	}
-	if s.fileCursor >= s.scrollOffset+vp {
-		s.scrollOffset = s.fileCursor - vp + 1
-	}
-	if s.scrollOffset < 0 {
-		s.scrollOffset = 0
-	}
-}
-
-// rebuildFlatFiles rebuilds the flat file list for cursor navigation.
-func (s *SidebarModel) rebuildFlatFiles() {
-	s.flatFiles = make([]git.FileStatus, 0, len(s.files))
-	groups := groupFilesByStatus(s.files)
-	groupOrder := []struct {
-		key        string
-		statusChar string
-	}{
-		{"modified", "M"},
-		{"added", "A"},
-		{"deleted", "D"},
-		{"renamed", "R"},
-		{"untracked", "?"},
-		{"other", ""},
-	}
-	for _, g := range groupOrder {
-		paths, ok := groups[g.key]
-		if !ok {
-			continue
-		}
-		for _, p := range paths {
-			s.flatFiles = append(s.flatFiles, git.FileStatus{
-				Path:   p,
-				Status: g.statusChar,
-			})
-		}
-	}
-	// Clamp cursor
-	if s.fileCursor >= len(s.flatFiles) {
-		s.fileCursor = len(s.flatFiles) - 1
-	}
-	if s.fileCursor < 0 {
-		s.fileCursor = 0
-	}
-}
 
 // refreshCmd returns a tea.Cmd that loads git status asynchronously.
 func (s *SidebarModel) refreshCmd() tea.Cmd {
@@ -299,7 +224,10 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 			files = append(files, git.FileStatus{Status: f.Status, Path: f.Path})
 		}
 		s.files = files
-		s.rebuildFlatFiles()
+		// Rebuild the tree
+		root := buildSidebarTree(files)
+		s.tree.Root = root
+		s.tree.Expanded["."] = true
 		s.loading = false
 		return s, nil
 
@@ -430,7 +358,7 @@ func (s *SidebarModel) View() string {
 		Bold(true).
 		PaddingLeft(1).
 		Render("FILES")
-	if s.focused && len(s.flatFiles) > 0 {
+	if s.focused {
 		filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓ enter")
 	}
 	lines = append(lines, filesLabel)
@@ -443,118 +371,17 @@ func (s *SidebarModel) View() string {
 			Render("✓ working tree clean")
 		lines = append(lines, noFiles)
 	} else {
-		// Build all file-section rows first, then apply viewport clipping.
-		// groupFirstIdx stores the first flat-file index for each group row so we
-		// can decide whether to show the header during scrolling.
-		type fileRow struct {
-			text       string
-			isFile     bool // true = counts toward flat-file index
-			flatIdx    int  // index in s.flatFiles (-1 for group headers)
-			groupFirst int  // first flat-file index in this group (headers only)
-			groupLast  int  // last flat-file index in this group (headers only)
-		}
-		var allRows []fileRow
-
-		fileIdx := 0
-		groups := groupFilesByStatus(s.files)
-		type groupInfo struct {
-			key        string
-			statusChar string
-		}
-		groupOrder := []groupInfo{
-			{"modified", "M"},
-			{"added", "A"},
-			{"deleted", "D"},
-			{"renamed", "R"},
-			{"untracked", "?"},
-			{"other", ""},
-		}
-		for _, g := range groupOrder {
-			paths, ok := groups[g.key]
-			if !ok || len(paths) == 0 {
-				continue
-			}
-			groupStart := fileIdx
-			icon, color := fileStatusIcon(g.statusChar, t)
-			headerText := lipgloss.NewStyle().
-				Foreground(color).
-				PaddingLeft(1).
-				Render(icon + " " + g.key)
-			// Header row placeholder — groupLast filled in after iterating paths.
-			headerRowIdx := len(allRows)
-			allRows = append(allRows, fileRow{text: headerText, isFile: false, flatIdx: -1, groupFirst: groupStart})
-
-			for _, p := range paths {
-				name := TruncateMiddle(p, contentW-6)
-				style := lipgloss.NewStyle().
-					Foreground(t.TextSecondary).
-					PaddingLeft(4)
-
-				// Highlight cursor
-				if s.focused && fileIdx == s.fileCursor {
-					style = style.
-						Background(t.SelectionBg).
-						Foreground(t.Text).
-						Bold(true)
-					name = "▸ " + TruncateMiddle(p, contentW-8)
+		// Update tree dimensions and render
+		if s.tree != nil {
+			s.tree.Width = contentW
+			treeView := s.tree.View()
+			for _, line := range strings.Split(treeView, "\n") {
+				// Truncate each line to fit the sidebar width
+				if len([]rune(line)) > contentW {
+					line = string([]rune(line)[:contentW-1]) + "…"
 				}
-
-				allRows = append(allRows, fileRow{text: style.Render(name), isFile: true, flatIdx: fileIdx})
-				fileIdx++
+				lines = append(lines, line)
 			}
-			// Patch the header with the correct groupLast.
-			allRows[headerRowIdx] = fileRow{
-				text:       allRows[headerRowIdx].text,
-				isFile:     false,
-				flatIdx:    -1,
-				groupFirst: groupStart,
-				groupLast:  fileIdx - 1,
-			}
-		}
-
-		// ── Viewport clipping ─────────────────────────────────────────────────
-		// Map flat-file index → row index so we can find scroll boundaries.
-		vp := s.fileListViewport()
-		totalFiles := len(s.flatFiles)
-
-		// Determine the range of flat-file indices that are visible.
-		visStart := s.scrollOffset
-		visEnd := s.scrollOffset + vp - 1
-		if visEnd >= totalFiles {
-			visEnd = totalFiles - 1
-		}
-
-		// Scroll-up indicator
-		if visStart > 0 {
-			indicator := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(contentW / 2).
-				Render("▲")
-			lines = append(lines, indicator)
-		}
-
-		// Emit rows visible in the current scroll window.
-		// Group headers are included only when at least one of their files is visible.
-		for _, row := range allRows {
-			if row.isFile {
-				if row.flatIdx >= visStart && row.flatIdx <= visEnd {
-					lines = append(lines, row.text)
-				}
-			} else {
-				// Show this group header only if the group overlaps the visible window.
-				if row.groupLast >= visStart && row.groupFirst <= visEnd {
-					lines = append(lines, row.text)
-				}
-			}
-		}
-
-		// Scroll-down indicator
-		if visEnd < totalFiles-1 {
-			indicator := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(contentW / 2).
-				Render("▼")
-			lines = append(lines, indicator)
 		}
 	}
 
@@ -638,50 +465,6 @@ func (s *SidebarModel) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, panel, rightBorder)
 }
 
-// groupFilesByStatus groups file paths by their git status category.
-func groupFilesByStatus(files []git.FileStatus) map[string][]string {
-	groups := make(map[string][]string)
-	for _, f := range files {
-		group := statusGroup(f.Status)
-		groups[group] = append(groups[group], f.Path)
-	}
-	return groups
-}
-
-func statusGroup(status string) string {
-	switch {
-	case strings.Contains(status, "M"):
-		return "modified"
-	case strings.Contains(status, "A"):
-		return "added"
-	case strings.Contains(status, "D"):
-		return "deleted"
-	case strings.Contains(status, "R"):
-		return "renamed"
-	case strings.Contains(status, "?"):
-		return "untracked"
-	default:
-		return "other"
-	}
-}
-
-func fileStatusIcon(status string, t theme.Theme) (string, lipgloss.Color) {
-	switch {
-	case strings.Contains(status, "M"):
-		return "●", t.Warning
-	case strings.Contains(status, "A"):
-		return "+", t.Success
-	case strings.Contains(status, "D"):
-		return "−", t.Error
-	case strings.Contains(status, "R"):
-		return "→", t.TextSecondary
-	case strings.Contains(status, "?"):
-		return "?", t.TextMuted
-	default:
-		return "·", t.TextMuted
-	}
-}
-
 // countFileStatuses returns counts of modified, added, deleted, and untracked files.
 func countFileStatuses(files []git.FileStatus) (mod, add, del, untracked int) {
 	for _, f := range files {
@@ -697,4 +480,48 @@ func countFileStatuses(files []git.FileStatus) (mod, add, del, untracked int) {
 		}
 	}
 	return
+}
+
+// buildSidebarTree converts a flat list of git-tracked files into a tree structure.
+func buildSidebarTree(files []git.FileStatus) *components.FileNode {
+	root := &components.FileNode{
+		Name:  ".",
+		Path:  ".",
+		IsDir: true,
+	}
+
+	for _, f := range files {
+		parts := strings.Split(f.Path, "/")
+		current := root
+
+		for i, part := range parts {
+			isLast := i == len(parts)-1
+			nodePath := strings.Join(parts[:i+1], "/")
+
+			var child *components.FileNode
+			for _, c := range current.Children {
+				if c.Name == part {
+					child = c
+					break
+				}
+			}
+
+			if child == nil {
+				child = &components.FileNode{
+					Name:  part,
+					Path:  nodePath,
+					IsDir: !isLast,
+				}
+				current.Children = append(current.Children, child)
+			}
+
+			if isLast {
+				child.Status = f.Status
+			}
+
+			current = child
+		}
+	}
+
+	return root
 }
