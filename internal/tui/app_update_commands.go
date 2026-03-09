@@ -14,7 +14,7 @@ import (
 
 // handleSlashCommand routes slash commands to the command registry.
 // It also handles special chat messages (non-slash input).
-func (m *AppState) handleSlashCommand(input string) tea.Cmd {
+func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 	if input == "" {
 		return nil
 	}
@@ -68,15 +68,12 @@ func (m *AppState) handleSlashCommand(input string) tea.Cmd {
 
 	// Regular chat message — route to the LLM
 	// Show toast for @-mention file attachments
-	if strings.Contains(input, "--- Attached file context ---") {
-		count := strings.Count(input, "**File: ")
-		if count > 0 {
-			m.toasts = append(m.toasts, Toast{
-				Text:      fmt.Sprintf("Attached %d file(s) via @-mention", count),
-				Type:      "info",
-				CreatedAt: time.Now(),
-			})
-		}
+	if attachedFiles > 0 {
+		m.toasts = append(m.toasts, Toast{
+			Text:      fmt.Sprintf("Attached %d file(s) via @-mention", attachedFiles),
+			Type:      "info",
+			CreatedAt: time.Now(),
+		})
 	}
 	return m.sendChatMessage(input, t)
 }
@@ -167,11 +164,19 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 			}
 		}
 	}
-	// Append new user message
-	msgs = append(msgs, types.Message{
+
+	// Replace the display placeholder (SkipForLLM) added by handleEnterKey
+	// with the actual message to send to the LLM. This avoids duplicating
+	// the user message in the conversation history.
+	userMsg := types.Message{
 		Role:    "user",
 		Content: input,
-	})
+	}
+	if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+		msgs[len(msgs)-1] = userMsg
+	} else {
+		msgs = append(msgs, userMsg)
+	}
 
 	model := m.activeModel
 	req := provider.ChatRequest{
