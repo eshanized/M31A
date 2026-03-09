@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,14 +49,22 @@ func run() int {
 		printUsage(cmdRegistry)
 	}
 	flag.Parse()
-	if *helpFlag {
+	if *helpFlag || len(flag.Args()) > 0 && flag.Arg(0) == "help" {
 		flag.Usage()
 		return 0
 	}
 	if *versionFlag {
-		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		// Normalise runtime.Version() to remove build-tag noise (e.g. "X:nodwarf5")
+		goVer := runtime.Version()
+		if idx := strings.Index(goVer, ":"); idx != -1 {
+			goVer = goVer[:idx]
+		}
+		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, goVer)
 		return 0
 	}
+
+	// Load .env before logger to avoid goroutine race on os.Setenv (§2.3)
+	config.LoadDotEnv()
 
 	logger, cleanup, err := log.NewLogger(Version)
 	if err != nil {
@@ -191,6 +200,7 @@ func run() int {
 		Version,
 		themeMode,
 	)
+	app.SetCwd(workDir)
 
 	if kc != nil {
 		app.SetKeychain(kc)
@@ -225,7 +235,8 @@ func run() int {
 	// reference to avoid a registration cycle; children created by the
 	// factory get isChild=true and cannot spawn grandchildren in background.
 	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false)); err != nil {
-		logger.Warn("failed to register Agent tool on parent dispatcher", "error", err)
+		logger.Error("failed to register Agent tool on parent dispatcher", "error", err)
+		return 1
 	}
 	app.SetSubagentManager(subagentMgr)
 
@@ -252,18 +263,26 @@ func run() int {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sigDone := make(chan struct{})
 	go func() {
-		select {
-		case <-sigCh:
-			slog.Info("received shutdown signal, sending quit to TUI...")
-			p.Send(tea.QuitMsg{})
-			// H-24: Hard fallback — force exit after 5 seconds if TUI doesn't quit
+		for {
 			select {
+			case <-sigCh:
+				slog.Info("received shutdown signal, sending quit to TUI...")
+				p.Send(tea.QuitMsg{})
+				// H-24: Hard fallback — force exit after 5 seconds if TUI doesn't quit.
+				// Write a sentinel file so run() can detect an unclean shutdown
+				// and clean up stale session state on next launch.
+				select {
+				case <-sigDone:
+					return
+				case <-time.After(5 * time.Second):
+					slog.Warn("TUI did not exit within timeout, forcing exit")
+					sentinel := filepath.Join(filepath.Dir(configPath), ".force-exit")
+					_ = os.WriteFile(sentinel, []byte("force-exit"), 0o644)
+					os.Exit(1)
+				}
 			case <-sigDone:
-			case <-time.After(5 * time.Second):
-				slog.Warn("TUI did not exit within timeout, forcing exit")
-				os.Exit(1)
+				return
 			}
-		case <-sigDone:
 		}
 	}()
 
@@ -273,6 +292,8 @@ func run() int {
 		return 1
 	}
 
+	// Cancel the signal goroutine before Shutdown to prevent the 5-second
+	// os.Exit(1) timer from racing with cleanup.
 	close(sigDone)
 	app.Shutdown()
 	return 0
