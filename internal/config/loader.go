@@ -99,17 +99,26 @@ func Load(path string) (*Config, error) {
 
 	// Step 3: Layer 2 — Global config (~/.m31a/config.toml)
 	if path != "" {
-		_, err := toml.DecodeFile(path, cfg)
+		meta, err := toml.DecodeFile(path, cfg)
 		if err != nil {
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("decode global config %s: %w", path, err)
 			}
 			// Missing global config is not an error
+		} else {
+			// Warn on unknown TOML keys so typos like [providr] don't silently fail.
+			knownKeys := knownConfigKeys()
+			for _, key := range meta.Keys() {
+				k := key.String()
+				if !knownKeys[k] {
+					slog.Warn("unknown config key, check for typos", "key", k, "file", path)
+				}
+			}
 		}
 	}
 
 	// Step 3.5: Auto-load .env file from cwd (I1)
-	loadDotEnv()
+	LoadDotEnv()
 
 	// Step 4: Layer 3 — Environment variable overrides (C2)
 	if theme := os.Getenv("M31A_THEME"); theme != "" {
@@ -152,11 +161,24 @@ func Load(path string) (*Config, error) {
 
 	// Step 6: Variable substitution (before validation so ${VAR} in
 	// enum fields like theme or permissions.default_mode resolves first)
-	applyVarSubstitution(cfg)
+	unresolvedVars := applyVarSubstitution(cfg)
 
 	// Step 7: Validation
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
+	// Check for unresolved ${VAR} patterns — these are almost certainly
+	// user mistakes (typo in env var name, forgot to export, etc.).
+	if len(unresolvedVars) > 0 {
+		var b strings.Builder
+		b.WriteString("Unresolved environment variable references in config:\n")
+		for _, msg := range unresolvedVars {
+			b.WriteString("- ")
+			b.WriteString(msg)
+			b.WriteString("\n")
+		}
+		return nil, fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
 
 	// TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
@@ -399,7 +421,12 @@ func validateConfig(cfg *Config) error {
 	}
 
 	// UI
-	if cfg.UI.Theme != "" && cfg.UI.Theme != "dark" && cfg.UI.Theme != "light" && cfg.UI.Theme != "auto" {
+	if cfg.UI.Theme == "" {
+		// Treat empty theme as "dark" (the documented default). The first-run
+		// wizard writes theme = "" which would otherwise fail validation.
+		cfg.UI.Theme = "dark"
+	}
+	if cfg.UI.Theme != "dark" && cfg.UI.Theme != "light" && cfg.UI.Theme != "auto" {
 		errs = append(errs, ValidationError{
 			Field:        "ui.theme",
 			ExpectedType: "\"dark\", \"light\", or \"auto\"",
@@ -562,39 +589,73 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
+// knownConfigKeys returns the set of known top-level TOML keys for warning
+// on unknown keys. This is a best-effort set; sub-keys are not checked.
+func knownConfigKeys() map[string]bool {
+	return map[string]bool{
+		"provider": true, "model": true, "ui": true, "permissions": true,
+		"features": true, "tools": true, "git": true, "ledger": true,
+		"ghost": true, "agents": true,
+		// Common typos / sub-tables that appear in user configs
+		"openrouter": true, "zen": true,
+	}
+}
+
 var varRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // applyVarSubstitution walks all string fields in cfg and replaces ${VAR}
 // patterns with their corresponding environment variable values.
-func applyVarSubstitution(cfg *Config) {
-	cfg.Provider.Default = substituteVars(cfg.Provider.Default)
-	cfg.Provider.OpenRouter.APIKey = substituteVars(cfg.Provider.OpenRouter.APIKey)
-	cfg.Provider.Zen.APIKey = substituteVars(cfg.Provider.Zen.APIKey)
-	cfg.Model.Default = substituteVars(cfg.Model.Default)
-	cfg.UI.Theme = substituteVars(cfg.UI.Theme)
-	cfg.Permissions.DefaultMode = substituteVars(cfg.Permissions.DefaultMode)
+// Returns a list of unresolved variable names (still containing ${...} patterns).
+func applyVarSubstitution(cfg *Config) []string {
+	var unresolved []string
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Provider.Default, "provider.default")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Provider.OpenRouter.APIKey, "provider.openrouter.api_key")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Provider.Zen.APIKey, "provider.zen.api_key")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Model.Default, "model.default")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.UI.Theme, "ui.theme")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.DefaultMode, "permissions.default_mode")...)
 
 	for i := range cfg.Permissions.Rules {
-		cfg.Permissions.Rules[i].Tool = substituteVars(cfg.Permissions.Rules[i].Tool)
-		cfg.Permissions.Rules[i].Pattern = substituteVars(cfg.Permissions.Rules[i].Pattern)
-		cfg.Permissions.Rules[i].Action = substituteVars(cfg.Permissions.Rules[i].Action)
+		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Tool, fmt.Sprintf("permissions.rules[%d].tool", i))...)
+		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Pattern, fmt.Sprintf("permissions.rules[%d].pattern", i))...)
+		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Action, fmt.Sprintf("permissions.rules[%d].action", i))...)
 	}
 
 	for name := range cfg.Permissions.Agents {
 		agent := cfg.Permissions.Agents[name]
-		agent.DefaultAction = substituteVars(agent.DefaultAction)
+		unresolved = append(unresolved, substituteVarsReport(&agent.DefaultAction, fmt.Sprintf("permissions.agents.%s.default_action", name))...)
 		for j := range agent.Rules {
-			agent.Rules[j].Tool = substituteVars(agent.Rules[j].Tool)
-			agent.Rules[j].Pattern = substituteVars(agent.Rules[j].Pattern)
-			agent.Rules[j].Action = substituteVars(agent.Rules[j].Action)
+			unresolved = append(unresolved, substituteVarsReport(&agent.Rules[j].Tool, fmt.Sprintf("permissions.agents.%s.rules[%d].tool", name, j))...)
+			unresolved = append(unresolved, substituteVarsReport(&agent.Rules[j].Pattern, fmt.Sprintf("permissions.agents.%s.rules[%d].pattern", name, j))...)
+			unresolved = append(unresolved, substituteVarsReport(&agent.Rules[j].Action, fmt.Sprintf("permissions.agents.%s.rules[%d].action", name, j))...)
 		}
 		cfg.Permissions.Agents[name] = agent
 	}
+	return unresolved
+}
+
+// substituteVarsReport replaces ${VAR} patterns and returns a list of
+// unresolved variable names for the given field.
+func substituteVarsReport(field *string, fieldName string) []string {
+	if *field == "" || !strings.Contains(*field, "${") {
+		return nil
+	}
+	var unresolved []string
+	*field = varRe.ReplaceAllStringFunc(*field, func(match string) string {
+		name := match[2 : len(match)-1]
+		if val, ok := os.LookupEnv(name); ok {
+			return val
+		}
+		slog.Warn("unresolved variable in config, preserving pattern", "variable", name, "field", fieldName)
+		unresolved = append(unresolved, fmt.Sprintf("%s references unset variable ${%s}", fieldName, name))
+		return match
+	})
+	return unresolved
 }
 
 // substituteVars replaces ${VAR} patterns in s with the value of the
 // environment variable VAR. If the variable is not set, the original ${VAR}
-// pattern is preserved as-is.
+// pattern is preserved as-is and a warning is logged.
 func substituteVars(s string) string {
 	if s == "" || !strings.Contains(s, "${") {
 		return s
@@ -604,7 +665,7 @@ func substituteVars(s string) string {
 		if val, ok := os.LookupEnv(name); ok {
 			return val
 		}
-		slog.Warn("unresolved variable in config, preserving pattern", "variable", name)
+		slog.Warn("unresolved variable in config, preserving pattern", "variable", name, "hint", "set the environment variable or replace the ${...} with a literal value")
 		return match
 	})
 }
@@ -684,19 +745,23 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 			}
 		}
 
-		// Only clear keys from config file if both keys were saved to keychain (or were empty)
+		// Clear keys from config file only for providers that were successfully
+		// saved to keychain. Providers that failed keychain storage keep their
+		// keys in the config file as fallback.
+		if openRouterSaved {
+			cfgCopy.Provider.OpenRouter.APIKey = ""
+		}
+		if zenSaved {
+			cfgCopy.Provider.Zen.APIKey = ""
+		}
 		if openRouterSaved && zenSaved {
 			persistKeys = false
 		} else {
-			slog.Warn("keychain unavailable or save failed; persisting API keys to config file as fallback")
+			slog.Warn("keychain unavailable or save failed for some providers; persisting API keys to config file as fallback")
 		}
 	}
 
-	if !persistKeys {
-		// Don't persist API keys — they're in the keychain
-		cfgCopy.Provider.OpenRouter.APIKey = ""
-		cfgCopy.Provider.Zen.APIKey = ""
-	} else {
+	if persistKeys {
 		// Keys will be persisted to config file as fallback
 		slog.Info("API keys will be stored in config file (keychain unavailable)")
 	}
@@ -771,6 +836,8 @@ type ConfigReloadMsg struct {
 
 // WatchConfig polls the config file for changes and sends ConfigReloadMsg
 // to the provided channel when a change is detected. Runs until ctx is cancelled.
+// Uses a buffered channel to reduce dropped messages when the TUI's Update()
+// loop is briefly busy.
 func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 	var lastModTime time.Time
 	if info, err := os.Stat(path); err == nil {
@@ -790,12 +857,21 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 			if info.ModTime().After(lastModTime) {
 				lastModTime = info.ModTime()
 				cfg, err := Load(path)
+				// Try sending with a short timeout to avoid dropping messages
+				// when the TUI is briefly busy rendering.
 				select {
 				case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
 				case <-ctx.Done():
 					return
-				default:
-					slog.Warn("config reload message dropped: receiver not ready")
+				case <-time.After(100 * time.Millisecond):
+					// Retry once after a brief wait
+					select {
+					case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+					case <-ctx.Done():
+						return
+					default:
+						slog.Warn("config reload message dropped: receiver not ready after retry")
+					}
 				}
 			}
 		}
@@ -813,12 +889,12 @@ func DefaultGitConfig() GitConfig {
 	}
 }
 
-// loadDotEnv reads a .env file from the current working directory and sets
+// LoadDotEnv reads a .env file from the current working directory and sets
 // environment variables. Does not override already-set variables.
 //
-// NOTE: os.Setenv is not goroutine-safe. This is safe because it is called
-// once during Load() at startup, before any concurrent access begins.
-func loadDotEnv() {
+// This must be called before any goroutines that read os.Environ() are started
+// (e.g., before logger initialization) because os.Setenv is not goroutine-safe.
+func LoadDotEnv() {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return
