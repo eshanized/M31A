@@ -11,6 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/ledger"
@@ -47,21 +48,22 @@ type CommandHandler func(args []string, ctx CommandContext) CommandResult
 
 // CommandContext carries shared resources that command handlers need.
 type CommandContext struct {
-	Ctx            context.Context
-	Registry       *provider.Registry
-	SessionManager *session.Manager
-	SessionID      string
-	Config         *config.Config
-	ConfigPath     string
-	Dispatcher     *tools.Dispatcher
-	Git            *git.Git
-	Ledger         *ledger.Ledger
-	Rollback       *rollback.Rollback
-	AutoDream      *autodream.Consolidator
-	WorkflowEngine workflowEngineInterface
-	CmdRegistry    *CommandRegistry
-	ClearMessages  func()
-	CopyError      func() tea.Cmd
+	Ctx             context.Context
+	Registry        *provider.Registry
+	SessionManager  *session.Manager
+	SessionID       string
+	Config          *config.Config
+	ConfigPath      string
+	Dispatcher      *tools.Dispatcher
+	Git             *git.Git
+	Ledger          *ledger.Ledger
+	Rollback        *rollback.Rollback
+	AutoDream       *autodream.Consolidator
+	WorkflowEngine  workflowEngineInterface
+	CmdRegistry     *CommandRegistry
+	SubagentManager *subagent.Manager
+	ClearMessages   func()
+	CopyError       func() tea.Cmd
 }
 
 // CommandRegistry maps slash command names to handlers and descriptions.
@@ -282,6 +284,10 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("themes", handleThemes, "Open theme picker")
 	r.Register("notifications", handleNotifications, "Open notification center")
 	r.Register("files", handleFiles, "Open file explorer")
+
+	// Subagents
+	r.Register("agent", handleAgent, "Spawn a parallel subagent (or list active)")
+	r.Register("agent-cancel", handleAgentCancel, "Cancel a running subagent")
 
 	return r
 }

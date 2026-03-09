@@ -201,6 +201,9 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 
 	// Keyboard hints
 	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+x leader"}
+	if m.screen == ScreenSettings {
+		info.KeyboardHints = []string{"s save global", "L save local", "q back"}
+	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
 	}
@@ -316,8 +319,41 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 
 func (m *AppState) renderREPLContent(chrome layout.PageChrome) string {
 	m.ensureReplModel()
+
+	// Subagent panel: reserve its rendered height from the REPL budget.
+	var panel string
+	panelHeight := 0
+	if m.subagentsVisible && m.subagentsModel != nil && !m.subagentsModel.IsEmpty() {
+		m.subagentsModel.SetSize(chrome.ContentWidth(), maxInt(4, chrome.ContentHeight()/3))
+		m.subagentsModel.SetTheme(m.themeManager.Current())
+		panel = m.subagentsModel.View()
+		// Count the rendered rows (lines) so the REPL knows how much to shrink.
+		for _, r := range panel {
+			if r == '\n' {
+				panelHeight++
+			}
+		}
+		if panelHeight > chrome.ContentHeight()-4 {
+			panelHeight = chrome.ContentHeight() - 4
+		}
+	}
+	replH := chrome.ContentHeight() - panelHeight
+	if replH < 4 {
+		replH = 4
+	}
 	m.syncReplSize(chrome)
-	return m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
+	replContent := m.replModel.ViewContent(replH, chrome.ContentWidth())
+	if panel == "" {
+		return replContent
+	}
+	return panel + "\n" + replContent
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {

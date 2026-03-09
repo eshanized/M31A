@@ -10,6 +10,7 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -421,6 +422,46 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Propagate changed-file count so the welcome screen project card is accurate
 		if m.replModel != nil {
 			m.replModel.SetChangedFiles(len(msg.Files))
+		}
+
+	// ── Subagent events ───────────────────────────────────────────────────────
+	case SubagentEventMsg:
+		if m.subagentsModel != nil {
+			m.subagentsModel.ApplyEvent(msg.Event)
+			// Auto-show the panel on first activity so the user sees progress.
+			if msg.Event.Type == subagent.EventSpawned {
+				m.subagentsVisible = true
+			}
+		}
+		// Surface terminal events in the REPL so the parent conversation
+		// has access to subagent summaries without opening the panel.
+		if m.replModel != nil {
+			switch msg.Event.Type {
+			case subagent.EventDone:
+				if msg.Event.Summary != "" {
+					label := msg.Event.Name
+					if label == "" {
+						label = msg.Event.AgentID
+					}
+					m.replModel.AddMessage(makeAssistantMsg(
+						fmt.Sprintf("**Subagent %s done** (%d tools, %d+%d tokens)\n\n%s",
+							label, msg.Event.ToolCalls, msg.Event.InputToks, msg.Event.OutputToks,
+							msg.Event.Summary),
+					))
+				}
+			case subagent.EventError:
+				label := msg.Event.Name
+				if label == "" {
+					label = msg.Event.AgentID
+				}
+				m.replModel.AddMessage(makeAssistantMsg(
+					fmt.Sprintf("**Subagent %s errored:** %s", label, msg.Event.Error),
+				))
+			}
+		}
+		// Re-register the listener so the next event is delivered.
+		if m.subagentManager != nil {
+			cmds = append(cmds, subagentListenerCmd(m.shutdownCtx, m.subagentManager.Events()))
 		}
 
 	// ── Diff screen ───────────────────────────────────────────────────────────
@@ -1371,6 +1412,11 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return m.navigateToScreen(ScreenNotifications)
 	case "open_files":
 		return m.navigateToScreen(ScreenFileExplorer)
+	case "toggle_subagents":
+		if m.subagentsModel != nil && !m.subagentsModel.IsEmpty() {
+			m.subagentsVisible = !m.subagentsVisible
+		}
+		return nil
 	case "toggle_sidebar":
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()

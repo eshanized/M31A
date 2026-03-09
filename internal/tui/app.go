@@ -66,6 +66,9 @@ func (m *AppState) Init() tea.Cmd {
 			baseCmds = append(baseCmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
 			baseCmds = append(baseCmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))
 		}
+		if m.subagentManager != nil {
+			baseCmds = append(baseCmds, subagentListenerCmd(m.shutdownCtx, m.subagentManager.Events()))
+		}
 		if m.sidebarModel != nil {
 			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
 			baseCmds = append(baseCmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
@@ -95,6 +98,9 @@ func (m *AppState) Init() tea.Cmd {
 		cmds = append(cmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
 		cmds = append(cmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))
 	}
+	if m.subagentManager != nil {
+		cmds = append(cmds, subagentListenerCmd(m.shutdownCtx, m.subagentManager.Events()))
+	}
 	if m.sidebarModel != nil {
 		cmds = append(cmds, m.sidebarModel.refreshCmd())
 		cmds = append(cmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
@@ -117,6 +123,9 @@ func (m *AppState) Shutdown() {
 	}
 	if m.dispatcher != nil {
 		m.dispatcher.Stop()
+	}
+	if m.subagentManager != nil {
+		m.subagentManager.Shutdown(context.Background())
 	}
 }
 

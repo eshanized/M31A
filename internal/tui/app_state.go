@@ -11,6 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -177,6 +178,11 @@ type AppState struct {
 
 	// Resume session ID set at startup (C3)
 	resumeSessionID string
+
+	// Subagents (parallel child agents with full tool access in own worktrees)
+	subagentManager  *subagent.Manager
+	subagentsModel   *SubagentsModel
+	subagentsVisible bool
 }
 
 // SetResumeSessionID configures the app to auto-resume a session on startup.
@@ -187,6 +193,16 @@ func (a *AppState) SetResumeSessionID(id string) {
 // SetKeychain configures the OS keychain for secure API key storage.
 func (a *AppState) SetKeychain(kc keychain.Keychain) {
 	a.keychain = kc
+}
+
+// SetSubagentManager wires the parallel-subagent manager into the app.
+// Must be called before the first tea.Program.Run; the manager's event
+// channel is drained starting from Init().
+func (a *AppState) SetSubagentManager(m *subagent.Manager) {
+	a.subagentManager = m
+	if m != nil {
+		a.subagentsModel = NewSubagentsModel(a.themeManager.Current())
+	}
 }
 
 // NewApp creates a new AppState.
@@ -266,6 +282,18 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 		m.config = config.DefaultConfig()
 	}
 
+	// Copy wizard-collected API keys into the config struct so that
+	// SaveWithKeychain can persist them (to keychain or config file).
+	// Without this, m.config still has empty keys and the save is a no-op.
+	for _, entry := range msg.Providers {
+		switch entry.ID {
+		case "openrouter":
+			m.config.Provider.OpenRouter.APIKey = entry.APIKey
+		case "zen":
+			m.config.Provider.Zen.APIKey = entry.APIKey
+		}
+	}
+
 	// Register each provider with its collected API key
 	for _, entry := range msg.Providers {
 		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey, m.version); err != nil {
@@ -283,15 +311,6 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 		m.config.Provider.Default = msg.DefaultProvider
 	}
 
-	// Save API keys to keychain if requested
-	if msg.SaveKeychain && m.keychain != nil {
-		for _, entry := range msg.Providers {
-			if err := m.keychain.Set(entry.ID, entry.APIKey); err != nil {
-				slog.Warn("failed to save API key to keychain", "provider", entry.ID, "error", err)
-			}
-		}
-	}
-
 	// Set the model
 	if msg.ModelID != "" {
 		m.config.Model.Default = msg.ModelID
@@ -307,15 +326,26 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 		}
 	}
 
-	// Persist config
+	// Persist config (SaveWithKeychain handles keychain + file fallback).
+	// If the user unchecked "save to keychain", pass nil so keys go to file only.
 	if m.configPath != "" {
-		if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
+		kc := m.keychain
+		if !msg.SaveKeychain {
+			kc = nil
+		}
+		if err := m.config.SaveWithKeychain(m.configPath, kc); err != nil {
 			slog.Warn("failed to save config after wizard", "error", err)
 			m.addToast("Failed to save configuration", "warning")
 		}
 	}
 
-	// Start a new session
+	// Sync REPL provider+model so chat works immediately
 	m.screen = ScreenREPL
-	return m.startNewSession()
+	m.ensureReplModel()
+	var cmds []tea.Cmd
+	if providerCmd := m.syncReplProvider(m.sessionID); providerCmd != nil {
+		cmds = append(cmds, providerCmd)
+	}
+	cmds = append(cmds, m.startNewSession())
+	return tea.Batch(cmds...)
 }

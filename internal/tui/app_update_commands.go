@@ -33,19 +33,20 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 	if strings.HasPrefix(input, "/") {
 		if m.cmdRegistry != nil {
 			ctx := CommandContext{
-				Ctx:            m.shutdownCtx,
-				Registry:       m.registry,
-				SessionManager: m.sessionManager,
-				SessionID:      m.sessionID,
-				Config:         m.config,
-				ConfigPath:     m.configPath,
-				Dispatcher:     m.dispatcher,
-				Git:            m.git,
-				Ledger:         m.ledger,
-				Rollback:       m.rollback,
-				AutoDream:      m.autoDream,
-				WorkflowEngine: m.workflowEngine,
-				CmdRegistry:    m.cmdRegistry,
+				Ctx:             m.shutdownCtx,
+				Registry:        m.registry,
+				SessionManager:  m.sessionManager,
+				SessionID:       m.sessionID,
+				Config:          m.config,
+				ConfigPath:      m.configPath,
+				Dispatcher:      m.dispatcher,
+				Git:             m.git,
+				Ledger:          m.ledger,
+				Rollback:        m.rollback,
+				AutoDream:       m.autoDream,
+				WorkflowEngine:  m.workflowEngine,
+				CmdRegistry:     m.cmdRegistry,
+				SubagentManager: m.subagentManager,
 			}
 			if m.replModel != nil {
 				ctx.ClearMessages = m.replModel.ClearMessages

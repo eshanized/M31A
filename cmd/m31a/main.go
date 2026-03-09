@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/eshanized/M31A/internal/log"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -192,6 +194,44 @@ func run() int {
 
 	if kc != nil {
 		app.SetKeychain(kc)
+	}
+
+	// Parallel subagents: manager + dispatcher integration.
+	// Each subagent gets its own dispatcher + worktree; the parent dispatcher
+	// exposes the Agent tool so the LLM can spawn children directly.
+	var activeModelForSubagents *types.ModelInfo
+	if cfg != nil && cfg.Model.Default != "" && registry != nil {
+		if p := registry.ActiveProvider(); p != nil {
+			if info, err := p.GetModel(cfg.Model.Default); err == nil {
+				activeModelForSubagents = info
+			}
+		}
+		if activeModelForSubagents == nil {
+			activeModelForSubagents = &types.ModelInfo{ID: cfg.Model.Default}
+		}
+	}
+	subagentMgr := subagent.NewManager(subagent.Dependencies{
+		WorkDir:     workDir,
+		Registry:    registry,
+		ActiveModel: activeModelForSubagents,
+		Logger:      logger,
+		Worktrees:   &subagent.GitWorktrees{},
+		NewDispatcher: tools.NewDispatcherFactory(
+			backupDir, sessionsDir, &cfg.Permissions, nil,
+		),
+	})
+	// Register the Agent tool on the parent dispatcher (non-child so it can
+	// spawn in background). The factory passes nil for the child-side manager
+	// reference to avoid a registration cycle; children created by the
+	// factory get isChild=true and cannot spawn grandchildren in background.
+	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false)); err != nil {
+		logger.Warn("failed to register Agent tool on parent dispatcher", "error", err)
+	}
+	app.SetSubagentManager(subagentMgr)
+
+	// Best-effort sweep of stale agent worktrees/branches from prior crashes.
+	if err := subagent.Sweep(context.Background(), workDir); err != nil {
+		logger.Warn("subagent worktree sweep failed", "error", err)
 	}
 
 	// Resume on startup (C3): if configured, auto-resume the most recent session
