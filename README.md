@@ -15,7 +15,7 @@ M31A is a terminal-based AI coding assistant written in Go. It uses a six-phase 
 - **Model arbitrage** for cost optimization
 - **Session persistence** and resume
 - **OS keychain integration** (Linux/macOS/Windows)
-- **16 slash commands** for session, provider, and workflow control
+- **16 core slash commands** for session, provider, and workflow control (45+ total including aliases)
 
 ## Quick Start
 
