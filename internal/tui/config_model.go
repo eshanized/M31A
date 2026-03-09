@@ -672,6 +672,9 @@ func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
 	case "s":
 		return m.saveConfig()
 
+	case "L":
+		return m.saveLocalConfig()
+
 	case "r":
 		m.buildSections()
 		m.statusMsg = "↺ Config reloaded from memory"
@@ -792,6 +795,31 @@ func (m *ConfigModel) saveConfig() (*ConfigModel, tea.Cmd) {
 	return m, func() tea.Msg { return ConfigSavedMsg{} }
 }
 
+func (m *ConfigModel) saveLocalConfig() (*ConfigModel, tea.Cmd) {
+	if m.cfg == nil {
+		m.statusMsg = "✗ No config loaded"
+		m.statusTime = time.Now()
+		return m, nil
+	}
+	localPath, err := config.LocalConfigPath()
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("✗ Cannot determine working directory: %v", err)
+		m.statusTime = time.Now()
+		return m, nil
+	}
+	if err := m.cfg.SaveProject(localPath); err != nil {
+		m.saveErr = err.Error()
+		m.statusMsg = "✗ Local save failed: " + err.Error()
+		m.statusTime = time.Now()
+		return m, nil
+	}
+	m.dirty = false
+	m.saveErr = ""
+	m.statusMsg = fmt.Sprintf("✓ Project config saved to %s", localPath)
+	m.statusTime = time.Now()
+	return m, func() tea.Msg { return ConfigSavedMsg{} }
+}
+
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 func (m *ConfigModel) View() string {
@@ -824,6 +852,8 @@ func (m *ConfigModel) View() string {
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render(" section  "),
 		lipgloss.NewStyle().Foreground(t.Brand).Render("s"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render(" save  "),
+		lipgloss.NewStyle().Foreground(t.Brand).Render("L"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render(" save local  "),
 		lipgloss.NewStyle().Foreground(t.Brand).Render("q"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render(" close"),
 	}

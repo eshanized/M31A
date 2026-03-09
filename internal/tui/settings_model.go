@@ -270,6 +270,8 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 			return s.activateField()
 		case "s":
 			return s.saveConfig()
+		case "L":
+			return s.saveLocalConfig()
 		case "r":
 			if s.activeTab == TabProvider {
 				return s, s.startHealthChecks()
@@ -497,6 +499,28 @@ func (s *SettingsModel) saveConfig() (*SettingsModel, tea.Cmd) {
 		return s, nil
 	}
 	s.statusMsg = "✓ Config saved to " + s.configPath
+	s.statusTime = time.Now()
+	return s, func() tea.Msg { return SettingsSavedMsg{} }
+}
+
+func (s *SettingsModel) saveLocalConfig() (*SettingsModel, tea.Cmd) {
+	if s.config == nil {
+		s.statusMsg = "No config loaded."
+		s.statusTime = time.Now()
+		return s, nil
+	}
+	localPath, err := config.LocalConfigPath()
+	if err != nil {
+		s.statusMsg = fmt.Sprintf("Cannot determine working directory: %v", err)
+		s.statusTime = time.Now()
+		return s, nil
+	}
+	if err := s.config.SaveProject(localPath); err != nil {
+		s.statusMsg = fmt.Sprintf("Local save failed: %v", err)
+		s.statusTime = time.Now()
+		return s, nil
+	}
+	s.statusMsg = "✓ Project config saved to " + localPath
 	s.statusTime = time.Now()
 	return s, func() tea.Msg { return SettingsSavedMsg{} }
 }

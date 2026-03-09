@@ -188,6 +188,61 @@ func findProjectConfig(cwd string) string {
 	return ""
 }
 
+// FindProjectConfigPath returns the path to a project-level m31a.toml if one
+// exists within max walk depth of cwd. Returns "" if not found.
+func FindProjectConfigPath(cwd string) string {
+	return findProjectConfig(cwd)
+}
+
+// LocalConfigPath returns the path where a new project-level m31a.toml should
+// be created (cwd/m31a.toml).
+func LocalConfigPath() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cwd, "m31a.toml"), nil
+}
+
+// SaveProject writes the config to a project-level m31a.toml in the working
+// directory. API keys are always cleared from project config for security —
+// they belong in the global config or keychain.
+func (c *Config) SaveProject(path string) error {
+	cfgCopy := *c
+	cfgCopy.Provider.OpenRouter.APIKey = ""
+	cfgCopy.Provider.Zen.APIKey = ""
+
+	if c.Permissions.Rules != nil {
+		rulesCopy := make([]PermissionRule, len(c.Permissions.Rules))
+		copy(rulesCopy, c.Permissions.Rules)
+		cfgCopy.Permissions.Rules = rulesCopy
+	}
+	if c.Permissions.Agents != nil {
+		agentsCopy := make(map[string]PermissionsAgentConfig, len(c.Permissions.Agents))
+		for k, v := range c.Permissions.Agents {
+			agentRulesCopy := make([]PermissionRule, len(v.Rules))
+			copy(agentRulesCopy, v.Rules)
+			v.Rules = agentRulesCopy
+			agentsCopy[k] = v
+		}
+		cfgCopy.Permissions.Agents = agentsCopy
+	}
+	if c.Tools.SkipDirs != nil {
+		skipDirsCopy := make([]string, len(c.Tools.SkipDirs))
+		copy(skipDirsCopy, c.Tools.SkipDirs)
+		cfgCopy.Tools.SkipDirs = skipDirsCopy
+	}
+
+	data, err := toml.Marshal(&cfgCopy)
+	if err != nil {
+		return fmt.Errorf("marshal project config: %w", err)
+	}
+	if err := fileutil.AtomicWrite(path, data); err != nil {
+		return fmt.Errorf("write project config: %w", err)
+	}
+	return nil
+}
+
 // mergeConfig performs a reflection-based merge of overlay into base.
 // Overlay non-zero values override base values. Zero-valued fields in overlay
 // leave base values unchanged. Handles nested structs recursively.
