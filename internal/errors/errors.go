@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	reHTTP401 = regexp.MustCompile(`\b401\b`)
-	reHTTP429 = regexp.MustCompile(`\b429\b`)
-	reHTTP503 = regexp.MustCompile(`\b503\b`)
+	reHTTP401              = regexp.MustCompile(`\b401\b`)
+	reHTTP429              = regexp.MustCompile(`\b429\b`)
+	reHTTP503              = regexp.MustCompile(`\b503\b`)
 	ErrProviderUnreachable = errors.New("provider unreachable")
 	ErrProviderNotFound    = errors.New("provider not found")
 	ErrInvalidProvider     = errors.New("invalid provider name")

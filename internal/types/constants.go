@@ -20,7 +20,7 @@ const (
 	BashTimeout             = 30 * time.Minute
 	BashOutputLimit         = 50_000
 	DefaultContextLength    = 128_000
-	MaxLLMResponseBytes = 1 << 20
+	MaxLLMResponseBytes     = 1 << 20
 	// MaxSessionFileSize is the maximum allowed size for session files
 	// (session.json, messages.json, checkpoint.json) to prevent OOM from
 	// corrupted or maliciously crafted files (WP-H05).
