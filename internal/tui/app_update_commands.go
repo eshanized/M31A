@@ -147,12 +147,29 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	}
 
 	if m.activeModel == nil {
-		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
-				"No model selected. Run /model to choose one.",
-			))
+		// Fallback: resolve from config default so the runtime state stays in
+		// sync with what /model reports from config.Model.Default. The app
+		// normally populates activeModel at startup (app.go), but if that
+		// was skipped (e.g. provider registry not yet ready) we recover here.
+		if m.config != nil && m.config.Model.Default != "" {
+			defaultID := m.config.Model.Default
+			if info, err := p.GetModel(defaultID); err == nil && info != nil {
+				m.activeModel = info
+			} else {
+				m.activeModel = &types.ModelInfo{ID: defaultID}
+			}
+			if m.replModel != nil {
+				m.replModel.activeModel = m.activeModel
+			}
 		}
-		return nil
+		if m.activeModel == nil {
+			if m.replModel != nil {
+				m.replModel.AddMessage(makeAssistantMsg(
+					"No model selected. Run /model to choose one.",
+				))
+			}
+			return nil
+		}
 	}
 
 	// Build messages (chat history + new user turn)
