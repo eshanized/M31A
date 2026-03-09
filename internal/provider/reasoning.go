@@ -177,6 +177,29 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 				}
 			}
 
+			if tcRaw, exists := deltaMap["tool_calls"]; exists {
+				if tcArr, ok := tcRaw.([]any); ok && len(tcArr) > 0 {
+					if tc, ok := tcArr[0].(map[string]any); ok {
+						chunk := &types.StreamChunk{Type: "tool_call", Usage: usage}
+						if idx, ok := tc["index"].(float64); ok {
+							chunk.Index = int(idx)
+						}
+						if id, ok := tc["id"].(string); ok {
+							chunk.ToolCallID = id
+						}
+						if fn, ok := tc["function"].(map[string]any); ok {
+							if name, ok := fn["name"].(string); ok {
+								chunk.ToolName = name
+							}
+							if args, ok := fn["arguments"].(string); ok {
+								chunk.ToolInput = args
+							}
+						}
+						return chunk, nil
+					}
+				}
+			}
+
 			content, _ := deltaMap["content"].(string)
 			if content != "" {
 				return &types.StreamChunk{Type: "content", Delta: content, Usage: usage}, nil
@@ -185,6 +208,9 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 	}
 
 	if finishReason, exists := firstChoice["finish_reason"]; exists && finishReason != nil {
+		if fr, ok := finishReason.(string); ok && fr == "tool_calls" {
+			return &types.StreamChunk{Type: "done", Usage: usage}, nil
+		}
 		return &types.StreamChunk{Type: "done", Usage: usage}, nil
 	}
 
