@@ -31,6 +31,7 @@ type Dispatcher struct {
 	agents            map[string]config.PermissionsAgentConfig
 	activeAgent       string
 	permissionTimeout int
+	workDir_          string // working directory for cwd-aware permission caching
 	// Rate limiter: token bucket for tool execution (WP-S04).
 	rateTokens chan struct{}
 	rateTicker *time.Ticker
@@ -238,6 +239,11 @@ func (d *Dispatcher) SetSessionID(id string) {
 	if d.todoWrite != nil {
 		d.todoWrite.SetSessionID(id)
 	}
+}
+
+// workDir returns the working directory for cwd-aware permission caching.
+func (d *Dispatcher) workDir() string {
+	return d.workDir_
 }
 
 // Stop shuts down the rate limiter goroutine and ticker.
