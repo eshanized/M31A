@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -97,6 +98,94 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.attemptAutoFallback(msg.Err))
 			}
 		}
+
+	// ── Agent loop ────────────────────────────────────────────────────────
+	case AgentStreamMsg:
+		if m.replModel != nil && msg.Chunk != nil {
+			sm := StreamMsg{
+				Chunk:     msg.Chunk,
+				ModelID:   m.activeModel.ID,
+				SessionID: m.sessionID,
+			}
+			cs := m.replModel.handleStreamMsg(sm)
+			cmds = append(cmds, cs...)
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentThinkingMsg:
+		if m.replModel != nil {
+			m.replModel.AddMessage(makeAssistantMsg(
+				fmt.Sprintf("*Agent thinking (iteration %d)...*", msg.Iteration),
+			))
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentToolStartMsg:
+		if m.replModel != nil {
+			m.replModel.AddMessage(makeAssistantMsg(
+				fmt.Sprintf("*Executing tool: %s*", msg.ToolCall.Name),
+			))
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentToolDoneMsg:
+		if m.replModel != nil {
+			status := "done"
+			if msg.Err != nil {
+				status = fmt.Sprintf("failed: %v", msg.Err)
+			}
+			m.replModel.AddMessage(makeAssistantMsg(
+				fmt.Sprintf("*Tool %s: %s (%dms)*", msg.ToolCall.Name, status, msg.DurationMs),
+			))
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentIterationDoneMsg:
+		if m.replModel != nil {
+			m.replModel.streaming = false
+			iterMsg := StreamDoneMsg{
+				Message: types.Message{
+					Role:    "assistant",
+					Content: fmt.Sprintf("*Iteration %d complete — executing %d tool(s)...*", msg.Iteration, msg.ToolCount),
+				},
+				ModelID:   m.activeModel.ID,
+				SessionID: m.sessionID,
+			}
+			m.replModel.handleStreamDoneMsg(iterMsg)
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentIterationMsg:
+		if m.replModel != nil {
+			var toolNames []string
+			for _, tc := range msg.ToolCalls {
+				toolNames = append(toolNames, tc.Name)
+			}
+			m.replModel.AddMessage(makeAssistantMsg(
+				fmt.Sprintf("*Agent iteration %d — tools: %s*", msg.Iteration, strings.Join(toolNames, ", ")),
+			))
+		}
+		cmds = append(cmds, m.readAgentCh())
+	case AgentDoneMsg:
+		if m.replModel != nil {
+			m.replModel.streaming = false
+			doneMsg := StreamDoneMsg{
+				Message:   msg.Message,
+				Usage:     msg.Usage,
+				ModelID:   m.activeModel.ID,
+				SessionID: m.sessionID,
+			}
+			m.replModel.handleStreamDoneMsg(doneMsg)
+			m.checkAutoDream()
+		}
+		m.streamCancelFn = nil
+		m.agentCh = nil
+		// Persist agent conversation to session
+		m.saveAgentSession()
+	case AgentErrorMsg:
+		if m.replModel != nil {
+			m.replModel.streaming = false
+			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: m.activeModel.ID}
+			m.replModel.handleStreamErrorMsg(errMsg)
+		}
+		m.streamCancelFn = nil
+		m.agentCh = nil
+
 	case TickMsg:
 		if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 			replM, cmd := m.replModel.Update(msg)
@@ -1185,6 +1274,10 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	// Push current screen to back-stack for esc-to-go-back navigation
 	if m.screen != screen && m.screen != ScreenPermission && screen != ScreenPermission {
 		m.screenStack = append(m.screenStack, m.screen)
+		// Cap the stack to prevent unbounded growth on repeated push/pop cycles
+		if m.screenCap > 0 && len(m.screenStack) > m.screenCap {
+			m.screenStack = m.screenStack[len(m.screenStack)-m.screenCap:]
+		}
 	}
 
 	// Start a brief transition overlay if this is a real screen change.
@@ -1848,5 +1941,39 @@ func (m *AppState) reRegisterProvidersFromConfig() {
 		if err := RegisterProvider(m.registry, m.config, "zen", m.config.Provider.Zen.APIKey, m.version); err != nil {
 			slog.Warn("failed to re-register Zen after config save", "error", err)
 		}
+	}
+}
+
+// readAgentCh returns a tea.Cmd that reads the next message from the agent
+// loop channel. Used to continue the Bubble Tea cmd chain for agent loop events.
+func (m *AppState) readAgentCh() tea.Cmd {
+	if m.agentCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-m.agentCh
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
+// saveAgentSession persists the current REPL messages to the session file
+// after an agent loop completes. This ensures the agent's conversation
+// (including tool calls and results) survives session resume.
+func (m *AppState) saveAgentSession() {
+	if m.sessionManager == nil || m.sessionID == "" || m.replModel == nil {
+		return
+	}
+	sess, err := m.sessionManager.LoadSession(m.sessionID)
+	if err != nil || sess == nil {
+		slog.Warn("saveAgentSession: failed to load session", "error", err)
+		return
+	}
+	sess.Messages = m.replModel.Messages()
+	sess.MessageCount = len(sess.Messages)
+	if err := m.sessionManager.SaveSession(sess); err != nil {
+		slog.Warn("saveAgentSession: failed to save session", "error", err)
 	}
 }
