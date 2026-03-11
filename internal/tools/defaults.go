@@ -4,6 +4,7 @@ import "github.com/eshanized/M31A/internal/config"
 
 func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) (*Dispatcher, error) {
 	d := NewDispatcher(cfg)
+	d.workDir_ = workDir
 	if err := d.Register(NewBash(workDir)); err != nil {
 		return nil, err
 	}
