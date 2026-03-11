@@ -35,7 +35,7 @@ type workflowEngineInterface interface {
 	SetSessionID(id string)
 	SetGit(g *git.Git)
 	SessionID() string
-	HealTask(ctx context.Context, taskID int) bool
+	HealTask(ctx context.Context, taskID int) (bool, error)
 	SubmitDiscussAnswer(index int, answer string) error
 	FinalizeDiscuss() error
 	SkipDiscuss() error
@@ -56,6 +56,7 @@ type AppState struct {
 	screen      Screen
 	prevScreen  Screen
 	screenStack []Screen
+	screenCap   int // max screen stack size (prevents unbounded growth)
 
 	// Theme
 	themeManager *theme.Manager
@@ -79,6 +80,9 @@ type AppState struct {
 
 	// Git
 	git *git.Git
+
+	// Working directory (for @-mention file resolution)
+	cwd string
 
 	// Workflow
 	workflowEngine workflowEngineInterface
@@ -183,6 +187,11 @@ type AppState struct {
 	subagentManager  *subagent.Manager
 	subagentsModel   *SubagentsModel
 	subagentsVisible bool
+
+	// Autonomous agent mode
+	agentMode      bool                // when true, plain text triggers agent loop (default)
+	promptRegistry *workflow.PromptRegistry
+	agentCh        <-chan tea.Msg // agent loop channel for cmd chain
 }
 
 // SetResumeSessionID configures the app to auto-resume a session on startup.
@@ -203,6 +212,12 @@ func (a *AppState) SetSubagentManager(m *subagent.Manager) {
 	if m != nil {
 		a.subagentsModel = NewSubagentsModel(a.themeManager.Current())
 	}
+}
+
+// SetCwd stores the working directory so it can be propagated to the REPL
+// model for @-mention file resolution.
+func (a *AppState) SetCwd(cwd string) {
+	a.cwd = cwd
 }
 
 // NewApp creates a new AppState.
@@ -258,6 +273,8 @@ func NewApp(
 		shutdownCancel: shutdownCancel,
 		permModalWidth: 60,
 		toastTimers:    make(map[int]*time.Timer),
+		agentMode:      true,
+		screenCap:      16,
 	}
 
 	if cfg != nil {
