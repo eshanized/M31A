@@ -108,11 +108,7 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 			// SSRF protection: resolve and cache DNS for redirect target,
 			// then check for private IPs. Using resolveAndCache ensures
 			// the same pinned IP is used for the redirect connection.
-			parsed, err := url.Parse(req.URL.String())
-			if err != nil {
-				return fmt.Errorf("invalid redirect URL: %w", err)
-			}
-			host := parsed.Hostname()
+			host := req.URL.Hostname()
 			if host == "" {
 				return nil
 			}
