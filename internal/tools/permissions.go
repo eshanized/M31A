@@ -189,7 +189,8 @@ func (d *Dispatcher) askPermissionWithAgentDefault(ctx context.Context, call typ
 
 func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolCall, risk types.RiskLevel) error {
 	cmd := extractCommandString(call.Name, call.Input)
-	cacheKey := call.Name + ":" + cmd
+	workDir := d.workDir()
+	cacheKey := workDir + ":" + call.Name + ":" + cmd
 
 	d.mu.RLock()
 	allowed, remembered := d.permissions[cacheKey]
@@ -208,13 +209,36 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 
 // buildPermissionRequest constructs a PermissionRequest with common fields.
 func (d *Dispatcher) buildPermissionRequest(call types.ToolCall, risk types.RiskLevel) PermissionRequest {
+	cmd := extractCommandString(call.Name, call.Input)
+	timeoutSecs := d.permissionTimeout
+	// For Bash commands, extract the actual shell timeout from tool params
+	// so the permission modal can show how long the command will hold the TTY.
+	if call.Name == "Bash" {
+		if t := extractBashTimeout(call.Input); t > 0 {
+			timeoutSecs = t
+		}
+	}
 	return PermissionRequest{
 		ID:          nextPermissionRequestID(),
 		ToolName:    call.Name,
-		Command:     extractCommandString(call.Name, call.Input),
+		Command:     cmd,
 		RiskLevel:   risk,
-		TimeoutSecs: d.permissionTimeout,
+		TimeoutSecs: timeoutSecs,
 	}
+}
+
+// extractBashTimeout parses the "timeout" parameter from a Bash tool call input.
+func extractBashTimeout(input json.RawMessage) int {
+	if len(input) == 0 {
+		return 0
+	}
+	var params struct {
+		Timeout float64 `json:"timeout"`
+	}
+	if err := json.Unmarshal(input, &params); err == nil && params.Timeout > 0 {
+		return int(params.Timeout)
+	}
+	return 0
 }
 
 // sendAndWaitForPermission sends a permission request to the TUI and blocks
@@ -251,7 +275,8 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 	}
 
 	if resp.Remember {
-		cacheKey := toolName + ":" + req.Command
+		workDir := d.workDir()
+		cacheKey := workDir + ":" + toolName + ":" + req.Command
 		d.mu.Lock()
 		d.permissions[cacheKey] = resp.Allowed
 		d.mu.Unlock()
