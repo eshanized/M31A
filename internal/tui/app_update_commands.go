@@ -10,6 +10,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // handleSlashCommand routes slash commands to the command registry.
@@ -47,6 +48,15 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 				WorkflowEngine:  m.workflowEngine,
 				CmdRegistry:     m.cmdRegistry,
 				SubagentManager: m.subagentManager,
+				AgentMode:       &m.agentMode,
+				SetAgentMode:    func(v bool) { m.agentMode = v },
+				CancelAgent: func() {
+					if m.streamCancelFn != nil {
+						m.streamCancelFn()
+						m.streamCancelFn = nil
+					}
+					m.agentCh = nil
+				},
 			}
 			if m.replModel != nil {
 				ctx.ClearMessages = m.replModel.ClearMessages
@@ -127,6 +137,8 @@ func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
 }
 
 // sendChatMessage dispatches a user message to the active LLM provider.
+// When agentMode is true, it starts the autonomous agent loop with tool use.
+// When agentMode is false, it sends a plain text-only chat request.
 func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	if m.registry == nil || m.activeProvider == "" {
 		if m.replModel != nil {
@@ -148,10 +160,6 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	}
 
 	if m.activeModel == nil {
-		// Fallback: resolve from config default so the runtime state stays in
-		// sync with what /model reports from config.Model.Default. The app
-		// normally populates activeModel at startup (app.go), but if that
-		// was skipped (e.g. provider registry not yet ready) we recover here.
 		if m.config != nil && m.config.Model.Default != "" {
 			defaultID := m.config.Model.Default
 			if info, err := p.GetModel(defaultID); err == nil && info != nil {
@@ -173,7 +181,66 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 		}
 	}
 
-	// Build messages (chat history + new user turn)
+	_ = t
+
+	// Autonomous agent mode: use agent loop with tool definitions
+	if m.agentMode {
+		return m.startAgentLoop(p, input)
+	}
+
+	// Plain text mode: no tools, single response
+	return m.sendPlainTextChat(p, input)
+}
+
+// startAgentLaunches the autonomous agent loop with tool use.
+func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd {
+	// Load and cache prompts
+	if m.promptRegistry == nil {
+		registry, err := workflow.LoadPrompts()
+		if err != nil {
+			if m.replModel != nil {
+				m.replModel.AddMessage(makeAssistantMsg(
+					fmt.Sprintf("Failed to load prompts: %v", err),
+				))
+			}
+			return nil
+		}
+		m.promptRegistry = registry
+	}
+
+	// Compose system prompt: base + autonomous + tool-use
+	sysContent := m.promptRegistry.Base + "\n\n---\n\n" +
+		m.promptRegistry.Autonomous + "\n\n---\n\n" +
+		m.promptRegistry.ToolUse
+
+	// Load project context (AGENTS.md / MEMORY.md)
+	projectCtx := LoadProjectContextForAgent(m.cwd)
+	if projectCtx != "" {
+		sysContent += "\n\n## Project Context (from AGENTS.md)\n\n" + projectCtx
+	}
+
+	// Build message history
+	var replMsgs []types.Message
+	if m.replModel != nil {
+		replMsgs = m.replModel.Messages()
+	}
+	msgs := BuildAgentMessages(replMsgs, input)
+
+	ctx, cancel := context.WithCancel(m.shutdownCtx)
+	m.streamCancelFn = cancel
+
+	cmd, ch := AgentLoop(ctx, p, m.activeModel.ID, m.dispatcher, msgs, sysContent, m.activeModel.ContextLength)
+	m.agentCh = ch
+
+	if m.replModel != nil {
+		m.replModel.streaming = true
+	}
+
+	return cmd
+}
+
+// sendPlainTextChat sends a chat request without tools (original behavior).
+func (m *AppState) sendPlainTextChat(p provider.LLMProvider, input string) tea.Cmd {
 	var msgs []types.Message
 	if m.replModel != nil {
 		for _, msg := range m.replModel.Messages() {
@@ -183,9 +250,6 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 		}
 	}
 
-	// Replace the display placeholder (SkipForLLM) added by handleEnterKey
-	// with the actual message to send to the LLM. This avoids duplicating
-	// the user message in the conversation history.
 	userMsg := types.Message{
 		Role:    "user",
 		Content: input,
@@ -210,8 +274,6 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 		m.replModel.streaming = true
 		m.replModel.streamCh = streamCh
 	}
-
-	_ = t // used for error rendering if needed
 
 	return cmd
 }
