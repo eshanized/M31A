@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +94,7 @@ func Sweep(ctx context.Context, parentWorkDir string) error {
 	}
 	out, err := g.Run("worktree", "list", "--porcelain")
 	if err != nil {
+		slog.Warn("failed to list git worktrees for sweep", "error", err)
 		return nil
 	}
 	// Prune metadata first (clears references to deleted worktree dirs).
@@ -172,13 +174,18 @@ func sanitizePath(s string) string {
 	for _, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
-			r == '-', r == '_', r == '.':
+			r == '-', r == '_':
 			out = append(out, r)
 		default:
 			out = append(out, '_')
 		}
 	}
-	return string(out)
+	result := string(out)
+	// Reject dot-only IDs (., .., etc.) which would collapse to the root.
+	if result == "" || strings.Trim(result, ".") == "" {
+		return "_invalid"
+	}
+	return result
 }
 
 // worktreeBranchName builds the git branch name for a subagent worktree.
