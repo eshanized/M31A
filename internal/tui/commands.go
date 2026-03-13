@@ -64,6 +64,9 @@ type CommandContext struct {
 	SubagentManager *subagent.Manager
 	ClearMessages   func()
 	CopyError       func() tea.Cmd
+	AgentMode       *bool
+	SetAgentMode    func(bool)
+	CancelAgent     func()
 }
 
 // CommandRegistry maps slash command names to handlers and descriptions.
@@ -80,10 +83,15 @@ func NewCommandRegistry() *CommandRegistry {
 	}
 }
 
-// Register adds a command handler with description.
-func (r *CommandRegistry) Register(name string, handler CommandHandler, description string) {
+// Register adds a command handler with description. Returns an error if a
+// command with the same name is already registered.
+func (r *CommandRegistry) Register(name string, handler CommandHandler, description string) error {
+	if _, exists := r.handlers[name]; exists {
+		return fmt.Errorf("command already registered: %s", name)
+	}
 	r.handlers[name] = handler
 	r.descriptions[name] = description
+	return nil
 }
 
 // Get returns the handler for a command name.
@@ -279,6 +287,7 @@ func DefaultCommands() *CommandRegistry {
 	r.Register("phase", handlePhase, "Show or transition phase")
 	r.Register("pause", handlePause, "Pause workflow")
 	r.Register("resume-task", handleResumeTask, "Resume workflow")
+	r.Register("agent-mode", handleAgentMode, "Toggle autonomous agent mode")
 	r.Register("metrics", handleMetrics, "Open session analytics")
 	r.Register("dashboard", handleDashboard, "Open workflow dashboard")
 	r.Register("themes", handleThemes, "Open theme picker")
