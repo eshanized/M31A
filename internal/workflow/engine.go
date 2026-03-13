@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/config"
@@ -33,6 +35,7 @@ type PromptRegistry struct {
 	Discuss       string
 	SelfHeal      string
 	Demonstration string
+	Autonomous    string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -46,6 +49,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/discuss-questions.md":    &r.Discuss,
 		"prompts/self-heal.md":            &r.SelfHeal,
 		"prompts/demonstration-format.md": &r.Demonstration,
+		"prompts/autonomous.md":           &r.Autonomous,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -80,7 +84,7 @@ type Engine struct {
 	execCommand      func(name string, args ...string) *exec.Cmd
 	msgEmitter       MsgEmitter
 	callCounter      int64
-	totalCost        float64 // cumulative cost for budget tracking
+	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
 	planMarkdown     string  // current plan content for refinement context
 	planVersion      int     // current plan version (increments on refine)
 	refineFeedback   string  // pending refinement feedback from user
@@ -222,12 +226,13 @@ func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	// Budget guardrail: check cumulative cost before each phase
 	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
-		if e.totalCost >= e.cfg.Features.BudgetLimitUSD {
+		cost := math.Float64frombits(atomic.LoadUint64(&e.totalCostBits))
+		if cost >= e.cfg.Features.BudgetLimitUSD {
 			return &PhaseResult{
 				Phase:   phase,
 				Success: false,
-				Error:   fmt.Sprintf("budget limit exceeded: $%.4f spent of $%.4f limit", e.totalCost, e.cfg.Features.BudgetLimitUSD),
-			}, fmt.Errorf("budget limit exceeded: $%.4f of $%.4f", e.totalCost, e.cfg.Features.BudgetLimitUSD)
+				Error:   fmt.Sprintf("budget limit exceeded: $%.4f spent of $%.4f limit", cost, e.cfg.Features.BudgetLimitUSD),
+			}, fmt.Errorf("budget limit exceeded: $%.4f of $%.4f", cost, e.cfg.Features.BudgetLimitUSD)
 		}
 	}
 
@@ -259,7 +264,13 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		result.Phase = phase
 		// Accumulate cost for budget tracking
 		if result.Cost > 0 {
-			e.totalCost += result.Cost
+			for {
+				old := atomic.LoadUint64(&e.totalCostBits)
+				new := math.Float64bits(math.Float64frombits(old) + result.Cost)
+				if atomic.CompareAndSwapUint64(&e.totalCostBits, old, new) {
+					break
+				}
+			}
 		}
 	}
 
@@ -271,7 +282,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 	m31types.PhaseIdle:       {m31types.PhaseInitialize},
 	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseIdle},
-	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseIdle},
+	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhasePlan, m31types.PhaseDiscuss, m31types.PhaseIdle},
 	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseIdle},
 	m31types.PhaseVerify:     {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
@@ -370,17 +381,15 @@ func (e *Engine) SetMsgEmitter(em MsgEmitter) {
 
 // HealTask triggers self-healing for a specific task by ID.
 // Returns true if healing was attempted, false if the task cannot be healed.
-func (e *Engine) HealTask(ctx context.Context, taskID int) bool {
+func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {
-		e.logger.Warn("failed to load tasks for heal", "error", err)
-		return false
+		return false, fmt.Errorf("failed to load tasks for heal: %w", err)
 	}
 	for i, task := range tasks {
 		if task.ID == taskID && task.Status == m31types.StatusFailed {
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
-				e.logger.Warn("task already at max heal attempts", "id", taskID)
-				return false
+				return false, fmt.Errorf("task %d already at max heal attempts (%d)", taskID, m31types.MaxHealAttempts)
 			}
 			tasks[i].HealsAttempted++
 			e.emit(SelfHealStartMsg{
@@ -413,11 +422,13 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) bool {
 					tasks[i].Status = m31types.StatusUnrecoverable
 				}
 			}
-			_ = e.sessionMgr.SaveTasks(e.sessionID, tasks)
-			return true
+			if saveErr := e.sessionMgr.SaveTasks(e.sessionID, tasks); saveErr != nil {
+				return true, fmt.Errorf("heal attempted but failed to save tasks: %w", saveErr)
+			}
+			return true, nil
 		}
 	}
-	return false
+	return false, fmt.Errorf("task %d not found or not in failed state", taskID)
 }
 
 // emit sends a message to the TUI if an emitter is configured.
@@ -513,10 +524,13 @@ func (e *Engine) FinalizeDiscuss() error {
 
 // SetRefinementFeedback stores user feedback for the next plan regeneration.
 // The plan phase reads this field to inject feedback into the LLM context.
+// Duplicate feedback is ignored — only new feedback bumps the plan version.
 func (e *Engine) SetRefinementFeedback(feedback string) {
-	e.refineFeedback = feedback
-	if feedback != "" {
+	if feedback != "" && feedback != e.refineFeedback {
+		e.refineFeedback = feedback
 		e.planVersion++
+	} else if feedback == "" {
+		e.refineFeedback = feedback
 	}
 }
 
