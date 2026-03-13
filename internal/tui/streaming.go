@@ -22,7 +22,9 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,6 +63,14 @@ type TickMsg struct {
 
 // ─── Streaming commands ───────────────────────────────────────────────────────
 
+// toolCallAcc accumulates streaming tool call deltas by index.
+type toolCallAcc struct {
+	id    string
+	name  string
+	args  strings.Builder
+	index int
+}
+
 // StartStreamCmd starts a streaming LLM request in a goroutine.
 // The goroutine owns the channel; it creates it, writes to it, and closes it.
 // The returned tea.Cmd reads one message per invocation; continuation is
@@ -97,14 +107,49 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 
 		var fullContent strings.Builder
 		var lastUsage *types.Usage
+		toolCalls := make(map[int]*toolCallAcc)
+
+		// buildToolCalls converts accumulated deltas into []ToolCall sorted by index.
+		buildToolCalls := func() []types.ToolCall {
+			if len(toolCalls) == 0 {
+				return nil
+			}
+			indices := make([]int, 0, len(toolCalls))
+			for idx := range toolCalls {
+				indices = append(indices, idx)
+			}
+			sort.Ints(indices)
+			var result []types.ToolCall
+			for _, idx := range indices {
+				acc := toolCalls[idx]
+				id := acc.id
+				if id == "" {
+					id = acc.name
+				}
+				argsStr := acc.args.String()
+				var input json.RawMessage
+				if argsStr != "" {
+					input = json.RawMessage(argsStr)
+				} else {
+					input = json.RawMessage("{}")
+				}
+				result = append(result, types.ToolCall{
+					ID:    id,
+					Name:  acc.name,
+					Input: input,
+				})
+			}
+			return result
+		}
 
 		for {
 			chunk, err := iterator.Next()
 			if err == io.EOF {
 				msg := types.Message{
-					Role:    "assistant",
-					Content: fullContent.String(),
-					Usage:   lastUsage,
+					Role:      "assistant",
+					Content:   fullContent.String(),
+					Usage:     lastUsage,
+					ToolCalls: buildToolCalls(),
 				}
 				streamCh <- StreamDoneMsg{
 					Message:   msg,
@@ -115,12 +160,12 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 				return
 			}
 			if err != nil {
-				// On cancellation, emit partial content instead of discarding it
 				if ctx.Err() != nil && fullContent.Len() > 0 {
 					msg := types.Message{
-						Role:    "assistant",
-						Content: fullContent.String() + "\n\n*[cancelled]*",
-						Usage:   lastUsage,
+						Role:      "assistant",
+						Content:   fullContent.String() + "\n\n*[cancelled]*",
+						Usage:     lastUsage,
+						ToolCalls: buildToolCalls(),
 					}
 					streamCh <- StreamDoneMsg{
 						Message:   msg,
@@ -135,6 +180,22 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			}
 			if chunk == nil {
 				continue
+			}
+
+			// Accumulate tool call deltas
+			if chunk.Type == "tool_call" {
+				acc, ok := toolCalls[chunk.Index]
+				if !ok {
+					acc = &toolCallAcc{index: chunk.Index}
+					toolCalls[chunk.Index] = acc
+				}
+				if chunk.ToolCallID != "" {
+					acc.id = chunk.ToolCallID
+				}
+				if chunk.ToolName != "" {
+					acc.name = chunk.ToolName
+				}
+				acc.args.WriteString(chunk.ToolInput)
 			}
 
 			select {
