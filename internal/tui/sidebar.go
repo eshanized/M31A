@@ -177,11 +177,35 @@ func (s *SidebarModel) HandleKey(msg tea.KeyMsg) tea.Cmd {
 	case "end", "G":
 		s.tree.Cursor = len(s.tree.FlatList()) - 1
 	case "enter", " ":
+		node := s.tree.SelectedNode()
+		if node != nil && !node.IsDir {
+			return s.showFileDiff(node)
+		}
 		s.tree.Toggle()
 	case "esc":
 		s.focused = false
 	}
 	return nil
+}
+
+// showFileDiff returns a command that fetches the diff for the given file node.
+func (s *SidebarModel) showFileDiff(node *components.FileNode) tea.Cmd {
+	g := s.git
+	filePath := node.Path
+	fileStatus := node.Status
+	return func() tea.Msg {
+		if g == nil || !g.IsRepo() {
+			return nil
+		}
+		diff, err := g.DiffFile(filePath, fileStatus)
+		if err != nil || strings.TrimSpace(diff) == "" {
+			return nil
+		}
+		return DiffScreenMsg{
+			Diff:  diff,
+			Title: "diff — " + filePath,
+		}
+	}
 }
 
 // sidebarFixedOverhead is the number of non-file-list lines in the sidebar.
