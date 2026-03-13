@@ -9,6 +9,9 @@ import (
 
 // handleNew starts a fresh workflow by resetting workflow state and opening the goal input.
 func handleNew(_ []string, ctx CommandContext) CommandResult {
+	if ctx.CancelAgent != nil {
+		ctx.CancelAgent()
+	}
 	if ctx.ClearMessages != nil {
 		ctx.ClearMessages()
 	}
@@ -73,6 +76,11 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 			Success: false,
 			Message: "No active workflow. Use /new to start a workflow first.",
 		}
+	}
+
+	// Cancel any running agent loop before transitioning phases
+	if ctx.CancelAgent != nil {
+		ctx.CancelAgent()
 	}
 
 	// Determine target phase from the first argument (or command name).
@@ -210,5 +218,34 @@ func handleResumeTask(_ []string, ctx CommandContext) CommandResult {
 		ResumePhase:     phase,
 		ResumeGoal:      goal,
 		ResumeQuestions: questions,
+	}
+}
+
+// handleAgentMode toggles autonomous agent mode on or off.
+func handleAgentMode(args []string, ctx CommandContext) CommandResult {
+	if len(args) == 0 {
+		status := "on"
+		if ctx.AgentMode != nil && !*ctx.AgentMode {
+			status = "off"
+		}
+		return CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("**Autonomous agent mode:** %s\n\nWhen on, plain text input triggers the agent loop with tool use. When off, text goes to plain LLM chat.\n\nUsage: `/agent on` or `/agent off`", status),
+		}
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "on":
+		if ctx.SetAgentMode != nil {
+			ctx.SetAgentMode(true)
+		}
+		return CommandResult{Success: true, Message: "Autonomous agent mode **enabled**. Plain text will now trigger the agent loop with tool use."}
+	case "off":
+		if ctx.SetAgentMode != nil {
+			ctx.SetAgentMode(false)
+		}
+		return CommandResult{Success: true, Message: "Autonomous agent mode **disabled**. Plain text will go to plain LLM chat without tools."}
+	default:
+		return CommandResult{Success: false, Message: "Usage: `/agent [on|off]`"}
 	}
 }
