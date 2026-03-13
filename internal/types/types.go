@@ -191,6 +191,10 @@ type StreamChunk struct {
 	Delta            string `json:"delta"`
 	ThinkingDuration int64  `json:"thinking_duration"`
 	Usage            *Usage `json:"usage,omitempty"`
+	ToolCallID       string `json:"tool_call_id,omitempty"`
+	ToolName         string `json:"tool_name,omitempty"`
+	ToolInput        string `json:"tool_input,omitempty"`
+	Index            int    `json:"index,omitempty"`
 }
 
 type StreamIterator struct {
