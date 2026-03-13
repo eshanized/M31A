@@ -598,6 +598,9 @@ func (m *AppState) ensureReplModel() {
 	m.replModel = &rm
 	m.replModel.SetCommandRegistry(m.cmdRegistry)
 	m.replModel.SetKeyRegistry(m.keyRegistry)
+	if m.cwd != "" {
+		m.replModel.SetCwd(m.cwd)
+	}
 }
 
 // syncReplSize ensures the REPL model dimensions match the content area.
