@@ -18,7 +18,10 @@ require (
 	golang.org/x/sync v0.10.0
 )
 
-require github.com/atotto/clipboard v0.1.4
+require (
+	github.com/atotto/clipboard v0.1.4
+	github.com/fsnotify/fsnotify v1.10.1
+)
 
 require (
 	github.com/alecthomas/chroma v0.10.0 // indirect
