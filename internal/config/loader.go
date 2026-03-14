@@ -10,12 +10,14 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/eshanized/M31A/internal/fileutil"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
+	"github.com/fsnotify/fsnotify"
 )
 
 // ErrValidation is returned when config validation fails.
@@ -299,23 +301,25 @@ func mergeStructs(base, overlay reflect.Value, defined map[string]bool, prefix s
 // toTOMLKey converts a Go field name to a TOML key (snake_case).
 // Handles acronyms correctly: APIKey → api_key, BaseURL → base_url,
 // HTTPSProxy → https_proxy.
+// Since Go struct field names are always ASCII, iterates over bytes directly
+// instead of converting to []rune.
 func toTOMLKey(name string) string {
-	runes := []rune(name)
 	var result []byte
-	for i, ch := range runes {
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
 		if ch >= 'A' && ch <= 'Z' {
 			if i > 0 {
-				prev := runes[i-1]
+				prev := name[i-1]
 				prevIsLower := prev >= 'a' && prev <= 'z'
 				prevIsDigit := prev >= '0' && prev <= '9'
-				nextIsLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
+				nextIsLower := i+1 < len(name) && name[i+1] >= 'a' && name[i+1] <= 'z'
 				if prevIsLower || prevIsDigit || nextIsLower {
 					result = append(result, '_')
 				}
 			}
-			result = append(result, byte(ch+32))
+			result = append(result, ch+32)
 		} else {
-			result = append(result, byte(ch))
+			result = append(result, ch)
 		}
 	}
 	return string(result)
@@ -591,14 +595,23 @@ func validateConfig(cfg *Config) error {
 
 // knownConfigKeys returns the set of known top-level TOML keys for warning
 // on unknown keys. This is a best-effort set; sub-keys are not checked.
+// Cached with sync.Once to avoid repeated map allocations.
+var (
+	knownKeysOnce sync.Once
+	knownKeysMap  map[string]bool
+)
+
 func knownConfigKeys() map[string]bool {
-	return map[string]bool{
-		"provider": true, "model": true, "ui": true, "permissions": true,
-		"features": true, "tools": true, "git": true, "ledger": true,
-		"ghost": true, "agents": true,
-		// Common typos / sub-tables that appear in user configs
-		"openrouter": true, "zen": true,
-	}
+	knownKeysOnce.Do(func() {
+		knownKeysMap = map[string]bool{
+			"provider": true, "model": true, "ui": true, "permissions": true,
+			"features": true, "tools": true, "git": true, "ledger": true,
+			"ghost": true, "agents": true,
+			// Common typos / sub-tables that appear in user configs
+			"openrouter": true, "zen": true,
+		}
+	})
+	return knownKeysMap
 }
 
 var varRe = regexp.MustCompile(`\$\{([^}]+)\}`)
@@ -834,11 +847,80 @@ type ConfigReloadMsg struct {
 	Error  error
 }
 
-// WatchConfig polls the config file for changes and sends ConfigReloadMsg
-// to the provided channel when a change is detected. Runs until ctx is cancelled.
-// Uses a buffered channel to reduce dropped messages when the TUI's Update()
-// loop is briefly busy.
+// sendReload loads the config and sends it on ch with a retry to avoid
+// dropping messages when the receiver is briefly busy.
+func sendReload(ctx context.Context, ch chan<- ConfigReloadMsg, path string) {
+	cfg, err := Load(path)
+	select {
+	case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+	case <-ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+		select {
+		case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+		case <-ctx.Done():
+		default:
+			slog.Warn("config reload message dropped: receiver not ready after retry")
+		}
+	}
+}
+
+// WatchConfig watches the config file for changes using fsnotify and sends
+// ConfigReloadMsg to the provided channel when a change is detected.
+// Falls back to polling with ConfigWatchInterval if fsnotify is unavailable.
+// Runs until ctx is cancelled.
 func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Warn("fsnotify unavailable, falling back to config polling", "error", err)
+		watchConfigPolling(ctx, path, ch)
+		return
+	}
+	defer watcher.Close()
+
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	if err := watcher.Add(dir); err != nil {
+		slog.Warn("fsnotify watch failed, falling back to config polling", "error", err)
+		watchConfigPolling(ctx, path, ch)
+		return
+	}
+
+	var debounce *time.Timer
+	for {
+		select {
+		case <-ctx.Done():
+			if debounce != nil {
+				debounce.Stop()
+			}
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(event.Name) != base {
+				continue
+			}
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+				continue
+			}
+			if debounce != nil {
+				debounce.Stop()
+			}
+			debounce = time.AfterFunc(50*time.Millisecond, func() {
+				sendReload(ctx, ch, path)
+			})
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			slog.Warn("config watcher error", "error", err)
+		}
+	}
+}
+
+// watchConfigPolling is the fallback config watcher that polls the file's
+// modification time every ConfigWatchInterval.
+func watchConfigPolling(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 	var lastModTime time.Time
 	if info, err := os.Stat(path); err == nil {
 		lastModTime = info.ModTime()
@@ -856,23 +938,7 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 			}
 			if info.ModTime().After(lastModTime) {
 				lastModTime = info.ModTime()
-				cfg, err := Load(path)
-				// Try sending with a short timeout to avoid dropping messages
-				// when the TUI is briefly busy rendering.
-				select {
-				case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
-				case <-ctx.Done():
-					return
-				case <-time.After(100 * time.Millisecond):
-					// Retry once after a brief wait
-					select {
-					case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
-					case <-ctx.Done():
-						return
-					default:
-						slog.Warn("config reload message dropped: receiver not ready after retry")
-					}
-				}
+				sendReload(ctx, ch, path)
 			}
 		}
 	}
@@ -894,48 +960,53 @@ func DefaultGitConfig() GitConfig {
 //
 // This must be called before any goroutines that read os.Environ() are started
 // (e.g., before logger initialization) because os.Setenv is not goroutine-safe.
+// Guarded with sync.Once to prevent duplicate calls from main.go and Load().
+var loadDotEnvOnce sync.Once
+
 func LoadDotEnv() {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return
-	}
-	envPath := filepath.Join(cwd, ".env")
-	info, err := os.Stat(envPath)
-	if err != nil {
-		return
-	}
-	if info.Mode().Perm()&0o022 != 0 {
-		slog.Warn("skipping group/world-writable .env file", "path", envPath)
-		return
-	}
-	data, err := os.ReadFile(envPath)
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) > 4096 {
-			slog.Warn("skipping overly long .env line", "path", envPath)
-			continue
+	loadDotEnvOnce.Do(func() {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return
 		}
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		envPath := filepath.Join(cwd, ".env")
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
+		if info.Mode().Perm()&0o022 != 0 {
+			slog.Warn("skipping group/world-writable .env file", "path", envPath)
+			return
 		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		// Remove surrounding quotes
-		if len(value) >= 2 {
-			if (value[0] == '"' && value[len(value)-1] == '"') ||
-				(value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
+		data, err := os.ReadFile(envPath)
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if len(line) > 4096 {
+				slog.Warn("skipping overly long .env line", "path", envPath)
+				continue
+			}
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			// Remove surrounding quotes
+			if len(value) >= 2 {
+				if (value[0] == '"' && value[len(value)-1] == '"') ||
+					(value[0] == '\'' && value[len(value)-1] == '\'') {
+					value = value[1 : len(value)-1]
+				}
+			}
+			if _, exists := os.LookupEnv(key); !exists {
+				os.Setenv(key, value)
 			}
 		}
-		if _, exists := os.LookupEnv(key); !exists {
-			os.Setenv(key, value)
-		}
-	}
+	})
 }
