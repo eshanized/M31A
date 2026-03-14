@@ -23,7 +23,7 @@ coverage.out
 
 # AI tool output directories
 /rush/
-/.planning/
+# /.planning/
 
 # Stray planning docs
 tui_plan.md
