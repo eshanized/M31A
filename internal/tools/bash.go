@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -86,6 +87,21 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	cmd.Dir = t.workDir
 
 	setupProcessGroup(cmd)
+
+	// Inject non-interactive environment variables to prevent CLI tools from
+	// hanging on stdin prompts (e.g., npx init, npm create, apt-get).
+	cmd.Env = append(os.Environ(),
+		"CI=true",
+		"DEBIAN_FRONTEND=noninteractive",
+		"npm_config_yes=true",
+		"PIP_NO_INPUT=1",
+		"YARN_ENABLE_IMMUTABLE_INSTALLS=false",
+	)
+
+	// Explicitly close stdin so child processes reading from it get EOF
+	// immediately instead of blocking. This prevents hangs from CLIs that
+	// open /dev/tty directly or fall back to stdin for interactive prompts.
+	cmd.Stdin = strings.NewReader("")
 
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
@@ -219,6 +235,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
+			output = fmt.Sprintf("[TIMEOUT: command exceeded %ds limit]\n%s", timeoutSec, output)
 			return types.ToolResult{
 				Output:     output,
 				DurationMs: elapsed,
