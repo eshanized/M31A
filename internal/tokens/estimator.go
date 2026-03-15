@@ -3,6 +3,7 @@ package tokens
 import (
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
@@ -63,7 +64,7 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 
 // Estimate returns the estimated token count for the given text.
 // Uses tiktoken-go if the model is supported; otherwise falls back to
-// len([]rune(text)) / 4 * 1.3. The emaFactor calibration is applied
+// utf8.RuneCountInString(text) / 4 * 1.3. The emaFactor calibration is applied
 // to all estimates.
 func (e *Estimator) Estimate(text string) int {
 	var estimated int
@@ -71,7 +72,9 @@ func (e *Estimator) Estimate(text string) int {
 	if e.tokenizer != nil {
 		estimated = len(e.tokenizer.Encode(text, nil, nil))
 	} else {
-		estimated = int((float64(len([]rune(text)))/4.0 + 1.0) * 1.3)
+		// Use utf8.RuneCountInString which is O(N) time but O(1) space
+		// instead of len([]rune(text)) which allocates O(N) memory
+		estimated = int((float64(utf8.RuneCountInString(text))/4.0 + 1.0) * 1.3)
 	}
 
 	e.mu.Lock()
