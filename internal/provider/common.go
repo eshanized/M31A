@@ -38,8 +38,10 @@ func IsContextExceeded(statusCode int, body string) bool {
 }
 
 // BuildChatBody constructs the standard chat completion request body.
-// Tool definitions are NOT sent as native provider tools in V1 — they are
-// included in the system prompt text and parsed via text JSON extraction.
+// Tool definitions are sent as native provider tools in OpenAI function-calling
+// format when req.Tools is populated. The engine uses native-first tool dispatch
+// with text-based JSON extraction as a fallback for models that do not support
+// native function calling.
 func BuildChatBody(req ChatRequest) map[string]any {
 	body := map[string]any{
 		"model":    req.Model,
