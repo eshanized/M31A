@@ -362,10 +362,16 @@ func lineTrimmedReplace(content, oldString, newString string) (string, error) {
 		oldTrimmed[i] = strings.TrimSpace(line)
 	}
 
+	// Pre-trim content lines to avoid repeated TrimSpace in inner loop (PERF-16)
+	contentTrimmed := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		contentTrimmed[i] = strings.TrimSpace(line)
+	}
+
 	for i := 0; i <= len(contentLines)-len(oldTrimmed); i++ {
 		match := true
 		for j := range oldTrimmed {
-			if strings.TrimSpace(contentLines[i+j]) != oldTrimmed[j] {
+			if contentTrimmed[i+j] != oldTrimmed[j] {
 				match = false
 				break
 			}
@@ -424,10 +430,16 @@ func whitespaceNormalizedReplace(content, oldString, newString string) (string, 
 		normalizedOldLines[i] = normalize(line)
 	}
 
+	// Pre-compute normalized content lines to avoid repeated normalize() calls (PERF-17)
+	normalizedContentLines := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		normalizedContentLines[i] = normalize(line)
+	}
+
 	for i := 0; i <= len(contentLines)-len(oldLines); i++ {
 		match := true
 		for j := range normalizedOldLines {
-			if normalize(contentLines[i+j]) != normalizedOldLines[j] {
+			if normalizedContentLines[i+j] != normalizedOldLines[j] {
 				match = false
 				break
 			}
