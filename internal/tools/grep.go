@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -343,11 +344,40 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
-func loadGitignore(dir string) []string {
-	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+// gitignoreCache caches parsed gitignore patterns with mtime-based invalidation.
+type gitignoreCache struct {
+	mu       sync.Mutex
+	dir      string
+	mtime    time.Time
+	patterns []string
+}
+
+var globalGitignoreCache gitignoreCache
+
+// loadGitignoreCached returns cached gitignore patterns, re-reading from disk
+// only if the .gitignore file has been modified since the last read.
+func loadGitignoreCached(dir string) []string {
+	path := filepath.Join(dir, ".gitignore")
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil
 	}
+
+	globalGitignoreCache.mu.Lock()
+	defer globalGitignoreCache.mu.Unlock()
+
+	if globalGitignoreCache.dir == dir && !info.ModTime().After(globalGitignoreCache.mtime) {
+		return globalGitignoreCache.patterns
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		globalGitignoreCache.dir = dir
+		globalGitignoreCache.mtime = info.ModTime()
+		globalGitignoreCache.patterns = nil
+		return nil
+	}
+
 	var patterns []string
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -356,7 +386,15 @@ func loadGitignore(dir string) []string {
 		}
 		patterns = append(patterns, line)
 	}
+
+	globalGitignoreCache.dir = dir
+	globalGitignoreCache.mtime = info.ModTime()
+	globalGitignoreCache.patterns = patterns
 	return patterns
+}
+
+func loadGitignore(dir string) []string {
+	return loadGitignoreCached(dir)
 }
 
 func matchesGitignore(path string, patterns []string, workDir string) bool {
