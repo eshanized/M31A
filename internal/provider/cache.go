@@ -119,10 +119,12 @@ func (c *ModelCache) FetchTime() time.Time {
 func (c *ModelCache) Models() map[string]*types.ModelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	// Return a snapshot of the map. Shallow copy of the map is sufficient
+	// since callers typically read fields, not mutate ModelInfo structs.
+	// This avoids O(N) deep-copy of all model entries (300+ for OpenRouter).
 	result := make(map[string]*types.ModelInfo, len(c.models))
 	for k, v := range c.models {
-		cp := *v
-		result[k] = &cp
+		result[k] = v
 	}
 	return result
 }
