@@ -344,15 +344,34 @@ type FileStatus struct {
 
 // StatusPorcelain returns structured git status for the working directory.
 // Uses git status --porcelain (v1 format): "XY path" per line.
+// Runs status and numstat concurrently for better performance (PERF-32).
 func (g *Git) StatusPorcelain() ([]FileStatus, error) {
-	statusOut, err := g.run("status", "--porcelain")
-	if err != nil {
-		return nil, fmt.Errorf("git status: %w", err)
+	type result struct {
+		output string
+		err    error
 	}
 
-	// Get diff stats via --numstat
-	numstatOut, numstatErr := g.run("diff", "--numstat", "HEAD")
-	if numstatErr != nil {
+	// Run both git commands concurrently
+	ch := make(chan result, 2)
+	go func() {
+		out, err := g.run("status", "--porcelain")
+		ch <- result{out, err}
+	}()
+	go func() {
+		out, err := g.run("diff", "--numstat", "HEAD")
+		ch <- result{out, err}
+	}()
+
+	statusRes := <-ch
+	numstatRes := <-ch
+
+	if statusRes.err != nil {
+		return nil, fmt.Errorf("git status: %w", statusRes.err)
+	}
+	statusOut := statusRes.output
+
+	numstatOut := numstatRes.output
+	if numstatRes.err != nil {
 		numstatOut = ""
 	}
 	numstatMap := make(map[string]struct{ add, del int })
