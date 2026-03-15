@@ -3,10 +3,31 @@ package provider
 import (
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
 )
+
+// sharedTransport is a shared HTTP transport across all provider clients.
+// This reuses connection pools, idle goroutines, and TLS session caches
+// instead of creating separate ones per provider (PERF-30).
+var (
+	sharedTransport     *http.Transport
+	sharedTransportOnce sync.Once
+)
+
+func getSharedTransport() *http.Transport {
+	sharedTransportOnce.Do(func() {
+		sharedTransport = &http.Transport{
+			DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		}
+	})
+	return sharedTransport
+}
 
 // BaseClient holds fields and methods shared by all provider implementations.
 // Provider-specific clients embed BaseClient and override only Name(),
@@ -40,9 +61,7 @@ func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time
 		BaseURLField: baseURL,
 		Version:      version,
 		HTTPClient: &http.Client{
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
-			},
+			Transport: getSharedTransport(),
 		},
 		Cache:        NewModelCacheWithStale(cacheTTL, cacheStaleTTL),
 		HealthLiveMs: healthLiveMs,
