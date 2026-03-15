@@ -110,6 +110,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	var b strings.Builder
+	b.Grow(64 * len(matches)) // pre-allocate for ~64 bytes per line
 	fmt.Fprintf(&b, "%-50s %10s %s\n", "path", "size", "modified")
 	for _, m := range matches {
 		fullPath := m
