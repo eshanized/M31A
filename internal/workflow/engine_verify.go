@@ -109,6 +109,28 @@ func hasTestFiles(workDir string, files []string) bool {
 // verifyTaskTimeout is the maximum time allowed for a single verification command.
 const verifyTaskTimeout = 5 * time.Minute
 
+// detectPackageManager identifies the package manager from lock files.
+// Returns the command prefix for running scripts (e.g., "npm run", "pnpm run").
+func detectPackageManager(workDir string) string {
+	lockFiles := map[string]string{
+		"pnpm-lock.yaml": "pnpm run",
+		"yarn.lock":      "yarn",
+		"bun.lockb":      "bun run",
+		"package-lock.json": "npm run",
+	}
+	// Check in priority order (more specific first)
+	for lockFile, cmd := range lockFiles {
+		if _, err := os.Stat(filepath.Join(workDir, lockFile)); err == nil {
+			return cmd
+		}
+	}
+	// Fall back to npm if package.json exists but no lock file
+	if _, err := os.Stat(filepath.Join(workDir, "package.json")); err == nil {
+		return "npm run"
+	}
+	return ""
+}
+
 // verifyTaskContext returns a context with a deadline for verification commands.
 // Derives from the parent context so session cancellation propagates.
 func (e *Engine) verifyTaskContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -188,20 +210,23 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 			}
 		}
 		if hasJS && !hasCustomBuild {
-			// Check for package.json and try npm build or tsc
+			// Check for package.json and try build command with detected package manager
 			if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
-				// Try npm run build first, fall back to tsc --noEmit
-				cmd := exec.CommandContext(ctx, "sh", "-c", "npm run build 2>&1")
-				cmd.Dir = e.workDir
-				out, buildErr := cmd.CombinedOutput()
-				if buildErr != nil {
-					// Try tsc as fallback (uses same parent context, C-7)
-					tscCmd := exec.CommandContext(ctx, "sh", "-c", "tsc --noEmit 2>&1")
-					tscCmd.Dir = e.workDir
-					tscOut, tscErr := tscCmd.CombinedOutput()
-					if tscErr != nil {
-						result.Errors = append(result.Errors, fmt.Sprintf("nodejs build failed: %s; tsc fallback: %s", string(out), string(tscOut)))
-						result.SyntaxOK = false
+				pm := detectPackageManager(e.workDir)
+				if pm != "" {
+					// Try the package manager's build command first, fall back to tsc
+					cmd := exec.CommandContext(ctx, "sh", "-c", pm+" build 2>&1")
+					cmd.Dir = e.workDir
+					out, buildErr := cmd.CombinedOutput()
+					if buildErr != nil {
+						// Try tsc as fallback (uses same parent context, C-7)
+						tscCmd := exec.CommandContext(ctx, "sh", "-c", "tsc --noEmit 2>&1")
+						tscCmd.Dir = e.workDir
+						tscOut, tscErr := tscCmd.CombinedOutput()
+						if tscErr != nil {
+							result.Errors = append(result.Errors, fmt.Sprintf("nodejs build failed (%s): %s; tsc fallback: %s", pm, string(out), string(tscOut)))
+							result.SyntaxOK = false
+						}
 					}
 				}
 			}
@@ -255,10 +280,24 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				result.TestsOK = false
 			}
 		case "nodejs":
-			cmd := exec.CommandContext(ctx, "sh", "-c", "npm test 2>&1")
+			pm := detectPackageManager(e.workDir)
+			testCmd := "npm test 2>&1"
+			if pm != "" {
+				// Replace "run" with "test" for test execution
+				testCmd = strings.Replace(pm, "run", "test", 1) + " 2>&1"
+				// For yarn, the command is just "yarn test"
+				if pm == "yarn" {
+					testCmd = "yarn test 2>&1"
+				}
+				// For bun, the command is "bun test"
+				if pm == "bun run" {
+					testCmd = "bun test 2>&1"
+				}
+			}
+			cmd := exec.CommandContext(ctx, "sh", "-c", testCmd)
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("npm test failed: %s", string(out)))
+				result.Errors = append(result.Errors, fmt.Sprintf("%s failed: %s", strings.Split(testCmd, " ")[0], string(out)))
 				result.TestsOK = false
 			}
 		case "python":
