@@ -85,14 +85,25 @@ func (m *Manager) ensureDir(path string) error {
 
 // readFileLimited reads a file with a size limit to prevent OOM from corrupted
 // or maliciously crafted session files. Returns the file contents or an error.
+// Pre-allocates the buffer when file size is known to avoid repeated reallocation.
 func readFileLimited(path string, maxBytes int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	limited := io.LimitReader(f, maxBytes+1)
-	data, err := io.ReadAll(limited)
+
+	// Pre-allocate buffer based on file size when known (A5)
+	fi, statErr := f.Stat()
+	var data []byte
+	if statErr == nil && fi.Size() > 0 && fi.Size() <= maxBytes {
+		data = make([]byte, 0, fi.Size())
+		limited := io.LimitReader(f, maxBytes+1)
+		data, err = io.ReadAll(limited)
+	} else {
+		limited := io.LimitReader(f, maxBytes+1)
+		data, err = io.ReadAll(limited)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +266,50 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 	return &session, nil
 }
 
+// loadSessionMetadata reads only session.json without loading messages.json.
+// This is an optimized path for operations that only need session metadata
+// (e.g., workflow state updates, session list).
+func (m *Manager) loadSessionMetadata(id string) (*Session, error) {
+	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
+		return nil, fmt.Errorf("invalid session ID %q: %w", id, m31errors.ErrSessionNotFound)
+	}
+
+	sessionPath := m.sessionJSONPath(id)
+	data, err := readFileLimited(sessionPath, types.MaxSessionFileSize)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("session %s not found at %s: %w", id, sessionPath, m31errors.ErrSessionNotFound)
+		}
+		if os.IsPermission(err) {
+			return nil, fmt.Errorf("cannot read session %s at %s: %w", id, sessionPath, m31errors.ErrSessionPermission)
+		}
+		return nil, fmt.Errorf("cannot read session %s: %w", id, err)
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("corrupt JSON in session.json for session %s: %w", id, m31errors.ErrSessionCorrupted)
+	}
+
+	if session.ID == "" {
+		return nil, fmt.Errorf("session %s has missing ID: %w", id, m31errors.ErrSessionCorrupted)
+	}
+	if session.StartedAt.IsZero() {
+		return nil, fmt.Errorf("session %s has zero StartedAt: %w", id, m31errors.ErrSessionCorrupted)
+	}
+
+	switch session.WorkflowPhase {
+	case types.PhaseIdle, types.PhaseInitialize, types.PhaseDiscuss,
+		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseShip:
+	case "":
+		session.WorkflowPhase = types.PhaseIdle
+	default:
+		return nil, fmt.Errorf("session %s has unknown WorkflowPhase %q: %w", id, session.WorkflowPhase, m31errors.ErrSessionCorrupted)
+	}
+
+	return &session, nil
+}
+
 // UpdateWorkflowState persists the workflow's current goal, phase,
 // and pending discuss questions to session.json. This is called
 // on every phase transition by the TUI.
@@ -262,8 +317,9 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 // Returns an error if the session doesn't exist or the write fails.
 // The write is atomic (temp file + rename) so a crash mid-write
 // leaves the existing session.json intact.
+// Optimized to load only session.json metadata, not messages.
 func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase, questions []string) error {
-	session, err := m.LoadSession(id)
+	session, err := m.loadSessionMetadata(id)
 	if err != nil {
 		return fmt.Errorf("UpdateWorkflowState: load session: %w", err)
 	}
@@ -275,12 +331,13 @@ func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase
 // session.json. Returns the persisted values, or zero values
 // (empty goal, PhaseIdle, empty questions) if the session
 // doesn't exist or the workflow state is unset.
+// Optimized to load only session.json metadata, not messages.
 func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.WorkflowPhase, questions []string, err error) {
 	// Validate ID format — return zero values for invalid IDs
 	if err := validateSessionID(id, m.sessionIDBytes*2); err != nil {
 		return "", types.PhaseIdle, nil, nil
 	}
-	session, err := m.LoadSession(id)
+	session, err := m.loadSessionMetadata(id)
 	if err != nil {
 		if errors.Is(err, m31errors.ErrSessionCorrupted) || errors.Is(err, m31errors.ErrSessionNotFound) {
 			// Session doesn't exist yet — return zero values with no error
@@ -376,7 +433,8 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 		}
 
 		// Get last-modified from session.json file stat
-		if fi, statErr := os.Stat(sessionPath); statErr == nil {
+		// Use DirEntry.Info() which may be cached by the OS, avoiding a separate stat syscall
+		if fi, statErr := entry.Info(); statErr == nil {
 			info.LastModified = fi.ModTime()
 		}
 
