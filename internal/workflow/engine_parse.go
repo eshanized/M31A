@@ -15,6 +15,14 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
+// Package-level compiled regexes (PERF-26/27/28) — compiled once at init time
+// instead of on every function call.
+var (
+	blockRe          = regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
+	questionRe       = regexp.MustCompile(`(\d+)\.\s+(.+\?)`)
+	questionFallback = regexp.MustCompile(`(\d+)\.\s+(.+)`)
+)
+
 // parseTasksFromJSON extracts tasks from LLM response, stripping markdown code blocks.
 func parseTasksFromJSON(content string) ([]m31types.Task, error) {
 	// Strip markdown code blocks
@@ -26,6 +34,12 @@ func parseTasksFromJSON(content string) ([]m31types.Task, error) {
 		return nil, fmt.Errorf("no JSON array found in response")
 	}
 
+	// Strip JSON comments that LLMs sometimes embed (// and /* */)
+	jsonStr = stripJSONComments(jsonStr)
+
+	// Normalize trailing commas before closing brackets/braces (common LLM mistake)
+	jsonStr = normalizeTrailingCommas(jsonStr)
+
 	var tasks []m31types.Task
 	if err := json.Unmarshal([]byte(jsonStr), &tasks); err != nil {
 		return nil, fmt.Errorf("JSON parse error: %w", err)
@@ -36,9 +50,8 @@ func parseTasksFromJSON(content string) ([]m31types.Task, error) {
 
 // stripCodeBlocks removes markdown code fences from content.
 func stripCodeBlocks(content string) string {
-	// Remove ```<any lang> ... ``` blocks
-	re := regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
-	return re.ReplaceAllString(content, "$1")
+	// Uses package-level compiled regex (PERF-27)
+	return blockRe.ReplaceAllString(content, "$1")
 }
 
 // extractJSONArray tries to find a JSON array in the content.
@@ -239,8 +252,8 @@ func detectProjectType(workDir string) string {
 // and prevent overwhelming the user with too many prompts at once.
 func parseQuestions(content string) []string {
 	// Match numbered questions that end with ?
-	re := regexp.MustCompile(`(\d+)\.\s+(.+\?)`)
-	matches := re.FindAllStringSubmatch(content, -1)
+	// Uses package-level compiled regexes (PERF-28)
+	matches := questionRe.FindAllStringSubmatch(content, -1)
 	var questions []string
 	for _, m := range matches {
 		if len(m) > 2 {
@@ -256,8 +269,7 @@ func parseQuestions(content string) []string {
 
 	// Fallback: match numbered items without ? if no questions found
 	if len(questions) == 0 {
-		reFallback := regexp.MustCompile(`(\d+)\.\s+(.+)`)
-		for _, m := range reFallback.FindAllStringSubmatch(content, -1) {
+		for _, m := range questionFallback.FindAllStringSubmatch(content, -1) {
 			if len(m) > 2 {
 				q := strings.TrimSpace(m[2])
 				if idx := strings.Index(q, "\n"); idx > 0 {
@@ -312,7 +324,7 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 	var totalAttempts int
 
 	// Pattern 1: JSON in code blocks ```<any lang> {...} ```
-	blockRe := regexp.MustCompile("(?s)```(?:\\w+)?\\s*\n(.*?)```")
+	// Uses package-level compiled regex (PERF-26)
 	for _, match := range blockRe.FindAllStringSubmatch(content, -1) {
 		if len(match) < 2 {
 			continue
@@ -499,6 +511,49 @@ func normalizeToolName(name string) string {
 		return canonical
 	}
 	return name
+}
+
+// normalizeTrailingCommas removes trailing commas before ] or } in JSON text.
+// LLMs sometimes produce trailing commas which are invalid in strict JSON.
+func normalizeTrailingCommas(s string) string {
+	runes := []rune(s)
+	var out []rune
+	inString := false
+	escaped := false
+
+	for i, c := range runes {
+		if escaped {
+			out = append(out, c)
+			escaped = false
+			continue
+		}
+		if inString {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			out = append(out, c)
+			continue
+		}
+		if c == '"' {
+			inString = true
+			out = append(out, c)
+			continue
+		}
+		// Skip comma if followed by ] or } (with optional whitespace)
+		if c == ',' {
+			j := i + 1
+			for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+				j++
+			}
+			if j < len(runes) && (runes[j] == ']' || runes[j] == '}') {
+				continue // skip the trailing comma
+			}
+		}
+		out = append(out, c)
+	}
+	return string(out)
 }
 
 // stripJSONComments removes // line comments and /* ... */ block comments from
