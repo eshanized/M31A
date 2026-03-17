@@ -745,3 +745,199 @@ func TestEngine_PreflightContextCheck_BelowThreshold(t *testing.T) {
 		t.Errorf("expected nil error for small context, got: %v", err)
 	}
 }
+
+func TestConsumeStreamWithTools_NativeToolCalls(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	chunks := []m31types.StreamChunk{
+		{Type: "content", Delta: "I'll create the file."},
+		{Type: "tool_call", Index: 0, ToolCallID: "call_abc", ToolName: "FileWrite", ToolInput: `{"path": "main.go"`},
+		{Type: "tool_call", Index: 0, ToolCallID: "call_abc", ToolName: "FileWrite", ToolInput: `, "content": "package main"}`},
+		{Type: "done"},
+	}
+	idx := 0
+	next := func() (*m31types.StreamChunk, error) {
+		if idx >= len(chunks) {
+			return nil, io.EOF
+		}
+		c := chunks[idx]
+		idx++
+		return &c, nil
+	}
+	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
+
+	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "I'll create the file." {
+		t.Errorf("unexpected content: %q", content)
+	}
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolCalls))
+	}
+	if toolCalls[0].Name != "FileWrite" {
+		t.Errorf("expected tool name FileWrite, got %q", toolCalls[0].Name)
+	}
+	if toolCalls[0].ID != "call_abc" {
+		t.Errorf("expected tool call ID call_abc, got %q", toolCalls[0].ID)
+	}
+	if !strings.Contains(string(toolCalls[0].Input), `"path"`) {
+		t.Errorf("expected input to contain path, got %q", string(toolCalls[0].Input))
+	}
+}
+
+func TestConsumeStreamWithTools_MultipleTools(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	chunks := []m31types.StreamChunk{
+		{Type: "tool_call", Index: 0, ToolCallID: "call_1", ToolName: "Bash", ToolInput: `{"command": "ls"}`},
+		{Type: "tool_call", Index: 1, ToolCallID: "call_2", ToolName: "FileRead", ToolInput: `{"path": "README.md"}`},
+		{Type: "done"},
+	}
+	idx := 0
+	next := func() (*m31types.StreamChunk, error) {
+		if idx >= len(chunks) {
+			return nil, io.EOF
+		}
+		c := chunks[idx]
+		idx++
+		return &c, nil
+	}
+	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
+
+	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "" {
+		t.Errorf("expected empty content, got %q", content)
+	}
+	if len(toolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", len(toolCalls))
+	}
+	if toolCalls[0].Name != "Bash" {
+		t.Errorf("expected first tool Bash, got %q", toolCalls[0].Name)
+	}
+	if toolCalls[1].Name != "FileRead" {
+		t.Errorf("expected second tool FileRead, got %q", toolCalls[1].Name)
+	}
+}
+
+func TestConsumeStreamWithTools_NoToolCalls(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	chunks := []m31types.StreamChunk{
+		{Type: "content", Delta: "Just text, no tools."},
+		{Type: "done"},
+	}
+	idx := 0
+	next := func() (*m31types.StreamChunk, error) {
+		if idx >= len(chunks) {
+			return nil, io.EOF
+		}
+		c := chunks[idx]
+		idx++
+		return &c, nil
+	}
+	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
+
+	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "Just text, no tools." {
+		t.Errorf("unexpected content: %q", content)
+	}
+	if len(toolCalls) != 0 {
+		t.Errorf("expected 0 tool calls, got %d", len(toolCalls))
+	}
+}
+
+func TestConsumeStreamWithTools_ToolNameNormalization(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	chunks := []m31types.StreamChunk{
+		{Type: "tool_call", Index: 0, ToolCallID: "call_1", ToolName: "bash", ToolInput: `{"command": "echo hi"}`},
+		{Type: "done"},
+	}
+	idx := 0
+	next := func() (*m31types.StreamChunk, error) {
+		if idx >= len(chunks) {
+			return nil, io.EOF
+		}
+		c := chunks[idx]
+		idx++
+		return &c, nil
+	}
+	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
+
+	_, toolCalls, err := engine.consumeStreamWithTools(iter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolCalls))
+	}
+	if toolCalls[0].Name != "Bash" {
+		t.Errorf("expected normalized name Bash, got %q", toolCalls[0].Name)
+	}
+}
+
+func TestFinalizeToolCalls_EmptyBuilders(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+	result := finalizeToolCalls(map[int]*toolCallBuilder{}, engine)
+	if result != nil {
+		t.Errorf("expected nil for empty builders, got %v", result)
+	}
+}
+
+func TestStreamLLMWithTools_SendsToolsInRequest(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	var capturedReq provider.ChatRequest
+	mp := engine.provider.(*mockProvider)
+
+	mp2 := &capturingProvider{
+		inner: mp,
+		onCall: func(req provider.ChatRequest) {
+			capturedReq = req
+		},
+	}
+	engine.provider = mp2
+
+	_, _, _ = engine.streamLLMWithTools(context.Background(), []m31types.Message{
+		{Role: "user", Content: "hello"},
+	})
+
+	if len(capturedReq.Tools) == 0 {
+		t.Error("expected tools to be sent in request, got none")
+	}
+}
+
+type capturingProvider struct {
+	inner  *mockProvider
+	onCall func(req provider.ChatRequest)
+}
+
+func (c *capturingProvider) Name() string   { return c.inner.Name() }
+func (c *capturingProvider) APIKey() string { return c.inner.APIKey() }
+func (c *capturingProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
+	return c.inner.FetchModels(ctx)
+}
+func (c *capturingProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
+	c.onCall(req)
+	return c.inner.ChatCompletionStream(ctx, req)
+}
+func (c *capturingProvider) EstimateCost(modelID string, usage m31types.Usage) float64 {
+	return c.inner.EstimateCost(modelID, usage)
+}
+func (c *capturingProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
+	return c.inner.HealthCheck(ctx)
+}
+func (c *capturingProvider) GetModel(id string) (*m31types.ModelInfo, error) {
+	return c.inner.GetModel(id)
+}
+func (c *capturingProvider) CachedModels() []m31types.ModelInfo {
+	return c.inner.CachedModels()
+}
