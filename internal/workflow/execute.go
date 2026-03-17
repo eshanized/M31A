@@ -126,8 +126,8 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		// Build context
 		messages := e.buildExecuteContext(*task, allTasks, goal)
 
-		// Stream LLM
-		content, err := e.streamLLM(ctx, messages, true)
+		// Stream LLM with native tool calling
+		content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
 		if err != nil {
 			failureReason := fmt.Sprintf("LLM stream failed: %v", err)
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
@@ -154,32 +154,35 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			continue
 		}
 
-		// Parse tool calls
-		toolCalls, parseErr := e.parseToolCalls(content)
-		if parseErr != nil {
-			failureReason := fmt.Sprintf("tool call parsing failed: %v", parseErr)
-			if task.HealsAttempted >= m31types.MaxHealAttempts {
-				return taskrunner.TaskResult{Success: false, Error: failureReason}
+		// Fall back to text-based parsing if no native tool calls
+		if len(toolCalls) == 0 {
+			parsedCalls, parseErr := e.parseToolCalls(content)
+			if parseErr != nil {
+				failureReason := fmt.Sprintf("tool call parsing failed: %v", parseErr)
+				if task.HealsAttempted >= m31types.MaxHealAttempts {
+					return taskrunner.TaskResult{Success: false, Error: failureReason}
+				}
+				task.HealsAttempted++
+				e.logger.Info("self-healing task after parse failure", "task", task.ID, "attempt", task.HealsAttempted)
+				e.emit(SelfHealStartMsg{
+					TaskID:  task.ID,
+					Attempt: task.HealsAttempted,
+					Max:     m31types.MaxHealAttempts,
+				})
+				healResult := e.healTask(ctx, *task, failureReason, goal)
+				e.emit(SelfHealCompleteMsg{
+					TaskID:  task.ID,
+					Attempt: task.HealsAttempted,
+					Max:     m31types.MaxHealAttempts,
+					Success: healResult.Success,
+					Error:   healResult.Error,
+				})
+				if !healResult.Success {
+					return healResult
+				}
+				continue
 			}
-			task.HealsAttempted++
-			e.logger.Info("self-healing task after parse failure", "task", task.ID, "attempt", task.HealsAttempted)
-			e.emit(SelfHealStartMsg{
-				TaskID:  task.ID,
-				Attempt: task.HealsAttempted,
-				Max:     m31types.MaxHealAttempts,
-			})
-			healResult := e.healTask(ctx, *task, failureReason, goal)
-			e.emit(SelfHealCompleteMsg{
-				TaskID:  task.ID,
-				Attempt: task.HealsAttempted,
-				Max:     m31types.MaxHealAttempts,
-				Success: healResult.Success,
-				Error:   healResult.Error,
-			})
-			if !healResult.Success {
-				return healResult
-			}
-			continue
+			toolCalls = parsedCalls
 		}
 
 		// Dispatch tool calls — C-6: execute ALL tool calls and collect results
@@ -406,18 +409,20 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 			task.ID, failure, e.readTaskFiles(task.Files))},
 	}
 
-	content, err := e.streamLLM(ctx, messages, true)
+	content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
 	if err != nil {
 		return taskrunner.TaskResult{Success: false, Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}
 	}
 
-	// Dispatch tool calls for fix
-	toolCalls, parseErr := e.parseToolCalls(content)
-	if parseErr != nil {
-		return taskrunner.TaskResult{
-			Success:    false,
-			Error:      fmt.Sprintf("heal: tool call parsing failed: %v", parseErr),
-			DurationMs: time.Since(start).Milliseconds(),
+	// Fall back to text-based parsing if no native tool calls
+	if len(toolCalls) == 0 {
+		toolCalls, err = e.parseToolCalls(content)
+		if err != nil {
+			return taskrunner.TaskResult{
+				Success:    false,
+				Error:      fmt.Sprintf("heal: tool call parsing failed: %v", err),
+				DurationMs: time.Since(start).Milliseconds(),
+			}
 		}
 	}
 	if len(toolCalls) == 0 {
