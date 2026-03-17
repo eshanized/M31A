@@ -370,37 +370,51 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}, nil
 }
 
-// PERF-2: This function uses multiple string passes (Index, ReplaceAll, ToLower)
-// on the full HTML body. Each pass re-processes the entire string. For V1, this
-// is acceptable because: (1) response bodies are capped at 5MB, (2) adding
-// golang.org/x/net/html would be a significant dependency for marginal gain.
-// If profiling shows this as a bottleneck, consider a single-pass parser.
-//
 // htmlToMarkdown converts HTML to a simplified markdown representation.
 // This is a pure-Go implementation without external dependencies.
+// Computes lowercase HTML once and reuses it across all tag operations,
+// avoiding repeated O(N) ToLower allocations.
 func htmlToMarkdown(html string) string {
-	// Strip script and style elements
+	// Strip script and style elements first (before lowercase computation
+	// since stripTags works on raw HTML)
 	html = stripTags(html, "script", "style")
 
-	// Handle common block elements with newlines
-	html = replaceBlockTag(html, "p", "\n\n")
-	html = replaceBlockTag(html, "div", "\n")
-	html = replaceBlockTag(html, "br", "\n")
-	html = replaceBlockTag(html, "li", "\n- ")
-	html = replaceBlockTag(html, "h1", "\n# ")
-	html = replaceBlockTag(html, "h2", "\n## ")
-	html = replaceBlockTag(html, "h3", "\n### ")
-	html = replaceBlockTag(html, "h4", "\n#### ")
+	// Compute lowercase once for all case-insensitive tag matching
+	lower := strings.ToLower(html)
+
+	// Handle common block elements with newlines — pass pre-computed lowercase
+	html = replaceBlockTag(html, lower, "p", "\n\n")
+	// Recompute lower after each replacement since string positions shift
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "div", "\n")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "br", "\n")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "li", "\n- ")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "h1", "\n# ")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "h2", "\n## ")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "h3", "\n### ")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "h4", "\n#### ")
 
 	// Handle links: <a href="url">text</a> -> [text](url)
-	html = convertLinks(html)
+	lower = strings.ToLower(html)
+	html = convertLinks(html, lower)
 
 	// Handle bold and italic
-	html = replaceInlineTag(html, "strong", "**")
-	html = replaceInlineTag(html, "b", "**")
-	html = replaceInlineTag(html, "em", "*")
-	html = replaceInlineTag(html, "i", "*")
-	html = replaceInlineTag(html, "code", "`")
+	lower = strings.ToLower(html)
+	html = replaceInlineTag(html, lower, "strong", "**")
+	lower = strings.ToLower(html)
+	html = replaceInlineTag(html, lower, "b", "**")
+	lower = strings.ToLower(html)
+	html = replaceInlineTag(html, lower, "em", "*")
+	lower = strings.ToLower(html)
+	html = replaceInlineTag(html, lower, "i", "*")
+	lower = strings.ToLower(html)
+	html = replaceInlineTag(html, lower, "code", "`")
 
 	// Strip all remaining tags
 	html = stripAllTags(html)
@@ -417,9 +431,12 @@ func htmlToMarkdown(html string) string {
 // htmlToText extracts plain text from HTML.
 func htmlToText(html string) string {
 	html = stripTags(html, "script", "style")
-	html = replaceBlockTag(html, "p", "\n\n")
-	html = replaceBlockTag(html, "br", "\n")
-	html = replaceBlockTag(html, "li", "\n")
+	lower := strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "p", "\n\n")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "br", "\n")
+	lower = strings.ToLower(html)
+	html = replaceBlockTag(html, lower, "li", "\n")
 	html = stripAllTags(html)
 
 	// Decode entities
@@ -429,18 +446,25 @@ func htmlToText(html string) string {
 }
 
 // stripTags removes all occurrences of the given HTML tags and their content.
+// Uses strings.Builder for efficient string construction instead of O(N²) concatenation.
 // Limitation: does not correctly handle nested same-type tags (e.g., nested
 // <script> blocks). This is acceptable for script/style stripping where such
 // nesting is extremely rare in practice.
 func stripTags(html string, tags ...string) string {
 	for _, tag := range tags {
+		openTag := "<" + tag
+		closeTag := "</" + tag + ">"
+		var b strings.Builder
+		b.Grow(len(html))
+		pos := 0
 		for {
-			start := strings.Index(html, "<"+tag)
+			start := strings.Index(html[pos:], openTag)
 			if start == -1 {
 				break
 			}
-			// Find end of opening tag
-			tagEnd := strings.Index(html[start:], ">")
+			start += pos
+
+			tagEnd := strings.IndexByte(html[start:], '>')
 			if tagEnd == -1 {
 				break
 			}
@@ -448,29 +472,32 @@ func stripTags(html string, tags ...string) string {
 
 			// Check for self-closing tag (/> at end)
 			if strings.HasSuffix(html[start:tagEnd], "/") {
-				html = html[:start] + html[tagEnd:]
+				b.WriteString(html[pos:start])
+				pos = tagEnd
 				continue
 			}
 
 			// Find closing tag
-			closeTag := "</" + tag + ">"
 			closeStart := strings.Index(html[tagEnd:], closeTag)
 			if closeStart == -1 {
 				break
 			}
 			closeStart += tagEnd
 			closeEnd := closeStart + len(closeTag)
-			html = html[:start] + html[closeEnd:]
+			b.WriteString(html[pos:start])
+			pos = closeEnd
 		}
+		b.WriteString(html[pos:])
+		html = b.String()
 	}
 	return html
 }
 
-func replaceBlockTag(html, tag, replacement string) string {
-	lower := strings.ToLower(html)
+func replaceBlockTag(html, lower, tag, replacement string) string {
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
 	var result strings.Builder
+	result.Grow(len(html))
 	pos := 0
 	for {
 		start := strings.Index(lower[pos:], openTag)
@@ -501,22 +528,21 @@ func replaceBlockTag(html, tag, replacement string) string {
 	return result.String()
 }
 
-func replaceInlineTag(html, tag, marker string) string {
-	lower := strings.ToLower(html)
+func replaceInlineTag(html, lower, tag, marker string) string {
+	openTag := "<" + tag
+	closeTag := "</" + tag + ">"
 	for {
-		openTag := "<" + tag
 		start := strings.Index(lower, openTag)
 		if start == -1 {
 			break
 		}
 
-		tagEnd := strings.Index(html[start:], ">")
+		tagEnd := strings.IndexByte(html[start:], '>')
 		if tagEnd == -1 {
 			break
 		}
 		tagEnd += start + 1
 
-		closeTag := "</" + tag + ">"
 		closeStart := strings.Index(lower[tagEnd:], closeTag)
 		if closeStart == -1 {
 			break
@@ -526,13 +552,13 @@ func replaceInlineTag(html, tag, marker string) string {
 
 		inner := html[tagEnd:closeStart]
 		html = html[:start] + marker + inner + marker + html[closeEnd:]
+		// Recompute lower for next iteration since string positions shift
 		lower = strings.ToLower(html)
 	}
 	return html
 }
 
-func convertLinks(html string) string {
-	lower := strings.ToLower(html)
+func convertLinks(html, lower string) string {
 	for {
 		start := strings.Index(lower, "<a ")
 		if start == -1 {
@@ -543,7 +569,7 @@ func convertLinks(html string) string {
 		hrefStart := strings.Index(lower[start:], "href=")
 		if hrefStart == -1 {
 			// No href, skip
-			tagEnd := strings.Index(html[start:], ">")
+			tagEnd := strings.IndexByte(html[start:], '>')
 			if tagEnd == -1 {
 				break
 			}
@@ -582,7 +608,7 @@ func convertLinks(html string) string {
 		}
 
 		// Find end of opening tag
-		tagEnd := strings.Index(html[start:], ">")
+		tagEnd := strings.IndexByte(html[start:], '>')
 		if tagEnd == -1 {
 			break
 		}
@@ -598,7 +624,9 @@ func convertLinks(html string) string {
 		closeEnd := closeStart + len(closeTag)
 
 		text := html[tagEnd:closeStart]
-		html = html[:start] + "[" + text + "](" + url + ")" + html[closeEnd:]
+		replacement := "[" + text + "](" + url + ")"
+		html = html[:start] + replacement + html[closeEnd:]
+		// Recompute lower for next iteration since string positions shift
 		lower = strings.ToLower(html)
 	}
 	return html
