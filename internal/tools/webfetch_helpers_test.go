@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -70,7 +71,8 @@ func TestStripTags_Multiple(t *testing.T) {
 func TestReplaceBlockTag(t *testing.T) {
 	t.Parallel()
 	input := "<p>hello</p><p>world</p>"
-	got := replaceBlockTag(input, "p", "\n")
+	lower := strings.ToLower(input)
+	got := replaceBlockTag(input, lower, "p", "\n")
 	if got == input {
 		t.Error("expected replacement to occur")
 	}
@@ -79,7 +81,8 @@ func TestReplaceBlockTag(t *testing.T) {
 func TestReplaceInlineTag(t *testing.T) {
 	t.Parallel()
 	input := "<strong>bold</strong>"
-	got := replaceInlineTag(input, "strong", "**")
+	lower := strings.ToLower(input)
+	got := replaceInlineTag(input, lower, "strong", "**")
 	if got != "**bold**" {
 		t.Errorf("replaceInlineTag = %q, want '**bold**'", got)
 	}
@@ -88,7 +91,8 @@ func TestReplaceInlineTag(t *testing.T) {
 func TestConvertLinks(t *testing.T) {
 	t.Parallel()
 	input := `<a href="https://example.com">Example</a>`
-	got := convertLinks(input)
+	lower := strings.ToLower(input)
+	got := convertLinks(input, lower)
 	expected := "[Example](https://example.com)"
 	if got != expected {
 		t.Errorf("convertLinks = %q, want %q", got, expected)
@@ -98,7 +102,8 @@ func TestConvertLinks(t *testing.T) {
 func TestConvertLinks_NoHref(t *testing.T) {
 	t.Parallel()
 	input := "<a>no link</a>"
-	got := convertLinks(input)
+	lower := strings.ToLower(input)
+	got := convertLinks(input, lower)
 	if got == "" {
 		t.Error("expected non-empty output for link without href")
 	}
@@ -107,7 +112,8 @@ func TestConvertLinks_NoHref(t *testing.T) {
 func TestConvertLinks_MultipleLinks(t *testing.T) {
 	t.Parallel()
 	input := `<a href="url1">Link1</a> and <a href="url2">Link2</a>`
-	got := convertLinks(input)
+	lower := strings.ToLower(input)
+	got := convertLinks(input, lower)
 	if got == input {
 		t.Error("expected links to be converted")
 	}
