@@ -3,13 +3,16 @@ package workflow
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -92,6 +95,12 @@ type Engine struct {
 	// Keys are WorkflowPhase values; values are model ID strings.
 	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
 	perPhaseModels map[m31types.WorkflowPhase]string
+	// Cached tool definitions (built once, reused for all LLM calls)
+	cachedToolDefs     []provider.ToolDefinition
+	cachedToolDefsOnce sync.Once
+	// Cached system prompt static portions
+	cachedBasePrompt     string
+	cachedBasePromptOnce sync.Once
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -546,30 +555,38 @@ func (e *Engine) PlanVersion() int {
 }
 
 // buildToolDefinitions returns the tool definitions for the LLM.
+// Results are cached after the first call since tool definitions
+// don't change during a session (PERF-23).
 func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
-	var defs []provider.ToolDefinition
-	for _, name := range e.dispatcher.List() {
-		tool, ok := e.dispatcher.GetTool(name)
-		if !ok {
-			continue
+	e.cachedToolDefsOnce.Do(func() {
+		var defs []provider.ToolDefinition
+		for _, name := range e.dispatcher.List() {
+			tool, ok := e.dispatcher.GetTool(name)
+			if !ok {
+				continue
+			}
+			def := provider.ToolDefinition{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  "{}",
+			}
+			if sp, ok := tool.(m31types.SchemaProvider); ok {
+				def.Parameters = sp.ParameterSchema()
+			}
+			defs = append(defs, def)
 		}
-		def := provider.ToolDefinition{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			Parameters:  "{}",
-		}
-		// use SchemaProvider interface for real parameter schemas
-		if sp, ok := tool.(m31types.SchemaProvider); ok {
-			def.Parameters = sp.ParameterSchema()
-		}
-		defs = append(defs, def)
-	}
-	return defs
+		e.cachedToolDefs = defs
+	})
+	return e.cachedToolDefs
 }
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
+// The base prompt is cached since it doesn't change during a session (PERF-24).
 func (e *Engine) buildSystemPrompt(extra ...string) string {
-	parts := []string{e.prompts.Base}
+	e.cachedBasePromptOnce.Do(func() {
+		e.cachedBasePrompt = e.prompts.Base
+	})
+	parts := []string{e.cachedBasePrompt}
 	for _, p := range extra {
 		if p != "" {
 			parts = append(parts, p)
@@ -606,6 +623,156 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 		}
 	}
 	return sb.String(), nil
+}
+
+// toolCallBuilder accumulates streamed tool_call chunks for a single tool invocation.
+type toolCallBuilder struct {
+	id        string
+	name      string
+	arguments strings.Builder
+}
+
+// consumeStreamWithTools reads all chunks from the iterator, collecting both
+// text content and native tool_call chunks. Returns the concatenated content,
+// any structured tool calls, and an error.
+//
+// Native tool_call chunks arrive with Type="tool_call" and incremental argument
+// deltas in ToolInput. They are accumulated by Index and finalized into ToolCall
+// structs with parsed JSON arguments.
+func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (string, []m31types.ToolCall, error) {
+	var content strings.Builder
+	builders := map[int]*toolCallBuilder{}
+	defer iterator.Close()
+
+	for {
+		chunk, err := iterator.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			if chunk != nil && chunk.Delta != "" {
+				content.WriteString(chunk.Delta)
+			}
+			return content.String(), nil, err
+		}
+		if chunk == nil {
+			continue
+		}
+
+		switch chunk.Type {
+		case "tool_call":
+			b, ok := builders[chunk.Index]
+			if !ok {
+				b = &toolCallBuilder{
+					id:   chunk.ToolCallID,
+					name: chunk.ToolName,
+				}
+				builders[chunk.Index] = b
+			}
+			if chunk.ToolInput != "" {
+				b.arguments.WriteString(chunk.ToolInput)
+			}
+			if chunk.ToolCallID != "" && b.id == "" {
+				b.id = chunk.ToolCallID
+			}
+			if chunk.ToolName != "" && b.name == "" {
+				b.name = chunk.ToolName
+			}
+
+		default:
+			if chunk.Delta != "" {
+				content.WriteString(chunk.Delta)
+				if content.Len() > m31types.MaxLLMResponseBytes {
+					return content.String(), nil, fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
+						m31types.MaxLLMResponseBytes, m31errors.ErrContextExceeded)
+				}
+			}
+		}
+	}
+
+	toolCalls := finalizeToolCalls(builders, e)
+	return content.String(), toolCalls, nil
+}
+
+// finalizeToolCalls converts accumulated toolCallBuilders into ToolCall structs.
+// Sorts by index for deterministic ordering. Normalizes tool names and parses
+// arguments as JSON.
+func finalizeToolCalls(builders map[int]*toolCallBuilder, e *Engine) []m31types.ToolCall {
+	if len(builders) == 0 {
+		return nil
+	}
+
+	indices := make([]int, 0, len(builders))
+	for idx := range builders {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	if len(indices) > m31types.MaxToolsPerCall {
+		slog.Warn("finalizeToolCalls: tool count exceeded cap, truncating",
+			"count", len(indices), "cap", m31types.MaxToolsPerCall)
+		indices = indices[:m31types.MaxToolsPerCall]
+	}
+
+	calls := make([]m31types.ToolCall, 0, len(indices))
+	for _, idx := range indices {
+		b := builders[idx]
+		name := normalizeToolName(b.name)
+
+		args := b.arguments.String()
+		var input json.RawMessage
+		if args != "" {
+			input = json.RawMessage(args)
+		} else {
+			input = json.RawMessage("{}")
+		}
+
+		id := b.id
+		if id == "" {
+			id = fmt.Sprintf("call_%s_%d", name, e.nextCallID())
+		}
+
+		calls = append(calls, m31types.ToolCall{
+			ID:    id,
+			Name:  name,
+			Input: input,
+		})
+	}
+	return calls
+}
+
+// streamLLMWithTools sends a chat request with tool definitions and returns
+// both the text content and any native tool calls from the response.
+// Used by execute and heal phases for structured tool dispatch.
+func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Message) (string, []m31types.ToolCall, error) {
+	if err := e.preflightContextCheck(messages); err != nil {
+		return "", nil, err
+	}
+
+	e.emit(ThinkingStartMsg{
+		Context: "LLM processing...",
+	})
+
+	req := provider.ChatRequest{
+		Model:            e.modelForPhase(e.activePhase),
+		Messages:         messages,
+		ReasoningEnabled: true,
+		Tools:            e.buildToolDefinitions(),
+	}
+
+	iterator, err := e.provider.ChatCompletionStream(ctx, req)
+	if err != nil {
+		e.emit(ThinkingCompleteMsg{
+			Context: "LLM processing failed",
+		})
+		return "", nil, err
+	}
+
+	content, toolCalls, err := e.consumeStreamWithTools(iterator)
+	e.emit(ThinkingCompleteMsg{
+		Context: "LLM processing complete",
+	})
+	return content, toolCalls, err
 }
 
 // streamLLM sends a chat request and returns the full response content.
