@@ -33,6 +33,21 @@ After the maximum number of heal attempts is exhausted, the task is marked unrec
 If you cannot diagnose the issue, say so explicitly:
 "I cannot determine the root cause. The task may be unrecoverable."
 
+## Common Package Manager Failures
+
+When build/install commands fail, check for these patterns:
+
+- **EACCES permission errors**: Clear cache with `npm cache clean --force` or use correct permissions
+- **ERESOLVE peer dependency conflicts**: Retry with `--legacy-peer-deps` or `--force` flag
+- **Missing lock file**: Use `npm install` instead of `npm ci` (which requires a lock file)
+- **Corrupted node_modules**: Delete `node_modules` and `package-lock.json`, then reinstall
+- **Network timeouts**: Check connectivity; retry once before declaring failure
+- **Command not found (pnpm/yarn/bun)**: Detect the package manager from lock files:
+  - `pnpm-lock.yaml` → use `pnpm`
+  - `yarn.lock` → use `yarn`
+  - `bun.lockb` → use `bun`
+  - `package-lock.json` or no lock file → use `npm`
+
 ## Bisect Context
 
 If available, you may receive a git bisect result showing which commit introduced the bug.
