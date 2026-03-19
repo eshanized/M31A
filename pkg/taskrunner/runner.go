@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -132,45 +133,44 @@ func (r *Runner) Schedule() ([][]int, error) {
 	return groups, nil
 }
 
-// ExecuteGroup runs all tasks in the group sequentially.
+// MaxParallelTasks is the default maximum number of tasks to execute concurrently
+// within a group. This controls parallelism for independent tasks.
+const MaxParallelTasks = 4
+
+// ExecuteGroup runs all tasks in the group concurrently with bounded parallelism.
 // Dependencies must have been completed in prior groups.
 // The provided ctx is used as the parent context for all tasks, ensuring
 // that cancellation (e.g. from TUI shutdown) propagates to running tasks.
 func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) error {
+	// Pre-filter: skip tasks already in terminal state or with failed dependencies
+	type readyTask struct {
+		idx  int
+		task types.Task
+	}
+	var ready []readyTask
 	for _, id := range group {
-		// Check parent context cancellation before starting each task
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		idx, ok := r.idToIdx[id]
 		if !ok {
 			return fmt.Errorf("task %d: not found in runner", id)
 		}
 		task := r.tasks[idx]
 
-		// Skip tasks already in terminal state
 		if curStatus := r.status[task.ID]; curStatus == types.StatusSkipped ||
 			curStatus == types.StatusFailed || curStatus == types.StatusUnrecoverable ||
 			curStatus == types.StatusDone {
 			continue
 		}
 
-		// Check all dependencies completed
 		allDepsOK := true
 		for _, depID := range task.Dependencies {
 			depStatus := r.status[depID]
 			if depStatus == types.StatusFailed || depStatus == types.StatusSkipped || depStatus == types.StatusUnrecoverable {
-				// Block this task
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d failed/skipped", depID)}
 				allDepsOK = false
 				break
 			}
 			if depStatus != types.StatusDone {
-				// Shouldn't happen with correct grouping, but skip if it does
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d not completed", depID)}
 				allDepsOK = false
@@ -178,72 +178,115 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 			}
 		}
 
-		if !allDepsOK {
-			continue
-		}
-
-		// Execute the task with retry support
-		r.status[task.ID] = types.StatusRunning
-		if r.OnTaskStart != nil {
-			r.OnTaskStart(task)
-		}
-
-		var result TaskResult
-		maxAttempts := r.MaxRetries + 1
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			var taskCtx context.Context
-			var cancel context.CancelFunc
-			if fn != nil {
-				if r.TaskTimeout > 0 {
-					taskCtx, cancel = context.WithTimeout(ctx, r.TaskTimeout)
-				} else {
-					taskCtx, cancel = context.WithCancel(ctx)
-				}
-				result = fn(taskCtx, task)
-			} else {
-				taskCtx, cancel = context.WithCancel(ctx)
-				result = TaskResult{Success: true}
-			}
-
-			if result.Success || attempt == maxAttempts-1 {
-				cancel()
-				break
-			}
-
-			// Use parent ctx for backoff so context cancellation takes effect
-			// but isn't affected by per-attempt taskCtx cancellation.
-			backoff := time.Duration(attempt+1) * time.Second
-			timer := time.NewTimer(backoff)
-			select {
-			case <-timer.C:
-				// Backoff completed, continue to next attempt
-			case <-ctx.Done():
-				timer.Stop()
-				cancel()
-				return ctx.Err()
-			}
-			cancel()
-		}
-
-		r.results[task.ID] = result
-
-		if result.Success {
-			r.status[task.ID] = types.StatusDone
-			if r.OnTaskUpdate != nil {
-				r.OnTaskUpdate(task, "done")
-			}
-			if result.CommitHash != "" {
-				// Update task's commit hash
-				r.tasks[idx].CommitHash = result.CommitHash
-			}
-		} else {
-			r.status[task.ID] = types.StatusFailed
-			if r.OnTaskUpdate != nil {
-				r.OnTaskUpdate(task, "failed")
-			}
+		if allDepsOK {
+			ready = append(ready, readyTask{idx: idx, task: task})
 		}
 	}
 
+	if len(ready) == 0 {
+		return nil
+	}
+
+	// Execute tasks concurrently with bounded parallelism
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, MaxParallelTasks)
+
+	for _, rt := range ready {
+		// Check parent context cancellation before starting each task
+		select {
+		case <-ctx.Done():
+			// Wait for running tasks to finish
+			wg.Wait()
+			return ctx.Err()
+		default:
+		}
+
+		task := rt.task
+		idx := rt.idx
+
+		wg.Add(1)
+		sem <- struct{}{} // acquire semaphore
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }() // release semaphore
+
+			// Check context again inside goroutine
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Execute the task with retry support
+			mu.Lock()
+			r.status[task.ID] = types.StatusRunning
+			mu.Unlock()
+			if r.OnTaskStart != nil {
+				r.OnTaskStart(task)
+			}
+
+			var result TaskResult
+			maxAttempts := r.MaxRetries + 1
+			for attempt := 0; attempt < maxAttempts; attempt++ {
+				var taskCtx context.Context
+				var cancel context.CancelFunc
+				if fn != nil {
+					if r.TaskTimeout > 0 {
+						taskCtx, cancel = context.WithTimeout(ctx, r.TaskTimeout)
+					} else {
+						taskCtx, cancel = context.WithCancel(ctx)
+					}
+					result = fn(taskCtx, task)
+				} else {
+					taskCtx, cancel = context.WithCancel(ctx)
+					result = TaskResult{Success: true}
+				}
+
+				if result.Success || attempt == maxAttempts-1 {
+					cancel()
+					break
+				}
+
+				backoff := time.Duration(attempt+1) * time.Second
+				timer := time.NewTimer(backoff)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					cancel()
+					mu.Lock()
+					r.results[task.ID] = TaskResult{Success: false, Error: ctx.Err().Error()}
+					r.status[task.ID] = types.StatusFailed
+					mu.Unlock()
+					return
+				}
+				cancel()
+			}
+
+			mu.Lock()
+			r.results[task.ID] = result
+			if result.Success {
+				r.status[task.ID] = types.StatusDone
+				if r.OnTaskUpdate != nil {
+					r.OnTaskUpdate(task, "done")
+				}
+				if result.CommitHash != "" {
+					r.tasks[idx].CommitHash = result.CommitHash
+				}
+			} else {
+				r.status[task.ID] = types.StatusFailed
+				if r.OnTaskUpdate != nil {
+					r.OnTaskUpdate(task, "failed")
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+	// ExecuteGroup returns nil for task failures — errors are tracked
+	// in r.results and r.status for callers to inspect.
 	return nil
 }
 
