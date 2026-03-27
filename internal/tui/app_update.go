@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -43,11 +44,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.addToastCmd("Response cancelled", "warning", 3*time.Second))
 				return m, tea.Batch(cmds...)
 			}
-			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
-				return m, tea.Quit
-			}
-			m.lastCtrlCTime = time.Now()
-			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit", "info", 3*time.Second))
+		if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
+			return m, tea.Quit
+		}
+		m.lastCtrlCTime = time.Now()
+		cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
 			return m, tea.Batch(cmds...)
 		default:
 			cmds = append(cmds, m.routeKeyMsg(msg))
@@ -129,7 +130,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			status := "done"
 			if msg.Err != nil {
-				status = fmt.Sprintf("failed: %v", msg.Err)
+				status = fmt.Sprintf("failed: %s", m31errors.UserMessage(msg.Err))
 			}
 			m.replModel.AddMessage(makeAssistantMsg(
 				fmt.Sprintf("*Tool %s: %s (%dms)*", msg.ToolCall.Name, status, msg.DurationMs),
@@ -180,7 +181,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentErrorMsg:
 		if m.replModel != nil {
 			m.replModel.streaming = false
-			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: m.activeModel.ID}
+			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: m.activeModel.ID, ProviderName: m.activeProvider}
 			m.replModel.handleStreamErrorMsg(errMsg)
 		}
 		m.streamCancelFn = nil
@@ -209,6 +210,34 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Forward to verify screen for heal spinner animation
 		if m.screen == ScreenVerify && m.verifyModel != nil {
 			m.verifyModel.TickSpinner()
+		}
+		// Forward to plan screen for animations
+		if m.screen == ScreenPlan && m.planModel != nil {
+			newPlan, cmd := m.planModel.Update(msg)
+			m.planModel = newPlan
+			cmds = append(cmds, cmd)
+		}
+		// Forward to ship screen for animations
+		if m.screen == ScreenShip && m.shipModel != nil {
+			newShip, cmd := m.shipModel.Update(msg)
+			m.shipModel = newShip
+			cmds = append(cmds, cmd)
+		}
+		// Forward to theme picker for animations
+		if m.screen == ScreenThemePicker && m.themePickerModel != nil {
+			newTP, cmd := m.themePickerModel.Update(msg)
+			if nt, ok := newTP.(*ThemePickerModel); ok {
+				m.themePickerModel = nt
+			}
+			cmds = append(cmds, cmd)
+		}
+		// Forward to dashboard for animations
+		if m.screen == ScreenDashboard && m.dashboardModel != nil {
+			newDash, cmd := m.dashboardModel.Update(msg)
+			if nd, ok := newDash.(*DashboardModel); ok {
+				m.dashboardModel = nd
+			}
+			cmds = append(cmds, cmd)
 		}
 		// Screen transition tick
 		if m.transition != nil && m.transition.Active {
@@ -439,6 +468,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ToastExpiryMsg:
 		m.removeToastByID(msg.ToastID)
 
+	case DismissToastMsg:
+		m.removeToastByID(msg.ToastID)
+
 	// ── First-run wizard complete ─────────────────────────────────────────────
 	case FirstRunCompleteMsg:
 		cmds = append(cmds, m.handleFirstRunComplete(msg))
@@ -453,13 +485,39 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Re-register providers with updated API keys from settings
 		m.reRegisterProvidersFromConfig()
-		m.screen = ScreenREPL
+		cmds = append(cmds, m.popScreen())
 
 	// ── Config editor saved (stays on ScreenConfig) ────────────────────────
 	case ConfigSavedMsg:
 		// Re-register providers so new API keys take effect immediately
 		m.reRegisterProvidersFromConfig()
+		if m.configModel != nil {
+			m.configModel.buildContent()
+		}
+		if m.dispatcher != nil && m.config != nil {
+			m.dispatcher.UpdatePermissions(&m.config.Permissions)
+		}
 		cmds = append(cmds, m.addToastCmd("Config saved to disk", "success", 3*time.Second))
+
+	// ── Config hot-reload (file changed on disk) ────────────────────────────
+	case config.ConfigReloadMsg:
+		if msg.Error != nil {
+			slog.Warn("config reload failed", "error", msg.Error)
+			cmds = append(cmds, m.addToastCmd("Config reload failed: "+m31errors.UserMessage(msg.Error), "error", 5*time.Second))
+			break
+		}
+		if msg.Config != nil {
+			m.config = msg.Config
+			m.reRegisterProvidersFromConfig()
+			if m.dispatcher != nil {
+				m.dispatcher.UpdatePermissions(&m.config.Permissions)
+			}
+			if m.configModel != nil {
+				m.configModel.cfg = m.config
+				m.configModel.buildContent()
+			}
+			cmds = append(cmds, m.addToastCmd("Config reloaded from disk", "info", 3*time.Second))
+		}
 
 	// ── Theme changed ─────────────────────────────────────────────────────────
 	case ThemeChangedMsg:
@@ -483,6 +541,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	// ── Arbitrage optimization results ───────────────────────────────────────
+	case OptimizedMsg:
+		if len(msg.Recommendations) > 0 {
+			rec := msg.Recommendations[0]
+			cmds = append(cmds, m.addToastCmd(
+				fmt.Sprintf("Optimization: recommended %s (saving $%.4f)",
+					rec.RecommendedModel.ModelID, rec.Savings),
+				"info", 5*time.Second))
+		}
+
 	// ── Model selected ────────────────────────────────────────────────────────
 	case ModelSelectedMsg:
 		m.activeModel = &msg.Model
@@ -495,7 +563,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			providerCmd := m.replModel.SetProvider(m.shutdownCtx, m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
 			cmds = append(cmds, providerCmd)
 		}
-		m.screen = ScreenREPL
+		cmds = append(cmds, m.popScreen())
 
 	// ── Sidebar refresh ───────────────────────────────────────────────────────
 	case SidebarRefreshMsg:
@@ -568,7 +636,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenDiff
 
 	case DiffCloseMsg:
-		m.screen = ScreenREPL
+		cmds = append(cmds, m.popScreen())
 		// Refresh sidebar git status after closing diff
 		if m.sidebarModel != nil {
 			cmds = append(cmds, m.sidebarModel.refreshCmd())
@@ -588,10 +656,35 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.screen = ScreenResume
 
+	// ── Session rename ───────────────────────────────────────────────────────
+	case SessionRenameMsg:
+		if m.sessionManager != nil && msg.SessionID != "" {
+			label := time.Now().Format("2006-01-02_150405")
+			if err := m.sessionManager.RenameSession(msg.SessionID, label); err != nil {
+				cmds = append(cmds, m.addToastCmd("Rename failed: "+m31errors.UserMessage(err), "error", 5*time.Second))
+			} else {
+				cmds = append(cmds, m.addToastCmd("Session renamed", "success", 3*time.Second))
+				// Refresh the resume screen session list
+				cmds = append(cmds, m.openResumeScreen())
+			}
+		}
+
+	// ── Session export ───────────────────────────────────────────────────────
+	case SessionExportMsg:
+		if m.sessionManager != nil && msg.SessionID != "" {
+			exportPath := fmt.Sprintf("session_%s.md", msg.SessionID)
+			if err := m.sessionManager.ExportSessionMarkdown(msg.SessionID, exportPath); err != nil {
+				cmds = append(cmds, m.addToastCmd("Export failed: "+m31errors.UserMessage(err), "error", 5*time.Second))
+			} else {
+				cmds = append(cmds, m.addToastCmd(fmt.Sprintf("Exported to %s", exportPath), "success", 5*time.Second))
+			}
+		}
+
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg("Error: " + m31errors.UserMessage(msg.Err)))
+			banner := renderErrorBanner(msg.Err, m.themeManager.Current(), m.activeProvider)
+			m.replModel.AddMessage(makeAssistantMsg(banner))
 		}
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
@@ -994,19 +1087,31 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	// Leader key must never be swallowed by sidebar or screen handlers.
+	// Activate leader mode or complete a chord before routing to sidebar.
+	if m.keyRegistry != nil {
+		if !m.keyRegistry.IsLeaderActive() {
+			// First press: check if this is the leader key itself
+			if msg.String() == m.keyRegistry.LeaderKey() {
+				handled, cmd := m.keyRegistry.Handle(msg.String(), CtxREPL)
+				if handled {
+					return cmd
+				}
+			}
+		} else {
+			// Leader active: complete chord regardless of focused screen.
+			// Use CtxREPL so Handle searches CtxREPL then CtxGlobal,
+			// catching all registered chords.
+			handled, cmd := m.keyRegistry.Handle(msg.String(), CtxREPL)
+			if handled {
+				return cmd
+			}
+		}
+	}
+
 	// When sidebar is focused AND we're on the REPL, route keys to sidebar
 	if m.screen == ScreenREPL && m.sidebarModel != nil && m.sidebarModel.IsFocused() {
 		return m.sidebarModel.HandleKey(msg)
-	}
-
-	// Global leader key — only intercept leader ACTIVATION here.
-	// When leader is already active, let the key fall through to the
-	// screen-specific handler so REPL chords (ctrl+x b, etc.) work.
-	if m.keyRegistry != nil && !m.keyRegistry.IsLeaderActive() {
-		handled, cmd := m.keyRegistry.Handle(msg.String(), CtxGlobal)
-		if handled {
-			return cmd
-		}
 	}
 
 	switch m.screen {
@@ -1201,7 +1306,14 @@ func (m *AppState) handleAppMsg(msg AppMsg) tea.Cmd {
 	if msg.ModelSelected != nil {
 		m.activeModel = &msg.ModelSelected.Model
 		m.activeProvider = msg.ModelSelected.Provider
-		m.screen = ScreenREPL
+		// Return to the previous screen instead of hardcoding REPL
+		if len(m.screenStack) > 0 {
+			prev := m.screenStack[len(m.screenStack)-1]
+			m.screenStack = m.screenStack[:len(m.screenStack)-1]
+			m.screen = prev
+		} else {
+			m.screen = ScreenREPL
+		}
 		return nil
 	}
 
@@ -1764,7 +1876,14 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 	allowed := msg.Response.Allowed
 	remember := msg.Response.Remember
 	m.permRequest = nil
-	m.screen = ScreenREPL
+	// Return to the previous screen (before permission overlay)
+	if len(m.screenStack) > 0 {
+		prev := m.screenStack[len(m.screenStack)-1]
+		m.screenStack = m.screenStack[:len(m.screenStack)-1]
+		m.screen = prev
+	} else {
+		m.screen = ScreenREPL
+	}
 	m.dispatcher.ApprovePermission(reqID, allowed, remember)
 	return permListenerCmd(m.shutdownCtx, m.dispatcher)
 }
@@ -1800,11 +1919,18 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleQuestionKey(msg)
 	}
 	if m.permRequest == nil {
-		m.screen = ScreenREPL
+		// Return to previous screen instead of hardcoding REPL
+		if len(m.screenStack) > 0 {
+			prev := m.screenStack[len(m.screenStack)-1]
+			m.screenStack = m.screenStack[:len(m.screenStack)-1]
+			m.screen = prev
+		} else {
+			m.screen = ScreenREPL
+		}
 		return nil
 	}
 	switch msg.String() {
-	case "y", "enter":
+	case "y":
 		return m.handlePermissionResponse(PermissionResponseMsg{
 			Response: tools.PermissionResponse{
 				RequestID: m.permRequest.ID,
@@ -1812,7 +1938,12 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 			},
 		})
 	case "a":
-		// Allow always (remember)
+		// Allow always (remember) — show confirmation for permanent rule
+		return func() tea.Msg {
+			return ToastMsg{Text: "Always Allow creates a permanent rule. Press A again to confirm.", Type: "warning", Duration: 3 * time.Second}
+		}
+	case "A":
+		// Confirm allow always
 		return m.handlePermissionResponse(PermissionResponseMsg{
 			Response: tools.PermissionResponse{
 				RequestID: m.permRequest.ID,
@@ -1820,7 +1951,7 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 				Remember:  true,
 			},
 		})
-	case "n", "esc":
+	case "n", "enter", "esc":
 		return m.handlePermissionResponse(PermissionResponseMsg{
 			Response: tools.PermissionResponse{
 				RequestID: m.permRequest.ID,
@@ -1834,7 +1965,14 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 // handleQuestionKey routes key events to the question model.
 func (m *AppState) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 	if m.questionModel == nil || m.questionRequest == nil {
-		m.screen = ScreenREPL
+		// Return to previous screen instead of hardcoding REPL
+		if len(m.screenStack) > 0 {
+			prev := m.screenStack[len(m.screenStack)-1]
+			m.screenStack = m.screenStack[:len(m.screenStack)-1]
+			m.screen = prev
+		} else {
+			m.screen = ScreenREPL
+		}
 		return nil
 	}
 	_, cmd := m.questionModel.Update(msg)
@@ -1849,7 +1987,14 @@ func (m *AppState) handleQuestionResponse(msg QuestionResponseMsg) tea.Cmd {
 	}
 	reqID := m.questionRequest.ID
 	m.questionRequest = nil
-	m.screen = ScreenREPL
+	// Return to the previous screen (before question overlay)
+	if len(m.screenStack) > 0 {
+		prev := m.screenStack[len(m.screenStack)-1]
+		m.screenStack = m.screenStack[:len(m.screenStack)-1]
+		m.screen = prev
+	} else {
+		m.screen = ScreenREPL
+	}
 
 	m.dispatcher.RespondQuestion(reqID, msg.Answer)
 	return questionListenerCmd(m.shutdownCtx, m.dispatcher)
