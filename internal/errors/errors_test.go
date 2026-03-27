@@ -20,7 +20,7 @@ func TestUserMessage(t *testing.T) {
 		{"ErrContextExceeded", ErrContextExceeded, "Context window exceeded — conversation too long. Use /compress to reduce context."},
 		{"ErrModelNotFound", ErrModelNotFound, "Model not found — use /models to see available models"},
 		{"ErrSessionCorrupted", ErrSessionCorrupted, "Session data corrupted — try resuming from a different session"},
-		{"ErrNoBinaryContent", ErrNoBinaryContent, "Binary file cannot be displayed"},
+		{"ErrNoBinaryContent", ErrNoBinaryContent, "Binary file cannot be displayed — use a tool to read its contents"},
 		{"ErrFileTooLarge", ErrFileTooLarge, "File exceeds 5MB limit — use a smaller file"},
 		{"ErrCircularDependency", ErrCircularDependency, "Circular dependency in task graph — check task dependencies"},
 		{"ErrPermissionDenied", ErrPermissionDenied, "Permission denied — check file permissions"},
@@ -56,7 +56,7 @@ func TestUserMessage(t *testing.T) {
 		{"HTTP 503", errors.New("HTTP 503 Service Unavailable"), "Provider temporarily unavailable — try again later"},
 
 		// Unknown error
-		{"unknown", errors.New("something completely unexpected"), "An unexpected error occurred"},
+		{"unknown", errors.New("something completely unexpected"), "An unexpected error occurred — check the logs or try again"},
 	}
 
 	for _, tt := range tests {
