@@ -72,7 +72,7 @@ func UserMessage(e error) string {
 	case errors.Is(e, ErrSessionCorrupted):
 		return "Session data corrupted — try resuming from a different session"
 	case errors.Is(e, ErrNoBinaryContent):
-		return "Binary file cannot be displayed"
+		return "Binary file cannot be displayed — use a tool to read its contents"
 	case errors.Is(e, ErrFileTooLarge):
 		return "File exceeds 5MB limit — use a smaller file"
 	case errors.Is(e, ErrCircularDependency):
@@ -114,6 +114,18 @@ func UserMessage(e error) string {
 		return "Request cancelled"
 	case strings.Contains(errStr, "eof") || strings.Contains(errStr, "unexpected end of json"):
 		return "Connection lost — try again"
+	case strings.Contains(errStr, "i/o timeout") || strings.Contains(errStr, "dial tcp"):
+		return "Connection timed out — check your internet connection"
+	case strings.Contains(errStr, "tls:") || strings.Contains(errStr, "certificate") || strings.Contains(errStr, "tls handshake"):
+		return "TLS error — check your network proxy or certificates"
+	case strings.Contains(errStr, "bad request") || strings.Contains(errStr, "status 400"):
+		return "Bad request — check your input parameters"
+	case strings.Contains(errStr, "forbidden") || strings.Contains(errStr, "status 403"):
+		return "Access forbidden — check API key scope or permissions"
+	case strings.Contains(errStr, "not found") || strings.Contains(errStr, "status 404"):
+		return "Resource not found — check the model or endpoint"
+	case strings.Contains(errStr, "internal server error") || strings.Contains(errStr, "status 500"):
+		return "Provider internal error — try again later"
 	case reHTTP401.MatchString(errStr):
 		return "Invalid API key — run /settings to update"
 	case reHTTP429.MatchString(errStr):
@@ -122,5 +134,5 @@ func UserMessage(e error) string {
 		return "Provider temporarily unavailable — try again later"
 	}
 
-	return "An unexpected error occurred"
+	return "An unexpected error occurred — check the logs or try again"
 }
