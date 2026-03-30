@@ -676,6 +676,15 @@ func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
 		return m.saveLocalConfig()
 
 	case "r":
+		if m.cfgPath != "" {
+			if cfg, err := config.Load(m.cfgPath); err == nil {
+				m.cfg = cfg
+				m.buildSections()
+				m.statusMsg = "↺ Config reloaded from disk"
+				m.statusTime = time.Now()
+				return m, func() tea.Msg { return ConfigSavedMsg{} }
+			}
+		}
 		m.buildSections()
 		m.statusMsg = "↺ Config reloaded from memory"
 		m.statusTime = time.Now()
