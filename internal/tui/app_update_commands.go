@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -200,7 +201,7 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 		if err != nil {
 			if m.replModel != nil {
 				m.replModel.AddMessage(makeAssistantMsg(
-					fmt.Sprintf("Failed to load prompts: %v", err),
+					fmt.Sprintf("Failed to load prompts: %s", m31errors.UserMessage(err)),
 				))
 			}
 			return nil
