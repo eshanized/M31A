@@ -86,11 +86,8 @@ func (m *AppState) View() string {
 		}
 	}
 
-	// Screen transition overlay
-	if m.transition != nil && m.transition.Active {
-		overlay := m.transition.renderTransitionOverlay(t, contentWidth, chrome.ContentHeight())
-		content = overlay
-	}
+	// Screen transition — during the 200ms transition, let content render normally
+	// rather than replacing it with a dim overlay that hides the actual screen.
 
 	// Compose the full page
 	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
@@ -201,8 +198,45 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 
 	// Keyboard hints
 	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+x leader"}
-	if m.screen == ScreenSettings {
+	switch m.screen {
+	case ScreenSettings:
 		info.KeyboardHints = []string{"s save global", "L save local", "q back"}
+	case ScreenPlan:
+		info.KeyboardHints = []string{"enter review", "r refine", "esc back"}
+	case ScreenExecute:
+		info.KeyboardHints = []string{"j/k scroll", "p pause", "esc back"}
+	case ScreenVerify:
+		info.KeyboardHints = []string{"h heal", "enter/s ship", "esc back"}
+	case ScreenShip:
+		info.KeyboardHints = []string{"enter confirm", "esc back"}
+	case ScreenModelSelector:
+		info.KeyboardHints = []string{"tab cycle", "enter select", "esc back"}
+	case ScreenResume:
+		info.KeyboardHints = []string{"enter restore", "esc back"}
+	case ScreenDiscuss:
+		info.KeyboardHints = []string{"enter submit", "esc skip", "Ctrl+Shift+S skip all"}
+	case ScreenHelp:
+		info.KeyboardHints = []string{"g top", "G bottom", "esc back"}
+	case ScreenLedger:
+		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+	case ScreenRollback:
+		info.KeyboardHints = []string{"j/k scroll", "enter restore", "esc back"}
+	case ScreenMetrics:
+		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+	case ScreenConfig:
+		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+	case ScreenBisect:
+		info.KeyboardHints = []string{"y good", "n bad", "b skip", "esc back"}
+	case ScreenThemePicker:
+		info.KeyboardHints = []string{"j/k select", "enter apply", "esc back"}
+	case ScreenNotifications:
+		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+	case ScreenDashboard:
+		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+	case ScreenPermission:
+		info.KeyboardHints = []string{"y allow", "n deny", "a always"}
+	case ScreenPhaseModelPicker:
+		info.KeyboardHints = []string{"tab cycle", "enter select", "esc back"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
