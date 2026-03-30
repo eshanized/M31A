@@ -59,7 +59,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	titleLine := lipgloss.JoinHorizontal(lipgloss.Top, lockBadge, lipgloss.NewStyle().Render(" "), title)
 
 	riskStyle := m.riskStyle()
-	riskLabel := riskStyle.Render(fmt.Sprintf(" [%s] ", string(m.request.RiskLevel)))
+	riskLabel := riskStyle.Render(fmt.Sprintf(" [%s] ", riskLabel(m.request.RiskLevel)))
 
 	toolInfo := lipgloss.NewStyle().
 		Foreground(m.theme.TextPrimary).
@@ -81,7 +81,7 @@ func (m *PermissionModal) Render(width, height int) string {
 
 	keys := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
-		Render("[Y] Allow Once    [A] Always Allow\n[N] Deny")
+		Render("[Y] Allow Once    [A] Always Allow\n[N] Deny (Enter)   [Esc] Exit")
 	exitHint := lipgloss.NewStyle().
 		Foreground(m.theme.TextSecondary).
 		Faint(true).
@@ -236,6 +236,22 @@ func (m *PermissionModal) riskStyle() lipgloss.Style {
 			Background(m.theme.TextSecondary).
 			Foreground(m.theme.BadgeForeground).
 			Padding(0, 1)
+	}
+}
+
+// riskLabel returns a human-readable risk label with icon for accessibility.
+func riskLabel(level types.RiskLevel) string {
+	switch level {
+	case types.RiskDangerous:
+		return "⚠ DANGEROUS"
+	case types.RiskDestructive:
+		return "✖ DESTRUCTIVE"
+	case types.RiskMedium:
+		return "● MEDIUM"
+	case types.RiskSafe:
+		return "✓ SAFE"
+	default:
+		return "UNKNOWN"
 	}
 }
 
