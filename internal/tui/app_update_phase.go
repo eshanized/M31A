@@ -2,6 +2,7 @@ package tui
 
 import (
 	"log/slog"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/types"
@@ -47,12 +48,25 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				m.discussQuestions = ds.Questions
 			}
 			m.screen = ScreenDiscuss
+			timeoutSecs := 0
+			if m.config != nil {
+				timeoutSecs = m.config.UI.DiscussTimeout
+			}
 			m.discussModel = NewDiscussModel(
 				m.themeManager.Current(),
 				m.discussQuestions,
 				m.width, m.height,
 			)
+			if timeoutSecs > 0 {
+				m.discussModel.SetTimeout(timeoutSecs)
+			}
 			m.persistWorkflowState()
+			if timeoutSecs > 0 {
+				secs := timeoutSecs
+				return tea.Tick(time.Duration(secs)*time.Second, func(time.Time) tea.Msg {
+					return DiscussAnswerTimeoutMsg{QuestionIndex: 0}
+				})
+			}
 			return nil
 		}
 		// No questions — skip directly to plan
