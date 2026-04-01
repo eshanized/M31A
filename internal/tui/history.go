@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,7 +29,10 @@ type frecentEntry struct {
 // If the file exists it is loaded immediately; otherwise an empty history is created.
 func NewFrecentHistory(filePath string) *FrecentHistory {
 	fh := &FrecentHistory{filePath: filePath}
-	_ = fh.load()
+	if err := fh.load(); err != nil && !os.IsNotExist(err) {
+		// Log corrupt history file but continue with empty history
+		slog.Warn("failed to load history, starting fresh", "error", err)
+	}
 	return fh
 }
 
@@ -60,7 +65,7 @@ func (fh *FrecentHistory) Upsert(text string) {
 	}
 }
 
-// Search returns entries matching the query, sorted by score descending.
+// Search returns entries matching the query, sorted by most recently used first.
 func (fh *FrecentHistory) Search(query string, limit int) []frecentEntry {
 	query = strings.ToLower(strings.TrimSpace(query))
 	var results []frecentEntry
@@ -70,7 +75,7 @@ func (fh *FrecentHistory) Search(query string, limit int) []frecentEntry {
 		}
 	}
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+		return results[i].LastUsed.After(results[j].LastUsed)
 	})
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
@@ -83,7 +88,9 @@ func (fh *FrecentHistory) Save() error {
 	if fh.filePath == "" {
 		return nil
 	}
-	_ = os.MkdirAll(filepath.Dir(fh.filePath), 0o700)
+	if err := os.MkdirAll(filepath.Dir(fh.filePath), 0o700); err != nil {
+		return fmt.Errorf("create history directory: %w", err)
+	}
 	fh.sort()
 	data, err := json.Marshal(fh.entries)
 	if err != nil {
