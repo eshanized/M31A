@@ -191,10 +191,15 @@ func (em *ExecuteModel) View() string {
 	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).
 		Render(strings.Repeat("─", w))
 
+	// Key hints
+	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render("j/k: scroll  p: pause  Esc: back")
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		progressLine,
 		sep,
 		em.viewport.View(),
+		hints,
 	)
 }
 
@@ -257,19 +262,19 @@ func taskStatusBadge(status types.TaskStatus, t theme.Theme) string {
 	switch status {
 	case types.StatusDone:
 		badgeType = components.BadgeSuccess
-		text = "done"
+		text = "✓ done"
 	case types.StatusFailed:
 		badgeType = components.BadgeError
-		text = "failed"
+		text = "✗ failed"
 	case types.StatusRunning:
 		badgeType = components.BadgeBrand
-		text = "running"
+		text = "● running"
 	case types.StatusSkipped:
 		badgeType = components.BadgeNeutral
-		text = "skipped"
+		text = "— skipped"
 	default:
 		badgeType = components.BadgeNeutral
-		text = "pending"
+		text = "○ pending"
 	}
 	return components.SimpleBadge{
 		Text:    text,
