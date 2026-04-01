@@ -98,6 +98,12 @@ func (m *AppState) propagateSessionID(id string) {
 	if m.sidebarModel != nil {
 		m.sidebarModel.SetSessionID(id)
 	}
+	if m.workflowEngine != nil {
+		m.workflowEngine.SetSessionID(id)
+	}
+	if m.dispatcher != nil {
+		m.dispatcher.SetSessionID(id)
+	}
 }
 
 // applySessionRestored applies a sessionRestoredMsg to the REPL.
