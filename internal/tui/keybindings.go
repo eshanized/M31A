@@ -77,7 +77,7 @@ func NewKeyRegistry(opts KeyRegistryOpts) *KeyRegistry {
 		opts.LeaderKey = "ctrl+x"
 	}
 	if opts.LeaderTimeout == 0 {
-		opts.LeaderTimeout = 1 * time.Second
+		opts.LeaderTimeout = 2 * time.Second
 	}
 	return &KeyRegistry{
 		bindings:      make(map[KeyContext][]KeyBinding),
@@ -123,7 +123,10 @@ func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
 			}
 		}
 		// Chord not found — just consumed the key sequence
-		return true, nil
+		// Return a brief toast to let the user know the chord was invalid
+		return true, func() tea.Msg {
+			return ToastMsg{Text: "Unknown leader chord", Type: "warning", Duration: 1 * time.Second}
+		}
 	}
 
 	// Activate leader mode
@@ -158,6 +161,11 @@ func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
 // IsLeaderActive returns true if the leader key was just pressed.
 func (r *KeyRegistry) IsLeaderActive() bool {
 	return r.leaderActive
+}
+
+// LeaderKey returns the configured leader key string (e.g. "ctrl+x").
+func (r *KeyRegistry) LeaderKey() string {
+	return r.leaderKey
 }
 
 // DeactivateLeader clears leader mode (called from LeaderTimeoutMsg handler).
