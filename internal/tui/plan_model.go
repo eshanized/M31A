@@ -194,6 +194,10 @@ func (pm *PlanModel) Update(msg tea.Msg) (*PlanModel, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		pm.width = msg.Width
+		pm.height = msg.Height
+		pm.initViewport()
 	case tea.KeyMsg:
 		if pm.confirmMode {
 			return pm.handleConfirmKey(msg)
