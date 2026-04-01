@@ -89,11 +89,11 @@ func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Skip current question
 			return dm, dm.advanceQuestion("")
-		case "ctrl+s":
-			// Skip all remaining questions
-			return dm, func() tea.Msg {
-				return DiscussCompleteMsg{}
-			}
+	case "ctrl+shift+s":
+		// Skip all remaining questions
+		return dm, func() tea.Msg {
+			return DiscussCompleteMsg{}
+		}
 		case "enter":
 			ans := strings.TrimSpace(dm.input.Value())
 			return dm, dm.advanceQuestion(ans)
@@ -156,14 +156,21 @@ func (dm *DiscussModel) View() string {
 	var dots []string
 	for i := range dm.questions {
 		var dotStyle lipgloss.Style
-		if i <= dm.current {
-			// Done or current → filled dot in brand
+		var dot string
+		if i < dm.current {
+			// Done → checkmark in brand
 			dotStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+			dot = "✓"
+		} else if i == dm.current {
+			// Current → filled dot in brand
+			dotStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+			dot = "●"
 		} else {
 			// Pending → empty dot in muted
 			dotStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+			dot = "○"
 		}
-		dots = append(dots, dotStyle.Render("●"))
+		dots = append(dots, dotStyle.Render(dot))
 	}
 	dotLine := lipgloss.NewStyle().Render(
 		strings.Join(dots, " "))
@@ -230,5 +237,9 @@ func (dm *DiscussModel) View() string {
 	if timeoutLine != "" {
 		parts = append(parts, timeoutLine)
 	}
+	// Key hints
+	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
+		Render("Enter: submit  Esc: skip  Ctrl+Shift+S: skip all")
+	parts = append(parts, "", hints)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
