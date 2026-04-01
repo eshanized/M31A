@@ -38,6 +38,7 @@ type ModelSelector struct {
 	cursor         int
 	offset         int // scroll offset
 	loading        bool
+	errored        map[string]bool // providers that returned errors
 	errMsg         string
 
 	width  int
@@ -60,6 +61,7 @@ func NewModelSelector(ctx context.Context, registry *provider.Registry, sessionM
 		sessionManager: sessionManager,
 		theme:          t,
 		modelsByProv:   make(map[string][]types.ModelInfo),
+		errored:        make(map[string]bool),
 		searchInput:    ti,
 		loading:        true,
 		spinner:        components.NewSpinner(),
@@ -127,13 +129,16 @@ func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ms.modelsByProv[msg.providerName] = msg.models
 		} else if msg.err != nil {
 			ms.errMsg = msg.err.Error()
+			ms.errored[msg.providerName] = true
 		}
-		// Check if all providers loaded
+		// Check if all providers loaded (either successfully or with errors)
 		allDone := true
 		for _, name := range ms.providers {
 			if _, ok := ms.modelsByProv[name]; !ok {
-				allDone = false
-				break
+				if !ms.errored[name] {
+					allDone = false
+					break
+				}
 			}
 		}
 		if allDone {
