@@ -63,9 +63,14 @@ func (fr *FirstRunModel) renderStepDots(current int) string {
 	t := fr.theme
 	var parts []string
 	for i := 0; i < firstRunStepCount; i++ {
-		if i == current {
+		if i < current {
+			// Completed step: checkmark
+			parts = append(parts, lipgloss.NewStyle().Foreground(t.Success).Render("✓"))
+		} else if i == current {
+			// Current step: filled dot
 			parts = append(parts, lipgloss.NewStyle().Foreground(t.Brand).Render("●"))
 		} else {
+			// Future step: empty dot
 			parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("○"))
 		}
 	}
@@ -814,10 +819,10 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 	var title string
 	if total > 1 {
 		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-			Render(fmt.Sprintf("Step 2/3 — Enter %s API key (%d/%d)", provName, current, total))
+			Render(fmt.Sprintf("Step 3/4 — Enter %s API key (%d/%d)", provName, current, total))
 	} else {
 		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-			Render(fmt.Sprintf("Step 2/3 — Enter %s API key", provName))
+			Render(fmt.Sprintf("Step 3/4 — Enter %s API key", provName))
 	}
 	dots := fr.renderStepDots(2)
 
@@ -892,7 +897,7 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	}
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 3/3 — Choose your default model")
+		Render("Step 4/4 — Choose your default model")
 	dots := fr.renderStepDots(3)
 
 	confirmBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
