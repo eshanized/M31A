@@ -65,7 +65,7 @@ func TestRenderErrorBanner(t *testing.T) {
 		{errors.New("generic error"), "generic error"},
 	}
 	for _, tt := range tests {
-		got := renderErrorBanner(tt.err, th)
+		got := renderErrorBanner(tt.err, th, "")
 		if got == "" {
 			t.Errorf("renderErrorBanner(%v) should not be empty", tt.err)
 		}
