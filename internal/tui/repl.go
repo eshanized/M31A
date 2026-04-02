@@ -175,14 +175,6 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		m.quickActionsCollapsed = !m.quickActionsCollapsed
 		return nil
 
-	case "ctrl+x":
-		if m.keyRegistry != nil {
-			handled, cmd := m.keyRegistry.Handle("ctrl+x", CtxREPL)
-			if handled {
-				return cmd
-			}
-		}
-
 	case "ctrl+l":
 		// Scroll to bottom
 		m.viewport.GotoBottom()
