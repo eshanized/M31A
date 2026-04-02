@@ -229,10 +229,14 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 		case "]":
 			s.activeTab = SettingsTab((int(s.activeTab) + 1) % len(settingsTabNames))
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "[":
 			s.activeTab = SettingsTab((int(s.activeTab) - 1 + len(settingsTabNames)) % len(settingsTabNames))
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "up", "k":
 			if s.fieldCursor > 0 {
@@ -245,26 +249,38 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 		case "1":
 			s.activeTab = TabProvider
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "2":
 			s.activeTab = TabModel
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "3":
 			s.activeTab = TabUI
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "4":
 			s.activeTab = TabKeys
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "5":
 			s.activeTab = TabWorkflow
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "6":
 			s.activeTab = TabAbout
 			s.fieldCursor = 0
+			s.editing = false
+			s.editField = ""
 			s.buildFields()
 		case "e", "enter", " ":
 			return s.activateField()
