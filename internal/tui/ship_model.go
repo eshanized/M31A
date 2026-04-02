@@ -65,6 +65,13 @@ func (sm *ShipModel) SetDemonstration(content string) {
 // Update handles ship screen key events.
 func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		sm.width = msg.Width
+		sm.height = msg.Height
+		sm.demoViewport = viewport.New(sm.width-4, sm.height-8)
+		if sm.demonstration != "" {
+			sm.demoViewport.SetContent(sm.demonstration)
+		}
 	case tea.KeyMsg:
 		if sm.showDemo {
 			switch msg.String() {
