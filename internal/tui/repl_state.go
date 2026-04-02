@@ -201,6 +201,7 @@ func (m *ReplModel) ClearMessages() {
 	m.messages = nil
 	m.streaming = false
 	m.thinking = false
+	m.awaitingResponse = false
 	m.activeSegmentType = ""
 	m.streamSegments = nil
 	m.streamContent.Reset()
