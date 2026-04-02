@@ -450,7 +450,7 @@ func (s *SidebarModel) View() string {
 	}{
 		{"ctrl+p", "commands"},
 		{"ctrl+b", "sidebar"},
-		{"ctrl+g", "files"},
+		{"ctrl+g", "focus"},
 		{"ctrl+x", "leader"},
 	}
 	for _, sc := range shortcuts {
