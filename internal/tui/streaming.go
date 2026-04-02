@@ -52,8 +52,9 @@ type StreamDoneMsg struct {
 
 // StreamErrorMsg signals that the stream terminated with an error.
 type StreamErrorMsg struct {
-	Err     error
-	ModelID string
+	Err          error
+	ModelID      string
+	ProviderName string
 }
 
 // TickMsg drives streaming render ticks at ~10fps.
@@ -79,6 +80,7 @@ type toolCallAcc struct {
 // continuation reads in handleStreamMsg.
 func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.ChatRequest, sessionID string) (tea.Cmd, <-chan tea.Msg) {
 	streamCh := make(chan tea.Msg, 64)
+	providerName := p.Name()
 
 	go func() {
 		// Goroutine owns streamCh: close it when the goroutine exits.
@@ -87,7 +89,7 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
-			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
+			streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model, ProviderName: providerName}
 			return
 		}
 
@@ -175,7 +177,7 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 					}
 					return
 				}
-				streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model}
+				streamCh <- StreamErrorMsg{Err: err, ModelID: req.Model, ProviderName: providerName}
 				return
 			}
 			if chunk == nil {
