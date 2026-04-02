@@ -63,10 +63,11 @@ func TruncateEnd(s string, maxLen int) string {
 	return string([]rune(s)[:maxLen-1]) + "…"
 }
 
-// TruncateError truncates an error message to show the first 200 chars plus "[...]".
+// TruncateError truncates an error message to show the first 200 runes plus "[...]".
 func TruncateError(s string) string {
-	if len(s) <= 200 {
+	if utf8.RuneCountInString(s) <= 200 {
 		return s
 	}
-	return s[:200] + "[...]"
+	runes := []rune(s)
+	return string(runes[:200]) + "[...]"
 }
