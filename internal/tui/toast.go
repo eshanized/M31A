@@ -20,6 +20,11 @@ type Toast struct {
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
 const maxVisibleToasts = 3
 
+// DismissToastMsg is emitted when a toast should be dismissed manually.
+type DismissToastMsg struct {
+	ToastID int
+}
+
 // renderToastStack renders up to 3 most recent toasts stacked top-right.
 func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	if len(toasts) == 0 {
