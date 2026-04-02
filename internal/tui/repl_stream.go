@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -146,17 +147,30 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) {
 }
 
 // renderErrorBanner returns a styled error message based on the typed sentinel.
-func renderErrorBanner(err error, t theme.Theme) string {
+func renderErrorBanner(err error, t theme.Theme, providerName string) string {
+	providerSuffix := ""
+	if providerName != "" {
+		providerSuffix = fmt.Sprintf(" (%s)", providerName)
+	}
 	switch {
 	case errors.Is(err, m31errors.ErrContextExceeded):
 		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
 			Render("⚠ Context window exceeded. Use /compress to free space.")
 	case errors.Is(err, m31errors.ErrInvalidKey):
 		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
-			Render("✗ Invalid API key. Run /settings to update.")
+			Render(fmt.Sprintf("✗ Invalid API key%s. Run /settings to update.", providerSuffix))
 	case errors.Is(err, m31errors.ErrRateLimited):
 		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-			Render("⚠ Rate limited. Auto-fallback in progress…")
+			Render(fmt.Sprintf("⚠ Rate limited%s. Auto-fallback in progress or retry in a moment.", providerSuffix))
+	case errors.Is(err, m31errors.ErrProviderUnreachable):
+		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
+			Render(fmt.Sprintf("⚠ Provider unreachable%s — check connection or try /fallback.", providerSuffix))
+	case errors.Is(err, m31errors.ErrStreamTruncated):
+		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
+			Render("⚠ Stream interrupted — try sending your message again.")
+	case errors.Is(err, m31errors.ErrModelNotFound):
+		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
+			Render(fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix))
 	default:
 		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
 			Render("✗ " + m31errors.UserMessage(err))
@@ -190,10 +204,11 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) {
 	if os.Getenv("M31A_LOG_LEVEL") == "debug" {
 		slog.Debug("stream error",
 			"typed", typedErrorName(msg.Err),
+			"provider", msg.ProviderName,
 			"message", msg.Err.Error())
 	}
 
-	banner := renderErrorBanner(msg.Err, m.theme)
+	banner := renderErrorBanner(msg.Err, m.theme, msg.ProviderName)
 	m.messages = append(m.messages, makeAssistantMsg(banner))
 
 	m.streaming = false
