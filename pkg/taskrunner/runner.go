@@ -29,6 +29,7 @@ type Runner struct {
 	status       map[int]types.TaskStatus
 	results      map[int]TaskResult
 	idToIdx      map[int]int
+	mu           sync.RWMutex
 	OnTaskStart  func(task types.Task)
 	OnTaskUpdate func(task types.Task, status string)
 	// TaskTimeout is the per-task timeout. Zero means no timeout.
@@ -188,7 +189,6 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 	}
 
 	// Execute tasks concurrently with bounded parallelism
-	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, MaxParallelTasks)
 
@@ -219,9 +219,9 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 			}
 
 			// Execute the task with retry support
-			mu.Lock()
+			r.mu.Lock()
 			r.status[task.ID] = types.StatusRunning
-			mu.Unlock()
+			r.mu.Unlock()
 			if r.OnTaskStart != nil {
 				r.OnTaskStart(task)
 			}
@@ -255,16 +255,16 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 				case <-ctx.Done():
 					timer.Stop()
 					cancel()
-					mu.Lock()
+					r.mu.Lock()
 					r.results[task.ID] = TaskResult{Success: false, Error: ctx.Err().Error()}
 					r.status[task.ID] = types.StatusFailed
-					mu.Unlock()
+					r.mu.Unlock()
 					return
 				}
 				cancel()
 			}
 
-			mu.Lock()
+			r.mu.Lock()
 			r.results[task.ID] = result
 			if result.Success {
 				r.status[task.ID] = types.StatusDone
@@ -280,7 +280,7 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 					r.OnTaskUpdate(task, "failed")
 				}
 			}
-			mu.Unlock()
+			r.mu.Unlock()
 		}()
 	}
 
@@ -292,11 +292,15 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 
 // Status returns the current status of a task.
 func (r *Runner) Status(id int) types.TaskStatus {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.status[id]
 }
 
 // Results returns a copy of all task results.
 func (r *Runner) Results() map[int]TaskResult {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make(map[int]TaskResult, len(r.results))
 	for k, v := range r.results {
 		out[k] = v
