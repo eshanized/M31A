@@ -1,257 +1,247 @@
-# M31A — Architecture
+# M31A Architecture
 
-## Package Dependency Graph
+## Overview
 
-```
-cmd/m31a/                     (binary entry point, no logic)
-└── internal/log/             (structured slog logger, file rotation)
+M31A is a modular AI agent framework built in Go with a Bubble Tea TUI. It routes user prompts through a **six-phase workflow** (`session → auto → dream → bisect → arbitrage → rollback`), selecting models by cost/quality, streaming responses, and maintaining full session history.
 
-internal/tui/                 (Bubble Tea app, all screens)
-├── internal/provider/        (LLMProvider interface + OpenRouter + Zen)
-│   └── pkg/session/          (session lifecycle, file persistence)
-├── internal/workflow/        (six workflow phases)
-│   ├── pkg/taskrunner/       (dependency graph, topological sort, task lifecycle)
-│   ├── pkg/bisect/           (git bisect wrapper)
-│   ├── pkg/autodream/        (context consolidation)
-│   └── pkg/session/
-├── internal/tools/           (Bash, FileRead, FileWrite, Glob, Grep)
-├── pkg/arbitrage/            (complexity scoring, model cost comparison)
-├── pkg/ledger/               (cross-session learning ledger)
-├── pkg/rollback/             (commit chain browser)
-├── internal/config/          (toml parsing, env vars, keychain resolution)
-│   └── pkg/keychain/         (OS-specific keychain: linux/darwin/windows)
-└── internal/types/           (shared core types: Message, Task, ToolCall, etc.)
+---
 
-internal/errors/              (sentinel errors — imported by all packages)
-```
-
-### TUI Component Decomposition (Phase 27)
-
-The `internal/tui/` package follows a model-view decomposition pattern:
-
-- **Model files** (`*_model.go`): Hold Bubble Tea `Model` structs and `Update()` logic
-- **View files** (`*_view.go`): Contain `View()` rendering functions
-- **Tab files** (`*_tabs.go`): Tab navigation and rendering for multi-tab screens
-- **State files** (`*_state.go`): In-memory state structs and state management
-- **Key files** (`*_keys.go`): Key binding definitions per screen
-
-Sub-packages:
-- `internal/tui/components/` — Reusable TUI components (toolcard, thinking, sparkline, etc.)
-- `internal/tui/theme/` — Color palette and theme definitions
-
-### Dependency Rules
-
-- `internal/types/` must have zero internal imports — it is the leaf package.
-- `internal/errors/` must have zero internal imports.
-- `internal/provider/` may import `internal/types/`, `internal/errors/`.
-- `internal/config/` may import `internal/types/`.
-- `internal/tools/` may import `internal/types/`, `internal/errors/`.
-- `internal/log/` must import only stdlib packages.
-- No circular dependencies are permitted.
-
-## Data Flow: Provider Layer
-
-### Streaming Chat Completion
+## Directory Layout
 
 ```
-User types message
-        │
-        v
-TUI REPL screen
-        │  User presses Enter
-        v
-AppState.Update() receives submitMsg
-        │  Creates ChatRequest from message history
-        v
-LLMProvider.ChatCompletionStream(ctx, req)
-        │  POST /chat/completions with stream:true
-        v
-SSE stream (HTTP response body)
-        │  Line-by-line SSE parser
-        v
-StreamIterator.Next()
-        │  yields typed StreamChunk events
-        v
-StreamChunk dispatched via tea.Cmd → tea.Msg
-        │
-        ├─ Type: "content"     → append to message content
-        ├─ Type: "thinking"    → open/collapsible thinking block
-        └─ Type: "done"        → finalize message, extract usage
-        │
-        v
-TUI renders progressively via View()
+.
+├── cmd/m31a/              # Main entry point (flag parsing, config init)
+├── docs/                  # User-facing documentation
+├── internal/
+│   ├── app/               # App lifecycle, Bubble Tea TUI, views
+│   ├── commands/          # Slash command registry + built-in commands
+│   ├── config/            # YAML config loading, validation, defaults
+│   ├── errors/            # Sentinel errors for the entire app
+│   ├── ghost/             # Ghost-written append-only file generation
+│   ├── provider/          # LLM provider abstraction (OpenRouter, Zen)
+│   ├── style/             # Lipgloss TUI styling
+│   ├── tools/             # Tool registry, MCP client, Toolhouse, Brave Search
+│   ├── types/             # Core type definitions
+│   ├── ui/                # TUI components (spinner, text input, etc.)
+│   ├── verify/            # Verification — attestation, validation, MCP mocks
+│   └── version/           # Version info from ldflags
+├── pkg/
+│   ├── arbitrage/         # Model scoring, cost estimation, recommendation
+│   ├── autodream/         # Prompt enhancement (DREAM → enhanced prompt)
+│   ├── bisect/            # Response comparison / diffing
+│   ├── keychain/          # Encrypted API key storage via OS keychain
+│   ├── ledger/            # Auditable prompt/response log
+│   ├── rollback/          # Session state snapshot & restore
+│   └── session/           # Session lifecycle, persistence, checkpointing
+└── m31a.yaml              # Default user config
 ```
 
-### Reasoning/Thinking Segment Detection
+---
 
-Two patterns handled by `StreamIterator.Next()`:
+## Six-Phase Workflow
 
-1. **Pre-content reasoning** (DeepSeek R1, OpenAI o-series): All thinking tokens arrive before any content tokens. The iterator emits `StreamChunk{Type: "thinking"}` for each thinking token, then switches to `StreamChunk{Type: "content"}` when content begins.
+| Phase | Package | Purpose |
+|-------|---------|---------|
+| **Session** | `pkg/session` | Create, persist, checkpoint, archive sessions under `~/.m31a/sessions/` |
+| **Auto** | `pkg/autodream` | Prompt enhancement — DEEP/FAST/SKIP; enhances user prompts for better results |
+| **Dream** | `internal/ghost` | Ghost writes append-only files with prompt-driven content generation |
+| **Bisect** | `pkg/bisect` | Compare multiple model responses, compute diff scores |
+| **Arbitrage** | `pkg/arbitrage` | Score task complexity, estimate costs, recommend optimal model |
+| **Rollback** | `pkg/rollback` | Snapshot session state, restore from checkpoint |
 
-2. **Interleaved reasoning** (Claude extended thinking): Thinking and content segments alternate. The iterator detects segment boundaries via SSE event type or special markers, emitting typed `StreamChunk` events accordingly.
+---
 
-## Data Flow: Workflow Engine
+## Provider Layer
 
-### Phase Sequence
-
-```
-Initialize ──► Discuss ──► Plan ──► Execute ──► Verify ──► Ship
-    │            │           │           │           │          │
-    ▼            ▼           ▼           ▼           ▼          ▼
- Create      Generate    Parse LLM   Execute     Run        Final
- session    clarifying  response →  tasks in   acceptance  commit +
- + detect   questions   validate    dependency checks +   archive
- project    → capture   → serialize cycle →     self-heal
- type       answers     to TASKS.md atomic      loop
-                                    commits
-```
-
-### Context Injection Table
-
-| Phase | Context Injected |
-|-------|-----------------|
-| Initialize → Discuss | Full session history + MEMORY.md + system prompt |
-| Plan | System prompt + goal + Discuss Q&A + MEMORY.md + cwd file schema |
-| Execute | System prompt + TASKS.md + PROJECT.md + current task spec only |
-| Verify | System prompt + TASKS.md + file contents of all task outputs |
-| Ship | System prompt + TASKS.md (final status) + commit log from git |
-
-Each phase discards the prior conversation. No conversation history is carried between phases. State is read from structured Markdown files in `~/.m31a/sessions/<id>/planning/`.
-
-## State Persistence Model
-
-### Session Directory Structure
-
-```
-~/.m31a/
-├── config.toml              (user configuration)
-├── m31a.log                 (structured log, daily rotation, 7-day retention)
-├── LEDGER.md                (cross-session learning ledger)
-└── sessions/
-    └── <session-id>/        (8-char lowercase alphanumeric)
-        ├── session.json     (metadata: model, provider, phase, timestamps)
-        ├── messages.json    (message history)
-        ├── checkpoints/     (state snapshots for undo)
-        │   ├── checkpoint-1.json
-        │   └── checkpoint-2.json
-        ├── planning/        (human-readable state files)
-        │   ├── PROJECT.md   (goal, project type, framework, discuss Q&A)
-        │   ├── TASKS.md     (task list with status, dependencies, files)
-        │   └── STATE.md     (current phase, progress, last action)
-        ├── backups/         (pre-overwrite file backups)
-        └── archives/        (post-ship archived sessions)
-```
-
-### File Format Rules
-
-- All planning files are human-readable Markdown.
-- session.json and messages.json are JSON for machine parsing.
-- All writes are atomic: write to temp file, then rename.
-- Session resume must parse all files and reconstruct exact state.
-
-## Threading Model
-
-Bubble Tea is single-threaded. All state mutations go through `Update()` only.
-Never mutate `AppState` from a goroutine. Use `tea.Cmd` and `tea.Msg`.
-
-### Thread Boundaries
-
-| Goroutine | Purpose | Communication |
-|-----------|---------|---------------|
-| Main (BT update loop) | All state mutations, rendering | N/A |
-| Stream iterator | Reads SSE, emits chunks | Sends tea.Cmd with StreamChunkMsg |
-| Health check ticker | Polls provider every 60s | Sends tea.Cmd with HealthUpdateMsg |
-| Permission request | Blocking user approval | Sends tea.Cmd with PermissionResponseMsg |
-
-### Key Rules
-
-- Goroutines emit `tea.Cmd` functions that return `tea.Msg` values.
-- `Update()` receives messages in the main loop and mutates state.
-- `View()` never reads mutable state without synchronization (use atomic values or snapshot pattern).
-- Stream reading and health checks never block `Update()` or `View()`.
-
-## Context Pruning Strategy
-
-Each workflow phase runs in a fresh, pruned context. The system prompt is preserved
-but all conversation history is discarded between phases. State is read from
-structured planning/ files only.
-
-### Phase Context Budget
-
-| Phase | Typical Tokens | Content |
-|-------|---------------|---------|
-| Initialize | ~2K | System prompt + MEMORY.md (if exists) |
-| Discuss | ~4K | System prompt + goal + PROJECT.md stub |
-| Plan | ~8K | System prompt + goal + Discuss Q&A + MEMORY.md + cwd schema |
-| Execute (per task) | ~6K | System prompt + TASKS.md + PROJECT.md + task spec |
-| Verify | ~10K | System prompt + TASKS.md + file contents |
-| Ship | ~4K | System prompt + TASKS.md + commit log |
-
-### AutoDream Consolidation
-
-When context usage exceeds 60%, AutoDream consolidates the oldest 50% of messages
-into a single summary segment. Never runs during tool execution. The `/compress`
-command triggers consolidation manually.
-
-## Error Handling Strategy
-
-### Sentinel Errors
-
-All sentinel errors are defined in `internal/errors/errors.go` and are of the form:
-
+### Interface (`internal/provider/provider.go`)
 ```go
-var Err* = errors.New("...")
+type LLMProvider interface {
+    Name() string
+    ListModels(ctx context.Context) ([]types.ModelInfo, error)
+    ChatCompletion(ctx context.Context, req types.ChatRequest) (*types.ChatResponse, error)
+    ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error)
+    HealthCheck(ctx context.Context) (*types.HealthReport, error)
+    EstimateCost(modelID string, usage types.Usage) float64
+    GetModel(id string) (*types.ModelInfo, error)
+    CachedModels() []types.ModelInfo
+    APIKey() string
+    FetchModels(ctx context.Context) ([]types.ModelInfo, error)
+}
 ```
 
-Use `errors.Is()` for comparison. Never use type assertions on sentinel errors.
+### Implementations
 
-### Provider Error Normalization
+- **OpenRouter** (`internal/provider/openrouter/`) — Aggregates 300+ models; configurable referer/title
+- **Zen** (`internal/provider/zen/`) — Barret AI / Zen API provider with default context length support
 
-| HTTP Status | Normalized Error | Action |
-|-------------|-----------------|--------|
-| 401          | ErrInvalidKey    | Show "Invalid API key" modal |
-| 402          | ErrProviderUnreachable | Log, suggest checking key status |
-| 429          | ErrRateLimited   | Auto-fallback if enabled; retry-after header respected |
-| 503          | ErrProviderUnreachable | Auto-fallback if enabled |
-| 400 (other)  | ErrToolExecution | Return to LLM for correction |
+### BaseClient (`internal/provider/base_client.go`)
+Shared HTTP transport with connection pooling (100 max idle conns, 10/host, 90s idle timeout). Provides `NewBaseClient()`, `APIKey()` (masked), `EstimateCost()`, `GetModel()`, `CachedModels()`, `MakeIterator()`, and caching.
 
-### Context Window Protection
+### Model Cache (`internal/provider/cache.go`)
+TTL-based in-memory cache with stale-while-revalidate support. Default TTL: 5 min, stale TTL: 1 hour.
 
-Before sending a chat completion request, M31A estimates total tokens via
-tiktoken-go (for GPT/Claude families) or `len(runes) / 4 * 1.3` fallback.
+### Capability Detection (`internal/provider/capabilities.go`)
+Heuristic inference of model capabilities from model ID:
+- **Tool use**: claude, gpt, gemini, deepseek, qwen, llama, mistral, command-r, command-a
+- **Reasoning**: /o1, /o3, /o4 patterns + "reason" / "thinking" in ID
+- **Vision**: "vision" or "multimodal" in ID
 
-If estimated tokens exceed 80% of the model's context window:
-- A warning banner is shown in the TUI header
-- AutoDream consolidation is triggered automatically
-- If tokens exceed 95%, the request is blocked with `ErrContextExceeded`
+---
 
-## Known Architecture Violations
+## TUI Layer
 
-### CR-09: internal/tools imports internal/config (Deferred to Phase 26+)
+Built with **Bubble Tea** (`tea.Program`). Architecture:
 
-**Status:** Known violation, documented for tracking.
+```
+cmd/m31a/main.go → NewApp() → tea.NewProgram(model)
+```
 
-The following files in `internal/tools/` import `internal/config`:
-- `internal/tools/dispatcher.go`
-- `internal/tools/permissions.go`
-- `internal/tools/defaults.go`
+### App Model (`internal/app/`)
+- **states.go** — AppState enum (Init, Ready, Processing, Streaming, Paused, Error, ConfirmQuit, SessionPicker, GhostPicker, GhostOutput, BisectOutput)
+- **init.go** — Tea init command (loads config, checks version)
+- **update.go** — Tea update loop (handles messages, keybinds, state transitions)
+- **view.go** — Tea render function (routes to active view)
+- **views.go** — Individual view renderers (init, ready, processing, streaming, error, confirmquit, session picker, ghost picker, ghost output, bisect output)
+- **keybinds.go** — Key mapping table
+- **messages.go** — Custom tea.Msg types
+- **startup.go** — Startup routine (checks keychain, provider health, version)
+- **session.go** — Session management (create, save checkpoint, restore, list)
+- **commands.go** — Slash command execution dispatch
+- **ghost.go** — Ghost write command execution
+- **bisect.go** — Bisect command execution
+- **autodream.go** — Auto dream prompt enhancement execution
 
-**Rule:** `internal/tools/` may only import `internal/types/` and `internal/errors/`.
+### Keyboard Shortcuts
+| Key | Action |
+|-----|--------|
+| `Ctrl+C` / `q` | Quit (with confirmation in Processing/Streaming states) |
+| `Enter` | Submit prompt |
+| `Tab` / `Shift+Tab` | Cycle through autocomplete suggestions |
+| `Up` / `Down` | Navigate suggestions |
+| `Ctrl+S` | Save session checkpoint (when in Ready state, session active) |
+| `Esc` | Abort / go back |
 
-**Root cause:** `PermissionRule` type is defined in `internal/config/types.go` but is consumed by `internal/tools/permissions.go`. Moving the type to `internal/types/types.go` would resolve the violation but cascades across 6+ files.
+### Slash Commands
+Registered in `internal/commands/registry.go`. Executed via `internal/app/commands.go`.
 
-**Planned fix:** Phase 26+ will move `PermissionRule` to `internal/types/` and update all import paths.
+| Command | Description |
+|---------|-------------|
+| `/session` | Session management (list, create, delete, switch, save, checkpoint) |
+| `/model` | List and select models |
+| `/tools` | List and toggle available tools |
+| `/config` | View/alter config at runtime |
+| `/history` | View/prompt session history |
+| `/export` | Export session data |
+| `/agent` | Agent configuration |
+| `/ghost` | Ghost write files |
+| `/bisect` | Compare model responses |
+| `/tui` | TUI mode toggle |
+| `/help` | General help |
+| `/keychain` | API key management |
+| `/dream` | Toggle dream/prompt enhancement |
+| `/flush` | Clear screen and reset |
+| `/quit` | Quit application |
+| `/exit` | Alias for quit |
+| `//` | Literal slash passthrough |
+| `!` | Bash command passthrough |
 
-**Phase 25 action:** Document only; do NOT modify the imports.
+### Autocomplete
+`internal/commands/autocomplete.go` — Tab-based suggestions; cycle through with Tab/Shift+Tab; matches by prefix.
 
-### W-26: Permission component imports tools package
+---
 
-**Status:** Known coupling, documented for tracking.
+## Configuration (`internal/config/`)
 
-`internal/tui/components/permission.go` imports `internal/tools` to access tool risk levels
-for the permission modal display. This creates a TUI→Tools dependency.
+Config loaded from `~/.m31a.yaml` or `$XDG_CONFIG_HOME/m31a/m31a.yaml`. Uses `gopkg.in/yaml.v3`. Schema defined in `config.go` with validation.
 
-**Impact:** Low — the import is read-only (risk level lookup), not a circular dependency.
+### Sections
+| Section | Description |
+|---------|-------------|
+| `api_key` | OpenRouter API key |
+| `providers` | Provider-specific settings (Zen API URL, key, default context) |
+| `model` | Default model ID, fallback model, token limits |
+| `ui` | TUI theme, viewport history, edit mode, suggestions |
+| `keys` | Custom keybindings |
+| `agents` | Agent definitions (name, model, system prompt, tools, parameters) |
+| `tools` | Tool configurations (MCP server commands, Toolhouse, Brave Search API key) |
+| `git` | Git integration settings (auto-commit, author, GPG signing) |
+| `verify` | Verification settings (provider, attestation, logging) |
+| `ghost` | Ghost write settings (default directory, max retries, file patterns) |
+| `dev` | Dev mode settings |
+| `advanced` | Advanced options (cache TTL, health check thresholds, SSE parsers) |
 
-**Planned fix:** Phase 26+ may extract risk level metadata into `internal/types/` to eliminate
-the dependency.
+---
+
+## Tools Layer (`internal/tools/`)
+
+| Package | Purpose |
+|---------|---------|
+| `registry.go` | ToolRegistry — register, list, lookup tools by name |
+| `execute.go` | ToolExecutor — execute tools with timeout, collect output |
+| `mcp_client.go` | MCP (Model Context Protocol) client — connects to MCP servers |
+| `mcp_transport.go` | MCP transport — stdio-based communication with MCP servers |
+| `toolhouse.go` | Toolhouse integration — cloud-based tool execution platform |
+| `brave.go` | Braze Search API integration — web search via Brave |
+
+### Tool Registry
+Tools are registered with name, description, input/output schemas, and a handler function. The registry allows listing available tools and dispatching execution by name.
+
+### MCP Client
+Connects to MCP servers over stdio transport. Handles JSON-RPC message exchange for tool discovery and execution.
+
+---
+
+## Verification Layer (`internal/verify/`)
+
+| Package | Purpose |
+|---------|---------|
+| `attestation.go` | Attestation — verifies binary integrity and provenance |
+| `validate.go` | Validation — validates prompts, configs, tool outputs |
+| `mock_mcp.go` | Mock MCP server for testing tool execution |
+
+---
+
+## Error Handling (`internal/errors/`)
+
+Defines sentinel errors used across the app:
+- `ErrInvalidKey` — Missing or empty API key
+- `ErrNoModels` — No models available from provider
+- `ErrHTTPRequest` — HTTP request failure
+- `ErrStream` — Stream read failure
+- `ErrConfigParse` — Config file parse failure
+- `ErrSessionNotFound`, `ErrSessionLoad`, `ErrSessionSave` — Session errors
+- `ErrProviderNotFound` — Unknown provider
+- `ErrToolNotFound`, `ErrToolExecution` — Tool errors
+- `ErrKeychainLocked`, `ErrKeychainSet`, `ErrKeychainGet` — Keychain errors
+- `ErrGhostWrite`, `ErrGhostRead` — Ghost write errors
+- `ErrBisectNoResponses`, `ErrBisectNoDiff` — Bisect errors
+
+---
+
+## State Machine
+
+```
+Init → Ready (healthy) or Error (startup failure)
+Ready → Processing (Enter / submit)
+Processing → Streaming (response received)
+Streaming → Ready (stream complete)
+Streaming → Paused (user interrupt) → Ready
+Any state → Error → Ready
+Any state → ConfirmQuit → Quit / resume
+Ready → SessionPicker (list sessions)
+Ready → GhostPicker / GhostOutput
+Ready → BisectOutput
+```
+
+---
+
+## Version
+
+`internal/version/version.go` — exported via ldflags at build time:
+```go
+var (
+    Version   = "dev"
+    Commit    = "none"
+    Date      = "unknown"
+)
+```
