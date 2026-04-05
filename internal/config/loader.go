@@ -847,19 +847,24 @@ type ConfigReloadMsg struct {
 	Error  error
 }
 
-// sendReload loads the config and sends it on ch with a retry to avoid
-// dropping messages when the receiver is briefly busy.
+// sendReload loads the config and sends it on ch, retrying briefly if the
+// receiver is busy. Blocks until delivered or ctx is cancelled — never drops
+// the message silently (BUG-18).
 func sendReload(ctx context.Context, ch chan<- ConfigReloadMsg, path string) {
 	cfg, err := Load(path)
+	msg := ConfigReloadMsg{Config: cfg, Error: err}
 	select {
-	case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+	case ch <- msg:
+		return
 	case <-ctx.Done():
+		return
 	case <-time.After(100 * time.Millisecond):
+		// Receiver didn't take it within 100ms — block until it does or
+		// the watcher is shut down. No silent drop.
 		select {
-		case ch <- ConfigReloadMsg{Config: cfg, Error: err}:
+		case ch <- msg:
 		case <-ctx.Done():
-		default:
-			slog.Warn("config reload message dropped: receiver not ready after retry")
+			slog.Warn("config reload message not delivered: watcher cancelled")
 		}
 	}
 }
