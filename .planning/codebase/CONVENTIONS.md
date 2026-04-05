@@ -1,230 +1,159 @@
-# Coding Conventions
+# CONVENTIONS.md — Code Style & Conventions
 
-**Analysis Date:** 2026-06-12
+**Last updated:** 2026-06-13
+**Project:** M31A — Terminal AI Coding Agent
 
-## Naming Patterns
+## Go Code Style
 
-**Files:**
-- Lowercase with underscores: `engine_test.go`, `bash_security_test.go`, `context_warning_test.go`
-- Platform-specific suffixes: `_unix.go`, `_windows.go`, `_darwin.go` (e.g., `bash_unix.go`, `bash_windows.go`)
-- Test files: `*_test.go` (standard Go convention)
-- Doc files: `doc.go` in each `pkg/` subdirectory for package documentation
+M31A follows standard Go conventions (`gofmt`, `go vet`, `golangci-lint`):
 
-**Functions:**
-- MixedCaps (exported): `NewBash()`, `NewSession()`, `LoadPrompts()`
-- camelCase (unexported): `setupTestEngine()`, `gitConfig()`, `modelForPhase()`
-- Constructor pattern: `New*()` or `NewXxx()` (e.g., `NewBash()`, `NewSession()`, `New()`)
-- Setup helpers in tests: `setupTestEngine()`, `setupBisectRepo()`, `setupRepo()`
-
-**Variables:**
-- MixedCaps for exported: `CurrentSchemaVersion`, `ErrProviderUnreachable`
-- camelCase for unexported: `sessionID`, `workDir`, `backupDir`
-- Constants: MixedCaps for exported (`RiskSafe`, `PhaseIdle`), camelCase for unexported (`fileActionCreate`)
-
-**Types:**
-- MixedCaps for exported types: `Engine`, `Session`, `Bash`, `Rollback`
-- Interface naming: Single-method interfaces named after method (`Name()`, `Description()`), larger interfaces descriptive (`LLMProvider`, `Tool`)
-- Struct field tags: `json:"field_name"` for JSON, `toml:"field_name"` for TOML
-
-**Packages:**
-- Lowercase single words: `session`, `tools`, `workflow`, `provider`
-- Internal packages: `internal/` prefix for private code
-- Public packages: `pkg/` prefix for reusable code
-
-## Code Style
-
-**Formatting:**
-- Tool: `gofmt` (standard Go formatter)
-- Run `gofmt -w .` before committing
-- Run `goimports` for import sorting
-
-**Linting:**
-- Tool: `golangci-lint` with configuration in `.golangci.yml`
-- Enabled linters: `govet`, `staticcheck`, `errcheck`, `ineffassign`, `unused`, `gosimple`
-- Shadow checking enabled: `check-shadowing: true`
-- Test files excluded from: `errcheck`, `unused` linters
-
-**Line Length:**
-- No explicit limit, but prefer readability
-- Long lines broken with proper Go formatting
-
-## Import Organization
-
-**Order:**
-1. Standard library (`context`, `fmt`, `os`, `time`)
-2. Third-party packages (`github.com/charmbracelet/bubbletea`, `github.com/eshanized/M31A/...`)
-3. Project internal packages (`internal/...`, `pkg/...`)
-
-**Separation:**
-- Blank line between groups
-- Use `goimports` for automatic sorting
-
-**Path Aliases:**
-- Common aliases for internal packages:
-  - `m31types "github.com/eshanized/M31A/internal/types"`
-  - `m31errors "github.com/eshanized/M31A/internal/errors"`
-  - `tea "github.com/charmbracelet/bubbletea"`
-
-**Example:**
-```go
-import (
-    "context"
-    "fmt"
-    "os"
-
-    "github.com/charmbracelet/bubbletea"
-    m31errors "github.com/eshanized/M31A/internal/errors"
-    "github.com/eshanized/M31A/internal/types"
-)
+### Linter Configuration (`.golangci.yml`)
+```yaml
+linters:
+  enable:
+    - govet       # Reports suspicious constructs
+    - staticcheck # Advanced static analysis
+    - errcheck    # Ensures errors are checked
+    - ineffassign # Detects ineffectual assignments
+    - unused      # Reports unused code
+    - gosimple    # Suggests simplifications
 ```
 
-## Error Handling
+- `govet` has `check-shadowing: true`
+- `errcheck` skips type assertions and blank identifier checks
+- Test files excluded from `errcheck` and `unused`
 
-**Patterns:**
-- Return errors rather than panicking
-- Use `fmt.Errorf` with `%w` for wrapping: `fmt.Errorf("chain: %w", err)`
-- Sentinel errors defined in `internal/errors/errors.go`:
-  - `ErrProviderUnreachable`, `ErrRateLimited`, `ErrInvalidKey`, etc.
-  - Use `errors.Is()` for checking
-- User-friendly messages via `errors.UserMessage()` function
+### Formatting
+- Standard `go fmt` enforced via `make fmt` target
+- `goimports` used for import ordering
+- `CGO_ENABLED=0` for all builds
+- Build flags: `-s -w` (strip debug info) for release builds
 
-**Error Types:**
-- Sentinel errors: `var ErrProviderUnreachable = errors.New("provider unreachable")`
-- Wrapped errors: `fmt.Errorf("load prompt %s: %w", path, err)`
-- Pattern matching: `strings.Contains(errStr, "connection refused")`
+## Naming Conventions
 
-**Example:**
+### Packages
+- All lowercase, single-word names preferred
+- `internal/`, `pkg/` distinction: internal for private, pkg for potentially reusable
+- Platform-specific suffix: `_unix.go`, `_windows.go`, `_darwin.go`, `_linux.go`
+- Test files: `*_test.go` alongside source, `extra_test.go` for integration-style tests
+
+### Types & Interfaces
+- PascalCase for exported types, camelCase for unexported
+- Interface names: `LLMProvider`, `PermissionGate`, `MsgEmitter`
+- Error sentinels: `Err*` pattern (e.g., `ErrProviderUnreachable`, `ErrRateLimited`)
+- Constants: PascalCase for exported, camelCase for unexported
+
+### Functions & Methods
+- PascalCase exported, camelCase unexported
+- Constructors: `New*()` pattern (e.g., `NewRegistry()`, `NewSession()`)
+- Getter methods: omit `Get` prefix (e.g., `Name()` not `GetName()`)
+
+## Error Handling Patterns
+
+### Sentinel Errors (`internal/errors/errors.go`)
 ```go
-if err != nil {
-    return nil, fmt.Errorf("load prompt %s: %w", path, err)
-}
+var ErrProviderUnreachable = errors.New("provider unreachable")
+var ErrRateLimited = errors.New("rate limited")
 ```
+- All sentinel errors defined in `internal/errors/errors.go`
+- User-friendly messages via `UserMessage(err) string` — converts internal errors to actionable messages
+- Pattern matching for unwrapped errors (HTTP status codes, connection errors, TLS errors)
 
-## Comments
-
-**When to Comment:**
-- Exported functions, types, and packages must have doc comments
-- Inline comments explain *why*, not *what*
-- Complex logic blocks get explanatory comments
-- TODO/FIXME for known issues
-
-**Doc Comment Style:**
+### Error Wrapping
 ```go
-// Session wraps types.Session with additional runtime state fields.
-type Session struct {
-    // ...
-}
-
-// NewSession creates a new Session with default values.
-func NewSession(id, model, provider string) *Session {
-    // ...
-}
+return fmt.Errorf("provider %q not registered: %w", name, m31errors.ErrProviderNotFound)
 ```
+- Uses `%w` for wrapping with `errors.Is` compatibility
+- Context added to errors before returning them
 
-**Package Documentation:**
-- Each `pkg/` package has a `doc.go` file
-- Example: `pkg/session/doc.go`
+### Validation Pattern
 ```go
-// Package session manages the lifecycle of agent sessions, including
-// creation, persistence, checkpointing, and archival. Sessions are stored
-// as JSON and Markdown files under ~/.m31a/sessions/.
-package session
-```
-
-## Function Design
-
-**Size:** Functions are focused and reasonably sized (typically <100 lines)
-
-**Parameters:**
-- Use structs for complex inputs: `ManagerOpts{}`, `ChatRequest{}`
-- Context as first parameter for cancellation support
-- Return multiple values: `(result, error)` pattern
-
-**Return Values:**
-- Always return error as last value
-- Use named return values for clarity in complex functions
-- Zero values for error cases
-
-**Example:**
-```go
-func (r *Rollback) Chain(limit int) ([]RollbackEntry, error) {
-    if limit <= 0 {
-        limit = 20
+func validateSessionID(id string, expectedLen int) error {
+    if expectedLen <= 0 { expectedLen = types.SessionIDLength }
+    if len(id) != expectedLen {
+        return fmt.Errorf("session ID must be %d chars, got %d", expectedLen, len(id))
     }
-    // ...
-    return entries, nil
+    for _, c := range id {
+        if !unicode.IsDigit(c) && !(c >= 'a' && c <= 'f') {
+            return fmt.Errorf("session ID must contain only lowercase hex chars [a-f0-9], got %q", id)
+        }
+    }
+    return nil
 }
 ```
 
-## Module Design
+## Logging
 
-**Exports:**
-- Export only what's needed for external use
-- Use interfaces for abstraction: `LLMProvider`, `Tool`
-- Keep implementation details unexported
+- Uses `log/slog` (structured logging, Go 1.21+)
+- Logger initialized once in `main.go`, set as default via `slog.SetDefault()`
+- Contextual attributes always included (e.g., `"version"`, `"error"`, `"model"`)
+- Log levels: `Info` for startup, `Warn` for recoverable issues, `Error` for failures
+- Keychain errors logged as warnings (non-fatal)
+- Log file managed by `internal/log/log.go`
 
-**Barrel Files:**
-- Not used (Go convention)
-- Each file exports specific types/functions
+## Concurrency Patterns
 
-**Package Boundaries:**
-- `internal/` packages: Private to the module
-- `pkg/` packages: Reusable across projects
-- Strict dependency rules enforced (see `docs/ARCHITECTURE.md`)
+### Thread Safety
+- `sync.RWMutex` for read-heavy structures (provider registry, config)
+- `sync.Mutex` for write-heavy operations
+- `sync.Once` for lazy initialization (`SkipDirsMap()`)
+- `sync/atomic` for counters (`permissionRequestID`)
+- `singleflight` (`golang.org/x/sync`) for deduplicating concurrent model fetches
 
-## Configuration
+### Channel Usage
+- Bubble Tea's message passing via `tea.Cmd` channels
+- `ChannelSendTimeout = 500ms` to prevent goroutine leaks on channel sends
+- Signal handling via dedicated goroutine with `sigDone` channel for clean shutdown
 
-**File Format:** TOML (`config.toml`)
-- Config types defined in `internal/config/types.go`
-- Use `toml:"field_name"` struct tags
-- Default values via `DefaultConfig()` functions
+## Configuration Defaults Pattern
 
-**Environment Variables:**
-- Load via `config.LoadDotEnv()` before logger initialization
-- Prefix: `M31A_` for project-specific vars
-- Sensitive values: API keys resolved via keychain → env → config file
+- `DefaultConfig()` in `internal/config/loader.go:28` returns a Config with all sane defaults
+- Missing config file causes Load to return DefaultConfig without error
+- Hot-reload supported via `fsnotify` file watcher
+- Config values overridable via environment variable `M31A_CONFIG`
 
-## Concurrency
+## Security Conventions
 
-**Bubble Tea Model:**
-- Single-threaded event loop
-- All state mutations through `Update()` only
-- Never mutate `AppState` from goroutines
-- Use `tea.Cmd` and `tea.Msg` for async operations
-
-**Goroutines:**
-- Use `sync.Once` for one-time initialization
-- Use channels for communication
-- Context cancellation for cleanup
-- `sync.Mutex` for shared state protection
-
-**Example:**
+### SSRF Protection (`internal/errors/errors.go:35`)
 ```go
-var killOnce sync.Once
-go func() {
-    select {
-    case <-ctx.Done():
-        killOnce.Do(func() {
-            processKill(cmd.Process.Pid, sigInt)
-        })
-    case <-cmdDone:
-        return
-    }
-}()
+ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
+```
+WebFetch tool blocks requests to private IP ranges, loopback, and link-local addresses.
+
+### API Key Handling
+- Keys stored in OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
+- Config file `api_key` fields also supported as fallback
+- Keys resolved at startup via `cfg.ResolveAPIKeys(kc)` in `main.go:116`
+- Provider errors sanitized (max 200 chars) to avoid leaking keys in logs
+
+### File Size Limits
+```go
+MaxFileSize = 5 * 1024 * 1024        // 5MB file read limit
+MaxSessionFileSize = 50 * 1024 * 1024 // 50MB session file limit
+MaxLLMResponseBytes = 1 << 20         // 1MB LLM response limit
 ```
 
-## Documentation
+### Permission System (`internal/config/types.go:163-183`)
+- `PermissionsConfig` with rules: tool, pattern, risk_level, action (allow/deny/ask)
+- Per-agent permission profiles via `PermissionsAgentConfig`
+- Default modes: allow-all, ask-first, deny-all
+- Timeout-based permission modal (default 300 seconds)
 
-**Architecture:**
-- `docs/ARCHITECTURE.md` — Package dependency graph, data flow
-- `CONTRIBUTING.md` — Development setup, code style, PR conventions
-- `AGENTS.md` — Architecture rules, absolute prohibitions
+## Code Organization Conventions
 
-**Code Documentation:**
-- Godoc comments on all exported symbols
-- Inline comments for complex logic
-- README files in key directories
+### Import Aliasing
+- External packages with long names: aliased for readability
+- Internal packages with naming conflicts: prefixed (e.g., `m31errors`, `m31types`)
+- Standard library imports grouped first, then external, then internal
 
----
+### Compile-time Interface Checks
+```go
+var _ provider.LLMProvider = (*Client)(nil)
+```
+Used in provider implementations to ensure interface compliance at compile time.
 
-*Convention analysis: 2026-06-12*
+### Documentation Comments
+- Exported types and functions have doc comments
+- Inline comments explain "why" not "what"
+- Phase transition validation documented in `engine_messages.go`
+- Constants have immediate comments explaining their purpose

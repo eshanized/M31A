@@ -1,429 +1,187 @@
-# Testing Patterns
+# TESTING.md — Testing Patterns & Practices
 
-**Analysis Date:** 2026-06-12
+**Last updated:** 2026-06-13
+**Project:** M31A — Terminal AI Coding Agent
 
 ## Test Framework
 
-**Runner:**
-- Go standard library `testing` package
-- No external test frameworks (no testify, no gomock)
+- **Standard library:** `testing` package (Go built-in)
+- **Assertions:** Standard `t.*` methods (`t.Errorf`, `t.Fatalf`, `t.Logf`) — no external assertion library
+- **Test runner:** `go test` via `make test` (with race detector) or `make test-fast` (without)
 
-**Assertion Library:**
-- Standard `testing.T` methods: `t.Fatal()`, `t.Fatalf()`, `t.Error()`, `t.Errorf()`, `t.Log()`, `t.Logf()`
-- Manual assertions with conditional checks
+## Test Distribution
 
-**Run Commands:**
-```bash
-go test -race -cover ./...              # Run all tests with race detector and coverage
-go test -cover ./...                    # Fast mode without race detector
-go test -v -race -cover ./...           # Verbose output
-go test -v -race -run TestSpecific ./... # Run specific test
-go test -bench=. -benchmem -run=^$ ./... # Run benchmarks
-```
+**Total test files:** ~120 across the codebase
 
-**Coverage Targets:**
-- 75% overall
-- 90% for `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`
+| Package | Test Files | Coverage |
+|---|---|---|
+| `internal/config/` | 2 (+1 extra) | Config loading, project context |
+| `internal/errors/` | 1 | Error sentinel checks |
+| `internal/fileutil/` | 2 | Atomic file operations |
+| `internal/git/` | 2 | Git commands |
+| `internal/log/` | 2 | Logger initialization |
+| `internal/provider/` | 11 | Providers, caching, fallback, SSE, capabilities |
+| `internal/provider/openrouter/` | 2 | OpenRouter API client |
+| `internal/provider/zen/` | 1 | Zen API client |
+| `internal/tokens/` | 2 | Token estimation, context warnings |
+| `internal/tools/` | 18 | All tool implementations, dispatcher, subagent, permissions |
+| `internal/tui/` | 25 | TUI models, views, components, theme, layout |
+| `internal/types/` | 2 | Shared types |
+| `internal/workflow/` | 18 | Workflow engine, plan parsing, phases |
+| `pkg/arbitrage/` | 1 | Cost arbitrage |
+| `pkg/autodream/` | 2 | Autonomous task chaining |
+| `pkg/bisect/` | 2 | Git bisect |
+| `pkg/keychain/` | 2 | Keychain integration |
+| `pkg/ledger/` | 2 | Decision ledger |
+| `pkg/rollback/` | 1 | Git rollback |
+| `pkg/session/` | 7 | Session management, checkpoints, planning |
+| `pkg/taskrunner/` | 1 | Task runner |
 
-## Test File Organization
+## Test Patterns
 
-**Location:**
-- Co-located with source files (standard Go convention)
-- Test files in same package as implementation
-
-**Naming:**
-- Test files: `*_test.go`
-- Example: `engine_test.go`, `bash_test.go`, `session_test.go`
-
-**Structure:**
-```
-internal/
-├── workflow/
-│   ├── engine.go
-│   ├── engine_test.go
-│   ├── plan.go
-│   ├── plan_test.go
-│   └── ...
-pkg/
-├── session/
-│   ├── session.go
-│   ├── session_test.go
-│   └── ...
-```
-
-## Test Structure
-
-**Suite Organization:**
-- Table-driven tests for multiple scenarios
-- Individual test functions for specific behaviors
-- Helper functions prefixed with `setup*` or `make*`
-
-**Pattern: Table-Driven Tests**
+### Standard Unit Tests
+Tests use standard Go table-driven tests extensively:
 ```go
-func TestEngine_ParseQuestions(t *testing.T) {
+func TestSomething(t *testing.T) {
     tests := []struct {
-        name      string
-        content   string
-        wantLen   int
-        wantFirst string
-    }{
-        {
-            name:      "numbered format",
-            content:   "1. What framework?\n2. What language?",
-            wantLen:   2,
-            wantFirst: "What framework?",
-        },
-        {
-            name:      "fallback question",
-            content:   "What framework should we use?\nHow about testing?",
-            wantLen:   2,
-            wantFirst: "What framework should we use?",
-        },
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            questions := parseQuestions(tt.content)
-            if len(questions) != tt.wantLen {
-                t.Errorf("Expected %d questions, got %d: %v", tt.wantLen, len(questions), questions)
-            }
-            if len(questions) > 0 && questions[0] != tt.wantFirst {
-                t.Errorf("Expected first question %q, got %q", tt.wantFirst, questions[0])
-            }
-        })
-    }
-}
-```
-
-**Pattern: Individual Tests**
-```go
-func TestBash_SimpleCommand(t *testing.T) {
-    t.Parallel()
-    b := NewBash(t.TempDir())
-    result, err := b.Execute(context.Background(), types.ToolInput{
-        Name: "Bash",
-        Params: map[string]any{
-            "command": `echo "hello world"`,
-        },
-    })
-    if err != nil {
-        t.Fatal(err)
-    }
-    if !strings.Contains(result.Output, "hello world") {
-        t.Errorf("expected 'hello world' in output, got: %s", result.Output)
-    }
-}
-```
-
-**Setup Pattern:**
-```go
-func setupTestEngine(t *testing.T) (*Engine, func()) {
-    t.Helper()
-    dir := t.TempDir()
-
-    // Init git repo
-    g := git.New(dir)
-    g.Init()
-    g.ConfigUser("Test", "test@test.com")
-
-    // Create session
-    sessionBaseDir := filepath.Join(dir, "sessions")
-    os.MkdirAll(sessionBaseDir, 0755)
-    mgr := session.NewManager(sessionBaseDir, session.ManagerOpts{})
-
-    s, err := mgr.NewSession("test-model", "test-provider")
-    if err != nil {
-        t.Fatalf("NewSession failed: %v", err)
-    }
-
-    // ... setup dispatcher, estimator, etc.
-
-    engine, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
-        &mockProvider{}, "test-model", dispatcher, est, mgr, nil)
-    engine.git = g
-
-    cleanup := func() {}
-    return engine, cleanup
-}
-```
-
-**Teardown Pattern:**
-- Use `defer os.RemoveAll(dir)` for temp directories
-- Use `t.TempDir()` for automatic cleanup
-- Cleanup functions returned from setup helpers
-
-**Assertion Pattern:**
-```go
-// Fatal for critical checks
-if err != nil {
-    t.Fatalf("Init failed: %v", err)
-}
-
-// Error for non-critical checks
-if !g.IsRepo() {
-    t.Fatal("Expected IsRepo to return true after Init")
-}
-
-// Log for expected conditions
-if err == nil {
-    t.Log("expected timeout error, got: %v", err)
-}
-```
-
-## Mocking
-
-**Framework:**
-- Manual mock implementations (no mock generation tools)
-
-**Patterns:**
-```go
-// Mock provider for testing
-type mockProvider struct {
-    response       string
-    err            error
-    callCount      int
-    multiResponses []string // if set, returns responses[callCount] per call
-}
-
-func (m *mockProvider) Name() string   { return "mock" }
-func (m *mockProvider) APIKey() string { return "test-key" }
-func (m *mockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
-    return nil, nil
-}
-func (m *mockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
-    m.callCount++
-    content := m.response
-    if len(m.multiResponses) > 0 {
-        idx := m.callCount - 1
-        if idx < len(m.multiResponses) {
-            content = m.multiResponses[idx]
-        }
-    }
-    if content == "" {
-        content = "OK"
-    }
-    done := false
-    next := func() (*m31types.StreamChunk, error) {
-        if done {
-            return nil, io.EOF
-        }
-        done = true
-        return &m31types.StreamChunk{Delta: content}, nil
-    }
-    close := func() error { return nil }
-    return &m31types.StreamIterator{Next: next, Close: close}, m.err
-}
-func (m *mockProvider) EstimateCost(modelID string, usage m31types.Usage) float64 { return 0 }
-func (m *mockProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
-    return m31types.HealthStatus{Status: "live"}
-}
-func (m *mockProvider) GetModel(id string) (*m31types.ModelInfo, error) { return nil, nil }
-func (m *mockProvider) CachedModels() []m31types.ModelInfo              { return nil }
-```
-
-**What to Mock:**
-- External dependencies (LLM providers, file system, network)
-- Complex state (git repositories, session managers)
-- Time-dependent operations
-
-**What NOT to Mock:**
-- Core business logic
-- Data structures
-- Simple utility functions
-
-## Fixtures and Factories
-
-**Test Data:**
-```go
-// Create test session
-s := NewSession("test-id", "gpt-4o", "openrouter")
-
-// Create test task
-task := types.Task{
-    ID:                 1,
-    Description:        "Create a REST API",
-    Action:             "create",
-    Dependencies:       []int{},
-    Files:              []string{"api.go"},
-    AcceptanceCriteria: []string{"Works correctly"},
-    Status:             types.StatusPending,
-}
-
-// Create test message
-msg := types.Message{
-    Role:    "user",
-    Content: "Hello, world!",
-    CreatedAt: time.Now(),
-}
-```
-
-**Location:**
-- Inline in test files
-- Setup helper functions: `setupTestEngine()`, `setupBisectRepo()`, `setupRepo()`
-
-## Coverage
-
-**Requirements:**
-- 75% overall
-- 90% for critical packages: `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`
-
-**View Coverage:**
-```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
-```
-
-**Coverage Report:**
-- Generated in project root: `coverage.out`
-- HTML report: `coverage.html`
-
-## Test Types
-
-**Unit Tests:**
-- Scope: Individual functions and methods
-- Approach: Table-driven tests, mock external dependencies
-- Example: `TestEngine_ParseQuestions`, `TestBash_SimpleCommand`
-
-**Integration Tests:**
-- Scope: Multiple components working together
-- Approach: Real git repos, temp directories, mock LLM providers
-- Example: `TestEngine_Transition`, `TestManager_UpdateWorkflowState_PersistsAndLoads`
-
-**E2E Tests:**
-- Framework: Not used (TUI testing is manual)
-
-## Common Patterns
-
-**Async Testing:**
-```go
-func TestBash_ContextCancellation(t *testing.T) {
-    ctx, cancel := context.WithCancel(context.Background())
-    b := NewBash(t.TempDir())
-
-    errCh := make(chan error, 1)
-    go func() {
-        _, err := b.Execute(ctx, types.ToolInput{
-            Name: "Bash",
-            Params: map[string]any{
-                "command": "sleep 30",
-            },
-        })
-        errCh <- err
-    }()
-
-    time.Sleep(100 * time.Millisecond)
-    cancel()
-
-    select {
-    case err := <-errCh:
-        if err == nil {
-            t.Log("context cancellation returned no error (expected error or cancellation)")
-        }
-    case <-time.After(5 * time.Second):
-        t.Fatal("command not cancelled in time")
-    }
-}
-```
-
-**Error Testing:**
-```go
-func TestEngine_ErrorHandling(t *testing.T) {
-    engine, _ := setupTestEngine(t)
-
-    // Unknown phase should error
-    _, err := engine.RunPhase(context.Background(), m31types.WorkflowPhase("unknown"), "goal")
-    if err == nil {
-        t.Fatal("Expected error for unknown phase")
-    }
-}
-```
-
-**Parallel Testing:**
-```go
-func TestBash_SimpleCommand(t *testing.T) {
-    t.Parallel()
-    // ... test implementation
-}
-```
-
-**Table-Driven Tests:**
-```go
-func TestStripCodeBlocks(t *testing.T) {
-    tests := []struct {
-        name  string
+        name string
         input string
         want  string
     }{
-        {"json tag", "```json\n[{\"id\":1}]\n```", "[{\"id\":1}]\n"},
-        {"go tag", "```go\nfunc main() {}\n```", "func main() {}\n"},
+        {name: "valid input", input: "hello", want: "HELLO"},
+        {name: "empty input", input: "", want: ""},
     }
-
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            got := stripCodeBlocks(tt.input)
+            got := process(tt.input)
             if got != tt.want {
-                t.Errorf("Expected %q, got %q", tt.want, got)
+                t.Errorf("process() = %q, want %q", got, tt.want)
             }
         })
     }
 }
 ```
 
-## Test Helper Functions
+### Extra Test Files
+Many packages have `extra_test.go` files that contain integration-style tests or tests requiring external dependencies:
+- `internal/provider/extra_test.go`
+- `internal/tools/extra_test.go`
+- `internal/tui/extra_test.go`
+- `internal/tui/components/extra_test.go`
+- `internal/tui/config_model_extra_test.go`
+- `internal/tui/settings_extra_test.go`
+- `internal/tui/settings_model_extra_test.go`
+- `internal/tui/plan_extra_test.go`
+- `pkg/session/manager_extra_test.go`
+- `pkg/session/planning_extra_test.go`
 
-**Common Helpers:**
+These are separated from main test files to distinguish pure unit tests from tests that may need more setup or run slower.
+
+### Mocking Strategy
+- Interfaces used extensively for testability (e.g., `LLMProvider`, `PermissionGate`, `MsgEmitter`)
+- No external mocking library — tests use hand-written mock implementations
+- Example provider mock pattern:
 ```go
-// Helper to run git commands in tests
-func runGit(t *testing.T, dir string, args ...string) {
-    t.Helper()
-    cmd := exec.Command("git", args...)
-    cmd.Dir = dir
-    out, err := cmd.CombinedOutput()
-    if err != nil {
-        t.Fatalf("git %s failed: %v\n%s", args[0], err, string(out))
-    }
+type mockProvider struct {
+    name string
+    err  error
 }
-
-// Helper to write files in tests
-func writeFile(t *testing.T, dir, name, content string) {
-    t.Helper()
-    if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
-        t.Fatalf("writeFile %s failed: %v", name, err)
-    }
-}
-
-// Helper to get commit hash
-func commitHash(t *testing.T, dir string) string {
-    t.Helper()
-    out, err := exec.Command("git", "rev-parse", "HEAD").CombinedOutput()
-    if err != nil {
-        t.Fatalf("rev-parse failed: %v", err)
-    }
-    return string(out[:len(out)-1]) // trim newline
-}
+func (m *mockProvider) Name() string { return m.name }
 ```
 
-**Helper Guidelines:**
-- Always call `t.Helper()` at the start
-- Use `t.Fatalf()` for failures (not `t.Error()`)
-- Prefix with descriptive name: `setup*`, `run*`, `write*`, `get*`
+### Concurrency Testing
+- Race detector enabled in `make test` (`-race` flag)
+- Tests use `sync.WaitGroup` for goroutine coordination
+- Channel-based tests with timeouts to prevent deadlocks
 
-## Test File Locations
+## Coverage
 
-**Key Test Files:**
-- `internal/workflow/engine_test.go` — Engine initialization, transitions, context building
-- `internal/tools/bash_test.go` — Bash tool execution, timeout, cancellation
-- `pkg/session/session_test.go` — Session workflow state persistence
-- `pkg/bisect/bisect_test.go` — Git bisect operations
-- `internal/errors/errors_test.go` — Error message generation
+- **Coverage command:** `make cover` (generates HTML report)
+- **Coverage targets:** All packages via `./...`
+- **Coverage output files:** `cover.out`, `coverage_final.out`, `cov2.out` in project root
+- **No specific coverage threshold enforced** — measured but not gated
 
-**Test Coverage by Package:**
-- `internal/workflow/` — 15+ test files covering all phases
-- `internal/tools/` — 12+ test files for each tool
-- `pkg/session/` — 5 test files for session lifecycle
-- `pkg/bisect/` — Comprehensive bisect testing
-- `internal/provider/` — 8+ test files for provider layer
+## Test Configuration (`Makefile`)
 
----
+```makefile
+test:
+    @go test -race -cover -coverprofile=$(COVER_OUT) ./...
 
-*Testing analysis: 2026-06-12*
+test-fast:
+    @go test -cover ./...
+
+test-verbose:
+    @go test -v -race -cover ./...
+
+test-specific:
+    @go test -v -race -run $(TEST) ./...
+
+bench:
+    @go test -bench=. -benchmem -run=^$$ ./...
+```
+
+## Notable Test Files
+
+### Provider Tests
+| File | Tests |
+|---|---|
+| `internal/provider/cache_test.go` | Model caching with TTL, stale behavior |
+| `internal/provider/capabilities_test.go` | Model capabilities detection |
+| `internal/provider/fallback_test.go` | Auto-fallback between providers |
+| `internal/provider/reasoning_test.go` | Reasoning/thinking support |
+| `internal/provider/resilience_test.go` | Provider resilience under failures |
+| `internal/provider/sse_test.go` | SSE stream parsing |
+| `internal/provider/registry_test.go` | Provider registration/activation |
+
+### Tool Tests
+| File | Tests |
+|---|---|
+| `internal/tools/bash_test.go` | Bash execution, timeout, output limits |
+| `internal/tools/bash_security_test.go` | Shell injection prevention |
+| `internal/tools/bash_kill_test.go` | Bash kill grace period |
+| `internal/tools/edit_test.go` | File edit operations |
+| `internal/tools/fileread_test.go` | File read operations |
+| `internal/tools/filewrite_test.go` | File write operations |
+| `internal/tools/glob_test.go` | Glob pattern matching |
+| `internal/tools/grep_test.go` | Grep search |
+| `internal/tools/grep_truncation_test.go` | Grep output truncation |
+| `internal/tools/permissions_test.go` | Permission rule evaluation |
+| `internal/tools/permission_timeout_test.go` | Permission modal timeout |
+| `internal/tools/dispatcher_test.go` | Tool dispatch routing |
+| `internal/tools/webfetch_test.go` | Web fetching |
+| `internal/tools/webfetch_security_test.go` | SSRF protection |
+| `internal/tools/webfetch_helpers_test.go` | WebFetch helper utilities |
+| `internal/tools/subagent/manager_test.go` | Subagent lifecycle |
+| `internal/tools/subagent/loop_parse_test.go` | Subagent tool call parsing |
+
+### Workflow Tests
+| File | Tests |
+|---|---|
+| `internal/workflow/engine_test.go` | Core engine behavior |
+| `internal/workflow/engine_parse_test.go` | LLM response parsing |
+| `internal/workflow/discuss_test.go` | Discuss phase |
+| `internal/workflow/plan_test.go` | Plan phase |
+| `internal/workflow/execute_test.go` | Execute phase |
+| `internal/workflow/verify_test.go` | Verify phase |
+| `internal/workflow/ship_test.go` | Ship phase |
+| `internal/workflow/initialize_test.go` | Init phase |
+| `internal/workflow/integration_test.go` | Cross-phase flows |
+| `internal/workflow/plan_parser_test.go` | Plan parsing from LLM |
+| `internal/workflow/phase_transition_test.go` | Phase transition validation |
+| `internal/workflow/thinking_indicator_test.go` | Thinking indicator |
+| `internal/workflow/self_heal_visibility_test.go` | Self-heal behavior |
+| `internal/workflow/intermediate_progress_test.go` | Progress reporting |
+
+### TUI Component Tests
+| File | Tests |
+|---|---|
+| `internal/tui/components/message_test.go` | Message rendering |
+| `internal/tui/components/permission_test.go` | Permission modal |
+| `internal/tui/components/sparkline_test.go` | Sparkline rendering |
+| `internal/tui/components/starfield_test.go` | Starfield animation |
+| `internal/tui/components/thinking_test.go` | Thinking block |
+| `internal/tui/components/toolcard_test.go` | Tool card rendering |
+| `internal/tui/layout/responsive_test.go` | Responsive layout |
+| `internal/tui/theme/registry_test.go` | Theme registry |
+| `internal/tui/theme/theme_test.go` | Theme switching |
+| `internal/tui/tui_test.go` | TUI integration |
