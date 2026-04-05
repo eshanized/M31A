@@ -1,238 +1,117 @@
-# Slash Command Reference
+# Slash Commands
 
-M31A provides 16 slash commands for session management, provider control, workflow operations, and configuration.
+M31A provides slash commands for runtime actions. Commands are parsed at input and executed before the LLM prompt.
 
-## Session Commands
+---
 
-### `/help`
+## Command List
 
-List all available commands with descriptions.
+| Command | Description | Usage |
+|---------|-------------|-------|
+| `/session` | Session management | `/session list`, `/session create <name>`, `/session delete <id>`, `/session switch <id>`, `/session save`, `/session checkpoint` |
+| `/model` | List and select models | `/model`, `/model <id>` to select |
+| `/tools` | List and toggle tools | `/tools`, `/tools <name>` to toggle |
+| `/config` | View/alter config | `/config`, `/config <key> <value>` |
+| `/history` | View session history | `/history`, `/history <n>` for last N messages |
+| `/export` | Export session | `/export`, `/export <format>` (json/md) |
+| `/agent` | Agent configuration | `/agent list`, `/agent <name>` to select |
+| `/ghost` | Ghost write files | `/ghost` enters ghost picker mode |
+| `/bisect` | Compare model responses | `/bisect <model1> <model2> <prompt>` |
+| `/tui` | Toggle TUI mode | `/tui on`, `/tui off` |
+| `/help` | Show help | `/help` |
+| `/keychain` | API key management | `/keychain set`, `/keychain get`, `/keychain delete` |
+| `/dream` | Toggle prompt enhancement | `/dream on`, `/dream off` |
+| `/flush` | Clear screen and reset | `/flush` |
+| `/quit` | Quit application | `/quit` |
+| `/exit` | Alias for quit | `/exit` |
+| `//` | Literal slash passthrough | `//command` sends `/command` as prompt |
+| `!` | Bash command passthrough | `!ls -la` runs `ls -la` |
 
-**Arguments:** None
+---
 
-**Example:**
+## Command Details
+
+### `/session`
+Session management commands. Sessions are stored as JSON in `~/.m31a/sessions/`.
+
+- `/session list` — List all sessions with timestamps
+- `/session create <name>` — Create a new session
+- `/session delete <id>` — Delete a session
+- `/session switch <id>` — Switch active session
+- `/session save` — Save current session
+- `/session checkpoint` — Create a checkpoint snapshot
+
+### `/model`
+Model selection and browsing.
+
+- `/model` — List all available models with capabilities
+- `/model <id>` — Select a specific model by ID (supports fuzzy matching)
+
+### `/tools`
+Tool management.
+
+- `/tools` — List all registered tools and their enabled/disabled status
+- `/tools <name>` — Toggle a tool on/off
+
+### `/config`
+Runtime configuration inspection and modification.
+
+- `/config` — Display current configuration
+- `/config <key> <value>` — Set a config value (e.g., `/config model.default gpt-4o`)
+
+### `/history`
+View conversation history for the current session.
+
+- `/history` — Show full history
+- `/history <n>` — Show last N messages
+
+### `/export`
+Export session data.
+
+- `/export` — Export current session in default format
+- `/export json` — Export as JSON
+- `/export md` — Export as Markdown
+
+### `/agent`
+Agent profile management. Agents define model + system prompt + tool configurations.
+
+- `/agent list` — List available agent profiles
+- `/agent <name>` — Switch to an agent profile
+
+### `/ghost`
+Ghost write — generates files from prompts using the LLM. Activates ghost picker mode where you select files to write.
+
+### `/bisect`
+Compare responses from different models side by side.
+
+- `/bisect <model1> <model2> <prompt>` — Sends the same prompt to two models and shows a diff
+
+### `/keychain`
+Manage API keys in the OS keychain.
+
+- `/keychain set` — Prompt to set an API key
+- `/keychain get` — Show current key status
+- `/keychain delete` — Remove a stored key
+
+### `/dream`
+Toggle DREAM prompt enhancement mode (auto-dream).
+
+- `/dream on` — Enable prompt enhancement
+- `/dream off` — Disable prompt enhancement
+
+---
+
+## Special Syntax
+
+### Literal Slash (`//`)
+Prefix a prompt with `//` to send it literally without slash command parsing:
 ```
-/help
-```
-
-### `/clear`
-
-Clear the current conversation context. Messages remain in session history.
-
-**Arguments:** None
-
-**Example:**
-```
-/clear
-```
-
-### `/status`
-
-Show current session information including session ID, provider, model, phase, and message count.
-
-**Arguments:** None
-
-**Example:**
-```
-/status
-```
-
-### `/sessions`
-
-List all recent sessions with their provider, model, and message count. Corrupted sessions are marked with `[!CORRUPT]`.
-
-**Arguments:** None
-
-**Example:**
-```
-/sessions
-```
-
-### `/undo`
-
-Show details of the latest checkpoint including phase, timestamp, message count, and task count.
-
-**Arguments:** None
-
-**Example:**
-```
-/undo
-```
-
-### `/quit`
-
-Exit the application. On exit, session state is saved.
-
-**Arguments:** None
-
-**Example:**
-```
-/quit
-```
-
-### `/reset`
-
-Return to the first-run setup screen.
-
-**Arguments:** None
-
-**Example:**
-```
-/reset
-```
-
-## Provider Commands
-
-### `/provider [name]`
-
-Show the active provider or switch to a different one.
-
-**Arguments:**
-- No args: Show current provider and available alternatives
-- `name`: Switch to the specified provider
-
-**Example:**
-```
-/provider
-/provider zen
-```
-
-### `/fallback [name]`
-
-Show fallback provider status or manually switch providers.
-
-**Arguments:**
-- No args: Show active provider and available fallbacks
-- `name`: Switch to the specified provider
-
-**Example:**
-```
-/fallback
-/fallback openrouter
+//model should be optimized
 ```
 
-### `/model [name|--selector]`
-
-View model information or open the interactive model selector.
-
-**Arguments:**
-- No args: Show current default model
-- `name`: Look up and display model details
-- `--selector`: Open the fuzzy-searchable model selector screen
-
-**Example:**
+### Bang Passthrough (`!`)
+Prefix a prompt with `!` to execute it as a bash command:
 ```
-/model
-/model anthropic/claude-sonnet-4-20250514
-/model --selector
+!ls -la src/
 ```
-
-### `/models`
-
-List all cached models from the active provider with context length and pricing.
-
-**Arguments:** None
-
-**Example:**
-```
-/models
-```
-
-## Workflow Commands
-
-### `/phase [name]`
-
-Show the current workflow phase or transition to a new phase.
-
-**Arguments:**
-- No args: Show current phase
-- `name`: Transition to the specified phase
-
-**Valid phases:** `idle`, `initialize`, `discuss`, `plan`, `execute`, `verify`, `ship`
-
-**Example:**
-```
-/phase
-/phase plan
-```
-
-### `/goal [text]`
-
-Show or set the session goal.
-
-**Arguments:**
-- No args: Show current goal
-- `text`: Set the session goal
-
-**Example:**
-```
-/goal
-/goal Add user authentication to the API
-```
-
-## Utility Commands
-
-### `/ledger [stats|<type>]`
-
-Show recent session entries from the cross-session learning ledger.
-
-**Subcommands:**
-- No args: Show last 5 session entries
-- `stats`: Show aggregate statistics (total sessions, avg tasks, avg cost, avg duration, top frameworks, top failures)
-- `<type>`: Filter entries by project type (e.g., `go`, `python`, `nodejs`)
-
-**Example:**
-```
-/ledger
-/ledger stats
-/ledger go
-```
-
-### `/rollback [<hash>]`
-
-Show the commit chain or reset to a specific commit.
-
-**Subcommands:**
-- No args: Show last 10 commits with HEAD marker
-- `<hash>`: Soft reset to the specified commit (preserves uncommitted changes)
-- `--hard <hash>`: Hard reset to the specified commit (discards uncommitted changes)
-
-**Example:**
-```
-/rollback
-/rollback abc1234
-/rollback --hard abc1234
-```
-
-### `/compress`
-
-Trigger AutoDream context consolidation. Compresses conversation history when it exceeds the context threshold.
-
-**Arguments:** None
-
-**Example:**
-```
-/compress
-```
-
-### `/config [key value]`
-
-Show all configuration or set a specific config value.
-
-**Arguments:**
-- No args: Display full config
-- `key value`: Set a config value using dot-notation keys
-
-**Supported keys:**
-- `ui.theme` — Theme name (e.g., `dark`, `light`)
-- `model.default` — Default model ID
-- `ui.compact_mode` — Enable/disable compact mode (boolean)
-- `ui.show_token_usage` — Show token usage in header (boolean)
-- `provider.auto_fallback` — Enable auto-fallback on errors (boolean)
-
-**Example:**
-```
-/config
-/config ui.theme light
-/config provider.auto_fallback true
-```
+Output is captured and displayed inline.
