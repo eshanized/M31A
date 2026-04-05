@@ -1,102 +1,280 @@
-# M31A — Types Reference
+# Type Reference
 
-## Environment Variables
+Core types used across M31A, defined in `internal/types/`.
 
-| Variable | Description | Default | Resolution Order |
-|----------|-------------|---------|-----------------|
-| `M31A_OPENROUTER_API_KEY` | OpenRouter API key | — | 1st (env var) |
-| `M31A_ZEN_API_KEY` | OpenCode Zen API key | — | 1st (env var) |
-| `M31A_LOG_FORMAT` | Log output format | `json` | — |
-| `M31A_LOG_LEVEL` | Log verbosity level | `info` | — |
+---
 
-### Key Resolution Order
+## Chat & Messages
 
-API keys are resolved in the following order (first hit wins):
+```go
+type ChatRequest struct {
+    Model       string            // Model ID
+    Messages    []Message          // Conversation messages
+    Stream      bool               // Enable streaming
+    Temperature float64            // Generation temperature
+    MaxTokens   int                // Max output tokens
+    Tools       []ToolDef          // Available tools
+    ToolChoice  string             // "auto", "required", "none"
+    Stop        []string           // Stop sequences
+}
 
-1. Environment variable (`M31A_OPENROUTER_API_KEY` / `M31A_ZEN_API_KEY`)
-2. OS keychain (secret-service on Linux, Keychain on macOS, Credential Manager on Windows)
-3. Config file (`~/.m31a/config.toml`)
+type ChatResponse struct {
+    ID         string
+    Model      string
+    Choices    []Choice            // Response choices
+    Usage      Usage               // Token usage
+    SystemFingerprint string
+}
 
-**Never store API keys in plaintext.** The config file `api_key` field is the last resort
-fallback. Always prefer env vars or keychain storage.
+type Choice struct {
+    Index   int
+    Message Message
+    FinishReason string             // "stop", "length", "tool_calls"
+}
+
+type Message struct {
+    Role       string              // "system", "user", "assistant", "tool"
+    Content    string              // Text content
+    ToolCallID string              // Tool call identifier
+    ToolCalls  []ToolCall          // Tool invocations
+}
+
+type StreamChunk struct {
+    ID                string
+    Model             string
+    Delta             Message            // Incremental message
+    FinishReason      string
+    Usage             *Usage             // Final usage (last chunk)
+}
+```
+
+---
+
+## Models
+
+```go
+type ModelInfo struct {
+    ID            string       // Model identifier (e.g., "openai/gpt-4o")
+    Name          string       // Human-readable name
+    Provider      ProviderName // "openrouter" or "zen"
+    Description   string
+    Pricing       Pricing      // Cost per token
+    ContextLength int          // Max context window
+    Capabilities  CapFlags     // Feature flags
+    Modified      time.Time    // Last update timestamp
+}
+
+type Pricing struct {
+    PromptCost     float64 // Cost per 1K input tokens
+    CompletionCost float64 // Cost per 1K output tokens
+}
+
+type CapFlags struct {
+    Tools    bool // Function/tool calling support
+    Reasoning bool // Reasoning/thinking model
+    Vision   bool // Image/multimodal input
+}
+```
+
+---
+
+## Token Usage & Cost
+
+```go
+type Usage struct {
+    PromptTokens     int
+    CompletionTokens int
+    TotalTokens      int
+}
+
+type UsageSample struct {
+    Timestamp time.Time
+    Usage     Usage
+}
+
+type UsageTracker struct {
+    Samples   []UsageSample
+    MaxAge    time.Duration   // Max age before samples expire
+    EMAAlpha  float64          // Exponential moving average alpha
+}
+```
+
+---
+
+## Streaming
+
+```go
+type StreamIterator struct {
+    Next func() (*StreamChunk, error) // Blocking read
+}
+```
+
+---
+
+## Tools
+
+```go
+type ToolDef struct {
+    Name        string      // Tool name
+    Description string      // Tool description
+    InputSchema Schema      // JSON Schema for input
+}
+
+type ToolCall struct {
+    ID      string
+    Type    string          // "function"
+    Function FunctionCall
+}
+
+type FunctionCall struct {
+    Name      string
+    Arguments string          // JSON-encoded arguments
+}
+
+type ToolResult struct {
+    ToolCallID string
+    Output    string
+    Error     string
+}
+```
+
+---
+
+## Health Monitoring
+
+```go
+type HealthReport struct {
+    Provider   string     // Provider name
+    Status     string     // "live", "slow", "down"
+    LatencyMs  int64      // Response time in ms
+    Error      string
+}
+
+type HealthCheckType int
+const (
+    HealthPending HealthCheckType = iota
+    HealthLive
+    HealthSlow
+    HealthDown
+)
+```
+
+---
+
+## Sessions
+
+```go
+type SessionID string    // Hex string (default 8 chars, configurable 4–16)
+
+type Session struct {
+    ID        SessionID
+    Name      string
+    Messages  []Message
+    CreatedAt time.Time
+    UpdatedAt time.Time
+    Checkpoints []SessionID  // References to checkpoint snapshots
+}
+```
+
+---
+
+## Arbitrage
+
+```go
+type ComplexityLevel string
+const (
+    ComplexitySimple   ComplexityLevel = "simple"
+    ComplexityModerate ComplexityLevel = "moderate"
+    ComplexityComplex  ComplexityLevel = "complex"
+)
+
+type CostEstimate struct {
+    ModelID      string
+    Provider     string
+    InputCost    float64
+    OutputCost   float64
+    TotalCost    float64
+    Currency     string
+    InputTokens  int
+    OutputTokens int
+}
+
+type ArbitrageRecommendation struct {
+    RecommendedModel CostEstimate
+    Alternatives     []CostEstimate
+    Complexity       ComplexityLevel
+    Savings          float64
+    Reason           string
+}
+```
+
+---
+
+## Verification
+
+```go
+type Attestation struct {
+    BinaryHash string    // SHA-256 of binary
+    Signature  string    // Cryptographic signature
+    Timestamp  time.Time
+}
+
+type ValidationResult struct {
+    Valid   bool
+    Errors  []string
+}
+```
+
+---
+
+## Ghost Write
+
+```go
+type GhostFile struct {
+    Path    string    // Target file path
+    Content string    // Generated content
+    Prompt  string    // Original prompt used
+}
+
+type GhostResult struct {
+    Files    []GhostFile
+    Warnings []string
+}
+```
+
+---
+
+## Config (internal)
+
+```go
+type RiskLevel string
+const (
+    RiskLevelLow          RiskLevel = "low"
+    RiskLevelMedium       RiskLevel = "medium"
+    RiskLevelHigh         RiskLevel = "high"
+    RiskLevelDestructive  RiskLevel = "destructive"
+)
+```
 
 ---
 
 ## Constants
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `ModelCacheTTL` | `5 * time.Minute` | How long model catalogs are cached before refresh |
-| `HealthCheckInterval` | `60 * time.Second` | Default polling interval for provider health checks |
-| `MaxFileSize` | `5 * 1024 * 1024` | Maximum file size for FileRead (5MB) |
-| `MaxToolOutputChars` | `10_000` | Caps tool output in the TUI (longer outputs truncated) |
-| `MaxHealAttempts` | `2` | Maximum self-heal retries for a failed task |
-| `MaxPlanRetries` | `3` | Maximum plan regeneration attempts on validation failure |
-| `SessionIDLength` | `8` | Characters in a session ID (lowercase alphanumeric) |
-| `AutoDreamThreshold` | `0.60` | Context usage % that triggers AutoDream consolidation |
-| `ContextWarningThreshold` | `0.80` | Context usage % that shows warning banner |
-| `HTTPDialTimeout` | `30 * time.Second` | Dial timeout for provider HTTP connections |
-| `BashTimeout` | `30 * time.Minute` | Absolute timeout for Bash tool execution |
-| `BashOutputLimit` | `50_000` | Max characters to stream from Bash output to TUI |
-| `DefaultContextLength` | `128_000` | Fallback context length if model metadata unavailable |
-| `EMACorrectionAlpha` | `0.3` | EMA correction rate for token estimation calibration |
-
-> **Note:** `auto_fallback` defaults to `false` in code. A future version may change this to `true`.
-
----
-
-## Sentinel Errors
-
-| Error | Triggered When |
-|-------|---------------|
-| `ErrProviderUnreachable` | HTTP request to LLM provider fails (network error, DNS, connection refused) |
-| `ErrRateLimited` | HTTP 429 response from provider |
-| `ErrInvalidKey` | HTTP 401 response from provider (invalid or expired API key) |
-| `ErrContextExceeded` | Estimated tokens exceed 95% of model's context window |
-| `ErrModelNotFound` | Requested model ID is not in the provider's model cache |
-| `ErrSessionCorrupted` | Session files cannot be parsed or are missing required fields |
-| `ErrNoBinaryContent` | FileRead detects binary content (not displayable in terminal) |
-| `ErrFileTooLarge` | FileRead target exceeds 5MB |
-| `ErrCircularDependency` | Task graph contains a cycle during topological sort |
-| `ErrBisectFailed` | Git bisect could not identify the offending commit |
-| `ErrPermissionDenied` | Tool execution blocked by permission gate |
-| `ErrToolExecution` | Tool implementation returned an error |
-| `ErrTaskFailed` | A task completed with failure status |
-| `ErrPhaseTransition` | Invalid phase transition requested |
-| `ErrCheckpointNotFound` | Requested checkpoint does not exist |
-
----
-
-## Enum Types
-
-### RiskLevel
-
-| Value | Meaning |
-|-------|---------|
-| `safe` | No side effects (FileRead, Glob, Grep) |
-| `medium` | Side effects but non-destructive (FileWrite) |
-| `dangerous` | Can modify system state (Bash, FileWrite with pattern) |
-| `destructive` | Can destroy data irreversibly (Bash with `rm`, `dd`, etc.) |
-
-### WorkflowPhase
-
-| Value | Order | Description |
-|-------|-------|-------------|
-| `idle` | 0 | No active workflow |
-| `initialize` | 1 | Create session, detect project type |
-| `discuss` | 2 | Generate clarifying questions, capture answers |
-| `plan` | 3 | Generate task list with dependencies |
-| `execute` | 4 | Run tasks in dependency order |
-| `verify` | 5 | Run acceptance checks, self-heal failures |
-| `ship` | 6 | Final commit, archive session, update ledger |
-
-### TaskStatus
-
-| Value | Meaning |
-|-------|---------|
-| `pending` | Not yet started |
-| `running` | Currently executing |
-| `done` | Completed successfully |
-| `failed` | Completed with errors |
-| `skipped` | Skipped (dependency failed or user skipped) |
-| `unrecoverable` | Failed after max heal attempts |
+```go
+// Default values
+const (
+    DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+    DefaultZenBaseURL        = "https://api.zen.com/v1"
+    DefaultReferer           = "https://github.com/eshanized/M31A"
+    DefaultAppTitle          = "M31A"
+    DefaultContextLength     = 128000
+    DefaultHealthLiveMs      = 2000
+    DefaultHealthSlowMs      = 5000
+    SessionIDLength          = 8
+    DefaultMaxRecentModels   = 10
+    ModelCacheTTL            = 5 * time.Minute
+    StaleCacheTTL            = 24 * time.Hour
+    ConfigWatchInterval      = 5 * time.Second
+    MaxProjectConfigDepth    = 3
+)
+```
