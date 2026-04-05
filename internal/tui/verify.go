@@ -100,17 +100,15 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			vm.viewport.LineDown(1)
 			failedCount := vm.countFailedTasks()
 			if failedCount > 0 && vm.healCursor < failedCount-1 {
 				vm.healCursor++
-				vm.viewport.SetContent(vm.renderResults())
+				vm.syncViewportToCursor()
 			}
 		case "k", "up":
-			vm.viewport.LineUp(1)
 			if vm.healCursor > 0 {
 				vm.healCursor--
-				vm.viewport.SetContent(vm.renderResults())
+				vm.syncViewportToCursor()
 			}
 		case "enter":
 			// Continue → go to ship
@@ -155,7 +153,10 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 // View renders the verify results screen content.
 // Header, footer, and chrome are handled by the unified PageLayout.
 func (vm *VerifyModel) View() string {
-	return vm.viewport.View()
+	result := vm.viewport.View()
+	hints := lipgloss.NewStyle().Foreground(vm.theme.TextMuted).
+		Render("j/k: scroll  h: heal  Enter/s: ship  Esc: back")
+	return lipgloss.JoinVertical(lipgloss.Left, result, hints)
 }
 
 func (vm *VerifyModel) renderResults() string {
@@ -250,6 +251,23 @@ func (vm *VerifyModel) countFailedTasks() int {
 		}
 	}
 	return count
+}
+
+// syncViewportToCursor scrolls the viewport so the task at healCursor is visible.
+func (vm *VerifyModel) syncViewportToCursor() {
+	failedIdx := -1
+	for i, task := range vm.tasks {
+		result, hasResult := vm.results[task.ID]
+		if hasResult && (!result.FilesExist || !result.SyntaxOK || !result.TestsOK) {
+			failedIdx++
+			if failedIdx == vm.healCursor {
+				vm.viewport.GotoTop()
+				vm.viewport.LineDown(i)
+				break
+			}
+		}
+	}
+	vm.viewport.SetContent(vm.renderResults())
 }
 
 // getFailedTasks returns the tasks with failing verification results.
