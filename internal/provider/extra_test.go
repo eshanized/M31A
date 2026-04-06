@@ -517,7 +517,9 @@ func TestFindFallbackWithRetryAfter_WithHeader(t *testing.T) {
 		t.Errorf("Wait = %v, want 30s", result.Wait)
 	}
 	if result.Event.Reason != "rate_limited" {
-		t.Errorf("Reason = %q, want 'rate_limited'", result.Event.Reason)
+		// rate_limited is set by FindFallbackWithRetryAfter when a Retry-After header
+		// is present; FindFallbackProvider's own reason (fallback_live) is overwritten.
+		t.Errorf("Reason = %q, want 'rate_limited' (overwrite from FindFallbackWithRetryAfter)", result.Event.Reason)
 	}
 }
 
@@ -578,8 +580,8 @@ func TestFindFallbackProvider_SlowStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if event.Reason != "unavailable" {
-		t.Errorf("Reason = %q, want 'unavailable'", event.Reason)
+	if event.Reason != "fallback_slow" {
+		t.Errorf("Reason = %q, want 'fallback_slow'", event.Reason)
 	}
 }
 
