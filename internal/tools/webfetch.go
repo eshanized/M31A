@@ -49,7 +49,12 @@ type WebFetch struct {
 	allowPrivateIPs bool
 	client          *http.Client
 	dnsCache        sync.Map // map[string]*dnsCacheEntry; key=hostname
+	// dnsInsertsSinceEvict counts Store calls; eviction runs when it exceeds
+	// dnsEvictThreshold. Prevents unbounded memory growth of dnsCache (BUG-08).
+	dnsInsertsSinceEvict atomic.Int32
 }
+
+const dnsEvictThreshold int32 = 64
 
 func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 	wf := &WebFetch{
@@ -58,6 +63,13 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 	}
 	wf.client = &http.Client{
 		Transport: &http.Transport{
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives:     false,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				host, port, err := net.SplitHostPort(addr)
 				if err != nil {
@@ -238,6 +250,19 @@ func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IPAd
 		expires: now.Add(ttl),
 	}
 	t.dnsCache.Store(host, entry)
+
+	// Periodic eviction: prevents unbounded growth when many unique hosts
+	// are fetched over a long session. Threshold-gated so it rarely runs.
+	if t.dnsInsertsSinceEvict.Add(1) >= dnsEvictThreshold {
+		t.dnsInsertsSinceEvict.Store(0)
+		t.dnsCache.Range(func(key, value any) bool {
+			e := value.(*dnsCacheEntry)
+			if now.After(e.expires) {
+				t.dnsCache.Delete(key)
+			}
+			return true
+		})
+	}
 
 	return addrs, nil
 }
