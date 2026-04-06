@@ -150,12 +150,25 @@ func (e *Estimator) ModelID() string {
 }
 
 // EstimateMessages returns the estimated total token count for a slice of
-// messages, summing the content of each message. Tool calls and other
-// metadata are not estimated (they are typically small relative to content).
+// messages. Accounts for:
+//   - Content of each message
+//   - Per-message role overhead (~4 tokens for role/separator metadata)
+//   - Tool call input JSON (when present)
+//
+// Without these, preflight context checks underestimate usage on tool-heavy
+// conversations and may allow requests that exceed the model's window (BUG-29).
 func (e *Estimator) EstimateMessages(messages []types.Message) int {
+	const perMessageOverhead = 4
 	total := 0
 	for _, msg := range messages {
+		total += perMessageOverhead
 		total += e.Estimate(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			if len(tc.Input) > 0 {
+				total += e.Estimate(string(tc.Input))
+			}
+			total += e.Estimate(tc.Name)
+		}
 	}
 	return total
 }
