@@ -245,7 +245,10 @@ func validateGitRef(ref string) bool {
 }
 
 // DiffRefs returns the diff between two refs. If both refs are empty, it runs
-// plain `git diff` to show unstaged working-tree changes.
+// plain `git diff` to show unstaged working-tree changes. If only ref2 is
+// empty, it produces "ref1.." which in git means "changes reachable from ref1
+// that are not in the current working tree state" — callers that want the
+// contents of a single commit should pass ref1^ and ref1 explicitly.
 func (g *Git) DiffRefs(ref1, ref2 string) (string, error) {
 	var args []string
 	if ref1 == "" && ref2 == "" {
