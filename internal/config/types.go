@@ -185,6 +185,13 @@ type PermissionsAgentConfig struct {
 type FeaturesConfig struct {
 	AutoBackup      bool `toml:"auto_backup"`
 	ResumeOnStartup bool `toml:"resume_on_startup"`
+	// WorkflowMode controls phase-skipping behaviour:
+	//   "auto"   — classify and adapt automatically (default)
+	//   "full"   — always run all 6 phases
+	//   "fast"   — skip Plan phase (Discuss→Execute)
+	//   "direct" — skip Discuss, Plan, Verify (only Initialize→Execute→Ship)
+	// Empty string means auto.
+	WorkflowMode string `toml:"workflow_mode"`
 	// Model cache TTL in minutes. Default 5.
 	ModelCacheTTLMinutes int `toml:"model_cache_ttl_minutes"`
 	// Stale cache TTL in hours. Default 24.
