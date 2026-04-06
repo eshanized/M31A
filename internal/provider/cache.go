@@ -43,12 +43,12 @@ func NewModelCacheWithStale(ttl time.Duration, staleTTL time.Duration) *ModelCac
 
 // Refresh deduplicates concurrent calls via singleflight — only one HTTP
 // request is made even if multiple goroutines call Refresh simultaneously.
+// The "refreshing" flag is set/cleared only by the goroutine that actually
+// runs fetchFn; waiters never touch it (BUG-17).
 func (c *ModelCache) Refresh(ctx context.Context, fetchFn func(ctx context.Context) ([]types.ModelInfo, error)) ([]types.ModelInfo, error) {
-	c.refreshing.Store(true)
-
-	defer c.refreshing.Store(false)
-
 	v, err, _ := c.sfg.Do("refresh", func() (any, error) {
+		c.refreshing.Store(true)
+		defer c.refreshing.Store(false)
 		models, fetchErr := fetchFn(ctx)
 		if fetchErr != nil {
 			return nil, fetchErr
