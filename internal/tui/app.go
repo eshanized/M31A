@@ -224,6 +224,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			DiffStats:               result.DiffStats,
 			Demonstration:           result.Demonstration,
 			ManualVerificationSteps: result.ManualVerificationSteps,
+			WorkflowMode:            result.WorkflowMode,
 		}
 	}
 }
