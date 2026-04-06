@@ -237,7 +237,7 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		return fmt.Errorf("cannot generate temp name: %w", err)
 	}
 	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, FilePermission)
 	if err != nil {
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
@@ -255,6 +255,9 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		os.Remove(tmpPath)
 		return fmt.Errorf("close failed: %w", err)
 	}
+	// Belt-and-braces: explicitly set final mode in case the create-mode was
+	// masked by a restrictive umask. After rename the inode keeps this mode.
+	_ = os.Chmod(tmpPath, FilePermission)
 	if err := os.Rename(tmpPath, targetPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename failed: %w", err)
