@@ -40,9 +40,11 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 		}()
 
 		if status.Status == "live" || status.Status == "slow" {
-			reason := "rate_limited"
+			// Reason describes the fallback's health, since the caller lost the
+			// original provider's failure context by the time we get here.
+			reason := "fallback_live"
 			if status.Status == "slow" {
-				reason = "unavailable"
+				reason = "fallback_slow"
 			}
 
 			return name, &FallbackEvent{
