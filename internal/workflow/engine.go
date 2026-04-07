@@ -91,6 +91,11 @@ type Engine struct {
 	planMarkdown     string  // current plan content for refinement context
 	planVersion      int     // current plan version (increments on refine)
 	refineFeedback   string  // pending refinement feedback from user
+	// discussPlanCycles counts Plan→Discuss→Plan round-trips. Capped at
+	// maxDiscussPlanCycles to prevent infinite oscillation (BUG-12).
+	discussPlanCycles int
+	// workflowMode controls phase-skipping behaviour based on prompt complexity.
+	workflowMode m31types.WorkflowMode
 	// perPhaseModels holds per-phase model overrides set by the TUI via SetPhaseModel.
 	// Keys are WorkflowPhase values; values are model ID strings.
 	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
@@ -159,6 +164,16 @@ func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
 	if modelID != "" {
 		e.perPhaseModels[phase] = modelID
 	}
+}
+
+// SetWorkflowMode sets the mode that controls phase-skipping behaviour.
+func (e *Engine) SetWorkflowMode(mode m31types.WorkflowMode) {
+	e.workflowMode = mode
+}
+
+// WorkflowMode returns the current workflow mode.
+func (e *Engine) WorkflowMode() m31types.WorkflowMode {
+	return e.workflowMode
 }
 
 // EngineOptions holds all parameters for creating a new Engine.
@@ -271,6 +286,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	if result != nil {
 		result.DurationMs = time.Since(start).Milliseconds()
 		result.Phase = phase
+		result.WorkflowMode = e.workflowMode
 		// Accumulate cost for budget tracking
 		if result.Cost > 0 {
 			for {
@@ -286,14 +302,22 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	return result, err
 }
 
+// maxDiscussPlanCycles caps the number of Plan→Discuss→Plan round-trips to
+// prevent infinite oscillation between the two phases (BUG-12). One cycle
+// (e.g. Plan→Discuss→Plan once) is a normal refinement; beyond that suggests
+// a TUI state bug or automated retry loop.
+const maxDiscussPlanCycles = 3
+
 // validPhaseTransitions defines which phase transitions are allowed.
 // Any transition not in this map is rejected with ErrPhaseTransition.
+// Fast/Direct mode transitions (Initialize→Execute, Execute→Ship) are
+// included because they are needed for adaptive workflow routing.
 var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 	m31types.PhaseIdle:       {m31types.PhaseInitialize},
-	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseIdle},
+	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhasePlan, m31types.PhaseDiscuss, m31types.PhaseIdle},
-	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseIdle},
+	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseShip, m31types.PhaseIdle},
 	m31types.PhaseVerify:     {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhaseShip:       {m31types.PhaseIdle},
 }
@@ -315,6 +339,20 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 	}
 	if !valid {
 		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
+	}
+
+	// Plan↔Discuss oscillation guard: count Plan→Discuss transitions and
+	// reject beyond maxDiscussPlanCycles. The counter resets whenever the
+	// workflow leaves the Plan/Discuss subgraph for Execute/Ship/Idle.
+	if from == m31types.PhasePlan && to == m31types.PhaseDiscuss {
+		e.discussPlanCycles++
+		if e.discussPlanCycles > maxDiscussPlanCycles {
+			return fmt.Errorf("plan↔discuss cycle limit exceeded (%d): %w",
+				maxDiscussPlanCycles, m31errors.ErrPhaseTransition)
+		}
+	}
+	if to == m31types.PhaseExecute || to == m31types.PhaseShip || to == m31types.PhaseIdle {
+		e.discussPlanCycles = 0
 	}
 
 	// Emit phase transition start message
