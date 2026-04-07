@@ -111,17 +111,22 @@ const verifyTaskTimeout = 5 * time.Minute
 
 // detectPackageManager identifies the package manager from lock files.
 // Returns the command prefix for running scripts (e.g., "npm run", "pnpm run").
+// Uses a priority-ordered slice (not a map) so projects with multiple lock
+// files produce deterministic results across runs.
 func detectPackageManager(workDir string) string {
-	lockFiles := map[string]string{
-		"pnpm-lock.yaml": "pnpm run",
-		"yarn.lock":      "yarn",
-		"bun.lockb":      "bun run",
-		"package-lock.json": "npm run",
+	type lockDetector struct {
+		file string
+		cmd  string
 	}
-	// Check in priority order (more specific first)
-	for lockFile, cmd := range lockFiles {
-		if _, err := os.Stat(filepath.Join(workDir, lockFile)); err == nil {
-			return cmd
+	lockFiles := []lockDetector{
+		{"pnpm-lock.yaml", "pnpm run"},
+		{"yarn.lock", "yarn"},
+		{"bun.lockb", "bun run"},
+		{"package-lock.json", "npm run"},
+	}
+	for _, d := range lockFiles {
+		if _, err := os.Stat(filepath.Join(workDir, d.file)); err == nil {
+			return d.cmd
 		}
 	}
 	// Fall back to npm if package.json exists but no lock file
