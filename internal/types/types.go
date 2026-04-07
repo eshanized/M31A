@@ -27,6 +27,26 @@ const (
 	PhaseShip       WorkflowPhase = "ship"
 )
 
+// ComplexityLevel represents the estimated complexity of a user's goal.
+type ComplexityLevel string
+
+const (
+	ComplexityTrivial  ComplexityLevel = "trivial"
+	ComplexitySimple   ComplexityLevel = "simple"
+	ComplexityModerate ComplexityLevel = "moderate"
+	ComplexityComplex  ComplexityLevel = "complex"
+)
+
+// WorkflowMode controls how aggressively the workflow skips phases.
+type WorkflowMode string
+
+const (
+	ModeAuto    WorkflowMode = "auto"    // classify and choose automatically (default)
+	ModeFull    WorkflowMode = "full"    // all 6 phases: Init→Discuss→Plan→Exec→Verify→Ship
+	ModeFast    WorkflowMode = "fast"    // skip Plan: Init→Discuss→Exec→Verify→Ship
+	ModeDirect  WorkflowMode = "direct"  // skip Discuss, Plan, Verify: Init→Exec→Ship
+)
+
 type TaskStatus string
 
 const (
