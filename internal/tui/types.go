@@ -227,6 +227,7 @@ type PhaseResultMsg struct {
 	DiffStats               workflow.DiffStats
 	Demonstration           string
 	ManualVerificationSteps []string
+	WorkflowMode            types.WorkflowMode
 }
 
 // PlanReadyMsg is emitted when the plan phase completes with valid tasks.
