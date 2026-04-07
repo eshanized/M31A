@@ -9,9 +9,44 @@ import (
 	"github.com/eshanized/M31A/internal/workflow"
 )
 
+// nextPhaseForMode returns the next phase to run based on the current phase
+// and the active workflow mode. The second return value is true if a transition
+// should happen (false means the phase is terminal).
+func nextPhaseForMode(from types.WorkflowPhase, mode types.WorkflowMode) (types.WorkflowPhase, bool) {
+	switch from {
+	case types.PhaseInitialize:
+		if mode == types.ModeDirect {
+			return types.PhaseExecute, true
+		}
+		return types.PhaseDiscuss, true
+
+	case types.PhaseDiscuss:
+		if mode == types.ModeFast || mode == types.ModeDirect {
+			return types.PhaseExecute, true
+		}
+		return types.PhasePlan, true
+
+	case types.PhasePlan:
+		return types.PhaseExecute, true
+
+	case types.PhaseExecute:
+		if mode == types.ModeDirect {
+			return types.PhaseShip, true
+		}
+		return types.PhaseVerify, true
+
+	case types.PhaseVerify:
+		return types.PhaseShip, true
+
+	case types.PhaseShip:
+		return types.PhaseIdle, false
+	}
+	return types.PhaseIdle, false
+}
+
 // handlePhaseResult processes the result of a workflow phase.
 func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
-	slog.Info("phase result", "phase", msg.Phase, "success", msg.Success, "err", msg.Error)
+	slog.Info("phase result", "phase", msg.Phase, "success", msg.Success, "err", msg.Error, "mode", msg.WorkflowMode)
 
 	if msg.Error != "" {
 		if m.replModel != nil {
@@ -20,6 +55,12 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.workflowPhase = types.PhaseIdle
 		m.screen = ScreenREPL
 		return nil
+	}
+
+	// Use the mode from the phase result, falling back to the stored mode
+	mode := msg.WorkflowMode
+	if mode == "" {
+		mode = m.workflowMode
 	}
 
 	modelID := ""
@@ -31,14 +72,19 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 
 	switch msg.Phase {
 	case types.PhaseInitialize:
-		m.setWorkflowPhase(types.PhaseDiscuss)
+		next, ok := nextPhaseForMode(types.PhaseInitialize, mode)
+		if !ok {
+			m.workflowPhase = types.PhaseIdle
+			return nil
+		}
+		m.setWorkflowPhase(next)
 		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseInitialize, types.PhaseDiscuss); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseInitialize, "to", types.PhaseDiscuss, "error", err)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseInitialize, next); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseInitialize, "to", next, "error", err)
 			}
 		}
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(types.PhaseDiscuss)
+		return m.RunPhaseCmd(next)
 
 	case types.PhaseDiscuss:
 		if msg.NeedsAnswers {
@@ -69,16 +115,33 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 			return nil
 		}
-		// No questions — skip directly to plan
+		// No questions — skip to next phase based on mode
 		if m.workflowEngine != nil {
 			_ = m.workflowEngine.SkipDiscuss()
 		}
-		m.setWorkflowPhase(types.PhasePlan)
-		m.screen = ScreenPlan
+		next, ok := nextPhaseForMode(types.PhaseDiscuss, mode)
+		if !ok || next == types.PhaseIdle {
+			m.setWorkflowPhase(types.PhaseIdle)
+			m.screen = ScreenREPL
+			return nil
+		}
+		m.setWorkflowPhase(next)
 		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", types.PhasePlan, "error", err)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, next); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", next, "error", err)
 			}
+		}
+		if next == types.PhaseExecute {
+			// In fast/direct mode, skip plan and go straight to execution
+			m.screen = ScreenExecute
+			tasks := msg.Tasks
+			if m.executeModel == nil {
+				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+			} else {
+				m.executeModel.tasks = tasks
+			}
+			m.persistWorkflowState()
+			return m.RunPhaseCmd(types.PhaseExecute)
 		}
 		if m.planModel == nil {
 			m.planModel = NewPlanModel(
@@ -89,8 +152,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				m.width, m.height,
 			)
 		}
+		m.screen = ScreenPlan
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(types.PhasePlan)
+		return m.RunPhaseCmd(next)
 
 	case types.PhasePlan:
 		// Show plan screen and wait for user approval (do NOT auto-advance to Execute)
@@ -115,12 +179,36 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		return nil
 
 	case types.PhaseExecute:
-		m.setWorkflowPhase(types.PhaseVerify)
+		// Reset workflow mode back to full after execution for fresh classification next time
+		next, ok := nextPhaseForMode(types.PhaseExecute, mode)
+		if !ok || next == types.PhaseIdle {
+			m.setWorkflowPhase(types.PhaseIdle)
+			m.screen = ScreenREPL
+			return nil
+		}
+		m.setWorkflowPhase(next)
 		m.screen = ScreenVerify
 		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, types.PhaseVerify); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseExecute, "to", types.PhaseVerify, "error", err)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, next); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseExecute, "to", next, "error", err)
 			}
+		}
+		if next == types.PhaseShip {
+			// Direct mode: skip verify, go straight to ship
+			summary := ShipSummary{
+				SessionID: m.sessionID,
+				TaskDone:  countDone(msg.Tasks),
+				TaskTotal: len(msg.Tasks),
+				Model:     modelName,
+				Provider:  m.activeProvider,
+			}
+			if msg.Usage != nil {
+				summary.TotalTokens = msg.Usage.TotalTokens
+			}
+			summary.TotalCost = msg.Cost
+			m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
+			m.persistWorkflowState()
+			return m.RunPhaseCmd(types.PhaseShip)
 		}
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
 		if len(msg.ManualVerificationSteps) > 0 {
