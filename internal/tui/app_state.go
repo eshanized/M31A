@@ -43,6 +43,8 @@ type workflowEngineInterface interface {
 	PlanContent() string
 	PlanVersion() int
 	SetRefinementFeedback(feedback string)
+	SetWorkflowMode(mode types.WorkflowMode)
+	WorkflowMode() types.WorkflowMode
 }
 
 // AppState is the top-level Bubble Tea model.
@@ -87,6 +89,7 @@ type AppState struct {
 	// Workflow
 	workflowEngine workflowEngineInterface
 	workflowPhase  types.WorkflowPhase
+	workflowMode   types.WorkflowMode
 	workflowGoal   string
 	workflowCancel context.CancelFunc
 	shutdownCtx    context.Context
