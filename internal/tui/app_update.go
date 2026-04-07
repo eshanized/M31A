@@ -353,12 +353,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workflow.TaskStartMsg:
 		if m.executeModel != nil {
+			found := false
 			for i, t := range m.executeModel.tasks {
 				if t.ID == msg.Task.ID {
 					m.executeModel.SetCurrentTask(i)
 					m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
+					found = true
 					break
 				}
+			}
+			if !found {
+				// Task was auto-generated (e.g. Fast/Direct mode without Plan).
+				// Append it to the model's task list so progress tracking works.
+				m.executeModel.tasks = append(m.executeModel.tasks, msg.Task)
+				m.executeModel.SetCurrentTask(len(m.executeModel.tasks) - 1)
+				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
 			}
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
@@ -1847,11 +1856,22 @@ func (m *AppState) openSettingsScreen() tea.Cmd {
 	return m.navigateToScreen(ScreenSettings)
 }
 
-// runWorkflowFromGoal starts the discuss → plan → execute workflow.
+// runWorkflowFromGoal starts the workflow with adaptive phase routing.
 // If m.workflowPhase is already set (e.g., from /resume-task), it resumes from that phase.
 func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 	m.workflowGoal = goal
 	cmds := []tea.Cmd{m.initWorkflowEngine()}
+
+	// Classify the goal and set the workflow mode on the engine
+	if m.workflowEngine != nil {
+		mode := m.resolveWorkflowMode(goal)
+		m.workflowEngine.SetWorkflowMode(mode)
+		m.workflowMode = mode
+		if mode != types.ModeFull {
+			m.addToast(fmt.Sprintf("Workflow mode: %s (adaptive — skipping unnecessary phases)", mode), "info")
+		}
+	}
+
 	// Resume from existing phase if set, otherwise start from Initialize
 	startPhase := m.workflowPhase
 	if startPhase == types.PhaseIdle || startPhase == "" {
@@ -1860,6 +1880,31 @@ func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 	m.workflowPhase = startPhase
 	cmds = append(cmds, m.RunPhaseCmd(startPhase))
 	return tea.Batch(cmds...)
+}
+
+// resolveWorkflowMode determines the appropriate workflow mode.
+// If the user has set an explicit mode via config, that takes precedence.
+// Otherwise, the goal is classified automatically.
+func (m *AppState) resolveWorkflowMode(goal string) types.WorkflowMode {
+	// Config override takes highest precedence
+	if m.config != nil {
+		switch m.config.Features.WorkflowMode {
+		case string(types.ModeFull):
+			return types.ModeFull
+		case string(types.ModeFast):
+			return types.ModeFast
+		case string(types.ModeDirect):
+			return types.ModeDirect
+		}
+	}
+
+	// Classify based on goal content when mode is auto or unset
+	workDir := "."
+	if m.git != nil {
+		workDir = m.git.WorkDir()
+	}
+	complexity := workflow.ClassifyPrompt(goal, workDir)
+	return workflow.WorkflowModeForComplexity(complexity)
 }
 
 // ─── Permission helpers ───────────────────────────────────────────────────────
@@ -2021,15 +2066,38 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 		m.addToast("Failed to save discuss answers", "error")
 		return nil
 	}
-	m.setWorkflowPhase(types.PhasePlan)
-	m.screen = ScreenPlan
-	if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, types.PhasePlan); err != nil {
-		slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", types.PhasePlan, "error", err)
+
+	next, ok := nextPhaseForMode(types.PhaseDiscuss, m.workflowMode)
+	if !ok || next == types.PhaseIdle {
+		m.setWorkflowPhase(types.PhaseIdle)
+		m.screen = ScreenREPL
+		return nil
+	}
+
+	m.setWorkflowPhase(next)
+	if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, next); err != nil {
+		slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", next, "error", err)
 		m.addToast("Phase transition failed — session may not resume correctly", "error")
 		return nil
 	}
 	m.persistWorkflowState()
-	return m.RunPhaseCmd(types.PhasePlan)
+
+	if next == types.PhaseExecute {
+		m.screen = ScreenExecute
+		var tasks []types.Task
+		if m.sessionManager != nil {
+			tasks, _ = m.sessionManager.LoadTasks(m.sessionID)
+		}
+		if m.executeModel == nil {
+			m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+		} else {
+			m.executeModel.tasks = tasks
+		}
+		return m.RunPhaseCmd(types.PhaseExecute)
+	}
+
+	m.screen = ScreenPlan
+	return m.RunPhaseCmd(next)
 }
 
 // attemptAutoFallback tries to switch to a fallback provider when the active one fails.
