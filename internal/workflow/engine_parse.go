@@ -223,20 +223,26 @@ func hasCycle(tasks []m31types.Task) bool {
 }
 
 // detectProjectType scans the working directory for project indicators.
+// Uses a priority-ordered slice (not a map) so multi-framework projects
+// (e.g. go.mod + package.json) produce deterministic results across runs.
 func detectProjectType(workDir string) string {
-	detectors := map[string]string{
-		"go.mod":           "go",
-		"package.json":     "nodejs",
-		"Cargo.toml":       "rust",
-		"pyproject.toml":   "python",
-		"requirements.txt": "python",
-		"pom.xml":          "java",
-		"Makefile":         "cc",
-		"CMakeLists.txt":   "cc",
+	type detector struct {
+		file string
+		typ  string
 	}
-	for file, typ := range detectors {
-		if _, err := os.Stat(filepath.Join(workDir, file)); err == nil {
-			return typ
+	detectors := []detector{
+		{"go.mod", "go"},
+		{"Cargo.toml", "rust"},
+		{"pyproject.toml", "python"},
+		{"requirements.txt", "python"},
+		{"pom.xml", "java"},
+		{"package.json", "nodejs"},
+		{"CMakeLists.txt", "cc"},
+		{"Makefile", "cc"},
+	}
+	for _, d := range detectors {
+		if _, err := os.Stat(filepath.Join(workDir, d.file)); err == nil {
+			return d.typ
 		}
 	}
 	return "unknown"
