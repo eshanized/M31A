@@ -35,6 +35,9 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 	}
 
 	// 3. Init git if not a repo
+	if e.git == nil {
+		return nil, fmt.Errorf("git not initialized on engine — call SetGit before runInitialize")
+	}
 	if !e.git.IsRepo() {
 		if err := e.git.Init(); err != nil {
 			return nil, fmt.Errorf("git init: %w", err)
