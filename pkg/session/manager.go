@@ -475,12 +475,27 @@ func (m *Manager) DeleteSession(id string) error {
 }
 
 // ArchiveSession moves the session directory into baseDir/archived/id.
+// If the destination already exists (e.g. rerunning ship on the same ID),
+// a timestamp suffix is appended to avoid overwriting the previous archive.
 func (m *Manager) ArchiveSession(id string) error {
 	archiveDir := filepath.Join(m.baseDir, "archived")
 	if err := m.ensureDir(archiveDir); err != nil {
 		return fmt.Errorf("cannot create archive directory: %w", err)
 	}
-	err := os.Rename(m.basePathFor(id), filepath.Join(archiveDir, id))
+	src := m.basePathFor(id)
+
+	// Bail out early when the source doesn't exist — os.Rename would fail
+	// anyway, but this gives a clearer error message.
+	if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+		return fmt.Errorf("session %q does not exist: cannot archive", id)
+	}
+
+	dst := filepath.Join(archiveDir, id)
+	if _, err := os.Stat(dst); err == nil {
+		// Destination exists — disambiguate with a timestamp suffix.
+		dst = filepath.Join(archiveDir, fmt.Sprintf("%s.%s", id, time.Now().Format("20060102T150405")))
+	}
+	err := os.Rename(src, dst)
 	if err == nil {
 		m.cacheMu.Lock()
 		m.sessionCache = nil
