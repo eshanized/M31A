@@ -125,7 +125,9 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		return nil, fmt.Errorf("save tasks: %w", err)
 	}
 
-	_ = e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks)
+	if err := e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks); err != nil {
+		e.logger.Warn("save checkbox tasks.md failed", "error", err)
+	}
 
 	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 		Phase:     m31types.PhasePlan,
@@ -155,7 +157,10 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 	var messages []m31types.Message
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat)})
 
-	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
+	if projErr != nil {
+		e.logger.Warn("plan context: failed to load project", "error", projErr)
+	}
 	projectType := "unknown"
 	framework := ""
 	if project != nil {
