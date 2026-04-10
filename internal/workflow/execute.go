@@ -16,12 +16,32 @@ import (
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.
 func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, error) {
-	e.logger.Info("execute phase starting", "goal", goal)
+	e.logger.Info("execute phase starting", "goal", goal, "mode", e.workflowMode)
 
 	// 1. Load tasks
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load tasks: %w", err)
+	}
+
+	// In Fast/Direct mode, auto-generate a single task when none exist
+	// (Plan phase was skipped, so we create one on the fly).
+	if len(tasks) == 0 && e.workflowMode != "" && e.workflowMode != m31types.ModeFull {
+		tasks = []m31types.Task{
+			{
+				ID:          1,
+				Description: goal,
+				Action:      "implement",
+				Dependencies: []int{},
+				Files:       []string{},
+				AcceptanceCriteria: []string{goal},
+				Status:      m31types.StatusPending,
+			},
+		}
+		e.logger.Info("auto-generated task for fast/direct mode", "task_id", 1, "goal", goal)
+		if saveErr := e.sessionMgr.SaveTasks(e.sessionID, tasks); saveErr != nil {
+			e.logger.Warn("failed to save auto-generated task", "error", saveErr)
+		}
 	}
 
 	if len(tasks) == 0 {
@@ -340,7 +360,10 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	// Load PROJECT.md for project context
-	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
+	if projErr != nil {
+		e.logger.Warn("execute context: failed to load project", "error", projErr)
+	}
 	projectCtx := ""
 	if project != nil {
 		projectCtx = fmt.Sprintf("## Project Context\nGoal: %s\nType: %s\nFramework: %s\n\n",
@@ -387,6 +410,19 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 		Role:    "user",
 		Content: taskSpec,
 	})
+
+	// Current file state — re-read from disk so the LLM sees post-heal content
+	// on every iteration of the heal loop. Capped to avoid ballooning context.
+	if fileCtx := e.readTaskFiles(task.Files); fileCtx != "" {
+		const maxFileCtx = 12000
+		if len(fileCtx) > maxFileCtx {
+			fileCtx = fileCtx[:maxFileCtx] + "\n... (truncated)"
+		}
+		messages = append(messages, m31types.Message{
+			Role:    "user",
+			Content: "## Current File State (fresh from disk)\n" + fileCtx,
+		})
+	}
 
 	return messages
 }
