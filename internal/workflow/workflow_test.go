@@ -120,8 +120,9 @@ func TestPlanValidator_RejectsSelfRef(t *testing.T) {
 
 func TestPhaseTransition_RejectsSkipping(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	// Initialize → Execute is invalid (must go through Discuss → Plan)
-	err := engine.Transition(t.Context(), types.PhaseInitialize, types.PhaseExecute)
+	// Initialize → Execute is now valid (Direct mode skips Discuss & Plan).
+	// Test a truly invalid transition instead.
+	err := engine.Transition(t.Context(), types.PhaseShip, types.PhaseExecute)
 	if !errors.Is(err, m31errors.ErrPhaseTransition) {
 		t.Errorf("expected ErrPhaseTransition, got %v", err)
 	}
@@ -143,9 +144,12 @@ func TestPhaseTransition_AllowsValidFlow(t *testing.T) {
 	}{
 		{types.PhaseIdle, types.PhaseInitialize},
 		{types.PhaseInitialize, types.PhaseDiscuss},
+		{types.PhaseInitialize, types.PhaseExecute}, // Direct mode
 		{types.PhaseDiscuss, types.PhasePlan},
+		{types.PhaseDiscuss, types.PhaseExecute}, // Fast mode
 		{types.PhasePlan, types.PhaseExecute},
 		{types.PhaseExecute, types.PhaseVerify},
+		{types.PhaseExecute, types.PhaseShip}, // Direct mode
 		{types.PhaseVerify, types.PhaseShip},
 		{types.PhaseShip, types.PhaseIdle},
 	}
