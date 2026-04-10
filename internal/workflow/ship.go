@@ -90,7 +90,14 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 				e.logger.Warn("git add all before ship commit failed", "error", err)
 			}
 		}
-		if err := e.git.Commit(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); err != nil {
+
+		// Guard: skip the commit when nothing is staged. DiffStaged checks
+		// the index against HEAD, which correctly detects staged changes even
+		// when the working tree is clean after AddAll (BUG-10).
+		staged, _ := e.git.DiffStaged()
+		if strings.TrimSpace(staged) == "" {
+			e.logger.Info("ship: no staged changes — skipping commit")
+		} else if _, err := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); err != nil {
 			return nil, fmt.Errorf("ship commit: %w", err)
 		}
 	}
@@ -176,7 +183,9 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	}
 
 	// Update checkbox tasks.md with final statuses
-	_ = e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks)
+	if err := e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks); err != nil {
+		e.logger.Warn("save checkbox tasks.md failed", "error", err)
+	}
 
 	// 8. Archive session (after all state is persisted)
 	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
@@ -208,6 +217,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 }
 
 // collectDiffStats collects file change statistics from git diff.
+// Diffs HEAD against the session start (or HEAD^ as fallback) so the stats
+// reflect changes made by this session, not unrelated uncommitted files.
+// Uses git status --porcelain on the range for accurate add/modify/delete
+// classification instead of a numstat-based heuristic (BUG-15).
 func (e *Engine) collectDiffStats() DiffStats {
 	stats := DiffStats{}
 
@@ -215,14 +228,36 @@ func (e *Engine) collectDiffStats() DiffStats {
 		return stats
 	}
 
-	// Use git diff --numstat to get per-file stats
-	diffOutput, err := e.git.DiffRefs("HEAD", "")
+	// Pick a base ref: prefer session start hash; fall back to HEAD^.
+	// If neither is available (root commit, no session start), use plain
+	// diff which compares working tree against HEAD (least useful but safe).
+	baseRef := ""
+	switch {
+	case e.sessionStartHash != "":
+		baseRef = e.sessionStartHash
+	default:
+		// Try HEAD^ — if the repo has no parent commit, this will fail
+		// and we'll fall through to plain diff.
+		if _, err := e.git.RevParse("HEAD^"); err == nil {
+			baseRef = "HEAD^"
+		}
+	}
+
+	var numstatOutput string
+	var err error
+	if baseRef != "" {
+		numstatOutput, err = e.git.Run("diff", "--numstat", baseRef+"..HEAD")
+	} else {
+		// Last resort: compare working tree against HEAD (not numstat-equivalent
+		// but preserves insertions/deletions accounting when no range is available).
+		numstatOutput, err = e.git.Run("diff", "--numstat")
+	}
 	if err != nil {
 		return stats
 	}
 
 	// Parse numstat format: <additions>\t<deletions>\t<filepath>
-	lines := strings.Split(diffOutput, "\n")
+	lines := strings.Split(numstatOutput, "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -243,25 +278,40 @@ func (e *Engine) collectDiffStats() DiffStats {
 
 		stats.Insertions += adds
 		stats.Deletions += dels
+		stats.FilesModified++
+	}
 
-		// Count file changes
-		filepath := parts[2]
-		if strings.HasPrefix(filepath, "a/") || strings.HasPrefix(filepath, "b/") {
-			filepath = strings.TrimPrefix(filepath, "a/")
-			filepath = strings.TrimPrefix(filepath, "b/")
+	// Refine classification using git log --diff-filter on the same range.
+	// This accurately distinguishes added/deleted/modified files, fixing the
+	// numstat-based heuristic that misclassified add-only modifications.
+	if baseRef != "" {
+		if addedOut, err := e.git.Run("diff", "--name-only", "--diff-filter=A", baseRef+"..HEAD"); err == nil {
+			stats.FilesAdded = countNonEmptyLines(addedOut)
 		}
-
-		// Simple heuristic: new files have all additions and no deletions
-		if adds > 0 && dels == 0 && parts[0] != "0" {
-			stats.FilesAdded++
-		} else if adds == 0 && dels > 0 {
-			stats.FilesDeleted++
-		} else {
-			stats.FilesModified++
+		if deletedOut, err := e.git.Run("diff", "--name-only", "--diff-filter=D", baseRef+"..HEAD"); err == nil {
+			stats.FilesDeleted = countNonEmptyLines(deletedOut)
+		}
+		// FilesModified currently counts ALL changed files (numstat lines).
+		// Subtract added+deleted to get true modification count.
+		total := stats.FilesModified
+		stats.FilesModified = total - stats.FilesAdded - stats.FilesDeleted
+		if stats.FilesModified < 0 {
+			stats.FilesModified = 0
 		}
 	}
 
 	return stats
+}
+
+// countNonEmptyLines counts non-empty lines in s.
+func countNonEmptyLines(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // BuildSummary creates a ShipSummary from the current session state.
@@ -325,8 +375,8 @@ func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks [
 
 	sb.WriteString(fmt.Sprintf("\n## Summary\n- Tasks completed: %d/%d\n- Tasks failed: %d\n", done, len(tasks), failed))
 
-	if e.git != nil {
-		if diffOut, err := e.git.DiffRefs(e.sessionStartHash, ""); err == nil && diffOut != "" {
+	if e.git != nil && e.sessionStartHash != "" {
+		if diffOut, err := e.git.DiffRefs(e.sessionStartHash, "HEAD"); err == nil && diffOut != "" {
 			lines := strings.Split(diffOut, "\n")
 			if len(lines) > 20 {
 				lines = lines[:20]
