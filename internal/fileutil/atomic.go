@@ -1,8 +1,6 @@
 package fileutil
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,13 +26,13 @@ func AtomicWriteWithPerm(path string, data []byte, perm os.FileMode) error {
 		perm = info.Mode().Perm()
 	}
 
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return fmt.Errorf("generate temp name: %w", err)
+	tmpFile, err := os.CreateTemp(dir, ".m31a_tmp_*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	tmpPath := filepath.Join(dir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-
-	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	tmpPath := tmpFile.Name()
+	// os.CreateTemp creates with 0600; restore desired permissions
+	_ = os.Chmod(tmpPath, perm)
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
