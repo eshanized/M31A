@@ -322,25 +322,28 @@ func replaceByLineRange(content string, startLine, endLine int, newContent strin
 }
 
 func cascadingReplace(content, oldString, newString string) (string, string, error) {
+	// Split content once for all strategies (H1 fix)
+	contentLines := strings.Split(content, "\n")
+
 	// Strategy 2: Exact match
 	if idx := strings.Index(content, oldString); idx >= 0 {
 		return strings.Replace(content, oldString, newString, 1), "exact-match", nil
 	}
 
 	// Strategy 3: Line-trimmed match
-	result, err := lineTrimmedReplace(content, oldString, newString)
+	result, err := lineTrimmedReplace(content, contentLines, oldString, newString)
 	if err == nil {
 		return result, "line-trimmed", nil
 	}
 
 	// Strategy 4: Whitespace-normalized match
-	result, err = whitespaceNormalizedReplace(content, oldString, newString)
+	result, err = whitespaceNormalizedReplace(content, contentLines, oldString, newString)
 	if err == nil {
 		return result, "whitespace-normalized", nil
 	}
 
 	// Strategy 5: Fuzzy anchor match
-	result, err = fuzzyAnchorReplace(content, oldString, newString)
+	result, err = fuzzyAnchorReplace(content, contentLines, oldString, newString)
 	if err == nil {
 		return result, "fuzzy-anchor", nil
 	}
@@ -352,13 +355,12 @@ func cascadingReplace(content, oldString, newString string) (string, string, err
 			"- Use start_line and end_line for precise line-range edits\n"+
 			"- Ensure old_string matches exactly (check indentation and whitespace)\n"+
 			"- Read the file first to get the current content",
-		strings.Count(content, "\n")+1, len(content),
+		len(contentLines), len(content),
 	)
 }
 
-func lineTrimmedReplace(content, oldString, newString string) (string, error) {
+func lineTrimmedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
-	contentLines := strings.Split(content, "\n")
 
 	oldTrimmed := make([]string, len(oldLines))
 	for i, line := range oldLines {
@@ -419,14 +421,13 @@ func lineTrimmedReplace(content, oldString, newString string) (string, error) {
 	return "", fmt.Errorf("no line-trimmed match found")
 }
 
-func whitespaceNormalizedReplace(content, oldString, newString string) (string, error) {
+func whitespaceNormalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	normalize := func(s string) string {
 		fields := strings.Fields(s)
 		return strings.Join(fields, " ")
 	}
 
 	oldLines := strings.Split(oldString, "\n")
-	contentLines := strings.Split(content, "\n")
 
 	normalizedOldLines := make([]string, len(oldLines))
 	for i, line := range oldLines {
@@ -461,13 +462,12 @@ func whitespaceNormalizedReplace(content, oldString, newString string) (string, 
 	return "", fmt.Errorf("no whitespace-normalized match found")
 }
 
-func fuzzyAnchorReplace(content, oldString, newString string) (string, error) {
+func fuzzyAnchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
 	if len(oldLines) < MinLinesForFuzzy {
 		return "", fmt.Errorf("fuzzy anchor requires at least %d lines", MinLinesForFuzzy)
 	}
 
-	contentLines := strings.Split(content, "\n")
 	firstLine := strings.TrimSpace(oldLines[0])
 	lastLine := strings.TrimSpace(oldLines[len(oldLines)-1])
 
