@@ -14,6 +14,8 @@ type ReasoningConfig struct {
 	ModelFamily   string         `json:"model_family"`
 	RequestParams map[string]any `json:"request_params"`
 	SSEField      string         `json:"sse_field"`
+	// Pre-computed field path parts to avoid per-chunk strings.Split
+	SSEFieldParts []string `json:"-"`
 }
 
 var reasoningParamMap = map[string]ReasoningConfig{
@@ -44,17 +46,40 @@ var reasoningParamMap = map[string]ReasoningConfig{
 	},
 }
 
-func GetReasoningConfig(modelID string) (ReasoningConfig, bool) {
-	keys := make([]string, 0, len(reasoningParamMap))
+// Pre-computed sorted keys and SSE field parts to avoid per-chunk allocations.
+// Initialized once at package load time.
+var (
+	sortedReasoningKeys    []string
+	sortedReasoningConfigs []ReasoningConfig
+)
+
+func init() {
+	sortedReasoningKeys = make([]string, 0, len(reasoningParamMap))
 	for k := range reasoningParamMap {
-		keys = append(keys, k)
+		sortedReasoningKeys = append(sortedReasoningKeys, k)
 	}
 	// Sort by length descending so longer prefixes match first
-	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
+	sort.Sort(sort.Reverse(sort.StringSlice(sortedReasoningKeys)))
+	// Pre-compute SSEFieldParts on both the map entries (for fallback path)
+	// and the sorted configs slice (for fast path).
+	for k := range reasoningParamMap {
+		cfg := reasoningParamMap[k]
+		if cfg.SSEField != "" {
+			cfg.SSEFieldParts = strings.Split(cfg.SSEField, ".")
+			reasoningParamMap[k] = cfg
+		}
+	}
+	sortedReasoningConfigs = make([]ReasoningConfig, len(sortedReasoningKeys))
+	for i, k := range sortedReasoningKeys {
+		sortedReasoningConfigs[i] = reasoningParamMap[k]
+	}
+}
 
-	for _, prefix := range keys {
+func GetReasoningConfig(modelID string) (ReasoningConfig, bool) {
+	// Use pre-computed sorted keys (H7 fix)
+	for i, prefix := range sortedReasoningKeys {
 		if strings.HasPrefix(modelID, prefix) {
-			return reasoningParamMap[prefix], true
+			return sortedReasoningConfigs[i], true
 		}
 	}
 
@@ -166,7 +191,8 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 			}
 
 			if cfg.SSEField != "" {
-				parts := strings.Split(cfg.SSEField, ".")
+				// Use pre-split parts (H4 fix) instead of strings.Split per chunk
+				parts := cfg.SSEFieldParts
 				if len(parts) >= 4 {
 					fieldName := parts[len(parts)-1]
 					if val, exists := deltaMap[fieldName]; exists {
