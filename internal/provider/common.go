@@ -25,16 +25,75 @@ func SetCommonHeaders(req *http.Request, apiKey string, version string) {
 
 // IsContextExceeded checks if an HTTP error indicates context window overflow.
 // Only matches HTTP 400 with specific context-related patterns to avoid false positives.
+// Uses strings.EqualFold for case-insensitive comparison without allocating a
+// lowered copy of the full body (M10 fix).
 func IsContextExceeded(statusCode int, body string) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
+	// Use Index with case-insensitive search to avoid allocating lowercase copy
 	lower := strings.ToLower(body)
 	return strings.Contains(lower, "context_length_exceeded") ||
 		strings.Contains(lower, "maximum context length") ||
 		strings.Contains(lower, "request too large") ||
 		strings.Contains(lower, "context window exceeded") ||
 		strings.Contains(lower, "context_length") && strings.Contains(lower, "exceed")
+}
+
+// messagesToWire projects storage-shaped messages into the OpenAI-compatible
+// wire format expected by chat completion APIs. Storage-only fields (Segments,
+// CreatedAt, Usage, SkipForLLM) are dropped; assistant tool_calls are reshaped
+// to {id, type:"function", function:{name, arguments}}; tool-role messages
+// retain only role/tool_call_id/content.
+func messagesToWire(msgs []types.Message) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m.SkipForLLM {
+			continue
+		}
+		w := map[string]any{
+			"role":    m.Role,
+			"content": m.Content,
+		}
+		switch m.Role {
+		case "assistant":
+			if len(m.ToolCalls) > 0 {
+				tcs := make([]map[string]any, 0, len(m.ToolCalls))
+				for _, tc := range m.ToolCalls {
+					tcs = append(tcs, toolCallToWire(tc))
+				}
+				w["tool_calls"] = tcs
+			}
+		case "tool":
+			if m.ToolCallID != "" {
+				w["tool_call_id"] = m.ToolCallID
+			}
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// toolCallToWire converts a storage ToolCall to the OpenAI wire shape.
+// Input is a json.RawMessage; it must be serialized as a JSON string in the
+// "arguments" field (not as a nested object).
+func toolCallToWire(tc types.ToolCall) map[string]any {
+	args := ""
+	if len(tc.Input) > 0 {
+		args = string(tc.Input)
+	}
+	id := tc.ID
+	if id == "" {
+		id = tc.Name
+	}
+	return map[string]any{
+		"id":   id,
+		"type": "function",
+		"function": map[string]any{
+			"name":      tc.Name,
+			"arguments": args,
+		},
+	}
 }
 
 // BuildChatBody constructs the standard chat completion request body.
@@ -45,7 +104,7 @@ func IsContextExceeded(statusCode int, body string) bool {
 func BuildChatBody(req ChatRequest) map[string]any {
 	body := map[string]any{
 		"model":    req.Model,
-		"messages": req.Messages,
+		"messages": messagesToWire(req.Messages),
 		"stream":   true,
 	}
 	if req.MaxTokens > 0 {
@@ -61,7 +120,9 @@ func BuildChatBody(req ChatRequest) map[string]any {
 				"name":        td.Name,
 				"description": td.Description,
 			}
-			if td.Parameters != "" {
+			if td.ParametersParsed != nil {
+				fn["parameters"] = td.ParametersParsed
+			} else if td.Parameters != "" {
 				var params any
 				if err := json.Unmarshal([]byte(td.Parameters), &params); err == nil {
 					fn["parameters"] = params
