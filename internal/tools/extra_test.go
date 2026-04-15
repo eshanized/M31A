@@ -119,7 +119,8 @@ func TestFuzzyAnchorReplace_NoMiddleLines(t *testing.T) {
 	content := "alpha\nbeta\ngamma\ntheta"
 	oldStr := "alpha\nbeta\ngamma"
 	newStr := "REPLACED"
-	result, err := fuzzyAnchorReplace(content, oldStr, newStr)
+	contentLines := strings.Split(content, "\n")
+	result, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +135,8 @@ func TestFuzzyAnchorReplace_MiddleLinesBelowThreshold(t *testing.T) {
 	content := "first\ncompletely different\nalso different\nlast"
 	oldStr := "first\nslightly similar\nalso somewhat\nlast"
 	newStr := "REPLACED"
-	_, err := fuzzyAnchorReplace(content, oldStr, newStr)
+	contentLines := strings.Split(content, "\n")
+	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when middle lines differ significantly")
 	}
@@ -145,7 +147,8 @@ func TestFuzzyAnchorReplace_FirstLineNoMatch(t *testing.T) {
 	content := "alpha\nbeta\ngamma"
 	oldStr := "zzzz\nbeta\ngamma"
 	newStr := "REPLACED"
-	_, err := fuzzyAnchorReplace(content, oldStr, newStr)
+	contentLines := strings.Split(content, "\n")
+	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when first line doesn't match")
 	}
@@ -156,7 +159,8 @@ func TestFuzzyAnchorReplace_LastLineNoMatch(t *testing.T) {
 	content := "alpha\nbeta\ngamma"
 	oldStr := "alpha\nbeta\nzzzz"
 	newStr := "REPLACED"
-	_, err := fuzzyAnchorReplace(content, oldStr, newStr)
+	contentLines := strings.Split(content, "\n")
+	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when last line doesn't match")
 	}
@@ -164,7 +168,9 @@ func TestFuzzyAnchorReplace_LastLineNoMatch(t *testing.T) {
 
 func TestFuzzyAnchorReplace_TooFewLines_AllOldLinesMatch(t *testing.T) {
 	t.Parallel()
-	_, err := fuzzyAnchorReplace("one\ntwo", "one\ntwo", "new")
+	content := "one\ntwo"
+	contentLines := strings.Split(content, "\n")
+	_, err := fuzzyAnchorReplace(content, contentLines, "one\ntwo", "new")
 	if err == nil {
 		t.Error("expected error for fewer than MinLinesForFuzzy lines")
 	}
@@ -175,7 +181,8 @@ func TestFuzzyAnchorReplace_ContentTooShort(t *testing.T) {
 	content := "short"
 	oldStr := "short\nsecond\nthird"
 	newStr := "REPLACED"
-	_, err := fuzzyAnchorReplace(content, oldStr, newStr)
+	contentLines := strings.Split(content, "\n")
+	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when content is shorter than old string")
 	}
@@ -188,7 +195,8 @@ func TestFuzzyAnchorReplace_ContentTooShort(t *testing.T) {
 func TestLineTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  baz"
-	result, err := lineTrimmedReplace(content, "hello\nworld", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -200,7 +208,8 @@ func TestLineTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
 func TestLineTrimmedReplace_MultipleOccurrences(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo\n  hello\n  world"
-	result, err := lineTrimmedReplace(content, "hello\nworld", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -213,7 +222,8 @@ func TestLineTrimmedReplace_MultipleOccurrences(t *testing.T) {
 func TestLineTrimmedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb\nccc"
-	_, err := lineTrimmedReplace(content, "xxx\nyyy", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	_, err := lineTrimmedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
@@ -222,7 +232,8 @@ func TestLineTrimmedReplace_NoMatch(t *testing.T) {
 func TestLineTrimmedReplace_SingleLine(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world"
-	result, err := lineTrimmedReplace(content, "hello", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := lineTrimmedReplace(content, contentLines, "hello", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +245,8 @@ func TestLineTrimmedReplace_SingleLine(t *testing.T) {
 func TestLineTrimmedReplace_IndentationPreserved(t *testing.T) {
 	t.Parallel()
 	content := "\t\thello\n\t\tworld"
-	result, err := lineTrimmedReplace(content, "hello\nworld", "replaced\nhere")
+	contentLines := strings.Split(content, "\n")
+	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "replaced\nhere")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,7 +262,8 @@ func TestLineTrimmedReplace_IndentationPreserved(t *testing.T) {
 func TestWhitespaceNormalizedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb"
-	_, err := whitespaceNormalizedReplace(content, "xxx\nyyy", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	_, err := whitespaceNormalizedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
@@ -259,7 +272,8 @@ func TestWhitespaceNormalizedReplace_NoMatch(t *testing.T) {
 func TestWhitespaceNormalizedReplace_MultipleSpaces(t *testing.T) {
 	t.Parallel()
 	content := "hello     world"
-	result, err := whitespaceNormalizedReplace(content, "hello world", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := whitespaceNormalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -271,7 +285,8 @@ func TestWhitespaceNormalizedReplace_MultipleSpaces(t *testing.T) {
 func TestWhitespaceNormalizedReplace_Tabs(t *testing.T) {
 	t.Parallel()
 	content := "hello\t\tworld"
-	result, err := whitespaceNormalizedReplace(content, "hello world", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := whitespaceNormalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -283,7 +298,8 @@ func TestWhitespaceNormalizedReplace_Tabs(t *testing.T) {
 func TestWhitespaceNormalizedReplace_MultiLine(t *testing.T) {
 	t.Parallel()
 	content := "line1   with   spaces\nline2  with  tabs"
-	result, err := whitespaceNormalizedReplace(content, "line1 with spaces\nline2 with tabs", "REPLACED")
+	contentLines := strings.Split(content, "\n")
+	result, err := whitespaceNormalizedReplace(content, contentLines, "line1 with spaces\nline2 with tabs", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1686,7 +1702,7 @@ func TestReplaceBlockTag_NoMatch(t *testing.T) {
 	t.Parallel()
 	input := "no tags here"
 	lower := strings.ToLower(input)
-	got := replaceBlockTag(input, lower, "div", "\n")
+	got, _ := replaceBlockTag(input, lower, "div", "\n")
 	if got != input {
 		t.Errorf("expected original text when no tag, got %q", got)
 	}
@@ -1696,7 +1712,7 @@ func TestReplaceBlockTag_MissingCloseTag(t *testing.T) {
 	t.Parallel()
 	input := "<div>unclosed"
 	lower := strings.ToLower(input)
-	got := replaceBlockTag(input, lower, "div", "\n")
+	got, _ := replaceBlockTag(input, lower, "div", "\n")
 	if got != input {
 		t.Errorf("expected original when no close tag, got %q", got)
 	}
