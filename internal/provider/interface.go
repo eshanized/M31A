@@ -26,7 +26,8 @@ type ChatRequest struct {
 }
 
 type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Parameters  string `json:"parameters"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Parameters      string `json:"parameters"`
+	ParametersParsed any    `json:"-"` // cached json.Unmarshal result, populated by buildToolDefinitions
 }
