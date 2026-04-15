@@ -380,3 +380,107 @@ func TestIsContextExceeded_OperatorPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildChatBody_WireFormat verifies that the agent loop's storage-shaped
+// messages (assistant with ToolCalls, tool-role with ToolCallID, messages with
+// Segments/CreatedAt/Usage/SkipForLLM) are projected to the OpenAI wire shape
+// expected by Zen/OpenRouter. A regression here causes HTTP 400 "Bad request"
+// on agent iteration 2 once tool results are fed back to the LLM.
+func TestBuildChatBody_WireFormat(t *testing.T) {
+	t.Parallel()
+	msgs := []types.Message{
+		{
+			Role:    "system",
+			Content: "sys",
+			Segments: []types.MessageSegment{{Type: "content", Content: "sys"}},
+			CreatedAt: time.Now(),
+		},
+		{
+			Role:    "user",
+			Content: "hi",
+		},
+		{
+			Role:    "assistant",
+			Content: "",
+			ToolCalls: []types.ToolCall{{
+				ID:    "call_42",
+				Name:  "glob",
+				Input: []byte(`{"pattern":"*.go"}`),
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call_42",
+			Content:    "file.go",
+			Segments:   []types.MessageSegment{{Type: "content", Content: "file.go"}},
+			CreatedAt:  time.Now(),
+		},
+		{
+			Role:       "assistant",
+			Content:    "done",
+			SkipForLLM: true,
+		},
+	}
+
+	body := BuildChatBody(ChatRequest{Model: "m", Messages: msgs})
+	wire, ok := body["messages"].([]map[string]any)
+	if !ok {
+		t.Fatalf("messages should be []map[string]any, got %T", body["messages"])
+	}
+	if len(wire) != 4 {
+		t.Fatalf("expected 4 wire messages (SkipForLLM excluded), got %d", len(wire))
+	}
+
+	// system: role+content only (no segments, created_at)
+	sys := wire[0]
+	if sys["role"] != "system" || sys["content"] != "sys" {
+		t.Errorf("sys = %+v", sys)
+	}
+	for _, bad := range []string{"segments", "created_at", "usage", "skip_for_llm"} {
+		if _, ok := sys[bad]; ok {
+			t.Errorf("sys message leaked storage field %q", bad)
+		}
+	}
+
+	// assistant with tool_calls: OpenAI shape
+	asst := wire[2]
+	tcs, ok := asst["tool_calls"].([]map[string]any)
+	if !ok || len(tcs) != 1 {
+		t.Fatalf("assistant tool_calls = %v", asst["tool_calls"])
+	}
+	tc := tcs[0]
+	if tc["id"] != "call_42" {
+		t.Errorf("tc.id = %v", tc["id"])
+	}
+	if tc["type"] != "function" {
+		t.Errorf("tc.type = %v, want function", tc["type"])
+	}
+	fn, ok := tc["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("tc.function = %T, want map", tc["function"])
+	}
+	if fn["name"] != "glob" {
+		t.Errorf("fn.name = %v", fn["name"])
+	}
+	if args, ok := fn["arguments"].(string); !ok || args != `{"pattern":"*.go"}` {
+		t.Errorf("fn.arguments = %v (%T), want JSON string", fn["arguments"], fn["arguments"])
+	}
+	// storage fields "name" and "input" must NOT appear at the top level
+	if _, ok := tc["name"]; ok {
+		t.Error("tool_call leaked storage field 'name' at top level")
+	}
+	if _, ok := tc["input"]; ok {
+		t.Error("tool_call leaked storage field 'input' at top level")
+	}
+
+	// tool message: role/tool_call_id/content only
+	tool := wire[3]
+	if tool["role"] != "tool" || tool["tool_call_id"] != "call_42" || tool["content"] != "file.go" {
+		t.Errorf("tool msg = %+v", tool)
+	}
+	for _, bad := range []string{"segments", "created_at", "usage"} {
+		if _, ok := tool[bad]; ok {
+			t.Errorf("tool message leaked storage field %q", bad)
+		}
+	}
+}
