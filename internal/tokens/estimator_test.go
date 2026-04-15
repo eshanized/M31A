@@ -86,32 +86,32 @@ func TestEstimator_EstimateMultibyte(t *testing.T) {
 
 func TestEstimator_Calibrate(t *testing.T) {
 	e := NewEstimator("gpt-4o")
-	initialFactor := e.emaFactor
+	initialFactor := e.emaFactor()
 
 	// Calibrate: estimated=100, actual=110 -> ratio=1.1
 	// newFactor = 0.3*1.1 + 0.7*1.0 = 0.33 + 0.70 = 1.03
 	e.Calibrate(100, 110)
 
-	if e.emaFactor <= initialFactor {
-		t.Errorf("expected emaFactor to increase after under-estimation, got %f (was %f)", e.emaFactor, initialFactor)
+	if e.emaFactor() <= initialFactor {
+		t.Errorf("expected emaFactor to increase after under-estimation, got %f (was %f)", e.emaFactor(), initialFactor)
 	}
 
 	// Expected: 0.3 * 1.1 + 0.7 * 1.0 = 1.03
 	expected := 0.3*1.1 + 0.7*1.0
-	if e.emaFactor != expected {
-		t.Errorf("expected emaFactor %f, got %f", expected, e.emaFactor)
+	if e.emaFactor() != expected {
+		t.Errorf("expected emaFactor %f, got %f", expected, e.emaFactor())
 	}
 }
 
 func TestEstimator_CalibrateZeroEstimated(t *testing.T) {
 	e := NewEstimator("gpt-4o")
-	initialFactor := e.emaFactor
+	initialFactor := e.emaFactor()
 
 	// Call with estimated=0 should not cause division by zero
 	e.Calibrate(0, 100)
 
-	if e.emaFactor != initialFactor {
-		t.Errorf("expected emaFactor unchanged after zero estimated, got %f (was %f)", e.emaFactor, initialFactor)
+	if e.emaFactor() != initialFactor {
+		t.Errorf("expected emaFactor unchanged after zero estimated, got %f (was %f)", e.emaFactor(), initialFactor)
 	}
 }
 
@@ -128,11 +128,11 @@ func TestEstimator_CalibrateConvergence(t *testing.T) {
 	// iter1: 0.3*0.95 + 0.7*1.0 = 0.285 + 0.7 = 0.985
 	// iter2: 0.3*0.95 + 0.7*0.985 = 0.285 + 0.6895 = 0.9745
 	// iter3: 0.3*0.95 + 0.7*0.9745 = 0.285 + 0.68215 = 0.96715
-	if e.emaFactor >= 1.0 {
-		t.Errorf("expected emaFactor < 1.0 after 3 over-estimations, got %f", e.emaFactor)
+	if e.emaFactor() >= 1.0 {
+		t.Errorf("expected emaFactor < 1.0 after 3 over-estimations, got %f", e.emaFactor())
 	}
-	if e.emaFactor < 0.9 {
-		t.Errorf("expected emaFactor close to 0.97, got %f (convergence too fast)", e.emaFactor)
+	if e.emaFactor() < 0.9 {
+		t.Errorf("expected emaFactor close to 0.97, got %f (convergence too fast)", e.emaFactor())
 	}
 }
 
@@ -146,8 +146,8 @@ func TestEstimator_CalibrateClampMin(t *testing.T) {
 		e.Calibrate(100, 1)
 	}
 
-	if e.emaFactor < 0.1 {
-		t.Errorf("expected emaFactor clamped to min 0.1, got %f", e.emaFactor)
+	if e.emaFactor() < 0.1 {
+		t.Errorf("expected emaFactor clamped to min 0.1, got %f", e.emaFactor())
 	}
 }
 
@@ -158,11 +158,11 @@ func TestEstimator_CalibrateClampMax(t *testing.T) {
 	// After one iteration: 0.3*100 + 0.7*1.0 = 30.7 -> clamped to 10.0
 	e.Calibrate(100, 10000)
 
-	if e.emaFactor > 10.0 {
-		t.Errorf("expected emaFactor clamped to max 10.0, got %f", e.emaFactor)
+	if e.emaFactor() > 10.0 {
+		t.Errorf("expected emaFactor clamped to max 10.0, got %f", e.emaFactor())
 	}
-	if e.emaFactor != 10.0 {
-		t.Errorf("expected emaFactor = 10.0, got %f", e.emaFactor)
+	if e.emaFactor() != 10.0 {
+		t.Errorf("expected emaFactor = 10.0, got %f", e.emaFactor())
 	}
 }
 
