@@ -2,7 +2,8 @@ package tokens
 
 import (
 	"fmt"
-	"sync"
+	"math"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
@@ -25,9 +26,10 @@ const DefaultWarningThreshold = 0.80
 type Estimator struct {
 	modelID   string
 	tokenizer *tiktoken.Tiktoken
-	mu        sync.Mutex
 	emaAlpha  float64
-	emaFactor float64
+	// emaFactor stores the calibration factor as raw uint64 bits (via
+	// math.Float64bits/Float64frombits) for lock-free atomic access.
+	emaFactorBits atomic.Uint64
 }
 
 // NewEstimator creates an Estimator for the given model ID.
@@ -51,8 +53,8 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 	e := &Estimator{
 		modelID:   modelID,
 		emaAlpha:  alpha,
-		emaFactor: 1.0,
 	}
+	e.emaFactorBits.Store(math.Float64bits(1.0))
 
 	tkm, err := tiktoken.EncodingForModel(modelID)
 	if err == nil {
@@ -65,7 +67,7 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 // Estimate returns the estimated token count for the given text.
 // Uses tiktoken-go if the model is supported; otherwise falls back to
 // utf8.RuneCountInString(text) / 4 * 1.3. The emaFactor calibration is applied
-// to all estimates.
+// to all estimates. Uses lock-free atomic read for the calibration factor.
 func (e *Estimator) Estimate(text string) int {
 	var estimated int
 
@@ -77,9 +79,7 @@ func (e *Estimator) Estimate(text string) int {
 		estimated = int((float64(utf8.RuneCountInString(text))/4.0 + 1.0) * 1.3)
 	}
 
-	e.mu.Lock()
-	factor := e.emaFactor
-	e.mu.Unlock()
+	factor := math.Float64frombits(e.emaFactorBits.Load())
 	return int(float64(estimated) * factor)
 }
 
@@ -87,6 +87,7 @@ func (e *Estimator) Estimate(text string) int {
 // ratio = actual / estimated
 // newFactor = emaAlpha * ratio + (1 - emaAlpha) * previousFactor
 // The factor is clamped to [0.1, 10.0] to prevent extreme values.
+// Uses lock-free atomic CAS for concurrent safety.
 func (e *Estimator) Calibrate(estimated, actual int) {
 	if estimated <= 0 {
 		return
@@ -94,15 +95,21 @@ func (e *Estimator) Calibrate(estimated, actual int) {
 
 	ratio := float64(actual) / float64(estimated)
 
-	e.mu.Lock()
-	e.emaFactor = e.emaAlpha*ratio + (1-e.emaAlpha)*e.emaFactor
-	if e.emaFactor < 0.1 {
-		e.emaFactor = 0.1
+	for {
+		oldBits := e.emaFactorBits.Load()
+		oldFactor := math.Float64frombits(oldBits)
+		newFactor := e.emaAlpha*ratio + (1-e.emaAlpha)*oldFactor
+		if newFactor < 0.1 {
+			newFactor = 0.1
+		}
+		if newFactor > 10.0 {
+			newFactor = 10.0
+		}
+		newBits := math.Float64bits(newFactor)
+		if e.emaFactorBits.CompareAndSwap(oldBits, newBits) {
+			return
+		}
 	}
-	if e.emaFactor > 10.0 {
-		e.emaFactor = 10.0
-	}
-	e.mu.Unlock()
 }
 
 // FormatUsage returns a formatted string showing used/total context with
@@ -147,6 +154,11 @@ func (e *Estimator) ContextWarningBanner(used int, total int64, threshold float6
 // ModelID returns the model identifier for this estimator.
 func (e *Estimator) ModelID() string {
 	return e.modelID
+}
+
+// emaFactor returns the current calibration factor. Exported for testing only.
+func (e *Estimator) emaFactor() float64 {
+	return math.Float64frombits(e.emaFactorBits.Load())
 }
 
 // EstimateMessages returns the estimated total token count for a slice of
