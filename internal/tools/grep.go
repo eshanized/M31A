@@ -135,7 +135,7 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	if t.hasRg {
 		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults)
 	} else {
-		result, err = t.grepPureGo(pattern, searchPath, globFilter, maxResults)
+		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults)
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
@@ -245,7 +245,7 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
-func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
+func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("invalid regex: %w", err)
@@ -258,6 +258,10 @@ func (t *Grep) grepPureGo(pattern, searchPath, glob string, maxResults int) (typ
 	err = filepath.Walk(searchPath, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible files
+		}
+		// Check context cancellation (H2 fix)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		if fi.IsDir() {
 			// Skip hidden directories and common non-code dirs
