@@ -169,6 +169,8 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 					card := NewToolCard(tc, nil, ToolRunning, t)
 					rendered = append(rendered, card.Render(contentWidth))
 				}
+			case "error":
+				rendered = append(rendered, r.renderErrorSegment(seg.Content, contentWidth))
 			}
 		}
 	}
@@ -216,6 +218,23 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		Width(width).
 		PaddingLeft(2).
 		Render(rendered)
+}
+
+// renderErrorSegment styles an error banner directly via lipgloss, bypassing
+// glamour so that plain-text error content (with ✗/⚠ glyphs) is rendered
+// without the markdown pipeline mangling any escape sequences.
+func (r *MessageRenderer) renderErrorSegment(content string, width int) string {
+	if content == "" {
+		return ""
+	}
+	styled := lipgloss.NewStyle().
+		Foreground(r.theme.Error).
+		Bold(true).
+		Render(content)
+	return lipgloss.NewStyle().
+		Width(width).
+		PaddingLeft(2).
+		Render(styled)
 }
 
 // FormatTimeBar formats a timestamp for use in timestamp bars.
