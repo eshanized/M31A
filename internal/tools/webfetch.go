@@ -407,30 +407,25 @@ func htmlToMarkdown(html string) string {
 	// Compute lowercase once for all case-insensitive tag matching
 	lower := strings.ToLower(html)
 
-	// Handle common block elements with newlines — pass pre-computed lowercase
-	html = replaceBlockTag(html, lower, "p", "\n\n")
-	// Recompute lower after each replacement since string positions shift
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "div", "\n")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "br", "\n")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "li", "\n- ")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "h1", "\n# ")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "h2", "\n## ")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "h3", "\n### ")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "h4", "\n#### ")
+	// Handle common block elements with newlines — each call returns the
+	// updated lowercase string, avoiding redundant ToLower calls.
+	html, lower = replaceBlockTag(html, lower, "p", "\n\n")
+	html, lower = replaceBlockTag(html, lower, "div", "\n")
+	html, lower = replaceBlockTag(html, lower, "br", "\n")
+	html, lower = replaceBlockTag(html, lower, "li", "\n- ")
+	html, lower = replaceBlockTag(html, lower, "h1", "\n# ")
+	html, lower = replaceBlockTag(html, lower, "h2", "\n## ")
+	html, lower = replaceBlockTag(html, lower, "h3", "\n### ")
+	html, lower = replaceBlockTag(html, lower, "h4", "\n#### ")
 
 	// Handle links: <a href="url">text</a> -> [text](url)
-	lower = strings.ToLower(html)
+	// convertLinks collects all matches before mutating, so only one
+	// ToLower recompute is needed after the batch.
 	html = convertLinks(html, lower)
-
-	// Handle bold and italic
 	lower = strings.ToLower(html)
+
+	// Handle bold and italic — each collects matches first, so one
+	// ToLower recompute is needed per function.
 	html = replaceInlineTag(html, lower, "strong", "**")
 	lower = strings.ToLower(html)
 	html = replaceInlineTag(html, lower, "b", "**")
@@ -457,11 +452,9 @@ func htmlToMarkdown(html string) string {
 func htmlToText(html string) string {
 	html = stripTags(html, "script", "style")
 	lower := strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "p", "\n\n")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "br", "\n")
-	lower = strings.ToLower(html)
-	html = replaceBlockTag(html, lower, "li", "\n")
+	html, lower = replaceBlockTag(html, lower, "p", "\n\n")
+	html, lower = replaceBlockTag(html, lower, "br", "\n")
+	html, _ = replaceBlockTag(html, lower, "li", "\n")
 	html = stripAllTags(html)
 
 	// Decode entities
@@ -518,7 +511,10 @@ func stripTags(html string, tags ...string) string {
 	return html
 }
 
-func replaceBlockTag(html, lower, tag, replacement string) string {
+// replaceBlockTag replaces block-level HTML tags with the given replacement string.
+// Returns both the modified HTML and its pre-computed lowercase, avoiding the
+// caller needing to recompute strings.ToLower after every call.
+func replaceBlockTag(html, lower, tag, replacement string) (string, string) {
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
 	var result strings.Builder
@@ -550,17 +546,32 @@ func replaceBlockTag(html, lower, tag, replacement string) string {
 		pos = closeEnd
 	}
 	result.WriteString(html[pos:])
-	return result.String()
+	newHTML := result.String()
+	return newHTML, strings.ToLower(newHTML)
 }
 
+// replaceInlineTag replaces inline HTML tags with the given marker around inner content.
+// Collects all match positions first, then applies replacements in reverse order
+// so earlier positions remain valid. Only one ToLower recompute is needed after
+// the caller uses the result.
 func replaceInlineTag(html, lower, tag, marker string) string {
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
+
+	type tagMatch struct {
+		openStart  int // position of '<' of opening tag
+		closeStart int // position of '<' of closing tag
+		closeEnd   int // position after '>' of closing tag
+	}
+	var matches []tagMatch
+
+	searchPos := 0
 	for {
-		start := strings.Index(lower, openTag)
+		start := strings.Index(lower[searchPos:], openTag)
 		if start == -1 {
 			break
 		}
+		start += searchPos
 
 		tagEnd := strings.IndexByte(html[start:], '>')
 		if tagEnd == -1 {
@@ -575,36 +586,72 @@ func replaceInlineTag(html, lower, tag, marker string) string {
 		closeStart += tagEnd
 		closeEnd := closeStart + len(closeTag)
 
-		inner := html[tagEnd:closeStart]
-		html = html[:start] + marker + inner + marker + html[closeEnd:]
-		// Recompute lower for next iteration since string positions shift
-		lower = strings.ToLower(html)
+		matches = append(matches, tagMatch{
+			openStart:  start,
+			closeStart: closeStart,
+			closeEnd:   closeEnd,
+		})
+		searchPos = closeEnd
 	}
-	return html
+
+	if len(matches) == 0 {
+		return html
+	}
+
+	// Build result in forward order
+	var b strings.Builder
+	b.Grow(len(html) + len(matches)*(len(marker)*2))
+	prevEnd := 0
+	for _, m := range matches {
+		b.WriteString(html[prevEnd:m.openStart])
+		b.WriteString(marker)
+		// Find the '>' of the opening tag to get inner content start
+		openGT := strings.IndexByte(html[m.openStart:], '>')
+		if openGT == -1 {
+			continue
+		}
+		innerStart := m.openStart + openGT + 1 // position after '>'
+		b.WriteString(html[innerStart:m.closeStart])
+		b.WriteString(marker)
+		prevEnd = m.closeEnd
+	}
+	b.WriteString(html[prevEnd:])
+	return b.String()
 }
 
+// convertLinks converts <a href="url">text</a> to [text](url).
+// Collects all link matches first, then applies replacements in reverse order
+// so position shifts don't invalidate earlier indices.
 func convertLinks(html, lower string) string {
+	type linkMatch struct {
+		start    int
+		closeEnd int
+		url      string
+		text     string
+	}
+	var matches []linkMatch
+
+	searchPos := 0
 	for {
-		start := strings.Index(lower, "<a ")
+		start := strings.Index(lower[searchPos:], "<a ")
 		if start == -1 {
 			break
 		}
+		start += searchPos
 
 		// Find href
-		hrefStart := strings.Index(lower[start:], "href=")
-		if hrefStart == -1 {
-			// No href, skip
+		hrefIdx := strings.Index(lower[start:], "href=")
+		if hrefIdx == -1 {
+			// No href, skip this tag
 			tagEnd := strings.IndexByte(html[start:], '>')
 			if tagEnd == -1 {
 				break
 			}
-			html = html[:start] + html[start+tagEnd+1:]
-			lower = strings.ToLower(html)
+			searchPos = start + tagEnd + 1
 			continue
 		}
-		hrefStart += start + 5 // len("href=") = 5
+		hrefStart := start + hrefIdx + 5 // len("href=") = 5
 
-		// Bounds check before accessing the character after href=
 		if hrefStart >= len(html) {
 			break
 		}
@@ -621,40 +668,62 @@ func convertLinks(html, lower string) string {
 			if urlEnd == -1 {
 				break
 			}
-			urlEnd += urlStart
-			url = html[urlStart:urlEnd]
+			url = html[urlStart : urlStart+urlEnd]
+			hrefStart = urlStart + urlEnd + 1
 		} else {
-			// Unquoted href — read until whitespace or >
 			urlEnd := hrefStart
 			for urlEnd < len(html) && html[urlEnd] != ' ' && html[urlEnd] != '>' && html[urlEnd] != '\t' && html[urlEnd] != '\n' {
 				urlEnd++
 			}
 			url = html[hrefStart:urlEnd]
+			hrefStart = urlEnd
 		}
 
 		// Find end of opening tag
-		tagEnd := strings.IndexByte(html[start:], '>')
-		if tagEnd == -1 {
+		openGT := strings.IndexByte(html[start:], '>')
+		if openGT == -1 {
 			break
 		}
-		tagEnd += start + 1
+		tagEndPos := start + openGT + 1
 
 		// Find closing tag
-		closeTag := "</a>"
-		closeStart := strings.Index(lower[tagEnd:], closeTag)
+		closeStart := strings.Index(lower[tagEndPos:], "</a>")
 		if closeStart == -1 {
 			break
 		}
-		closeStart += tagEnd
-		closeEnd := closeStart + len(closeTag)
+		closeStart += tagEndPos
+		closeEnd := closeStart + 4 // len("</a>")
 
-		text := html[tagEnd:closeStart]
-		replacement := "[" + text + "](" + url + ")"
-		html = html[:start] + replacement + html[closeEnd:]
-		// Recompute lower for next iteration since string positions shift
-		lower = strings.ToLower(html)
+		text := html[tagEndPos:closeStart]
+		matches = append(matches, linkMatch{
+			start:    start,
+			closeEnd: closeEnd,
+			url:      url,
+			text:     text,
+		})
+		searchPos = closeEnd
 	}
-	return html
+
+	if len(matches) == 0 {
+		return html
+	}
+
+	// Build the result by writing non-matched segments in forward order
+	result := make([]byte, 0, len(html)+len(matches)*4)
+	result = append(result, html[:matches[0].start]...)
+	for i, m := range matches {
+		result = append(result, '[')
+		result = append(result, m.text...)
+		result = append(result, ']')
+		result = append(result, '(')
+		result = append(result, m.url...)
+		result = append(result, ')')
+		if i+1 < len(matches) {
+			result = append(result, html[m.closeEnd:matches[i+1].start]...)
+		}
+	}
+	result = append(result, html[matches[len(matches)-1].closeEnd:]...)
+	return string(result)
 }
 
 // decodeHTMLEntities replaces common HTML entities with their character equivalents.
