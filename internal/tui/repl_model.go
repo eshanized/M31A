@@ -117,6 +117,10 @@ type ReplModel struct {
 
 	// Typing indicator: true between user submit and first streaming token
 	awaitingResponse bool
+
+	// Render throttle: skip renderMessages() if called within minRenderInterval
+	// of the previous render. Reduces CPU during high-frequency streaming ticks.
+	lastRenderTime time.Time
 }
 
 // NewReplModel creates a new ReplModel.
