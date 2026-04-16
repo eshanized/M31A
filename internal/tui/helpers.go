@@ -28,6 +28,26 @@ func makeAssistantMsg(content string) types.Message {
 	}
 }
 
+// makeErrorBannerMsg creates an assistant message carrying a plain-text error
+// banner. Styling is applied by the message renderer (not here) so that ANSI
+// escape codes never enter the markdown pipeline and get mangled.
+func makeErrorBannerMsg(text string, providerName string) types.Message {
+	content := text
+	if providerName != "" {
+		content = text + " (" + providerName + ")"
+	}
+	return types.Message{
+		Role:    "assistant",
+		Content: content,
+		Segments: []types.MessageSegment{{
+			Type:    "error",
+			Content: content,
+			Visible: true,
+		}},
+		CreatedAt: time.Now(),
+	}
+}
+
 // makeUserMsg creates a standard user message with proper rendering properties.
 func makeUserMsg(content string) types.Message {
 	return makeUserMsgWithSkip(content, false)
