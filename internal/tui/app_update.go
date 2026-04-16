@@ -692,8 +692,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
 		if m.replModel != nil {
-			banner := renderErrorBanner(msg.Err, m.themeManager.Current(), m.activeProvider)
-			m.replModel.AddMessage(makeAssistantMsg(banner))
+			m.replModel.AddMessage(makeErrorBannerMsg(plainErrorBanner(msg.Err, m.activeProvider), m.activeProvider))
 		}
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
