@@ -72,7 +72,7 @@ func TestReplaceBlockTag(t *testing.T) {
 	t.Parallel()
 	input := "<p>hello</p><p>world</p>"
 	lower := strings.ToLower(input)
-	got := replaceBlockTag(input, lower, "p", "\n")
+	got, _ := replaceBlockTag(input, lower, "p", "\n")
 	if got == input {
 		t.Error("expected replacement to occur")
 	}
