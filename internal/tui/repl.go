@@ -209,8 +209,14 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	m.updateAutoExpandHeight()
-	m.updateSlashSuggestions()
-	m.updateMentionSuggestions()
+	// M26+M27 fix: only update suggestions when relevant prefix is present
+	current := m.InputValue()
+	if strings.HasPrefix(current, "/") {
+		m.updateSlashSuggestions()
+	}
+	if strings.Contains(current, "@") {
+		m.updateMentionSuggestions()
+	}
 	return cmd
 }
 
