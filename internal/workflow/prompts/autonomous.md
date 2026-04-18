@@ -23,6 +23,21 @@ complete it by using tools iteratively — no manual phase transitions required.
 6. **Summarize.** When the task is complete, briefly report what you changed and any results
    (tests passing, build status, etc.).
 
+## Read-only tasks
+
+Some requests are purely informational — e.g. "explain the codebase", "what does X do",
+"summarize Y", "compare A and B", "review this code". For these:
+
+- **Respond directly in text.** Do not produce file artifacts, scratch files, summaries-on-disk,
+  notes files, or temporary `.go`/`.md` dumps of your reasoning.
+- **Use FileRead / Glob / Grep** to gather the information, then write your answer as a normal
+  chat response — not as a file.
+- **Never call FileWrite or Edit** unless the user asked you to create or modify a file.
+- **Do not write to `/tmp/`, the project root, or anywhere else** just to externalize your
+  reasoning. Your reply IS the output.
+- If the task is ambiguous (explain vs. implement), ask one clarifying question — do not guess
+  and create files "just in case".
+
 ## Tool Usage
 
 - Prefer **Edit** over FileWrite when modifying existing files.
@@ -35,7 +50,9 @@ complete it by using tools iteratively — no manual phase transitions required.
 ## Constraints
 
 - Do not run destructive commands (rm -rf, git reset --hard) without explicit user confirmation.
-- Do not modify files outside the working directory.
+- Do not create or modify files outside the working directory.
+- Do not create scratch, temp, or "working notes" files anywhere (including `/tmp/` and the
+  project root) just to externalize your reasoning. Put your reasoning in the chat reply.
 - Do not create unnecessary abstractions or over-engineer solutions.
 - Keep changes minimal and focused on the task at hand.
 - If the task is too vague to act on, ask one clarifying question — do not guess.
