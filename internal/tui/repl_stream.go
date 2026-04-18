@@ -177,6 +177,33 @@ func renderErrorBanner(err error, t theme.Theme, providerName string) string {
 	}
 }
 
+// plainErrorBanner returns the same textual content as renderErrorBanner but
+// without any lipgloss styling. Callers that persist the banner as a message
+// segment should use this variant so ANSI escape codes are applied once at
+// render time (avoiding glamour's markdown pipeline mangling raw ANSI).
+func plainErrorBanner(err error, providerName string) string {
+	providerSuffix := ""
+	if providerName != "" {
+		providerSuffix = fmt.Sprintf(" (%s)", providerName)
+	}
+	switch {
+	case errors.Is(err, m31errors.ErrContextExceeded):
+		return "⚠ Context window exceeded. Use /compress to free space."
+	case errors.Is(err, m31errors.ErrInvalidKey):
+		return fmt.Sprintf("✗ Invalid API key%s. Run /settings to update.", providerSuffix)
+	case errors.Is(err, m31errors.ErrRateLimited):
+		return fmt.Sprintf("⚠ Rate limited%s. Auto-fallback in progress or retry in a moment.", providerSuffix)
+	case errors.Is(err, m31errors.ErrProviderUnreachable):
+		return fmt.Sprintf("⚠ Provider unreachable%s — check connection or try /fallback.", providerSuffix)
+	case errors.Is(err, m31errors.ErrStreamTruncated):
+		return "⚠ Stream interrupted — try sending your message again."
+	case errors.Is(err, m31errors.ErrModelNotFound):
+		return fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix)
+	default:
+		return "✗ " + m31errors.UserMessage(err)
+	}
+}
+
 // typedErrorName returns the sentinel name for debug logging.
 func typedErrorName(err error) string {
 	switch {
@@ -208,8 +235,7 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) {
 			"message", msg.Err.Error())
 	}
 
-	banner := renderErrorBanner(msg.Err, m.theme, msg.ProviderName)
-	m.messages = append(m.messages, makeAssistantMsg(banner))
+	m.messages = append(m.messages, makeErrorBannerMsg(plainErrorBanner(msg.Err, msg.ProviderName), msg.ProviderName))
 
 	m.streaming = false
 	m.thinking = false
