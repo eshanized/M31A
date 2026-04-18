@@ -106,6 +106,13 @@ type Engine struct {
 	// Cached system prompt static portions
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once
+	// Cached project state for execute phase (H15 fix)
+	cachedProject     *m31types.ProjectState
+	cachedProjectOnce sync.Once
+	cachedProjectID   string // session ID for invalidation
+	// Cached parsed plan for execute phase (H15 fix)
+	cachedPlan     *m31types.Plan
+	cachedPlanMD5  string // MD5 of planMarkdown for invalidation
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -594,7 +601,9 @@ func (e *Engine) PlanVersion() int {
 
 // buildToolDefinitions returns the tool definitions for the LLM.
 // Results are cached after the first call since tool definitions
-// don't change during a session (PERF-23).
+// don't change during a session (PERF-23). Each definition's
+// ParametersParsed field is populated once to avoid repeated
+// json.Unmarshal in BuildChatBody (PERF-25).
 func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 	e.cachedToolDefsOnce.Do(func() {
 		var defs []provider.ToolDefinition
@@ -610,6 +619,13 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 			}
 			if sp, ok := tool.(m31types.SchemaProvider); ok {
 				def.Parameters = sp.ParameterSchema()
+			}
+			// Pre-parse JSON to avoid repeated Unmarshal in BuildChatBody
+			if def.Parameters != "" {
+				var parsed any
+				if err := json.Unmarshal([]byte(def.Parameters), &parsed); err == nil {
+					def.ParametersParsed = parsed
+				}
 			}
 			defs = append(defs, def)
 		}
