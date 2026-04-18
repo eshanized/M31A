@@ -32,6 +32,9 @@ last_reviewed: 2026-06-06
 - **Prefer Edit over FileWrite when modifying an existing file** — FileWrite replaces the entire content.
 - Path resolution: paths are relative to the working directory.
 - Format: provide the complete file content, not just diffs.
+- Never use for: scratch/temp artifacts, reasoning dumps, "notes" files, or exploratory dumps
+  to `/tmp/` or the project root. If the user did not ask you to create a file, do not call
+  FileWrite — respond in text instead.
 
 ## Edit
 
