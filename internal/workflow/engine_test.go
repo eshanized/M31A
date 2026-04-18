@@ -541,6 +541,31 @@ func TestPromptRegistry_LoadPrompts(t *testing.T) {
 	}
 }
 
+// TestAutonomousPrompt_ReadOnlyGuidance locks in the read-only-task guidance
+// in autonomous.md so the agent is told to respond in text (not call FileWrite
+// for scratch artifacts) when asked to explain/summarize/review code.
+// Regression here re-triggers the DESTRUCTIVE permission dialog on "explain
+// the codebase" style requests.
+func TestAutonomousPrompt_ReadOnlyGuidance(t *testing.T) {
+	registry, err := LoadPrompts()
+	if err != nil {
+		t.Fatalf("LoadPrompts failed: %v", err)
+	}
+	for _, want := range []string{
+		"Read-only tasks",
+		"Respond directly in text",
+		"Never call FileWrite",
+		"/tmp/",
+	} {
+		if !strings.Contains(registry.Autonomous, want) {
+			t.Errorf("autonomous prompt missing %q", want)
+		}
+	}
+	if !strings.Contains(registry.ToolUse, "Never use for") {
+		t.Error("tool-use FileWrite section missing 'Never use for' guidance")
+	}
+}
+
 func TestEngine_BuildSystemPrompt(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
