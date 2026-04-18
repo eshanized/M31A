@@ -7,6 +7,29 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
+// Pre-compiled regex patterns — avoids recompilation on every ParsePlan call.
+var (
+	reTitle      = regexp.MustCompile(`(?m)^#\s+(.+)$`)
+	reNextH2     = regexp.MustCompile(`(?m)^##\s+`)
+	reNextH3     = regexp.MustCompile(`(?m)^###\s+`)
+	reBlockquote = regexp.MustCompile(`(?m)^>\s?`)
+	reReviewNote = regexp.MustCompile(`(?m)>\s*\[!(\w+)\]\s*\n((?:>\s*.+\n?)+)`)
+	reQuestion   = regexp.MustCompile(`(?m)^\d+\.\s+(.+?)(?:\s*[—-]\s*(.+))?$`)
+	reH3         = regexp.MustCompile(`(?m)^###\s+(.+)$`)
+	reH4         = regexp.MustCompile(`(?m)^####\s+\[(NEW|MODIFY)\]\s+(.+)$`)
+)
+
+// sectionHeaderRe returns a compiled regex for matching an H2 header with the given name.
+// Uses regexp.QuoteMeta for safe interpolation.
+func sectionHeaderRe(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?im)^##\s+` + regexp.QuoteMeta(name) + `\s*$`)
+}
+
+// subsectionHeaderRe returns a compiled regex for matching an H3 header with the given name.
+func subsectionHeaderRe(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?im)^###\s+` + regexp.QuoteMeta(name) + `\s*$`)
+}
+
 // ParsePlan extracts a structured Plan from rich markdown content.
 // The markdown is expected to follow the format defined in plan-format.md.
 // Sections that cannot be parsed are left empty rather than causing an error.
@@ -41,8 +64,7 @@ func ParsePlan(markdown string) (*m31types.Plan, error) {
 
 // extractTitle returns the first H1 heading from the markdown.
 func extractTitle(markdown string) string {
-	re := regexp.MustCompile(`(?m)^#\s+(.+)$`)
-	m := re.FindStringSubmatch(markdown)
+	m := reTitle.FindStringSubmatch(markdown)
 	if len(m) > 1 {
 		return strings.TrimSpace(m[1])
 	}
@@ -51,15 +73,14 @@ func extractTitle(markdown string) string {
 
 // extractSection returns the content between a given H2 header and the next H2 header.
 func extractSection(markdown, header string) string {
-	headerRe := regexp.MustCompile(`(?im)^##\s+` + regexp.QuoteMeta(header) + `\s*$`)
+	headerRe := sectionHeaderRe(header)
 	loc := headerRe.FindStringIndex(markdown)
 	if loc == nil {
 		return ""
 	}
 	start := loc[1]
 
-	nextH2 := regexp.MustCompile(`(?m)^##\s+`)
-	nextLoc := nextH2.FindStringIndex(markdown[start:])
+	nextLoc := reNextH2.FindStringIndex(markdown[start:])
 	if nextLoc != nil {
 		return strings.TrimSpace(markdown[start : start+nextLoc[0]])
 	}
@@ -72,13 +93,12 @@ func extractReviewNotes(section string) []m31types.ReviewNote {
 		return nil
 	}
 	var notes []m31types.ReviewNote
-	re := regexp.MustCompile(`(?m)>\s*\[!(\w+)\]\s*\n((?:>\s*.+\n?)+)`)
-	matches := re.FindAllStringSubmatch(section, -1)
+	matches := reReviewNote.FindAllStringSubmatch(section, -1)
 	for _, m := range matches {
 		if len(m) > 2 {
 			level := strings.TrimSpace(m[1])
 			text := strings.TrimSpace(m[2])
-			text = regexp.MustCompile(`(?m)^>\s?`).ReplaceAllString(text, "")
+			text = reBlockquote.ReplaceAllString(text, "")
 			notes = append(notes, m31types.ReviewNote{
 				Level: level,
 				Text:  strings.TrimSpace(text),
@@ -97,8 +117,7 @@ func extractOpenQuestions(section string) []m31types.OpenQuestion {
 		return nil
 	}
 	var questions []m31types.OpenQuestion
-	re := regexp.MustCompile(`(?m)^\d+\.\s+(.+?)(?:\s*[—-]\s*(.+))?$`)
-	matches := re.FindAllStringSubmatch(section, -1)
+	matches := reQuestion.FindAllStringSubmatch(section, -1)
 	for _, m := range matches {
 		if len(m) > 1 {
 			q := strings.TrimSpace(m[1])
@@ -124,10 +143,7 @@ func extractProposedChanges(section string) []m31types.ProposedChangeGroup {
 	}
 	var groups []m31types.ProposedChangeGroup
 
-	h3Re := regexp.MustCompile(`(?m)^###\s+(.+)$`)
-	h4Re := regexp.MustCompile(`(?m)^####\s+\[(NEW|MODIFY)\]\s+(.+)$`)
-
-	h3Matches := h3Re.FindAllStringSubmatchIndex(section, -1)
+	h3Matches := reH3.FindAllStringSubmatchIndex(section, -1)
 
 	for i, h3Match := range h3Matches {
 		category := strings.TrimSpace(section[h3Match[2]:h3Match[3]])
@@ -139,7 +155,7 @@ func extractProposedChanges(section string) []m31types.ProposedChangeGroup {
 		chunk := section[start:end]
 
 		var changes []m31types.ProposedChange
-		h4IndexMatches := h4Re.FindAllStringSubmatchIndex(chunk, -1)
+		h4IndexMatches := reH4.FindAllStringSubmatchIndex(chunk, -1)
 		for _, h4Idx := range h4IndexMatches {
 			if len(h4Idx) >= 6 {
 				action := strings.TrimSpace(chunk[h4Idx[2]:h4Idx[3]])
@@ -191,15 +207,14 @@ func extractVerificationPlan(section string) m31types.VerificationPlan {
 
 // extractSubsection returns content under an H3 header within a section.
 func extractSubsection(section, header string) string {
-	headerRe := regexp.MustCompile(`(?im)^###\s+` + regexp.QuoteMeta(header) + `\s*$`)
+	headerRe := subsectionHeaderRe(header)
 	loc := headerRe.FindStringIndex(section)
 	if loc == nil {
 		return ""
 	}
 	start := loc[1]
 
-	nextH3 := regexp.MustCompile(`(?m)^###\s+`)
-	nextLoc := nextH3.FindStringIndex(section[start:])
+	nextLoc := reNextH3.FindStringIndex(section[start:])
 	if nextLoc != nil {
 		return strings.TrimSpace(section[start : start+nextLoc[0]])
 	}
