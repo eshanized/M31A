@@ -279,6 +279,11 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 
 // ─── Viewport management ──────────────────────────────────────────────────────
 
+// minRenderInterval is the minimum time between full viewport re-renders
+// during streaming. Prevents rebuilding the entire viewport at 10fps when
+// only the streaming tail changes.
+const minRenderInterval = time.Second / 5 // 5fps during streaming
+
 // autoScrollConditionally scrolls to the bottom only if the user hasn't manually scrolled.
 func (m *ReplModel) autoScrollConditionally() {
 	if !m.userScrolled {
@@ -287,7 +292,15 @@ func (m *ReplModel) autoScrollConditionally() {
 }
 
 // renderMessages rebuilds the viewport content from the message list.
+// During streaming, renders are throttled to minRenderInterval to avoid
+// rebuilding the entire viewport on every 100ms tick.
 func (m *ReplModel) renderMessages() {
+	// Throttle during streaming: skip if rendered too recently
+	if m.streaming || m.thinking {
+		if !m.lastRenderTime.IsZero() && time.Since(m.lastRenderTime) < minRenderInterval {
+			return
+		}
+	}
 	if len(m.messages) == 0 && !m.streaming {
 		// Render welcome screen content
 		m.viewport.SetContent(m.renderWelcome())
@@ -368,4 +381,5 @@ func (m *ReplModel) renderMessages() {
 	}
 
 	m.viewport.SetContent(sb.String())
+	m.lastRenderTime = time.Now()
 }
