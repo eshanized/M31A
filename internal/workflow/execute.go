@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -73,14 +74,8 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	toolCallCount := 0
 	for _, group := range groups {
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
-			// Save checkpoint before each task for rollback on heal failure.
-			if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
-				Phase:     m31types.PhaseExecute,
-				Timestamp: time.Now(),
-				TaskCount: task.ID,
-			}); err != nil {
-				e.logger.Warn("pre-task checkpoint failed", "task", task.ID, "error", err)
-			}
+			// H16 fix: removed pre-task checkpoint — too expensive (10+ read+parse+write
+			// cycles per plan). Checkpoints now only at phase boundaries and on heal.
 
 			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
 			// Count tool calls from task result
@@ -95,11 +90,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			e.logger.Error("execute group failed", "error", err)
 		}
 
-		// Update TASKS.md and STATE.md after each group
-		updatedTasks := runner.Tasks()
-		if err := e.sessionMgr.SaveTasks(e.sessionID, updatedTasks); err != nil {
-			e.logger.Warn("save tasks failed", "error", err)
-		}
+		// M38 fix: only save state after group, not tasks (tasks saved once at end)
 		if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
 			"executing tasks", "group complete"); err != nil {
 			e.logger.Warn("save state failed", "error", err)
@@ -221,44 +212,64 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			ToolCalls: toolCalls,
 		})
 
-		for _, tc := range toolCalls {
-			// Emit tool start message
-			e.emit(ToolStartMsg{
-				ToolName:    tc.Name,
-				Description: fmt.Sprintf("Executing %s", tc.Name),
-			})
+		// Execute tool calls in parallel with bounded concurrency.
+		// The dispatcher has its own rate limiter, and goroutines are bounded
+		// by the semaphore to prevent resource exhaustion.
+		const maxToolConcurrency = 4
+		toolExecResults = make([]struct {
+			call     m31types.ToolCall
+			result   m31types.ToolResult
+			err      error
+			duration int64
+		}, len(toolCalls))
 
-			toolStart := time.Now()
-			result, err := e.dispatcher.Execute(ctx, tc)
-			toolDuration := time.Since(toolStart).Milliseconds()
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, maxToolConcurrency)
+		for i, tc := range toolCalls {
+			wg.Add(1)
+			go func(idx int, call m31types.ToolCall) {
+				defer wg.Done()
+				sem <- struct{}{}        // acquire
+				defer func() { <-sem }() // release
 
-			toolExecResults = append(toolExecResults, struct {
-				call     m31types.ToolCall
-				result   m31types.ToolResult
-				err      error
-				duration int64
-			}{
-				call:     tc,
-				result:   result,
-				err:      err,
-				duration: toolDuration,
-			})
-
-			if err != nil {
-				e.emit(ToolCompleteMsg{
-					ToolName:   tc.Name,
-					Success:    false,
-					DurationMs: toolDuration,
-					Error:      err.Error(),
+				e.emit(ToolStartMsg{
+					ToolName:    call.Name,
+					Description: fmt.Sprintf("Executing %s", call.Name),
 				})
-			} else {
-				e.emit(ToolCompleteMsg{
-					ToolName:   tc.Name,
-					Success:    true,
-					DurationMs: toolDuration,
-				})
-			}
+
+				toolStart := time.Now()
+				result, err := e.dispatcher.Execute(ctx, call)
+				toolDuration := time.Since(toolStart).Milliseconds()
+
+				toolExecResults[idx] = struct {
+					call     m31types.ToolCall
+					result   m31types.ToolResult
+					err      error
+					duration int64
+				}{
+					call:     call,
+					result:   result,
+					err:      err,
+					duration: toolDuration,
+				}
+
+				if err != nil {
+					e.emit(ToolCompleteMsg{
+						ToolName:   call.Name,
+						Success:    false,
+						DurationMs: toolDuration,
+						Error:      err.Error(),
+					})
+				} else {
+					e.emit(ToolCompleteMsg{
+						ToolName:   call.Name,
+						Success:    true,
+						DurationMs: toolDuration,
+					})
+				}
+			}(i, tc)
 		}
+		wg.Wait()
 
 		// Feed ALL tool results back to the LLM, including errors
 		var toolErrMessages []string
@@ -359,10 +370,18 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 	}
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
-	// Load PROJECT.md for project context
-	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
-	if projErr != nil {
-		e.logger.Warn("execute context: failed to load project", "error", projErr)
+	// Load PROJECT.md for project context (H15 fix: cache on first load per session)
+	var project *m31types.ProjectState
+	if e.cachedProjectID == e.sessionID {
+		project = e.cachedProject
+	} else {
+		var projErr error
+		project, projErr = e.sessionMgr.LoadProject(e.sessionID)
+		if projErr != nil {
+			e.logger.Warn("execute context: failed to load project", "error", projErr)
+		}
+		e.cachedProject = project
+		e.cachedProjectID = e.sessionID
 	}
 	projectCtx := ""
 	if project != nil {
@@ -370,14 +389,21 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 			project.Goal, project.ProjectType, project.Framework)
 	}
 
-	// Load plan narrative for implementation context
+	// Load plan narrative for implementation context (H15 fix: cache parsed plan)
 	planCtx := ""
 	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
 	if planMarkdown == "" {
 		planMarkdown = e.planMarkdown
 	}
 	if planMarkdown != "" {
-		plan, _ := ParsePlan(planMarkdown)
+		var plan *m31types.Plan
+		if e.cachedPlan != nil && e.cachedPlanMD5 == planMarkdown {
+			plan = e.cachedPlan
+		} else {
+			plan, _ = ParsePlan(planMarkdown)
+			e.cachedPlan = plan
+			e.cachedPlanMD5 = planMarkdown
+		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"
 			if plan.Summary != "" {
