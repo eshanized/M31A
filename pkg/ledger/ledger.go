@@ -120,8 +120,8 @@ func NewEntry(session types.Session, taskCount, failedTasks, skippedTasks, commi
 // Append adds an entry to the ledger, deduplicating by SessionID.
 // If the file doesn't exist, it creates it with a markdown table header.
 // Returns an error wrapping ErrTaskFailed if an entry for the same SessionID
-// already exists (H-18 idempotency guard). The write is atomic: content is
-// written to a temp file then renamed to prevent corruption on crash (H-16).
+// already exists (H-18 idempotency guard). Uses true append-only writes (H9 fix)
+// instead of rewriting the entire file on every append.
 func (l *Ledger) Append(entry LedgerEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -135,8 +135,32 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 
 	l.entries = append(l.entries, entry)
 
-	// Atomic write via temp file + rename.
+	// Append-only write (H9 fix): if file exists, append the new row;
+	// otherwise create the full file with header.
+	if _, err := os.Stat(l.path); err == nil {
+		return l.appendEntry(entry)
+	}
 	return l.rewriteFile()
+}
+
+// appendEntry appends a single entry to the ledger file without rewriting.
+// The file must already exist with the header.
+func (l *Ledger) appendEntry(entry LedgerEntry) error {
+	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND, types.DirPermission)
+	if err != nil {
+		// Fallback to full rewrite if append fails
+		return l.rewriteFile()
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	if _, err := fmt.Fprintln(w, formatEntry(entry)); err != nil {
+		return fmt.Errorf("append entry: %w", err)
+	}
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("flush append: %w", err)
+	}
+	return nil
 }
 
 // formatEntry serializes a LedgerEntry to a markdown table row.
@@ -233,8 +257,8 @@ func matchesAnyKeyword(entryKeywords, queryKeywords []string) bool {
 // Uses mtime-based caching: if LEDGER.md hasn't been modified since
 // the last call, returns the cached result (M-16).
 func (l *Ledger) Stats() LedgerStats {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	// Check mtime-based cache
 	if info, err := os.Stat(l.path); err == nil {
@@ -351,24 +375,25 @@ func (l *Ledger) rewriteFile() error {
 	}
 
 	writeLines := func() error {
-		if _, err := fmt.Fprintln(f, "# Cross-Session Learning Ledger"); err != nil {
+		w := bufio.NewWriter(f)
+		if _, err := fmt.Fprintln(w, "# Cross-Session Learning Ledger"); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(f, ""); err != nil {
+		if _, err := fmt.Fprintln(w, ""); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(f, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |"); err != nil {
+		if _, err := fmt.Fprintln(w, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |"); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(f, "|---|---|---|---|---|---|---|---|---|---|"); err != nil {
+		if _, err := fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|"); err != nil {
 			return err
 		}
 		for _, entry := range l.entries {
-			if _, err := fmt.Fprintln(f, formatEntry(entry)); err != nil {
+			if _, err := fmt.Fprintln(w, formatEntry(entry)); err != nil {
 				return err
 			}
 		}
-		return nil
+		return w.Flush()
 	}
 
 	if err := writeLines(); err != nil {
