@@ -409,22 +409,11 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 			ID: entry.Name(),
 		}
 
-		// Try to read session.json
-		sessionPath := m.sessionJSONPath(entry.Name())
-		data, err := readFileLimited(sessionPath, types.MaxSessionFileSize)
+		// Try to read session.json using optimized metadata-only path (H8 fix)
+		sess, err := m.loadSessionMetadata(entry.Name())
 		if err != nil {
 			info.Corrupted = true
 			// Use directory modtime as fallback
-			if fi, statErr := entry.Info(); statErr == nil {
-				info.LastModified = fi.ModTime()
-			}
-			sessions = append(sessions, info)
-			continue
-		}
-
-		var s Session
-		if err := json.Unmarshal(data, &s); err != nil {
-			info.Corrupted = true
 			if fi, statErr := entry.Info(); statErr == nil {
 				info.LastModified = fi.ModTime()
 			}
@@ -438,12 +427,12 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 			info.LastModified = fi.ModTime()
 		}
 
-		info.Model = s.Model
-		info.Provider = s.Provider
-		info.StartedAt = s.StartedAt
-		info.MessageCount = s.MessageCount
-		info.WorkflowPhase = s.WorkflowPhase
-		info.Label = s.Label
+		info.Model = sess.Model
+		info.Provider = sess.Provider
+		info.StartedAt = sess.StartedAt
+		info.MessageCount = sess.MessageCount
+		info.WorkflowPhase = sess.WorkflowPhase
+		info.Label = sess.Label
 		sessions = append(sessions, info)
 	}
 
