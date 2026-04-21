@@ -156,27 +156,40 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 		}
 		task := r.tasks[idx]
 
-		if curStatus := r.status[task.ID]; curStatus == types.StatusSkipped ||
+		r.mu.RLock()
+		curStatus := r.status[task.ID]
+		r.mu.RUnlock()
+		if curStatus == types.StatusSkipped ||
 			curStatus == types.StatusFailed || curStatus == types.StatusUnrecoverable ||
 			curStatus == types.StatusDone {
 			continue
 		}
 
+		r.mu.RLock()
 		allDepsOK := true
 		for _, depID := range task.Dependencies {
 			depStatus := r.status[depID]
 			if depStatus == types.StatusFailed || depStatus == types.StatusSkipped || depStatus == types.StatusUnrecoverable {
+				r.mu.RUnlock()
+				r.mu.Lock()
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d failed/skipped", depID)}
+				r.mu.Unlock()
 				allDepsOK = false
 				break
 			}
 			if depStatus != types.StatusDone {
+				r.mu.RUnlock()
+				r.mu.Lock()
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d not completed", depID)}
+				r.mu.Unlock()
 				allDepsOK = false
 				break
 			}
+		}
+		if allDepsOK {
+			r.mu.RUnlock()
 		}
 
 		if allDepsOK {
@@ -310,6 +323,8 @@ func (r *Runner) Results() map[int]TaskResult {
 
 // AllDone returns true when all tasks are done, skipped, failed, or unrecoverable.
 func (r *Runner) AllDone() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, t := range r.tasks {
 		s := r.status[t.ID]
 		if s == types.StatusPending || s == types.StatusRunning {
@@ -321,6 +336,8 @@ func (r *Runner) AllDone() bool {
 
 // Summary returns task counts by status.
 func (r *Runner) Summary() (total, done, failed, skipped int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	total = len(r.tasks)
 	for _, t := range r.tasks {
 		switch r.status[t.ID] {
