@@ -711,3 +711,17 @@ func (g *Git) BranchList() ([]string, error) {
 	}
 	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }
+
+// CountCommits returns the number of commits between two hashes using
+// `git rev-list --count`. startHash is the older commit, endHash the newer.
+func (g *Git) CountCommits(startHash, endHash string) (int, error) {
+	out, err := g.run("rev-list", "--count", startHash+".."+endHash)
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("parse rev-list count: %w", err)
+	}
+	return n, nil
+}
