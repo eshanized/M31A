@@ -142,6 +142,10 @@ func (m *AppState) addToast(text, toastType string) int {
 	if len(m.toasts) > maxVisibleToasts+2 {
 		m.toasts = m.toasts[len(m.toasts)-(maxVisibleToasts+2):]
 	}
+	// Also store in notification history
+	if m.notifModel != nil {
+		m.notifModel.AddNotification(text, toastType)
+	}
 	return id
 }
 
@@ -347,12 +351,15 @@ func (m *AppState) persistWorkflowState() {
 	if m.sessionManager == nil || m.sessionID == "" {
 		return
 	}
-	_ = m.sessionManager.UpdateWorkflowState(
+	if err := m.sessionManager.UpdateWorkflowState(
 		m.sessionID,
 		m.workflowGoal,
 		m.workflowPhase,
 		m.discussQuestions,
-	)
+	); err != nil {
+		slog.Warn("failed to persist workflow state", "error", err)
+		m.addToast("Failed to save workflow state", "warning")
+	}
 }
 
 // checkAutoDream syncs REPL messages to the AutoDream consolidator and
