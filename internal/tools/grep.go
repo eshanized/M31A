@@ -318,6 +318,11 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
+			if lineNum%1000 == 0 {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+			}
 			if re.MatchString(scanner.Text()) {
 				if len(results) >= maxResults {
 					truncated = true
