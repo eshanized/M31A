@@ -290,6 +290,9 @@ func NewApp(
 	// Initialize sidebar
 	a.sidebarModel = NewSidebarModel(gitClient, tm.Current())
 	a.sidebarModel.SetShutdownContext(a.shutdownCtx)
+	if cfg != nil && cfg.UI.SidebarWidth > 0 {
+		a.sidebarModel.SetWidth(cfg.UI.SidebarWidth)
+	}
 
 	return a
 }
