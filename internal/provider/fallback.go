@@ -22,40 +22,74 @@ const maxRetryAfter = types.MaxRetryAfterWait
 func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
 	names := registry.ListAll()
 
+	// Collect candidate providers (excluding the current one)
+	type candidate struct {
+		name     string
+		provider LLMProvider
+	}
+	var candidates []candidate
 	for _, name := range names {
 		if name == currentProvider {
 			continue
 		}
-
-		p, err := registry.TrySetActive(name)
+		p, err := registry.Get(name)
 		if err != nil {
 			continue
 		}
+		candidates = append(candidates, candidate{name: name, provider: p})
+	}
 
-		// Use defer cancel() to ensure cleanup even if HealthCheck panics
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		status := func() types.HealthStatus {
-			defer cancel()
-			return p.HealthCheck(ctx)
-		}()
+	if len(candidates) == 0 {
+		return "", nil, m31errors.ErrProviderUnreachable
+	}
 
+	// Parallel health checks (PV-14 fix): run all candidates concurrently
+	// and pick the first healthy one instead of serial 10s×N worst case.
+	type result struct {
+		name   string
+		status types.HealthStatus
+	}
+	ch := make(chan result, len(candidates))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, c := range candidates {
+		go func(c candidate) {
+			status := c.provider.HealthCheck(ctx)
+			ch <- result{name: c.name, status: status}
+		}(c)
+	}
+
+	// Collect results; return the first healthy provider in priority order.
+	// We track results and return based on the original candidate order.
+	results := make(map[string]types.HealthStatus, len(candidates))
+	for i := 0; i < len(candidates); i++ {
+		r := <-ch
+		results[r.name] = r.status
+	}
+
+	// Check candidates in original order for deterministic priority
+	for _, c := range candidates {
+		status, ok := results[c.name]
+		if !ok {
+			continue
+		}
 		if status.Status == "live" || status.Status == "slow" {
-			// Reason describes the fallback's health, since the caller lost the
-			// original provider's failure context by the time we get here.
+			// Commit the switch now that we know it's healthy
+			if _, err := registry.TrySetActive(c.name); err != nil {
+				continue
+			}
 			reason := "fallback_live"
 			if status.Status == "slow" {
 				reason = "fallback_slow"
 			}
-
-			return name, &FallbackEvent{
+			return c.name, &FallbackEvent{
 				From:   currentProvider,
-				To:     name,
+				To:     c.name,
 				Reason: reason,
 			}, nil
 		}
-
-		// Health check failed — rollback to the original provider
-		registry.RollbackActive(name, currentProvider)
 	}
 
 	return "", nil, m31errors.ErrProviderUnreachable
