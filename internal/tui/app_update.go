@@ -550,6 +550,54 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	// ── Bisect start with commit range ─────────────────────────────────────
+	case BisectStartMsg:
+		if m.bisectModel != nil && m.git != nil {
+			commits, err := m.git.Log(0) // all commits
+			if err == nil && len(commits) > 0 {
+				var bisectCommits []bisectCommit
+				goodIdx := -1
+				badIdx := -1
+				for i, c := range commits {
+					hash := c.Hash
+					if len(hash) > 7 {
+						hash = hash[:7]
+					}
+					status := "pending"
+					if msg.GoodCommit != "" && (c.Hash == msg.GoodCommit || c.ShortHash == msg.GoodCommit || hash == msg.GoodCommit) {
+						status = "good"
+						goodIdx = i
+					}
+					if msg.BadCommit != "" && (c.Hash == msg.BadCommit || c.ShortHash == msg.BadCommit || hash == msg.BadCommit) {
+						status = "bad"
+						badIdx = i
+					}
+					bisectCommits = append(bisectCommits, bisectCommit{
+						Hash:    c.Hash,
+						Message: c.Message,
+						Status:  status,
+					})
+				}
+				// If we found good and bad, keep only the range between them
+				if goodIdx >= 0 && badIdx >= 0 && goodIdx != badIdx {
+					start, end := goodIdx, badIdx
+					if start > end {
+						start, end = end, start
+					}
+					bisectCommits = bisectCommits[start : end+1]
+				}
+				if len(bisectCommits) > 0 {
+					m.bisectModel.SetCommits(bisectCommits)
+				}
+			}
+		}
+
+	// ── Session detail request ─────────────────────────────────────────────
+	case SessionDetailRequestMsg:
+		if m.sessionDetailModel != nil && msg.Session != nil {
+			m.sessionDetailModel.SetSession(msg.Session)
+		}
+
 	// ── Arbitrage optimization results ───────────────────────────────────────
 	case OptimizedMsg:
 		if len(msg.Recommendations) > 0 {
@@ -664,6 +712,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resumeModel.Refresh(msg.sessions)
 		}
 		m.screen = ScreenResume
+
+	// ── Metrics loaded (async) ──────────────────────────────────────────────
+	case metricsLoadedMsg:
+		if m.metricsModel != nil {
+			m.metricsModel.ApplyStats(msg.stats)
+		}
 
 	// ── Session rename ───────────────────────────────────────────────────────
 	case SessionRenameMsg:
@@ -1515,7 +1569,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		}
 		m.metricsModel.SetDimensions(cw, ch)
 		if m.sessionManager != nil {
-			m.metricsModel.LoadStats(m.sessionManager)
+			return m.metricsModel.LoadStatsCmd(m.sessionManager)
 		}
 		return nil
 	case ScreenConfig:
@@ -1540,6 +1594,10 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenDiscuss:
 		if m.discussModel == nil {
 			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+			// Activate discuss timeout from config
+			if m.config != nil && m.config.UI.DiscussTimeout > 0 {
+				m.discussModel.SetTimeout(m.config.UI.DiscussTimeout)
+			}
 		} else {
 			m.discussModel.SetDimensions(cw, ch)
 		}
@@ -1581,10 +1639,30 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		} else {
 			m.sessionDetailModel.SetDimensions(cw, ch)
 		}
+		// Load session data if we have a session ID from AppMsg
+		if m.sessionDetailModel.sess == nil && m.sessionManager != nil {
+			// Try to find the session from the resume model's current selection
+			if m.resumeModel != nil && len(m.resumeModel.sessions) > 0 {
+				idx := m.resumeModel.cursor
+				if idx >= 0 && idx < len(m.resumeModel.sessions) {
+					sid := m.resumeModel.sessions[idx].ID
+					if sess, err := m.sessionManager.LoadSession(sid); err == nil && sess != nil {
+						m.sessionDetailModel.SetSession(sess)
+					}
+				}
+			}
+		}
 		return nil
 	case ScreenFileExplorer:
 		if m.fileExplorerModel == nil {
 			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), cw, ch)
+			// Build real file tree from working directory
+			if m.cwd != "" {
+				root := buildFileTree(m.cwd, 0, 3)
+				if root != nil {
+					m.fileExplorerModel.SetRoot(root)
+				}
+			}
 		} else {
 			m.fileExplorerModel.SetDimensions(cw, ch)
 		}
@@ -2085,7 +2163,11 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 		m.screen = ScreenExecute
 		var tasks []types.Task
 		if m.sessionManager != nil {
-			tasks, _ = m.sessionManager.LoadTasks(m.sessionID)
+			var loadErr error
+			tasks, loadErr = m.sessionManager.LoadTasks(m.sessionID)
+			if loadErr != nil {
+				slog.Warn("failed to load tasks for execute screen", "error", loadErr)
+			}
 		}
 		if m.executeModel == nil {
 			m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
