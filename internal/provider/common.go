@@ -25,19 +25,47 @@ func SetCommonHeaders(req *http.Request, apiKey string, version string) {
 
 // IsContextExceeded checks if an HTTP error indicates context window overflow.
 // Only matches HTTP 400 with specific context-related patterns to avoid false positives.
-// Uses strings.EqualFold for case-insensitive comparison without allocating a
-// lowered copy of the full body (M10 fix).
+// Uses containsFold for case-insensitive matching without allocating a lowered copy (PV-6 fix).
 func IsContextExceeded(statusCode int, body string) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
-	// Use Index with case-insensitive search to avoid allocating lowercase copy
-	lower := strings.ToLower(body)
-	return strings.Contains(lower, "context_length_exceeded") ||
-		strings.Contains(lower, "maximum context length") ||
-		strings.Contains(lower, "request too large") ||
-		strings.Contains(lower, "context window exceeded") ||
-		strings.Contains(lower, "context_length") && strings.Contains(lower, "exceed")
+	return containsFold(body, "context_length_exceeded") ||
+		containsFold(body, "maximum context length") ||
+		containsFold(body, "request too large") ||
+		containsFold(body, "context window exceeded") ||
+		containsFold(body, "context_length") && containsFold(body, "exceed")
+}
+
+// containsFold reports whether s contains substr using case-insensitive comparison.
+// Avoids allocating a lowered copy of s by scanning character-by-character.
+func containsFold(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+	if len(substr) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if toLowerByte(s[i+j]) != toLowerByte(substr[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+func toLowerByte(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
 }
 
 // messagesToWire projects storage-shaped messages into the OpenAI-compatible
