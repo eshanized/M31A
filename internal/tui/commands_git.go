@@ -103,16 +103,52 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 	}
 }
 
-// handleBisect provides git bisect information.
-func handleBisect(_ []string, ctx CommandContext) CommandResult {
+// handleBisect provides git bisect information or starts interactive bisect.
+func handleBisect(args []string, ctx CommandContext) CommandResult {
 	if ctx.Git == nil {
 		return CommandResult{Success: false, Message: "Git not available in this context."}
 	}
 	if !ctx.Git.IsRepo() {
 		return CommandResult{Success: false, Message: "Not inside a git repository."}
 	}
+
+	// /bisect with args: start <good> <bad>
+	if len(args) >= 2 {
+		goodRef := args[0]
+		badRef := args[1]
+
+		screen := ScreenBisect
+		return CommandResult{
+			Success: true,
+			Screen:  &screen,
+			Message: fmt.Sprintf("Starting bisect: good=%s, bad=%s", goodRef, badRef),
+			Cmd: func() tea.Msg {
+				return BisectStartMsg{
+					GoodCommit: goodRef,
+					BadCommit:  badRef,
+				}
+			},
+		}
+	}
+
+	// /bisect with no args: show last 20 commits in the bisect screen
+	screen := ScreenBisect
 	return CommandResult{
 		Success: true,
-		Message: "**Git bisect** requires a known good and bad commit.\n\nUsage:\n  `git bisect start`\n  `git bisect bad HEAD`\n  `git bisect good <good-commit>`\n\nThen run your test and mark each commit as `good` or `bad`.",
+		Screen:  &screen,
+		Message: "Opening bisect screen with recent commits...",
+		Cmd: func() tea.Msg {
+			commits, err := ctx.Git.Log(20)
+			if err != nil || len(commits) == 0 {
+				return ToastMsg{
+					Text: fmt.Sprintf("Could not load commits: %v", err),
+					Type: "error",
+				}
+			}
+			return BisectStartMsg{
+				BadCommit:  commits[0].Hash,
+				GoodCommit: commits[len(commits)-1].Hash,
+			}
+		},
 	}
 }
