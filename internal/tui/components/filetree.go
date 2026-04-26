@@ -19,8 +19,10 @@ type FileNode struct {
 
 // flatNode is a node with its depth for rendering.
 type flatNode struct {
-	node  *FileNode
-	depth int
+	node      *FileNode
+	depth     int
+	isLast    bool // true if this is the last child at its level
+	parentEnd []bool // tracks which ancestors are last children
 }
 
 // FileTree renders a tree-view of files with indentation.
@@ -34,15 +36,36 @@ type FileTree struct {
 	flatList []flatNode
 }
 
-// NewFileTree creates a FileTree.
+// NewFileTree creates a FileTree with all directories expanded by default.
 func NewFileTree(root *FileNode, t theme.Theme, w, h int) *FileTree {
-	return &FileTree{
+	ft := &FileTree{
 		Root:     root,
 		Expanded: make(map[string]bool),
 		Theme:    t,
 		Width:    w,
 		Height:   h,
 	}
+	// Expand all directories by default
+	ft.expandAll(root)
+	return ft
+}
+
+// expandAll recursively marks all directories as expanded.
+func (ft *FileTree) expandAll(node *FileNode) {
+	if node == nil {
+		return
+	}
+	for _, child := range node.Children {
+		if child.IsDir {
+			ft.Expanded[child.Path] = true
+			ft.expandAll(child)
+		}
+	}
+}
+
+// ExpandAll expands all directories in the tree starting from Root.
+func (ft *FileTree) ExpandAll() {
+	ft.expandAll(ft.Root)
 }
 
 // Toggle expands/collapses a directory.
@@ -89,15 +112,29 @@ func (ft *FileTree) FlatList() []*FileNode {
 func (ft *FileTree) flatten() {
 	ft.flatList = nil
 	if ft.Root != nil {
-		ft.flattenNode(ft.Root, 0)
+		ft.flattenNode(ft.Root, 0, nil)
 	}
 }
 
-func (ft *FileTree) flattenNode(node *FileNode, depth int) {
-	for _, child := range node.Children {
-		ft.flatList = append(ft.flatList, flatNode{node: child, depth: depth})
+func (ft *FileTree) flattenNode(node *FileNode, depth int, parentEnd []bool) {
+	for i, child := range node.Children {
+		isLast := i == len(node.Children)-1
+		// Build parentEnd for children: append whether THIS node is last
+		var childParentEnd []bool
+		if parentEnd != nil {
+			childParentEnd = make([]bool, len(parentEnd))
+			copy(childParentEnd, parentEnd)
+		}
+		childParentEnd = append(childParentEnd, isLast)
+		
+		ft.flatList = append(ft.flatList, flatNode{
+			node:      child,
+			depth:     depth,
+			isLast:    isLast,
+			parentEnd: childParentEnd,
+		})
 		if child.IsDir && ft.Expanded[child.Path] {
-			ft.flattenNode(child, depth+1)
+			ft.flattenNode(child, depth+1, childParentEnd)
 		}
 	}
 }
@@ -139,16 +176,40 @@ func (ft *FileTree) View() string {
 	for i := start; i < end; i++ {
 		flat := ft.flatList[i]
 		selected := i == ft.Cursor
-		lines = append(lines, ft.renderNode(flat.node, flat.depth, selected))
+		lines = append(lines, ft.renderNode(flat, selected))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func (ft *FileTree) renderNode(node *FileNode, depth int, selected bool) string {
+func (ft *FileTree) renderNode(flat flatNode, selected bool) string {
 	t := ft.Theme
+	node := flat.node
 
-	indent := strings.Repeat("  ", depth)
+	// Build tree prefix with proper box-drawing characters.
+	// parentEnd tracks whether each ancestor level is the last child.
+	// For depth d, parentEnd has d entries (one per ancestor level).
+	var indent strings.Builder
+	for i := 0; i < flat.depth; i++ {
+		if i < len(flat.parentEnd) {
+			if flat.parentEnd[i] {
+				indent.WriteString("  ")
+			} else {
+				indent.WriteString("│ ")
+			}
+		} else {
+			indent.WriteString("  ")
+		}
+	}
+	
+	// Add the connector for this node
+	if flat.depth > 0 {
+		if flat.isLast {
+			indent.WriteString("└─")
+		} else {
+			indent.WriteString("├─")
+		}
+	}
 
 	icon := ""
 	iconStyle := lipgloss.NewStyle()
@@ -171,24 +232,44 @@ func (ft *FileTree) renderNode(node *FileNode, depth int, selected bool) string 
 	if selected {
 		nameStyle = nameStyle.Foreground(t.Brand).Bold(true)
 	}
+	
+	// Calculate prefix length for width-aware truncation
+	prefixLen := len(indent.String())
+	
+	// Truncate filename to fit within available width
+	maxNameLen := ft.Width - prefixLen - 4 // leave room for icon, space, padding
+	if maxNameLen < 8 {
+		maxNameLen = 8
+	}
+	displayName := node.Name
+	if len([]rune(displayName)) > maxNameLen {
+		// Keep start and end, truncate middle
+		keepEnd := 4
+		if maxNameLen > keepEnd+3 {
+			displayName = string([]rune(displayName)[:maxNameLen-keepEnd-3]) + "…" + string([]rune(displayName)[len([]rune(displayName))-keepEnd:])
+		} else {
+			displayName = string([]rune(displayName)[:maxNameLen-1]) + "…"
+		}
+	}
+	
 	if node.IsDir {
 		nameStyle = nameStyle.Bold(true)
-		prefix := "  "
+		prefix := " "
 		if ft.Expanded[node.Path] {
-			prefix = "▾ "
+			prefix = "▾"
 		} else {
-			prefix = "▸ "
+			prefix = "▸"
 		}
-		return indent + prefix + nameStyle.Render(node.Name+"/")
+		return indent.String() + prefix + " " + nameStyle.Render(displayName)
 	}
 
 	statusStr := ""
 	if icon != "" {
 		statusStr = iconStyle.Render(icon) + " "
 	}
-	prefix := "    "
+	prefix := "  "
 	if selected {
-		prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("  ▶ ")
+		prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
 	}
-	return indent + prefix + statusStr + nameStyle.Render(node.Name)
+	return indent.String() + prefix + statusStr + nameStyle.Render(displayName)
 }
