@@ -49,11 +49,12 @@ func (m *AppState) View() string {
 	headerInfo := m.buildHeaderInfo()
 	footerInfo := m.buildFooterInfo()
 
-	// Sidebar composition
+	// Sidebar composition — hide sidebar on first-run welcome screen so the
+	// setup wizard gets the full terminal width.
 	m.ensureSidebarModel()
 	sidebarVisible := m.sidebarModel != nil && m.sidebarModel.IsVisible()
-	hasSidebar := sidebarVisible && layout.ShowSidebar(m.width)
-	sidebarOverlay := sidebarVisible && !hasSidebar // narrow terminal, overlay mode
+	hasSidebar := sidebarVisible && layout.ShowSidebar(m.width) && m.screen != ScreenFirstRun
+	sidebarOverlay := sidebarVisible && !hasSidebar && m.screen != ScreenFirstRun // narrow terminal, overlay mode
 	sidebarStr := ""
 
 	contentWidth := m.width
@@ -226,13 +227,13 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	case ScreenConfig:
 		info.KeyboardHints = []string{"j/k scroll", "esc back"}
 	case ScreenBisect:
-		info.KeyboardHints = []string{"y good", "n bad", "b skip", "esc back"}
+		info.KeyboardHints = []string{"g good", "b bad", "s skip", "esc back"}
 	case ScreenThemePicker:
 		info.KeyboardHints = []string{"j/k select", "enter apply", "esc back"}
 	case ScreenNotifications:
 		info.KeyboardHints = []string{"j/k scroll", "esc back"}
 	case ScreenDashboard:
-		info.KeyboardHints = []string{"j/k scroll", "esc back"}
+		info.KeyboardHints = []string{"enter phase", "esc back"}
 	case ScreenPermission:
 		info.KeyboardHints = []string{"y allow", "n deny", "a always"}
 	case ScreenPhaseModelPicker:
