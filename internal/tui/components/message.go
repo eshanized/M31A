@@ -28,12 +28,17 @@ type MessageRenderer struct {
 	theme    theme.Theme
 	renderer *glamour.TermRenderer
 	width    int
+
+	// toolCallCache maps segment content string → pre-parsed ToolCall (TU-3 fix).
+	// Avoids json.Unmarshal on every render for unchanged tool_use segments.
+	toolCallCache map[string]*types.ToolCall
 }
 
 func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 	mr := &MessageRenderer{
-		theme: t,
-		width: width,
+		theme:         t,
+		width:         width,
+		toolCallCache: make(map[string]*types.ToolCall),
 	}
 	if err := mr.createGlamourRenderer(); err != nil {
 		return nil, err
@@ -164,9 +169,16 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 				tb := NewThinkingBlock(seg, t, false, 0)
 				rendered = append(rendered, tb.Render(contentWidth))
 			case "tool_use":
-				var tc types.ToolCall
-				if err := json.Unmarshal([]byte(seg.Content), &tc); err == nil {
-					card := NewToolCard(tc, nil, ToolRunning, t)
+				tc, ok := r.toolCallCache[seg.Content]
+				if !ok {
+					var parsed types.ToolCall
+					if err := json.Unmarshal([]byte(seg.Content), &parsed); err == nil {
+						tc = &parsed
+						r.toolCallCache[seg.Content] = tc
+					}
+				}
+				if tc != nil {
+					card := NewToolCard(*tc, nil, ToolRunning, t)
 					rendered = append(rendered, card.Render(contentWidth))
 				}
 			case "error":
