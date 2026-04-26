@@ -117,7 +117,9 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		}
 		// No questions — skip to next phase based on mode
 		if m.workflowEngine != nil {
-			_ = m.workflowEngine.SkipDiscuss()
+			if err := m.workflowEngine.SkipDiscuss(); err != nil {
+				slog.Warn("failed to skip discuss phase", "error", err)
+			}
 		}
 		next, ok := nextPhaseForMode(types.PhaseDiscuss, mode)
 		if !ok || next == types.PhaseIdle {
