@@ -83,10 +83,15 @@ func handleCost(_ []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "Config not available."}
 	}
 	current := ctx.Config.UI.ShowCostEstimate
-	if current {
-		return CommandResult{Success: true, Message: "Cost display is currently **enabled**. Use settings to toggle."}
+	ctx.Config.UI.ShowCostEstimate = !current
+	state := "enabled"
+	if !ctx.Config.UI.ShowCostEstimate {
+		state = "disabled"
 	}
-	return CommandResult{Success: true, Message: "Cost display is currently **disabled**. Use settings to toggle."}
+	return CommandResult{
+		Success: true,
+		Message: fmt.Sprintf("Cost display **%s**.", state),
+	}
 }
 
 // handleLog shows recent log entries from the m31a log file.
