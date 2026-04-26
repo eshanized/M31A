@@ -138,11 +138,21 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 				}
 			}
 
-			return ToastMsg{
-				Text:     sb.String(),
-				Duration: 8 * time.Second,
-				Type:     "info",
-			}
+			// Emit OptimizedMsg for the notification system
+			return tea.Batch(
+				func() tea.Msg {
+					return OptimizedMsg{
+						Recommendations: []arbitrage.ArbitrageRecommendation{*rec},
+					}
+				},
+				func() tea.Msg {
+					return ToastMsg{
+						Text:     sb.String(),
+						Duration: 8 * time.Second,
+						Type:     "info",
+					}
+				},
+			)
 		},
 	}
 }
