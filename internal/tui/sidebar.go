@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	sidebarDefaultWidth = 28
-	sidebarMinWidth     = 20
-	sidebarMaxWidth     = 50
+	sidebarDefaultWidth = 35
+	sidebarMinWidth     = 25
+	sidebarMaxWidth     = 65
 )
 
 // SidebarModel manages the collapsible sidebar panel that shows git status.
@@ -143,6 +143,17 @@ func (s *SidebarModel) DecreaseWidth() {
 	}
 }
 
+// SetWidth sets the sidebar width, clamped to min/max.
+func (s *SidebarModel) SetWidth(w int) {
+	if w < sidebarMinWidth {
+		w = sidebarMinWidth
+	}
+	if w > sidebarMaxWidth {
+		w = sidebarMaxWidth
+	}
+	s.width = w
+}
+
 // SetTheme updates the sidebar theme.
 func (s *SidebarModel) SetTheme(t theme.Theme) {
 	s.theme = t
@@ -251,7 +262,7 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 		// Rebuild the tree
 		root := buildSidebarTree(files)
 		s.tree.Root = root
-		s.tree.Expanded["."] = true
+		s.tree.ExpandAll()
 		s.loading = false
 		return s, nil
 
@@ -400,10 +411,6 @@ func (s *SidebarModel) View() string {
 			s.tree.Width = contentW
 			treeView := s.tree.View()
 			for _, line := range strings.Split(treeView, "\n") {
-				// Truncate each line to fit the sidebar width
-				if len([]rune(line)) > contentW {
-					line = string([]rune(line)[:contentW-1]) + "…"
-				}
 				lines = append(lines, line)
 			}
 		}
@@ -460,11 +467,18 @@ func (s *SidebarModel) View() string {
 		lines = append(lines, line)
 	}
 
-	content := strings.Join(lines, "\n")
-
-	panel := lipgloss.NewStyle().
-		Width(contentW).
-		Render(content)
+	// Pad each line to exactly contentW characters for consistent border alignment.
+	// Using manual padding instead of lipgloss.Width() to avoid truncation issues
+	// with Unicode characters (box-drawing chars, tree symbols).
+	var paddedLines []string
+	for _, line := range lines {
+		lineW := lipgloss.Width(line)
+		if lineW < contentW {
+			line += strings.Repeat(" ", contentW-lineW)
+		}
+		paddedLines = append(paddedLines, line)
+	}
+	panel := lipgloss.NewStyle().Render(strings.Join(paddedLines, "\n"))
 
 	// Build right border: brand accent when focused, muted otherwise
 	lineCount := len(lines)
@@ -514,6 +528,11 @@ func buildSidebarTree(files []git.FileStatus) *components.FileNode {
 		IsDir: true,
 	}
 
+	// Per-level index for O(1) child lookup instead of O(C) linear scan (TU-6 fix).
+	childIndex := map[*components.FileNode]map[string]*components.FileNode{
+		root: {},
+	}
+
 	for _, f := range files {
 		parts := strings.Split(f.Path, "/")
 		current := root
@@ -522,21 +541,18 @@ func buildSidebarTree(files []git.FileStatus) *components.FileNode {
 			isLast := i == len(parts)-1
 			nodePath := strings.Join(parts[:i+1], "/")
 
-			var child *components.FileNode
-			for _, c := range current.Children {
-				if c.Name == part {
-					child = c
-					break
-				}
-			}
+			index := childIndex[current]
+			child, found := index[part]
 
-			if child == nil {
+			if !found {
 				child = &components.FileNode{
 					Name:  part,
 					Path:  nodePath,
 					IsDir: !isLast,
 				}
 				current.Children = append(current.Children, child)
+				index[part] = child
+				childIndex[child] = map[string]*components.FileNode{}
 			}
 
 			if isLast {
