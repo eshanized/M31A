@@ -414,6 +414,9 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter", " ":
 			fr.step = stepProviderSelect
+		case "esc":
+			// Allow escaping back to REPL if user has already configured a provider
+			return fr, func() tea.Msg { return PopScreenMsg{} }
 		case "q", "ctrl+c":
 			return fr, tea.Quit
 		}
