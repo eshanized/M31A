@@ -197,27 +197,27 @@ func (fr *FirstRunModel) renderWelcome() string {
 	return result
 }
 
-// renderWelcomePanel builds the redesigned "Command Center" welcome panel.
+// renderWelcomePanel builds the welcome panel with a large logo, glow effect,
+// feature cards, and quick-start prompts.
 //
 // Layout (wide ≥56 inner width):
 //
 //	╭──────── M 3 1 A ────────╮  ← double border + branded header tab
 //	│                          │
-//	│      ▂▃▅▆▇▇▆▅▃▂         │  ← accent line above logo
-//	│      [  M31A logo  ]     │
-//	│      ▂▃▅▆▇▇▆▅▃▂         │  ← accent line below logo
-//	│   ░▒▓████████████▓▒░    │  ← gradient separator
+//	│   █████╗  ██████╗  ...   │  ← big block logo
+//	│   ...                    │
+//	│   ▓▓▓▒▒▒░░░··  ···░░░▒▒▓ │  ← glow fade
 //	│                          │
-//	│   AI pair programmer     │  ← tagline
+//	│   Your AI pair programmer│  ← tagline
 //	│   in the terminal        │
 //	│                          │
-//	│   ⚡          🔧        ⎇│  ← feature pipeline
-//	│   Workflows──▶Tools──▶Git│
-//	│   Plan→Ship   Bash   Live│
+//	│  ┌─ Workflows ─┐  ...   │  ← feature cards
+//	│  │  Plan→Ship   │        │
+//	│  └─────────────┘        │
 //	│                          │
-//	│   [ 1 ] Fix tests        │  ← quick-start prompts
-//	│   [ 2 ] Refactor API     │
-//	│   [ 3 ] Explain arch     │
+//	│  › Fix the failing tests │  ← quick-start prompts
+//	│  › Add error handling    │
+//	│  › Explain architecture  │
 //	│                          │
 //	│   ●○○○          [↵] [q] │  ← step dots + key hints
 //	╰──────────────────────────╯
@@ -226,9 +226,7 @@ func (fr *FirstRunModel) renderWelcome() string {
 func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	t := fr.theme
 
-	logoBlock := components.RenderLogo("", true, t.Brand)
-	accent := fr.renderAccentLine(innerW)
-	separator := fr.renderGradientSeparator(innerW)
+	logoBlock := components.RenderBigLogo(t.Brand, true)
 
 	tagline := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).
@@ -237,7 +235,7 @@ func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 
 	var features string
 	if innerW >= 56 {
-		features = fr.renderFeaturePipeline(innerW)
+		features = fr.renderFeatureCards(innerW)
 	} else {
 		features = fr.renderCompactFeatures()
 	}
@@ -248,13 +246,8 @@ func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	var body string
 	if innerW >= 56 {
 		body = lipgloss.JoinVertical(lipgloss.Center,
-			accent,
 			"",
 			logoBlock,
-			"",
-			accent,
-			"",
-			separator,
 			"",
 			tagline,
 			"",
@@ -267,8 +260,6 @@ func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	} else {
 		body = lipgloss.JoinVertical(lipgloss.Center,
 			logoBlock,
-			"",
-			separator,
 			"",
 			tagline,
 			"",
@@ -340,24 +331,6 @@ func truncateStyled(s string, maxW int) string {
 	return out.String()
 }
 
-// renderGlowRow renders a horizontal gradient-bar glow row used beneath the logo.
-func (fr *FirstRunModel) renderGlowRow(width int) string {
-	t := fr.theme
-	chars := []string{"█", "▓", "▒", "░"}
-	var edge strings.Builder
-	for _, ch := range chars {
-		edge.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
-	}
-	edgeStr := edge.String()
-	edgeW := len(chars)
-	center := width - 2*edgeW
-	if center < 2 {
-		center = 2
-	}
-	fill := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", center))
-	return edgeStr + fill + edgeStr
-}
-
 // ─── Overlay helpers (starfield + panel composition) ────────────────────────
 
 // ─── Welcome panel section renderers ────────────────────────────────────────
@@ -381,78 +354,31 @@ func (fr *FirstRunModel) renderWelcomeHeaderRow(panelW int) string {
 	return left + title + right
 }
 
-// renderAccentLine renders a thin decorative line using tapered block characters.
-// Used above and below the logo for a subtle glow frame.
-func (fr *FirstRunModel) renderAccentLine(width int) string {
+// renderFeatureCards renders three feature cards with accent top borders.
+func (fr *FirstRunModel) renderFeatureCards(width int) string {
 	t := fr.theme
-	if width < 12 {
-		return lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("▂", width))
-	}
-	chars := []string{"▂", "▃", "▅", "▆", "▇"}
-	var left, right strings.Builder
-	for _, ch := range chars {
-		styled := lipgloss.NewStyle().Foreground(t.Brand).Render(ch)
-		left.WriteString(styled)
-		right.WriteString(styled)
-	}
-	centerW := width - 2*len(chars)
-	if centerW < 2 {
-		centerW = 2
-	}
-	center := lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("▇", centerW))
-	return left.String() + center + right.String()
-}
-
-// renderGradientSeparator renders a flowing gradient bar using ░▒▓█ characters.
-func (fr *FirstRunModel) renderGradientSeparator(width int) string {
-	t := fr.theme
-	if width <= 0 {
-		return ""
-	}
-	if width <= 8 {
-		return lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("█", width))
-	}
-	edge := []string{"░", "▒", "▓"}
-	var b strings.Builder
-	for _, ch := range edge {
-		b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
-	}
-	centerW := width - 2*len(edge)
-	if centerW < 1 {
-		centerW = 1
-	}
-	b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(strings.Repeat("█", centerW)))
-	for i := len(edge) - 1; i >= 0; i-- {
-		b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(edge[i]))
-	}
-	return b.String()
-}
-
-// renderFeaturePipeline renders three feature blocks connected with ──▶ arrows.
-func (fr *FirstRunModel) renderFeaturePipeline(width int) string {
-	t := fr.theme
-	arrowW := 3
-	cardW := (width - 2*arrowW) / 3
+	marginW := 2
+	gapW := 2
+	cardW := (width - marginW - 2*gapW) / 3
 	if cardW < 12 {
 		cardW = 12
 	}
 
-	c1 := fr.renderFeatureBlock("⚡", "Workflows", "Plan → Execute → Ship", cardW)
-	c2 := fr.renderFeatureBlock("🔧", "Tools", "Bash · Read · Write · Grep", cardW)
-	c3 := fr.renderFeatureBlock("⎇", "Git Aware", "Live repo status", cardW)
+	c1 := fr.renderFeatureCard("⚡", "Workflows", "Plan → Execute → Ship", cardW, t.Brand)
+	c2 := fr.renderFeatureCard("🔧", "Tools", "Bash · Read · Write · Grep", cardW, t.Secondary)
+	c3 := fr.renderFeatureCard("⎇", "Git Aware", "Live repo status", cardW, t.Success)
 
-	arrow := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("─▶")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, c1, " "+arrow+" ", c2, " "+arrow+" ", c3)
+	return "  " + lipgloss.JoinHorizontal(lipgloss.Top, c1, " ", c2, " ", c3)
 }
 
-// renderFeatureBlock renders a single feature block: icon header, bold title, muted desc.
-func (fr *FirstRunModel) renderFeatureBlock(icon, title, desc string, w int) string {
+// renderFeatureCard renders a single feature card with a colored top accent line.
+func (fr *FirstRunModel) renderFeatureCard(icon, title, desc string, w int, accent lipgloss.Color) string {
 	t := fr.theme
-	iconRow := lipgloss.NewStyle().Foreground(t.Brand).Render(icon)
+	topLine := lipgloss.NewStyle().Foreground(accent).Render(strings.Repeat("─", w-2))
+	iconRow := lipgloss.NewStyle().Foreground(accent).Render(icon + " ")
 	titleRow := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(title)
 	descRow := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(desc)
-	content := lipgloss.JoinVertical(lipgloss.Left, iconRow, titleRow, descRow)
+	content := lipgloss.JoinVertical(lipgloss.Left, topLine, "", iconRow+titleRow, descRow)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Border).
@@ -461,35 +387,26 @@ func (fr *FirstRunModel) renderFeatureBlock(icon, title, desc string, w int) str
 		Render(content)
 }
 
-// renderQuickStart renders numbered suggestion prompts.
+// renderQuickStart renders suggestion prompts with a chevron prefix.
 func (fr *FirstRunModel) renderQuickStart(width int) string {
 	t := fr.theme
 
 	title := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
+		Foreground(t.Brand).
 		Bold(true).
-		Render("QUICK START")
+		Render("Quick start")
 
-	type prompt struct {
-		num  int
-		text string
-	}
-	prompts := []prompt{
-		{1, "Fix the failing tests in this repo"},
-		{2, "Add error handling to the API layer"},
-		{3, "Explain this codebase architecture"},
+	prompts := []string{
+		"Fix the failing tests in this repo",
+		"Add error handling to the API layer",
+		"Explain this codebase architecture",
 	}
 
 	var lines []string
-	for _, p := range prompts {
-		numBadge := lipgloss.NewStyle().
-			Foreground(t.Brand).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Brand).
-			Padding(0, 1).
-			Render(fmt.Sprintf("%d", p.num))
-		text := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.text)
-		lines = append(lines, numBadge+text)
+	for _, text := range prompts {
+		chevron := lipgloss.NewStyle().Foreground(t.Brand).Render("› ")
+		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(text)
+		lines = append(lines, "  "+chevron+body)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, "", strings.Join(lines, "\n"))
@@ -511,7 +428,7 @@ func (fr *FirstRunModel) renderCompactFeatures() string {
 	for _, f := range feats {
 		icon := lipgloss.NewStyle().Foreground(t.Brand).Render(f.icon)
 		label := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(" " + f.label)
-		lines = append(lines, icon+label)
+		lines = append(lines, "  "+icon+label)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
