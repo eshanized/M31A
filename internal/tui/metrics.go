@@ -48,58 +48,71 @@ func (mm *MetricsModel) SetDimensions(w, h int) {
 	mm.height = h
 }
 
-// LoadStats computes aggregate metrics from the session manager.
-func (mm *MetricsModel) LoadStats(sessionManager *session.Manager) {
-	sessions, err := sessionManager.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		mm.stats = metricsStats{
-			Providers: make(map[string]int),
-			Models:    make(map[string]int),
-			Phases:    make(map[string]int),
-		}
-		mm.loaded = true
-		return
-	}
+// metricsLoadedMsg carries the result of an async LoadStats call.
+type metricsLoadedMsg struct {
+	stats  metricsStats
+	loaded bool
+}
 
-	s := metricsStats{
-		SessionCount: len(sessions),
-		Providers:    make(map[string]int),
-		Models:       make(map[string]int),
-		Phases:       make(map[string]int),
-	}
-
-	for _, info := range sessions {
-		s.TotalMessages += info.MessageCount
-
-		if info.Provider != "" {
-			s.Providers[info.Provider]++
-		}
-		if info.Model != "" {
-			s.Models[info.Model]++
-		}
-		if info.WorkflowPhase != "" {
-			s.Phases[string(info.WorkflowPhase)]++
-		}
-		if info.WorkflowPhase != "" && info.WorkflowPhase != "idle" {
-			s.ActiveSessions++
-		}
-
-		// Load full session to get token usage from messages
-		sess, err := sessionManager.LoadSession(info.ID)
-		if err != nil {
-			continue
-		}
-		for _, msg := range sess.Messages {
-			if msg.Usage != nil {
-				s.TotalTokens += msg.Usage.TotalTokens
+// LoadStatsCmd returns a tea.Cmd that loads metrics asynchronously (TU-11 fix).
+func (mm *MetricsModel) LoadStatsCmd(sessionManager *session.Manager) tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := sessionManager.ListSessions()
+		if err != nil || len(sessions) == 0 {
+			return metricsLoadedMsg{
+				stats: metricsStats{
+					Providers: make(map[string]int),
+					Models:    make(map[string]int),
+					Phases:    make(map[string]int),
+				},
+				loaded: true,
 			}
 		}
-	}
 
-	if s.SessionCount > 0 {
-		s.AvgTokens = s.TotalTokens / s.SessionCount
-	}
+		s := metricsStats{
+			SessionCount: len(sessions),
+			Providers:    make(map[string]int),
+			Models:       make(map[string]int),
+			Phases:       make(map[string]int),
+		}
 
+		for _, info := range sessions {
+			s.TotalMessages += info.MessageCount
+
+			if info.Provider != "" {
+				s.Providers[info.Provider]++
+			}
+			if info.Model != "" {
+				s.Models[info.Model]++
+			}
+			if info.WorkflowPhase != "" {
+				s.Phases[string(info.WorkflowPhase)]++
+			}
+			if info.WorkflowPhase != "" && info.WorkflowPhase != "idle" {
+				s.ActiveSessions++
+			}
+
+			sess, err := sessionManager.LoadSession(info.ID)
+			if err != nil {
+				continue
+			}
+			for _, msg := range sess.Messages {
+				if msg.Usage != nil {
+					s.TotalTokens += msg.Usage.TotalTokens
+				}
+			}
+		}
+
+		if s.SessionCount > 0 {
+			s.AvgTokens = s.TotalTokens / s.SessionCount
+		}
+
+		return metricsLoadedMsg{stats: s, loaded: true}
+	}
+}
+
+// ApplyStats applies loaded stats to the model (called from Update on metricsLoadedMsg).
+func (mm *MetricsModel) ApplyStats(s metricsStats) {
 	mm.stats = s
 	mm.loaded = true
 }
