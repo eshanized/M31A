@@ -163,6 +163,17 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return SessionExportMsg{SessionID: id}
 				}
 			}
+		case "d":
+			// Show session detail preview
+			if len(rm.sessions) > 0 {
+				id := rm.sessions[rm.cursor].ID
+				return rm, func() tea.Msg {
+					return AppMsg{
+						Screen:    ScreenSessionDetail,
+						SessionID: id,
+					}
+				}
+			}
 		}
 	}
 	return rm, nil
