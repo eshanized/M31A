@@ -91,43 +91,41 @@ func welcomeCardWidth(availWidth int) int {
 	return w
 }
 
-// renderLogoWithGlow renders the M31A logo with a subtle gradient-block glow row.
+// renderLogoWithGlow renders the M31A logo with a gradient glow row beneath.
 func (m *ReplModel) renderLogoWithGlow() string {
-	version := m.version
-	if version == "" {
-		version = "dev"
-	}
-	logoBlock := components.RenderLogo(version, false, m.theme.Brand)
-
-	glowChars := []string{"█", "▓", "▒", "░"}
-	var glow strings.Builder
-	for _, ch := range glowChars {
-		glow.WriteString(lipgloss.NewStyle().Foreground(m.theme.Brand).Render(ch))
-	}
-	centerFill := strings.Repeat(" ", 12)
-	glowRow := glow.String() + lipgloss.NewStyle().Foreground(m.theme.Border).Render(centerFill) + glow.String()
-
-	// Add gradient separator
+	logoBlock := components.RenderBigLogo(m.theme.Brand, true)
 	gradientSep := renderGradientSeparator(m.replWidth(), m.theme)
 
-	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowRow, gradientSep)
+	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, gradientSep)
 }
 
-// renderGradientSeparator renders a gradient separator line
+// renderGradientSeparator renders a clean gradient separator line
 func renderGradientSeparator(width int, t theme.Theme) string {
 	if width <= 0 {
 		return ""
 	}
 
-	// Create gradient from brand to border
-	gradientChars := []string{"█", "▓", "▒", "░", "─", "░", "▒", "▓", "█"}
-	var gradient strings.Builder
-	for i := 0; i < width; i++ {
-		charIdx := i % len(gradientChars)
-		gradient.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(gradientChars[charIdx]))
+	// Clean gradient: fade from center outward
+	fadeChars := []rune{'█', '▓', '▒', '░', '·'}
+	halfW := width / 2
+	var left strings.Builder
+	for i := 0; i < halfW; i++ {
+		idx := i * len(fadeChars) / halfW
+		if idx >= len(fadeChars) {
+			idx = len(fadeChars) - 1
+		}
+		left.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(string(fadeChars[idx])))
+	}
+	var right strings.Builder
+	for i := halfW - 1; i >= 0; i-- {
+		idx := i * len(fadeChars) / halfW
+		if idx >= len(fadeChars) {
+			idx = len(fadeChars) - 1
+		}
+		right.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(string(fadeChars[idx])))
 	}
 
-	return gradient.String()
+	return left.String() + right.String()
 }
 
 // renderProviderCard shows current model/provider status or a setup prompt.
@@ -306,17 +304,10 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 
 	var lines []string
 	for _, p := range prompts {
-		// Render as pill instead of numbered list
-		pillStyle := lipgloss.NewStyle().
-			Background(t.Surface).
-			Foreground(t.TextPrimary).
-			Padding(0, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border)
-
-		pill := pillStyle.Render(p.prompt)
+		chevron := lipgloss.NewStyle().Foreground(t.Brand).Render("› ")
+		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(p.prompt)
 		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  " + p.hint)
-		lines = append(lines, "  "+pill+hint)
+		lines = append(lines, "  "+chevron+body+hint)
 	}
 
 	sep := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", 36))
