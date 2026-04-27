@@ -85,6 +85,24 @@ func (dm *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return dm, func() tea.Msg { return PopScreenMsg{} }
+		case "enter":
+			// Navigate to the current workflow phase screen
+			var screen Screen
+			switch types.WorkflowPhase(dm.current) {
+			case types.PhasePlan:
+				screen = ScreenPlan
+			case types.PhaseExecute:
+				screen = ScreenExecute
+			case types.PhaseVerify:
+				screen = ScreenVerify
+			case types.PhaseShip:
+				screen = ScreenShip
+			default:
+				return dm, nil
+			}
+			return dm, func() tea.Msg {
+				return AppMsg{Screen: screen}
+			}
 		}
 	}
 	return dm, nil
