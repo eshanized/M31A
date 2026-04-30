@@ -347,19 +347,23 @@ func (e *Engine) parseToolCalls(content string) ([]m31types.ToolCall, error) {
 
 	// Pattern 2: Try to find standalone JSON objects with tool call fields
 	if len(calls) == 0 {
+		// Strip comments once before scan loop to avoid redundant O(N) stripping
+		// per '{' position inside extractJSONObject (WF-11 fix).
+		scanned := stripJSONComments(content)
+
 		// Scan at each { position, use extractJSONObject for proper nesting
-		scanLimit := len(content)
+		scanLimit := len(scanned)
 		if scanLimit > maxJSONScanBytes {
 			scanLimit = maxJSONScanBytes
 		}
 		for i := 0; i < scanLimit; i++ {
-			if content[i] != '{' {
+			if scanned[i] != '{' {
 				continue
 			}
-			obj := extractJSONObject(content[i:])
+			obj := extractJSONObject(scanned[i:])
 			if obj == "" {
 				// Check if this looks like a tool call but is malformed JSON
-				remaining := content[i:]
+				remaining := scanned[i:]
 				if strings.Contains(remaining, `"name"`) || strings.Contains(remaining, `"tool"`) {
 					// Malformed JSON that looks like a tool call
 					totalAttempts++
@@ -642,8 +646,12 @@ func stripJSONComments(s string) string {
 // at the beginning of the string.
 // Uses json.NewDecoder for robust parsing without index drift issues.
 func extractJSONObject(s string) string {
-	// strip comments before scanning for JSON structure.
-	s = stripJSONComments(s)
+	// Strip comments before scanning for JSON structure, but only if comment
+	// markers are present — avoids O(N) allocation when content is already clean
+	// (e.g. when caller pre-strips in parseToolCalls Pattern 2).
+	if strings.Contains(s, "//") || strings.Contains(s, "/*") {
+		s = stripJSONComments(s)
+	}
 
 	// Find the first '{' or '[' to skip surrounding text
 	trimmed := strings.TrimSpace(s)
