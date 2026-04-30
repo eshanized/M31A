@@ -255,40 +255,34 @@ func (r *Rollback) stashIfDirty() (bool, error) {
 }
 
 // countCommitsBetween counts the number of commits between two hashes.
-// startHash is the older commit, endHash the newer one.
-// Log returns newest first, so endHash (newer) has a smaller index.
+// Uses `git rev-list --count` for O(1) counting instead of loading the full log (PK-19 fix).
+// startHash is the older commit, endHash the newer one. Returns an error if
+// the hashes are in the wrong order (startHash newer than endHash).
 func (r *Rollback) countCommitsBetween(startHash, endHash string) (int, error) {
 	if startHash == endHash {
 		return 0, nil
 	}
 
-	commits, err := r.git.LogAll()
+	count, err := r.git.CountCommits(startHash, endHash)
 	if err != nil {
-		return 0, err
-	}
-
-	startIdx := -1
-	endIdx := -1
-	for i, c := range commits {
-		if c.Hash == startHash {
-			startIdx = i
-		}
-		if c.Hash == endHash {
-			endIdx = i
-		}
-	}
-
-	if startIdx == -1 || endIdx == -1 {
 		return 0, ErrInvalidHash
 	}
 
-	// Log returns newest first. endHash (HEAD before reset) should appear
-	// earlier (smaller index) than startHash (older commit being reset to).
-	if endIdx < startIdx {
-		return startIdx - endIdx, nil
+	if count == 0 {
+		// Either the hashes are in the wrong order or one doesn't exist.
+		// Verify both hashes exist by trying the reverse direction.
+		reverseCount, rerr := r.git.CountCommits(endHash, startHash)
+		if rerr != nil {
+			return 0, ErrInvalidHash
+		}
+		if reverseCount > 0 {
+			// Hashes are valid but in reverse order — that's an error per contract.
+			return 0, fmt.Errorf("commits in unexpected order: %s should be older than %s", startHash, endHash)
+		}
+		return 0, ErrInvalidHash
 	}
 
-	return 0, fmt.Errorf("commits in unexpected order: %s should be older than %s", startHash, endHash)
+	return count, nil
 }
 
 // buildResult creates a RollbackResult with a user-friendly message.
