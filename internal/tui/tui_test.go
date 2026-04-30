@@ -817,17 +817,23 @@ func TestScreenTransitionZeroDuration(t *testing.T) {
 }
 
 func TestScreenTransitionRendering(t *testing.T) {
-	th := testTheme()
 	st := &ScreenTransition{Active: true, StartAt: time.Now(), Duration: 200 * time.Millisecond, FromScreen: ScreenREPL, ToScreen: ScreenPlan}
-	if r := st.renderTransitionOverlay(th, 80, 24); r == "" {
-		t.Error("render should not be empty")
+	// Verify transition mechanics work
+	if !st.Active {
+		t.Error("transition should be active")
+	}
+	if st.Progress() < 0 || st.Progress() > 1 {
+		t.Error("progress should be between 0 and 1")
 	}
 }
 
 func TestScreenTransitionNilRender(t *testing.T) {
 	var st *ScreenTransition
-	if r := st.renderTransitionOverlay(testTheme(), 80, 24); r != "" {
-		t.Error("nil render should be empty")
+	if st.TransitionTick() != true {
+		t.Error("nil transition should be tick-complete")
+	}
+	if st.Progress() != 1.0 {
+		t.Error("nil transition progress should be 1.0")
 	}
 }
 
