@@ -9,6 +9,7 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
+	"github.com/eshanized/M31A/pkg/session"
 )
 
 // Screen identifies which full-screen view is active.
@@ -315,6 +316,17 @@ type SettingsSavedMsg struct{}
 type OptimizedMsg struct {
 	Recommendations []arbitrage.ArbitrageRecommendation
 	TaskID          int
+}
+
+// BisectStartMsg carries commit data to initialize the bisect screen.
+type BisectStartMsg struct {
+	GoodCommit string
+	BadCommit  string
+}
+
+// SessionDetailRequestMsg navigates to the session detail screen with session data.
+type SessionDetailRequestMsg struct {
+	Session *session.Session
 }
 
 // DiffScreenMsg triggers the diff viewer screen.
