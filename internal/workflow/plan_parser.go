@@ -3,6 +3,7 @@ package workflow
 import (
 	"regexp"
 	"strings"
+	"sync"
 
 	m31types "github.com/eshanized/M31A/internal/types"
 )
@@ -19,15 +20,33 @@ var (
 	reH4         = regexp.MustCompile(`(?m)^####\s+\[(NEW|MODIFY)\]\s+(.+)$`)
 )
 
+// Cached compiled regexes for section/subsection headers.
+// Keys are the section name strings; values are *regexp.Regexp.
+var (
+	sectionHeaderCache    sync.Map
+	subsectionHeaderCache sync.Map
+)
+
 // sectionHeaderRe returns a compiled regex for matching an H2 header with the given name.
-// Uses regexp.QuoteMeta for safe interpolation.
+// Results are cached to avoid recompilation on every call.
 func sectionHeaderRe(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?im)^##\s+` + regexp.QuoteMeta(name) + `\s*$`)
+	if v, ok := sectionHeaderCache.Load(name); ok {
+		return v.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(`(?im)^##\s+` + regexp.QuoteMeta(name) + `\s*$`)
+	sectionHeaderCache.Store(name, re)
+	return re
 }
 
 // subsectionHeaderRe returns a compiled regex for matching an H3 header with the given name.
+// Results are cached to avoid recompilation on every call.
 func subsectionHeaderRe(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?im)^###\s+` + regexp.QuoteMeta(name) + `\s*$`)
+	if v, ok := subsectionHeaderCache.Load(name); ok {
+		return v.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(`(?im)^###\s+` + regexp.QuoteMeta(name) + `\s*$`)
+	subsectionHeaderCache.Store(name, re)
+	return re
 }
 
 // ParsePlan extracts a structured Plan from rich markdown content.
