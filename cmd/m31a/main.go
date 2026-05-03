@@ -145,10 +145,6 @@ func run() int {
 		logger.Warn("no active provider configured — LLM features will be unavailable")
 	}
 
-	// Session manager
-	sessionsDir := filepath.Join(filepath.Dir(configPath), "sessions")
-	sessionMgr := session.NewManager(sessionsDir, session.ManagerOpts{})
-
 	// Working directory — fail fast if Getwd fails (WP-C03)
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -156,9 +152,13 @@ func run() int {
 		return 1
 	}
 
+	// Session manager — project-local sessions in <workDir>/.m31a/
+	globalConfigDir := filepath.Dir(configPath)
+	sessionMgr := session.NewManager(globalConfigDir, workDir, session.ManagerOpts{})
+
 	// Tools dispatcher — fail fast on permission config errors (WP-C04)
-	backupDir := filepath.Join(filepath.Dir(configPath), "backups")
-	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, sessionsDir, &cfg.Permissions)
+	backupDir := filepath.Join(workDir, ".m31a", "backups")
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions)
 	if err != nil {
 		logger.Error("failed to create tools dispatcher — permission configuration is invalid", "error", err)
 		return 1
@@ -227,7 +227,7 @@ func run() int {
 		Logger:      logger,
 		Worktrees:   &subagent.GitWorktrees{},
 		NewDispatcher: tools.NewDispatcherFactory(
-			backupDir, sessionsDir, &cfg.Permissions, nil,
+			backupDir, backupDir, &cfg.Permissions, nil,
 		),
 	})
 	// Register the Agent tool on the parent dispatcher (non-child so it can
