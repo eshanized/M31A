@@ -30,7 +30,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	// Create session
 	sessionBaseDir := filepath.Join(dir, "sessions")
 	os.MkdirAll(sessionBaseDir, 0755)
-	mgr := session.NewManager(sessionBaseDir, session.ManagerOpts{})
+	mgr := session.NewManager(sessionBaseDir, sessionBaseDir, session.ManagerOpts{})
 
 	s, err := mgr.NewSession("test-model", "test-provider")
 	if err != nil {
@@ -120,6 +120,7 @@ func TestEngine_Initialization(t *testing.T) {
 }
 
 func TestEngine_SessionDirSetup(t *testing.T) {
+	t.Skip("removed: project-local sessions")
 	engine, _ := setupTestEngine(t)
 
 	// Planning directory should exist
@@ -360,31 +361,31 @@ func TestEngine_ValidateTasks(t *testing.T) {
 	}{
 		{
 			name:     "valid task",
-			tasks:    []m31types.Task{{ID: 1, Action: "Create", Description: "test", Dependencies: []int{}}},
+			tasks:    []m31types.Task{{ID: 1, Action: "Create", Description: "test", Dependencies: []int{}, AcceptanceCriteria: []string{"works"}}},
 			wantErrs: 0,
 		},
 		{
 			name:     "missing description",
-			tasks:    []m31types.Task{{ID: 1, Action: "Create", Dependencies: []int{}}},
+			tasks:    []m31types.Task{{ID: 1, Action: "Create", Dependencies: []int{}, AcceptanceCriteria: []string{"works"}}},
 			wantErrs: 1,
 		},
 		{
 			name:     "self reference",
-			tasks:    []m31types.Task{{ID: 1, Action: "Create", Description: "test", Dependencies: []int{1}}},
+			tasks:    []m31types.Task{{ID: 1, Action: "Create", Description: "test", Dependencies: []int{1}, AcceptanceCriteria: []string{"works"}}},
 			wantErrs: 2, // self-reference + circular
 		},
 		{
 			name: "missing dep",
 			tasks: []m31types.Task{
-				{ID: 1, Action: "Create", Description: "a", Dependencies: []int{2}},
+				{ID: 1, Action: "Create", Description: "a", Dependencies: []int{2}, AcceptanceCriteria: []string{"works"}},
 			},
 			wantErrs: 1,
 		},
 		{
 			name: "circular",
 			tasks: []m31types.Task{
-				{ID: 1, Action: "Create", Description: "a", Dependencies: []int{2}},
-				{ID: 2, Action: "Create", Description: "b", Dependencies: []int{1}},
+				{ID: 1, Action: "Create", Description: "a", Dependencies: []int{2}, AcceptanceCriteria: []string{"works"}},
+				{ID: 2, Action: "Create", Description: "b", Dependencies: []int{1}, AcceptanceCriteria: []string{"works"}},
 			},
 			wantErrs: 1,
 		},
