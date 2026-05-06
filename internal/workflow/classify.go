@@ -76,7 +76,7 @@ func ClassifyPrompt(goal string, workDir string) m31types.ComplexityLevel {
 
 	// Check project size as a complexity signal
 	fileCount := countProjectFiles(workDir)
-	if fileCount > 50 {
+	if fileCount > 30 {
 		// Large project + non-trivial goal verb => moderate
 		if strings.Contains(lower, "add ") || strings.Contains(lower, "implement ") || strings.Contains(lower, "create ") {
 			return m31types.ComplexityModerate
