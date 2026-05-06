@@ -54,67 +54,19 @@ func handleSessions(_ []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: sb.String()}
 }
 
-// handleFork forks the current session into a child session.
+// handleFork is disabled with project-local sessions (one session per project).
 func handleFork(_ []string, ctx CommandContext) CommandResult {
-	if ctx.SessionManager == nil || ctx.SessionID == "" {
-		return CommandResult{Success: false, Message: "No active session to fork."}
-	}
-
-	child, err := ctx.SessionManager.ForkSession(ctx.SessionID)
-	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Fork failed: %v", err)}
-	}
-
-	id := child.ID
-	return CommandResult{
-		Success:   true,
-		Message:   fmt.Sprintf("Forked session **%s** → **%s**. Switching to new session.", ctx.SessionID, id),
-		SessionID: &id,
-	}
+	return CommandResult{Success: false, Message: "Session forking is not available with project-local sessions. Each project has one session stored in `.m31a/`."}
 }
 
-// handlePrev switches to the previous sibling session.
+// handlePrev is disabled with project-local sessions.
 func handlePrev(_ []string, ctx CommandContext) CommandResult {
-	if ctx.SessionManager == nil || ctx.SessionID == "" {
-		return CommandResult{Success: false, Message: "No active session."}
-	}
-
-	siblings, idx, err := ctx.SessionManager.SiblingSessions(ctx.SessionID)
-	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to list siblings: %v", err)}
-	}
-	if siblings == nil || idx <= 0 {
-		return CommandResult{Success: false, Message: "No previous sibling session."}
-	}
-
-	prevID := siblings[idx-1].ID
-	return CommandResult{
-		Success:   true,
-		Message:   fmt.Sprintf("Switching to previous session **%s**.", prevID),
-		SessionID: &prevID,
-	}
+	return CommandResult{Success: false, Message: "Session switching is not available with project-local sessions. Each project has one session stored in `.m31a/`."}
 }
 
-// handleNext switches to the next sibling session.
+// handleNext is disabled with project-local sessions.
 func handleNext(_ []string, ctx CommandContext) CommandResult {
-	if ctx.SessionManager == nil || ctx.SessionID == "" {
-		return CommandResult{Success: false, Message: "No active session."}
-	}
-
-	siblings, idx, err := ctx.SessionManager.SiblingSessions(ctx.SessionID)
-	if err != nil {
-		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to list siblings: %v", err)}
-	}
-	if siblings == nil || idx < 0 || idx >= len(siblings)-1 {
-		return CommandResult{Success: false, Message: "No next sibling session."}
-	}
-
-	nextID := siblings[idx+1].ID
-	return CommandResult{
-		Success:   true,
-		Message:   fmt.Sprintf("Switching to next session **%s**.", nextID),
-		SessionID: &nextID,
-	}
+	return CommandResult{Success: false, Message: "Session switching is not available with project-local sessions. Each project has one session stored in `.m31a/`."}
 }
 
 // handleSave saves the current session to disk.
