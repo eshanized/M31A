@@ -877,15 +877,7 @@ func TestSessionID(t *testing.T) {
 }
 
 func TestSetSessionID(t *testing.T) {
-	engine, _ := setupTestEngine(t)
-	original := engine.planningDir
-	engine.SetSessionID("new-session")
-	if engine.sessionID != "new-session" {
-		t.Errorf("expected sessionID 'new-session', got %q", engine.sessionID)
-	}
-	if engine.planningDir == original {
-		t.Error("expected planningDir to be updated")
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestSetMsgEmitter(t *testing.T) {
@@ -2934,7 +2926,7 @@ func TestBuildPlanContext_LongPlanTruncation(t *testing.T) {
 
 	messages := engine.buildPlanContext("Goal", nil, nil, "")
 	for _, m := range messages {
-		if strings.Contains(m.Content, "... (truncated)") {
+		if strings.Contains(m.Content, "... (summary truncated)") {
 			return // success
 		}
 	}
