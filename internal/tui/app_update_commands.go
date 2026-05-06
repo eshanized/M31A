@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/codeintel"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -209,15 +210,26 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 		m.promptRegistry = registry
 	}
 
-	// Compose system prompt: base + autonomous + tool-use
+	// Compose system prompt: base + autonomous + tool-use + context-awareness + code-quality + code-intelligence
 	sysContent := m.promptRegistry.Base + "\n\n---\n\n" +
 		m.promptRegistry.Autonomous + "\n\n---\n\n" +
-		m.promptRegistry.ToolUse
+		m.promptRegistry.ToolUse + "\n\n---\n\n" +
+		m.promptRegistry.ContextAwareness + "\n\n---\n\n" +
+		m.promptRegistry.CodeQuality + "\n\n---\n\n" +
+		m.promptRegistry.CodeIntelligence
 
 	// Load project context (AGENTS.md / MEMORY.md)
 	projectCtx := LoadProjectContextForAgent(m.cwd)
 	if projectCtx != "" {
 		sysContent += "\n\n## Project Context (from AGENTS.md)\n\n" + projectCtx
+	}
+
+	// Codebase intelligence — build index and inject project summary
+	idx := codeintel.NewIndexer(m.cwd)
+	if err := idx.Build(m.shutdownCtx); err == nil {
+		if summary := idx.ProjectSummary(4000); summary != "" {
+			sysContent += "\n\n" + summary
+		}
 	}
 
 	// Build message history
