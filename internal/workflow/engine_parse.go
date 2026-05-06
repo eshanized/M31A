@@ -137,6 +137,9 @@ func validateTasks(tasks []m31types.Task) []string {
 		if t.Action == "" {
 			errs = append(errs, fmt.Sprintf("task %d: missing action", t.ID))
 		}
+		if len(t.AcceptanceCriteria) == 0 {
+			errs = append(errs, fmt.Sprintf("task %d: missing acceptance_criteria", t.ID))
+		}
 	}
 
 	// Check all deps reference existing tasks
