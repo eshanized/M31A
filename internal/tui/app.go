@@ -289,20 +289,20 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 		modelID = m.config.Model.Default
 	}
 
-	sessDir := m.sessionManager.BaseDir()
 	workDir := "."
 	if m.git != nil {
 		workDir = m.git.WorkDir()
 	}
 
-	planningDir := filepath.Join(sessDir, m.sessionID, "planning")
+	planningDir := filepath.Join(workDir, ".m31a")
+	backupDir := filepath.Join(workDir, ".m31a", "backups")
 
 	tokenEst := tokens.NewEstimator(modelID)
 
 	engine, err := workflow.NewEngine(
 		m.sessionID,
 		workDir,
-		sessDir+"/backups",
+		backupDir,
 		planningDir,
 		p,
 		modelID,
