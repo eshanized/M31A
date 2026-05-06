@@ -195,13 +195,16 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 		rw = 20
 	}
 
-	// Resize viewport to fit content area
+	// Resize viewport to fit content area.
+	// ViewContent receives the correct contentHeight (terminal minus PageLayout
+	// header/footer), which may differ from the WindowSizeMsg-based height.
+	// When dimensions change we must re-anchor the scroll position so the
+	// viewport stays at the bottom (unless the user manually scrolled up).
 	vpH := contentViewportHeight(contentHeight)
 	if m.viewport.Width != rw || m.viewport.Height != vpH {
 		m.viewport.Width = rw
 		m.viewport.Height = vpH
-		// Note: renderMessages() is called from Update() on WindowSizeMsg,
-		// not here, to avoid state mutation in the View path.
+		m.autoScrollConditionally()
 	}
 
 	// Viewport (messages or welcome content)
