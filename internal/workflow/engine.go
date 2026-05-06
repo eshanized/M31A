@@ -9,13 +9,13 @@ import (
 	"log/slog"
 	"math"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/eshanized/M31A/internal/codeintel"
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
@@ -31,14 +31,17 @@ var promptFS embed.FS
 
 // PromptRegistry holds all loaded prompt templates.
 type PromptRegistry struct {
-	Base          string
-	ToolUse       string
-	PlanFormat    string
-	ExecuteTask   string
-	Discuss       string
-	SelfHeal      string
-	Demonstration string
-	Autonomous    string
+	Base             string
+	ToolUse          string
+	PlanFormat       string
+	ExecuteTask      string
+	Discuss          string
+	SelfHeal         string
+	Demonstration    string
+	Autonomous       string
+	ContextAwareness string
+	CodeQuality      string
+	CodeIntelligence string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -53,6 +56,9 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/self-heal.md":            &r.SelfHeal,
 		"prompts/demonstration-format.md": &r.Demonstration,
 		"prompts/autonomous.md":           &r.Autonomous,
+		"prompts/context-awareness.md":    &r.ContextAwareness,
+		"prompts/code-quality.md":         &r.CodeQuality,
+		"prompts/code-intelligence.md":    &r.CodeIntelligence,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -69,7 +75,6 @@ type Engine struct {
 	sessionID        string
 	workDir          string
 	backupDir        string
-	sessionsRoot     string // store sessions root for reliable planningDir recalculation
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
@@ -113,6 +118,9 @@ type Engine struct {
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan     *m31types.Plan
 	cachedPlanMD5  string // MD5 of planMarkdown for invalidation
+	// Codebase intelligence layer (lazy-built once per session)
+	codeIntel     *codeintel.Indexer
+	codeIntelOnce sync.Once
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -222,15 +230,10 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
-	// derive sessionsRoot from planningDir reliably
-	// planningDir = <sessionsRoot>/<sessionID>/planning
-	sessionsRoot := filepath.Dir(filepath.Dir(opts.PlanningDir))
-
 	return &Engine{
 		sessionID:    opts.SessionID,
 		workDir:      opts.WorkDir,
 		backupDir:    opts.BackupDir,
-		sessionsRoot: sessionsRoot,
 		planningDir:  opts.PlanningDir,
 		provider:     opts.Provider,
 		modelID:      opts.ModelID,
@@ -419,13 +422,9 @@ func (e *Engine) SessionID() string {
 	return e.sessionID
 }
 
-// SetSessionID updates the engine's session ID and replans the planning
-// directory to point to the new session's planning folder. Used after
-// session-switching commands like /fork, /prev, /next.
+// SetSessionID updates the engine's session ID.
 func (e *Engine) SetSessionID(id string) {
 	e.sessionID = id
-	// use stored sessionsRoot instead of brittle .. navigation
-	e.planningDir = filepath.Join(e.sessionsRoot, id, "planning")
 }
 
 // SetMsgEmitter sets the callback for emitting messages back to the TUI.
@@ -452,8 +451,10 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 				Max:     m31types.MaxHealAttempts,
 			})
 			failure := fmt.Sprintf(
-				"Manual heal triggered by user.\nTask description: %s\nFiles: %v\nAcceptance criteria: %v\n"+
+				"Manual heal triggered by user.\nTask %d failed verification: %v\n"+
+					"Task description: %s\nFiles: %v\nAcceptance criteria: %v\n"+
 					"Inspect the files listed above, identify any issues, and apply a fix.",
+				taskID, e.verifyTask(ctx, task).Errors,
 				task.Description, task.Files, task.AcceptanceCriteria,
 			)
 			healResult := e.healTask(ctx, task, failure, "")
@@ -636,6 +637,9 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
 // The base prompt is cached since it doesn't change during a session (PERF-24).
+// cachedBasePromptOnce caches e.prompts.Base for the lifetime of this Engine
+// instance. Since prompts are loaded once at engine creation and never reloaded,
+// this is correct. Do not reuse an Engine across different prompt configurations.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
 	e.cachedBasePromptOnce.Do(func() {
 		e.cachedBasePrompt = e.prompts.Base
@@ -647,6 +651,22 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n---\n\n")
+}
+
+// getCodeIntel lazily builds the codebase intelligence indexer.
+// Returns nil if building fails or the workDir is empty.
+func (e *Engine) getCodeIntel() *codeintel.Indexer {
+	e.codeIntelOnce.Do(func() {
+		idx := codeintel.NewIndexer(e.workDir)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := idx.Build(ctx); err != nil {
+			e.logger.Warn("codeintel build failed", "error", err)
+			return
+		}
+		e.codeIntel = idx
+	})
+	return e.codeIntel
 }
 
 // consumeStream reads all chunks from the iterator and returns the concatenated content.
@@ -707,7 +727,8 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 			if chunk != nil && chunk.Delta != "" {
 				content.WriteString(chunk.Delta)
 			}
-			return content.String(), nil, err
+			partialCalls := finalizeToolCalls(builders, e)
+			return content.String(), partialCalls, err
 		}
 		if chunk == nil {
 			continue
