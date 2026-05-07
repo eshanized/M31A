@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,6 +91,11 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			e.logger.Error("execute group failed", "error", err)
 		}
 
+		// Invalidate code intel so next group gets a fresh index reflecting
+		// files written by this group.
+		e.codeIntelOnce = sync.Once{}
+		e.codeIntel = nil
+
 		// M38 fix: only save state after group, not tasks (tasks saved once at end)
 		if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
 			"executing tasks", "group complete"); err != nil {
@@ -162,6 +168,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			if !healResult.Success {
 				return healResult
 			}
+			if !e.healCreatedExpectedFiles(task) {
+				e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
+			}
 			continue
 		}
 
@@ -190,6 +199,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				})
 				if !healResult.Success {
 					return healResult
+				}
+				if !e.healCreatedExpectedFiles(task) {
+					e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
 				}
 				continue
 			}
@@ -275,7 +287,8 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		var toolErrMessages []string
 		for _, tr := range toolExecResults {
 			if tr.err != nil {
-				toolErrMessages = append(toolErrMessages, fmt.Sprintf("tool %s failed: %v", tr.call.Name, tr.err))
+				toolErrMessages = append(toolErrMessages, fmt.Sprintf("Tool: %s\nInput: %s\nError: %v",
+					tr.call.Name, summarizeInput(tr.call.Input, 200), tr.err))
 				messages = append(messages, m31types.Message{
 					Role:       "tool",
 					Content:    fmt.Sprintf("Error: %v", tr.err),
@@ -318,6 +331,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			})
 			if !healResult.Success {
 				return healResult
+			}
+			if !e.healCreatedExpectedFiles(task) {
+				e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
 			}
 			continue
 		}
@@ -364,7 +380,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 // buildExecuteContext creates messages for task execution.
 func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
 	var messages []m31types.Message
-	systemPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask)
+	systemPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)
 	if goal != "" {
 		systemPrompt += "\n\n## Original Goal\n" + goal
 	}
@@ -437,10 +453,21 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 		Content: taskSpec,
 	})
 
+	// Codebase intelligence — inject relevant file context automatically
+	if ci := e.getCodeIntel(); ci != nil {
+		ciCtx := ci.FormatContext(task.Files, task.Description, 10, 4000)
+		if ciCtx != "" {
+			messages = append(messages, m31types.Message{
+				Role:    "user",
+				Content: ciCtx,
+			})
+		}
+	}
+
 	// Current file state — re-read from disk so the LLM sees post-heal content
 	// on every iteration of the heal loop. Capped to avoid ballooning context.
 	if fileCtx := e.readTaskFiles(task.Files); fileCtx != "" {
-		const maxFileCtx = 12000
+		const maxFileCtx = 32000
 		if len(fileCtx) > maxFileCtx {
 			fileCtx = fileCtx[:maxFileCtx] + "\n... (truncated)"
 		}
@@ -457,7 +484,7 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
-	healPrompt := e.buildSystemPrompt(e.prompts.SelfHeal)
+	healPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.SelfHeal, e.prompts.CodeQuality)
 	if goal != "" {
 		healPrompt += "\n\n## Original Goal\n" + goal
 	}
@@ -533,4 +560,24 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		CommitHash: commitHash,
 		DurationMs: time.Since(start).Milliseconds(),
 	}
+}
+
+func summarizeInput(input json.RawMessage, maxChars int) string {
+	s := string(input)
+	if len(s) <= maxChars {
+		return s
+	}
+	return s[:maxChars] + "...(truncated)"
+}
+
+func (e *Engine) healCreatedExpectedFiles(task *m31types.Task) bool {
+	if len(task.Files) == 0 {
+		return true
+	}
+	for _, f := range task.Files {
+		if _, err := os.Stat(filepath.Join(e.workDir, f)); os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
 }
