@@ -15,7 +15,9 @@ import (
 )
 
 // readTaskFiles reads the content of files for a task.
+// When maxBytesPerFile > 0, each file's content is truncated to that limit.
 func (e *Engine) readTaskFiles(files []string) string {
+	const maxBytesPerFile = 4096
 	var sb strings.Builder
 	for _, f := range files {
 		path := filepath.Join(e.workDir, f)
@@ -29,7 +31,11 @@ func (e *Engine) readTaskFiles(files []string) string {
 			sb.WriteString(fmt.Sprintf("=== %s: (not found) ===\n", f))
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", f, string(content)))
+		text := string(content)
+		if maxBytesPerFile > 0 && len(text) > maxBytesPerFile {
+			text = text[:maxBytesPerFile] + "\n... (file truncated)"
+		}
+		sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", f, text))
 	}
 	return sb.String()
 }
