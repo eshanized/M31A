@@ -155,7 +155,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 // On refinement, the previous plan and user feedback are injected.
 func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat)})
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)})
 
 	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
 	if projErr != nil {
@@ -181,6 +181,13 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 		ctx += "Existing files:\n" + fileSchema + "\n\n"
 	}
 
+	// Codebase intelligence — structural overview for planning
+	if ci := e.getCodeIntel(); ci != nil {
+		if summary := ci.ProjectSummary(4000); summary != "" {
+			ctx += summary + "\n"
+		}
+	}
+
 	if project != nil && len(project.Answers) > 0 {
 		ctx += "User answers from Discuss phase:\n"
 		for q, a := range project.Answers {
@@ -192,7 +199,7 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 	if e.refineFeedback != "" && e.planMarkdown != "" {
 		prevPlan := e.planMarkdown
 		if len(prevPlan) > 4000 {
-			prevPlan = prevPlan[:4000] + "\n... (truncated)"
+			prevPlan = "... (summary truncated)\n" + prevPlan[len(prevPlan)-4000:]
 		}
 		ctx += "## Previous Plan (v" + fmt.Sprintf("%d", e.planVersion) + ")\n" + prevPlan + "\n\n"
 		ctx += "## User Refinement Feedback\n" + e.refineFeedback + "\n\n"
