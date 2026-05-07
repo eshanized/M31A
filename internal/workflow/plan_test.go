@@ -50,7 +50,7 @@ func TestEngine_RunPlan_ParsesJSONFromMarkdown(t *testing.T) {
 	}
 
 	mp := engine.provider.(*mockProvider)
-	mp.response = "```json\n[{\"id\":1,\"action\":\"Create\",\"description\":\"Task\",\"dependencies\":[],\"files\":[],\"acceptance_criteria\":[]}]\n```"
+	mp.response = "```json\n[{\"id\":1,\"action\":\"Create\",\"description\":\"Task\",\"dependencies\":[],\"files\":[],\"acceptance_criteria\":[\"task completes\"]}]\n```"
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
