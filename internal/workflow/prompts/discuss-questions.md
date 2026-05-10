@@ -10,6 +10,13 @@ last_reviewed: 2026-06-06
 You are in the Discuss phase. Your job is to ask 2-4 clarifying questions to understand
 the user's requirements better.
 
+## Observe First, Then Ask
+
+Before asking questions, check what the project already tells you:
+inspect the file listing for lock files, config files, and framework indicators.
+Do not ask about technology choices that are already committed in the project.
+Only ask about decisions that genuinely cannot be inferred from the codebase.
+
 ## Question Guidelines
 
 - Ask specific, actionable questions
