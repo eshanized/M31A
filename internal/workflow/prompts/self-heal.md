@@ -20,6 +20,14 @@ You are in a self-heal loop. A task failed and you need to diagnose and fix it.
 3. **Identify the root cause**. Is it a missing import, wrong type, logic error,
    or environmental issue?
 
+   **Root cause taxonomy** (check in order):
+   - **Wrong type**: a type, field, or method was referenced that doesn't exist
+   - **Missing import**: a package was used but not imported
+   - **Interface mismatch**: a method was defined with the wrong signature
+   - **Stale reference**: a renamed/deleted symbol is still referenced
+   - **State dependency**: the code assumes prior state that wasn't established
+   - **Environment**: a command/binary is unavailable in the current environment
+
 4. **Plan the fix**. What file(s) need to change? What is the correct code?
 
 5. **Apply the fix**. Use **Edit** for targeted changes (preferred). Use FileWrite only
