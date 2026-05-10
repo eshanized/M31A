@@ -19,6 +19,8 @@ last_reviewed: 2026-06-06
 ## FileRead
 
 - Use for: reading file contents, understanding existing code
+- **Before modifying any file, read it AND all related files** — imports, types, interfaces,
+  callers, tests, and configuration. Reading only the target file is not enough to write correct code.
 - Max file size: 5MB. Larger files will be rejected.
 - Binary detection: binary files are not displayed.
 - Path resolution: paths are relative to the working directory.
@@ -27,6 +29,8 @@ last_reviewed: 2026-06-06
 ## FileWrite
 
 - Use for: creating brand-new files, or fully rewriting a file from scratch
+- **Prerequisite: read ALL relevant files first** — the target (if rewriting), its imports, types,
+  callers, and configuration. Never write a file without understanding its full context.
 - Atomic writes: files are written to a temp file, then renamed. No partial writes.
 - Backup: existing files are backed up before modification.
 - **Prefer Edit over FileWrite when modifying an existing file** — FileWrite replaces the entire content.
@@ -44,7 +48,8 @@ last_reviewed: 2026-06-06
   - **String mode**: provide `old_string` (exact text to find) and `new_string` (replacement)
   - **Line-range mode**: provide `start_line`, `end_line`, and `new_string` (replaces those lines)
 - Cascading match strategies: exact → line-trimmed → whitespace-normalized → fuzzy-anchor
-- Always read the file first so you know the exact text to replace.
+- Always read the file AND all related files first so you know the exact text to replace and
+  understand how the change affects imports, callers, and types.
 
 ## Glob
 
@@ -108,6 +113,9 @@ last_reviewed: 2026-06-06
 
 ## General Rules
 
+- **Read before you write.** Before calling FileWrite or Edit, you must have read the target file
+  AND all files it interacts with (imports, types, callers, config). Writing without full context
+  produces incorrect code. This is the most important rule.
 - If a tool fails, diagnose the issue before retrying.
 - Never chain destructive tool calls without confirmation.
 - Do not use tools for purposes they were not designed for.
