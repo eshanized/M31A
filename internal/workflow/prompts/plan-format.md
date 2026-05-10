@@ -101,6 +101,11 @@ Task rules:
 - Order by dependency depth (independent tasks first).
 - Do NOT include a `status` field — the engine sets it automatically.
 
+**Task granularity rule**: Each task should be completable in one LLM call
+(< 200 lines of code). If a task's file list has more than 3 files, split it.
+If a task description contains "and", consider splitting. Group related
+one-line changes into a single task.
+
 ### 7. Verification Plan
 
 Describe how the implementation will be validated after execution:
