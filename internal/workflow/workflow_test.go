@@ -289,13 +289,13 @@ func TestLedger_RejectsDuplicateSessionID(t *testing.T) {
 
 func TestSession_Load_RejectsMissingID(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager(dir, session.ManagerOpts{})
+	mgr := session.NewManager(dir, dir, session.ManagerOpts{})
 
 	// Create a session with empty ID
-	sessionDir := filepath.Join(dir, "aabbccdf")
-	os.MkdirAll(sessionDir, 0755)
+	projectDir := filepath.Join(dir, ".m31a")
+	os.MkdirAll(projectDir, 0755)
 	sessionData := []byte(`{"id":"","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z","workflow_phase":"idle"}`)
-	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
+	os.WriteFile(filepath.Join(projectDir, "session.json"), sessionData, 0644)
 
 	_, err := mgr.LoadSession("aabbccdf")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
@@ -305,13 +305,13 @@ func TestSession_Load_RejectsMissingID(t *testing.T) {
 
 func TestSession_Load_RejectsZeroStartedAt(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager(dir, session.ManagerOpts{})
+	mgr := session.NewManager(dir, dir, session.ManagerOpts{})
 
 	// Create a session with zero StartedAt
-	sessionDir := filepath.Join(dir, "aabbccdd")
-	os.MkdirAll(sessionDir, 0755)
+	projectDir := filepath.Join(dir, ".m31a")
+	os.MkdirAll(projectDir, 0755)
 	sessionData := []byte(`{"id":"aabbccdd","model":"test","provider":"test","started_at":"0001-01-01T00:00:00Z","workflow_phase":"idle"}`)
-	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
+	os.WriteFile(filepath.Join(projectDir, "session.json"), sessionData, 0644)
 
 	_, err := mgr.LoadSession("aabbccdd")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
@@ -321,13 +321,13 @@ func TestSession_Load_RejectsZeroStartedAt(t *testing.T) {
 
 func TestSession_Load_RejectsUnknownPhase(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager(dir, session.ManagerOpts{})
+	mgr := session.NewManager(dir, dir, session.ManagerOpts{})
 
 	// Create a session with unknown workflow phase
-	sessionDir := filepath.Join(dir, "aabbccde")
-	os.MkdirAll(sessionDir, 0755)
+	projectDir := filepath.Join(dir, ".m31a")
+	os.MkdirAll(projectDir, 0755)
 	sessionData := []byte(`{"id":"aabbccde","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z","workflow_phase":"bogus"}`)
-	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
+	os.WriteFile(filepath.Join(projectDir, "session.json"), sessionData, 0644)
 
 	_, err := mgr.LoadSession("aabbccde")
 	if !errors.Is(err, m31errors.ErrSessionCorrupted) {
@@ -337,13 +337,13 @@ func TestSession_Load_RejectsUnknownPhase(t *testing.T) {
 
 func TestSession_Load_AcceptsEmptyPhase(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager(dir, session.ManagerOpts{})
+	mgr := session.NewManager(dir, dir, session.ManagerOpts{})
 
 	// Create a session with empty workflow phase (legacy)
-	sessionDir := filepath.Join(dir, "abc0def0")
-	os.MkdirAll(sessionDir, 0755)
+	projectDir := filepath.Join(dir, ".m31a")
+	os.MkdirAll(projectDir, 0755)
 	sessionData := []byte(`{"id":"abc0def0","model":"test","provider":"test","started_at":"2024-01-01T00:00:00Z"}`)
-	os.WriteFile(filepath.Join(sessionDir, "session.json"), sessionData, 0644)
+	os.WriteFile(filepath.Join(projectDir, "session.json"), sessionData, 0644)
 
 	sess, err := mgr.LoadSession("abc0def0")
 	if err != nil {
