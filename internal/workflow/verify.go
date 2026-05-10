@@ -38,7 +38,11 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 	}
 
 	// 2. Verify each completed task
+	var skippedWithFiles []string
 	for i, task := range tasks {
+		if task.Status == m31types.StatusSkipped && len(task.Files) > 0 {
+			skippedWithFiles = append(skippedWithFiles, fmt.Sprintf("task %d (%s)", task.ID, task.Description))
+		}
 		if task.Status != m31types.StatusDone {
 			continue
 		}
@@ -148,8 +152,15 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		ManualVerificationSteps: manualSteps,
 	}
 	if !allOK && len(failedTasks) > 0 {
-		result.Error = strings.Join(failedTasks, "; ")
+		errMsg := strings.Join(failedTasks, "; ")
+		if len(skippedWithFiles) > 0 {
+			errMsg += "; skipped with undelivered files: " + strings.Join(skippedWithFiles, "; ")
+		}
+		result.Error = errMsg
 		return result, fmt.Errorf("%w: %s", m31errors.ErrTaskFailed, result.Error)
+	}
+	if len(skippedWithFiles) > 0 {
+		result.Error = "skipped tasks with undelivered files: " + strings.Join(skippedWithFiles, "; ")
 	}
 	return result, nil
 }
