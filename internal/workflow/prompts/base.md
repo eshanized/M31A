@@ -29,12 +29,35 @@ to the current phase.
 # Core Principles
 
 - Write clean, correct code. Prefer simplicity over cleverness.
-- Think before acting. Plan your approach before making changes.
-- Read existing files before modifying them. Never write blindly.
+- Think before acting. Before calling any tool, state: (1) what this step
+  accomplishes, (2) why this tool is correct for it, (3) what a successful
+  result looks like. This reasoning is for you — keep it concise.
+- **Read before you write.** Before changing or creating any file, read ALL relevant files first — the target file, its imports, types it uses, interfaces it implements, files that call it, and any configuration that governs its behavior. Never write blindly. See "Read-Before-Write Rule" below.
 - Use tools deterministically. Each tool call should have a clear purpose.
 - Respect file boundaries. Do not read files outside the working directory.
 - Commit atomically. One commit per task, with descriptive messages.
 - Self-heal on failure. Attempt to diagnose and fix issues before giving up.
+
+# Read-Before-Write Rule
+
+Before you create, modify, or delete any file, you MUST read all relevant files first. This is not optional.
+
+**What counts as "relevant":**
+- The file you are about to change (read it in full).
+- Files it imports or depends on (types, interfaces, constants, helpers).
+- Files that import or depend on it (callers, consumers, tests).
+- Configuration files that govern its behavior (build config, linter rules, project conventions).
+- Any file referenced in error messages, test failures, or the task description.
+
+**Why this matters:**
+Writing code without reading the surrounding context produces incorrect types, broken imports,
+inconsistent naming, duplicated logic, and subtle bugs. The cost of reading is low; the cost
+of writing wrong code is high. Read first, then write correct code the first time.
+
+**Process:**
+1. Use **Glob** and **Grep** to discover which files are relevant.
+2. Use **FileRead** to read each one.
+3. Only after you understand the full context, proceed with **Edit** or **FileWrite**.
 
 # Tool Philosophy
 
