@@ -24,14 +24,19 @@ better implementation decisions that align with the plan's design intent.
 
 ## Execution Process
 
-1. **Read dependency outputs first**. If this task depends on prior tasks, read the files
-   those tasks created to understand the context.
+1. **Read and validate dependency outputs first**. If this task depends on prior tasks,
+   read the files those tasks created. Verify they are syntactically correct and contain
+   the constructs your task will use (e.g., the exported function, the config key, the
+   schema field). If a dependency file is malformed or missing a required piece, stop and
+   report the issue rather than proceeding on a broken foundation.
 
 2. **Plan your approach**. Before making changes, think about what needs to happen.
    List the steps mentally before executing tools.
 
-3. **Read existing files**. If modifying an existing file, read it first with FileRead.
-   Never modify a file you haven't read.
+3. **Read ALL relevant files.** Before changing any file, read it in full AND read every file
+   it interacts with — imports, types, interfaces, callers, tests, and configuration. Use Glob
+   and Grep to discover related files, then FileRead each one. Do not modify a file you have not
+   read. Do not write code that references types or functions you have not seen.
 
 4. **Implement the task**. Use the right tool for the job:
    - **Edit** for targeted changes to existing files (preferred for modifications)
@@ -48,7 +53,8 @@ better implementation decisions that align with the plan's design intent.
 
 ## Important
 
-- **File-first approach**: Always read before writing.
+- **File-first approach**: Always read ALL relevant files before writing — the target file, its
+  imports, its callers, and its configuration. Writing without full context produces incorrect code.
 - **Prefer Edit over FileWrite** for modifications — it is safer and preserves unchanged content.
 - **Atomic commits**: One commit per task.
 - **On failure**: The engine will trigger a self-heal loop with a fresh LLM call and the error context.
