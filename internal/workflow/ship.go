@@ -182,14 +182,30 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.emit(DemonstrationReadyMsg{Content: demonstration})
 	}
 
+	// Append session learnings to MEMORY.md for cross-session recall
+	sessionDir := filepath.Dir(e.planningDir)
+	memPath := filepath.Join(sessionDir, "MEMORY.md")
+	project, _ := e.sessionMgr.LoadProject(e.sessionID)
+	projectType, framework := "unknown", ""
+	if project != nil {
+		projectType = project.ProjectType
+		framework = project.Framework
+	}
+	memEntry := fmt.Sprintf(
+		"\n## Session %s (%s)\n- Goal: %s\n- Tasks done: %d/%d\n- Project: %s (%s)\n",
+		e.sessionID, time.Now().Format("2006-01-02"),
+		goal, done, total, projectType, framework,
+	)
+	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
+		if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
+			e.logger.Warn("memory write failed", "error", writeErr)
+		}
+		memFile.Close()
+	}
+
 	// Update checkbox tasks.md with final statuses
 	if err := e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks); err != nil {
 		e.logger.Warn("save checkbox tasks.md failed", "error", err)
-	}
-
-	// 8. Archive session (after all state is persisted)
-	if err := e.sessionMgr.ArchiveSession(e.sessionID); err != nil {
-		e.logger.Warn("archive session failed", "error", err)
 	}
 
 	e.logger.Info("ship phase complete", "duration", duration, "tasks", fmt.Sprintf("%d/%d", done, total))
