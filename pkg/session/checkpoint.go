@@ -25,7 +25,7 @@ type Checkpoint struct {
 // If more than 2 checkpoints exist, the oldest are trimmed (only last 2 retained).
 // Writes are atomic (temp + rename) per M-20.
 func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
-	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
+	path := filepath.Join(m.projectDir(), "checkpoint.json")
 
 	// Read existing checkpoints directly (not via LoadCheckpoints which sorts)
 	existing, err := m.loadCheckpointsRaw(sessionID)
@@ -53,7 +53,7 @@ func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
 // loadCheckpointsRaw reads checkpoints from disk in file order (chronological).
 // Used internally by SaveCheckpoint for read-trim-write without sorting.
 func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
-	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
+	path := filepath.Join(m.projectDir(), "checkpoint.json")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -73,24 +73,14 @@ func (m *Manager) loadCheckpointsRaw(sessionID string) ([]Checkpoint, error) {
 // LoadCheckpoints reads all checkpoints from checkpoint.json for the given session.
 // Returns an empty slice without error if the file does not exist.
 // Prunes old checkpoints, keeping only the 2 most recent.
-// Falls back to archived path if the primary session directory no longer exists.
 func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
-	path := filepath.Join(m.basePathFor(sessionID), "checkpoint.json")
+	path := filepath.Join(m.projectDir(), "checkpoint.json")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
+		if os.IsNotExist(err) {
+			return []Checkpoint{}, nil
 		}
-		// Try archived path if session was archived
-		archivedPath := filepath.Join(m.baseDir, "archived", sessionID, "checkpoint.json")
-		data, err = readFileLimited(archivedPath, types.MaxSessionFileSize)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return []Checkpoint{}, nil
-			}
-			return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
-		}
-		path = archivedPath
+		return nil, fmt.Errorf("cannot read checkpoint.json: %w", err)
 	}
 
 	var checkpoints []Checkpoint
