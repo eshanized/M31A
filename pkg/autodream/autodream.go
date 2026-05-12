@@ -174,14 +174,10 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 	wordCount := len(strings.Fields(rawContent))
 	tokensSaved := int(math.Ceil(float64(wordCount) * 1.3))
 
-	// Build summary text: prefix + timeframe + truncated content (~500 tokens)
+	// Build summary text: prefix + timeframe + role-sampled content (~500 tokens)
 	timeFrame := c.timeframeDescription(targetMsgs)
 	maxWords := int(math.Floor(500.0 / 1.3)) // ~384 words ≈ 500 tokens
-	allWords := strings.Fields(rawContent)
-	truncatedContent := rawContent
-	if len(allWords) > maxWords {
-		truncatedContent = strings.Join(allWords[:maxWords], " ")
-	}
+	truncatedContent := c.roleSampledSummary(targetMsgs, maxWords)
 	summaryText := fmt.Sprintf("[AutoDream Context Summary] %s — %s", timeFrame, truncatedContent)
 
 	summarySegment := types.MessageSegment{
@@ -335,6 +331,85 @@ func (c *Consolidator) rawText(msgs []types.Message) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// roleSampledSummary selects representative content from messages by role
+// distribution instead of naive head-truncation. Priority order:
+// 1. First user message (sets the goal)
+// 2. Last user message (most recent instruction)
+// 3. Last assistant message (most recent reasoning)
+// 4. Remaining messages in order until the word budget is exhausted.
+func (c *Consolidator) roleSampledSummary(msgs []types.Message, maxWords int) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+
+	type msgSlice struct {
+		label   string
+		content string
+	}
+	var selected []msgSlice
+	used := make(map[int]bool)
+	budget := maxWords
+
+	addMsg := func(idx int, label string) {
+		if used[idx] || msgs[idx].Content == "" {
+			return
+		}
+		words := strings.Fields(msgs[idx].Content)
+		if len(words) == 0 {
+			return
+		}
+		text := strings.Join(words, " ")
+		if len(words) > budget {
+			text = strings.Join(words[:budget], " ")
+			budget = 0
+		} else {
+			budget -= len(words)
+		}
+		selected = append(selected, msgSlice{label, text})
+		used[idx] = true
+	}
+
+	// Priority 1: first user message
+	for i, msg := range msgs {
+		if msg.Role == "user" {
+			addMsg(i, "goal")
+			break
+		}
+	}
+	// Priority 2: last user message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && !used[i] {
+			addMsg(i, "recent-instruction")
+			break
+		}
+	}
+	// Priority 3: last assistant message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && !used[i] {
+			addMsg(i, "recent-reasoning")
+			break
+		}
+	}
+	// Priority 4: remaining messages in order
+	if budget > 0 {
+		for i, msg := range msgs {
+			if used[i] || msg.Content == "" {
+				continue
+			}
+			addMsg(i, msg.Role)
+			if budget <= 0 {
+				break
+			}
+		}
+	}
+
+	var parts []string
+	for _, s := range selected {
+		parts = append(parts, fmt.Sprintf("[%s] %s", s.label, s.content))
+	}
+	return strings.Join(parts, " ")
 }
 
 // timeframeDescription returns a human-friendly description of when the
