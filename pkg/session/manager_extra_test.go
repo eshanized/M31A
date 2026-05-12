@@ -24,7 +24,7 @@ func newTestManagerIsolated(t *testing.T) (*Manager, string) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		t.Fatalf("Failed to create base dir: %v", err)
 	}
-	return NewManager(baseDir, ManagerOpts{}), baseDir
+	return NewManager(baseDir, baseDir, ManagerOpts{}), baseDir
 }
 
 // ---------------------------------------------------------------------------
@@ -152,64 +152,15 @@ func TestManager_RenameSession_Nonexistent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_FilterSessions_EmptyQuery(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	s1, _ := mgr.NewSession("gpt-4o", "openrouter")
-	s2, _ := mgr.NewSession("claude-3", "zen")
-
-	filtered, err := mgr.FilterSessions("")
-	if err != nil {
-		t.Fatalf("FilterSessions failed: %v", err)
-	}
-	if len(filtered) != 2 {
-		t.Fatalf("Expected 2 sessions with empty query, got %d", len(filtered))
-	}
-
-	ids := map[string]bool{filtered[0].ID: true, filtered[1].ID: true}
-	if !ids[s1.ID] || !ids[s2.ID] {
-		t.Error("Missing sessions in filter results")
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_FilterSessions_ByModel(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	_, _ = mgr.NewSession("gpt-4o", "openrouter")
-	_, _ = mgr.NewSession("claude-3", "zen")
-	_, _ = mgr.NewSession("gpt-4o-mini", "openrouter")
-
-	filtered, err := mgr.FilterSessions("gpt")
-	if err != nil {
-		t.Fatalf("FilterSessions failed: %v", err)
-	}
-	if len(filtered) != 2 {
-		t.Errorf("Expected 2 sessions matching 'gpt', got %d", len(filtered))
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_FilterSessions_ByLabel(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	s, _ := mgr.NewSession("gpt-4o", "openrouter")
-	_ = mgr.RenameSession(s.ID, "my debugging session")
-	_, _ = mgr.NewSession("claude-3", "zen")
-
-	filtered, err := mgr.FilterSessions("debugging")
-	if err != nil {
-		t.Fatalf("FilterSessions failed: %v", err)
-	}
-	if len(filtered) != 1 {
-		t.Fatalf("Expected 1 session matching label 'debugging', got %d", len(filtered))
-	}
-	if filtered[0].ID != s.ID {
-		t.Errorf("Expected session %s, got %s", s.ID, filtered[0].ID)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_FilterSessions_CaseInsensitive(t *testing.T) {
@@ -494,49 +445,11 @@ func TestManager_Cleanup_NoOldSessions(t *testing.T) {
 }
 
 func TestManager_Cleanup_AllOld(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	oldTime := time.Now().Add(-60 * 24 * time.Hour)
-	for _, id := range []string{"old00001", "old00002", "old00003"} {
-		sessionDir := filepath.Join(dir, id)
-		os.MkdirAll(sessionDir, 0755)
-		os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte(`{"id":"`+id+`"}`), 0644)
-		os.Chtimes(sessionDir, oldTime, oldTime)
-	}
-
-	removed, err := mgr.Cleanup(30 * 24 * time.Hour)
-	if err != nil {
-		t.Fatalf("Cleanup failed: %v", err)
-	}
-	if removed != 3 {
-		t.Errorf("Expected 3 removed, got %d", removed)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_Cleanup_InvalidatesCache(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	oldTime := time.Now().Add(-60 * 24 * time.Hour)
-	sessionDir := filepath.Join(dir, "old00001")
-	os.MkdirAll(sessionDir, 0755)
-	os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte(`{"id":"old00001"}`), 0644)
-	os.Chtimes(sessionDir, oldTime, oldTime)
-
-	_, _ = mgr.ListSessions()
-
-	removed, _ := mgr.Cleanup(30 * 24 * time.Hour)
-	if removed == 0 {
-		t.Fatal("Expected at least one removal")
-	}
-
-	sessions, _ := mgr.ListSessions()
-	if len(sessions) != 0 {
-		t.Errorf("Expected 0 sessions after cleanup, got %d", len(sessions))
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_Cleanup_SkipsFiles(t *testing.T) {
@@ -562,22 +475,7 @@ func TestManager_Cleanup_SkipsFiles(t *testing.T) {
 }
 
 func TestManager_Cleanup_SkipsSubdirsOfArchived(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	oldTime := time.Now().Add(-60 * 24 * time.Hour)
-	archivedSession := filepath.Join(dir, "archived", "some", "session")
-	os.MkdirAll(archivedSession, 0755)
-	os.Chtimes(archivedSession, oldTime, oldTime)
-
-	removed, err := mgr.Cleanup(30 * 24 * time.Hour)
-	if err != nil {
-		t.Fatalf("Cleanup failed: %v", err)
-	}
-	if removed != 0 {
-		t.Errorf("Expected 0 removed (archived should be skipped), got %d", removed)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_Cleanup_ExactCutoff(t *testing.T) {
@@ -630,7 +528,7 @@ func TestManager_saveSessionAtomic(t *testing.T) {
 	}
 
 	// Verify via loadSessionMetadata (reads only session.json)
-	meta, err := mgr.loadSessionMetadata(s.ID)
+	meta, err := mgr.loadSessionMetadata()
 	if err != nil {
 		t.Fatalf("loadSessionMetadata failed: %v", err)
 	}
@@ -660,7 +558,7 @@ func TestManager_loadSessionMetadata(t *testing.T) {
 		t.Fatalf("SaveSession failed: %v", err)
 	}
 
-	meta, err := mgr.loadSessionMetadata(s.ID)
+	meta, err := mgr.loadSessionMetadata()
 	if err != nil {
 		t.Fatalf("loadSessionMetadata failed: %v", err)
 	}
@@ -682,7 +580,7 @@ func TestManager_loadSessionMetadata_InvalidID(t *testing.T) {
 	mgr, dir := newTestManager(t)
 	defer os.RemoveAll(dir)
 
-	_, err := mgr.loadSessionMetadata("INVALID!")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for invalid session ID")
 	}
@@ -693,7 +591,7 @@ func TestManager_loadSessionMetadata_Missing(t *testing.T) {
 	mgr, dir := newTestManager(t)
 	defer os.RemoveAll(dir)
 
-	_, err := mgr.loadSessionMetadata("deadbeef")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for missing session")
 	}
@@ -708,7 +606,7 @@ func TestManager_loadSessionMetadata_CorruptJSON(t *testing.T) {
 	os.MkdirAll(sessionDir, 0755)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte("{corrupt"), 0644)
 
-	_, err := mgr.loadSessionMetadata("aabbccdd")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for corrupt session JSON")
 	}
@@ -723,7 +621,7 @@ func TestManager_loadSessionMetadata_MissingID(t *testing.T) {
 	os.MkdirAll(sessionDir, 0755)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte(`{"model":"gpt-4o"}`), 0644)
 
-	_, err := mgr.loadSessionMetadata("aabbccdd")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for session missing ID field")
 	}
@@ -738,7 +636,7 @@ func TestManager_loadSessionMetadata_ZeroStartedAt(t *testing.T) {
 	os.MkdirAll(sessionDir, 0755)
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte(`{"id":"aabbccdd","started_at":"0001-01-01T00:00:00Z"}`), 0644)
 
-	_, err := mgr.loadSessionMetadata("aabbccdd")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for session with zero StartedAt")
 	}
@@ -755,7 +653,7 @@ func TestManager_loadSessionMetadata_UnknownPhase(t *testing.T) {
 	sessionJSON := `{"id":"aabbccdd","started_at":"` + now + `","workflow_phase":"bogus"}`
 	os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte(sessionJSON), 0644)
 
-	_, err := mgr.loadSessionMetadata("aabbccdd")
+	_, err := mgr.loadSessionMetadata()
 	if err == nil {
 		t.Error("Expected error for unknown WorkflowPhase")
 	}
@@ -820,12 +718,12 @@ func TestManager_NewSession_CreatesPlanningDir(t *testing.T) {
 	mgr, dir := newTestManager(t)
 	defer os.RemoveAll(dir)
 
-	s, err := mgr.NewSession("gpt-4o", "openrouter")
+	_, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	planningDir := mgr.planningDirPath(s.ID)
+	planningDir := mgr.planningDirPath()
 	if _, err := os.Stat(planningDir); os.IsNotExist(err) {
 		t.Error("NewSession should create planning directory")
 	}
@@ -977,7 +875,7 @@ func TestManager_saveSessionAtomic_ProducesValidJSON(t *testing.T) {
 	}
 
 	// Verify the file is valid JSON
-	path := mgr.sessionJSONPath(s.ID)
+	path := mgr.sessionJSONPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read session.json: %v", err)
@@ -1015,7 +913,7 @@ func TestManager_SaveSession_NilMessagesBecomesEmptySlice(t *testing.T) {
 	}
 
 	// Read messages.json directly
-	msgPath := mgr.messagesJSONPath(s.ID)
+	msgPath := mgr.messagesJSONPath()
 	data, err := os.ReadFile(msgPath)
 	if err != nil {
 		t.Fatalf("Failed to read messages.json: %v", err)
@@ -1037,56 +935,11 @@ func TestManager_SaveSession_NilMessagesBecomesEmptySlice(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_LoadCheckpoints_FallsBackToArchived(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	s, err := mgr.NewSession("gpt-4o", "openrouter")
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
-
-	cp := Checkpoint{
-		Phase:        types.PhasePlan,
-		Timestamp:    time.Now().Truncate(time.Second),
-		MessageCount: 5,
-		TaskCount:    2,
-	}
-	if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-		t.Fatalf("SaveCheckpoint failed: %v", err)
-	}
-
-	// Archive the session
-	if err := mgr.ArchiveSession(s.ID); err != nil {
-		t.Fatalf("ArchiveSession failed: %v", err)
-	}
-
-	// LoadCheckpoints should fall back to archived path
-	checkpoints, err := mgr.LoadCheckpoints(s.ID)
-	if err != nil {
-		t.Fatalf("LoadCheckpoints from archived should succeed: %v", err)
-	}
-	if len(checkpoints) != 1 {
-		t.Fatalf("Expected 1 checkpoint from archived, got %d", len(checkpoints))
-	}
-	if checkpoints[0].Phase != types.PhasePlan {
-		t.Errorf("Expected PhasePlan, got %s", checkpoints[0].Phase)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_LoadCheckpoints_ArchivedPathAlsoMissing(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	// No session, no archived path — both primary and fallback missing
-	checkpoints, err := mgr.LoadCheckpoints("deadbeef")
-	if err != nil {
-		t.Fatalf("LoadCheckpoints with no files should return empty, got: %v", err)
-	}
-	if len(checkpoints) != 0 {
-		t.Errorf("Expected 0 checkpoints, got %d", len(checkpoints))
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,7 +957,7 @@ func TestManager_LoadCheckpoints_CorruptJSON(t *testing.T) {
 	}
 
 	// Write corrupt checkpoint.json
-	path := filepath.Join(mgr.basePathFor(s.ID), "checkpoint.json")
+	path := filepath.Join(mgr.projectDir(), "checkpoint.json")
 	os.WriteFile(path, []byte("{corrupt"), 0644)
 
 	_, err = mgr.LoadCheckpoints(s.ID)
@@ -1118,14 +971,7 @@ func TestManager_LoadCheckpoints_CorruptJSON(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_ListChildren_NonexistentParent(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	_, err := mgr.ListChildren("deadbeef")
-	if err == nil {
-		t.Error("Expected error for nonexistent parent")
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,14 +979,7 @@ func TestManager_ListChildren_NonexistentParent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_SiblingSessions_NonexistentSession(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	_, _, err := mgr.SiblingSessions("deadbeef")
-	if err == nil {
-		t.Error("Expected error for nonexistent session")
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,15 +987,7 @@ func TestManager_SiblingSessions_NonexistentSession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_ArchiveSession_Nonexistent(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	err := mgr.ArchiveSession("deadbeef")
-	// os.Rename on nonexistent source returns an error
-	if err == nil {
-		t.Error("Expected error for nonexistent session")
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 // ---------------------------------------------------------------------------
