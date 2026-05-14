@@ -38,7 +38,7 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 		}
 	}
 
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
@@ -50,7 +50,7 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 // LoadProject reads and parses planning/PROJECT.md for the given session.
 // Returns nil without error if the file does not exist (graceful degradation).
 func (m *Manager) LoadProject(sessionID string) (*types.ProjectState, error) {
-	path := filepath.Join(m.planningDirPath(sessionID), "PROJECT.md")
+	path := filepath.Join(m.planningDirPath(), "PROJECT.md")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -124,7 +124,7 @@ func (m *Manager) SaveTasks(sessionID string, tasks []types.Task) error {
 			task.ID, task.Action, task.Description, deps, string(task.Status), files))
 	}
 
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
@@ -136,7 +136,7 @@ func (m *Manager) SaveTasks(sessionID string, tasks []types.Task) error {
 // LoadTasks reads and parses planning/TASKS.md for the given session.
 // Returns an empty slice without error if the file does not exist.
 func (m *Manager) LoadTasks(sessionID string) ([]types.Task, error) {
-	path := filepath.Join(m.planningDirPath(sessionID), "TASKS.md")
+	path := filepath.Join(m.planningDirPath(), "TASKS.md")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -248,7 +248,7 @@ func (m *Manager) SaveState(sessionID string, phase types.WorkflowPhase, progres
 	b.WriteString(fmt.Sprintf("**Last Action:** %s\n", lastAction))
 	b.WriteString(fmt.Sprintf("**Timestamp:** %s\n", time.Now().Format(time.RFC3339)))
 
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
@@ -260,7 +260,7 @@ func (m *Manager) SaveState(sessionID string, phase types.WorkflowPhase, progres
 // LoadState reads and parses planning/STATE.md for the given session.
 // Returns empty/default values without error if the file does not exist.
 func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progress, lastAction string, timestamp time.Time, err error) {
-	path := filepath.Join(m.planningDirPath(sessionID), "STATE.md")
+	path := filepath.Join(m.planningDirPath(), "STATE.md")
 	data, readErr := readFileLimited(path, types.MaxSessionFileSize)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
@@ -307,7 +307,7 @@ func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progre
 // SavePlan writes the plan markdown to planning/plan.md and a versioned copy
 // to planning/plan_v{version}.md for refinement history.
 func (m *Manager) SavePlan(sessionID string, version int, markdown string) error {
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
@@ -327,7 +327,7 @@ func (m *Manager) SavePlan(sessionID string, version int, markdown string) error
 // LoadPlan reads planning/plan.md for the given session.
 // Returns empty string without error if the file does not exist.
 func (m *Manager) LoadPlan(sessionID string) (string, error) {
-	path := filepath.Join(m.planningDirPath(sessionID), "plan.md")
+	path := filepath.Join(m.planningDirPath(), "plan.md")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -344,7 +344,7 @@ func (m *Manager) LoadPlan(sessionID string) (string, error) {
 
 // SaveDemonstration writes the demonstration markdown to planning/DEMONSTRATION.md.
 func (m *Manager) SaveDemonstration(sessionID string, markdown string) error {
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
@@ -355,7 +355,7 @@ func (m *Manager) SaveDemonstration(sessionID string, markdown string) error {
 // LoadDemonstration reads planning/DEMONSTRATION.md for the given session.
 // Returns empty string without error if the file does not exist.
 func (m *Manager) LoadDemonstration(sessionID string) (string, error) {
-	path := filepath.Join(m.planningDirPath(sessionID), "DEMONSTRATION.md")
+	path := filepath.Join(m.planningDirPath(), "DEMONSTRATION.md")
 	data, err := readFileLimited(path, types.MaxSessionFileSize)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -413,7 +413,7 @@ func (m *Manager) SaveTasksCheckbox(sessionID string, tasks []types.Task) error 
 		}
 	}
 
-	planningDir := m.planningDirPath(sessionID)
+	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
 		return fmt.Errorf("cannot create planning directory: %w", err)
 	}
