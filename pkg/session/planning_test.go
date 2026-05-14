@@ -99,7 +99,7 @@ func TestPlanning_ToleratesExtraWhitespace(t *testing.T) {
 - **Q:**   What language?   → **A:**   Go
 - **Q:** What UI lib? → **A:**   Bubble Tea
 `
-	projectPath := filepath.Join(mgr.planningDirPath(s.ID), "PROJECT.md")
+	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
 	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write PROJECT.md: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPlanning_ToleratesMissingSections(t *testing.T) {
 **Type:** Test
 **Framework:** None
 `
-	projectPath := filepath.Join(mgr.planningDirPath(s.ID), "PROJECT.md")
+	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
 	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write PROJECT.md: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestPlanning_NoTempFilesAfterSave(t *testing.T) {
 	_ = mgr.SaveState(s.ID, types.PhaseIdle, "p", "a")
 
 	// Check for leftover temp files
-	planningDir := mgr.planningDirPath(s.ID)
+	planningDir := mgr.planningDirPath()
 	entries, err := os.ReadDir(planningDir)
 	if err != nil {
 		t.Fatalf("Failed to read planning dir: %v", err)
