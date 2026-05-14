@@ -37,7 +37,7 @@ func TestPlanning_SaveAndLoadPlan(t *testing.T) {
 	}
 
 	// Verify versioned file exists
-	versioned := filepath.Join(mgr.planningDirPath(s.ID), "plan_v1.md")
+	versioned := filepath.Join(mgr.planningDirPath(), "plan_v1.md")
 	data, err := os.ReadFile(versioned)
 	if err != nil {
 		t.Fatalf("Failed to read versioned plan: %v", err)
@@ -62,13 +62,13 @@ func TestPlanning_SavePlanVersionZeroSkipsVersioned(t *testing.T) {
 	}
 
 	// plan.md should exist
-	planPath := filepath.Join(mgr.planningDirPath(s.ID), "plan.md")
+	planPath := filepath.Join(mgr.planningDirPath(), "plan.md")
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		t.Error("plan.md should exist")
 	}
 
 	// plan_v0.md should NOT exist
-	versionedPath := filepath.Join(mgr.planningDirPath(s.ID), "plan_v0.md")
+	versionedPath := filepath.Join(mgr.planningDirPath(), "plan_v0.md")
 	if _, err := os.Stat(versionedPath); !os.IsNotExist(err) {
 		t.Error("plan_v0.md should not exist when version is 0")
 	}
@@ -155,7 +155,7 @@ func TestPlanning_SaveTasksCheckbox_GroupsByCategory(t *testing.T) {
 		t.Fatalf("SaveTasksCheckbox failed: %v", err)
 	}
 
-	path := filepath.Join(mgr.planningDirPath(s.ID), "tasks.md")
+	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read tasks.md: %v", err)
@@ -200,7 +200,7 @@ func TestPlanning_SaveTasksCheckbox_AllDoneCategories(t *testing.T) {
 		t.Fatalf("SaveTasksCheckbox failed: %v", err)
 	}
 
-	path := filepath.Join(mgr.planningDirPath(s.ID), "tasks.md")
+	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read tasks.md: %v", err)
@@ -233,7 +233,7 @@ func TestPlanning_SaveTasksCheckbox_EmptyTasks(t *testing.T) {
 		t.Fatalf("SaveTasksCheckbox with nil tasks failed: %v", err)
 	}
 
-	path := filepath.Join(mgr.planningDirPath(s.ID), "tasks.md")
+	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read tasks.md: %v", err)
@@ -384,67 +384,32 @@ func TestGenerateID_HexOnly(t *testing.T) {
 // Path helpers
 // ---------------------------------------------------------------------------
 
-func TestManager_BasePathFor(t *testing.T) {
+func TestManager_ProjectDir(t *testing.T) {
 	t.Parallel()
 	mgr, dir := newTestManager(t)
 	defer os.RemoveAll(dir)
 
-	expected := filepath.Join(dir, "abc12345")
-	got := mgr.basePathFor("abc12345")
+	expected := filepath.Join(dir, ".m31a")
+	got := mgr.projectDir()
 	if got != expected {
-		t.Errorf("basePathFor: expected %q, got %q", expected, got)
+		t.Errorf("projectDir: expected %q, got %q", expected, got)
 	}
 }
 
 func TestManager_SessionJSONPath(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	expected := filepath.Join(dir, "abc12345", "session.json")
-	got := mgr.sessionJSONPath("abc12345")
-	if got != expected {
-		t.Errorf("sessionJSONPath: expected %q, got %q", expected, got)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_MessagesJSONPath(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	expected := filepath.Join(dir, "abc12345", "messages.json")
-	got := mgr.messagesJSONPath("abc12345")
-	if got != expected {
-		t.Errorf("messagesJSONPath: expected %q, got %q", expected, got)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_PlanningDirPath(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	expected := filepath.Join(dir, "abc12345", "planning")
-	got := mgr.planningDirPath("abc12345")
-	if got != expected {
-		t.Errorf("planningDirPath: expected %q, got %q", expected, got)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_RecentModelsPath(t *testing.T) {
-	t.Parallel()
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
-
-	// recentModelsPath is filepath.Join(filepath.Dir(m.baseDir), "recent_models.json")
-	// So it should be a sibling of the baseDir
-	got := mgr.recentModelsPath()
-	parent := filepath.Dir(dir)
-	expected := filepath.Join(parent, "recent_models.json")
-	if got != expected {
-		t.Errorf("recentModelsPath: expected %q, got %q", expected, got)
-	}
+	t.Skip("removed: project-local sessions")
 }
 
 func TestManager_BaseDir(t *testing.T) {
@@ -464,7 +429,7 @@ func TestManager_BaseDir(t *testing.T) {
 func TestManager_NewManager_DefaultOpts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 	if mgr.sessionIDBytes != 4 {
 		t.Errorf("Expected default sessionIDBytes=4, got %d", mgr.sessionIDBytes)
 	}
@@ -479,7 +444,7 @@ func TestManager_NewManager_DefaultOpts(t *testing.T) {
 func TestManager_NewManager_CustomOpts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	mgr := NewManager(dir, ManagerOpts{
+	mgr := NewManager(dir, dir, ManagerOpts{
 		SessionIDBytes:  8,
 		MaxRecentModels: 5,
 		SessionCacheTTL: 10,
@@ -560,7 +525,7 @@ func TestPlanning_LoadStateEmptyPhaseDefaultsToIdle(t *testing.T) {
 **Last Action:** did something
 **Timestamp:** 2025-01-01T00:00:00Z
 `
-	statePath := filepath.Join(mgr.planningDirPath(s.ID), "STATE.md")
+	statePath := filepath.Join(mgr.planningDirPath(), "STATE.md")
 	if err := os.WriteFile(statePath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write STATE.md: %v", err)
 	}
@@ -595,7 +560,7 @@ func TestPlanning_LoadStateMalformedTimestamp(t *testing.T) {
 **Last Action:** wrote tests
 **Timestamp:** not-a-valid-timestamp
 `
-	statePath := filepath.Join(mgr.planningDirPath(s.ID), "STATE.md")
+	statePath := filepath.Join(mgr.planningDirPath(), "STATE.md")
 	if err := os.WriteFile(statePath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write STATE.md: %v", err)
 	}
@@ -643,7 +608,7 @@ func TestPlanning_LoadProjectMalformedQA(t *testing.T) {
 - **Q:** valid question → **A:** valid answer
 - **Q:** malformed question without arrow
 `
-	projectPath := filepath.Join(mgr.planningDirPath(s.ID), "PROJECT.md")
+	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
 	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write PROJECT.md: %v", err)
 	}
