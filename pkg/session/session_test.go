@@ -79,7 +79,7 @@ func TestManager_UpdateWorkflowState_PersistsAndLoads(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 
 	// Create a session
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
@@ -121,7 +121,7 @@ func TestManager_UpdateWorkflowState_OverwritesPrevious(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -164,7 +164,7 @@ func TestManager_LoadWorkflowState_ReturnsZeroForUnset(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 
 	// No session created — should return zero values with no error
 	goal, phase, questions, err := mgr.LoadWorkflowState("nonexistent-id")
@@ -193,7 +193,7 @@ func TestManager_LoadWorkflowState_ReturnsZeroForUnsetSession(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -226,7 +226,7 @@ func TestManager_UpdateWorkflowState_AfterReset(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -266,7 +266,7 @@ func TestManager_UpdateWorkflowState_NonexistentSession(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	mgr := NewManager(dir, ManagerOpts{})
+	mgr := NewManager(dir, dir, ManagerOpts{})
 
 	// Try to update a session that doesn't exist
 	err = mgr.UpdateWorkflowState("nonexistent", "goal", types.PhasePlan, nil)
