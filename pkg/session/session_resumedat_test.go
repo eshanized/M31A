@@ -391,7 +391,7 @@ func TestCheckpoint_Retention_FilePruned(t *testing.T) {
 	}
 
 	// Re-read the file directly to verify it was pruned on disk
-	path := filepath.Join(mgr.basePathFor(s.ID), "checkpoint.json")
+	path := filepath.Join(mgr.projectDir(), "checkpoint.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
