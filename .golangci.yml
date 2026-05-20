@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
 
@@ -8,14 +10,13 @@ linters:
     - errcheck
     - ineffassign
     - unused
-    - gosimple
 
-linters-settings:
-  govet:
-    check-shadowing: true
-  errcheck:
-    check-type-assertions: false
-    check-blank: false
+  settings:
+    govet:
+      shadow: true
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
 
 issues:
   exclude-rules:
