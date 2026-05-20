@@ -13,18 +13,24 @@ M31A is a modular AI agent framework built in Go with a Bubble Tea TUI. It route
 ├── cmd/m31a/              # Main entry point (flag parsing, config init)
 ├── docs/                  # User-facing documentation
 ├── internal/
-│   ├── app/               # App lifecycle, Bubble Tea TUI, views
-│   ├── commands/          # Slash command registry + built-in commands
+│   ├── codeintel/         # Code intelligence utilities
 │   ├── config/            # YAML config loading, validation, defaults
 │   ├── errors/            # Sentinel errors for the entire app
-│   ├── ghost/             # Ghost-written append-only file generation
+│   ├── fileutil/          # File system utilities
+│   ├── git/               # Git operations abstraction
+│   ├── log/               # Logging infrastructure
 │   ├── provider/          # LLM provider abstraction (OpenRouter, Zen)
-│   ├── style/             # Lipgloss TUI styling
+│   ├── tokens/            # Token counting and estimation
 │   ├── tools/             # Tool registry, MCP client, Toolhouse, Brave Search
-│   ├── types/             # Core type definitions
-│   ├── ui/                # TUI components (spinner, text input, etc.)
-│   ├── verify/            # Verification — attestation, validation, MCP mocks
-│   └── version/           # Version info from ldflags
+│   ├── tui/               # Bubble Tea TUI — models, views, commands, components
+│   │   ├── commands/      # Slash command registry + built-in commands
+│   │   ├── components/    # Reusable TUI components (spinners, lists, etc.)
+│   │   ├── layout/        # Layout helpers (chrome, sidebar sizing)
+│   │   ├── streaming/     # Streaming response rendering
+│   │   ├── theme/         # Lipgloss TUI theming (dark/light/auto)
+│   │   └── tuitypes/      # TUI-specific type definitions and interfaces
+│   ├── types/             # Core type definitions (workflow phases, tasks, etc.)
+│   └── workflow/          # Workflow engine (phase transitions, state management)
 ├── pkg/
 │   ├── arbitrage/         # Model scoring, cost estimation, recommendation
 │   ├── autodream/         # Prompt enhancement (DREAM → enhanced prompt)
