@@ -1,10 +1,10 @@
 # TUI Screen Reference
 
-M31A uses a Bubble Tea TUI with multiple screens. The active screen depends on the current `AppState`.
+M31A uses a Bubble Tea TUI with 29 screens. The active screen depends on the current `AppState`.
 
 ---
 
-## Init Screen
+## Init Screen (ScreenFirstRun)
 Shown during startup while M31A:
 - Loads configuration (`~/.m31a/config.toml`)
 - Resolves API keys (env → keychain → config)
@@ -14,7 +14,7 @@ Shown during startup while M31A:
 
 ---
 
-## Ready Screen
+## Ready Screen (ScreenREPL)
 The main interaction screen. Layout:
 ```
 ┌─────────────────────────────────────────────────┐
@@ -35,7 +35,7 @@ The main interaction screen. Layout:
 
 ---
 
-## Processing Screen
+## Processing Screen (ScreenExecute)
 Shown while waiting for the LLM to respond:
 - Spinner animation (configurable style)
 - "Processing..." status text
@@ -61,12 +61,14 @@ Shown on critical errors:
 
 ---
 
-## Confirm Quit Screen
+## Confirm Quit Screen (ScreenConfirmQuit)
 Shown when quitting during active processing:
 ```
 ┌──────────────────────────────────┐
-│  Confirm Quit?                    │
-│  An operation is in progress.     │
+│  Confirm Quit                    │
+│                                  │
+│  An operation is in progress.    │
+│  Are you sure you want to quit?  │
 │                                  │
 │  [y] Yes, quit    [n] No, stay  │
 └──────────────────────────────────┘
@@ -74,8 +76,8 @@ Shown when quitting during active processing:
 
 ---
 
-## Session Picker
-Activated via `/session` command:
+## Session Picker (ScreenResume)
+Activated via `/sessions` command:
 ```
 ┌──────────────────────────────────┐
 │  Sessions                        │
@@ -90,7 +92,15 @@ Activated via `/session` command:
 
 ---
 
-## Ghost Picker
+## Session Detail (ScreenSessionDetail)
+Shows detailed info about a session before loading it:
+- Session ID, Model, Provider, Phase
+- Message count and preview
+- Resume with Enter, Back with Esc
+
+---
+
+## Ghost Picker (ScreenGhostPicker)
 Activated via `/ghost` command:
 ```
 ┌──────────────────────────────────┐
@@ -108,15 +118,15 @@ Activated via `/ghost` command:
 
 ---
 
-## Ghost Output
+## Ghost Output (ScreenGhostOutput)
 Shows results of ghost write operation:
 - Files created/appended
 - Warnings (if any)
-- Content preview
+- Content preview for selected file
 
 ---
 
-## Bisect Output
+## Bisect Output (ScreenBisect)
 Shows model comparison results:
 ```
 ┌──────────────────────────────────┐
@@ -129,3 +139,181 @@ Shows model comparison results:
 │    Common lines (white)         │
 └──────────────────────────────────┘
 ```
+
+---
+
+## Model Selector (ScreenModelSelector)
+Model/provider picker with fuzzy search:
+- Lists all available models
+- Cost comparison
+- Capability filtering
+
+---
+
+## Settings (ScreenSettings)
+Settings editor with 6 tabs:
+- Provider configuration
+- Model defaults
+- UI preferences
+- Permission modes
+- Feature toggles
+- Keychain management
+
+---
+
+## Plan Review (ScreenPlan)
+Plan review screen:
+- Task graph with dependencies
+- File list and acceptance criteria
+- Approve, refine, or reject
+
+---
+
+## Verify (ScreenVerify)
+Verification results screen:
+- Test results
+- Validation output
+- Self-heal options
+
+---
+
+## Ship (ScreenShip)
+Ship summary screen:
+- Commit details
+- Changes summary
+- Ledger entry
+
+---
+
+## Diff Viewer (ScreenDiff)
+Full diff viewer:
+- Syntax-highlighted diff
+- Line-by-line navigation
+
+---
+
+## Ledger (ScreenLedger)
+Learning ledger browser:
+- Pattern tracking across sessions
+- Statistics and insights
+
+---
+
+## Rollback (ScreenRollback)
+Commit time machine:
+- Browse commit history
+- Soft reset to any commit
+
+---
+
+## Goal Input (ScreenGoalInput)
+Full-screen goal entry:
+- Text input for workflow goal
+- Confirmation
+
+---
+
+## Discuss (ScreenDiscuss)
+Discuss Q&A screen:
+- One-by-one question presentation
+- Timeout support
+- Skip all option
+
+---
+
+## Metrics (ScreenMetrics)
+Session analytics:
+- Token usage over time
+- Cost breakdown
+- Performance stats
+
+---
+
+## Config Viewer (ScreenConfig)
+Full config viewer:
+- Read-only config display
+- JSON/TOML formatted
+
+---
+
+## Help (ScreenHelp)
+Keybinding help overlay:
+- All keybindings listed
+- Screen-specific shortcuts
+
+---
+
+## Theme Picker (ScreenThemePicker)
+Theme browser/preview:
+- Dark/Light/Auto themes
+- Preview before apply
+
+---
+
+## Notifications (ScreenNotifications)
+Notification history:
+- All past notifications
+- Type-colored entries
+- Scrollable list
+
+---
+
+## Dashboard (ScreenDashboard)
+Workflow pipeline overview:
+- Phase progress bar
+- Current goal and model
+- Activity timeline
+
+---
+
+## File Explorer (ScreenFileExplorer)
+File tree browser:
+- Project file tree
+- Expandable directories
+- Navigate with j/k
+
+---
+
+## Tool Detail (ScreenToolDetail)
+Expandable tool output:
+- Full tool call results
+- Copy content
+
+---
+
+## Phase Model Picker (ScreenPhaseModelPicker)
+Dual-model picker:
+- Planning model (Discuss/Plan/Verify)
+- Coding model (Execute/Ship)
+- Tab to cycle, Enter to confirm
+
+---
+
+## Permission Modal (ScreenPermission)
+Tool permission modal:
+- Allow/Deny/Always allow
+- Countdown timer
+- Tool details
+
+---
+
+## Command Palette
+Overlay command palette:
+- Fuzzy search commands
+- Category grouping
+- Keyboard shortcuts
+
+---
+
+## Screen Count Summary
+
+| Category | Count |
+|----------|-------|
+| Core screens | 6 (REPL, FirstRun, Settings, ModelSelector, Help, Config) |
+| Workflow screens | 6 (GoalInput, Discuss, Plan, Execute, Verify, Ship) |
+| Data viewers | 5 (Resume, SessionDetail, Ledger, Metrics, Diff) |
+| Git screens | 2 (Rollback, Bisect) |
+| UI screens | 5 (ThemePicker, Notifications, Dashboard, FileExplorer, ToolDetail) |
+| Ghost screens | 2 (GhostPicker, GhostOutput) |
+| Modals | 3 (Permission, ConfirmQuit, PhaseModelPicker) |
+| **Total** | **29** |
