@@ -6,7 +6,7 @@ M31A is a terminal-based AI coding assistant written in Go. It uses a six-phase 
 
 - **Six-phase workflow**: Initialize → Discuss → Plan → Execute → Verify → Ship
 - **Dual provider support**: OpenRouter and OpenCode Zen gateways with auto-fallback on failure
-- **10-screen Bubble Tea TUI** with dark/light themes and keyboard navigation
+- **29-screen Bubble Tea TUI** with dark/light themes and keyboard navigation
 - **5 core tools**: Bash, FileRead, FileWrite, Glob, Grep
 - **Model selector** with fuzzy search and cost comparison
 - **Cross-session learning ledger** for pattern tracking across sessions
