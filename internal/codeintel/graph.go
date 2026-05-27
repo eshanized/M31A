@@ -212,9 +212,85 @@ func resolveImport(workDir, fromFile, importPath, language string) string {
 	return ""
 }
 
-func resolveGoImport(workDir, fromFile, importPath string) string {
-	if !strings.Contains(importPath, ".") {
+// goModulePath caches the module path read from go.mod (lazily initialized).
+var goModulePath string
+
+// readGoModModule reads the module path from go.mod in workDir.
+// Returns empty string if go.mod is missing or unparseable.
+func readGoModModule(workDir string) string {
+	if goModulePath != "" {
+		return goModulePath
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, "go.mod"))
+	if err != nil {
 		return ""
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			goModulePath = strings.TrimSpace(strings.TrimPrefix(line, "module"))
+			return goModulePath
+		}
+	}
+	return ""
+}
+
+func resolveGoImport(workDir, fromFile, importPath string) string {
+	// Standard library imports have no dots in the first path element.
+	// Skip them — they are not local files.
+	parts := strings.Split(importPath, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	firstElem := parts[0]
+	// Standard library: first element has no dot (e.g. "fmt", "net/http")
+	if !strings.Contains(firstElem, ".") {
+		return ""
+	}
+
+	// Relative imports (./foo or ../foo) — resolve from the importing file's directory.
+	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+		fromDir := filepath.Dir(fromFile)
+		relPath := filepath.Join(fromDir, importPath)
+		// Try as a directory (package) first, then as a file.
+		candidate := filepath.Join(workDir, relPath)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return filepath.ToSlash(filepath.Join(relPath, "index.go"))
+		}
+		// Try with .go extension
+		if _, err := os.Stat(candidate + ".go"); err == nil {
+			return filepath.ToSlash(relPath + ".go")
+		}
+		return ""
+	}
+
+	// Module-internal imports: check if the import starts with the module path.
+	modPath := readGoModModule(workDir)
+	if modPath == "" {
+		return ""
+	}
+	if !strings.HasPrefix(importPath, modPath) {
+		// External package (not our module) — skip.
+		return ""
+	}
+
+	// Strip the module prefix and convert to a file path.
+	relPath := strings.TrimPrefix(importPath, modPath)
+	relPath = strings.TrimPrefix(relPath, "/")
+	if relPath == "" {
+		return ""
+	}
+
+	// Try as a directory (package with multiple files).
+	candidate := filepath.Join(workDir, relPath)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		// Look for a Go file in the directory — return the directory as the node path
+		// so the graph connects to the package, not a specific file.
+		return filepath.ToSlash(relPath)
+	}
+	// Try as a single-file package (e.g. util.go).
+	if _, err := os.Stat(candidate + ".go"); err == nil {
+		return filepath.ToSlash(relPath + ".go")
 	}
 	return ""
 }
