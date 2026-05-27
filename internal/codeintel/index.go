@@ -13,7 +13,7 @@ type SymbolLocation struct {
 // SymbolIndex maps symbol names to their definitions and files to their symbols.
 type SymbolIndex struct {
 	byName map[string][]SymbolLocation // symbol name → definition locations
-	byFile map[string][]SymbolInfo      // file → exported symbols
+	byFile map[string][]SymbolInfo     // file → exported symbols
 }
 
 // NewSymbolIndex creates an empty symbol index.
