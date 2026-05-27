@@ -334,12 +334,12 @@ func (p *PythonParser) CanParse(path string) bool {
 }
 
 var (
-	pyImportRe      = regexp.MustCompile(`^import\s+([\w.]+)`)
-	pyFromImportRe  = regexp.MustCompile(`^from\s+([\w.]+)\s+import\s+(.+)`)
-	pyClassRe       = regexp.MustCompile(`^class\s+(\w+)(?:\(([^)]*)\))?\s*:`)
-	pyFuncRe        = regexp.MustCompile(`^(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)(?:\s*->\s*([^\s:]+))?\s*:`)
-	pyDecoratorRe   = regexp.MustCompile(`^@(\w+(?:\.\w+)?)`)
-	pyTopLevelRe    = regexp.MustCompile(`^(\w+)\s*=\s*`)
+	pyImportRe     = regexp.MustCompile(`^import\s+([\w.]+)`)
+	pyFromImportRe = regexp.MustCompile(`^from\s+([\w.]+)\s+import\s+(.+)`)
+	pyClassRe      = regexp.MustCompile(`^class\s+(\w+)(?:\(([^)]*)\))?\s*:`)
+	pyFuncRe       = regexp.MustCompile(`^(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)(?:\s*->\s*([^\s:]+))?\s*:`)
+	pyDecoratorRe  = regexp.MustCompile(`^@(\w+(?:\.\w+)?)`)
+	pyTopLevelRe   = regexp.MustCompile(`^(\w+)\s*=\s*`)
 )
 
 func (p *PythonParser) Parse(path string, content []byte) (*FileInfo, error) {
