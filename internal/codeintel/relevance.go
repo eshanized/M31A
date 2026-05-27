@@ -126,27 +126,89 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 func extractIdentifiers(text string) []string {
 	var words []string
 	seen := make(map[string]bool)
+
+	addWord := func(w string) {
+		if len(w) < 2 {
+			return
+		}
+		lower := strings.ToLower(w)
+		if isStopWord(lower) {
+			return
+		}
+		if !seen[lower] {
+			words = append(words, w)
+			seen[lower] = true
+		}
+	}
+
 	for _, w := range strings.Fields(text) {
 		w = strings.Trim(w, ".,;:!?\"'()[]{}")
-		if len(w) < 3 {
+		if len(w) == 0 {
 			continue
 		}
-		if isStopWord(strings.ToLower(w)) {
-			continue
-		}
+		// Check if it's a valid identifier character mix
 		isIdent := false
 		for _, r := range w {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' || r >= '0' && r <= '9' {
 				isIdent = true
 				break
 			}
 		}
-		if isIdent && !seen[w] {
-			words = append(words, w)
-			seen[w] = true
+		if !isIdent {
+			continue
+		}
+
+		// Add the whole word first
+		addWord(w)
+
+		// Decompose camelCase: getUserByID → get, User, By, ID
+		parts := splitCamelCase(w)
+		for _, p := range parts {
+			addWord(p)
+		}
+
+		// Decompose snake_case: get_user_by_id → get, user, by, id
+		if strings.Contains(w, "_") {
+			for _, p := range strings.Split(w, "_") {
+				addWord(p)
+			}
 		}
 	}
 	return words
+}
+
+// splitCamelCase breaks a camelCase or PascalCase identifier into its parts.
+// Examples: getUserByID → [get, User, By, ID], HTMLParser → [HTML, Parser]
+func splitCamelCase(s string) []string {
+	var parts []string
+	var current strings.Builder
+
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			// Upper case: check if this starts a new word
+			if current.Len() > 0 {
+				// If next char is lowercase, this is a word boundary (e.g., "getU" → "get", "U")
+				// If next char is also upper case, this might be an acronym (e.g., "HTML" stays together)
+				if i+1 < len(s) {
+					next := rune(s[i+1])
+					if next >= 'a' && next <= 'z' {
+						// End current word before this uppercase
+						parts = append(parts, current.String())
+						current.Reset()
+					}
+				} else {
+					// End of string
+					parts = append(parts, current.String())
+					current.Reset()
+				}
+			}
+		}
+		current.WriteRune(r)
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
 }
 
 func isStopWord(w string) bool {
