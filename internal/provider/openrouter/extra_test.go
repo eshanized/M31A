@@ -102,11 +102,11 @@ func TestHealthCheck_Degraded(t *testing.T) {
 	defer srv.Close()
 
 	c, err := New("sk-or-v1-testkey", Options{
-		BaseURL:             srv.URL,
-		HealthCheckLiveMs:   10,
-		HealthCheckSlowMs:   50,
-		CacheTTL:            time.Minute,
-		CacheStaleTTL:       time.Minute,
+		BaseURL:           srv.URL,
+		HealthCheckLiveMs: 10,
+		HealthCheckSlowMs: 50,
+		CacheTTL:          time.Minute,
+		CacheStaleTTL:     time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,11 +124,11 @@ func TestHealthCheck_ContextCanceled(t *testing.T) {
 	defer srv.Close()
 
 	c, err := New("sk-or-v1-testkey", Options{
-		BaseURL:             srv.URL,
-		HealthCheckLiveMs:   10,
-		HealthCheckSlowMs:   100,
-		CacheTTL:            time.Minute,
-		CacheStaleTTL:       time.Minute,
+		BaseURL:           srv.URL,
+		HealthCheckLiveMs: 10,
+		HealthCheckSlowMs: 100,
+		CacheTTL:          time.Minute,
+		CacheStaleTTL:     time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
