@@ -51,8 +51,8 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 		alpha = types.EMACorrectionAlpha
 	}
 	e := &Estimator{
-		modelID:   modelID,
-		emaAlpha:  alpha,
+		modelID:  modelID,
+		emaAlpha: alpha,
 	}
 	e.emaFactorBits.Store(math.Float64bits(1.0))
 
