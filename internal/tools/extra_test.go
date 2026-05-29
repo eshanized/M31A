@@ -907,7 +907,7 @@ func TestFileList_SkipDirs(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "app.go"), []byte("package main"), 0644)
 	fl := NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
-		Name: "FileList",
+		Name:   "FileList",
 		Params: map[string]any{},
 	})
 	if err != nil {
@@ -923,7 +923,7 @@ func TestFileList_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	fl := NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
-		Name: "FileList",
+		Name:   "FileList",
 		Params: map[string]any{},
 	})
 	if err != nil {
@@ -3640,9 +3640,9 @@ func TestAskUserQuestion_WithHeaderAndOptions(t *testing.T) {
 	result, err := q.Execute(context.Background(), types.ToolInput{
 		Name: "AskUserQuestion",
 		Params: map[string]any{
-			"question":    "Pick one",
-			"header":      "Choice",
-			"options":     []any{"option1", "option2"},
+			"question":     "Pick one",
+			"header":       "Choice",
+			"options":      []any{"option1", "option2"},
 			"allow_custom": false,
 		},
 	})
