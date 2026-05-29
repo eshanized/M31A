@@ -546,10 +546,10 @@ func TestLoop_UpdateLastTool(t *testing.T) {
 	t.Parallel()
 	sa := &Subagent{Info: SubagentInfo{ID: "test"}}
 	l := &loop{
-		agent:       sa,
+		agent:        sa,
 		toolCallsRun: 3,
-		inputToks:   100,
-		outputToks:  50,
+		inputToks:    100,
+		outputToks:   50,
 	}
 	l.updateLastTool("Bash", "running")
 	if sa.Info.LastToolName != "Bash" {
@@ -571,12 +571,12 @@ func TestLoop_FinishDone(t *testing.T) {
 		deps:    Dependencies{Logger: slog.Default()},
 	}
 	l := &loop{
-		manager:     m,
-		agent:       sa,
-		messages:    []types.Message{{Role: "assistant", Content: "done summary"}},
+		manager:      m,
+		agent:        sa,
+		messages:     []types.Message{{Role: "assistant", Content: "done summary"}},
 		toolCallsRun: 5,
-		inputToks:   200,
-		outputToks:  100,
+		inputToks:    200,
+		outputToks:   100,
 	}
 	l.finishDone()
 	if sa.Info.Status != StatusDone {
