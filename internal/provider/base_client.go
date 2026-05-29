@@ -20,7 +20,7 @@ var (
 func getSharedTransport() *http.Transport {
 	sharedTransportOnce.Do(func() {
 		sharedTransport = &http.Transport{
-			DialContext: (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
+			DialContext:         (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
