@@ -390,9 +390,9 @@ func TestBuildChatBody_WireFormat(t *testing.T) {
 	t.Parallel()
 	msgs := []types.Message{
 		{
-			Role:    "system",
-			Content: "sys",
-			Segments: []types.MessageSegment{{Type: "content", Content: "sys"}},
+			Role:      "system",
+			Content:   "sys",
+			Segments:  []types.MessageSegment{{Type: "content", Content: "sys"}},
 			CreatedAt: time.Now(),
 		},
 		{
