@@ -26,26 +26,7 @@ import (
 
 // workflowEngineInterface is the interface that AppState uses to invoke workflow phases.
 // It is defined separately from the concrete workflow.Engine to allow testing.
-type workflowEngineInterface interface {
-	RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*workflow.PhaseResult, error)
-	Transition(ctx context.Context, from, to types.WorkflowPhase) error
-	SetModel(modelID string, p provider.LLMProvider)
-	SetPhaseModel(phase types.WorkflowPhase, modelID string)
-	SetMsgEmitter(em workflow.MsgEmitter)
-	SetSessionID(id string)
-	SetGit(g *git.Git)
-	SessionID() string
-	HealTask(ctx context.Context, taskID int) (bool, error)
-	SubmitDiscussAnswer(index int, answer string) error
-	FinalizeDiscuss() error
-	SkipDiscuss() error
-	DiscussState() workflow.DiscussState
-	PlanContent() string
-	PlanVersion() int
-	SetRefinementFeedback(feedback string)
-	SetWorkflowMode(mode types.WorkflowMode)
-	WorkflowMode() types.WorkflowMode
-}
+type workflowEngineInterface = WorkflowEngine
 
 // AppState is the top-level Bubble Tea model.
 // All state mutations go through Update(). No goroutine may mutate AppState directly.
@@ -132,6 +113,11 @@ type AppState struct {
 	fileExplorerModel  *FileExplorerModel
 	toolDetailModel    *ToolDetailModel
 
+	// Missing screens (Ghost & ConfirmQuit)
+	ghostPickerModel *GhostPickerModel
+	ghostOutputModel *GhostOutputModel
+	confirmQuitModel *ConfirmQuitModel
+
 	// Dual-model picker (Planning vs Coding phase selection)
 	phaseModelPicker *PhaseModelPickerModel
 	planningModelID  string // model ID assigned to Discuss/Plan/Verify phases
@@ -192,7 +178,7 @@ type AppState struct {
 	subagentsVisible bool
 
 	// Autonomous agent mode
-	agentMode      bool                // when true, plain text triggers agent loop (default)
+	agentMode      bool // when true, plain text triggers agent loop (default)
 	promptRegistry *workflow.PromptRegistry
 	agentCh        <-chan tea.Msg // agent loop channel for cmd chain
 }
