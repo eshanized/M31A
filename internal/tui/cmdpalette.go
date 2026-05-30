@@ -61,10 +61,21 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 
 	// Shortcut map for common key bindings
 	shortcuts := map[string]string{
-		"help":    "?",
-		"model":   "ctrl+m",
-		"settings": "ctrl+s",
-		"new":     "ctrl+n",
+		"help":          "?",
+		"model":         "ctrl+m",
+		"settings":      "ctrl+s",
+		"new":           "ctrl+n",
+		"clear":         "ctrl+l",
+		"sessions":      "ctrl+r",
+		"diff":          "ctrl+d",
+		"themes":        "ctrl+x p",
+		"dashboard":     "ctrl+x d",
+		"notifications": "ctrl+x !",
+		"files":         "ctrl+x f",
+		"ledger":        "ctrl+x l",
+		"rollback":      "ctrl+x k",
+		"config":        "ctrl+x s",
+		"metrics":       "ctrl+x m",
 	}
 
 	// Category map
