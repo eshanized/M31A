@@ -44,11 +44,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.addToastCmd("Response cancelled", "warning", 3*time.Second))
 				return m, tea.Batch(cmds...)
 			}
-		if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
-			return m, tea.Quit
-		}
-		m.lastCtrlCTime = time.Now()
-		cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
+			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
+				return m, tea.Quit
+			}
+			m.lastCtrlCTime = time.Now()
+			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
 			return m, tea.Batch(cmds...)
 		default:
 			cmds = append(cmds, m.routeKeyMsg(msg))
@@ -598,6 +598,22 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionDetailModel.SetSession(msg.Session)
 		}
 
+	// ── Ghost write request ───────────────────────────────────────────────
+	case GhostWriteRequestMsg:
+		if len(msg.Files) > 0 {
+			cmds = append(cmds, m.addToastCmd(
+				fmt.Sprintf("Ghost write started for %d file(s)...", len(msg.Files)),
+				"info", 3*time.Second))
+			// Navigate to ghost output screen
+			cmds = append(cmds, m.navigateToScreen(ScreenGhostOutput))
+		}
+
+	// ── Ghost write result ────────────────────────────────────────────────
+	case GhostWriteResultMsg:
+		if m.ghostOutputModel != nil && msg.Result != nil {
+			m.ghostOutputModel.SetResult(msg.Result)
+		}
+
 	// ── Arbitrage optimization results ───────────────────────────────────────
 	case OptimizedMsg:
 		if len(msg.Recommendations) > 0 {
@@ -977,6 +993,164 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.replModel.height = ch
 		}
 		return m.replModel.Init()
+	case ScreenModelSelector:
+		if m.msModel == nil {
+			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
+		}
+		cw, ch := m.contentDimensions()
+		m.msModel.SetDimensions(cw, ch)
+		return m.msModel.Init()
+	case ScreenSettings:
+		if m.settingsModel == nil {
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
+		}
+		cw, ch := m.contentDimensions()
+		m.settingsModel.width = cw
+		m.settingsModel.height = ch
+		return m.settingsModel.Init()
+	case ScreenResume:
+		return m.openResumeScreen()
+	case ScreenPlan:
+		if m.planModel != nil {
+			cw, ch := m.contentDimensions()
+			m.planModel.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenExecute:
+		if m.executeModel != nil {
+			cw, ch := m.contentDimensions()
+			m.executeModel.width = cw
+			m.executeModel.height = ch
+		}
+		return nil
+	case ScreenVerify:
+		if m.verifyModel != nil {
+			cw, ch := m.contentDimensions()
+			m.verifyModel.width = cw
+			m.verifyModel.height = ch
+		}
+		return nil
+	case ScreenShip:
+		if m.shipModel != nil {
+			cw, ch := m.contentDimensions()
+			m.shipModel.width = cw
+			m.shipModel.height = ch
+		}
+		return nil
+	case ScreenGoalInput:
+		if m.goalInput == nil {
+			m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
+		}
+		cw, ch := m.contentDimensions()
+		m.goalInput.SetDimensions(cw, ch)
+		return m.goalInput.Init()
+	case ScreenLedger:
+		if m.ledgerModel == nil {
+			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
+			cw, ch := m.contentDimensions()
+			m.ledgerModel.SetDimensions(cw, ch)
+			m.ledgerModel.LoadEntries()
+		}
+		return nil
+	case ScreenRollback:
+		if m.rollbackModel == nil {
+			cw, ch := m.contentDimensions()
+			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
+			m.rollbackModel.LoadCommits()
+		}
+		return nil
+	case ScreenMetrics:
+		if m.metricsModel == nil {
+			m.metricsModel = NewMetricsModel(m.themeManager.Current())
+		}
+		cw, ch := m.contentDimensions()
+		m.metricsModel.SetDimensions(cw, ch)
+		if m.sessionManager != nil {
+			return m.metricsModel.LoadStatsCmd(m.sessionManager)
+		}
+		return nil
+	case ScreenDiscuss:
+		if m.discussModel == nil {
+			cw, ch := m.contentDimensions()
+			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+			if m.config != nil && m.config.UI.DiscussTimeout > 0 {
+				m.discussModel.SetTimeout(m.config.UI.DiscussTimeout)
+			}
+		} else {
+			cw, ch := m.contentDimensions()
+			m.discussModel.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenConfig:
+		if m.configModel == nil {
+			cw, ch := m.contentDimensions()
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
+		}
+		return nil
+	case ScreenHelp:
+		if m.helpModel == nil {
+			m.helpModel = NewHelpModel(m.themeManager.Current())
+		}
+		cw, ch := m.contentDimensions()
+		m.helpModel.SetDimensions(cw, ch)
+		return m.helpModel.Init()
+	case ScreenBisect:
+		if m.bisectModel == nil {
+			cw, ch := m.contentDimensions()
+			m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenThemePicker:
+		if m.themePickerModel == nil {
+			cw, ch := m.contentDimensions()
+			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenNotifications:
+		if m.notifModel == nil {
+			cw, ch := m.contentDimensions()
+			m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenDashboard:
+		if m.dashboardModel == nil {
+			cw, ch := m.contentDimensions()
+			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), cw, ch)
+		}
+		if m.workflowEngine != nil {
+			m.dashboardModel.SetWorkflowState(m.workflowPhase, m.workflowGoal, "", m.activeProvider)
+		}
+		return nil
+	case ScreenSessionDetail:
+		if m.sessionDetailModel == nil {
+			cw, ch := m.contentDimensions()
+			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenFileExplorer:
+		if m.fileExplorerModel == nil {
+			cw, ch := m.contentDimensions()
+			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), cw, ch)
+			if m.cwd != "" {
+				root := buildFileTree(m.cwd, 0, 3)
+				if root != nil {
+					m.fileExplorerModel.SetRoot(root)
+				}
+			}
+		}
+		return nil
+	case ScreenToolDetail:
+		if m.toolDetailModel == nil {
+			cw, ch := m.contentDimensions()
+			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenPhaseModelPicker:
+		if m.phaseModelPicker == nil {
+			cw, ch := m.contentDimensions()
+			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -1679,6 +1853,34 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		fm.SetDimensions(cw, ch)
 		m.firstRunModel = fm
 		return fm.Init()
+	case ScreenGhostPicker:
+		if m.ghostPickerModel == nil {
+			m.ghostPickerModel = NewGhostPickerModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.ghostPickerModel.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenGhostOutput:
+		if m.ghostOutputModel == nil {
+			m.ghostOutputModel = NewGhostOutputModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.ghostOutputModel.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenConfirmQuit:
+		if m.confirmQuitModel == nil {
+			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.confirmQuitModel.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenPhaseModelPicker:
+		if m.phaseModelPicker == nil {
+			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
+		} else {
+			m.phaseModelPicker.SetDimensions(cw, ch)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -1703,6 +1905,12 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return m.navigateToScreen(ScreenNotifications)
 	case "open_files":
 		return m.navigateToScreen(ScreenFileExplorer)
+	case "open_config":
+		return m.navigateToScreen(ScreenConfig)
+	case "open_session_detail":
+		return m.navigateToScreen(ScreenSessionDetail)
+	case "open_tool_detail":
+		return m.navigateToScreen(ScreenToolDetail)
 	case "toggle_subagents":
 		if m.subagentsModel != nil && !m.subagentsModel.IsEmpty() {
 			m.subagentsVisible = !m.subagentsVisible
@@ -2217,7 +2425,14 @@ func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
 		}
 	}
 
-	return nil
+	// Emit FallbackEventMsg so the notification system tracks auto-fallback events
+	return func() tea.Msg {
+		return FallbackEventMsg{
+			From:   oldProvider,
+			To:     result.Event.To,
+			Reason: result.Event.Reason,
+		}
+	}
 }
 
 // reRegisterProvidersFromConfig re-registers OpenRouter and Zen with the current
