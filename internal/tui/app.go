@@ -142,10 +142,13 @@ func (m *AppState) addToast(text, toastType string) int {
 	if len(m.toasts) > maxVisibleToasts+2 {
 		m.toasts = m.toasts[len(m.toasts)-(maxVisibleToasts+2):]
 	}
-	// Also store in notification history
-	if m.notifModel != nil {
-		m.notifModel.AddNotification(text, toastType)
+	// Eagerly create notification model so notifications are never lost
+	if m.notifModel == nil {
+		cw, ch := m.contentDimensions()
+		m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
 	}
+	// Also store in notification history
+	m.notifModel.AddNotification(text, toastType)
 	return id
 }
 
