@@ -238,6 +238,12 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"y allow", "n deny", "a always"}
 	case ScreenPhaseModelPicker:
 		info.KeyboardHints = []string{"tab cycle", "enter select", "esc back"}
+	case ScreenGhostPicker:
+		info.KeyboardHints = []string{"j/k navigate", "space toggle", "enter write", "esc back"}
+	case ScreenGhostOutput:
+		info.KeyboardHints = []string{"j/k navigate", "esc back"}
+	case ScreenConfirmQuit:
+		info.KeyboardHints = []string{"y quit", "n stay"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -344,6 +350,12 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderToolDetailContent(chrome)
 	case ScreenPhaseModelPicker:
 		return m.renderPhaseModelPickerContent(chrome)
+	case ScreenGhostPicker:
+		return m.renderGhostPickerContent(chrome)
+	case ScreenGhostOutput:
+		return m.renderGhostOutputContent(chrome)
+	case ScreenConfirmQuit:
+		return m.renderConfirmQuitContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -589,6 +601,30 @@ func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) strin
 	}
 	m.phaseModelPicker.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.phaseModelPicker.View()
+}
+
+func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
+	if m.ghostPickerModel == nil {
+		return renderLoading("Loading ghost picker...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+	}
+	m.ghostPickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.ghostPickerModel.View()
+}
+
+func (m *AppState) renderGhostOutputContent(chrome layout.PageChrome) string {
+	if m.ghostOutputModel == nil {
+		return renderLoading("Loading ghost output...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+	}
+	m.ghostOutputModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.ghostOutputModel.View()
+}
+
+func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {
+	if m.confirmQuitModel == nil {
+		m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+	}
+	m.confirmQuitModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.confirmQuitModel.View()
 }
 
 // renderPermissionModal renders the permission or question overlay.
