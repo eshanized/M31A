@@ -6,8 +6,8 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tools/subagent"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/types"
 )
 
