@@ -24,6 +24,9 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 	r.Register(CtxGlobal, "ctrl+x !", "Notifications", emit("open_notifications"))
 	r.Register(CtxGlobal, "ctrl+x f", "File explorer", emit("open_files"))
 	r.Register(CtxGlobal, "ctrl+x a", "Subagents panel", emit("toggle_subagents"))
+	r.Register(CtxGlobal, "ctrl+x c", "Config viewer", emit("open_config"))
+	r.Register(CtxGlobal, "ctrl+x i", "Session detail", emit("open_session_detail"))
+	r.Register(CtxGlobal, "ctrl+x o", "Tool output", emit("open_tool_detail"))
 
 	// REPL bindings
 	r.Register(CtxREPL, "ctrl+x b", "Toggle sidebar", emit("toggle_sidebar"))
