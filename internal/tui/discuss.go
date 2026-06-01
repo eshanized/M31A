@@ -89,11 +89,11 @@ func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Skip current question
 			return dm, dm.advanceQuestion("")
-	case "ctrl+shift+s":
-		// Skip all remaining questions
-		return dm, func() tea.Msg {
-			return DiscussCompleteMsg{}
-		}
+		case "ctrl+shift+s":
+			// Skip all remaining questions
+			return dm, func() tea.Msg {
+				return DiscussCompleteMsg{}
+			}
 		case "enter":
 			ans := strings.TrimSpace(dm.input.Value())
 			return dm, dm.advanceQuestion(ans)
