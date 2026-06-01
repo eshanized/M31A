@@ -81,8 +81,8 @@ func TestSettingsSetFieldValueAllKeys(t *testing.T) {
 	s.editValue = textinput.New()
 
 	setTests := []struct {
-		key  string
-		val  string
+		key   string
+		val   string
 		check func() bool
 	}{
 		{"provider", "zen", func() bool { return cfg.Provider.Default == "zen" }},
