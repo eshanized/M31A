@@ -14,9 +14,9 @@ import (
 func TestTruncateEnd(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		s       string
-		maxLen  int
-		want    string
+		s      string
+		maxLen int
+		want   string
 	}{
 		{"hello", 10, "hello"},
 		{"hello", 5, "hello"},
