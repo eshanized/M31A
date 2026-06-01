@@ -21,7 +21,7 @@ type FileNode struct {
 type flatNode struct {
 	node      *FileNode
 	depth     int
-	isLast    bool // true if this is the last child at its level
+	isLast    bool   // true if this is the last child at its level
 	parentEnd []bool // tracks which ancestors are last children
 }
 
@@ -126,7 +126,7 @@ func (ft *FileTree) flattenNode(node *FileNode, depth int, parentEnd []bool) {
 			copy(childParentEnd, parentEnd)
 		}
 		childParentEnd = append(childParentEnd, isLast)
-		
+
 		ft.flatList = append(ft.flatList, flatNode{
 			node:      child,
 			depth:     depth,
@@ -201,7 +201,7 @@ func (ft *FileTree) renderNode(flat flatNode, selected bool) string {
 			indent.WriteString("  ")
 		}
 	}
-	
+
 	// Add the connector for this node
 	if flat.depth > 0 {
 		if flat.isLast {
@@ -232,10 +232,10 @@ func (ft *FileTree) renderNode(flat flatNode, selected bool) string {
 	if selected {
 		nameStyle = nameStyle.Foreground(t.Brand).Bold(true)
 	}
-	
+
 	// Calculate prefix length for width-aware truncation
 	prefixLen := len(indent.String())
-	
+
 	// Truncate filename to fit within available width
 	maxNameLen := ft.Width - prefixLen - 4 // leave room for icon, space, padding
 	if maxNameLen < 8 {
@@ -251,7 +251,7 @@ func (ft *FileTree) renderNode(flat flatNode, selected bool) string {
 			displayName = string([]rune(displayName)[:maxNameLen-1]) + "…"
 		}
 	}
-	
+
 	if node.IsDir {
 		nameStyle = nameStyle.Bold(true)
 		prefix := " "
