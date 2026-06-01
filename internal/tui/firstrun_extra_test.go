@@ -184,9 +184,9 @@ func TestFirstRunProviderVisibleCount(t *testing.T) {
 
 func TestFirstRunClampProviderScrollWithVisible(t *testing.T) {
 	fr := &FirstRunModel{
-		providers:       []string{"a", "b", "c", "d", "e", "f"},
-		providerCursor:  5,
-		providerScroll:  0,
+		providers:      []string{"a", "b", "c", "d", "e", "f"},
+		providerCursor: 5,
+		providerScroll: 0,
 	}
 	fr.clampProviderScrollWithVisible(3)
 	if fr.providerScroll != 3 {
