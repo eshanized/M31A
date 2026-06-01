@@ -237,7 +237,7 @@ func TestBuildFooter_VerySmallCost(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{
-		Cwd:       "project",
+		Cwd:        "project",
 		TokenCount: 100,
 		Cost:       0.001,
 		ShowCost:   true,
@@ -275,9 +275,9 @@ func TestBuildFooter_StandardWidth_NoCost(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{
-		Cwd:       "project",
-		Cost:      5.0,
-		ShowCost:  true,
+		Cwd:      "project",
+		Cost:     5.0,
+		ShowCost: true,
 	}
 	footer := BuildFooter(info, 70, Standard, tm)
 	if !strings.Contains(footer, "project") {
