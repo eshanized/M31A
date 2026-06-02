@@ -32,6 +32,13 @@ var codeComplexitySignals = []string{
 	"concurrent", "parallel", "goroutine", "mutex",
 	"payment", "transaction", "rollback", "migration",
 	"vulnerability", "cve", "ssrf", "xss", "sqli", "sql injection",
+	"timeout", "retry", "circuit breaker", "backpressure",
+	"async", "await", "promise", "channel",
+	"cache", "invalidation", "consistency",
+	"idempotent", "atomic", "distributed",
+	"schema", "index", "query optimization",
+	"websocket", "grpc", "protobuf",
+	"middleware", "interceptor", "hook",
 }
 
 // ClassifyPrompt estimates the complexity of a user's goal using heuristics.
@@ -86,16 +93,20 @@ func ClassifyPrompt(goal string, workDir string) m31types.ComplexityLevel {
 	// Detect code-complexity signals that override trivial classification.
 	// Short goals like "fix race condition" or "add auth bypass" involve
 	// non-trivial code work even though they read like single-action verbs.
-	hasCodeSignal := false
+	// Position-weighted: signals at the start of the goal are stronger.
+	codeSignalCount := 0
 	for _, sig := range codeComplexitySignals {
-		if strings.Contains(lower, sig) {
-			hasCodeSignal = true
-			break
+		if idx := strings.Index(lower, sig); idx >= 0 {
+			codeSignalCount++
+			// Boost score if signal appears early in the goal (first 30%)
+			if idx < len(lower)*3/10 {
+				codeSignalCount++
+			}
 		}
 	}
-	if hasCodeSignal {
+	if codeSignalCount > 0 {
 		// At least moderate; if multiple signals or long goal, promote to complex.
-		if complexScore >= 1 || wordCount > 10 {
+		if codeSignalCount >= 2 || complexScore >= 1 || wordCount > 10 {
 			return m31types.ComplexityComplex
 		}
 		return m31types.ComplexityModerate
