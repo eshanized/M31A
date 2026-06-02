@@ -31,13 +31,13 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	if len(tasks) == 0 && e.workflowMode != "" && e.workflowMode != m31types.ModeFull {
 		tasks = []m31types.Task{
 			{
-				ID:          1,
-				Description: goal,
-				Action:      "implement",
-				Dependencies: []int{},
-				Files:       []string{},
+				ID:                 1,
+				Description:        goal,
+				Action:             "implement",
+				Dependencies:       []int{},
+				Files:              []string{},
 				AcceptanceCriteria: []string{goal},
-				Status:      m31types.StatusPending,
+				Status:             m31types.StatusPending,
 			},
 		}
 		e.logger.Info("auto-generated task for fast/direct mode", "task_id", 1, "goal", goal)
@@ -489,13 +489,44 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		healPrompt += "\n\n## Original Goal\n" + goal
 	}
 
+	// Build enhanced heal context with acceptance criteria and diagnostic info
+	healCtx := fmt.Sprintf(
+		"## Self-Heal Request\n\nTask %d failed with the following error:\n\n%s\n\n"+
+			"## Task Specification\n"+
+			"- Action: %s\n"+
+			"- Description: %s\n"+
+			"- Files: %v\n"+
+			"- Acceptance Criteria: %s\n"+
+			"- Heal Attempts: %d/%d\n\n"+
+			"## Current File State\n\n%s\n",
+		task.ID, failure,
+		task.Action, task.Description, task.Files,
+		strings.Join(task.AcceptanceCriteria, "; "),
+		task.HealsAttempted, m31types.MaxHealAttempts,
+		e.readTaskFiles(task.Files),
+	)
+
+	// Add git diff of recent changes if available
+	if e.git != nil {
+		if diff, diffErr := e.git.Run("diff", "--stat", "HEAD~3..HEAD"); diffErr == nil && strings.TrimSpace(diff) != "" {
+			healCtx += "\n## Recent Changes (last 3 commits)\n\n```\n" + diff + "\n```\n"
+		}
+	}
+
+	// Add codebase intelligence context for the task files
+	if ci := e.getCodeIntel(); ci != nil {
+		ciCtx := ci.FormatContext(task.Files, task.Description, 5, 2000)
+		if ciCtx != "" {
+			healCtx += "\n" + ciCtx + "\n"
+		}
+	}
+
+	healCtx += "\nDiagnose the root cause using the diagnostic steps in your instructions, then apply a fix using your available tools." +
+		" Prefer Edit for targeted changes; use FileWrite only when rewriting a file entirely."
+
 	messages := []m31types.Message{
 		{Role: "system", Content: healPrompt},
-		{Role: "user", Content: fmt.Sprintf(
-			"## Self-Heal Request\n\nTask %d failed with the following error:\n\n%s\n\n## Current File State\n\n%s\n\n"+
-				"Diagnose the root cause using the diagnostic steps in your instructions, then apply a fix using your available tools."+
-				" Prefer Edit for targeted changes; use FileWrite only when rewriting a file entirely.",
-			task.ID, failure, e.readTaskFiles(task.Files))},
+		{Role: "user", Content: healCtx},
 	}
 
 	content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
