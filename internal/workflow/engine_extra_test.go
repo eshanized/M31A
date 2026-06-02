@@ -1080,11 +1080,11 @@ func TestHasCycle_NoDeps(t *testing.T) {
 func TestBuildExecuteContext(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{
-		ID:          1,
-		Action:      "Create",
-		Description: "test task",
-		Files:       []string{"main.go"},
-		Dependencies: []int{},
+		ID:                 1,
+		Action:             "Create",
+		Description:        "test task",
+		Files:              []string{"main.go"},
+		Dependencies:       []int{},
 		AcceptanceCriteria: []string{"compiles"},
 	}
 	allTasks := []m31types.Task{task}
@@ -2076,10 +2076,10 @@ func TestBuildExecuteContext_WithGoal(t *testing.T) {
 func TestBuildExecuteContext_AcceptanceCriteria(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{
-		ID:          1,
-		Action:      "Create",
-		Description: "test",
-		Files:       []string{"a.go"},
+		ID:                 1,
+		Action:             "Create",
+		Description:        "test",
+		Files:              []string{"a.go"},
 		AcceptanceCriteria: []string{"compiles", "tests pass"},
 	}
 	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
@@ -3227,7 +3227,12 @@ func TestRunVerify_ManualStepsFromPlan(t *testing.T) {
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
 	t.Logf("Verify with manual steps: success=%v, err=%v, manualSteps=%d", result != nil && result.Success, err,
-		func() int { if result != nil { return len(result.ManualVerificationSteps) }; return 0 }())
+		func() int {
+			if result != nil {
+				return len(result.ManualVerificationSteps)
+			}
+			return 0
+		}())
 }
 
 func TestRunShip_EmptyTaskList(t *testing.T) {
