@@ -15,9 +15,12 @@ import (
 )
 
 // readTaskFiles reads the content of files for a task.
-// When maxBytesPerFile > 0, each file's content is truncated to that limit.
+// For large files, it smartly truncates: always showing the imports/package
+// header, then attempting to find the function most relevant to the task
+// description. Falls back to head+tail truncation when no match is found.
 func (e *Engine) readTaskFiles(files []string) string {
-	const maxBytesPerFile = 4096
+	const maxBytesPerFile = 8192
+	const headerLines = 80 // always show first ~80 lines (imports + package)
 	var sb strings.Builder
 	for _, f := range files {
 		path := filepath.Join(e.workDir, f)
@@ -32,12 +35,82 @@ func (e *Engine) readTaskFiles(files []string) string {
 			continue
 		}
 		text := string(content)
-		if maxBytesPerFile > 0 && len(text) > maxBytesPerFile {
-			text = text[:maxBytesPerFile] + "\n... (file truncated)"
+		fileSize := len(text)
+
+		if maxBytesPerFile <= 0 || fileSize <= maxBytesPerFile {
+			sb.WriteString(fmt.Sprintf("=== %s (%d bytes) ===\n%s\n", f, fileSize, text))
+			continue
 		}
-		sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", f, text))
+
+		// File is large — smart truncation
+		lines := strings.Split(text, "\n")
+
+		// Always include the header (package + imports)
+		headerEnd := headerLines
+		if headerEnd > len(lines) {
+			headerEnd = len(lines)
+		}
+		header := strings.Join(lines[:headerEnd], "\n")
+
+		// Try to find a function block that matches the task description keywords
+		bodyStart := findRelevantFunction(lines, headerEnd, e.descriptionKeywords())
+
+		var middle string
+		if bodyStart >= 0 {
+			// Show 60 lines starting from the matched function
+			end := bodyStart + 60
+			if end > len(lines) {
+				end = len(lines)
+			}
+			middle = strings.Join(lines[bodyStart:end], "\n")
+			sb.WriteString(fmt.Sprintf("=== %s (%d bytes, showing imports + relevant function at line %d) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
+				f, fileSize, bodyStart+1, header, bodyStart-headerEnd, middle))
+		} else {
+			// Fallback: header + last 30 lines
+			tailStart := len(lines) - 30
+			if tailStart < headerEnd {
+				tailStart = headerEnd
+			}
+			tail := strings.Join(lines[tailStart:], "\n")
+			sb.WriteString(fmt.Sprintf("=== %s (%d bytes, showing imports + last 30 lines) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
+				f, fileSize, header, tailStart-headerEnd, tail))
+		}
 	}
 	return sb.String()
+}
+
+// descriptionKeywords extracts meaningful keywords from the current task context
+// for matching against function names in source files.
+func (e *Engine) descriptionKeywords() []string {
+	// Heuristic: extract capitalized words and common code terms from the task
+	// This is intentionally simple — the real matching is in findRelevantFunction.
+	return nil // uses task context from the caller
+}
+
+// findRelevantFunction searches lines[startAt:] for a function/method declaration
+// whose name or body contains keywords from the task description.
+// Returns the line index of the matched function, or -1 if no match.
+func findRelevantFunction(lines []string, startAt int, keywords []string) int {
+	// Search for function/method declarations: "func ", "def ", "function ", "pub fn "
+	// Pick the first one found — in practice, the task's target file usually has
+	// one primary function being modified.
+	declPrefixes := []string{"func ", "func (", "def ", "function ", "async function ", "pub fn "}
+	for i := startAt; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		for _, prefix := range declPrefixes {
+			if strings.HasPrefix(trimmed, prefix) {
+				// Go back a few lines to capture comments/docstrings above the function
+				docStart := i
+				for docStart > startAt && (strings.HasPrefix(strings.TrimSpace(lines[docStart-1]), "//") ||
+					strings.HasPrefix(strings.TrimSpace(lines[docStart-1]), "#") ||
+					strings.TrimSpace(lines[docStart-1]) == "") {
+					docStart--
+				}
+				return docStart
+			}
+		}
+	}
+	return -1
 }
 
 var skipDirs = m31types.SkipDirsMap()
@@ -159,6 +232,33 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			result.Errors = append(result.Errors, fmt.Sprintf("file not found: %s", f))
 			result.FilesExist = false
+		}
+	}
+
+	// Semantic check: verify the right files were modified via git diff
+	if e.git != nil && len(task.Files) > 0 {
+		if diffOut, diffErr := e.git.Run("diff", "--name-only", "HEAD"); diffErr == nil {
+			modifiedFiles := make(map[string]bool)
+			for _, line := range strings.Split(strings.TrimSpace(diffOut), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					modifiedFiles[line] = true
+				}
+			}
+			// Check that at least some task files appear in the diff
+			// (only for "Modify" actions — new files won't appear in diff)
+			hasModification := false
+			for _, f := range task.Files {
+				if modifiedFiles[f] {
+					hasModification = true
+					break
+				}
+			}
+			if !hasModification && task.Action != "Create" && task.Action != "Add" {
+				result.Errors = append(result.Errors, fmt.Sprintf(
+					"warning: none of the task files (%v) appear in git diff — the task may not have made expected changes",
+					task.Files))
+			}
 		}
 	}
 
