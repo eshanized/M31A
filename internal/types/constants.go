@@ -112,6 +112,10 @@ const (
 	DateFormat = "2006-01-02"
 	// DateTimeFormat is the date+time format used for file listings
 	DateTimeFormat = "2006-01-02 15:04"
+
+	// DefaultMaxParallelTasks is the default maximum number of tasks to execute
+	// concurrently within a group. Configurable via Runner.MaxParallel.
+	DefaultMaxParallelTasks = 4
 )
 
 // SkipDirs is the list of directories to skip during file traversal.
