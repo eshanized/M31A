@@ -606,8 +606,8 @@ type mockTool struct {
 	risk        RiskLevel
 }
 
-func (m *mockTool) Name() string        { return m.name }
-func (m *mockTool) Description() string { return m.description }
+func (m *mockTool) Name() string         { return m.name }
+func (m *mockTool) Description() string  { return m.description }
 func (m *mockTool) RiskLevel() RiskLevel { return m.risk }
 func (m *mockTool) Execute(_ context.Context, _ ToolInput) (ToolResult, error) {
 	return ToolResult{}, nil
