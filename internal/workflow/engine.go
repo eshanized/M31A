@@ -93,9 +93,9 @@ type Engine struct {
 	msgEmitter       MsgEmitter
 	callCounter      int64
 	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
-	planMarkdown     string  // current plan content for refinement context
-	planVersion      int     // current plan version (increments on refine)
-	refineFeedback   string  // pending refinement feedback from user
+	planMarkdown     string // current plan content for refinement context
+	planVersion      int    // current plan version (increments on refine)
+	refineFeedback   string // pending refinement feedback from user
 	// discussPlanCycles counts Plan→Discuss→Plan round-trips. Capped at
 	// maxDiscussPlanCycles to prevent infinite oscillation (BUG-12).
 	discussPlanCycles int
@@ -116,8 +116,8 @@ type Engine struct {
 	cachedProjectOnce sync.Once
 	cachedProjectID   string // session ID for invalidation
 	// Cached parsed plan for execute phase (H15 fix)
-	cachedPlan     *m31types.Plan
-	cachedPlanMD5  string // MD5 of planMarkdown for invalidation
+	cachedPlan    *m31types.Plan
+	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
 	// Codebase intelligence layer (lazy-built once per session)
 	codeIntel     *codeintel.Indexer
 	codeIntelOnce sync.Once
@@ -231,20 +231,20 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 	}
 
 	return &Engine{
-		sessionID:    opts.SessionID,
-		workDir:      opts.WorkDir,
-		backupDir:    opts.BackupDir,
-		planningDir:  opts.PlanningDir,
-		provider:     opts.Provider,
-		modelID:      opts.ModelID,
-		cfg:          opts.Config,
-		dispatcher:   opts.Dispatcher,
-		tokens:       opts.TokenEst,
-		sessionMgr:   opts.SessionMgr,
-		prompts:      prompts,
-		logger:       slog.Default(),
-		startTime:    time.Now(),
-		execCommand:  exec.Command,
+		sessionID:   opts.SessionID,
+		workDir:     opts.WorkDir,
+		backupDir:   opts.BackupDir,
+		planningDir: opts.PlanningDir,
+		provider:    opts.Provider,
+		modelID:     opts.ModelID,
+		cfg:         opts.Config,
+		dispatcher:  opts.Dispatcher,
+		tokens:      opts.TokenEst,
+		sessionMgr:  opts.SessionMgr,
+		prompts:     prompts,
+		logger:      slog.Default(),
+		startTime:   time.Now(),
+		execCommand: exec.Command,
 	}, nil
 }
 
