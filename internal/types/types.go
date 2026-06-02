@@ -41,10 +41,10 @@ const (
 type WorkflowMode string
 
 const (
-	ModeAuto    WorkflowMode = "auto"    // classify and choose automatically (default)
-	ModeFull    WorkflowMode = "full"    // all 6 phases: Init→Discuss→Plan→Exec→Verify→Ship
-	ModeFast    WorkflowMode = "fast"    // skip Plan: Init→Discuss→Exec→Verify→Ship
-	ModeDirect  WorkflowMode = "direct"  // skip Discuss, Plan, Verify: Init→Exec→Ship
+	ModeAuto   WorkflowMode = "auto"   // classify and choose automatically (default)
+	ModeFull   WorkflowMode = "full"   // all 6 phases: Init→Discuss→Plan→Exec→Verify→Ship
+	ModeFast   WorkflowMode = "fast"   // skip Plan: Init→Discuss→Exec→Verify→Ship
+	ModeDirect WorkflowMode = "direct" // skip Discuss, Plan, Verify: Init→Exec→Ship
 )
 
 type TaskStatus string
