@@ -1,8 +1,8 @@
 ---
-version: 1.1
+version: 1.2
 phase: execute (heal loop), verify (heal after failed verification)
 injected_in: execute.go/healTask, engine.go/HealTask
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-14
 ---
 
 # Self-Healing Instructions
@@ -27,6 +27,12 @@ You are in a self-heal loop. A task failed and you need to diagnose and fix it.
    - **Stale reference**: a renamed/deleted symbol is still referenced
    - **State dependency**: the code assumes prior state that wasn't established
    - **Environment**: a command/binary is unavailable in the current environment
+   - **Missing symbol**: a function/type is referenced but not defined in scope
+   - **Wrong method signature**: correct type, wrong parameter count or types
+   - **Stale import path**: package moved or renamed; import path no longer valid
+   - **Circular dependency**: code creates an import cycle between packages
+   - **Platform issue**: OS-specific code running on wrong platform (e.g., Windows paths on Linux)
+   - **Version mismatch**: using an API that doesn't exist in the installed package version
 
 4. **Plan the fix**. What file(s) need to change? What is the correct code?
 
