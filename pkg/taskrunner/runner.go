@@ -37,6 +37,17 @@ type Runner struct {
 	TaskTimeout time.Duration
 	// MaxRetries is the number of retry attempts for failed tasks. Default 0.
 	MaxRetries int
+	// MaxParallel is the maximum number of tasks to execute concurrently within a group.
+	// Zero means use DefaultMaxParallelTasks (4).
+	MaxParallel int
+}
+
+// maxParallel returns the effective parallelism limit.
+func (r *Runner) maxParallel() int {
+	if r.MaxParallel > 0 {
+		return r.MaxParallel
+	}
+	return types.DefaultMaxParallelTasks
 }
 
 // New creates a Runner for the given tasks.
@@ -135,8 +146,8 @@ func (r *Runner) Schedule() ([][]int, error) {
 }
 
 // MaxParallelTasks is the default maximum number of tasks to execute concurrently
-// within a group. This controls parallelism for independent tasks.
-const MaxParallelTasks = 4
+// within a group. Deprecated: use types.DefaultMaxParallelTasks or Runner.MaxParallel instead.
+const MaxParallelTasks = types.DefaultMaxParallelTasks
 
 // ExecuteGroup runs all tasks in the group concurrently with bounded parallelism.
 // Dependencies must have been completed in prior groups.
@@ -203,7 +214,7 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 
 	// Execute tasks concurrently with bounded parallelism
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, MaxParallelTasks)
+	sem := make(chan struct{}, r.maxParallel())
 
 	for _, rt := range ready {
 		// Check parent context cancellation before starting each task
