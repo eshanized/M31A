@@ -192,10 +192,48 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		framework = project.Framework
 	}
 	memEntry := fmt.Sprintf(
-		"\n## Session %s (%s)\n- Goal: %s\n- Tasks done: %d/%d\n- Project: %s (%s)\n",
+		"\n## Session %s (%s)\n- Goal: %s\n- Tasks done: %d/%d\n- Project: %s (%s)\n- Model: %s\n",
 		e.sessionID, time.Now().Format("2006-01-02"),
-		goal, done, total, projectType, framework,
+		goal, done, total, projectType, framework, e.modelForPhase(m31types.PhaseExecute),
 	)
+
+	// Record failed tasks with their root causes for cross-session learning
+	if failed > 0 {
+		memEntry += "- Failed tasks:\n"
+		for _, t := range tasks {
+			if t.Status == m31types.StatusFailed || t.Status == m31types.StatusUnrecoverable {
+				memEntry += fmt.Sprintf("  - Task %d (%s): %s (heals attempted: %d)\n",
+					t.ID, t.Status, t.Description, t.HealsAttempted)
+			}
+		}
+	}
+
+	// Record key patterns discovered (file types touched, frameworks used)
+	fileExts := make(map[string]int)
+	for _, t := range tasks {
+		for _, f := range t.Files {
+			ext := filepath.Ext(f)
+			if ext != "" {
+				fileExts[ext]++
+			}
+		}
+	}
+	if len(fileExts) > 0 {
+		memEntry += "- File patterns: "
+		first := true
+		for ext, count := range fileExts {
+			if !first {
+				memEntry += ", "
+			}
+			memEntry += fmt.Sprintf("%s(%d)", ext, count)
+			first = false
+		}
+		memEntry += "\n"
+	}
+
+	// Record duration and efficiency
+	memEntry += fmt.Sprintf("- Duration: %s\n", duration.Round(time.Second))
+
 	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
 		if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
 			e.logger.Warn("memory write failed", "error", writeErr)
