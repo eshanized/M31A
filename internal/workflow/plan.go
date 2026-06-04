@@ -94,6 +94,19 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			continue
 		}
 
+		// Granularity check: warn about oversized tasks that may be hard to execute
+		for _, t := range tasks {
+			if len(t.Files) > 3 {
+				e.logger.Warn("task has many files, consider splitting",
+					"task_id", t.ID, "file_count", len(t.Files), "description", t.Description)
+			}
+			wordCount := len(strings.Fields(t.Description))
+			if wordCount > 80 {
+				e.logger.Warn("task description is very long, consider simplifying",
+					"task_id", t.ID, "word_count", wordCount)
+			}
+		}
+
 		break
 	}
 
