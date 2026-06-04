@@ -275,7 +275,8 @@ func (c *Consolidator) Stats() map[string]any {
 
 // protectedIndices computes the set of message indices that must never be
 // consolidated. These are: the first message (index 0), all system messages,
-// the last 5 messages, and all messages with tool calls.
+// the last 5 messages, all messages with tool calls, tool result messages,
+// and messages containing critical context (plan, task specs, file content).
 // Caller must hold at least a read lock.
 func (c *Consolidator) protectedIndices() map[int]struct{} {
 	protected := make(map[int]struct{})
@@ -290,11 +291,33 @@ func (c *Consolidator) protectedIndices() map[int]struct{} {
 
 	for i := 0; i < n; i++ {
 		msg := c.messages[i]
+
+		// System messages are always protected
 		if msg.Role == "system" {
 			protected[i] = struct{}{}
+			continue
 		}
+
+		// Messages with tool calls (assistant proposing tool use) are protected
 		if len(msg.ToolCalls) > 0 {
 			protected[i] = struct{}{}
+			continue
+		}
+
+		// Tool result messages (role="tool") contain tool outputs — protect them
+		// as they may be needed for later heal attempts or verification
+		if msg.Role == "tool" || msg.ToolCallID != "" {
+			protected[i] = struct{}{}
+			continue
+		}
+
+		// Protect messages containing critical context that might be needed later
+		if msg.Role == "user" {
+			lower := msg.Content
+			if containsCriticalContext(lower) {
+				protected[i] = struct{}{}
+				continue
+			}
 		}
 	}
 
@@ -308,6 +331,27 @@ func (c *Consolidator) protectedIndices() map[int]struct{} {
 	}
 
 	return protected
+}
+
+// containsCriticalContext checks if a message contains context that should
+// be preserved across consolidation (plan specs, task lists, file contents).
+func containsCriticalContext(content string) bool {
+	criticalMarkers := []string{
+		"Implementation Plan",
+		"Task List",
+		"Acceptance Criteria",
+		"Current Task",
+		"## File",
+		"=== ",
+		"PROJECT.md",
+		"STATE.md",
+	}
+	for _, marker := range criticalMarkers {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidateIndices returns all indices not in the protected set, sorted ascending.
