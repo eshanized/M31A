@@ -27,18 +27,18 @@ func TestValidateService_Valid(t *testing.T) {
 func TestValidateService_Invalid(t *testing.T) {
 	invalidNames := []string{
 		"",
-		"OpenRouter",   // uppercase
-		"my api key",   // spaces
-		"key; rm -rf",  // injection attempt
-		"key/../../",   // path traversal
-		"key=value",    // equals sign
-		"key&value",    // ampersand
-		"key|value",    // pipe
-		"key`cmd`",     // backtick
-		"key$(cmd)",    // dollar
-		"hello world",  // space
-		"a.b",          // dot
-		"a_b",          // underscore
+		"OpenRouter",  // uppercase
+		"my api key",  // spaces
+		"key; rm -rf", // injection attempt
+		"key/../../",  // path traversal
+		"key=value",   // equals sign
+		"key&value",   // ampersand
+		"key|value",   // pipe
+		"key`cmd`",    // backtick
+		"key$(cmd)",   // dollar
+		"hello world", // space
+		"a.b",         // dot
+		"a_b",         // underscore
 	}
 	for _, name := range invalidNames {
 		t.Run(name, func(t *testing.T) {
