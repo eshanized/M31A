@@ -1051,21 +1051,7 @@ func TestReplModelUpdateTab(t *testing.T) {
 	rm.Update(tea.KeyMsg{Type: tea.KeyTab})
 }
 
-// ═══ header.go renderProviderBadge ═══
-
-func TestRenderProviderBadge(t *testing.T) {
-	th := testTheme()
-	r := renderProviderBadge(th, "openrouter")
-	if r == "" {
-		t.Error("renderProviderBadge should not be empty")
-	}
-	r = renderProviderBadge(th, "zen")
-	if r == "" {
-		t.Error("renderProviderBadge zen should not be empty")
-	}
-}
-
-// ═══ header.go renderContextMeter ═══
+// ═══ repl_view.go renderContextMeter ═══
 
 func TestRenderContextMeter(t *testing.T) {
 	th := testTheme()

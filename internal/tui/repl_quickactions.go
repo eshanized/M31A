@@ -6,25 +6,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// repl_quickactions.go — quick action panel shown below messages when no active workflow.
+// repl_quickactions.go — quick-actions dropdown overlay (ctrl+q).
+//
+// The quick-actions chip ("quick actions ctrl+q") is embedded directly in
+// the input separator shelf (see repl_view.go) so it consumes no extra row.
+// This file only handles the expanded dropdown that ctrl+q toggles.
 
-// renderQuickActionsPanel renders a quick actions panel suggesting next steps.
-// Only shown when there are messages but no workflow is active.
-func (m *ReplModel) renderQuickActionsPanel(width int) string {
-	if m.streaming {
-		return ""
-	}
-	if len(m.messages) == 0 {
-		return ""
-	}
-
+// renderQuickActionsOverlay renders the expanded quick-actions list as a
+// dropdown-style overlay. Anchored to the bottom of the viewport by
+// compositeOverlays in View()/ViewContent.
+func (m *ReplModel) renderQuickActionsOverlay(width int) string {
 	t := m.theme
-
-	// Collapsed state: single-line hint
-	if m.quickActionsCollapsed {
-		return lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).
-			Render("  Quick actions (ctrl+q to expand)")
-	}
 
 	items := []struct {
 		key  string
@@ -36,17 +28,22 @@ func (m *ReplModel) renderQuickActionsPanel(width int) string {
 		{"/history", "conversation log"},
 	}
 
-	var parts []string
+	var lines []string
 	for _, item := range items {
-		keyS := lipgloss.NewStyle().Foreground(t.Brand).Render(item.key)
-		descS := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" " + item.desc)
-		parts = append(parts, "  "+keyS+descS)
+		slash := lipgloss.NewStyle().Foreground(t.Brand).Render(item.key)
+		desc := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + item.desc)
+		line := "  " + slash + desc
+		if lipgloss.Width(line) > width {
+			line = TruncateWithEllipsis(line, width)
+		}
+		lines = append(lines, line)
 	}
 
-	joined := strings.Join(parts, "  ")
-	if lipgloss.Width(joined) > width {
-		joined = strings.Join(parts[:3], "  ")
-	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
 
-	return lipgloss.NewStyle().Foreground(t.TextMuted).Render(joined)
+	return box
 }

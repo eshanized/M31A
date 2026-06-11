@@ -54,6 +54,14 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.MouseMsg:
+		// Mouse handling: scroll wheel over viewport, click on overlays,
+		// scrollbar drag, and click-to-focus on the input area. The textarea
+		// itself doesn't consume mouse events in bubbles v0.20.
+		if c := m.handleMouseMsg(msg); c != nil {
+			cmds = append(cmds, c)
+		}
+
 	case StreamMsg:
 		cs := m.handleStreamMsg(msg)
 		cmds = append(cmds, cs...)
@@ -67,6 +75,14 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		if m.streaming || m.thinking {
 			m.spinner.Next()
+			// Smooth scroll: ease toward target
+			if !m.userScrolled && m.viewport.YOffset < m.smoothScrollTarget {
+				step := (m.smoothScrollTarget - m.viewport.YOffset) / 3
+				if step < 1 {
+					step = 1
+				}
+				m.viewport.SetYOffset(m.viewport.YOffset + step)
+			}
 			cmds = append(cmds, StreamTickCmd())
 		}
 
@@ -172,7 +188,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		}
 
 	case "ctrl+q":
-		m.quickActionsCollapsed = !m.quickActionsCollapsed
+		m.quickActionsVisible = !m.quickActionsVisible
 		return nil
 
 	case "ctrl+l":
@@ -375,4 +391,12 @@ func (m *ReplModel) navigateHistoryDown() {
 // ThinkingBlockToggleMsg is emitted when the user toggles a thinking block.
 type ThinkingBlockToggleMsg struct {
 	Index int
+}
+
+// ToolClickMsg is emitted when a mouse click lands on a tool card inside
+// the REPL viewport. MessageIndex identifies the message; ToolName is the
+// name of the first tool_use segment in that message.
+type ToolClickMsg struct {
+	MessageIndex int
+	ToolName     string
 }

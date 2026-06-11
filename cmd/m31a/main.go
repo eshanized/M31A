@@ -253,7 +253,10 @@ func run() int {
 		}
 	}
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
 
 	// Signal handler sends tea.Quit through the program channel
 	// instead of calling app.Shutdown() directly from a goroutine.

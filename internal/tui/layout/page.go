@@ -324,3 +324,16 @@ func intToStr(n int) string {
 	}
 	return string(digits)
 }
+
+// CenterText centers a styled text within a given width.
+func CenterText(text string, style lipgloss.Style, width int) string {
+	rendered := style.Render(text)
+	textWidth := lipgloss.Width(rendered)
+	padding := width - textWidth
+	if padding <= 0 {
+		return rendered
+	}
+	leftPad := padding / 2
+	rightPad := padding - leftPad
+	return strings.Repeat(" ", leftPad) + rendered + strings.Repeat(" ", rightPad)
+}

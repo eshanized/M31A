@@ -86,20 +86,42 @@ func (r *MessageRenderer) RenderMessage(msg types.Message, width int) string {
 // RenderTimestampBar renders a timestamp separator between conversation turns.
 // Format: ┤ HH:MM ├──────────────────────────────────
 func RenderTimestampBar(t theme.Theme, ts time.Time, width int) string {
+	return RenderTimestampBarWithSummary(t, ts, width, "")
+}
+
+// RenderTimestampBarWithSummary renders a timestamp separator with an optional
+// trailing summary suffix. When summary is non-empty, the dashes fill the gap
+// between the time prefix and the summary; when empty, behaves like
+// RenderTimestampBar.
+//
+//	┤ 13:08 ├────────────────────── iter 3 · 3 tools
+func RenderTimestampBarWithSummary(t theme.Theme, ts time.Time, width int, summary string) string {
 	if ts.IsZero() {
 		return ""
 	}
 	timeStr := ts.Format("15:04")
 	prefix := "┤ " + timeStr + " ├"
 	prefixWidth := lipgloss.Width(prefix)
-	dashCount := width - prefixWidth - 1
-	if dashCount < 2 {
-		dashCount = 2
-	}
-	dashes := strings.Repeat("─", dashCount)
 
 	barStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
-	return barStyle.Render(prefix + dashes)
+
+	if summary == "" {
+		dashCount := width - prefixWidth - 1
+		if dashCount < 2 {
+			dashCount = 2
+		}
+		return barStyle.Render(prefix + strings.Repeat("─", dashCount))
+	}
+
+	// Leave a space, dashes, space, summary.
+	suffix := " " + summary
+	suffixWidth := lipgloss.Width(suffix)
+	gap := width - prefixWidth - suffixWidth - 2
+	if gap < 2 {
+		gap = 2
+	}
+	dashes := strings.Repeat("─", gap)
+	return barStyle.Render(prefix + dashes + " " + summary)
 }
 
 // renderUserMessage renders a user message with an opencode-style right-leaning bubble.
@@ -217,6 +239,13 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		return ""
 	}
 
+	// Special-case: "Agent iteration N — tools: X, Y" → card + tool chips.
+	if strings.HasPrefix(content, "**Agent iteration") {
+		if out := r.renderAgentIteration(content, width); out != "" {
+			return out
+		}
+	}
+
 	rendered, err := r.renderer.Render(content)
 	if err != nil {
 		return lipgloss.NewStyle().
@@ -230,6 +259,68 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		Width(width).
 		PaddingLeft(2).
 		Render(rendered)
+}
+
+// renderAgentIteration renders an agent-loop iteration summary as a bordered
+// card with tool badges:
+//
+//	╭ Agent iteration 3 ──────────────────╮
+//	│ [FileRead] [FileRead] [FileRead]     │
+//	╰──────────────────────────────────────╯
+//
+// Input format: "**Agent iteration N** — tools: X, Y, Z"
+// Returns "" if the content doesn't match the expected format.
+func (r *MessageRenderer) renderAgentIteration(content string, width int) string {
+	t := r.theme
+
+	idx := strings.Index(content, "** — tools: ")
+	if idx < 0 {
+		return ""
+	}
+	title := strings.TrimPrefix(content[:idx], "**")
+	toolsList := strings.TrimSpace(content[idx+len("** — tools: "):])
+	if toolsList == "" {
+		return ""
+	}
+
+	toolNames := strings.Split(toolsList, ", ")
+	var badges []Badge
+	for _, name := range toolNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		badges = append(badges, NewBadge(name, BadgeBrandPreset, t))
+	}
+	if len(badges) == 0 {
+		return ""
+	}
+
+	// Reserve 4 columns for the card's left+right border + inner padding.
+	innerWidth := width - 4
+	if innerWidth < 8 {
+		innerWidth = 8
+	}
+	body := RenderBadges(badges)
+	if lipgloss.Width(body) > innerWidth {
+		body = TruncateEnd(body, innerWidth)
+	}
+
+	cardW := width
+	if cardW < 20 {
+		cardW = 20
+	}
+
+	card := Card{
+		Title:   title,
+		Content: body,
+		Width:   cardW,
+		Border:  theme.ThinBorder,
+		Style:   CardBrand,
+		Theme:   t,
+	}.Render()
+
+	return lipgloss.NewStyle().Width(width).Render(card)
 }
 
 // renderErrorSegment styles an error banner directly via lipgloss, bypassing

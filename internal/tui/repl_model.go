@@ -14,6 +14,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/history"
 )
 
 const (
@@ -81,12 +82,12 @@ type ReplModel struct {
 	slashSelected    int
 
 	// History
-	frecentHistory *FrecentHistory
+	frecentHistory *history.FrecentHistory
 	historyIndex   int
 	savedInput     string // saves current input during history navigation
 
-	// Quick actions panel state
-	quickActionsCollapsed bool
+	// Quick actions overlay state (ctrl+q toggles the dropdown)
+	quickActionsVisible bool
 
 	// Activity tracking
 	lastActivity     time.Time
@@ -121,6 +122,21 @@ type ReplModel struct {
 	// Render throttle: skip renderMessages() if called within minRenderInterval
 	// of the previous render. Reduces CPU during high-frequency streaming ticks.
 	lastRenderTime time.Time
+
+	// Smooth scroll: ease-out scrolling toward smoothScrollTarget during streaming
+	smoothScrollTarget int
+	viewportContent    string // cached viewport content for line counting
+
+	// Mouse interaction state
+	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
+
+	// messageLineOffsets[i] is the line offset in viewportContent where
+	// messages[i] begins. Populated by renderMessages() for mouse hit-testing.
+	messageLineOffsets []int
+
+	// Live tool tracking: maps tool name → message index for in-progress agent
+	// loop tool cards, so AgentToolDoneMsg can update them in-place.
+	liveToolIndex map[string]int
 }
 
 // NewReplModel creates a new ReplModel.
@@ -136,6 +152,10 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
+	// Visible cursor: block char + brand color so the caret stands out.
+	ta.Cursor.SetChar("█")
+	ta.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
+
 	m := ReplModel{
 		theme:          t,
 		version:        version,
@@ -143,6 +163,7 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 		spinner:        components.NewSpinner(),
 		thinkingBlocks: make(map[int]*components.ThinkingBlock),
 		toolCards:      make(map[int]*components.ToolCard),
+		liveToolIndex:  make(map[string]int),
 		modelValid:     true,
 		historyIndex:   -1,
 	}

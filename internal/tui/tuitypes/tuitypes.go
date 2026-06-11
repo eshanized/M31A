@@ -318,6 +318,20 @@ type ToastExpiryMsg struct {
 	ToastID int
 }
 
+// Toast represents a transient notification overlay.
+type Toast struct {
+	ID        int
+	Text      string
+	Type      string // "success", "error", "warning", "info"
+	CreatedAt time.Time
+	Frame     int // animation frame (0, 1, 2)
+}
+
+// DismissToastMsg is emitted when a toast should be dismissed manually.
+type DismissToastMsg struct {
+	ToastID int
+}
+
 // FallbackEventMsg carries provider fallback information.
 type FallbackEventMsg struct {
 	From   string

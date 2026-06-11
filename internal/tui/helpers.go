@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
@@ -227,4 +229,135 @@ func renderLoading(label string, w, h int, t theme.Theme) string {
 		h = 3
 	}
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
+}
+
+// ─── Formatting utilities ──────────────────────────────────────────────────────
+
+// formatSI formats an integer with SI suffix (K, M).
+func formatSI(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// formatDurationMs formats a duration in milliseconds as a human-readable string.
+func formatDurationMs(ms int64) string {
+	if ms < 0 {
+		return "0s"
+	}
+	s := ms / 1000
+	m := s / 60
+	h := m / 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%dm", h, m%60)
+	case m > 0:
+		return fmt.Sprintf("%dm%ds", m, s%60)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// ProviderShortName returns a short display name for a provider.
+func ProviderShortName(name string) string {
+	switch strings.ToLower(name) {
+	case "openrouter":
+		return "OR"
+	case "zen", "zen-gateway":
+		return "Zen"
+	case "openai":
+		return "OAI"
+	case "anthropic":
+		return "AC"
+	default:
+		if len(name) > 4 {
+			return name[:4]
+		}
+		return name
+	}
+}
+
+// ─── Infrastructure command factories ──────────────────────────────────────────
+
+// HealthCheckTicker returns a tea.Cmd that emits a HealthCheckTickMsg after the
+// given duration. The app re-schedules it in response to HealthCheckResultMsg.
+func HealthCheckTicker(ctx context.Context, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return HealthCheckTickMsg{Time: t}
+	})
+}
+
+// NextHealthTick returns a tea.Cmd for the next health check tick.
+func NextHealthTick(ctx context.Context, d time.Duration) tea.Cmd {
+	return HealthCheckTicker(ctx, d)
+}
+
+// HealthCheckCmd runs a health check against the given provider in a goroutine
+// and emits a HealthCheckResultMsg when it completes.
+func HealthCheckCmd(ctx context.Context, p provider.LLMProvider, timeout time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		if timeout <= 0 {
+			timeout = types.HealthCheckInterval
+		}
+		hCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		status := p.HealthCheck(hCtx)
+		return HealthCheckResultMsg{Result: status}
+	}
+}
+
+// SidebarRefreshTicker returns a tea.Cmd that emits a SidebarRefreshTickMsg after the
+// given duration. The sidebar re-schedules it in response to the tick.
+func SidebarRefreshTicker(ctx context.Context, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return SidebarRefreshTickMsg{}
+	})
+}
+
+// NextSidebarRefreshTick returns a tea.Cmd for the next sidebar refresh tick.
+func NextSidebarRefreshTick(ctx context.Context, d time.Duration) tea.Cmd {
+	return SidebarRefreshTicker(ctx, d)
+}
+
+// CacheRefreshTicker returns a tea.Cmd that emits a RefreshCacheMsg after d.
+func CacheRefreshTicker(providerName string, d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return RefreshCacheMsg{ProviderName: providerName}
+	})
+}
+
+// NextCacheRefreshTick returns a tea.Cmd for the next cache refresh tick.
+func NextCacheRefreshTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return RefreshCacheMsg{}
+	})
+}
+
+// CacheRefreshCmd runs FetchModels in a goroutine and emits CacheRefreshResultMsg.
+func CacheRefreshCmd(ctx context.Context, registry *provider.Registry, providerName string) tea.Cmd {
+	return func() tea.Msg {
+		if registry == nil {
+			return CacheRefreshResultMsg{ErrMsg: "no registry"}
+		}
+		p, err := registry.Get(providerName)
+		if err != nil {
+			return CacheRefreshResultMsg{ErrMsg: err.Error()}
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if _, err := p.FetchModels(fetchCtx); err != nil {
+			return CacheRefreshResultMsg{
+				ErrMsg:  err.Error(),
+				NextCmd: NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
+			}
+		}
+		return CacheRefreshResultMsg{
+			NextCmd: NextCacheRefreshTick(provider.DefaultCacheRefreshInterval),
+		}
+	}
 }

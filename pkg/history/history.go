@@ -1,4 +1,4 @@
-package tui
+package history
 
 import (
 	"encoding/json"
@@ -14,11 +14,12 @@ import (
 // FrecentHistory tracks prompt history by frecency (frequency + recency).
 // Entries are persisted as JSON in the user's session directory.
 type FrecentHistory struct {
-	entries  []frecentEntry
+	entries  []FrecentEntry
 	filePath string
 }
 
-type frecentEntry struct {
+// FrecentEntry is a single history entry with scoring metadata.
+type FrecentEntry struct {
 	Text     string    `json:"text"`
 	Score    float64   `json:"score"`
 	LastUsed time.Time `json:"last_used"`
@@ -51,7 +52,7 @@ func (fh *FrecentHistory) Upsert(text string) {
 			return
 		}
 	}
-	entry := frecentEntry{
+	entry := FrecentEntry{
 		Text:     text,
 		UseCount: 1,
 		LastUsed: now,
@@ -66,9 +67,9 @@ func (fh *FrecentHistory) Upsert(text string) {
 }
 
 // Search returns entries matching the query, sorted by most recently used first.
-func (fh *FrecentHistory) Search(query string, limit int) []frecentEntry {
+func (fh *FrecentHistory) Search(query string, limit int) []FrecentEntry {
 	query = strings.ToLower(strings.TrimSpace(query))
-	var results []frecentEntry
+	var results []FrecentEntry
 	for _, e := range fh.entries {
 		if strings.Contains(strings.ToLower(e.Text), query) {
 			results = append(results, e)
@@ -113,7 +114,7 @@ func (fh *FrecentHistory) sort() {
 	})
 }
 
-func (fh *FrecentHistory) computeScore(e frecentEntry) float64 {
+func (fh *FrecentHistory) computeScore(e FrecentEntry) float64 {
 	ageHours := time.Since(e.LastUsed).Hours()
 	// Combine recency (exponential decay) and frequency
 	recency := 1.0 / (1.0 + ageHours/24.0)

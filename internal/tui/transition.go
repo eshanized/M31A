@@ -1,10 +1,7 @@
 package tui
 
 import (
-	"strings"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ScreenTransition captures a dim-and-reveal transition between screens.
@@ -65,17 +62,4 @@ func (t *ScreenTransition) Progress() float64 {
 		return 1.0
 	}
 	return pct
-}
-
-// centerText centers a styled text within a given width.
-func centerText(text string, style lipgloss.Style, width int) string {
-	rendered := style.Render(text)
-	textWidth := lipgloss.Width(rendered)
-	padding := width - textWidth
-	if padding <= 0 {
-		return rendered
-	}
-	leftPad := padding / 2
-	rightPad := padding - leftPad
-	return strings.Repeat(" ", leftPad) + rendered + strings.Repeat(" ", rightPad)
 }

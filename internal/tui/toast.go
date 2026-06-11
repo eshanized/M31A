@@ -8,22 +8,8 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
-// Toast represents a transient notification overlay.
-type Toast struct {
-	ID        int
-	Text      string
-	Type      string // "success", "error", "warning", "info"
-	CreatedAt time.Time
-	Frame     int // animation frame (0, 1, 2)
-}
-
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
 const maxVisibleToasts = 3
-
-// DismissToastMsg is emitted when a toast should be dismissed manually.
-type DismissToastMsg struct {
-	ToastID int
-}
 
 // renderToastStack renders up to 3 most recent toasts stacked top-right.
 func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {

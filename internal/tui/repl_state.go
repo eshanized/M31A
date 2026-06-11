@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/history"
 )
 
 // ─── Theme / layout setters ───────────────────────────────────────────────────
@@ -116,7 +118,7 @@ func (m *ReplModel) SetCommandRegistry(reg *CommandRegistry) {
 }
 
 // SetFrecentHistory sets the frecency history for prompt history navigation.
-func (m *ReplModel) SetFrecentHistory(fh *FrecentHistory) {
+func (m *ReplModel) SetFrecentHistory(fh *history.FrecentHistory) {
 	m.frecentHistory = fh
 }
 
@@ -207,6 +209,7 @@ func (m *ReplModel) ClearMessages() {
 	m.streamContent.Reset()
 	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
 	m.toolCards = make(map[int]*components.ToolCard)
+	m.liveToolIndex = make(map[string]int)
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
@@ -285,8 +288,19 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 const minRenderInterval = time.Second / 5 // 5fps during streaming
 
 // autoScrollConditionally scrolls to the bottom only if the user hasn't manually scrolled.
+// Uses smooth ease-out scrolling: sets a target offset and lets the tick handler animate toward it.
+// Snaps immediately if the gap exceeds one viewport height (initial load, session restore).
 func (m *ReplModel) autoScrollConditionally() {
-	if !m.userScrolled {
+	if m.userScrolled {
+		return
+	}
+	lineCount := strings.Count(m.viewportContent, "\n") + 1
+	target := lineCount - m.viewport.Height
+	if target < 0 {
+		target = 0
+	}
+	m.smoothScrollTarget = target
+	if m.smoothScrollTarget-m.viewport.YOffset > m.viewport.Height {
 		m.viewport.GotoBottom()
 	}
 }
@@ -319,21 +333,40 @@ func (m *ReplModel) renderMessages() {
 	var sb strings.Builder
 	rw := m.replWidth()
 
+	// Build a line-offset table so mouse clicks can map Y → message index.
+	offsets := make([]int, len(m.messages))
+	lineCount := 0
+
 	for i, msg := range m.messages {
 		if i > 0 {
 			sb.WriteString("\n")
-			sb.WriteString(components.RenderTimestampBar(m.theme, msg.CreatedAt, rw))
+			lineCount++
+
+			summary := ""
+			prevRole := m.messages[i-1].Role
+			if prevRole != msg.Role && msg.Role == "assistant" {
+				summary = summarizeIteration(msg)
+			}
+			tsBar := components.RenderTimestampBarWithSummary(m.theme, msg.CreatedAt, rw, summary)
+			sb.WriteString(tsBar)
+			lineCount += strings.Count(tsBar, "\n") + 1
 			sb.WriteString("\n")
+			lineCount++
 
 			// Add extra blank line between conversation turns (role switches)
-			prevRole := m.messages[i-1].Role
 			if prevRole != msg.Role {
 				sb.WriteString("\n")
+				lineCount++
 			}
 		}
-		sb.WriteString(m.msgRenderer.RenderMessage(msg, rw))
+		offsets[i] = lineCount
+		rendered := m.msgRenderer.RenderMessage(msg, rw)
+		sb.WriteString(rendered)
+		lineCount += strings.Count(rendered, "\n") + 1
 		sb.WriteString("\n")
+		lineCount++
 	}
+	m.messageLineOffsets = offsets
 
 	// Append active streaming content
 	if m.streaming || m.thinking {
@@ -344,26 +377,29 @@ func (m *ReplModel) renderMessages() {
 				Content: streamContent,
 			}
 			if m.activeSegmentType == "thinking" {
-				thinkingHeader := lipgloss.NewStyle().
-					Foreground(m.theme.Thinking).
-					Italic(true).
-					Render("  ── thinking ──")
+				// Render thinking using the full ThinkingBlock component
+				tb := components.NewThinkingBlock(
+					types.MessageSegment{
+						Type:      "thinking",
+						Content:   streamContent,
+						Visible:   true,
+						StartedAt: m.thinkingStartAt,
+					}, m.theme, true, -1)
 				sb.WriteString("\n")
-				sb.WriteString(thinkingHeader)
-				streamMsg.Segments = []types.MessageSegment{{
-					Type:      "thinking",
-					Content:   streamContent,
-					Visible:   true,
-					StartedAt: m.thinkingStartAt,
-				}}
+				sb.WriteString(tb.Render(rw))
+			} else {
+				// Add animated cursor to streaming content
+				cursorFrame := m.spinner.Peek()
+				streamMsg.Content = streamContent + " " +
+					lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorFrame)
+				sb.WriteString("\n")
+				sb.WriteString(m.msgRenderer.RenderMessage(streamMsg, rw))
 			}
-			sb.WriteString("\n")
-			sb.WriteString(m.msgRenderer.RenderMessage(streamMsg, rw))
 		} else if m.streaming && !m.thinking {
+			spinnerFrame := m.spinner.Peek()
 			generating := lipgloss.NewStyle().
 				Foreground(m.theme.TextMuted).
-				Italic(true).
-				Render("  generating response…")
+				Render("  " + spinnerFrame + " generating response…")
 			sb.WriteString("\n")
 			sb.WriteString(generating)
 		}
@@ -380,6 +416,88 @@ func (m *ReplModel) renderMessages() {
 		}
 	}
 
-	m.viewport.SetContent(sb.String())
+	content := sb.String()
+	m.viewportContent = content
+	m.viewport.SetContent(content)
 	m.lastRenderTime = time.Now()
+}
+
+// TrackLiveTool registers an in-progress agent loop tool card by name,
+// mapping it to the message index so UpdateLiveTool can find it later.
+func (m *ReplModel) TrackLiveTool(toolName string, msgIndex int) {
+	if m.liveToolIndex == nil {
+		m.liveToolIndex = make(map[string]int)
+	}
+	m.liveToolIndex[toolName] = msgIndex
+}
+
+// UpdateLiveTool updates an in-progress tool card with its result.
+// It modifies the message's tool_use segment to carry result data,
+// then re-renders the viewport.
+func (m *ReplModel) UpdateLiveTool(toolName string, err error, durationMs int64) {
+	if m.liveToolIndex == nil {
+		return
+	}
+	idx, ok := m.liveToolIndex[toolName]
+	if !ok || idx >= len(m.messages) {
+		return
+	}
+	delete(m.liveToolIndex, toolName)
+
+	msg := &m.messages[idx]
+	for i := range msg.Segments {
+		if msg.Segments[i].Type == "tool_use" {
+			resultSuffix := " ✓"
+			if err != nil {
+				resultSuffix = " ✗"
+			}
+			msg.Segments[i].DurationMs = durationMs
+			if durationMs > 0 {
+				resultSuffix = fmt.Sprintf(" (%dms)%s", durationMs, resultSuffix)
+			}
+			msg.Segments[i].Content += resultSuffix
+			break
+		}
+	}
+	m.renderMessages()
+	m.autoScrollConditionally()
+}
+
+// summarizeIteration returns a brief timestamp-bar suffix for agent-iteration
+// messages, e.g. "iter 3 · 3 tools". Returns "" for non-iteration messages.
+func summarizeIteration(msg types.Message) string {
+	content := msg.Content
+	if content == "" && len(msg.Segments) > 0 {
+		content = msg.Segments[0].Content
+	}
+	if !strings.HasPrefix(content, "**Agent iteration") {
+		return ""
+	}
+	idx := strings.Index(content, "** — tools: ")
+	if idx < 0 {
+		return ""
+	}
+	header := strings.TrimPrefix(content[:idx], "**")
+	toolsList := strings.TrimSpace(content[idx+len("** — tools: "):])
+	if toolsList == "" {
+		return ""
+	}
+	parts := strings.Split(toolsList, ", ")
+	n := 0
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			n++
+		}
+	}
+	iter := strings.TrimPrefix(header, "Agent iteration ")
+	if iter == header {
+		return header
+	}
+	if n <= 0 {
+		return "iter " + iter
+	}
+	if n == 1 {
+		return "iter " + iter + " · 1 tool"
+	}
+	return fmt.Sprintf("iter %s · %d tools", iter, n)
 }

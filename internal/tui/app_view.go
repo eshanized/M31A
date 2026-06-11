@@ -132,6 +132,14 @@ func (m *AppState) buildHeaderInfo() layout.HeaderInfo {
 	}
 	info.Provider = m.activeProvider
 
+	// Context usage: last response's tokens vs. model's context window.
+	if m.replModel != nil && m.replModel.lastUsage != nil {
+		info.CtxUsed = m.replModel.lastUsage.TotalTokens
+		if m.replModel.activeModel != nil && m.replModel.activeModel.ContextLength > 0 {
+			info.CtxTotal = int(m.replModel.activeModel.ContextLength)
+		}
+	}
+
 	// When per-phase model overrides are active, show a compact badge
 	// indicating which models handle Planning vs Coding work.
 	if m.planningModelID != "" || m.codingModelID != "" {
@@ -198,7 +206,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	}
 
 	// Keyboard hints
-	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+x leader"}
+	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+q qa", "ctrl+x leader"}
 	switch m.screen {
 	case ScreenSettings:
 		info.KeyboardHints = []string{"s save global", "L save local", "q back"}

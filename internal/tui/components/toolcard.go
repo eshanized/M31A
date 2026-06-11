@@ -64,6 +64,15 @@ type ToolCard struct {
 	lineCount  int // output line count (for header display)
 }
 
+// ToolName returns the tool's identifier (e.g. "FileRead", "Bash").
+func (c *ToolCard) ToolName() string { return c.toolName }
+
+// Input returns the rendered input summary the card displays.
+func (c *ToolCard) Input() string { return c.input }
+
+// Output returns the rendered tool output body the card displays.
+func (c *ToolCard) Output() string { return c.output }
+
 func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState, t theme.Theme) *ToolCard {
 	renderer := RendererForTool(call.Name, t)
 	input := renderer.RenderInput(call, 0)
@@ -180,7 +189,7 @@ func (c *ToolCard) renderInline(width int) string {
 	if c.input != "" {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
-		short = truncateEnd(short, 60)
+		short = TruncateEnd(short, 60)
 		parts = append(parts, lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short))
 	}
 	parts = append(parts, desc)
@@ -262,7 +271,7 @@ func (c *ToolCard) renderThinBorderHeader(width int) string {
 	if c.input != "" {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
-		short = truncateEnd(short, 50)
+		short = TruncateEnd(short, 50)
 		inputSnippet = " " + lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
 	}
 

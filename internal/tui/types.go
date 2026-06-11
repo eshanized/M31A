@@ -74,6 +74,8 @@ type (
 	ThemeChangedMsg         = tuitypes.ThemeChangedMsg
 	ToastMsg                = tuitypes.ToastMsg
 	ToastExpiryMsg          = tuitypes.ToastExpiryMsg
+	Toast                   = tuitypes.Toast
+	DismissToastMsg         = tuitypes.DismissToastMsg
 	FallbackEventMsg        = tuitypes.FallbackEventMsg
 	SettingsSavedMsg        = tuitypes.SettingsSavedMsg
 	OptimizedMsg            = tuitypes.OptimizedMsg

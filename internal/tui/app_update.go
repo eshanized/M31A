@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
@@ -114,36 +115,57 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.readAgentCh())
 	case AgentThinkingMsg:
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
-				fmt.Sprintf("*Agent thinking (iteration %d)...*", msg.Iteration),
-			))
+			thinkMsg := types.Message{
+				Role: "assistant",
+				Segments: []types.MessageSegment{{
+					Type:      "thinking",
+					Content:   fmt.Sprintf("Agent thinking (iteration %d)…", msg.Iteration),
+					Visible:   true,
+					StartedAt: time.Now(),
+				}},
+				CreatedAt: time.Now(),
+			}
+			m.replModel.AddMessage(thinkMsg)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentToolStartMsg:
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
-				fmt.Sprintf("*Executing tool: %s*", msg.ToolCall.Name),
-			))
+			tcJSON, _ := json.Marshal(types.ToolCall{
+				ID:    msg.ToolCall.ID,
+				Name:  msg.ToolCall.Name,
+				Input: msg.ToolCall.Input,
+			})
+			toolMsg := types.Message{
+				Role: "assistant",
+				Segments: []types.MessageSegment{{
+					Type:    "tool_use",
+					Content: string(tcJSON),
+					Visible: true,
+				}},
+				CreatedAt: time.Now(),
+			}
+			m.replModel.AddMessage(toolMsg)
+			m.replModel.TrackLiveTool(msg.ToolCall.Name, len(m.replModel.Messages())-1)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentToolDoneMsg:
 		if m.replModel != nil {
-			status := "done"
-			if msg.Err != nil {
-				status = fmt.Sprintf("failed: %s", m31errors.UserMessage(msg.Err))
-			}
-			m.replModel.AddMessage(makeAssistantMsg(
-				fmt.Sprintf("*Tool %s: %s (%dms)*", msg.ToolCall.Name, status, msg.DurationMs),
-			))
+			m.replModel.UpdateLiveTool(msg.ToolCall.Name, msg.Err, msg.DurationMs)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentIterationDoneMsg:
 		if m.replModel != nil {
 			m.replModel.streaming = false
+			iterContent := fmt.Sprintf("**Iteration %d complete** — executing %d tool(s)…", msg.Iteration, msg.ToolCount)
 			iterMsg := StreamDoneMsg{
 				Message: types.Message{
 					Role:    "assistant",
-					Content: fmt.Sprintf("*Iteration %d complete — executing %d tool(s)...*", msg.Iteration, msg.ToolCount),
+					Content: iterContent,
+					Segments: []types.MessageSegment{{
+						Type:    "content",
+						Content: iterContent,
+						Visible: true,
+					}},
 				},
 				ModelID:   m.activeModel.ID,
 				SessionID: m.sessionID,
@@ -157,9 +179,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, tc := range msg.ToolCalls {
 				toolNames = append(toolNames, tc.Name)
 			}
-			m.replModel.AddMessage(makeAssistantMsg(
-				fmt.Sprintf("*Agent iteration %d — tools: %s*", msg.Iteration, strings.Join(toolNames, ", ")),
-			))
+			iterContent := fmt.Sprintf("**Agent iteration %d** — tools: %s", msg.Iteration, strings.Join(toolNames, ", "))
+			iterMsg := types.Message{
+				Role: "assistant",
+				Segments: []types.MessageSegment{{
+					Type:    "content",
+					Content: iterContent,
+					Visible: true,
+				}},
+				CreatedAt: time.Now(),
+			}
+			m.replModel.AddMessage(iterMsg)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentDoneMsg:
@@ -783,6 +813,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ThinkingBlockToggleMsg:
 		if m.replModel != nil {
 			m.replModel.handleThinkingToggle(msg)
+		}
+
+	// ── Tool card click (mouse) ───────────────────────────────────────────────
+	case ToolClickMsg:
+		if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.messages) {
+			m.ensureToolDetailModel()
+			title, body := m.extractToolDetail(msg.MessageIndex, msg.ToolName)
+			if title != "" {
+				m.toolDetailModel.SetContent(title, body)
+				cmds = append(cmds, m.navigateToScreen(ScreenToolDetail))
+			}
 		}
 
 	// ── Model/command palette sub-model forwarding ────────────────────────────
@@ -2134,6 +2175,66 @@ func (m *AppState) openResumeScreen() tea.Cmd {
 // resumeScreenReadyMsg carries loaded sessions for the resume screen.
 type resumeScreenReadyMsg struct {
 	sessions []session.SessionInfo
+}
+
+// ensureToolDetailModel lazily creates the tool-detail model with the current
+// theme and REPL dimensions so the detail screen is ready to display.
+func (m *AppState) ensureToolDetailModel() {
+	if m.toolDetailModel != nil {
+		return
+	}
+	t := m.themeManager.Current()
+	w := m.width
+	h := m.height
+	if w < 40 {
+		w = 40
+	}
+	if h < 10 {
+		h = 10
+	}
+	m.toolDetailModel = NewToolDetailModel(t, w, h)
+}
+
+// extractToolDetail returns (title, body) for the first tool_use segment in
+// messages[messageIndex] whose Name matches toolName. Falls back to the first
+// tool_use segment when toolName is empty or unmatched. Returns ("", "") when
+// no tool_use segment exists in the message.
+func (m *AppState) extractToolDetail(messageIndex int, toolName string) (string, string) {
+	if m.replModel == nil {
+		return "", ""
+	}
+	msgs := m.replModel.messages
+	if messageIndex < 0 || messageIndex >= len(msgs) {
+		return "", ""
+	}
+	msg := msgs[messageIndex]
+
+	type candidate struct {
+		name  string
+		input string
+		body  string
+	}
+	var fallback *candidate
+
+	for _, seg := range msg.Segments {
+		if seg.Type != "tool_use" {
+			continue
+		}
+		name := extractToolName(seg.Content)
+		body := seg.Content
+		c := &candidate{name: name, input: seg.Content, body: body}
+		if toolName != "" && name == toolName {
+			return name, c.body
+		}
+		if fallback == nil {
+			fallback = c
+		}
+	}
+
+	if fallback != nil {
+		return fallback.name, fallback.body
+	}
+	return "", ""
 }
 
 // openSettingsScreen transitions to the settings screen.

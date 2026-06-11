@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -40,6 +41,65 @@ func viewportBottomChrome() int {
 	return inputSeparatorHeight + inputHeight
 }
 
+// chromeHeight computes the total number of rows ViewContent reserves for
+// non-viewport chrome: the input separator (1) + the textarea's current
+// height (which grows with multi-line input).
+//
+// Overlays (slash, mention, quick-actions, which-key, new-messages) float on
+// the viewport and do NOT count toward chromeHeight.
+func (m *ReplModel) chromeHeight() int {
+	taH := m.textarea.Height()
+	if taH < inputHeight {
+		taH = inputHeight
+	}
+	return inputSeparatorHeight + taH
+}
+
+// compositeOverlays anchors overlay lines to the bottom of the viewport
+// content, replacing the last len(overlayLines) rows. The underlying message
+// text in those rows is occluded; the user can scroll to reveal it.
+//
+// When overlayLines is empty the viewport content is returned unchanged.
+func compositeOverlays(viewportContent string, overlayLines []string, width, vpHeight int) string {
+	if len(overlayLines) == 0 || vpHeight <= 0 {
+		return viewportContent
+	}
+	n := len(overlayLines)
+	if n > vpHeight {
+		n = vpHeight
+		overlayLines = overlayLines[len(overlayLines)-vpHeight:]
+	}
+
+	lines := strings.Split(viewportContent, "\n")
+	for len(lines) < vpHeight {
+		lines = append(lines, "")
+	}
+	if len(lines) > vpHeight {
+		lines = lines[:vpHeight]
+	}
+
+	start := vpHeight - n
+	for i, ov := range overlayLines {
+		base := lines[start+i]
+		baseW := lipgloss.Width(base)
+		if baseW < width {
+			base = base + strings.Repeat(" ", width-baseW)
+		}
+		ovW := lipgloss.Width(ov)
+		if ovW >= width {
+			lines[start+i] = ov
+			continue
+		}
+		prefix := truncateStyledToWidth(base, width-ovW)
+		gap := width - lipgloss.Width(prefix) - ovW
+		if gap < 0 {
+			gap = 0
+		}
+		lines[start+i] = prefix + strings.Repeat(" ", gap) + ov
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 // View renders the REPL screen.
@@ -61,29 +121,56 @@ func (m *ReplModel) View() string {
 	t := m.theme
 	rw := m.replWidth()
 
-	// ── Welcome mode: viewport content is set by renderMessages() ────────────
-	// Welcome content is handled via renderMessages() → renderWelcome()
+	// ── Viewport (messages or welcome) with scrollbar overlay ───────────────
+	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
 
-	// ── Viewport ──────────────────────────────────────────────────────────────────
-	viewportContent := m.viewport.View()
+	// ── Floating overlays (anchored to viewport's bottom rows) ─────────────
+	var overlays []string
+	if m.mentionVisible && len(m.mentionEntries) > 0 {
+		overlays = append(overlays, m.renderMentionSuggestions(rw))
+	}
+	if m.slashVisible && len(m.slashSuggestions) > 0 {
+		overlays = append(overlays, m.renderSlashSuggestions(rw))
+	}
+	if m.quickActionsVisible && !m.streaming && len(m.messages) > 0 {
+		overlays = append(overlays, m.renderQuickActionsOverlay(rw))
+	}
+	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
+		if wk := m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted); wk != "" {
+			overlays = append(overlays, wk)
+		}
+	}
+	viewportContent = compositeOverlays(viewportContent, overlays, rw, m.viewport.Height)
 
-	// ── Quick actions panel (below messages when idle) ───────────────────────────
-	quickActions := ""
-	if len(m.messages) > 0 && !m.streaming {
-		quickActions = m.renderQuickActionsPanel(rw)
+	// Floating new-messages pill anchored to the TOP of the viewport.
+	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
+		pill := lipgloss.NewStyle().
+			Foreground(t.Background).
+			Background(t.Brand).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(rw).
+			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, m.viewport.Height)
 	}
 
-	// ── Input separator (opencode half-block style) ──────────────────────────────
-	// Top half-block row gives a visual "shelf" effect above the input area
+	// ── Input separator: shelf with quick-actions chip embedded on the left ─
 	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	shelfFillWidth := rw - 1
+	if !m.streaming && len(m.messages) > 0 {
+		shelfLeft = lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Background(t.Surface).
+			Render(" quick actions ctrl+q ")
+	}
+	shelfFillWidth := rw - lipgloss.Width(shelfLeft)
 	if shelfFillWidth < 0 {
 		shelfFillWidth = 0
 	}
 	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
 	inputBorder := shelfLeft + shelfFill
 
-	// ── Metadata row: M31A · model [provider] ───────────────────────────────────
+	// ── Combined metadata row: M31A · model [provider] · ctx meter · cost ──
+	// Single line instead of two rows (usage + metadata) saves vertical space.
 	agentName := "M31A"
 	modelName := ""
 	providerName := ""
@@ -93,12 +180,12 @@ func (m *ReplModel) View() string {
 	if m.activeProvider != "" {
 		providerName = m.activeProvider
 	}
-	metaRow := RenderPromptMetadata(agentName, modelName, providerName, t, rw)
+	metaRow := m.renderMergedMetadata(agentName, modelName, providerName, rw)
 
-	// ── Textarea ─────────────────────────────────────────────────────────────────
+	// ── Textarea ───────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
 
-	// ── Status bar ──────────────────────────────────────────────────────────────
+	// ── Status bar ─────────────────────────────────────────────────────────
 	var thinkingDur int64
 	if m.thinking && !m.thinkingStartAt.IsZero() {
 		thinkingDur = time.Since(m.thinkingStartAt).Milliseconds()
@@ -108,12 +195,11 @@ func (m *ReplModel) View() string {
 		IsThinking:       m.thinking,
 		ThinkingDuration: thinkingDur,
 		SpinnerFrame:     m.spinner.Peek(),
-		KeyboardHints:    []string{"ctrl+p commands", "ctrl+b sidebar", "@ files", "ctrl+x leader"},
+		KeyboardHints:    []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+q qa", "@ files", "ctrl+x leader"},
 	}
 	if m.streaming || m.thinking {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
 	}
-	// Add cwd and git branch if available
 	if m.cwd != "" {
 		info.CwdName = pathBase(m.cwd)
 	}
@@ -130,64 +216,77 @@ func (m *ReplModel) View() string {
 	}
 	statusBar := RenderStatusBar(t, rw, info)
 
-	// ── Mention suggestions overlay (above slash overlay) ─────────────────────
-	mentionOverlay := ""
-	if m.mentionVisible && len(m.mentionEntries) > 0 {
-		mentionOverlay = m.renderMentionSuggestions(rw) + "\n"
-	}
+	// ── Assemble all parts ─────────────────────────────────────────────────
+	parts := []string{viewportContent, inputBorder, metaRow, textareaView, statusBar}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
 
-	// ── Slash suggestions overlay (above input) ───────────────────────────────
-	slashOverlay := ""
-	if m.slashVisible && len(m.slashSuggestions) > 0 {
-		slashOverlay = m.renderSlashSuggestions(rw) + "\n"
-	}
+// renderMergedMetadata renders a single line combining the usage row (ctx
+// meter · last-request tokens · cost) and the agent · model · provider line.
+// The two are separated by a " · " so everything fits on one row.
+func (m *ReplModel) renderMergedMetadata(agentName, modelName, providerName string, width int) string {
+	t := m.theme
+	var parts []string
 
-	// ── Which-key overlay (leader key active) ─────────────────────────────────
-	whichKeyOverlay := ""
-	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
-		whichKeyOverlay = m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted)
-		if whichKeyOverlay != "" {
-			whichKeyOverlay += "\n"
+	// Usage prefix (context meter + tokens + cost), if any data is available.
+	if m.lastUsage != nil && m.lastUsage.TotalTokens > 0 {
+		if m.activeModel != nil && m.activeModel.ContextLength > 0 {
+			total := int(m.activeModel.ContextLength)
+			used := m.lastUsage.TotalTokens
+			if used > total {
+				used = total
+			}
+			parts = append(parts, renderContextMeter(used, total, t))
+		}
+		parts = append(parts,
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatTokenCount(m.lastUsage.TotalTokens)))
+		if m.cfg != nil && m.cfg.UI.ShowCostEstimate && m.lastCost > 0 {
+			var costStr string
+			if m.lastCost < 0.01 {
+				costStr = "<$0.01"
+			} else {
+				costStr = fmt.Sprintf("$%.2f", m.lastCost)
+			}
+			parts = append(parts, lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
 		}
 	}
 
-	// ── "New messages" indicator ────────────────────────────────────────────────
-	newMessagesIndicator := ""
-	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		newMessagesIndicator = lipgloss.NewStyle().
-			Foreground(t.Background).
-			Background(t.Brand).
-			Bold(true).
-			Align(lipgloss.Center).
-			Width(rw).
-			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+	// Agent · model · provider suffix.
+	if agentName != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.Text).Render(agentName))
+	}
+	if modelName != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(modelName))
+	}
+	if providerName != "" {
+		providerShort := ProviderShortName(providerName)
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("["+providerShort+"]"))
+	}
+	if len(parts) == 0 {
+		return ""
 	}
 
-	// ── Assemble all parts ────────────────────────────────────────────────────
-	parts := []string{viewportContent}
-	if quickActions != "" {
-		parts = append(parts, quickActions)
+	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · ")
+	row := strings.Join(parts, sep)
+	if lipgloss.Width(row) > width {
+		row = TruncateWithEllipsis(row, width)
 	}
-	if mentionOverlay != "" {
-		parts = append(parts, mentionOverlay)
-	}
-	if slashOverlay != "" {
-		parts = append(parts, slashOverlay)
-	}
-	if whichKeyOverlay != "" {
-		parts = append(parts, whichKeyOverlay)
-	}
-	if newMessagesIndicator != "" {
-		parts = append(parts, newMessagesIndicator)
-	}
-	parts = append(parts, inputBorder, metaRow, textareaView, statusBar)
-
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.NewStyle().PaddingTop(1).Width(width).Render(row)
 }
 
 // ViewContent renders the REPL content area for the unified PageLayout system.
 // It returns ONLY the content: viewport + separator + textarea.
 // Header, footer, metadata row, and status bar are handled by PageChrome.
+//
+// Layout (exactly contentHeight rows):
+//
+//	viewport  ← contentHeight - chromeHeight rows
+//	▁[quick actions ctrl+q]▁▁▁▁▁▁▁▁▁▁▁  ← input separator (1 row)
+//	[textarea]                ← textarea.Height() rows
+//
+// Overlays (slash, mention, quick-actions dropdown, which-key, new-messages)
+// float on the viewport — they are composited onto its bottom rows so they
+// do not consume extra vertical space.
 func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 	t := m.theme
 	rw := contentWidth
@@ -195,89 +294,129 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 		rw = 20
 	}
 
-	// Resize viewport to fit content area.
-	// ViewContent receives the correct contentHeight (terminal minus PageLayout
-	// header/footer), which may differ from the WindowSizeMsg-based height.
-	// When dimensions change we must re-anchor the scroll position so the
-	// viewport stays at the bottom (unless the user manually scrolled up).
-	vpH := contentViewportHeight(contentHeight)
+	// Auto-expand textarea height based on current input lines, then compute
+	// the chrome budget and resize the viewport to fill the remaining rows.
+	m.updateAutoExpandHeight()
+	chromeH := m.chromeHeight()
+	vpH := contentHeight - chromeH
+	if vpH < 4 {
+		vpH = 4
+	}
 	if m.viewport.Width != rw || m.viewport.Height != vpH {
 		m.viewport.Width = rw
 		m.viewport.Height = vpH
 		m.autoScrollConditionally()
 	}
 
-	// Viewport (messages or welcome content)
-	viewportContent := m.viewport.View()
+	// Base viewport (messages or welcome content) with scrollbar overlay.
+	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
 
-	// Quick actions panel (below messages when idle)
-	quickActions := ""
-	if len(m.messages) > 0 && !m.streaming {
-		quickActions = m.renderQuickActionsPanel(rw)
-	}
-
-	// Input separator (opencode half-block style)
+	// Input separator (opencode half-block shelf). When idle with messages,
+	// the quick-actions chip is embedded in the left edge of the shelf so
+	// the chip consumes no extra row.
 	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	shelfFillWidth := rw - 1
+	shelfFill := ""
+	if !m.streaming && len(m.messages) > 0 {
+		chip := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Background(t.Surface).
+			Render(" quick actions ctrl+q ")
+		shelfLeft = chip
+	}
+	shelfFillWidth := rw - lipgloss.Width(shelfLeft)
 	if shelfFillWidth < 0 {
 		shelfFillWidth = 0
 	}
-	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
+	shelfFill = lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
 	inputBorder := shelfLeft + shelfFill
 
-	// Textarea
-	textareaView := m.textarea.View()
+	// ── Floating overlays — composited onto the viewport's bottom rows ────
+	var overlays []string
 
-	// Overlays (mention, slash, which-key, new messages)
-	mentionOverlay := ""
+	// @-mention dropdown.
 	if m.mentionVisible && len(m.mentionEntries) > 0 {
-		mentionOverlay = m.renderMentionSuggestions(rw) + "\n"
+		overlays = append(overlays, m.renderMentionSuggestions(rw))
 	}
-
-	slashOverlay := ""
+	// Slash-command dropdown.
 	if m.slashVisible && len(m.slashSuggestions) > 0 {
-		slashOverlay = m.renderSlashSuggestions(rw) + "\n"
+		overlays = append(overlays, m.renderSlashSuggestions(rw))
 	}
-
-	whichKeyOverlay := ""
+	// Quick actions dropdown (ctrl+q).
+	if m.quickActionsVisible && !m.streaming && len(m.messages) > 0 {
+		overlays = append(overlays, m.renderQuickActionsOverlay(rw))
+	}
+	// Which-key overlay (leader key active).
 	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
-		whichKeyOverlay = m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted)
-		if whichKeyOverlay != "" {
-			whichKeyOverlay += "\n"
+		if wk := m.keyRegistry.RenderWhichKey(CtxREPL, rw, t.Brand, t.TextSecondary, t.TextMuted); wk != "" {
+			overlays = append(overlays, wk)
 		}
 	}
 
-	newMessagesIndicator := ""
+	viewportContent = compositeOverlays(viewportContent, overlays, rw, vpH)
+
+	// ── Floating new-messages indicator — anchored to the TOP of viewport ─
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		newMessagesIndicator = lipgloss.NewStyle().
+		pill := lipgloss.NewStyle().
 			Foreground(t.Background).
 			Background(t.Brand).
 			Bold(true).
 			Align(lipgloss.Center).
 			Width(rw).
 			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, vpH)
 	}
 
-	// Assemble content parts
-	parts := []string{viewportContent}
-	if quickActions != "" {
-		parts = append(parts, quickActions)
-	}
-	if mentionOverlay != "" {
-		parts = append(parts, mentionOverlay)
-	}
-	if slashOverlay != "" {
-		parts = append(parts, slashOverlay)
-	}
-	if whichKeyOverlay != "" {
-		parts = append(parts, whichKeyOverlay)
-	}
-	if newMessagesIndicator != "" {
-		parts = append(parts, newMessagesIndicator)
-	}
-	parts = append(parts, inputBorder, textareaView)
+	// Textarea
+	textareaView := m.textarea.View()
 
+	// Assemble exactly contentHeight rows: viewport + input border + textarea.
+	parts := []string{viewportContent, inputBorder, textareaView}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// compositeOverlaysTop anchors overlay lines to the TOP of the viewport
+// content, replacing the first len(overlayLines) rows. Used for transient
+// indicators like the "N new messages" pill.
+func compositeOverlaysTop(viewportContent string, overlayLines []string, width, vpHeight int) string {
+	if len(overlayLines) == 0 || vpHeight <= 0 {
+		return viewportContent
+	}
+	n := len(overlayLines)
+	if n > vpHeight {
+		n = vpHeight
+		overlayLines = overlayLines[:vpHeight]
+	}
+
+	lines := strings.Split(viewportContent, "\n")
+	for len(lines) < vpHeight {
+		lines = append(lines, "")
+	}
+	if len(lines) > vpHeight {
+		lines = lines[:vpHeight]
+	}
+
+	for i, ov := range overlayLines {
+		if i >= n {
+			break
+		}
+		base := lines[i]
+		baseW := lipgloss.Width(base)
+		if baseW < width {
+			base = base + strings.Repeat(" ", width-baseW)
+		}
+		ovW := lipgloss.Width(ov)
+		if ovW >= width {
+			lines[i] = ov
+			continue
+		}
+		prefix := truncateStyledToWidth(base, width-ovW)
+		gap := width - lipgloss.Width(prefix) - ovW
+		if gap < 0 {
+			gap = 0
+		}
+		lines[i] = prefix + strings.Repeat(" ", gap) + ov
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderSlashSuggestions renders the slash command autocomplete dropdown.
@@ -329,4 +468,89 @@ func pathBase(p string) string {
 		}
 	}
 	return p
+}
+
+// renderUsageRow renders an optional row above the metadata:
+//
+//	ctx [████░░░░] 42%  ·  3.6K ctx  ·  $0.12
+//
+// Returns "" when there is no usage data, so callers may append its output
+// unconditionally inside a vertical stack.
+func (m *ReplModel) renderUsageRow(width int) string {
+	if m.lastUsage == nil || m.lastUsage.TotalTokens == 0 {
+		return ""
+	}
+
+	t := m.theme
+	var parts []string
+
+	// Context meter (visual bar) — only when model's context length is known.
+	if m.activeModel != nil && m.activeModel.ContextLength > 0 {
+		total := int(m.activeModel.ContextLength)
+		used := m.lastUsage.TotalTokens
+		if used > total {
+			used = total
+		}
+		parts = append(parts, renderContextMeter(used, total, t))
+	}
+
+	// Last-request token count.
+	parts = append(parts,
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatTokenCount(m.lastUsage.TotalTokens)))
+
+	// Session cost (honors UI.ShowCostEstimate config).
+	if m.cfg != nil && m.cfg.UI.ShowCostEstimate && m.lastCost > 0 {
+		var costStr string
+		if m.lastCost < 0.01 {
+			costStr = "<$0.01"
+		} else {
+			costStr = fmt.Sprintf("$%.2f", m.lastCost)
+		}
+		parts = append(parts,
+			lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
+	}
+
+	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · ")
+	row := strings.Join(parts, sep)
+	if lipgloss.Width(row) > width {
+		row = TruncateWithEllipsis(row, width)
+	}
+	return lipgloss.NewStyle().Width(width).Render(row)
+}
+
+// renderContextMeter renders a compact visual context usage bar:
+//
+//	ctx [████░░░░] 42%
+func renderContextMeter(used, total int, t theme.Theme) string {
+	if total <= 0 {
+		return ""
+	}
+	pct := float64(used) / float64(total)
+	var ctxColor lipgloss.Color
+	switch {
+	case pct >= 0.9:
+		ctxColor = t.Error
+	case pct >= 0.7:
+		ctxColor = t.Warning
+	default:
+		ctxColor = t.TextMuted
+	}
+
+	const barSegments = 8
+	filled := int(pct * barSegments)
+	if filled > barSegments {
+		filled = barSegments
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	bar := "["
+	bar += strings.Repeat("█", filled)
+	bar += strings.Repeat("░", barSegments-filled)
+	bar += "]"
+
+	return lipgloss.NewStyle().Foreground(ctxColor).Render(
+		fmt.Sprintf("ctx %s %d%%", bar, int(pct*100)),
+	)
 }

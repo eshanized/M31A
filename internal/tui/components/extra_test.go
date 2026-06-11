@@ -30,9 +30,9 @@ func TestTruncateEnd(t *testing.T) {
 		{"hello", 1, "…"},
 	}
 	for _, tt := range tests {
-		got := truncateEnd(tt.s, tt.maxLen)
+		got := TruncateEnd(tt.s, tt.maxLen)
 		if got != tt.want {
-			t.Errorf("truncateEnd(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.want)
+			t.Errorf("TruncateEnd(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.want)
 		}
 	}
 }
