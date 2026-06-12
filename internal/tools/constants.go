@@ -35,4 +35,9 @@ const (
 	// Max 20 tools per second burst, sustained 10 tools/second.
 	ToolRateLimitBurst  = 20
 	ToolRateLimitPerSec = 10
+
+	DefaultSearchBaseURL    = "https://search.sagibo.net"
+	MaxSearchQueryLength    = 500
+	DefaultMaxSearchResults = 5
+	MaxSearchResults        = 10
 )

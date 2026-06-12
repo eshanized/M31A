@@ -232,6 +232,8 @@ type ToolsConfig struct {
 	WebfetchMaxRedirects int      `toml:"webfetch_max_redirects"`
 	WebfetchUserAgent    string   `toml:"webfetch_user_agent"`
 	SkipDirs             []string `toml:"skip_dirs"`
+	WebSearchBaseURL     string   `toml:"websearch_base_url"`
+	WebSearchEnabled     bool     `toml:"websearch_enabled"`
 }
 
 type AgentsConfig struct {

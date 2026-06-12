@@ -66,6 +66,8 @@ func DefaultConfig() *Config {
 			WebfetchMaxRedirects: types.DefaultWebfetchMaxRedirects,
 			WebfetchUserAgent:    "M31A/dev",
 			SkipDirs:             types.SkipDirs,
+			WebSearchBaseURL:     "https://search.sagibo.net",
+			WebSearchEnabled:     true,
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",
@@ -627,6 +629,7 @@ func applyVarSubstitution(cfg *Config) []string {
 	unresolved = append(unresolved, substituteVarsReport(&cfg.Model.Default, "model.default")...)
 	unresolved = append(unresolved, substituteVarsReport(&cfg.UI.Theme, "ui.theme")...)
 	unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.DefaultMode, "permissions.default_mode")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Tools.WebSearchBaseURL, "tools.websearch_base_url")...)
 
 	for i := range cfg.Permissions.Rules {
 		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Tool, fmt.Sprintf("permissions.rules[%d].tool", i))...)
