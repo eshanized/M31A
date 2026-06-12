@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +19,7 @@ import (
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/autodream"
+	"github.com/eshanized/M31A/pkg/history"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
@@ -78,10 +80,11 @@ type AppState struct {
 	emitterCh      chan tea.Msg
 
 	// Optional packages
-	ledger    *ledger.Ledger
-	rollback  *rollback.Rollback
-	autoDream *autodream.Consolidator
-	keychain  keychain.Keychain
+	ledger         *ledger.Ledger
+	rollback       *rollback.Rollback
+	autoDream      *autodream.Consolidator
+	keychain       keychain.Keychain
+	frecentHistory *history.FrecentHistory
 
 	// Sub-models
 	replModel     *ReplModel
@@ -243,6 +246,10 @@ func NewApp(
 
 	cmdReg := DefaultCommands()
 
+	// Frecent history — persisted to ~/.m31a/history.json
+	historyPath := filepath.Join(filepath.Dir(configPath), "history.json")
+	frecentHist := history.NewFrecentHistory(historyPath)
+
 	a := &AppState{
 		config:         cfg,
 		configPath:     configPath,
@@ -253,6 +260,7 @@ func NewApp(
 		ledger:         ledgerClient,
 		rollback:       rollbackClient,
 		autoDream:      autoDreamClient,
+		frecentHistory: frecentHist,
 		version:        version,
 		themeManager:   tm,
 		keyRegistry:    keyReg,

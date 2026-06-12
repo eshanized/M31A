@@ -145,6 +145,18 @@ func AgentLoop(
 				return
 			}
 
+			// Unblock iterator.Next() on context cancellation.
+			// Without this goroutine, scanner.Scan() blocks on network I/O
+			// and the context check inside SSEParser.Next() never runs.
+			iterDone := make(chan struct{})
+			go func() {
+				select {
+				case <-ctx.Done():
+					iterator.Close()
+				case <-iterDone:
+				}
+			}()
+
 			var fullContent strings.Builder
 			accMap := make(map[int]*agentToolCallAcc)
 			var lastUsage *types.Usage
@@ -196,6 +208,7 @@ func AgentLoop(
 				}
 			}
 			iterator.Close()
+			close(iterDone)
 
 			calls := buildAgentToolCalls(accMap)
 

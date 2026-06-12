@@ -102,21 +102,7 @@ func compositeOverlays(viewportContent string, overlayLines []string, width, vpH
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
-// View renders the REPL screen.
-//
-// Layout (from top to bottom):
-//  1. [optional sidebar] | [viewport: messages OR welcome content]
-//  2. ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  (bottom half-block input separator — opencode style)
-//  3. M31A · model [provider]  (metadata row with badge)
-//  4. [textarea: user input]
-//  5. status bar (cwd ⎇ branch  hints  cost)
-//  6. [slash suggestion dropdown overlay]
-//
-// NOTE: Bottom border (╹▀▀▀) was removed — status bar sits flush below textarea.
-//
-// IMPORTANT: The welcome screen (logo + provider card + hints) is set as
-// the viewport's content, NOT rendered outside the viewport. This prevents
-// the double-input visual bug seen in the previous version.
+// View renders the REPL screen (standalone mode, not used by PageLayout).
 func (m *ReplModel) View() string {
 	t := m.theme
 	rw := m.replWidth()
@@ -154,33 +140,8 @@ func (m *ReplModel) View() string {
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, m.viewport.Height)
 	}
 
-	// ── Input separator: shelf with quick-actions chip embedded on the left ─
-	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	if !m.streaming && len(m.messages) > 0 {
-		shelfLeft = lipgloss.NewStyle().
-			Foreground(t.Brand).
-			Background(t.Surface).
-			Render(" quick actions ctrl+q ")
-	}
-	shelfFillWidth := rw - lipgloss.Width(shelfLeft)
-	if shelfFillWidth < 0 {
-		shelfFillWidth = 0
-	}
-	shelfFill := lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
-	inputBorder := shelfLeft + shelfFill
-
-	// ── Combined metadata row: M31A · model [provider] · ctx meter · cost ──
-	// Single line instead of two rows (usage + metadata) saves vertical space.
-	agentName := "M31A"
-	modelName := ""
-	providerName := ""
-	if m.activeModel != nil {
-		modelName = m.activeModel.Name
-	}
-	if m.activeProvider != "" {
-		providerName = m.activeProvider
-	}
-	metaRow := m.renderMergedMetadata(agentName, modelName, providerName, rw)
+	// ── Input separator: clean half-block line ──────────────────────────────
+	inputBorder := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("▁", rw))
 
 	// ── Textarea ───────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
@@ -195,7 +156,7 @@ func (m *ReplModel) View() string {
 		IsThinking:       m.thinking,
 		ThinkingDuration: thinkingDur,
 		SpinnerFrame:     m.spinner.Peek(),
-		KeyboardHints:    []string{"ctrl+p commands", "ctrl+b sidebar", "ctrl+q qa", "@ files", "ctrl+x leader"},
+		KeyboardHints:    []string{"ctrl+p cmds", "ctrl+b sidebar"},
 	}
 	if m.streaming || m.thinking {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -217,7 +178,7 @@ func (m *ReplModel) View() string {
 	statusBar := RenderStatusBar(t, rw, info)
 
 	// ── Assemble all parts ─────────────────────────────────────────────────
-	parts := []string{viewportContent, inputBorder, metaRow, textareaView, statusBar}
+	parts := []string{viewportContent, inputBorder, textareaView, statusBar}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -311,24 +272,8 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 	// Base viewport (messages or welcome content) with scrollbar overlay.
 	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
 
-	// Input separator (opencode half-block shelf). When idle with messages,
-	// the quick-actions chip is embedded in the left edge of the shelf so
-	// the chip consumes no extra row.
-	shelfLeft := lipgloss.NewStyle().Foreground(t.Brand).Render("▁")
-	shelfFill := ""
-	if !m.streaming && len(m.messages) > 0 {
-		chip := lipgloss.NewStyle().
-			Foreground(t.Brand).
-			Background(t.Surface).
-			Render(" quick actions ctrl+q ")
-		shelfLeft = chip
-	}
-	shelfFillWidth := rw - lipgloss.Width(shelfLeft)
-	if shelfFillWidth < 0 {
-		shelfFillWidth = 0
-	}
-	shelfFill = lipgloss.NewStyle().Foreground(t.Surface).Render(strings.Repeat("▁", shelfFillWidth))
-	inputBorder := shelfLeft + shelfFill
+	// Input separator: clean half-block line
+	inputBorder := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("▁", rw))
 
 	// ── Floating overlays — composited onto the viewport's bottom rows ────
 	var overlays []string

@@ -112,6 +112,11 @@ func (m *AppState) Init() tea.Cmd {
 
 // Shutdown cleanly tears down all background goroutines.
 func (m *AppState) Shutdown() {
+	if m.frecentHistory != nil {
+		if err := m.frecentHistory.Save(); err != nil {
+			slog.Warn("failed to save history on shutdown", "error", err)
+		}
+	}
 	if m.workflowCancel != nil {
 		m.workflowCancel()
 	}

@@ -38,25 +38,27 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 	}
 }
 
-// Render renders the thinking block as a panel-style component:
+// Render renders the thinking block as a compact inline element:
 //
-//	┌─ ▾ Thinking 1.2s ──────────────────────────────────┐  (collapsed/expanded toggle)
-//	│ thinking content in italic blue                     │
-//	│ more thinking content...                             │
-//	└─ 1.2s ───────────────────────────────────────────────┘
+// Collapsed:  ▸ Thinking · 1.2s
+// Expanded:   full panel with scrollable content
 func (b *ThinkingBlock) Render(width int) string {
 	contentWidth := width - 4 // account for padding
 
 	if !b.expanded {
-		// Collapsed: single-line panel-style with header only
-		header := b.Header(contentWidth)
-		panel := lipgloss.NewStyle().
-			Border(theme.ThinBorder).
-			BorderForeground(b.theme.Thinking).
-			Padding(0, 1).
-			Width(contentWidth + 2).
-			Render(header)
-		return panel
+		// Collapsed: single compact line, no border
+		durStr := b.Duration()
+		label := lipgloss.NewStyle().
+			Foreground(b.theme.Thinking).
+			Render("▸ ") +
+			lipgloss.NewStyle().
+				Foreground(b.theme.TextMuted).
+				Render("Thinking · "+durStr)
+
+		return lipgloss.NewStyle().
+			PaddingLeft(2).
+			Width(width).
+			Render(label)
 	}
 
 	// Expanded: panel with header, body content, and footer
@@ -220,23 +222,15 @@ func (b *ThinkingBlock) Duration() string {
 // Header returns the toggle + label + duration text for the thinking block header.
 func (b *ThinkingBlock) Header(width int) string {
 	toggle := "▸"
-	hint := " [T] expand"
+	hint := ""
 	if b.expanded {
 		toggle = "▾"
-		hint = " [T] collapse"
 		if b.scrollOffset > 0 {
-			hint += " ↑↓ scroll"
+			hint = " ↑↓"
 		}
 	}
 
 	durStr := b.Duration()
-
-	label := fmt.Sprintf("%s Thinking · %s%s", toggle, durStr, hint)
-
-	if lipgloss.Width(label) > width-2 {
-		// Compact: just toggle + label + duration
-		label = fmt.Sprintf("%s Thinking · %s", toggle, durStr)
-	}
 
 	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
 	if b.focused {

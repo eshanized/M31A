@@ -112,10 +112,10 @@ func TestCalcContentWidth(t *testing.T) {
 		width int
 		want  int
 	}{
-		{80, 71},
-		{100, 91},
-		{30, 21}, // 30 - 9 = 21
-		{28, 20}, // 28 - 9 = 19, clamped to min 20
+		{80, 74},
+		{100, 94},
+		{30, 24}, // 30 - 6 = 24
+		{28, 22}, // 28 - 6 = 22
 		{0, 20},  // clamped to min 20
 	}
 	for _, tt := range tests {
@@ -855,8 +855,8 @@ func TestThinkingBlock_Header_ScrollHint(t *testing.T) {
 	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
 	tb.ScrollDown(5)
 	h := tb.Header(80)
-	if !strings.Contains(h, "scroll") {
-		t.Error("Header with scroll offset should contain 'scroll'")
+	if !strings.Contains(h, "↑↓") {
+		t.Error("Header with scroll offset should contain scroll hint '↑↓'")
 	}
 }
 

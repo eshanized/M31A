@@ -338,29 +338,23 @@ func (m *ReplModel) renderMessages() {
 	lineCount := 0
 
 	for i, msg := range m.messages {
+		// Skip empty assistant messages with no visible content
+		if msg.Role == "assistant" && msg.Content == "" && len(msg.Segments) == 0 && len(msg.ToolCalls) == 0 {
+			offsets[i] = -1
+			continue
+		}
+
 		if i > 0 {
+			// Minimal blank-line separator between messages (no timestamp bar)
 			sb.WriteString("\n")
 			lineCount++
-
-			summary := ""
-			prevRole := m.messages[i-1].Role
-			if prevRole != msg.Role && msg.Role == "assistant" {
-				summary = summarizeIteration(msg)
-			}
-			tsBar := components.RenderTimestampBarWithSummary(m.theme, msg.CreatedAt, rw, summary)
-			sb.WriteString(tsBar)
-			lineCount += strings.Count(tsBar, "\n") + 1
-			sb.WriteString("\n")
-			lineCount++
-
-			// Add extra blank line between conversation turns (role switches)
-			if prevRole != msg.Role {
-				sb.WriteString("\n")
-				lineCount++
-			}
 		}
 		offsets[i] = lineCount
 		rendered := m.msgRenderer.RenderMessage(msg, rw)
+		if rendered == "" {
+			offsets[i] = -1
+			continue
+		}
 		sb.WriteString(rendered)
 		lineCount += strings.Count(rendered, "\n") + 1
 		sb.WriteString("\n")
@@ -402,17 +396,6 @@ func (m *ReplModel) renderMessages() {
 				Render("  " + spinnerFrame + " generating response…")
 			sb.WriteString("\n")
 			sb.WriteString(generating)
-		}
-	}
-
-	// Append thinking toggle hints after finalized thinking blocks
-	if len(m.thinkingBlocks) > 0 {
-		for idx := range m.thinkingBlocks {
-			hint := m.renderThinkingToggleHint(idx, 0)
-			if hint != "" {
-				sb.WriteString("\n")
-				sb.WriteString(hint)
-			}
 		}
 	}
 
@@ -463,41 +446,4 @@ func (m *ReplModel) UpdateLiveTool(toolName string, err error, durationMs int64)
 	m.autoScrollConditionally()
 }
 
-// summarizeIteration returns a brief timestamp-bar suffix for agent-iteration
-// messages, e.g. "iter 3 · 3 tools". Returns "" for non-iteration messages.
-func summarizeIteration(msg types.Message) string {
-	content := msg.Content
-	if content == "" && len(msg.Segments) > 0 {
-		content = msg.Segments[0].Content
-	}
-	if !strings.HasPrefix(content, "**Agent iteration") {
-		return ""
-	}
-	idx := strings.Index(content, "** — tools: ")
-	if idx < 0 {
-		return ""
-	}
-	header := strings.TrimPrefix(content[:idx], "**")
-	toolsList := strings.TrimSpace(content[idx+len("** — tools: "):])
-	if toolsList == "" {
-		return ""
-	}
-	parts := strings.Split(toolsList, ", ")
-	n := 0
-	for _, p := range parts {
-		if strings.TrimSpace(p) != "" {
-			n++
-		}
-	}
-	iter := strings.TrimPrefix(header, "Agent iteration ")
-	if iter == header {
-		return header
-	}
-	if n <= 0 {
-		return "iter " + iter
-	}
-	if n == 1 {
-		return "iter " + iter + " · 1 tool"
-	}
-	return fmt.Sprintf("iter %s · %d tools", iter, n)
-}
+

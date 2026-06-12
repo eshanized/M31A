@@ -570,7 +570,7 @@ func TestSidebarViewClean(t *testing.T) {
 	sm := NewSidebarModel(&git.Git{}, testTheme())
 	sm.SetHeight(40)
 	sm.Update(SidebarRefreshMsg{Branch: "main"})
-	if r := sm.View(); !strings.Contains(r, "working tree clean") {
+	if r := sm.View(); !strings.Contains(r, "clean") {
 		t.Error("should show clean")
 	}
 }

@@ -163,70 +163,23 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 	}
 }
 
-// handleModel shows or switches the current model.
+// handleModel opens the model selector screen.
 func handleModel(args []string, ctx CommandContext) CommandResult {
-	if ctx.Config == nil {
-		return CommandResult{Success: false, Message: "Config not available."}
-	}
-
-	currentModel := ctx.Config.Model.Default
-	currentProvider := ctx.Config.Provider.Default
-
-	if len(args) == 0 {
-		return CommandResult{
-			Success: true,
-			Message: fmt.Sprintf("**Current model:** %s\n**Provider:** %s", currentModel, currentProvider),
-		}
-	}
-
-	// Switch to model selector screen
 	screen := tuitypes.ScreenModelSelector
 	return CommandResult{
 		Success: true,
 		Screen:  &screen,
-		Message: fmt.Sprintf("Opening model selector (requested: %s)...", strings.Join(args, " ")),
+		Message: "Opening model selector...",
 	}
 }
 
-// handleModels lists all cached models for the active provider.
+// handleModels opens the model selector screen.
 func handleModels(_ []string, ctx CommandContext) CommandResult {
-	if ctx.Registry == nil {
-		return CommandResult{Success: false, Message: "Provider registry not available."}
-	}
-
-	active := ctx.Registry.Active()
-	p, err := ctx.Registry.Get(active)
-	if err != nil || p == nil {
-		return CommandResult{Success: false, Message: "No active provider."}
-	}
-
+	screen := tuitypes.ScreenModelSelector
 	return CommandResult{
 		Success: true,
-		Message: fmt.Sprintf("Fetching models for **%s**...", active),
-		Cmd: func() tea.Msg {
-			models, err := p.FetchModels(ctx.Ctx)
-			if err != nil {
-				return tuitypes.ToastMsg{
-					Text:     fmt.Sprintf("Failed to list models: %v", err),
-					Duration: 4 * time.Second,
-					Type:     "error",
-				}
-			}
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("**%s models** (%d):\n\n", active, len(models)))
-			for i, m := range models {
-				if i >= 20 {
-					sb.WriteString(fmt.Sprintf("...and %d more. Use /model to select.\n", len(models)-20))
-					break
-				}
-				sb.WriteString(fmt.Sprintf("  %s\n", m.ID))
-			}
-			return tuitypes.ToastMsg{
-				Text:     sb.String(),
-				Duration: 8 * time.Second,
-				Type:     "info",
-			}
-		},
+		Screen:  &screen,
+		Message: "Opening model selector...",
 	}
 }
 

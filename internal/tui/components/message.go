@@ -12,8 +12,8 @@ import (
 )
 
 // GutterWidth is the fixed width for the role gutter.
-// "┃  M31A  " ≈ 9 chars — enough for the brand label + split border.
-const GutterWidth = 9
+// "┃ ◆  " ≈ 6 chars — compact brand icon + split border.
+const GutterWidth = 6
 
 // calcContentWidth returns the available content width, clamped to a minimum of 20 columns.
 func calcContentWidth(width int) int {
@@ -83,70 +83,49 @@ func (r *MessageRenderer) RenderMessage(msg types.Message, width int) string {
 	}
 }
 
-// RenderTimestampBar renders a timestamp separator between conversation turns.
-// Format: ┤ HH:MM ├──────────────────────────────────
+// RenderTimestampBar renders a compact timestamp between conversation turns.
+// Format: ── 15:04 ──
 func RenderTimestampBar(t theme.Theme, ts time.Time, width int) string {
 	return RenderTimestampBarWithSummary(t, ts, width, "")
 }
 
-// RenderTimestampBarWithSummary renders a timestamp separator with an optional
-// trailing summary suffix. When summary is non-empty, the dashes fill the gap
-// between the time prefix and the summary; when empty, behaves like
-// RenderTimestampBar.
-//
-//	┤ 13:08 ├────────────────────── iter 3 · 3 tools
+// RenderTimestampBarWithSummary renders a compact timestamp separator with an
+// optional trailing summary suffix.
 func RenderTimestampBarWithSummary(t theme.Theme, ts time.Time, width int, summary string) string {
 	if ts.IsZero() {
 		return ""
 	}
 	timeStr := ts.Format("15:04")
-	prefix := "┤ " + timeStr + " ├"
-	prefixWidth := lipgloss.Width(prefix)
 
 	barStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
 
 	if summary == "" {
-		dashCount := width - prefixWidth - 1
-		if dashCount < 2 {
-			dashCount = 2
-		}
-		return barStyle.Render(prefix + strings.Repeat("─", dashCount))
+		return barStyle.Render("── " + timeStr + " ──")
 	}
 
-	// Leave a space, dashes, space, summary.
-	suffix := " " + summary
-	suffixWidth := lipgloss.Width(suffix)
-	gap := width - prefixWidth - suffixWidth - 2
-	if gap < 2 {
-		gap = 2
-	}
-	dashes := strings.Repeat("─", gap)
-	return barStyle.Render(prefix + dashes + " " + summary)
+	return barStyle.Render("── " + timeStr + " ── " + summary)
 }
 
-// renderUserMessage renders a user message with an opencode-style right-leaning bubble.
+// renderUserMessage renders a user message with a compact right-aligned bubble.
 //
 // Layout:
 //
-//	┃ user
-//	┃   <content in muted right-aligned style>
+//	┃ ▸ you
+//	┃   <content>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
-	// Gutter: thick split border + "user" role label (lowercase, muted, no bold)
-	gutterStyle := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Bold(false)
 	borderChar := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).
 		Render("┃")
-	roleLabel := gutterStyle.Render(" user")
+	roleLabel := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render(" ▸ you")
 	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
 
-	// Content: user input in a subtly styled block
 	if msg.Content == "" {
-		return lipgloss.JoinVertical(lipgloss.Top, gutter, "")
+		return ""
 	}
 
 	contentStyle := lipgloss.NewStyle().
@@ -160,36 +139,48 @@ func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string
 		contentStyle.Render(msg.Content),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Top, gutter, contentLine, "")
+	return lipgloss.JoinVertical(lipgloss.Top, gutter, contentLine)
 }
 
-// renderAssistantMessage renders assistant content with an opencode-style thick left border.
+// renderAssistantMessage renders assistant content with a compact left border.
 //
 // Layout:
 //
-//	┃ M31A
-//	┃   <segments...>
+//	┃ ◆ assistant
+//	  <segments...>
+//
+// Tool-only messages (no text content) are collapsed into a single summary line.
 func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) string {
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
-	// Gutter header: thick brand-colored border + "M31A" label
 	borderChar := lipgloss.NewStyle().Foreground(t.Brand).Render("┃")
-	roleLabel := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(" M31A")
+	roleLabel := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(" ◆")
 	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
 
 	// Render segments
-	var rendered []string
+	var contentSegments []string
+	var toolSegments []string
+	hasContent := false
+
 	if len(msg.Segments) == 0 && msg.Content != "" {
-		rendered = append(rendered, r.renderContentSegment(msg.Content, contentWidth))
+		stripped := StripANSI(msg.Content)
+		contentSegments = append(contentSegments, r.renderContentSegment(stripped, contentWidth))
+		hasContent = true
 	} else {
 		for _, seg := range msg.Segments {
 			switch seg.Type {
 			case "content":
-				rendered = append(rendered, r.renderContentSegment(seg.Content, contentWidth))
+				stripped := StripANSI(seg.Content)
+				rendered := r.renderContentSegment(stripped, contentWidth)
+				if rendered != "" {
+					contentSegments = append(contentSegments, rendered)
+					hasContent = true
+				}
 			case "thinking":
 				tb := NewThinkingBlock(seg, t, false, 0)
-				rendered = append(rendered, tb.Render(contentWidth))
+				contentSegments = append(contentSegments, tb.Render(contentWidth))
+				hasContent = true
 			case "tool_use":
 				tc, ok := r.toolCallCache[seg.Content]
 				if !ok {
@@ -200,28 +191,45 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 					}
 				}
 				if tc != nil {
-					card := NewToolCard(*tc, nil, ToolRunning, t)
-					rendered = append(rendered, card.Render(contentWidth))
+					toolSegments = append(toolSegments, tc.Name)
+					if hasContent {
+						card := NewToolCard(*tc, nil, ToolRunning, t)
+						contentSegments = append(contentSegments, card.Render(contentWidth))
+					}
 				}
 			case "error":
-				rendered = append(rendered, r.renderErrorSegment(seg.Content, contentWidth))
+				contentSegments = append(contentSegments, r.renderErrorSegment(seg.Content, contentWidth))
+				hasContent = true
 			}
 		}
 	}
 
 	if len(msg.ToolCalls) > 0 {
 		for _, tc := range msg.ToolCalls {
-			card := NewToolCard(tc, nil, ToolRunning, t)
-			rendered = append(rendered, card.Render(contentWidth))
+			toolSegments = append(toolSegments, tc.Name)
+			if hasContent {
+				card := NewToolCard(tc, nil, ToolRunning, t)
+				contentSegments = append(contentSegments, card.Render(contentWidth))
+			}
 		}
 	}
 
-	if len(rendered) == 0 {
-		rendered = append(rendered, "")
+	// Collapse tool-only messages into a compact summary
+	if !hasContent && len(toolSegments) > 0 {
+		toolBadges := strings.Join(toolSegments, " ")
+		summary := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Faint(true).
+			Render("  " + toolBadges)
+		return lipgloss.JoinVertical(lipgloss.Top, gutter, summary)
 	}
 
-	// Join content lines with thick left border on each
-	content := lipgloss.JoinVertical(lipgloss.Top, rendered...)
+	if len(contentSegments) == 0 {
+		return ""
+	}
+
+	// Join content lines with left border
+	content := lipgloss.JoinVertical(lipgloss.Top, contentSegments...)
 	contentLines := strings.Split(content, "\n")
 	borderedLines := make([]string, len(contentLines))
 	for i, line := range contentLines {
@@ -231,13 +239,16 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Top, gutter, strings.Join(borderedLines, "\n"), "")
+	return lipgloss.JoinVertical(lipgloss.Top, gutter, strings.Join(borderedLines, "\n"))
 }
 
 func (r *MessageRenderer) renderContentSegment(content string, width int) string {
 	if content == "" {
 		return ""
 	}
+
+	// Strip any ANSI escape codes before glamour to prevent mangling
+	content = StripANSI(content)
 
 	// Special-case: "Agent iteration N — tools: X, Y" → card + tool chips.
 	if strings.HasPrefix(content, "**Agent iteration") {
@@ -261,12 +272,9 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		Render(rendered)
 }
 
-// renderAgentIteration renders an agent-loop iteration summary as a bordered
-// card with tool badges:
+// renderAgentIteration renders an agent-loop iteration as a compact inline line.
 //
-//	╭ Agent iteration 3 ──────────────────╮
-//	│ [FileRead] [FileRead] [FileRead]     │
-//	╰──────────────────────────────────────╯
+//	 ³ FileRead FileRead FileRead
 //
 // Input format: "**Agent iteration N** — tools: X, Y, Z"
 // Returns "" if the content doesn't match the expected format.
@@ -277,50 +285,64 @@ func (r *MessageRenderer) renderAgentIteration(content string, width int) string
 	if idx < 0 {
 		return ""
 	}
-	title := strings.TrimPrefix(content[:idx], "**")
 	toolsList := strings.TrimSpace(content[idx+len("** — tools: "):])
 	if toolsList == "" {
 		return ""
 	}
 
 	toolNames := strings.Split(toolsList, ", ")
-	var badges []Badge
+	var badges []string
 	for _, name := range toolNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		badges = append(badges, NewBadge(name, BadgeBrandPreset, t))
+		badges = append(badges, name)
 	}
 	if len(badges) == 0 {
 		return ""
 	}
 
-	// Reserve 4 columns for the card's left+right border + inner padding.
-	innerWidth := width - 4
-	if innerWidth < 8 {
-		innerWidth = 8
-	}
-	body := RenderBadges(badges)
-	if lipgloss.Width(body) > innerWidth {
-		body = TruncateEnd(body, innerWidth)
+	// Extract iteration number
+	title := strings.TrimPrefix(content[:idx], "**")
+	iterNum := strings.TrimPrefix(title, "Agent iteration ")
+
+	// Compact single-line: superscript iteration number + tool names
+	superscript := ""
+	for _, ch := range iterNum {
+		switch ch {
+		case '0':
+			superscript += "⁰"
+		case '1':
+			superscript += "¹"
+		case '2':
+			superscript += "²"
+		case '3':
+			superscript += "³"
+		case '4':
+			superscript += "⁴"
+		case '5':
+			superscript += "⁵"
+		case '6':
+			superscript += "⁶"
+		case '7':
+			superscript += "⁷"
+		case '8':
+			superscript += "⁸"
+		case '9':
+			superscript += "⁹"
+		default:
+			superscript += string(ch)
+		}
 	}
 
-	cardW := width
-	if cardW < 20 {
-		cardW = 20
-	}
+	line := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Faint(true).
+		PaddingLeft(2).
+		Render(superscript + " " + strings.Join(badges, " "))
 
-	card := Card{
-		Title:   title,
-		Content: body,
-		Width:   cardW,
-		Border:  theme.ThinBorder,
-		Style:   CardBrand,
-		Theme:   t,
-	}.Render()
-
-	return lipgloss.NewStyle().Width(width).Render(card)
+	return lipgloss.NewStyle().Width(width).Render(line)
 }
 
 // renderErrorSegment styles an error banner directly via lipgloss, bypassing

@@ -126,11 +126,14 @@ func TestHandleOptimize_NilRegistry(t *testing.T) {
 	}
 }
 
-func TestHandleModels_NilRegistry(t *testing.T) {
+func TestHandleModels_OpensScreen(t *testing.T) {
 	t.Parallel()
 	result := handleModels(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleModels should fail without registry")
+	if !result.Success {
+		t.Error("handleModels should succeed and open model selector screen")
+	}
+	if result.Screen == nil {
+		t.Error("handleModels should set Screen to model selector")
 	}
 }
 

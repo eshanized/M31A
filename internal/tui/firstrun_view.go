@@ -45,14 +45,15 @@ func (fr *FirstRunModel) renderFirstRun() string {
 		content = fr.renderDone()
 	}
 
+	boxW := centerW - 4
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(1, 3).
-		Width(centerW - 4).
+		Width(boxW).
 		Render(content)
 
-	return centerScreen(box, centerW, fr.height)
+	return centerScreen(box, boxW, fr.height)
 }
 
 // ─── Step progress indicator ─────────────────────────────────────────────────
@@ -106,11 +107,11 @@ func (fr *FirstRunModel) renderWelcome() string {
 		availH = 24
 	}
 
-	// Panel width budget: cap at 68 so the starfield peeks through on wide
-	// terminals; shrink gracefully on narrow ones.
+	// Responsive panel width: scale with terminal width, leaving margin for
+	// the starfield to peek through on wide terminals.
 	panelW := availW - 4
-	if panelW > 68 {
-		panelW = 68
+	if panelW > availW {
+		panelW = availW
 	}
 	if panelW < 20 {
 		panelW = 20
@@ -173,9 +174,7 @@ func (fr *FirstRunModel) renderWelcome() string {
 		out = out[:availH]
 	}
 
-	// Center vertically by adding empty rows top/bottom. Skip horizontal
-	// centering entirely because lipgloss.Place has historically added
-	// unpredictable per-line padding that pushed the rendered width past availW.
+	// Center vertically by adding empty rows top/bottom.
 	topPad := (availH - len(out)) / 2
 	if topPad < 0 {
 		topPad = 0
@@ -184,13 +183,28 @@ func (fr *FirstRunModel) renderWelcome() string {
 	if bottomPad < 0 {
 		bottomPad = 0
 	}
+
+	// Center each line horizontally within availW.
+	leftPad := (availW - panelW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+	padStr := strings.Repeat(" ", leftPad)
+
 	var finalRows []string
 	for i := 0; i < topPad; i++ {
-		finalRows = append(finalRows, "")
+		finalRows = append(finalRows, strings.Repeat(" ", availW))
 	}
-	finalRows = append(finalRows, out...)
+	for _, line := range out {
+		// Starfield lines are already availW wide; pad panel lines.
+		if lipgloss.Width(line) < availW {
+			finalRows = append(finalRows, padStr+line)
+		} else {
+			finalRows = append(finalRows, line)
+		}
+	}
 	for i := 0; i < bottomPad; i++ {
-		finalRows = append(finalRows, "")
+		finalRows = append(finalRows, strings.Repeat(" ", availW))
 	}
 
 	result := strings.Join(finalRows, "\n")
@@ -357,9 +371,8 @@ func (fr *FirstRunModel) renderWelcomeHeaderRow(panelW int) string {
 // renderFeatureCards renders three feature cards with accent top borders.
 func (fr *FirstRunModel) renderFeatureCards(width int) string {
 	t := fr.theme
-	marginW := 2
 	gapW := 2
-	cardW := (width - marginW - 2*gapW) / 3
+	cardW := (width - 2*gapW) / 3
 	if cardW < 12 {
 		cardW = 12
 	}
@@ -368,7 +381,7 @@ func (fr *FirstRunModel) renderFeatureCards(width int) string {
 	c2 := fr.renderFeatureCard("🔧", "Tools", "Bash · Read · Write · Grep", cardW, t.Secondary)
 	c3 := fr.renderFeatureCard("⎇", "Git Aware", "Live repo status", cardW, t.Success)
 
-	return "  " + lipgloss.JoinHorizontal(lipgloss.Top, c1, " ", c2, " ", c3)
+	return lipgloss.JoinHorizontal(lipgloss.Top, c1, " ", c2, " ", c3)
 }
 
 // renderFeatureCard renders a single feature card with a colored top accent line.
@@ -505,11 +518,18 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 	// silently dropping cards on some terminal sizes. The hard line clamp
 	// below handles overflow on genuinely tiny terminals.
 	fr.clampProviderScroll()
+	// Each card renders at cardW outer width (border 2 + padding 2 + content
+	// cardW-4). A 2-char prefix (cursor) is prepended per card, and cards are
+	// joined with a 1-col gap.  Total = 2*(cardW+2) + 1 <= innerW.
+	cardW := (innerW - 5) / 2
+	if cardW < 20 {
+		cardW = 20
+	}
 	var cards []string
 	for i, p := range providerCatalog {
-		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, innerW-2))
+		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, cardW))
 	}
-	cardsBlock := strings.Join(cards, "\n\n")
+	cardsBlock := lipgloss.JoinHorizontal(lipgloss.Top, cards[0], " ", cards[1])
 
 	// ── Summary row: count + selected chips ──────────────────────────────
 	summary := fr.renderProviderSummary(innerW)
@@ -689,6 +709,15 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 	titleRow := checkBox + icon + "  " + name + badges
 	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(p.Description)
 
+	// Truncate title and desc so the card content fits within the available
+	// width.  Content area = w - 2 (border) - 2 (padding) = w - 4.
+	contentW := w - 4
+	if contentW < 10 {
+		contentW = 10
+	}
+	titleRow = truncateStyled(titleRow, contentW)
+	desc = truncateStyled(desc, contentW)
+
 	// Fixed-height body: exactly 3 content rows (title, blank, desc). No
 	// conditional footer — selected/checked state is conveyed by prefix +
 	// border + color only. This keeps every card the same height.
@@ -706,7 +735,7 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1).
-		Width(w - 4).
+		Width(contentW).
 		Render(content)
 
 	// Cursor prefix — bold arrow on the focused card, subtle tick on checked

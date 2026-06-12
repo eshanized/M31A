@@ -334,7 +334,7 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 
 // renderKeyboardHints renders keyboard shortcut hints as a muted separator-joined line.
 func renderKeyboardHints(t theme.Theme) string {
-	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "@ files", "ctrl+x leader", "/help"}
+	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "/help"}
 	parts := make([]string, len(hints))
 	for i, h := range hints {
 		parts[i] = lipgloss.NewStyle().Foreground(t.TextMuted).Render(h)

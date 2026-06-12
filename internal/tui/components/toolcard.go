@@ -13,15 +13,24 @@ import (
 
 var (
 	ansiEscapeRe  = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	mouseEventRe  = regexp.MustCompile(`\x1b\[<\d+;\d+;\d+[Mm]`)
 	controlCharRe = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
 )
+
+// StripANSI removes all ANSI escape sequences, mouse event codes, and
+// non-printable control characters from a string. Use this before passing
+// content to Glamour to prevent escape-sequence mangling.
+func StripANSI(s string) string {
+	s = mouseEventRe.ReplaceAllString(s, "")
+	s = ansiEscapeRe.ReplaceAllString(s, "")
+	s = controlCharRe.ReplaceAllString(s, "")
+	return s
+}
 
 // SanitizeOutput strips ANSI escape sequences and non-printable control
 // characters from tool output to prevent terminal injection attacks.
 func SanitizeOutput(s string) string {
-	s = ansiEscapeRe.ReplaceAllString(s, "")
-	s = controlCharRe.ReplaceAllString(s, "")
-	return s
+	return StripANSI(s)
 }
 
 // ToolIcons maps tool names to icon characters for inline rendering.

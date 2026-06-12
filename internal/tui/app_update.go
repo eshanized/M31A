@@ -55,6 +55,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.routeKeyMsg(msg))
 		}
 
+	// ── Mouse ─────────────────────────────────────────────────────────────────
+	case tea.MouseMsg:
+		// Route sidebar clicks before passing to active screen
+		if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.screen == ScreenREPL {
+			sidebarW := m.sidebarModel.GetWidth()
+			if sidebarW > 0 && msg.X < sidebarW {
+				if c := m.sidebarModel.HandleMouse(msg, 0); c != nil {
+					cmds = append(cmds, c)
+					return m, tea.Batch(cmds...)
+				}
+			}
+		}
+
 	// ── Screen routing ─────────────────────────────────────────────────────────
 	case AppMsg:
 		cmds = append(cmds, m.handleAppMsg(msg))
@@ -87,6 +100,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.replModel != nil {
 			m.replModel.handleStreamDoneMsg(msg)
 			m.checkAutoDream()
+			// Update sidebar with token usage
+			m.updateSidebarUsage()
 		}
 		m.streamCancelFn = nil
 	case StreamErrorMsg:
@@ -235,6 +250,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenPhaseModelPicker && m.phaseModelPicker != nil {
 			newPMP, cmd := m.phaseModelPicker.Update(msg)
 			m.phaseModelPicker = newPMP
+			cmds = append(cmds, cmd)
+		}
+		// Forward to model selector screen for spinner animation
+		if m.screen == ScreenModelSelector && m.msModel != nil {
+			newMS, cmd := m.msModel.Update(msg)
+			if r, ok := newMS.(*ModelSelector); ok {
+				m.msModel = r
+			}
 			cmds = append(cmds, cmd)
 		}
 		// Forward to verify screen for heal spinner animation
@@ -2368,13 +2391,7 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 				Allowed:   true,
 			},
 		})
-	case "a":
-		// Allow always (remember) — show confirmation for permanent rule
-		return func() tea.Msg {
-			return ToastMsg{Text: "Always Allow creates a permanent rule. Press A again to confirm.", Type: "warning", Duration: 3 * time.Second}
-		}
-	case "A":
-		// Confirm allow always
+	case "a", "A":
 		return m.handlePermissionResponse(PermissionResponseMsg{
 			Response: tools.PermissionResponse{
 				RequestID: m.permRequest.ID,

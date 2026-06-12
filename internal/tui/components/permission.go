@@ -46,31 +46,31 @@ func (m *PermissionModal) Render(width, height int) string {
 		modalWidth = 40
 	}
 
+	// ── Title ─────────────────────────────────────────────────────────────
 	lockBadge := lipgloss.NewStyle().
 		Foreground(m.theme.Warning).
 		Bold(true).
-		Render("[LOCK]")
+		Render("🔒")
 
 	title := lipgloss.NewStyle().
 		Foreground(m.theme.Warning).
 		Bold(true).
 		Render("Permission Required")
 
-	titleLine := lipgloss.JoinHorizontal(lipgloss.Top, lockBadge, lipgloss.NewStyle().Render(" "), title)
+	titleLine := lipgloss.JoinHorizontal(lipgloss.Top, lockBadge, " ", title)
 
-	riskStyle := m.riskStyle()
-	riskLabel := riskStyle.Render(fmt.Sprintf(" [%s] ", riskLabel(m.request.RiskLevel)))
+	// ── Tool & risk info ──────────────────────────────────────────────────
+	riskBadge := m.riskStyle().Render(fmt.Sprintf(" %s ", riskLabel(m.request.RiskLevel)))
 
-	toolInfo := lipgloss.NewStyle().
-		Foreground(m.theme.TextPrimary).
-		Render(fmt.Sprintf("Tool:     %s", m.request.ToolName))
-
-	riskInfo := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render("Risk:     "),
-		riskLabel,
+	toolLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Tool  "),
+		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true).Render(m.request.ToolName),
+		lipgloss.NewStyle().Render("  "),
+		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Risk  "),
+		riskBadge,
 	)
 
-	// Tool card with exact command (double-border for blocking semantics)
+	// ── Command box ───────────────────────────────────────────────────────
 	highlighted := highlightCommand(m.request.Command, m.theme)
 	cmdBox := lipgloss.NewStyle().
 		Border(theme.DoubleBorder).
@@ -79,14 +79,24 @@ func (m *PermissionModal) Render(width, height int) string {
 		Width(modalWidth - 6).
 		Render(highlighted)
 
-	keys := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Render("[Y] Allow Once    [A] Always Allow\n[N] Deny (Enter)   [Esc] Exit")
-	exitHint := lipgloss.NewStyle().
-		Foreground(m.theme.TextSecondary).
-		Faint(true).
-		Render("[Esc] Exit")
+	// ── Keybindings ───────────────────────────────────────────────────────
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+	keys := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("[Y]"),
+			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Allow once    "),
+			keyStyle.Render("[A]"),
+			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Always allow"),
+		),
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("[N]"),
+			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Deny          "),
+			keyStyle.Render("[Esc]"),
+			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Exit"),
+		),
+	)
 
+	// ── Countdown ─────────────────────────────────────────────────────────
 	remaining := m.Remaining()
 	var countdown string
 	if remaining <= 0 {
@@ -97,17 +107,16 @@ func (m *PermissionModal) Render(width, height int) string {
 	} else if remaining <= 30*time.Second {
 		countdown = lipgloss.NewStyle().
 			Foreground(m.theme.Error).
-			Render(fmt.Sprintf("Auto-deny in %s...", formatDurationClock(remaining)))
+			Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	} else {
 		countdown = lipgloss.NewStyle().
 			Foreground(m.theme.Warning).
-			Render(fmt.Sprintf("Auto-deny in %s...", formatDurationClock(remaining)))
+			Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	}
 
-	// Countdown bar using half-block characters (▀▄)
 	countdownBar := m.renderCountdownBar(modalWidth - 6)
 
-	// Rule context section (displayed when a permission rule matched)
+	// ── Rule context ──────────────────────────────────────────────────────
 	var ruleInfo string
 	if m.request.RuleTool != "" || m.request.RulePattern != "" {
 		ruleInfo = lipgloss.NewStyle().Faint(true).Render(
@@ -116,27 +125,26 @@ func (m *PermissionModal) Render(width, height int) string {
 		)
 	}
 
+	// ── Assemble ──────────────────────────────────────────────────────────
 	modalContent := lipgloss.JoinVertical(lipgloss.Top,
 		titleLine,
 		"",
-		toolInfo,
-		riskInfo,
+		toolLine,
 		"",
-		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Render("Command:"),
+		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Command"),
 		cmdBox,
-		"",
 	)
 	if ruleInfo != "" {
 		modalContent = lipgloss.JoinVertical(lipgloss.Top,
 			modalContent,
-			ruleInfo,
 			"",
+			ruleInfo,
 		)
 	}
 	modalContent = lipgloss.JoinVertical(lipgloss.Top,
 		modalContent,
+		"",
 		keys,
-		exitHint,
 		"",
 		countdownBar,
 		countdown,

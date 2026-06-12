@@ -206,7 +206,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	}
 
 	// Keyboard hints
-	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar", "ctrl+q qa", "ctrl+x leader"}
+	info.KeyboardHints = []string{"ctrl+p cmds", "ctrl+b sidebar"}
 	switch m.screen {
 	case ScreenSettings:
 		info.KeyboardHints = []string{"s save global", "L save local", "q back"}
@@ -677,6 +677,7 @@ func (m *AppState) ensureReplModel() {
 	m.replModel = &rm
 	m.replModel.SetCommandRegistry(m.cmdRegistry)
 	m.replModel.SetKeyRegistry(m.keyRegistry)
+	m.replModel.SetFrecentHistory(m.frecentHistory)
 	if m.cwd != "" {
 		m.replModel.SetCwd(m.cwd)
 	}
@@ -704,6 +705,30 @@ func (m *AppState) syncReplProvider(sessionID string) tea.Cmd {
 		return nil
 	}
 	return m.replModel.SetProvider(m.shutdownCtx, m.registry, m.activeProvider, m.activeModel, sessionID, m.config)
+}
+
+// updateSidebarUsage pushes token usage data from the REPL to the sidebar.
+func (m *AppState) updateSidebarUsage() {
+	if m.sidebarModel == nil || m.replModel == nil {
+		return
+	}
+	var tokens, ctxLen int
+	var cost float64
+	var showCost bool
+	var modelName string
+	if m.replModel.lastUsage != nil {
+		tokens = m.replModel.lastUsage.TotalTokens
+	}
+	if m.replModel.activeModel != nil {
+		ctxLen = int(m.replModel.activeModel.ContextLength)
+		modelName = m.replModel.activeModel.Name
+		if modelName == "" {
+			modelName = m.replModel.activeModel.ID
+		}
+	}
+	cost = m.replModel.lastCost
+	showCost = m.replModel.cfg != nil && m.replModel.cfg.UI.ShowCostEstimate
+	m.sidebarModel.SetTokenUsage(tokens, ctxLen, cost, showCost, modelName)
 }
 
 // ─── Render helpers ───────────────────────────────────────────────────────────

@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	sidebarDefaultWidth = 35
-	sidebarMinWidth     = 25
-	sidebarMaxWidth     = 65
+	sidebarDefaultWidth = 30
+	sidebarMinWidth     = 20
+	sidebarMaxWidth     = 50
 )
 
 // SidebarModel manages the collapsible sidebar panel that shows git status.
@@ -36,6 +36,13 @@ type SidebarModel struct {
 	// Optional fields for enhanced display
 	version   string
 	sessionID string
+
+	// Token usage
+	totalTokens  int
+	contextLen   int
+	cost         float64
+	showCost     bool
+	modelName    string
 
 	loading bool
 
@@ -63,6 +70,15 @@ func (s *SidebarModel) SetVersion(v string) {
 // SetSessionID sets the active session ID for display.
 func (s *SidebarModel) SetSessionID(id string) {
 	s.sessionID = id
+}
+
+// SetTokenUsage updates the token usage display in the sidebar.
+func (s *SidebarModel) SetTokenUsage(totalTokens, contextLen int, cost float64, showCost bool, modelName string) {
+	s.totalTokens = totalTokens
+	s.contextLen = contextLen
+	s.cost = cost
+	s.showCost = showCost
+	s.modelName = modelName
 }
 
 // SetShutdownContext sets the context for the periodic refresh ticker.
@@ -220,9 +236,8 @@ func (s *SidebarModel) showFileDiff(node *components.FileNode) tea.Cmd {
 }
 
 // sidebarFixedOverhead is the number of non-file-list lines in the sidebar.
-// Fixed chrome: header(2) + sep(1) + git-section(≈5) +
-// files-label(2) + session-section(3) + shortcuts-section(6) = ~19 lines.
-const sidebarFixedOverhead = 20
+// Layout: header(1) + sep(1) + git(≈3) + usage(≈5) + files-label(1) + session(≈2) = ~13 lines.
+const sidebarFixedOverhead = 13
 
 // refreshCmd returns a tea.Cmd that loads git status asynchronously.
 func (s *SidebarModel) refreshCmd() tea.Cmd {
@@ -290,7 +305,7 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 	return s, nil
 }
 
-// View renders the sidebar with a thin right border.
+// View renders the sidebar with file tree, git info, and token usage.
 func (s *SidebarModel) View() string {
 	if !s.visible {
 		return ""
@@ -301,7 +316,7 @@ func (s *SidebarModel) View() string {
 
 	var lines []string
 
-	// ── Header: M31A + version badge ──────────────────────────────────────────
+	// ── Header: brand + version ───────────────────────────────────────────────
 	version := s.version
 	if version == "" {
 		version = "dev"
@@ -313,32 +328,14 @@ func (s *SidebarModel) View() string {
 		Render("M31A")
 	versionBadge := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
-		PaddingLeft(1).
-		Render(version)
-	headerRow := lipgloss.JoinHorizontal(lipgloss.Left, title, versionBadge)
-	lines = append(lines, headerRow)
+		Render(" " + version)
+	lines = append(lines, title+versionBadge)
 
-	// ── Gradient separator ────────────────────────────────────────────────────
-	sepChars := []string{"▓", "▒", "░"}
-	var sep strings.Builder
-	for i := 0; i < len(sepChars) && i < contentW; i++ {
-		sep.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(sepChars[i]))
-	}
-	remaining := contentW - len(sepChars)
-	if remaining > 0 {
-		sep.WriteString(lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", remaining)))
-	}
-	lines = append(lines, sep.String())
+	// ── Thin separator ────────────────────────────────────────────────────────
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", contentW)))
 
-	// ── Git section ────────────────────────────────────────────────────────────
+	// ── Git branch + status ───────────────────────────────────────────────────
 	if s.branch != "" {
-		secLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("GIT")
-		lines = append(lines, "", secLabel)
-
 		branchLine := lipgloss.NewStyle().
 			Foreground(t.TextSecondary).
 			PaddingLeft(1).
@@ -346,34 +343,22 @@ func (s *SidebarModel) View() string {
 			Render("⎇ " + s.branch)
 		lines = append(lines, branchLine)
 
-		if s.remote != "" {
-			remoteLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(3).
-				Width(contentW).
-				Render(s.remote)
-			lines = append(lines, remoteLine)
-		}
-
 		modCount, addCount, delCount, untracked := countFileStatuses(s.files)
 		if modCount+addCount+delCount+untracked > 0 {
 			var pills []string
 			if modCount > 0 {
 				pills = append(pills, lipgloss.NewStyle().
-					Background(t.Warning).Foreground(t.Background).
-					Padding(0, 1).Bold(true).
+					Foreground(t.Warning).
 					Render(fmt.Sprintf("●%d", modCount)))
 			}
 			if addCount > 0 {
 				pills = append(pills, lipgloss.NewStyle().
-					Background(t.Success).Foreground(t.Background).
-					Padding(0, 1).Bold(true).
+					Foreground(t.Success).
 					Render(fmt.Sprintf("+%d", addCount)))
 			}
 			if delCount > 0 {
 				pills = append(pills, lipgloss.NewStyle().
-					Background(t.Error).Foreground(t.Background).
-					Padding(0, 1).Bold(true).
+					Foreground(t.Error).
 					Render(fmt.Sprintf("-%d", delCount)))
 			}
 			if untracked > 0 {
@@ -386,7 +371,83 @@ func (s *SidebarModel) View() string {
 		}
 	}
 
-	// ── Files section ──────────────────────────────────────────────────────────
+	// ── Token usage ───────────────────────────────────────────────────────────
+	if s.totalTokens > 0 {
+		lines = append(lines, "")
+		usageLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("USAGE")
+		lines = append(lines, usageLabel)
+
+		// Context meter
+		if s.contextLen > 0 {
+			pct := float64(s.totalTokens) / float64(s.contextLen)
+			if pct > 1 {
+				pct = 1
+			}
+			const barSegments = 8
+			filled := int(pct * barSegments)
+			var ctxColor lipgloss.Color
+			switch {
+			case pct >= 0.9:
+				ctxColor = t.Error
+			case pct >= 0.7:
+				ctxColor = t.Warning
+			default:
+				ctxColor = t.TextMuted
+			}
+			bar := "["
+			bar += strings.Repeat("█", filled)
+			bar += strings.Repeat("░", barSegments-filled)
+			bar += "]"
+			pctStr := fmt.Sprintf("%d%%", int(pct*100))
+			meterLine := lipgloss.NewStyle().
+				Foreground(ctxColor).
+				PaddingLeft(1).
+				Render(bar + " " + pctStr)
+			lines = append(lines, meterLine)
+		}
+
+		// Token count
+		tokStr := formatTokenCountSidebar(s.totalTokens)
+		tokLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Render(tokStr)
+		lines = append(lines, tokLine)
+
+		// Cost (if enabled)
+		if s.showCost && s.cost > 0 {
+			var costStr string
+			if s.cost < 0.01 {
+				costStr = "<$0.01"
+			} else {
+				costStr = fmt.Sprintf("$%.2f", s.cost)
+			}
+			costLine := lipgloss.NewStyle().
+				Foreground(t.Warning).
+				PaddingLeft(1).
+				Render(costStr)
+			lines = append(lines, costLine)
+		}
+
+		// Model name
+		if s.modelName != "" {
+			modelDisplay := s.modelName
+			if len(modelDisplay) > contentW-2 {
+				modelDisplay = modelDisplay[:contentW-5] + "..."
+			}
+			modelLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Render(modelDisplay)
+			lines = append(lines, modelLine)
+		}
+	}
+
+	// ── File tree ──────────────────────────────────────────────────────────────
 	lines = append(lines, "")
 	filesLabel := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
@@ -394,7 +455,7 @@ func (s *SidebarModel) View() string {
 		PaddingLeft(1).
 		Render("FILES")
 	if s.focused {
-		filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓ enter")
+		filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓")
 	}
 	lines = append(lines, filesLabel)
 
@@ -403,10 +464,9 @@ func (s *SidebarModel) View() string {
 			Foreground(t.Success).
 			PaddingLeft(2).
 			Width(contentW).
-			Render("✓ working tree clean")
+			Render("✓ clean")
 		lines = append(lines, noFiles)
 	} else {
-		// Update tree dimensions and render
 		if s.tree != nil {
 			s.tree.Width = contentW
 			treeView := s.tree.View()
@@ -416,60 +476,21 @@ func (s *SidebarModel) View() string {
 		}
 	}
 
-	// ── Session section ────────────────────────────────────────────────────────
-	lines = append(lines, "")
-	sessionLabel := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Bold(true).
-		PaddingLeft(1).
-		Render("SESSION")
-	lines = append(lines, sessionLabel)
-
+	// ── Session (compact) ─────────────────────────────────────────────────────
 	if s.sessionID != "" {
+		lines = append(lines, "")
 		sessDisplay := s.sessionID
-		if len(sessDisplay) > contentW-4 {
-			sessDisplay = sessDisplay[:contentW-7] + "..."
+		if len(sessDisplay) > contentW-2 {
+			sessDisplay = sessDisplay[:contentW-5] + "..."
 		}
 		sessLine := lipgloss.NewStyle().
-			Foreground(t.TextSecondary).
-			PaddingLeft(2).
-			Render("⊙ " + sessDisplay)
-		lines = append(lines, sessLine)
-	} else {
-		noSession := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
-			Italic(true).
-			PaddingLeft(2).
-			Render("Start typing to begin a session")
-		lines = append(lines, noSession)
-	}
-
-	// ── Keyboard shortcuts (bottom, muted) ─────────────────────────────────────
-	lines = append(lines, "")
-	shortcutDivider := lipgloss.NewStyle().
-		Foreground(t.Border).
-		Render(strings.Repeat("─", contentW))
-	lines = append(lines, shortcutDivider)
-
-	shortcuts := []struct {
-		key  string
-		desc string
-	}{
-		{"ctrl+p", "commands"},
-		{"ctrl+b", "sidebar"},
-		{"ctrl+g", "focus"},
-		{"ctrl+x", "leader"},
-	}
-	for _, sc := range shortcuts {
-		k := lipgloss.NewStyle().Foreground(t.TextMuted).Render(sc.key)
-		d := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(" " + sc.desc)
-		line := lipgloss.NewStyle().PaddingLeft(1).Render(k + d)
-		lines = append(lines, line)
+			PaddingLeft(1).
+			Render(sessDisplay)
+		lines = append(lines, sessLine)
 	}
 
 	// Pad each line to exactly contentW characters for consistent border alignment.
-	// Using manual padding instead of lipgloss.Width() to avoid truncation issues
-	// with Unicode characters (box-drawing chars, tree symbols).
 	var paddedLines []string
 	for _, line := range lines {
 		lineW := lipgloss.Width(line)
@@ -480,22 +501,16 @@ func (s *SidebarModel) View() string {
 	}
 	panel := lipgloss.NewStyle().Render(strings.Join(paddedLines, "\n"))
 
-	// Build right border: brand accent when focused, muted otherwise
+	// Build right border
 	lineCount := len(lines)
-	brandSegment := 3
 	borderColor := t.TextMuted
 	if s.focused {
 		borderColor = t.Brand
 	}
 	var rightBorderParts []string
 	for i := 0; i < lineCount; i++ {
-		if i < brandSegment {
-			rightBorderParts = append(rightBorderParts,
-				lipgloss.NewStyle().Foreground(t.Brand).Render("│"))
-		} else {
-			rightBorderParts = append(rightBorderParts,
-				lipgloss.NewStyle().Foreground(borderColor).Render("│"))
-		}
+		rightBorderParts = append(rightBorderParts,
+			lipgloss.NewStyle().Foreground(borderColor).Render("│"))
 	}
 	rightBorderStr := strings.Join(rightBorderParts, "\n")
 	rightBorder := lipgloss.NewStyle().Render(rightBorderStr)
@@ -518,6 +533,81 @@ func countFileStatuses(files []git.FileStatus) (mod, add, del, untracked int) {
 		}
 	}
 	return
+}
+
+// formatTokenCountSidebar formats token count for sidebar display.
+func formatTokenCountSidebar(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fK tokens", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d tokens", n)
+}
+
+// HandleMouse processes mouse events for the sidebar.
+// Returns a tea.Cmd if a file was clicked (to show diff), or nil.
+func (s *SidebarModel) HandleMouse(msg tea.MouseMsg, sidebarX int) tea.Cmd {
+	if !s.visible || !s.focused {
+		return nil
+	}
+
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return nil
+	}
+
+	// Check if click is within the sidebar's X range
+	if msg.X < sidebarX || msg.X >= sidebarX+s.width {
+		return nil
+	}
+
+	// Convert absolute Y to sidebar-relative Y (account for header)
+	// The sidebar starts at Y=0 in the terminal. The file tree starts after
+	// the header sections. We need to figure out which tree item was clicked.
+	if s.tree == nil {
+		return nil
+	}
+
+	// Count header lines to find where the file tree starts
+	headerLines := s.countHeaderLines()
+	relativeY := msg.Y - headerLines
+	if relativeY < 0 {
+		return nil
+	}
+
+	// Map click to tree cursor
+	flatList := s.tree.FlatList()
+	if relativeY >= len(flatList) {
+		return nil
+	}
+
+	s.tree.Cursor = relativeY
+	node := s.tree.SelectedNode()
+	if node != nil && !node.IsDir {
+		return s.showFileDiff(node)
+	}
+	if node != nil && node.IsDir {
+		s.tree.Toggle()
+	}
+
+	return nil
+}
+
+// countHeaderLines returns the number of lines before the file tree section.
+func (s *SidebarModel) countHeaderLines() int {
+	n := 1 // header (M31A + version)
+	n++    // separator
+	if s.branch != "" {
+		n++ // branch line
+		modCount, addCount, delCount, untracked := countFileStatuses(s.files)
+		if modCount+addCount+delCount+untracked > 0 {
+			n++ // status pills
+		}
+	}
+	if s.totalTokens > 0 {
+		n += 4 // USAGE label + meter + tokens + cost/model (approximate)
+	}
+	n++ // blank line before FILES
+	n++ // FILES label
+	return n
 }
 
 // buildSidebarTree converts a flat list of git-tracked files into a tree structure.
