@@ -2260,8 +2260,8 @@ func TestBuildToolDefs(t *testing.T) {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
 	defs := BuildToolDefs(d)
-	if len(defs) != 13 {
-		t.Errorf("expected 13 tool defs, got %d", len(defs))
+	if len(defs) != 14 {
+		t.Errorf("expected 14 tool defs, got %d", len(defs))
 	}
 	for _, def := range defs {
 		if def.Name == "" {

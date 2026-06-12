@@ -25,6 +25,9 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewWebFetch(sessionsDir, false)); err != nil {
 		return nil, err
 	}
+	if err := d.Register(NewWebSearch("")); err != nil {
+		return nil, err
+	}
 	if err := d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh, &d.pendingQuestions)); err != nil {
 		return nil, err
 	}
