@@ -42,7 +42,7 @@ go vet ./...
 
 ## Architecture Rules
 
-For the complete set of architecture rules, package layout, and absolute prohibitions, see [`AGENTS.md`](./AGENTS.md). Key highlights:
+For the full package layout and architectural constraints, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Key highlights:
 
 - Only OpenRouter and Zen providers are supported — no direct Anthropic or OpenAI.
 - V1 tools are limited to: Bash, FileRead, FileWrite, Glob, Grep.
