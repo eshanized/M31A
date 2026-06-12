@@ -136,6 +136,8 @@ webfetch_user_agent = "M31A/dev"     # User-Agent for web fetches
 skip_dirs = [                        # Directories to skip in searches
   ".git", "node_modules", "vendor", "target", "dist", "build"
 ]
+websearch_base_url = "https://search.sagibo.net"  # SearXNG instance URL
+websearch_enabled = true             # Enable/disable web search tool
 
 [ledger]
 enabled = true                       # Cross-session learning ledger
@@ -270,6 +272,8 @@ max_backups_per_file = 5
 webfetch_max_redirects = 3
 webfetch_user_agent = "M31A/dev"
 skip_dirs = [".git", "node_modules", "vendor", "target", "dist", "build"]
+websearch_base_url = "https://search.sagibo.net"
+websearch_enabled = true
 
 [git]
 commit_prefix = "feat"

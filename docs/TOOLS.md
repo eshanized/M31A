@@ -53,11 +53,13 @@ Fetch and convert web content to markdown.
 - Returns content as markdown, text, or HTML
 
 ### WebSearch
-Real-time web search.
+Search the web using SearXNG (privacy-respecting meta-search engine).
 
-- Supports live crawling mode
-- Configurable result count and search depth
-- Domain filtering available
+- Returns structured results: title, URL, and snippet
+- Configurable max results (`max_results`, default 5, max 10)
+- Optional engine selection (`engines` parameter, e.g. `"google,bing"`)
+- Configurable SearXNG instance (`tools.websearch_base_url` in config)
+- No API key required — zero telemetry
 
 ---
 
