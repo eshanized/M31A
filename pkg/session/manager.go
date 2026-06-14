@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -29,7 +28,6 @@ type Manager struct {
 	maxRecentModels int           // max recent models to track (default 10)
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
 
-	cacheMu sync.RWMutex
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -106,7 +104,7 @@ func readFileLimited(path string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	fi, statErr := f.Stat()
 	var data []byte
@@ -144,13 +142,13 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 	}
 
 	dir := m.projectDir()
-	if err := m.ensureDir(dir); err != nil {
-		return nil, fmt.Errorf("cannot create project directory: %w", err)
+	if dirErr := m.ensureDir(dir); dirErr != nil {
+		return nil, fmt.Errorf("cannot create project directory: %w", dirErr)
 	}
 
 	// Backup existing session if present
 	sessPath := m.sessionJSONPath()
-	if _, err := os.Stat(sessPath); err == nil {
+	if _, statErr := os.Stat(sessPath); statErr == nil {
 		bakPath := sessPath + ".bak"
 		_ = os.Rename(sessPath, bakPath)
 	}
@@ -172,9 +170,6 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 	}
 
 	m.ensureGitIgnore()
-
-	m.cacheMu.Lock()
-	m.cacheMu.Unlock()
 
 	return session, nil
 }
@@ -433,11 +428,11 @@ func (m *Manager) ExportSessionMarkdown(id, path string) error {
 		return fmt.Errorf("load session: %w", err)
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Session: %s\n\n", sess.ID))
-	sb.WriteString(fmt.Sprintf("**Model:** %s  \n**Provider:** %s  \n**Started:** %s  \n**Messages:** %d\n\n---\n\n",
-		sess.Model, sess.Provider, sess.StartedAt.Format(time.RFC3339), sess.MessageCount))
+	fmt.Fprintf(&sb, "# Session: %s\n\n", sess.ID)
+	fmt.Fprintf(&sb, "**Model:** %s  \n**Provider:** %s  \n**Started:** %s  \n**Messages:** %d\n\n---\n\n",
+		sess.Model, sess.Provider, sess.StartedAt.Format(time.RFC3339), sess.MessageCount)
 	for _, msg := range sess.Messages {
-		sb.WriteString(fmt.Sprintf("## %s\n\n%s\n\n---\n\n", msg.Role, msg.Content))
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n---\n\n", msg.Role, msg.Content)
 	}
 	return m.atomicWrite(path, []byte(sb.String()))
 }
@@ -481,7 +476,7 @@ func (m *Manager) ensureGitIgnore() {
 		slog.Warn("failed to update .gitignore", "error", err)
 		return
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	content := string(existing)
 	if !strings.HasSuffix(content, "\n") {
