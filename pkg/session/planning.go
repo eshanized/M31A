@@ -21,9 +21,9 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 	var b strings.Builder
 
 	b.WriteString("# Project\n\n")
-	b.WriteString(fmt.Sprintf("**Goal:** %s\n", project.Goal))
-	b.WriteString(fmt.Sprintf("**Type:** %s\n", project.ProjectType))
-	b.WriteString(fmt.Sprintf("**Framework:** %s\n", project.Framework))
+	fmt.Fprintf(&b, "**Goal:** %s\n", project.Goal)
+	fmt.Fprintf(&b, "**Type:** %s\n", project.ProjectType)
+	fmt.Fprintf(&b, "**Framework:** %s\n", project.Framework)
 
 	if len(project.Answers) > 0 {
 		b.WriteString("\n## Questions\n\n")
@@ -34,7 +34,7 @@ func (m *Manager) SaveProject(sessionID string, project *types.ProjectState) err
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			b.WriteString(fmt.Sprintf("- **Q:** %s → **A:** %s\n", k, project.Answers[k]))
+			fmt.Fprintf(&b, "- **Q:** %s → **A:** %s\n", k, project.Answers[k])
 		}
 	}
 
@@ -120,8 +120,8 @@ func (m *Manager) SaveTasks(sessionID string, tasks []types.Task) error {
 			files = strings.Join(task.Files, ", ")
 		}
 
-		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s | %s |\n",
-			task.ID, task.Action, task.Description, deps, string(task.Status), files))
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s |\n",
+			task.ID, task.Action, task.Description, deps, string(task.Status), files)
 	}
 
 	planningDir := m.planningDirPath()
@@ -243,10 +243,10 @@ func (m *Manager) SaveState(sessionID string, phase types.WorkflowPhase, progres
 	var b strings.Builder
 
 	b.WriteString("# State\n\n")
-	b.WriteString(fmt.Sprintf("**Phase:** %s\n", string(phase)))
-	b.WriteString(fmt.Sprintf("**Progress:** %s\n", progress))
-	b.WriteString(fmt.Sprintf("**Last Action:** %s\n", lastAction))
-	b.WriteString(fmt.Sprintf("**Timestamp:** %s\n", time.Now().Format(time.RFC3339)))
+	fmt.Fprintf(&b, "**Phase:** %s\n", string(phase))
+	fmt.Fprintf(&b, "**Progress:** %s\n", progress)
+	fmt.Fprintf(&b, "**Last Action:** %s\n", lastAction)
+	fmt.Fprintf(&b, "**Timestamp:** %s\n", time.Now().Format(time.RFC3339))
 
 	planningDir := m.planningDirPath()
 	if err := m.ensureDir(planningDir); err != nil {
@@ -287,9 +287,7 @@ func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progre
 			ts := strings.TrimSpace(line[len("**Timestamp:**"):])
 			var err error
 			timestamp, err = time.Parse(time.RFC3339, ts)
-			if err != nil {
-				// Malformed timestamp — use zero time and continue
-			}
+			_ = err
 		}
 	}
 
@@ -403,13 +401,13 @@ func (m *Manager) SaveTasksCheckbox(sessionID string, tasks []types.Task) error 
 		if allDone {
 			check = "x"
 		}
-		b.WriteString(fmt.Sprintf("- [%s] **%s**\n", check, cat))
+		fmt.Fprintf(&b, "- [%s] **%s**\n", check, cat)
 		for _, t := range grouped[cat] {
 			taskCheck := " "
 			if t.Status == types.StatusDone || t.Status == types.StatusSkipped {
 				taskCheck = "x"
 			}
-			b.WriteString(fmt.Sprintf("  - [%s] %s\n", taskCheck, t.Description))
+			fmt.Fprintf(&b, "  - [%s] %s\n", taskCheck, t.Description)
 		}
 	}
 
