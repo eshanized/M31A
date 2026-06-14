@@ -85,9 +85,9 @@ func run() int {
 	// Resolve config path
 	configPath := os.Getenv("M31A_CONFIG")
 	if configPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			logger.Error("cannot determine home directory", "error", err)
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			logger.Error("cannot determine home directory", "error", homeErr)
 			return 1
 		}
 		configPath = filepath.Join(home, ".m31a", "config.toml")
