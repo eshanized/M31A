@@ -54,14 +54,6 @@ func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
 			if r.res.Error == "" {
 				t.Fatal("expected error for permission denial")
 			}
-			// The typed error should be in the ToolResult.Error string
-			if !errors.Is(r.err, m31errors.ErrPermissionDenied) &&
-				!errors.Is(m31errors.ErrPermissionDenied, r.err) {
-				// Check if the error string contains the sentinel name
-				if r.res.Error == "" {
-					t.Fatalf("expected ErrPermissionDenied in error, got: err=%v result=%v", r.err, r.res)
-				}
-			}
 		} else {
 			if !errors.Is(r.err, m31errors.ErrPermissionDenied) {
 				t.Fatalf("expected ErrPermissionDenied, got: %v", r.err)
