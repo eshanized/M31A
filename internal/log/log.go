@@ -28,14 +28,14 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	}
 
 	logDir := filepath.Join(homeDir, ".m31a")
-	if err := os.MkdirAll(logDir, dirPermission); err != nil {
-		return nil, nil, fmt.Errorf("cannot create log directory %s: %w", logDir, err)
+	if mkdirErr := os.MkdirAll(logDir, dirPermission); mkdirErr != nil {
+		return nil, nil, fmt.Errorf("cannot create log directory %s: %w", logDir, mkdirErr)
 	}
 
 	logFile := filepath.Join(logDir, "m31a.log")
-	if err := rotateLogFiles(logDir, logFile); err != nil {
+	if rotateErr := rotateLogFiles(logDir, logFile); rotateErr != nil {
 		// log rotation failure is non-fatal — warn and continue append-only
-		fmt.Fprintf(os.Stderr, "m31a: log rotation failed (%v); continuing with append-only log\n", err)
+		fmt.Fprintf(os.Stderr, "m31a: log rotation failed (%v); continuing with append-only log\n", rotateErr)
 	}
 
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePermission)
@@ -62,7 +62,7 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	})
 
 	cleanup := func() {
-		f.Close()
+		_ = f.Close()
 	}
 
 	return logger, cleanup, nil
