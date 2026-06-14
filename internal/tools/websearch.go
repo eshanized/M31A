@@ -162,7 +162,7 @@ func (t *WebSearch) Execute(ctx context.Context, input types.ToolInput) (types.T
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("search request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return types.ToolResult{}, fmt.Errorf("search returned HTTP %d: %s", resp.StatusCode, resp.Status)
