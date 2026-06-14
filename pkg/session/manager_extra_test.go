@@ -42,13 +42,13 @@ func TestManager_ExportSessionJSON(t *testing.T) {
 	}
 	s.Messages = append(s.Messages, types.Message{Role: "user", Content: "hello"})
 	s.MessageCount = 1
-	if err := mgr.SaveSession(s); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if saveErr := mgr.SaveSession(s); saveErr != nil {
+		t.Fatalf("SaveSession failed: %v", saveErr)
 	}
 
 	exportPath := filepath.Join(t.TempDir(), "export.json")
-	if err := mgr.ExportSessionJSON(s.ID, exportPath); err != nil {
-		t.Fatalf("ExportSessionJSON failed: %v", err)
+	if exportErr := mgr.ExportSessionJSON(s.ID, exportPath); exportErr != nil {
+		t.Fatalf("ExportSessionJSON failed: %v", exportErr)
 	}
 
 	data, err := os.ReadFile(exportPath)
@@ -97,8 +97,8 @@ func TestManager_RenameSession(t *testing.T) {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	if err := mgr.RenameSession(s.ID, "my cool session"); err != nil {
-		t.Fatalf("RenameSession failed: %v", err)
+	if renameErr := mgr.RenameSession(s.ID, "my cool session"); renameErr != nil {
+		t.Fatalf("RenameSession failed: %v", renameErr)
 	}
 
 	loaded, err := mgr.LoadSession(s.ID)
@@ -120,11 +120,11 @@ func TestManager_RenameSession_ClearLabel(t *testing.T) {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	if err := mgr.RenameSession(s.ID, "initial name"); err != nil {
-		t.Fatalf("RenameSession failed: %v", err)
+	if renameErr := mgr.RenameSession(s.ID, "initial name"); renameErr != nil {
+		t.Fatalf("RenameSession failed: %v", renameErr)
 	}
-	if err := mgr.RenameSession(s.ID, ""); err != nil {
-		t.Fatalf("RenameSession clear failed: %v", err)
+	if renameErr := mgr.RenameSession(s.ID, ""); renameErr != nil {
+		t.Fatalf("RenameSession clear failed: %v", renameErr)
 	}
 
 	loaded, err := mgr.LoadSession(s.ID)
@@ -523,8 +523,8 @@ func TestManager_saveSessionAtomic(t *testing.T) {
 	// Verify that the label persists correctly via session.json.
 	s.Label = "atomic test"
 	s.WorkflowPhase = types.PhasePlan
-	if err := mgr.saveSessionAtomic(s); err != nil {
-		t.Fatalf("saveSessionAtomic failed: %v", err)
+	if saveErr := mgr.saveSessionAtomic(s); saveErr != nil {
+		t.Fatalf("saveSessionAtomic failed: %v", saveErr)
 	}
 
 	// Verify via loadSessionMetadata (reads only session.json)
@@ -554,8 +554,8 @@ func TestManager_loadSessionMetadata(t *testing.T) {
 	// including the Messages slice (serialized by json.Marshal in SaveSession).
 	s.Messages = append(s.Messages, types.Message{Role: "user", Content: "hi"})
 	s.MessageCount = 1
-	if err := mgr.SaveSession(s); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if saveErr := mgr.SaveSession(s); saveErr != nil {
+		t.Fatalf("SaveSession failed: %v", saveErr)
 	}
 
 	meta, err := mgr.loadSessionMetadata()
@@ -747,13 +747,13 @@ func TestManager_ExportSessionMarkdown(t *testing.T) {
 		types.Message{Role: "assistant", Content: "Hi there!"},
 	)
 	s.MessageCount = 2
-	if err := mgr.SaveSession(s); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if saveErr := mgr.SaveSession(s); saveErr != nil {
+		t.Fatalf("SaveSession failed: %v", saveErr)
 	}
 
 	exportPath := filepath.Join(t.TempDir(), "export.md")
-	if err := mgr.ExportSessionMarkdown(s.ID, exportPath); err != nil {
-		t.Fatalf("ExportSessionMarkdown failed: %v", err)
+	if exportErr := mgr.ExportSessionMarkdown(s.ID, exportPath); exportErr != nil {
+		t.Fatalf("ExportSessionMarkdown failed: %v", exportErr)
 	}
 
 	data, err := os.ReadFile(exportPath)
@@ -870,8 +870,8 @@ func TestManager_saveSessionAtomic_ProducesValidJSON(t *testing.T) {
 	s.DiscussQuestions = []string{"Q1", "Q2"}
 	s.MessageCount = 5
 
-	if err := mgr.saveSessionAtomic(s); err != nil {
-		t.Fatalf("saveSessionAtomic failed: %v", err)
+	if saveErr := mgr.saveSessionAtomic(s); saveErr != nil {
+		t.Fatalf("saveSessionAtomic failed: %v", saveErr)
 	}
 
 	// Verify the file is valid JSON
@@ -908,8 +908,8 @@ func TestManager_SaveSession_NilMessagesBecomesEmptySlice(t *testing.T) {
 	}
 
 	s.Messages = nil
-	if err := mgr.SaveSession(s); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if saveErr := mgr.SaveSession(s); saveErr != nil {
+		t.Fatalf("SaveSession failed: %v", saveErr)
 	}
 
 	// Read messages.json directly
