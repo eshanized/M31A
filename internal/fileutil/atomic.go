@@ -36,14 +36,14 @@ func AtomicWriteWithPerm(path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer os.Remove(tmpPath)
+	defer os.Remove(tmpPath) //nolint:errcheck
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return fmt.Errorf("sync temp file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
