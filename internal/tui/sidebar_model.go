@@ -202,7 +202,9 @@ func (s *SidebarModel) HandleKey(msg tea.KeyMsg) tea.Cmd {
 	case "home", "g":
 		s.tree.Cursor = 0
 	case "end", "G":
-		s.tree.Cursor = len(s.tree.FlatList()) - 1
+		if list := s.tree.FlatList(); len(list) > 0 {
+			s.tree.Cursor = len(list) - 1
+		}
 	case "enter", " ":
 		node := s.tree.SelectedNode()
 		if node != nil && !node.IsDir {
