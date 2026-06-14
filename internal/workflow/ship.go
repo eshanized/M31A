@@ -79,10 +79,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		}
 
 		if len(taskFiles) > 0 {
-			if err := e.git.Add(taskFiles...); err != nil {
-				e.logger.Warn("git add task files failed, falling back to add all", "error", err)
-				if err := e.git.AddAll(); err != nil {
-					e.logger.Warn("git add all before ship commit failed", "error", err)
+			if addErr := e.git.Add(taskFiles...); addErr != nil {
+				e.logger.Warn("git add task files failed, falling back to add all", "error", addErr)
+				if addAllErr := e.git.AddAll(); addAllErr != nil {
+					e.logger.Warn("git add all before ship commit failed", "error", addAllErr)
 				}
 			}
 		} else {
@@ -98,8 +98,8 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		staged, _ := e.git.DiffStaged()
 		if strings.TrimSpace(staged) == "" {
 			e.logger.Info("ship: no staged changes — skipping commit")
-		} else if _, err := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); err != nil {
-			return nil, fmt.Errorf("ship commit: %w", err)
+		} else if _, commitErr := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); commitErr != nil {
+			return nil, fmt.Errorf("ship commit: %w", commitErr)
 		}
 	}
 
@@ -108,10 +108,10 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 	var commits []git.CommitInfo
 	if e.git != nil {
-		var err error
-		commits, err = e.git.LogSince(e.startTime)
-		if err != nil {
-			e.logger.Warn("git log failed during ship summary", "error", err)
+		var logErr error
+		commits, logErr = e.git.LogSince(e.startTime)
+		if logErr != nil {
+			e.logger.Warn("git log failed during ship summary", "error", logErr)
 		}
 		// W-17: Truncate commit log to last 50 lines
 		if len(commits) > 50 {
@@ -148,8 +148,8 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
 			l := ledger.New(ledgerPath)
 			entry := ledger.NewEntry(sess.Session, total, failed, skipped, len(commits), 0)
-			if err := l.Append(entry); err != nil {
-				e.logger.Warn("ledger update failed", "error", err)
+			if appendErr := l.Append(entry); appendErr != nil {
+				e.logger.Warn("ledger update failed", "error", appendErr)
 			}
 		}
 	} else {
@@ -239,7 +239,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
 			e.logger.Warn("memory write failed", "error", writeErr)
 		}
-		memFile.Close()
+		_ = memFile.Close()
 	}
 
 	// Update checkbox tasks.md with final statuses
@@ -325,10 +325,10 @@ func (e *Engine) collectDiffStats() DiffStats {
 		adds := 0
 		dels := 0
 		if parts[0] != "-" {
-			fmt.Sscanf(parts[0], "%d", &adds)
+			_, _ = fmt.Sscanf(parts[0], "%d", &adds)
 		}
 		if parts[1] != "-" {
-			fmt.Sscanf(parts[1], "%d", &dels)
+			_, _ = fmt.Sscanf(parts[1], "%d", &dels)
 		}
 
 		stats.Insertions += adds
@@ -424,11 +424,11 @@ func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks [
 	if len(commits) > 0 {
 		sb.WriteString("\n## Commits\n")
 		for _, c := range commits {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", c.Hash[:min(len(c.Hash), 7)], c.Message))
+			fmt.Fprintf(&sb, "- %s: %s\n", c.Hash[:min(len(c.Hash), 7)], c.Message)
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n## Summary\n- Tasks completed: %d/%d\n- Tasks failed: %d\n", done, len(tasks), failed))
+	fmt.Fprintf(&sb, "\n## Summary\n- Tasks completed: %d/%d\n- Tasks failed: %d\n", done, len(tasks), failed)
 
 	if e.git != nil && e.sessionStartHash != "" {
 		if diffOut, err := e.git.DiffRefs(e.sessionStartHash, "HEAD"); err == nil && diffOut != "" {
