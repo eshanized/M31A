@@ -151,7 +151,7 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 	walk(targetDir, "", 1)
 
 	if count >= maxEntries {
-		sb.WriteString(fmt.Sprintf("\n(listing truncated at %d entries)\n", maxEntries))
+		fmt.Fprintf(&sb, "\n(listing truncated at %d entries)\n", maxEntries)
 	}
 
 	return types.ToolResult{
