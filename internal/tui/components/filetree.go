@@ -254,7 +254,7 @@ func (ft *FileTree) renderNode(flat flatNode, selected bool) string {
 
 	if node.IsDir {
 		nameStyle = nameStyle.Bold(true)
-		prefix := " "
+		var prefix string
 		if ft.Expanded[node.Path] {
 			prefix = "▾"
 		} else {
