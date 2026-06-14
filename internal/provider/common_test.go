@@ -437,7 +437,7 @@ func TestBuildChatBody_WireFormat(t *testing.T) {
 		t.Errorf("sys = %+v", sys)
 	}
 	for _, bad := range []string{"segments", "created_at", "usage", "skip_for_llm"} {
-		if _, ok := sys[bad]; ok {
+		if _, hasKey := sys[bad]; hasKey {
 			t.Errorf("sys message leaked storage field %q", bad)
 		}
 	}
