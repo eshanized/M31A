@@ -85,7 +85,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("models fetch returned status %d", resp.StatusCode)
 		}
@@ -142,7 +142,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
 		case http.StatusTooManyRequests:
@@ -180,7 +180,7 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	_, _ = provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
 
 	if resp.StatusCode != http.StatusOK {
