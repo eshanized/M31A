@@ -33,8 +33,8 @@ func TestPlanning_SaveAndLoadProject(t *testing.T) {
 		},
 	}
 
-	if err := mgr.SaveProject(s.ID, original); err != nil {
-		t.Fatalf("SaveProject failed: %v", err)
+	if saveErr := mgr.SaveProject(s.ID, original); saveErr != nil {
+		t.Fatalf("SaveProject failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadProject(s.ID)
@@ -100,8 +100,8 @@ func TestPlanning_ToleratesExtraWhitespace(t *testing.T) {
 - **Q:** What UI lib? → **A:**   Bubble Tea
 `
 	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
-	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write PROJECT.md: %v", err)
+	if writeErr := os.WriteFile(projectPath, []byte(content), 0644); writeErr != nil {
+		t.Fatalf("Failed to write PROJECT.md: %v", writeErr)
 	}
 
 	project, err := mgr.LoadProject(s.ID)
@@ -149,8 +149,8 @@ func TestPlanning_ToleratesMissingSections(t *testing.T) {
 **Framework:** None
 `
 	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
-	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write PROJECT.md: %v", err)
+	if writeErr := os.WriteFile(projectPath, []byte(content), 0644); writeErr != nil {
+		t.Fatalf("Failed to write PROJECT.md: %v", writeErr)
 	}
 
 	project, err := mgr.LoadProject(s.ID)
@@ -208,8 +208,8 @@ func TestPlanning_SaveAndLoadTasks(t *testing.T) {
 		},
 	}
 
-	if err := mgr.SaveTasks(s.ID, original); err != nil {
-		t.Fatalf("SaveTasks failed: %v", err)
+	if saveErr := mgr.SaveTasks(s.ID, original); saveErr != nil {
+		t.Fatalf("SaveTasks failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadTasks(s.ID)
@@ -291,8 +291,8 @@ func TestPlanning_TasksWithDeps(t *testing.T) {
 		},
 	}
 
-	if err := mgr.SaveTasks(s.ID, original); err != nil {
-		t.Fatalf("SaveTasks failed: %v", err)
+	if saveErr := mgr.SaveTasks(s.ID, original); saveErr != nil {
+		t.Fatalf("SaveTasks failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadTasks(s.ID)
@@ -340,8 +340,8 @@ func TestPlanning_SaveAndLoadState(t *testing.T) {
 	}
 
 	// Save state
-	if err := mgr.SaveState(s.ID, types.PhasePlan, "3 of 5 tasks complete", "Executed task 3"); err != nil {
-		t.Fatalf("SaveState failed: %v", err)
+	if saveErr := mgr.SaveState(s.ID, types.PhasePlan, "3 of 5 tasks complete", "Executed task 3"); saveErr != nil {
+		t.Fatalf("SaveState failed: %v", saveErr)
 	}
 
 	// Load and verify
@@ -395,8 +395,8 @@ func TestPlanning_StateTimestampFormat(t *testing.T) {
 	}
 
 	// Save state
-	if err := mgr.SaveState(s.ID, types.PhaseExecute, "1 of 1", "First task"); err != nil {
-		t.Fatalf("SaveState failed: %v", err)
+	if saveErr := mgr.SaveState(s.ID, types.PhaseExecute, "1 of 1", "First task"); saveErr != nil {
+		t.Fatalf("SaveState failed: %v", saveErr)
 	}
 
 	// Load and verify RFC3339 roundtrip
