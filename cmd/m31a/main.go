@@ -93,8 +93,8 @@ func run() int {
 		configPath = filepath.Join(home, ".m31a", "config.toml")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), types.DirPermission); err != nil {
-		logger.Error("cannot create config directory", "error", err)
+	if mkdirErr := os.MkdirAll(filepath.Dir(configPath), types.DirPermission); mkdirErr != nil {
+		logger.Error("cannot create config directory", "error", mkdirErr)
 		return 1
 	}
 
@@ -113,8 +113,8 @@ func run() int {
 		logger.Warn("keychain initialization failed", "error", kcErr)
 	}
 	if kc != nil {
-		if err := cfg.ResolveAPIKeys(kc); err != nil {
-			logger.Warn("failed to resolve API keys", "error", err)
+		if resolveErr := cfg.ResolveAPIKeys(kc); resolveErr != nil {
+			logger.Warn("failed to resolve API keys", "error", resolveErr)
 		}
 	}
 
@@ -123,20 +123,20 @@ func run() int {
 	registry := provider.NewRegistry()
 
 	if cfg.Provider.OpenRouter.APIKey != "" {
-		if err := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey, Version); err != nil {
-			logger.Warn("failed to register OpenRouter provider", "error", err)
+		if regErr := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey, Version); regErr != nil {
+			logger.Warn("failed to register OpenRouter provider", "error", regErr)
 		}
 	}
 
 	if cfg.Provider.Zen.APIKey != "" {
-		if err := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey, Version); err != nil {
-			logger.Warn("failed to register Zen provider", "error", err)
+		if regErr := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey, Version); regErr != nil {
+			logger.Warn("failed to register Zen provider", "error", regErr)
 		}
 	}
 
 	if cfg.Provider.Default != "" {
-		if err := registry.SetActive(cfg.Provider.Default); err != nil {
-			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", err)
+		if setErr := registry.SetActive(cfg.Provider.Default); setErr != nil {
+			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", setErr)
 		}
 	}
 
@@ -179,11 +179,13 @@ func run() int {
 
 	// Theme
 	themeMode := theme.ModeDark
-	switch cfg.UI.Theme {
-	case "light":
-		themeMode = theme.ModeLight
-	case "auto":
-		themeMode = theme.ModeAuto
+	if cfg != nil {
+		switch cfg.UI.Theme {
+		case "light":
+			themeMode = theme.ModeLight
+		case "auto":
+			themeMode = theme.ModeAuto
+		}
 	}
 
 	// Build and launch TUI app
