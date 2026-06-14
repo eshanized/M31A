@@ -781,7 +781,7 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 		Padding(0, 1).
 		Render(fr.keyInput.View())
 
-	saveLabel := "  ○ Save to system keychain  "
+	var saveLabel string
 	if fr.opts.SaveKeychain {
 		saveLabel = "  " + lipgloss.NewStyle().
 			Foreground(t.Success).
