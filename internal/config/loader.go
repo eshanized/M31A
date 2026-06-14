@@ -883,7 +883,7 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 		watchConfigPolling(ctx, path, ch)
 		return
 	}
-	defer watcher.Close()
+	defer watcher.Close() //nolint:errcheck
 
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
@@ -1013,7 +1013,7 @@ func LoadDotEnv() {
 				}
 			}
 			if _, exists := os.LookupEnv(key); !exists {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			}
 		}
 	})
