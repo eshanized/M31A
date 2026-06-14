@@ -84,8 +84,8 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 	if err != nil {
 		return types.ToolResult{Error: "Agent: invalid params: " + err.Error()}, nil
 	}
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return types.ToolResult{Error: "Agent: invalid params: " + err.Error()}, nil
+	if unmarshalErr := json.Unmarshal(raw, &req); unmarshalErr != nil {
+		return types.ToolResult{Error: "Agent: invalid params: " + unmarshalErr.Error()}, nil
 	}
 	if req.Description == "" {
 		return types.ToolResult{Error: "Agent: 'description' is required"}, nil
