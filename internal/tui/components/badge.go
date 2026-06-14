@@ -175,11 +175,11 @@ func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
 
 	switch preset {
 	case BadgeSuccessPreset:
-		style = t.SuccessBadge.Copy()
+		style = t.SuccessBadge
 	case BadgeWarningPreset:
-		style = t.WarningBadge.Copy()
+		style = t.WarningBadge
 	case BadgeErrorPreset:
-		style = t.ErrorBadge.Copy()
+		style = t.ErrorBadge
 	case BadgeInfoPreset:
 		style = lipgloss.NewStyle().
 			Background(t.Thinking).
@@ -187,7 +187,7 @@ func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
 			Padding(0, 1).
 			Bold(true)
 	case BadgeBrandPreset:
-		style = t.ModelBadge.Copy()
+		style = t.ModelBadge
 	case BadgeMutedPreset:
 		style = lipgloss.NewStyle().
 			Background(t.Border).
