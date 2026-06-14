@@ -133,7 +133,7 @@ func (sm *ShipModel) View() string {
 	}
 
 	taskStr := lipgloss.NewStyle().Foreground(t.Text).Render(
-		fmt.Sprintf("Tasks:")) + " " +
+		"Tasks:") + " " +
 		lipgloss.NewStyle().Foreground(taskColor).Render(
 			fmt.Sprintf("%d/%d %s", sm.summary.TaskDone, sm.summary.TaskTotal, taskIcon))
 
