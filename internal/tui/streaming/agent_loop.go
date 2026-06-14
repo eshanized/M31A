@@ -152,7 +152,7 @@ func AgentLoop(
 			go func() {
 				select {
 				case <-ctx.Done():
-					iterator.Close()
+					_ = iterator.Close()
 				case <-iterDone:
 				}
 			}()
@@ -168,11 +168,11 @@ func AgentLoop(
 				}
 				if err != nil {
 					if ctx.Err() != nil {
-						iterator.Close()
+						_ = iterator.Close()
 						return
 					}
 					ch <- AgentErrorMsg{Err: fmt.Errorf("stream error: %w", err)}
-					iterator.Close()
+					_ = iterator.Close()
 					return
 				}
 				if chunk == nil {
@@ -207,7 +207,7 @@ func AgentLoop(
 					break
 				}
 			}
-			iterator.Close()
+			_ = iterator.Close()
 			close(iterDone)
 
 			calls := buildAgentToolCalls(accMap)
