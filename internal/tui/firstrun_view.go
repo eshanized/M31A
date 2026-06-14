@@ -572,15 +572,15 @@ func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
 
 	n := len(fr.selectedProviders)
 	var countBadge string
-	switch {
-	case n == 0:
+	switch n {
+	case 0:
 		countBadge = lipgloss.NewStyle().
 			Foreground(t.TextMuted).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
 			Padding(0, 1).
 			Render("none selected")
-	case n == 1:
+		case 1:
 		countBadge = lipgloss.NewStyle().
 			Foreground(t.Success).
 			Border(lipgloss.RoundedBorder()).
