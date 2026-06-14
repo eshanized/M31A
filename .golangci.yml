@@ -17,9 +17,9 @@ linters:
       check-type-assertions: false
       check-blank: false
 
-issues:
-  rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unused
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unused

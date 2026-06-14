@@ -82,12 +82,12 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - name: Build
-        run: CGO_ENABLED=0 GOARCH=${{ matrix.arch }} go build -o m31a ./cmd/m31a
+        run: go build -o m31a ./cmd/m31a
         env:
           CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
       - name: Vet
-        run: GOARCH=${{ matrix.arch }} go vet ./...
+        run: go vet ./...
         env:
           GOARCH: ${{ matrix.arch }}
 
