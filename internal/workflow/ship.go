@@ -86,8 +86,9 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 				}
 			}
 		} else {
-			if err := e.git.AddAll(); err != nil {
-				e.logger.Warn("git add all before ship commit failed", "error", err)
+			e.logger.Error("ship: no task-to-file mapping found — ALL uncommitted changes will be committed, including unrelated files")
+			if addErr := e.git.AddAll(); addErr != nil {
+				e.logger.Warn("git add all before ship commit failed", "error", addErr)
 			}
 		}
 
@@ -140,9 +141,9 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// 4. Update ledger
 	sess, err := e.sessionMgr.LoadSession(e.sessionID)
 	if err == nil {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			e.logger.Warn("ledger update skipped: cannot determine home dir", "error", err)
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			e.logger.Warn("ledger update skipped: cannot determine home dir", "error", homeErr)
 		} else {
 			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
 			l := ledger.New(ledgerPath)
