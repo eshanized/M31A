@@ -3,7 +3,6 @@ package rollback
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/git"
@@ -210,29 +209,10 @@ func (r *Rollback) SafeReset(hash string) (*RollbackResult, error) {
 }
 
 // HasUncommittedChanges returns true if the working tree has uncommitted changes
-// (modified, staged, untracked, or deleted files).
+// (modified, staged, untracked, or deleted files). Uses porcelain format for
+// reliable, locale-independent parsing.
 func (r *Rollback) HasUncommittedChanges() (bool, error) {
-	status, err := r.git.Status()
-	if err != nil {
-		return false, fmt.Errorf("has uncommitted changes: %w", err)
-	}
-
-	dirtyIndicators := []string{
-		"Changes not staged",
-		"Untracked files",
-		"Changes to be committed",
-		"modified:",
-		"new file:",
-		"deleted:",
-	}
-
-	for _, indicator := range dirtyIndicators {
-		if strings.Contains(status, indicator) {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	return r.git.HasUncommittedChanges()
 }
 
 // stashIfDirty checks for uncommitted changes and stashes them if found.
