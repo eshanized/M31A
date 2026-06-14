@@ -30,17 +30,6 @@ func contentViewportHeight(contentHeight int) int {
 	return h
 }
 
-// viewportTopChrome is the height of everything above the viewport in the REPL.
-// With unified chrome, the header/footer are handled by PageLayout. The viewport
-// sits at the top of the content area with no additional top chrome.
-const viewportTopChrome = 0
-
-// viewportBottomChrome is the height of everything below the viewport in the REPL.
-// This is: separator (1) + textarea (inputHeight) = inputHeight + 1.
-func viewportBottomChrome() int {
-	return inputSeparatorHeight + inputHeight
-}
-
 // chromeHeight computes the total number of rows ViewContent reserves for
 // non-viewport chrome: the input separator (1) + the textarea's current
 // height (which grows with multi-line input).
@@ -180,59 +169,6 @@ func (m *ReplModel) View() string {
 	// ── Assemble all parts ─────────────────────────────────────────────────
 	parts := []string{viewportContent, inputBorder, textareaView, statusBar}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
-}
-
-// renderMergedMetadata renders a single line combining the usage row (ctx
-// meter · last-request tokens · cost) and the agent · model · provider line.
-// The two are separated by a " · " so everything fits on one row.
-func (m *ReplModel) renderMergedMetadata(agentName, modelName, providerName string, width int) string {
-	t := m.theme
-	var parts []string
-
-	// Usage prefix (context meter + tokens + cost), if any data is available.
-	if m.lastUsage != nil && m.lastUsage.TotalTokens > 0 {
-		if m.activeModel != nil && m.activeModel.ContextLength > 0 {
-			total := int(m.activeModel.ContextLength)
-			used := m.lastUsage.TotalTokens
-			if used > total {
-				used = total
-			}
-			parts = append(parts, renderContextMeter(used, total, t))
-		}
-		parts = append(parts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatTokenCount(m.lastUsage.TotalTokens)))
-		if m.cfg != nil && m.cfg.UI.ShowCostEstimate && m.lastCost > 0 {
-			var costStr string
-			if m.lastCost < 0.01 {
-				costStr = "<$0.01"
-			} else {
-				costStr = fmt.Sprintf("$%.2f", m.lastCost)
-			}
-			parts = append(parts, lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
-		}
-	}
-
-	// Agent · model · provider suffix.
-	if agentName != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.Text).Render(agentName))
-	}
-	if modelName != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(modelName))
-	}
-	if providerName != "" {
-		providerShort := ProviderShortName(providerName)
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("["+providerShort+"]"))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-
-	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · ")
-	row := strings.Join(parts, sep)
-	if lipgloss.Width(row) > width {
-		row = TruncateWithEllipsis(row, width)
-	}
-	return lipgloss.NewStyle().PaddingTop(1).Width(width).Render(row)
 }
 
 // ViewContent renders the REPL content area for the unified PageLayout system.
@@ -413,54 +349,6 @@ func pathBase(p string) string {
 		}
 	}
 	return p
-}
-
-// renderUsageRow renders an optional row above the metadata:
-//
-//	ctx [████░░░░] 42%  ·  3.6K ctx  ·  $0.12
-//
-// Returns "" when there is no usage data, so callers may append its output
-// unconditionally inside a vertical stack.
-func (m *ReplModel) renderUsageRow(width int) string {
-	if m.lastUsage == nil || m.lastUsage.TotalTokens == 0 {
-		return ""
-	}
-
-	t := m.theme
-	var parts []string
-
-	// Context meter (visual bar) — only when model's context length is known.
-	if m.activeModel != nil && m.activeModel.ContextLength > 0 {
-		total := int(m.activeModel.ContextLength)
-		used := m.lastUsage.TotalTokens
-		if used > total {
-			used = total
-		}
-		parts = append(parts, renderContextMeter(used, total, t))
-	}
-
-	// Last-request token count.
-	parts = append(parts,
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatTokenCount(m.lastUsage.TotalTokens)))
-
-	// Session cost (honors UI.ShowCostEstimate config).
-	if m.cfg != nil && m.cfg.UI.ShowCostEstimate && m.lastCost > 0 {
-		var costStr string
-		if m.lastCost < 0.01 {
-			costStr = "<$0.01"
-		} else {
-			costStr = fmt.Sprintf("$%.2f", m.lastCost)
-		}
-		parts = append(parts,
-			lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
-	}
-
-	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" · ")
-	row := strings.Join(parts, sep)
-	if lipgloss.Width(row) > width {
-		row = TruncateWithEllipsis(row, width)
-	}
-	return lipgloss.NewStyle().Width(width).Render(row)
 }
 
 // renderContextMeter renders a compact visual context usage bar:
