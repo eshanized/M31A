@@ -58,10 +58,6 @@ func TestIntermediateProgress(t *testing.T) {
 	})
 
 	t.Run("IntermediateProgressMsg is tea.Msg", func(t *testing.T) {
-		// Verify it implements tea.Msg interface (empty struct)
-		var msg interface{} = IntermediateProgressMsg{}
-		if msg == nil {
-			t.Error("message should not be nil")
-		}
+		var _ = IntermediateProgressMsg{}
 	})
 }
