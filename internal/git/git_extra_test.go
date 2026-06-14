@@ -432,7 +432,7 @@ func TestGit_StashList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StashList failed: %v", err)
 	}
-	if stashes != nil && len(stashes) != 0 {
+	if len(stashes) != 0 {
 		t.Errorf("Expected empty stash list, got %v", stashes)
 	}
 
