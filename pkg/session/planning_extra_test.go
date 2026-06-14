@@ -24,8 +24,8 @@ func TestPlanning_SaveAndLoadPlan(t *testing.T) {
 	}
 
 	markdown := "# Implementation Plan\n\n1. Step one\n2. Step two\n"
-	if err := mgr.SavePlan(s.ID, 1, markdown); err != nil {
-		t.Fatalf("SavePlan failed: %v", err)
+	if saveErr := mgr.SavePlan(s.ID, 1, markdown); saveErr != nil {
+		t.Fatalf("SavePlan failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadPlan(s.ID)
@@ -103,8 +103,8 @@ func TestPlanning_SaveAndLoadDemonstration(t *testing.T) {
 	}
 
 	markdown := "# Demonstration\n\nHere is the walkthrough of the feature.\n"
-	if err := mgr.SaveDemonstration(s.ID, markdown); err != nil {
-		t.Fatalf("SaveDemonstration failed: %v", err)
+	if saveErr := mgr.SaveDemonstration(s.ID, markdown); saveErr != nil {
+		t.Fatalf("SaveDemonstration failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadDemonstration(s.ID)
@@ -151,8 +151,8 @@ func TestPlanning_SaveTasksCheckbox_GroupsByCategory(t *testing.T) {
 		{ID: 4, Description: "Task D", Status: types.StatusPending},
 	}
 
-	if err := mgr.SaveTasksCheckbox(s.ID, tasks); err != nil {
-		t.Fatalf("SaveTasksCheckbox failed: %v", err)
+	if saveErr := mgr.SaveTasksCheckbox(s.ID, tasks); saveErr != nil {
+		t.Fatalf("SaveTasksCheckbox failed: %v", saveErr)
 	}
 
 	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
@@ -196,8 +196,8 @@ func TestPlanning_SaveTasksCheckbox_AllDoneCategories(t *testing.T) {
 		{ID: 2, Description: "Task B", Category: "Deploy", Status: types.StatusSkipped},
 	}
 
-	if err := mgr.SaveTasksCheckbox(s.ID, tasks); err != nil {
-		t.Fatalf("SaveTasksCheckbox failed: %v", err)
+	if saveErr := mgr.SaveTasksCheckbox(s.ID, tasks); saveErr != nil {
+		t.Fatalf("SaveTasksCheckbox failed: %v", saveErr)
 	}
 
 	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
@@ -229,8 +229,8 @@ func TestPlanning_SaveTasksCheckbox_EmptyTasks(t *testing.T) {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	if err := mgr.SaveTasksCheckbox(s.ID, nil); err != nil {
-		t.Fatalf("SaveTasksCheckbox with nil tasks failed: %v", err)
+	if saveErr := mgr.SaveTasksCheckbox(s.ID, nil); saveErr != nil {
+		t.Fatalf("SaveTasksCheckbox with nil tasks failed: %v", saveErr)
 	}
 
 	path := filepath.Join(mgr.planningDirPath(), "tasks.md")
@@ -372,7 +372,7 @@ func TestGenerateID_HexOnly(t *testing.T) {
 			t.Fatalf("generateID failed: %v", err)
 		}
 		for _, c := range id {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 				t.Errorf("Non-hex char %c in ID %q", c, id)
 				break
 			}
@@ -485,8 +485,8 @@ func TestPlanning_TasksWithEmptyDepsAndFiles(t *testing.T) {
 		},
 	}
 
-	if err := mgr.SaveTasks(s.ID, original); err != nil {
-		t.Fatalf("SaveTasks failed: %v", err)
+	if saveErr := mgr.SaveTasks(s.ID, original); saveErr != nil {
+		t.Fatalf("SaveTasks failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadTasks(s.ID)
@@ -526,8 +526,8 @@ func TestPlanning_LoadStateEmptyPhaseDefaultsToIdle(t *testing.T) {
 **Timestamp:** 2025-01-01T00:00:00Z
 `
 	statePath := filepath.Join(mgr.planningDirPath(), "STATE.md")
-	if err := os.WriteFile(statePath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write STATE.md: %v", err)
+	if writeErr := os.WriteFile(statePath, []byte(content), 0644); writeErr != nil {
+		t.Fatalf("Failed to write STATE.md: %v", writeErr)
 	}
 
 	phase, _, _, _, err := mgr.LoadState(s.ID)
@@ -561,8 +561,8 @@ func TestPlanning_LoadStateMalformedTimestamp(t *testing.T) {
 **Timestamp:** not-a-valid-timestamp
 `
 	statePath := filepath.Join(mgr.planningDirPath(), "STATE.md")
-	if err := os.WriteFile(statePath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write STATE.md: %v", err)
+	if writeErr := os.WriteFile(statePath, []byte(content), 0644); writeErr != nil {
+		t.Fatalf("Failed to write STATE.md: %v", writeErr)
 	}
 
 	phase, progress, lastAction, timestamp, err := mgr.LoadState(s.ID)
@@ -609,8 +609,8 @@ func TestPlanning_LoadProjectMalformedQA(t *testing.T) {
 - **Q:** malformed question without arrow
 `
 	projectPath := filepath.Join(mgr.planningDirPath(), "PROJECT.md")
-	if err := os.WriteFile(projectPath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write PROJECT.md: %v", err)
+	if writeErr := os.WriteFile(projectPath, []byte(content), 0644); writeErr != nil {
+		t.Fatalf("Failed to write PROJECT.md: %v", writeErr)
 	}
 
 	project, err := mgr.LoadProject(s.ID)
