@@ -80,7 +80,7 @@ func validateSessionID(id string, expectedLen int) error {
 		return fmt.Errorf("session ID must be %d chars, got %d", expectedLen, len(id))
 	}
 	for _, c := range id {
-		if !unicode.IsDigit(c) && !(c >= 'a' && c <= 'f') {
+		if !unicode.IsDigit(c) && (c < 'a' || c > 'f') {
 			return fmt.Errorf("session ID must contain only lowercase hex chars [a-f0-9], got %q", id)
 		}
 	}
