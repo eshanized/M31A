@@ -1379,12 +1379,12 @@ func TestRollbackModel(t *testing.T) {
 		t.Error("any key should clear confirm")
 	}
 	rm.confirmReset = "soft"
-	_, cmd = rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if rm.confirmReset != "" {
 		t.Error("Esc from confirm should clear")
 	}
 	rm.showDiff = true
-	_, cmd = rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if rm.showDiff {
 		t.Error("Esc from diff should hide")
 	}
