@@ -45,8 +45,8 @@ func TestAtomicWriteWithPerm_PreservesPermissions(t *testing.T) {
 	}
 
 	// Overwrite with different perm — original permissions should be preserved
-	if err := AtomicWriteWithPerm(path, []byte("second"), 0755); err != nil {
-		t.Fatalf("second write failed: %v", err)
+	if overwriteErr := AtomicWriteWithPerm(path, []byte("second"), 0755); overwriteErr != nil {
+		t.Fatalf("second write failed: %v", overwriteErr)
 	}
 
 	info2, err := os.Stat(path)
