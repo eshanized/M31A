@@ -61,12 +61,8 @@ func TestSelfHealVisibility(t *testing.T) {
 	})
 
 	t.Run("SelfHealStartMsg and SelfHealCompleteMsg are tea.Msg", func(t *testing.T) {
-		// Verify they implement tea.Msg interface (empty struct)
-		var startMsg interface{} = SelfHealStartMsg{}
-		var completeMsg interface{} = SelfHealCompleteMsg{}
-		if startMsg == nil || completeMsg == nil {
-			t.Error("messages should not be nil")
-		}
+		var _ = SelfHealStartMsg{}
+		var _ = SelfHealCompleteMsg{}
 	})
 
 	t.Run("Attempt count displays correctly", func(t *testing.T) {
