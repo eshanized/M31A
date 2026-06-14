@@ -73,16 +73,16 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	}()
 
 	// Start bisect
-	if _, err := b.run("bisect", "start"); err != nil {
-		return nil, fmt.Errorf("bisect start: %w", err)
+	if _, startErr := b.run("bisect", "start"); startErr != nil {
+		return nil, fmt.Errorf("bisect start: %w", startErr)
 	}
 
 	// Mark good and bad
-	if _, err := b.run("bisect", "good", sessionStartHash); err != nil {
-		return nil, fmt.Errorf("bisect good %s: %w", sessionStartHash, err)
+	if _, goodErr := b.run("bisect", "good", sessionStartHash); goodErr != nil {
+		return nil, fmt.Errorf("bisect good %s: %w", sessionStartHash, goodErr)
 	}
-	if _, err := b.run("bisect", "bad", headHash); err != nil {
-		return nil, fmt.Errorf("bisect bad %s: %w", headHash, err)
+	if _, badErr := b.run("bisect", "bad", headHash); badErr != nil {
+		return nil, fmt.Errorf("bisect bad %s: %w", headHash, badErr)
 	}
 
 	// Bisect loop
@@ -94,9 +94,9 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 		}
 
 		// Get current bisect commit
-		current, err := b.run("rev-parse", "HEAD")
-		if err != nil {
-			return nil, fmt.Errorf("bisect rev-parse HEAD: %w", err)
+		current, headErr := b.run("rev-parse", "HEAD")
+		if headErr != nil {
+			return nil, fmt.Errorf("bisect rev-parse HEAD: %w", headErr)
 		}
 
 		if b.logger != nil {
@@ -105,12 +105,12 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 
 		// Run check function
 		if checkFn() {
-			if _, err := b.run("bisect", "good"); err != nil {
-				return nil, fmt.Errorf("bisect good: %w", err)
+			if _, goodErr := b.run("bisect", "good"); goodErr != nil {
+				return nil, fmt.Errorf("bisect good: %w", goodErr)
 			}
 		} else {
-			if _, err := b.run("bisect", "bad"); err != nil {
-				return nil, fmt.Errorf("bisect bad: %w", err)
+			if _, badErr := b.run("bisect", "bad"); badErr != nil {
+				return nil, fmt.Errorf("bisect bad: %w", badErr)
 			}
 		}
 	}

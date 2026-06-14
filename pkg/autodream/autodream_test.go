@@ -403,7 +403,7 @@ func TestMessages_Immutability(t *testing.T) {
 
 	// Mutate the returned slice
 	got[0].Content = "MUTATED"
-	got = append(got, types.Message{Role: "injected", Content: "INJECTED"})
+	_ = append(got, types.Message{Role: "injected", Content: "INJECTED"})
 
 	// Internal state should be unchanged
 	internal := c.Messages()
