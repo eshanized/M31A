@@ -472,9 +472,7 @@ func (s *SidebarModel) View() string {
 		if s.tree != nil {
 			s.tree.Width = contentW
 			treeView := s.tree.View()
-			for _, line := range strings.Split(treeView, "\n") {
-				lines = append(lines, line)
-			}
+			lines = append(lines, strings.Split(treeView, "\n")...)
 		}
 	}
 
