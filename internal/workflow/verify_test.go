@@ -187,8 +187,7 @@ func TestEngine_SessionStartHash(t *testing.T) {
 
 	// Create a new engine to test hash capture
 	dir := engine.workDir
-	sessionBaseDir := engine.planningDir
-	sessionBaseDir = sessionBaseDir[:len(sessionBaseDir)-len("/planning")]
+	_ = dir
 	mgr := engine.sessionMgr
 
 	s, err := mgr.NewSession("test-model", "test-provider")
@@ -197,7 +196,7 @@ func TestEngine_SessionStartHash(t *testing.T) {
 	}
 
 	planningDir := engine.planningDir
-	eng, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
+	eng, _ := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
 		&mockProvider{}, "test-model", tools.NewDispatcher(nil), tokens.NewEstimator("test-model"), mgr, nil)
 	eng.SetGit(engine.git)
 
