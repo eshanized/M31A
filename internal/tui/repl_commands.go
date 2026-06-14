@@ -19,10 +19,10 @@ func (m *ReplModel) executeShellCommand(input string, ctx context.Context) tea.C
 	}
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
-		out, err := exec.CommandContext(ctx, "sh", "-c", cmd).CombinedOutput()
+		out, err := exec.CommandContext(timeoutCtx, "sh", "-c", cmd).CombinedOutput()
 		var result string
 		if err != nil {
 			result = "Error: " + err.Error()
