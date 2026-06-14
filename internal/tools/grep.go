@@ -246,6 +246,9 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 }
 
 func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
+	if err := checkRedos(pattern); err != nil {
+		return types.ToolResult{}, err
+	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("invalid regex: %w", err)
@@ -426,4 +429,18 @@ func matchesGitignore(path string, patterns []string, workDir string) bool {
 		}
 	}
 	return false
+}
+
+// redosDetector matches groups containing a quantifier that are themselves
+// followed by a quantifier — the classic nested-quantifier ReDoS pattern.
+var redosDetector = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*{]`)
+
+// checkRedos rejects regex patterns that contain nested quantifiers likely
+// to cause catastrophic backtracking. This protects the pure-Go grep from
+// hanging on malicious or poorly-crafted patterns.
+func checkRedos(pattern string) error {
+	if redosDetector.MatchString(pattern) {
+		return fmt.Errorf("regex rejected: pattern contains nested quantifiers that may cause catastrophic backtracking")
+	}
+	return nil
 }
