@@ -53,12 +53,8 @@ func TestStreamingProgress(t *testing.T) {
 	})
 
 	t.Run("ToolStartMsg and ToolCompleteMsg are tea.Msg", func(t *testing.T) {
-		// Verify they implement tea.Msg interface (empty struct)
-		var startMsg interface{} = ToolStartMsg{}
-		var completeMsg interface{} = ToolCompleteMsg{}
-		if startMsg == nil || completeMsg == nil {
-			t.Error("messages should not be nil")
-		}
+		var _ = ToolStartMsg{}
+		var _ = ToolCompleteMsg{}
 	})
 
 	t.Run("TaskStartMsg and TaskUpdateMsg exist", func(t *testing.T) {
