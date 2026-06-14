@@ -189,9 +189,9 @@ func formatFileList(title string, files []string) string {
 		return title + ": none found."
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s (%d files):\n\n", title, len(files)))
+	fmt.Fprintf(&sb, "%s (%d files):\n\n", title, len(files))
 	for _, f := range files {
-		sb.WriteString(fmt.Sprintf("- %s\n", f))
+		fmt.Fprintf(&sb, "- %s\n", f)
 	}
 	return sb.String()
 }
@@ -201,9 +201,9 @@ func formatSymbolLocations(title string, locs []codeintel.SymbolLocation) string
 		return title + ": not found in the codebase."
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s (%d locations):\n\n", title, len(locs)))
+	fmt.Fprintf(&sb, "%s (%d locations):\n\n", title, len(locs))
 	for _, loc := range locs {
-		sb.WriteString(fmt.Sprintf("- **%s** in %s\n", loc.Kind, loc.File))
+		fmt.Fprintf(&sb, "- **%s** in %s\n", loc.Kind, loc.File)
 	}
 	return sb.String()
 }
@@ -213,9 +213,9 @@ func formatScoredFiles(title string, files []codeintel.ScoredFile) string {
 		return title + ": no relevant files found."
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s (%d files):\n\n", title, len(files)))
+	fmt.Fprintf(&sb, "%s (%d files):\n\n", title, len(files))
 	for _, sf := range files {
-		sb.WriteString(fmt.Sprintf("- **%s** (score: %.1f)", sf.Path, sf.Score))
+		fmt.Fprintf(&sb, "- **%s** (score: %.1f)", sf.Path, sf.Score)
 		if len(sf.Reasons) > 0 {
 			sb.WriteString(" — " + sf.Reasons[0])
 		}
