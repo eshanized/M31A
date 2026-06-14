@@ -10,9 +10,12 @@ linters:
     - errcheck
     - ineffassign
     - unused
-    - shadow
 
   settings:
+    govet:
+      enable:
+        - shadow
+
     errcheck:
       check-type-assertions: false
       check-blank: false
