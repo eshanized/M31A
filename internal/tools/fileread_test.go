@@ -59,8 +59,8 @@ func TestFileRead_TooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Create a 6MB sparse file
-	if err := f.Truncate(6 * 1024 * 1024); err != nil {
-		t.Fatal(err)
+	if truncErr := f.Truncate(6 * 1024 * 1024); truncErr != nil {
+		t.Fatal(truncErr)
 	}
 	f.Close()
 
