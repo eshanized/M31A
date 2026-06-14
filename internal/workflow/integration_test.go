@@ -99,7 +99,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	est := tokens.NewEstimator("test-model")
 
-	engine, err := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
+	engine, _ := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
 		mockP, "test-model", dispatcher, est, mgr, nil)
 	engine.SetGit(g)
 
@@ -138,17 +138,17 @@ func TestFullWorkflow(t *testing.T) {
 	}
 
 	// Submit answers
-	if err := engine.SubmitDiscussAnswer(0, "Go standard library"); err != nil {
-		t.Fatalf("SubmitDiscussAnswer 0 failed: %v", err)
+	if submitErr := engine.SubmitDiscussAnswer(0, "Go standard library"); submitErr != nil {
+		t.Fatalf("SubmitDiscussAnswer 0 failed: %v", submitErr)
 	}
-	if err := engine.SubmitDiscussAnswer(1, "Developers"); err != nil {
-		t.Fatalf("SubmitDiscussAnswer 1 failed: %v", err)
+	if submitErr := engine.SubmitDiscussAnswer(1, "Developers"); submitErr != nil {
+		t.Fatalf("SubmitDiscussAnswer 1 failed: %v", submitErr)
 	}
 
 	// Finalize discuss (saves answers + transitions to Plan)
 	// We need a method that finalizes without filling defaults — use SkipDiscuss which handles both
-	if err := engine.FinalizeDiscuss(); err != nil {
-		t.Fatalf("FinalizeDiscuss failed: %v", err)
+	if finalizeErr := engine.FinalizeDiscuss(); finalizeErr != nil {
+		t.Fatalf("FinalizeDiscuss failed: %v", finalizeErr)
 	}
 
 	// Verify answers saved
@@ -204,7 +204,7 @@ func TestFullWorkflow(t *testing.T) {
 	planningFiles := []string{"PROJECT.md", "TASKS.md", "STATE.md"}
 	for _, f := range planningFiles {
 		path := filepath.Join(planningDir, f)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			t.Errorf("Expected planning file %s to exist before Ship", f)
 		}
 	}
@@ -223,7 +223,7 @@ func TestFullWorkflow(t *testing.T) {
 	projectDir := filepath.Join(dir, ".m31a")
 	for _, f := range planningFiles {
 		path := filepath.Join(projectDir, f)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			t.Errorf("Expected planning file %s to exist in project-local .m31a/ directory", f)
 		}
 	}
