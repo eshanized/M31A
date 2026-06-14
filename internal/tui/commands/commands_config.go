@@ -104,7 +104,7 @@ func handleLog(args []string, ctx CommandContext) CommandResult {
 	}
 	if len(args) > 0 {
 		n := 0
-		fmt.Sscanf(args[0], "%d", &n)
+		_, _ = fmt.Sscanf(args[0], "%d", &n)
 		if n > 0 {
 			lines = n
 		}
@@ -137,7 +137,7 @@ func readTailLines(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	stat, err := f.Stat()
 	if err != nil {
