@@ -67,7 +67,7 @@ func (r *MessageRenderer) SetWidth(width int) error {
 		return nil
 	}
 	r.width = width
-	r.renderer.Close()
+	_ = r.renderer.Close()
 	return r.createGlamourRenderer()
 }
 
