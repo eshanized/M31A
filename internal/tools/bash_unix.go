@@ -19,7 +19,7 @@ func setupProcessGroup(cmd *exec.Cmd) {
 }
 
 func processKill(pid int, sig int) {
-	syscall.Kill(-pid, syscall.Signal(sig))
+	_ = syscall.Kill(-pid, syscall.Signal(sig))
 }
 
 func newShellCmd(ctx context.Context, command string) *exec.Cmd {
