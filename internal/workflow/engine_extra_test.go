@@ -1123,8 +1123,8 @@ func TestHealTask_FailedTaskMaxAttemptsExceeded(t *testing.T) {
 	tasks := []m31types.Task{
 		{ID: 1, Action: "Create", Description: "failed task", Status: m31types.StatusFailed, HealsAttempted: 3},
 	}
-	if err := engine.sessionMgr.SaveTasks(engine.sessionID, tasks); err != nil {
-		t.Fatalf("SaveTasks failed: %v", err)
+	if saveErr := engine.sessionMgr.SaveTasks(engine.sessionID, tasks); saveErr != nil {
+		t.Fatalf("SaveTasks failed: %v", saveErr)
 	}
 	_, err = engine.HealTask(context.Background(), 1)
 	// This test verifies that HealTask processes the task. With a failed status
@@ -1765,9 +1765,9 @@ func TestStreamLLMStreaming_WithTools(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if iter == nil {
-		t.Error("expected non-nil iterator")
+		t.Fatal("expected non-nil iterator")
 	}
-	iter.Close()
+	defer iter.Close()
 }
 
 func TestStreamLLMStreaming_WithoutTools(t *testing.T) {
@@ -1780,9 +1780,9 @@ func TestStreamLLMStreaming_WithoutTools(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if iter == nil {
-		t.Error("expected non-nil iterator")
+		t.Fatal("expected non-nil iterator")
 	}
-	iter.Close()
+	defer iter.Close()
 }
 
 func TestStreamLLMStreaming_LLMError(t *testing.T) {
