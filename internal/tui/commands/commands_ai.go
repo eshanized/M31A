@@ -131,16 +131,16 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 
 			// Build result message
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("**Optimization Analysis** (%s complexity):\n\n", rec.Complexity))
-			sb.WriteString(fmt.Sprintf("**Recommended:** %s ($%.6f)\n", rec.RecommendedModel.ModelID, rec.RecommendedModel.TotalCost))
-			sb.WriteString(fmt.Sprintf("**Reason:** %s\n", rec.Reason))
+			fmt.Fprintf(&sb, "**Optimization Analysis** (%s complexity):\n\n", rec.Complexity)
+			fmt.Fprintf(&sb, "**Recommended:** %s ($%.6f)\n", rec.RecommendedModel.ModelID, rec.RecommendedModel.TotalCost)
+			fmt.Fprintf(&sb, "**Reason:** %s\n", rec.Reason)
 			if rec.Savings > 0 {
-				sb.WriteString(fmt.Sprintf("**Potential savings:** $%.6f vs most expensive model\n", rec.Savings))
+				fmt.Fprintf(&sb, "**Potential savings:** $%.6f vs most expensive model\n", rec.Savings)
 			}
 			if len(rec.Alternatives) > 0 {
 				sb.WriteString("\n**Alternatives:**\n")
 				for _, alt := range rec.Alternatives {
-					sb.WriteString(fmt.Sprintf("  - %s ($%.6f)\n", alt.ModelID, alt.TotalCost))
+					fmt.Fprintf(&sb, "  - %s ($%.6f)\n", alt.ModelID, alt.TotalCost)
 				}
 			}
 
@@ -195,10 +195,10 @@ func handleFallback(args []string, ctx CommandContext) CommandResult {
 	if len(args) == 0 {
 		var sb strings.Builder
 		sb.WriteString("**Provider fallback status:**\n\n")
-		sb.WriteString(fmt.Sprintf("  Active: **%s**\n", active))
-		sb.WriteString(fmt.Sprintf("  Registered: %s\n", strings.Join(providers, ", ")))
+		fmt.Fprintf(&sb, "  Active: **%s**\n", active)
+		fmt.Fprintf(&sb, "  Registered: %s\n", strings.Join(providers, ", "))
 		if ctx.Config != nil {
-			sb.WriteString(fmt.Sprintf("  Auto-fallback: %v\n", ctx.Config.Provider.AutoFallback))
+			fmt.Fprintf(&sb, "  Auto-fallback: %v\n", ctx.Config.Provider.AutoFallback)
 		}
 		return CommandResult{Success: true, Message: sb.String()}
 	}
