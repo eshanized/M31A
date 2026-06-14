@@ -73,10 +73,6 @@ func (go_ *GhostOutputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model.
 func (go_ *GhostOutputModel) View() string {
 	t := go_.theme
-	w := go_.width
-	if w < 30 {
-		w = 80
-	}
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
 		Render("Ghost Write Output")
