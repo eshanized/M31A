@@ -227,7 +227,7 @@ func (l *loop) updateLastTool(name, status string) {
 
 // consume reads a StreamIterator to completion.
 func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, error) {
-	defer it.Close()
+	defer it.Close() //nolint:errcheck
 
 	var content, thinking strings.Builder
 	var lastUsage *types.Usage
@@ -323,10 +323,10 @@ func (l *loop) buildSystemPrompt() string {
 	sb.WriteString("- Do not ask the user questions; you run autonomously.\n")
 	sb.WriteString("- When you have enough information, stop calling tools and write a clear summary.\n")
 	sb.WriteString("- Keep tool calls minimal; every call costs tokens and time.\n")
-	sb.WriteString(fmt.Sprintf("- Tool-call budget: %d calls. Stop before exhausting it.\n", l.maxTools))
-	sb.WriteString(fmt.Sprintf("- Describe: %s\n", l.agent.req.Description))
+	fmt.Fprintf(&sb, "- Tool-call budget: %d calls. Stop before exhausting it.\n", l.maxTools)
+	fmt.Fprintf(&sb, "- Describe: %s\n", l.agent.req.Description)
 	if l.agent.req.Name != "" {
-		sb.WriteString(fmt.Sprintf("- Name: %s\n", l.agent.req.Name))
+		fmt.Fprintf(&sb, "- Name: %s\n", l.agent.req.Name)
 	}
 	return sb.String()
 }
