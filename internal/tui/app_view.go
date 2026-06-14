@@ -223,7 +223,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	case ScreenResume:
 		info.KeyboardHints = []string{"enter restore", "esc back"}
 	case ScreenDiscuss:
-		info.KeyboardHints = []string{"enter submit", "esc skip", "Ctrl+Shift+S skip all"}
+		info.KeyboardHints = []string{"enter submit", "esc skip", "Ctrl+S skip all"}
 	case ScreenHelp:
 		info.KeyboardHints = []string{"g top", "G bottom", "esc back"}
 	case ScreenLedger:
