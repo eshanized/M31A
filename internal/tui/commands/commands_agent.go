@@ -33,15 +33,15 @@ func handleAgent(args []string, ctx CommandContext) CommandResult {
 			}
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("**Subagents (%d):**\n\n", len(infos)))
+		fmt.Fprintf(&sb, "**Subagents (%d):**\n\n", len(infos))
 		for _, info := range infos {
 			label := info.Name
 			if label == "" {
 				label = info.ID
 			}
-			sb.WriteString(fmt.Sprintf("- `%s` **%s** — %s  \n  status: %s · tools: %d · tokens: %d+%d\n",
+			fmt.Fprintf(&sb, "- `%s` **%s** — %s  \n  status: %s · tools: %d · tokens: %d+%d\n",
 				info.ID, label, info.Description,
-				info.Status, info.ToolCalls, info.InputToks, info.OutputToks))
+				info.Status, info.ToolCalls, info.InputToks, info.OutputToks)
 		}
 		return CommandResult{Success: true, Message: sb.String()}
 	}
