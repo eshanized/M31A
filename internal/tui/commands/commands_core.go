@@ -155,9 +155,9 @@ func handleTools(_ []string, ctx CommandContext) CommandResult {
 	for _, name := range names {
 		tool, ok := ctx.Dispatcher.GetTool(name)
 		if ok {
-			sb.WriteString(fmt.Sprintf("  %-20s — %s\n", name, tool.Description()))
+			fmt.Fprintf(&sb, "  %-20s — %s\n", name, tool.Description())
 		} else {
-			sb.WriteString(fmt.Sprintf("  %s\n", name))
+			fmt.Fprintf(&sb, "  %s\n", name)
 		}
 	}
 	return CommandResult{Success: true, Message: sb.String()}
