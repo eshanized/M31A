@@ -311,7 +311,7 @@ func (pm *PlanModel) renderTasks() string {
 
 	for waveIdx, wave := range pm.waves {
 		color := pm.waveColor(waveIdx)
-		badgeType := components.BadgeNeutral
+		var badgeType components.BadgeType
 		switch waveIdx {
 		case 0:
 			badgeType = components.BadgeBrand
