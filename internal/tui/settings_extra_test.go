@@ -155,7 +155,7 @@ func TestSettingsCycleChoiceWrapping(t *testing.T) {
 	if cfg.UI.Theme != "auto" {
 		t.Errorf("want auto (wrap), got %s", cfg.UI.Theme)
 	}
-	s, _ = s.cycleChoice(-1)
+	_, _ = s.cycleChoice(-1)
 	if cfg.UI.Theme != "light" {
 		t.Errorf("want light (back), got %s", cfg.UI.Theme)
 	}
