@@ -200,8 +200,8 @@ func TestEngine_SkipDiscuss(t *testing.T) {
 		Questions: []string{"Q1", "Q2"},
 	}
 
-	if err := engine.SkipDiscuss(); err != nil {
-		t.Fatalf("SkipDiscuss failed: %v", err)
+	if skipErr := engine.SkipDiscuss(); skipErr != nil {
+		t.Fatalf("SkipDiscuss failed: %v", skipErr)
 	}
 
 	// Verify answers saved with defaults
