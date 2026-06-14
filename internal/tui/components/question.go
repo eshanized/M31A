@@ -169,12 +169,12 @@ func FormatQuestion(question, header string, options []string, width int, t them
 	if len(options) > 0 {
 		b.WriteString("\n")
 		for i, opt := range options {
-			b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, opt))
+			fmt.Fprintf(&b, "  %d. %s\n", i+1, opt)
 		}
 	}
 
 	if len(timeoutSecs) > 0 && timeoutSecs[0] > 0 {
-		b.WriteString(fmt.Sprintf("\n  Timeout: %ds — no response uses default", timeoutSecs[0]))
+		fmt.Fprintf(&b, "\n  Timeout: %ds — no response uses default", timeoutSecs[0])
 	}
 
 	return lipgloss.NewStyle().
