@@ -37,15 +37,15 @@ func handleWorkflow(_ []string, ctx CommandContext) CommandResult {
 
 	var sb strings.Builder
 	sb.WriteString("**Workflow status:**\n\n")
-	sb.WriteString(fmt.Sprintf("  Session: **%s**\n", ctx.SessionID))
+	fmt.Fprintf(&sb, "  Session: **%s**\n", ctx.SessionID)
 	if goal != "" {
-		sb.WriteString(fmt.Sprintf("  Goal:    %s\n", goal))
+		fmt.Fprintf(&sb, "  Goal:    %s\n", goal)
 	} else {
 		sb.WriteString("  Goal:    (none set)\n")
 	}
-	sb.WriteString(fmt.Sprintf("  Phase:   **%s**\n", phase))
+	fmt.Fprintf(&sb, "  Phase:   **%s**\n", phase)
 	if len(questions) > 0 {
-		sb.WriteString(fmt.Sprintf("  Pending questions: %d\n", len(questions)))
+		fmt.Fprintf(&sb, "  Pending questions: %d\n", len(questions))
 	}
 
 	return CommandResult{Success: true, Message: sb.String()}
