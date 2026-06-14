@@ -92,8 +92,8 @@ func TestSession_ResumedAt_Persisted(t *testing.T) {
 	}
 
 	// Save the session (ResumedAt should be persisted)
-	if err := mgr.SaveSession(loaded); err != nil {
-		t.Fatalf("SaveSession failed: %v", err)
+	if saveErr := mgr.SaveSession(loaded); saveErr != nil {
+		t.Fatalf("SaveSession failed: %v", saveErr)
 	}
 
 	// Reload and check ResumedAt is still present
@@ -276,8 +276,8 @@ func TestPlanning_AtomicWrites(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := mgr.SaveProject(s.ID, proj); err != nil {
-				errs <- err
+			if saveErr := mgr.SaveProject(s.ID, proj); saveErr != nil {
+				errs <- saveErr
 			}
 		}()
 	}
@@ -337,8 +337,8 @@ func TestCheckpoint_Retention_LastTwoOnly(t *testing.T) {
 			MessageCount: i,
 			TaskCount:    i,
 		}
-		if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-			t.Fatalf("SaveCheckpoint %d failed: %v", i, err)
+		if saveErr := mgr.SaveCheckpoint(s.ID, cp); saveErr != nil {
+			t.Fatalf("SaveCheckpoint %d failed: %v", i, saveErr)
 		}
 		time.Sleep(10 * time.Millisecond) // ensure distinct timestamps
 	}
@@ -379,8 +379,8 @@ func TestCheckpoint_Retention_FilePruned(t *testing.T) {
 			MessageCount: i,
 			TaskCount:    i,
 		}
-		if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-			t.Fatalf("SaveCheckpoint %d failed: %v", i, err)
+		if saveErr := mgr.SaveCheckpoint(s.ID, cp); saveErr != nil {
+			t.Fatalf("SaveCheckpoint %d failed: %v", i, saveErr)
 		}
 	}
 
