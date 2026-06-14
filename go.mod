@@ -1,6 +1,6 @@
 module github.com/eshanized/M31A
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -13,7 +13,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.8
 	// DEP-1: golang.org/x/sync/singleflight — stable x/ package, appropriate usage
-	golang.org/x/sync v0.10.0
+	golang.org/x/sync v0.21.0
 )
 
 require (
