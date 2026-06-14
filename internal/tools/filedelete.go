@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,7 +103,9 @@ func (t *FileDelete) Execute(ctx context.Context, input types.ToolInput) (types.
 
 	if !permanent {
 		// Backup before delete
-		backupPath := filepath.Join(t.backupDir, filepath.Base(absPath)+".deleted."+time.Now().Format("20060102150405"))
+		backupPrefix := filepath.Base(absPath) + ".deleted"
+		t.pruneBackups(backupPrefix)
+		backupPath := filepath.Join(t.backupDir, backupPrefix+"."+time.Now().Format("20060102150405"))
 		if err := os.MkdirAll(t.backupDir, types.DirPermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
 		}
@@ -127,4 +131,34 @@ func (t *FileDelete) Execute(ctx context.Context, input types.ToolInput) (types.
 		Output:     msg,
 		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+// pruneBackups removes the oldest backups matching the given prefix when the
+// count exceeds MaxBackupsPerFile.
+func (t *FileDelete) pruneBackups(prefix string) {
+	entries, err := os.ReadDir(t.backupDir)
+	if err != nil {
+		return
+	}
+
+	var matches []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix+".") {
+			matches = append(matches, e.Name())
+		}
+	}
+
+	if len(matches) < MaxBackupsPerFile {
+		return
+	}
+
+	sort.Strings(matches)
+
+	toDelete := matches[:len(matches)-MaxBackupsPerFile+1]
+	for _, name := range toDelete {
+		path := filepath.Join(t.backupDir, name)
+		if err := os.Remove(path); err != nil {
+			slog.Warn("failed to prune old delete backup", "path", path, "error", err)
+		}
+	}
 }
