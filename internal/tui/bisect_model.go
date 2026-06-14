@@ -180,7 +180,11 @@ func (bm *BisectModel) View() string {
 				color = t.TextMuted
 			}
 			iconStyled := lipgloss.NewStyle().Foreground(color).Render(icon)
-			hashStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Render(c.Hash[:7])
+			hash := c.Hash
+			if len(hash) > 7 {
+				hash = hash[:7]
+			}
+			hashStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Render(hash)
 			msgStyled := lipgloss.NewStyle().Foreground(t.Text).Render(
 				TruncateWithEllipsis(c.Message, w-30))
 			prefix := "    "
