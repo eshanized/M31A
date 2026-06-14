@@ -128,13 +128,13 @@ func TestManager_UpdateWorkflowState_OverwritesPrevious(t *testing.T) {
 	}
 
 	// First update
-	if err := mgr.UpdateWorkflowState(s.ID, "first goal", types.PhasePlan, []string{"Q1"}); err != nil {
-		t.Fatalf("first UpdateWorkflowState failed: %v", err)
+	if updateErr := mgr.UpdateWorkflowState(s.ID, "first goal", types.PhasePlan, []string{"Q1"}); updateErr != nil {
+		t.Fatalf("first UpdateWorkflowState failed: %v", updateErr)
 	}
 
 	// Second update overwrites
-	if err := mgr.UpdateWorkflowState(s.ID, "second goal", types.PhaseExecute, []string{"Q2", "Q3"}); err != nil {
-		t.Fatalf("second UpdateWorkflowState failed: %v", err)
+	if updateErr := mgr.UpdateWorkflowState(s.ID, "second goal", types.PhaseExecute, []string{"Q2", "Q3"}); updateErr != nil {
+		t.Fatalf("second UpdateWorkflowState failed: %v", updateErr)
 	}
 
 	goal, phase, questions, err := mgr.LoadWorkflowState(s.ID)
@@ -233,13 +233,13 @@ func TestManager_UpdateWorkflowState_AfterReset(t *testing.T) {
 	}
 
 	// Set state
-	if err := mgr.UpdateWorkflowState(s.ID, "build it", types.PhaseExecute, []string{"Q1"}); err != nil {
-		t.Fatalf("UpdateWorkflowState failed: %v", err)
+	if updateErr := mgr.UpdateWorkflowState(s.ID, "build it", types.PhaseExecute, []string{"Q1"}); updateErr != nil {
+		t.Fatalf("UpdateWorkflowState failed: %v", updateErr)
 	}
 
 	// Reset to idle (post-Ship)
-	if err := mgr.UpdateWorkflowState(s.ID, "", types.PhaseIdle, nil); err != nil {
-		t.Fatalf("reset UpdateWorkflowState failed: %v", err)
+	if updateErr := mgr.UpdateWorkflowState(s.ID, "", types.PhaseIdle, nil); updateErr != nil {
+		t.Fatalf("reset UpdateWorkflowState failed: %v", updateErr)
 	}
 
 	// Load back
