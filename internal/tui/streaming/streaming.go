@@ -99,12 +99,12 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 		go func() {
 			select {
 			case <-ctx.Done():
-				iterator.Close()
+				_ = iterator.Close()
 			case <-done:
 			}
 		}()
 		defer func() {
-			iterator.Close()
+			_ = iterator.Close()
 		}()
 
 		var fullContent strings.Builder
