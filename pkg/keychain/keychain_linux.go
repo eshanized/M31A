@@ -58,7 +58,7 @@ func (k *linuxKeychain) dbusGet(service string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service
@@ -154,7 +154,7 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service
@@ -179,7 +179,7 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 		"service": servicePath,
 	})
 	if call.Err == nil {
-		call.Store(&unlocked, &locked)
+		_ = call.Store(&unlocked, &locked)
 	}
 	items := append(unlocked, locked...)
 
@@ -241,7 +241,7 @@ func (k *linuxKeychain) dbusDelete(service string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service

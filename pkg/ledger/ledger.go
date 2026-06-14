@@ -67,7 +67,7 @@ func New(filePath string) *Ledger {
 	}
 
 	if _, err := os.Stat(filePath); err == nil {
-		l.parseFile()
+		_ = l.parseFile()
 	}
 
 	return l
@@ -151,7 +151,7 @@ func (l *Ledger) appendEntry(entry LedgerEntry) error {
 		// Fallback to full rewrite if append fails
 		return l.rewriteFile()
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	w := bufio.NewWriter(f)
 	if _, err := fmt.Fprintln(w, formatEntry(entry)); err != nil {
@@ -397,23 +397,23 @@ func (l *Ledger) rewriteFile() error {
 	}
 
 	if err := writeLines(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write ledger: %w", err)
 	}
 
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("sync ledger: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close ledger: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, l.path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename ledger: %w", err)
 	}
 
@@ -428,7 +428,7 @@ func (l *Ledger) parseFile() error {
 	if err != nil {
 		return fmt.Errorf("open ledger for parse: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -467,12 +467,8 @@ func (l *Ledger) Reload() error {
 func parseEntry(line string) (LedgerEntry, error) {
 	line = strings.TrimSpace(line)
 	// Remove leading and trailing pipes
-	if strings.HasPrefix(line, "|") {
-		line = line[1:]
-	}
-	if strings.HasSuffix(line, "|") {
-		line = line[:len(line)-1]
-	}
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
 
 	parts := strings.Split(line, "|")
 	// After stripping leading/trailing pipes, we collect non-empty fields.
