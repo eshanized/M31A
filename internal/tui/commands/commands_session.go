@@ -32,7 +32,7 @@ func handleSessions(_ []string, ctx CommandContext) CommandResult {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**Recent sessions** (showing %d):\n\n", len(sessions)))
+	fmt.Fprintf(&sb, "**Recent sessions** (showing %d):\n\n", len(sessions))
 	for _, s := range sessions {
 		active := " "
 		if s.ID == ctx.SessionID {
@@ -42,7 +42,7 @@ func handleSessions(_ []string, ctx CommandContext) CommandResult {
 		if s.Corrupted {
 			corrupted = " [corrupted]"
 		}
-		sb.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&sb,
 			"  %s %s  %-10s  %s  %d msgs%s\n",
 			active,
 			s.ID,
@@ -50,7 +50,7 @@ func handleSessions(_ []string, ctx CommandContext) CommandResult {
 			s.LastModified.Format("Jan 02 15:04"),
 			s.MessageCount,
 			corrupted,
-		))
+		)
 	}
 	return CommandResult{Success: true, Message: sb.String()}
 }
