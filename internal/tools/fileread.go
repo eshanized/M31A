@@ -127,7 +127,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %v", m31errors.ErrToolExecution, path, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	// Read first 512 bytes for binary detection
 	header := make([]byte, 512)
