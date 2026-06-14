@@ -277,8 +277,8 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		// Check glob filter
 		if glob != "" {
 			relPath, _ := filepath.Rel(t.workDir, path)
-			match, err := doublestar.Match(glob, relPath)
-			if err != nil || !match {
+			match, matchErr := doublestar.Match(glob, relPath)
+			if matchErr != nil || !match {
 				return nil
 			}
 		}
@@ -293,7 +293,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
+		defer f.Close() //nolint:errcheck
 
 		// Read first 512 bytes for binary detection
 		header := make([]byte, 512)
