@@ -244,8 +244,8 @@ func TestLedger_AppendIsAtomic(t *testing.T) {
 		CostEstimate:    2.0,
 		DurationMinutes: 20,
 	}
-	if err := l.Append(entry2); err != nil {
-		t.Fatalf("second Append failed: %v", err)
+	if appendErr := l.Append(entry2); appendErr != nil {
+		t.Fatalf("second Append failed: %v", appendErr)
 	}
 
 	// Verify both entries present
