@@ -1084,20 +1084,4 @@ func (m *ConfigModel) buildContent() {
 	// No-op: content is now rendered dynamically from cfg in View().
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func orVal(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return "(not set)"
-}
-
-func keyStatus(key string) string {
-	if key == "" {
-		return "(not set)"
-	}
-	return maskedKey(key)
-}
