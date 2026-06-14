@@ -175,11 +175,11 @@ func (idx *Indexer) FormatContext(targetFiles []string, description string, topN
 
 	var sb strings.Builder
 
-	scored := idx.scorer.Score(targetFiles, description, topN)
+		scored := idx.scorer.Score(targetFiles, description, topN)
 	if len(scored) > 0 {
 		sb.WriteString("## Recommended Files (by relevance)\n\n")
 		for _, sf := range scored {
-			sb.WriteString(fmt.Sprintf("- **%s** (score: %.1f)", sf.Path, sf.Score))
+			fmt.Fprintf(&sb, "- **%s** (score: %.1f)", sf.Path, sf.Score)
 			if len(sf.Reasons) > 0 {
 				sb.WriteString(" — " + strings.Join(sf.Reasons[:min(5, len(sf.Reasons))], "; "))
 			}
@@ -191,12 +191,12 @@ func (idx *Indexer) FormatContext(targetFiles []string, description string, topN
 	for _, target := range targetFiles {
 		imports, importedBy := idx.graph.Neighbors(target)
 		if len(imports) > 0 || len(importedBy) > 0 {
-			sb.WriteString(fmt.Sprintf("### Dependencies for %s\n", target))
+			fmt.Fprintf(&sb, "### Dependencies for %s\n", target)
 			if len(imports) > 0 {
-				sb.WriteString(fmt.Sprintf("  Imports: %s\n", strings.Join(imports, ", ")))
+				fmt.Fprintf(&sb, "  Imports: %s\n", strings.Join(imports, ", "))
 			}
 			if len(importedBy) > 0 {
-				sb.WriteString(fmt.Sprintf("  Imported by: %s\n", strings.Join(importedBy, ", ")))
+				fmt.Fprintf(&sb, "  Imported by: %s\n", strings.Join(importedBy, ", "))
 			}
 			sb.WriteString("\n")
 		}
@@ -239,9 +239,9 @@ func (idx *Indexer) ProjectSummary(maxBytes int) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Codebase Overview\n\n"))
-	sb.WriteString(fmt.Sprintf("- **Source files**: %d\n", idx.graph.NodeCount()))
-	sb.WriteString(fmt.Sprintf("- **Unique symbols**: %d\n\n", idx.index.SymbolCount()))
+	sb.WriteString("## Codebase Overview\n\n")
+	fmt.Fprintf(&sb, "- **Source files**: %d\n", idx.graph.NodeCount())
+	fmt.Fprintf(&sb, "- **Unique symbols**: %d\n\n", idx.index.SymbolCount())
 
 	pkgFiles := make(map[string]int)
 	for _, f := range idx.files {
@@ -251,7 +251,7 @@ func (idx *Indexer) ProjectSummary(maxBytes int) string {
 	if len(pkgFiles) > 0 {
 		sb.WriteString("### Packages/Directories\n\n")
 		for dir, count := range pkgFiles {
-			sb.WriteString(fmt.Sprintf("- `%s/` (%d files)\n", dir, count))
+			fmt.Fprintf(&sb, "- `%s/` (%d files)\n", dir, count)
 		}
 		sb.WriteString("\n")
 	}
