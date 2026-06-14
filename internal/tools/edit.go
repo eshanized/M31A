@@ -192,7 +192,7 @@ func (t *Edit) resolvePath(path string) (string, error) {
 	} else if os.IsNotExist(err) {
 		// File doesn't exist — resolve parent directory through symlinks
 		parentDir := filepath.Dir(targetPath)
-		if resolvedParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+		if resolvedParent, parentErr := filepath.EvalSymlinks(parentDir); parentErr == nil {
 			resolved = filepath.Join(resolvedParent, filepath.Base(targetPath))
 		}
 	} else {
@@ -242,24 +242,24 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
 	if _, err := tmpFile.WriteString(newContent); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write failed: %w", err)
 	}
 	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("sync failed: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close failed: %w", err)
 	}
 	// Belt-and-braces: explicitly set final mode in case the create-mode was
 	// masked by a restrictive umask. After rename the inode keeps this mode.
 	_ = os.Chmod(tmpPath, FilePermission)
 	if err := os.Rename(tmpPath, targetPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename failed: %w", err)
 	}
 
@@ -350,7 +350,7 @@ func cascadingReplace(content, oldString, newString string) (string, string, err
 
 	// All strategies failed
 	return "", "", fmt.Errorf(
-		"Could not find old_string in file.\n\nFile has %d lines, %d characters.\n\n"+
+		"could not find old_string in file.\n\nFile has %d lines, %d characters.\n\n"+
 			"Tips:\n"+
 			"- Use start_line and end_line for precise line-range edits\n"+
 			"- Ensure old_string matches exactly (check indentation and whitespace)\n"+
