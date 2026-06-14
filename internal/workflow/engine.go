@@ -112,9 +112,8 @@ type Engine struct {
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once
 	// Cached project state for execute phase (H15 fix)
-	cachedProject     *m31types.ProjectState
-	cachedProjectOnce sync.Once
-	cachedProjectID   string // session ID for invalidation
+	cachedProject   *m31types.ProjectState
+	cachedProjectID string // session ID for invalidation
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
@@ -673,7 +672,7 @@ func (e *Engine) getCodeIntel() *codeintel.Indexer {
 // Enforces MaxLLMResponseBytes limit to prevent OOM from pathological responses.
 func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error) {
 	var sb strings.Builder
-	defer iterator.Close()
+	defer iterator.Close() //nolint:errcheck
 
 	for {
 		chunk, err := iterator.Next()
@@ -716,7 +715,7 @@ type toolCallBuilder struct {
 func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (string, []m31types.ToolCall, error) {
 	var content strings.Builder
 	builders := map[int]*toolCallBuilder{}
-	defer iterator.Close()
+	defer iterator.Close() //nolint:errcheck
 
 	for {
 		chunk, err := iterator.Next()
