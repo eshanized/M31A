@@ -26,19 +26,19 @@ func (e *Engine) readTaskFiles(files []string) string {
 		path := filepath.Join(e.workDir, f)
 		relPath, relErr := filepath.Rel(e.workDir, path)
 		if relErr != nil || strings.HasPrefix(relPath, "..") {
-			sb.WriteString(fmt.Sprintf("=== %s: (path traversal blocked) ===\n", f))
+			fmt.Fprintf(&sb, "=== %s: (path traversal blocked) ===\n", f)
 			continue
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("=== %s: (not found) ===\n", f))
+			fmt.Fprintf(&sb, "=== %s: (not found) ===\n", f)
 			continue
 		}
 		text := string(content)
 		fileSize := len(text)
 
 		if maxBytesPerFile <= 0 || fileSize <= maxBytesPerFile {
-			sb.WriteString(fmt.Sprintf("=== %s (%d bytes) ===\n%s\n", f, fileSize, text))
+			fmt.Fprintf(&sb, "=== %s (%d bytes) ===\n%s\n", f, fileSize, text)
 			continue
 		}
 
@@ -63,8 +63,8 @@ func (e *Engine) readTaskFiles(files []string) string {
 				end = len(lines)
 			}
 			middle = strings.Join(lines[bodyStart:end], "\n")
-			sb.WriteString(fmt.Sprintf("=== %s (%d bytes, showing imports + relevant function at line %d) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
-				f, fileSize, bodyStart+1, header, bodyStart-headerEnd, middle))
+			fmt.Fprintf(&sb, "=== %s (%d bytes, showing imports + relevant function at line %d) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
+				f, fileSize, bodyStart+1, header, bodyStart-headerEnd, middle)
 		} else {
 			// Fallback: header + last 30 lines
 			tailStart := len(lines) - 30
@@ -72,8 +72,8 @@ func (e *Engine) readTaskFiles(files []string) string {
 				tailStart = headerEnd
 			}
 			tail := strings.Join(lines[tailStart:], "\n")
-			sb.WriteString(fmt.Sprintf("=== %s (%d bytes, showing imports + last 30 lines) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
-				f, fileSize, header, tailStart-headerEnd, tail))
+			fmt.Fprintf(&sb, "=== %s (%d bytes, showing imports + last 30 lines) ===\n%s\n\n... (skipping %d lines) ...\n\n%s\n",
+				f, fileSize, header, tailStart-headerEnd, tail)
 		}
 	}
 	return sb.String()
@@ -122,7 +122,7 @@ var skipDirs = m31types.SkipDirsMap()
 // will be included in output.
 func listCwdFiles(workDir string) string {
 	var sb strings.Builder
-	filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			slog.Warn("walk error", "path", path, "error", err)
 			return nil
@@ -155,10 +155,13 @@ func listCwdFiles(workDir string) string {
 				slog.Warn("stat error", "path", path, "error", err)
 				return nil
 			}
-			sb.WriteString(fmt.Sprintf("%s (%d bytes)\n", rel, info.Size()))
+			fmt.Fprintf(&sb, "%s (%d bytes)\n", rel, info.Size())
 		}
 		return nil
 	})
+	if err != nil {
+		slog.Warn("walkdir failed", "error", err)
+	}
 	return sb.String()
 }
 
