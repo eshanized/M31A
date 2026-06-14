@@ -25,8 +25,8 @@ func TestCheckpoint_SaveAndLoad(t *testing.T) {
 		TaskCount:    7,
 	}
 
-	if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-		t.Fatalf("SaveCheckpoint failed: %v", err)
+	if saveErr := mgr.SaveCheckpoint(s.ID, cp); saveErr != nil {
+		t.Fatalf("SaveCheckpoint failed: %v", saveErr)
 	}
 
 	loaded, err := mgr.LoadCheckpoints(s.ID)
@@ -73,8 +73,8 @@ func TestCheckpoint_MaxRetention(t *testing.T) {
 			MessageCount: i * 10,
 			TaskCount:    i,
 		}
-		if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-			t.Fatalf("SaveCheckpoint %d failed: %v", i, err)
+		if saveErr := mgr.SaveCheckpoint(s.ID, cp); saveErr != nil {
+			t.Fatalf("SaveCheckpoint %d failed: %v", i, saveErr)
 		}
 	}
 
@@ -124,11 +124,11 @@ func TestCheckpoint_Latest(t *testing.T) {
 		TaskCount:    5,
 	}
 
-	if err := mgr.SaveCheckpoint(s.ID, cp1); err != nil {
-		t.Fatalf("SaveCheckpoint 1 failed: %v", err)
+	if saveErr := mgr.SaveCheckpoint(s.ID, cp1); saveErr != nil {
+		t.Fatalf("SaveCheckpoint 1 failed: %v", saveErr)
 	}
-	if err := mgr.SaveCheckpoint(s.ID, cp2); err != nil {
-		t.Fatalf("SaveCheckpoint 2 failed: %v", err)
+	if saveErr := mgr.SaveCheckpoint(s.ID, cp2); saveErr != nil {
+		t.Fatalf("SaveCheckpoint 2 failed: %v", saveErr)
 	}
 
 	latest, err := mgr.LatestCheckpoint(s.ID)
