@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net"
@@ -669,14 +670,12 @@ func convertLinks(html, lower string) string {
 				break
 			}
 			url = html[urlStart : urlStart+urlEnd]
-			hrefStart = urlStart + urlEnd + 1
 		} else {
 			urlEnd := hrefStart
 			for urlEnd < len(html) && html[urlEnd] != ' ' && html[urlEnd] != '>' && html[urlEnd] != '\t' && html[urlEnd] != '\n' {
 				urlEnd++
 			}
 			url = html[hrefStart:urlEnd]
-			hrefStart = urlEnd
 		}
 
 		// Find end of opening tag
@@ -726,15 +725,13 @@ func convertLinks(html, lower string) string {
 	return string(result)
 }
 
-// decodeHTMLEntities replaces common HTML entities with their character equivalents.
+// decodeHTMLEntities replaces HTML entities with their character equivalents.
+// Uses the standard library's html.UnescapeString for comprehensive coverage
+// of named, numeric, and hex entities. Non-breaking spaces are normalised to
+// regular spaces for downstream text processing.
 func decodeHTMLEntities(s string) string {
-	s = strings.ReplaceAll(s, "&amp;", "&")
-	s = strings.ReplaceAll(s, "&lt;", "<")
-	s = strings.ReplaceAll(s, "&gt;", ">")
-	s = strings.ReplaceAll(s, "&quot;", "\"")
-	s = strings.ReplaceAll(s, "&#39;", "'")
-	s = strings.ReplaceAll(s, "&nbsp;", " ")
-	return s
+	s = html.UnescapeString(s)
+	return strings.ReplaceAll(s, "\u00a0", " ")
 }
 
 func stripAllTags(html string) string {
