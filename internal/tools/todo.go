@@ -139,7 +139,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	for i, item := range items {
 		statusIcon := statusIcon(item.Status)
-		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s |\n", i+1, statusIcon, item.Priority, item.Content))
+		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, statusIcon, item.Priority, item.Content)
 	}
 
 	// Write to session directory
@@ -164,7 +164,7 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		return types.ToolResult{}, fmt.Errorf("%w: cannot write temp file: %v", m31errors.ErrToolExecution, err)
 	}
 	if err := os.Rename(tmpPath, todoPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return types.ToolResult{}, fmt.Errorf("%w: cannot write TODO.md: %v", m31errors.ErrToolExecution, err)
 	}
 
