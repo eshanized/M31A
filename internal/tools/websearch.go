@@ -5,36 +5,81 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
 type WebSearch struct {
-	client     *http.Client
-	baseURL    string
-	maxResults int
+	client          *http.Client
+	baseURL         string
+	maxResults      int
+	allowPrivateIPs bool
 }
 
 func NewWebSearch(baseURL string) *WebSearch {
 	if baseURL == "" {
 		baseURL = DefaultSearchBaseURL
 	}
-	return &WebSearch{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     60 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second,
-			},
-		},
-		baseURL:    strings.TrimRight(baseURL, "/"),
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	ws := &WebSearch{
+		baseURL:    baseURL,
 		maxResults: DefaultMaxSearchResults,
 	}
+	ws.client = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			IdleConnTimeout:     60 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid address: %w", err)
+				}
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+				}
+				if !ws.allowPrivateIPs {
+					for _, ip := range ips {
+						if isPrivateIP(ip.IP) {
+							return nil, fmt.Errorf("access to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+						}
+					}
+				}
+				pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
+				dialer := &net.Dialer{Timeout: 10 * time.Second}
+				return dialer.DialContext(ctx, network, pinnedAddr)
+			},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if ws.allowPrivateIPs {
+				return nil
+			}
+			host := req.URL.Hostname()
+			ips, err := net.DefaultResolver.LookupIPAddr(req.Context(), host)
+			if err != nil {
+				return fmt.Errorf("redirect DNS resolution failed: %w", err)
+			}
+			for _, ip := range ips {
+				if isPrivateIP(ip.IP) {
+					return fmt.Errorf("redirect to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+				}
+			}
+			return nil
+		},
+	}
+	return ws
 }
 
 func (t *WebSearch) Name() string               { return "WebSearch" }
@@ -180,4 +225,10 @@ func (t *WebSearch) buildURL(query string, params map[string]any) (string, error
 	}
 
 	return t.baseURL + "/search?" + q.Encode(), nil
+}
+
+// Close releases idle connections held by the HTTP client's transport.
+// Call this during shutdown to prevent connection leaks.
+func (t *WebSearch) Close() {
+	t.client.CloseIdleConnections()
 }
