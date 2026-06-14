@@ -203,7 +203,7 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 
 	goodHash := e.sessionStartHash
 	if goodHash == "" {
-		if rootHash, err := e.findRootCommit(); err == nil {
+		if rootHash, rootErr := e.findRootCommit(); rootErr == nil {
 			goodHash = rootHash
 		} else {
 			// Cannot determine a good commit for bisect
