@@ -61,9 +61,10 @@ func (m MetricCard) Render() string {
 
 	if m.Width > 0 {
 		align := lipgloss.Left
-		if m.Align == lipgloss.Center {
+		switch m.Align {
+		case lipgloss.Center:
 			align = lipgloss.Center
-		} else if m.Align == lipgloss.Right {
+		case lipgloss.Right:
 			align = lipgloss.Right
 		}
 		parts = lipgloss.NewStyle().
