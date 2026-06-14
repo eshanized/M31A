@@ -145,7 +145,6 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 
 	// ── Overflow: drop right zone first, then center, then truncate left ─────
 	if resultWidth > width && rightText != "" {
-		rightText = ""
 		displayParts = nil
 		if leftText != "" {
 			displayParts = append(displayParts, leftText)
@@ -158,7 +157,6 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 	}
 
 	if resultWidth > width && centerText != "" {
-		centerText = ""
 		displayParts = nil
 		if leftText != "" {
 			displayParts = append(displayParts, leftText)
