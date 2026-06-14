@@ -273,10 +273,10 @@ func shortProviderName(name string) string {
 func formatTokenCount(n int) string {
 	if n >= 1000 {
 		return strings.TrimRight(strings.TrimRight(
-			strings.Replace(
+			strings.ReplaceAll(
 				strings.Replace(
 					formatFloat1(float64(n)/1000), ".", ".", 1),
-				"0", "0", -1),
+				"0", "0"),
 			"0"), ".") + "K ctx"
 	}
 	return intToStr(n) + " ctx"
