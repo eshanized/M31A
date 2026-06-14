@@ -89,7 +89,7 @@ func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Skip current question
 			return dm, dm.advanceQuestion("")
-		case "ctrl+shift+s":
+		case "ctrl+s":
 			// Skip all remaining questions
 			return dm, func() tea.Msg {
 				return DiscussCompleteMsg{}
