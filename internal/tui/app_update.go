@@ -826,9 +826,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// uses the fully-populated ModelInfo (pricing, context, capabilities).
 			if m.replModel.activeModel != nil {
 				m.activeModel = m.replModel.activeModel
-			} else if msg.Err == nil && msg.Model != nil && m.activeModel != nil && m.activeModel.ID == msg.Model.ID {
-				// Fetch succeeded but model wasn't in catalog — keep the stub
-				// so the user can still chat; the model ID is valid.
 			}
 		}
 
