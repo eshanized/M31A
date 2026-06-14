@@ -10,16 +10,15 @@ linters:
     - errcheck
     - ineffassign
     - unused
+    - shadow
 
   settings:
-    govet:
-      shadow: true
     errcheck:
       check-type-assertions: false
       check-blank: false
 
 issues:
-  exclude-rules:
+  rules:
     - path: _test\.go
       linters:
         - errcheck
