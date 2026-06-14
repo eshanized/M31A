@@ -32,7 +32,7 @@ func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParse
 	// C-2: Start a watchdog that closes the body if no data arrives
 	// within DefaultStreamTimeout. This prevents indefinite blocking.
 	watchdog := time.AfterFunc(DefaultStreamTimeout, func() {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	})
 
 	return &SSEParser{
