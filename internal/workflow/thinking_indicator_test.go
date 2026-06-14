@@ -33,12 +33,8 @@ func TestThinkingIndicator(t *testing.T) {
 	})
 
 	t.Run("ThinkingStartMsg and ThinkingCompleteMsg are tea.Msg", func(t *testing.T) {
-		// Verify they implement tea.Msg interface (empty struct)
-		var startMsg interface{} = ThinkingStartMsg{}
-		var completeMsg interface{} = ThinkingCompleteMsg{}
-		if startMsg == nil || completeMsg == nil {
-			t.Error("messages should not be nil")
-		}
+		var _ = ThinkingStartMsg{}
+		var _ = ThinkingCompleteMsg{}
 	})
 
 	t.Run("Thinking indicator display format", func(t *testing.T) {
