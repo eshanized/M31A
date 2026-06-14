@@ -106,7 +106,7 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 				if tcpConn, ok := conn.(*net.TCPConn); ok {
 					remoteAddr := tcpConn.RemoteAddr().(*net.TCPAddr)
 					if !wf.allowPrivateIPs && isPrivateIP(remoteAddr.IP) {
-						conn.Close()
+						_ = conn.Close()
 						return nil, fmt.Errorf("connected to private IP %s is blocked: %w", remoteAddr.IP, errors.ErrPrivateIPBlocked)
 					}
 				}
@@ -354,7 +354,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Check status code
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
@@ -759,19 +759,20 @@ func normalizeWhitespace(s string) string {
 	prevNewlines := 0
 	inSpace := false
 	for _, ch := range s {
-		if ch == '\n' {
+		switch ch {
+		case '\n':
 			prevNewlines++
 			inSpace = false
 			if prevNewlines <= 2 {
 				b.WriteRune(ch)
 			}
-		} else if ch == ' ' || ch == '\t' {
+		case ' ', '\t':
 			prevNewlines = 0
 			if !inSpace {
 				b.WriteRune(' ')
 				inSpace = true
 			}
-		} else {
+		default:
 			prevNewlines = 0
 			inSpace = false
 			b.WriteRune(ch)
