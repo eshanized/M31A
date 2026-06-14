@@ -117,7 +117,7 @@ func validateTasks(tasks []m31types.Task) []string {
 
 	for _, t := range tasks {
 		if t.ID == 0 {
-			errs = append(errs, fmt.Sprintf("task: missing ID"))
+			errs = append(errs, "task: missing ID")
 			continue
 		}
 		if idSet[t.ID] {
@@ -541,9 +541,10 @@ func normalizeTrailingCommas(s string) string {
 			continue
 		}
 		if inString {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inString = false
 			}
 			out = append(out, c)
@@ -592,9 +593,10 @@ func stripJSONComments(s string) string {
 		}
 
 		if inString {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inString = false
 			}
 			out = append(out, c)
@@ -691,8 +693,8 @@ func formatTaskSummary(tasks []m31types.Task) string {
 		if status == "" {
 			status = "pending"
 		}
-		sb.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s |\n",
-			t.ID, t.Action, t.Description, deps, status))
+		fmt.Fprintf(&sb, "| %d | %s | %s | %s | %s |\n",
+			t.ID, t.Action, t.Description, deps, status)
 	}
 	return sb.String()
 }
