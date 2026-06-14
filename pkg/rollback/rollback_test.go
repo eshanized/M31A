@@ -132,11 +132,11 @@ func TestPreview(t *testing.T) {
 	}
 
 	// Second commit modifies the file
-	if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
+	if writeErr := os.WriteFile(f, []byte("v2"), 0644); writeErr != nil {
+		t.Fatalf("WriteFile failed: %v", writeErr)
 	}
-	if err := g.Commit("v2"); err != nil {
-		t.Fatalf("Commit failed: %v", err)
+	if commitErr := g.Commit("v2"); commitErr != nil {
+		t.Fatalf("Commit failed: %v", commitErr)
 	}
 
 	r := New(g)
