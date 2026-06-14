@@ -98,7 +98,6 @@ func TestCascadingReplace_EmptyContent(t *testing.T) {
 
 func TestCascadingReplace_EmptyOldString(t *testing.T) {
 	t.Parallel()
-	_, _, err := cascadingReplace("hello world", "", "REPLACED")
 	// empty oldString matches at index 0 in strings.Index, so it returns exact-match
 	// Actually strings.Index returns 0 for empty substring
 	result, strategy, err := cascadingReplace("hello world", "", "REPLACED")
@@ -4000,8 +3999,8 @@ func TestEdit_Execute_NoMatchOldString(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	// The error is in ToolResult.Output, not a Go error
-	if !strings.Contains(result.Output, "Could not find") {
-		t.Errorf("expected 'Could not find' in output, got: %s", result.Output)
+	if !strings.Contains(result.Output, "could not find") {
+		t.Errorf("expected 'could not find' in output, got: %s", result.Output)
 	}
 }
 
