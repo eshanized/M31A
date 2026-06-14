@@ -124,8 +124,8 @@ func (r *Rollback) SoftReset(hash string, onReset func(newHead string) error) (*
 		return nil, fmt.Errorf("soft reset: %w", err)
 	}
 
-	if err := r.git.ResetSoft(hash); err != nil {
-		return nil, fmt.Errorf("soft reset: %w", err)
+	if resetErr := r.git.ResetSoft(hash); resetErr != nil {
+		return nil, fmt.Errorf("soft reset: %w", resetErr)
 	}
 
 	newHead, err := r.git.HeadHash()
@@ -159,12 +159,12 @@ func (r *Rollback) HardReset(hash string) (*RollbackResult, error) {
 
 	// C-11: Create timestamped backup branch before destructive reset
 	backupBranch := fmt.Sprintf("m31a/rollback-backup-%d", time.Now().Unix())
-	if _, err := r.git.Run("branch", "--force", backupBranch); err != nil {
-		return nil, fmt.Errorf("create backup branch: %w", err)
+	if _, branchErr := r.git.Run("branch", "--force", backupBranch); branchErr != nil {
+		return nil, fmt.Errorf("create backup branch: %w", branchErr)
 	}
 
-	if err := r.git.ResetHard(hash); err != nil {
-		return nil, fmt.Errorf("hard reset: %w", err)
+	if resetErr := r.git.ResetHard(hash); resetErr != nil {
+		return nil, fmt.Errorf("hard reset: %w", resetErr)
 	}
 
 	newHead, err := r.git.HeadHash()
@@ -190,13 +190,13 @@ func (r *Rollback) SafeReset(hash string) (*RollbackResult, error) {
 		return nil, fmt.Errorf("safe reset: %w", err)
 	}
 
-	if err := r.git.ResetHard(hash); err != nil {
-		return nil, fmt.Errorf("safe reset: %w", err)
+	if resetErr := r.git.ResetHard(hash); resetErr != nil {
+		return nil, fmt.Errorf("safe reset: %w", resetErr)
 	}
 
 	if stashed {
-		if err := r.git.StashPop(); err != nil {
-			return nil, fmt.Errorf("safe reset: stash pop: %w", err)
+		if popErr := r.git.StashPop(); popErr != nil {
+			return nil, fmt.Errorf("safe reset: stash pop: %w", popErr)
 		}
 	}
 
