@@ -695,9 +695,10 @@ func (s *SettingsModel) renderProviderTab() string {
 	} else {
 		for _, hs := range s.healthResults {
 			icon, color := "⟳", t.Warning
-			if hs.Status == "ok" {
+			switch hs.Status {
+			case "ok":
 				icon, color = "✓", t.Success
-			} else if hs.Status == "error" {
+			case "error":
 				icon, color = "✗", t.Error
 			}
 			detail := ""
