@@ -94,7 +94,7 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 		return types.ToolResult{Error: "Agent: 'prompt' is required"}, nil
 	}
 
-	iso := subagent.IsolationDefault
+	var iso subagent.Isolation
 	switch req.Isolation {
 	case "", "worktree":
 		iso = subagent.IsolationWorktree
