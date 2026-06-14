@@ -445,5 +445,3 @@ func (m *ReplModel) UpdateLiveTool(toolName string, err error, durationMs int64)
 	m.renderMessages()
 	m.autoScrollConditionally()
 }
-
-

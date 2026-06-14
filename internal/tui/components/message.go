@@ -274,7 +274,7 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 
 // renderAgentIteration renders an agent-loop iteration as a compact inline line.
 //
-//	 ³ FileRead FileRead FileRead
+//	³ FileRead FileRead FileRead
 //
 // Input format: "**Agent iteration N** — tools: X, Y, Z"
 // Returns "" if the content doesn't match the expected format.

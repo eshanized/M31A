@@ -38,7 +38,7 @@ func NewWebSearch(baseURL string) *WebSearch {
 }
 
 func (t *WebSearch) Name() string               { return "WebSearch" }
-func (t *WebSearch) RiskLevel() types.RiskLevel  { return types.RiskMedium }
+func (t *WebSearch) RiskLevel() types.RiskLevel { return types.RiskMedium }
 
 func (t *WebSearch) Description() string {
 	return `Search the web and return structured results (title, URL, snippet).

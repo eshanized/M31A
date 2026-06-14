@@ -38,11 +38,11 @@ type SidebarModel struct {
 	sessionID string
 
 	// Token usage
-	totalTokens  int
-	contextLen   int
-	cost         float64
-	showCost     bool
-	modelName    string
+	totalTokens int
+	contextLen  int
+	cost        float64
+	showCost    bool
+	modelName   string
 
 	loading bool
 
