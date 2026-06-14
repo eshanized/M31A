@@ -1409,8 +1409,9 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
-	// When sidebar is focused AND we're on the REPL, route keys to sidebar
-	if m.screen == ScreenREPL && m.sidebarModel != nil && m.sidebarModel.IsFocused() {
+	// When sidebar is focused, route keys to sidebar regardless of active screen.
+	// ctrl+g can toggle sidebar focus from any screen, so keys must reach it.
+	if m.sidebarModel != nil && m.sidebarModel.IsFocused() {
 		return m.sidebarModel.HandleKey(msg)
 	}
 
@@ -1595,6 +1596,36 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			if nt, ok := newTD.(*ToolDetailModel); ok {
 				m.toolDetailModel = nt
 			}
+			return cmd
+		}
+	case ScreenGhostPicker:
+		if m.ghostPickerModel != nil {
+			newGP, cmd := m.ghostPickerModel.Update(msg)
+			if ngp, ok := newGP.(*GhostPickerModel); ok {
+				m.ghostPickerModel = ngp
+			}
+			return cmd
+		}
+	case ScreenGhostOutput:
+		if m.ghostOutputModel != nil {
+			newGO, cmd := m.ghostOutputModel.Update(msg)
+			if ngo, ok := newGO.(*GhostOutputModel); ok {
+				m.ghostOutputModel = ngo
+			}
+			return cmd
+		}
+	case ScreenConfirmQuit:
+		if m.confirmQuitModel != nil {
+			newCQ, cmd := m.confirmQuitModel.Update(msg)
+			if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
+				m.confirmQuitModel = ncq
+			}
+			return cmd
+		}
+	case ScreenPhaseModelPicker:
+		if m.phaseModelPicker != nil {
+			newPM, cmd := m.phaseModelPicker.Update(msg)
+			m.phaseModelPicker = newPM
 			return cmd
 		}
 	}
@@ -2141,6 +2172,18 @@ func (m *AppState) applyTheme(themeName string) {
 	}
 	if m.toolDetailModel != nil {
 		m.toolDetailModel.SetTheme(t)
+	}
+	if m.confirmQuitModel != nil {
+		m.confirmQuitModel.SetTheme(t)
+	}
+	if m.ghostPickerModel != nil {
+		m.ghostPickerModel.SetTheme(t)
+	}
+	if m.ghostOutputModel != nil {
+		m.ghostOutputModel.SetTheme(t)
+	}
+	if m.phaseModelPicker != nil {
+		m.phaseModelPicker.SetTheme(t)
 	}
 }
 
