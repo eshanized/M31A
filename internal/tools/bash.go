@@ -115,11 +115,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	if err := cmd.Start(); err != nil {
 		// Close pipe ends to unblock the goroutines that will read from them
-		stdoutW.Close()
-		stderrW.Close()
-		stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
+		_ = stdoutR.Close()
 		errRead, _ := io.ReadAll(io.LimitReader(stderrR, types.BashOutputLimit))
-		stderrR.Close()
+		_ = stderrR.Close()
 		extra := ""
 		if len(errRead) > 0 {
 			extra = ": " + strings.TrimSpace(string(errRead))
@@ -164,8 +164,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	waitCh := make(chan error, 1)
 	go func() {
 		waitCh <- cmd.Wait()
-		stdoutW.Close()
-		stderrW.Close()
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
 		close(cmdDone)
 	}()
 
@@ -179,7 +179,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	go func() {
 		defer wg.Done()
 		var stdoutBuf strings.Builder
-		io.Copy(&stdoutBuf, stdoutR)
+		_, _ = io.Copy(&stdoutBuf, stdoutR)
 		outMu.Lock()
 		outStr.WriteString(stdoutBuf.String())
 		outMu.Unlock()
@@ -188,7 +188,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	go func() {
 		defer wg.Done()
 		var stderrBuf strings.Builder
-		io.Copy(&stderrBuf, stderrR)
+		_, _ = io.Copy(&stderrBuf, stderrR)
 		outMu.Lock()
 		if stderrBuf.Len() > 0 {
 			if outStr.Len() > 0 {
@@ -202,8 +202,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	wg.Wait()
 
 	// Close pipe readers explicitly (L-11)
-	stdoutR.Close()
-	stderrR.Close()
+	_ = stdoutR.Close()
+	_ = stderrR.Close()
 
 	output := outStr.String()
 
