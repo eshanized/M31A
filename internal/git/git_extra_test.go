@@ -315,6 +315,9 @@ func TestGit_StatusPorcelain_WithModifications(t *testing.T) {
 	g.Commit("initial")
 
 	os.WriteFile(filepath.Join(g.workDir, "myfile.txt"), []byte("v2"), 0644)
+	// Ensure git observes the mtime change even under the race detector's
+	// slower execution, where concurrent commands may see different states.
+	time.Sleep(50 * time.Millisecond)
 
 	statuses, err := g.StatusPorcelain()
 	if err != nil {
@@ -325,14 +328,15 @@ func TestGit_StatusPorcelain_WithModifications(t *testing.T) {
 		t.Fatal("Expected non-empty status for modified file")
 	}
 
-	// Verify the file appears in status results
+	// Verify the file appears in status results.
+	// Under -race, the concurrent status+numstat commands can observe
+	// different file states, so accept any non-empty status.
 	found := false
 	for _, s := range statuses {
 		if strings.Contains(s.Path, "myfile.txt") {
 			found = true
-			// Status should indicate modification
-			if s.Status != "M" && s.Status != "?" {
-				t.Logf("Status for myfile.txt: %q (may vary by git version)", s.Status)
+			if s.Status == "" {
+				t.Errorf("Expected non-empty status for myfile.txt, got empty")
 			}
 			break
 		}
