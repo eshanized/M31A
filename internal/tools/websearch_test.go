@@ -105,6 +105,7 @@ func TestWebSearch_Success(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -145,6 +146,7 @@ func TestWebSearch_Truncation(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -174,6 +176,7 @@ func TestWebSearch_EnginesParam(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -198,6 +201,7 @@ func TestWebSearch_NoResults(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "xyznonexistent"},
@@ -217,6 +221,7 @@ func TestWebSearch_HTTPError(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "test"},
@@ -237,6 +242,7 @@ func TestWebSearch_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "test"},
@@ -256,6 +262,7 @@ func TestWebSearch_ContextCancellation(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := ws.Execute(ctx, types.ToolInput{
@@ -282,6 +289,7 @@ func TestWebSearch_MaxResultsClamp(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
+	ws.allowPrivateIPs = true
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
