@@ -320,7 +320,7 @@ func TestNew_ReturnsKeychain(t *testing.T) {
 	if kc == nil {
 		t.Fatal("New() returned nil")
 	}
-	var _ Keychain = kc
+	var _ = kc
 }
 
 func TestKeychain_Constants(t *testing.T) {
