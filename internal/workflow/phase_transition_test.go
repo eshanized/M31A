@@ -56,12 +56,8 @@ func TestPhaseTransition(t *testing.T) {
 	})
 
 	t.Run("PhaseTransitionStartMsg and PhaseTransitionCompleteMsg are tea.Msg", func(t *testing.T) {
-		// Verify they implement tea.Msg interface (empty struct)
-		var startMsg interface{} = PhaseTransitionStartMsg{}
-		var completeMsg interface{} = PhaseTransitionCompleteMsg{}
-		if startMsg == nil || completeMsg == nil {
-			t.Error("messages should not be nil")
-		}
+		var _ = PhaseTransitionStartMsg{}
+		var _ = PhaseTransitionCompleteMsg{}
 	})
 
 	t.Run("Phase transition display format", func(t *testing.T) {
