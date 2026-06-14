@@ -263,7 +263,7 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 					}
 					result = fn(taskCtx, task)
 				} else {
-					taskCtx, cancel = context.WithCancel(ctx)
+					_, cancel = context.WithCancel(ctx)
 					result = TaskResult{Success: true}
 				}
 
