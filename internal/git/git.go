@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -354,19 +355,20 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 		err    error
 	}
 
-	// Run both git commands concurrently
-	ch := make(chan result, 2)
+	// Run both git commands concurrently, using separate result variables
+	// to avoid channel ordering issues (BUG-01).
+	var statusRes, numstatRes result
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		out, err := g.run("status", "--porcelain")
-		ch <- result{out, err}
+		defer wg.Done()
+		statusRes.output, statusRes.err = g.run("status", "--porcelain")
 	}()
 	go func() {
-		out, err := g.run("diff", "--numstat", "HEAD")
-		ch <- result{out, err}
+		defer wg.Done()
+		numstatRes.output, numstatRes.err = g.run("diff", "--numstat", "HEAD")
 	}()
-
-	statusRes := <-ch
-	numstatRes := <-ch
+	wg.Wait()
 
 	if statusRes.err != nil {
 		return nil, fmt.Errorf("git status: %w", statusRes.err)
@@ -397,7 +399,7 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 	}
 
 	var statuses []FileStatus
-	for _, line := range strings.Split(strings.TrimSpace(statusOut), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(statusOut, "\n\r"), "\n") {
 		if len(line) < 4 {
 			continue
 		}
@@ -441,12 +443,20 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 			}
 		}
 
-		// Handle renames: "R old -> new"
-		if fs.Status == "R" && strings.Contains(path, " -> ") {
+		// Handle renames and copies: "R old -> new" or "C old -> new"
+		if (fs.Status == "R" || fs.Status == "C") && strings.Contains(path, " -> ") {
 			parts := strings.SplitN(path, " -> ", 2)
 			if len(parts) == 2 {
-				fs.OldPath = strings.TrimSpace(parts[0])
-				fs.Path = strings.TrimSpace(parts[1])
+				oldP := strings.TrimSpace(parts[0])
+				newP := strings.TrimSpace(parts[1])
+				if strings.HasPrefix(oldP, "\"") {
+					oldP, _ = strconv.Unquote(oldP)
+				}
+				if strings.HasPrefix(newP, "\"") {
+					newP, _ = strconv.Unquote(newP)
+				}
+				fs.OldPath = oldP
+				fs.Path = newP
 			}
 		}
 
