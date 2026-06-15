@@ -161,6 +161,12 @@ func (m *ReplModel) View() string {
 		info.Cost = m.lastCost
 		info.ShowCost = true
 	}
+	if m.lastUsage != nil {
+		info.ContextUsed = m.lastUsage.TotalTokens
+	}
+	if m.activeModel != nil && m.activeModel.ContextLength > 0 {
+		info.ContextMax = int(m.activeModel.ContextLength)
+	}
 	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
 		info.LeaderActive = true
 	}
