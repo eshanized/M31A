@@ -12,6 +12,7 @@ type ConfirmDialog struct {
 	ConfirmText string
 	CancelText  string
 	Danger      bool
+	Warning     bool
 	Theme       theme.Theme
 	Width       int
 }
@@ -40,6 +41,13 @@ func (cd ConfirmDialog) View(screenW, screenH int) string {
 	borderColor := t.Brand
 	if cd.Danger {
 		borderColor = t.Error
+	} else if cd.Warning {
+		borderColor = t.Warning
+	}
+
+	cardStyle := CardBrand
+	if cd.Warning {
+		cardStyle = CardWarning
 	}
 
 	card := Card{
@@ -47,7 +55,7 @@ func (cd ConfirmDialog) View(screenW, screenH int) string {
 		Content: body,
 		Width:   cd.Width,
 		Border:  theme.NormalBorder,
-		Style:   CardBrand,
+		Style:   cardStyle,
 		Theme:   t,
 	}.Render()
 

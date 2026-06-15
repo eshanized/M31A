@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -61,10 +59,9 @@ func (cq *ConfirmQuitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (cq *ConfirmQuitModel) View() string {
-	t := cq.theme
 	w := cq.width
 	if w <= 0 {
-		w = 80 // only when uninitialized, not when genuinely narrow
+		w = 80
 	}
 
 	// Scale dialog width to terminal size: ideal 50, min 24, max 60
@@ -76,31 +73,13 @@ func (cq *ConfirmQuitModel) View() string {
 		dialogWidth = 24
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-		Render("Confirm Quit")
-
-	message := lipgloss.NewStyle().Foreground(t.Text).
-		Render(cq.message)
-
-	buttons := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("[y] Yes, quit"),
-		"    ",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("[n] No, stay"),
-	)
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Warning).
-		Padding(1, 2).
-		Width(dialogWidth).
-		Render(strings.Join([]string{
-			"",
-			title,
-			"",
-			message,
-			"",
-			buttons,
-		}, "\n"))
-
-	return lipgloss.Place(cq.width, cq.height, lipgloss.Center, lipgloss.Center, dialog)
+	return components.ConfirmDialog{
+		Title:       "Confirm Quit",
+		Message:     cq.message,
+		ConfirmText: "Yes, quit",
+		CancelText:  "No, stay",
+		Warning:     true,
+		Theme:       cq.theme,
+		Width:       dialogWidth,
+	}.View(cq.width, cq.height)
 }
