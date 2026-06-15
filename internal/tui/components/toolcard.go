@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
@@ -71,6 +72,10 @@ type ToolCard struct {
 	collapsed  bool
 	renderer   ToolRenderer
 	lineCount  int // output line count (for header display)
+
+	flashUntil  time.Time      // border flash expiry timestamp
+	flashColor  lipgloss.Color // border flash color
+	completedAt time.Time      // when the tool completed (for age-based fading)
 }
 
 // ToolName returns the tool's identifier (e.g. "FileRead", "Bash").
@@ -112,6 +117,9 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 	if result != nil {
 		tc.durationMs = result.DurationMs
 	}
+	if state == ToolSuccess || state == ToolError {
+		tc.completedAt = time.Now()
+	}
 
 	trimmed := strings.TrimRight(output, "\n")
 	lineCount := strings.Count(trimmed, "\n") + 1
@@ -119,7 +127,7 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		lineCount = 0
 	}
 	tc.lineCount = lineCount
-	if lineCount > 20 {
+	if lineCount > 50 {
 		tc.collapsed = true
 	}
 
@@ -164,46 +172,54 @@ func (c *ToolCard) Render(width int) string {
 	return c.renderBlock(cardWidth)
 }
 
-// renderInline renders a tool as a single-line inline element with paddingLeft=3.
+// renderInline renders a tool as a single-line inline element:
+//
+//	⟳ [ FileRead ] reading path/to/file.go
 func (c *ToolCard) renderInline(width int) string {
-	icon := ToolIcons[c.toolName]
-	if icon == "" {
-		icon = "\u2022"
+	// Tool name badge with per-tool colors
+	labelStyle, ok := c.theme.ToolLabel[c.toolName]
+	if !ok {
+		labelStyle = lipgloss.NewStyle().
+			Foreground(c.theme.TextSecondary).
+			Background(c.theme.SurfaceElevated).
+			Padding(0, 1).
+			Bold(true)
 	}
+	badge := labelStyle.Render(c.toolName)
 
-	statusIcon := ToolStatusIcons[c.state]
-
-	var desc string
-	switch c.state {
-	case ToolRunning:
-		desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("running...")
-	case ToolSuccess:
-		if c.truncated {
-			desc = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("completed (truncated)")
-		} else if c.collapsed && c.output != "" {
-			lineCount := strings.Count(c.output, "\n") + 1
-			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("[+%d lines]", lineCount))
-		} else {
-			desc = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render("completed")
-		}
-	case ToolError:
-		desc = lipgloss.NewStyle().Foreground(c.theme.Error).Render("failed")
-	}
-
-	parts := []string{
-		lipgloss.NewStyle().Foreground(c.theme.Text).Render(statusIcon),
-		lipgloss.NewStyle().Foreground(c.theme.Text).Render(icon),
-		lipgloss.NewStyle().Foreground(c.theme.Text).Render(c.toolName),
-	}
+	// Input description
+	inputStr := ""
 	if c.input != "" {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
-		short = TruncateEnd(short, 60)
-		parts = append(parts, lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short))
+		short = TruncateEnd(short, 50)
+		inputStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
 	}
-	parts = append(parts, desc)
 
-	line := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	// Status indicator
+	var statusStr string
+	switch c.state {
+	case ToolRunning:
+		statusStr = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("⟳")
+	case ToolSuccess:
+		if c.truncated {
+			statusStr = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("✓ truncated")
+		} else if c.collapsed && c.output != "" {
+			lineCount := strings.Count(c.output, "\n") + 1
+			statusStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("✓ +%d lines", lineCount))
+		} else {
+			statusStr = lipgloss.NewStyle().Foreground(c.theme.Success).Render("✓")
+		}
+	case ToolError:
+		statusStr = lipgloss.NewStyle().Foreground(c.theme.Error).Render("✗ failed")
+	}
+
+	// Assemble: badge + input + status
+	line := badge
+	if inputStr != "" {
+		line += " " + inputStr
+	}
+	line += " " + statusStr
 
 	return lipgloss.NewStyle().
 		PaddingLeft(3).
@@ -255,6 +271,9 @@ func (c *ToolCard) renderBlock(width int) string {
 		Padding(0, 1).
 		MarginTop(1).
 		Width(width + 4)
+	if c.isFaded() {
+		blockStyle = blockStyle.Faint(true)
+	}
 
 	return blockStyle.Render(content)
 }
@@ -341,6 +360,9 @@ func (c *ToolCard) renderThinBorderHeader(width int) string {
 
 // getBorderColor returns the appropriate border color based on tool state.
 func (c *ToolCard) getBorderColor() lipgloss.Color {
+	if !c.flashUntil.IsZero() && time.Now().Before(c.flashUntil) {
+		return c.flashColor
+	}
 	switch c.state {
 	case ToolRunning:
 		return c.theme.Warning
@@ -351,6 +373,31 @@ func (c *ToolCard) getBorderColor() lipgloss.Color {
 	default:
 		return c.theme.Border
 	}
+}
+
+// StartFlash begins a transient border color flash (e.g., green on success, red on error).
+func (c *ToolCard) StartFlash(color lipgloss.Color, dur time.Duration) {
+	c.flashColor = color
+	c.flashUntil = time.Now().Add(dur)
+}
+
+// MarkCompleted sets the completion timestamp and applies a flash effect.
+func (c *ToolCard) MarkCompleted(state ToolState) {
+	c.state = state
+	c.completedAt = time.Now()
+	if state == ToolSuccess {
+		c.StartFlash(c.theme.Success, 300*time.Millisecond)
+	} else if state == ToolError {
+		c.StartFlash(c.theme.Error, 300*time.Millisecond)
+	}
+}
+
+// isFaded returns true if the tool card completed more than 30 seconds ago.
+func (c *ToolCard) isFaded() bool {
+	if c.completedAt.IsZero() {
+		return false
+	}
+	return time.Since(c.completedAt) > 30*time.Second
 }
 
 func (c *ToolCard) Toggle() {
