@@ -359,29 +359,28 @@ func TestLevenshteinDistance_SubsetString(t *testing.T) {
 func TestGenerateDiffSummary_Identical(t *testing.T) {
 	t.Parallel()
 	summary := generateDiffSummary("test.txt", "line1\nline2", "line1\nline2")
-	// Identical content still generates the --- and +++ header lines
 	if !strings.Contains(summary, "--- test.txt") {
 		t.Errorf("expected '--- test.txt' in summary, got %q", summary)
 	}
-	// But no +/- line count lines should appear
-	if strings.Contains(summary, "-0 lines") || strings.Contains(summary, "+0 lines") {
-		t.Errorf("expected no line count for identical content, got %q", summary)
+	// Identical content should produce (no changes) or empty hunks
+	if strings.Contains(summary, "@@") {
+		t.Errorf("expected no diff hunks for identical content, got %q", summary)
 	}
 }
 
 func TestGenerateDiffSummary_AddedLines(t *testing.T) {
 	t.Parallel()
 	summary := generateDiffSummary("test.txt", "line1", "line1\nline2\nline3")
-	if !strings.Contains(summary, "+2 lines") {
-		t.Errorf("expected '+2 lines' in summary, got %q", summary)
+	if !strings.Contains(summary, "+line2") {
+		t.Errorf("expected '+line2' in diff, got %q", summary)
 	}
 }
 
 func TestGenerateDiffSummary_RemovedLines(t *testing.T) {
 	t.Parallel()
 	summary := generateDiffSummary("test.txt", "line1\nline2\nline3", "line1")
-	if !strings.Contains(summary, "-2 lines") {
-		t.Errorf("expected '-2 lines' in summary, got %q", summary)
+	if !strings.Contains(summary, "-line2") {
+		t.Errorf("expected '-line2' in diff, got %q", summary)
 	}
 }
 
