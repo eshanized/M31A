@@ -607,33 +607,158 @@ func generateDiffSummary(path, oldContent, newContent string) string {
 	oldLines := strings.Split(oldContent, "\n")
 	newLines := strings.Split(newContent, "\n")
 
-	added := 0
-	removed := 0
+	// Build LCS table for line-level diff
+	lcs := buildLCS(oldLines, newLines)
+	hunks := diffHunks(oldLines, newLines, lcs, 3)
 
-	// Simple diff: count line differences
-	minLen := len(oldLines)
-	if len(newLines) < minLen {
-		minLen = len(newLines)
+	if len(hunks) == 0 {
+		return fmt.Sprintf("--- %s\n+++ %s\n(no changes)", path, path)
 	}
 
-	for i := 0; i < minLen; i++ {
-		if oldLines[i] != newLines[i] {
-			removed++
-			added++
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("--- %s\n+++ %s\n", path, path))
+	for _, h := range hunks {
+		out.WriteString(h)
+	}
+	return out.String()
+}
+
+func buildLCS(a, b []string) [][]int {
+	m, n := len(a), len(b)
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if a[i-1] == b[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] > dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
 		}
 	}
-	removed += len(oldLines) - minLen
-	added += len(newLines) - minLen
-
-	var lines []string
-	lines = append(lines, fmt.Sprintf("--- %s", path))
-	lines = append(lines, fmt.Sprintf("+++ %s", path))
-	if removed > 0 {
-		lines = append(lines, fmt.Sprintf("-%d lines", removed))
-	}
-	if added > 0 {
-		lines = append(lines, fmt.Sprintf("+%d lines", added))
-	}
-
-	return strings.Join(lines, "\n")
+	return dp
 }
+
+type diffOp int
+
+const (
+	diffEqual diffOp = iota
+	diffDelete
+	diffInsert
+)
+
+func diffLines(a, b []string, lcs [][]int) []struct {
+	op   diffOp
+	line string
+} {
+	var ops []struct {
+		op   diffOp
+		line string
+	}
+	i, j := len(a), len(b)
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && a[i-1] == b[j-1] {
+			ops = append([]struct {
+				op   diffOp
+				line string
+			}{{diffEqual, a[i-1]}}, ops...)
+			i--
+			j--
+		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {
+			ops = append([]struct {
+				op   diffOp
+				line string
+			}{{diffInsert, b[j-1]}}, ops...)
+			j--
+		} else if i > 0 {
+			ops = append([]struct {
+				op   diffOp
+				line string
+			}{{diffDelete, a[i-1]}}, ops...)
+			i--
+		}
+	}
+	return ops
+}
+
+func diffHunks(a, b []string, lcs [][]int, contextLines int) []string {
+	ops := diffLines(a, b, lcs)
+
+	type region struct {
+		start, end int
+	}
+	var changeRegions []region
+	for i, op := range ops {
+		if op.op != diffEqual {
+			changeRegions = append(changeRegions, region{i, i})
+		}
+	}
+	if len(changeRegions) == 0 {
+		return nil
+	}
+
+	// Merge nearby change regions into hunks with context
+	type hunkRange struct {
+		start, end int
+	}
+	var hunkRanges []hunkRange
+	cur := hunkRange{
+		start: max(0, changeRegions[0].start-contextLines),
+		end:   min(len(ops)-1, changeRegions[0].end+contextLines),
+	}
+	for _, r := range changeRegions[1:] {
+		newStart := max(0, r.start-contextLines)
+		newEnd := min(len(ops)-1, r.end+contextLines)
+		if newStart <= cur.end+1 {
+			cur.end = newEnd
+		} else {
+			hunkRanges = append(hunkRanges, cur)
+			cur = hunkRange{newStart, newEnd}
+		}
+	}
+	hunkRanges = append(hunkRanges, cur)
+
+	var hunks []string
+	for _, hr := range hunkRanges {
+		var hunk strings.Builder
+		oldStart, newStart := 1, 1
+		for i := 0; i < hr.start; i++ {
+			if ops[i].op == diffEqual || ops[i].op == diffDelete {
+				oldStart++
+			}
+			if ops[i].op == diffEqual || ops[i].op == diffInsert {
+				newStart++
+			}
+		}
+		oldCount, newCount := 0, 0
+		for i := hr.start; i <= hr.end; i++ {
+			switch ops[i].op {
+			case diffEqual:
+				oldCount++
+				newCount++
+			case diffDelete:
+				oldCount++
+			case diffInsert:
+				newCount++
+			}
+		}
+		hunk.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount))
+		for i := hr.start; i <= hr.end; i++ {
+			switch ops[i].op {
+			case diffEqual:
+				hunk.WriteString(" " + ops[i].line + "\n")
+			case diffDelete:
+				hunk.WriteString("-" + ops[i].line + "\n")
+			case diffInsert:
+				hunk.WriteString("+" + ops[i].line + "\n")
+			}
+		}
+		hunks = append(hunks, hunk.String())
+	}
+	return hunks
+}
+
