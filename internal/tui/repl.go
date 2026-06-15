@@ -269,6 +269,10 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		m.textarea.SetValue("")
 		m.slashVisible = false
 		m.slashSuggestions = nil
+		m.historyIndex = -1
+		if m.frecentHistory != nil {
+			m.frecentHistory.Upsert(input)
+		}
 
 		// Add user message so welcome screen is replaced by conversation
 		m.messages = append(m.messages, makeUserMsg(input))
@@ -285,6 +289,10 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 	if strings.HasPrefix(input, "!") {
 		m.textarea.SetValue("")
 		m.slashVisible = false
+		m.historyIndex = -1
+		if m.frecentHistory != nil {
+			m.frecentHistory.Upsert(input)
+		}
 
 		m.messages = append(m.messages, makeUserMsg(input))
 		// Add temporary "Running..." feedback
@@ -373,7 +381,12 @@ func (m *ReplModel) navigateHistoryUp() {
 
 // navigateHistoryDown moves to the next command in frecent history.
 func (m *ReplModel) navigateHistoryDown() {
-	if m.historyIndex <= 0 {
+	if m.historyIndex < 0 {
+		// Not navigating history — Down is a no-op.
+		return
+	}
+	if m.historyIndex == 0 {
+		// At the most recent entry — restore the original input and exit navigation.
 		m.historyIndex = -1
 		m.textarea.SetValue(m.savedInput)
 		m.savedInput = ""
