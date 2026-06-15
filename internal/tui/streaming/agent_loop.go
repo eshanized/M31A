@@ -68,7 +68,13 @@ type AgentIterationMsg struct {
 	ToolCalls []types.ToolCall
 }
 
-// agentToolCallAcc accumulates streaming tool call deltas by index.
+// AgentToolProgressMsg signals periodic elapsed-time updates while a tool is executing.
+type AgentToolProgressMsg struct {
+	ToolCall   types.ToolCall
+	ElapsedMs  int64
+}
+
+// AgentToolCallAcc accumulates streaming tool call deltas by index.
 type agentToolCallAcc struct {
 	id    string
 	name  string
@@ -258,7 +264,27 @@ func AgentLoop(
 				ch <- AgentToolStartMsg{ToolCall: tc}
 
 				start := time.Now()
+
+				// Progress ticker: send elapsed time every 500ms
+				progressDone := make(chan struct{})
+				go func(toolCall types.ToolCall) {
+					ticker := time.NewTicker(500 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							ch <- AgentToolProgressMsg{
+								ToolCall:  toolCall,
+								ElapsedMs: time.Since(start).Milliseconds(),
+							}
+						case <-progressDone:
+							return
+						}
+					}
+				}(tc)
+
 				result, execErr := dispatcher.Execute(ctx, tc)
+				close(progressDone)
 				duration := time.Since(start).Milliseconds()
 
 				ch <- AgentToolDoneMsg{
