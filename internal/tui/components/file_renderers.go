@@ -107,7 +107,14 @@ func (r *FileReadRenderer) RenderOutput(result *types.ToolResult, state ToolStat
 	}
 	parts := []string{}
 	if !collapsed && output != "" {
-		parts = append(parts, r.RenderGenericOutput(output, truncated, false, width))
+		highlighted := RenderCodeBlock(output, "", r.theme, width)
+		if truncated {
+			highlighted += "\n" + lipgloss.NewStyle().
+				Foreground(r.theme.Warning).
+				Italic(true).
+				Render("[... output truncated]")
+		}
+		parts = append(parts, highlighted)
 	}
 	parts = append(parts, r.RenderStatus(state, durationMs, width, ""))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
