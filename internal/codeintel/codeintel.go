@@ -175,7 +175,7 @@ func (idx *Indexer) FormatContext(targetFiles []string, description string, topN
 
 	var sb strings.Builder
 
-		scored := idx.scorer.Score(targetFiles, description, topN)
+	scored := idx.scorer.Score(targetFiles, description, topN)
 	if len(scored) > 0 {
 		sb.WriteString("## Recommended Files (by relevance)\n\n")
 		for _, sf := range scored {

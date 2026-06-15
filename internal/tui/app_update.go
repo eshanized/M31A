@@ -1041,6 +1041,30 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenGhostPicker:
+			if m.ghostPickerModel != nil {
+				newGP, cmd := m.ghostPickerModel.Update(msg)
+				if ngp, ok := newGP.(*GhostPickerModel); ok {
+					m.ghostPickerModel = ngp
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenGhostOutput:
+			if m.ghostOutputModel != nil {
+				newGO, cmd := m.ghostOutputModel.Update(msg)
+				if ngo, ok := newGO.(*GhostOutputModel); ok {
+					m.ghostOutputModel = ngo
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenConfirmQuit:
+			if m.confirmQuitModel != nil {
+				newCQ, cmd := m.confirmQuitModel.Update(msg)
+				if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
+					m.confirmQuitModel = ncq
+				}
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 
@@ -1226,6 +1250,31 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
 		}
 		return nil
+	case ScreenGhostPicker:
+		if m.ghostPickerModel == nil {
+			cw, ch := m.contentDimensions()
+			m.ghostPickerModel = NewGhostPickerModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenGhostOutput:
+		if m.ghostOutputModel == nil {
+			cw, ch := m.contentDimensions()
+			m.ghostOutputModel = NewGhostOutputModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenConfirmQuit:
+		if m.confirmQuitModel == nil {
+			cw, ch := m.contentDimensions()
+			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+		}
+		return nil
+	case ScreenDiff:
+		if m.diffModel == nil {
+			m.diffModel = NewDiffModel(m.themeManager.Current())
+		}
+		cw, ch := m.contentDimensions()
+		m.diffModel.SetDimensions(cw, ch)
+		return nil
 	default:
 		return nil
 	}
@@ -1296,8 +1345,7 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.resumeModel.SetDimensions(contentW, contentH)
 	}
 	if m.diffModel != nil {
-		m.diffModel.width = contentW
-		m.diffModel.height = contentH
+		m.diffModel.SetDimensions(contentW, contentH)
 	}
 	if m.goalInput != nil {
 		m.goalInput.SetDimensions(contentW, contentH)
@@ -1348,6 +1396,15 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	if m.phaseModelPicker != nil {
 		m.phaseModelPicker.SetDimensions(contentW, contentH)
+	}
+	if m.ghostPickerModel != nil {
+		m.ghostPickerModel.SetDimensions(contentW, contentH)
+	}
+	if m.ghostOutputModel != nil {
+		m.ghostOutputModel.SetDimensions(contentW, contentH)
+	}
+	if m.confirmQuitModel != nil {
+		m.confirmQuitModel.SetDimensions(contentW, contentH)
 	}
 
 	// UX-38: Notify when sidebar auto-hides due to narrow terminal

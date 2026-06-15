@@ -684,5 +684,3 @@ func TestLoadProjectContext_LargeFileTruncated(t *testing.T) {
 		t.Errorf("expected truncated to %d, got %d", maxProjectContextBytes, len(got))
 	}
 }
-
-

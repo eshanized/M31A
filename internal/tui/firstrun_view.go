@@ -581,7 +581,7 @@ func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
 			BorderForeground(t.Border).
 			Padding(0, 1).
 			Render("none selected")
-		case 1:
+	case 1:
 		countBadge = lipgloss.NewStyle().
 			Foreground(t.Success).
 			Border(lipgloss.RoundedBorder()).

@@ -37,32 +37,32 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 	// Slash command
 	if strings.HasPrefix(input, "/") {
 		if m.cmdRegistry != nil {
-		ctx := CommandContext{
-			Ctx:             m.shutdownCtx,
-			Registry:        m.registry,
-			SessionManager:  m.sessionManager,
-			SessionID:       m.sessionID,
-			Config:          m.config,
-			ConfigPath:      m.configPath,
-			Dispatcher:      m.dispatcher,
-			Git:             m.git,
-			Ledger:          m.ledger,
-			Rollback:        m.rollback,
-			AutoDream:       m.autoDream,
-			WorkflowEngine:  m.workflowEngine,
-			CmdRegistry:     m.cmdRegistry,
-			FrecentHistory:  m.frecentHistory,
-			SubagentManager: m.subagentManager,
-			AgentMode:       &m.agentMode,
-			SetAgentMode:    func(v bool) { m.agentMode = v },
-			CancelAgent: func() {
-				if m.streamCancelFn != nil {
-					m.streamCancelFn()
-					m.streamCancelFn = nil
-				}
-				m.agentCh = nil
-			},
-		}
+			ctx := CommandContext{
+				Ctx:             m.shutdownCtx,
+				Registry:        m.registry,
+				SessionManager:  m.sessionManager,
+				SessionID:       m.sessionID,
+				Config:          m.config,
+				ConfigPath:      m.configPath,
+				Dispatcher:      m.dispatcher,
+				Git:             m.git,
+				Ledger:          m.ledger,
+				Rollback:        m.rollback,
+				AutoDream:       m.autoDream,
+				WorkflowEngine:  m.workflowEngine,
+				CmdRegistry:     m.cmdRegistry,
+				FrecentHistory:  m.frecentHistory,
+				SubagentManager: m.subagentManager,
+				AgentMode:       &m.agentMode,
+				SetAgentMode:    func(v bool) { m.agentMode = v },
+				CancelAgent: func() {
+					if m.streamCancelFn != nil {
+						m.streamCancelFn()
+						m.streamCancelFn = nil
+					}
+					m.agentCh = nil
+				},
+			}
 			if m.replModel != nil {
 				ctx.ClearMessages = m.replModel.ClearMessages
 				ctx.CopyError = m.replModel.copyLastError

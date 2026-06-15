@@ -41,5 +41,3 @@ type PermissionContext struct {
 	RuleAction  string // The action that triggered (allow/deny/ask)
 	Source      string // Source of the decision: "rule", "agent_default", or "risk_level"
 }
-
-

@@ -338,7 +338,6 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 	return sb.String()
 }
 
-
 func (m *ReplModel) renderSlashSuggestions(width int) string {
 	t := m.theme
 	var lines []string

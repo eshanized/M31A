@@ -70,8 +70,8 @@ type AgentIterationMsg struct {
 
 // AgentToolProgressMsg signals periodic elapsed-time updates while a tool is executing.
 type AgentToolProgressMsg struct {
-	ToolCall   types.ToolCall
-	ElapsedMs  int64
+	ToolCall  types.ToolCall
+	ElapsedMs int64
 }
 
 // AgentToolCallAcc accumulates streaming tool call deltas by index.

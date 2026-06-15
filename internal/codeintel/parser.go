@@ -473,7 +473,7 @@ var (
 	rustPubTypeRe   = regexp.MustCompile(`pub\s+type\s+(\w+)`)
 	rustPubConstRe  = regexp.MustCompile(`pub\s+const\s+(\w+)`)
 	rustFnRe        = regexp.MustCompile(`(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)(?:\s*->\s*([^{]+))?`)
-	rustStructRe = regexp.MustCompile(`(?:pub\s+)?struct\s+(\w+)(?:<[^>]*>)?\s*(?:\{([^}]*)\}|;)`)
+	rustStructRe    = regexp.MustCompile(`(?:pub\s+)?struct\s+(\w+)(?:<[^>]*>)?\s*(?:\{([^}]*)\}|;)`)
 )
 
 func (p *RustParser) Parse(path string, content []byte) (*FileInfo, error) {

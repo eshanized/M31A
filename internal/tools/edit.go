@@ -761,4 +761,3 @@ func diffHunks(a, b []string, lcs [][]int, contextLines int) []string {
 	}
 	return hunks
 }
-

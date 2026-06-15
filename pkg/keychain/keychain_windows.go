@@ -15,6 +15,13 @@ import (
 
 var validServiceNameRe = regexp.MustCompile(`^[a-z]+$`)
 
+func validateService(service string) error {
+	if !validServiceNameRe.MatchString(service) {
+		return ErrKeychainUnavailable
+	}
+	return nil
+}
+
 type windowsKeychain struct{}
 
 // Compile-time interface check

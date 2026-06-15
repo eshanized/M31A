@@ -1098,5 +1098,3 @@ func (m *ConfigModel) scrollToField() {
 func (m *ConfigModel) buildContent() {
 	// No-op: content is now rendered dynamically from cfg in View().
 }
-
-

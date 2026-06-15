@@ -366,6 +366,7 @@ func TestManager_Spawn_NoDispatcher(t *testing.T) {
 			ID:   "test-model",
 			Name: "Test Model",
 		},
+		Registry: newTestRegistry(),
 	})
 	_, _, err := m.Spawn(context.Background(), SpawnRequest{
 		Description: "test",

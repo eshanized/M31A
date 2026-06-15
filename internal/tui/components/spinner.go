@@ -36,7 +36,7 @@ var SpinnerSets = map[string][]string{
 	"grow":     {"▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"},
 	"pulse":    {"◐", "◓", "◑", "◒"},
 	// "orbit" is a smooth braille orbital — good for streaming state
-	"orbit":    {"⠄", "⠆", "⠇", "⠋", "⠙", "⠸", "⠰", "⠠", "⠀"},
+	"orbit": {"⠄", "⠆", "⠇", "⠋", "⠙", "⠸", "⠰", "⠠", "⠀"},
 }
 
 // GetSpinnerFrames returns frames for the given style, defaulting to braille

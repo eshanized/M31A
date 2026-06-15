@@ -32,5 +32,3 @@ func LoadProjectContext(workDir string) (content string, path string) {
 	}
 	return "", ""
 }
-
-

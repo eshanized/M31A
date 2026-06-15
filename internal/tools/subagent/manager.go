@@ -98,6 +98,10 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 		req.MaxTokens = DefaultMaxTokens
 	}
 
+	if m.resolveProvider() == nil {
+		return "", nil, errors.New("subagent: no LLM provider configured")
+	}
+
 	select {
 	case m.sem <- struct{}{}:
 	default:
