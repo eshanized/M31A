@@ -145,6 +145,10 @@ type ReplModel struct {
 	// waveOffset drives the animated wave separator during streaming/thinking.
 	// Incremented on each spinner tick to create a travelling ▁▂▃▄ wave.
 	waveOffset int
+
+	// welcomeRevealCount tracks how many getting-started prompts have been
+	// revealed via the typewriter animation on the welcome screen (max 3).
+	welcomeRevealCount int
 }
 
 // NewReplModel creates a new ReplModel.
