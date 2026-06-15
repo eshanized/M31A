@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -85,6 +86,13 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.SetYOffset(m.viewport.YOffset + step)
 			}
 			cmds = append(cmds, StreamTickCmd())
+		} else if len(m.messages) == 0 && m.welcomeRevealCount < 3 {
+			// Welcome screen typewriter: reveal prompts one-by-one
+			m.welcomeRevealCount++
+			m.renderMessages()
+			cmds = append(cmds, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+				return TickMsg{}
+			}))
 		}
 
 	case ProviderModelsFetchedMsg:
