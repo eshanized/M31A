@@ -98,10 +98,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case StreamDoneMsg:
 		if m.replModel != nil {
-			m.replModel.handleStreamDoneMsg(msg)
+			collapsed := m.replModel.handleStreamDoneMsg(msg)
 			m.checkAutoDream()
 			// Update sidebar with token usage
 			m.updateSidebarUsage()
+			if collapsed > 0 {
+				cmds = append(cmds, m.addToastCmd(
+					fmt.Sprintf("↓ %d tool output(s) collapsed — press Enter to expand", collapsed),
+					"info", 3*time.Second))
+			}
 		}
 		m.streamCancelFn = nil
 	case StreamErrorMsg:
@@ -130,17 +135,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.readAgentCh())
 	case AgentThinkingMsg:
 		if m.replModel != nil {
-			thinkMsg := types.Message{
-				Role: "assistant",
-				Segments: []types.MessageSegment{{
-					Type:      "thinking",
-					Content:   fmt.Sprintf("Agent thinking (iteration %d)…", msg.Iteration),
-					Visible:   true,
-					StartedAt: time.Now(),
-				}},
-				CreatedAt: time.Now(),
+			m.replModel.lastStatus = fmt.Sprintf("⟳ Iteration %d — thinking…", msg.Iteration)
+			m.replModel.thinking = true
+			if m.replModel.thinkingStartAt.IsZero() {
+				m.replModel.thinkingStartAt = time.Now()
 			}
-			m.replModel.AddMessage(thinkMsg)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentToolStartMsg:
@@ -163,6 +162,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.TrackLiveTool(msg.ToolCall.Name, len(m.replModel.Messages())-1)
 		}
 		cmds = append(cmds, m.readAgentCh())
+	case AgentToolProgressMsg:
+		if m.replModel != nil {
+			elapsed := float64(msg.ElapsedMs) / 1000.0
+			m.replModel.lastStatus = fmt.Sprintf("⏳ %s — %.1fs", msg.ToolCall.Name, elapsed)
+		}
+		cmds = append(cmds, m.readAgentCh())
 	case AgentToolDoneMsg:
 		if m.replModel != nil {
 			m.replModel.UpdateLiveTool(msg.ToolCall.Name, msg.Err, msg.DurationMs)
@@ -171,30 +176,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentIterationDoneMsg:
 		if m.replModel != nil {
 			m.replModel.streaming = false
-			iterContent := fmt.Sprintf("**Iteration %d complete** — executing %d tool(s)…", msg.Iteration, msg.ToolCount)
-			iterMsg := StreamDoneMsg{
-				Message: types.Message{
-					Role:    "assistant",
-					Content: iterContent,
-					Segments: []types.MessageSegment{{
-						Type:    "content",
-						Content: iterContent,
-						Visible: true,
-					}},
-				},
-				ModelID:   m.activeModel.ID,
-				SessionID: m.sessionID,
-			}
-			m.replModel.handleStreamDoneMsg(iterMsg)
+			m.replModel.thinking = false
+			m.replModel.thinkingStartAt = time.Time{}
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentIterationMsg:
 		if m.replModel != nil {
-			var toolNames []string
+			var chips []string
 			for _, tc := range msg.ToolCalls {
-				toolNames = append(toolNames, tc.Name)
+				inputSnippet := extractToolInputSnippet(tc)
+				chips = append(chips, tc.Name+"|"+inputSnippet)
 			}
-			iterContent := fmt.Sprintf("**Agent iteration %d** — tools: %s", msg.Iteration, strings.Join(toolNames, ", "))
+			iterContent := fmt.Sprintf("iter:%d:chips:%s", msg.Iteration, strings.Join(chips, ","))
 			iterMsg := types.Message{
 				Role: "assistant",
 				Segments: []types.MessageSegment{{
@@ -210,14 +203,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentDoneMsg:
 		if m.replModel != nil {
 			m.replModel.streaming = false
+			m.replModel.thinking = false
+			m.replModel.thinkingStartAt = time.Time{}
 			doneMsg := StreamDoneMsg{
 				Message:   msg.Message,
 				Usage:     msg.Usage,
 				ModelID:   m.activeModel.ID,
 				SessionID: m.sessionID,
 			}
-			m.replModel.handleStreamDoneMsg(doneMsg)
+			collapsed := m.replModel.handleStreamDoneMsg(doneMsg)
 			m.checkAutoDream()
+			if collapsed > 0 {
+				cmds = append(cmds, m.addToastCmd(
+					fmt.Sprintf("↓ %d tool output(s) collapsed — press Enter to expand", collapsed),
+					"info", 3*time.Second))
+			}
 		}
 		m.streamCancelFn = nil
 		m.agentCh = nil
@@ -226,6 +226,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentErrorMsg:
 		if m.replModel != nil {
 			m.replModel.streaming = false
+			m.replModel.thinking = false
+			m.replModel.thinkingStartAt = time.Time{}
 			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: m.activeModel.ID, ProviderName: m.activeProvider}
 			m.replModel.handleStreamErrorMsg(errMsg)
 		}
@@ -2668,4 +2670,26 @@ func (m *AppState) saveAgentSession() {
 	if err := m.sessionManager.SaveSession(sess); err != nil {
 		slog.Warn("saveAgentSession: failed to save session", "error", err)
 	}
+}
+
+// extractToolInputSnippet returns a short human-readable description of a tool call's input.
+// Extracts the most relevant parameter (path, command, pattern) and truncates to 40 chars.
+func extractToolInputSnippet(tc types.ToolCall) string {
+	var params map[string]any
+	if err := json.Unmarshal(tc.Input, &params); err != nil {
+		return ""
+	}
+	// Priority order for display: path > command > pattern > query > description
+	for _, key := range []string{"path", "command", "pattern", "query", "url"} {
+		if v, ok := params[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				snippet := strings.ReplaceAll(s, "\n", " ")
+				if len(snippet) > 40 {
+					snippet = snippet[:37] + "..."
+				}
+				return snippet
+			}
+		}
+	}
+	return ""
 }
