@@ -56,7 +56,7 @@ func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width i
 
 	trackStyle := lipgloss.NewStyle().Foreground(t.BorderSubtle)
 	thumbStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-	trackChar := trackStyle.Render("░")
+	trackChar := trackStyle.Render("·")
 	thumbChar := thumbStyle.Render("█")
 
 	// Pad or clip lines to exactly vp.Height rows.
