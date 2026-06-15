@@ -94,7 +94,8 @@ func (m *ReplModel) closeActiveSegment() {
 }
 
 // handleStreamDoneMsg finalizes the completed stream.
-func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) {
+// Returns the number of tool cards that were auto-collapsed (for toast notification).
+func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) int {
 	m.closeActiveSegment()
 
 	msg.Message.Segments = m.streamSegments
@@ -118,10 +119,14 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) {
 
 	// Build tool cards from tool calls
 	m.toolCards = make(map[int]*components.ToolCard)
+	collapsedCount := 0
 	for i, tc := range msg.Message.ToolCalls {
 		card := components.NewToolCard(tc, nil, components.ToolRunning, m.theme)
 		if m.cfg != nil && m.cfg.Model.AutoCollapseTools {
 			card.SetCollapsed(true)
+		}
+		if card.IsCollapsed() {
+			collapsedCount++
 		}
 		m.toolCards[i] = card
 	}
@@ -144,6 +149,7 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) {
 
 	m.renderMessages()
 	m.autoScrollConditionally()
+	return collapsedCount
 }
 
 // renderErrorBanner returns a styled error message based on the typed sentinel.
