@@ -95,7 +95,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			return nil, err
 		}
 		provider.SetCommonHeaders(req, c.APIKeyField, c.Version)
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.CatalogClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +228,7 @@ func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	}
 	provider.SetCommonHeaders(req, c.APIKeyField, c.Version)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.CatalogClient.Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}

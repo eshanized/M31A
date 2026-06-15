@@ -20,10 +20,12 @@ var (
 func getSharedTransport() *http.Transport {
 	sharedTransportOnce.Do(func() {
 		sharedTransport = &http.Transport{
-			DialContext:         (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
+			DialContext:           (&net.Dialer{Timeout: types.HTTPDialTimeout}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
 		}
 	})
 	return sharedTransport
@@ -32,14 +34,21 @@ func getSharedTransport() *http.Transport {
 // BaseClient holds fields and methods shared by all provider implementations.
 // Provider-specific clients embed BaseClient and override only Name(),
 // FetchModels(), ChatCompletionStream(), and HealthCheck().
+//
+// Two HTTP clients are maintained:
+//   - HTTPClient: no Timeout, used for long-running SSE streaming requests
+//     where the connection stays open for the entire generation.
+//   - CatalogClient: hard Timeout (FetchModelsTimeout), used for short
+//     catalog and health-check requests that must never block indefinitely.
 type BaseClient struct {
-	APIKeyField  string
-	BaseURLField string
-	HTTPClient   *http.Client
-	Cache        *ModelCache
-	HealthLiveMs int64
-	HealthSlowMs int64
-	Version      string
+	APIKeyField   string
+	BaseURLField  string
+	HTTPClient    *http.Client // streaming — no hard Timeout
+	CatalogClient *http.Client // catalog/health — hard Timeout
+	Cache         *ModelCache
+	HealthLiveMs  int64
+	HealthSlowMs  int64
+	Version       string
 }
 
 // NewBaseClient creates a BaseClient with the given settings.
@@ -56,12 +65,21 @@ func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time
 	if healthSlowMs == 0 {
 		healthSlowMs = types.DefaultHealthSlowMs
 	}
+	transport := getSharedTransport()
 	return BaseClient{
 		APIKeyField:  apiKey,
 		BaseURLField: baseURL,
 		Version:      version,
+		// HTTPClient has no hard Timeout so SSE streams can run indefinitely.
 		HTTPClient: &http.Client{
-			Transport: getSharedTransport(),
+			Transport: transport,
+		},
+		// CatalogClient has a hard wall-clock Timeout for model list / health check
+		// requests. This is the primary defence against the hanging-fetch bug:
+		// even if the server stalls mid-response the request will be cancelled.
+		CatalogClient: &http.Client{
+			Transport: transport,
+			Timeout:   types.FetchModelsTimeout,
 		},
 		Cache:        NewModelCacheWithStale(cacheTTL, cacheStaleTTL),
 		HealthLiveMs: healthLiveMs,
