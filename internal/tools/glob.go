@@ -14,6 +14,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*Glob)(nil)
+
 type Glob struct {
 	workDir string
 }

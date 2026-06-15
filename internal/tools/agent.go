@@ -10,6 +10,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*Agent)(nil)
+
 // Agent is a tool that spawns a parallel subagent to perform an independent
 // task. The parent conversation receives the subagent's ID immediately and
 // can continue issuing other tool calls while the subagent runs.
@@ -154,6 +157,9 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 type dispatcherAdapter struct {
 	d *Dispatcher
 }
+
+// Compile-time interface check
+var _ subagent.ToolDispatcher = (*dispatcherAdapter)(nil)
 
 func (a *dispatcherAdapter) Execute(ctx context.Context, call subagent.ToolCallInput) (subagent.ToolCallOutput, error) {
 	res, err := a.d.Execute(ctx, types.ToolCall{

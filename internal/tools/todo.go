@@ -16,6 +16,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*TodoWrite)(nil)
+
 var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type TodoWrite struct {

@@ -18,6 +18,9 @@ var validServiceName = regexp.MustCompile(`^[a-z]+$`)
 
 type macOSKeychain struct{}
 
+// Compile-time interface check
+var _ Keychain = (*macOSKeychain)(nil)
+
 // New returns a macOS keychain backed by /usr/bin/security CLI.
 func New() (Keychain, error) {
 	return &macOSKeychain{}, nil

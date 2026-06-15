@@ -11,6 +11,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*AskUserQuestion)(nil)
+
 // QuestionRequest represents a question sent from the tool to the TUI.
 type QuestionRequest struct {
 	ID          int64

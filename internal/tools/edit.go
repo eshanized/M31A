@@ -16,6 +16,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*Edit)(nil)
+
 type Edit struct {
 	workDir   string
 	backupDir string

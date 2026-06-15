@@ -11,6 +11,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*FileList)(nil)
+
 type FileList struct {
 	workDir string
 }

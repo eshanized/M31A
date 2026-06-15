@@ -19,6 +19,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*Grep)(nil)
+
 type Grep struct {
 	workDir string
 	hasRg   bool

@@ -23,6 +23,9 @@ var validServiceName = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type linuxKeychain struct{}
 
+// Compile-time interface check
+var _ Keychain = (*linuxKeychain)(nil)
+
 // New returns a Linux keychain backed by D-Bus Secret Service with pass CLI fallback.
 func New() (Keychain, error) {
 	return &linuxKeychain{}, nil

@@ -17,6 +17,9 @@ var validServiceNameRe = regexp.MustCompile(`^[a-z]+$`)
 
 type windowsKeychain struct{}
 
+// Compile-time interface check
+var _ Keychain = (*windowsKeychain)(nil)
+
 // New returns a Windows keychain backed by Windows Credential Manager.
 func New() (Keychain, error) {
 	return &windowsKeychain{}, nil

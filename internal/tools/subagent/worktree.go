@@ -21,6 +21,9 @@ type GitWorktrees struct {
 	Root string
 }
 
+// Compile-time interface check
+var _ WorktreeOps = (*GitWorktrees)(nil)
+
 // IsRepo reports whether parentWorkDir lives inside a git repository.
 func (g *GitWorktrees) IsRepo(parentWorkDir string) bool {
 	return git.New(parentWorkDir).IsRepo()

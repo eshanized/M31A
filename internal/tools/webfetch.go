@@ -18,6 +18,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*WebFetch)(nil)
+
 // Version is the application version used in User-Agent headers.
 // Set via SetVersion() from cmd/m31a/main.go.
 var Version atomic.Value

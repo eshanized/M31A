@@ -13,6 +13,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// Compile-time interface check
+var _ types.Tool = (*FileDelete)(nil)
+
 type FileDelete struct {
 	workDir   string
 	backupDir string
