@@ -175,6 +175,9 @@ type AppState struct {
 	// Resume session ID set at startup (C3)
 	resumeSessionID string
 
+	// File watcher for real-time sidebar refresh
+	fileWatcher *FileWatcher
+
 	// Subagents (parallel child agents with full tool access in own worktrees)
 	subagentManager  *subagent.Manager
 	subagentsModel   *SubagentsModel

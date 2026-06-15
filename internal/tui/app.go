@@ -73,6 +73,8 @@ func (m *AppState) Init() tea.Cmd {
 			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
 			baseCmds = append(baseCmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
 		}
+		// Start file watcher for real-time sidebar refresh
+		baseCmds = append(baseCmds, m.startFileWatcher())
 
 		// Async provider+model enrichment: fetches the model catalog so the REPL
 		// has full model metadata (pricing, context, capabilities) for display.
@@ -105,13 +107,46 @@ func (m *AppState) Init() tea.Cmd {
 		cmds = append(cmds, m.sidebarModel.refreshCmd())
 		cmds = append(cmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
 	}
+	// Start file watcher for real-time sidebar refresh
+	cmds = append(cmds, m.startFileWatcher())
 	return tea.Batch(cmds...)
 }
 
 // ─── Shutdown ─────────────────────────────────────────────────────────────────
 
+// startFileWatcher creates and starts a file watcher for the working directory.
+// The watcher monitors filesystem changes and triggers immediate sidebar refreshes.
+func (m *AppState) startFileWatcher() tea.Cmd {
+	workDir := "."
+	if m.git != nil {
+		workDir = m.git.WorkDir()
+	}
+	if workDir == "" || workDir == "." {
+		return nil
+	}
+	ch := make(chan tea.Msg, 16)
+	fw, err := NewFileWatcher(workDir, ch)
+	if err != nil {
+		slog.Debug("file watcher init failed", "error", err)
+		return nil
+	}
+	m.fileWatcher = fw
+	// Drain the watcher channel: each file change triggers a sidebar refresh
+	return func() tea.Msg {
+		select {
+		case msg := <-fw.Events:
+			return msg
+		case <-m.shutdownCtx.Done():
+			return nil
+		}
+	}
+}
+
 // Shutdown cleanly tears down all background goroutines.
 func (m *AppState) Shutdown() {
+	if m.fileWatcher != nil {
+		m.fileWatcher.Close()
+	}
 	if m.frecentHistory != nil {
 		if err := m.frecentHistory.Save(); err != nil {
 			slog.Warn("failed to save history on shutdown", "error", err)
@@ -347,6 +382,22 @@ func (m *AppState) drainEmitterCmd() tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case msg := <-m.emitterCh:
+			return msg
+		case <-m.shutdownCtx.Done():
+			return nil
+		}
+	}
+}
+
+// drainFileWatcherCmd returns a tea.Cmd that reads one message from the file
+// watcher channel and forwards it to the Bubble Tea update loop.
+func (m *AppState) drainFileWatcherCmd() tea.Cmd {
+	if m.fileWatcher == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case msg := <-m.fileWatcher.Events:
 			return msg
 		case <-m.shutdownCtx.Done():
 			return nil
