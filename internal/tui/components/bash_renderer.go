@@ -3,9 +3,7 @@ package components
 import (
 	"encoding/json"
 	"runtime"
-	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -51,86 +49,20 @@ func (r *BashRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 	}
 	parts := []string{}
 	if !collapsed && output != "" {
-		// Try to apply syntax highlighting for code output
-		highlighted := r.applySyntaxHighlighting(output)
-		parts = append(parts, r.RenderGenericOutput(highlighted, truncated, false, width))
+		lang := DetectLanguage(output)
+		highlighted := HighlightCode(output, lang, r.theme)
+		if truncated {
+			highlighted += "\n" + lipgloss.NewStyle().
+				Foreground(r.theme.Warning).
+				Italic(true).
+				Render("[... output truncated, full output in session log]")
+		}
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(r.theme.TextSecondary).
+			Width(width).
+			Padding(0, 1).
+			Render(highlighted))
 	}
 	parts = append(parts, r.RenderStatus(state, durationMs, width, errMsg))
 	return lipgloss.JoinVertical(lipgloss.Top, parts...)
-}
-
-// applySyntaxHighlighting attempts to apply syntax highlighting to code output
-func (r *BashRenderer) applySyntaxHighlighting(output string) string {
-	// Detect if output looks like code
-	if !looksLikeCode(output) {
-		return output
-	}
-
-	// Detect language from content
-	lang := detectLanguage(output)
-	if lang == "" {
-		return output
-	}
-
-	// Use glamour with Chroma for syntax highlighting
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(80),
-	)
-	if err != nil {
-		return output
-	}
-
-	// Wrap in code block for glamour to highlight
-	codeBlock := "```" + lang + "\n" + output + "\n```"
-	rendered, err := renderer.Render(codeBlock)
-	if err != nil {
-		return output
-	}
-
-	// Remove the code block markers and extra newlines
-	rendered = strings.TrimPrefix(rendered, "```"+lang+"\n")
-	rendered = strings.TrimSuffix(rendered, "\n```")
-	return strings.TrimSpace(rendered)
-}
-
-// looksLikeCode checks if output looks like code
-func looksLikeCode(output string) bool {
-	// Check for common code patterns
-	codeIndicators := []string{
-		"func ", "import ", "package ", "class ", "def ", "function ",
-		"if ", "for ", "while ", "return ", "err := ", "error(",
-		"panic(", "fmt.", "console.", "print(",
-	}
-	for _, indicator := range codeIndicators {
-		if strings.Contains(output, indicator) {
-			return true
-		}
-	}
-	return false
-}
-
-// detectLanguage detects the programming language from code content
-func detectLanguage(output string) string {
-	// Go
-	if strings.Contains(output, "package ") && (strings.Contains(output, "func ") || strings.Contains(output, "import ")) {
-		return "go"
-	}
-	// Python
-	if strings.Contains(output, "def ") && strings.Contains(output, ":") {
-		return "python"
-	}
-	// JavaScript/TypeScript
-	if strings.Contains(output, "function ") || strings.Contains(output, "=>") || strings.Contains(output, "console.") {
-		return "javascript"
-	}
-	// Shell
-	if strings.Contains(output, "$ ") || strings.Contains(output, "#!/") {
-		return "bash"
-	}
-	// JSON
-	if strings.HasPrefix(strings.TrimSpace(output), "{") || strings.HasPrefix(strings.TrimSpace(output), "[") {
-		return "json"
-	}
-	return ""
 }
