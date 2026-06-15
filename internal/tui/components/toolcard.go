@@ -385,9 +385,10 @@ func (c *ToolCard) StartFlash(color lipgloss.Color, dur time.Duration) {
 func (c *ToolCard) MarkCompleted(state ToolState) {
 	c.state = state
 	c.completedAt = time.Now()
-	if state == ToolSuccess {
+	switch state {
+	case ToolSuccess:
 		c.StartFlash(c.theme.Success, 300*time.Millisecond)
-	} else if state == ToolError {
+	case ToolError:
 		c.StartFlash(c.theme.Error, 300*time.Millisecond)
 	}
 }

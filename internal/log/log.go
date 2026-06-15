@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -14,11 +13,6 @@ const (
 	dirPermission  = 0755
 	filePermission = 0644
 	dateFormat     = "2006-01-02"
-)
-
-var (
-	defaultLogger *slog.Logger
-	loggerOnce    sync.Once
 )
 
 func NewLogger(version string) (*slog.Logger, func(), error) {
@@ -57,9 +51,6 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	}
 
 	logger := slog.New(handler)
-	loggerOnce.Do(func() {
-		defaultLogger = logger
-	})
 
 	cleanup := func() {
 		_ = f.Close()

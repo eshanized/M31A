@@ -616,7 +616,7 @@ func generateDiffSummary(path, oldContent, newContent string) string {
 	}
 
 	var out strings.Builder
-	out.WriteString(fmt.Sprintf("--- %s\n+++ %s\n", path, path))
+	fmt.Fprintf(&out, "--- %s\n+++ %s\n", path, path)
 	for _, h := range hunks {
 		out.WriteString(h)
 	}
@@ -746,7 +746,7 @@ func diffHunks(a, b []string, lcs [][]int, contextLines int) []string {
 				newCount++
 			}
 		}
-		hunk.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount))
+		fmt.Fprintf(&hunk, "@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount)
 		for i := hr.start; i <= hr.end; i++ {
 			switch ops[i].op {
 			case diffEqual:
