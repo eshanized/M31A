@@ -357,6 +357,7 @@ func (m *ReplModel) renderMessages() {
 	offsets := make([]int, len(m.messages))
 	lineCount := 0
 
+	prevRole := ""
 	for i, msg := range m.messages {
 		// Skip empty assistant messages with no visible content
 		if msg.Role == "assistant" && msg.Content == "" && len(msg.Segments) == 0 && len(msg.ToolCalls) == 0 {
@@ -365,9 +366,21 @@ func (m *ReplModel) renderMessages() {
 		}
 
 		if i > 0 {
-			// Minimal blank-line separator between messages (no timestamp bar)
-			sb.WriteString("\n")
-			lineCount++
+			// Turn separator: subtle dotted line when role changes
+			if prevRole != "" && msg.Role != prevRole {
+				sepChar := "·"
+				sepLine := lipgloss.NewStyle().
+					Foreground(m.theme.BorderSubtle).
+					Faint(true).
+					Render(strings.Repeat(sepChar, rw/2))
+				sb.WriteString("\n")
+				sb.WriteString(sepLine)
+				sb.WriteString("\n")
+				lineCount += 2
+			} else {
+				sb.WriteString("\n")
+				lineCount++
+			}
 		}
 		offsets[i] = lineCount
 		rendered := m.msgRenderer.RenderMessage(msg, rw)
@@ -379,6 +392,7 @@ func (m *ReplModel) renderMessages() {
 		lineCount += strings.Count(rendered, "\n") + 1
 		sb.WriteString("\n")
 		lineCount++
+		prevRole = msg.Role
 	}
 	m.messageLineOffsets = offsets
 
@@ -427,14 +441,17 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 				}, m.theme, true, -1)
 			return tb.Render(rw)
 		}
-		// Render response with animated cursor
+		// Render response with animated block cursor
 		streamMsg := types.Message{
 			Role:    "assistant",
 			Content: streamContent,
 		}
-		cursorFrame := m.spinner.Peek()
-		streamMsg.Content = streamContent + " " +
-			lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorFrame)
+		// Animated block cursor: alternates between █ and ░ for visibility
+		cursorFrames := []string{"█", "▓", "▒", "░", "▒", "▓"}
+		frameIdx := int(time.Now().UnixMilli()/150) % len(cursorFrames)
+		cursorChar := cursorFrames[frameIdx]
+		streamMsg.Content = streamContent +
+			lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorChar)
 		return m.msgRenderer.RenderMessage(streamMsg, rw)
 	}
 	// Show spinner when streaming but no content yet
