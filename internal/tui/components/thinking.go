@@ -46,13 +46,29 @@ func (b *ThinkingBlock) Render(width int) string {
 	contentWidth := width - 4 // account for padding
 
 	if !b.expanded {
-		// Collapsed: styled capsule showing spinner-like state
+		// Collapsed: styled capsule with content preview
 		durStr := b.Duration()
 		spinner := "⠹" // static thinking indicator; parent spinner provides animation
 		spinnerStyled := lipgloss.NewStyle().Foreground(b.theme.Thinking).Bold(true).Render(spinner)
 		labelStyled := lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(" Thinking · " + durStr)
 
-		inner := spinnerStyled + labelStyled
+		// Content preview: first line truncated to fit
+		preview := ""
+		if b.segment.Content != "" {
+			firstLine := strings.SplitN(b.segment.Content, "\n", 2)[0]
+			firstLine = strings.TrimSpace(firstLine)
+			if firstLine != "" {
+				maxPreview := contentWidth - lipgloss.Width(spinnerStyled) - lipgloss.Width(labelStyled) - 12
+				if maxPreview > 10 {
+					if len(firstLine) > maxPreview {
+						firstLine = firstLine[:maxPreview-1] + "…"
+					}
+					preview = " " + lipgloss.NewStyle().Foreground(b.theme.TextMuted).Faint(true).Render(firstLine)
+				}
+			}
+		}
+
+		inner := spinnerStyled + labelStyled + preview
 
 		// Build capsule: ╭─ [inner] ──────╮
 		innerW := lipgloss.Width(inner)
@@ -64,9 +80,15 @@ func (b *ThinkingBlock) Render(width int) string {
 		if dashW < 1 {
 			dashW = 1
 		}
-		dashes := strings.Repeat("─", dashW)
 
 		capStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+		// Animated dashes: alternate between ╌ and ┄ for a subtle breathing effect
+		dashChar := "╌"
+		if time.Now().UnixMilli()/500%2 == 1 {
+			dashChar = "┄"
+		}
+		dashes := strings.Repeat(dashChar, dashW)
+
 		line := capStyle.Render(prefixRaw) + inner + capStyle.Render(suffixRaw+dashes+"╮")
 
 		return lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(line)
