@@ -68,10 +68,6 @@ func NewLogger(version string) (*slog.Logger, func(), error) {
 	return logger, cleanup, nil
 }
 
-func DefaultLogger() *slog.Logger {
-	return defaultLogger
-}
-
 func rotateLogFiles(logDir, logFile string) error {
 	info, err := os.Stat(logFile)
 	if err != nil {

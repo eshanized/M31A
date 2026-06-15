@@ -137,18 +137,6 @@ func TestNewLogger_InfoLevel_Default(t *testing.T) {
 	}
 }
 
-func TestDefaultLogger_ReturnsNil_BeforeInit(t *testing.T) {
-	// Reset the default logger to test nil case
-	old := defaultLogger
-	defaultLogger = nil
-	defer func() { defaultLogger = old }()
-
-	got := DefaultLogger()
-	if got != nil {
-		t.Errorf("Expected nil default logger before init, got: %v", got)
-	}
-}
-
 func TestRotateLogFiles_RenamesOldFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "m31a.log")

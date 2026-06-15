@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"sync/atomic"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -43,6 +42,4 @@ type PermissionContext struct {
 	Source      string // Source of the decision: "rule", "agent_default", or "risk_level"
 }
 
-type PermissionGate interface {
-	RequestPermission(ctx context.Context, req PermissionRequest) (PermissionResponse, error)
-}
+

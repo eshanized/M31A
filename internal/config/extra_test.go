@@ -10,48 +10,6 @@ import (
 	"time"
 )
 
-// ── FindProjectConfigPath ────────────────────────────────────────────────────
-
-func TestFindProjectConfigPath_FoundInSameDir(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "m31a.toml"), []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	got := FindProjectConfigPath(dir)
-	if got == "" {
-		t.Fatal("expected non-empty path")
-	}
-	if filepath.Base(got) != "m31a.toml" {
-		t.Errorf("expected m31a.toml, got %s", filepath.Base(got))
-	}
-}
-
-func TestFindProjectConfigPath_FoundInParent(t *testing.T) {
-	parent := t.TempDir()
-	if err := os.WriteFile(filepath.Join(parent, "m31a.toml"), []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	child := filepath.Join(parent, "child", "grandchild")
-	if err := os.MkdirAll(child, 0755); err != nil {
-		t.Fatal(err)
-	}
-	got := FindProjectConfigPath(child)
-	if got == "" {
-		t.Fatal("expected non-empty path")
-	}
-	if filepath.Dir(got) != parent {
-		t.Errorf("expected parent dir, got %s", filepath.Dir(got))
-	}
-}
-
-func TestFindProjectConfigPath_NotFound(t *testing.T) {
-	dir := t.TempDir()
-	got := FindProjectConfigPath(dir)
-	if got != "" {
-		t.Errorf("expected empty, got %q", got)
-	}
-}
-
 // ── LocalConfigPath ──────────────────────────────────────────────────────────
 
 func TestLocalConfigPath(t *testing.T) {
@@ -727,41 +685,4 @@ func TestLoadProjectContext_LargeFileTruncated(t *testing.T) {
 	}
 }
 
-// ── ProjectContextMtime ──────────────────────────────────────────────────────
 
-func TestProjectContextMtime_Found(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "AGENTS.md")
-	if err := os.WriteFile(path, []byte("content"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	mtime := ProjectContextMtime(dir)
-	if mtime == 0 {
-		t.Fatal("expected non-zero mtime")
-	}
-}
-
-func TestProjectContextMtime_NotFound(t *testing.T) {
-	dir := t.TempDir()
-	mtime := ProjectContextMtime(dir)
-	if mtime != 0 {
-		t.Errorf("expected 0, got %d", mtime)
-	}
-}
-
-func TestProjectContextMtime_ReturnsNano(t *testing.T) {
-	dir := t.TempDir()
-	// Write a file and verify mtime is in nanoseconds
-	path := filepath.Join(dir, "AGENTS.md")
-	if err := os.WriteFile(path, []byte("content"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	info, _ := os.Stat(path)
-	expected := info.ModTime().UnixNano()
-	got := ProjectContextMtime(dir)
-	if got != expected {
-		t.Errorf("expected %d, got %d", expected, got)
-	}
-}

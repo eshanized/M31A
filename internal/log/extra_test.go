@@ -253,30 +253,6 @@ func TestNewLogger_ErrorLevel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DefaultLogger tests
-// ---------------------------------------------------------------------------
-
-func TestDefaultLogger_ReturnsLogger(t *testing.T) {
-	old := defaultLogger
-	defer func() { defaultLogger = old }()
-
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	logger, cleanup, err := NewLogger("test")
-	if err != nil {
-		t.Fatalf("NewLogger failed: %v", err)
-	}
-	defer cleanup()
-
-	defaultLogger = logger
-	got := DefaultLogger()
-	if got == nil {
-		t.Error("DefaultLogger() returned nil after init")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Log file creation and content
 // ---------------------------------------------------------------------------
 

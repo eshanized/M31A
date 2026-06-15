@@ -136,30 +136,6 @@ type UIConfig struct {
 	ToastMaxVisible   int    `toml:"toast_max_visible"`
 }
 
-// AnimationSpeed represents animation speed setting
-type AnimationSpeed int
-
-const (
-	AnimFast   AnimationSpeed = iota // 50% duration
-	AnimNormal                       // 100% duration
-	AnimSlow                         // 200% duration
-	AnimNone                         // all animations disabled
-)
-
-// ParseAnimationSpeed parses an animation speed string
-func ParseAnimationSpeed(s string) AnimationSpeed {
-	switch s {
-	case "fast":
-		return AnimFast
-	case "slow":
-		return AnimSlow
-	case "none":
-		return AnimNone
-	default:
-		return AnimNormal
-	}
-}
-
 type PermissionsConfig struct {
 	DefaultMode    string                            `toml:"default_mode"`
 	TimeoutSeconds int                               `toml:"timeout_seconds"`

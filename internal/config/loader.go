@@ -214,12 +214,6 @@ func findProjectConfig(cwd string) string {
 	return ""
 }
 
-// FindProjectConfigPath returns the path to a project-level m31a.toml if one
-// exists within max walk depth of cwd. Returns "" if not found.
-func FindProjectConfigPath(cwd string) string {
-	return findProjectConfig(cwd)
-}
-
 // LocalConfigPath returns the path where a new project-level m31a.toml should
 // be created (cwd/m31a.toml).
 func LocalConfigPath() (string, error) {

@@ -33,16 +33,4 @@ func LoadProjectContext(workDir string) (content string, path string) {
 	return "", ""
 }
 
-// ProjectContextMtime returns the modification time of the first available
-// project context file. Returns 0 if none found.
-func ProjectContextMtime(workDir string) int64 {
-	for _, name := range projectContextFiles {
-		full := filepath.Join(workDir, name)
-		info, err := os.Stat(full)
-		if err != nil {
-			continue
-		}
-		return info.ModTime().UnixNano()
-	}
-	return 0
-}
+

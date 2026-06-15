@@ -800,33 +800,6 @@ func TestDefaultGitConfig(t *testing.T) {
 	}
 }
 
-// ── ParseAnimationSpeed Tests ───────────────────────────────────────────────
-
-func TestParseAnimationSpeed(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input string
-		want  AnimationSpeed
-	}{
-		{"fast", AnimFast},
-		{"slow", AnimSlow},
-		{"none", AnimNone},
-		{"normal", AnimNormal},
-		{"", AnimNormal},
-		{"unknown", AnimNormal},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := ParseAnimationSpeed(tt.input)
-			if got != tt.want {
-				t.Errorf("ParseAnimationSpeed(%q) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 // ── WatchConfig Tests ────────────────────────────────────────────────────────
 
 func TestWatchConfig_DetectsChange(t *testing.T) {
