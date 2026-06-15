@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -28,6 +29,8 @@ type StatusBarInfo struct {
 	CwdName          string // basename of working directory
 	GitBranch        string // current git branch
 	SpinnerFrame     string // animated spinner frame (empty = use static char)
+	ContextUsed      int    // tokens used in context window
+	ContextMax       int    // model's max context length (0 = unknown)
 }
 
 // RenderStatusBar renders the status bar line at the bottom of the terminal.
@@ -124,6 +127,9 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 			rightParts = append(rightParts,
 				lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
 		}
+	}
+	if info.ContextMax > 0 && info.ContextUsed > 0 {
+		rightParts = append(rightParts, renderContextRing(info.ContextUsed, info.ContextMax, t))
 	}
 	rightText := strings.Join(rightParts, "  ")
 
@@ -232,4 +238,44 @@ func formatTokenCount(n int) string {
 		return fmt.Sprintf("%.1fK ctx", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d ctx", n)
+}
+
+// renderContextRing renders a compact context window usage bar:
+//
+//	ctx [████░░░░] 42%
+//
+// Color shifts from brand → warning → error as usage increases.
+func renderContextRing(used, total int, t theme.Theme) string {
+	if total <= 0 {
+		return ""
+	}
+	pct := float64(used) / float64(total)
+	if pct > 1.0 {
+		pct = 1.0
+	}
+
+	var barColor lipgloss.Color
+	switch {
+	case pct >= 0.9:
+		barColor = t.Error
+	case pct >= 0.7:
+		barColor = t.Warning
+	default:
+		barColor = t.Brand
+	}
+
+	const segments = 8
+	filled := int(math.Round(pct * segments))
+	if filled > segments {
+		filled = segments
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", segments-filled) + "]"
+
+	return lipgloss.NewStyle().Foreground(barColor).Render(
+		fmt.Sprintf("ctx %s %d%%", bar, int(pct*100)),
+	)
 }
