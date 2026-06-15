@@ -98,6 +98,8 @@ func renderSingleToast(toast Toast, t theme.Theme, index int) string {
 		toastContent = lipgloss.NewStyle().PaddingLeft(offset).Render(toastContent)
 	}
 
+	toastContent = theme.RenderWithShadow(toastContent, t.ShadowColor, 1, 1)
+
 	return toastContent
 }
 
