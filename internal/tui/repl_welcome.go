@@ -307,9 +307,17 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 	nums := []string{"1.", "2.", "3."}
 	var lines []string
 	for i, p := range prompts {
-		numStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(nums[i])
-		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.prompt)
-		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  ·" + p.hint)
+		revealed := i < m.welcomeRevealCount
+		var numStyle, body, hint string
+		if revealed {
+			numStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(nums[i])
+			body = lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.prompt)
+			hint = lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  ·" + p.hint)
+		} else {
+			numStyle = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(nums[i])
+			body = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(" " + p.prompt)
+			hint = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Italic(true).Render("  ·" + p.hint)
+		}
 		lines = append(lines, "  "+numStyle+body+hint)
 	}
 
