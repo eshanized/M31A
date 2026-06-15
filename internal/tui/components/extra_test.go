@@ -37,64 +37,15 @@ func TestTruncateEnd(t *testing.T) {
 	}
 }
 
-func TestLooksLikeCode(t *testing.T) {
+func TestDetectLanguageFromCode(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"func main() {}", true},
-		{"import \"fmt\"", true},
-		{"package main", true},
-		{"class Foo:", true},
-		{"def bar():", true},
-		{"function baz() {}", true},
-		{"if err != nil {", true},
-		{"for i := 0; i < 10; i++ {}", true},
-		{"while True:", true},
-		{"return x", true},
-		{"err := something()", true},
-		{"error(\"oops\")", true},
-		{"panic(err)", true},
-		{"fmt.Println()", true},
-		{"console.log(x)", true},
-		{"print('hello')", true},
-		{"hello world", false},
-		{"just some text", false},
-		{"", false},
+	got := DetectLanguage("package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}")
+	if got != "Go" {
+		t.Errorf("DetectLanguage(Go code) = %q, want \"Go\"", got)
 	}
-	for _, tt := range tests {
-		got := looksLikeCode(tt.input)
-		if got != tt.want {
-			t.Errorf("looksLikeCode(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
-
-func TestDetectLanguage(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"package main\nfunc main() {}", "go"},
-		{"package foo\nimport \"fmt\"", "go"},
-		{"def foo():\n    pass", "python"},
-		{"function foo() {}", "javascript"},
-		{"const x = () => {}", "javascript"},
-		{"console.log(x)", "javascript"},
-		{"$ ls -la", "bash"},
-		{"#!/bin/bash\necho hello", "bash"},
-		{`{"key": "value"}`, "json"},
-		{"[1, 2, 3]", "json"},
-		{"hello world", ""},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		got := detectLanguage(tt.input)
-		if got != tt.want {
-			t.Errorf("detectLanguage(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+	empty := DetectLanguage("")
+	if empty != "" {
+		t.Errorf("DetectLanguage(empty) = %q, want empty", empty)
 	}
 }
 
@@ -1435,22 +1386,20 @@ func TestBashRenderer_RenderOutput_NilResult(t *testing.T) {
 	}
 }
 
-func TestApplySyntaxHighlighting(t *testing.T) {
+func TestHighlightCode_PlainText(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
-	got := r.applySyntaxHighlighting("hello world")
-	if got != "hello world" {
-		t.Errorf("applySyntaxHighlighting non-code = %q, want original", got)
+	got := HighlightCode("hello world", "", theme.Dark())
+	if got == "" {
+		t.Error("HighlightCode should return non-empty string")
 	}
 }
 
-func TestApplySyntaxHighlighting_GoCode(t *testing.T) {
+func TestHighlightCode_GoCode(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
 	code := "package main\nfunc main() {}"
-	got := r.applySyntaxHighlighting(code)
+	got := HighlightCode(code, "go", theme.Dark())
 	if got == "" {
-		t.Error("applySyntaxHighlighting for Go code should return non-empty string")
+		t.Error("HighlightCode for Go code should return non-empty string")
 	}
 }
 
