@@ -196,10 +196,14 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+		retryAfter := provider.GetRetryAfter(resp)
 		_ = resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
 		case http.StatusTooManyRequests:
+			if retryAfter != "" {
+				return nil, fmt.Errorf("%w (retry-after: %s)", m31errors.ErrRateLimited, retryAfter)
+			}
 			return nil, m31errors.ErrRateLimited
 		case http.StatusUnauthorized:
 			return nil, m31errors.ErrInvalidKey

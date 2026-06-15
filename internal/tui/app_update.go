@@ -2568,7 +2568,20 @@ func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
 		return nil
 	}
 
-	result := provider.FindFallbackWithRetryAfter(m.registry, m.activeProvider, "")
+	// Extract Retry-After header from rate-limit errors (embedded by provider clients).
+	retryAfter := ""
+	if origErr != nil {
+		errMsg := origErr.Error()
+		const prefix = "(retry-after: "
+		if idx := strings.Index(errMsg, prefix); idx != -1 {
+			start := idx + len(prefix)
+			if end := strings.Index(errMsg[start:], ")"); end != -1 {
+				retryAfter = errMsg[start : start+end]
+			}
+		}
+	}
+
+	result := provider.FindFallbackWithRetryAfter(m.registry, m.activeProvider, retryAfter)
 	if result.Err != nil {
 		slog.Warn("auto-fallback failed: no healthy fallback provider", "error", result.Err)
 		return m.addToastCmd("Auto-fallback failed: no healthy provider available", "error", 5*time.Second)

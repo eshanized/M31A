@@ -142,10 +142,14 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+		retryAfter := provider.GetRetryAfter(resp)
 		_ = resp.Body.Close()
 		bodyStr := string(bodyBytes)
 		switch resp.StatusCode {
 		case http.StatusTooManyRequests:
+			if retryAfter != "" {
+				return nil, fmt.Errorf("%w (retry-after: %s)", m31errors.ErrRateLimited, retryAfter)
+			}
 			return nil, m31errors.ErrRateLimited
 		case http.StatusUnauthorized:
 			if strings.Contains(bodyStr, "CreditsError") || strings.Contains(bodyStr, "payment") || strings.Contains(bodyStr, "billing") || strings.Contains(bodyStr, "credit") {
