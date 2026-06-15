@@ -132,13 +132,17 @@ func (m *PhaseModelPickerModel) Init() tea.Cmd {
 }
 
 // fetchCmd fetches models for one provider.
+// A hard deadline of FetchModelsTimeout is applied so the goroutine can never
+// block indefinitely when the remote server is slow or unresponsive.
 func (m *PhaseModelPickerModel) fetchCmd(provName string) tea.Cmd {
 	return func() tea.Msg {
 		p, err := m.registry.Get(provName)
 		if err != nil {
 			return modelSelectorLoadedMsg{providerName: provName, err: err}
 		}
-		models, err := p.FetchModels(m.ctx)
+		fetchCtx, cancel := context.WithTimeout(m.ctx, types.FetchModelsTimeout)
+		defer cancel()
+		models, err := p.FetchModels(fetchCtx)
 		return modelSelectorLoadedMsg{providerName: provName, models: models, err: err}
 	}
 }

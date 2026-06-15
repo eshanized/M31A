@@ -98,13 +98,17 @@ func (ms *ModelSelector) Init() tea.Cmd {
 }
 
 // fetchModelsCmd fetches models for a single provider asynchronously.
+// A hard deadline of FetchModelsTimeout is applied so the goroutine can never
+// block indefinitely when the remote server is slow or unresponsive.
 func (ms *ModelSelector) fetchModelsCmd(provName string) tea.Cmd {
 	return func() tea.Msg {
 		p, err := ms.registry.Get(provName)
 		if err != nil {
 			return modelSelectorLoadedMsg{providerName: provName, err: err}
 		}
-		models, err := p.FetchModels(ms.ctx)
+		fetchCtx, cancel := context.WithTimeout(ms.ctx, types.FetchModelsTimeout)
+		defer cancel()
+		models, err := p.FetchModels(fetchCtx)
 		return modelSelectorLoadedMsg{providerName: provName, models: models, err: err}
 	}
 }
