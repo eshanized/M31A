@@ -1,6 +1,6 @@
 <div align="center">
 
-# M31A
+# M31 Autonomous
 
 ### The terminal-native AI coding agent that ships, not just suggests.
 
@@ -16,7 +16,7 @@
 
 ---
 
-M31A is a terminal-based AI coding agent written in Go. Unlike browser-bound assistants, it runs inside your shell, owns the six-phase workflow end-to-end — **Initialize, Discuss, Plan, Execute, Verify, Ship** — and commits verified changes to your git tree. One static binary, zero telemetry, any POSIX shell.
+M31 Autonomous is a terminal-based AI coding agent written in Go. Unlike browser-bound assistants, it runs inside your shell, owns the six-phase workflow end-to-end — **Initialize, Discuss, Plan, Execute, Verify, Ship** — and commits verified changes to your git tree. One static binary, zero telemetry, any POSIX shell.
 
 ```
 $ m31a
@@ -48,11 +48,11 @@ cd M31A
 CGO_ENABLED=0 go build -o m31a ./cmd/m31a
 ```
 
-On first launch, M31A prompts for your OpenRouter or Zen API key. Keys are stored in the OS keychain — **never written to disk in plaintext**.
+On first launch, M31 Autonomous prompts for your OpenRouter or Zen API key. Keys are stored in the OS keychain — **never written to disk in plaintext**.
 
-## Why M31A?
+## Why M31 Autonomous?
 
-| | M31A | Cursor | Aider | Cline |
+| | M31 Autonomous | Cursor | Aider | Cline |
 |---|:---:|:---:|:---:|:---:|
 | Terminal-native (no Electron) | **yes** | no | yes | no |
 | Six-phase workflow engine | **yes** | no | no | no |
@@ -63,7 +63,7 @@ On first launch, M31A prompts for your OpenRouter or Zen API key. Keys are store
 | Static binary, no CGO | **yes** | no | no | no |
 | Telemetry / phone-home | **none** | yes | none | yes |
 
-M31A is the tool you reach for when you want an agent that **owns the loop** — not just an autocomplete with `rm -rf` access.
+M31 Autonomous is the tool you reach for when you want an agent that **owns the loop** — not just an autocomplete with `rm -rf` access.
 
 ## Features
 
@@ -197,7 +197,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for code style, architecture rules, and
 
 ## Security
 
-M31A executes shell commands on your behalf. Every `Bash` tool call is gated by a permission modal (allow / allow always / deny), with a configurable timeout and default `ask` mode. Path traversal, size limits (50MB per session file read), and stream-size caps are enforced at the tool boundary.
+M31 Autonomous executes shell commands on your behalf. Every `Bash` tool call is gated by a permission modal (allow / allow always / deny), with a configurable timeout and default `ask` mode. Path traversal, size limits (50MB per session file read), and stream-size caps are enforced at the tool boundary.
 
 See [`SECURITY.md`](SECURITY.md) to report vulnerabilities. See [`docs/TOOLS.md`](docs/TOOLS.md) for the full tool security model.
 
@@ -210,7 +210,7 @@ See [`SECURITY.md`](SECURITY.md) to report vulnerabilities. See [`docs/TOOLS.md`
 
 ## Star history
 
-If M31A saves you time, [drop a star](https://github.com/eshanized/M31A) — it's the single most effective way to keep the project alive.
+If M31 Autonomous saves you time, [drop a star](https://github.com/eshanized/M31A) — it's the single most effective way to keep the project alive.
 
 [![Star History Chart](https://api.star-history.com/svg?repos=eshanized/M31A&type=Date)](https://star-history.com/#eshanized/M31A&Date)
 

@@ -1,6 +1,6 @@
 # Tools Reference
 
-Tools allow M31A's LLM to interact with the outside world — read files, search code, run commands, and fetch web content.
+Tools allow M31 Autonomous's LLM to interact with the outside world — read files, search code, run commands, and fetch web content.
 
 ---
 

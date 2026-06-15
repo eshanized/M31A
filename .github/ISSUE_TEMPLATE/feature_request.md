@@ -41,7 +41,7 @@ Which phase or screen does this touch?
 
 ### Is this a V1.1+ feature?
 
-M31A v1.0 is core-feature-complete. Features like ghost mode, PiP, subagents, and deferred tools are scoped for V1.1. If your request is in that bucket, label it accordingly.
+M31 Autonomous v1.0 is core-feature-complete. Features like ghost mode, PiP, subagents, and deferred tools are scoped for V1.1. If your request is in that bucket, label it accordingly.
 
 - [ ] This is a V1.1+ feature (non-breaking addition)
 - [ ] This is a V1.x quality-of-life improvement

@@ -20,7 +20,7 @@ go install github.com/eshanized/M31A/cmd/m31a@latest
 ./m31a
 ```
 
-On first run, M31A checks for:
+On first run, M31 Autonomous checks for:
 1. **Config file** — creates `~/.m31a/config.toml` if missing
 2. **API keys** — prompts for key if not found in env/keychain/config
 3. **Provider health** — verifies provider is reachable
@@ -41,11 +41,11 @@ api_key = "sk-or-v1-..."
 ```
 
 ### Option 3: Keychain (recommended)
-Use the `/keychain set` command inside M31A to store the key securely.
+Use the `/keychain set` command inside M31 Autonomous to store the key securely.
 
 ## Basic Usage
 
-1. Launch M31A: `./m31a`
+1. Launch M31 Autonomous: `./m31a`
 2. Type your prompt at the `>` prompt
 3. Press `Enter` to submit
 4. View streaming response in real-time

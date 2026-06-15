@@ -1,8 +1,8 @@
-# M31A Architecture
+# M31 Autonomous Architecture
 
 ## Overview
 
-M31A is a modular AI agent framework built in Go with a Bubble Tea TUI. It routes user prompts through a **six-phase workflow** (`session → auto → dream → bisect → arbitrage → rollback`), selecting models by cost/quality, streaming responses, and maintaining full session history.
+M31 Autonomous is a modular AI agent framework built in Go with a Bubble Tea TUI. It routes user prompts through a **six-phase workflow** (`session → auto → dream → bisect → arbitrage → rollback`), selecting models by cost/quality, streaming responses, and maintaining full session history.
 
 ---
 

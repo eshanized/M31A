@@ -14,7 +14,7 @@ Common issues and their solutions.
    echo $M31A_OPENROUTER_API_KEY
    ```
 2. Verify the key in `~/.m31a/config.toml` is correct
-3. Re-enter via keychain: `/keychain set` inside M31A
+3. Re-enter via keychain: `/keychain set` inside M31 Autonomous
 4. Ensure no trailing whitespace in the key value
 
 ---
@@ -24,7 +24,7 @@ Common issues and their solutions.
 **Problem:** Provider returns no models or list fails.
 
 **Solutions:**
-1. Check provider health by running M31A and checking the header status indicator
+1. Check provider health by running M31 Autonomous and checking the header status indicator
 2. Verify network connectivity to OpenRouter/Zen
 3. Increase model cache TTL if rate-limited:
    ```toml
@@ -44,7 +44,7 @@ Common issues and their solutions.
    ```bash
    m31a --check-config  # (not yet implemented — manually validate)
    ```
-2. Check for unknown keys in config (M31A warns about typos)
+2. Check for unknown keys in config (M31 Autonomous warns about typos)
 3. Verify all `${VAR}` references have corresponding env vars set
 4. Ensure boolean fields use `true`/`false` (not `yes`/`no`)
 5. Config path precedence: `M31A_CONFIG` env → `~/.m31a/config.toml` → defaults
@@ -140,7 +140,7 @@ Common issues and their solutions.
 ## Provider Rate Limited (429)
 
 **Solutions:**
-1. M31A handles backoff automatically (configurable):
+1. M31 Autonomous handles backoff automatically (configurable):
    ```toml
    [features]
    rate_limit_backoff_secs = 120  # Wait 2 minutes before retry
@@ -156,7 +156,7 @@ Common issues and their solutions.
 
 ## Logs
 
-M31A logs to stderr. Set verbosity:
+M31 Autonomous logs to stderr. Set verbosity:
 
 ```bash
 export M31A_LOG_LEVEL=debug   # Most verbose
@@ -170,7 +170,7 @@ export M31A_LOG_FORMAT=json   # Structured JSON logs
 ## Debugging Tips
 
 1. Check version: `m31a --version`
-2. Inspect config at runtime: `/config` inside M31A
+2. Inspect config at runtime: `/config` inside M31 Autonomous
 3. Check provider health endpoint is reachable:
    ```bash
    curl -I https://openrouter.ai/api/v1/models

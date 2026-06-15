@@ -1,6 +1,6 @@
 # Interface Reference
 
-Key interfaces and their implementations across M31A.
+Key interfaces and their implementations across M31 Autonomous.
 
 ---
 

@@ -1,4 +1,4 @@
-# Contributing to M31A
+# Contributing to M31 Autonomous
 
 ## Development Setup
 
@@ -51,7 +51,7 @@ For the full package layout and architectural constraints, see [`docs/ARCHITECTU
 - No V1.1 features (ghost mode, PiP, subagents, deferred tools).
 - No telemetry, analytics, or phone-home behavior.
 
-M31A enforces strict package dependency rules. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph. Additional rules:
+M31 Autonomous enforces strict package dependency rules. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph. Additional rules:
 
 - **Bubble Tea is single-threaded.** All state mutations go through `Update()` only. Never mutate `AppState` from a goroutine. Use `tea.Cmd` and `tea.Msg`.
 - **No CGO.** Binary must be static (`CGO_ENABLED=0`).

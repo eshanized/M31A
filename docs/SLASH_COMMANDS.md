@@ -1,6 +1,6 @@
 # Slash Commands
 
-M31A provides slash commands for runtime actions. Commands are parsed at input and executed before the LLM prompt.
+M31 Autonomous provides slash commands for runtime actions. Commands are parsed at input and executed before the LLM prompt.
 
 ---
 

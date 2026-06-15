@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in M31A isn't working the way it should.
+about: Something in M31 Autonomous isn't working the way it should.
 title: "[bug] "
 labels: bug
 assignees: ''
@@ -29,7 +29,7 @@ What actually happened. Include the exact output, error message, or stack trace.
 
 ### Environment
 
-- **M31A version**: `m31a --version` (or commit SHA if built from source)
+- **M31 Autonomous version**: `m31a --version` (or commit SHA if built from source)
 - **OS**: [e.g. Ubuntu 24.04, macOS 14.5, Windows 11 / WSL2]
 - **Architecture**: [e.g. amd64, arm64]
 - **Go version** (if built from source): `go version`

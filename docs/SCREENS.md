@@ -1,11 +1,11 @@
 # TUI Screen Reference
 
-M31A uses a Bubble Tea TUI with 29 screens. The active screen depends on the current `AppState`.
+M31 Autonomous uses a Bubble Tea TUI with 29 screens. The active screen depends on the current `AppState`.
 
 ---
 
 ## Init Screen (ScreenFirstRun)
-Shown during startup while M31A:
+Shown during startup while M31 Autonomous:
 - Loads configuration (`~/.m31a/config.toml`)
 - Resolves API keys (env → keychain → config)
 - Checks provider health (OpenRouter/Zen)

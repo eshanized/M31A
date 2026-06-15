@@ -1,4 +1,4 @@
-# M31A — Complete Project Context
+# M31 Autonomous — Complete Project Context
 
 > **The terminal-native AI coding agent that ships, not just suggests.**
 
@@ -10,13 +10,13 @@
 
 ---
 
-## 1. What M31A Is
+## 1. What M31 Autonomous Is
 
-M31A is a terminal-based AI coding agent written entirely in Go. Unlike browser-bound assistants, it runs inside your shell and owns a **six-phase workflow end-to-end**: Initialize → Discuss → Plan → Execute → Verify → Ship. Every run ends with a verified git commit and a ledger entry. One static binary, zero telemetry, any POSIX shell.
+M31 Autonomous is a terminal-based AI coding agent written entirely in Go. Unlike browser-bound assistants, it runs inside your shell and owns a **six-phase workflow end-to-end**: Initialize → Discuss → Plan → Execute → Verify → Ship. Every run ends with a verified git commit and a ledger entry. One static binary, zero telemetry, any POSIX shell.
 
 ### Key Differentiators
 
-| Capability | M31A | Cursor | Aider | Cline |
+| Capability | M31 Autonomous | Cursor | Aider | Cline |
 |---|:---:|:---:|:---:|:---:|
 | Terminal-native (no Electron) | **yes** | no | yes | no |
 | Six-phase workflow engine | **yes** | no | no | no |
@@ -66,21 +66,21 @@ M31A is a terminal-based AI coding agent written entirely in Go. Unlike browser-
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          Entry Point                                │
-│  `cmd/m31a/main.go` — CLI flags, config loading, provider wiring   │
+│  `cmd/m31a/main.go` — CLI flags, config loading, provider wiring    │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         TUI Layer (Bubble Tea)                      │
-│  `internal/tui/` — 29 screens, page layout, screen transitions     │
+│  `internal/tui/` — 29 screens, page layout, screen transitions      │
 │                                                                     │
-│  AppState (root) → Screen enum routing → Sub-model Update/View     │
+│  AppState (root) → Screen enum routing → Sub-model Update/View      │
 │  MsgEmitter pattern decouples workflow engine from Bubble Tea       │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     Workflow Engine (6 phases)                       │
+│                     Workflow Engine (6 phases)                      │
 │  `internal/workflow/engine.go` — core orchestrator                  │
 │                                                                     │
 │  Initialize → Discuss → Plan → Execute → Verify → Ship              │
@@ -92,17 +92,17 @@ M31A is a terminal-based AI coding agent written entirely in Go. Unlike browser-
                                │
                     ┌──────────┼──────────┐
                     ▼          ▼          ▼
-┌──────────────────┐ ┌────────────────┐ ┌────────────────────────────┐
+┌───────────────────┐ ┌────────────────┐ ┌────────────────────────────┐
 │  Provider Layer   │ │  Tool Layer    │ │  Packages (domain logic)   │
 │  OpenRouter, Zen  │ │  Bash, Read,   │ │  session, ledger, rollback │
 │  Fallback, SSE    │ │  Write, Glob,  │ │  bisect, taskrunner,       │
 │  Health checks    │ │  Grep, Web     │ │  keychain, autodream,      │
 │                   │ │  Permissions   │ │  arbitrage, history        │
-└────────┬─────────┘ └───────┬────────┘ └────────────┬───────────────┘
-         │                   │                        │
-         ▼                   ▼                        ▼
+└────────┬──────────┘ └───────┬────────┘ └────────────┬───────────────┘
+         │                    │                       │
+         ▼                    ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     Infrastructure Layer                             │
+│                     Infrastructure Layer                            │
 │  git/ config/ errors/ tokens/ codeintel/ fileutil/ log/             │
 │  TOML config, slog logging, atomic I/O, token estimation            │
 └─────────────────────────────────────────────────────────────────────┘
@@ -163,7 +163,7 @@ M31A/
 
 ## 5. Core Workflow Engine
 
-The six-phase workflow is the heart of M31A. Each phase is implemented in a separate file under `internal/workflow/`.
+The six-phase workflow is the heart of M31 Autonomous. Each phase is implemented in a separate file under `internal/workflow/`.
 
 ### Phase 1: Initialize (`initialize.go`)
 - Detects project type, framework, language

@@ -1,6 +1,6 @@
-# internal/tui — M31A Terminal UI
+# internal/tui — M31 Autonomous Terminal UI
 
-This directory implements the Bubble Tea-based terminal user interface for M31A.
+This directory implements the Bubble Tea-based terminal user interface for M31 Autonomous.
 
 ## Package Organization
 

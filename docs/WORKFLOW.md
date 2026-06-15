@@ -1,6 +1,6 @@
 # Six-Phase Workflow
 
-M31A routes every prompt through six phases, giving you cost-optimized, high-quality responses with full traceability.
+M31 Autonomous routes every prompt through six phases, giving you cost-optimized, high-quality responses with full traceability.
 
 ---
 

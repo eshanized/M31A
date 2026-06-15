@@ -1,6 +1,6 @@
 # Keyboard Shortcuts
 
-Default keybindings for M31A's TUI.
+Default keybindings for M31 Autonomous's TUI.
 
 ---
 

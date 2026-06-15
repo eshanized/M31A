@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-M31A follows semantic versioning. Security fixes are applied to the latest minor release and backported to the previous minor release for 90 days.
+M31 Autonomous follows semantic versioning. Security fixes are applied to the latest minor release and backported to the previous minor release for 90 days.
 
 | Version | Supported |
 | ------- | --------- |
@@ -30,14 +30,14 @@ If the issue is accepted, you'll be credited in the release notes (unless you re
 
 ## Security model
 
-M31A is a terminal agent with shell access, so the security posture is intentionally defensive:
+M31 Autonomous is a terminal agent with shell access, so the security posture is intentionally defensive:
 
 - **Permission gating** — the `Bash` tool runs in `ask` mode by default; every invocation requires explicit user approval (`y`/`a`/`n`/`e`). The mode and timeout are configurable in `~/.m31a/config.toml`.
 - **No plaintext secrets** — API keys resolve in order: environment variable → OS keychain → config file. They are never written to disk outside the keychain, never echoed to the TUI, and never included in ledger entries.
 - **Path traversal validation** — the Python compile step in the verify phase, and all `FileRead`/`FileWrite` calls, validate paths against the session working directory.
 - **Size limits** — all session file reads are capped at 50MB (`readFileLimited`), and the LLM response stream enforces `MaxLLMResponseBytes` to prevent memory exhaustion.
 - **Static binary** — `CGO_ENABLED=0` on every release build. No dynamic linking, no hidden native dependencies.
-- **No telemetry** — M31A does not phone home. No analytics, no crash reporting, no usage pings.
+- **No telemetry** — M31 Autonomous does not phone home. No analytics, no crash reporting, no usage pings.
 - **Dependency hygiene** — `govulncheck` runs on every CI build. `go.sum` is committed and verified.
 
 ## Known historical issues

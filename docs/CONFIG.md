@@ -1,6 +1,6 @@
 # Configuration Reference
 
-M31A reads configuration from `~/.m31a/config.toml`. Override with `M31A_CONFIG` environment variable.
+M31 Autonomous reads configuration from `~/.m31a/config.toml`. Override with `M31A_CONFIG` environment variable.
 
 Config loading order (later overrides earlier):
 1. **Defaults** — built-in sane defaults
@@ -26,7 +26,7 @@ api_key = ""                         # Zen API key
 openrouter_base_url = ""             # Custom base URL (default: https://openrouter.ai/api/v1)
 zen_base_url = ""                    # Custom base URL (default: https://api.zen.com/v1)
 openrouter_referer = ""              # HTTP-Referer header (default: https://github.com/eshanized/M31A)
-openrouter_title = ""                # X-Title header (default: M31A)
+openrouter_title = ""                # X-Title header (default: M31 Autonomous)
 
 [model]
 default = ""                         # Default model ID
@@ -132,7 +132,7 @@ max_grep_results = 100               # Max grep search results
 bash_kill_grace_secs = 5             # Grace period before killing bash
 max_backups_per_file = 5             # Max backup copies per file
 webfetch_max_redirects = 3           # Max web fetch redirects
-webfetch_user_agent = "M31A/dev"     # User-Agent for web fetches
+webfetch_user_agent = "M31 Autonomous/dev"     # User-Agent for web fetches
 skip_dirs = [                        # Directories to skip in searches
   ".git", "node_modules", "vendor", "target", "dist", "build"
 ]
@@ -147,7 +147,7 @@ max_entries = 100                    # Max ledger entries
 commit_prefix = "feat"               # Git commit message prefix
 fix_prefix = "fix"                   # Fix commit prefix
 ship_prefix = "chore"                # Ship commit prefix
-user_name = "M31A"                   # Git user name
+user_name = "M31 Autonomous"                   # Git user name
 user_email = "m31a@local"            # Git user email
 
 [verify]
@@ -226,7 +226,7 @@ default = "${M31A_PROVIDER:-openrouter}"
 
 ## Default Config
 
-If no config file exists, M31A uses built-in defaults equivalent to:
+If no config file exists, M31 Autonomous uses built-in defaults equivalent to:
 
 ```toml
 [provider]
@@ -270,7 +270,7 @@ max_grep_results = 100
 bash_kill_grace_secs = 5
 max_backups_per_file = 5
 webfetch_max_redirects = 3
-webfetch_user_agent = "M31A/dev"
+webfetch_user_agent = "M31 Autonomous/dev"
 skip_dirs = [".git", "node_modules", "vendor", "target", "dist", "build"]
 websearch_base_url = "https://search.sagibo.net"
 websearch_enabled = true
@@ -279,7 +279,7 @@ websearch_enabled = true
 commit_prefix = "feat"
 fix_prefix = "fix"
 ship_prefix = "chore"
-user_name = "M31A"
+user_name = "M31 Autonomous"
 user_email = "m31a@local"
 ```
 
@@ -287,4 +287,4 @@ user_email = "m31a@local"
 
 ## Config Hot-Reload
 
-M31A watches `~/.m31a/config.toml` for changes using `fsnotify` (falls back to polling every 5 seconds). Changes are applied without restarting.
+M31 Autonomous watches `~/.m31a/config.toml` for changes using `fsnotify` (falls back to polling every 5 seconds). Changes are applied without restarting.

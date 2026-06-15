@@ -1,6 +1,6 @@
 # Type Reference
 
-Core types used across M31A, defined in `internal/types/`.
+Core types used across M31 Autonomous, defined in `internal/types/`.
 
 ---
 
@@ -266,7 +266,7 @@ const (
     DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
     DefaultZenBaseURL        = "https://api.zen.com/v1"
     DefaultReferer           = "https://github.com/eshanized/M31A"
-    DefaultAppTitle          = "M31A"
+    DefaultAppTitle          = "M31 Autonomous"
     DefaultContextLength     = 128000
     DefaultHealthLiveMs      = 2000
     DefaultHealthSlowMs      = 5000
