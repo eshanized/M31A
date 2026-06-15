@@ -42,16 +42,6 @@ nfpms:
     section: utils
     priority: optional
 
-snapcrafts:
-  - id: m31a-snap
-    name: m31a
-    summary: Terminal-native AI coding agent
-    description: M31 Autonomous is a terminal-based AI coding agent that owns a six-phase workflow end-to-end.
-    base: core22
-    grade: stable
-    confinement: strict
-    license: MIT
-
 scoops:
   - name: m31a
     homepage: https://github.com/eshanized/M31A
