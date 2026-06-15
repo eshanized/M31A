@@ -691,6 +691,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.popScreen())
 
+	// ── Sidebar tick (periodic or file-watcher triggered) ──────────────────────
+	case SidebarRefreshTickMsg:
+		if m.sidebarModel != nil {
+			newSidebar, cmd := m.sidebarModel.Update(msg)
+			m.sidebarModel = newSidebar
+			cmds = append(cmds, cmd)
+		}
+		// Re-register file watcher listener for next event
+		if m.fileWatcher != nil {
+			cmds = append(cmds, m.drainFileWatcherCmd())
+		}
+
 	// ── Sidebar refresh ───────────────────────────────────────────────────────
 	case SidebarRefreshMsg:
 		if m.sidebarModel != nil {
@@ -1723,12 +1735,12 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	// Start a brief transition overlay if this is a real screen change.
 	// Skip for overlays and first-run.
 	skipTransition := screen == ScreenPermission || screen == ScreenDiff ||
-		screen == ScreenFirstRun
+		screen == ScreenFirstRun || screen == ScreenModelSelector
 	if m.screen != screen && !skipTransition {
 		// Eagerly ensure sub-model exists so it's ready when transition completes.
-		m.ensureSubModel(screen)
+		initCmd := m.ensureSubModel(screen)
 		m.StartTransition(screen, "")
-		return StreamTickCmd()
+		return tea.Batch(StreamTickCmd(), initCmd)
 	}
 
 	m.screen = screen
