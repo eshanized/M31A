@@ -30,6 +30,12 @@ import (
 // It is defined separately from the concrete workflow.Engine to allow testing.
 type workflowEngineInterface = WorkflowEngine
 
+// Compile-time interface check
+var _ workflowEngineInterface = (*workflow.Engine)(nil)
+
+// Compile-time interface check for channelEmitter
+var _ workflow.MsgEmitter = (*channelEmitter)(nil)
+
 // AppState is the top-level Bubble Tea model.
 // All state mutations go through Update(). No goroutine may mutate AppState directly.
 type AppState struct {
@@ -177,6 +183,9 @@ type AppState struct {
 
 	// File watcher for real-time sidebar refresh
 	fileWatcher *FileWatcher
+
+	// Config watcher for hot-reload of config.toml
+	configWatcherStop chan struct{}
 
 	// Subagents (parallel child agents with full tool access in own worktrees)
 	subagentManager  *subagent.Manager

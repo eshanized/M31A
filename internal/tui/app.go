@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
@@ -76,6 +77,9 @@ func (m *AppState) Init() tea.Cmd {
 		// Start file watcher for real-time sidebar refresh
 		baseCmds = append(baseCmds, m.startFileWatcher())
 
+		// Start config watcher for hot-reload of config.toml
+		baseCmds = append(baseCmds, m.startConfigWatcher())
+
 		// Async provider+model enrichment: fetches the model catalog so the REPL
 		// has full model metadata (pricing, context, capabilities) for display.
 		if providerCmd := m.syncReplProvider(m.sessionID); providerCmd != nil {
@@ -109,6 +113,9 @@ func (m *AppState) Init() tea.Cmd {
 	}
 	// Start file watcher for real-time sidebar refresh
 	cmds = append(cmds, m.startFileWatcher())
+
+	// Start config watcher for hot-reload of config.toml
+	cmds = append(cmds, m.startConfigWatcher())
 	return tea.Batch(cmds...)
 }
 
@@ -146,6 +153,9 @@ func (m *AppState) startFileWatcher() tea.Cmd {
 func (m *AppState) Shutdown() {
 	if m.fileWatcher != nil {
 		m.fileWatcher.Close()
+	}
+	if m.configWatcherStop != nil {
+		close(m.configWatcherStop)
 	}
 	if m.frecentHistory != nil {
 		if err := m.frecentHistory.Save(); err != nil {
@@ -398,6 +408,31 @@ func (m *AppState) drainFileWatcherCmd() tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case msg := <-m.fileWatcher.Events:
+			return msg
+		case <-m.shutdownCtx.Done():
+			return nil
+		}
+	}
+}
+
+// startConfigWatcher launches a background goroutine that watches the config
+// file for changes and forwards ConfigReloadMsg to the Bubble Tea update loop.
+func (m *AppState) startConfigWatcher() tea.Cmd {
+	if m.configPath == "" {
+		return nil
+	}
+	ch := make(chan config.ConfigReloadMsg, 4)
+	m.configWatcherStop = make(chan struct{})
+	go func() {
+		defer close(ch)
+		config.WatchConfig(m.shutdownCtx, m.configPath, ch)
+	}()
+	return func() tea.Msg {
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
 			return msg
 		case <-m.shutdownCtx.Done():
 			return nil
