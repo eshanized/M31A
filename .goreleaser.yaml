@@ -44,6 +44,9 @@ nfpms:
 
 scoops:
   - name: m31a
+    repository:
+      owner: eshanized
+      name: M31A
     homepage: https://github.com/eshanized/M31A
     description: Terminal-native AI coding agent
     license: MIT
