@@ -112,8 +112,8 @@ func (dm *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (dm *DashboardModel) View() string {
 	t := dm.theme
 	w := dm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	phaseBar := components.WorkflowPhaseBar{

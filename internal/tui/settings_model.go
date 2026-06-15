@@ -210,6 +210,13 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 		s.healthLoading = false
 		return s, nil
 
+	case tea.WindowSizeMsg:
+		s.width = msg.Width
+		s.height = msg.Height
+		// Update input width to match terminal
+		s.editValue.Width = max(20, min(40, msg.Width-12))
+		return s, nil
+
 	case tea.KeyMsg:
 		if s.editing {
 			return s.updateEditing(msg)
@@ -546,16 +553,22 @@ func (s *SettingsModel) saveLocalConfig() (*SettingsModel, tea.Cmd) {
 func (s *SettingsModel) View() string {
 	t := s.theme
 	w := s.width
-
-	navWidth := 20
-	if w < 70 {
-		navWidth = 16
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
+	if w < 30 {
+		return lipgloss.NewStyle().Foreground(t.Warning).
+			Render("Terminal too narrow (need ≥30 cols)")
+	}
+
+	// Nav width: proportional to terminal, 12–20 cols
+	navWidth := max(12, min(20, w/6))
+
 	leftNav := s.renderLeftNav()
 	content := s.renderTabContent()
 	tabNames := []string{"Provider", "Model", "UI", "Keys", "Workflow", "About"}
 	title := tabNames[s.activeTab]
-	contentCard := renderSettingCard(t, title, content, w-navWidth)
+	contentCard := renderSettingCard(t, title, content, max(20, w-navWidth))
 
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top,
 		lipgloss.NewStyle().Width(navWidth).Padding(0, 1).Render(leftNav),
@@ -609,7 +622,15 @@ func (s *SettingsModel) renderFieldRow(f settingsField, idx int) string {
 		cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
 	}
 
-	labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(28)
+	// Label width: ideal 28, scaled down on narrow terminals
+	labelW := 28
+	navW := max(12, min(20, s.width/6))
+	avail := s.width - navW - 10 // cursor(2) + padding(4) + value margin(4)
+	if avail < labelW {
+		labelW = max(10, avail/2)
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(labelW)
 	valStyle := lipgloss.NewStyle().Foreground(t.Text)
 
 	if selected {
@@ -794,12 +815,13 @@ func (s *SettingsModel) renderAboutTab() string {
 func (s *SettingsModel) renderEditBox() string {
 	t := s.theme
 	label := "Editing: " + s.editField
+	// Edit box width: clamped to terminal, never larger than screen
+	editW := min(50, max(30, s.width-8))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 2).
-		Width(50).
-		PaddingLeft(4).
+		Width(editW).
 		Render(lipgloss.JoinVertical(lipgloss.Left,
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(label),
 			s.editValue.View(),

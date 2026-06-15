@@ -84,9 +84,15 @@ type ConfigModel struct {
 func NewConfigModel(t theme.Theme, cfg *config.Config, cfgPath string, w, h int, kc keychain.Keychain) *ConfigModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
-	ti.Width = 50
+	// Width set relative to terminal; will be corrected on first WindowSizeMsg
+	ti.Width = max(20, min(50, w-12))
 
-	vp := viewport.New(w-4, h-8)
+	vpH := h - 8
+	if vpH < 4 {
+		vpH = 4
+	}
+	vpW := max(10, w-4)
+	vp := viewport.New(vpW, vpH)
 	vp.Style = lipgloss.NewStyle().PaddingLeft(0)
 
 	m := &ConfigModel{
@@ -623,12 +629,13 @@ func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width - 4
+		m.viewport.Width = max(10, msg.Width-4)
 		h := msg.Height - 8
-		if h < 1 {
-			h = 1
+		if h < 4 {
+			h = 4
 		}
 		m.viewport.Height = h
+		m.editInput.Width = max(20, min(50, msg.Width-12))
 	}
 
 	var cmd tea.Cmd
@@ -902,7 +909,7 @@ func (m *ConfigModel) renderTabs() string {
 		BorderBottom(true).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(t.Border).
-		Width(m.width-2).
+		Width(max(10, m.width-2)).
 		PaddingLeft(1).
 		Render(bar) + "\n"
 }
@@ -926,7 +933,8 @@ func (m *ConfigModel) renderFields() string {
 	}
 	content := strings.Join(rows, "\n")
 
-	m.viewport.Width = m.width - 4
+	cContentW := max(10, m.width-4)
+	m.viewport.Width = cContentW
 	m.viewport.Height = vpH
 	m.viewport.SetContent(content)
 	m.scrollToField()
@@ -935,7 +943,7 @@ func (m *ConfigModel) renderFields() string {
 	return lipgloss.NewStyle().
 		Border(theme.ThinBorder).
 		BorderForeground(t.Border).
-		Width(m.width-2).
+		Width(max(10, m.width-2)).
 		Margin(0, 1).
 		Render(m.viewport.View())
 }
@@ -950,7 +958,12 @@ func (m *ConfigModel) renderFieldRow(f cfgField, idx int) string {
 		cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
 	}
 
+	// Label width: ideal 34, scaled down on narrow terminals
 	labelW := 34
+	avail := m.width - 10 // cursor(2) + borders(4) + value margin(4)
+	if avail < labelW {
+		labelW = max(10, avail/2)
+	}
 	labelStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(labelW)
 	valStyle := lipgloss.NewStyle().Foreground(t.Text)
 	if selected {
@@ -1017,11 +1030,13 @@ func (m *ConfigModel) renderEditBox() string {
 		m.editInput.View(),
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("↵ confirm   esc cancel"),
 	)
+	// Edit box width: clamped to terminal, max 60, min 30
+	editW := min(60, max(30, m.width-8))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 2).
-		Width(60).
+		Width(editW).
 		MarginLeft(2).
 		Render(inner)
 }

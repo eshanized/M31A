@@ -20,8 +20,9 @@ import (
 // unified PageLayout system: 1-line header + content viewport + 1-line footer.
 func (m *AppState) View() string {
 	if m.width == 0 || m.height == 0 {
-		return lipgloss.Place(80, 24, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Bold(true).Render("M31A"))
+		// Dimensions not yet known — emit empty frame; bubbletea will repaint
+		// on first WindowSizeMsg.
+		return ""
 	}
 
 	t := m.themeManager.Current()
@@ -739,9 +740,17 @@ func (m *AppState) renderQuestionModal() string {
 	if q == nil {
 		return ""
 	}
-	width := m.permModalWidth
-	if width < 40 {
-		width = 60
+
+	// Scale modal width: 2/3 of terminal, between 30 and 80 cols
+	width := m.width * 2 / 3
+	if width < 30 {
+		width = 30
+	}
+	if width > 80 {
+		width = 80
+	}
+	if width > m.width-4 {
+		width = m.width - 4
 	}
 
 	if m.questionModel != nil {

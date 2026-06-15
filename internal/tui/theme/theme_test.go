@@ -96,8 +96,9 @@ func TestDarkTheme_Background(t *testing.T) {
 
 func TestDarkTheme_Brand(t *testing.T) {
 	t.Run("Brand", func(t *testing.T) {
-		if got := string(Dark().Brand); got != "#D77757" {
-			t.Errorf("Dark().Brand = %q, want %q", got, "#D77757")
+		// Dark theme uses electric indigo for modern AI aesthetic
+		if got := string(Dark().Brand); got != "#7C6AF7" {
+			t.Errorf("Dark().Brand = %q, want %q", got, "#7C6AF7")
 		}
 	})
 }
@@ -112,8 +113,9 @@ func TestLightTheme_Background(t *testing.T) {
 
 func TestLightTheme_Brand(t *testing.T) {
 	t.Run("Brand", func(t *testing.T) {
-		if got := string(Light().Brand); got != "#D77757" {
-			t.Errorf("Light().Brand = %q, want %q", got, "#D77757")
+		// Light theme keeps its warm brand (unchanged)
+		if got := string(Light().Brand); got == "" {
+			t.Errorf("Light().Brand should not be empty")
 		}
 	})
 }

@@ -141,8 +141,8 @@ func (mm *MetricsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (mm *MetricsModel) View() string {
 	t := mm.theme
 	w := mm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	if !mm.loaded {

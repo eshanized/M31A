@@ -36,7 +36,7 @@ func (m *ReplModel) renderWelcome() string {
 
 	// 2. Top row — provider card always shown; project card when wide enough
 	var topRow string
-	if availWidth >= 88 {
+	if availWidth >= replWelcomeTwoColThreshold {
 		provCard := m.renderProviderCard(cardW)
 		projCard := m.renderProjectCard(cardW)
 		topRow = lipgloss.JoinHorizontal(lipgloss.Top, provCard, "  ", projCard)
@@ -69,12 +69,14 @@ func (m *ReplModel) renderWelcome() string {
 }
 
 // welcomeCardWidth computes the responsive card width for the welcome screen.
-// Two-column layout requires availWidth >= 88 (2*cardW + spacing).
+// Two-column layout requires availWidth >= replWelcomeTwoColThreshold.
+const replWelcomeTwoColThreshold = 88
+
 func welcomeCardWidth(availWidth int) int {
-	if availWidth >= 88 {
+	if availWidth >= replWelcomeTwoColThreshold {
 		w := (availWidth - 6) / 2
-		if w > 42 {
-			w = 42
+		if w > 60 { // allow wider cards on ultra-wide terminals
+			w = 60
 		}
 		if w < 20 {
 			w = 20
@@ -82,8 +84,8 @@ func welcomeCardWidth(availWidth int) int {
 		return w
 	}
 	w := availWidth - 4
-	if w > 42 {
-		w = 42
+	if w > 60 {
+		w = 60
 	}
 	if w < 20 {
 		w = 20
@@ -133,14 +135,14 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 	t := m.theme
 
 	if m.activeModel == nil || m.activeProvider == "" {
-		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Render("●")
-		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render("No provider configured")
+		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("⚠")
+		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(" No provider configured")
 		subtitle := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("Run /settings to get started")
-		content := lipgloss.JoinVertical(lipgloss.Left, warningDot+" "+title, subtitle)
+		content := lipgloss.JoinVertical(lipgloss.Left, warningDot+title, subtitle)
 		return components.Card{
 			Content: content,
 			Width:   cardWidth,
-			Border:  theme.ThinBorder,
+			Border:  lipgloss.RoundedBorder(),
 			Style:   components.CardWarning,
 			Theme:   t,
 		}.Render()
@@ -206,7 +208,7 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 	return components.Card{
 		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
 		Width:   cardWidth,
-		Border:  theme.ThinBorder,
+		Border:  lipgloss.RoundedBorder(),
 		Style:   components.CardSuccess,
 		Theme:   t,
 	}.Render()
@@ -261,7 +263,7 @@ func (m *ReplModel) renderProjectCard(cardWidth int) string {
 	return components.Card{
 		Content: lipgloss.JoinVertical(lipgloss.Left, parts...),
 		Width:   cardWidth,
-		Border:  theme.ThinBorder,
+		Border:  lipgloss.RoundedBorder(),
 		Style:   components.CardDefault,
 		Theme:   t,
 	}.Render()
@@ -302,15 +304,21 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 		}
 	}
 
+	nums := []string{"1.", "2.", "3."}
 	var lines []string
-	for _, p := range prompts {
-		chevron := lipgloss.NewStyle().Foreground(t.Brand).Render("› ")
-		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(p.prompt)
-		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  " + p.hint)
-		lines = append(lines, "  "+chevron+body+hint)
+	for i, p := range prompts {
+		numStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(nums[i])
+		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.prompt)
+		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  ·" + p.hint)
+		lines = append(lines, "  "+numStyle+body+hint)
 	}
 
-	sep := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", 36))
+	// Separator width tied to card width, not hardcoded
+	sepWidth := cardWidth - 4
+	if sepWidth < 10 {
+		sepWidth = 10
+	}
+	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("─", sepWidth))
 	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("  Type a message, @file, /command, or goal…")
 
@@ -326,13 +334,13 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 	return components.Card{
 		Content: content,
 		Width:   cardWidth,
-		Border:  theme.ThinBorder,
+		Border:  lipgloss.RoundedBorder(),
 		Style:   components.CardDefault,
 		Theme:   t,
 	}.Render()
 }
 
-// renderKeyboardHints renders keyboard shortcut hints as a muted separator-joined line.
+// renderKeyboardHints renders keyboard shortcut hints with branded separator dots.
 func renderKeyboardHints(t theme.Theme) string {
 	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "/help"}
 	parts := make([]string, len(hints))
@@ -343,20 +351,21 @@ func renderKeyboardHints(t theme.Theme) string {
 	return strings.Join(parts, sep)
 }
 
-// renderBottomBar renders a bottom bar showing cwd basename and version.
+// renderBottomBar renders a bottom bar showing cwd basename and version with │ separator.
 func (m *ReplModel) renderBottomBar() string {
 	t := m.theme
 
 	cwdLabel := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(filepath.Base(m.cwd))
+		Render("⌂ " + filepath.Base(m.cwd))
 
 	version := m.version
 	if version == "" {
 		version = "dev"
 	}
-	versionLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render(version)
+	versionLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("v" + version)
+	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" │ ")
 
-	spacer := m.replWidth() - lipgloss.Width(cwdLabel) - lipgloss.Width(versionLabel) - 4
+	spacer := m.replWidth() - lipgloss.Width(cwdLabel) - lipgloss.Width(sep) - lipgloss.Width(versionLabel) - 4
 	if spacer < 0 {
 		spacer = 0
 	}
@@ -364,7 +373,7 @@ func (m *ReplModel) renderBottomBar() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left,
 		"  "+cwdLabel,
 		strings.Repeat(" ", spacer),
-		versionLabel+"  ",
+		sep+versionLabel+"  ",
 	)
 }
 

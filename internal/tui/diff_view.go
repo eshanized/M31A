@@ -13,8 +13,8 @@ import (
 func renderDiffView(dm *DiffModel) string {
 	t := dm.theme
 	w := dm.width
-	if w < 20 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	var parts []string
@@ -46,7 +46,7 @@ func renderDiffView(dm *DiffModel) string {
 }
 
 // renderDiffStats renders the stats row with additions/deletions count and visual bar.
-func renderDiffStats(dm *DiffModel, t theme.Theme, _ int) string {
+func renderDiffStats(dm *DiffModel, t theme.Theme, w int) string {
 	total := dm.additions + dm.deletions
 	if total == 0 {
 		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
@@ -63,8 +63,14 @@ func renderDiffStats(dm *DiffModel, t theme.Theme, _ int) string {
 		Padding(0, 1).Bold(true).
 		Render(fmt.Sprintf("-%d", dm.deletions))
 
-	// Visual ratio bar (max 20 chars)
-	const barWidth = 20
+	// Visual ratio bar: scale to ~1/6 of terminal width, min 10, max 30
+	barWidth := w / 6
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	if barWidth > 30 {
+		barWidth = 30
+	}
 	addBlocks := 0
 	delBlocks := 0
 	if total > 0 {

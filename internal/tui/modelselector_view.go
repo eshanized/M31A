@@ -14,8 +14,8 @@ import (
 func (ms *ModelSelector) renderView() string {
 	t := ms.theme
 	w := ms.width
-	if w < 40 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	// ── Provider filter pills ────────────────────────────────────────────────
@@ -49,7 +49,9 @@ func (ms *ModelSelector) renderView() string {
 
 	// ── Layout: list + detail side by side if wide enough ────────────────────
 	var mainContent string
-	if detailPane != "" && w > 120 {
+	// Side-by-side layout at 120+ cols: list on left (60%), detail on right (40%)
+	const modelSelectorSideBySideThreshold = 120
+	if detailPane != "" && w > modelSelectorSideBySideThreshold {
 		listWidth := w * 3 / 5
 		detailWidth := w * 2 / 5
 		listPane := lipgloss.NewStyle().Width(listWidth).Render(

@@ -57,8 +57,11 @@ func TestViewZeroSize(t *testing.T) {
 	m.width = 0
 	m.height = 0
 	r := m.View()
-	if r == "" {
-		t.Error("View should not be empty for zero size")
+	// When dimensions are not yet known, View() should return "" and wait
+	// for the first tea.WindowSizeMsg before rendering. This is the correct
+	// BubbleTea pattern — an empty initial frame prevents layout artifacts.
+	if r != "" {
+		t.Error("View should return empty string for zero size (dimensions not yet set)")
 	}
 }
 

@@ -15,8 +15,8 @@ import (
 func (rm *ResumeModel) renderResume() string {
 	t := rm.theme
 	w := rm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	// Search input bar

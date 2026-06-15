@@ -63,14 +63,17 @@ func (cq *ConfirmQuitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (cq *ConfirmQuitModel) View() string {
 	t := cq.theme
 	w := cq.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized, not when genuinely narrow
 	}
 
-	// Center the confirmation dialog
-	dialogWidth := 50
-	if w-4 < dialogWidth {
-		dialogWidth = w - 4
+	// Scale dialog width to terminal size: ideal 50, min 24, max 60
+	dialogWidth := w - 4
+	if dialogWidth > 60 {
+		dialogWidth = 60
+	}
+	if dialogWidth < 24 {
+		dialogWidth = 24
 	}
 
 	title := lipgloss.NewStyle().Foreground(t.Warning).Bold(true).

@@ -271,30 +271,37 @@ func (cp *CommandPaletteModel) View() string {
 	if !cp.visible {
 		return ""
 	}
+	if cp.width <= 0 || cp.height <= 0 {
+		return ""
+	}
 	t := cp.theme
 
-	// Palette box (bottom of terminal — ensure room for status bar)
-	paletteWidth := 60
-	if cp.width > 0 && cp.width < paletteWidth+4 {
+	// Palette width: 2/3 of terminal width, min 40, max 72
+	paletteWidth := cp.width * 2 / 3
+	if paletteWidth < 40 {
+		paletteWidth = 40
+	}
+	if paletteWidth > 72 {
+		paletteWidth = 72
+	}
+	if paletteWidth > cp.width-4 {
 		paletteWidth = cp.width - 4
 	}
 
-	// ── Search bar ───────────────────────────────────────────────────────────
+	// ── Search bar ────────────────────────────────────────────────────────────────────────────────────
 	searchLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("> ")
 	searchText := cp.renderHighlightedQuery(t)
 	cursor := lipgloss.NewStyle().Foreground(t.Brand).Render("█")
 	searchBar := searchLabel + searchText + cursor
 
-	// ── Commands grouped by category ─────────────────────────────────────────
-	maxItems := 12
-	if cp.height > 0 {
-		maxItems = cp.height - 8
-		if maxItems < 6 {
-			maxItems = 6
-		}
-		if maxItems > 20 {
-			maxItems = 20
-		}
+	// ── Commands grouped by category ───────────────────────────────────────────────────────────────────
+	// Max items scales with terminal height (available for content)
+	maxItems := cp.height - 8
+	if maxItems < 6 {
+		maxItems = 6
+	}
+	if maxItems > 20 {
+		maxItems = 20
 	}
 	var items []string
 	start := 0
@@ -328,11 +335,11 @@ func (cp *CommandPaletteModel) View() string {
 		items = append(items, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  No commands match"))
 	}
 
-	// ── Footer hint ──────────────────────────────────────────────────────────
+	// ── Footer hint ─────────────────────────────────────────────────────────────────────────────
 	footerHint := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).
 		Render("  ↑↓ navigate  ↵ select  esc close")
 
-	// ── Assemble palette ─────────────────────────────────────────────────────
+	// ── Assemble palette ────────────────────────────────────────────────────────────────────────────────
 	// Use SectionDivider between search and results
 	divider := components.SectionDivider{Width: paletteWidth, Theme: t}.Render()
 

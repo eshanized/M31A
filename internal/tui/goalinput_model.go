@@ -26,8 +26,7 @@ func NewGoalInputModel(t theme.Theme, recentGoals []string) *GoalInputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Describe the goal for this coding session..."
 	ta.Focus()
-	ta.SetWidth(80)
-	ta.SetHeight(6)
+	// Width/height are set by SetDimensions on first WindowSizeMsg
 	ta.CharLimit = 2000
 
 	return &GoalInputModel{
@@ -115,8 +114,8 @@ func (gi *GoalInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model — content only, chrome handled by PageLayout.
 func (gi *GoalInputModel) View() string {
 	w := gi.width
-	if w < 40 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized (not when genuinely narrow)
 	}
 
 	// Textarea — no border, inherits terminal background
@@ -140,6 +139,11 @@ func (gi *GoalInputModel) renderRecent() string {
 	t := gi.theme
 	title := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("Recent goals:")
+	// Truncate goal text relative to actual terminal width
+	maxGoalLen := gi.width - 12
+	if maxGoalLen < 20 {
+		maxGoalLen = 20
+	}
 	var rows []string
 	for i, g := range gi.recentGoals {
 		prefix := "  "
@@ -148,7 +152,7 @@ func (gi *GoalInputModel) renderRecent() string {
 			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
 			style = style.Foreground(t.Brand).Bold(true)
 		}
-		rows = append(rows, fmt.Sprintf("%s%s. %s", prefix, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d", i+1)), style.Render(TruncateWithEllipsis(g, 60))))
+		rows = append(rows, fmt.Sprintf("%s%s. %s", prefix, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d", i+1)), style.Render(TruncateWithEllipsis(g, maxGoalLen))))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		"  "+title, strings.Join(rows, "\n"))

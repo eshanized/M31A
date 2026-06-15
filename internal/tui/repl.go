@@ -75,6 +75,7 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		if m.streaming || m.thinking {
 			m.spinner.Next()
+			m.waveOffset++ // advance the animated input separator wave
 			// Smooth scroll: ease toward target
 			if !m.userScrolled && m.viewport.YOffset < m.smoothScrollTarget {
 				step := (m.smoothScrollTarget - m.viewport.YOffset) / 3

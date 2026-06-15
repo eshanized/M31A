@@ -29,7 +29,7 @@ func renderSettingCard(t theme.Theme, title string, content string, width int) s
 		Border(theme.ThinBorder).
 		BorderForeground(t.Border).
 		Padding(0, 1).
-		Width(width - 4).
+		Width(max(4, width-4)).
 		Render(inner)
 }
 

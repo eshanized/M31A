@@ -40,28 +40,39 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 
 // Render renders the thinking block as a compact inline element:
 //
-// Collapsed:  ▸ Thinking · 1.2s
-// Expanded:   full panel with scrollable content
+// Collapsed:  ╭─ ⠹ Thinking · 1.2s ──────────────────╮
+// Expanded:   full panel with ┃ left-gutter content
 func (b *ThinkingBlock) Render(width int) string {
 	contentWidth := width - 4 // account for padding
 
 	if !b.expanded {
-		// Collapsed: single compact line, no border
+		// Collapsed: styled capsule showing spinner-like state
 		durStr := b.Duration()
-		label := lipgloss.NewStyle().
-			Foreground(b.theme.Thinking).
-			Render("▸ ") +
-			lipgloss.NewStyle().
-				Foreground(b.theme.TextMuted).
-				Render("Thinking · "+durStr)
+		spinner := "⠹" // static thinking indicator; parent spinner provides animation
+		spinnerStyled := lipgloss.NewStyle().Foreground(b.theme.Thinking).Bold(true).Render(spinner)
+		labelStyled := lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(" Thinking · " + durStr)
 
-		return lipgloss.NewStyle().
-			PaddingLeft(2).
-			Width(width).
-			Render(label)
+		inner := spinnerStyled + labelStyled
+
+		// Build capsule: ╭─ [inner] ──────╮
+		innerW := lipgloss.Width(inner)
+		prefixRaw := "╭─ "
+		suffixRaw := " "
+		// trailing dashes fill to contentWidth
+		fixedW := lipgloss.Width(prefixRaw) + innerW + lipgloss.Width(suffixRaw) + 2 // +2 for ╮ and left pad
+		dashW := contentWidth - fixedW
+		if dashW < 1 {
+			dashW = 1
+		}
+		dashes := strings.Repeat("─", dashW)
+
+		capStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+		line := capStyle.Render(prefixRaw) + inner + capStyle.Render(suffixRaw+dashes+"╮")
+
+		return lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(line)
 	}
 
-	// Expanded: panel with header, body content, and footer
+	// Expanded: panel with ┃ left-gutter border + italic thinking content + footer
 
 	// Header line: toggle + "Thinking" + duration
 	headerText := b.Header(contentWidth)

@@ -7,20 +7,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// logo is the ASCII art for M31A.
+// logo is the ASCII art for M31A (compact version for header/sidebar).
 const logo = `  __  _______  __
  /  |/  / __ \/ _/
  / /|_/ / /_/ / _/
  /_/  /_/\____/_/ `
 
-// bigLogo is a larger, bolder block-style logo for the welcome screen.
-// Each line is the same width for clean glow alignment.
-const bigLogo = `  ███╗   ███╗ █████╗ ██████╗  ██████╗ ██╗  ██╗
-  ████╗ ████║██╔══██╗██╔══██╗██╔═══██╗██║  ██║
-  ██╔████╔██║███████║██║  ██║██║   ██║███████║
-  ██║╚██╔╝██║██╔══██║██║  ██║██║   ██║██╔══██║
-  ██║ ╚═╝ ██║██║  ██║██████╔╝╚██████╔╝██║  ██║
-  ╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝`
+// bigLogo is the user-specified large ASCII art logo for the welcome/first-run screens.
+const bigLogo = `___  ___ _____  __    ___  
+|  \/  ||____ |/  |  / _ \ 
+| .  . |    / /` + "`" + `| | / /_\ \
+| |\/| |    \ \ | | |  _  |
+| |  | |.___/ /_| |_| | | |
+\_|  |_/\____/ \___/\_| |_/`
+
+// bigLogoTagline is displayed beneath the big logo in muted text.
+const bigLogoTagline = "autonomous coding agent"
 
 // RenderLogo renders the M31A logo with optional version and bold styling.
 func RenderLogo(version string, bold bool, brandColor lipgloss.Color) string {
@@ -40,10 +42,11 @@ func RenderLogo(version string, bold bool, brandColor lipgloss.Color) string {
 	return lipgloss.JoinVertical(lipgloss.Top, styled...)
 }
 
-// RenderBigLogo renders the large block-style M31A logo, optionally with a
+// RenderBigLogo renders the large ASCII art logo, optionally with a
 // multi-row gradient glow effect beneath it. When glow is true the glow
 // fades from full brand color at the center to transparent at the edges
-// using fade characters (█ ▓ ▒ ░ ·).
+// using fade characters (█ ▓ ▒ ░ ·). The tagline "autonomous coding agent"
+// is always rendered below in muted secondary color.
 func RenderBigLogo(brandColor lipgloss.Color, glow bool) string {
 	lines := strings.Split(bigLogo, "\n")
 	styled := make([]string, len(lines))
@@ -52,11 +55,28 @@ func RenderBigLogo(brandColor lipgloss.Color, glow bool) string {
 	}
 	logoBlock := lipgloss.JoinVertical(lipgloss.Top, styled...)
 
+	// Tagline centered below logo
+	taglineW := len(bigLogoTagline)
+	logoLineW := 0
+	for _, l := range lines {
+		if len(l) > logoLineW {
+			logoLineW = len(l)
+		}
+	}
+	pad := (logoLineW - taglineW) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	tagline := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Italic(true).
+		Render(strings.Repeat(" ", pad) + bigLogoTagline)
+
 	if !glow {
-		return logoBlock
+		return logoBlock + "\n" + tagline
 	}
 
-	return logoBlock + "\n" + RenderLogoGlow(brandColor)
+	return logoBlock + "\n" + tagline + "\n" + RenderLogoGlow(brandColor)
 }
 
 // RenderLogoGlow renders a gradient glow line centered beneath the big logo.

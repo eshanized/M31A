@@ -14,8 +14,8 @@ import (
 func (fr *FirstRunModel) renderFirstRun() string {
 	t := fr.theme
 	w := fr.width
-	if w < 40 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	// Use contentWidth (set by parent to account for sidebar) if available.
@@ -400,7 +400,7 @@ func (fr *FirstRunModel) renderFeatureCard(icon, title, desc string, w int, acce
 		Render(content)
 }
 
-// renderQuickStart renders suggestion prompts with a chevron prefix.
+// renderQuickStart renders numbered suggestion prompts with a brand-colored index.
 func (fr *FirstRunModel) renderQuickStart(width int) string {
 	t := fr.theme
 
@@ -414,12 +414,13 @@ func (fr *FirstRunModel) renderQuickStart(width int) string {
 		"Add error handling to the API layer",
 		"Explain this codebase architecture",
 	}
+	nums := []string{"1.", "2.", "3."}
 
 	var lines []string
-	for _, text := range prompts {
-		chevron := lipgloss.NewStyle().Foreground(t.Brand).Render("› ")
-		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(text)
-		lines = append(lines, "  "+chevron+body)
+	for i, text := range prompts {
+		num := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(nums[i])
+		body := lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + text)
+		lines = append(lines, "  "+num+body)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, "", strings.Join(lines, "\n"))
@@ -474,12 +475,12 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 	// Add 2 back because lipgloss's Width includes the border in its outer
 	// measurement, giving a practical inner budget of w - 10.
 	w := fr.effectiveWidth()
-	if w < 32 {
-		w = 70
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 	innerW := w - 10
 	if innerW < 22 {
-		innerW = 60
+		innerW = 22 // minimum, never inflate above actual w
 	}
 	// Vertical budget: outer box adds border (2) + vertical padding (1+1) = 4,
 	// plus a 2-row safety margin for centerScreen.
@@ -652,7 +653,7 @@ func lookupProviderInfo(id string) providerInfo {
 func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int) string {
 	t := fr.theme
 	if w < 20 {
-		w = 40
+		w = 20 // enforce minimum, never inflate
 	}
 
 	checked := fr.providerChecked[p.ID]
@@ -835,8 +836,8 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 func (fr *FirstRunModel) renderModelPickStep() string {
 	t := fr.theme
 	w := fr.width
-	if w < 40 {
-		w = 70
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 	if fr.contentWidth > 0 {
 		w = fr.contentWidth

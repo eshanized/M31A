@@ -142,8 +142,8 @@ func (dm *DiscussModel) advanceQuestion(answer string) tea.Cmd {
 func (dm *DiscussModel) View() string {
 	t := dm.theme
 	w := dm.width
-	if w < 40 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	if len(dm.questions) == 0 {

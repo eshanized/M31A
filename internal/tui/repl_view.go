@@ -129,8 +129,8 @@ func (m *ReplModel) View() string {
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, m.viewport.Height)
 	}
 
-	// ── Input separator: clean half-block line ──────────────────────────────
-	inputBorder := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("▁", rw))
+	// ── Input separator: animated wave during streaming, clean line when idle ──
+	inputBorder := m.renderWaveSeparator(rw)
 
 	// ── Textarea ───────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
@@ -208,8 +208,8 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 	// Base viewport (messages or welcome content) with scrollbar overlay.
 	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
 
-	// Input separator: clean half-block line
-	inputBorder := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("▁", rw))
+	// Input separator: animated wave during streaming, clean line when idle
+	inputBorder := m.renderWaveSeparator(rw)
 
 	// ── Floating overlays — composited onto the viewport's bottom rows ────
 	var overlays []string
@@ -300,7 +300,39 @@ func compositeOverlaysTop(viewportContent string, overlayLines []string, width, 
 	return strings.Join(lines, "\n")
 }
 
-// renderSlashSuggestions renders the slash command autocomplete dropdown.
+// renderWaveSeparator renders the input area separator.
+// When the agent is idle: a plain ▁▁▁ line in border color.
+// When streaming or thinking: a travelling ▁▂▃▄▃▂▁ wave in brand color.
+func (m *ReplModel) renderWaveSeparator(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	t := m.theme
+
+	if !m.streaming && !m.thinking {
+		// Idle: clean, subtle line
+		return lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("▁", width))
+	}
+
+	// Active: travelling sine-wave using block chars
+	// Wave pattern: ▁▂▃▄▃▂ cycling with waveOffset
+	waveChars := []rune{'▁', '▂', '▃', '▄', '▃', '▂'}
+	waveLen := len(waveChars)
+
+	var sb strings.Builder
+	for i := 0; i < width; i++ {
+		// Position in the wave cycle, offset by position + global offset
+		phase := (i + m.waveOffset) % waveLen
+		if phase < 0 {
+			phase += waveLen
+		}
+		ch := string(waveChars[phase])
+		sb.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
+	}
+	return sb.String()
+}
+
+
 func (m *ReplModel) renderSlashSuggestions(width int) string {
 	t := m.theme
 	var lines []string

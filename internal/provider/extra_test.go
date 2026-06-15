@@ -925,8 +925,8 @@ func TestSSEParserWithContext_CancelBetweenEvents(t *testing.T) {
 }
 
 func TestDefaultStreamTimeout(t *testing.T) {
-	if DefaultStreamTimeout != 5*time.Minute {
-		t.Errorf("DefaultStreamTimeout = %v, want 5m", DefaultStreamTimeout)
+	if DefaultStreamTimeout != 30*time.Second {
+		t.Errorf("DefaultStreamTimeout = %v, want 30s", DefaultStreamTimeout)
 	}
 }
 

@@ -159,8 +159,8 @@ func (hm *HelpModel) SetTheme(t theme.Theme) {
 func (hm *HelpModel) SetDimensions(w, h int) {
 	hm.width = w
 	hm.height = h
-	hm.viewport.Width = w - 4
-	hm.viewport.Height = h - 4
+	hm.viewport.Width = max(10, w-4)
+	hm.viewport.Height = max(4, h-4)
 	hm.viewport.SetContent(hm.renderContent())
 }
 
@@ -173,8 +173,8 @@ func (hm *HelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		hm.width = msg.Width
 		hm.height = msg.Height
-		hm.viewport.Width = msg.Width - 4
-		hm.viewport.Height = msg.Height - 4
+		hm.viewport.Width = max(10, msg.Width-4)
+		hm.viewport.Height = max(4, msg.Height-4)
 		hm.viewport.SetContent(hm.renderContent())
 		return hm, nil
 	case tea.KeyMsg:
@@ -200,13 +200,19 @@ func (hm *HelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (hm *HelpModel) renderContent() string {
 	t := hm.theme
 	w := hm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
+	}
+
+	// Key column: ideal 18, scaled down on narrow terminals
+	keyColW := 18
+	if w < 60 {
+		keyColW = max(10, w/4)
 	}
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
 		Render("M31A Keyboard Shortcuts")
-	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
+	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w-2))
 
 	var sectionParts []string
 	for _, sec := range hm.sections {
@@ -215,7 +221,7 @@ func (hm *HelpModel) renderContent() string {
 		var rows []string
 		for _, item := range sec.items {
 			key := lipgloss.NewStyle().Foreground(t.Brand).
-				Width(18).Render(item[0])
+				Width(keyColW).Render(item[0])
 			desc := lipgloss.NewStyle().Foreground(t.Text).Render(item[1])
 			rows = append(rows, "    "+key+"  "+desc)
 		}

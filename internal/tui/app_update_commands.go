@@ -10,6 +10,8 @@ import (
 	"github.com/eshanized/M31A/internal/codeintel"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
@@ -239,6 +241,12 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 	}
 	msgs := BuildAgentMessages(replMsgs, input)
 
+	// Smart truncation to prevent context overflow
+	if m.activeModel != nil {
+		estimator := tokens.NewEstimator(m.activeModel.ID)
+		msgs, _ = streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
+	}
+
 	ctx, cancel := context.WithCancel(m.shutdownCtx)
 	m.streamCancelFn = cancel
 
@@ -271,6 +279,12 @@ func (m *AppState) sendPlainTextChat(p provider.LLMProvider, input string) tea.C
 		msgs[len(msgs)-1] = userMsg
 	} else {
 		msgs = append(msgs, userMsg)
+	}
+
+	// Smart truncation to prevent context overflow
+	if m.activeModel != nil {
+		estimator := tokens.NewEstimator(m.activeModel.ID)
+		msgs, _ = streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
 	}
 
 	model := m.activeModel

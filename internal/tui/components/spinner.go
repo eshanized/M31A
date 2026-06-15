@@ -19,8 +19,12 @@ type Spinner struct {
 	tick   time.Duration
 }
 
-// OpenCodeFrames is the 10-frame spinner set used across M31A.
+// OpenCodeFrames is the 10-frame braille spinner set used across M31A.
 var OpenCodeFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// ThinkingFrames is the spinner set used for AI thinking state.
+// Identical to OpenCodeFrames — exposed with a semantic name for clarity.
+var ThinkingFrames = OpenCodeFrames
 
 // SpinnerSets provides multiple spinner frame sets for variety
 var SpinnerSets = map[string][]string{
@@ -31,6 +35,8 @@ var SpinnerSets = map[string][]string{
 	"line":     {"|", "/", "-", "\\"},
 	"grow":     {"▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"},
 	"pulse":    {"◐", "◓", "◑", "◒"},
+	// "orbit" is a smooth braille orbital — good for streaming state
+	"orbit":    {"⠄", "⠆", "⠇", "⠋", "⠙", "⠸", "⠰", "⠠", "⠀"},
 }
 
 // GetSpinnerFrames returns frames for the given style, defaulting to braille

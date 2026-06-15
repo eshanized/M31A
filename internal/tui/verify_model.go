@@ -48,7 +48,9 @@ func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationRes
 }
 
 func (vm *VerifyModel) initViewport() {
-	h := vm.height - 6
+	// verifyViewChrome: progressLine(1) + separator(1) + hints(1) + margins(3)
+	const verifyViewChrome = 6
+	h := vm.height - verifyViewChrome
 	if h < 5 {
 		h = 5
 	}

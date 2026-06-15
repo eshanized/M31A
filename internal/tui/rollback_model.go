@@ -106,7 +106,9 @@ func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			rm.confirmReset = ""
 			if len(rm.entries) > 0 {
 				e := rm.entries[rm.cursor]
-				vpH := rm.height - 8
+				// diffChromeHeight accounts for: title + filepath + stats + divider + hints + margins
+				const rollbackDiffChromeH = 8
+				vpH := rm.height - rollbackDiffChromeH
 				if vpH < 3 {
 					vpH = 3
 				}
@@ -162,8 +164,8 @@ func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (rm *RollbackModel) View() string {
 	t := rm.theme
 	w := rm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	if rm.errMsg != "" {
@@ -274,9 +276,11 @@ func (rm *RollbackModel) clampScroll() {
 	}
 }
 
-// listVisibleRows returns how many commit rows fit in the terminal.
+// listVisibleRows returns the number of rows available for the commit list.
 func (rm *RollbackModel) listVisibleRows() int {
-	h := rm.height - 6
+	// chrome: title(1) + header row(1) + footer/hints(2) + margins(2)
+	const rollbackListChromeH = 6
+	h := rm.height - rollbackListChromeH
 	if h < 3 {
 		return 3
 	}

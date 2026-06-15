@@ -131,7 +131,8 @@ func (p *SSEParser) Close() error {
 }
 
 // DefaultStreamTimeout is the maximum time to wait for a single SSE event.
-const DefaultStreamTimeout = 5 * time.Minute
+// Reduced from 5 minutes to 30 seconds to prevent hanging on dead connections.
+const DefaultStreamTimeout = 30 * time.Second
 
 // sseMaxLineLength is the maximum size of a single SSE event line (1MB).
 const sseMaxLineLength = 1024 * 1024

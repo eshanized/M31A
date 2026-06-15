@@ -119,6 +119,7 @@ func AgentLoop(
 
 			// Context pruning: estimate token usage and prune if needed
 			estimatedTokens := estimator.EstimateMessages(messages)
+			threshold70 := int(float64(contextLength) * 0.70)
 			threshold80 := int(float64(contextLength) * 0.80)
 			threshold95 := int(float64(contextLength) * 0.95)
 
@@ -128,8 +129,14 @@ func AgentLoop(
 				return
 			}
 
-			if estimatedTokens > threshold80 {
+			// Progressive pruning: start at 70% to prevent hitting 95%
+			if estimatedTokens > threshold70 {
 				pruneOldToolResults(messages, estimator)
+			}
+
+			// Aggressive pruning at 80%: also prune old assistant messages with large content
+			if estimatedTokens > threshold80 {
+				pruneOldAssistantContent(messages)
 			}
 
 			req := provider.ChatRequest{
@@ -344,6 +351,85 @@ func BuildAgentMessages(replMessages []types.Message, userInput string) []types.
 	return msgs
 }
 
+// TruncateMessagesForLLM smartly truncates message history to fit within
+// the model's context window. Strategy:
+// 1. Keep system messages (first position)
+// 2. Keep the most recent N messages (for context continuity)
+// 3. If still over budget, remove oldest non-critical messages
+// Returns the truncated slice and whether truncation occurred.
+func TruncateMessagesForLLM(messages []types.Message, contextLength int64, estimator *tokens.Estimator) ([]types.Message, bool) {
+	if contextLength <= 0 {
+		contextLength = 128_000
+	}
+
+	// Reserve 20% for response generation
+	maxInputTokens := int(float64(contextLength) * 0.80)
+
+	// Estimate current usage
+	totalTokens := estimator.EstimateMessages(messages)
+	if totalTokens <= maxInputTokens {
+		return messages, false
+	}
+
+	// Smart truncation: keep system prompt + recent messages
+	var systemMsgs []types.Message
+	var otherMsgs []types.Message
+
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			otherMsgs = append(otherMsgs, msg)
+		}
+	}
+
+	// Calculate tokens used by system messages
+	systemTokens := estimator.EstimateMessages(systemMsgs)
+	remainingBudget := maxInputTokens - systemTokens
+
+	if remainingBudget <= 0 {
+		// System messages alone exceed budget - return just system + last message
+		if len(messages) > 0 {
+			return append(systemMsgs, messages[len(messages)-1]), true
+		}
+		return systemMsgs, true
+	}
+
+	// Keep recent messages until budget is exhausted
+	var keptMsgs []types.Message
+	tokensUsed := 0
+
+	// Iterate from most recent to oldest
+	for i := len(otherMsgs) - 1; i >= 0; i-- {
+		msgTokens := estimator.Estimate(otherMsgs[i].Content)
+		// Add overhead for tool calls
+		for _, tc := range otherMsgs[i].ToolCalls {
+			if len(tc.Input) > 0 {
+				msgTokens += estimator.Estimate(string(tc.Input))
+			}
+		}
+
+		if tokensUsed+msgTokens > remainingBudget {
+			break
+		}
+
+		keptMsgs = append(keptMsgs, otherMsgs[i])
+		tokensUsed += msgTokens
+	}
+
+	// Reverse to restore chronological order
+	for i, j := 0, len(keptMsgs)-1; i < j; i, j = i+1, j-1 {
+		keptMsgs[i], keptMsgs[j] = keptMsgs[j], keptMsgs[i]
+	}
+
+	// Combine system + kept messages
+	result := make([]types.Message, 0, len(systemMsgs)+len(keptMsgs))
+	result = append(result, systemMsgs...)
+	result = append(result, keptMsgs...)
+
+	return result, true
+}
+
 // LoadProjectContextForAgent loads AGENTS.md/MEMORY.md context for the given
 // working directory and returns the content string.
 func LoadProjectContextForAgent(cwd string) string {
@@ -352,10 +438,9 @@ func LoadProjectContextForAgent(cwd string) string {
 }
 
 // pruneOldToolResults truncates older tool result messages to reduce token usage.
-// It keeps the last 3 tool results in full and replaces older ones with a short summary.
-func pruneOldToolResults(messages []types.Message, _ *tokens.Estimator) {
+// It keeps the last 3 tool results in full and removes older ones completely.
+func pruneOldToolResults(messages []types.Message, estimator *tokens.Estimator) {
 	const keepRecent = 3
-	const maxToolOutputChars = 500
 
 	var toolIndices []int
 	for i, msg := range messages {
@@ -368,11 +453,37 @@ func pruneOldToolResults(messages []types.Message, _ *tokens.Estimator) {
 		return
 	}
 
+	// Remove older tool messages completely (set content to empty and mark for skip)
 	cutoff := len(toolIndices) - keepRecent
 	for _, idx := range toolIndices[:cutoff] {
+		messages[idx].Content = "[tool result pruned to save context]"
+		messages[idx].SkipForLLM = true
+	}
+}
+
+// pruneOldAssistantContent truncates older assistant messages to reduce token usage.
+// Keeps the last 5 assistant messages in full, truncates older ones.
+func pruneOldAssistantContent(messages []types.Message) {
+	const keepRecent = 5
+	const maxContentChars = 1000
+
+	var assistantIndices []int
+	for i, msg := range messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) == 0 {
+			assistantIndices = append(assistantIndices, i)
+		}
+	}
+
+	if len(assistantIndices) <= keepRecent {
+		return
+	}
+
+	// Truncate older assistant messages
+	cutoff := len(assistantIndices) - keepRecent
+	for _, idx := range assistantIndices[:cutoff] {
 		content := messages[idx].Content
-		if len(content) > maxToolOutputChars {
-			messages[idx].Content = content[:maxToolOutputChars] + "\n...[truncated]"
+		if len(content) > maxContentChars {
+			messages[idx].Content = content[:maxContentChars] + "\n...[truncated to save context]"
 		}
 	}
 }

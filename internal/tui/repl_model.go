@@ -127,6 +127,10 @@ type ReplModel struct {
 	smoothScrollTarget int
 	viewportContent    string // cached viewport content for line counting
 
+	// Incremental rendering cache: avoids full re-render during streaming
+	cachedMessageContent string // cached rendered content of all finalized messages
+	cachedMessageCount   int    // number of messages in the cache
+
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
 
@@ -137,6 +141,10 @@ type ReplModel struct {
 	// Live tool tracking: maps tool name → message index for in-progress agent
 	// loop tool cards, so AgentToolDoneMsg can update them in-place.
 	liveToolIndex map[string]int
+
+	// waveOffset drives the animated wave separator during streaming/thinking.
+	// Incremented on each spinner tick to create a travelling ▁▂▃▄ wave.
+	waveOffset int
 }
 
 // NewReplModel creates a new ReplModel.

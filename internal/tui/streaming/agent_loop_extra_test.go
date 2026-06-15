@@ -269,13 +269,19 @@ func TestPruneOldToolResults_MoreThanThree(t *testing.T) {
 	pruneOldToolResults(messages, nil)
 	// First two should be pruned (indices 0,1), last 3 kept
 	for i := 0; i < 2; i++ {
-		if !strings.HasSuffix(messages[i].Content, "...[truncated]") {
+		if !strings.HasSuffix(messages[i].Content, "pruned to save context]") {
 			t.Errorf("message %d should be pruned", i)
+		}
+		if !messages[i].SkipForLLM {
+			t.Errorf("message %d should have SkipForLLM=true", i)
 		}
 	}
 	for i := 2; i < 5; i++ {
 		if len(messages[i].Content) != 1000 {
 			t.Errorf("message %d should not be pruned", i)
+		}
+		if messages[i].SkipForLLM {
+			t.Errorf("message %d should have SkipForLLM=false", i)
 		}
 	}
 }
@@ -289,10 +295,14 @@ func TestPruneOldToolResults_ShortContent(t *testing.T) {
 		{Role: "tool", Content: "short"},
 	}
 	pruneOldToolResults(messages, nil)
-	// Short content (<500 chars) should not be truncated
-	for i := 0; i < 2; i++ {
+	// Only first message should be pruned (4 messages - 3 keep = 1 pruned)
+	if messages[0].Content != "[tool result pruned to save context]" {
+		t.Errorf("message 0 should be pruned, got %q", messages[0].Content)
+	}
+	// Last 3 should be untouched
+	for i := 1; i < 4; i++ {
 		if messages[i].Content != "short" {
-			t.Errorf("short message %d should not be modified, got %q", i, messages[i].Content)
+			t.Errorf("message %d should not be pruned, got %q", i, messages[i].Content)
 		}
 	}
 }
@@ -308,13 +318,19 @@ func TestPruneOldToolResults_ExactBoundary(t *testing.T) {
 		{Role: "tool", Content: content500},
 	}
 	pruneOldToolResults(messages, nil)
-	// First two (501 chars) should be truncated to 500 + suffix
-	if !strings.HasSuffix(messages[0].Content, "...[truncated]") {
-		t.Error("501-char message should be truncated")
+	// Only first message should be pruned (4 messages - 3 keep = 1 pruned)
+	if messages[0].Content != "[tool result pruned to save context]" {
+		t.Error("first message should be pruned")
 	}
-	// Last two (500 chars) should be untouched
+	// Last 3 should be untouched
+	if messages[1].Content != content501 {
+		t.Error("second message should not be pruned")
+	}
 	if messages[2].Content != content500 {
-		t.Error("500-char message should not be truncated")
+		t.Error("third message should not be pruned")
+	}
+	if messages[3].Content != content500 {
+		t.Error("fourth message should not be pruned")
 	}
 }
 

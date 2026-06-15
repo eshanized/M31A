@@ -82,30 +82,40 @@ func RenderPage(chrome PageChrome, content string, header HeaderInfo, footer Foo
 
 // BuildHeader renders the unified 1-line header bar.
 //
-// Layout: left (brand) · center (breadcrumb) · right (model + provider)
-// Adapts based on breakpoint:
-//   - UltraNarrow: not called (RenderTooNarrow handles this)
-//   - Compact: brand only (left)
-//   - Standard: brand + breadcrumb (left + center)
-//   - Full: brand + breadcrumb + model/provider (all zones)
+// Layout (premium): M31A │ breadcrumb ········ model [provider] [ctx]
+// Uses │ separators and leader dots to create visual depth.
 func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) string {
 	if width < 20 {
 		return strings.Repeat(" ", width)
 	}
 
-	// Left zone: brand
-	left := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(info.Brand)
+	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
+	sepW := 3 // visible width of " │ "
 
-	// Center zone: breadcrumb
-	var center string
+	// Left zone: brand name
+	brand := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(info.Brand)
+	brandW := lipgloss.Width(brand)
+
+	// Center zone: breadcrumb (Standard+)
+	var crumb string
+	crumbW := 0
 	if bp >= Standard && info.Breadcrumb != "" {
-		center = lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.Breadcrumb)
+		crumb = lipgloss.NewStyle().Foreground(t.TextSecondary).Render(info.Breadcrumb)
+		crumbW = lipgloss.Width(crumb)
 	}
 
-	// Right zone: model + provider badge
+	// Right zone: context meter + model + provider (Full only)
 	var right string
+	rightW := 0
 	if bp >= Full {
 		var parts []string
+		// Context meter — show when usage is meaningful
+		if info.CtxTotal > 0 && info.CtxUsed > 0 {
+			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, t)
+			if ctxMeter != "" {
+				parts = append(parts, ctxMeter)
+			}
+		}
 		if info.ModelName != "" {
 			parts = append(parts,
 				lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.ModelName))
@@ -113,65 +123,144 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 		if info.Provider != "" {
 			parts = append(parts, renderProvBadge(t, info.Provider))
 		}
-		right = strings.Join(parts, " ")
+		if len(parts) > 0 {
+			right = strings.Join(parts, " ")
+			rightW = lipgloss.Width(right)
+		}
 	}
 
-	return assembleThreeZone(left, center, right, width)
+	// Compute leader-dot fill between crumb and right zone.
+	// Total line: brand sep crumb dots sep right
+	leftFixed := brandW + sepW + crumbW
+	rightFixed := 0
+	if right != "" {
+		rightFixed = sepW + rightW
+	}
+	fillW := width - leftFixed - rightFixed
+	if fillW < 1 {
+		fillW = 1
+	}
+	dots := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("·", fillW))
+
+	var result string
+	if crumb != "" {
+		result = brand + sep + crumb + dots
+	} else {
+		result = brand + dots
+	}
+	if right != "" {
+		result += sep + right
+	}
+
+	// Final width guard
+	resultW := lipgloss.Width(result)
+	if resultW > width {
+		result = truncateToWidth(result, width)
+	} else if resultW < width {
+		result += strings.Repeat(" ", width-resultW)
+	}
+	return result
+}
+
+// renderContextMeter renders a compact inline context usage bar for the header.
+// Returns empty string when usage is low or total is unknown.
+func renderContextMeter(used, total int, t theme.Theme) string {
+	if total <= 0 || used <= 0 {
+		return ""
+	}
+	pct := float64(used) / float64(total)
+	// Only show meter when usage is notable (>30%)
+	if pct < 0.30 {
+		return ""
+	}
+
+	const barW = 6
+	filled := int(pct * barW)
+	if filled > barW {
+		filled = barW
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	var ctxColor lipgloss.Color
+	switch {
+	case pct >= 0.90:
+		ctxColor = t.Error
+	case pct >= 0.70:
+		ctxColor = t.Warning
+	default:
+		ctxColor = t.TextMuted
+	}
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
+	pctLabel := intToStr(int(pct*100)) + "%"
+	return lipgloss.NewStyle().Foreground(ctxColor).Render(bar + " " + pctLabel)
 }
 
 // BuildFooter renders the unified 1-line footer bar.
 //
-// Layout: left (cwd + branch) · center (operation) · right (hints + cost)
-// Adapts based on breakpoint:
-//   - Compact: cwd only (left)
-//   - Standard: cwd + branch + operation + hints
-//   - Full: all zones including cost
+// Layout (premium): ⌂ cwd ⎇ branch │ ⠹ responding... │ ctrl+p · ctrl+b  $0.02
+// Uses │ separators to create distinct zones with visual weight.
 func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) string {
 	if width < 10 {
 		return strings.Repeat(" ", width)
 	}
 
-	// Left zone: cwd + branch
+	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
+	dotSep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" · ")
+
+	// Left zone: ⌂ cwd  ⎇ branch
 	var leftParts []string
 	if info.Cwd != "" {
 		cwd := info.Cwd
 		if bp < Standard {
-			// Compact: show basename only
 			parts := strings.Split(cwd, "/")
 			cwd = parts[len(parts)-1]
 		}
 		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(cwd))
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("⌂ "+cwd))
 	}
 	if bp >= Standard && info.GitBranch != "" {
 		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render(info.GitBranch))
+			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("⎇ "+info.GitBranch))
 	}
 	left := strings.Join(leftParts, "  ")
 
-	// Center zone: operation status
+	// Center zone: animated operation with spinner
 	var center string
 	if bp >= Compact {
 		switch {
 		case info.LeaderActive:
-			center = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("ctrl+x") +
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render(" waiting")
+			center = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("LEADER") +
+				lipgloss.NewStyle().Foreground(t.TextMuted).Render(" awaiting key")
 		case info.Operation != "":
 			spinner := info.SpinnerFrame
 			if spinner == "" {
-				spinner = "~"
+				spinner = "⋯"
 			}
-			center = t.Spinner.Render(spinner) + " " +
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.Operation)
+			isThinking := strings.HasPrefix(info.Operation, "thinking")
+			var opStyle lipgloss.Style
+			if isThinking {
+				opStyle = lipgloss.NewStyle().Foreground(t.Thinking).Italic(true)
+			} else {
+				opStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+			}
+			spinStyle := lipgloss.NewStyle().Foreground(t.Brand)
+			center = spinStyle.Render(spinner) + " " + opStyle.Render(info.Operation)
 		}
 	}
 
-	// Right zone: hints + cost
+	// Right zone: keyboard hints (dot-separated) + cost
 	var rightParts []string
 	if ShowFooterHints(width) {
+		hintStrs := make([]string, 0, len(info.KeyboardHints))
 		for _, hint := range info.KeyboardHints {
-			rightParts = append(rightParts,
+			hintStrs = append(hintStrs,
 				lipgloss.NewStyle().Foreground(t.TextMuted).Render(hint))
+		}
+		if len(hintStrs) > 0 {
+			rightParts = append(rightParts, strings.Join(hintStrs, dotSep))
 		}
 	}
 	if ShowFooterCost(width) && info.ShowCost && info.TokenCount > 0 {
@@ -190,7 +279,46 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 	}
 	right := strings.Join(rightParts, "  ")
 
-	return assembleThreeZone(left, center, right, width)
+	// Compose with │ separators between non-empty zones
+	var zones []string
+	if left != "" {
+		zones = append(zones, left)
+	}
+	if center != "" {
+		zones = append(zones, center)
+	}
+	if right != "" {
+		zones = append(zones, right)
+	}
+
+	result := strings.Join(zones, sep)
+	resultW := lipgloss.Width(result)
+
+	// Overflow: drop right, then center, then truncate left
+	if resultW > width && right != "" {
+		zones2 := zones[:0]
+		if left != "" {
+			zones2 = append(zones2, left)
+		}
+		if center != "" {
+			zones2 = append(zones2, center)
+		}
+		result = strings.Join(zones2, sep)
+		resultW = lipgloss.Width(result)
+	}
+	if resultW > width && center != "" {
+		result = left
+		resultW = lipgloss.Width(result)
+	}
+	if resultW > width {
+		result = truncateToWidth(result, width)
+		resultW = lipgloss.Width(result)
+	}
+
+	if resultW < width {
+		result += strings.Repeat(" ", width-resultW)
+	}
+	return result
 }
 
 // assembleThreeZone lays out left/center/right content in a single line.
@@ -250,10 +378,11 @@ func assembleThreeZone(left, center, right string, width int) string {
 }
 
 func renderProvBadge(t theme.Theme, provider string) string {
-	short := strings.ToUpper(shortProviderName(provider))
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render("[" + short + "]")
+	short := shortProviderName(provider)
+	// Render as a subtle [tag] with border-colored brackets
+	bracket := lipgloss.NewStyle().Foreground(t.Border).Render
+	text := lipgloss.NewStyle().Foreground(t.TextMuted).Render(short)
+	return bracket("[") + text + bracket("]")
 }
 
 func shortProviderName(name string) string {

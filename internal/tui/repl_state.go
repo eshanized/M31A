@@ -174,6 +174,9 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 	if len(m.messages) > MaxMessageHistory {
 		m.messages = m.messages[len(m.messages)-MaxMessageHistory/2:]
 	}
+	// Invalidate incremental rendering cache when messages change
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
 	if m.userScrolled {
 		m.newMessagesWhileScrolled++
 	}
@@ -184,6 +187,9 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 // SetMessages replaces all messages and re-renders the viewport.
 func (m *ReplModel) SetMessages(msgs []types.Message) {
 	m.messages = msgs
+	// Invalidate incremental rendering cache when messages change
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
 	m.renderMessages()
 	m.autoScrollConditionally()
 }
@@ -210,6 +216,9 @@ func (m *ReplModel) ClearMessages() {
 	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
 	m.toolCards = make(map[int]*components.ToolCard)
 	m.liveToolIndex = make(map[string]int)
+	// Invalidate incremental rendering cache
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
@@ -236,6 +245,9 @@ func (m *ReplModel) updateAutoExpandHeight() {
 	}
 }
 func (m *ReplModel) RefreshViewport() {
+	// Invalidate cache on explicit refresh
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
 	m.renderMessages()
 }
 
@@ -306,8 +318,8 @@ func (m *ReplModel) autoScrollConditionally() {
 }
 
 // renderMessages rebuilds the viewport content from the message list.
-// During streaming, renders are throttled to minRenderInterval to avoid
-// rebuilding the entire viewport on every 100ms tick.
+// During streaming, uses incremental rendering to avoid rebuilding the
+// entire viewport on every 100ms tick.
 func (m *ReplModel) renderMessages() {
 	// Throttle during streaming: skip if rendered too recently
 	if m.streaming || m.thinking {
@@ -330,8 +342,16 @@ func (m *ReplModel) renderMessages() {
 		m.msgRenderer = r
 	}
 
-	var sb strings.Builder
 	rw := m.replWidth()
+
+	// During streaming, use incremental rendering if we have cached content
+	if m.streaming && m.cachedMessageContent != "" && len(m.messages) > 0 {
+		m.renderMessagesIncremental(rw)
+		return
+	}
+
+	// Full render
+	var sb strings.Builder
 
 	// Build a line-offset table so mouse clicks can map Y → message index.
 	offsets := make([]int, len(m.messages))
@@ -362,47 +382,66 @@ func (m *ReplModel) renderMessages() {
 	}
 	m.messageLineOffsets = offsets
 
+	// Cache the rendered messages content for incremental streaming
+	m.cachedMessageContent = sb.String()
+	m.cachedMessageCount = len(m.messages)
+
 	// Append active streaming content
 	if m.streaming || m.thinking {
-		streamContent := m.streamContent.String()
-		if streamContent != "" {
-			streamMsg := types.Message{
-				Role:    "assistant",
-				Content: streamContent,
-			}
-			if m.activeSegmentType == "thinking" {
-				// Render thinking using the full ThinkingBlock component
-				tb := components.NewThinkingBlock(
-					types.MessageSegment{
-						Type:      "thinking",
-						Content:   streamContent,
-						Visible:   true,
-						StartedAt: m.thinkingStartAt,
-					}, m.theme, true, -1)
-				sb.WriteString("\n")
-				sb.WriteString(tb.Render(rw))
-			} else {
-				// Add animated cursor to streaming content
-				cursorFrame := m.spinner.Peek()
-				streamMsg.Content = streamContent + " " +
-					lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorFrame)
-				sb.WriteString("\n")
-				sb.WriteString(m.msgRenderer.RenderMessage(streamMsg, rw))
-			}
-		} else if m.streaming && !m.thinking {
-			spinnerFrame := m.spinner.Peek()
-			generating := lipgloss.NewStyle().
-				Foreground(m.theme.TextMuted).
-				Render("  " + spinnerFrame + " generating response…")
-			sb.WriteString("\n")
-			sb.WriteString(generating)
-		}
+		sb.WriteString("\n")
+		sb.WriteString(m.renderStreamingContent(rw))
 	}
 
 	content := sb.String()
 	m.viewportContent = content
 	m.viewport.SetContent(content)
 	m.lastRenderTime = time.Now()
+}
+
+// renderMessagesIncremental appends only the streaming content to the cached
+// message content, avoiding a full re-render during streaming.
+func (m *ReplModel) renderMessagesIncremental(rw int) {
+	var sb strings.Builder
+	sb.WriteString(m.cachedMessageContent)
+	sb.WriteString("\n")
+	sb.WriteString(m.renderStreamingContent(rw))
+
+	content := sb.String()
+	m.viewportContent = content
+	m.viewport.SetContent(content)
+	m.lastRenderTime = time.Now()
+}
+
+// renderStreamingContent renders the current streaming content (thinking or response).
+func (m *ReplModel) renderStreamingContent(rw int) string {
+	streamContent := m.streamContent.String()
+	if streamContent != "" {
+		if m.activeSegmentType == "thinking" {
+			// Render thinking using the full ThinkingBlock component
+			tb := components.NewThinkingBlock(
+				types.MessageSegment{
+					Type:      "thinking",
+					Content:   streamContent,
+					Visible:   true,
+					StartedAt: m.thinkingStartAt,
+				}, m.theme, true, -1)
+			return tb.Render(rw)
+		}
+		// Render response with animated cursor
+		streamMsg := types.Message{
+			Role:    "assistant",
+			Content: streamContent,
+		}
+		cursorFrame := m.spinner.Peek()
+		streamMsg.Content = streamContent + " " +
+			lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorFrame)
+		return m.msgRenderer.RenderMessage(streamMsg, rw)
+	}
+	// Show spinner when streaming but no content yet
+	spinnerFrame := m.spinner.Peek()
+	return lipgloss.NewStyle().
+		Foreground(m.theme.TextMuted).
+		Render("  " + spinnerFrame + " generating response…")
 }
 
 // TrackLiveTool registers an in-progress agent loop tool card by name,
@@ -442,6 +481,9 @@ func (m *ReplModel) UpdateLiveTool(toolName string, err error, durationMs int64)
 			break
 		}
 	}
+	// Invalidate cache since we modified a message
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
 	m.renderMessages()
 	m.autoScrollConditionally()
 }

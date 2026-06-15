@@ -256,8 +256,9 @@ func TestBuildFooter_LeaderActive(t *testing.T) {
 		LeaderActive: true,
 	}
 	footer := BuildFooter(info, 80, Full, tm)
-	if !strings.Contains(footer, "ctrl+x") {
-		t.Error("Leader active should show 'ctrl+x'")
+	// Footer now shows "LEADER" (not "ctrl+x") when leader key is active
+	if !strings.Contains(footer, "LEADER") {
+		t.Error("Leader active should show 'LEADER'")
 	}
 }
 

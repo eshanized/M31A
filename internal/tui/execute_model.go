@@ -53,7 +53,8 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 			Animated: components.AnimatedProgress{
 				Total: len(tasks),
 			},
-			Width:   10,
+			// Width is set proportionally in View(); initialized to a safe default
+			Width:   max(10, w/5),
 			ShowPct: false,
 			Theme:   t,
 		},
@@ -64,7 +65,9 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 }
 
 func (em *ExecuteModel) initViewport() {
-	h := em.height - 6
+	// executeViewChrome: progressLine(1) + separator(1) + hints(1) + margins(3)
+	const executeViewChrome = 6
+	h := em.height - executeViewChrome
 	if h < 5 {
 		h = 5
 	}
@@ -229,8 +232,13 @@ func (em *ExecuteModel) renderTasks() string {
 		if !em.paused && em.currentTask >= 0 && em.tasks[i].ID == em.tasks[em.currentTask].ID &&
 			task.Status == types.StatusRunning && len(em.liveOutput) > 0 {
 			showLines := em.liveOutput
-			if len(showLines) > 10 {
-				showLines = showLines[len(showLines)-10:]
+			// Cap live output to 1/3 of viewport height, min 3
+			maxLines := em.viewport.Height / 3
+			if maxLines < 3 {
+				maxLines = 3
+			}
+			if len(showLines) > maxLines {
+				showLines = showLines[len(showLines)-maxLines:]
 			}
 			for _, l := range showLines {
 				lines = append(lines, lipgloss.NewStyle().

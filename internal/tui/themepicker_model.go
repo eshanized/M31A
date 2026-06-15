@@ -92,8 +92,14 @@ func (tp *ThemePickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (tp *ThemePickerModel) View() string {
 	t := tp.theme
 	w := tp.width
-	if w < 40 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
+	}
+
+	// Name column: ideal 20, scales down on narrow terminals
+	nameColW := 20
+	if w < 60 {
+		nameColW = max(10, w/4)
 	}
 
 	var lines []string
@@ -108,7 +114,7 @@ func (tp *ThemePickerModel) View() string {
 			lipgloss.NewStyle().Background(lipgloss.Color(preset.Brand)).Render(" ■ ") +
 			lipgloss.NewStyle().Background(lipgloss.Color(preset.Text)).Render(" ■ ")
 
-		nameStyle := lipgloss.NewStyle().Foreground(t.Text).Width(20)
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text).Width(nameColW)
 		if selected {
 			nameStyle = nameStyle.Foreground(t.Brand).Bold(true)
 		}
@@ -122,7 +128,15 @@ func (tp *ThemePickerModel) View() string {
 		lines = append(lines, line)
 	}
 
-	// Preview card
+	// Preview card: clamp width to available terminal space
+	previewW := w - 8
+	if previewW < 20 {
+		previewW = 20
+	}
+	if previewW > 80 {
+		previewW = 80
+	}
+
 	if tp.cursor < len(tp.themes) {
 		p := tp.themes[tp.cursor]
 		previewContent := lipgloss.JoinVertical(lipgloss.Left,
@@ -135,7 +149,7 @@ func (tp *ThemePickerModel) View() string {
 			BorderForeground(lipgloss.Color(p.Brand)).
 			Background(lipgloss.Color(p.Background)).
 			Padding(1, 2).
-			Width(w - 8).
+			Width(previewW).
 			Render(previewContent)
 		lines = append(lines, "", "  "+preview)
 	}

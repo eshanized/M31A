@@ -34,6 +34,7 @@ func (dm *DiffModel) SetTheme(t theme.Theme) {
 }
 
 // diffChromeHeight is the total height of non-viewport chrome in the diff view.
+// Accounts for: title(1) + filePath(1) + stats(1) + divider(1) + hints(1) + margins(3)
 const diffChromeHeight = 8
 
 // SetDimensions updates the diff model dimensions and refreshes the viewport.
@@ -63,15 +64,16 @@ func (dm *DiffModel) SetDiff(diff string) {
 			dm.deletions++
 		}
 	}
-	vpH := dm.height - diffChromeHeight
-	if vpH < 3 {
-		vpH = 3
+	// Only initialize the viewport if dimensions have already been set via
+	// SetDimensions. If not, SetDimensions will apply the content when called.
+	if dm.width > 0 && dm.height > 0 {
+		vpH := dm.height - diffChromeHeight
+		if vpH < 3 {
+			vpH = 3
+		}
+		dm.viewport = viewport.New(dm.width, vpH)
+		dm.viewport.SetContent(colorizeDiff(diff, dm.theme))
 	}
-	if dm.width == 0 {
-		dm.width = 80
-	}
-	dm.viewport = viewport.New(dm.width, vpH)
-	dm.viewport.SetContent(colorizeDiff(diff, dm.theme))
 }
 
 // SetTitle sets the optional title line shown above the diff.
