@@ -17,12 +17,12 @@ require (
 )
 
 require (
+	github.com/alecthomas/chroma v0.10.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/fsnotify/fsnotify v1.10.1
 )
 
 require (
-	github.com/alecthomas/chroma v0.10.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
