@@ -16,6 +16,7 @@ type (
 	AgentStreamMsg        = streaming.AgentStreamMsg
 	AgentToolStartMsg     = streaming.AgentToolStartMsg
 	AgentToolDoneMsg      = streaming.AgentToolDoneMsg
+	AgentToolProgressMsg  = streaming.AgentToolProgressMsg
 	AgentDoneMsg          = streaming.AgentDoneMsg
 	AgentErrorMsg         = streaming.AgentErrorMsg
 	AgentThinkingMsg      = streaming.AgentThinkingMsg
