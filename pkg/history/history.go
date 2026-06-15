@@ -37,7 +37,7 @@ func NewFrecentHistory(filePath string) *FrecentHistory {
 	return fh
 }
 
-// Upsert adds or updates an entry in the history.
+// Upsert adds or updates an entry in the history and persists to disk.
 func (fh *FrecentHistory) Upsert(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -49,6 +49,9 @@ func (fh *FrecentHistory) Upsert(text string) {
 			fh.entries[i].UseCount++
 			fh.entries[i].LastUsed = now
 			fh.entries[i].Score = fh.computeScore(fh.entries[i])
+			if err := fh.Save(); err != nil {
+				slog.Warn("failed to save history after upsert", "error", err)
+			}
 			return
 		}
 	}
@@ -63,6 +66,9 @@ func (fh *FrecentHistory) Upsert(text string) {
 	if len(fh.entries) > 500 {
 		fh.sort()
 		fh.entries = fh.entries[:500]
+	}
+	if err := fh.Save(); err != nil {
+		slog.Warn("failed to save history after upsert", "error", err)
 	}
 }
 
