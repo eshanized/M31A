@@ -60,11 +60,11 @@ func TestHandleUndo_NoSession(t *testing.T) {
 	}
 }
 
-func TestHandleHistory_NoSession(t *testing.T) {
+func TestHandleHistory_NoHistory(t *testing.T) {
 	t.Parallel()
 	result := handleHistory(nil, CommandContext{})
 	if result.Success {
-		t.Error("handleHistory should fail without session")
+		t.Error("handleHistory should fail without FrecentHistory")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/autodream"
+	"github.com/eshanized/M31A/pkg/history"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
@@ -62,6 +63,7 @@ type CommandContext struct {
 	AutoDream       *autodream.Consolidator
 	WorkflowEngine  tuitypes.WorkflowEngine
 	CmdRegistry     *CommandRegistry
+	FrecentHistory  *history.FrecentHistory
 	SubagentManager *subagent.Manager
 	ClearMessages   func()
 	CopyError       func() tea.Cmd
@@ -238,7 +240,7 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("reset", handleReset, "Reset to first-run screen")
 	_ = r.Register("quit", handleQuit, "Exit the application")
 	_ = r.Register("undo", handleUndo, "Show latest checkpoint info")
-	_ = r.Register("history", handleHistory, "Show conversation history")
+	_ = r.Register("history", handleHistory, "Show recent prompt history")
 	_ = r.Register("health", handleHealth, "Show system health status")
 	_ = r.Register("tools", handleTools, "List available tools")
 	_ = r.Register("copy-error", handleCopyError, "Copy last error to clipboard")

@@ -103,23 +103,27 @@ func handleUndo(_ []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: msg}
 }
 
-// handleHistory shows conversation history entry count.
+// handleHistory shows recent prompt history from the frecency tracker.
 func handleHistory(_ []string, ctx CommandContext) CommandResult {
-	if ctx.SessionManager == nil || ctx.SessionID == "" {
-		return CommandResult{Success: false, Message: "No active session."}
+	if ctx.FrecentHistory == nil {
+		return CommandResult{Success: false, Message: "Prompt history not available."}
 	}
-	sess, err := ctx.SessionManager.LoadSession(ctx.SessionID)
-	if err != nil {
-		return CommandResult{Success: false, Message: "Failed to load session."}
+	entries := ctx.FrecentHistory.Search("", 20)
+	if len(entries) == 0 {
+		return CommandResult{Success: true, Message: "No prompt history yet."}
 	}
-	count := 0
-	if sess != nil {
-		count = sess.MessageCount
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "**Prompt history** (%d entries):\n\n", len(entries))
+	for i, e := range entries {
+		text := e.Text
+		if len(text) > 60 {
+			text = text[:57] + "..."
+		}
+		// Replace newlines for single-line display
+		text = strings.ReplaceAll(text, "\n", " ")
+		fmt.Fprintf(&sb, "  %2d. %s\n", i+1, text)
 	}
-	return CommandResult{
-		Success: true,
-		Message: fmt.Sprintf("Session **%s** has **%d** messages in history.", ctx.SessionID, count),
-	}
+	return CommandResult{Success: true, Message: sb.String()}
 }
 
 // handleHealth shows the system health status.
