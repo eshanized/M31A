@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -47,12 +48,9 @@ func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 }
 
 func (r *MessageRenderer) createGlamourRenderer() error {
-	style := glamour.WithStylePath("dark")
-	if r.theme.Mode == theme.ModeLight {
-		style = glamour.WithStylePath("light")
-	}
+	styleConfig := buildGlamourStyle(r.theme)
 	renderer, err := glamour.NewTermRenderer(
-		style,
+		glamour.WithStyles(styleConfig),
 		glamour.WithWordWrap(r.width-GutterWidth),
 	)
 	if err != nil {
@@ -61,6 +59,150 @@ func (r *MessageRenderer) createGlamourRenderer() error {
 	r.renderer = renderer
 	return nil
 }
+
+func strPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool    { return &b }
+
+func buildGlamourStyle(t theme.Theme) ansi.StyleConfig {
+	brand := string(t.Brand)
+	text := string(t.TextPrimary)
+	muted := string(t.TextMuted)
+	bg := string(t.CodeBG)
+	success := string(t.Success)
+	errColor := string(t.Error)
+	warning := string(t.Warning)
+	secondary := string(t.Secondary)
+
+	chromaTheme := "monokai"
+	if t.Mode == theme.ModeLight {
+		chromaTheme = "github"
+	}
+
+	return ansi.StyleConfig{
+		Document: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(text),
+			},
+		},
+		Heading: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(brand),
+				Bold:  boolPtr(true),
+			},
+		},
+		H1: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(brand),
+				Bold:  boolPtr(true),
+			},
+		},
+		H2: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(brand),
+				Bold:  boolPtr(true),
+			},
+		},
+		H3: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(secondary),
+				Bold:  boolPtr(true),
+			},
+		},
+		Paragraph: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(text),
+			},
+		},
+		Text: ansi.StylePrimitive{
+			Color: strPtr(text),
+		},
+		Emph: ansi.StylePrimitive{
+			Color:  strPtr(text),
+			Italic: boolPtr(true),
+		},
+		Strong: ansi.StylePrimitive{
+			Color: strPtr(text),
+			Bold:  boolPtr(true),
+		},
+		HorizontalRule: ansi.StylePrimitive{
+			Color: strPtr(muted),
+		},
+		BlockQuote: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(muted),
+			},
+			Indent:      uintPtr(2),
+			IndentToken: strPtr("│ "),
+		},
+		List: ansi.StyleList{
+			StyleBlock: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color: strPtr(text),
+				},
+			},
+			LevelIndent: 2,
+		},
+		Item: ansi.StylePrimitive{
+			Color: strPtr(text),
+		},
+		Link: ansi.StylePrimitive{
+			Color:     strPtr(brand),
+			Underline: boolPtr(true),
+		},
+		LinkText: ansi.StylePrimitive{
+			Color: strPtr(brand),
+			Bold:  boolPtr(true),
+		},
+		Code: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color:           strPtr(brand),
+				BackgroundColor: strPtr(bg),
+			},
+		},
+		CodeBlock: ansi.StyleCodeBlock{
+			StyleBlock: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr(text),
+					BackgroundColor: strPtr(bg),
+				},
+				Margin: uintPtr(1),
+			},
+			Theme: chromaTheme,
+			Chroma: &ansi.Chroma{
+				GenericDeleted:  ansi.StylePrimitive{Color: strPtr(errColor)},
+				GenericInserted: ansi.StylePrimitive{Color: strPtr(success)},
+				GenericEmph:     ansi.StylePrimitive{Color: strPtr(warning), Italic: boolPtr(true)},
+				GenericStrong:   ansi.StylePrimitive{Color: strPtr(text), Bold: boolPtr(true)},
+			},
+		},
+		Strikethrough: ansi.StylePrimitive{
+			CrossedOut: boolPtr(true),
+		},
+		Table: ansi.StyleTable{
+			StyleBlock: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color: strPtr(text),
+				},
+			},
+		},
+		DefinitionTerm: ansi.StylePrimitive{
+			Color: strPtr(brand),
+			Bold:  boolPtr(true),
+		},
+		DefinitionDescription: ansi.StylePrimitive{
+			Color: strPtr(text),
+		},
+		Task: ansi.StyleTask{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: strPtr(text),
+			},
+			Ticked:   "[✓] ",
+			Unticked: "[ ] ",
+		},
+	}
+}
+
+func uintPtr(u uint) *uint { return &u }
 
 func (r *MessageRenderer) SetWidth(width int) error {
 	if width == r.width {
@@ -106,23 +248,27 @@ func RenderTimestampBarWithSummary(t theme.Theme, ts time.Time, width int, summa
 	return barStyle.Render("── " + timeStr + " ── " + summary)
 }
 
-// renderUserMessage renders a user message with a compact right-aligned bubble.
+// renderUserMessage renders a user message with a distinct right-aligned badge.
 //
 // Layout:
 //
-//	┃ ▸ you
+//	┃ ● you
 //	┃   <content>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
 	borderChar := lipgloss.NewStyle().
-		Foreground(t.TextSecondary).
+		Foreground(t.Secondary).
 		Render("┃")
-	roleLabel := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render(" ▸ you")
-	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
+
+	roleBadge := lipgloss.NewStyle().
+		Foreground(t.Surface).
+		Background(t.Secondary).
+		Bold(true).
+		Padding(0, 1).
+		Render("you")
+	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, " ", roleBadge)
 
 	if msg.Content == "" {
 		return ""
@@ -130,12 +276,13 @@ func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string
 
 	contentStyle := lipgloss.NewStyle().
 		Foreground(t.TextPrimary).
+		Background(t.Surface).
 		PaddingLeft(2).
 		Width(contentWidth - 2).
 		MaxWidth(contentWidth - 2)
 
 	contentLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(t.TextSecondary).Render("┃"),
+		lipgloss.NewStyle().Foreground(t.Secondary).Render("┃"),
 		contentStyle.Render(msg.Content),
 	)
 
@@ -154,8 +301,17 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
-	borderChar := lipgloss.NewStyle().Foreground(t.Brand).Render("┃")
-	roleLabel := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(" ◆")
+	// Ambient border temperature: gutter color reflects message content
+	gutterColor := t.Brand
+	for _, seg := range msg.Segments {
+		if seg.Type == "error" {
+			gutterColor = t.Error
+			break
+		}
+	}
+
+	borderChar := lipgloss.NewStyle().Foreground(gutterColor).Render("┃")
+	roleLabel := lipgloss.NewStyle().Foreground(gutterColor).Bold(true).Render(" ◆")
 	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, roleLabel)
 
 	// Render segments
@@ -214,8 +370,30 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		}
 	}
 
-	// Collapse tool-only messages into a compact summary
+	// Tool-only messages: render each tool as a proper inline card
 	if !hasContent && len(toolSegments) > 0 {
+		// Re-parse tool_use segments and render as cards
+		var toolCards []string
+		for _, seg := range msg.Segments {
+			if seg.Type == "tool_use" {
+				tc, ok := r.toolCallCache[seg.Content]
+				if !ok {
+					var parsed types.ToolCall
+					if err := json.Unmarshal([]byte(seg.Content), &parsed); err == nil {
+						tc = &parsed
+						r.toolCallCache[seg.Content] = tc
+					}
+				}
+				if tc != nil {
+					card := NewToolCard(*tc, nil, ToolRunning, t)
+					toolCards = append(toolCards, card.Render(contentWidth))
+				}
+			}
+		}
+		if len(toolCards) > 0 {
+			return strings.Join(toolCards, "\n")
+		}
+		// Fallback: just show the badges
 		toolBadges := strings.Join(toolSegments, " ")
 		summary := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
@@ -234,7 +412,7 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 	borderedLines := make([]string, len(contentLines))
 	for i, line := range contentLines {
 		borderedLines[i] = lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Foreground(t.Brand).Render("┃"),
+			lipgloss.NewStyle().Foreground(gutterColor).Render("┃"),
 			lipgloss.NewStyle().PaddingLeft(2).Width(contentWidth-2).Render(line),
 		)
 	}
@@ -249,6 +427,13 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 
 	// Strip any ANSI escape codes before glamour to prevent mangling
 	content = StripANSI(content)
+
+	// Special-case: iteration chips — "iter:N:tools:X,Y,Z"
+	if strings.HasPrefix(content, "iter:") {
+		if out := r.renderIterationChips(content, width); out != "" {
+			return out
+		}
+	}
 
 	// Special-case: "Agent iteration N — tools: X, Y" → card + tool chips.
 	if strings.HasPrefix(content, "**Agent iteration") {
@@ -343,6 +528,117 @@ func (r *MessageRenderer) renderAgentIteration(content string, width int) string
 		Render(superscript + " " + strings.Join(badges, " "))
 
 	return lipgloss.NewStyle().Width(width).Render(line)
+}
+
+// renderIterationChips renders "iter:N:chips:Name|input,Name|input" as a compact line:
+//
+//	⚡⁴  FileRead commands.go · FileRead app.go · Bash go test
+func (r *MessageRenderer) renderIterationChips(content string, width int) string {
+	t := r.theme
+
+	// Parse format: "iter:N:chips:..." or legacy "iter:N:tools:..."
+	parts := strings.SplitN(content, ":", 4)
+	if len(parts) < 4 || parts[0] != "iter" {
+		return ""
+	}
+	iterNum := parts[1]
+	format := parts[2]
+	data := parts[3]
+	if data == "" {
+		return ""
+	}
+
+	// Iteration badge: ⚡ with superscript number
+	superscript := ""
+	for _, ch := range iterNum {
+		switch ch {
+		case '0':
+			superscript += "⁰"
+		case '1':
+			superscript += "¹"
+		case '2':
+			superscript += "²"
+		case '3':
+			superscript += "³"
+		case '4':
+			superscript += "⁴"
+		case '5':
+			superscript += "⁵"
+		case '6':
+			superscript += "⁶"
+		case '7':
+			superscript += "⁷"
+		case '8':
+			superscript += "⁸"
+		case '9':
+			superscript += "⁹"
+		default:
+			superscript += string(ch)
+		}
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(t.Brand).
+		Bold(true).
+		Render("⚡" + superscript)
+
+	var chips []string
+
+	if format == "chips" {
+		// New format: "Name|input,Name|input"
+		entries := strings.Split(data, ",")
+		for _, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			nameInput := strings.SplitN(entry, "|", 2)
+			name := nameInput[0]
+			input := ""
+			if len(nameInput) > 1 {
+				input = nameInput[1]
+			}
+
+			// Tool name badge
+			chipStyle, ok := t.ToolLabel[name]
+			if !ok {
+				chipStyle = lipgloss.NewStyle().
+					Foreground(t.TextMuted).
+					Bold(true)
+			}
+			chip := chipStyle.Render(name)
+			if input != "" {
+				chip += " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(input)
+			}
+			chips = append(chips, chip)
+		}
+	} else {
+		// Legacy format: "Name,Name,Name"
+		toolNames := strings.Split(data, ",")
+		for _, name := range toolNames {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			chipStyle, ok := t.ToolLabel[name]
+			if !ok {
+				chipStyle = lipgloss.NewStyle().
+					Foreground(t.TextMuted).
+					Bold(true)
+			}
+			chips = append(chips, chipStyle.Render(name))
+		}
+	}
+
+	if len(chips) == 0 {
+		return ""
+	}
+
+	// Join chips with separator
+	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" · ")
+	chipsStr := strings.Join(chips, sep)
+	line := badge + "  " + chipsStr
+
+	return lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(line)
 }
 
 // renderErrorSegment styles an error banner directly via lipgloss, bypassing
