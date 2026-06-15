@@ -509,6 +509,21 @@ func (m *AppState) checkAutoArbitrage() {
 		return
 	}
 
+	// Only switch if the savings exceed the threshold (use ShouldArbitrage).
+	currentCost := rec.RecommendedModel.TotalCost
+	if m.activeModel != nil && len(rec.Alternatives) > 0 {
+		// Find current model's cost in alternatives to compare against recommended
+		for _, alt := range rec.Alternatives {
+			if alt.ModelID == m.activeModel.ID {
+				currentCost = alt.TotalCost
+				break
+			}
+		}
+	}
+	if !arbitrage.ShouldArbitrage(currentCost, rec.RecommendedModel.TotalCost, threshold) {
+		return
+	}
+
 	recommended := rec.RecommendedModel.ModelID
 	modelInfo, err := p.GetModel(recommended)
 	if err != nil {
