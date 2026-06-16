@@ -593,7 +593,7 @@ Installation is a one-liner:
 brew install eshanized/tap/m31a
 
 # Linux / macOS (curl)
-curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | bash
 
 # From source (any OS)
 git clone https://github.com/eshanized/M31A.git
@@ -656,7 +656,7 @@ If you're interested in the intersection of AI, developer tools, and terminal UI
 
 **Links**:
 - GitHub: [github.com/eshanized/M31A](https://github.com/eshanized/M31A)
-- Documentation: [docs/](https://github.com/eshanized/M31A/tree/main/docs)
+- Documentation: [docs/](https://github.com/eshanized/M31A/tree/master/docs)
 - Issues: [github.com/eshanized/M31A/issues](https://github.com/eshanized/M31A/issues)
 
 ---
