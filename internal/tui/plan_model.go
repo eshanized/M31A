@@ -198,6 +198,15 @@ func (pm *PlanModel) Update(msg tea.Msg) (*PlanModel, tea.Cmd) {
 		pm.width = msg.Width
 		pm.height = msg.Height
 		pm.initViewport()
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				pm.viewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				pm.viewport.LineDown(3)
+			}
+		}
 	case tea.KeyMsg:
 		if pm.confirmMode {
 			return pm.handleConfirmKey(msg)
