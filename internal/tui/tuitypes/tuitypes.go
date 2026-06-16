@@ -53,6 +53,7 @@ const (
 	ScreenGhostOutput      Screen = 27   // ghost write results
 	ScreenConfirmQuit      Screen = 28   // confirm quit dialog
 	ScreenChatHistory      Screen = 29   // chat history table browser
+	ScreenCommandPalette   Screen = 30   // dedicated command palette with detail panel
 )
 
 // Label returns a human-readable name for the screen.
@@ -118,6 +119,8 @@ func (s Screen) Label() string {
 		return "Confirm Quit"
 	case ScreenChatHistory:
 		return "Chat History"
+	case ScreenCommandPalette:
+		return "Commands"
 	default:
 		return "Unknown"
 	}
