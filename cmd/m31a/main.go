@@ -268,6 +268,11 @@ func run() int {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sigDone := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("signal handler panic", "error", r)
+			}
+		}()
 		for {
 			select {
 			case <-sigCh:
