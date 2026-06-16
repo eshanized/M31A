@@ -23,6 +23,7 @@ type CodeMap struct {
 	mu      sync.Mutex
 	indexer *codeintel.Indexer
 	built   bool
+	builtAt time.Time
 }
 
 func NewCodeMap(workDir string) *CodeMap {
@@ -173,7 +174,8 @@ func (t *CodeMap) Execute(ctx context.Context, input types.ToolInput) (types.Too
 func (t *CodeMap) getIndexer(ctx context.Context) (*codeintel.Indexer, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.built {
+	// Rebuild if not built or if stale (older than 5 minutes)
+	if t.built && time.Since(t.builtAt) < 5*time.Minute {
 		return t.indexer, nil
 	}
 	idx := codeintel.NewIndexer(t.workDir)
@@ -184,6 +186,7 @@ func (t *CodeMap) getIndexer(ctx context.Context) (*codeintel.Indexer, error) {
 	}
 	t.indexer = idx
 	t.built = true
+	t.builtAt = time.Now()
 	return idx, nil
 }
 
