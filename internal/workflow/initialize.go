@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -36,7 +37,7 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 
 	// 3. Init git if not a repo
 	if e.git == nil {
-		return nil, fmt.Errorf("git not initialized on engine — call SetGit before runInitialize")
+		return nil, fmt.Errorf("%w: call SetGit before runInitialize", m31errors.ErrGitNotInitialized)
 	}
 	if !e.git.IsRepo() {
 		if err := e.git.Init(); err != nil {
