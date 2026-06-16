@@ -99,6 +99,22 @@ func (vm *VerifyModel) TickSpinner() {
 // Update handles verify screen key events.
 func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			failedCount := vm.countFailedTasks()
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if vm.healCursor > 0 {
+					vm.healCursor--
+					vm.syncViewportToCursor()
+				}
+			case tea.MouseButtonWheelDown:
+				if failedCount > 0 && vm.healCursor < failedCount-1 {
+					vm.healCursor++
+					vm.syncViewportToCursor()
+				}
+			}
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
