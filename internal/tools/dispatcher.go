@@ -85,7 +85,11 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 			copy(d.originalRules, cfg.Rules)
 		}
 		if cfg.Agents != nil {
-			d.agents = cfg.Agents
+			newAgents := make(map[string]config.PermissionsAgentConfig, len(cfg.Agents))
+			for k, v := range cfg.Agents {
+				newAgents[k] = v
+			}
+			d.agents = newAgents
 		}
 		if cfg.TimeoutSeconds > 0 {
 			d.permissionTimeout = cfg.TimeoutSeconds
@@ -106,7 +110,11 @@ func (d *Dispatcher) UpdatePermissions(cfg *config.PermissionsConfig) {
 		copy(d.rules, cfg.Rules)
 	}
 	if cfg.Agents != nil {
-		d.agents = cfg.Agents
+		newAgents := make(map[string]config.PermissionsAgentConfig, len(cfg.Agents))
+		for k, v := range cfg.Agents {
+			newAgents[k] = v
+		}
+		d.agents = newAgents
 	}
 	if cfg.TimeoutSeconds > 0 {
 		d.permissionTimeout = cfg.TimeoutSeconds
