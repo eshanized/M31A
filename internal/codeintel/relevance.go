@@ -2,6 +2,7 @@ package codeintel
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -185,16 +186,20 @@ func splitCamelCase(s string) []string {
 
 	for i, r := range s {
 		if r >= 'A' && r <= 'Z' {
-			// Upper case: check if this starts a new word
 			if current.Len() > 0 {
-				// If next char is lowercase, this is a word boundary (e.g., "getU" → "get", "U")
-				// If next char is also upper case, this might be an acronym (e.g., "HTML" stays together)
 				if i+1 < len(s) {
 					next := rune(s[i+1])
 					if next >= 'a' && next <= 'z' {
-						// End current word before this uppercase
+						// Upper followed by lower: word boundary (e.g., "getUser" → "get", "User")
 						parts = append(parts, current.String())
 						current.Reset()
+					} else if current.Len() > 0 {
+						// Check if current ends with lowercase (transition to acronym)
+						lastRune := rune(current.String()[current.Len()-1])
+						if lastRune >= 'a' && lastRune <= 'z' {
+							parts = append(parts, current.String())
+							current.Reset()
+						}
 					}
 				} else {
 					// End of string
@@ -226,9 +231,7 @@ func isStopWord(w string) bool {
 }
 
 func sortByScore(files []ScoredFile) {
-	for i := 1; i < len(files); i++ {
-		for j := i; j > 0 && files[j].Score > files[j-1].Score; j-- {
-			files[j], files[j-1] = files[j-1], files[j]
-		}
-	}
+	sort.SliceStable(files, func(i, j int) bool {
+		return files[i].Score > files[j].Score
+	})
 }
