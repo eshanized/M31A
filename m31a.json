@@ -1,0 +1,15 @@
+{
+    "version": "1.0.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/eshanized/M31A/releases/download/v1.0.0/m31a_1.0.0_windows_amd64.tar.gz",
+            "bin": [
+                "m31a.exe"
+            ],
+            "hash": "13d43ce3cf53bd678ff8ef044f4fe38882634fbb44b8102c4f97f275d99c2ecb"
+        }
+    },
+    "homepage": "https://github.com/eshanized/M31A",
+    "license": "MIT",
+    "description": "Terminal-native AI coding agent"
+}
