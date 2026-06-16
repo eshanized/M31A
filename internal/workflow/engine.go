@@ -289,7 +289,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	case m31types.PhaseShip:
 		result, err = e.runShip(ctx, goal)
 	default:
-		return nil, fmt.Errorf("unknown phase: %s", phase)
+		return nil, fmt.Errorf("%w: unknown phase %s", m31errors.ErrPhaseTransition, phase)
 	}
 
 	if result != nil {
@@ -523,10 +523,10 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) error {
 // SubmitDiscussAnswer records an answer for a discuss question.
 func (e *Engine) SubmitDiscussAnswer(index int, answer string) error {
 	if e.discussState.Questions == nil {
-		return fmt.Errorf("no discuss questions to answer")
+		return fmt.Errorf("%w: no discuss questions", m31errors.ErrPhaseTransition)
 	}
 	if index < 0 || index >= len(e.discussState.Questions) {
-		return fmt.Errorf("invalid question index: %d", index)
+		return fmt.Errorf("%w: invalid question index %d", m31errors.ErrPhaseTransition, index)
 	}
 	if e.discussState.Answers == nil {
 		e.discussState.Answers = make(map[int]string)
@@ -729,8 +729,9 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 			if chunk != nil && chunk.Delta != "" {
 				content.WriteString(chunk.Delta)
 			}
-			partialCalls := finalizeToolCalls(builders, e)
-			return content.String(), partialCalls, err
+			// Discard partial tool calls from truncated streams to prevent
+			// dispatching incomplete/malformed tool calls.
+			return content.String(), nil, err
 		}
 		if chunk == nil {
 			continue
