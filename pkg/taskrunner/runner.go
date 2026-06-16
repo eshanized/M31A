@@ -167,41 +167,32 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 		}
 		task := r.tasks[idx]
 
-		r.mu.RLock()
+		r.mu.Lock()
 		curStatus := r.status[task.ID]
-		r.mu.RUnlock()
 		if curStatus == types.StatusSkipped ||
 			curStatus == types.StatusFailed || curStatus == types.StatusUnrecoverable ||
 			curStatus == types.StatusDone {
+			r.mu.Unlock()
 			continue
 		}
 
-		r.mu.RLock()
 		allDepsOK := true
 		for _, depID := range task.Dependencies {
 			depStatus := r.status[depID]
 			if depStatus == types.StatusFailed || depStatus == types.StatusSkipped || depStatus == types.StatusUnrecoverable {
-				r.mu.RUnlock()
-				r.mu.Lock()
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d failed/skipped", depID)}
-				r.mu.Unlock()
 				allDepsOK = false
 				break
 			}
 			if depStatus != types.StatusDone {
-				r.mu.RUnlock()
-				r.mu.Lock()
 				r.status[task.ID] = types.StatusSkipped
 				r.results[task.ID] = TaskResult{Success: false, Error: fmt.Sprintf("dependency %d not completed", depID)}
-				r.mu.Unlock()
 				allDepsOK = false
 				break
 			}
 		}
-		if allDepsOK {
-			r.mu.RUnlock()
-		}
+		r.mu.Unlock()
 
 		if allDepsOK {
 			ready = append(ready, readyTask{idx: idx, task: task})
@@ -272,6 +263,7 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 					break
 				}
 
+				cancel() // cancel before backoff to avoid context leak
 				backoff := time.Duration(attempt+1) * time.Second
 				timer := time.NewTimer(backoff)
 				select {
@@ -365,6 +357,8 @@ func (r *Runner) Summary() (total, done, failed, skipped int) {
 
 // Tasks returns the current task list with updated statuses.
 func (r *Runner) Tasks() []types.Task {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]types.Task, len(r.tasks))
 	for i, t := range r.tasks {
 		t.Status = r.status[t.ID]
