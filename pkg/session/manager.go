@@ -108,13 +108,11 @@ func readFileLimited(path string, maxBytes int64) ([]byte, error) {
 
 	fi, statErr := f.Stat()
 	var data []byte
-	if statErr == nil && fi.Size() > 0 && fi.Size() <= maxBytes {
-		limited := io.LimitReader(f, maxBytes+1)
-		data, err = io.ReadAll(limited)
-	} else {
-		limited := io.LimitReader(f, maxBytes+1)
-		data, err = io.ReadAll(limited)
+	if statErr == nil && fi.Size() > maxBytes {
+		return nil, fmt.Errorf("file exceeds maximum size limit: %d bytes (max %d)", fi.Size(), maxBytes)
 	}
+	limited := io.LimitReader(f, maxBytes+1)
+	data, err = io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
