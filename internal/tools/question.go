@@ -106,8 +106,14 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 	var options []string
 	if optsRaw, ok := input.Params["options"].([]any); ok {
 		for _, o := range optsRaw {
-			if s, ok := o.(string); ok {
-				options = append(options, s)
+			switch v := o.(type) {
+			case string:
+				options = append(options, v)
+			case map[string]any:
+				// Schema-compliant format: {"label": "...", "description": "..."}
+				if label, ok := v["label"].(string); ok && label != "" {
+					options = append(options, label)
+				}
 			}
 		}
 	}
