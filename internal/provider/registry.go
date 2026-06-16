@@ -69,14 +69,17 @@ func (r *Registry) TrySetActive(name string) (LLMProvider, error) {
 // RollbackActive reverts the active provider to the given name if the current
 // active provider matches fromName. Used when a health check fails after
 // TrySetActive, preventing the system from being left with an unhealthy active provider.
-func (r *Registry) RollbackActive(fromName, toName string) {
+func (r *Registry) RollbackActive(fromName, toName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.active == fromName {
 		if _, ok := r.providers[toName]; ok {
 			r.active = toName
+			return true
 		}
+		return false
 	}
+	return false
 }
 
 func (r *Registry) Get(name string) (LLMProvider, error) {
