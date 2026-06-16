@@ -114,13 +114,6 @@ func (l *loop) runOneTurn(ctx context.Context) (bool, error) {
 			Delta:   thinking,
 		})
 	}
-	if content != "" {
-		l.manager.emit(SubagentEvent{
-			Type:    EventTextDelta,
-			AgentID: l.agent.Info.ID,
-			Delta:   content,
-		})
-	}
 
 	toolCalls, parseErr := l.parseToolCalls(content)
 	if parseErr != nil && len(toolCalls) == 0 && content != "" {
