@@ -72,16 +72,20 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 	// 4. Execute each group sequentially
 	var execErrors []string
-	toolCallCount := 0
+	totalToolCalls := 0
 	for _, group := range groups {
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
 			// H16 fix: removed pre-task checkpoint — too expensive (10+ read+parse+write
 			// cycles per plan). Checkpoints now only at phase boundaries and on heal.
 
 			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
-			// Count tool calls from task result
-			if result.ToolCalls > 0 {
-				toolCallCount += result.ToolCalls
+			totalToolCalls += result.ToolCalls
+			// Propagate HealsAttempted mutations back to the tasks slice
+			for i := range tasks {
+				if tasks[i].ID == task.ID {
+					tasks[i].HealsAttempted = task.HealsAttempted
+					break
+				}
 			}
 			return result
 		}
@@ -126,7 +130,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 		Phase:     m31types.PhaseExecute,
 		Success:   allDone,
 		Tasks:     updatedTasks,
-		ToolCalls: toolCallCount,
+		ToolCalls: totalToolCalls,
 	}
 	if len(execErrors) > 0 {
 		result.Error = strings.Join(execErrors, "; ")
@@ -352,8 +356,8 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 		}
 
-		// Guard: fail file-changing tasks that produced no tool calls
-		if toolCallCount == 0 && len(task.Files) > 0 {
+		// Guard: fail file-changing tasks that produced no tool calls and no commit
+		if toolCallCount == 0 && len(task.Files) > 0 && commitHash == "" {
 			return taskrunner.TaskResult{
 				Success:    false,
 				Error:      "no tool calls produced for file-changing task",
