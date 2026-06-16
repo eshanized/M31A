@@ -185,12 +185,6 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
 
-	// TokenEMAAlpha=0 silently disables EMA. Apply default when unset.
-	if cfg.Model.TokenEMAAlpha == 0 {
-		slog.Warn("token_ema_alpha is 0 (disabled), applying default")
-		cfg.Model.TokenEMAAlpha = types.EMACorrectionAlpha
-	}
-
 	return cfg, nil
 }
 
@@ -602,7 +596,7 @@ func knownConfigKeys() map[string]bool {
 		knownKeysMap = map[string]bool{
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
-			"ghost": true, "agents": true,
+			"ghost": true, "agents": true, "verify": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true,
 		}
