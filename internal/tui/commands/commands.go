@@ -70,6 +70,7 @@ type CommandContext struct {
 	AgentMode       *bool
 	SetAgentMode    func(bool)
 	CancelAgent     func()
+	Version         string
 }
 
 // CommandRegistry maps slash command names to handlers and descriptions.
@@ -239,6 +240,11 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("status", handleStatus, "Show session info")
 	_ = r.Register("reset", handleReset, "Reset to first-run screen")
 	_ = r.Register("quit", handleQuit, "Exit the application")
+	_ = r.Register("exit", handleExit, "Exit the application (alias for /quit)")
+	_ = r.Register("chat", handleChat, "Start a new chat session (clear messages)")
+	_ = r.Register("flush", handleFlush, "Clear screen and reset view")
+	_ = r.Register("search", handleSearch, "Search conversation messages")
+	_ = r.Register("about", handleAbout, "Show version and system info")
 	_ = r.Register("undo", handleUndo, "Show latest checkpoint info")
 	_ = r.Register("history", handleHistory, "Show chat history table browser")
 	_ = r.Register("prompt-history", handlePromptHistory, "Show recent prompt history")
@@ -253,7 +259,9 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("cost", handleCost, "Toggle cost display")
 	_ = r.Register("log", handleLog, "Show recent log entries")
 	_ = r.Register("key", handleKey, "Show API key status")
+	_ = r.Register("keychain", handleKey, "Show API key status (alias for /key)")
 	_ = r.Register("tokens", handleTokens, "Estimate token count")
+	_ = r.Register("dream", handleMemory, "Manage context memory (alias for /memory)")
 
 	// AI/model
 	_ = r.Register("compress", handleCompress, "Trigger context consolidation")
