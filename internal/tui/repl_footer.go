@@ -48,6 +48,10 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		info = &StatusBarInfo{}
 	}
 
+	// Clone info to avoid mutating the original (narrow terminal adaptations)
+	cloned := *info
+	info = &cloned
+
 	// ── Compact mode ──────────────────────────────────────────────────────────
 	// Narrow terminal (< 80 cols): hide hints, hide cost, shorten cwd.
 	if width < 80 {
