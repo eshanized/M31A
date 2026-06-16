@@ -112,7 +112,10 @@ func (g *Git) CommitStaged(message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
-	hash, _ := g.HeadHash()
+	hash, err := g.HeadHash()
+	if err != nil {
+		return "", fmt.Errorf("git commit succeeded but HeadHash failed: %w", err)
+	}
 	return hash, nil
 }
 
@@ -127,7 +130,10 @@ func (g *Git) CommitWithFiles(message string, paths ...string) (string, error) {
 	if _, err := g.run("commit", "--message="+sanitizeCommitMessage(message)); err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
-	hash, _ := g.HeadHash()
+	hash, err := g.HeadHash()
+	if err != nil {
+		return "", fmt.Errorf("git commit succeeded but HeadHash failed: %w", err)
+	}
 	return hash, nil
 }
 
@@ -431,8 +437,6 @@ func (g *Git) StatusPorcelain() ([]FileStatus, error) {
 		case y == 'M':
 			fs.Status = "M"
 		case y == 'D' && x != ' ':
-			fs.Status = "D"
-		case x == 'D' && y == ' ':
 			fs.Status = "D"
 		case y == 'A':
 			fs.Status = "A"
