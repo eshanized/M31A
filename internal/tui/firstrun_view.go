@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -76,6 +77,20 @@ func (fr *FirstRunModel) renderStepDots(current int) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// renderStepBar renders a labeled horizontal rule: "─── Step N of 4 · Label ───".
+func renderStepBar(current, total int, label string, w int, brand, muted lipgloss.Color) string {
+	tag := fmt.Sprintf("Step %d of %d · %s", current, total, label)
+	styled := lipgloss.NewStyle().Foreground(brand).Bold(true).Render(tag)
+	pad := w - lipgloss.Width(styled) - 6 // 3 chars each side for the rule
+	if pad < 4 {
+		pad = 4
+	}
+	left := strings.Repeat("─", pad/2+1)
+	right := strings.Repeat("─", pad-pad/2+1)
+	rule := lipgloss.NewStyle().Foreground(muted).Render(left + " " + styled + " " + right)
+	return rule
 }
 
 // ─── Styled key badge ────────────────────────────────────────────────────────
@@ -468,42 +483,27 @@ func (fr *FirstRunModel) renderWelcomeHints() string {
 
 func (fr *FirstRunModel) renderProviderSelect() string {
 	t := fr.theme
-	// Use effectiveWidth (which accounts for the sidebar and the parent's
-	// contentWidth) rather than fr.width directly. The parent wraps this
-	// output in a rounded box with Width(w - 4) and Padding(1, 3), so the
-	// visible inner content area is (w - 4) - 2 (border) - 6 (pad) = w - 12.
-	// Add 2 back because lipgloss's Width includes the border in its outer
-	// measurement, giving a practical inner budget of w - 10.
 	w := fr.effectiveWidth()
 	if w <= 0 {
-		w = 80 // only when uninitialized
+		w = 80
 	}
 	innerW := w - 10
 	if innerW < 22 {
-		innerW = 22 // minimum, never inflate above actual w
+		innerW = 22
 	}
-	// Vertical budget: outer box adds border (2) + vertical padding (1+1) = 4,
-	// plus a 2-row safety margin for centerScreen.
 	h := fr.height
 	if h < 1 {
-		h = 24 // sane default if dimensions haven't been pushed yet
+		h = 24
 	}
 	availH := h - 6
 	if availH < 10 {
 		availH = 10
 	}
 
-	// ── Row 1: step title + progress dots ─────────────────────────────────
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 1 of 4 — Choose your providers")
-	dots := fr.renderStepDots(1)
-	stepLine := lipgloss.JoinHorizontal(lipgloss.Center,
-		title,
-		lipgloss.NewStyle().Foreground(t.Border).Render("   "),
-		dots,
-	)
+	// ── Step bar ──────────────────────────────────────────────────────────
+	stepBar := renderStepBar(1, firstRunStepCount, "Choose your providers", innerW, t.Brand, t.Border)
 
-	// ── Row 2: subtitle or validation error (single status row) ───────────
+	// ── Subtitle or validation error ──────────────────────────────────────
 	var statusRow string
 	if fr.keyErr != "" {
 		statusRow = lipgloss.NewStyle().Foreground(t.Error).
@@ -513,40 +513,36 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 			Render("Select one or more providers. You can switch between them anytime.")
 	}
 
-	// ── Provider cards ────────────────────────────────────────────────────
-	// Always render the full catalog. The catalog is small (2 providers in
-	// V1), so the viewport heuristic is premature optimization — and it was
-	// silently dropping cards on some terminal sizes. The hard line clamp
-	// below handles overflow on genuinely tiny terminals.
+	// ── Provider cards (vertical, full-width) ─────────────────────────────
 	fr.clampProviderScroll()
-	// Each card renders at cardW outer width (border 2 + padding 2 + content
-	// cardW-4). A 2-char prefix (cursor) is prepended per card, and cards are
-	// joined with a 1-col gap.  Total = 2*(cardW+2) + 1 <= innerW.
-	cardW := (innerW - 5) / 2
-	if cardW < 20 {
-		cardW = 20
-	}
 	var cards []string
 	for i, p := range providerCatalog {
-		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, cardW))
+		if i > 0 {
+			// Thin separator between cards
+			sep := lipgloss.NewStyle().Foreground(t.Border).
+				Render(strings.Repeat("─", innerW))
+			cards = append(cards, sep)
+		}
+		cards = append(cards, fr.renderProviderCard(p, i == fr.providerCursor, innerW))
 	}
-	cardsBlock := lipgloss.JoinHorizontal(lipgloss.Top, cards[0], " ", cards[1])
+	cardsBlock := lipgloss.JoinVertical(lipgloss.Left, cards...)
 
-	// ── Summary row: count + selected chips ──────────────────────────────
+	// ── Summary: count + horizontal rule ──────────────────────────────────
 	summary := fr.renderProviderSummary(innerW)
 
-	// ── Hints row ─────────────────────────────────────────────────────────
-	navBadge := keyBadge("↑↓", "Navigate", t.Brand, t.TextMuted)
-	toggleBadge := keyBadge("space", "Toggle", t.Brand, t.TextMuted)
-	selBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
-	skipBadge := keyBadge("s", "Skip", t.Warning, t.TextMuted)
-	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
+	// ── Hints (compact single line) ───────────────────────────────────────
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
 	hints := lipgloss.JoinHorizontal(lipgloss.Center,
-		navBadge, "  ", toggleBadge, "  ", selBadge, "  ", skipBadge, "  ", backBadge)
+		keyStyle.Render("↑↓"), hintStyle.Render(" navigate  "),
+		keyStyle.Render("space"), hintStyle.Render(" select  "),
+		keyStyle.Render("↵"), hintStyle.Render(" confirm  "),
+		keyStyle.Render("s"), hintStyle.Render(" skip  "),
+		keyStyle.Render("esc"), hintStyle.Render(" back"),
+	)
 
-	// Compose, pad each line to innerW, and hard-clamp to availH rows so the
-	// outer box never overflows the terminal — even on very small sizes.
-	parts := []string{stepLine, "", statusRow, "", cardsBlock, "", summary, "", hints}
+	// ── Compose ───────────────────────────────────────────────────────────
+	parts := []string{stepBar, "", statusRow, "", cardsBlock, "", summary, "", hints}
 	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	body = padLines(body, innerW)
 
@@ -565,78 +561,25 @@ func plural(n int) string {
 	return "s"
 }
 
-// renderProviderSummary renders a single-line summary showing selected count
-// and chip row for chosen providers. The output is truncated to innerW so it
-// never breaks the layout.
+// renderProviderSummary renders a compact count line: "N selected ────────".
 func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
 	t := fr.theme
-
 	n := len(fr.selectedProviders)
-	var countBadge string
+
+	var label string
 	switch n {
 	case 0:
-		countBadge = lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
-			Padding(0, 1).
-			Render("none selected")
+		label = lipgloss.NewStyle().Foreground(t.TextMuted).Render("none selected")
 	case 1:
-		countBadge = lipgloss.NewStyle().
-			Foreground(t.Success).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Success).
-			Padding(0, 1).
-			Render("1 selected")
+		label = lipgloss.NewStyle().Foreground(t.Success).Render("1 selected")
 	default:
-		countBadge = lipgloss.NewStyle().
-			Foreground(t.Success).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Success).
-			Padding(0, 1).
+		label = lipgloss.NewStyle().Foreground(t.Success).
 			Render(fmt.Sprintf("%d selected", n))
 	}
 
-	if n == 0 {
-		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  press space to select")
-		return truncateStyled(countBadge+hint, innerW)
-	}
-
-	// Build chip row. Stop appending chips once we'd exceed innerW.
-	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" ")
-	prefix := countBadge + lipgloss.NewStyle().Foreground(t.Border).Render(" │")
-	used := lipgloss.Width(prefix)
-	var chips []string
-	for i, pid := range fr.selectedProviders {
-		info := lookupProviderInfo(pid)
-		label := info.Icon + " " + info.Name
-		var chip string
-		if i == 0 {
-			chip = lipgloss.NewStyle().
-				Foreground(t.Brand).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(t.Brand).
-				Padding(0, 1).
-				Render("★ " + label)
-		} else {
-			chip = lipgloss.NewStyle().
-				Foreground(t.TextSecondary).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(t.Border).
-				Padding(0, 1).
-				Render(label)
-		}
-		chipW := lipgloss.Width(chip) + lipgloss.Width(sep)
-		if used+chipW+4 > innerW { // leave 4 cells headroom
-			chips = append(chips, lipgloss.NewStyle().Foreground(t.TextMuted).Render("…"))
-			break
-		}
-		chips = append(chips, chip)
-		used += chipW
-	}
-
-	row := prefix + sep + strings.Join(chips, sep)
-	return truncateStyled(row, innerW)
+	rule := lipgloss.NewStyle().Foreground(t.Border).
+		Render(strings.Repeat("─", innerW-lipgloss.Width(label)-2))
+	return label + " " + rule
 }
 
 // lookupProviderInfo returns catalog metadata for a provider ID, falling back
@@ -652,25 +595,16 @@ func lookupProviderInfo(id string) providerInfo {
 
 func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int) string {
 	t := fr.theme
-	if w < 20 {
-		w = 20 // enforce minimum, never inflate
-	}
-
 	checked := fr.providerChecked[p.ID]
 
-	// Checkbox — always rendered with an explicit color so it's visible on
-	// both light and dark terminal themes.
-	var checkBox string
-	if checked {
-		box := lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("▣")
-		checkBox = lipgloss.NewStyle().Foreground(t.Success).Render("[") +
-			box +
-			lipgloss.NewStyle().Foreground(t.Success).Render("] ")
+	// ── Line 1: cursor + icon + name + status pill (right-aligned) ────────
+	var cursor string
+	if selected {
+		cursor = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▸ ")
 	} else {
-		checkBox = lipgloss.NewStyle().Foreground(t.TextMuted).Render("[ ] ")
+		cursor = "  "
 	}
 
-	// Icon + Name row
 	var iconStyle, nameStyle lipgloss.Style
 	if checked {
 		iconStyle = lipgloss.NewStyle().Foreground(t.Success).Bold(true)
@@ -681,6 +615,8 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 	}
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	} else if checked {
+		nameStyle = lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
 	} else {
 		nameStyle = lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true)
 	}
@@ -688,73 +624,62 @@ func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int
 	icon := iconStyle.Render(p.Icon)
 	name := nameStyle.Render(p.Name)
 
-	// Badges
-	var badges string
+	// Status pill (right side of line 1)
+	var statusPill string
+	if checked {
+		statusPill = lipgloss.NewStyle().
+			Foreground(t.Success).Bold(true).
+			Render("● selected")
+	} else if selected {
+		statusPill = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Render("○ press space")
+	}
+
+	// Badge tags after name (Recommended, default)
+	var tags string
 	if p.Recommended {
-		badges += " " + lipgloss.NewStyle().
-			Foreground(t.Success).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Success).
-			Padding(0, 1).
-			Render("Recommended")
+		tags += " " + lipgloss.NewStyle().
+			Foreground(t.Warning).
+			Render("★ recommended")
 	}
 	if checked && len(fr.selectedProviders) > 0 && fr.selectedProviders[0] == p.ID {
-		badges += " " + lipgloss.NewStyle().
+		tags += " " + lipgloss.NewStyle().
 			Foreground(t.Brand).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Brand).
-			Padding(0, 1).
 			Render("★ default")
 	}
 
-	titleRow := checkBox + icon + "  " + name + badges
-	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).Render(p.Description)
-
-	// Truncate title and desc so the card content fits within the available
-	// width.  Content area = w - 2 (border) - 2 (padding) = w - 4.
-	contentW := w - 4
-	if contentW < 10 {
-		contentW = 10
+	// Compose line 1: left side + pad + right side
+	leftSide := cursor + icon + "  " + name + tags
+	leftW := lipgloss.Width(leftSide)
+	rightW := lipgloss.Width(statusPill)
+	gap := w - leftW - rightW
+	if gap < 2 {
+		gap = 2
 	}
-	titleRow = truncateStyled(titleRow, contentW)
-	desc = truncateStyled(desc, contentW)
+	line1 := leftSide + strings.Repeat(" ", gap) + statusPill
+	line1 = truncateStyled(line1, w)
 
-	// Fixed-height body: exactly 3 content rows (title, blank, desc). No
-	// conditional footer — selected/checked state is conveyed by prefix +
-	// border + color only. This keeps every card the same height.
-	content := lipgloss.JoinVertical(lipgloss.Left, titleRow, "", desc)
+	// ── Line 2: indented description ──────────────────────────────────────
+	desc := lipgloss.NewStyle().Foreground(t.TextSecondary).
+		Render("  " + p.Description)
+	desc = truncateStyled(desc, w)
 
-	// Border reflects state: brand = focused, success = checked, muted = idle.
-	borderColor := t.Border
-	if selected {
-		borderColor = t.Brand
-	} else if checked {
-		borderColor = t.Success
-	}
-
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1).
-		Width(contentW).
-		Render(content)
-
-	// Cursor prefix — bold arrow on the focused card, subtle tick on checked
-	// cards. Both are a single character so card height is unaffected.
-	prefix := "  "
-	if selected {
-		prefix = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▶ ")
-	} else if checked {
-		prefix = lipgloss.NewStyle().Foreground(t.Success).Render("✓ ")
-	}
-
-	return prefix + card
+	return line1 + "\n" + desc
 }
 
 // ─── API key step ────────────────────────────────────────────────────────────
 
 func (fr *FirstRunModel) renderAPIKeyStep() string {
 	t := fr.theme
+	w := fr.effectiveWidth()
+	if w <= 0 {
+		w = 70
+	}
+	innerW := w - 10
+	if innerW < 22 {
+		innerW = 22
+	}
 
 	total := len(fr.selectedProviders)
 	current := fr.keyProviderIndex + 1
@@ -763,71 +688,68 @@ func (fr *FirstRunModel) renderAPIKeyStep() string {
 		provName = titleCase(fr.selectedProviders[fr.keyProviderIndex])
 	}
 
-	var title string
-	if total > 1 {
-		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-			Render(fmt.Sprintf("Step 3/4 — Enter %s API key (%d/%d)", provName, current, total))
-	} else {
-		title = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-			Render(fmt.Sprintf("Step 3/4 — Enter %s API key", provName))
-	}
-	dots := fr.renderStepDots(2)
+	// ── Step bar ──────────────────────────────────────────────────────────
+	stepBar := renderStepBar(3, firstRunStepCount, "API key", innerW, t.Brand, t.Border)
 
+	// ── Subtitle ──────────────────────────────────────────────────────────
+	var subtitle string
+	if total > 1 {
+		subtitle = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("Enter %s API key (%d/%d)", provName, current, total))
+	} else {
+		subtitle = lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("Enter %s API key", provName))
+	}
+
+	// ── Security note ─────────────────────────────────────────────────────
 	desc := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("Your key is stored securely and never sent anywhere else.")
 
+	// ── API key input ─────────────────────────────────────────────────────
 	keyBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border).
 		Padding(0, 1).
 		Render(fr.keyInput.View())
 
-	var saveLabel string
+	// ── Keychain toggle (plain inline, no border) ─────────────────────────
+	var toggleIcon string
+	var toggleStyle lipgloss.Style
 	if fr.opts.SaveKeychain {
-		saveLabel = "  " + lipgloss.NewStyle().
-			Foreground(t.Success).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Success).
-			Padding(0, 1).
-			Render("✓ Save to system keychain")
+		toggleIcon = "✓"
+		toggleStyle = lipgloss.NewStyle().Foreground(t.Success)
 	} else {
-		saveLabel = "  " + lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
-			Padding(0, 1).
-			Render("○ Save to system keychain")
+		toggleIcon = "○"
+		toggleStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
 	}
-	saveLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  (tab to toggle)")
+	saveLabel := toggleStyle.Render(toggleIcon+" Save to system keychain") +
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  (tab to toggle)")
 
-	errLine := ""
-	if fr.keyValidationErr != "" {
-		errLine = lipgloss.NewStyle().Foreground(t.Error).Render("  ✗ " + fr.keyValidationErr)
-	} else if fr.keyErr != "" {
-		errLine = lipgloss.NewStyle().Foreground(t.Error).Render("  ⚠ " + fr.keyErr)
-	}
-
-	validatingLine := ""
+	// ── Status lines ──────────────────────────────────────────────────────
+	var statusLines []string
 	if fr.keyValidating {
-		validatingLine = lipgloss.NewStyle().Foreground(t.Brand).Render("  ⠋ Validating API key...")
+		statusLines = append(statusLines,
+			lipgloss.NewStyle().Foreground(t.Brand).Render("⠋ Validating API key..."))
+	}
+	if fr.keyValidationErr != "" {
+		statusLines = append(statusLines,
+			lipgloss.NewStyle().Foreground(t.Error).Render("✗ "+fr.keyValidationErr))
+	} else if fr.keyErr != "" {
+		statusLines = append(statusLines,
+			lipgloss.NewStyle().Foreground(t.Error).Render("⚠ "+fr.keyErr))
 	}
 
-	// Navigation hints
-	confirmBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
-	keychainBadge := keyBadge("tab", "Keychain", t.Brand, t.TextMuted)
-	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
-	hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", keychainBadge, "  ", backBadge)
+	// ── Compact hints ─────────────────────────────────────────────────────
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	hints := lipgloss.JoinHorizontal(lipgloss.Center,
+		keyStyle.Render("↵"), hintStyle.Render(" confirm  "),
+		keyStyle.Render("tab"), hintStyle.Render(" keychain  "),
+		keyStyle.Render("esc"), hintStyle.Render(" back"),
+	)
 
-	parts := []string{title, "", dots, "", desc, "", keyBox, ""}
-	// UX-04: keychain toggle with focus highlight
-	parts = append(parts, saveLabel)
-	if validatingLine != "" {
-		parts = append(parts, validatingLine)
-	}
-	if errLine != "" {
-		parts = append(parts, errLine)
-	}
-	parts = append(parts, "", "", hints)
+	// ── Compose ───────────────────────────────────────────────────────────
+	parts := []string{stepBar, "", subtitle, "", desc, "", keyBox, "", saveLabel}
+	parts = append(parts, statusLines...)
+	parts = append(parts, "", hints)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -837,23 +759,57 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	t := fr.theme
 	w := fr.width
 	if w <= 0 {
-		w = 80 // only when uninitialized
+		w = 80
 	}
 	if fr.contentWidth > 0 {
 		w = fr.contentWidth
 	}
+	innerW := w - 10
+	if innerW < 22 {
+		innerW = 22
+	}
+	h := fr.height
+	if h < 1 {
+		h = 24
+	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render("Step 4/4 — Choose your default model")
-	dots := fr.renderStepDots(3)
+	// ── Step bar ──────────────────────────────────────────────────────────
+	stepBar := renderStepBar(4, firstRunStepCount, "Choose your default model", innerW, t.Brand, t.Border)
 
-	confirmBadge := keyBadge("↵", "Confirm", t.Brand, t.TextMuted)
-	backBadge := keyBadge("esc", "Back", t.TextMuted, t.TextMuted)
+	// ── Compact hints (reused across branches) ────────────────────────────
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	keyStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	baseHints := func() string {
+		return lipgloss.JoinHorizontal(lipgloss.Center,
+			keyStyle.Render("↑↓"), hintStyle.Render(" navigate  "),
+			keyStyle.Render("tab"), hintStyle.Render(" category  "),
+			keyStyle.Render("↵"), hintStyle.Render(" confirm  "),
+			keyStyle.Render("esc"), hintStyle.Render(" back"),
+		)
+	}
+
+	// ── Bottom-up layout ──────────────────────────────────────────────────
+	// The outer renderFirstRun() wraps content in a box with:
+	//   Border(2) + Padding(1,3) = 4 extra rows
+	// Inside the box, fixed rows are:
+	//   stepBar(1) + blank(1) + tab(1) + blank(1) + listBorder(2) +
+	//   blank(1) + inputLabel(1) + inputBox(3) + blank(1) + hints(1) = 13
+	// Total overhead = 4 (box) + 13 (inner) = 17
+	const overheadRows = 17
+	listBudget := h - overheadRows
+	if listBudget < 3 {
+		listBudget = 3
+	}
+	// Always cap at 12 visible rows so the input + hints stay on screen
+	// and scrolling is always available for longer lists.
+	if listBudget > 12 {
+		listBudget = 12
+	}
 
 	var parts []string
-	parts = append(parts, title, "", dots, "")
+	parts = append(parts, stepBar, "")
 
-	// ── Loading ───────────────────────────────────────────────────────────────
+	// ── Loading ───────────────────────────────────────────────────────────
 	if fr.modelsLoading {
 		spinner := lipgloss.NewStyle().Foreground(t.Brand).Render("⠋")
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
@@ -862,68 +818,90 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// ── No provider configured ────────────────────────────────────────────────
+	// ── No provider configured ────────────────────────────────────────────
 	if fr.opts.DefaultProvider == "" {
 		inputBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
 			Padding(0, 1).
+			Width(innerW).
 			Render(fr.modelInput.View())
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render("No provider configured. Enter a model ID or press ↵ to continue.")
-		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
+		hints := lipgloss.JoinHorizontal(lipgloss.Center,
+			keyStyle.Render("↵"), hintStyle.Render(" confirm  "),
+			keyStyle.Render("esc"), hintStyle.Render(" back"),
+		)
 		parts = append(parts, desc, "", inputBox, "", hints)
 		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// ── Full categorized browser ──────────────────────────────────────────────
+	// ── Full categorized browser ──────────────────────────────────────────
 	b := fr.browser
 	if b == nil || len(b.categories) == 0 {
 		inputBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
 			Padding(0, 1).
+			Width(innerW).
 			Render(fr.modelInput.View())
 		warnLine := lipgloss.NewStyle().Foreground(t.Warning).
 			Render("⚠  Could not fetch models. Enter a model ID manually.")
-		hints := lipgloss.JoinHorizontal(lipgloss.Center, confirmBadge, "  ", backBadge)
+		hints := lipgloss.JoinHorizontal(lipgloss.Center,
+			keyStyle.Render("↵"), hintStyle.Render(" confirm  "),
+			keyStyle.Render("esc"), hintStyle.Render(" back"),
+		)
 		parts = append(parts, warnLine, "", inputBox, "", hints)
 		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Category tab bar
+	// ── Category tab bar (compact, scrollable) ────────────────────────────
+	// Measure available width for tabs. Active tab always visible; render
+	// from catCursor outward, stopping when we run out of width.
+	maxTabW := innerW - 4 // leave room for overflow indicator
 	var tabParts []string
-	for i, cat := range b.categories {
+	usedTabW := 0
+	// Always include the active tab first
+	for offset := 0; offset < len(b.categories); offset++ {
+		i := (b.catCursor + offset) % len(b.categories)
+		cat := b.categories[i]
 		count := fmt.Sprintf("%d", len(cat.Models))
 		label := cat.Icon + " " + cat.Title + " (" + count + ")"
+		var tab string
 		if i == b.catCursor {
-			tabParts = append(tabParts, lipgloss.NewStyle().
+			tab = lipgloss.NewStyle().
 				Foreground(t.Brand).Bold(true).
 				Border(lipgloss.RoundedBorder()).BorderForeground(t.Brand).
-				Padding(0, 1).Render(label))
+				Padding(0, 1).Render(label)
 		} else {
-			tabParts = append(tabParts, lipgloss.NewStyle().
+			tab = lipgloss.NewStyle().
 				Foreground(t.TextMuted).
 				Border(lipgloss.RoundedBorder()).BorderForeground(t.Border).
-				Padding(0, 1).Render(label))
+				Padding(0, 1).Render(label)
 		}
-		if i < len(b.categories)-1 {
-			tabParts = append(tabParts, " ")
+		tw := lipgloss.Width(tab)
+		if usedTabW+tw > maxTabW && offset > 0 {
+			// Show overflow indicator
+			tabParts = append(tabParts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("…"))
+			break
 		}
+		tabParts = append(tabParts, tab)
+		usedTabW += tw + 1
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 	parts = append(parts, tabBar, "")
 
-	// Model list
+	// ── Model list with scrollbar ─────────────────────────────────────────
 	cat := b.activeCat()
-	listW := w - 8
-	if listW < 30 {
-		listW = 30
+	listW := innerW
+	if listW < 20 {
+		listW = 20
 	}
+
 	if cat != nil && len(cat.Models) > 0 {
-		listH := fr.height - 22
-		if listH < 5 {
-			listH = 5
+		listH := listBudget
+		if listH < 3 {
+			listH = 3
 		}
 		// Clamp scroll
 		if b.modelCursor >= b.scrollOffset+listH {
@@ -937,41 +915,109 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 			end = len(cat.Models)
 		}
 
+		// Reserve space for scrollbar (3 chars) on wide terminals
+		scrollBarW := 0
+		if listW > 40 && len(cat.Models) > listH {
+			scrollBarW = 3
+		}
+		modelW := listW - scrollBarW
+
+		// Render model rows
 		var rows []string
 		for i := b.scrollOffset; i < end; i++ {
-			rows = append(rows, fr.renderModelRow(cat.Models[i], i == b.modelCursor, listW))
+			rows = append(rows, fr.renderModelRow(cat.Models[i], i == b.modelCursor, modelW))
 		}
-		if len(cat.Models) > listH {
-			rows = append(rows, lipgloss.NewStyle().Foreground(t.TextMuted).
-				Render(fmt.Sprintf("  %d–%d of %d  (↑/↓ scroll)",
-					b.scrollOffset+1, end, len(cat.Models))))
+
+		// Build scrollbar
+		var scrollBar string
+		if scrollBarW > 0 {
+			scrollBar = fr.renderScrollbar(len(cat.Models), listH, b.scrollOffset, t)
 		}
+
+		// Compose list: rows on the left, scrollbar on the right
+		listContent := strings.Join(rows, "\n")
+		if scrollBarW > 0 {
+			// Pad rows to modelW, then append scrollbar
+			listLines := strings.Split(listContent, "\n")
+			for i, line := range listLines {
+				lineW := lipgloss.Width(line)
+				if lineW < modelW {
+					listLines[i] = line + strings.Repeat(" ", modelW-lineW)
+				}
+			}
+			scrollLines := strings.Split(scrollBar, "\n")
+			// Merge line by line
+			merged := make([]string, len(listLines))
+			for i := range listLines {
+				if i < len(scrollLines) {
+					merged[i] = listLines[i] + scrollLines[i]
+				} else {
+					merged[i] = listLines[i] + strings.Repeat(" ", scrollBarW)
+				}
+			}
+			listContent = strings.Join(merged, "\n")
+		}
+
 		listBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
 			Width(listW).
-			Render(strings.Join(rows, "\n"))
+			Render(listContent)
+
+		// Store list Y offset for mouse handling
+		// stepBar(1) + blank(1) + tabBar(1) + blank(1) = 4 rows above list
+		fr.modelListY = 4
+		fr.modelListH = end - b.scrollOffset
 		parts = append(parts, listBox)
+	} else {
+		fr.modelListY = 0
+		fr.modelListH = 0
 	}
 
-	// Selected model ID input
+	// ── Selected model ID input ───────────────────────────────────────────
 	inputLabel := lipgloss.NewStyle().Foreground(t.TextSecondary).
 		Render("Selected model (edit to override):")
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 1).
+		Width(innerW).
 		Render(fr.modelInput.View())
 	parts = append(parts, "", inputLabel, inputBox)
 
-	// Hints
-	navBadge := keyBadge("↑↓", "Navigate", t.Brand, t.TextMuted)
-	tabNavBadge := keyBadge("tab", "Category", t.Brand, t.TextMuted)
-	hints := lipgloss.JoinHorizontal(lipgloss.Center,
-		navBadge, "  ", tabNavBadge, "  ", confirmBadge, "  ", backBadge)
-	parts = append(parts, "", hints)
+	// ── Hints (always visible at bottom) ──────────────────────────────────
+	parts = append(parts, "", baseHints())
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// renderScrollbar renders a vertical scrollbar showing position in the list.
+func (fr *FirstRunModel) renderScrollbar(total, visible, offset int, t theme.Theme) string {
+	if total <= visible {
+		return ""
+	}
+	barH := visible
+	thumbH := 1
+	if barH > 2 {
+		thumbH = barH * visible / total
+		if thumbH < 1 {
+			thumbH = 1
+		}
+	}
+	thumbPos := 0
+	if total-visible > 0 {
+		thumbPos = offset * (barH - thumbH) / (total - visible)
+	}
+
+	var lines []string
+	for i := 0; i < barH; i++ {
+		if i >= thumbPos && i < thumbPos+thumbH {
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ▌"))
+		} else {
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.Border).Render(" ·"))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderModelRow renders a single model row in the categorized browser list.

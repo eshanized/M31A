@@ -40,6 +40,7 @@ const (
 	ScreenGhostPicker      = tuitypes.ScreenGhostPicker
 	ScreenGhostOutput      = tuitypes.ScreenGhostOutput
 	ScreenConfirmQuit      = tuitypes.ScreenConfirmQuit
+	ScreenChatHistory      = tuitypes.ScreenChatHistory
 )
 
 // Message type re-exports
@@ -91,6 +92,7 @@ type (
 	PopScreenMsg            = tuitypes.PopScreenMsg
 	GhostWriteRequestMsg    = tuitypes.GhostWriteRequestMsg
 	GhostWriteResultMsg     = tuitypes.GhostWriteResultMsg
+	ChatHistoryContinueMsg  = tuitypes.ChatHistoryContinueMsg
 )
 
 // WorkflowEngine re-exports the workflow engine interface from tuitypes.

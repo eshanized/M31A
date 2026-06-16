@@ -132,6 +132,9 @@ type AppState struct {
 	planningModelID  string // model ID assigned to Discuss/Plan/Verify phases
 	codingModelID    string // model ID assigned to Execute/Ship phases
 
+	// Chat history browser
+	chatHistoryModel *ChatHistoryModel
+
 	// Command system
 	cmdRegistry *CommandRegistry
 	keyRegistry *KeyRegistry

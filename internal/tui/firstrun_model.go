@@ -158,6 +158,10 @@ type FirstRunModel struct {
 	starfieldCache  string
 	starfieldCacheW int
 	starfieldCacheH int
+
+	// Model list layout tracking (set by renderer, used by mouse handler)
+	modelListY int // Y offset of model list top in rendered view
+	modelListH int // visible height of model list in rows
 }
 
 // NewFirstRunModel creates a FirstRunModel.
@@ -287,6 +291,9 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fr, nil // block input during validation
 		}
 		return fr.handleKey(msg)
+
+	case tea.MouseMsg:
+		return fr.handleMouse(msg)
 	}
 	// Delegate to focused input if applicable
 	var cmd tea.Cmd
@@ -576,6 +583,80 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	}
+	return fr, nil
+}
+
+// handleMouse processes mouse events for the first-run wizard.
+func (fr *FirstRunModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return fr, nil
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if fr.step == stepModelPick && fr.browser != nil {
+			b := fr.browser
+			if b.modelCursor > 0 {
+				b.modelCursor--
+				if b.modelCursor < b.scrollOffset {
+					b.scrollOffset = b.modelCursor
+				}
+				if m, ok := b.selectedModel(); ok {
+					fr.modelInput.SetValue(m.ID)
+				}
+			}
+		}
+
+	case tea.MouseButtonWheelDown:
+		if fr.step == stepModelPick && fr.browser != nil {
+			b := fr.browser
+			cat := b.activeCat()
+			if cat != nil && b.modelCursor < len(cat.Models)-1 {
+				b.modelCursor++
+				// Scroll down if cursor exceeds visible window
+				if b.modelCursor >= b.scrollOffset+fr.modelListH {
+					b.scrollOffset = b.modelCursor - fr.modelListH + 1
+				}
+			}
+			if m, ok := b.selectedModel(); ok {
+				fr.modelInput.SetValue(m.ID)
+			}
+		}
+
+	case tea.MouseButtonLeft:
+		if fr.step == stepModelPick && fr.browser != nil {
+			b := fr.browser
+			cat := b.activeCat()
+			if cat == nil || len(cat.Models) == 0 {
+				return fr, nil
+			}
+			// Map absolute Y to model list row
+			row := msg.Y - fr.modelListY
+			if row < 0 || row >= fr.modelListH {
+				return fr, nil
+			}
+			idx := b.scrollOffset + row
+			if idx < 0 || idx >= len(cat.Models) {
+				return fr, nil
+			}
+			// If clicking the already-selected model, confirm it
+			if idx == b.modelCursor {
+				modelID := strings.TrimSpace(fr.modelInput.Value())
+				if modelID != "" {
+					fr.opts.ModelID = modelID
+					fr.step = stepDone
+					fr.modelInput.Blur()
+					return fr, fr.completeSetup()
+				}
+			}
+			// Otherwise, select the clicked model
+			b.modelCursor = idx
+			if m, ok := b.selectedModel(); ok {
+				fr.modelInput.SetValue(m.ID)
+			}
+		}
+	}
+
 	return fr, nil
 }
 

@@ -43,6 +43,7 @@ func handleStatus(_ []string, ctx CommandContext) CommandResult {
 	provider := "unknown"
 	model := "unknown"
 	phase := "idle"
+	msgCount := 0
 	if ctx.Config != nil {
 		provider = ctx.Config.Provider.Default
 		model = ctx.Config.Model.Default
@@ -55,11 +56,12 @@ func handleStatus(_ []string, ctx CommandContext) CommandResult {
 			model = sess.Model
 		}
 		phase = string(sess.WorkflowPhase)
+		msgCount = sess.MessageCount
 	}
 
 	msg := fmt.Sprintf(
 		"**Session:** %s\n**Provider:** %s\n**Model:** %s\n**Phase:** %s\n**Messages:** %d",
-		ctx.SessionID, provider, model, phase, sess.MessageCount,
+		ctx.SessionID, provider, model, phase, msgCount,
 	)
 	return CommandResult{Success: true, Message: msg}
 }
@@ -103,8 +105,18 @@ func handleUndo(_ []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: msg}
 }
 
-// handleHistory shows recent prompt history from the frecency tracker.
-func handleHistory(_ []string, ctx CommandContext) CommandResult {
+// handleHistory opens the chat history table browser.
+func handleHistory(_ []string, _ CommandContext) CommandResult {
+	screen := tuitypes.ScreenChatHistory
+	return CommandResult{
+		Success: true,
+		Screen:  &screen,
+		Message: "Opening chat history...",
+	}
+}
+
+// handlePromptHistory shows recent prompt history from the frecency tracker.
+func handlePromptHistory(_ []string, ctx CommandContext) CommandResult {
 	if ctx.FrecentHistory == nil {
 		return CommandResult{Success: false, Message: "Prompt history not available."}
 	}

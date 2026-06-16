@@ -653,6 +653,29 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionDetailModel.SetSession(msg.Session)
 		}
 
+	// ── Chat history: continue from message ────────────────────────────────
+	case ChatHistoryContinueMsg:
+		if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.Messages()) {
+			// Truncate messages: keep everything up to and including the selected message
+			truncated := make([]types.Message, msg.MessageIndex+1)
+			copy(truncated, m.replModel.Messages()[:msg.MessageIndex+1])
+			m.replModel.SetMessages(truncated)
+			// Persist the truncated session
+			if m.sessionManager != nil && m.sessionID != "" {
+				sess, err := m.sessionManager.LoadSession(m.sessionID)
+				if err == nil {
+					sess.Messages = truncated
+					sess.MessageCount = len(truncated)
+					_ = m.sessionManager.SaveSession(sess)
+				}
+			}
+			cmds = append(cmds, m.addToastCmd(
+				fmt.Sprintf("Continued from message %d — %d messages remaining", msg.MessageIndex+1, len(truncated)),
+				"success", 3*time.Second))
+			// Navigate back to REPL
+			cmds = append(cmds, m.navigateToScreen(ScreenREPL))
+		}
+
 	// ── Ghost write request ───────────────────────────────────────────────
 	case GhostWriteRequestMsg:
 		if len(msg.Files) > 0 {
@@ -2042,6 +2065,17 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
 		} else {
 			m.phaseModelPicker.SetDimensions(cw, ch)
+		}
+		return nil
+	case ScreenChatHistory:
+		if m.chatHistoryModel == nil {
+			m.chatHistoryModel = NewChatHistoryModel(m.themeManager.Current(), cw, ch)
+		} else {
+			m.chatHistoryModel.SetDimensions(cw, ch)
+		}
+		// Load messages from current REPL session
+		if m.replModel != nil {
+			m.chatHistoryModel.SetMessages(m.replModel.Messages())
 		}
 		return nil
 	default:

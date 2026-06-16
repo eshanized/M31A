@@ -52,6 +52,7 @@ const (
 	ScreenGhostPicker      Screen = 26   // ghost write file selector
 	ScreenGhostOutput      Screen = 27   // ghost write results
 	ScreenConfirmQuit      Screen = 28   // confirm quit dialog
+	ScreenChatHistory      Screen = 29   // chat history table browser
 )
 
 // Label returns a human-readable name for the screen.
@@ -115,6 +116,8 @@ func (s Screen) Label() string {
 		return "Ghost Output"
 	case ScreenConfirmQuit:
 		return "Confirm Quit"
+	case ScreenChatHistory:
+		return "Chat History"
 	default:
 		return "Unknown"
 	}
@@ -397,6 +400,11 @@ type SessionExportMsg struct {
 
 // PopScreenMsg navigates back to the previous screen in the back-stack.
 type PopScreenMsg struct{}
+
+// ChatHistoryContinueMsg is emitted when the user selects a message in chat history to continue from.
+type ChatHistoryContinueMsg struct {
+	MessageIndex int // index of the message to continue from (truncate everything after)
+}
 
 // GhostWriteRequestMsg is emitted when the user selects files for ghost write.
 type GhostWriteRequestMsg struct {

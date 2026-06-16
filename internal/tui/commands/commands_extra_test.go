@@ -63,8 +63,11 @@ func TestHandleUndo_NoSession(t *testing.T) {
 func TestHandleHistory_NoHistory(t *testing.T) {
 	t.Parallel()
 	result := handleHistory(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleHistory should fail without FrecentHistory")
+	if !result.Success {
+		t.Error("handleHistory should succeed and open chat history screen")
+	}
+	if result.Screen == nil {
+		t.Error("handleHistory should return a screen")
 	}
 }
 

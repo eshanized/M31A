@@ -253,6 +253,8 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"j/k navigate", "esc back"}
 	case ScreenConfirmQuit:
 		info.KeyboardHints = []string{"y quit", "n stay"}
+	case ScreenChatHistory:
+		info.KeyboardHints = []string{"↑↓ navigate", "enter continue", "g top", "G bottom", "q back"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -365,6 +367,8 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderGhostOutputContent(chrome)
 	case ScreenConfirmQuit:
 		return m.renderConfirmQuitContent(chrome)
+	case ScreenChatHistory:
+		return m.renderChatHistoryContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -634,6 +638,14 @@ func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {
 	}
 	m.confirmQuitModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.confirmQuitModel.View()
+}
+
+func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
+	if m.chatHistoryModel == nil {
+		m.chatHistoryModel = NewChatHistoryModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+	}
+	m.chatHistoryModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.chatHistoryModel.View()
 }
 
 // renderPermissionModal renders the permission or question overlay.
