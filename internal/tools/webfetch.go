@@ -783,3 +783,9 @@ func normalizeWhitespace(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// Close releases idle connections held by the HTTP client's transport.
+// Call this during shutdown to prevent connection leaks.
+func (wf *WebFetch) Close() {
+	wf.client.CloseIdleConnections()
+}
