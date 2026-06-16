@@ -438,6 +438,9 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to load tasks for heal: %w", err)
 	}
+	// Add a timeout to prevent indefinite hangs from build/test commands
+	verifyCtx, verifyCancel := e.verifyTaskContext(ctx)
+	defer verifyCancel()
 	for i, task := range tasks {
 		if task.ID == taskID && task.Status == m31types.StatusFailed {
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
@@ -453,7 +456,7 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 				"Manual heal triggered by user.\nTask %d failed verification: %v\n"+
 					"Task description: %s\nFiles: %v\nAcceptance criteria: %v\n"+
 					"Inspect the files listed above, identify any issues, and apply a fix.",
-				taskID, e.verifyTask(ctx, task).Errors,
+				taskID, e.verifyTask(verifyCtx, task).Errors,
 				task.Description, task.Files, task.AcceptanceCriteria,
 			)
 			healResult := e.healTask(ctx, task, failure, "")
@@ -465,7 +468,7 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 				Error:   healResult.Error,
 			})
 			if healResult.Success {
-				newResult := e.verifyTask(ctx, task)
+				newResult := e.verifyTask(verifyCtx, task)
 				if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
 					tasks[i].Status = m31types.StatusDone
 				} else {
