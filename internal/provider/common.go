@@ -12,6 +12,30 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// HTTPStatusError carries the HTTP status code from a provider response,
+// enabling typed retry classification via errors.As instead of fragile
+// string matching on error messages.
+type HTTPStatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPStatusError) Error() string {
+	return e.Message
+}
+
+// IsRetryable reports whether the HTTP status code indicates a transient
+// server error that should be retried (500, 502, 503).
+func (e *HTTPStatusError) IsRetryable() bool {
+	switch e.StatusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable:
+		return true
+	}
+	return false
+}
+
 // UserAgent returns the standard M31A User-Agent string.
 func UserAgent(version string) string {
 	return fmt.Sprintf("M31A/%s", version)
