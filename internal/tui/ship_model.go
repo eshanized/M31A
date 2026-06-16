@@ -72,6 +72,15 @@ func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 		if sm.demonstration != "" {
 			sm.demoViewport.SetContent(sm.demonstration)
 		}
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				sm.demoViewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				sm.demoViewport.LineDown(3)
+			}
+		}
 	case tea.KeyMsg:
 		if sm.showDemo {
 			switch msg.String() {
