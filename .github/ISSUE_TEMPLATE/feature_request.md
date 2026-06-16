@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Propose a new capability or improvement for M31A.
+about: Propose a new capability or improvement for M31 Autonomous.
 title: "[feat] "
 labels: enhancement
 assignees: ''
