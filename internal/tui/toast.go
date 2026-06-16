@@ -107,7 +107,8 @@ func renderSingleToast(toast Toast, t theme.Theme, index int) string {
 func renderToastProgress(toast Toast, t theme.Theme) string {
 	// Calculate elapsed time since creation
 	elapsed := time.Since(toast.CreatedAt)
-	duration := 5 * time.Second // default duration
+	// Default duration for toasts without explicit Duration field
+	duration := 5 * time.Second
 
 	// Calculate progress (0 to 1)
 	progress := float64(elapsed) / float64(duration)
