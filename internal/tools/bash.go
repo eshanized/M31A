@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -136,6 +137,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var termMu sync.Mutex
 	var terminationMsg string
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bash signal forwarder panic", "error", r)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			if cmd.Process != nil {
@@ -166,6 +172,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	// Use error channel instead of shared variable to avoid data race
 	waitCh := make(chan error, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bash wait goroutine panic", "error", r)
+			}
+		}()
 		waitCh <- cmd.Wait()
 		_ = stdoutW.Close()
 		_ = stderrW.Close()
@@ -181,6 +192,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bash stdout copy panic", "error", r)
+			}
+		}()
 		var stdoutBuf strings.Builder
 		_, _ = io.Copy(&stdoutBuf, stdoutR)
 		outMu.Lock()
@@ -190,6 +206,11 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bash stderr copy panic", "error", r)
+			}
+		}()
 		var stderrBuf strings.Builder
 		_, _ = io.Copy(&stderrBuf, stderrR)
 		outMu.Lock()
