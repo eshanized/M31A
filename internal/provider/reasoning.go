@@ -58,7 +58,7 @@ func init() {
 	for k := range reasoningParamMap {
 		sortedReasoningKeys = append(sortedReasoningKeys, k)
 	}
-	// Sort by length descending so longer prefixes match first
+	// Sort reverse-alphabetically so longer/more-specific prefixes match first
 	sort.Sort(sort.Reverse(sort.StringSlice(sortedReasoningKeys)))
 	// Pre-compute SSEFieldParts on both the map entries (for fallback path)
 	// and the sorted configs slice (for fast path).
@@ -240,5 +240,5 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 		return &types.StreamChunk{Type: "done", Usage: usage}, nil
 	}
 
-	return &types.StreamChunk{Type: "content", Delta: "", Usage: usage}, nil
+	return nil, nil
 }
