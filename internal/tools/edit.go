@@ -283,7 +283,7 @@ func (t *Edit) pruneBackups(sanitizedPrefix string) {
 		}
 	}
 
-	if len(matches) <= MaxBackupsPerFile {
+	if len(matches) < MaxBackupsPerFile {
 		return
 	}
 
