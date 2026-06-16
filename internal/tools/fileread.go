@@ -113,7 +113,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		if os.IsNotExist(err) {
 			return types.ToolResult{}, fmt.Errorf("%w: file not found: %s", m31errors.ErrToolExecution, path)
 		}
-		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %v", m31errors.ErrToolExecution, path, err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %w", m31errors.ErrToolExecution, path, err)
 	}
 	if fi.IsDir() {
 		return types.ToolResult{}, fmt.Errorf("%w: path is a directory, not a file: %s", m31errors.ErrToolExecution, path)
@@ -128,7 +128,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	// Open and read
 	f, err := os.Open(resolved)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %v", m31errors.ErrToolExecution, path, err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %w", m31errors.ErrToolExecution, path, err)
 	}
 	defer f.Close() //nolint:errcheck
 
