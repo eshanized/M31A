@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Node represents a single file in the import graph.
@@ -51,6 +52,12 @@ func (g *ImportGraph) addReverseEdge(target, source string) {
 	if !ok {
 		node = &Node{Path: target}
 		g.nodes[target] = node
+	}
+	// Avoid duplicates
+	for _, s := range node.ImportedBy {
+		if s == source {
+			return
+		}
 	}
 	node.ImportedBy = append(node.ImportedBy, source)
 }
@@ -212,14 +219,19 @@ func resolveImport(workDir, fromFile, importPath, language string) string {
 	return ""
 }
 
-// goModulePath caches the module path read from go.mod (lazily initialized).
-var goModulePath string
+// goModulePath caches the module path read from go.mod per working directory.
+var (
+	goModulePathCache   = make(map[string]string)
+	goModulePathCacheMu sync.Mutex
+)
 
 // readGoModModule reads the module path from go.mod in workDir.
 // Returns empty string if go.mod is missing or unparseable.
 func readGoModModule(workDir string) string {
-	if goModulePath != "" {
-		return goModulePath
+	goModulePathCacheMu.Lock()
+	defer goModulePathCacheMu.Unlock()
+	if cached, ok := goModulePathCache[workDir]; ok {
+		return cached
 	}
 	content, err := os.ReadFile(filepath.Join(workDir, "go.mod"))
 	if err != nil {
@@ -228,8 +240,9 @@ func readGoModModule(workDir string) string {
 	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "module ") {
-			goModulePath = strings.TrimSpace(strings.TrimPrefix(line, "module"))
-			return goModulePath
+			modPath := strings.TrimSpace(strings.TrimPrefix(line, "module"))
+			goModulePathCache[workDir] = modPath
+			return modPath
 		}
 	}
 	return ""
