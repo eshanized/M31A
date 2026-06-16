@@ -223,6 +223,64 @@ install:
 	@CGO_ENABLED=0 $(GO) install $(LDFLAGS) $(CMD_DIR)
 	@echo "$(GREEN)[install]$(NC) Done"
 
+# ==============================================================================
+# Platform-specific installation
+# ==============================================================================
+
+INSTALL_PREFIX ?= /usr/local
+
+## install-linux-amd64    — Install linux/amd64 binary to $(INSTALL_PREFIX)/bin
+install-linux-amd64: build-linux-amd64
+	@echo "$(GREEN)[install]$(NC) Installing linux/amd64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-linux-amd64 $(INSTALL_PREFIX)/bin/$(BINARY)
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+
+## install-linux-arm64    — Install linux/arm64 binary to $(INSTALL_PREFIX)/bin
+install-linux-arm64: build-linux-arm64
+	@echo "$(GREEN)[install]$(NC) Installing linux/arm64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-linux-arm64 $(INSTALL_PREFIX)/bin/$(BINARY)
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+
+## install-darwin-amd64   — Install darwin/amd64 binary to $(INSTALL_PREFIX)/bin
+install-darwin-amd64: build-darwin-amd64
+	@echo "$(GREEN)[install]$(NC) Installing darwin/amd64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-darwin-amd64 $(INSTALL_PREFIX)/bin/$(BINARY)
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+
+## install-darwin-arm64   — Install darwin/arm64 binary to $(INSTALL_PREFIX)/bin
+install-darwin-arm64: build-darwin-arm64
+	@echo "$(GREEN)[install]$(NC) Installing darwin/arm64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-darwin-arm64 $(INSTALL_PREFIX)/bin/$(BINARY)
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+
+## install-windows-amd64  — Install windows/amd64 binary to $(INSTALL_PREFIX)/bin
+install-windows-amd64: build-windows-amd64
+	@echo "$(GREEN)[install]$(NC) Installing windows/amd64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-windows-amd64.exe $(INSTALL_PREFIX)/bin/$(BINARY).exe
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe"
+
+## install-windows-arm64  — Install windows/arm64 binary to $(INSTALL_PREFIX)/bin
+install-windows-arm64: build-windows-arm64
+	@echo "$(GREEN)[install]$(NC) Installing windows/arm64 to $(INSTALL_PREFIX)/bin..."
+	@install -d $(INSTALL_PREFIX)/bin
+	@install -m 755 $(DIST_DIR)/$(BINARY)-windows-arm64.exe $(INSTALL_PREFIX)/bin/$(BINARY).exe
+	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe"
+
+## install-all           — Build and install all platform binaries
+install-all: install-linux-amd64 install-linux-arm64 install-darwin-amd64 install-darwin-arm64 install-windows-amd64 install-windows-arm64
+	@echo "$(GREEN)[install]$(NC) All platforms installed to $(INSTALL_PREFIX)/bin"
+
+## uninstall            — Remove installed binary from $(INSTALL_PREFIX)/bin
+uninstall:
+	@echo "$(YELLOW)[uninstall]$(NC) Removing $(INSTALL_PREFIX)/bin/$(BINARY)..."
+	@rm -f $(INSTALL_PREFIX)/bin/$(BINARY) $(INSTALL_PREFIX)/bin/$(BINARY).exe
+	@echo "$(YELLOW)[uninstall]$(NC) Done"
+
 ## version           — Show version info
 version:
 	@echo "Version: $(VERSION)"
@@ -240,4 +298,8 @@ version:
         lint lint-fix vet fmt tidy check \
         cross $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(arch))) \
         release release-dry \
-        deps deps-verify size clean nuke install version
+        deps deps-verify size clean nuke install version \
+        install-linux-amd64 install-linux-arm64 \
+        install-darwin-amd64 install-darwin-arm64 \
+        install-windows-amd64 install-windows-arm64 \
+        install-all uninstall
