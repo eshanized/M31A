@@ -64,3 +64,4 @@ image_99999.png
 .env.*
 !.env.example
 config.local.toml
+promotion/
