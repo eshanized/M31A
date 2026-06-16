@@ -70,6 +70,15 @@ func (lm *LedgerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		lm.SetDimensions(msg.Width, msg.Height)
 		return lm, nil
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				lm.viewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				lm.viewport.LineDown(3)
+			}
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc", "q":
