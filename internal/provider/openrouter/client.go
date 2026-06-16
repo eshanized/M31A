@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -159,11 +160,14 @@ func isRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	var httpErr *provider.HTTPStatusError
+	if errors.As(err, &httpErr) {
+		return httpErr.IsRetryable()
+	}
+	// Fallback: string matching for network-level errors that don't
+	// carry an HTTP status code (connection resets, unexpected EOF, etc.)
 	msg := err.Error()
-	return strings.Contains(msg, "500") ||
-		strings.Contains(msg, "502") ||
-		strings.Contains(msg, "503") ||
-		strings.Contains(msg, "connection reset") ||
+	return strings.Contains(msg, "connection reset") ||
 		strings.Contains(msg, "unexpected EOF") ||
 		strings.Contains(msg, "server error") ||
 		strings.Contains(msg, "gateway error") ||
@@ -215,7 +219,8 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 			if provider.IsContextExceeded(resp.StatusCode, bodyStr) {
 				return nil, m31errors.ErrContextExceeded
 			}
-			return nil, fmt.Errorf("%s", provider.SanitizeProviderError(resp.StatusCode, bodyStr, "openrouter"))
+			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, "openrouter")
+			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 		}
 	}
 
