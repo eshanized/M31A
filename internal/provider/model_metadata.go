@@ -13,6 +13,11 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// lastFetchAttempt tracks the time of the last fetch attempt (success or failure)
+// to prevent hammering the API on repeated failures. Separate from
+// openRouterMetadataFetched which only tracks successful fetches.
+var lastFetchAttempt time.Time
+
 // ModelMetadata holds enrichment data for a model from an external source.
 type ModelMetadata struct {
 	ContextLength int64
@@ -22,7 +27,6 @@ type ModelMetadata struct {
 
 var (
 	openRouterMetadataCache   map[string]ModelMetadata
-	openRouterMetadataOnce    sync.Once
 	openRouterMetadataFetched time.Time
 	openRouterMetadataMu      sync.RWMutex
 
@@ -49,6 +53,7 @@ type openRouterModelEntry struct {
 // FetchOpenRouterMetadata fetches model metadata from OpenRouter's public API.
 // Results are cached for openRouterMetadataTTL. Uses a dedicated HTTP client
 // with a short timeout to avoid blocking provider operations.
+// Unlike sync.Once, this retries on failure after a cooldown period.
 func FetchOpenRouterMetadata(ctx context.Context) map[string]ModelMetadata {
 	openRouterMetadataMu.RLock()
 	if openRouterMetadataCache != nil && time.Since(openRouterMetadataFetched) < openRouterMetadataTTL {
@@ -57,20 +62,27 @@ func FetchOpenRouterMetadata(ctx context.Context) map[string]ModelMetadata {
 	}
 	openRouterMetadataMu.RUnlock()
 
-	openRouterMetadataOnce.Do(func() {
-		metadata, err := fetchOpenRouterMetadataUncached(ctx)
-		if err != nil {
-			slog.Warn("model_metadata: failed to fetch OpenRouter metadata", "error", err)
-			return
-		}
-		openRouterMetadataMu.Lock()
-		openRouterMetadataCache = metadata
-		openRouterMetadataFetched = time.Now()
-		openRouterMetadataMu.Unlock()
-	})
+	openRouterMetadataMu.Lock()
+	defer openRouterMetadataMu.Unlock()
 
-	openRouterMetadataMu.RLock()
-	defer openRouterMetadataMu.RUnlock()
+	// Double-check after acquiring write lock (another goroutine may have refreshed)
+	if openRouterMetadataCache != nil && time.Since(openRouterMetadataFetched) < openRouterMetadataTTL {
+		return openRouterMetadataCache
+	}
+
+	// Cooldown: avoid hammering API on repeated failures (5 min between retries)
+	if time.Since(lastFetchAttempt) < 5*time.Minute && openRouterMetadataCache != nil {
+		return openRouterMetadataCache
+	}
+	lastFetchAttempt = time.Now()
+
+	metadata, err := fetchOpenRouterMetadataUncached(ctx)
+	if err != nil {
+		slog.Warn("model_metadata: failed to fetch OpenRouter metadata", "error", err)
+		return openRouterMetadataCache // return stale cache if available
+	}
+	openRouterMetadataCache = metadata
+	openRouterMetadataFetched = time.Now()
 	return openRouterMetadataCache
 }
 
@@ -136,26 +148,26 @@ func parseFloatSafe(s string) float64 {
 func LocalMetadataFallback() map[string]ModelMetadata {
 	return map[string]ModelMetadata{
 		// Anthropic Claude models
-		"claude-fable-5":      {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 10, OutputPerMToken: 50}, Source: "local"},
-		"claude-opus-4-8":     {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
-		"claude-opus-4-7":     {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
-		"claude-opus-4-6":     {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
-		"claude-opus-4-5":     {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
-		"claude-opus-4-1":     {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
-		"claude-sonnet-4-6":   {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
-		"claude-sonnet-4-5":   {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
-		"claude-sonnet-4":     {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
-		"claude-haiku-4-5":    {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 1, OutputPerMToken: 5}, Source: "local"},
-		"claude-3-5-sonnet":   {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
-		"claude-3-5-haiku":    {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 0.8, OutputPerMToken: 4}, Source: "local"},
-		"claude-3-opus":       {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 15, OutputPerMToken: 75}, Source: "local"},
+		"claude-fable-5":    {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 10, OutputPerMToken: 50}, Source: "local"},
+		"claude-opus-4-8":   {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
+		"claude-opus-4-7":   {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
+		"claude-opus-4-6":   {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
+		"claude-opus-4-5":   {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
+		"claude-opus-4-1":   {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 25}, Source: "local"},
+		"claude-sonnet-4-6": {ContextLength: 1_000_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
+		"claude-sonnet-4-5": {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
+		"claude-sonnet-4":   {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
+		"claude-haiku-4-5":  {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 1, OutputPerMToken: 5}, Source: "local"},
+		"claude-3-5-sonnet": {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 3, OutputPerMToken: 15}, Source: "local"},
+		"claude-3-5-haiku":  {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 0.8, OutputPerMToken: 4}, Source: "local"},
+		"claude-3-opus":     {ContextLength: 200_000, Pricing: types.Pricing{InputPerMToken: 15, OutputPerMToken: 75}, Source: "local"},
 
 		// Google Gemini models
-		"gemini-3.5-flash":  {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 1.5, OutputPerMToken: 9}, Source: "local"},
-		"gemini-3.1-pro":    {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 2, OutputPerMToken: 12}, Source: "local"},
-		"gemini-3-flash":    {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 0.5, OutputPerMToken: 3}, Source: "local"},
-		"gemini-2.5-pro":    {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 2.5, OutputPerMToken: 15}, Source: "local"},
-		"gemini-2.5-flash":  {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 0.5, OutputPerMToken: 3}, Source: "local"},
+		"gemini-3.5-flash": {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 1.5, OutputPerMToken: 9}, Source: "local"},
+		"gemini-3.1-pro":   {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 2, OutputPerMToken: 12}, Source: "local"},
+		"gemini-3-flash":   {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 0.5, OutputPerMToken: 3}, Source: "local"},
+		"gemini-2.5-pro":   {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 2.5, OutputPerMToken: 15}, Source: "local"},
+		"gemini-2.5-flash": {ContextLength: 1_048_576, Pricing: types.Pricing{InputPerMToken: 0.5, OutputPerMToken: 3}, Source: "local"},
 
 		// OpenAI GPT models
 		"gpt-5.5":      {ContextLength: 1_050_000, Pricing: types.Pricing{InputPerMToken: 5, OutputPerMToken: 30}, Source: "local"},
@@ -167,8 +179,8 @@ func LocalMetadataFallback() map[string]ModelMetadata {
 		"gpt-4o-mini":  {ContextLength: 128_000, Pricing: types.Pricing{InputPerMToken: 0.15, OutputPerMToken: 0.6}, Source: "local"},
 
 		// DeepSeek models
-		"deepseek-r1":  {ContextLength: 128_000, Pricing: types.Pricing{InputPerMToken: 0.55, OutputPerMToken: 2.19}, Source: "local"},
-		"deepseek-v3":  {ContextLength: 128_000, Pricing: types.Pricing{InputPerMToken: 0.27, OutputPerMToken: 1.1}, Source: "local"},
+		"deepseek-r1": {ContextLength: 128_000, Pricing: types.Pricing{InputPerMToken: 0.55, OutputPerMToken: 2.19}, Source: "local"},
+		"deepseek-v3": {ContextLength: 128_000, Pricing: types.Pricing{InputPerMToken: 0.27, OutputPerMToken: 1.1}, Source: "local"},
 
 		// Qwen models
 		"qwen-3-235b": {ContextLength: 131_072, Pricing: types.Pricing{InputPerMToken: 0.25, OutputPerMToken: 1.0}, Source: "local"},
@@ -247,19 +259,11 @@ func EnrichModelInfo(models []types.ModelInfo, providerName string) []types.Mode
 	defer cancel()
 
 	openRouterMeta := FetchOpenRouterMetadata(ctx)
-	localDB := LocalMetadataFallback()
 
 	enriched := make([]types.ModelInfo, len(models))
 	for i, m := range models {
-		// Try OpenRouter metadata first
-		meta, found := lookupMetadata(m.ID, openRouterMeta)
-
-		// Fall back to local database
-		if !found {
-			if localMeta, ok := lookupMetadata(m.ID, localDB); ok {
-				meta = localMeta
-			}
-		}
+		// lookupMetadata tries OpenRouter first, then falls back to local DB
+		meta, _ := lookupMetadata(m.ID, openRouterMeta)
 
 		if meta != nil {
 			// Enrich context_length if the provider didn't set it (still at default)
