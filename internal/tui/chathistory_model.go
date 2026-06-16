@@ -69,6 +69,22 @@ func (ch *ChatHistoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		ch.SetDimensions(msg.Width, msg.Height)
 		return ch, nil
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if ch.cursor > 0 {
+					ch.cursor--
+					ch.clampScroll()
+				}
+			case tea.MouseButtonWheelDown:
+				if ch.cursor < len(ch.messages)-1 {
+					ch.cursor++
+					ch.clampScroll()
+				}
+			}
+		}
+		return ch, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc", "q":
