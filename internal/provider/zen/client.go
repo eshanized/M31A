@@ -109,6 +109,9 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			}
 			models = append(models, info)
 		}
+		// Enrich models with context_length and pricing from OpenRouter or local database.
+		// Zen API does not return pricing or per-model context_length.
+		models = provider.EnrichModelInfo(models, "zen")
 		return models, nil
 	})
 	if err != nil {
