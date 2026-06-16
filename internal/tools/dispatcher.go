@@ -65,6 +65,11 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	}
 	d.rateTicker = time.NewTicker(time.Second / ToolRateLimitPerSec)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("rate limiter panic", "error", r)
+			}
+		}()
 		for {
 			select {
 			case <-d.rateDone:
