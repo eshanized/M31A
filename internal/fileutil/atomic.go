@@ -32,9 +32,9 @@ func AtomicWriteWithPerm(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpPath := tmpFile.Name()
 	// os.CreateTemp creates with 0600; restore desired permissions
-	_ = os.Chmod(tmpPath, perm)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+	if chmodErr := os.Chmod(tmpPath, perm); chmodErr != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("chmod temp file: %w", chmodErr)
 	}
 	defer os.Remove(tmpPath) //nolint:errcheck
 
