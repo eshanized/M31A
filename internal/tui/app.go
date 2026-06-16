@@ -425,6 +425,11 @@ func (m *AppState) startConfigWatcher() tea.Cmd {
 	m.configWatcherStop = make(chan struct{})
 	go func() {
 		defer close(ch)
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("config watcher panic", "error", r)
+			}
+		}()
 		config.WatchConfig(m.shutdownCtx, m.configPath, ch)
 	}()
 	return func() tea.Msg {
