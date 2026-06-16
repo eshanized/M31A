@@ -22,6 +22,7 @@ func (m *ReplModel) renderQuickActionsOverlay(width int) string {
 		key  string
 		desc string
 	}{
+		{"/chat", "new chat session"},
 		{"/workflow", "start workflow"},
 		{"/optimize", "suggest model"},
 		{"/compress", "compress context"},
