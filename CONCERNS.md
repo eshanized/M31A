@@ -422,4 +422,42 @@
 
 ---
 
+## Resolved Issues (2026-06-17)
+
+### Error Handling Fixes
+- **ParsePlan silent failure** (`execute.go:423`): Now logs warning on parse failure instead of discarding error
+- **Ship phase git errors** (`ship.go:60-61,98`): `HasUncommittedChanges`, `StatusPorcelain`, and `DiffStaged` errors now logged with safe defaults (assume dirty on error)
+- **Ship phase AddAll** (`ship.go:88-93`): No longer commits unrelated files silently; skips commit when no task-to-file mapping exists
+- **FileRead error wrapping** (`fileread.go:116,131`): Changed `%v` to `%w` to preserve error chain for `errors.Is()` matching
+- **Engine error wrapping** (`engine.go:292,526,529`): Wrapped with `ErrPhaseTransition` sentinel for `errors.Is()` matching
+- **Missing ErrGitNotInitialized sentinel** (`initialize.go:39`, `verify.go:173`): Added sentinel error with `UserMessage()` case
+
+### Panic Recovery
+- **Tool execution goroutines** (`execute.go:246-286`): Added `recover()` that stores panic error in results and emits `ToolCompleteMsg`
+- **Agent loop goroutine** (`agent_loop.go:101`): Added `recover()` that sends `AgentErrorMsg` on panic
+- **Streaming goroutine** (`streaming.go:85`): Added `recover()` that sends `StreamErrorMsg` on panic
+- **Dispatcher rate-limiter** (`dispatcher.go:67-79`): Added `recover()` with `slog.Error` logging
+- **Config watcher** (`app.go:426-429`): Added `recover()` with `slog.Error` logging
+- **Signal handler** (`main.go:270-291`): Added `recover()` with `slog.Error` logging
+- **Bash tool goroutines** (`bash.go:138,168,182,191`): Added `recover()` to all 4 goroutines
+
+### Stream Safety
+- **Partial tool calls on truncation** (`engine.go:728-733`): `consumeStreamWithTools` now returns `nil` for partial tool calls on stream error, preventing dispatch of incomplete calls
+- **Demonstration size guard** (`ship.go:401-459`): Task list capped to 20 tasks for demonstration generation
+
+### Typed Error Classification
+- **isRetryable string matching** (`openrouter/client.go:158-171`): Added `provider.HTTPStatusError` typed error carrying HTTP status codes; `isRetryable()` now uses `errors.As` for typed matching with string fallback for network errors
+
+### Tech Debt Cleanup
+- **Backup pruning inconsistency** (`filedelete.go`, `filewrite.go`): Extracted shared `pruneBackupsByPrefix()` utility in `internal/tools/backup.go`; both tools now delegate to it
+
+### Already Mitigated (no changes needed)
+- **Global mutable state** (`goModulePath`): Already uses `sync.Mutex`-guarded cache
+- **Gitignore cache eviction**: Already uses mtime-based invalidation via `loadGitignoreCached()`
+- **LoadDotEnv race**: Already guarded with `sync.Once`, called before goroutine init
+- **ReDoS protection**: `checkRedos()` already detects nested and adjacent quantifiers
+
+---
+
 *Concerns audit: 2026-06-17*
+*Resolution: 2026-06-17*
