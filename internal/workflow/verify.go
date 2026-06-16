@@ -170,7 +170,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 // is empty during bisect setup.
 func (e *Engine) findRootCommit() (string, error) {
 	if e.git == nil {
-		return "", fmt.Errorf("git not initialized")
+		return "", m31errors.ErrGitNotInitialized
 	}
 	out, err := e.git.Run("rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
