@@ -360,14 +360,14 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 }
 
 // gitignoreCache caches parsed gitignore patterns with mtime-based invalidation.
-type gitignoreCache struct {
+// Uses sync.Map for thread-safe per-directory caching.
+var gitignoreCacheStore sync.Map // map[string]*gitignoreCacheEntry
+
+type gitignoreCacheEntry struct {
 	mu       sync.Mutex
-	dir      string
 	mtime    time.Time
 	patterns []string
 }
-
-var globalGitignoreCache gitignoreCache
 
 // loadGitignoreCached returns cached gitignore patterns, re-reading from disk
 // only if the .gitignore file has been modified since the last read.
@@ -378,18 +378,20 @@ func loadGitignoreCached(dir string) []string {
 		return nil
 	}
 
-	globalGitignoreCache.mu.Lock()
-	defer globalGitignoreCache.mu.Unlock()
+	// Get or create per-directory cache entry
+	val, _ := gitignoreCacheStore.LoadOrStore(dir, &gitignoreCacheEntry{})
+	entry := val.(*gitignoreCacheEntry)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
 
-	if globalGitignoreCache.dir == dir && !info.ModTime().After(globalGitignoreCache.mtime) {
-		return globalGitignoreCache.patterns
+	if !info.ModTime().After(entry.mtime) {
+		return entry.patterns
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		globalGitignoreCache.dir = dir
-		globalGitignoreCache.mtime = info.ModTime()
-		globalGitignoreCache.patterns = nil
+		entry.mtime = info.ModTime()
+		entry.patterns = nil
 		return nil
 	}
 
@@ -402,9 +404,8 @@ func loadGitignoreCached(dir string) []string {
 		patterns = append(patterns, line)
 	}
 
-	globalGitignoreCache.dir = dir
-	globalGitignoreCache.mtime = info.ModTime()
-	globalGitignoreCache.patterns = patterns
+	entry.mtime = info.ModTime()
+	entry.patterns = patterns
 	return patterns
 }
 
@@ -434,9 +435,13 @@ func matchesGitignore(path string, patterns []string, workDir string) bool {
 	return false
 }
 
-// redosDetector matches groups containing a quantifier that are themselves
-// followed by a quantifier — the classic nested-quantifier ReDoS pattern.
+// redosDetector matches patterns containing nested quantifiers or adjacent
+// quantifiers that are likely to cause catastrophic backtracking.
 var redosDetector = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*{]`)
+
+// adjacentQuantifierDetector matches adjacent quantifier characters (e.g., a++,
+// a*+, a+*) which can cause catastrophic backtracking.
+var adjacentQuantifierDetector = regexp.MustCompile(`[+*][+*]`)
 
 // checkRedos rejects regex patterns that contain nested quantifiers likely
 // to cause catastrophic backtracking. This protects the pure-Go grep from
@@ -444,6 +449,9 @@ var redosDetector = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*{]`)
 func checkRedos(pattern string) error {
 	if redosDetector.MatchString(pattern) {
 		return fmt.Errorf("regex rejected: pattern contains nested quantifiers that may cause catastrophic backtracking")
+	}
+	if adjacentQuantifierDetector.MatchString(pattern) {
+		return fmt.Errorf("regex rejected: pattern contains adjacent quantifiers that may cause catastrophic backtracking")
 	}
 	return nil
 }
