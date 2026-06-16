@@ -245,6 +245,22 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			wg.Add(1)
 			go func(idx int, call m31types.ToolCall) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						panicErr := fmt.Errorf("tool %s panicked: %v", call.Name, r)
+						toolExecResults[idx] = struct {
+							call     m31types.ToolCall
+							result   m31types.ToolResult
+							err      error
+							duration int64
+						}{call: call, err: panicErr}
+						e.emit(ToolCompleteMsg{
+							ToolName: call.Name,
+							Success:  false,
+							Error:    panicErr.Error(),
+						})
+					}
+				}()
 				sem <- struct{}{}        // acquire
 				defer func() { <-sem }() // release
 
@@ -420,7 +436,11 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 		if e.cachedPlan != nil && e.cachedPlanMD5 == planMarkdown {
 			plan = e.cachedPlan
 		} else {
-			plan, _ = ParsePlan(planMarkdown)
+			var parseErr error
+			plan, parseErr = ParsePlan(planMarkdown)
+			if parseErr != nil {
+				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
+			}
 			e.cachedPlan = plan
 			e.cachedPlanMD5 = planMarkdown
 		}
