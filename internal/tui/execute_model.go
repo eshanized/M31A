@@ -131,6 +131,15 @@ func (em *ExecuteModel) AppendLiveOutput(lines []string) {
 // Update handles execute screen key events.
 func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				em.viewport.LineUp(3)
+			case tea.MouseButtonWheelDown:
+				em.viewport.LineDown(3)
+			}
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
