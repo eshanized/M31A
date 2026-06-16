@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # M31A Install Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | bash
 # Or:    bash install.sh [--version VERSION] [--bin-dir DIR]
 
 REPO="eshanized/M31A"
