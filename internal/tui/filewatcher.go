@@ -66,6 +66,12 @@ func (fw *FileWatcher) walkAndAdd() {
 
 	var walk func(dir string)
 	walk = func(dir string) {
+		// Check for cancellation periodically
+		select {
+		case <-fw.ctx.Done():
+			return
+		default:
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return
