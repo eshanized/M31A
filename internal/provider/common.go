@@ -34,7 +34,7 @@ func IsContextExceeded(statusCode int, body string) bool {
 		containsFold(body, "maximum context length") ||
 		containsFold(body, "request too large") ||
 		containsFold(body, "context window exceeded") ||
-		containsFold(body, "context_length") && containsFold(body, "exceed")
+		(containsFold(body, "context_length") && containsFold(body, "exceed"))
 }
 
 // containsFold reports whether s contains substr using case-insensitive comparison.
