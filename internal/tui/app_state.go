@@ -135,6 +135,9 @@ type AppState struct {
 	// Chat history browser
 	chatHistoryModel *ChatHistoryModel
 
+	// Dedicated command palette screen (ctrl+p)
+	commandPaletteScreenModel *CommandPaletteScreenModel
+
 	// Command system
 	cmdRegistry *CommandRegistry
 	keyRegistry *KeyRegistry
