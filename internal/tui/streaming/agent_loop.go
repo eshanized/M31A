@@ -100,6 +100,11 @@ func AgentLoop(
 
 	go func() {
 		defer close(ch)
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %v", r)}
+			}
+		}()
 
 		if contextLength <= 0 {
 			contextLength = 128_000
