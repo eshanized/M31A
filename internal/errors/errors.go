@@ -42,6 +42,7 @@ var (
 	// Session-specific errors for distinct failure modes.
 	ErrSessionNotFound   = errors.New("session not found")
 	ErrSessionPermission = errors.New("session access denied")
+	ErrGitNotInitialized = errors.New("git not initialized")
 )
 
 // UserMessage returns a user-friendly, actionable message for common errors.
@@ -103,6 +104,8 @@ func UserMessage(e error) string {
 		return "Session not found — check the session ID or start a new session"
 	case errors.Is(e, ErrSessionPermission):
 		return "Cannot access session — check file permissions"
+	case errors.Is(e, ErrGitNotInitialized):
+		return "Git not initialized — ensure you're in a git repository"
 	}
 
 	// Pattern matching for unwrapped errors
