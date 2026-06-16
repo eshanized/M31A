@@ -231,7 +231,6 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 	failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",
 		bisectResult.OffendingCommit.ShortHash, bisectResult.Diff, verifyResult.Errors)
 	healResult := e.healTask(ctx, task, failure, goal)
-	taskEntry.HealsAttempted++
 
 	if !healResult.Success {
 		e.logger.Warn("post-bisect heal failed", "id", task.ID, "error", healResult.Error)
