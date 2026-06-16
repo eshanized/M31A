@@ -313,8 +313,7 @@ func (c *Consolidator) protectedIndices() map[int]struct{} {
 
 		// Protect messages containing critical context that might be needed later
 		if msg.Role == "user" {
-			lower := msg.Content
-			if containsCriticalContext(lower) {
+			if containsCriticalContext(msg.Content) {
 				protected[i] = struct{}{}
 				continue
 			}
@@ -335,6 +334,7 @@ func (c *Consolidator) protectedIndices() map[int]struct{} {
 
 // containsCriticalContext checks if a message contains context that should
 // be preserved across consolidation (plan specs, task lists, file contents).
+// Uses case-insensitive matching to catch variations in user content.
 func containsCriticalContext(content string) bool {
 	criticalMarkers := []string{
 		"Implementation Plan",
@@ -346,8 +346,9 @@ func containsCriticalContext(content string) bool {
 		"PROJECT.md",
 		"STATE.md",
 	}
+	lower := strings.ToLower(content)
 	for _, marker := range criticalMarkers {
-		if strings.Contains(content, marker) {
+		if strings.Contains(lower, strings.ToLower(marker)) {
 			return true
 		}
 	}
