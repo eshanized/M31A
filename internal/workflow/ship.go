@@ -57,9 +57,16 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 			taskFiles = append(taskFiles, task.Files...)
 		}
 
-		if dirty, _ := e.git.HasUncommittedChanges(); dirty {
-			statusOut, _ := e.git.StatusPorcelain()
-			if len(statusOut) > 0 {
+		dirty, dirtyErr := e.git.HasUncommittedChanges()
+		if dirtyErr != nil {
+			e.logger.Warn("ship: failed to check uncommitted changes, assuming dirty", "error", dirtyErr)
+			dirty = true
+		}
+		if dirty {
+			statusOut, statusErr := e.git.StatusPorcelain()
+			if statusErr != nil {
+				e.logger.Warn("ship: failed to get status porcelain", "error", statusErr)
+			} else if len(statusOut) > 0 {
 				// Log unrelated dirty files as a warning
 				e.logger.Warn("ship commit: found uncommitted changes in working tree",
 					"dirty_files", len(statusOut))
@@ -86,17 +93,16 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 				}
 			}
 		} else {
-			e.logger.Error("ship: no task-to-file mapping found — ALL uncommitted changes will be committed, including unrelated files")
-			if addErr := e.git.AddAll(); addErr != nil {
-				e.logger.Warn("git add all before ship commit failed", "error", addErr)
-			}
+			e.logger.Warn("ship: no task-to-file mapping found — skipping commit to avoid committing unrelated files")
 		}
 
 		// Guard: skip the commit when nothing is staged. DiffStaged checks
 		// the index against HEAD, which correctly detects staged changes even
 		// when the working tree is clean after AddAll (BUG-10).
-		staged, _ := e.git.DiffStaged()
-		if strings.TrimSpace(staged) == "" {
+		staged, stagedErr := e.git.DiffStaged()
+		if stagedErr != nil {
+			e.logger.Warn("ship: failed to check staged changes, attempting commit anyway", "error", stagedErr)
+		} else if strings.TrimSpace(staged) == "" {
 			e.logger.Info("ship: no staged changes — skipping commit")
 		} else if _, commitErr := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); commitErr != nil {
 			return nil, fmt.Errorf("ship commit: %w", commitErr)
@@ -419,7 +425,11 @@ func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks [
 		sb.WriteString(summary)
 	}
 	sb.WriteString("\n\n## Completed Tasks\n")
-	sb.WriteString(formatTaskSummary(tasks))
+	demoTasks := tasks
+	if len(demoTasks) > 20 {
+		demoTasks = demoTasks[:20]
+	}
+	sb.WriteString(formatTaskSummary(demoTasks))
 
 	if len(commits) > 0 {
 		sb.WriteString("\n## Commits\n")
