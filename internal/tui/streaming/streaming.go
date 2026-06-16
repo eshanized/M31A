@@ -23,6 +23,7 @@ package streaming
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -86,6 +87,11 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 		// Goroutine owns streamCh: close it when the goroutine exits.
 		// The cmd reader detects closure and returns nil to stop the chain.
 		defer close(streamCh)
+		defer func() {
+			if r := recover(); r != nil {
+				streamCh <- StreamErrorMsg{Err: fmt.Errorf("stream panic: %v", r), ModelID: req.Model, ProviderName: providerName}
+			}
+		}()
 
 		iterator, err := p.ChatCompletionStream(ctx, req)
 		if err != nil {
