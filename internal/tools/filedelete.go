@@ -3,10 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -139,29 +137,5 @@ func (t *FileDelete) Execute(ctx context.Context, input types.ToolInput) (types.
 // pruneBackups removes the oldest backups matching the given prefix when the
 // count exceeds MaxBackupsPerFile.
 func (t *FileDelete) pruneBackups(prefix string) {
-	entries, err := os.ReadDir(t.backupDir)
-	if err != nil {
-		return
-	}
-
-	var matches []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix+".") {
-			matches = append(matches, e.Name())
-		}
-	}
-
-	if len(matches) < MaxBackupsPerFile {
-		return
-	}
-
-	sort.Strings(matches)
-
-	toDelete := matches[:len(matches)-MaxBackupsPerFile+1]
-	for _, name := range toDelete {
-		path := filepath.Join(t.backupDir, name)
-		if err := os.Remove(path); err != nil {
-			slog.Warn("failed to prune old delete backup", "path", path, "error", err)
-		}
-	}
+	pruneBackupsByPrefix(t.backupDir, prefix, MaxBackupsPerFile)
 }

@@ -5,10 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -217,41 +215,8 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 }
 
 // pruneBackups removes the oldest backups for a given file prefix when the
-// count exceeds MaxBackupsPerFile. Backups are sorted lexicographically
-// (timestamp in the name ensures chronological order). Logs but does not
-// fail on removal errors.
-//
-// Called BEFORE writing the new backup so that the just-written backup is
-// never accidentally pruned by lexicographic ordering on fast disks.
+// count exceeds MaxBackupsPerFile. Called BEFORE writing the new backup so
+// that the just-written backup is never accidentally pruned.
 func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
-	entries, err := os.ReadDir(t.backupDir)
-	if err != nil {
-		slog.Warn("cannot read backup directory for pruning", "dir", t.backupDir, "error", err)
-		return
-	}
-
-	// Filter to backups matching this file's prefix
-	var matches []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), sanitizedPrefix+".") {
-			matches = append(matches, e.Name())
-		}
-	}
-
-	// Leave room for one new backup: prune when at or above the limit.
-	if len(matches) < MaxBackupsPerFile {
-		return
-	}
-
-	// Sort lexicographically — timestamp in the name ensures chronological order
-	sort.Strings(matches)
-
-	// Delete oldest entries (lowest sort order) to keep room for the new backup
-	toDelete := matches[:len(matches)-MaxBackupsPerFile+1]
-	for _, name := range toDelete {
-		path := filepath.Join(t.backupDir, name)
-		if err := os.Remove(path); err != nil {
-			slog.Warn("failed to prune old backup", "path", path, "error", err)
-		}
-	}
+	pruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
 }
