@@ -255,6 +255,8 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"y quit", "n stay"}
 	case ScreenChatHistory:
 		info.KeyboardHints = []string{"↑↓ navigate", "enter continue", "g top", "G bottom", "q back"}
+	case ScreenCommandPalette:
+		info.KeyboardHints = []string{"↑↓ navigate", "enter execute", "type to filter", "esc close"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -369,6 +371,8 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderConfirmQuitContent(chrome)
 	case ScreenChatHistory:
 		return m.renderChatHistoryContent(chrome)
+	case ScreenCommandPalette:
+		return m.renderCommandPaletteContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -646,6 +650,14 @@ func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
 	}
 	m.chatHistoryModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.chatHistoryModel.View()
+}
+
+func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string {
+	if m.commandPaletteScreenModel == nil {
+		m.commandPaletteScreenModel = NewCommandPaletteScreenModel(m.cmdRegistry, m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+	}
+	m.commandPaletteScreenModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.commandPaletteScreenModel.View()
 }
 
 // renderPermissionModal renders the permission or question overlay.
