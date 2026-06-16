@@ -285,9 +285,7 @@ func (m *Manager) LoadState(sessionID string) (phase types.WorkflowPhase, progre
 			lastAction = strings.TrimSpace(line[len("**Last Action:**"):])
 		case strings.HasPrefix(line, "**Timestamp:**"):
 			ts := strings.TrimSpace(line[len("**Timestamp:**"):])
-			var err error
-			timestamp, err = time.Parse(time.RFC3339, ts)
-			_ = err
+			timestamp, _ = time.Parse(time.RFC3339, ts)
 		}
 	}
 
