@@ -257,7 +257,7 @@ func run() int {
 
 	p := tea.NewProgram(app,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
+		tea.WithMouseAllMotion(),
 	)
 
 	// Signal handler sends tea.Quit through the program channel
