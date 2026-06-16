@@ -23,21 +23,21 @@ func TestIsRetryable_Nil(t *testing.T) {
 
 func TestIsRetryable_500(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("500 Internal Server Error")) {
+	if !isRetryable(&provider.HTTPStatusError{StatusCode: 500, Message: "Internal Server Error"}) {
 		t.Error("should retry on 500")
 	}
 }
 
 func TestIsRetryable_502(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("502 Bad Gateway")) {
+	if !isRetryable(&provider.HTTPStatusError{StatusCode: 502, Message: "Bad Gateway"}) {
 		t.Error("should retry on 502")
 	}
 }
 
 func TestIsRetryable_503(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("503 Service Unavailable")) {
+	if !isRetryable(&provider.HTTPStatusError{StatusCode: 503, Message: "Service Unavailable"}) {
 		t.Error("should retry on 503")
 	}
 }
