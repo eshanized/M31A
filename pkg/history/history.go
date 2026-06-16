@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 // FrecentHistory tracks prompt history by frecency (frequency + recency).
 // Entries are persisted as JSON in the user's session directory.
 type FrecentHistory struct {
+	mu       sync.RWMutex
 	entries  []FrecentEntry
 	filePath string
 }
@@ -39,6 +41,8 @@ func NewFrecentHistory(filePath string) *FrecentHistory {
 
 // Upsert adds or updates an entry in the history and persists to disk.
 func (fh *FrecentHistory) Upsert(text string) {
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
@@ -74,6 +78,8 @@ func (fh *FrecentHistory) Upsert(text string) {
 
 // Search returns entries matching the query, sorted by most recently used first.
 func (fh *FrecentHistory) Search(query string, limit int) []FrecentEntry {
+	fh.mu.RLock()
+	defer fh.mu.RUnlock()
 	query = strings.ToLower(strings.TrimSpace(query))
 	var results []FrecentEntry
 	for _, e := range fh.entries {
