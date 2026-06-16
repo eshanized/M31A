@@ -153,10 +153,6 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 	sb.WriteString(filepath.Base(targetDir) + "/\n")
 	walk(targetDir, "", 1)
 
-	if count >= maxEntries {
-		fmt.Fprintf(&sb, "\n(listing truncated at %d entries)\n", maxEntries)
-	}
-
 	return types.ToolResult{
 		Output:     sb.String(),
 		DurationMs: time.Since(start).Milliseconds(),
