@@ -219,7 +219,7 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 		ctx += "Please revise the plan above based on the user's feedback. Return the complete revised plan in the same format.\n\n"
 	}
 
-	if len(existingTasks) > 0 {
+	if len(existingTasks) > 0 || len(validationErrors) > 0 {
 		ctx += "## Previous Attempt Failed\n"
 		if len(validationErrors) > 0 {
 			ctx += "Errors:\n"
