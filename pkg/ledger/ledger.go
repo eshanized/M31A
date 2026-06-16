@@ -146,7 +146,7 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 // appendEntry appends a single entry to the ledger file without rewriting.
 // The file must already exist with the header.
 func (l *Ledger) appendEntry(entry LedgerEntry) error {
-	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND, types.DirPermission)
+	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND, types.FilePermission)
 	if err != nil {
 		// Fallback to full rewrite if append fails
 		return l.rewriteFile()
@@ -459,6 +459,8 @@ func (l *Ledger) parseFile() error {
 func (l *Ledger) Reload() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Invalidate stats cache on reload
+	l.statsCacheMtime = time.Time{}
 	return l.parseFile()
 }
 
