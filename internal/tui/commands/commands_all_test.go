@@ -60,8 +60,9 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 	t.Parallel()
 	r := DefaultCommands()
 	expected := []string{
-		"help", "clear", "status", "reset", "quit", "undo", "history", "prompt-history", "health", "tools", "copy-error",
-		"settings", "config", "theme", "cost", "log", "key", "tokens",
+		"help", "clear", "status", "reset", "quit", "exit", "chat", "flush", "search", "about",
+		"undo", "history", "prompt-history", "health", "tools", "copy-error",
+		"settings", "config", "theme", "cost", "log", "key", "keychain", "tokens", "dream",
 		"compress", "memory", "optimize", "model", "models", "fallback", "provider",
 		"diff", "rollback", "bisect",
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
@@ -128,7 +129,7 @@ func TestSuggestCommand_CloseMatch(t *testing.T) {
 		{"the", "theme"},
 		{"modl", "model"},
 		{"cler", "clear"},
-		{"quit", ""},
+		{"quit", "exit"},
 	}
 	for _, tt := range tests {
 		got := suggestCommand(r, tt.input)
