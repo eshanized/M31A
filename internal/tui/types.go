@@ -88,6 +88,9 @@ type (
 	SidebarRefreshMsg       = tuitypes.SidebarRefreshMsg
 	SidebarFile             = tuitypes.SidebarFile
 	SidebarRefreshTickMsg   = tuitypes.SidebarRefreshTickMsg
+	SidebarTodoUpdateMsg    = tuitypes.SidebarTodoUpdateMsg
+	SidebarTodoItem         = tuitypes.SidebarTodoItem
+	SidebarRevertMsg        = tuitypes.SidebarRevertMsg
 	SessionRenameMsg        = tuitypes.SessionRenameMsg
 	SessionExportMsg        = tuitypes.SessionExportMsg
 	PopScreenMsg            = tuitypes.PopScreenMsg
