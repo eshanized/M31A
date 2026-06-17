@@ -325,6 +325,8 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 	waveChars := []rune{'▁', '▂', '▃', '▄', '▃', '▂'}
 	waveLen := len(waveChars)
 
+	// Pre-compute the style once instead of per-character.
+	brandStyle := lipgloss.NewStyle().Foreground(t.Brand)
 	var sb strings.Builder
 	for i := 0; i < width; i++ {
 		// Position in the wave cycle, offset by position + global offset
@@ -333,7 +335,7 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 			phase += waveLen
 		}
 		ch := string(waveChars[phase])
-		sb.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(ch))
+		sb.WriteString(brandStyle.Render(ch))
 	}
 	return sb.String()
 }
