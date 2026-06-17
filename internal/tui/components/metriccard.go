@@ -114,8 +114,12 @@ func MetricRow(metrics []MetricCard, totalWidth int) string {
 
 	cards := make([]string, len(metrics))
 	cardWidth := totalWidth / len(metrics)
-	if cardWidth < 15 {
-		cardWidth = 15
+	if cardWidth < 8 {
+		cardWidth = 8
+	}
+	// Ensure total card widths don't exceed available space
+	if cardWidth*len(metrics) > totalWidth {
+		cardWidth = totalWidth / len(metrics)
 	}
 
 	for i, m := range metrics {
