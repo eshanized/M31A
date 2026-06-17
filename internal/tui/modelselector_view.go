@@ -53,7 +53,7 @@ func (ms *ModelSelector) renderView() string {
 	const modelSelectorSideBySideThreshold = 120
 	if detailPane != "" && w > modelSelectorSideBySideThreshold {
 		listWidth := w * 3 / 5
-		detailWidth := w * 2 / 5
+		detailWidth := w * 2 / 5 - 1 // account for PaddingLeft(1)
 		listPane := lipgloss.NewStyle().Width(listWidth).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				tabs,
