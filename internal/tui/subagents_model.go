@@ -41,6 +41,17 @@ func NewSubagentsModel(t theme.Theme) *SubagentsModel {
 	}
 }
 
+// GetStatus returns the total and active sub-agent counts.
+func (m *SubagentsModel) GetStatus() (total, active int) {
+	total = len(m.rows)
+	for _, row := range m.rows {
+		if row.Info.Status == "running" || row.Info.Status == "" {
+			active++
+		}
+	}
+	return
+}
+
 // SetTheme refreshes the theme.
 func (m *SubagentsModel) SetTheme(t theme.Theme) { m.theme = t }
 
