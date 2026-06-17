@@ -91,6 +91,9 @@ func (m *ReplModel) closeActiveSegment() {
 	}
 	m.streamSegments = append(m.streamSegments, seg)
 	m.streamContent.Reset()
+	// Invalidate streaming render cache
+	m.cachedThinkingBlock = nil
+	m.cachedThinkingContent = ""
 }
 
 // handleStreamDoneMsg finalizes the completed stream.
@@ -250,6 +253,9 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) {
 	m.streamContent.Reset()
 	m.thinkingBlocks = make(map[int]*components.ThinkingBlock)
 	m.toolCards = make(map[int]*components.ToolCard)
+	// Invalidate streaming render cache
+	m.cachedThinkingBlock = nil
+	m.cachedThinkingContent = ""
 	m.textarea.Focus()
 
 	m.renderMessages()
