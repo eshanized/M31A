@@ -156,11 +156,26 @@ func Light() Theme {
 // buildBadgeStyles sets all badge/label styles using the theme's BadgeForeground color.
 func buildBadgeStyles(t *Theme) {
 	fg := lipgloss.Color(t.BadgeForeground)
+	// Execution tools
 	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["Agent"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Secondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	// File tools
 	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["FileDelete"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["FileMove"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["FileList"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	// Code analysis tools
+	t.ToolLabel["CodeMap"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["Edit"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
+	// Web tools
+	t.ToolLabel["WebFetch"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["WebSearch"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	// User interaction tools
+	t.ToolLabel["AskUserQuestion"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["TodoWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(fg).Padding(0, 1).Bold(true)
 	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
