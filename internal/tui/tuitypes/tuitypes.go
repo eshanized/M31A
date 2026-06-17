@@ -348,6 +348,10 @@ type FallbackEventMsg struct {
 // SettingsSavedMsg is emitted when settings are saved.
 type SettingsSavedMsg struct{}
 
+// ResetCompleteMsg is emitted when /reset finishes cleaning up persistent state.
+// AppState handles this by resetting in-memory state and navigating to the first-run screen.
+type ResetCompleteMsg struct{}
+
 // OptimizedMsg carries arbitrage optimization recommendations.
 type OptimizedMsg struct {
 	Recommendations []arbitrage.ArbitrageRecommendation
