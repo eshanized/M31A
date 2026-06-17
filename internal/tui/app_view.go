@@ -61,6 +61,8 @@ func (m *AppState) View() string {
 	contentWidth := m.width
 	if hasSidebar {
 		m.sidebarModel.SetHeight(m.height)
+		// Update sidebar with current screen for shortcut hints
+		m.sidebarModel.SetCurrentScreen(screenName(m.screen))
 		sidebarStr = m.sidebarModel.View()
 		contentWidth = m.width - m.sidebarModel.GetWidth()
 	}
@@ -78,7 +80,7 @@ func (m *AppState) View() string {
 	if len(m.toasts) > 0 {
 		toastOverlay := ""
 		if m.width >= WidthCompact {
-			toastOverlay = renderToastStack(m.toasts, t, contentWidth)
+			toastOverlay = renderToastStack(m.toasts, t)
 		} else {
 			last := m.toasts[len(m.toasts)-1]
 			toastOverlay = renderSingleToast(last, t, 0)
@@ -647,6 +649,10 @@ func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {
 func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
 	if m.chatHistoryModel == nil {
 		m.chatHistoryModel = NewChatHistoryModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		// Load messages from current REPL session on first creation
+		if m.replModel != nil {
+			m.chatHistoryModel.SetMessages(m.replModel.Messages())
+		}
 	}
 	m.chatHistoryModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.chatHistoryModel.View()
@@ -754,6 +760,65 @@ func (m *AppState) updateSidebarUsage() {
 	cost = m.replModel.lastCost
 	showCost = m.replModel.cfg != nil && m.replModel.cfg.UI.ShowCostEstimate
 	m.sidebarModel.SetTokenUsage(tokens, ctxLen, cost, showCost, modelName)
+	// Update new sidebar metrics
+	m.sidebarModel.UpdateTokenBurn()
+	m.sidebarModel.UpdateContextPressure()
+	m.sidebarModel.UpdateCostAccumulator()
+	m.sidebarModel.UpdateExecutionMetrics()
+}
+
+// screenName returns a lowercase screen name for sidebar shortcut hints.
+func screenName(s Screen) string {
+	switch s {
+	case ScreenREPL:
+		return "repl"
+	case ScreenExecute:
+		return "execute"
+	case ScreenPlan:
+		return "plan"
+	case ScreenVerify:
+		return "verify"
+	case ScreenShip:
+		return "ship"
+	case ScreenDiscuss:
+		return "discuss"
+	case ScreenSettings:
+		return "settings"
+	case ScreenHelp:
+		return "help"
+	case ScreenChatHistory:
+		return "chathistory"
+	case ScreenConfig:
+		return "config"
+	case ScreenResume:
+		return "resume"
+	case ScreenRollback:
+		return "rollback"
+	case ScreenDiff:
+		return "diff"
+	case ScreenModelSelector:
+		return "modelselector"
+	case ScreenCommandPalette:
+		return "cmdpalette"
+	case ScreenPhaseModelPicker:
+		return "phasem picker"
+	case ScreenSessionDetail:
+		return "session"
+	case ScreenFileExplorer:
+		return "fileexplorer"
+	case ScreenConfirmQuit:
+		return "confirmquit"
+	case ScreenDashboard:
+		return "dashboard"
+	case ScreenMetrics:
+		return "metrics"
+	case ScreenLedger:
+		return "ledger"
+	case ScreenThemePicker:
+		return "themepicker"
+	default:
+		return ""
+	}
 }
 
 // ─── Render helpers ───────────────────────────────────────────────────────────
@@ -830,7 +895,7 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
 		"  Tool:  "+req.ToolName,
 		"  Command:",
-		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width-4).Render(req.Command),
+		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width-8).Render(req.Command),
 		"  Risk:  "+riskStyle.Render(string(req.RiskLevel)),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny   a allow always"),
