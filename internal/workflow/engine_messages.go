@@ -34,6 +34,7 @@ type ToolCompleteMsg struct {
 	Success    bool
 	DurationMs int64
 	Error      string
+	FilePath   string // populated for file-writing tools (FileWrite, Edit, FileDelete, FileMove)
 }
 
 // SelfHealStartMsg is emitted when a self-heal attempt begins.

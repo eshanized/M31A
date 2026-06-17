@@ -285,18 +285,33 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					duration: toolDuration,
 				}
 
+				// Extract the file path from the tool call input for file-writing tools
+				// so the TUI can track recently changed files in the sidebar.
+				var affectedPath string
+				switch call.Name {
+				case "FileWrite", "Edit", "FileDelete", "FileMove":
+					var params struct {
+						Path string `json:"path"`
+					}
+					if err := json.Unmarshal(call.Input, &params); err == nil {
+						affectedPath = params.Path
+					}
+				}
+
 				if err != nil {
 					e.emit(ToolCompleteMsg{
 						ToolName:   call.Name,
 						Success:    false,
 						DurationMs: toolDuration,
 						Error:      err.Error(),
+						FilePath:   affectedPath,
 					})
 				} else {
 					e.emit(ToolCompleteMsg{
 						ToolName:   call.Name,
 						Success:    true,
 						DurationMs: toolDuration,
+						FilePath:   affectedPath,
 					})
 				}
 			}(i, tc)
