@@ -23,6 +23,7 @@ import (
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -120,6 +121,9 @@ type Engine struct {
 	// Codebase intelligence layer (lazy-built once per session)
 	codeIntel     *codeintel.Indexer
 	codeIntelOnce sync.Once
+	// Shared ledger instance for session record persistence (uses the
+	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).
+	ledger *ledger.Ledger
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -416,6 +420,13 @@ func (e *Engine) SetGit(g *git.Git) {
 	}
 }
 
+// SetLedger sets the shared ledger instance on the engine so the ship phase
+// writes session records to the application-configured path instead of
+// creating a new ledger at a hardcoded location.
+func (e *Engine) SetLedger(l *ledger.Ledger) {
+	e.ledger = l
+}
+
 // SessionID returns the current session ID.
 func (e *Engine) SessionID() string {
 	return e.sessionID
@@ -657,12 +668,13 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 
 // getCodeIntel lazily builds the codebase intelligence indexer.
 // Returns nil if building fails or the workDir is empty.
-func (e *Engine) getCodeIntel() *codeintel.Indexer {
+// The caller's context is used for the build, so cancellation propagates.
+func (e *Engine) getCodeIntel(ctx context.Context) *codeintel.Indexer {
 	e.codeIntelOnce.Do(func() {
 		idx := codeintel.NewIndexer(e.workDir)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		buildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if err := idx.Build(ctx); err != nil {
+		if err := idx.Build(buildCtx); err != nil {
 			e.logger.Warn("codeintel build failed", "error", err)
 			return
 		}
