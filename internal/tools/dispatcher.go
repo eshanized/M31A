@@ -254,6 +254,13 @@ func (d *Dispatcher) SetSessionID(id string) {
 	}
 }
 
+// SetTodoWriteCallback sets the callback invoked after successful TodoWrite tool executions.
+func (d *Dispatcher) SetTodoWriteCallback(fn func(items []TodoItem)) {
+	if d.todoWrite != nil {
+		d.todoWrite.SetOnUpdate(fn)
+	}
+}
+
 // workDir returns the working directory for cwd-aware permission caching.
 func (d *Dispatcher) workDir() string {
 	return d.workDir_
