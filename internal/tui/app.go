@@ -253,7 +253,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 	engine := m.workflowEngine
 	goal := m.workflowGoal
 
-	return func() tea.Msg {
+	phaseCmd := func() tea.Msg {
 		result, err := engine.RunPhase(ctx, phase, goal)
 		if err != nil {
 			return PhaseResultMsg{
@@ -284,6 +284,11 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			WorkflowMode:            result.WorkflowMode,
 		}
 	}
+	// Bootstrap the emitter drain chain so intermediate workflow messages
+	// (TaskStartMsg, TaskUpdateMsg, ToolStartMsg, etc.) are delivered to
+	// Update() during phase execution. Without this, messages accumulate
+	// in the channel buffer and are never consumed.
+	return tea.Batch(phaseCmd, m.drainEmitterCmd())
 }
 
 // ─── Permission/Question listeners ───────────────────────────────────────────
@@ -379,8 +384,37 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	engine.SetMsgEmitter(emitter)
 	m.emitterCh = emitter.ch
 
+	// Wire TodoWrite callback to update sidebar
+	m.wireTodoWriteCallback()
+
 	m.workflowEngine = engine
 	return nil
+}
+
+// wireTodoWriteCallback connects the TodoWrite tool's callback to update the sidebar.
+func (m *AppState) wireTodoWriteCallback() {
+	if m.dispatcher == nil {
+		return
+	}
+	m.dispatcher.SetTodoWriteCallback(func(items []tools.TodoItem) {
+		if m.emitterCh == nil {
+			return
+		}
+		sidebarItems := make([]SidebarTodoItem, len(items))
+		for i, item := range items {
+			sidebarItems[i] = SidebarTodoItem{
+				Content:  item.Content,
+				Status:   item.Status,
+				Priority: item.Priority,
+				Source:   "llm",
+			}
+		}
+		// Non-blocking send to emitter
+		select {
+		case m.emitterCh <- SidebarTodoUpdateMsg{Items: sidebarItems}:
+		default:
+		}
+	})
 }
 
 // drainEmitterCmd returns a tea.Cmd that reads one message from the workflow
