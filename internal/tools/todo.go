@@ -24,12 +24,25 @@ var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type TodoWrite struct {
 	sessionsDir string
 	sessionID   atomic.Value // stores string
+	onUpdate    func(items []TodoItem) // callback for sidebar updates
+}
+
+// TodoItem represents a parsed todo item from the TodoWrite tool.
+type TodoItem struct {
+	Content  string
+	Status   string
+	Priority string
 }
 
 func NewTodoWrite(sessionsDir, sessionID string) *TodoWrite {
 	t := &TodoWrite{sessionsDir: sessionsDir}
 	t.sessionID.Store(sessionID)
 	return t
+}
+
+// SetOnUpdate sets the callback invoked after successful todo writes.
+func (t *TodoWrite) SetOnUpdate(fn func(items []TodoItem)) {
+	t.onUpdate = fn
 }
 
 func (t *TodoWrite) SetSessionID(id string) {
@@ -87,12 +100,6 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	todosSlice, ok := todosRaw.([]any)
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("%w: parameter todos must be an array", m31errors.ErrToolExecution)
-	}
-
-	type TodoItem struct {
-		Content  string
-		Status   string
-		Priority string
 	}
 
 	var items []TodoItem
@@ -188,6 +195,19 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	summary := fmt.Sprintf("TODO updated: %d total (%d pending, %d in progress, %d completed, %d cancelled)",
 		len(items), pending, inProgress, completed, cancelled)
+
+	// Notify sidebar of todo updates
+	if t.onUpdate != nil {
+		callbackItems := make([]TodoItem, len(items))
+		for i, item := range items {
+			callbackItems[i] = TodoItem{
+				Content:  item.Content,
+				Status:   item.Status,
+				Priority: item.Priority,
+			}
+		}
+		t.onUpdate(callbackItems)
+	}
 
 	elapsed := time.Since(start).Milliseconds()
 	return types.ToolResult{
