@@ -131,6 +131,10 @@ type ReplModel struct {
 	cachedMessageContent string // cached rendered content of all finalized messages
 	cachedMessageCount   int    // number of messages in the cache
 
+	// Streaming render cache: avoids re-allocating components on every tick
+	cachedThinkingBlock   *components.ThinkingBlock // cached ThinkingBlock during streaming
+	cachedThinkingContent string                   // content used to create cachedThinkingBlock
+
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
 
