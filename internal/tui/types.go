@@ -80,6 +80,7 @@ type (
 	DismissToastMsg         = tuitypes.DismissToastMsg
 	FallbackEventMsg        = tuitypes.FallbackEventMsg
 	SettingsSavedMsg        = tuitypes.SettingsSavedMsg
+	ResetCompleteMsg        = tuitypes.ResetCompleteMsg
 	OptimizedMsg            = tuitypes.OptimizedMsg
 	BisectStartMsg          = tuitypes.BisectStartMsg
 	SessionDetailRequestMsg = tuitypes.SessionDetailRequestMsg
