@@ -47,7 +47,8 @@ func RenderLogo(version string, bold bool, brandColor lipgloss.Color) string {
 // fades from full brand color at the center to transparent at the edges
 // using fade characters (█ ▓ ▒ ░ ·). The tagline "autonomous coding agent"
 // is always rendered below in muted secondary color.
-func RenderBigLogo(brandColor lipgloss.Color, glow bool) string {
+// maxW limits the total output width; pass 0 for no limit.
+func RenderBigLogo(brandColor lipgloss.Color, glow bool, maxW int) string {
 	lines := strings.Split(bigLogo, "\n")
 	styled := make([]string, len(lines))
 	for i, line := range lines {
@@ -76,14 +77,18 @@ func RenderBigLogo(brandColor lipgloss.Color, glow bool) string {
 		return logoBlock + "\n" + tagline
 	}
 
-	return logoBlock + "\n" + tagline + "\n" + RenderLogoGlow(brandColor)
+	return logoBlock + "\n" + tagline + "\n" + RenderLogoGlow(brandColor, maxW)
 }
 
 // RenderLogoGlow renders a gradient glow line centered beneath the big logo.
 // Characters fade from solid (█) at the center to transparent (·) at edges.
-func RenderLogoGlow(brandColor lipgloss.Color) string {
-	// Match the width of the big logo block (52 visible chars)
+// The width parameter limits the glow to fit the available space.
+func RenderLogoGlow(brandColor lipgloss.Color, maxWidth int) string {
+	// Match the width of the big logo block (52 visible chars), capped by maxWidth
 	glowW := 54
+	if maxWidth > 0 && glowW > maxWidth {
+		glowW = maxWidth
+	}
 	fadeChars := []rune{'█', '▓', '▒', '░', '·'}
 
 	halfW := glowW / 2
