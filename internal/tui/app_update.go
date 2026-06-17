@@ -287,6 +287,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenChatHistory:
+			if m.chatHistoryModel != nil {
+				newCH, cmd := m.chatHistoryModel.Update(msg)
+				if nch, ok := newCH.(*ChatHistoryModel); ok {
+					m.chatHistoryModel = nch
+				}
+				cmds = append(cmds, cmd)
+			}
 		}
 
 	// ── Screen routing ─────────────────────────────────────────────────────────
@@ -314,6 +322,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Streaming ─────────────────────────────────────────────────────────────
 	case StreamMsg:
 		if m.replModel != nil {
+			// Start token burn tracking on the first chunk of a new response.
+			if !m.replModel.streaming && m.sidebarModel != nil {
+				m.sidebarModel.StartTokenBurn()
+			}
 			cs := m.replModel.handleStreamMsg(msg)
 			cmds = append(cmds, cs...)
 		}
@@ -345,6 +357,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Agent loop ────────────────────────────────────────────────────────
 	case AgentStreamMsg:
 		if m.replModel != nil && msg.Chunk != nil {
+			// Start token burn tracking on the first chunk of a new response.
+			if !m.replModel.streaming && m.sidebarModel != nil {
+				m.sidebarModel.StartTokenBurn()
+			}
 			sm := StreamMsg{
 				Chunk:     msg.Chunk,
 				ModelID:   m.activeModel.ID,
@@ -646,6 +662,22 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
 			}
 		}
+		// Update sidebar todo list
+		if m.sidebarModel != nil {
+			if m.sidebarModel.GetMode() == SidebarModeFiles {
+				m.sidebarModel.SetMode(SidebarModeTodo)
+				if m.executeModel != nil {
+					m.sidebarModel.InitTaskProgress(len(m.executeModel.tasks))
+				}
+			}
+			m.sidebarModel.AddTodoItem(SidebarTodoItem{
+				Content:  msg.Task.Action,
+				Status:   "in_progress",
+				Priority: "high",
+				Source:   "task",
+				TaskID:   msg.Task.ID,
+			})
+		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.TaskUpdateMsg:
 		if m.executeModel != nil {
@@ -660,6 +692,28 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.executeModel.UpdateTaskStatus(msg.Task.ID, status)
 		}
+		// Update sidebar todo list
+		if m.sidebarModel != nil {
+			todoStatus := msg.Status
+			if todoStatus == "done" {
+				todoStatus = "completed"
+			}
+			m.sidebarModel.AddTodoItem(SidebarTodoItem{
+				Content:  msg.Task.Action,
+				Status:   todoStatus,
+				Priority: "high",
+				Source:   "task",
+				TaskID:   msg.Task.ID,
+			})
+			// Update progress counters from the full Task struct.
+			m.sidebarModel.UpdateTaskProgress(msg.Task)
+			// Auto-revert to file tree when all tasks complete
+			if m.sidebarModel.IsAllTasksDone() {
+				cmds = append(cmds, func() tea.Msg {
+					return SidebarRevertMsg{}
+				})
+			}
+		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.ToolStartMsg:
 		if m.executeModel != nil {
@@ -671,6 +725,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fmt.Sprintf("→ %s: %s", msg.ToolName, detail),
 			})
 		}
+		// Update sidebar tool call timeline
+		if m.sidebarModel != nil {
+			m.sidebarModel.AddToolCallStart(msg.ToolName)
+		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.ToolCompleteMsg:
 		if m.executeModel != nil {
@@ -681,6 +739,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeModel.AppendLiveOutput([]string{
 				fmt.Sprintf("  %s %s (%dms)", status, msg.ToolName, msg.DurationMs),
 			})
+		}
+		// Update sidebar tool call timeline
+		if m.sidebarModel != nil {
+			m.sidebarModel.CompleteToolCall(msg.ToolName, msg.Success, time.Duration(msg.DurationMs)*time.Millisecond)
+			// Track recently changed files for the smart file watcher section.
+			if msg.Success && msg.FilePath != "" {
+				m.sidebarModel.MarkFileChanged(msg.FilePath)
+			}
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.SelfHealStartMsg:
@@ -707,8 +773,21 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.verifyModel.StopHealing()
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
-	case workflow.PhaseTransitionStartMsg, workflow.PhaseTransitionCompleteMsg,
-		workflow.IntermediateProgressMsg,
+	case workflow.PhaseTransitionStartMsg:
+		// Update sidebar phase pipeline
+		if m.sidebarModel != nil {
+			m.sidebarModel.SetCurrentPhase(msg.To)
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.PhaseTransitionCompleteMsg:
+		// Mark the just-completed phase in the sidebar pipeline so that the
+		// final phase (Ship) — which has no successor to trigger SetCurrentPhase
+		// — is still shown as completed.
+		if m.sidebarModel != nil && msg.To != "" {
+			m.sidebarModel.MarkPhaseCompleted(msg.To)
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.IntermediateProgressMsg,
 		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
 		cmds = append(cmds, m.drainEmitterCmd())
 
@@ -792,6 +871,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if msg.Config != nil {
+			// Resolve API keys from env/keychain since Load() does not call
+			// ResolveAPIKeys — without this, keychain-stored keys are lost
+			// after SaveWithKeychain clears them from the TOML file.
+			if err := msg.Config.ResolveAPIKeys(m.keychain); err != nil {
+				slog.Warn("failed to resolve API keys on reload", "error", err)
+			}
 			m.config = msg.Config
 			m.reRegisterProvidersFromConfig()
 			if m.dispatcher != nil {
@@ -800,6 +885,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.configModel != nil {
 				m.configModel.cfg = m.config
 				m.configModel.buildContent()
+			}
+			if m.settingsModel != nil {
+				m.settingsModel.config = m.config
 			}
 			cmds = append(cmds, m.addToastCmd("Config reloaded from disk", "info", 3*time.Second))
 		}
@@ -968,6 +1056,28 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.SetChangedFiles(len(msg.Files))
 		}
 
+	case SidebarRevertMsg:
+		if m.sidebarModel != nil {
+			m.sidebarModel.RevertToFiles()
+		}
+
+	case SidebarTodoUpdateMsg:
+		if m.sidebarModel != nil {
+			// Ensure sidebar is in todo mode
+			if m.sidebarModel.GetMode() == SidebarModeFiles {
+				m.sidebarModel.SetMode(SidebarModeTodo)
+			}
+			// Add LLM-generated items
+			for _, item := range msg.Items {
+				m.sidebarModel.AddTodoItem(SidebarTodoItem{
+					Content:  item.Content,
+					Status:   item.Status,
+					Priority: item.Priority,
+					Source:   "llm",
+				})
+			}
+		}
+
 	// ── Subagent events ───────────────────────────────────────────────────────
 	case SubagentEventMsg:
 		if m.subagentsModel != nil {
@@ -975,6 +1085,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Auto-show the panel on first activity so the user sees progress.
 			if msg.Event.Type == subagent.EventSpawned {
 				m.subagentsVisible = true
+			}
+			// Update sidebar sub-agent status
+			if m.sidebarModel != nil {
+				total, active := m.subagentsModel.GetStatus()
+				m.sidebarModel.UpdateSubAgentStatus(total, active)
 			}
 		}
 		// Surface terminal events in the REPL so the parent conversation
@@ -1309,6 +1424,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				newCQ, cmd := m.confirmQuitModel.Update(msg)
 				if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
 					m.confirmQuitModel = ncq
+				}
+				cmds = append(cmds, cmd)
+			}
+		case ScreenChatHistory:
+			if m.chatHistoryModel != nil {
+				newCH, cmd := m.chatHistoryModel.Update(msg)
+				if nch, ok := newCH.(*ChatHistoryModel); ok {
+					m.chatHistoryModel = nch
 				}
 				cmds = append(cmds, cmd)
 			}
@@ -1958,6 +2081,14 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		if m.phaseModelPicker != nil {
 			newPM, cmd := m.phaseModelPicker.Update(msg)
 			m.phaseModelPicker = newPM
+			return cmd
+		}
+	case ScreenChatHistory:
+		if m.chatHistoryModel != nil {
+			newCH, cmd := m.chatHistoryModel.Update(msg)
+			if nch, ok := newCH.(*ChatHistoryModel); ok {
+				m.chatHistoryModel = nch
+			}
 			return cmd
 		}
 	case ScreenCommandPalette:
