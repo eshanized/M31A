@@ -255,7 +255,7 @@ func (fr *FirstRunModel) renderWelcome() string {
 func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	t := fr.theme
 
-	logoBlock := components.RenderBigLogo(t.Brand, true)
+	logoBlock := components.RenderBigLogo(t.Brand, true, fr.effectiveWidth())
 
 	tagline := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).
@@ -391,6 +391,11 @@ func (fr *FirstRunModel) renderFeatureCards(width int) string {
 	if cardW < 12 {
 		cardW = 12
 	}
+	// Clamp card width so 3 cards + gaps don't exceed available width
+	maxCardW := (width - 2*gapW) / 3
+	if cardW > maxCardW && maxCardW > 0 {
+		cardW = maxCardW
+	}
 
 	c1 := fr.renderFeatureCard("⚡", "Workflows", "Plan → Execute → Ship", cardW, t.Brand)
 	c2 := fr.renderFeatureCard("🔧", "Tools", "Bash · Read · Write · Grep", cardW, t.Secondary)
@@ -490,6 +495,10 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 	innerW := w - 10
 	if innerW < 22 {
 		innerW = 22
+	}
+	// Clamp to actual available interior width
+	if boxInner := w - 10; innerW > boxInner && boxInner > 0 {
+		innerW = boxInner
 	}
 	h := fr.height
 	if h < 1 {
@@ -768,6 +777,10 @@ func (fr *FirstRunModel) renderModelPickStep() string {
 	if innerW < 22 {
 		innerW = 22
 	}
+	// Clamp to actual available interior width
+	if boxInner := w - 10; innerW > boxInner && boxInner > 0 {
+		innerW = boxInner
+	}
 	h := fr.height
 	if h < 1 {
 		h = 24
@@ -1035,9 +1048,12 @@ func (fr *FirstRunModel) renderModelRow(m types.ModelInfo, selected bool, maxW i
 	if name == "" {
 		name = m.ID
 	}
-	maxName := maxW - 38
-	if maxName < 12 {
-		maxName = 12
+	maxName := maxW - 20
+	if maxName < 8 {
+		maxName = 8
+	}
+	if maxName > maxW-10 {
+		maxName = maxW - 10
 	}
 	nameStr := nameStyle.Render(TruncateWithEllipsis(name, maxName))
 
