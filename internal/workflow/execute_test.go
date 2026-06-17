@@ -70,7 +70,7 @@ func TestEngine_BuildExecuteContext(t *testing.T) {
 	}
 	allTasks := []m31types.Task{task}
 
-	messages := engine.buildExecuteContext(task, allTasks, "")
+	messages := engine.buildExecuteContext(context.Background(), task, allTasks, "")
 	if len(messages) == 0 {
 		t.Fatal("Expected non-empty messages")
 	}
