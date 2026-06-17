@@ -42,8 +42,8 @@ func (m *PermissionModal) Render(width, height int) string {
 	if width < modalWidth+4 {
 		modalWidth = width - 4
 	}
-	if modalWidth < 40 {
-		modalWidth = 40
+	if modalWidth < 20 {
+		modalWidth = 20
 	}
 
 	// ── Title ─────────────────────────────────────────────────────────────
@@ -71,7 +71,12 @@ func (m *PermissionModal) Render(width, height int) string {
 	)
 
 	// ── Command box ───────────────────────────────────────────────────────
+	cmdContentW := modalWidth - 10
+	if cmdContentW < 8 {
+		cmdContentW = 8
+	}
 	highlighted := highlightCommand(m.request.Command, m.theme)
+	highlighted = TruncateWithEllipsis(highlighted, cmdContentW)
 	cmdBox := lipgloss.NewStyle().
 		Border(theme.DoubleBorder).
 		BorderForeground(m.theme.Border).
