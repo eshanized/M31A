@@ -130,7 +130,15 @@ func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modelSelectorLoadedMsg:
 		if msg.err == nil && len(msg.models) > 0 {
-			ms.modelsByProv[msg.providerName] = msg.models
+			// Ensure each model has its Provider field set from the source provider.
+			models := make([]types.ModelInfo, len(msg.models))
+			copy(models, msg.models)
+			for i := range models {
+				if models[i].Provider == "" {
+					models[i].Provider = msg.providerName
+				}
+			}
+			ms.modelsByProv[msg.providerName] = models
 		} else if msg.err != nil {
 			ms.errMsg = msg.err.Error()
 			ms.errored[msg.providerName] = true
