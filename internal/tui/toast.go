@@ -11,8 +11,8 @@ import (
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
 const maxVisibleToasts = 3
 
-// renderToastStack renders up to 3 most recent toasts stacked top-right.
-func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
+// renderToastStack renders up to 3 most recent toasts stacked.
+func renderToastStack(toasts []Toast, t theme.Theme) string {
 	if len(toasts) == 0 {
 		return ""
 	}
@@ -28,9 +28,8 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	}
 	stack := lipgloss.JoinVertical(lipgloss.Right, rendered...)
 
-	// Position in top-right: right-align with 2-char right margin
-	return lipgloss.PlaceHorizontal(termWidth, lipgloss.Right,
-		lipgloss.NewStyle().MarginRight(2).Render(stack))
+	// Return raw stack — overlayToastOnContent handles right-alignment positioning
+	return stack
 }
 
 // renderSingleToast renders one toast with a ThinBorder and colored left border.
