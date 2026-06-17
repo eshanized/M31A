@@ -100,6 +100,7 @@ func (m *AppState) ensureSidebarModel() {
 	if m.sidebarModel == nil {
 		m.sidebarModel = NewSidebarModel(m.git, m.themeManager.Current())
 		m.sidebarModel.SetHeight(m.height)
+		m.sidebarModel.SetMaxToolCalls(5)
 	}
 }
 
