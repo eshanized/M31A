@@ -50,6 +50,9 @@ const (
 	// DefaultZenBaseURL is the default Zen API base URL
 	DefaultZenBaseURL = "https://opencode.ai/zen/v1"
 
+	// DefaultNvidiaBaseURL is the default NVIDIA NIM API base URL
+	DefaultNvidiaBaseURL = "https://integrate.api.nvidia.com/v1"
+
 	// DefaultReferer is the default HTTP-Referer header for OpenRouter
 	DefaultReferer = "https://github.com/eshanized/M31A"
 
