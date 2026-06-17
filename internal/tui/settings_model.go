@@ -118,7 +118,7 @@ func (s *SettingsModel) buildFields() {
 	switch s.activeTab {
 	case TabProvider:
 		s.fields = []settingsField{
-			{key: "provider", label: "Default provider", fieldType: "choice", choices: []string{"openrouter", "zen"}},
+			{key: "provider", label: "Default provider", fieldType: "choice", choices: []string{"openrouter", "zen", "nvidia"}},
 			{key: "auto_fallback", label: "Auto fallback", fieldType: "bool"},
 		}
 	case TabModel:
@@ -143,6 +143,7 @@ func (s *SettingsModel) buildFields() {
 		s.fields = []settingsField{
 			{key: "apikey_or", label: "OpenRouter API key", fieldType: "password"},
 			{key: "apikey_zen", label: "Zen API key", fieldType: "password"},
+			{key: "apikey_nvidia", label: "NVIDIA NIM API key", fieldType: "password"},
 		}
 	case TabWorkflow:
 		s.fields = []settingsField{
@@ -407,6 +408,8 @@ func (s *SettingsModel) getFieldValue(f settingsField) string {
 		return s.config.Provider.OpenRouter.APIKey
 	case "apikey_zen":
 		return s.config.Provider.Zen.APIKey
+	case "apikey_nvidia":
+		return s.config.Provider.Nvidia.APIKey
 	case "perm_mode":
 		return s.config.Permissions.DefaultMode
 	case "perm_timeout":
@@ -465,6 +468,8 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (*SettingsMod
 		s.config.Provider.OpenRouter.APIKey = val
 	case "apikey_zen":
 		s.config.Provider.Zen.APIKey = val
+	case "apikey_nvidia":
+		s.config.Provider.Nvidia.APIKey = val
 	case "perm_mode":
 		s.config.Permissions.DefaultMode = val
 	case "perm_timeout":
@@ -701,9 +706,10 @@ func (s *SettingsModel) renderProviderTab() string {
 
 	if len(s.healthResults) == 0 {
 		if s.config != nil {
-			for _, name := range []string{"openrouter", "zen"} {
+			for _, name := range []string{"openrouter", "zen", "nvidia"} {
 				hasKey := name == "openrouter" && s.config.Provider.OpenRouter.APIKey != "" ||
-					name == "zen" && s.config.Provider.Zen.APIKey != ""
+					name == "zen" && s.config.Provider.Zen.APIKey != "" ||
+					name == "nvidia" && s.config.Provider.Nvidia.APIKey != ""
 				if hasKey {
 					lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
 						Render("● "+name+" (key set)"))
@@ -844,6 +850,13 @@ func (s *SettingsModel) keySource(fieldKey string) string {
 			return "env"
 		}
 		if s.config != nil && s.config.Provider.Zen.APIKey != "" {
+			return "config"
+		}
+	case "apikey_nvidia":
+		if os.Getenv("NVIDIA_API_KEY") != "" {
+			return "env"
+		}
+		if s.config != nil && s.config.Provider.Nvidia.APIKey != "" {
 			return "config"
 		}
 	}
