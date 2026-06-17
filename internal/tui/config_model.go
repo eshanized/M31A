@@ -909,7 +909,7 @@ func (m *ConfigModel) renderTabs() string {
 		BorderBottom(true).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(t.Border).
-		Width(max(10, m.width-2)).
+		Width(max(10, m.width-4)).
 		PaddingLeft(1).
 		Render(bar) + "\n"
 }
