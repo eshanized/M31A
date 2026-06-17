@@ -3114,6 +3114,11 @@ func (m *AppState) reRegisterProvidersFromConfig() {
 			slog.Warn("failed to re-register Zen after config save", "error", err)
 		}
 	}
+	if m.config.Provider.Nvidia.APIKey != "" {
+		if err := RegisterProvider(m.registry, m.config, "nvidia", m.config.Provider.Nvidia.APIKey, m.version); err != nil {
+			slog.Warn("failed to re-register NVIDIA after config save", "error", err)
+		}
+	}
 }
 
 // readAgentCh returns a tea.Cmd that reads the next message from the agent
