@@ -118,8 +118,8 @@ type SidebarModel struct {
 	// Current screen for shortcut hints
 	currentScreen string
 
-	// Smart file watcher - files changed since last LLM read
-	recentlyChanged map[string]bool
+	// Smart file watcher - files changed since last LLM read, with timestamps for TTL eviction
+	recentlyChanged map[string]time.Time
 
 	// Active sub-agents
 	subAgentCount  int
@@ -271,6 +271,64 @@ func (s *SidebarModel) IsAllTasksDone() bool {
 		return false
 	}
 	return s.taskProgress.Done+s.taskProgress.Failed >= s.taskProgress.Total
+}
+
+// InitAgentProgress initializes the progress tracker for an agent loop session.
+func (s *SidebarModel) InitAgentProgress() {
+	s.taskProgress = SidebarTaskProgress{
+		StartedAt: time.Now(),
+	}
+}
+
+// AgentToolStarted adds a todo item for an agent tool call and updates progress.
+func (s *SidebarModel) AgentToolStarted(name string) {
+	s.AddTodoItem(SidebarTodoItem{
+		Content:  name,
+		Status:   "in_progress",
+		Priority: "medium",
+		Source:   "agent",
+	})
+	s.taskProgress.Total++
+	s.taskProgress.Running++
+	s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
+}
+
+// AgentToolCompleted marks the most recent matching agent tool as done and updates progress.
+func (s *SidebarModel) AgentToolCompleted(name string, success bool) {
+	for i := len(s.todoItems) - 1; i >= 0; i-- {
+		if s.todoItems[i].Source == "agent" && s.todoItems[i].Content == name && s.todoItems[i].Status == "in_progress" {
+			if success {
+				s.todoItems[i].Status = "completed"
+			} else {
+				s.todoItems[i].Status = "failed"
+			}
+			break
+		}
+	}
+	s.taskProgress.Running--
+	if success {
+		s.taskProgress.Done++
+	} else {
+		s.taskProgress.Failed++
+	}
+	s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
+}
+
+// computeProgress derives progress counters from the current todo items list.
+// This ensures the progress bar always matches what's visible in the TODO section.
+func (s *SidebarModel) computeProgress() (total, done, failed, running int) {
+	for _, item := range s.todoItems {
+		total++
+		switch item.Status {
+		case "completed":
+			done++
+		case "failed":
+			failed++
+		case "in_progress":
+			running++
+		}
+	}
+	return
 }
 
 // ─── Token Burn Rate ──────────────────────────────────────────────────────────
@@ -430,22 +488,37 @@ func (s *SidebarModel) SetCurrentScreen(screen string) {
 
 // ─── Smart File Watcher ──────────────────────────────────────────────────────
 
-// MarkFileChanged marks a file as recently changed.
+// recentlyChangedTTL is the maximum age for a recently-changed file entry
+// before it is evicted during the next MarkFileChanged or refresh cycle.
+const recentlyChangedTTL = 10 * time.Minute
+
+// MarkFileChanged marks a file as recently changed and evicts stale entries.
 func (s *SidebarModel) MarkFileChanged(path string) {
 	if s.recentlyChanged == nil {
-		s.recentlyChanged = make(map[string]bool)
+		s.recentlyChanged = make(map[string]time.Time)
 	}
-	s.recentlyChanged[path] = true
+	now := time.Now()
+	s.recentlyChanged[path] = now
+	// Evict entries older than the TTL
+	for p, t := range s.recentlyChanged {
+		if now.Sub(t) > recentlyChangedTTL {
+			delete(s.recentlyChanged, p)
+		}
+	}
 }
 
 // ClearRecentlyChanged clears the recently changed files set.
 func (s *SidebarModel) ClearRecentlyChanged() {
-	s.recentlyChanged = make(map[string]bool)
+	s.recentlyChanged = make(map[string]time.Time)
 }
 
-// IsFileRecentlyChanged checks if a file was recently changed.
+// IsFileRecentlyChanged checks if a file was recently changed (within the TTL window).
 func (s *SidebarModel) IsFileRecentlyChanged(path string) bool {
-	return s.recentlyChanged[path]
+	t, ok := s.recentlyChanged[path]
+	if !ok {
+		return false
+	}
+	return time.Since(t) <= recentlyChangedTTL
 }
 
 // ─── Sub-Agent Status ────────────────────────────────────────────────────────
@@ -972,8 +1045,17 @@ func (s *SidebarModel) View() string {
 		lines = append(lines, progressLabel)
 
 		// Progress bar
-		if s.taskProgress.Total > 0 {
-			pct := float64(s.taskProgress.Done+s.taskProgress.Failed) / float64(s.taskProgress.Total)
+		pTotal, pDone, pFailed, _ := s.computeProgress()
+		if pTotal > 0 || s.taskProgress.Total > 0 {
+			total := pTotal
+			done := pDone
+			failed := pFailed
+			if total == 0 {
+				total = s.taskProgress.Total
+				done = s.taskProgress.Done
+				failed = s.taskProgress.Failed
+			}
+			pct := float64(done+failed) / float64(total)
 			if pct > 1 {
 				pct = 1
 			}
@@ -986,9 +1068,9 @@ func (s *SidebarModel) View() string {
 
 			var barColor lipgloss.Color
 			switch {
-			case pct >= 1.0 && s.taskProgress.Failed == 0:
+			case pct >= 1.0 && failed == 0:
 				barColor = t.Success
-			case s.taskProgress.Failed > 0:
+			case failed > 0:
 				barColor = t.Error
 			default:
 				barColor = t.Brand
@@ -997,9 +1079,9 @@ func (s *SidebarModel) View() string {
 			bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled)) +
 				lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("░", empty))
 			pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
-			summary := fmt.Sprintf("%d/%d", s.taskProgress.Done+s.taskProgress.Failed, s.taskProgress.Total)
-			if s.taskProgress.Failed > 0 {
-				summary += fmt.Sprintf(" (%d failed)", s.taskProgress.Failed)
+			summary := fmt.Sprintf("%d/%d", done+failed, total)
+			if failed > 0 {
+				summary += fmt.Sprintf(" (%d failed)", failed)
 			}
 			barLine := lipgloss.NewStyle().PaddingLeft(1).Render(bar + " " + pctStr)
 			summaryLine := lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary)
@@ -1038,7 +1120,15 @@ func (s *SidebarModel) View() string {
 				Render("no items yet")
 			lines = append(lines, emptyTodo)
 		} else {
-			for _, item := range s.todoItems {
+			items := s.todoItems
+			maxTodoItems := s.height - sidebarFixedOverhead - 6
+			if maxTodoItems < 3 {
+				maxTodoItems = 3
+			}
+			if len(items) > maxTodoItems {
+				items = items[len(items)-maxTodoItems:]
+			}
+			for _, item := range items {
 				icon := todoItemIcon(item.Status, t)
 				desc := item.Content
 				// Truncate if too long
