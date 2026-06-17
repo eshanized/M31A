@@ -253,6 +253,10 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		if m.shipModel != nil && msg.Demonstration != "" {
 			m.shipModel.SetDemonstration(msg.Demonstration)
 		}
+		// Auto-revert sidebar from todo mode back to file tree
+		if m.sidebarModel != nil && m.sidebarModel.GetMode() == SidebarModeTodo {
+			m.sidebarModel.RevertToFiles()
+		}
 		return nil
 	}
 
