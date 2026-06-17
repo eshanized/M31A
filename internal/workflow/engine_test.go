@@ -615,7 +615,7 @@ func TestEngine_PhasePromptComposition(t *testing.T) {
 	}
 
 	// Plan: base + tool-use + plan-format
-	planMsgs := engine.buildPlanContext("test goal", nil, nil, "")
+	planMsgs := engine.buildPlanContext(context.Background(), "test goal", nil, nil, "")
 	if len(planMsgs) == 0 || planMsgs[0].Role != "system" {
 		t.Fatal("Expected system message first")
 	}
