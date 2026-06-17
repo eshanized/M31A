@@ -95,6 +95,13 @@ var providerCatalog = []providerInfo{
 		Description: "Zen gateway with built-in cost controls.",
 		Recommended: false,
 	},
+	{
+		ID:          "nvidia",
+		Name:        "NVIDIA NIM",
+		Icon:        "◆",
+		Description: "NVIDIA NIM with coding-optimized models (Nemotron, Llama, DeepSeek).",
+		Recommended: false,
+	},
 }
 
 // FirstRunOpts carries the data collected from the first-run wizard.
