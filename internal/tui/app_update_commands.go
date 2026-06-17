@@ -63,6 +63,7 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 					m.agentCh = nil
 				},
 				Version: m.version,
+				Keychain: m.keychain,
 			}
 			if m.replModel != nil {
 				ctx.ClearMessages = m.replModel.ClearMessages
@@ -251,6 +252,13 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 
 	ctx, cancel := context.WithCancel(m.shutdownCtx)
 	m.streamCancelFn = cancel
+
+	// Switch sidebar to todo mode so the user sees task/tool progress
+	// instead of the file tree while the agent loop is running.
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetMode(SidebarModeTodo)
+		m.sidebarModel.InitAgentProgress()
+	}
 
 	cmd, ch := AgentLoop(ctx, p, m.activeModel.ID, m.dispatcher, msgs, sysContent, m.activeModel.ContextLength)
 	m.agentCh = ch
