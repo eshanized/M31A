@@ -134,6 +134,12 @@ func run() int {
 		}
 	}
 
+	if cfg.Provider.Nvidia.APIKey != "" {
+		if regErr := tui.RegisterProvider(registry, cfg, "nvidia", cfg.Provider.Nvidia.APIKey, Version); regErr != nil {
+			logger.Warn("failed to register NVIDIA provider", "error", regErr)
+		}
+	}
+
 	if cfg.Provider.Default != "" {
 		if setErr := registry.SetActive(cfg.Provider.Default); setErr != nil {
 			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", setErr)
@@ -288,6 +294,7 @@ func run() int {
 					slog.Warn("TUI did not exit within timeout, forcing exit")
 					sentinel := filepath.Join(filepath.Dir(configPath), ".force-exit")
 					_ = os.WriteFile(sentinel, []byte("force-exit"), 0o644)
+					cleanup()
 					os.Exit(1)
 				}
 			case <-sigDone:
