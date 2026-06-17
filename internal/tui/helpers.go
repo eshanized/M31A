@@ -275,6 +275,8 @@ func ProviderShortName(name string) string {
 		return "OAI"
 	case "anthropic":
 		return "AC"
+	case "nvidia", "nim":
+		return "NV"
 	default:
 		if len(name) > 4 {
 			return name[:4]
