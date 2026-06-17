@@ -727,8 +727,10 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 		// Try to save keys to keychain to test availability
 		openRouterKey := c.Provider.OpenRouter.APIKey
 		zenKey := c.Provider.Zen.APIKey
+		nvidiaKey := c.Provider.Nvidia.APIKey
 		openRouterSaved := openRouterKey == ""
 		zenSaved := zenKey == ""
+		nvidiaSaved := nvidiaKey == ""
 
 		if openRouterKey != "" {
 			if err := kc.Set("openrouter", openRouterKey); err == nil {
@@ -748,6 +750,15 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 				slog.Warn("failed to save Zen key to keychain", "error", err)
 			}
 		}
+		if nvidiaKey != "" {
+			if err := kc.Set("nvidia", nvidiaKey); err == nil {
+				nvidiaSaved = true
+			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
+				// Keychain unavailable - will persist to config file
+			} else {
+				slog.Warn("failed to save NVIDIA key to keychain", "error", err)
+			}
+		}
 
 		// Clear keys from config file only for providers that were successfully
 		// saved to keychain. Providers that failed keychain storage keep their
@@ -758,7 +769,10 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 		if zenSaved {
 			cfgCopy.Provider.Zen.APIKey = ""
 		}
-		if openRouterSaved && zenSaved {
+		if nvidiaSaved {
+			cfgCopy.Provider.Nvidia.APIKey = ""
+		}
+		if openRouterSaved && zenSaved && nvidiaSaved {
 			persistKeys = false
 		} else {
 			slog.Warn("keychain unavailable or save failed for some providers; persisting API keys to config file as fallback")
@@ -826,6 +840,19 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 			c.Provider.Zen.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
 			slog.Warn("keychain error", "provider", "zen", "error", err)
+		}
+	}
+
+	// NVIDIA NIM
+	if key := os.Getenv("M31A_NVIDIA_API_KEY"); key != "" {
+		c.Provider.Nvidia.APIKey = key
+	} else if key := os.Getenv("NVIDIA_API_KEY"); key != "" {
+		c.Provider.Nvidia.APIKey = key
+	} else if kc != nil {
+		if k, err := kc.Get("nvidia"); err == nil {
+			c.Provider.Nvidia.APIKey = k
+		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
+			slog.Warn("keychain error", "provider", "nvidia", "error", err)
 		}
 	}
 
