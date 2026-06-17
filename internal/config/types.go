@@ -36,10 +36,12 @@ type ProviderConfig struct {
 	AutoFallback bool                     `toml:"auto_fallback"`
 	OpenRouter   ProviderCredentialConfig `toml:"openrouter"`
 	Zen          ProviderCredentialConfig `toml:"zen"`
+	Nvidia       ProviderCredentialConfig `toml:"nvidia"`
 	// Custom base URLs for self-hosted or proxied gateways.
 	// Empty means use the default provider URLs.
 	OpenRouterBaseURL string `toml:"openrouter_base_url"`
 	ZenBaseURL        string `toml:"zen_base_url"`
+	NvidiaBaseURL     string `toml:"nvidia_base_url"`
 	// HTTP-Referer and X-Title headers sent to OpenRouter.
 	// Empty means use defaults ("https://github.com/eshanized/M31A", "M31A").
 	OpenRouterReferer string `toml:"openrouter_referer"`
