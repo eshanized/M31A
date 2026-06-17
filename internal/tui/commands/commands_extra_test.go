@@ -47,8 +47,15 @@ func TestHandleReset_ConfirmRequired(t *testing.T) {
 	if !result.ConfirmRequired {
 		t.Error("handleReset should require confirmation")
 	}
-	if result.Screen == nil || *result.Screen != tuitypes.ScreenFirstRun {
-		t.Error("handleReset should navigate to ScreenFirstRun")
+	if result.Screen != nil {
+		t.Error("handleReset should not set Screen directly; navigation happens via ResetCompleteMsg")
+	}
+	if result.Cmd == nil {
+		t.Fatal("handleReset should return a Cmd for cleanup")
+	}
+	msg := result.Cmd()
+	if _, ok := msg.(tuitypes.ResetCompleteMsg); !ok {
+		t.Errorf("handleReset Cmd should return ResetCompleteMsg, got %T", msg)
 	}
 }
 
