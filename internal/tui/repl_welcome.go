@@ -95,7 +95,7 @@ func welcomeCardWidth(availWidth int) int {
 
 // renderLogoWithGlow renders the M31A logo with a gradient glow row beneath.
 func (m *ReplModel) renderLogoWithGlow() string {
-	logoBlock := components.RenderBigLogo(m.theme.Brand, true)
+	logoBlock := components.RenderBigLogo(m.theme.Brand, true, m.replWidth())
 	gradientSep := renderGradientSeparator(m.replWidth(), m.theme)
 
 	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, gradientSep)
