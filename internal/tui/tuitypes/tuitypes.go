@@ -391,6 +391,23 @@ type SidebarFile struct {
 // SidebarRefreshTickMsg is emitted periodically to trigger sidebar git status refresh.
 type SidebarRefreshTickMsg struct{}
 
+// SidebarTodoUpdateMsg carries updated TODO items from the TodoWrite tool to the sidebar.
+type SidebarTodoUpdateMsg struct {
+	Items []SidebarTodoItem
+}
+
+// SidebarTodoItem represents a single item in the sidebar todo list.
+type SidebarTodoItem struct {
+	Content  string
+	Status   string // "pending", "in_progress", "completed", "cancelled"
+	Priority string // "high", "medium", "low"
+	Source   string // "task" or "llm"
+	TaskID   int    // only for Source=="task"
+}
+
+// SidebarRevertMsg triggers the sidebar to revert from todo mode back to file tree.
+type SidebarRevertMsg struct{}
+
 // SessionRenameMsg is emitted when the user triggers a rename on a session in the browser.
 type SessionRenameMsg struct {
 	SessionID string
