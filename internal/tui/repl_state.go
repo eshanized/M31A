@@ -177,6 +177,9 @@ func (m *ReplModel) AddMessage(msg types.Message) {
 	// Invalidate incremental rendering cache when messages change
 	m.cachedMessageContent = ""
 	m.cachedMessageCount = 0
+	// Invalidate streaming render cache when a new message arrives
+	m.cachedThinkingBlock = nil
+	m.cachedThinkingContent = ""
 	if m.userScrolled {
 		m.newMessagesWhileScrolled++
 	}
@@ -190,6 +193,9 @@ func (m *ReplModel) SetMessages(msgs []types.Message) {
 	// Invalidate incremental rendering cache when messages change
 	m.cachedMessageContent = ""
 	m.cachedMessageCount = 0
+	// Invalidate streaming render cache to prevent stale thinking blocks
+	m.cachedThinkingBlock = nil
+	m.cachedThinkingContent = ""
 	m.renderMessages()
 	m.autoScrollConditionally()
 }
@@ -219,6 +225,9 @@ func (m *ReplModel) ClearMessages() {
 	// Invalidate incremental rendering cache
 	m.cachedMessageContent = ""
 	m.cachedMessageCount = 0
+	// Invalidate streaming render cache
+	m.cachedThinkingBlock = nil
+	m.cachedThinkingContent = ""
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
@@ -359,14 +368,16 @@ func (m *ReplModel) renderMessages() {
 
 	prevRole := ""
 	for i, msg := range m.messages {
-		// Skip empty assistant messages with no visible content
-		if msg.Role == "assistant" && msg.Content == "" && len(msg.Segments) == 0 && len(msg.ToolCalls) == 0 {
+		offsets[i] = lineCount
+		rendered := m.msgRenderer.RenderMessage(msg, rw)
+		if rendered == "" {
 			offsets[i] = -1
 			continue
 		}
-
+		// Write separator AFTER confirming message has content.
+		// Previously the separator was written before the empty check,
+		// causing blank lines to accumulate between visible messages.
 		if i > 0 {
-			// Turn separator: subtle dotted line when role changes
 			if prevRole != "" && msg.Role != prevRole {
 				sepChar := "·"
 				sepLine := lipgloss.NewStyle().
@@ -381,12 +392,6 @@ func (m *ReplModel) renderMessages() {
 				sb.WriteString("\n")
 				lineCount++
 			}
-		}
-		offsets[i] = lineCount
-		rendered := m.msgRenderer.RenderMessage(msg, rw)
-		if rendered == "" {
-			offsets[i] = -1
-			continue
 		}
 		sb.WriteString(rendered)
 		lineCount += strings.Count(rendered, "\n") + 1
@@ -427,32 +432,44 @@ func (m *ReplModel) renderMessagesIncremental(rw int) {
 }
 
 // renderStreamingContent renders the current streaming content (thinking or response).
+// Uses plain lipgloss styling during streaming instead of Glamour's full markdown
+// pipeline. Glamour is O(n) with accumulated text and re-parses markdown on every
+// chunk, making it the primary bottleneck for streaming throughput. Full markdown
+// rendering is deferred to stream completion when the message is finalized.
 func (m *ReplModel) renderStreamingContent(rw int) string {
 	streamContent := m.streamContent.String()
 	if streamContent != "" {
 		if m.activeSegmentType == "thinking" {
-			// Render thinking using the full ThinkingBlock component
-			tb := components.NewThinkingBlock(
-				types.MessageSegment{
-					Type:      "thinking",
-					Content:   streamContent,
-					Visible:   true,
-					StartedAt: m.thinkingStartAt,
-				}, m.theme, true, -1)
-			return tb.Render(rw)
+			// Cache ThinkingBlock to avoid re-allocating on every tick.
+			// Only recreate when content has actually changed.
+			if m.cachedThinkingBlock == nil || m.cachedThinkingContent != streamContent {
+				m.cachedThinkingBlock = components.NewThinkingBlock(
+					types.MessageSegment{
+						Type:      "thinking",
+						Content:   streamContent,
+						Visible:   true,
+						StartedAt: m.thinkingStartAt,
+					}, m.theme, true, -1)
+				m.cachedThinkingContent = streamContent
+			}
+			return m.cachedThinkingBlock.Render(rw)
 		}
-		// Render response with animated block cursor
-		streamMsg := types.Message{
-			Role:    "assistant",
-			Content: streamContent,
+		// Plain lipgloss rendering during streaming — bypass Glamour entirely.
+		// Apply basic text styling: brand color for the content, no markdown parsing.
+		contentWidth := rw - 6 // account for gutter + padding
+		if contentWidth < 20 {
+			contentWidth = 20
 		}
 		// Animated block cursor: alternates between █ and ░ for visibility
 		cursorFrames := []string{"█", "▓", "▒", "░", "▒", "▓"}
 		frameIdx := int(time.Now().UnixMilli()/150) % len(cursorFrames)
 		cursorChar := cursorFrames[frameIdx]
-		streamMsg.Content = streamContent +
-			lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorChar)
-		return m.msgRenderer.RenderMessage(streamMsg, rw)
+		cursor := lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorChar)
+		rendered := lipgloss.NewStyle().
+			Foreground(m.theme.TextPrimary).
+			Width(contentWidth).
+			Render(streamContent + cursor)
+		return rendered
 	}
 	// Show spinner when streaming but no content yet
 	spinnerFrame := m.spinner.Peek()
