@@ -55,6 +55,8 @@ func (rm *ResumeModel) renderResume() string {
 	countInfo := fmt.Sprintf("%d/%d", rm.cursor+1, len(rm.sessions))
 	if rm.searching || rm.searchInput.Value() != "" {
 		countInfo += fmt.Sprintf(" (filtered from %d)", len(rm.allSessions))
+	} else if rm.totalCount > len(rm.sessions) {
+		countInfo += fmt.Sprintf(" (showing %d of %d total)", len(rm.sessions), rm.totalCount)
 	}
 	scrollInfo := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(countInfo)
 
