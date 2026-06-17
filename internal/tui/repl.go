@@ -85,6 +85,8 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.viewport.SetYOffset(m.viewport.YOffset + step)
 			}
+			// Re-render to update spinner, wave, and cursor animations
+			m.renderMessages()
 			cmds = append(cmds, StreamTickCmd())
 		} else if len(m.messages) == 0 && m.welcomeRevealCount < 3 {
 			// Welcome screen typewriter: reveal prompts one-by-one
