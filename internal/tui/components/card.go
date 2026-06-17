@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -119,7 +121,11 @@ func (c Card) Render() string {
 		gradientStyle := lipgloss.NewStyle().
 			Foreground(c.Theme.Brand).
 			Bold(true)
-		gradientLine := gradientStyle.Render("────────────────────────────────────────────────────────────────")
+		gradientW := c.Width - 2
+		if gradientW < 1 {
+			gradientW = 1
+		}
+		gradientLine := gradientStyle.Render(strings.Repeat("─", gradientW))
 		return gradientLine + "\n" + content
 	case CardInline:
 		// No borders, just background tint
