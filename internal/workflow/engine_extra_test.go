@@ -1088,7 +1088,7 @@ func TestBuildExecuteContext(t *testing.T) {
 		AcceptanceCriteria: []string{"compiles"},
 	}
 	allTasks := []m31types.Task{task}
-	messages := engine.buildExecuteContext(task, allTasks, "Build a CLI tool")
+	messages := engine.buildExecuteContext(context.Background(), task, allTasks, "Build a CLI tool")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(messages))
 	}
@@ -1107,7 +1107,7 @@ func TestBuildExecuteContext_WithProject(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"a.go"}}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(messages))
 	}
@@ -1915,7 +1915,7 @@ func TestBuildExecuteContext_WithPlanMarkdown(t *testing.T) {
 	engine.planMarkdown = "# Plan\n## Summary\nBuild a web server\n### Core\n#### [NEW] main.go\n- Entry point"
 
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"main.go"}}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(messages))
 	}
@@ -2013,7 +2013,7 @@ func TestConsumeStreamWithTools_TextThenError(t *testing.T) {
 func TestBuildExecuteContext_EmptyGoal(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"a.go"}}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(messages))
 	}
@@ -2062,7 +2062,7 @@ func TestCollectDiffStats_EmptyRepo(t *testing.T) {
 func TestBuildExecuteContext_WithGoal(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"a.go"}}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "Build a web server")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "Build a web server")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages")
 	}
@@ -2082,7 +2082,7 @@ func TestBuildExecuteContext_AcceptanceCriteria(t *testing.T) {
 		Files:              []string{"a.go"},
 		AcceptanceCriteria: []string{"compiles", "tests pass"},
 	}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 	found := false
 	for _, m := range messages {
 		if m.Role == "user" && strings.Contains(m.Content, "compiles") {
@@ -2105,7 +2105,7 @@ func TestBuildPlanContext_WithRefinement(t *testing.T) {
 	engine.planVersion = 1
 	engine.refineFeedback = "make it simpler"
 
-	messages := engine.buildPlanContext("Test", nil, nil, "")
+	messages := engine.buildPlanContext(context.Background(), "Test", nil, nil, "")
 	found := false
 	for _, m := range messages {
 		if m.Role == "user" && strings.Contains(m.Content, "User Refinement Feedback") {
@@ -2122,7 +2122,7 @@ func TestBuildPlanContext_WithExistingTasks(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	existingTasks := []m31types.Task{{ID: 1, Action: "Create", Description: "test"}}
 	valErrs := []string{"missing description"}
-	messages := engine.buildPlanContext("Test", existingTasks, valErrs, "raw response here")
+	messages := engine.buildPlanContext(context.Background(), "Test", existingTasks, valErrs, "raw response here")
 	found := false
 	for _, m := range messages {
 		if m.Role == "user" && strings.Contains(m.Content, "Previous Attempt Failed") {
@@ -2417,7 +2417,7 @@ func TestBuildExecuteContext_NoPlanMarkdown(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	engine.planMarkdown = ""
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"a.go"}}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages")
 	}
@@ -2896,7 +2896,7 @@ func TestBuildPlanContext_AllFeatures(t *testing.T) {
 	valErrs := []string{"error 1"}
 	raw := "raw response"
 
-	messages := engine.buildPlanContext("Test", existingTasks, valErrs, raw)
+	messages := engine.buildPlanContext(context.Background(), "Test", existingTasks, valErrs, raw)
 	if len(messages) < 2 {
 		t.Fatalf("expected at least 2 messages")
 	}
@@ -2924,7 +2924,7 @@ func TestBuildPlanContext_LongPlanTruncation(t *testing.T) {
 	engine.planVersion = 1
 	engine.refineFeedback = "revise"
 
-	messages := engine.buildPlanContext("Goal", nil, nil, "")
+	messages := engine.buildPlanContext(context.Background(), "Goal", nil, nil, "")
 	for _, m := range messages {
 		if strings.Contains(m.Content, "... (summary truncated)") {
 			return // success
@@ -3277,7 +3277,7 @@ func TestBuildExecuteContext_WithPlanProposedChanges(t *testing.T) {
 		Description: "test",
 		Files:       []string{"test.go"},
 	}
-	messages := engine.buildExecuteContext(task, []m31types.Task{task}, "goal")
+	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 
 	found := false
 	for _, m := range messages {
