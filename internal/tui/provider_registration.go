@@ -6,9 +6,9 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/provider/nvidia"
 	"github.com/eshanized/M31A/internal/provider/openrouter"
 	"github.com/eshanized/M31A/internal/provider/zen"
-	"github.com/eshanized/M31A/internal/provider/nvidia"
 	"github.com/eshanized/M31A/internal/types"
 )
 

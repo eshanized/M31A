@@ -133,7 +133,7 @@ type ReplModel struct {
 
 	// Streaming render cache: avoids re-allocating components on every tick
 	cachedThinkingBlock   *components.ThinkingBlock // cached ThinkingBlock during streaming
-	cachedThinkingContent string                   // content used to create cachedThinkingBlock
+	cachedThinkingContent string                    // content used to create cachedThinkingBlock
 
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb

@@ -62,7 +62,7 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 					}
 					m.agentCh = nil
 				},
-				Version: m.version,
+				Version:  m.version,
 				Keychain: m.keychain,
 			}
 			if m.replModel != nil {

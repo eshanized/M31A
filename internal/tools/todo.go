@@ -23,7 +23,7 @@ var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type TodoWrite struct {
 	sessionsDir string
-	sessionID   atomic.Value // stores string
+	sessionID   atomic.Value           // stores string
 	onUpdate    func(items []TodoItem) // callback for sidebar updates
 }
 

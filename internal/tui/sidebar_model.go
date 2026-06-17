@@ -93,14 +93,14 @@ type SidebarModel struct {
 	tokenBurnCostRate float64 // cost per second
 
 	// Phase pipeline tracking
-	currentPhase    string
-	phaseHistory    []string // completed phases
-	phaseStartedAt  time.Time
-	phaseElapsed    time.Duration
+	currentPhase   string
+	phaseHistory   []string // completed phases
+	phaseStartedAt time.Time
+	phaseElapsed   time.Duration
 
 	// Tool call timeline
-	toolCalls      []SidebarToolCall
-	maxToolCalls   int // max visible in sidebar (default 5)
+	toolCalls    []SidebarToolCall
+	maxToolCalls int // max visible in sidebar (default 5)
 
 	// Execution speed metrics
 	tasksPerMinute   float64
@@ -111,9 +111,9 @@ type SidebarModel struct {
 	contextPressure float64 // 0.0 to 1.0
 
 	// Cost accumulator
-	totalCost     float64
-	costTrend     float64 // positive = spending faster, negative = slower
-	prevCostRate  float64
+	totalCost    float64
+	costTrend    float64 // positive = spending faster, negative = slower
+	prevCostRate float64
 
 	// Current screen for shortcut hints
 	currentScreen string
