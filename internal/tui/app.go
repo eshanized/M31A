@@ -378,6 +378,9 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	if m.git != nil {
 		engine.SetGit(m.git)
 	}
+	if m.ledger != nil {
+		engine.SetLedger(m.ledger)
+	}
 
 	// Connect the MsgEmitter so workflow events reach the TUI
 	emitter := &channelEmitter{ch: make(chan tea.Msg, 128)}
