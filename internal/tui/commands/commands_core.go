@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -67,14 +68,38 @@ func handleStatus(_ []string, ctx CommandContext) CommandResult {
 	return CommandResult{Success: true, Message: msg}
 }
 
-// handleReset navigates to the first-run screen, resetting the UI to initial state.
-func handleReset(_ []string, _ CommandContext) CommandResult {
-	screen := tuitypes.ScreenFirstRun
+// handleReset deletes all persistent state (config file, API keys, session data,
+// ledger) and navigates to the first-run screen for a fresh setup.
+func handleReset(_ []string, ctx CommandContext) CommandResult {
 	return CommandResult{
 		Success:         true,
 		ConfirmRequired: true,
-		ConfirmPrompt:   "Reset to first-run screen? Current session state will be lost.",
-		Screen:          &screen,
+		ConfirmPrompt:   "Reset M31A to factory state? This deletes your config, API keys, session data, and ledger.",
+		Cmd: func() tea.Msg {
+			// Delete API keys from keychain
+			if ctx.Keychain != nil {
+				for _, provider := range []string{"openrouter", "zen", "nvidia"} {
+					_ = ctx.Keychain.Delete(provider)
+				}
+			}
+
+			// Delete config file
+			if ctx.ConfigPath != "" {
+				_ = os.Remove(ctx.ConfigPath)
+			}
+
+			// Delete session data
+			if ctx.SessionManager != nil {
+				_ = ctx.SessionManager.DeleteSession(ctx.SessionID)
+			}
+
+			// Clear ledger
+			if ctx.Ledger != nil {
+				_ = ctx.Ledger.Clear()
+			}
+
+			return tuitypes.ResetCompleteMsg{}
+		},
 	}
 }
 
@@ -245,9 +270,15 @@ func handleSearch(args []string, ctx CommandContext) CommandResult {
 	var sb strings.Builder
 	matches := 0
 	for _, msg := range sess.Messages {
-		if strings.Contains(strings.ToLower(msg.Content), query) {
+		text := msg.Content
+		for _, seg := range msg.Segments {
+			if seg.Content != "" {
+				text += "\n" + seg.Content
+			}
+		}
+		if strings.Contains(strings.ToLower(text), query) {
 			matches++
-			snippet := msg.Content
+			snippet := text
 			if len(snippet) > 120 {
 				snippet = snippet[:117] + "..."
 			}
