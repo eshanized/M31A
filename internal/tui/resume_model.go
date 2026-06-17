@@ -20,6 +20,7 @@ type ResumeModel struct {
 	height      int
 	searchInput textinput.Model
 	searching   bool
+	totalCount  int // total sessions on disk (may exceed len(sessions) due to cap)
 }
 
 // NewResumeModel creates a ResumeModel.
@@ -58,6 +59,12 @@ func (rm *ResumeModel) Refresh(sessions []session.SessionInfo) {
 	if rm.cursor >= len(rm.sessions) {
 		rm.cursor = max(0, len(rm.sessions)-1)
 	}
+}
+
+// SetTotalCount sets the total number of sessions on disk, used to display
+// a truncation indicator when the visible list is capped.
+func (rm *ResumeModel) SetTotalCount(n int) {
+	rm.totalCount = n
 }
 
 // filterSessions applies the current search text to filter the session list.
