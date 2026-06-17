@@ -8,6 +8,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/provider/openrouter"
 	"github.com/eshanized/M31A/internal/provider/zen"
+	"github.com/eshanized/M31A/internal/provider/nvidia"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -85,6 +86,33 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			return err
 		}
 		slog.Info("Zen provider registered")
+
+	case "nvidia":
+		baseURL := ""
+		var defaultCtxLen int
+		var healthLiveMs, healthSlowMs int
+		if cfg != nil {
+			baseURL = cfg.Provider.NvidiaBaseURL
+			defaultCtxLen = cfg.Model.DefaultContextLength
+			healthLiveMs = cfg.Features.HealthCheckLiveMs
+			healthSlowMs = cfg.Features.HealthCheckSlowMs
+		}
+		client, err := nvidia.New(apiKey, nvidia.Options{
+			BaseURL:           baseURL,
+			CacheTTL:          cacheTTL,
+			CacheStaleTTL:     cacheStaleTTL,
+			HealthCheckLiveMs: int64(healthLiveMs),
+			HealthCheckSlowMs: int64(healthSlowMs),
+			DefaultContextLen: int64(defaultCtxLen),
+			Version:           version,
+		})
+		if err != nil {
+			return err
+		}
+		if err := registry.Register("nvidia", client); err != nil {
+			return err
+		}
+		slog.Info("NVIDIA NIM provider registered")
 	}
 
 	return nil
