@@ -104,6 +104,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 					InputPerMToken:  0,
 					OutputPerMToken: 0,
 				},
+				Provider:     "zen",
 				TopProvider:  "zen",
 				Capabilities: provider.ParseModelCapabilities(m.ID, "-r1"),
 			}

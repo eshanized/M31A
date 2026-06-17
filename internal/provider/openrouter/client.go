@@ -119,6 +119,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 					InputPerMToken:  m.Pricing.PromptToken * 1_000_000,
 					OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
 				},
+				Provider:     "openrouter",
 				TopProvider:  m.TopProvider,
 				Capabilities: provider.ParseModelCapabilities(m.ID),
 			}
