@@ -166,9 +166,17 @@ func (m *PhaseModelPickerModel) Update(msg tea.Msg) (*PhaseModelPickerModel, tea
 	case modelSelectorLoadedMsg:
 		m.loadedProviders[msg.providerName] = true
 		if msg.err == nil && len(msg.models) > 0 {
+			// Ensure each model has its Provider field set from the source provider.
+			models := make([]types.ModelInfo, len(msg.models))
+			copy(models, msg.models)
+			for i := range models {
+				if models[i].Provider == "" {
+					models[i].Provider = msg.providerName
+				}
+			}
 			// Append loaded models to both panels.
-			m.panels[0].models = append(m.panels[0].models, msg.models...)
-			m.panels[1].models = append(m.panels[1].models, msg.models...)
+			m.panels[0].models = append(m.panels[0].models, models...)
+			m.panels[1].models = append(m.panels[1].models, models...)
 		}
 		// Check if all providers are done.
 		allDone := true
