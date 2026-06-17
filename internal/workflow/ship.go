@@ -147,16 +147,13 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// 4. Update ledger
 	sess, err := e.sessionMgr.LoadSession(e.sessionID)
 	if err == nil {
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil {
-			e.logger.Warn("ledger update skipped: cannot determine home dir", "error", homeErr)
-		} else {
-			ledgerPath := filepath.Join(home, ".m31a", "LEDGER.md")
-			l := ledger.New(ledgerPath)
+		if e.ledger != nil {
 			entry := ledger.NewEntry(sess.Session, total, failed, skipped, len(commits), 0)
-			if appendErr := l.Append(entry); appendErr != nil {
+			if appendErr := e.ledger.Append(entry); appendErr != nil {
 				e.logger.Warn("ledger update failed", "error", appendErr)
 			}
+		} else {
+			e.logger.Warn("ledger update skipped: no ledger instance configured on engine")
 		}
 	} else {
 		e.logger.Warn("ledger update skipped: cannot load session", "error", err)
