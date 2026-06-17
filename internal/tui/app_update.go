@@ -398,6 +398,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.AddMessage(toolMsg)
 			m.replModel.TrackLiveTool(msg.ToolCall.Name, len(m.replModel.Messages())-1)
 		}
+		if m.sidebarModel != nil {
+			m.sidebarModel.AddToolCallStart(msg.ToolCall.Name)
+			m.sidebarModel.AgentToolStarted(msg.ToolCall.Name)
+		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentToolProgressMsg:
 		if m.replModel != nil {
@@ -408,6 +412,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentToolDoneMsg:
 		if m.replModel != nil {
 			m.replModel.UpdateLiveTool(msg.ToolCall.Name, msg.Err, msg.DurationMs)
+		}
+		if m.sidebarModel != nil {
+			m.sidebarModel.CompleteToolCall(msg.ToolCall.Name, msg.Err == nil, time.Duration(msg.DurationMs)*time.Millisecond)
+			m.sidebarModel.AgentToolCompleted(msg.ToolCall.Name, msg.Err == nil)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentIterationDoneMsg:
@@ -458,6 +466,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.streamCancelFn = nil
 		m.agentCh = nil
+		// Revert sidebar from todo mode back to file tree after agent completes
+		if m.sidebarModel != nil && m.sidebarModel.GetMode() == SidebarModeTodo {
+			m.sidebarModel.RevertToFiles()
+		}
 		// Persist agent conversation to session
 		m.saveAgentSession()
 	case AgentErrorMsg:
@@ -470,6 +482,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.streamCancelFn = nil
 		m.agentCh = nil
+		// Revert sidebar from todo mode back to file tree on agent error
+		if m.sidebarModel != nil && m.sidebarModel.GetMode() == SidebarModeTodo {
+			m.sidebarModel.RevertToFiles()
+		}
 
 	case TickMsg:
 		if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
@@ -666,9 +682,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sidebarModel != nil {
 			if m.sidebarModel.GetMode() == SidebarModeFiles {
 				m.sidebarModel.SetMode(SidebarModeTodo)
-				if m.executeModel != nil {
-					m.sidebarModel.InitTaskProgress(len(m.executeModel.tasks))
-				}
+			}
+			if m.executeModel != nil && m.sidebarModel.taskProgress.Total == 0 {
+				m.sidebarModel.InitTaskProgress(len(m.executeModel.tasks))
 			}
 			m.sidebarModel.AddTodoItem(SidebarTodoItem{
 				Content:  msg.Task.Action,
@@ -850,6 +866,19 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-register providers with updated API keys from settings
 		m.reRegisterProvidersFromConfig()
 		cmds = append(cmds, m.popScreen())
+
+	// ── Reset complete ───────────────────────────────────────────────────────
+	case ResetCompleteMsg:
+		m.config = config.DefaultConfig()
+		m.registry = provider.NewRegistry()
+		m.activeProvider = ""
+		m.activeModel = nil
+		m.firstRunModel = nil
+		m.replModel = nil
+		m.configModel = nil
+		m.screenStack = m.screenStack[:0]
+		cmds = append(cmds, m.navigateToScreen(ScreenFirstRun))
+		cmds = append(cmds, m.addToastCmd("M31A reset to factory state", "success", 3*time.Second))
 
 	// ── Config editor saved (stays on ScreenConfig) ────────────────────────
 	case ConfigSavedMsg:
@@ -1096,17 +1125,32 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// has access to subagent summaries without opening the panel.
 		if m.replModel != nil {
 			switch msg.Event.Type {
+			case subagent.EventSpawned:
+				label := msg.Event.Name
+				if label == "" {
+					label = msg.Event.AgentID
+				}
+				m.replModel.AddMessage(makeAssistantMsg(
+					fmt.Sprintf("**Subagent %s** spawned", label),
+				))
 			case subagent.EventDone:
+				label := msg.Event.Name
+				if label == "" {
+					label = msg.Event.AgentID
+				}
+				body := fmt.Sprintf("**Subagent %s done** (%d tools, %d+%d tokens)",
+					label, msg.Event.ToolCalls, msg.Event.InputToks, msg.Event.OutputToks)
 				if msg.Event.Summary != "" {
-					label := msg.Event.Name
-					if label == "" {
-						label = msg.Event.AgentID
-					}
-					m.replModel.AddMessage(makeAssistantMsg(
-						fmt.Sprintf("**Subagent %s done** (%d tools, %d+%d tokens)\n\n%s",
-							label, msg.Event.ToolCalls, msg.Event.InputToks, msg.Event.OutputToks,
-							msg.Event.Summary),
-					))
+					body += "\n\n" + msg.Event.Summary
+				}
+				m.replModel.AddMessage(makeAssistantMsg(body))
+				// Clean up the subagent's worktree now that it's done.
+				if m.subagentManager != nil {
+					agentID := msg.Event.AgentID
+					cmds = append(cmds, func() tea.Msg {
+						_ = m.subagentManager.Cleanup(m.shutdownCtx, agentID)
+						return nil
+					})
 				}
 			case subagent.EventError:
 				label := msg.Event.Name
@@ -1116,6 +1160,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.replModel.AddMessage(makeAssistantMsg(
 					fmt.Sprintf("**Subagent %s errored:** %s", label, msg.Event.Error),
 				))
+				// Clean up the subagent's worktree on error too.
+				if m.subagentManager != nil {
+					agentID := msg.Event.AgentID
+					cmds = append(cmds, func() tea.Msg {
+						_ = m.subagentManager.Cleanup(m.shutdownCtx, agentID)
+						return nil
+					})
+				}
 			}
 		}
 		// Re-register the listener so the next event is delivered.
@@ -1152,9 +1204,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionList = nil
 		if m.resumeModel == nil {
 			rm := NewResumeModel(msg.sessions, m.themeManager.Current())
+			rm.SetTotalCount(msg.total)
 			m.resumeModel = rm
 		} else {
 			m.resumeModel.Refresh(msg.sessions)
+			m.resumeModel.SetTotalCount(msg.total)
 		}
 		m.screen = ScreenResume
 
@@ -2712,9 +2766,11 @@ func (m *AppState) startNewSession() tea.Cmd {
 func (m *AppState) openResumeScreen() tea.Cmd {
 	return func() tea.Msg {
 		var sessions []session.SessionInfo
+		total := 0
 		if m.sessionManager != nil {
 			infos, err := m.sessionManager.ListSessions()
 			if err == nil {
+				total = len(infos)
 				for i, info := range infos {
 					if i >= 20 {
 						break
@@ -2723,13 +2779,14 @@ func (m *AppState) openResumeScreen() tea.Cmd {
 				}
 			}
 		}
-		return resumeScreenReadyMsg{sessions: sessions}
+		return resumeScreenReadyMsg{sessions: sessions, total: total}
 	}
 }
 
 // resumeScreenReadyMsg carries loaded sessions for the resume screen.
 type resumeScreenReadyMsg struct {
 	sessions []session.SessionInfo
+	total    int
 }
 
 // ensureToolDetailModel lazily creates the tool-detail model with the current
@@ -2803,6 +2860,12 @@ func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 	m.workflowGoal = goal
 	cmds := []tea.Cmd{m.initWorkflowEngine()}
 
+	// Switch sidebar to todo mode immediately so the user sees phase/task
+	// progress instead of the file tree from the moment the workflow starts.
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetMode(SidebarModeTodo)
+	}
+
 	// Classify the goal and set the workflow mode on the engine
 	if m.workflowEngine != nil {
 		mode := m.resolveWorkflowMode(goal)
@@ -2819,6 +2882,12 @@ func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 		startPhase = types.PhaseInitialize
 	}
 	m.workflowPhase = startPhase
+
+	// Seed the sidebar phase pipeline so the phase bar is visible right away.
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetCurrentPhase(string(startPhase))
+	}
+
 	cmds = append(cmds, m.RunPhaseCmd(startPhase))
 	return tea.Batch(cmds...)
 }
