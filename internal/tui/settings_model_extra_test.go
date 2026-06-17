@@ -97,8 +97,8 @@ func TestBuildFieldsTabKeys(t *testing.T) {
 	s := testSettingsModel(t)
 	s.activeTab = TabKeys
 	s.buildFields()
-	if len(s.fields) != 2 {
-		t.Errorf("fields=%d, want 2", len(s.fields))
+	if len(s.fields) != 3 {
+		t.Errorf("fields=%d, want 3", len(s.fields))
 	}
 }
 
@@ -268,8 +268,8 @@ func TestCycleChoice2(t *testing.T) {
 		t.Errorf("provider=%s, want zen", s.config.Provider.Default)
 	}
 	_, _ = s.cycleChoice(1)
-	if s.config.Provider.Default != "openrouter" {
-		t.Errorf("provider=%s, want openrouter", s.config.Provider.Default)
+	if s.config.Provider.Default != "nvidia" {
+		t.Errorf("provider=%s, want nvidia", s.config.Provider.Default)
 	}
 }
 
@@ -277,8 +277,8 @@ func TestCycleChoiceBackward(t *testing.T) {
 	s := testSettingsModel(t)
 	s.config.Provider.Default = "openrouter"
 	_, _ = s.cycleChoice(-1)
-	if s.config.Provider.Default != "zen" {
-		t.Errorf("provider=%s, want zen", s.config.Provider.Default)
+	if s.config.Provider.Default != "nvidia" {
+		t.Errorf("provider=%s, want nvidia", s.config.Provider.Default)
 	}
 }
 
@@ -422,8 +422,8 @@ func TestSettingsUpdateShiftTabChoice(t *testing.T) {
 	s.config.Provider.Default = "openrouter"
 	result, _ := s.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	_ = result
-	if s.config.Provider.Default != "zen" {
-		t.Errorf("provider=%s, want zen", s.config.Provider.Default)
+	if s.config.Provider.Default != "nvidia" {
+		t.Errorf("provider=%s, want nvidia", s.config.Provider.Default)
 	}
 }
 
