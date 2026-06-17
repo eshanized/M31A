@@ -145,7 +145,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 	for task.HealsAttempted < m31types.MaxHealAttempts {
 		// Build context
-		messages := e.buildExecuteContext(*task, allTasks, goal)
+		messages := e.buildExecuteContext(ctx, *task, allTasks, goal)
 
 		// Stream LLM with native tool calling
 		content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
@@ -413,7 +413,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 }
 
 // buildExecuteContext creates messages for task execution.
-func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
+func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
 	var messages []m31types.Message
 	systemPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)
 	if goal != "" {
@@ -493,7 +493,7 @@ func (e *Engine) buildExecuteContext(task m31types.Task, tasks []m31types.Task, 
 	})
 
 	// Codebase intelligence — inject relevant file context automatically
-	if ci := e.getCodeIntel(); ci != nil {
+	if ci := e.getCodeIntel(ctx); ci != nil {
 		ciCtx := ci.FormatContext(task.Files, task.Description, 10, 4000)
 		if ciCtx != "" {
 			messages = append(messages, m31types.Message{
@@ -553,7 +553,7 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 	}
 
 	// Add codebase intelligence context for the task files
-	if ci := e.getCodeIntel(); ci != nil {
+	if ci := e.getCodeIntel(ctx); ci != nil {
 		ciCtx := ci.FormatContext(task.Files, task.Description, 5, 2000)
 		if ciCtx != "" {
 			healCtx += "\n" + ciCtx + "\n"
