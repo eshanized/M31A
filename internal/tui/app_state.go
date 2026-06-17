@@ -326,6 +326,8 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 			m.config.Provider.OpenRouter.APIKey = entry.APIKey
 		case "zen":
 			m.config.Provider.Zen.APIKey = entry.APIKey
+		case "nvidia":
+			m.config.Provider.Nvidia.APIKey = entry.APIKey
 		}
 	}
 
