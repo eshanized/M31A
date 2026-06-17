@@ -334,7 +334,7 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 					hasContent = true
 				}
 			case "thinking":
-				tb := NewThinkingBlock(seg, t, false, 0)
+				tb := NewThinkingBlock(seg, t, true, 0)
 				contentSegments = append(contentSegments, tb.Render(contentWidth))
 				hasContent = true
 			case "tool_use":
