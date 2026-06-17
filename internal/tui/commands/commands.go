@@ -16,6 +16,7 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/history"
+	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
@@ -71,6 +72,7 @@ type CommandContext struct {
 	SetAgentMode    func(bool)
 	CancelAgent     func()
 	Version         string
+	Keychain        keychain.Keychain
 }
 
 // CommandRegistry maps slash command names to handlers and descriptions.
@@ -238,7 +240,7 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("help", handleHelp, "List available commands")
 	_ = r.Register("clear", handleClear, "Clear conversation")
 	_ = r.Register("status", handleStatus, "Show session info")
-	_ = r.Register("reset", handleReset, "Reset to first-run screen")
+	_ = r.Register("reset", handleReset, "Reset to factory state (deletes config, keys, sessions)")
 	_ = r.Register("quit", handleQuit, "Exit the application")
 	_ = r.Register("exit", handleExit, "Exit the application (alias for /quit)")
 	_ = r.Register("chat", handleChat, "Start a new chat session (clear messages)")
