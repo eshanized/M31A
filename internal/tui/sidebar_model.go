@@ -3,13 +3,16 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 const (
@@ -17,6 +20,35 @@ const (
 	sidebarMinWidth     = 20
 	sidebarMaxWidth     = 50
 )
+
+// SidebarMode controls what the sidebar displays below the header sections.
+type SidebarMode int
+
+const (
+	// SidebarModeFiles shows the git file tree (default).
+	SidebarModeFiles SidebarMode = iota
+	// SidebarModeTodo shows the task progress and TODO list.
+	SidebarModeTodo
+)
+
+// SidebarTaskProgress tracks overall task execution progress.
+type SidebarTaskProgress struct {
+	Total     int
+	Done      int
+	Failed    int
+	Running   int
+	Elapsed   time.Duration
+	StartedAt time.Time
+}
+
+// SidebarToolCall represents a tool execution in the timeline.
+type SidebarToolCall struct {
+	Name      string
+	StartTime time.Time
+	Duration  time.Duration
+	Success   bool
+	Active    bool
+}
 
 // SidebarModel manages the collapsible sidebar panel that shows git status.
 type SidebarModel struct {
@@ -48,6 +80,50 @@ type SidebarModel struct {
 
 	// Periodic refresh
 	shutdownCtx context.Context
+
+	// Todo list mode
+	mode         SidebarMode
+	todoItems    []SidebarTodoItem
+	taskProgress SidebarTaskProgress
+
+	// Token burn rate tracking
+	tokenBurnStart    time.Time
+	tokenBurnTokens   int
+	tokenBurnRate     float64 // tokens per second
+	tokenBurnCostRate float64 // cost per second
+
+	// Phase pipeline tracking
+	currentPhase    string
+	phaseHistory    []string // completed phases
+	phaseStartedAt  time.Time
+	phaseElapsed    time.Duration
+
+	// Tool call timeline
+	toolCalls      []SidebarToolCall
+	maxToolCalls   int // max visible in sidebar (default 5)
+
+	// Execution speed metrics
+	tasksPerMinute   float64
+	avgTaskDuration  time.Duration
+	estimatedTimeRem time.Duration
+
+	// Context pressure
+	contextPressure float64 // 0.0 to 1.0
+
+	// Cost accumulator
+	totalCost     float64
+	costTrend     float64 // positive = spending faster, negative = slower
+	prevCostRate  float64
+
+	// Current screen for shortcut hints
+	currentScreen string
+
+	// Smart file watcher - files changed since last LLM read
+	recentlyChanged map[string]bool
+
+	// Active sub-agents
+	subAgentCount  int
+	subAgentActive int
 }
 
 // NewSidebarModel creates a new SidebarModel.
@@ -84,6 +160,300 @@ func (s *SidebarModel) SetTokenUsage(totalTokens, contextLen int, cost float64, 
 // SetShutdownContext sets the context for the periodic refresh ticker.
 func (s *SidebarModel) SetShutdownContext(ctx context.Context) {
 	s.shutdownCtx = ctx
+}
+
+// SetMode switches the sidebar between file tree and todo list display.
+func (s *SidebarModel) SetMode(mode SidebarMode) {
+	s.mode = mode
+}
+
+// GetMode returns the current sidebar display mode.
+func (s *SidebarModel) GetMode() SidebarMode {
+	return s.mode
+}
+
+// SetTodoItems sets the LLM-generated TODO items for display.
+func (s *SidebarModel) SetTodoItems(items []SidebarTodoItem) {
+	s.todoItems = items
+}
+
+// AddTodoItem adds or updates a single TODO item.
+func (s *SidebarModel) AddTodoItem(item SidebarTodoItem) {
+	for i, existing := range s.todoItems {
+		if existing.Source == item.Source && existing.TaskID == item.TaskID && item.Source == "task" {
+			s.todoItems[i] = item
+			s.recalcTaskProgress()
+			return
+		}
+		if existing.Source == item.Source && existing.Content == item.Content && item.Source == "llm" {
+			s.todoItems[i] = item
+			return
+		}
+	}
+	s.todoItems = append(s.todoItems, item)
+	s.recalcTaskProgress()
+}
+
+// recalcTaskProgress recomputes taskProgress counters from the current todoItems.
+func (s *SidebarModel) recalcTaskProgress() {
+	s.taskProgress.Total = 0
+	s.taskProgress.Done = 0
+	s.taskProgress.Failed = 0
+	s.taskProgress.Running = 0
+	for _, item := range s.todoItems {
+		if item.Source != "task" {
+			continue
+		}
+		s.taskProgress.Total++
+		switch item.Status {
+		case "completed":
+			s.taskProgress.Done++
+		case "failed":
+			s.taskProgress.Failed++
+		case "in_progress":
+			s.taskProgress.Running++
+		}
+	}
+	if !s.taskProgress.StartedAt.IsZero() {
+		s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
+	}
+}
+
+// UpdateTaskProgress updates the progress from a task status change.
+func (s *SidebarModel) UpdateTaskProgress(task types.Task) {
+	s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
+
+	// Recount from todo items
+	s.taskProgress.Total = 0
+	s.taskProgress.Done = 0
+	s.taskProgress.Failed = 0
+	s.taskProgress.Running = 0
+
+	for _, item := range s.todoItems {
+		if item.Source != "task" {
+			continue
+		}
+		s.taskProgress.Total++
+		switch item.Status {
+		case "completed":
+			s.taskProgress.Done++
+		case "failed":
+			s.taskProgress.Failed++
+		case "in_progress":
+			s.taskProgress.Running++
+		}
+	}
+
+	// If no todo items yet, use direct counts
+	if s.taskProgress.Total == 0 {
+		s.taskProgress.Total = task.ID // fallback
+	}
+}
+
+// InitTaskProgress initializes the progress tracker when execution starts.
+func (s *SidebarModel) InitTaskProgress(total int) {
+	s.taskProgress = SidebarTaskProgress{
+		Total:     total,
+		StartedAt: time.Now(),
+	}
+}
+
+// RevertToFiles switches the sidebar back to file tree mode and clears todo data.
+func (s *SidebarModel) RevertToFiles() {
+	s.mode = SidebarModeFiles
+	s.todoItems = nil
+	s.taskProgress = SidebarTaskProgress{}
+}
+
+// IsAllTasksDone returns true if all tracked tasks are completed or failed.
+func (s *SidebarModel) IsAllTasksDone() bool {
+	if s.taskProgress.Total == 0 {
+		return false
+	}
+	return s.taskProgress.Done+s.taskProgress.Failed >= s.taskProgress.Total
+}
+
+// ─── Token Burn Rate ──────────────────────────────────────────────────────────
+
+// StartTokenBurn begins tracking token burn rate for streaming.
+func (s *SidebarModel) StartTokenBurn() {
+	s.tokenBurnStart = time.Now()
+	s.tokenBurnTokens = s.totalTokens
+}
+
+// UpdateTokenBurn updates the burn rate based on current token count.
+func (s *SidebarModel) UpdateTokenBurn() {
+	if s.tokenBurnStart.IsZero() || s.totalTokens <= s.tokenBurnTokens {
+		return
+	}
+	elapsed := time.Since(s.tokenBurnStart).Seconds()
+	if elapsed <= 0 {
+		return
+	}
+	tokensDiff := s.totalTokens - s.tokenBurnTokens
+	s.tokenBurnRate = float64(tokensDiff) / elapsed
+	if elapsed > 0 && s.cost > 0 {
+		s.tokenBurnCostRate = s.cost / elapsed
+	}
+}
+
+// GetTokenBurnRate returns tokens per second.
+func (s *SidebarModel) GetTokenBurnRate() float64 {
+	return s.tokenBurnRate
+}
+
+// ─── Phase Pipeline ───────────────────────────────────────────────────────────
+
+// SetCurrentPhase updates the current workflow phase.
+func (s *SidebarModel) SetCurrentPhase(phase string) {
+	if s.currentPhase != "" && s.currentPhase != phase {
+		s.phaseHistory = append(s.phaseHistory, s.currentPhase)
+	}
+	s.currentPhase = phase
+	s.phaseStartedAt = time.Now()
+}
+
+// GetPhasePipeline returns the list of all phases for display.
+// Keys are lowercase to match workflow.WorkflowPhase constants.
+func (s *SidebarModel) GetPhasePipeline() []string {
+	return []string{"initialize", "discuss", "plan", "execute", "verify", "ship"}
+}
+
+// IsPhaseCompleted checks if a phase is in the history.
+func (s *SidebarModel) IsPhaseCompleted(phase string) bool {
+	for _, p := range s.phaseHistory {
+		if p == phase {
+			return true
+		}
+	}
+	return false
+}
+
+// MarkPhaseCompleted explicitly marks the given phase as completed.
+// Use this when a phase finishes without a subsequent phase transition
+// (e.g. the final Ship phase, which has no successor to trigger the append
+// in SetCurrentPhase).
+func (s *SidebarModel) MarkPhaseCompleted(phase string) {
+	if !s.IsPhaseCompleted(phase) {
+		s.phaseHistory = append(s.phaseHistory, phase)
+	}
+}
+
+// ─── Tool Call Timeline ───────────────────────────────────────────────────────
+
+// SetMaxToolCalls sets the maximum number of tool calls to show in timeline.
+func (s *SidebarModel) SetMaxToolCalls(max int) {
+	s.maxToolCalls = max
+	if s.maxToolCalls == 0 {
+		s.maxToolCalls = 5
+	}
+}
+
+// AddToolCallStart records a new tool call starting.
+func (s *SidebarModel) AddToolCallStart(name string) {
+	tc := SidebarToolCall{
+		Name:      name,
+		StartTime: time.Now(),
+		Active:    true,
+	}
+	s.toolCalls = append(s.toolCalls, tc)
+	// Keep only the last N calls
+	if len(s.toolCalls) > s.maxToolCalls {
+		s.toolCalls = s.toolCalls[len(s.toolCalls)-s.maxToolCalls:]
+	}
+}
+
+// CompleteToolCall marks the most recent matching tool call as complete.
+func (s *SidebarModel) CompleteToolCall(name string, success bool, duration time.Duration) {
+	for i := len(s.toolCalls) - 1; i >= 0; i-- {
+		if s.toolCalls[i].Name == name && s.toolCalls[i].Active {
+			s.toolCalls[i].Active = false
+			s.toolCalls[i].Success = success
+			s.toolCalls[i].Duration = duration
+			return
+		}
+	}
+}
+
+// ─── Execution Speed Metrics ──────────────────────────────────────────────────
+
+// UpdateExecutionMetrics recalculates speed metrics from task progress.
+func (s *SidebarModel) UpdateExecutionMetrics() {
+	if s.taskProgress.StartedAt.IsZero() || s.taskProgress.Total == 0 {
+		return
+	}
+	elapsed := time.Since(s.taskProgress.StartedAt)
+	s.taskProgress.Elapsed = elapsed
+	completed := s.taskProgress.Done + s.taskProgress.Failed
+
+	if completed > 0 && elapsed > 0 {
+		s.tasksPerMinute = float64(completed) / elapsed.Minutes()
+		s.avgTaskDuration = time.Duration(int64(elapsed) / int64(completed))
+	}
+
+	remaining := s.taskProgress.Total - completed
+	if s.tasksPerMinute > 0 && remaining > 0 {
+		s.estimatedTimeRem = time.Duration(float64(time.Minute) * float64(remaining) / s.tasksPerMinute)
+	}
+}
+
+// ─── Context Pressure ─────────────────────────────────────────────────────────
+
+// UpdateContextPressure updates the context window pressure gauge.
+func (s *SidebarModel) UpdateContextPressure() {
+	if s.contextLen > 0 {
+		s.contextPressure = float64(s.totalTokens) / float64(s.contextLen)
+		if s.contextPressure > 1.0 {
+			s.contextPressure = 1.0
+		}
+	}
+}
+
+// ─── Cost Accumulator ─────────────────────────────────────────────────────────
+
+// UpdateCostAccumulator updates the running cost total and trend.
+func (s *SidebarModel) UpdateCostAccumulator() {
+	s.totalCost = s.cost
+	// Calculate trend based on burn rate vs previous
+	if s.prevCostRate > 0 && s.tokenBurnCostRate > 0 {
+		s.costTrend = s.tokenBurnCostRate - s.prevCostRate
+	}
+	s.prevCostRate = s.tokenBurnCostRate
+}
+
+// ─── Screen & Shortcuts ──────────────────────────────────────────────────────
+
+// SetCurrentScreen updates the current screen for shortcut hints.
+func (s *SidebarModel) SetCurrentScreen(screen string) {
+	s.currentScreen = screen
+}
+
+// ─── Smart File Watcher ──────────────────────────────────────────────────────
+
+// MarkFileChanged marks a file as recently changed.
+func (s *SidebarModel) MarkFileChanged(path string) {
+	if s.recentlyChanged == nil {
+		s.recentlyChanged = make(map[string]bool)
+	}
+	s.recentlyChanged[path] = true
+}
+
+// ClearRecentlyChanged clears the recently changed files set.
+func (s *SidebarModel) ClearRecentlyChanged() {
+	s.recentlyChanged = make(map[string]bool)
+}
+
+// IsFileRecentlyChanged checks if a file was recently changed.
+func (s *SidebarModel) IsFileRecentlyChanged(path string) bool {
+	return s.recentlyChanged[path]
+}
+
+// ─── Sub-Agent Status ────────────────────────────────────────────────────────
+
+// UpdateSubAgentStatus updates the sub-agent count.
+func (s *SidebarModel) UpdateSubAgentStatus(total, active int) {
+	s.subAgentCount = total
+	s.subAgentActive = active
 }
 
 // Toggle shows/hides the sidebar.
@@ -383,7 +753,7 @@ func (s *SidebarModel) View() string {
 			Render("USAGE")
 		lines = append(lines, usageLabel)
 
-		// Context meter
+		// Context pressure gauge (enhanced with animation hint)
 		if s.contextLen > 0 {
 			pct := float64(s.totalTokens) / float64(s.contextLen)
 			if pct > 1 {
@@ -392,13 +762,17 @@ func (s *SidebarModel) View() string {
 			const barSegments = 8
 			filled := int(pct * barSegments)
 			var ctxColor lipgloss.Color
+			var pressureIcon string
 			switch {
 			case pct >= 0.9:
 				ctxColor = t.Error
+				pressureIcon = " !!"
 			case pct >= 0.7:
 				ctxColor = t.Warning
+				pressureIcon = " !"
 			default:
 				ctxColor = t.TextMuted
+				pressureIcon = ""
 			}
 			bar := "["
 			bar += strings.Repeat("█", filled)
@@ -408,25 +782,38 @@ func (s *SidebarModel) View() string {
 			meterLine := lipgloss.NewStyle().
 				Foreground(ctxColor).
 				PaddingLeft(1).
-				Render(bar + " " + pctStr)
+				Render(bar + " " + pctStr + pressureIcon)
 			lines = append(lines, meterLine)
 		}
 
-		// Token count
+		// Token count + burn rate
 		tokStr := formatTokenCountSidebar(s.totalTokens)
+		if s.tokenBurnRate > 0 {
+			tokStr += fmt.Sprintf(" (%.0f/s)", s.tokenBurnRate)
+		}
 		tokLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
 			PaddingLeft(1).
 			Render(tokStr)
 		lines = append(lines, tokLine)
 
-		// Cost (if enabled)
+		// Cost accumulator with trend
 		if s.showCost && s.cost > 0 {
 			var costStr string
 			if s.cost < 0.01 {
 				costStr = "<$0.01"
 			} else {
 				costStr = fmt.Sprintf("$%.2f", s.cost)
+			}
+			// Show cost trend arrow
+			if s.costTrend > 0.001 {
+				costStr += lipgloss.NewStyle().Foreground(t.Error).Render(" ↑")
+			} else if s.costTrend < -0.001 {
+				costStr += lipgloss.NewStyle().Foreground(t.Success).Render(" ↓")
+			}
+			// Show cost rate if streaming
+			if s.tokenBurnCostRate > 0 {
+				costStr += fmt.Sprintf(" ($%.3f/s)", s.tokenBurnCostRate)
 			}
 			costLine := lipgloss.NewStyle().
 				Foreground(t.Warning).
@@ -449,30 +836,251 @@ func (s *SidebarModel) View() string {
 		}
 	}
 
-	// ── File tree ──────────────────────────────────────────────────────────────
-	lines = append(lines, "")
-	filesLabel := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Bold(true).
-		PaddingLeft(1).
-		Render("FILES")
-	if s.focused {
-		filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓")
-	}
-	lines = append(lines, filesLabel)
+	// ── Phase Pipeline (when in todo mode) ───────────────────────────────────
+	if s.mode == SidebarModeTodo && s.currentPhase != "" {
+		lines = append(lines, "")
+		phaseLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("PHASE")
+		lines = append(lines, phaseLabel)
 
-	if len(s.files) == 0 {
-		noFiles := lipgloss.NewStyle().
-			Foreground(t.Success).
-			PaddingLeft(2).
-			Width(contentW).
-			Render("✓ clean")
-		lines = append(lines, noFiles)
+		phases := s.GetPhasePipeline()
+		var phaseParts []string
+		for _, phase := range phases {
+			label := strings.ToUpper(phase[:1])
+			var styledPhase string
+			switch {
+			case s.IsPhaseCompleted(phase):
+				styledPhase = lipgloss.NewStyle().Foreground(t.Success).Render("✓" + label)
+			case phase == s.currentPhase:
+				styledPhase = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("●" + label)
+			default:
+				styledPhase = lipgloss.NewStyle().Foreground(t.TextMuted).Render("○" + label)
+			}
+			phaseParts = append(phaseParts, styledPhase)
+		}
+		phaseLine := lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(phaseParts, " "))
+		lines = append(lines, phaseLine)
+
+		// Phase elapsed time
+		if !s.phaseStartedAt.IsZero() {
+			phaseElapsed := time.Since(s.phaseStartedAt)
+			phaseTimeLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Render(fmt.Sprintf("%ds in %s", int(phaseElapsed.Seconds()), s.currentPhase))
+			lines = append(lines, phaseTimeLine)
+		}
+	}
+
+	// ── Tool Call Timeline (when in todo mode) ────────────────────────────────
+	if s.mode == SidebarModeTodo && len(s.toolCalls) > 0 {
+		lines = append(lines, "")
+		toolLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("TOOLS")
+		lines = append(lines, toolLabel)
+
+		for _, tc := range s.toolCalls {
+			var icon string
+			var durationStr string
+			if tc.Active {
+				icon = lipgloss.NewStyle().Foreground(t.Brand).Render("●")
+				durationStr = "..."
+			} else if tc.Success {
+				icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
+			} else {
+				icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
+				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
+			}
+			nameDisplay := tc.Name
+			if len(nameDisplay) > 10 {
+				nameDisplay = nameDisplay[:7] + "..."
+			}
+			toolLine := lipgloss.NewStyle().
+				Foreground(t.Text).
+				PaddingLeft(1).
+				Render(fmt.Sprintf("%s %-10s %s", icon, nameDisplay, durationStr))
+			lines = append(lines, toolLine)
+		}
+	}
+
+	// ── Execution Speed Metrics (when in todo mode) ──────────────────────────
+	if s.mode == SidebarModeTodo && s.tasksPerMinute > 0 {
+		lines = append(lines, "")
+		speedLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("SPEED")
+		lines = append(lines, speedLabel)
+
+		speedLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Render(fmt.Sprintf("%.1f tasks/min", s.tasksPerMinute))
+		lines = append(lines, speedLine)
+
+		if s.avgTaskDuration > 0 {
+			avgLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Render(fmt.Sprintf("avg %ds/task", int(s.avgTaskDuration.Seconds())))
+			lines = append(lines, avgLine)
+		}
+
+		if s.estimatedTimeRem > 0 {
+			etaLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Render(fmt.Sprintf("ETA %ds", int(s.estimatedTimeRem.Seconds())))
+			lines = append(lines, etaLine)
+		}
+	}
+
+	// ── Sub-Agent Status (when active) ───────────────────────────────────────
+	if s.subAgentCount > 0 {
+		lines = append(lines, "")
+		agentLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("AGENTS")
+		lines = append(lines, agentLabel)
+
+		agentLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Render(fmt.Sprintf("%d/%d active", s.subAgentActive, s.subAgentCount))
+		lines = append(lines, agentLine)
+	}
+
+	// ── File tree or Todo list ────────────────────────────────────────────────
+	lines = append(lines, "")
+	if s.mode == SidebarModeTodo {
+		// Progress section
+		progressLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("PROGRESS")
+		lines = append(lines, progressLabel)
+
+		// Progress bar
+		if s.taskProgress.Total > 0 {
+			pct := float64(s.taskProgress.Done+s.taskProgress.Failed) / float64(s.taskProgress.Total)
+			if pct > 1 {
+				pct = 1
+			}
+			barW := contentW - 4
+			if barW < 8 {
+				barW = 8
+			}
+			filled := int(math.Round(pct * float64(barW)))
+			empty := barW - filled
+
+			var barColor lipgloss.Color
+			switch {
+			case pct >= 1.0 && s.taskProgress.Failed == 0:
+				barColor = t.Success
+			case s.taskProgress.Failed > 0:
+				barColor = t.Error
+			default:
+				barColor = t.Brand
+			}
+
+			bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled)) +
+				lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("░", empty))
+			pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
+			summary := fmt.Sprintf("%d/%d", s.taskProgress.Done+s.taskProgress.Failed, s.taskProgress.Total)
+			if s.taskProgress.Failed > 0 {
+				summary += fmt.Sprintf(" (%d failed)", s.taskProgress.Failed)
+			}
+			barLine := lipgloss.NewStyle().PaddingLeft(1).Render(bar + " " + pctStr)
+			summaryLine := lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary)
+			lines = append(lines, barLine, summaryLine)
+		} else {
+			noTasks := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(2).
+				Render("waiting...")
+			lines = append(lines, noTasks)
+		}
+
+		// Elapsed time
+		if !s.taskProgress.StartedAt.IsZero() {
+			elapsed := time.Since(s.taskProgress.StartedAt)
+			elapsedLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Render(fmt.Sprintf("%ds elapsed", int(elapsed.Seconds())))
+			lines = append(lines, elapsedLine)
+		}
+
+		// Todo items
+		lines = append(lines, "")
+		todoLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("TODO")
+		lines = append(lines, todoLabel)
+
+		if len(s.todoItems) == 0 {
+			emptyTodo := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(2).
+				Render("no items yet")
+			lines = append(lines, emptyTodo)
+		} else {
+			for _, item := range s.todoItems {
+				icon := todoItemIcon(item.Status, t)
+				desc := item.Content
+				// Truncate if too long
+				maxDescW := contentW - 6
+				if maxDescW < 10 {
+					maxDescW = 10
+				}
+				if lipgloss.Width(desc) > maxDescW {
+					desc = desc[:maxDescW-3] + "..."
+				}
+				itemLine := lipgloss.NewStyle().
+					Foreground(t.Text).
+					PaddingLeft(1).
+					Render(icon + " " + desc)
+				lines = append(lines, itemLine)
+			}
+		}
 	} else {
-		if s.tree != nil {
-			s.tree.Width = contentW
-			treeView := s.tree.View()
-			lines = append(lines, strings.Split(treeView, "\n")...)
+		// File tree (existing behavior)
+		filesLabel := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Bold(true).
+			PaddingLeft(1).
+			Render("FILES")
+		if s.focused {
+			filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓")
+		}
+		lines = append(lines, filesLabel)
+
+		if len(s.files) == 0 {
+			noFiles := lipgloss.NewStyle().
+				Foreground(t.Success).
+				PaddingLeft(2).
+				Width(contentW).
+				Render("✓ clean")
+			lines = append(lines, noFiles)
+		} else {
+			if s.tree != nil {
+				s.tree.Width = contentW
+				treeView := s.tree.View()
+				lines = append(lines, strings.Split(treeView, "\n")...)
+			}
 		}
 	}
 
@@ -489,6 +1097,44 @@ func (s *SidebarModel) View() string {
 			Render(sessDisplay)
 		lines = append(lines, sessLine)
 	}
+
+	// ── Keyboard Shortcut Hints ──────────────────────────────────────────────
+	lines = append(lines, "")
+	var hints []string
+	switch s.currentScreen {
+	case "execute":
+		hints = []string{"p:pause", "j/k:scroll"}
+	case "plan":
+		hints = []string{"a:approve", "r:refine"}
+	case "repl":
+		hints = []string{"ctrl+b:sidebar", "ctrl+g:focus"}
+	case "verify":
+		hints = []string{"y:yes", "n:no"}
+	case "ship":
+		hints = []string{"ctrl+b:sidebar"}
+	case "settings":
+		hints = []string{"tab:tabs", "e:edit"}
+	case "config":
+		hints = []string{"tab:tabs", "/:search"}
+	case "diff":
+		hints = []string{"j/k:scroll", "q:close"}
+	case "rollback":
+		hints = []string{"enter:revert", "j/k:nav"}
+	case "chathistory":
+		hints = []string{"j/k:scroll", "enter:view"}
+	case "dashboard":
+		hints = []string{"enter:select"}
+	default:
+		hints = []string{"ctrl+b:sidebar"}
+	}
+	if s.focused {
+		hints = append(hints, "esc:unfocus")
+	}
+	hintLine := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		PaddingLeft(1).
+		Render(strings.Join(hints, " "))
+	lines = append(lines, hintLine)
 
 	// Pad each line to exactly contentW characters for consistent border alignment.
 	var paddedLines []string
@@ -608,6 +1254,22 @@ func (s *SidebarModel) countHeaderLines() int {
 	n++ // blank line before FILES
 	n++ // FILES label
 	return n
+}
+
+// todoItemIcon returns the status icon for a todo item.
+func todoItemIcon(status string, t theme.Theme) string {
+	switch status {
+	case "completed":
+		return lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+	case "in_progress":
+		return lipgloss.NewStyle().Foreground(t.Brand).Render("●")
+	case "failed":
+		return lipgloss.NewStyle().Foreground(t.Error).Render("✗")
+	case "cancelled":
+		return lipgloss.NewStyle().Foreground(t.TextMuted).Render("—")
+	default:
+		return lipgloss.NewStyle().Foreground(t.TextMuted).Render("○")
+	}
 }
 
 // buildSidebarTree converts a flat list of git-tracked files into a tree structure.
