@@ -464,6 +464,26 @@ func (l *Ledger) Reload() error {
 	return l.parseFile()
 }
 
+// Path returns the ledger file path.
+func (l *Ledger) Path() string {
+	return l.path
+}
+
+// Clear deletes the ledger file from disk and clears in-memory entries.
+func (l *Ledger) Clear() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = l.entries[:0]
+	l.statsCache = LedgerStats{}
+	l.statsCacheMtime = time.Time{}
+	if l.path != "" {
+		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove ledger file: %w", err)
+		}
+	}
+	return nil
+}
+
 // parseEntry parses a single markdown table row into a LedgerEntry.
 // Expected format: | SessionID | Timestamp | Model | ProjectType | TaskCount | FailedTasks | Cost | Duration |
 func parseEntry(line string) (LedgerEntry, error) {
