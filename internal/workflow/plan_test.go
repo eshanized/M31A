@@ -108,7 +108,7 @@ func TestEngine_RunPlan_FailsOnValidationErrors(t *testing.T) {
 func TestEngine_BuildPlanContext(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
-	messages := engine.buildPlanContext("Build a tool", nil, nil, "")
+	messages := engine.buildPlanContext(context.Background(), "Build a tool", nil, nil, "")
 	if len(messages) == 0 {
 		t.Fatal("Expected non-empty messages")
 	}
@@ -141,7 +141,7 @@ func TestEngine_BuildPlanContext_IncludesProjectAnswers(t *testing.T) {
 	}
 	engine.sessionMgr.SaveProject(engine.sessionID, project)
 
-	messages := engine.buildPlanContext("Test", nil, nil, "")
+	messages := engine.buildPlanContext(context.Background(), "Test", nil, nil, "")
 
 	found := false
 	for _, m := range messages {
@@ -161,7 +161,7 @@ func TestEngine_BuildPlanContext_IncludesPreviousErrors(t *testing.T) {
 	existingTasks := []m31types.Task{{ID: 1, Action: "Create", Description: "test"}}
 	valErrs := []string{"task 1: missing description"}
 	raw := `[{"id":1,"action":"Create"}]`
-	messages := engine.buildPlanContext("Test", existingTasks, valErrs, raw)
+	messages := engine.buildPlanContext(context.Background(), "Test", existingTasks, valErrs, raw)
 
 	found := false
 	for _, m := range messages {
@@ -272,7 +272,7 @@ func TestEngine_BuildPlanContext_IncludesMemory(t *testing.T) {
 	memPath := filepath.Join(sessionDir, "MEMORY.md")
 	os.WriteFile(memPath, []byte("User prefers Go for backend"), 0644)
 
-	messages := engine.buildPlanContext("Test", nil, nil, "")
+	messages := engine.buildPlanContext(context.Background(), "Test", nil, nil, "")
 
 	found := false
 	for _, m := range messages {
