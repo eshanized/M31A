@@ -41,7 +41,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			})
 		}
 
-		messages := e.buildPlanContext(goal, tasks, valErrs, rawResponse)
+		messages := e.buildPlanContext(ctx, goal, tasks, valErrs, rawResponse)
 
 		content, err := e.streamLLM(ctx, messages, false)
 		if err != nil {
@@ -166,7 +166,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 
 // buildPlanContext creates messages for the plan phase.
 // On refinement, the previous plan and user feedback are injected.
-func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
+func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
 	var messages []m31types.Message
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)})
 
@@ -181,32 +181,32 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 		framework = project.Framework
 	}
 
-	ctx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s\n\n", goal, projectType, framework)
+	planCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s\n\n", goal, projectType, framework)
 
 	sessionDir := filepath.Dir(e.planningDir)
 	memPath := filepath.Join(sessionDir, "MEMORY.md")
 	if mem, err := os.ReadFile(memPath); err == nil {
-		ctx += "## Cross-Session Memory\n" + string(mem) + "\n\n"
+		planCtx += "## Cross-Session Memory\n" + string(mem) + "\n\n"
 	}
 
 	fileSchema := listCwdFiles(e.workDir)
 	if fileSchema != "" {
-		ctx += "Existing files:\n" + fileSchema + "\n\n"
+		planCtx += "Existing files:\n" + fileSchema + "\n\n"
 	}
 
 	// Codebase intelligence — structural overview for planning
-	if ci := e.getCodeIntel(); ci != nil {
+	if ci := e.getCodeIntel(ctx); ci != nil {
 		if summary := ci.ProjectSummary(4000); summary != "" {
-			ctx += summary + "\n"
+			planCtx += summary + "\n"
 		}
 	}
 
 	if project != nil && len(project.Answers) > 0 {
-		ctx += "User answers from Discuss phase:\n"
+		planCtx += "User answers from Discuss phase:\n"
 		for q, a := range project.Answers {
-			ctx += fmt.Sprintf("- Q: %s → A: %s\n", q, a)
+			planCtx += fmt.Sprintf("- Q: %s → A: %s\n", q, a)
 		}
-		ctx += "\n"
+		planCtx += "\n"
 	}
 
 	if e.refineFeedback != "" && e.planMarkdown != "" {
@@ -214,27 +214,27 @@ func (e *Engine) buildPlanContext(goal string, existingTasks []m31types.Task, va
 		if len(prevPlan) > 4000 {
 			prevPlan = "... (summary truncated)\n" + prevPlan[len(prevPlan)-4000:]
 		}
-		ctx += "## Previous Plan (v" + fmt.Sprintf("%d", e.planVersion) + ")\n" + prevPlan + "\n\n"
-		ctx += "## User Refinement Feedback\n" + e.refineFeedback + "\n\n"
-		ctx += "Please revise the plan above based on the user's feedback. Return the complete revised plan in the same format.\n\n"
+		planCtx += "## Previous Plan (v" + fmt.Sprintf("%d", e.planVersion) + ")\n" + prevPlan + "\n\n"
+		planCtx += "## User Refinement Feedback\n" + e.refineFeedback + "\n\n"
+		planCtx += "Please revise the plan above based on the user's feedback. Return the complete revised plan in the same format.\n\n"
 	}
 
 	if len(existingTasks) > 0 || len(validationErrors) > 0 {
-		ctx += "## Previous Attempt Failed\n"
+		planCtx += "## Previous Attempt Failed\n"
 		if len(validationErrors) > 0 {
-			ctx += "Errors:\n"
+			planCtx += "Errors:\n"
 			for _, e := range validationErrors {
-				ctx += "- " + e + "\n"
+				planCtx += "- " + e + "\n"
 			}
-			ctx += "\n"
+			planCtx += "\n"
 		}
 		if rawResponse != "" {
-			ctx += "Previous LLM response (truncated):\n" + rawResponse[:min(len(rawResponse), 2000)] + "\n\n"
+			planCtx += "Previous LLM response (truncated):\n" + rawResponse[:min(len(rawResponse), 2000)] + "\n\n"
 		}
-		ctx += "Please fix the issues above and return a corrected plan.\n\n"
+		planCtx += "Please fix the issues above and return a corrected plan.\n\n"
 	}
 
-	messages = append(messages, m31types.Message{Role: "user", Content: ctx})
+	messages = append(messages, m31types.Message{Role: "user", Content: planCtx})
 
 	return messages
 }
