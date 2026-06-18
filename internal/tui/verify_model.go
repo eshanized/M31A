@@ -171,10 +171,46 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 // View renders the verify results screen content.
 // Header, footer, and chrome are handled by the unified PageLayout.
 func (vm *VerifyModel) View() string {
+	t := vm.theme
+
+	// Summary header
+	passed, failed, pending := 0, 0, 0
+	for _, task := range vm.tasks {
+		if r, ok := vm.results[task.ID]; ok {
+			if r.FilesExist && r.SyntaxOK && r.TestsOK {
+				passed++
+			} else {
+				failed++
+			}
+		} else {
+			pending++
+		}
+	}
+	total := len(vm.tasks)
+
+	var summaryLine string
+	if failed > 0 {
+		summaryLine = lipgloss.NewStyle().Foreground(t.Error).Bold(true).
+			Render(fmt.Sprintf("✗ %d/%d failed", failed, total))
+	} else if passed == total && total > 0 {
+		summaryLine = lipgloss.NewStyle().Foreground(t.Success).Bold(true).
+			Render(fmt.Sprintf("✓ All %d tasks passed", total))
+	} else {
+		summaryLine = lipgloss.NewStyle().Foreground(t.TextSecondary).
+			Render(fmt.Sprintf("%d/%d verified", passed, total))
+	}
+	if pending > 0 {
+		summaryLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("(%d pending)", pending))
+	}
+
+	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).
+		Render(strings.Repeat("─", vm.width))
+
 	result := vm.viewport.View()
-	hints := lipgloss.NewStyle().Foreground(vm.theme.TextMuted).
+	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render("j/k: scroll  h: heal  Enter/s: ship  Esc: back")
-	return lipgloss.JoinVertical(lipgloss.Left, result, hints)
+	return lipgloss.JoinVertical(lipgloss.Left, summaryLine, sep, result, hints)
 }
 
 func (vm *VerifyModel) renderResults() string {
