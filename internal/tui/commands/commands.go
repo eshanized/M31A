@@ -313,6 +313,9 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("agent", handleAgent, "Spawn a parallel subagent (or list active)")
 	_ = r.Register("agent-cancel", handleAgentCancel, "Cancel a running subagent")
 
+	// Analysis
+	_ = r.Register("complexity", handleComplexity, "Show codebase complexity report")
+
 	return r
 }
 

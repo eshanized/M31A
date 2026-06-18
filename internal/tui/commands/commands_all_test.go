@@ -68,7 +68,7 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
 		"new", "workflow", "plan", "refine", "execute", "verify", "ship", "phase", "pause", "resume-task", "agent-mode",
 		"metrics", "dashboard", "themes", "notifications", "files", "ghost",
-		"agent", "agent-cancel",
+		"agent", "agent-cancel", "complexity",
 	}
 	registered := r.List()
 	if len(registered) != len(expected) {
