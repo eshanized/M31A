@@ -43,11 +43,12 @@ type SidebarTaskProgress struct {
 
 // SidebarToolCall represents a tool execution in the timeline.
 type SidebarToolCall struct {
-	Name      string
-	StartTime time.Time
-	Duration  time.Duration
-	Success   bool
-	Active    bool
+	Name        string
+	Description string
+	StartTime   time.Time
+	Duration    time.Duration
+	Success     bool
+	Active      bool
 }
 
 // SidebarModel manages the collapsible sidebar panel that shows git status.
@@ -408,11 +409,15 @@ func (s *SidebarModel) SetMaxToolCalls(max int) {
 }
 
 // AddToolCallStart records a new tool call starting.
-func (s *SidebarModel) AddToolCallStart(name string) {
+func (s *SidebarModel) AddToolCallStart(name, description string) {
+	if description == "" || strings.HasPrefix(description, "Executing ") {
+		description = toolCallAction(name)
+	}
 	tc := SidebarToolCall{
-		Name:      name,
-		StartTime: time.Now(),
-		Active:    true,
+		Name:        name,
+		Description: description,
+		StartTime:   time.Now(),
+		Active:      true,
 	}
 	s.toolCalls = append(s.toolCalls, tc)
 	// Keep only the last N calls
@@ -971,14 +976,21 @@ func (s *SidebarModel) View() string {
 				icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
 				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
 			}
-			nameDisplay := tc.Name
-			if len(nameDisplay) > 10 {
-				nameDisplay = nameDisplay[:7] + "..."
+			descDisplay := tc.Description
+			if descDisplay == "" {
+				descDisplay = tc.Name
+			}
+			maxDescLen := contentW - 12
+			if maxDescLen < 8 {
+				maxDescLen = 8
+			}
+			if len(descDisplay) > maxDescLen {
+				descDisplay = descDisplay[:maxDescLen-3] + "..."
 			}
 			toolLine := lipgloss.NewStyle().
 				Foreground(t.Text).
 				PaddingLeft(1).
-				Render(fmt.Sprintf("%s %-10s %s", icon, nameDisplay, durationStr))
+				Render(fmt.Sprintf("%s %-16s %s", icon, descDisplay, durationStr))
 			lines = append(lines, toolLine)
 		}
 	}
@@ -1016,20 +1028,18 @@ func (s *SidebarModel) View() string {
 		}
 	}
 
-	// ── Sub-Agent Status (when active) ───────────────────────────────────────
+	// ── Sub-Agent Badge (compact, when active) ───────────────────────────────
 	if s.subAgentCount > 0 {
-		lines = append(lines, "")
-		agentLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("AGENTS")
-		lines = append(lines, agentLabel)
-
+		var agentText string
+		if s.subAgentActive > 0 {
+			agentText = fmt.Sprintf("⬡ %d/%d agents", s.subAgentActive, s.subAgentCount)
+		} else {
+			agentText = fmt.Sprintf("⬡ %d agents", s.subAgentCount)
+		}
 		agentLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
 			PaddingLeft(1).
-			Render(fmt.Sprintf("%d/%d active", s.subAgentActive, s.subAgentCount))
+			Render(agentText)
 		lines = append(lines, agentLine)
 	}
 
@@ -1277,6 +1287,44 @@ func formatTokenCountSidebar(n int) string {
 		return fmt.Sprintf("%.1fK tokens", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d tokens", n)
+}
+
+// toolCallAction returns a human-readable action description for a tool name.
+func toolCallAction(name string) string {
+	switch name {
+	case "Bash":
+		return "Running command"
+	case "FileRead":
+		return "Reading file"
+	case "FileWrite":
+		return "Writing file"
+	case "Edit":
+		return "Editing file"
+	case "Glob":
+		return "Finding files"
+	case "Grep":
+		return "Searching code"
+	case "WebFetch":
+		return "Fetching URL"
+	case "WebSearch":
+		return "Searching web"
+	case "CodeMap":
+		return "Mapping code"
+	case "FileDelete":
+		return "Deleting file"
+	case "FileMove":
+		return "Moving file"
+	case "FileList":
+		return "Listing files"
+	case "TodoWrite":
+		return "Updating tasks"
+	case "AskUserQuestion":
+		return "Asking question"
+	case "Agent":
+		return "Spawning agent"
+	default:
+		return name
+	}
 }
 
 // HandleMouse processes mouse events for the sidebar.
