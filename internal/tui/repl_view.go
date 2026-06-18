@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -93,6 +92,7 @@ func compositeOverlays(viewportContent string, overlayLines []string, width, vpH
 
 // View renders the REPL screen (standalone mode, not used by PageLayout).
 func (m *ReplModel) View() string {
+	m.updatePlaceholder()
 	t := m.theme
 	rw := m.replWidth()
 
@@ -125,7 +125,7 @@ func (m *ReplModel) View() string {
 			Bold(true).
 			Align(lipgloss.Center).
 			Width(rw).
-			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+			Render(fmt.Sprintf(" ● %d new message(s) — ctrl+l or end to jump ", m.newMessagesWhileScrolled))
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, m.viewport.Height)
 	}
 
@@ -191,6 +191,7 @@ func (m *ReplModel) View() string {
 // float on the viewport — they are composited onto its bottom rows so they
 // do not consume extra vertical space.
 func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
+	m.updatePlaceholder()
 	t := m.theme
 	rw := contentWidth
 	if rw < 20 {
@@ -249,7 +250,7 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 			Bold(true).
 			Align(lipgloss.Center).
 			Width(rw).
-			Render(fmt.Sprintf(" ↓ %d new message(s) — ctrl+l to scroll ", m.newMessagesWhileScrolled))
+			Render(fmt.Sprintf(" ● %d new message(s) — ctrl+l or end to jump ", m.newMessagesWhileScrolled))
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, vpH)
 	}
 
@@ -388,41 +389,4 @@ func pathBase(p string) string {
 		}
 	}
 	return p
-}
-
-// renderContextMeter renders a compact visual context usage bar:
-//
-//	ctx [████░░░░] 42%
-func renderContextMeter(used, total int, t theme.Theme) string {
-	if total <= 0 {
-		return ""
-	}
-	pct := float64(used) / float64(total)
-	var ctxColor lipgloss.Color
-	switch {
-	case pct >= 0.9:
-		ctxColor = t.Error
-	case pct >= 0.7:
-		ctxColor = t.Warning
-	default:
-		ctxColor = t.TextMuted
-	}
-
-	const barSegments = 8
-	filled := int(pct * barSegments)
-	if filled > barSegments {
-		filled = barSegments
-	}
-	if filled < 0 {
-		filled = 0
-	}
-
-	bar := "["
-	bar += strings.Repeat("█", filled)
-	bar += strings.Repeat("░", barSegments-filled)
-	bar += "]"
-
-	return lipgloss.NewStyle().Foreground(ctxColor).Render(
-		fmt.Sprintf("ctx %s %d%%", bar, int(pct*100)),
-	)
 }

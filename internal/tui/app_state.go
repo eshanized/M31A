@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -335,7 +336,7 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 	for _, entry := range msg.Providers {
 		if err := RegisterProvider(m.registry, m.config, entry.ID, entry.APIKey, m.version); err != nil {
 			slog.Warn("failed to register provider from wizard", "provider", entry.ID, "error", err)
-			m.addToast(fmt.Sprintf("Failed to register provider %s", entry.ID), "warning")
+			m.addToast(fmt.Sprintf("Provider %s: %s", entry.ID, m31errors.UserMessage(err)), "warning")
 		}
 	}
 

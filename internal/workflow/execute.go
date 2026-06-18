@@ -293,7 +293,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					var params struct {
 						Path string `json:"path"`
 					}
-					if err := json.Unmarshal(call.Input, &params); err == nil {
+					if unmarshalErr := json.Unmarshal(call.Input, &params); unmarshalErr == nil {
 						affectedPath = params.Path
 					}
 				}

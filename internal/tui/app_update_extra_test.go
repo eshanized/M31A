@@ -416,15 +416,28 @@ func TestHandleAppMsgEmpty(t *testing.T) {
 func TestNavigateToScreen(t *testing.T) {
 	m := testAppState()
 	cmd := m.navigateToScreen(ScreenSettings)
-	// navigateToScreen starts a transition; screen changes after transition completes.
 	_ = cmd
 	// Verify prevScreen was set
 	if m.prevScreen != ScreenREPL {
 		t.Errorf("prevScreen=%d, want ScreenREPL", m.prevScreen)
 	}
-	// Verify screenStack has the old screen
+	// REPL is never pushed — it's the fallback when stack is empty
+	if len(m.screenStack) != 0 {
+		t.Errorf("stack=%d, want 0 (REPL is never pushed)", len(m.screenStack))
+	}
+}
+
+func TestNavigateToScreenFromNonREPL(t *testing.T) {
+	m := testAppState()
+	m.screen = ScreenSettings
+	cmd := m.navigateToScreen(ScreenHelp)
+	_ = cmd
+	// Non-REPL screen should be pushed onto the stack
 	if len(m.screenStack) != 1 {
 		t.Errorf("stack=%d, want 1", len(m.screenStack))
+	}
+	if len(m.screenStack) > 0 && m.screenStack[0] != ScreenSettings {
+		t.Errorf("stack[0]=%d, want ScreenSettings", m.screenStack[0])
 	}
 }
 

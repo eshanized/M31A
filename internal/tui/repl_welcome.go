@@ -270,6 +270,28 @@ func (m *ReplModel) renderProjectCard(cardWidth int) string {
 }
 
 // renderGettingStarted renders suggested prompts, context-aware when possible.
+func (m *ReplModel) welcomePrompts() []struct{ prompt, hint string } {
+	type suggestion = struct{ prompt, hint string }
+	prompts := []suggestion{
+		{"Fix the failing tests in this repo", "auto-fix"},
+		{"Add error handling to the API layer", "refactor"},
+		{"Explain this codebase architecture", "explore"},
+	}
+	if m.changedFiles > 0 {
+		prompts[1] = suggestion{
+			fmt.Sprintf("Review recent changes (%d files)", m.changedFiles),
+			"review",
+		}
+	}
+	if proj := pathBase(m.cwd); proj != "" {
+		prompts[2] = suggestion{
+			fmt.Sprintf("Explain the %s architecture", proj),
+			"explore",
+		}
+	}
+	return prompts
+}
+
 func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 	t := m.theme
 
@@ -277,32 +299,7 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 		Foreground(t.Brand).Bold(true).
 		Render("Getting started")
 
-	type suggestion struct {
-		prompt string
-		hint   string
-	}
-
-	prompts := []suggestion{
-		{"Fix the failing tests in this repo", "auto-fix"},
-		{"Add error handling to the API layer", "refactor"},
-		{"Explain this codebase architecture", "explore"},
-	}
-
-	// Context-aware substitution: highlight changed files if any
-	if m.changedFiles > 0 {
-		prompts[1] = suggestion{
-			fmt.Sprintf("Review recent changes (%d files)", m.changedFiles),
-			"review",
-		}
-	}
-
-	// Project-name substitution for the architecture prompt
-	if proj := pathBase(m.cwd); proj != "" {
-		prompts[2] = suggestion{
-			fmt.Sprintf("Explain the %s architecture", proj),
-			"explore",
-		}
-	}
+	prompts := m.welcomePrompts()
 
 	nums := []string{"1.", "2.", "3."}
 	var lines []string

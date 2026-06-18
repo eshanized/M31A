@@ -111,12 +111,12 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 
 // renderToastProgress renders a progress bar for auto-dismiss
 func renderToastProgress(toast Toast, t theme.Theme) string {
-	// Calculate elapsed time since creation
 	elapsed := time.Since(toast.CreatedAt)
-	// Default duration for toasts without explicit Duration field
-	duration := 5 * time.Second
+	duration := toast.Duration
+	if duration <= 0 {
+		duration = 5 * time.Second
+	}
 
-	// Calculate progress (0 to 1)
 	progress := float64(elapsed) / float64(duration)
 	if progress > 1 {
 		progress = 1

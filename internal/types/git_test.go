@@ -28,5 +28,5 @@ func TestCommitInfo_Fields(t *testing.T) {
 func TestGitClient_Interface(t *testing.T) {
 	t.Parallel()
 	// Verify interface exists at compile time
-	var _ GitClient = (GitClient)(nil)
+	var _ GitClient
 }

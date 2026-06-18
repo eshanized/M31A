@@ -4,24 +4,22 @@ import (
 	"time"
 )
 
-// ScreenTransition captures a dim-and-reveal transition between screens.
+// ScreenTransition tracks a brief timing gap between screen switches.
+// It is used only for timing — no visual overlay is rendered.
 type ScreenTransition struct {
 	Active     bool
 	StartAt    time.Time
 	Duration   time.Duration
 	FromScreen Screen
 	ToScreen   Screen
-	prevView   string // cached view of the from-screen at transition start
 }
 
-// transitionDuration is the duration of the screen dim effect.
+// transitionDuration is the duration of the screen switch delay.
 const transitionDuration = 200 * time.Millisecond
 
-// StartTransition begins a screen transition effect.
-// It captures the current view as the fading-out frame.
-func (m *AppState) StartTransition(to Screen, prevView string) {
+// StartTransition begins a screen transition.
+func (m *AppState) StartTransition(to Screen, _ string) {
 	if m.prevScreen == to {
-		// No transition needed for same screen
 		m.screen = to
 		return
 	}
@@ -31,10 +29,7 @@ func (m *AppState) StartTransition(to Screen, prevView string) {
 		Duration:   transitionDuration,
 		FromScreen: m.screen,
 		ToScreen:   to,
-		prevView:   prevView,
 	}
-	// Don't switch m.screen yet; the View() will overlay the dim effect
-	// on the current view. When the transition completes, we switch.
 }
 
 // TransitionTick advances a running transition.
@@ -49,17 +44,4 @@ func (t *ScreenTransition) TransitionTick() bool {
 		return true
 	}
 	return false
-}
-
-// Progress returns the transition progress as 0.0–1.0.
-func (t *ScreenTransition) Progress() float64 {
-	if t == nil || !t.Active || t.Duration <= 0 {
-		return 1.0
-	}
-	elapsed := time.Since(t.StartAt)
-	pct := float64(elapsed) / float64(t.Duration)
-	if pct > 1.0 {
-		return 1.0
-	}
-	return pct
 }

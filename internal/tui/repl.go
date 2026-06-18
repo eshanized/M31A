@@ -187,6 +187,16 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.textarea.SetValue("")
 
+	case "1", "2", "3":
+		if len(m.messages) == 0 && m.welcomeRevealCount >= 3 {
+			idx := int(msg.String()[0] - '1')
+			prompts := m.welcomePrompts()
+			if idx >= 0 && idx < len(prompts) {
+				m.textarea.SetValue(prompts[idx].prompt)
+				return nil
+			}
+		}
+
 	case "ctrl+p":
 		// Command palette — emit for AppState
 		return func() tea.Msg {
@@ -202,7 +212,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		m.quickActionsVisible = !m.quickActionsVisible
 		return nil
 
-	case "ctrl+l":
+	case "ctrl+l", "end":
 		// Scroll to bottom
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -260,7 +270,7 @@ func (m *ReplModel) handleStreamingKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		m.userScrolled = true
 	case "pgdown", "ctrl+d":
 		m.viewport.ViewDown()
-	case "ctrl+l":
+	case "ctrl+l", "end":
 		m.viewport.GotoBottom()
 		m.userScrolled = false
 	}

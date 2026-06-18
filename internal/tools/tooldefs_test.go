@@ -3,7 +3,6 @@ package tools
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -62,5 +61,5 @@ func TestBuildToolDefs_DefinitionType_Implicit(t *testing.T) {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
 	// Verify it's a ToolDefinition
-	var _ provider.ToolDefinition = defs[0]
+	var _ = defs[0]
 }

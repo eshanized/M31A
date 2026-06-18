@@ -56,7 +56,7 @@ func defaultHelpSections() []helpSection {
 				{"tab", "Complete slash/mention suggestion"},
 				{"/", "Slash command autocomplete"},
 				{"@", "File mention autocomplete"},
-				{"ctrl+l", "Scroll to bottom"},
+				{"ctrl+l / end", "Scroll to bottom"},
 				{"ctrl+u / pgup", "Scroll page up"},
 				{"ctrl+d / pgdn", "Scroll page down"},
 				{"j / k", "Scroll line down/up (empty input)"},

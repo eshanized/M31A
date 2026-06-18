@@ -9,6 +9,6 @@ import (
 func TestLLMProvider_Interface_Exists(t *testing.T) {
 	t.Parallel()
 	// Verify the interface exists and can be referenced
-	var _ LLMProvider = (LLMProvider)(nil)
+	var _ LLMProvider
 	_ = types.HealthStatus{}
 }

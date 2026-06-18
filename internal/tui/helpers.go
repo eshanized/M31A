@@ -232,17 +232,26 @@ func renderLoading(label string, w, h int, t theme.Theme) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 }
 
-// renderPlaceholder renders a minimal blank state for screens that are
-// initializing. Unlike renderLoading, it doesn't show a spinner or text
-// since these screens load instantly and the "Loading..." message is misleading.
-func renderPlaceholder(w, h int, t theme.Theme) string {
+// renderEmptyState renders a centered empty state with a title and hint,
+// telling the user why the screen is empty and what to do about it.
+func renderEmptyState(title, hint string, w, h int, t theme.Theme) string {
 	if w < 1 {
 		w = 40
 	}
 	if h < 1 {
 		h = 3
 	}
-	return strings.Repeat("\n", h)
+
+	titleStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true)
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		titleStyle.Render(title),
+		"",
+		hintStyle.Render(hint),
+	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 }
 
 // ─── Formatting utilities ──────────────────────────────────────────────────────

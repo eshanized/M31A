@@ -90,9 +90,6 @@ func (m *AppState) View() string {
 		}
 	}
 
-	// Screen transition — during the 200ms transition, let content render normally
-	// rather than replacing it with a dim overlay that hides the actual screen.
-
 	// Compose the full page
 	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
 
@@ -216,7 +213,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	case ScreenPlan:
 		info.KeyboardHints = []string{"enter review", "r refine", "esc back"}
 	case ScreenExecute:
-		info.KeyboardHints = []string{"j/k scroll", "p pause", "esc back"}
+		info.KeyboardHints = []string{"j/k scroll", "p pause", "ctrl+c cancel", "esc back"}
 	case ScreenVerify:
 		info.KeyboardHints = []string{"h heal", "enter/s ship", "esc back"}
 	case ScreenShip:
@@ -228,7 +225,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	case ScreenDiscuss:
 		info.KeyboardHints = []string{"enter submit", "esc skip", "Ctrl+S skip all"}
 	case ScreenHelp:
-		info.KeyboardHints = []string{"g top", "G bottom", "esc back"}
+		info.KeyboardHints = []string{"g top", "G bottom", "esc/q back"}
 	case ScreenLedger:
 		info.KeyboardHints = []string{"j/k scroll", "esc back"}
 	case ScreenRollback:
@@ -256,9 +253,9 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 	case ScreenConfirmQuit:
 		info.KeyboardHints = []string{"y quit", "n stay"}
 	case ScreenChatHistory:
-		info.KeyboardHints = []string{"↑↓ navigate", "enter continue", "g top", "G bottom", "q back"}
+		info.KeyboardHints = []string{"j/k navigate", "enter continue", "g/G top/bottom", "esc back"}
 	case ScreenCommandPalette:
-		info.KeyboardHints = []string{"↑↓ navigate", "enter execute", "type to filter", "esc close"}
+		info.KeyboardHints = []string{"j/k navigate", "enter execute", "type to filter", "esc close"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -441,7 +438,7 @@ func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 	if m.planModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("No plan available", "Run /plan or start a workflow with /new", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.planModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.planModel.View()
@@ -449,7 +446,7 @@ func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
 	if m.executeModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("No tasks to execute", "Run /new to start a workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.executeModel.width = chrome.ContentWidth()
 	m.executeModel.height = chrome.ContentHeight()
@@ -458,7 +455,7 @@ func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
 	if m.verifyModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("No verification results", "Run /verify after executing tasks", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.verifyModel.width = chrome.ContentWidth()
 	m.verifyModel.height = chrome.ContentHeight()
@@ -467,7 +464,7 @@ func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
 	if m.shipModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Nothing to ship", "Complete the workflow phases first — run /new to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.shipModel.width = chrome.ContentWidth()
 	m.shipModel.height = chrome.ContentHeight()
@@ -484,7 +481,7 @@ func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
 	if m.goalInput == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Goal input", "Type a goal below and press enter to start a workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.goalInput.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.goalInput.View()
@@ -500,7 +497,7 @@ func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 	if m.ledgerModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Learning ledger", "No learning entries yet — complete a workflow to populate the ledger", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ledgerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ledgerModel.View()
@@ -508,7 +505,7 @@ func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
 	if m.rollbackModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Rollback browser", "No commit history loaded — ensure git is initialized", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.rollbackModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.rollbackModel.View()
@@ -516,7 +513,7 @@ func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 	if m.metricsModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Session metrics", "No metrics available — complete some tasks to see analytics", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.metricsModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.metricsModel.View()
@@ -524,7 +521,7 @@ func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
 	if m.discussModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Discussion", "No discussion questions — start a workflow with /new", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.discussModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.discussModel.View()
@@ -544,7 +541,7 @@ func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 	if m.diffModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Diff viewer", "No diff to display — run /diff or use the workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.diffModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.diffModel.View()
@@ -552,7 +549,7 @@ func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 	if m.helpModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Help", "Loading keyboard shortcuts...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.helpModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.helpModel.View()
@@ -560,7 +557,7 @@ func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
 	if m.bisectModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Git bisect", "No bisect session active — run /bisect to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.bisectModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.bisectModel.View()
@@ -568,7 +565,7 @@ func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
 	if m.themePickerModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Theme picker", "Loading themes...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.themePickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.themePickerModel.View()
@@ -576,7 +573,7 @@ func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 	if m.notifModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Notifications", "No notifications yet — they'll appear here as you use M31A", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.notifModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.notifModel.View()
@@ -584,7 +581,7 @@ func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
 	if m.dashboardModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Dashboard", "No workflow active — type a goal or run /new to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.dashboardModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.dashboardModel.View()
@@ -592,7 +589,7 @@ func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
 	if m.sessionDetailModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Session detail", "No session selected — use /resume to browse sessions", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.sessionDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.sessionDetailModel.View()
@@ -600,7 +597,7 @@ func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
 	if m.fileExplorerModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("File explorer", "No files to display — ensure the working directory is set", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.fileExplorerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.fileExplorerModel.View()
@@ -608,7 +605,7 @@ func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 	if m.toolDetailModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Tool output", "No tool output selected — click a tool card in the REPL to inspect it", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.toolDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.toolDetailModel.View()
@@ -616,7 +613,7 @@ func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
 	if m.phaseModelPicker == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Model picker", "Loading models...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.phaseModelPicker.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.phaseModelPicker.View()
@@ -624,7 +621,7 @@ func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) strin
 
 func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
 	if m.ghostPickerModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Ghost mode", "No ghost files available — run a workflow to generate ghost outputs", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ghostPickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ghostPickerModel.View()
@@ -632,7 +629,7 @@ func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderGhostOutputContent(chrome layout.PageChrome) string {
 	if m.ghostOutputModel == nil {
-		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Ghost output", "No ghost output yet — select a ghost file to see results", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ghostOutputModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ghostOutputModel.View()
@@ -694,7 +691,7 @@ func (m *AppState) renderPermissionModal() string {
 		return m.permModal.Render(m.width, m.height)
 	}
 
-	return RenderPermissionModal(m.permRequest, m.permCountdown, modalWidth, m.width, m.height, m.themeManager.Current(), m.permCountdown < 5)
+	return RenderPermissionModal(m.permRequest, m.permCountdown, modalWidth, m.width, m.height, m.themeManager.Current(), m.permCountdown < 5, string(m.workflowPhase), m.workflowGoal)
 }
 
 // ─── REPL sync helpers ────────────────────────────────────────────────────────
@@ -882,7 +879,7 @@ func (m *AppState) renderQuestionModal() string {
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
 // RenderPermissionModal renders a full-screen permission modal.
-func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW, termH int, t theme.Theme, urgent bool) string {
+func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW, termH int, t theme.Theme, urgent bool, phase, goal string) string {
 	if req == nil {
 		return ""
 	}
@@ -892,16 +889,36 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 		riskStyle = lipgloss.NewStyle().Foreground(t.Error)
 	}
 
-	bodyContent := lipgloss.JoinVertical(lipgloss.Left,
-		"  Tool:  "+req.ToolName,
+	bodyLines := []string{
+		"  Tool:  " + req.ToolName,
 		"  Command:",
 		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width-8).Render(req.Command),
-		"  Risk:  "+riskStyle.Render(string(req.RiskLevel)),
+		"  Risk:  " + riskStyle.Render(string(req.RiskLevel)),
+	}
+
+	if phase != "" && phase != "idle" {
+		phaseLine := lipgloss.NewStyle().Foreground(t.TextSecondary).
+			Render("  Phase: " + phase)
+		bodyLines = append(bodyLines, phaseLine)
+	}
+	if goal != "" {
+		goalSnippet := goal
+		if len(goalSnippet) > width-12 {
+			goalSnippet = goalSnippet[:width-15] + "..."
+		}
+		goalLine := lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render("  Goal:  " + goalSnippet)
+		bodyLines = append(bodyLines, goalLine)
+	}
+
+	bodyLines = append(bodyLines,
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny   a allow always"),
 		"",
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  Timeout: "+formatSI(countdown)+"s"),
 	)
+
+	bodyContent := lipgloss.JoinVertical(lipgloss.Left, bodyLines...)
 
 	borderStyle := lipgloss.RoundedBorder()
 

@@ -441,7 +441,7 @@ func TestHandlePhase_InvalidPhaseName(t *testing.T) {
 	})
 	// Will fail because LoadWorkflowState fails on empty manager
 	if r.Success {
-		// If somehow succeeds, the invalid phase name should fail
+		t.Error("expected handlePhase to fail with bogus phase name")
 	}
 }
 

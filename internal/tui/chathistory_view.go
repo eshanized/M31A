@@ -10,10 +10,6 @@ import (
 // renderChatHistory renders the chat history table screen content.
 func (ch *ChatHistoryModel) renderChatHistory() string {
 	t := ch.theme
-	w := ch.width
-	if w <= 0 {
-		w = 80
-	}
 
 	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
 		Render("Chat History")

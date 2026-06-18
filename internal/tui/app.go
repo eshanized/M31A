@@ -208,6 +208,12 @@ func (m *AppState) addToastCmd(text, toastType string, duration time.Duration) t
 	if duration <= 0 {
 		duration = 3 * time.Second
 	}
+	for i := len(m.toasts) - 1; i >= 0; i-- {
+		if m.toasts[i].ID == id {
+			m.toasts[i].Duration = duration
+			break
+		}
+	}
 	return tea.Tick(duration, func(time.Time) tea.Msg {
 		return ToastExpiryMsg{ToastID: id}
 	})

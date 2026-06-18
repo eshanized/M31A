@@ -17,6 +17,19 @@ import (
 	"github.com/eshanized/M31A/pkg/history"
 )
 
+// updatePlaceholder sets the textarea placeholder based on current state
+// so the input hint reflects what the user can do right now.
+func (m *ReplModel) updatePlaceholder() {
+	switch {
+	case m.streaming || m.thinking:
+		m.textarea.Placeholder = "Waiting for response… (ctrl+c to cancel)"
+	case m.newMessagesWhileScrolled > 0 && m.userScrolled:
+		m.textarea.Placeholder = "Type a message… (ctrl+l to jump to latest)"
+	default:
+		m.textarea.Placeholder = "Type a message, /command, or goal..."
+	}
+}
+
 // ─── Theme / layout setters ───────────────────────────────────────────────────
 
 // SetTheme updates the theme and reinitializes the message renderer.
@@ -367,6 +380,7 @@ func (m *ReplModel) renderMessages() {
 	lineCount := 0
 
 	prevRole := ""
+	var prevTime time.Time
 	for i, msg := range m.messages {
 		offsets[i] = lineCount
 		rendered := m.msgRenderer.RenderMessage(msg, rw)
@@ -375,9 +389,9 @@ func (m *ReplModel) renderMessages() {
 			continue
 		}
 		// Write separator AFTER confirming message has content.
-		// Previously the separator was written before the empty check,
-		// causing blank lines to accumulate between visible messages.
 		if i > 0 {
+			timeGap := !msg.CreatedAt.IsZero() && !prevTime.IsZero() &&
+				msg.CreatedAt.Sub(prevTime) > 60*time.Second
 			if prevRole != "" && msg.Role != prevRole {
 				sepChar := "·"
 				sepLine := lipgloss.NewStyle().
@@ -386,6 +400,16 @@ func (m *ReplModel) renderMessages() {
 					Render(strings.Repeat(sepChar, rw/2))
 				sb.WriteString("\n")
 				sb.WriteString(sepLine)
+				sb.WriteString("\n")
+				lineCount += 2
+			} else if timeGap {
+				timeLabel := msg.CreatedAt.Format("15:04")
+				timeGapLine := lipgloss.NewStyle().
+					Foreground(m.theme.TextMuted).
+					Faint(true).
+					Render("── " + timeLabel + " " + strings.Repeat("─", rw/2-8))
+				sb.WriteString("\n")
+				sb.WriteString(timeGapLine)
 				sb.WriteString("\n")
 				lineCount += 2
 			} else {
@@ -398,6 +422,9 @@ func (m *ReplModel) renderMessages() {
 		sb.WriteString("\n")
 		lineCount++
 		prevRole = msg.Role
+		if !msg.CreatedAt.IsZero() {
+			prevTime = msg.CreatedAt
+		}
 	}
 	m.messageLineOffsets = offsets
 

@@ -330,7 +330,8 @@ type Toast struct {
 	Text      string
 	Type      string // "success", "error", "warning", "info"
 	CreatedAt time.Time
-	Frame     int // animation frame (0, 1, 2)
+	Frame     int           // animation frame (0, 1, 2)
+	Duration  time.Duration // auto-dismiss duration (0 = default 5s)
 }
 
 // DismissToastMsg is emitted when a toast should be dismissed manually.

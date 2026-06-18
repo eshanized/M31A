@@ -311,8 +311,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Leader timeout ────────────────────────────────────────────────────────
 	case LeaderTimeoutMsg:
-		if m.keyRegistry != nil {
+		if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
 			m.keyRegistry.DeactivateLeader()
+			cmds = append(cmds, m.addToastCmd("Leader key timed out", "info", 2*time.Second))
 		}
 
 	// ── Slash command ─────────────────────────────────────────────────────────
@@ -544,6 +545,22 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newDash, cmd := m.dashboardModel.Update(msg)
 			if nd, ok := newDash.(*DashboardModel); ok {
 				m.dashboardModel = nd
+			}
+			cmds = append(cmds, cmd)
+		}
+		// Forward to chat history for scroll animations
+		if m.screen == ScreenChatHistory && m.chatHistoryModel != nil {
+			newCH, cmd := m.chatHistoryModel.Update(msg)
+			if nch, ok := newCH.(*ChatHistoryModel); ok {
+				m.chatHistoryModel = nch
+			}
+			cmds = append(cmds, cmd)
+		}
+		// Forward to ghost output for scroll animations
+		if m.screen == ScreenGhostOutput && m.ghostOutputModel != nil {
+			newGO, cmd := m.ghostOutputModel.Update(msg)
+			if ngo, ok := newGO.(*GhostOutputModel); ok {
+				m.ghostOutputModel = ngo
 			}
 			cmds = append(cmds, cmd)
 		}
@@ -841,6 +858,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if duration <= 0 {
 			duration = 3 * time.Second
 		}
+		for i := len(m.toasts) - 1; i >= 0; i-- {
+			if m.toasts[i].ID == id {
+				m.toasts[i].Duration = duration
+				break
+			}
+		}
 		cmds = append(cmds, tea.Tick(duration, func(time.Time) tea.Msg {
 			return ToastExpiryMsg{ToastID: id}
 		}))
@@ -1045,7 +1068,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModel = &msg.Model
 		m.activeProvider = msg.Provider
 		if m.registry != nil {
-			_ = m.registry.SetActive(msg.Provider)
+			if err := m.registry.SetActive(msg.Provider); err != nil {
+				slog.Warn("failed to set active provider", "provider", msg.Provider, "error", err)
+				cmds = append(cmds, m.addToastCmd("Could not switch to "+msg.Provider+": "+m31errors.UserMessage(err), "warning", 5*time.Second))
+			}
 		}
 		if m.replModel != nil {
 			// Immediately sync the model to replModel to avoid split-brain
@@ -1250,10 +1276,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
 	case ProviderModelsFetchedMsg:
+		if msg.Err != nil {
+			slog.Warn("failed to fetch provider models", "error", msg.Err)
+			cmds = append(cmds, m.addToastCmd("Could not load model catalog: "+m31errors.UserMessage(msg.Err), "warning", 5*time.Second))
+		}
 		if m.replModel != nil {
 			m.replModel.handleProviderModelsFetched(msg)
-			// Sync enriched model info back to AppState so sendChatMessage
-			// uses the fully-populated ModelInfo (pricing, context, capabilities).
 			if m.replModel.activeModel != nil {
 				m.activeModel = m.replModel.activeModel
 			}
@@ -2242,10 +2270,14 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 	m.prevScreen = m.screen
 
-	// Push current screen to back-stack for esc-to-go-back navigation
-	if m.screen != screen && m.screen != ScreenPermission && screen != ScreenPermission {
-		m.screenStack = append(m.screenStack, m.screen)
-		// Cap the stack to prevent unbounded growth on repeated push/pop cycles
+	// Push current screen to back-stack for esc-to-go-back navigation.
+	// Skip: same screen, permission overlay, diff overlay, and REPL (always fallback).
+	if m.screen != screen && m.screen != ScreenPermission && screen != ScreenPermission &&
+		m.screen != ScreenREPL {
+		// Avoid duplicate consecutive entries
+		if len(m.screenStack) == 0 || m.screenStack[len(m.screenStack)-1] != m.screen {
+			m.screenStack = append(m.screenStack, m.screen)
+		}
 		if m.screenCap > 0 && len(m.screenStack) > m.screenCap {
 			m.screenStack = m.screenStack[len(m.screenStack)-m.screenCap:]
 		}

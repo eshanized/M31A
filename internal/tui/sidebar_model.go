@@ -97,7 +97,7 @@ type SidebarModel struct {
 	currentPhase   string
 	phaseHistory   []string // completed phases
 	phaseStartedAt time.Time
-	phaseElapsed   time.Duration
+
 
 	// Tool call timeline
 	toolCalls    []SidebarToolCall
@@ -283,8 +283,9 @@ func (s *SidebarModel) InitAgentProgress() {
 
 // AgentToolStarted adds a todo item for an agent tool call and updates progress.
 func (s *SidebarModel) AgentToolStarted(name string) {
+	desc := toolCallAction(name)
 	s.AddTodoItem(SidebarTodoItem{
-		Content:  name,
+		Content:  desc,
 		Status:   "in_progress",
 		Priority: "medium",
 		Source:   "agent",
@@ -296,8 +297,9 @@ func (s *SidebarModel) AgentToolStarted(name string) {
 
 // AgentToolCompleted marks the most recent matching agent tool as done and updates progress.
 func (s *SidebarModel) AgentToolCompleted(name string, success bool) {
+	desc := toolCallAction(name)
 	for i := len(s.todoItems) - 1; i >= 0; i-- {
-		if s.todoItems[i].Source == "agent" && s.todoItems[i].Content == name && s.todoItems[i].Status == "in_progress" {
+		if s.todoItems[i].Source == "agent" && s.todoItems[i].Content == desc && s.todoItems[i].Status == "in_progress" {
 			if success {
 				s.todoItems[i].Status = "completed"
 			} else {
@@ -812,8 +814,12 @@ func (s *SidebarModel) View() string {
 					Render(fmt.Sprintf("-%d", delCount)))
 			}
 			if untracked > 0 {
+				untrackedColor := t.TextMuted
+				if untracked >= 5 {
+					untrackedColor = t.Warning
+				}
 				pills = append(pills, lipgloss.NewStyle().
-					Foreground(t.TextMuted).
+					Foreground(untrackedColor).
 					Render(fmt.Sprintf("?%d", untracked)))
 			}
 			countLine := lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(pills, " "))
@@ -1091,7 +1097,9 @@ func (s *SidebarModel) View() string {
 			pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
 			summary := fmt.Sprintf("%d/%d", done+failed, total)
 			if failed > 0 {
-				summary += fmt.Sprintf(" (%d failed)", failed)
+				summary += lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf(" (%d failed)", failed))
+			} else if s.taskProgress.Running > 0 && done+failed < total {
+				summary += lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf(" (%d pending)", total-done-failed))
 			}
 			barLine := lipgloss.NewStyle().PaddingLeft(1).Render(bar + " " + pctStr)
 			summaryLine := lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary)
@@ -1138,21 +1146,31 @@ func (s *SidebarModel) View() string {
 			if len(items) > maxTodoItems {
 				items = items[len(items)-maxTodoItems:]
 			}
-			for _, item := range items {
+			for idx, item := range items {
 				icon := todoItemIcon(item.Status, t)
 				desc := item.Content
-				// Truncate if too long
-				maxDescW := contentW - 6
-				if maxDescW < 10 {
-					maxDescW = 10
+				num := fmt.Sprintf("%d.", idx+1)
+				var sourceBadge string
+				if item.Source != "" && item.Source != "agent" {
+					sourceBadge = lipgloss.NewStyle().
+						Foreground(t.TextMuted).
+						Render(" " + item.Source)
+				}
+				maxDescW := contentW - 10
+				if maxDescW < 8 {
+					maxDescW = 8
 				}
 				if lipgloss.Width(desc) > maxDescW {
 					desc = desc[:maxDescW-3] + "..."
 				}
+				descColor := t.Text
+				if item.Status == "completed" {
+					descColor = t.TextMuted
+				}
 				itemLine := lipgloss.NewStyle().
-					Foreground(t.Text).
+					Foreground(descColor).
 					PaddingLeft(1).
-					Render(icon + " " + desc)
+					Render(fmt.Sprintf("%s %s %s", num, icon, desc) + sourceBadge)
 				lines = append(lines, itemLine)
 			}
 		}
