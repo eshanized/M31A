@@ -138,6 +138,23 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 		return nil, err
 	}
 
+	// NVIDIA (and some OpenAI-compatible providers) return HTTP 200 with an
+	// error object in the SSE body instead of a proper HTTP error status code.
+	// Detect this before checking for 'choices' so the user sees the real error.
+	if errObj, exists := raw["error"]; exists {
+		switch e := errObj.(type) {
+		case map[string]any:
+			if msg, ok := e["message"].(string); ok && msg != "" {
+				return nil, fmt.Errorf("provider error: %s", msg)
+			}
+			return nil, fmt.Errorf("provider error: %v", e)
+		case string:
+			if e != "" {
+				return nil, fmt.Errorf("provider error: %s", e)
+			}
+		}
+	}
+
 	cfg, _ := GetReasoningConfig(modelID)
 
 	// Extract usage from the final SSE chunk if present.
