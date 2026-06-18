@@ -399,7 +399,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.TrackLiveTool(msg.ToolCall.Name, len(m.replModel.Messages())-1)
 		}
 		if m.sidebarModel != nil {
-			m.sidebarModel.AddToolCallStart(msg.ToolCall.Name)
+			m.sidebarModel.AddToolCallStart(msg.ToolCall.Name, "")
 			m.sidebarModel.AgentToolStarted(msg.ToolCall.Name)
 		}
 		cmds = append(cmds, m.readAgentCh())
@@ -743,7 +743,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update sidebar tool call timeline
 		if m.sidebarModel != nil {
-			m.sidebarModel.AddToolCallStart(msg.ToolName)
+			m.sidebarModel.AddToolCallStart(msg.ToolName, msg.Description)
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.ToolCompleteMsg:
