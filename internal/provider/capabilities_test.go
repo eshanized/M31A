@@ -129,3 +129,44 @@ func TestParseModelCapabilities_EmptyID(t *testing.T) {
 		t.Error("expected all capabilities false for empty ID")
 	}
 }
+
+func TestParseModelCapabilities_ChatDefault(t *testing.T) {
+	t.Parallel()
+
+	chatModels := []string{
+		"anthropic/claude-3-opus",
+		"openai/gpt-4o",
+		"google/gemini-pro",
+		"meta-llama/llama-3-70b",
+		"deepseek/deepseek-chat",
+	}
+
+	for _, id := range chatModels {
+		t.Run(id, func(t *testing.T) {
+			caps := ParseModelCapabilities(id)
+			if !caps.Chat {
+				t.Errorf("expected Chat=true for %q", id)
+			}
+		})
+	}
+}
+
+func TestParseModelCapabilities_ChatCompletionOnly(t *testing.T) {
+	t.Parallel()
+
+	completionOnly := []string{
+		"meta/codellama-70b",
+		"meta/code-llama-70b",
+		"bigcode/starcoder2-15b",
+		"bigcode/starcoder",
+	}
+
+	for _, id := range completionOnly {
+		t.Run(id, func(t *testing.T) {
+			caps := ParseModelCapabilities(id)
+			if caps.Chat {
+				t.Errorf("expected Chat=false for %q", id)
+			}
+		})
+	}
+}

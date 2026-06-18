@@ -15,6 +15,13 @@ var toolCapablePatterns = []string{
 	"llama", "mistral", "command-r", "command-a",
 }
 
+// completionOnlyPatterns are model ID patterns for models that only support the
+// /completions endpoint, not /chat/completions. These are hidden from the chat UI.
+var completionOnlyPatterns = []string{
+	"codellama", "code-llama",
+	"starcoder", "starcoder2",
+}
+
 // ParseModelCapabilities infers capability flags from the model ID using heuristics.
 // extraReasoningPatterns are additional patterns to check for reasoning detection
 // (e.g., Zen uses "-r1" which OpenRouter does not).
@@ -55,6 +62,15 @@ func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) ty
 	// Detect vision/multimodal models by ID patterns
 	if strings.Contains(id, "vision") || strings.Contains(id, "multimodal") {
 		caps.Vision = true
+	}
+
+	// Most models support chat; completion-only models (e.g., codellama) do not.
+	caps.Chat = true
+	for _, p := range completionOnlyPatterns {
+		if strings.Contains(id, p) {
+			caps.Chat = false
+			break
+		}
 	}
 
 	return caps
