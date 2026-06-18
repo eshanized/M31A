@@ -193,11 +193,26 @@ func (em *ExecuteModel) View() string {
 
 	elapsed := time.Since(em.startedAt)
 	progressLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf("· %ds elapsed", int(elapsed.Seconds())))
+		Render(fmt.Sprintf("· %ds", int(elapsed.Seconds())))
+
+	// ETA based on elapsed time and completion rate
+	if done > 0 && done < total {
+		perTask := elapsed.Seconds() / float64(done)
+		etaSec := int(math.Round(perTask * float64(total-done)))
+		progressLine += lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf(" · ETA %ds", etaSec))
+	}
 
 	if em.paused {
 		progressLine += "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("PAUSED")
 	}
+
+	// Animated progress bar
+	em.animatedProg.Width = w
+	if em.animatedProg.Width > 60 {
+		em.animatedProg.Width = 60
+	}
+	progressBar := em.animatedProg.Render()
 
 	// Thin separator
 	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).
@@ -209,6 +224,7 @@ func (em *ExecuteModel) View() string {
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		progressLine,
+		progressBar,
 		sep,
 		em.viewport.View(),
 		hints,
