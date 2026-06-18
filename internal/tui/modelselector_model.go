@@ -215,17 +215,31 @@ func (ms *ModelSelector) applyFilter() {
 	}
 
 	if query == "" {
-		ms.filtered = all
+		ms.filtered = filterChatModels(all)
 		return
 	}
 	ms.filtered = nil
 	for _, m := range all {
+		if !m.Capabilities.Chat {
+			continue
+		}
 		if strings.Contains(strings.ToLower(m.ID), query) ||
 			strings.Contains(strings.ToLower(m.Name), query) ||
 			strings.Contains(strings.ToLower(m.Provider), query) {
 			ms.filtered = append(ms.filtered, m)
 		}
 	}
+}
+
+// filterChatModels returns only models that support chat completions.
+func filterChatModels(models []types.ModelInfo) []types.ModelInfo {
+	out := make([]types.ModelInfo, 0, len(models))
+	for _, m := range models {
+		if m.Capabilities.Chat {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // cycleProvider rotates through "" (all) and each provider name.

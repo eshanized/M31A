@@ -42,11 +42,14 @@ func newPickerPanel(label, description string) pickerPanel {
 func (p *pickerPanel) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(p.searchInput.Value()))
 	if query == "" {
-		p.filtered = p.models
+		p.filtered = filterChatModels(p.models)
 		return
 	}
 	p.filtered = nil
 	for _, m := range p.models {
+		if !m.Capabilities.Chat {
+			continue
+		}
 		if strings.Contains(strings.ToLower(m.ID), query) ||
 			strings.Contains(strings.ToLower(m.Name), query) ||
 			strings.Contains(strings.ToLower(m.Provider), query) {
