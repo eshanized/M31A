@@ -49,5 +49,8 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewCodeMap(workDir)); err != nil {
 		return nil, err
 	}
+	if err := d.Register(NewCodeComplexity(workDir, nil)); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
