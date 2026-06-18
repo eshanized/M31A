@@ -127,6 +127,12 @@ func UserMessage(e error) string {
 		return "Access forbidden — check API key scope or permissions"
 	case strings.Contains(errStr, "not found") || strings.Contains(errStr, "status 404"):
 		return "Resource not found — check the model or endpoint"
+	case strings.Contains(errStr, "provider error"):
+		// Extract the provider's actual error message after "provider error: "
+		if idx := strings.Index(e.Error(), "provider error: "); idx >= 0 {
+			return e.Error()[idx:]
+		}
+		return "Provider returned an error — try again"
 	case strings.Contains(errStr, "internal server error") || strings.Contains(errStr, "status 500"):
 		return "Provider internal error — try again later"
 	case reHTTP401.MatchString(errStr):
