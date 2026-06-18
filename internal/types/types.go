@@ -68,6 +68,7 @@ type CapFlags struct {
 	Tools     bool `json:"tools"`
 	Reasoning bool `json:"reasoning"`
 	Vision    bool `json:"vision"`
+	Chat      bool `json:"chat"`
 }
 
 type Pricing struct {
