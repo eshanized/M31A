@@ -12,7 +12,7 @@ import (
 const maxVisibleToasts = 3
 
 // renderToastStack renders up to 3 most recent toasts stacked.
-func renderToastStack(toasts []Toast, t theme.Theme) string {
+func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	if len(toasts) == 0 {
 		return ""
 	}
@@ -24,7 +24,7 @@ func renderToastStack(toasts []Toast, t theme.Theme) string {
 
 	var rendered []string
 	for i, toast := range show {
-		rendered = append(rendered, renderSingleToast(toast, t, i))
+		rendered = append(rendered, renderSingleToast(toast, t, i, termWidth))
 	}
 	stack := lipgloss.JoinVertical(lipgloss.Right, rendered...)
 
@@ -33,7 +33,7 @@ func renderToastStack(toasts []Toast, t theme.Theme) string {
 }
 
 // renderSingleToast renders one toast with a ThinBorder and colored left border.
-func renderSingleToast(toast Toast, t theme.Theme, index int) string {
+func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) string {
 	var borderColor lipgloss.Color
 	switch toast.Type {
 	case "success":
@@ -69,7 +69,14 @@ func renderSingleToast(toast Toast, t theme.Theme, index int) string {
 	progressBar := renderToastProgress(toast, t)
 
 	// Stack offset: each toast 2 cols narrower than one above
+	// Responsive width: scale with terminal, clamped to usable bounds
 	contentWidth := 40 - (index * 2)
+	if toastWidth > 0 {
+		contentWidth = toastWidth/3 - (index * 2)
+	}
+	if contentWidth > 45 {
+		contentWidth = 45
+	}
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
