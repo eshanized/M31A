@@ -232,6 +232,19 @@ func renderLoading(label string, w, h int, t theme.Theme) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 }
 
+// renderPlaceholder renders a minimal blank state for screens that are
+// initializing. Unlike renderLoading, it doesn't show a spinner or text
+// since these screens load instantly and the "Loading..." message is misleading.
+func renderPlaceholder(w, h int, t theme.Theme) string {
+	if w < 1 {
+		w = 40
+	}
+	if h < 1 {
+		h = 3
+	}
+	return strings.Repeat("\n", h)
+}
+
 // ─── Formatting utilities ──────────────────────────────────────────────────────
 
 // formatSI formats an integer with SI suffix (K, M).
