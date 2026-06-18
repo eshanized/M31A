@@ -281,6 +281,7 @@ func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fr.keyInput.SetValue("")
 			fr.keyProviderIndex++
 			if fr.keyProviderIndex < len(fr.selectedProviders) {
+				fr.keyInput.Placeholder = keyPlaceholderForProvider(fr.selectedProviders[fr.keyProviderIndex])
 				return fr, nil
 			}
 			fr.step = stepModelPick
@@ -396,6 +397,20 @@ func categorizeModels(models []types.ModelInfo) []modelCategory {
 	return cats
 }
 
+// keyPlaceholderForProvider returns the API key placeholder text for a given provider.
+func keyPlaceholderForProvider(providerID string) string {
+	switch providerID {
+	case "openrouter":
+		return "sk-or-..."
+	case "nvidia":
+		return "nvapi-..."
+	case "zen":
+		return "API key"
+	default:
+		return "API key"
+	}
+}
+
 // validateKeyCmd returns a tea.Cmd that validates an API key format.
 func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
@@ -413,6 +428,13 @@ func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 				return firstRunKeyValidationMsg{
 					OK:     false,
 					ErrStr: "API key seems too short",
+				}
+			}
+		case "nvidia":
+			if !strings.HasPrefix(apiKey, "nvapi-") {
+				return firstRunKeyValidationMsg{
+					OK:     false,
+					ErrStr: "NVIDIA NIM API keys typically start with 'nvapi-'",
 				}
 			}
 		}
@@ -463,6 +485,7 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			fr.providerScroll = 0
 			fr.step = stepAPIKey
 			fr.keyInput.SetValue("")
+			fr.keyInput.Placeholder = keyPlaceholderForProvider(fr.selectedProviders[0])
 			fr.keyInput.Focus()
 		case "s":
 			fr.rebuildSelectedProviders()
@@ -577,6 +600,7 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				fr.step = stepAPIKey
 				fr.modelInput.Blur()
 				fr.keyInput.SetValue("")
+				fr.keyInput.Placeholder = keyPlaceholderForProvider(fr.selectedProviders[fr.keyProviderIndex])
 				fr.keyInput.Focus()
 			} else {
 				fr.step = stepProviderSelect
