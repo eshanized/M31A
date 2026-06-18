@@ -80,10 +80,10 @@ func (m *AppState) View() string {
 	if len(m.toasts) > 0 {
 		toastOverlay := ""
 		if m.width >= WidthCompact {
-			toastOverlay = renderToastStack(m.toasts, t)
+			toastOverlay = renderToastStack(m.toasts, t, m.width)
 		} else {
 			last := m.toasts[len(m.toasts)-1]
-			toastOverlay = renderSingleToast(last, t, 0)
+			toastOverlay = renderSingleToast(last, t, 0, m.width)
 		}
 		if toastOverlay != "" {
 			content = overlayToastOnContent(content, toastOverlay, contentWidth)
@@ -441,7 +441,7 @@ func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 	if m.planModel == nil {
-		return renderLoading("Loading plan...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.planModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.planModel.View()
@@ -449,7 +449,7 @@ func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
 	if m.executeModel == nil {
-		return renderLoading("Loading execution...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.executeModel.width = chrome.ContentWidth()
 	m.executeModel.height = chrome.ContentHeight()
@@ -458,7 +458,7 @@ func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
 	if m.verifyModel == nil {
-		return renderLoading("Loading verification...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.verifyModel.width = chrome.ContentWidth()
 	m.verifyModel.height = chrome.ContentHeight()
@@ -467,7 +467,7 @@ func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
 	if m.shipModel == nil {
-		return renderLoading("Loading ship summary...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.shipModel.width = chrome.ContentWidth()
 	m.shipModel.height = chrome.ContentHeight()
@@ -484,7 +484,7 @@ func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
 	if m.goalInput == nil {
-		return renderLoading("Loading goal input...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.goalInput.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.goalInput.View()
@@ -500,7 +500,7 @@ func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 	if m.ledgerModel == nil {
-		return renderLoading("Loading ledger...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ledgerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ledgerModel.View()
@@ -508,7 +508,7 @@ func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
 	if m.rollbackModel == nil {
-		return renderLoading("Loading rollback browser...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.rollbackModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.rollbackModel.View()
@@ -516,7 +516,7 @@ func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 	if m.metricsModel == nil {
-		return renderLoading("Loading metrics...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.metricsModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.metricsModel.View()
@@ -524,7 +524,7 @@ func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
 	if m.discussModel == nil {
-		return renderLoading("Loading discuss...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.discussModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.discussModel.View()
@@ -544,7 +544,7 @@ func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 	if m.diffModel == nil {
-		return renderLoading("Loading diff...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.diffModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.diffModel.View()
@@ -552,7 +552,7 @@ func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 	if m.helpModel == nil {
-		return renderLoading("Loading help...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.helpModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.helpModel.View()
@@ -560,7 +560,7 @@ func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
 	if m.bisectModel == nil {
-		return renderLoading("Loading bisect...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.bisectModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.bisectModel.View()
@@ -568,7 +568,7 @@ func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
 	if m.themePickerModel == nil {
-		return renderLoading("Loading themes...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.themePickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.themePickerModel.View()
@@ -576,7 +576,7 @@ func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 	if m.notifModel == nil {
-		return renderLoading("Loading notifications...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.notifModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.notifModel.View()
@@ -584,7 +584,7 @@ func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
 	if m.dashboardModel == nil {
-		return renderLoading("Loading dashboard...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.dashboardModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.dashboardModel.View()
@@ -592,7 +592,7 @@ func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
 	if m.sessionDetailModel == nil {
-		return renderLoading("Loading session...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.sessionDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.sessionDetailModel.View()
@@ -600,7 +600,7 @@ func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
 	if m.fileExplorerModel == nil {
-		return renderLoading("Loading files...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.fileExplorerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.fileExplorerModel.View()
@@ -608,7 +608,7 @@ func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 	if m.toolDetailModel == nil {
-		return renderLoading("Loading tool output...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.toolDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.toolDetailModel.View()
@@ -616,7 +616,7 @@ func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
 	if m.phaseModelPicker == nil {
-		return renderLoading("Loading model picker...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.phaseModelPicker.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.phaseModelPicker.View()
@@ -624,7 +624,7 @@ func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) strin
 
 func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
 	if m.ghostPickerModel == nil {
-		return renderLoading("Loading ghost picker...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ghostPickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ghostPickerModel.View()
@@ -632,7 +632,7 @@ func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderGhostOutputContent(chrome layout.PageChrome) string {
 	if m.ghostOutputModel == nil {
-		return renderLoading("Loading ghost output...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderPlaceholder(chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.ghostOutputModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.ghostOutputModel.View()
