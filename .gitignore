@@ -66,3 +66,4 @@ image_99999.png
 !.env.example
 config.local.toml
 promotion/
+space.txt
