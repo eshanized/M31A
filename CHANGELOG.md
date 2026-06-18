@@ -6,27 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-18
+
 ### Fixed
-- **WP-C01**: Signal handler race condition — sends tea.QuitMsg through program channel instead of calling app.Shutdown() from goroutine
-- **WP-C02**: Added warning when no provider is active at startup
-- **WP-C03**: Fail fast on os.Getwd() error instead of silently discarding
-- **WP-C04**: Fail fast on permission config error instead of falling back to nil permissions
-- **WP-C05**: Guard autoDreamClient against premature /compress calls
-- **WP-H01**: Removed bash blacklist (trivially bypassable substring matching)
-- **WP-H02**: Added path traversal validation for Python compile step in verify phase
-- **WP-H03**: Replaced time.Sleep with cancellable timer in taskrunner retry loop
-- **WP-H04**: Enforced MaxLLMResponseBytes in consumeStream
-- **WP-H05**: Added size limits (50MB) to all session file reads via readFileLimited()
-- **WP-H07**: Extracted main logic into run() function for proper defer cleanup
-- **WP-H08**: All main.go error output now goes through structured logger
-- **WP-M02**: Replaced context.Background() with shutdownCtx in TUI commands
-- **WP-M03**: Removed duplicated DateTimeFormat constant between types and tools
-- **WP-M05**: Removed ResponseHeaderTimeout from streaming HTTP clients (already absent)
-- **WP-M09**: Removed init() function in webfetch.go
-- **WP-S02**: Improved IPv6 SSRF protection using net.IP.IsPrivate()
-- **WP-L01**: Replaced all interface{} with any
-- **WP-L06**: Removed 46 stale bug ID references from comments across 18 source files
-- **WP-L07**: Removed nolint:gochecknoglobals directive
+- **errcheck**: Wrap `f.Close()` return value in `codecomplexity.go`
+- **govet**: Resolve variable shadowing in `execute.go` (renamed inner `err` to `unmarshalErr`)
+- **ineffassign**: Remove dead `w` assignment in `chathistory_view.go`
+- **ineffassign**: Remove dead `w` assignment in `helpers.go`
+- **staticcheck**: Simplify redundant type assertion in `interface_test.go`
+- **staticcheck**: Simplify redundant type assertion in `tooldefs_test.go` and remove unused import
+- **staticcheck**: Fill empty branch with assertion in `commands_all_test.go`
+- **staticcheck**: Simplify redundant type assertion in `git_test.go`
+
+### Removed
+- Remove unused `renderPlaceholder` function from `helpers.go`
+- Remove unused `renderContextMeter` duplicate from `repl_view.go`
+- Remove unused `phaseElapsed` field from `SidebarModel`
 
 ### Added
 - **WP-A03**: GitClient interface in internal/types/ for testability
@@ -38,6 +33,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WP-S03**: Expanded pass CLI regex to allow digits and hyphens
 - **WP-L02**: Centralized timeout constants (DefaultSessionCacheTTL, DefaultVerifyTimeout, DefaultFetchModelsTimeout)
 - **WP-L08**: Added documentation to firstrunpreview dev tool
+- NVIDIA NIM provider integration
+- Command palette with fuzzy search
+- Chat history model
+- Code complexity analysis tool (`/complexity`)
+- Sidebar todo mode, phase pipeline, and metrics tracking
+- Mouse wheel support across all viewports
+- Factory reset flow via `/reset` command
+- New slash commands (exit, chat, flush, search, about, keychain, dream)
+- Panic recovery across all goroutines
+- Thread-safety fixes for caches and maps
+- Provider error detection for NVIDIA/OpenAI-compatible streams
+- Agent progress tracking and TTL-based file watcher
 
 ### Changed
 - **WP-D01**: Updated AGENTS.md package layout to reflect main.go reality
