@@ -107,6 +107,9 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 				TopProvider:  "nvidia",
 				Capabilities: provider.ParseModelCapabilities(m.ID),
 			}
+			if !info.Capabilities.Chat {
+				continue
+			}
 			models = append(models, info)
 		}
 		models = provider.EnrichModelInfo(models, "nvidia")
