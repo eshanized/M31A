@@ -892,7 +892,7 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 	bodyLines := []string{
 		"  Tool:  " + req.ToolName,
 		"  Command:",
-		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width-8).Render(req.Command),
+		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width - 8).Render(req.Command),
 		"  Risk:  " + riskStyle.Render(string(req.RiskLevel)),
 	}
 

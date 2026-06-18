@@ -98,7 +98,6 @@ type SidebarModel struct {
 	phaseHistory   []string // completed phases
 	phaseStartedAt time.Time
 
-
 	// Tool call timeline
 	toolCalls    []SidebarToolCall
 	maxToolCalls int // max visible in sidebar (default 5)

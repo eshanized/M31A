@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // Compile-time interface check
@@ -43,7 +43,7 @@ type FileStat struct {
 // a complexity report with file counts, line counts, top packages, top files,
 // and a complexity score.
 type CodeComplexity struct {
-	workDir string
+	workDir  string
 	skipDirs []string
 }
 
