@@ -572,8 +572,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = m.transition.ToScreen
 				m.transition = nil
 			} else {
-				// Keep ticking
-				cmds = append(cmds, StreamTickCmd())
+				// Keep ticking at transition FPS for smooth animation
+				cmds = append(cmds, tea.Tick(transitionTickInterval, func(t time.Time) tea.Msg {
+					return TickMsg{Time: t}
+				}))
 			}
 		}
 
@@ -1174,7 +1176,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.subagentManager != nil {
 					agentID := msg.Event.AgentID
 					cmds = append(cmds, func() tea.Msg {
-						_ = m.subagentManager.Cleanup(m.shutdownCtx, agentID)
+						if err := m.subagentManager.Cleanup(m.shutdownCtx, agentID); err != nil {
+							slog.Warn("subagent worktree cleanup failed", "id", agentID, "error", err)
+						}
 						return nil
 					})
 				}
@@ -1190,7 +1194,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.subagentManager != nil {
 					agentID := msg.Event.AgentID
 					cmds = append(cmds, func() tea.Msg {
-						_ = m.subagentManager.Cleanup(m.shutdownCtx, agentID)
+						if err := m.subagentManager.Cleanup(m.shutdownCtx, agentID); err != nil {
+							slog.Warn("subagent worktree cleanup failed", "id", agentID, "error", err)
+						}
 						return nil
 					})
 				}
