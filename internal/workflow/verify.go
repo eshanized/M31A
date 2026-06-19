@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 
 	// 2. Verify each completed task
 	var skippedWithFiles []string
+	verifyResults := make(map[int]VerificationResult)
 	for i, task := range tasks {
 		if task.Status == m31types.StatusSkipped && len(task.Files) > 0 {
 			skippedWithFiles = append(skippedWithFiles, fmt.Sprintf("task %d (%s)", task.ID, task.Description))
@@ -48,6 +51,7 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		}
 
 		result := e.verifyTask(ctx, task)
+		verifyResults[task.ID] = result
 
 		if result.FilesExist && result.SyntaxOK && result.TestsOK {
 			e.logger.Info("task verified", "id", task.ID)
@@ -122,6 +126,36 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 	// 5. Write STATE.md
 	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseVerify, "verification complete", "verify done"); err != nil {
 		e.logger.Warn("save state failed", "error", err)
+	}
+
+	// ── Verification report generation ────────────────────────────────────
+	reportEnabled := e.cfg != nil && e.cfg.Features.VerifyReport
+	if reportEnabled {
+		reportContent := e.generateVerifyReport(tasks, verifyResults)
+		if reportContent != "" {
+			// Save report to session directory
+			reportPath := filepath.Join(filepath.Dir(e.planningDir), "VERIFY_REPORT.md")
+			if writeErr := os.WriteFile(reportPath, []byte(reportContent), m31types.FilePermission); writeErr != nil {
+				e.logger.Warn("failed to write verification report", "error", writeErr)
+			} else {
+				e.logger.Info("verification report written", "path", reportPath)
+			}
+			// Calculate pass rate for the message
+			passed := 0
+			for _, t := range tasks {
+				if t.Status == m31types.StatusDone {
+					passed++
+				}
+			}
+			passRate := 0
+			if len(tasks) > 0 {
+				passRate = (passed * 100) / len(tasks)
+			}
+			e.emit(VerifyReportMsg{
+				Report:   reportContent,
+				PassRate: passRate,
+			})
+		}
 	}
 
 	// 6. Check if all passed or skipped
