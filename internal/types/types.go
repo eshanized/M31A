@@ -141,6 +141,30 @@ type ToolResult struct {
 	Truncated  bool   `json:"truncated"`
 }
 
+// ToolError is a structured error type that carries both an error message
+// and a hint for LLM self-recovery. Tools should return this when they
+// want to provide actionable guidance alongside the error.
+type ToolError struct {
+	Err  error  // The underlying error message
+	Hint string // Actionable hint for the LLM to recover
+}
+
+func (e *ToolError) Error() string {
+	if e.Hint != "" {
+		return e.Err.Error() + "\nHint: " + e.Hint
+	}
+	return e.Err.Error()
+}
+
+func (e *ToolError) Unwrap() error {
+	return e.Err
+}
+
+// NewToolError creates a new ToolError with an error and hint.
+func NewToolError(err error, hint string) *ToolError {
+	return &ToolError{Err: err, Hint: hint}
+}
+
 type Tool interface {
 	Name() string
 	Description() string
