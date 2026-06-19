@@ -12,6 +12,7 @@ import (
 )
 
 // runDiscuss asks clarifying questions and collects user answers.
+// Integrates question quality checking with optional retry on blockers.
 func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, error) {
 	e.logger.Info("discuss phase starting")
 
@@ -70,6 +71,35 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 	// 4. Parse questions
 	questions := parseQuestions(fullContent)
 
+	// 5. Question quality checker
+	qualityEnabled := e.cfg != nil && e.cfg.Features.DiscussQualityCheck
+	if qualityEnabled && len(questions) > 0 {
+		issues := checkQuestionQuality(questions)
+		blockers, warnings := countDiscussIssues(issues)
+
+		e.emit(DiscussQualityMsg{
+			Passed:   blockers == 0,
+			Warnings: warnings,
+		})
+
+		if blockers > 0 {
+			e.logger.Warn("question quality check found blockers", "blockers", blockers, "warnings", warnings)
+			// Retry once: regenerate questions with quality feedback
+			retryQuestions, retryErr := e.retryDiscussQuestions(ctx, goal, questions, issues)
+			if retryErr == nil && len(retryQuestions) > 0 {
+				questions = retryQuestions
+				e.emit(DiscussQualityMsg{
+					Passed:   true,
+					Warnings: 0,
+					Retried:  true,
+				})
+				e.logger.Info("questions regenerated after quality check", "new_count", len(questions))
+			}
+		} else if warnings > 0 {
+			e.logger.Info("question quality check: warnings only", "warnings", warnings)
+		}
+	}
+
 	msg := m31types.Message{
 		Role:    "assistant",
 		Content: fullContent,
@@ -93,7 +123,93 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 	return result, nil
 }
 
+// retryDiscussQuestions re-invokes the LLM with quality feedback to regenerate questions.
+func (e *Engine) retryDiscussQuestions(ctx context.Context, goal string, originalQuestions []string, issues []DiscussIssue) ([]string, error) {
+	var feedback strings.Builder
+	feedback.WriteString("The following questions were generated but have quality issues:\n\n")
+	for _, issue := range issues {
+		if issue.Severity == "blocker" {
+			feedback.WriteString(fmt.Sprintf("- %s\n", issue.Message))
+		}
+	}
+	feedback.WriteString("\nPlease regenerate the questions, fixing the issues above. Keep the same format (numbered, with suggested defaults).")
+
+	messages := e.buildDiscussContext(goal)
+	// Add the feedback as a follow-up user message
+	messages = append(messages, m31types.Message{
+		Role:    "user",
+		Content: feedback.String(),
+	})
+
+	content, err := e.streamLLM(ctx, messages, false)
+	if err != nil {
+		return nil, fmt.Errorf("discuss retry LLM call failed: %w", err)
+	}
+
+	return parseQuestions(content), nil
+}
+
+// CheckDiscussCompleteness evaluates how well the collected answers cover the goal.
+// Called by the TUI after all answers are collected, before proceeding to Plan.
+func (e *Engine) CheckDiscussCompleteness() DiscussCompleteness {
+	completenessEnabled := e.cfg != nil && e.cfg.Features.DiscussCompleteness
+	if !completenessEnabled {
+		return DiscussCompleteness{Score: 100}
+	}
+
+	goal := ""
+	project, err := e.sessionMgr.LoadProject(e.sessionID)
+	if err == nil && project != nil {
+		goal = project.Goal
+	}
+
+	completeness := checkAnswerCompleteness(e.discussState.Questions, e.discussState.Answers, goal)
+
+	e.emit(DiscussCompletenessMsg{
+		Score:        completeness.Score,
+		MissingAreas: completeness.MissingAreas,
+	})
+
+	e.logger.Info("discuss completeness check",
+		"score", completeness.Score,
+		"answered", completeness.Answered,
+		"skipped", completeness.Skipped,
+		"missing", len(completeness.MissingAreas))
+
+	return completeness
+}
+
+// GenerateFollowUpsIfNeeded creates follow-up questions when answers are incomplete.
+// Called by the TUI after CheckDiscussCompleteness if score is low.
+func (e *Engine) GenerateFollowUpsIfNeeded(ctx context.Context) ([]string, error) {
+	goal := ""
+	project, err := e.sessionMgr.LoadProject(e.sessionID)
+	if err == nil && project != nil {
+		goal = project.Goal
+	}
+
+	completeness := checkAnswerCompleteness(e.discussState.Questions, e.discussState.Answers, goal)
+	if !e.shouldGenerateFollowUps(completeness) {
+		return nil, nil
+	}
+
+	return e.generateFollowUps(ctx, goal, e.discussState.Questions, e.discussState.Answers)
+}
+
+// countDiscussIssues returns blocker and warning counts from discuss issues.
+func countDiscussIssues(issues []DiscussIssue) (blockers, warnings int) {
+	for _, i := range issues {
+		if i.Severity == "blocker" {
+			blockers++
+		} else {
+			warnings++
+		}
+	}
+	return
+}
+
 // buildDiscussContext creates the message list for the discuss phase.
+// Injects code intelligence and file listing for richer context.
 func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 	var messages []m31types.Message
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.Discuss)})
@@ -122,9 +238,20 @@ func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 		framework = project.Framework
 	}
 
-	// The system prompt (discuss-questions.md) already instructs the model on question format.
-	// The user message supplies only the project context so the model can generate relevant questions.
 	userCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s", goal, projectType, framework)
+
+	// Inject file listing so the LLM can see what's already in the codebase
+	fileSchema := listCwdFiles(e.workDir)
+	if fileSchema != "" {
+		userCtx += "\n\n## Existing Files\n" + fileSchema
+	}
+
+	// Inject code intelligence summary so the LLM knows the codebase structure
+	if ci := e.getCodeIntel(context.Background()); ci != nil {
+		if summary := ci.ProjectSummary(2000); summary != "" {
+			userCtx += "\n" + summary
+		}
+	}
 
 	// Inform the model if answers have already been captured so it doesn't repeat covered ground.
 	if project != nil && len(project.Answers) > 0 {
