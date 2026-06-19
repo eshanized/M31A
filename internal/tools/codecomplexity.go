@@ -77,6 +77,11 @@ func (t *CodeComplexity) ParameterSchema() string {
 				"type": "array",
 				"items": {"type": "string"},
 				"description": "Additional directories to skip during analysis. Merged with default skip list."
+			},
+			"extensions": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "File extensions to analyze (default: Go only). E.g. ['*.go', '*.py', '*.js', '*.ts']"
 			}
 		},
 		"required": []
@@ -89,7 +94,23 @@ func (t *CodeComplexity) Execute(ctx context.Context, input types.ToolInput) (ty
 	// Merge default skip dirs with any provided via params.
 	skip := t.effectiveSkipDirs(input)
 
-	report, err := t.analyze(ctx, skip)
+	// Parse extensions parameter
+	var extensions []string
+	if extRaw, ok := input.Params["extensions"]; ok {
+		if extArr, ok := extRaw.([]any); ok {
+			for _, v := range extArr {
+				if s, ok := v.(string); ok && s != "" {
+					// Normalize: ensure extension starts with dot
+					if s[0] != '.' {
+						s = "." + s
+					}
+					extensions = append(extensions, s)
+				}
+			}
+		}
+	}
+
+	report, err := t.analyze(ctx, skip, extensions)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
 	}
@@ -124,9 +145,20 @@ func (t *CodeComplexity) effectiveSkipDirs(input types.ToolInput) map[string]boo
 }
 
 // analyze walks the workDir and computes the complexity report.
-func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool) (*ComplexityReport, error) {
+func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool, extensions []string) (*ComplexityReport, error) {
 	// Always skip .m31a-worktrees
 	skipDirs[".m31a-worktrees"] = true
+
+	// Default to Go files if no extensions specified
+	if len(extensions) == 0 {
+		extensions = []string{".go"}
+	}
+
+	// Build extension lookup set
+	extSet := make(map[string]bool, len(extensions))
+	for _, ext := range extensions {
+		extSet[ext] = true
+	}
 
 	report := &ComplexityReport{}
 	pkgMap := make(map[string]*PackageStat) // directory path → stats
@@ -160,13 +192,23 @@ func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool) 
 			return nil
 		}
 
-		// Only analyze .go files
-		if !strings.HasSuffix(d.Name(), ".go") {
+		// Check file extension
+		matched := false
+		for ext := range extSet {
+			if strings.HasSuffix(d.Name(), ext) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			return nil
 		}
 
-		// Skip test files
-		if strings.HasSuffix(d.Name(), "_test.go") {
+		// Skip test files (common convention across languages)
+		name := d.Name()
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".test.js") ||
+			strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, "_test.py") ||
+			strings.Contains(name, ".spec.") {
 			return nil
 		}
 
