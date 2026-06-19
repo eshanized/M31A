@@ -11,7 +11,7 @@ import (
 
 func TestAgent_NewAgent(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	if a == nil {
 		t.Fatal("expected non-nil agent")
 	}
@@ -19,12 +19,12 @@ func TestAgent_NewAgent(t *testing.T) {
 
 func TestAgent_IsChildField(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, true)
+	a := NewAgent(nil, true, 1)
 	if !a.isChild {
 		t.Error("expected isChild to be true")
 	}
 
-	b := NewAgent(nil, false)
+	b := NewAgent(nil, false, 0)
 	if b.isChild {
 		t.Error("expected isChild to be false")
 	}
@@ -32,7 +32,7 @@ func TestAgent_IsChildField(t *testing.T) {
 
 func TestAgent_Execute_InvalidIsolation(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -52,7 +52,7 @@ func TestAgent_Execute_InvalidIsolation(t *testing.T) {
 
 func TestAgent_SchemaValidity(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	schema := a.ParameterSchema()
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(schema), &parsed); err != nil {
