@@ -71,6 +71,14 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		return types.ToolResult{}, fmt.Errorf("parameter command must be a string: %w", m31errors.ErrToolExecution)
 	}
 
+	// Check for dangerous commands before execution
+	if reason, blocked := checkDangerousCommand(command); blocked {
+		return types.ToolResult{}, types.NewToolError(
+			fmt.Errorf("command blocked: %s", reason),
+			"Modify the command to avoid destructive patterns. If this is intentional, use a more specific command.",
+		)
+	}
+
 	timeoutSec := int(types.BashTimeout.Seconds())
 	if customRaw, ok := input.Params["timeout"]; ok {
 		if customFloat, ok := customRaw.(float64); ok {
@@ -342,4 +350,52 @@ func isBinary(s string) bool {
 		}
 	}
 	return false
+}
+
+// dangerousCommandPatterns lists shell command patterns that should be blocked
+// as a defense-in-depth measure. These are patterns that could cause catastrophic
+// damage if executed accidentally or by a compromised LLM.
+var dangerousCommandPatterns = []struct {
+	pattern string
+	reason  string
+}{
+	{"rm -rf /", "recursive delete of root filesystem"},
+	{"rm -rf /*", "recursive delete of root filesystem"},
+	{"rm -fr /", "recursive delete of root filesystem"},
+	{"rm -fr /*", "recursive delete of root filesystem"},
+	{":(){ :|:& };:", "fork bomb"},
+	{"mkfs", "filesystem formatting"},
+	{"dd if=", "raw disk write"},
+	{"dd of=/dev/", "raw disk write to device"},
+	{"> /dev/sda", "raw disk overwrite"},
+	{"chmod -R 777 /", "recursive permission change on root"},
+	{"chmod -R 777 /*", "recursive permission change on root"},
+	{"chown -R", "recursive ownership change"},
+	{"curl | sh", "piping remote code to shell"},
+	{"curl | bash", "piping remote code to shell"},
+	{"wget | sh", "piping remote code to shell"},
+	{"wget | bash", "piping remote code to shell"},
+	{"shutdown", "system shutdown"},
+	{"reboot", "system reboot"},
+	{"halt", "system halt"},
+	{"init 0", "system shutdown"},
+	{"init 6", "system reboot"},
+	{"systemctl stop", "stopping system services"},
+	{"killall", "killing all processes"},
+	{"pkill -9", "force killing processes"},
+	{"> /etc/", "writing to system config directory"},
+	{"mv / ", "moving to root filesystem"},
+	{"mv /* ", "moving from root filesystem"},
+}
+
+// checkDangerousCommand checks if a command matches any dangerous patterns.
+// Returns the reason and true if blocked, or empty string and false if allowed.
+func checkDangerousCommand(command string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(command))
+	for _, dp := range dangerousCommandPatterns {
+		if strings.Contains(normalized, dp.pattern) {
+			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
+		}
+	}
+	return "", false
 }
