@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -47,6 +48,24 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// Create runner to get summary
 	runner := taskrunner.New(tasks)
 	total, done, failed, skipped := runner.Summary()
+
+	// ── Pre-ship checklist ────────────────────────────────────────────────
+	preflightEnabled := e.cfg != nil && e.cfg.Features.ShipPreflight
+	if preflightEnabled {
+		preflight := e.runShipPreflight(tasks)
+		e.emit(ShipPreflightMsg{
+			Passed: preflight.Passed,
+			Issues: preflight.Issues,
+		})
+		if !preflight.Passed {
+			e.logger.Warn("ship preflight found blocking issues", "count", len(preflight.Issues))
+			for _, issue := range preflight.Issues {
+				e.logger.Warn("preflight issue", "issue", issue)
+			}
+		} else if len(preflight.Issues) > 0 {
+			e.logger.Info("ship preflight: warnings only", "count", len(preflight.Issues))
+		}
+	}
 
 	// 2. Final git commit — ship commits files touched by the workflow.
 	// Collect file paths from tasks to scope the commit.
@@ -186,6 +205,24 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.emit(DemonstrationReadyMsg{Content: demonstration})
 	}
 
+	// ── Changelog generation ──────────────────────────────────────────────
+	changelogEnabled := e.cfg != nil && e.cfg.Features.ShipChangelog
+	if changelogEnabled {
+		changelogContent := e.generateChangelog(tasks, commits)
+		if changelogContent != "" {
+			changelogPath := filepath.Join(filepath.Dir(e.planningDir), "CHANGELOG_SESSION.md")
+			if writeErr := os.WriteFile(changelogPath, []byte(changelogContent), m31types.FilePermission); writeErr != nil {
+				e.logger.Warn("failed to write changelog", "error", writeErr)
+			} else {
+				e.logger.Info("changelog written", "path", changelogPath)
+			}
+			e.emit(ShipChangelogMsg{
+				Content: changelogContent,
+				Entries: len(tasks),
+			})
+		}
+	}
+
 	// Append session learnings to MEMORY.md for cross-session recall
 	sessionDir := filepath.Dir(e.planningDir)
 	memPath := filepath.Join(sessionDir, "MEMORY.md")
@@ -239,8 +276,14 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	memEntry += fmt.Sprintf("- Duration: %s\n", duration.Round(time.Second))
 
 	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
-		if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
-			e.logger.Warn("memory write failed", "error", writeErr)
+		// Use flock to prevent interleaved writes from concurrent sessions.
+		if lockErr := syscall.Flock(int(memFile.Fd()), syscall.LOCK_EX); lockErr == nil {
+			if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
+				e.logger.Warn("memory write failed", "error", writeErr)
+			}
+			_ = syscall.Flock(int(memFile.Fd()), syscall.LOCK_UN)
+		} else {
+			e.logger.Warn("memory file lock failed", "error", lockErr)
 		}
 		_ = memFile.Close()
 	}
