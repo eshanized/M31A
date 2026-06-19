@@ -106,8 +106,8 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	data = strings.Join(dataParts, "\n")
 	if strings.TrimSpace(data) == "" {
 		// Empty data line (keep-alive or empty event) — skip to next SSE event
-		// instead of returning an error or empty string that would fail JSON parsing.
-		return "", "", nil
+		// by recursing into Next() so the caller never sees a nil result.
+		return p.Next()
 	}
 	return eventType, data, nil
 }

@@ -231,19 +231,17 @@ func TestBaseClient_MakeIterator(t *testing.T) {
 
 func TestBaseClient_MakeIterator_EmptyData(t *testing.T) {
 	t.Parallel()
-	// Send an event with only event type but no data lines
+	// Send an event with only event type but no data lines, followed by EOF.
+	// The parser now recursively skips empty events, so this results in EOF.
 	resp := bodyReader("event: ping\n\n")
 	sse := NewSSEParser(resp)
 
 	c := NewBaseClient("", "", "", 0, 0, 0, 0)
 	iter := c.MakeIterator(sse, "any/model")
 
-	chunk, err := iter.Next()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if chunk != nil {
-		t.Errorf("expected nil chunk for empty data, got %+v", chunk)
+	_, err := iter.Next()
+	if err == nil {
+		t.Fatal("expected EOF for empty event stream, got nil error")
 	}
 }
 
@@ -839,22 +837,14 @@ func TestSSEParser_KeepAlive(t *testing.T) {
 	p := NewSSEParser(resp)
 	defer p.Close()
 
-	// First event is the keep-alive comment (empty data)
+	// The parser now recursively skips keep-alive events, so the first
+	// call to Next() returns the actual data event directly.
 	_, data1, err := p.Next()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if data1 != "" {
-		t.Errorf("expected empty data for comment event, got %q", data1)
-	}
-
-	// Second event has the actual data
-	_, data2, err := p.Next()
-	if err != nil {
-		t.Fatalf("unexpected error on second event: %v", err)
-	}
-	if data2 != `{"ok":true}` {
-		t.Errorf("data = %q, want %q", data2, `{"ok":true}`)
+	if data1 != `{"ok":true}` {
+		t.Errorf("data = %q, want %q", data1, `{"ok":true}`)
 	}
 }
 
