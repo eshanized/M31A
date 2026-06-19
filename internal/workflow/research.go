@@ -50,17 +50,17 @@ func (e *Engine) buildResearchContext(goal string) []m31types.Message {
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
 	// Project info
 	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
 	if projErr == nil && project != nil {
-		userCtx.WriteString(fmt.Sprintf("## Project Context\nType: %s\nFramework: %s\n\n",
-			project.ProjectType, project.Framework))
+		fmt.Fprintf(&userCtx, "## Project Context\nType: %s\nFramework: %s\n\n",
+			project.ProjectType, project.Framework)
 		if len(project.Answers) > 0 {
 			userCtx.WriteString("## Discuss Phase Answers\n")
 			for q, a := range project.Answers {
-				userCtx.WriteString(fmt.Sprintf("- Q: %s → A: %s\n", q, a))
+				fmt.Fprintf(&userCtx, "- Q: %s → A: %s\n", q, a)
 			}
 			userCtx.WriteString("\n")
 		}

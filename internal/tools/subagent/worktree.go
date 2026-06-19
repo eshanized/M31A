@@ -96,7 +96,7 @@ func Sweep(ctx context.Context, parentWorkDir string) error {
 	if !g.IsRepo() {
 		return nil
 	}
-	out, err := g.Run("worktree", "list", "--porcelain")
+	_, err := g.Run("worktree", "list", "--porcelain")
 	if err != nil {
 		slog.Warn("failed to list git worktrees for sweep", "error", err)
 		return nil
@@ -105,7 +105,7 @@ func Sweep(ctx context.Context, parentWorkDir string) error {
 	_, _ = g.Run("worktree", "prune")
 
 	// Re-read after prune to get the accurate live set.
-	out, err = g.Run("worktree", "list", "--porcelain")
+	out, err := g.Run("worktree", "list", "--porcelain")
 	if err != nil {
 		out = "" // best-effort; proceed with empty set
 	}

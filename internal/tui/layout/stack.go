@@ -135,22 +135,3 @@ func RenderModalOverlay(base string, modal string, width, height int, t theme.Th
 	return strings.Join(dimmedLines, "\n")
 }
 
-// stripANSI removes ANSI escape sequences from a string.
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEsc := false
-	for _, r := range s {
-		if inEsc {
-			if r == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEsc = true
-			continue
-		}
-		out.WriteRune(r)
-	}
-	return out.String()
-}

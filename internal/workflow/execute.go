@@ -59,10 +59,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	preflightEnabled := e.cfg != nil && e.cfg.Features.ExecutePreflight
 	if preflightEnabled {
 		preflight := e.runExecutePreflight(tasks)
-		e.emit(ExecutePreflightMsg{
-			Passed: preflight.Passed,
-			Issues: preflight.Issues,
-		})
+		e.emit(ExecutePreflightMsg(preflight))
 		if !preflight.Passed {
 			e.logger.Warn("execute preflight found issues", "count", len(preflight.Issues))
 			for _, issue := range preflight.Issues {

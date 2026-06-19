@@ -152,14 +152,14 @@ func formatVerifyReport(report VerifyReport) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Verification Report\n\n")
-	sb.WriteString(fmt.Sprintf("**Session:** %s  \n", report.SessionID))
-	sb.WriteString(fmt.Sprintf("**Timestamp:** %s  \n", report.Timestamp.Format("2006-01-02 15:04:05")))
+	fmt.Fprintf(&sb, "**Session:** %s  \n", report.SessionID)
+	fmt.Fprintf(&sb, "**Timestamp:** %s  \n", report.Timestamp.Format("2006-01-02 15:04:05"))
 
 	passRate := 0
 	if report.Total > 0 {
 		passRate = (report.Passed * 100) / report.Total
 	}
-	sb.WriteString(fmt.Sprintf("**Pass Rate:** %d%% (%d/%d)\n\n", passRate, report.Passed, report.Total))
+	fmt.Fprintf(&sb, "**Pass Rate:** %d%% (%d/%d)\n\n", passRate, report.Passed, report.Total)
 
 	// Per-task results
 	sb.WriteString("## Task Results\n\n")
@@ -178,7 +178,7 @@ func formatVerifyReport(report VerifyReport) string {
 				buildIcon = "✗"
 			}
 		}
-		testIcon := "-"
+		var testIcon string
 		if r.TestsOK {
 			testIcon = "✓"
 		} else if !r.BuildOK {
@@ -191,8 +191,8 @@ func formatVerifyReport(report VerifyReport) string {
 		if len(desc) > 50 {
 			desc = desc[:47] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s | %s |\n",
-			r.TaskID, desc, fileIcon, buildIcon, testIcon, r.Status))
+		fmt.Fprintf(&sb, "| %d | %s | %s | %s | %s | %s |\n",
+			r.TaskID, desc, fileIcon, buildIcon, testIcon, r.Status)
 	}
 
 	// Errors
@@ -207,7 +207,7 @@ func formatVerifyReport(report VerifyReport) string {
 		sb.WriteString("\n## Errors\n\n")
 		for _, r := range report.Results {
 			for _, err := range r.Errors {
-				sb.WriteString(fmt.Sprintf("- **Task %d:** %s\n", r.TaskID, err))
+				fmt.Fprintf(&sb, "- **Task %d:** %s\n", r.TaskID, err)
 			}
 		}
 	}
@@ -216,8 +216,8 @@ func formatVerifyReport(report VerifyReport) string {
 	if len(report.Security) > 0 {
 		sb.WriteString("\n## Security Findings\n\n")
 		for _, f := range report.Security {
-			sb.WriteString(fmt.Sprintf("- **[%s]** %s:%d — %s (`%s`)\n",
-				strings.ToUpper(f.Severity), f.File, f.Line, f.Message, f.Pattern))
+			fmt.Fprintf(&sb, "- **[%s]** %s:%d — %s (`%s`)\n",
+				strings.ToUpper(f.Severity), f.File, f.Line, f.Message, f.Pattern)
 		}
 	}
 
@@ -225,7 +225,7 @@ func formatVerifyReport(report VerifyReport) string {
 	if len(report.ManualSteps) > 0 {
 		sb.WriteString("\n## Manual Verification Steps\n\n")
 		for _, step := range report.ManualSteps {
-			sb.WriteString(fmt.Sprintf("- [ ] %s\n", step))
+			fmt.Fprintf(&sb, "- [ ] %s\n", step)
 		}
 	}
 

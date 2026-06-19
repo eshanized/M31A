@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -91,7 +90,7 @@ func (e *Engine) buildCheckContext(plan *m31types.Plan, goal string) []m31types.
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 	userCtx.WriteString("## Plan to Review\n\n")
 	userCtx.WriteString(plan.RawMarkdown)
 	userCtx.WriteString("\n\n## Task List\n")
@@ -109,7 +108,7 @@ func (e *Engine) buildRevisionContext(plan *m31types.Plan, issues []PlanIssue, g
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
 	userCtx.WriteString("## Checker Issues to Fix\n\n")
 	for _, issue := range issues {
@@ -117,8 +116,8 @@ func (e *Engine) buildRevisionContext(plan *m31types.Plan, issues []PlanIssue, g
 		if issue.TaskID > 0 {
 			taskRef = fmt.Sprintf("Task %d: ", issue.TaskID)
 		}
-		userCtx.WriteString(fmt.Sprintf("- [%s] %s%s — %s\n",
-			issue.Severity, taskRef, issue.Category, issue.Message))
+		fmt.Fprintf(&userCtx, "- [%s] %s%s — %s\n",
+			issue.Severity, taskRef, issue.Category, issue.Message)
 	}
 
 	userCtx.WriteString("\n## Current Plan\n\n")
@@ -220,12 +219,3 @@ func isPlanCheckStalled(current, previous int) bool {
 	return previous > 0 && current >= previous
 }
 
-// formatIssuesForPrompt converts a list of PlanIssues to a JSON representation
-// suitable for injection into LLM context.
-func formatIssuesForPrompt(issues []PlanIssue) string {
-	data, err := json.MarshalIndent(issues, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%v", issues)
-	}
-	return string(data)
-}

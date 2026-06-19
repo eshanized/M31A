@@ -109,31 +109,32 @@ func (e *Engine) generateChangelog(tasks []m31types.Task, commits []git.CommitIn
 
 	// Write entries grouped by category
 	for cat, catTasks := range categories {
-		sb.WriteString(fmt.Sprintf("### %s\n\n", cat))
+		fmt.Fprintf(&sb, "### %s\n\n", cat)
 		for _, task := range catTasks {
 			icon := "✨"
-			switch {
-			case task.Status == m31types.StatusDone:
+			switch task.Status {
+			case m31types.StatusDone:
 				icon = "✅"
-			case task.Status == m31types.StatusFailed:
+			case m31types.StatusFailed:
 				icon = "❌"
-			case task.Status == m31types.StatusSkipped:
+			case m31types.StatusSkipped:
 				icon = "⏭️"
 			}
 
 			actionLower := strings.ToLower(task.Action)
 			prefix := "Changed"
-			if actionLower == "create" || actionLower == "add" {
+			switch actionLower {
+			case "create", "add":
 				prefix = "Added"
-			} else if actionLower == "delete" || actionLower == "remove" {
+			case "delete", "remove":
 				prefix = "Removed"
-			} else if actionLower == "fix" {
+			case "fix":
 				prefix = "Fixed"
 			}
 
-			sb.WriteString(fmt.Sprintf("- %s **%s** %s", icon, prefix, task.Description))
+			fmt.Fprintf(&sb, "- %s **%s** %s", icon, prefix, task.Description)
 			if len(task.Files) > 0 {
-				sb.WriteString(fmt.Sprintf(" (`%s`)", strings.Join(task.Files[:min(3, len(task.Files))], "`, `")))
+				fmt.Fprintf(&sb, " (`%s`)", strings.Join(task.Files[:min(3, len(task.Files))], "`, `"))
 			}
 			sb.WriteString("\n")
 		}
@@ -148,7 +149,7 @@ func (e *Engine) generateChangelog(tasks []m31types.Task, commits []git.CommitIn
 			if len(hash) > 7 {
 				hash = hash[:7]
 			}
-			sb.WriteString(fmt.Sprintf("- `%s` %s\n", hash, c.Message))
+			fmt.Fprintf(&sb, "- `%s` %s\n", hash, c.Message)
 		}
 	}
 

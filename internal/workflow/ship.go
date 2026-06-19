@@ -53,10 +53,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	preflightEnabled := e.cfg != nil && e.cfg.Features.ShipPreflight
 	if preflightEnabled {
 		preflight := e.runShipPreflight(tasks)
-		e.emit(ShipPreflightMsg{
-			Passed: preflight.Passed,
-			Issues: preflight.Issues,
-		})
+		e.emit(ShipPreflightMsg(preflight))
 		if !preflight.Passed {
 			e.logger.Warn("ship preflight found blocking issues", "count", len(preflight.Issues))
 			for _, issue := range preflight.Issues {

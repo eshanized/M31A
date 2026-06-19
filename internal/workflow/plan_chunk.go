@@ -109,12 +109,12 @@ func (e *Engine) buildOutlineContext(ctx context.Context, goal string) []m31type
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
 	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
 	if projErr == nil && project != nil {
-		userCtx.WriteString(fmt.Sprintf("## Project Context\nType: %s\nFramework: %s\n\n",
-			project.ProjectType, project.Framework))
+		fmt.Fprintf(&userCtx, "## Project Context\nType: %s\nFramework: %s\n\n",
+			project.ProjectType, project.Framework)
 	}
 
 	fileSchema := listCwdFiles(e.workDir)
@@ -150,9 +150,9 @@ func (e *Engine) buildWaveExpandContext(outline *PlanOutline, wave *WaveOutline,
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
-	userCtx.WriteString(fmt.Sprintf("## Expanding Wave %d of %d\n\n", wave.Wave, len(outline.Waves)))
+	fmt.Fprintf(&userCtx, "## Expanding Wave %d of %d\n\n", wave.Wave, len(outline.Waves))
 
 	userCtx.WriteString("### Tasks in this wave:\n")
 	for _, stub := range wave.Tasks {
@@ -164,8 +164,8 @@ func (e *Engine) buildWaveExpandContext(outline *PlanOutline, wave *WaveOutline,
 			}
 			deps = strings.Join(depStrs, ", ")
 		}
-		userCtx.WriteString(fmt.Sprintf("- Task %d: [%s] %s (deps: %s, category: %s)\n",
-			stub.ID, stub.Action, stub.Description, deps, stub.Category))
+		fmt.Fprintf(&userCtx, "- Task %d: [%s] %s (deps: %s, category: %s)\n",
+			stub.ID, stub.Action, stub.Description, deps, stub.Category)
 	}
 
 	userCtx.WriteString("\n## Instructions\n")

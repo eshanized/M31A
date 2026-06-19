@@ -62,13 +62,7 @@ func (e *Engine) runInitialize(ctx context.Context, goal string) (*PhaseResult, 
 	preflightEnabled := e.cfg != nil && e.cfg.Features.InitPreflight
 	if preflightEnabled {
 		preflight := e.runEnvironmentPreflight()
-		e.emit(InitPreflightMsg{
-			Passed:         preflight.Passed,
-			RuntimeVersion: preflight.RuntimeVersion,
-			DiskSpaceOK:    preflight.DiskSpaceOK,
-			GitRemoteOK:    preflight.GitRemoteOK,
-			Issues:         preflight.Issues,
-		})
+		e.emit(InitPreflightMsg(preflight))
 		if !preflight.Passed {
 			e.logger.Warn("environment preflight found issues", "issues", preflight.Issues)
 		}

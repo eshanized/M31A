@@ -469,7 +469,7 @@ func (e *Engine) runEnvironmentPreflight() PreflightCheck {
 			check.DiskSpaceOK = false
 		} else {
 			check.DiskSpaceOK = true
-			os.Remove(tmpFile)
+			_ = os.Remove(tmpFile)
 		}
 	}
 

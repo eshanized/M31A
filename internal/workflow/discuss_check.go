@@ -255,7 +255,7 @@ func (e *Engine) buildFollowUpContext(goal string, questions []string, answers m
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
-	userCtx.WriteString(fmt.Sprintf("## Goal\n%s\n\n", goal))
+	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
 	userCtx.WriteString("## Original Questions and Answers\n\n")
 	for i, q := range questions {
@@ -263,14 +263,14 @@ func (e *Engine) buildFollowUpContext(goal string, questions []string, answers m
 		if a, ok := answers[i]; ok && strings.TrimSpace(a) != "" {
 			ans = a
 		}
-		userCtx.WriteString(fmt.Sprintf("%d. **Q:** %s\n   **A:** %s\n\n", i+1, q, ans))
+		fmt.Fprintf(&userCtx, "%d. **Q:** %s\n   **A:** %s\n\n", i+1, q, ans)
 	}
 
 	completeness := checkAnswerCompleteness(questions, answers, goal)
 	if len(completeness.MissingAreas) > 0 {
 		userCtx.WriteString("## Areas Not Yet Covered\n")
 		for _, area := range completeness.MissingAreas {
-			userCtx.WriteString(fmt.Sprintf("- %s\n", area))
+			fmt.Fprintf(&userCtx, "- %s\n", area)
 		}
 		userCtx.WriteString("\n")
 	}

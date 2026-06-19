@@ -391,7 +391,7 @@ func (e *Engine) runChunkedPlan(ctx context.Context, goal string) ([]m31types.Ta
 // composeChunkedPlanMarkdown builds a plan document from the outline and expanded tasks.
 func composeChunkedPlanMarkdown(outline *PlanOutline, tasks []m31types.Task, sections []string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# %s\n\n", outline.Title))
+	fmt.Fprintf(&sb, "# %s\n\n", outline.Title)
 	sb.WriteString("## Summary\n\nGenerated via chunked planning mode.\n\n")
 	sb.WriteString("## Task List\n\n```json\n")
 	taskJSON, _ := json.MarshalIndent(tasks, "", "  ")

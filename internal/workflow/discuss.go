@@ -129,7 +129,7 @@ func (e *Engine) retryDiscussQuestions(ctx context.Context, goal string, origina
 	feedback.WriteString("The following questions were generated but have quality issues:\n\n")
 	for _, issue := range issues {
 		if issue.Severity == "blocker" {
-			feedback.WriteString(fmt.Sprintf("- %s\n", issue.Message))
+			fmt.Fprintf(&feedback, "- %s\n", issue.Message)
 		}
 	}
 	feedback.WriteString("\nPlease regenerate the questions, fixing the issues above. Keep the same format (numbered, with suggested defaults).")
