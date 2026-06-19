@@ -25,15 +25,54 @@ func (m *AppState) View() string {
 		return ""
 	}
 
+	// Visual screen transition: composite old → new frame with slide/fade
+	if m.transition != nil && m.transition.Active {
+		// Render the new (target) screen frame
+		prevFrame := m.transition.PrevFrame
+		// Temporarily switch screen to render target
+		savedScreen := m.screen
+		m.screen = m.transition.ToScreen
+		defer func() { m.screen = savedScreen }()
+		nextFrame := m.renderFrame()
+		m.screen = savedScreen
+
+		progress := m.transition.Progress()
+		t := m.themeManager.Current()
+		return RenderTransition(prevFrame, nextFrame, progress, m.transition.Type, m.width, m.height, t)
+	}
+
 	t := m.themeManager.Current()
 
-	// Command palette overlay (rendered on top of everything)
+	return m.renderFrameWithTheme(t)
+}
+
+// renderFrame renders the full frame for the current screen.
+// Used by the transition system to capture the target screen.
+func (m *AppState) renderFrame() string {
+	t := m.themeManager.Current()
+	return m.renderFrameWithTheme(t)
+}
+
+// renderFrameWithTheme renders the full frame with the given theme.
+func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 	if m.cmdPalette != nil && m.cmdPalette.IsOpen() {
 		return m.cmdPalette.View()
 	}
 
 	// Permission/question modal (top priority overlay)
 	if m.screen == ScreenPermission {
+		// Render dimmed background behind the modal
+		bgFrame := ""
+		if m.replModel != nil {
+			chrome := layout.PageChrome{Width: m.width, Height: m.height}
+			m.ensureReplModel()
+			m.syncReplSize(chrome)
+			bgFrame = m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
+		}
+		if bgFrame != "" {
+			modalContent := m.renderPermissionModalContent()
+			return layout.RenderModalOverlay(bgFrame, modalContent, m.width, m.height, t)
+		}
 		return m.renderPermissionModal()
 	}
 
@@ -661,6 +700,35 @@ func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string 
 	}
 	m.commandPaletteScreenModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.commandPaletteScreenModel.View()
+}
+
+// renderPermissionModalContent returns the modal card without centering,
+// for use with RenderModalOverlay.
+func (m *AppState) renderPermissionModalContent() string {
+	if m.questionRequest != nil {
+		return m.renderQuestionModal()
+	}
+	if m.permRequest == nil {
+		return ""
+	}
+
+	modalWidth := m.permModalWidth
+	if modalWidth < 40 {
+		modalWidth = 60
+	}
+	if modalWidth > m.width-4 {
+		modalWidth = m.width - 4
+	}
+	if modalWidth < 20 {
+		modalWidth = 20
+	}
+
+	if m.permModal != nil {
+		return m.permModal.Render(modalWidth, 0)
+	}
+
+	t := m.themeManager.Current()
+	return RenderPermissionModal(m.permRequest, m.permCountdown, modalWidth, m.width, m.height, t, m.permCountdown < 5, string(m.workflowPhase), m.workflowGoal)
 }
 
 // renderPermissionModal renders the permission or question overlay.
