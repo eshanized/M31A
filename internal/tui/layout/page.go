@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -15,6 +16,7 @@ type HeaderInfo struct {
 	Provider   string // provider short name (OR, ZEN)
 	CtxUsed    int    // context tokens used
 	CtxTotal   int    // context tokens total
+	CtxHistory []int  // recent context usage readings for sparkline
 }
 
 // FooterInfo carries the data needed to render the unified footer.
@@ -111,7 +113,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 		var parts []string
 		// Context meter — show when usage is meaningful
 		if info.CtxTotal > 0 && info.CtxUsed > 0 {
-			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, t)
+			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, info.CtxHistory, t)
 			if ctxMeter != "" {
 				parts = append(parts, ctxMeter)
 			}
@@ -164,7 +166,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 
 // renderContextMeter renders a compact inline context usage bar for the header.
 // Returns empty string when usage is low or total is unknown.
-func renderContextMeter(used, total int, t theme.Theme) string {
+func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 	if total <= 0 || used <= 0 {
 		return ""
 	}
@@ -195,7 +197,19 @@ func renderContextMeter(used, total int, t theme.Theme) string {
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
 	pctLabel := intToStr(int(pct*100)) + "%"
-	return lipgloss.NewStyle().Foreground(ctxColor).Render(bar + " " + pctLabel)
+	result := lipgloss.NewStyle().Foreground(ctxColor).Render(bar + " " + pctLabel)
+
+	// Append sparkline of recent usage history
+	if len(history) > 1 {
+		sparkW := 5
+		if len(history) < sparkW {
+			sparkW = len(history)
+		}
+		spark := components.Sparkline{Values: history, Width: sparkW, Theme: t}
+		result += " " + spark.Render()
+	}
+
+	return result
 }
 
 // BuildFooter renders the unified 1-line footer bar.
