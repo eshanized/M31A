@@ -88,7 +88,8 @@ func (g *GitWorktrees) Remove(ctx context.Context, path string) error {
 	return nil
 }
 
-// Sweep removes every stale m31a/agent-* branch that no longer has a worktree.
+// Sweep removes every stale m31a/agent-* branch that no longer has a worktree
+// AND removes orphaned worktree directories that are no longer tracked by git.
 // Call this at startup to recover from crashes.
 func Sweep(ctx context.Context, parentWorkDir string) error {
 	g := git.New(parentWorkDir)
@@ -103,40 +104,68 @@ func Sweep(ctx context.Context, parentWorkDir string) error {
 	// Prune metadata first (clears references to deleted worktree dirs).
 	_, _ = g.Run("worktree", "prune")
 
-	// List branches matching the agent prefix and delete any whose worktree
-	// directory no longer exists.
-	branchesOut, err := g.Run("branch", "--list", "m31a/agent-*", "--format=%(refname:short)")
+	// Re-read after prune to get the accurate live set.
+	out, err = g.Run("worktree", "list", "--porcelain")
 	if err != nil {
+		out = "" // best-effort; proceed with empty set
+	}
+
+	liveBranches, livePaths := parseWorktreeList(out)
+
+	// Phase 1: delete orphaned m31a/agent-* branches that have no worktree dir.
+	branchesOut, err := g.Run("branch", "--list", "m31a/agent-*", "--format=%(refname:short)")
+	if err == nil {
+		for _, b := range strings.Split(strings.TrimSpace(branchesOut), "\n") {
+			b = strings.TrimSpace(b)
+			if b == "" {
+				continue
+			}
+			if liveBranches[b] {
+				continue
+			}
+			_, _ = g.Run("branch", "-D", b)
+		}
+	}
+
+	// Phase 2: remove orphaned worktree directories under .m31a-worktrees/
+	// that git no longer tracks.
+	root := (&GitWorktrees{}).rootFor(parentWorkDir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		// .m31a-worktrees/ doesn't exist — nothing to clean.
 		return nil
 	}
-	liveBranches := liveAgentBranches(out)
-	for _, b := range strings.Split(strings.TrimSpace(branchesOut), "\n") {
-		b = strings.TrimSpace(b)
-		if b == "" {
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		if liveBranches[b] {
+		dirPath := filepath.Join(root, entry.Name())
+		if livePaths[dirPath] {
 			continue
 		}
-		_, _ = g.Run("branch", "-D", b)
+		// Directory is not tracked by any live worktree — remove it.
+		slog.Info("sweep: removing orphaned worktree directory", "path", dirPath)
+		_ = os.RemoveAll(dirPath)
 	}
-	_ = ctx // reserved for future timeout control
 	return nil
 }
 
-// liveAgentBranches parses `git worktree list --porcelain` output and returns
-// the set of branches that currently have a worktree.
-func liveAgentBranches(porcelain string) map[string]bool {
-	set := make(map[string]bool)
+// parseWorktreeList parses `git worktree list --porcelain` output and returns
+// the set of live branches and the set of live worktree directory paths.
+func parseWorktreeList(porcelain string) (branches map[string]bool, paths map[string]bool) {
+	branches = make(map[string]bool)
+	paths = make(map[string]bool)
 	for _, line := range strings.Split(porcelain, "\n") {
-		if strings.HasPrefix(line, "branch ") {
+		if strings.HasPrefix(line, "worktree ") {
+			p := strings.TrimPrefix(line, "worktree ")
+			paths[p] = true
+		} else if strings.HasPrefix(line, "branch ") {
 			ref := strings.TrimPrefix(line, "branch ")
-			// ref looks like "refs/heads/m31a/agent-abc"; strip prefix.
 			ref = strings.TrimPrefix(ref, "refs/heads/")
-			set[ref] = true
+			branches[ref] = true
 		}
 	}
-	return set
+	return branches, paths
 }
 
 // parentRepoOf returns the root of the git repo that contains path (or the

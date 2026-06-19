@@ -34,9 +34,8 @@ func TestWorktreeBranchName_WithSuffix(t *testing.T) {
 	}
 }
 
-func TestLiveAgentBranches_AllBranches(t *testing.T) {
+func TestParseWorktreeList_AllBranchesAndPaths(t *testing.T) {
 	t.Parallel()
-	// liveAgentBranches returns ALL branches (not just agent branches)
 	porcelain := `worktree /path/to/wt1
 HEAD abc123
 branch refs/heads/m31a/agent-abc
@@ -47,7 +46,7 @@ worktree /path/to/wt3
 HEAD ghi789
 branch refs/heads/m31a/agent-def-fix
 `
-	branches := liveAgentBranches(porcelain)
+	branches, paths := parseWorktreeList(porcelain)
 	// The function returns ALL branches from porcelain output
 	if len(branches) != 3 {
 		t.Fatalf("expected 3 branches, got %d: %v", len(branches), branches)
@@ -60,6 +59,19 @@ branch refs/heads/m31a/agent-def-fix
 	}
 	if !branches["m31a/agent-def-fix"] {
 		t.Error("missing m31a/agent-def-fix")
+	}
+	// Verify paths are also parsed
+	if len(paths) != 3 {
+		t.Fatalf("expected 3 paths, got %d: %v", len(paths), paths)
+	}
+	if !paths["/path/to/wt1"] {
+		t.Error("missing /path/to/wt1")
+	}
+	if !paths["/path/to/wt2"] {
+		t.Error("missing /path/to/wt2")
+	}
+	if !paths["/path/to/wt3"] {
+		t.Error("missing /path/to/wt3")
 	}
 }
 

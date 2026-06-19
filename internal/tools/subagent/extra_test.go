@@ -57,7 +57,7 @@ func TestWorktreeBranchName(t *testing.T) {
 	}
 }
 
-func TestLiveAgentBranches(t *testing.T) {
+func TestParseWorktreeList(t *testing.T) {
 	t.Parallel()
 	porcelain := `worktree /path/to/worktree1
 HEAD abc123
@@ -66,32 +66,47 @@ worktree /path/to/worktree2
 HEAD def456
 branch refs/heads/m31a/agent-def-fix
 `
-	got := liveAgentBranches(porcelain)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 branches, got %d: %v", len(got), got)
+	branches, paths := parseWorktreeList(porcelain)
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d: %v", len(branches), branches)
 	}
-	if !got["m31a/agent-abc"] {
+	if !branches["m31a/agent-abc"] {
 		t.Error("missing m31a/agent-abc")
 	}
-	if !got["m31a/agent-def-fix"] {
+	if !branches["m31a/agent-def-fix"] {
 		t.Error("missing m31a/agent-def-fix")
 	}
-}
-
-func TestLiveAgentBranches_Empty(t *testing.T) {
-	t.Parallel()
-	got := liveAgentBranches("")
-	if len(got) != 0 {
-		t.Errorf("expected empty map, got %v", got)
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths, got %d: %v", len(paths), paths)
+	}
+	if !paths["/path/to/worktree1"] {
+		t.Error("missing /path/to/worktree1")
+	}
+	if !paths["/path/to/worktree2"] {
+		t.Error("missing /path/to/worktree2")
 	}
 }
 
-func TestLiveAgentBranches_NoBranches(t *testing.T) {
+func TestParseWorktreeList_Empty(t *testing.T) {
+	t.Parallel()
+	branches, paths := parseWorktreeList("")
+	if len(branches) != 0 {
+		t.Errorf("expected empty branches, got %v", branches)
+	}
+	if len(paths) != 0 {
+		t.Errorf("expected empty paths, got %v", paths)
+	}
+}
+
+func TestParseWorktreeList_NoBranches(t *testing.T) {
 	t.Parallel()
 	porcelain := "worktree /some/path\nHEAD abc123\n\n"
-	got := liveAgentBranches(porcelain)
-	if len(got) != 0 {
-		t.Errorf("expected empty map, got %v", got)
+	branches, paths := parseWorktreeList(porcelain)
+	if len(branches) != 0 {
+		t.Errorf("expected empty branches, got %v", branches)
+	}
+	if len(paths) != 1 {
+		t.Errorf("expected 1 path, got %d: %v", len(paths), paths)
 	}
 }
 
