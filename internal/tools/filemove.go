@@ -54,6 +54,10 @@ func (t *FileMove) ParameterSchema() string {
 func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
 
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("context cancelled: %w", err)
+	}
+
 	srcRaw, ok := input.Params["source"]
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("missing parameter: source")
