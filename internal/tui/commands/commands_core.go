@@ -240,14 +240,15 @@ func handleChat(_ []string, ctx CommandContext) CommandResult {
 	}
 }
 
-// handleFlush clears the screen and resets the view to the REPL without
-// clearing conversation messages.
+// handleFlush clears the terminal screen and scrolls to the top, preserving
+// conversation messages but giving a clean viewport.
 func handleFlush(_ []string, _ CommandContext) CommandResult {
-	screen := tuitypes.ScreenREPL
 	return CommandResult{
 		Success: true,
-		Screen:  &screen,
 		Message: "Screen flushed.",
+		Cmd: func() tea.Msg {
+			return tea.ClearScreen()
+		},
 	}
 }
 
