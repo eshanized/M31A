@@ -32,7 +32,8 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	return stack
 }
 
-// renderSingleToast renders one toast with a ThinBorder and colored left border.
+// renderSingleToast renders one toast as a card with rounded border, colored accent,
+// and depth-based shadow for stacking effect.
 func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) string {
 	var borderColor lipgloss.Color
 	switch toast.Type {
@@ -46,7 +47,6 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		borderColor = t.Brand
 	}
 
-	// Icon prefix
 	icon := ""
 	switch toast.Type {
 	case "success":
@@ -59,17 +59,14 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		icon = "● "
 	}
 
-	// Calculate slide-in offset based on frame
 	offset := 0
 	if toast.Frame < 2 {
 		offset = (2 - toast.Frame) * 10
 	}
 
-	// Create progress bar for auto-dismiss
 	progressBar := renderToastProgress(toast, t)
 
-	// Stack offset: each toast 2 cols narrower than one above
-	// Responsive width: scale with terminal, clamped to usable bounds
+	// Card width: front toast widest, each subsequent 2 cols narrower
 	contentWidth := 40 - (index * 2)
 	if toastWidth > 0 {
 		contentWidth = toastWidth/3 - (index * 2)
@@ -82,29 +79,36 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 	}
 
 	content := icon + toast.Text
-	if len(content) > contentWidth {
-		content = content[:contentWidth-3] + "..."
+	if lipgloss.Width(content) > contentWidth-2 {
+		content = content[:contentWidth-5] + "..."
 	}
 
+	// Rounded card with surface background
 	toastContent := lipgloss.NewStyle().
-		Border(theme.ThinBorder).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Foreground(t.TextPrimary).
+		Background(t.SurfaceElevated).
 		Width(contentWidth).
 		Render(content)
 
-	// Add progress bar below
 	if progressBar != "" {
 		toastContent += "\n" + progressBar
 	}
 
-	// Apply slide-in offset
 	if offset > 0 {
 		toastContent = lipgloss.NewStyle().PaddingLeft(offset).Render(toastContent)
 	}
 
-	toastContent = theme.RenderWithShadow(toastContent, t.ShadowColor, 1, 1)
+	// Depth-based shadow: front gets full shadow, deeper toasts get less
+	shadowDepth := 2 - index
+	if shadowDepth < 0 {
+		shadowDepth = 0
+	}
+	if shadowDepth > 0 {
+		toastContent = theme.RenderWithShadow(toastContent, t.ShadowColor, shadowDepth, shadowDepth)
+	}
 
 	return toastContent
 }
