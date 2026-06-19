@@ -742,7 +742,7 @@ func TestEngine_PreflightContextCheck(t *testing.T) {
 		{Role: "user", Content: longContent},
 	}
 
-	err := engine.preflightContextCheck(messages)
+	_, err := engine.preflightContextCheck(messages)
 	if err == nil {
 		t.Fatal("expected ErrContextExceeded, got nil")
 	}
@@ -766,7 +766,7 @@ func TestEngine_PreflightContextCheck_BelowThreshold(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	}
 
-	err := engine.preflightContextCheck(messages)
+	_, err := engine.preflightContextCheck(messages)
 	if err != nil {
 		t.Errorf("expected nil error for small context, got: %v", err)
 	}

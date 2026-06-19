@@ -926,7 +926,7 @@ func TestGitConfig_WithConfig(t *testing.T) {
 func TestPreflightContextCheck_NilTokens(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	engine.tokens = nil
-	err := engine.preflightContextCheck([]m31types.Message{
+	_, err := engine.preflightContextCheck([]m31types.Message{
 		{Role: "user", Content: "hello"},
 	})
 	if err != nil {
@@ -937,7 +937,7 @@ func TestPreflightContextCheck_NilTokens(t *testing.T) {
 func TestPreflightContextCheck_NilProvider(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	engine.provider = nil
-	err := engine.preflightContextCheck([]m31types.Message{
+	_, err := engine.preflightContextCheck([]m31types.Message{
 		{Role: "user", Content: "hello"},
 	})
 	if err != nil {
@@ -2461,7 +2461,7 @@ func TestPreflightContextCheck_WarningThreshold(t *testing.T) {
 		{Role: "user", Content: longContent},
 	}
 
-	err := engine.preflightContextCheck(messages)
+	_, err := engine.preflightContextCheck(messages)
 	if err != nil {
 		t.Errorf("expected nil for warning threshold, got: %v", err)
 	}
