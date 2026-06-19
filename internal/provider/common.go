@@ -48,17 +48,24 @@ func SetCommonHeaders(req *http.Request, apiKey string, version string) {
 }
 
 // IsContextExceeded checks if an HTTP error indicates context window overflow.
-// Only matches HTTP 400 with specific context-related patterns to avoid false positives.
-// Uses containsFold for case-insensitive matching without allocating a lowered copy (PV-6 fix).
+// Matches HTTP 400 and 413 with context-related patterns to avoid false positives.
+// Uses containsFold for case-insensitive matching without allocating a lowered copy.
 func IsContextExceeded(statusCode int, body string) bool {
-	if statusCode != http.StatusBadRequest {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusRequestEntityTooLarge {
 		return false
 	}
 	return containsFold(body, "context_length_exceeded") ||
 		containsFold(body, "maximum context length") ||
 		containsFold(body, "request too large") ||
 		containsFold(body, "context window exceeded") ||
-		(containsFold(body, "context_length") && containsFold(body, "exceed"))
+		containsFold(body, "context length") ||
+		containsFold(body, "too many tokens") ||
+		containsFold(body, "input.*exceeds") ||
+		containsFold(body, "token limit") ||
+		containsFold(body, "max tokens") ||
+		containsFold(body, "token_count") ||
+		(containsFold(body, "context_length") && containsFold(body, "exceed")) ||
+		(containsFold(body, "context") && containsFold(body, "limit"))
 }
 
 // containsFold reports whether s contains substr using case-insensitive comparison.
