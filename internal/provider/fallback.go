@@ -61,33 +61,45 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 		}(c)
 	}
 
-	// Collect results; return the first healthy provider in priority order.
-	// We track results and return based on the original candidate order.
+	// Collect results as they arrive, short-circuiting on the first live
+	// provider in priority order. Falls back to a slow provider if no live
+	// one is found after all results arrive.
 	results := make(map[string]types.HealthStatus, len(candidates))
+	var slowFallback string
 	for i := 0; i < len(candidates); i++ {
 		r := <-ch
 		results[r.name] = r.status
-	}
 
-	// Check candidates in original order for deterministic priority
-	for _, c := range candidates {
-		status, ok := results[c.name]
-		if !ok {
-			continue
-		}
-		if status.Status == "live" || status.Status == "slow" {
-			// Commit the switch now that we know it's healthy
-			if _, err := registry.TrySetActive(c.name); err != nil {
+		// Check priority order after each result arrives
+		for _, c := range candidates {
+			status, ok := results[c.name]
+			if !ok {
 				continue
 			}
-			reason := "fallback_live"
-			if status.Status == "slow" {
-				reason = "fallback_slow"
+			if status.Status == "live" {
+				cancel()
+				if _, err := registry.TrySetActive(c.name); err != nil {
+					continue
+				}
+				return c.name, &FallbackEvent{
+					From:   currentProvider,
+					To:     c.name,
+					Reason: "fallback_live",
+				}, nil
 			}
-			return c.name, &FallbackEvent{
+			if status.Status == "slow" && slowFallback == "" {
+				slowFallback = c.name
+			}
+		}
+	}
+
+	// No live provider found; use the first slow one if available
+	if slowFallback != "" {
+		if _, err := registry.TrySetActive(slowFallback); err == nil {
+			return slowFallback, &FallbackEvent{
 				From:   currentProvider,
-				To:     c.name,
-				Reason: reason,
+				To:     slowFallback,
+				Reason: "fallback_slow",
 			}, nil
 		}
 	}
