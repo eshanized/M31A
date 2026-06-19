@@ -222,29 +222,45 @@ func (m *Manager) Cleanup(ctx context.Context, id string) error {
 	return nil
 }
 
-// Shutdown cancels all subagents, waits for completion, and closes the event
-// channel. Safe to call once at application exit.
+// Shutdown cancels all subagents, waits for completion, cleans up their
+// worktrees, and closes the event channel. Safe to call once at application exit.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.CancelAll()
-	m.agents.Range(func(_, value any) bool {
-		<-value.(*Subagent).done
+	m.agents.Range(func(key, value any) bool {
+		sa := value.(*Subagent)
+		<-sa.done
+		// Clean up worktree so orphaned directories don't accumulate.
+		if sa.Info.Isolation == IsolationWorktree &&
+			sa.Info.Worktree != "" && sa.Info.Worktree != m.deps.WorkDir &&
+			m.deps.Worktrees != nil {
+			if err := m.deps.Worktrees.Remove(ctx, sa.Info.Worktree); err != nil {
+				m.deps.Logger.Warn("subagent: worktree cleanup failed on shutdown", "id", sa.Info.ID, "err", err)
+			}
+		}
+		m.agents.Delete(key)
 		return true
 	})
 	close(m.eventCh)
 }
 
-// emit delivers an event to the outbound channel. Lifecycle events block
-// briefly; verbose deltas are dropped when the channel is saturated.
+// emit delivers an event to the outbound channel. Lifecycle events that
+// trigger cleanup (Done, Error, Cancelled, Spawned) block with a generous
+// timeout to ensure the TUI has a chance to call Cleanup(). Text deltas
+// are dropped when the channel is saturated to avoid blocking the loop.
 func (m *Manager) emit(ev SubagentEvent) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now()
 	}
 	switch ev.Type {
 	case EventDone, EventError, EventCancelled, EventSpawned:
+		// These events trigger worktree cleanup in the TUI; dropping them
+		// would leak directories. Use a generous timeout (5s) so the
+		// consumer can keep up even under heavy load.
 		select {
 		case m.eventCh <- ev:
-		case <-time.After(500 * time.Millisecond):
-			m.deps.Logger.Warn("subagent: lifecycle event dropped", "type", ev.Type, "id", ev.AgentID)
+		case <-time.After(5 * time.Second):
+			m.deps.Logger.Warn("subagent: lifecycle event dropped (cleanup may be skipped)",
+				"type", ev.Type, "id", ev.AgentID)
 		}
 	default:
 		select {
