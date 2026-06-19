@@ -71,7 +71,7 @@ func (c *ModelCache) Get(id string) (*types.ModelInfo, bool) {
 		return nil, false
 	}
 	elapsed := time.Since(c.fetched)
-	if elapsed > c.ttl && elapsed > c.staleTTL {
+	if elapsed > c.staleTTL {
 		return nil, false
 	}
 	return model, true
