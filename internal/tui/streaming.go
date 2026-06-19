@@ -19,6 +19,7 @@ type (
 	AgentToolProgressMsg  = streaming.AgentToolProgressMsg
 	AgentDoneMsg          = streaming.AgentDoneMsg
 	AgentErrorMsg         = streaming.AgentErrorMsg
+	AgentCompressedMsg    = streaming.AgentCompressedMsg
 	AgentThinkingMsg      = streaming.AgentThinkingMsg
 	AgentIterationDoneMsg = streaming.AgentIterationDoneMsg
 	AgentIterationMsg     = streaming.AgentIterationMsg

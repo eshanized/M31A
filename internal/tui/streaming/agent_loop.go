@@ -3,6 +3,7 @@ package streaming
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -11,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
@@ -46,6 +48,13 @@ type AgentDoneMsg struct {
 // AgentErrorMsg signals an error in the agent loop.
 type AgentErrorMsg struct {
 	Err error
+}
+
+// AgentCompressedMsg signals that the agent loop auto-compressed context
+// to recover from context window overflow.
+type AgentCompressedMsg struct {
+	MessagesRemoved int
+	TokensSaved     int
 }
 
 // AgentThinkingMsg signals the agent is waiting for LLM response.
@@ -119,6 +128,9 @@ func AgentLoop(
 
 		toolDefs := tools.BuildToolDefs(dispatcher)
 
+		// Auto-compress retry guard: at most one compression per loop to prevent infinite cycles.
+		compressedThisLoop := false
+
 		for iteration := 0; iteration < agentMaxIterations; iteration++ {
 			select {
 			case <-ctx.Done():
@@ -135,9 +147,32 @@ func AgentLoop(
 			threshold95 := int(float64(contextLength) * 0.95)
 
 			if estimatedTokens > threshold95 {
-				ch <- AgentErrorMsg{Err: fmt.Errorf(
-					"context window exceeded: estimated %d tokens (limit: %d at 95%%)", estimatedTokens, threshold95)}
-				return
+				// Attempt auto-compression before giving up
+				if !compressedThisLoop {
+					compressed := aggressiveCompress(messages, estimator, int(float64(contextLength)*0.50))
+					if len(compressed) < len(messages) {
+						removed := len(messages) - len(compressed)
+						saved := estimatedTokens - estimator.EstimateMessages(compressed)
+						messages = compressed
+						compressedThisLoop = true
+						ch <- AgentCompressedMsg{MessagesRemoved: removed, TokensSaved: saved}
+						// Re-estimate after compression
+						estimatedTokens = estimator.EstimateMessages(messages)
+						if estimatedTokens > threshold95 {
+							ch <- AgentErrorMsg{Err: fmt.Errorf(
+								"context window exceeded after compression: estimated %d tokens (limit: %d at 95%%)", estimatedTokens, threshold95)}
+							return
+						}
+					} else {
+						ch <- AgentErrorMsg{Err: fmt.Errorf(
+							"context window exceeded: estimated %d tokens (limit: %d at 95%%)", estimatedTokens, threshold95)}
+						return
+					}
+				} else {
+					ch <- AgentErrorMsg{Err: fmt.Errorf(
+						"context window exceeded: estimated %d tokens (limit: %d at 95%%)", estimatedTokens, threshold95)}
+					return
+				}
 			}
 
 			// Progressive pruning: start at 70% to prevent hitting 95%
@@ -159,6 +194,18 @@ func AgentLoop(
 
 			iterator, err := p.ChatCompletionStream(ctx, req)
 			if err != nil {
+				// Check if this is a context overflow error from the provider
+				if errors.Is(err, m31errors.ErrContextExceeded) && !compressedThisLoop {
+					compressed := aggressiveCompress(messages, estimator, int(float64(contextLength)*0.50))
+					if len(compressed) < len(messages) {
+						removed := len(messages) - len(compressed)
+						saved := estimator.EstimateMessages(messages) - estimator.EstimateMessages(compressed)
+						messages = compressed
+						compressedThisLoop = true
+						ch <- AgentCompressedMsg{MessagesRemoved: removed, TokensSaved: saved}
+						continue // retry the iteration with compressed context
+					}
+				}
 				ch <- AgentErrorMsg{Err: fmt.Errorf("LLM request failed: %w", err)}
 				return
 			}
@@ -272,6 +319,7 @@ func AgentLoop(
 
 				// Progress ticker: send elapsed time every 500ms
 				progressDone := make(chan struct{})
+				defer close(progressDone)
 				go func(toolCall types.ToolCall) {
 					ticker := time.NewTicker(500 * time.Millisecond)
 					defer ticker.Stop()
@@ -289,7 +337,6 @@ func AgentLoop(
 				}(tc)
 
 				result, execErr := dispatcher.Execute(ctx, tc)
-				close(progressDone)
 				duration := time.Since(start).Milliseconds()
 
 				ch <- AgentToolDoneMsg{
@@ -599,4 +646,85 @@ func extractAgentJSONObject(s string) string {
 		return ""
 	}
 	return string(raw)
+}
+
+// aggressiveCompress reduces message history to fit within targetTokens by:
+// 1. Keeping system messages
+// 2. Keeping the last N messages (lastUserKeep)
+// 3. Summarizing the oldest non-protected messages into a single memory message
+// Returns the compressed message slice.
+func aggressiveCompress(messages []types.Message, estimator *tokens.Estimator, targetTokens int) []types.Message {
+	if len(messages) <= 2 {
+		return messages
+	}
+
+	// Separate system from non-system
+	var systemMsgs []types.Message
+	var otherMsgs []types.Message
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			otherMsgs = append(otherMsgs, msg)
+		}
+	}
+
+	if len(otherMsgs) <= 2 {
+		return messages
+	}
+
+	// Keep last 4 messages intact for conversation continuity
+	const lastKeep = 4
+	if len(otherMsgs) <= lastKeep {
+		return messages
+	}
+
+	recent := otherMsgs[len(otherMsgs)-lastKeep:]
+	old := otherMsgs[:len(otherMsgs)-lastKeep]
+
+	// Build a summary from the old messages
+	var summaryParts []string
+	summaryParts = append(summaryParts, "[Context compressed — older conversation summarized]")
+	for _, msg := range old {
+		switch msg.Role {
+		case "user":
+			content := msg.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			summaryParts = append(summaryParts, "User: "+content)
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				names := make([]string, 0, len(msg.ToolCalls))
+				for _, tc := range msg.ToolCalls {
+					names = append(names, tc.Name)
+				}
+				summaryParts = append(summaryParts, fmt.Sprintf("Assistant called tools: %s", strings.Join(names, ", ")))
+			} else {
+				content := msg.Content
+				if len(content) > 200 {
+					content = content[:200] + "..."
+				}
+				summaryParts = append(summaryParts, "Assistant: "+content)
+			}
+		case "tool":
+			content := msg.Content
+			if len(content) > 100 {
+				content = content[:100] + "..."
+			}
+			summaryParts = append(summaryParts, "Tool result: "+content)
+		}
+	}
+
+	memoryMsg := types.Message{
+		Role:    "system",
+		Content: strings.Join(summaryParts, "\n"),
+	}
+
+	// Reconstruct: system + memory + recent
+	result := make([]types.Message, 0, len(systemMsgs)+1+len(recent))
+	result = append(result, systemMsgs...)
+	result = append(result, memoryMsg)
+	result = append(result, recent...)
+	return result
 }
