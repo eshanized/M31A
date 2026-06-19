@@ -49,7 +49,8 @@ func (t *Edit) ParameterSchema() string {
 			"old_string": {"type": "string", "description": "Exact string to find and replace (use with new_string; mutually exclusive with start_line/end_line)"},
 			"new_string": {"type": "string", "description": "Replacement string (required for both modes)"},
 			"start_line": {"type": "integer", "description": "First line to replace, 1-indexed inclusive (use with end_line; mutually exclusive with old_string)"},
-			"end_line": {"type": "integer", "description": "Last line to replace, 1-indexed inclusive (use with start_line)"}
+			"end_line": {"type": "integer", "description": "Last line to replace, 1-indexed inclusive (use with start_line)"},
+			"replace_all": {"type": "boolean", "description": "Replace all occurrences, not just the first (default false)"}
 		},
 		"required": ["path", "new_string"]
 	}`
@@ -121,6 +122,14 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	var strategy string
 	var matchErr error
 
+	// Parse replace_all flag
+	replaceAll := false
+	if raRaw, ok := input.Params["replace_all"]; ok {
+		if raBool, ok := raRaw.(bool); ok {
+			replaceAll = raBool
+		}
+	}
+
 	// Strategy 1: Line-range replacement
 	startLineRaw, hasStartLine := input.Params["start_line"]
 	endLineRaw, hasEndLine := input.Params["end_line"]
@@ -137,7 +146,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		newContent, matchErr = replaceByLineRange(normalizedContent, startLine, endLine, normalizedNewString)
 		strategy = "line-range"
 	} else {
-		// Strategy 2-5: Cascading string matching
+		// Strategy 2-7: Cascading string matching
 		oldStringRaw, ok := input.Params["old_string"]
 		if !ok {
 			return types.ToolResult{}, fmt.Errorf("must provide either start_line+end_line or old_string")
@@ -148,7 +157,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 		normalizedOldString := strings.ReplaceAll(oldString, "\r\n", "\n")
 
-		newContent, strategy, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString)
+		newContent, strategy, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll)
 	}
 
 	if matchErr != nil {
@@ -218,7 +227,12 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 	if _, err := os.Stat(targetPath); err == nil {
 		relPath, _ := filepath.Rel(t.workDir, targetPath)
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
-		backupPath := filepath.Join(t.backupDir, fmt.Sprintf("%s.%d.bak", sanitized, time.Now().Unix()))
+		// Use timestamp + random hex to prevent collision on rapid edits
+		randBytes := make([]byte, 4)
+		if _, err := rand.Read(randBytes); err != nil {
+			return fmt.Errorf("cannot generate backup name: %w", err)
+		}
+		backupPath := filepath.Join(t.backupDir, fmt.Sprintf("%s.%d.%s.bak", sanitized, time.Now().UnixNano(), hex.EncodeToString(randBytes)))
 
 		if err := os.MkdirAll(t.backupDir, DirPermission); err != nil {
 			return fmt.Errorf("cannot create backup directory: %w", err)
@@ -324,12 +338,15 @@ func replaceByLineRange(content string, startLine, endLine int, newContent strin
 	return strings.Join(newLines, "\n"), nil
 }
 
-func cascadingReplace(content, oldString, newString string) (string, string, error) {
+func cascadingReplace(content, oldString, newString string, replaceAll bool) (string, string, error) {
 	// Split content once for all strategies (H1 fix)
 	contentLines := strings.Split(content, "\n")
 
 	// Strategy 2: Exact match
 	if idx := strings.Index(content, oldString); idx >= 0 {
+		if replaceAll {
+			return strings.ReplaceAll(content, oldString, newString), "exact-match-all", nil
+		}
 		return strings.Replace(content, oldString, newString, 1), "exact-match", nil
 	}
 
@@ -345,20 +362,29 @@ func cascadingReplace(content, oldString, newString string) (string, string, err
 		return result, "whitespace-normalized", nil
 	}
 
-	// Strategy 5: Fuzzy anchor match
+	// Strategy 5: Indentation-normalized match (handles tab/space mixing)
+	result, err = indentNormalizedReplace(content, contentLines, oldString, newString)
+	if err == nil {
+		return result, "indent-normalized", nil
+	}
+
+	// Strategy 6: Line-skip fuzzy match (allows missing/extra blank lines)
+	result, err = lineSkipReplace(content, contentLines, oldString, newString)
+	if err == nil {
+		return result, "line-skip", nil
+	}
+
+	// Strategy 7: Fuzzy anchor match (first+last line anchoring with Levenshtein)
 	result, err = fuzzyAnchorReplace(content, contentLines, oldString, newString)
 	if err == nil {
 		return result, "fuzzy-anchor", nil
 	}
 
 	// All strategies failed
-	return "", "", fmt.Errorf(
-		"could not find old_string in file.\n\nFile has %d lines, %d characters.\n\n"+
-			"Tips:\n"+
-			"- Use start_line and end_line for precise line-range edits\n"+
-			"- Ensure old_string matches exactly (check indentation and whitespace)\n"+
-			"- Read the file first to get the current content",
-		len(contentLines), len(content),
+	return "", "", types.NewToolError(
+		fmt.Errorf("could not find old_string in file (file has %d lines, %d characters)", len(contentLines), len(content)),
+		"Use start_line and end_line for precise line-range edits, or read the file first to get the current content. "+
+			"Ensure old_string matches exactly (check indentation and whitespace).",
 	)
 }
 
@@ -463,6 +489,118 @@ func whitespaceNormalizedReplace(content string, contentLines []string, oldStrin
 	}
 
 	return "", fmt.Errorf("no whitespace-normalized match found")
+}
+
+// indentNormalizedReplace handles cases where tabs and spaces are mixed differently
+// between the old_string and the file content. It normalizes all indentation to
+// spaces for comparison purposes.
+func indentNormalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+	normalizeIndent := func(s string) string {
+		// Replace tabs with 4 spaces, then collapse leading whitespace to spaces
+		s = strings.ReplaceAll(s, "\t", "    ")
+		fields := strings.Fields(s)
+		if len(fields) == 0 {
+			return ""
+		}
+		// Count leading spaces from original
+		leading := len(s) - len(strings.TrimLeft(s, " \t"))
+		return strings.Repeat(" ", leading) + strings.Join(fields, " ")
+	}
+
+	oldLines := strings.Split(oldString, "\n")
+
+	normalizedOldLines := make([]string, len(oldLines))
+	for i, line := range oldLines {
+		normalizedOldLines[i] = normalizeIndent(line)
+	}
+
+	normalizedContentLines := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		normalizedContentLines[i] = normalizeIndent(line)
+	}
+
+	for i := 0; i <= len(contentLines)-len(oldLines); i++ {
+		match := true
+		for j := range normalizedOldLines {
+			if normalizedContentLines[i+j] != normalizedOldLines[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			newLines := make([]string, 0, len(contentLines)-len(oldLines)+strings.Count(newString, "\n")+1)
+			newLines = append(newLines, contentLines[:i]...)
+			newLines = append(newLines, strings.Split(newString, "\n")...)
+			if i+len(oldLines) < len(contentLines) {
+				newLines = append(newLines, contentLines[i+len(oldLines):]...)
+			}
+			return strings.Join(newLines, "\n"), nil
+		}
+	}
+
+	return "", fmt.Errorf("no indent-normalized match found")
+}
+
+// lineSkipReplace handles cases where the old_string has blank lines that don't
+// exist in the file content, or vice versa. It skips blank lines during matching.
+func lineSkipReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+	oldLines := strings.Split(oldString, "\n")
+
+	// Filter to non-blank lines from old_string
+	var oldNonBlank []string
+	var oldNonBlankIndices []int
+	for i, line := range oldLines {
+		if strings.TrimSpace(line) != "" {
+			oldNonBlank = append(oldNonBlank, strings.TrimSpace(line))
+			oldNonBlankIndices = append(oldNonBlankIndices, i)
+		}
+	}
+
+	if len(oldNonBlank) == 0 {
+		return "", fmt.Errorf("old_string has no non-blank lines")
+	}
+
+	// Find consecutive non-blank lines in content that match
+	for i := 0; i <= len(contentLines)-len(oldNonBlank); i++ {
+		match := true
+		for j, nl := range oldNonBlank {
+			if strings.TrimSpace(contentLines[i+j]) != nl {
+				match = false
+				break
+			}
+		}
+		if match {
+			// Map the match range back to include any blank lines in the old_string
+			matchStart := i
+			matchEnd := i + len(oldNonBlank) - 1
+
+			// Adjust for leading/trailing blank lines in old_string
+			if len(oldNonBlankIndices) > 0 {
+				leadingBlanks := oldNonBlankIndices[0]
+				trailingBlanks := len(oldLines) - 1 - oldNonBlankIndices[len(oldNonBlankIndices)-1]
+				matchStart = i - leadingBlanks
+				matchEnd = i + len(oldNonBlank) - 1 + trailingBlanks
+			}
+
+			// Bounds check
+			if matchStart < 0 {
+				matchStart = 0
+			}
+			if matchEnd >= len(contentLines) {
+				matchEnd = len(contentLines) - 1
+			}
+
+			newLines := make([]string, 0, len(contentLines))
+			newLines = append(newLines, contentLines[:matchStart]...)
+			newLines = append(newLines, strings.Split(newString, "\n")...)
+			if matchEnd+1 < len(contentLines) {
+				newLines = append(newLines, contentLines[matchEnd+1:]...)
+			}
+			return strings.Join(newLines, "\n"), nil
+		}
+	}
+
+	return "", fmt.Errorf("no line-skip match found")
 }
 
 func fuzzyAnchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
