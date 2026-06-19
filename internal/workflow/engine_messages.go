@@ -136,6 +136,107 @@ type DiscussState struct {
 	Answers   map[int]string
 }
 
+// ResearchProgressMsg is emitted during the pre-plan research sub-step.
+type ResearchProgressMsg struct {
+	Phase    string
+	Message  string
+	Complete bool
+}
+
+// PlanCheckMsg is emitted after the plan checker reviews the plan.
+type PlanCheckMsg struct {
+	Passed     bool
+	IssueCount int
+	Blockers   int
+	Warnings   int
+}
+
+// PlanRevisionMsg is emitted during each plan revision iteration.
+type PlanRevisionMsg struct {
+	Iteration       int
+	MaxIterations   int
+	IssuesRemaining int
+}
+
+// PlanChunkProgressMsg is emitted during chunked plan generation.
+type PlanChunkProgressMsg struct {
+	Wave        int
+	TotalWaves  int
+	TasksInWave int
+}
+
+// DiscussQualityMsg is emitted after the question quality checker runs.
+type DiscussQualityMsg struct {
+	Passed   bool
+	Warnings int
+	Retried  bool
+}
+
+// DiscussCompletenessMsg is emitted after the answer completeness check.
+type DiscussCompletenessMsg struct {
+	Score        int // 0-100
+	MissingAreas []string
+}
+
+// ExecutePreflightMsg is emitted after pre-execution validation.
+type ExecutePreflightMsg struct {
+	Passed bool
+	Issues []string
+}
+
+// ExecuteQualityGateMsg is emitted after per-task acceptance criteria check.
+type ExecuteQualityGateMsg struct {
+	TaskID  int
+	Passed  bool
+	Checked int
+	Failed  int
+}
+
+// ExecuteLoopDetectMsg is emitted when a tool call loop is detected.
+type ExecuteLoopDetectMsg struct {
+	TaskID   int
+	ToolName string
+	Count    int
+}
+
+// VerifyReportMsg is emitted when the verification report is generated.
+type VerifyReportMsg struct {
+	Report   string
+	PassRate int // percentage 0-100
+}
+
+// ShipPreflightMsg is emitted when the pre-ship checklist runs.
+type ShipPreflightMsg struct {
+	Passed  bool
+	Issues  []string
+}
+
+// ShipChangelogMsg is emitted when the changelog is generated.
+type ShipChangelogMsg struct {
+	Content string
+	Entries int
+}
+
+// InitAnalysisMsg is emitted when deep project analysis completes.
+type InitAnalysisMsg struct {
+	ProjectType    string
+	Framework      string
+	Language       string
+	DependencyCount int
+	TestFileRatio  float64
+	FileCount      int
+	HealthScore    int // 0-100
+}
+
+// InitPreflightMsg is emitted when environment pre-flight checks complete.
+type InitPreflightMsg struct {
+	Passed        bool
+	RuntimeVersion string
+	DiskSpaceOK   bool
+	GitRemoteOK   bool
+	Issues        []string
+}
+
 // VerificationResult holds the outcome of verifying a task.
 type VerificationResult struct {
 	TaskID     int
