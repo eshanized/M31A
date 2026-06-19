@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 )
 
 // runPlan generates a rich implementation plan and task list to accomplish the goal.
+// Integrates GSD-inspired sub-steps: research → plan → check → gates.
 // On refinement (when e.refineFeedback is non-empty), the previous plan is injected
 // into the LLM context along with the user's feedback for revision.
 func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error) {
@@ -33,7 +35,37 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		})
 	}
 
-	for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
+	// ── Sub-step 1: Pre-plan Research ─────────────────────────────────────
+	researchEnabled := e.cfg != nil && e.cfg.Features.PlanResearch
+	if !isRefinement && (researchEnabled || e.isResearchWorthy(goal)) {
+		e.logger.Info("plan phase: starting pre-plan research")
+		research, researchErr := e.runResearch(ctx, goal)
+		if researchErr != nil {
+			e.logger.Warn("pre-plan research failed, continuing without", "error", researchErr)
+		} else if research != "" {
+			e.researchOutput = research
+			e.logger.Info("pre-plan research complete", "output_len", len(research))
+		}
+	}
+
+	// ── Sub-step 2: Chunked Planning (alternative to standard retry loop) ─
+	chunkSucceeded := false
+	chunkEnabled := e.cfg != nil && e.cfg.Features.PlanChunked
+	if !isRefinement && (chunkEnabled || e.shouldChunk(goal)) {
+		e.logger.Info("plan phase: using chunked planning mode")
+		chunkTasks, chunkMarkdown, chunkErr := e.runChunkedPlan(ctx, goal)
+		if chunkErr != nil {
+			e.logger.Warn("chunked planning failed, falling back to standard", "error", chunkErr)
+		} else if len(chunkTasks) > 0 && chunkMarkdown != "" {
+			tasks = chunkTasks
+			planMarkdown = chunkMarkdown
+			chunkSucceeded = true
+		}
+	}
+
+	// ── Standard Plan Generation (retry loop) ─────────────────────────────
+	if !chunkSucceeded {
+		for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
 		if !isRefinement {
 			e.emit(IntermediateProgressMsg{
 				Phase:   "plan",
@@ -94,20 +126,8 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			continue
 		}
 
-		// Granularity check: warn about oversized tasks that may be hard to execute
-		for _, t := range tasks {
-			if len(t.Files) > 3 {
-				e.logger.Warn("task has many files, consider splitting",
-					"task_id", t.ID, "file_count", len(t.Files), "description", t.Description)
-			}
-			wordCount := len(strings.Fields(t.Description))
-			if wordCount > 80 {
-				e.logger.Warn("task description is very long, consider simplifying",
-					"task_id", t.ID, "word_count", wordCount)
-			}
-		}
-
 		break
+		}
 	}
 
 	if len(tasks) == 0 {
@@ -119,6 +139,17 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 			Error:               fmt.Sprintf("Plan generation failed after %d attempts:\n%s", m31types.MaxPlanRetries, combinedErrs),
 			RequiresManualInput: true,
 		}, lastErr
+	}
+
+	// ── Sub-step 3: Plan Checker + Revision Loop ──────────────────────────
+	checkEnabled := e.cfg != nil && e.cfg.Features.PlanCheck
+	if !isRefinement && checkEnabled {
+		tasks, planMarkdown = e.runPlanChecker(ctx, tasks, planMarkdown, goal)
+	}
+
+	// ── Sub-step 4: Coverage Gates ────────────────────────────────────────
+	if !isRefinement {
+		tasks, planMarkdown = e.runCoverageGates(ctx, tasks, planMarkdown, goal)
 	}
 
 	for i := range tasks {
@@ -164,6 +195,211 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	}, nil
 }
 
+// runPlanChecker executes the plan checker + revision loop.
+// Returns the (possibly revised) tasks and plan markdown.
+func (e *Engine) runPlanChecker(ctx context.Context, tasks []m31types.Task, planMarkdown string, goal string) ([]m31types.Task, string) {
+	plan, parseErr := ParsePlan(planMarkdown)
+	if parseErr != nil || plan == nil {
+		plan = &m31types.Plan{Tasks: tasks, RawMarkdown: planMarkdown}
+	}
+
+	maxIter := e.maxPlanRevisions()
+	prevIssueCount := 0
+
+	for iteration := 1; iteration <= maxIter; iteration++ {
+		checkResult, err := e.checkPlan(ctx, plan, goal)
+		if err != nil {
+			e.logger.Warn("plan check failed", "iteration", iteration, "error", err)
+			break
+		}
+
+		blockers, warnings := countIssuesByType(checkResult.Issues)
+		e.emit(PlanCheckMsg{
+			Passed:     checkResult.Passed,
+			IssueCount: len(checkResult.Issues),
+			Blockers:   blockers,
+			Warnings:   warnings,
+		})
+
+		if checkResult.Passed {
+			e.logger.Info("plan check passed", "iteration", iteration)
+			break
+		}
+
+		if isPlanCheckStalled(len(checkResult.Issues), prevIssueCount) {
+			e.logger.Warn("plan check stalled, breaking revision loop",
+				"iteration", iteration, "issues", len(checkResult.Issues), "prev", prevIssueCount)
+			break
+		}
+		prevIssueCount = len(checkResult.Issues)
+
+		e.emit(PlanRevisionMsg{
+			Iteration:       iteration,
+			MaxIterations:   maxIter,
+			IssuesRemaining: len(checkResult.Issues),
+		})
+
+		revised, revErr := e.revisePlan(ctx, plan, checkResult.Issues, goal)
+		if revErr != nil {
+			e.logger.Warn("plan revision failed", "iteration", iteration, "error", revErr)
+			break
+		}
+
+		valErrs := validateTasks(revised.Tasks)
+		if len(valErrs) > 0 {
+			e.logger.Warn("revised plan has validation errors", "iteration", iteration, "errors", valErrs)
+			break
+		}
+
+		plan = revised
+		tasks = revised.Tasks
+		planMarkdown = revised.RawMarkdown
+
+		e.logger.Info("plan revised", "iteration", iteration, "tasks", len(tasks))
+	}
+
+	return tasks, planMarkdown
+}
+
+// runCoverageGates executes pure-Go coverage gates and feeds blockers back
+// into the plan checker revision loop if needed.
+// Returns the (possibly revised) tasks and plan markdown.
+func (e *Engine) runCoverageGates(ctx context.Context, tasks []m31types.Task, planMarkdown string, goal string) ([]m31types.Task, string) {
+	plan, parseErr := ParsePlan(planMarkdown)
+	if parseErr != nil || plan == nil {
+		plan = &m31types.Plan{Tasks: tasks, RawMarkdown: planMarkdown}
+	} else {
+		plan.Tasks = tasks
+	}
+
+	var allIssues []PlanIssue
+
+	// Granularity gate — always runs
+	allIssues = append(allIssues, granularityGate(plan)...)
+
+	// Security gate — if flag or heuristic
+	secEnabled := e.cfg != nil && e.cfg.Features.PlanSecurityGate
+	if secEnabled || hasSecurityKeywords(plan) {
+		allIssues = append(allIssues, securityGate(plan)...)
+	}
+
+	// Gap analysis gate — if flag
+	gapEnabled := e.cfg != nil && e.cfg.Features.PlanGapAnalysis
+	if gapEnabled {
+		allIssues = append(allIssues, gapAnalysisGate(plan, goal)...)
+	}
+
+	// Requirements coverage gate — if flag
+	covEnabled := e.cfg != nil && e.cfg.Features.PlanCoverageGate
+	if covEnabled {
+		allIssues = append(allIssues, requirementsCoverageGate(plan, goal)...)
+	}
+
+	blockers, warnings := countIssuesByType(allIssues)
+	if blockers > 0 {
+		e.logger.Info("coverage gates found issues", "blockers", blockers, "warnings", warnings)
+		// Feed blockers back into a single revision pass
+		checkEnabled := e.cfg != nil && e.cfg.Features.PlanCheck
+		if checkEnabled {
+			e.emit(PlanCheckMsg{
+				Passed:     false,
+				IssueCount: len(allIssues),
+				Blockers:   blockers,
+				Warnings:   warnings,
+			})
+			revised, revErr := e.revisePlan(ctx, plan, allIssues, goal)
+			if revErr == nil {
+				valErrs := validateTasks(revised.Tasks)
+				if len(valErrs) == 0 {
+					return revised.Tasks, revised.RawMarkdown
+				}
+				e.logger.Warn("gate-revised plan has validation errors", "errors", valErrs)
+			}
+		}
+	} else if warnings > 0 {
+		e.logger.Info("coverage gates: warnings only", "warnings", warnings)
+		for _, issue := range allIssues {
+			e.logger.Warn("coverage gate warning", "category", issue.Category, "message", issue.Message)
+		}
+	}
+
+	return tasks, planMarkdown
+}
+
+// runChunkedPlan executes the chunked planning path: outline → per-wave expansion.
+func (e *Engine) runChunkedPlan(ctx context.Context, goal string) ([]m31types.Task, string, error) {
+	outline, err := e.generateOutline(ctx, goal)
+	if err != nil {
+		return nil, "", fmt.Errorf("outline generation failed: %w", err)
+	}
+
+	e.logger.Info("plan outline generated", "waves", len(outline.Waves), "total_tasks", outline.TotalTasks)
+	e.emit(IntermediateProgressMsg{
+		Phase:   "plan",
+		Message: fmt.Sprintf("Outline: %d tasks in %d waves", outline.TotalTasks, len(outline.Waves)),
+	})
+
+	var allTasks []m31types.Task
+	var planSections []string
+
+	for _, wave := range outline.Waves {
+		waveTasks, waveErr := e.expandWave(ctx, outline, wave.Wave, goal)
+		if waveErr != nil {
+			e.logger.Warn("wave expansion failed", "wave", wave.Wave, "error", waveErr)
+			// Fall back: use stub tasks from outline
+			for _, stub := range wave.Tasks {
+				allTasks = append(allTasks, m31types.Task{
+					ID:                 stub.ID,
+					Action:             stub.Action,
+					Description:        stub.Description,
+					Dependencies:       stub.Dependencies,
+					Category:           stub.Category,
+					Files:              []string{},
+					AcceptanceCriteria: []string{stub.Description},
+					Status:             m31types.StatusPending,
+				})
+			}
+			continue
+		}
+
+		allTasks = append(allTasks, waveTasks...)
+		// Save incrementally for crash resilience
+		if saveErr := e.sessionMgr.SaveTasks(e.sessionID, allTasks); saveErr != nil {
+			e.logger.Warn("incremental task save failed", "error", saveErr)
+		}
+
+		e.logger.Info("wave expanded", "wave", wave.Wave, "tasks", len(waveTasks))
+	}
+
+	if len(allTasks) == 0 {
+		return nil, "", fmt.Errorf("chunked planning produced no tasks")
+	}
+
+	// Validate all tasks
+	valErrs := validateTasks(allTasks)
+	if len(valErrs) > 0 {
+		e.logger.Warn("chunked plan validation errors", "errors", valErrs)
+		// Non-fatal: log but continue
+	}
+
+	// Compose plan markdown from outline + tasks
+	planMarkdown := composeChunkedPlanMarkdown(outline, allTasks, planSections)
+
+	return allTasks, planMarkdown, nil
+}
+
+// composeChunkedPlanMarkdown builds a plan document from the outline and expanded tasks.
+func composeChunkedPlanMarkdown(outline *PlanOutline, tasks []m31types.Task, sections []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", outline.Title))
+	sb.WriteString("## Summary\n\nGenerated via chunked planning mode.\n\n")
+	sb.WriteString("## Task List\n\n```json\n")
+	taskJSON, _ := json.MarshalIndent(tasks, "", "  ")
+	sb.WriteString(string(taskJSON))
+	sb.WriteString("\n```\n")
+	return sb.String()
+}
+
 // buildPlanContext creates messages for the plan phase.
 // On refinement, the previous plan and user feedback are injected.
 func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
@@ -182,6 +418,11 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 	}
 
 	planCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s\n\n", goal, projectType, framework)
+
+	// Inject pre-plan research output if available
+	if e.researchOutput != "" {
+		planCtx += "## Research Findings\n" + e.researchOutput + "\n\n"
+	}
 
 	sessionDir := filepath.Dir(e.planningDir)
 	memPath := filepath.Join(sessionDir, "MEMORY.md")
