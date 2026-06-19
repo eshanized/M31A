@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/errors"
@@ -23,6 +24,13 @@ type WebSearch struct {
 	baseURL         string
 	maxResults      int
 	allowPrivateIPs bool
+	dnsCache        sync.Map // map[string]*webSearchDNSCacheEntry
+}
+
+// webSearchDNSCacheEntry caches DNS resolution results for TOCTOU prevention.
+type webSearchDNSCacheEntry struct {
+	addrs    []net.IPAddr
+	cachedAt time.Time
 }
 
 func NewWebSearch(baseURL string) *WebSearch {
@@ -46,7 +54,7 @@ func NewWebSearch(baseURL string) *WebSearch {
 				if err != nil {
 					return nil, fmt.Errorf("invalid address: %w", err)
 				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := ws.resolveAndCache(ctx, host)
 				if err != nil {
 					return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
 				}
@@ -70,7 +78,7 @@ func NewWebSearch(baseURL string) *WebSearch {
 				return nil
 			}
 			host := req.URL.Hostname()
-			ips, err := net.DefaultResolver.LookupIPAddr(req.Context(), host)
+			ips, err := ws.resolveAndCache(req.Context(), host)
 			if err != nil {
 				return fmt.Errorf("redirect DNS resolution failed: %w", err)
 			}
@@ -83,6 +91,40 @@ func NewWebSearch(baseURL string) *WebSearch {
 		},
 	}
 	return ws
+}
+
+// resolveAndCache resolves DNS for a hostname using a sync.Map cache with
+// DNSCacheTTL. This prevents TOCTOU rebinding attacks (SEC-02) by pinning
+// the resolved IPs for the duration of the TTL.
+func (t *WebSearch) resolveAndCache(ctx context.Context, host string) ([]net.IPAddr, error) {
+	// Check cache first
+	if cached, ok := t.dnsCache.Load(host); ok {
+		entry := cached.(*webSearchDNSCacheEntry)
+		if time.Since(entry.cachedAt) < DNSCacheTTL {
+			return entry.addrs, nil
+		}
+		// Expired — remove and re-resolve
+		t.dnsCache.Delete(host)
+	}
+
+	// Resolve fresh
+	resolver := &net.Resolver{}
+	addrs, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no IP addresses found for %s", host)
+	}
+
+	// Cache the result
+	entry := &webSearchDNSCacheEntry{
+		addrs:    addrs,
+		cachedAt: time.Now(),
+	}
+	t.dnsCache.Store(host, entry)
+
+	return addrs, nil
 }
 
 func (t *WebSearch) Name() string               { return "WebSearch" }
