@@ -195,7 +195,7 @@ func TestReplaceByLineRange_SingleLine(t *testing.T) {
 func TestCascadingReplace_ExactMatch(t *testing.T) {
 	t.Parallel()
 	content := "hello world\nfoo bar"
-	result, strategy, err := cascadingReplace(content, "foo bar", "baz qux")
+	result, strategy, err := cascadingReplace(content, "foo bar", "baz qux", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestCascadingReplace_ExactMatch(t *testing.T) {
 func TestCascadingReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "hello world"
-	_, _, err := cascadingReplace(content, "nonexistent pattern", "replacement")
+	_, _, err := cascadingReplace(content, "nonexistent pattern", "replacement", false)
 	if err == nil {
 		t.Error("expected error when no strategy matches")
 	}
