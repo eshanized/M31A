@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +48,11 @@ func (t *FileList) ParameterSchema() string {
 				"description": "Maximum depth to traverse (default 3, max 6)",
 				"minimum": 1,
 				"maximum": 6
+			},
+			"sort": {
+				"type": "string",
+				"description": "Sort entries by: 'name' (default), 'size', or 'modified'",
+				"enum": ["name", "size", "modified"]
 			}
 		}
 	}`
@@ -54,6 +60,10 @@ func (t *FileList) ParameterSchema() string {
 
 func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	start := time.Now()
+
+	if err := ctx.Err(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("context cancelled: %w", err)
+	}
 
 	targetDir := t.workDir
 	if pathRaw, ok := input.Params["path"]; ok {
@@ -99,6 +109,14 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	skipDirs := types.SkipDirsMap()
 
+	// Parse sort parameter
+	sortBy := "name"
+	if sortRaw, ok := input.Params["sort"]; ok {
+		if sortStr, ok := sortRaw.(string); ok {
+			sortBy = sortStr
+		}
+	}
+
 	var sb strings.Builder
 	count := 0
 	maxEntries := 500
@@ -108,10 +126,15 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 		if depth > maxDepth || count >= maxEntries {
 			return
 		}
+		if ctx.Err() != nil {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return
 		}
+		// Sort entries based on sort parameter
+		sortEntries(entries, sortBy)
 		for i, entry := range entries {
 			if count >= maxEntries {
 				sb.WriteString(prefix + "... (truncated at " + fmt.Sprintf("%d", maxEntries) + " entries)\n")
@@ -178,4 +201,33 @@ func humanSize(b int64) string {
 		}
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), units[exp])
+}
+
+// sortEntries sorts directory entries by the given criteria.
+// Directories always come first, then sorted by the specified field.
+func sortEntries(entries []os.DirEntry, sortBy string) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		ii, _ := entries[i].Info()
+		ji, _ := entries[j].Info()
+
+		// Directories always come first
+		if entries[i].IsDir() != entries[j].IsDir() {
+			return entries[i].IsDir()
+		}
+
+		switch sortBy {
+		case "size":
+			if ii != nil && ji != nil {
+				return ii.Size() > ji.Size() // largest first
+			}
+			return entries[i].Name() < entries[j].Name()
+		case "modified":
+			if ii != nil && ji != nil {
+				return ii.ModTime().After(ji.ModTime()) // newest first
+			}
+			return entries[i].Name() < entries[j].Name()
+		default: // "name"
+			return entries[i].Name() < entries[j].Name()
+		}
+	})
 }
