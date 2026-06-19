@@ -43,6 +43,11 @@ type PromptRegistry struct {
 	ContextAwareness string
 	CodeQuality      string
 	CodeIntelligence string
+	Research         string
+	PlanCheck        string
+	PlanRevise       string
+	PlanOutline      string
+	DiscussFollowup  string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -60,6 +65,11 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/context-awareness.md":    &r.ContextAwareness,
 		"prompts/code-quality.md":         &r.CodeQuality,
 		"prompts/code-intelligence.md":    &r.CodeIntelligence,
+		"prompts/research.md":             &r.Research,
+		"prompts/plan-check.md":           &r.PlanCheck,
+		"prompts/plan-revise.md":          &r.PlanRevise,
+		"prompts/plan-outline.md":         &r.PlanOutline,
+		"prompts/discuss-followup.md":   &r.DiscussFollowup,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -97,6 +107,8 @@ type Engine struct {
 	planMarkdown     string // current plan content for refinement context
 	planVersion      int    // current plan version (increments on refine)
 	refineFeedback   string // pending refinement feedback from user
+	// researchOutput holds the pre-plan research results for injection into plan context.
+	researchOutput string
 	// discussPlanCycles counts Plan→Discuss→Plan round-trips. Capped at
 	// maxDiscussPlanCycles to prevent infinite oscillation (BUG-12).
 	discussPlanCycles int
@@ -118,9 +130,10 @@ type Engine struct {
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
-	// Codebase intelligence layer (lazy-built once per session)
-	codeIntel     *codeintel.Indexer
-	codeIntelOnce sync.Once
+	// Codebase intelligence layer (lazy-built, invalidated between execute groups)
+	codeIntel   *codeintel.Indexer
+	codeIntelMu sync.Mutex
+	codeIntelBuilt bool
 	// Shared ledger instance for session record persistence (uses the
 	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).
 	ledger *ledger.Ledger
@@ -507,28 +520,80 @@ func (e *Engine) emit(msg any) {
 }
 
 // preflightContextCheck estimates token usage before each LLM request
-// and returns ErrContextExceeded if the estimate exceeds 95% of the
-// model's context window. Returns nil if estimation is unavailable.
-func (e *Engine) preflightContextCheck(messages []m31types.Message) error {
+// and attempts automatic truncation if the estimate exceeds 80% of the
+// model's context window. Returns ErrContextExceeded only if truncation
+// cannot bring usage below 95%. Returns a (possibly truncated) copy of the
+// messages so the caller's original slice is never mutated.
+func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.Message, error) {
 	if e.tokens == nil || e.provider == nil {
-		return nil
+		return messages, nil
 	}
 	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.activePhase))
 	if err != nil || modelInfo == nil {
-		return nil
+		return messages, nil
 	}
 	estimated := e.tokens.EstimateMessages(messages)
 	contextLength := modelInfo.ContextLength
 	if contextLength <= 0 {
 		contextLength = m31types.DefaultContextLength
 	}
-	if float64(estimated) > 0.95*float64(contextLength) {
-		return fmt.Errorf("%w: estimated %d tokens exceeds 95%% of %d context", m31errors.ErrContextExceeded, estimated, contextLength)
+
+	threshold80 := int(float64(contextLength) * 0.80)
+	threshold95 := int(float64(contextLength) * 0.95)
+
+	if estimated <= threshold80 {
+		return messages, nil
 	}
-	if float64(estimated) > 0.80*float64(contextLength) {
-		slog.Warn("context usage approaching limit", "estimated", estimated, "limit", contextLength, "pct", float64(estimated)/float64(contextLength))
+
+	// Work on a shallow copy to avoid mutating the caller's slice.
+	msgs := make([]m31types.Message, len(messages))
+	copy(msgs, messages)
+
+	// Try progressive truncation before giving up
+	// Pass 1: truncate old tool results
+	if estimated > threshold80 {
+		for i := 0; i < len(msgs) && estimated > threshold80; i++ {
+			if msgs[i].Role == "tool" && len(msgs[i].Content) > 500 {
+				msgs[i].Content = msgs[i].Content[:500] + "\n...[truncated for context]"
+				estimated = e.tokens.EstimateMessages(msgs)
+			}
+		}
 	}
-	return nil
+
+	// Pass 2: truncate old assistant messages
+	if estimated > threshold80 {
+		for i := 0; i < len(msgs) && estimated > threshold80; i++ {
+			if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) == 0 && len(msgs[i].Content) > 1000 {
+				msgs[i].Content = msgs[i].Content[:1000] + "\n...[truncated for context]"
+				estimated = e.tokens.EstimateMessages(msgs)
+			}
+		}
+	}
+
+	// Pass 3: remove oldest non-system, non-recent messages
+	if estimated > threshold80 {
+		keepRecent := 6
+		if len(msgs) > keepRecent+1 {
+			removed := 0
+			for i := 1; i < len(msgs)-keepRecent && estimated > threshold80; i++ {
+				if msgs[i-removed].Role == "system" {
+					continue
+				}
+				msgs = append(msgs[:i-removed], msgs[i-removed+1:]...)
+				removed++
+				estimated = e.tokens.EstimateMessages(msgs)
+			}
+		}
+	}
+
+	if estimated > threshold95 {
+		return msgs, fmt.Errorf("%w: estimated %d tokens exceeds 95%% of %d context (auto-truncation insufficient)", m31errors.ErrContextExceeded, estimated, contextLength)
+	}
+
+	if estimated > threshold80 {
+		slog.Warn("context usage approaching limit after truncation", "estimated", estimated, "limit", contextLength)
+	}
+	return msgs, nil
 }
 
 // SubmitDiscussAnswer records an answer for a discuss question.
@@ -670,16 +735,20 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 // Returns nil if building fails or the workDir is empty.
 // The caller's context is used for the build, so cancellation propagates.
 func (e *Engine) getCodeIntel(ctx context.Context) *codeintel.Indexer {
-	e.codeIntelOnce.Do(func() {
-		idx := codeintel.NewIndexer(e.workDir)
-		buildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if err := idx.Build(buildCtx); err != nil {
-			e.logger.Warn("codeintel build failed", "error", err)
-			return
-		}
-		e.codeIntel = idx
-	})
+	e.codeIntelMu.Lock()
+	defer e.codeIntelMu.Unlock()
+	if e.codeIntelBuilt {
+		return e.codeIntel
+	}
+	e.codeIntelBuilt = true
+	idx := codeintel.NewIndexer(e.workDir)
+	buildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := idx.Build(buildCtx); err != nil {
+		e.logger.Warn("codeintel build failed", "error", err)
+		return nil
+	}
+	e.codeIntel = idx
 	return e.codeIntel
 }
 
@@ -835,7 +904,8 @@ func finalizeToolCalls(builders map[int]*toolCallBuilder, e *Engine) []m31types.
 // both the text content and any native tool calls from the response.
 // Used by execute and heal phases for structured tool dispatch.
 func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Message) (string, []m31types.ToolCall, error) {
-	if err := e.preflightContextCheck(messages); err != nil {
+	msgs, err := e.preflightContextCheck(messages)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -845,7 +915,7 @@ func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Mes
 
 	req := provider.ChatRequest{
 		Model:            e.modelForPhase(e.activePhase),
-		Messages:         messages,
+		Messages:         msgs,
 		ReasoningEnabled: true,
 		Tools:            e.buildToolDefinitions(),
 	}
@@ -868,7 +938,8 @@ func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Mes
 // streamLLM sends a chat request and returns the full response content.
 func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
 	// preflight context check before sending to LLM
-	if err := e.preflightContextCheck(messages); err != nil {
+	msgs, err := e.preflightContextCheck(messages)
+	if err != nil {
 		return "", err
 	}
 
@@ -879,7 +950,7 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 
 	req := provider.ChatRequest{
 		Model:            e.modelForPhase(e.activePhase),
-		Messages:         messages,
+		Messages:         msgs,
 		ReasoningEnabled: true,
 	}
 	if toolsEnabled {
