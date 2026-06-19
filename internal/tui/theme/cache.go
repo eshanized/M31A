@@ -34,14 +34,14 @@ type StyleCache struct {
 	Selection    lipgloss.Style
 
 	// Header/Footer styles
-	HeaderBrand    lipgloss.Style
-	HeaderCrumb    lipgloss.Style
-	HeaderDots     lipgloss.Style
-	FooterCwd      lipgloss.Style
-	FooterBranch   lipgloss.Style
-	FooterOp       lipgloss.Style
-	FooterHint     lipgloss.Style
-	FooterLeader   lipgloss.Style
+	HeaderBrand  lipgloss.Style
+	HeaderCrumb  lipgloss.Style
+	HeaderDots   lipgloss.Style
+	FooterCwd    lipgloss.Style
+	FooterBranch lipgloss.Style
+	FooterOp     lipgloss.Style
+	FooterHint   lipgloss.Style
+	FooterLeader lipgloss.Style
 
 	// Badge styles
 	BadgeSuccess lipgloss.Style
@@ -51,22 +51,22 @@ type StyleCache struct {
 	BadgeInfo    lipgloss.Style
 
 	// Code block
-	CodeBG     lipgloss.Style
-	LineNum    lipgloss.Style
-	LineHigh   lipgloss.Style
+	CodeBG   lipgloss.Style
+	LineNum  lipgloss.Style
+	LineHigh lipgloss.Style
 
 	// Message styles
-	UserGutter    lipgloss.Style
-	UserContent   lipgloss.Style
-	AsstGutter    lipgloss.Style
-	AsstContent   lipgloss.Style
+	UserGutter  lipgloss.Style
+	UserContent lipgloss.Style
+	AsstGutter  lipgloss.Style
+	AsstContent lipgloss.Style
 
 	// Card styles
-	CardBorder     lipgloss.Style
-	CardBrand      lipgloss.Style
-	CardSuccess    lipgloss.Style
-	CardError      lipgloss.Style
-	CardWarning    lipgloss.Style
+	CardBorder  lipgloss.Style
+	CardBrand   lipgloss.Style
+	CardSuccess lipgloss.Style
+	CardError   lipgloss.Style
+	CardWarning lipgloss.Style
 
 	// Misc
 	FocusRing    lipgloss.Style

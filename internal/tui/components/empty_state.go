@@ -16,7 +16,7 @@ type Action struct {
 // EmptyState renders a branded, illustrated empty state with icon, title,
 // description, and actionable suggestions.
 type EmptyState struct {
-	Icon     string   // Unicode icon (e.g., "◈")
+	Icon     string // Unicode icon (e.g., "◈")
 	Title    string
 	Subtitle string
 	Actions  []Action
