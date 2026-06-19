@@ -36,6 +36,13 @@ const (
 	ToolRateLimitBurst  = 20
 	ToolRateLimitPerSec = 10
 
+	// Per-risk-level rate limits (M6): dangerous tools get stricter limits.
+	DangerousRateLimitBurst  = 5
+	DangerousRateLimitPerSec = 2
+
+	// Max concurrent tool executions (M5): prevents resource exhaustion.
+	MaxConcurrentTools = 8
+
 	DefaultSearchBaseURL    = "https://search.sagibo.net"
 	MaxSearchQueryLength    = 500
 	DefaultMaxSearchResults = 5

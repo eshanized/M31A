@@ -36,6 +36,12 @@ type Dispatcher struct {
 	rateTokens chan struct{}
 	rateTicker *time.Ticker
 	rateDone   chan struct{}
+	// Per-risk-level rate limiter for dangerous/destructive tools (M6).
+	dangerousRateTokens chan struct{}
+	dangerousRateTicker *time.Ticker
+	dangerousRateDone   chan struct{}
+	// Concurrency limiter: semaphore limiting concurrent tool executions (M5).
+	concurrencySem chan struct{}
 	// C-12: sync.Once prevents TOCTOU race in Stop().
 	stopOnce sync.Once
 }
@@ -45,19 +51,22 @@ type Dispatcher struct {
 // goroutine leaks (e.g., during session restart or app shutdown).
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
-		tools:             make(map[string]types.Tool),
-		permissions:       make(map[string]bool),
-		requestCh:         make(chan PermissionRequest, PermissionChannelBuffer),
-		responseCh:        make(chan PermissionResponse, PermissionChannelBuffer),
-		questionReqCh:     make(chan QuestionRequest, QuestionChannelBuffer),
-		questionRespCh:    make(chan QuestionResponse, QuestionChannelBuffer),
-		rules:             []config.PermissionRule{},
-		originalRules:     []config.PermissionRule{},
-		agents:            make(map[string]config.PermissionsAgentConfig),
-		activeAgent:       DefaultAgentName,
-		permissionTimeout: types.DefaultPermissionTimeout,
-		rateTokens:        make(chan struct{}, ToolRateLimitBurst),
-		rateDone:          make(chan struct{}),
+		tools:              make(map[string]types.Tool),
+		permissions:        make(map[string]bool),
+		requestCh:          make(chan PermissionRequest, PermissionChannelBuffer),
+		responseCh:         make(chan PermissionResponse, PermissionChannelBuffer),
+		questionReqCh:      make(chan QuestionRequest, QuestionChannelBuffer),
+		questionRespCh:     make(chan QuestionResponse, QuestionChannelBuffer),
+		rules:              []config.PermissionRule{},
+		originalRules:      []config.PermissionRule{},
+		agents:             make(map[string]config.PermissionsAgentConfig),
+		activeAgent:        DefaultAgentName,
+		permissionTimeout:  types.DefaultPermissionTimeout,
+		rateTokens:         make(chan struct{}, ToolRateLimitBurst),
+		rateDone:           make(chan struct{}),
+		dangerousRateTokens: make(chan struct{}, DangerousRateLimitBurst),
+		dangerousRateDone:   make(chan struct{}),
+		concurrencySem:     make(chan struct{}, MaxConcurrentTools),
 	}
 	// Initialize token bucket for rate limiting.
 	for i := 0; i < ToolRateLimitBurst; i++ {
@@ -77,6 +86,29 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 			case <-d.rateTicker.C:
 				select {
 				case d.rateTokens <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	// Initialize dangerous tool rate limiter (M6).
+	for i := 0; i < DangerousRateLimitBurst; i++ {
+		d.dangerousRateTokens <- struct{}{}
+	}
+	d.dangerousRateTicker = time.NewTicker(time.Second / DangerousRateLimitPerSec)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("dangerous rate limiter panic", "error", r)
+			}
+		}()
+		for {
+			select {
+			case <-d.dangerousRateDone:
+				return
+			case <-d.dangerousRateTicker.C:
+				select {
+				case d.dangerousRateTokens <- struct{}{}:
 				default:
 				}
 			}
@@ -140,6 +172,14 @@ func (d *Dispatcher) Register(tool types.Tool) error {
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
 	start := time.Now()
 
+	// Concurrency limiter (M5): limit concurrent tool executions.
+	select {
+	case d.concurrencySem <- struct{}{}:
+		defer func() { <-d.concurrencySem }()
+	case <-ctx.Done():
+		return types.ToolResult{}, ctx.Err()
+	}
+
 	// Rate limit tool execution to prevent resource exhaustion from
 	// malicious or buggy LLMs generating thousands of tool calls per second.
 	select {
@@ -157,6 +197,16 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	if !ok {
 		available := d.List()
 		return types.ToolResult{}, fmt.Errorf("%w: unknown tool: %s. Available tools: %s", m31errors.ErrToolExecution, call.Name, strings.Join(available, ", "))
+	}
+
+	// Per-risk-level rate limiting (M6): dangerous/destructive tools get stricter limits.
+	risk := tool.RiskLevel()
+	if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
+		select {
+		case <-d.dangerousRateTokens:
+		case <-ctx.Done():
+			return types.ToolResult{}, ctx.Err()
+		}
 	}
 
 	// Tolerate nil or empty Input by treating it as an empty JSON object.
@@ -273,6 +323,8 @@ func (d *Dispatcher) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.rateDone)
 		d.rateTicker.Stop()
+		close(d.dangerousRateDone)
+		d.dangerousRateTicker.Stop()
 	})
 }
 
