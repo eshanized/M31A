@@ -108,6 +108,9 @@ type UIConfig struct {
 	ItalicThinking bool `toml:"italic_thinking"`
 	TabWidth       int  `toml:"tab_width"`
 
+	// Accessibility
+	ReducedMotion bool `toml:"reduced_motion"`
+
 	// New - Layout
 	SidebarPosition string `toml:"sidebar_position"`
 	SidebarAutoShow bool   `toml:"sidebar_auto_show"`
