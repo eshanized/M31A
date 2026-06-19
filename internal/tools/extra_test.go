@@ -25,7 +25,7 @@ func TestCascadingReplace_LineTrimmedFallback(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo"
 	// Exact match fails because of leading spaces; line-trimmed should match
-	result, strategy, err := cascadingReplace(content, "hello\nworld", "REPLACED")
+	result, strategy, err := cascadingReplace(content, "hello\nworld", "REPLACED", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestCascadingReplace_WhitespaceNormalizedFallback(t *testing.T) {
 	content := "hello    world\nfoo   bar"
 	// Line-trimmed fails because trimmed lines differ by whitespace;
 	// whitespace-normalized normalizes fields so it should match
-	result, strategy, err := cascadingReplace(content, "hello world\nfoo bar", "REPLACED")
+	result, strategy, err := cascadingReplace(content, "hello world\nfoo bar", "REPLACED", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestCascadingReplace_FuzzyAnchorFallback(t *testing.T) {
 	newStr := "REPLACED"
 	// Exact, line-trimmed, whitespace-normalized all fail;
 	// fuzzy anchor should match via Levenshtein on middle lines
-	result, strategy, err := cascadingReplace(content, oldStr, newStr)
+	result, strategy, err := cascadingReplace(content, oldStr, newStr, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCascadingReplace_FuzzyAnchorFallback(t *testing.T) {
 func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 	t.Parallel()
 	content := "hello world"
-	result, strategy, err := cascadingReplace(content, "hello world", "REPLACED")
+	result, strategy, err := cascadingReplace(content, "hello world", "REPLACED", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 
 func TestCascadingReplace_EmptyContent(t *testing.T) {
 	t.Parallel()
-	_, _, err := cascadingReplace("", "hello", "world")
+	_, _, err := cascadingReplace("", "hello", "world", false)
 	if err == nil {
 		t.Error("expected error for empty content")
 	}
@@ -100,7 +100,7 @@ func TestCascadingReplace_EmptyOldString(t *testing.T) {
 	t.Parallel()
 	// empty oldString matches at index 0 in strings.Index, so it returns exact-match
 	// Actually strings.Index returns 0 for empty substring
-	result, strategy, err := cascadingReplace("hello world", "", "REPLACED")
+	result, strategy, err := cascadingReplace("hello world", "", "REPLACED", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3279,7 +3279,7 @@ func TestNormalizeWhitespace_TrailingWhitespace(t *testing.T) {
 
 func TestAgent_Name(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	if a.Name() != "Agent" {
 		t.Errorf("expected 'Agent', got %s", a.Name())
 	}
@@ -3287,7 +3287,7 @@ func TestAgent_Name(t *testing.T) {
 
 func TestAgent_RiskLevel(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	if a.RiskLevel() != types.RiskSafe {
 		t.Errorf("expected RiskSafe, got %s", a.RiskLevel())
 	}
@@ -3295,7 +3295,7 @@ func TestAgent_RiskLevel(t *testing.T) {
 
 func TestAgent_Description(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	if a.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -3303,7 +3303,7 @@ func TestAgent_Description(t *testing.T) {
 
 func TestAgent_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	schema := a.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty schema")
@@ -3316,7 +3316,7 @@ func TestAgent_ParameterSchema(t *testing.T) {
 
 func TestAgent_Execute_NilManager(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3334,7 +3334,7 @@ func TestAgent_Execute_NilManager(t *testing.T) {
 
 func TestAgent_Execute_MissingDescription(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3352,7 +3352,7 @@ func TestAgent_Execute_MissingDescription(t *testing.T) {
 
 func TestAgent_Execute_MissingPrompt(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3370,7 +3370,7 @@ func TestAgent_Execute_MissingPrompt(t *testing.T) {
 
 func TestAgent_Execute_UnknownIsolation(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false)
+	a := NewAgent(nil, false, 0)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
