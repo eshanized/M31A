@@ -273,49 +273,6 @@ func (s *SidebarModel) IsAllTasksDone() bool {
 	return s.taskProgress.Done+s.taskProgress.Failed >= s.taskProgress.Total
 }
 
-// InitAgentProgress initializes the progress tracker for an agent loop session.
-func (s *SidebarModel) InitAgentProgress() {
-	s.taskProgress = SidebarTaskProgress{
-		StartedAt: time.Now(),
-	}
-}
-
-// AgentToolStarted adds a todo item for an agent tool call and updates progress.
-func (s *SidebarModel) AgentToolStarted(name string) {
-	desc := toolCallAction(name)
-	s.AddTodoItem(SidebarTodoItem{
-		Content:  desc,
-		Status:   "in_progress",
-		Priority: "medium",
-		Source:   "agent",
-	})
-	s.taskProgress.Total++
-	s.taskProgress.Running++
-	s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
-}
-
-// AgentToolCompleted marks the most recent matching agent tool as done and updates progress.
-func (s *SidebarModel) AgentToolCompleted(name string, success bool) {
-	desc := toolCallAction(name)
-	for i := len(s.todoItems) - 1; i >= 0; i-- {
-		if s.todoItems[i].Source == "agent" && s.todoItems[i].Content == desc && s.todoItems[i].Status == "in_progress" {
-			if success {
-				s.todoItems[i].Status = "completed"
-			} else {
-				s.todoItems[i].Status = "failed"
-			}
-			break
-		}
-	}
-	s.taskProgress.Running--
-	if success {
-		s.taskProgress.Done++
-	} else {
-		s.taskProgress.Failed++
-	}
-	s.taskProgress.Elapsed = time.Since(s.taskProgress.StartedAt)
-}
-
 // computeProgress derives progress counters from the current todo items list.
 // This ensures the progress bar always matches what's visible in the TODO section.
 func (s *SidebarModel) computeProgress() (total, done, failed, running int) {
