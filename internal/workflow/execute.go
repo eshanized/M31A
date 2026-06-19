@@ -2,7 +2,9 @@ package workflow
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,6 +55,22 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 		}, nil
 	}
 
+	// ── Pre-execution validation ──────────────────────────────────────────
+	preflightEnabled := e.cfg != nil && e.cfg.Features.ExecutePreflight
+	if preflightEnabled {
+		preflight := e.runExecutePreflight(tasks)
+		e.emit(ExecutePreflightMsg{
+			Passed: preflight.Passed,
+			Issues: preflight.Issues,
+		})
+		if !preflight.Passed {
+			e.logger.Warn("execute preflight found issues", "count", len(preflight.Issues))
+			for _, issue := range preflight.Issues {
+				e.logger.Warn("preflight issue", "issue", issue)
+			}
+		}
+	}
+
 	// 2. Create runner
 	runner := taskrunner.New(tasks)
 
@@ -97,8 +115,10 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 		// Invalidate code intel so next group gets a fresh index reflecting
 		// files written by this group.
-		e.codeIntelOnce = sync.Once{}
+		e.codeIntelMu.Lock()
 		e.codeIntel = nil
+		e.codeIntelBuilt = false
+		e.codeIntelMu.Unlock()
 
 		// M38 fix: only save state after group, not tasks (tasks saved once at end)
 		if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
@@ -143,6 +163,13 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, allTasks []m31types.Task, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
+	// Loop detection tracker for this task
+	loopEnabled := e.cfg != nil && e.cfg.Features.ExecuteLoopDetect
+	var tracker *ToolCallTracker
+	if loopEnabled {
+		tracker = NewToolCallTracker(3)
+	}
+
 	for task.HealsAttempted < m31types.MaxHealAttempts {
 		// Build context
 		messages := e.buildExecuteContext(ctx, *task, allTasks, goal)
@@ -150,6 +177,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		// Stream LLM with native tool calling
 		content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
 		if err != nil {
+			// Context overflow must NOT enter self-heal — healTask() adds MORE context
+			// (git diff, file state, failure description) which guarantees repeat failure.
+			if errors.Is(err, m31errors.ErrContextExceeded) {
+				return taskrunner.TaskResult{Success: false, Error: fmt.Sprintf("context window exceeded: %v", err)}
+			}
 			failureReason := fmt.Sprintf("LLM stream failed: %v", err)
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
 				return taskrunner.TaskResult{Success: false, Error: failureReason}
@@ -173,7 +205,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				return healResult
 			}
 			if !e.healCreatedExpectedFiles(task) {
-				e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
+				e.logger.Warn("heal succeeded but expected files missing, treating as failure", "task", task.ID)
+				return taskrunner.TaskResult{
+					Success: false,
+					Error:   fmt.Sprintf("heal succeeded but expected files not created for task %d", task.ID),
+				}
 			}
 			continue
 		}
@@ -263,6 +299,19 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				}()
 				sem <- struct{}{}        // acquire
 				defer func() { <-sem }() // release
+
+				// Loop detection: check if this tool call repeats the same pattern
+				if tracker != nil {
+					if tracker.Record(call.Name, string(call.Input)) {
+						e.emit(ExecuteLoopDetectMsg{
+							TaskID:   task.ID,
+							ToolName: call.Name,
+							Count:    tracker.Count(),
+						})
+						e.logger.Warn("tool call loop detected",
+							"task_id", task.ID, "tool", call.Name, "count", tracker.Count())
+					}
+				}
 
 				e.emit(ToolStartMsg{
 					ToolName:    call.Name,
@@ -368,7 +417,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				return healResult
 			}
 			if !e.healCreatedExpectedFiles(task) {
-				e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
+				e.logger.Warn("heal succeeded but expected files missing, treating as failure", "task", task.ID)
+				return taskrunner.TaskResult{
+					Success: false,
+					Error:   fmt.Sprintf("heal succeeded but expected files not created for task %d", task.ID),
+				}
 			}
 			continue
 		}
@@ -387,7 +440,51 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 		}
 
-		// Guard: fail file-changing tasks that produced no tool calls and no commit
+		// ── Per-task quality gate ───────────────────────────────────────────
+			qualityEnabled := e.cfg != nil && e.cfg.Features.ExecuteQualityGate
+			if qualityEnabled && len(task.AcceptanceCriteria) > 0 {
+				qgResult := e.checkAcceptanceCriteria(*task)
+				e.emit(ExecuteQualityGateMsg{
+					TaskID:  task.ID,
+					Passed:  qgResult.Passed,
+					Checked: qgResult.Checked,
+					Failed:  qgResult.Failed,
+				})
+				if !qgResult.Passed {
+					e.logger.Warn("quality gate failed for task",
+						"task_id", task.ID, "failed", qgResult.Failed, "checked", qgResult.Checked)
+					for _, detail := range qgResult.Details {
+						if strings.HasPrefix(detail, "FAIL:") {
+							e.logger.Warn("quality gate detail", "detail", detail)
+						}
+					}
+					// Feed quality gate failures back as a heal trigger
+					if task.HealsAttempted < m31types.MaxHealAttempts {
+						failureReason := fmt.Sprintf("Quality gate failed: %s",
+							strings.Join(qgResult.Details, "; "))
+						task.HealsAttempted++
+						e.emit(SelfHealStartMsg{
+							TaskID:  task.ID,
+							Attempt: task.HealsAttempted,
+							Max:     m31types.MaxHealAttempts,
+						})
+						healResult := e.healTask(ctx, *task, failureReason, goal)
+						e.emit(SelfHealCompleteMsg{
+							TaskID:  task.ID,
+							Attempt: task.HealsAttempted,
+							Max:     m31types.MaxHealAttempts,
+							Success: healResult.Success,
+							Error:   healResult.Error,
+						})
+						if !healResult.Success {
+							return healResult
+						}
+						continue
+					}
+				}
+			}
+
+			// Guard: fail file-changing tasks that produced no tool calls and no commit
 		if toolCallCount == 0 && len(task.Files) > 0 && commitHash == "" {
 			return taskrunner.TaskResult{
 				Success:    false,
@@ -448,7 +545,8 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	}
 	if planMarkdown != "" {
 		var plan *m31types.Plan
-		if e.cachedPlan != nil && e.cachedPlanMD5 == planMarkdown {
+		planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
+		if e.cachedPlan != nil && e.cachedPlanMD5 == planHash {
 			plan = e.cachedPlan
 		} else {
 			var parseErr error
@@ -457,7 +555,7 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
 			}
 			e.cachedPlan = plan
-			e.cachedPlanMD5 = planMarkdown
+			e.cachedPlanMD5 = planHash
 		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"
