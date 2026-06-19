@@ -58,21 +58,23 @@ func (l *loop) run(ctx context.Context) {
 			l.finishCancelled(err)
 			return
 		}
-		// Enforce tool-call budget.
-		if l.toolCallsRun >= l.maxTools {
+		// Enforce budgets — combine checks to avoid duplicate messages.
+		toolBudgetExhausted := l.toolCallsRun >= l.maxTools
+		tokenBudgetExhausted := l.maxTokens > 0 && l.inputToks+l.outputToks >= l.maxTokens
+		if toolBudgetExhausted || tokenBudgetExhausted {
 			budgetExhausted = true
+			var reason string
+			switch {
+			case toolBudgetExhausted && tokenBudgetExhausted:
+				reason = "Tool-call and token budgets exhausted. Summarize your findings now without further tool use."
+			case toolBudgetExhausted:
+				reason = "Tool-call budget exhausted. Summarize your findings now without further tool use."
+			default:
+				reason = "Token budget exhausted. Summarize your findings now without further tool use."
+			}
 			l.messages = append(l.messages, types.Message{
 				Role:      "user",
-				Content:   "Tool-call budget exhausted. Summarize your findings now without further tool use.",
-				CreatedAt: time.Now(),
-			})
-		}
-		// Enforce token budget.
-		if l.inputToks+l.outputToks >= l.maxTokens && l.maxTokens > 0 {
-			budgetExhausted = true
-			l.messages = append(l.messages, types.Message{
-				Role:      "user",
-				Content:   "Token budget exhausted. Summarize your findings now without further tool use.",
+				Content:   reason,
 				CreatedAt: time.Now(),
 			})
 		}
