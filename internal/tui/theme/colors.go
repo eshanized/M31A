@@ -239,6 +239,55 @@ func Auto() Theme {
 	return Light()
 }
 
+// HighContrast returns a high-contrast theme for accessibility.
+// Uses maximum contrast colors: white background, black text, vivid accents.
+func HighContrast() Theme {
+	t := Theme{
+		Mode:              ModeLight,
+		Background:        lipgloss.Color("#FFFFFF"),
+		Surface:           lipgloss.Color("#F0F0F0"),
+		SurfaceElevated:   lipgloss.Color("#FFFFFF"),
+		Border:            lipgloss.Color("#000000"),
+		Brand:             lipgloss.Color("#0000CC"), // vivid blue
+		TextPrimary:       lipgloss.Color("#000000"),
+		TextSecondary:     lipgloss.Color("#333333"),
+		Thinking:          lipgloss.Color("#0066CC"),
+		Success:           lipgloss.Color("#006600"), // vivid green
+		Error:             lipgloss.Color("#CC0000"), // vivid red
+		Warning:           lipgloss.Color("#CC6600"), // vivid orange
+		CodeBG:            lipgloss.Color("#F0F0F0"),
+		ToolLabel:         make(map[string]lipgloss.Style),
+		BackgroundPanel:   lipgloss.Color("#F0F0F0"),
+		BackgroundElement: lipgloss.Color("#E0E0E0"),
+		Text:              lipgloss.Color("#000000"),
+		TextMuted:         lipgloss.Color("#555555"),
+		BorderActive:      lipgloss.Color("#0000CC"),
+		BorderSubtle:      lipgloss.Color("#888888"),
+		Primary:           lipgloss.Color("#0000CC"),
+		Secondary:         lipgloss.Color("#0066CC"),
+		Accent:            lipgloss.Color("#0066CC"),
+		Info:              lipgloss.Color("#0066CC"),
+		ThinkingOpacity:   0.8,
+		DiffAdded:         lipgloss.Color("#006600"),
+		DiffRemoved:       lipgloss.Color("#CC0000"),
+		DiffAddedBg:       lipgloss.Color("#CCFFCC"),
+		DiffRemovedBg:     lipgloss.Color("#FFCCCC"),
+		DiffContextBg:     lipgloss.Color("#F0F0F0"),
+		BadgeForeground:   lipgloss.Color("#FFFFFF"),
+		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
+		BadgeTextDark:     lipgloss.Color("#000000"),
+		DividerChar:       "─",
+		HeaderHeight:      1,
+		ShadowColor:       lipgloss.Color("#00000040"),
+		CompactMode:       false,
+		SelectionBg:       lipgloss.Color("#CCCCFF"),
+		CardPadding:       1,
+		TabWidth:          4,
+	}
+	applyThemeStyles(&t)
+	return t
+}
+
 // WithAccent returns a new Theme with the accent color overridden
 func (t *Theme) WithAccent(hex string) Theme {
 	newTheme := *t

@@ -22,6 +22,7 @@ var registry = []ThemeDefinition{
 	{"dracula", "Dracula", "High contrast purple", ModeDark, Dracula},
 	{"solarized", "Solarized Dark", "Teal/olive", ModeDark, SolarizedDark},
 	{"monochrome", "Pure Mono", "Zero saturation", ModeDark, Monochrome},
+	{"high-contrast", "High Contrast", "Maximum accessibility", ModeLight, HighContrast},
 }
 
 // Available returns all available theme definitions

@@ -144,6 +144,7 @@ type Manager struct {
 	profile     ColorProfile
 	borderStyle string
 	accentColor string
+	cache       *StyleCache // lazily built, invalidated on theme change
 }
 
 func NewManager(mode Mode) *Manager {
@@ -204,6 +205,7 @@ func (m *Manager) resolve() {
 	}
 
 	m.current = base
+	m.invalidateCache()
 }
 
 func (m *Manager) Cycle() Mode {
