@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Galaxy core gradient -->
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="30%" stop-color="#fef3c7" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#fbbf24" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#92400e" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Arm gradient - warm to cool -->
+    <linearGradient id="armGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#f97316" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.3"/>
+    </linearGradient>
+    <linearGradient id="armGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#f97316" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.3"/>
+    </linearGradient>
+
+    <!-- Dust lane gradient -->
+    <linearGradient id="dustGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e1b4b" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#312e81" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Overall galaxy glow -->
+    <radialGradient id="galaxyAura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c4b5fd" stop-opacity="0.15"/>
+      <stop offset="70%" stop-color="#6366f1" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#0f0f23" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Filters -->
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <filter id="blurHeavy" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <filter id="coreBlur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+    <filter id="starGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark space background -->
+  <rect width="512" height="512" fill="#08071a"/>
+
+  <!-- Scattered background stars -->
+  <g opacity="0.4">
+    <circle cx="45" cy="38" r="0.8" fill="#e0e7ff"/>
+    <circle cx="120" cy="72" r="0.5" fill="#c4b5fd"/>
+    <circle cx="380" cy="45" r="0.7" fill="#e0e7ff"/>
+    <circle cx="460" cy="95" r="0.6" fill="#c4b5fd"/>
+    <circle cx="30" cy="180" r="0.5" fill="#e0e7ff"/>
+    <circle cx="485" cy="200" r="0.8" fill="#c4b5fd"/>
+    <circle cx="65" cy="320" r="0.6" fill="#e0e7ff"/>
+    <circle cx="440" cy="340" r="0.5" fill="#c4b5fd"/>
+    <circle cx="90" cy="430" r="0.7" fill="#e0e7ff"/>
+    <circle cx="400" cy="460" r="0.6" fill="#c4b5fd"/>
+    <circle cx="200" cy="25" r="0.5" fill="#e0e7ff"/>
+    <circle cx="320" cy="490" r="0.4" fill="#c4b5fd"/>
+    <circle cx="15" cy="420" r="0.6" fill="#e0e7ff"/>
+    <circle cx="495" cy="400" r="0.5" fill="#c4b5fd"/>
+    <circle cx="250" cy="15" r="0.7" fill="#e0e7ff"/>
+    <circle cx="260" cy="498" r="0.5" fill="#c4b5fd"/>
+    <circle cx="55" cy="250" r="0.4" fill="#e0e7ff"/>
+    <circle cx="458" cy="270" r="0.6" fill="#c4b5fd"/>
+    <circle cx="140" cy="470" r="0.5" fill="#e0e7ff"/>
+    <circle cx="370" cy="30" r="0.6" fill="#c4b5fd"/>
+  </g>
+
+  <!-- Galaxy container - tilted to mimic Andromeda's viewing angle -->
+  <g transform="translate(256,240) rotate(-30) scale(1, 0.55)">
+
+    <!-- Outer halo / aura -->
+    <ellipse cx="0" cy="0" rx="200" ry="200" fill="url(#galaxyAura)" filter="url(#coreBlur)"/>
+
+    <!-- Dust lane 1 - dark band between arms -->
+    <path d="M-180,-20 C-140,-60 -60,-80 0,-60 C60,-40 140,-20 180,20"
+          fill="none" stroke="url(#dustGrad)" stroke-width="18" stroke-linecap="round" filter="url(#blur)"/>
+
+    <!-- Dust lane 2 -->
+    <path d="M180,20 C140,60 60,80 0,60 C-60,40 -140,20 -180,-20"
+          fill="none" stroke="url(#dustGrad)" stroke-width="18" stroke-linecap="round" filter="url(#blur)"/>
+
+    <!-- Spiral arm 1 - upper -->
+    <path d="M-190,0 C-170,-50 -120,-90 -60,-100 C0,-110 80,-80 130,-30 C160,0 170,30 150,50"
+          fill="none" stroke="url(#armGrad1)" stroke-width="35" stroke-linecap="round" opacity="0.8" filter="url(#blur)"/>
+    <path d="M-190,0 C-170,-50 -120,-90 -60,-100 C0,-110 80,-80 130,-30 C160,0 170,30 150,50"
+          fill="none" stroke="url(#armGrad1)" stroke-width="18" stroke-linecap="round" opacity="0.95"/>
+
+    <!-- Spiral arm 2 - lower -->
+    <path d="M190,0 C170,50 120,90 60,100 C0,110 -80,80 -130,30 C-160,0 -170,-30 -150,-50"
+          fill="none" stroke="url(#armGrad2)" stroke-width="35" stroke-linecap="round" opacity="0.8" filter="url(#blur)"/>
+    <path d="M190,0 C170,50 120,90 60,100 C0,110 -80,80 -130,30 C-160,0 -170,-30 -150,-50"
+          fill="none" stroke="url(#armGrad2)" stroke-width="18" stroke-linecap="round" opacity="0.95"/>
+
+    <!-- Inner arm detail 1 -->
+    <path d="M-130,-10 C-100,-40 -40,-60 20,-55 C70,-50 110,-25 120,0"
+          fill="none" stroke="#fbbf24" stroke-width="8" stroke-linecap="round" opacity="0.6" filter="url(#blur)"/>
+
+    <!-- Inner arm detail 2 -->
+    <path d="M130,10 C100,40 40,60 -20,55 C-70,50 -110,25 -120,0"
+          fill="none" stroke="#fbbf24" stroke-width="8" stroke-linecap="round" opacity="0.6" filter="url(#blur)"/>
+
+    <!-- Star clusters along arms -->
+    <g filter="url(#starGlow)" opacity="0.9">
+      <circle cx="-100" cy="-70" r="2.5" fill="#fef3c7"/>
+      <circle cx="-60" cy="-85" r="2" fill="#fde68a"/>
+      <circle cx="20" cy="-75" r="2.2" fill="#fef3c7"/>
+      <circle cx="80" cy="-50" r="1.8" fill="#fde68a"/>
+      <circle cx="120" cy="-15" r="2.3" fill="#fef3c7"/>
+      <circle cx="100" cy="55" r="2" fill="#fde68a"/>
+      <circle cx="60" cy="80" r="2.2" fill="#fef3c7"/>
+      <circle cx="-20" cy="75" r="1.8" fill="#fde68a"/>
+      <circle cx="-80" cy="50" r="2.3" fill="#fef3c7"/>
+      <circle cx="-120" cy="15" r="2" fill="#fde68a"/>
+      <circle cx="-40" cy="-50" r="1.5" fill="#fef3c7"/>
+      <circle cx="40" cy="50" r="1.5" fill="#fef3c7"/>
+      <circle cx="0" cy="-65" r="1.8" fill="#ffffff"/>
+      <circle cx="0" cy="65" r="1.8" fill="#ffffff"/>
+    </g>
+
+    <!-- Galactic bulge / core glow (outer) -->
+    <ellipse cx="0" cy="0" rx="65" ry="55" fill="#fbbf24" opacity="0.25" filter="url(#coreBlur)"/>
+
+    <!-- Galactic bulge / core glow (mid) -->
+    <ellipse cx="0" cy="0" rx="40" ry="32" fill="#fef3c7" opacity="0.5" filter="url(#blurHeavy)"/>
+
+    <!-- Galactic bulge / core (bright center) -->
+    <ellipse cx="0" cy="0" rx="22" ry="18" fill="#ffffff" opacity="0.85" filter="url(#blur)"/>
+
+    <!-- Core bright point -->
+    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#ffffff" opacity="1"/>
+  </g>
+
+  <!-- M31 label -->
+  <text x="256" y="440" text-anchor="middle"
+        font-family="'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace"
+        font-size="52" font-weight="700" fill="#e0e7ff" letter-spacing="10">
+    M31
+  </text>
+
+  <!-- AUTONOMOUS subtitle -->
+  <text x="256" y="472" text-anchor="middle"
+        font-family="'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace"
+        font-size="13" fill="#8b5cf6" letter-spacing="5" opacity="0.75">
+    AUTONOMOUS
+  </text>
+</svg>
