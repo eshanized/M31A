@@ -49,6 +49,11 @@ func (t *Glob) ParameterSchema() string {
 			"path": {
 				"type": "string",
 				"description": "Directory to search in (defaults to working directory)"
+			},
+			"type": {
+				"type": "string",
+				"description": "Filter by type: 'file' (regular files only), 'dir' (directories only), or 'all' (default)",
+				"enum": ["file", "dir", "all"]
 			}
 		},
 		"required": ["pattern"]
@@ -69,6 +74,14 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	pattern, ok := patternRaw.(string)
 	if !ok {
 		return types.ToolResult{}, fmt.Errorf("parameter pattern must be a string")
+	}
+
+	// Parse type filter
+	typeFilter := "all"
+	if typeRaw, ok := input.Params["type"]; ok {
+		if typeStr, ok := typeRaw.(string); ok {
+			typeFilter = typeStr
+		}
 	}
 
 	// Check if .gitignore exists and rg is available for gitignore-aware listing
@@ -96,6 +109,32 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("invalid glob pattern: %w", err)
 		}
+	}
+
+	// Apply type filter
+	if typeFilter != "all" {
+		var filtered []string
+		for _, m := range matches {
+			fullPath := m
+			if !filepath.IsAbs(m) {
+				fullPath = filepath.Join(t.workDir, m)
+			}
+			fi, err := os.Stat(fullPath)
+			if err != nil {
+				continue
+			}
+			switch typeFilter {
+			case "file":
+				if !fi.IsDir() {
+					filtered = append(filtered, m)
+				}
+			case "dir":
+				if fi.IsDir() {
+					filtered = append(filtered, m)
+				}
+			}
+		}
+		matches = filtered
 	}
 
 	maxResults := MaxGlobResults
