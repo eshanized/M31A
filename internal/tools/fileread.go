@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -48,7 +49,17 @@ func (t *FileRead) ParameterSchema() string {
 			},
 			"limit": {
 				"type": "integer",
-				"description": "Maximum number of bytes to read (default 5242880)",
+				"description": "Maximum number of bytes to read (default 5242880). Ignored when offset is set.",
+				"minimum": 1
+			},
+			"offset": {
+				"type": "integer",
+				"description": "Line number to start reading from (1-indexed). When set, limit becomes max lines to return.",
+				"minimum": 1
+			},
+			"max_lines": {
+				"type": "integer",
+				"description": "Maximum number of lines to return when offset is set (default 2000).",
 				"minimum": 1
 			}
 		},
@@ -72,10 +83,29 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("%w: parameter path must be a string", m31errors.ErrToolExecution)
 	}
 
+	// Parse offset (line number to start from, 1-indexed)
+	offset := 0
+	if offsetRaw, ok := input.Params["offset"]; ok {
+		if offsetFloat, ok := offsetRaw.(float64); ok {
+			offset = int(offsetFloat)
+		}
+	}
+
+	// Parse max_lines (max lines to return when offset is set)
+	maxLines := 2000
+	if maxLinesRaw, ok := input.Params["max_lines"]; ok {
+		if maxLinesFloat, ok := maxLinesRaw.(float64); ok {
+			maxLines = int(maxLinesFloat)
+		}
+	}
+
+	// Parse byte limit (only used when offset is not set)
 	limit := types.MaxFileSize
-	if limitRaw, ok := input.Params["limit"]; ok {
-		if limitFloat, ok := limitRaw.(float64); ok {
-			limit = int(limitFloat)
+	if offset == 0 {
+		if limitRaw, ok := input.Params["limit"]; ok {
+			if limitFloat, ok := limitRaw.(float64); ok {
+				limit = int(limitFloat)
+			}
 		}
 	}
 
@@ -119,10 +149,13 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("%w: path is a directory, not a file: %s", m31errors.ErrToolExecution, path)
 	}
 
-	// Check file size
+	// Check file size (skip for offset mode — we read line-by-line)
 	fileSize := fi.Size()
-	if fileSize > int64(limit) {
-		return types.ToolResult{}, fmt.Errorf("%w: file %s exceeds size limit", m31errors.ErrFileTooLarge, path)
+	if offset == 0 && fileSize > int64(limit) {
+		return types.ToolResult{}, types.NewToolError(
+			fmt.Errorf("%w: file %s exceeds size limit (%d bytes)", m31errors.ErrFileTooLarge, path, fileSize),
+			fmt.Sprintf("Use offset and max_lines parameters to read specific line ranges, or increase the limit parameter (current: %d bytes).", limit),
+		)
 	}
 
 	// Open and read
@@ -158,7 +191,12 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 		}, nil
 	}
 
-	// Read the rest of the file (up to limit)
+	// Line-level reading mode (offset is set)
+	if offset > 0 {
+		return t.readLineRange(f, path, offset, maxLines, start)
+	}
+
+	// Byte-level reading mode (original behavior)
 	totalContent := make([]byte, len(header))
 	copy(totalContent, header)
 
@@ -185,5 +223,52 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	return types.ToolResult{
 		Output:     string(totalContent),
 		DurationMs: elapsed,
+	}, nil
+}
+
+// readLineRange reads lines from a file starting at offset (1-indexed) up to maxLines.
+// It returns the selected lines with line numbers prefixed.
+func (t *FileRead) readLineRange(f *os.File, path string, offset, maxLines int, start time.Time) (types.ToolResult, error) {
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	var sb strings.Builder
+	linesShown := 0
+
+	for scanner.Scan() {
+		lineNum++
+		if lineNum < offset {
+			continue
+		}
+		if linesShown >= maxLines {
+			break
+		}
+		fmt.Fprintf(&sb, "%d: %s\n", lineNum, scanner.Text())
+		linesShown++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return types.ToolResult{}, fmt.Errorf("%w: read error: %v", m31errors.ErrToolExecution, err)
+	}
+
+	elapsed := time.Since(start).Milliseconds()
+
+	if linesShown == 0 {
+		totalLines := lineNum
+		return types.ToolResult{
+			Output:     fmt.Sprintf("No lines found at offset %d (file has %d lines)", offset, totalLines),
+			DurationMs: elapsed,
+		}, nil
+	}
+
+	output := sb.String()
+	truncated := linesShown >= maxLines
+	if truncated {
+		output += fmt.Sprintf("\n[... showing %d lines from line %d (limit: %d lines)]", linesShown, offset, maxLines)
+	}
+
+	return types.ToolResult{
+		Output:     output,
+		DurationMs: elapsed,
+		Truncated:  truncated,
 	}, nil
 }
