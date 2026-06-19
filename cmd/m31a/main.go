@@ -242,7 +242,7 @@ func run() int {
 	// spawn in background). The factory passes nil for the child-side manager
 	// reference to avoid a registration cycle; children created by the
 	// factory get isChild=true and cannot spawn grandchildren in background.
-	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false)); err != nil {
+	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false, 0)); err != nil {
 		logger.Error("failed to register Agent tool on parent dispatcher", "error", err)
 		return 1
 	}
