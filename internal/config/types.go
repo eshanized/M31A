@@ -193,6 +193,36 @@ type FeaturesConfig struct {
 	// Optional per-session budget limit in USD. 0 means no limit.
 	// When set, workflow phases check cumulative cost before proceeding.
 	BudgetLimitUSD float64 `toml:"budget_limit_usd"`
+
+	// Plan enhancements (GSD-inspired sub-steps within the Plan phase)
+	PlanResearch       bool `toml:"plan_research"`        // Pre-plan research step
+	PlanCheck          bool `toml:"plan_check"`            // Plan quality checker + revision loop
+	PlanCheckMaxIter   int  `toml:"plan_check_max_iter"`   // Max revision iterations (default 3)
+	PlanSecurityGate   bool `toml:"plan_security_gate"`    // Security heuristic gate
+	PlanCoverageGate   bool `toml:"plan_coverage_gate"`    // Requirements coverage gate
+	PlanGapAnalysis    bool `toml:"plan_gap_analysis"`      // Post-plan gap analysis
+	PlanChunked        bool `toml:"plan_chunked"`           // Chunked plan generation
+	PlanChunkThreshold int  `toml:"plan_chunk_threshold"`   // Tasks threshold for auto-chunking (default 10)
+
+	// Discuss phase enhancements
+	DiscussQualityCheck bool `toml:"discuss_quality_check"` // Question quality checker
+	DiscussCompleteness bool `toml:"discuss_completeness"`  // Answer completeness check
+	DiscussFollowUps    bool `toml:"discuss_follow_ups"`    // Follow-up question generation
+
+	// Execute phase enhancements
+	ExecutePreflight   bool `toml:"execute_preflight"`     // Pre-execution validation
+	ExecuteQualityGate bool `toml:"execute_quality_gate"`  // Per-task acceptance criteria checks
+	ExecuteLoopDetect  bool `toml:"execute_loop_detect"`   // Tool call loop detection
+
+	// Verify + Ship phase enhancements
+	VerifyReport    bool `toml:"verify_report"`    // Generate verification report
+	VerifySecurity  bool `toml:"verify_security"`  // Security file scanning
+	ShipPreflight   bool `toml:"ship_preflight"`   // Pre-ship checklist
+	ShipChangelog   bool `toml:"ship_changelog"`   // Changelog generation
+
+	// Initialize phase enhancements
+	InitDeepAnalysis bool `toml:"init_deep_analysis"` // Deep project analysis
+	InitPreflight    bool `toml:"init_preflight"`      // Environment pre-flight checks
 }
 
 type LedgerConfig struct {
