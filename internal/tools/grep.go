@@ -67,6 +67,16 @@ func (t *Grep) ParameterSchema() string {
 			"max_results": {
 				"type": "integer",
 				"description": "Maximum number of matches to return (default 100, min 1)"
+			},
+			"context_lines": {
+				"type": "integer",
+				"description": "Number of context lines to show before and after each match (default 0)",
+				"minimum": 0,
+				"maximum": 10
+			},
+			"fixed_string": {
+				"type": "boolean",
+				"description": "Treat pattern as a literal string, not a regex (default false)"
 			}
 		},
 		"required": ["pattern"]
@@ -89,7 +99,21 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		return types.ToolResult{}, fmt.Errorf("parameter pattern must be a string")
 	}
 	if len(pattern) > MaxGrepPatternLength {
-		return types.ToolResult{}, fmt.Errorf("regex pattern too long (max %d chars)", MaxGrepPatternLength)
+		return types.ToolResult{}, types.NewToolError(
+			fmt.Errorf("regex pattern too long (max %d chars, got %d)", MaxGrepPatternLength, len(pattern)),
+			"Simplify the pattern or use fixed_string=true for literal string searches.",
+		)
+	}
+
+	// Fixed-string mode: escape regex special characters
+	fixedString := false
+	if fsRaw, ok := input.Params["fixed_string"]; ok {
+		if fsBool, ok := fsRaw.(bool); ok {
+			fixedString = fsBool
+		}
+	}
+	if fixedString {
+		pattern = regexp.QuoteMeta(pattern)
 	}
 
 	searchPath := t.workDir
@@ -133,12 +157,22 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
+	contextLines := 0
+	if ctxRaw, ok := input.Params["context_lines"]; ok {
+		if ctxFloat, ok := ctxRaw.(float64); ok {
+			contextLines = int(ctxFloat)
+			if contextLines > 10 {
+				contextLines = 10
+			}
+		}
+	}
+
 	var result types.ToolResult
 	var err error
 	if t.hasRg {
-		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults)
+		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults, contextLines)
 	} else {
-		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults)
+		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults, contextLines)
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
@@ -160,8 +194,11 @@ type rgDataMatch struct {
 	LineNumber int `json:"line_number"`
 }
 
-func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
+func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int) (types.ToolResult, error) {
 	args := []string{"--json", "--no-heading", "--line-number", "--max-count", fmt.Sprintf("%d", maxResults)}
+	if contextLines > 0 {
+		args = append(args, "--context", fmt.Sprintf("%d", contextLines))
+	}
 	if glob != "" {
 		args = append(args, "--glob", glob)
 	}
@@ -183,30 +220,40 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	var results []string
 	count := 0
 	truncated := false
+	seenMatch := make(map[string]bool) // track match lines to avoid duplicates from context
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		if count >= maxResults {
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			truncated = true
-			break
-		}
 		line := scanner.Text()
 		var match rgMatch
 		if err := json.Unmarshal([]byte(line), &match); err != nil {
 			continue
 		}
-		if match.Type != "match" {
-			continue
+		if match.Type == "match" {
+			if count >= maxResults {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				truncated = true
+				break
+			}
+			var data rgDataMatch
+			if err := json.Unmarshal(match.Data, &data); err != nil {
+				continue
+			}
+			content := strings.TrimRight(data.Lines.Text, "\n\r")
+			results = append(results, fmt.Sprintf("%s:%d: %s", data.Path.Text, data.LineNumber, content))
+			count++
+			seenMatch[fmt.Sprintf("%s:%d", data.Path.Text, data.LineNumber)] = true
+		} else if match.Type == "context" && contextLines > 0 {
+			// Context lines are useful for understanding surrounding code
+			var data rgDataMatch
+			if err := json.Unmarshal(match.Data, &data); err != nil {
+				continue
+			}
+			// Add context lines with a separator marker
+			content := strings.TrimRight(data.Lines.Text, "\n\r")
+			results = append(results, fmt.Sprintf("%s:%d-%s", data.Path.Text, data.LineNumber, content))
 		}
-		var data rgDataMatch
-		if err := json.Unmarshal(match.Data, &data); err != nil {
-			continue
-		}
-		content := strings.TrimRight(data.Lines.Text, "\n\r")
-		results = append(results, fmt.Sprintf("%s:%d: %s", data.Path.Text, data.LineNumber, content))
-		count++
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -248,7 +295,7 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
-func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults int) (types.ToolResult, error) {
+func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int) (types.ToolResult, error) {
 	if err := checkRedos(pattern); err != nil {
 		return types.ToolResult{}, err
 	}
@@ -320,26 +367,45 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 			return nil
 		}
 
+		// Read all lines for context support
 		scanner := bufio.NewScanner(f)
-		lineNum := 0
+		var allLines []string
 		for scanner.Scan() {
-			lineNum++
-			if lineNum%1000 == 0 {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-			}
-			if re.MatchString(scanner.Text()) {
-				if len(results) >= maxResults {
-					truncated = true
-					return filepath.SkipAll
-				}
-				relPath, _ := filepath.Rel(t.workDir, path)
-				results = append(results, fmt.Sprintf("%s:%d: %s", relPath, lineNum, scanner.Text()))
-			}
+			allLines = append(allLines, scanner.Text())
 		}
 		if err := scanner.Err(); err != nil {
 			slog.Debug("grep: scanner error", "path", path, "error", err)
+		}
+
+		// Find matches with context
+		for i, line := range allLines {
+			if len(results) >= maxResults {
+				truncated = true
+				return filepath.SkipAll
+			}
+			if re.MatchString(line) {
+				relPath, _ := filepath.Rel(t.workDir, path)
+				startLine := i - contextLines
+				if startLine < 0 {
+					startLine = 0
+				}
+				endLine := i + contextLines
+				if endLine >= len(allLines) {
+					endLine = len(allLines) - 1
+				}
+				// Emit context window
+				for j := startLine; j <= endLine; j++ {
+					if len(results) >= maxResults {
+						truncated = true
+						break
+					}
+					marker := " "
+					if j == i {
+						marker = ":"
+					}
+					results = append(results, fmt.Sprintf("%s:%d%s %s", relPath, j+1, marker, allLines[j]))
+				}
+			}
 		}
 		return nil
 	})
