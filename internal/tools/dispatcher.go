@@ -325,6 +325,15 @@ func (d *Dispatcher) Stop() {
 		d.rateTicker.Stop()
 		close(d.dangerousRateDone)
 		d.dangerousRateTicker.Stop()
+		// Drain stale responses from shared channels to prevent buildup
+		// from responses that arrive after per-request channels are deleted.
+		for {
+			select {
+			case <-d.responseCh:
+			default:
+				return
+			}
+		}
 	})
 }
 
