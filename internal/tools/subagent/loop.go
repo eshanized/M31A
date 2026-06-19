@@ -52,19 +52,31 @@ func (l *loop) run(ctx context.Context) {
 		},
 	}
 
+	budgetExhausted := false
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			l.finishCancelled(err)
 			return
 		}
+		// Enforce tool-call budget.
 		if l.toolCallsRun >= l.maxTools {
+			budgetExhausted = true
 			l.messages = append(l.messages, types.Message{
 				Role:      "user",
 				Content:   "Tool-call budget exhausted. Summarize your findings now without further tool use.",
 				CreatedAt: time.Now(),
 			})
 		}
-		done, err := l.runOneTurn(ctx)
+		// Enforce token budget.
+		if l.inputToks+l.outputToks >= l.maxTokens && l.maxTokens > 0 {
+			budgetExhausted = true
+			l.messages = append(l.messages, types.Message{
+				Role:      "user",
+				Content:   "Token budget exhausted. Summarize your findings now without further tool use.",
+				CreatedAt: time.Now(),
+			})
+		}
+		done, err := l.runOneTurn(ctx, budgetExhausted)
 		if err != nil {
 			l.manager.failAgent(l.agent, err)
 			return
@@ -79,7 +91,9 @@ func (l *loop) run(ctx context.Context) {
 
 // runOneTurn performs a single LLM request + tool dispatch round.
 // Returns (true, nil) when the assistant produced no tool calls (terminal).
-func (l *loop) runOneTurn(ctx context.Context) (bool, error) {
+// When budgetExhausted is true, tool definitions are omitted and any tool
+// calls in the response are discarded — the LLM is forced to summarize.
+func (l *loop) runOneTurn(ctx context.Context, budgetExhausted bool) (bool, error) {
 	if l.provider == nil {
 		return false, fmt.Errorf("no LLM provider configured")
 	}
@@ -89,7 +103,7 @@ func (l *loop) runOneTurn(ctx context.Context) (bool, error) {
 		Messages:         l.messages,
 		ReasoningEnabled: true,
 	}
-	if l.toolCallsRun < l.maxTools {
+	if !budgetExhausted && l.toolCallsRun < l.maxTools {
 		req.Tools = l.buildToolDefinitions()
 	}
 
@@ -127,6 +141,18 @@ func (l *loop) runOneTurn(ctx context.Context) (bool, error) {
 	}
 
 	if len(toolCalls) == 0 {
+		l.messages = append(l.messages, types.Message{
+			Role:      "assistant",
+			Content:   content,
+			CreatedAt: time.Now(),
+			Usage:     usage,
+		})
+		return true, nil
+	}
+
+	// When the budget is exhausted, discard any tool calls the LLM tried to
+	// generate — tools were not advertised, so executing them would be wrong.
+	if budgetExhausted {
 		l.messages = append(l.messages, types.Message{
 			Role:      "assistant",
 			Content:   content,
@@ -311,12 +337,22 @@ func (l *loop) buildSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("You are a focused subagent running inside a parallel exploration swarm.\n")
 	sb.WriteString("Your parent has given you a single, well-defined task. Execute it efficiently.\n\n")
-	sb.WriteString("Guidelines:\n")
+
+	// Provide workspace context so the subagent can orient itself.
+	fmt.Fprintf(&sb, "Working directory: %s\n", l.agent.Info.Worktree)
+	if l.agent.Info.Isolation == IsolationWorktree {
+		sb.WriteString("You are in an isolated git worktree — file changes here do not affect the parent.\n")
+	} else {
+		sb.WriteString("You share the parent's working directory — file changes affect the parent directly.\n")
+	}
+	sb.WriteString("\nGuidelines:\n")
 	sb.WriteString("- Prefer parallel-friendly tools (Glob, Grep, FileRead, Bash with read-only commands).\n")
 	sb.WriteString("- Do not ask the user questions; you run autonomously.\n")
 	sb.WriteString("- When you have enough information, stop calling tools and write a clear summary.\n")
 	sb.WriteString("- Keep tool calls minimal; every call costs tokens and time.\n")
+	sb.WriteString("- Read files before editing them to understand existing code.\n")
 	fmt.Fprintf(&sb, "- Tool-call budget: %d calls. Stop before exhausting it.\n", l.maxTools)
+	fmt.Fprintf(&sb, "- Token budget: %d tokens (input + output).\n", l.maxTokens)
 	fmt.Fprintf(&sb, "- Describe: %s\n", l.agent.req.Description)
 	if l.agent.req.Name != "" {
 		fmt.Fprintf(&sb, "- Name: %s\n", l.agent.req.Name)
