@@ -26,11 +26,18 @@ type Agent struct {
 	// isChild prevents recursive fan-out: a subagent's own dispatcher
 	// registers an Agent with isChild=true, which forces foreground mode.
 	isChild bool
+	// depth tracks nesting depth (0 = root, 1 = child, 2 = grandchild).
+	depth int
 }
 
+// MaxAgentDepth is the maximum nesting depth for subagents.
+// Depth 0 is the root agent, depth 1 is a child, depth 2 is a grandchild.
+// Going deeper is blocked to prevent runaway resource consumption.
+const MaxAgentDepth = 2
+
 // NewAgent creates an Agent tool backed by the given manager.
-func NewAgent(m *subagent.Manager, isChild bool) *Agent {
-	return &Agent{manager: m, isChild: isChild}
+func NewAgent(m *subagent.Manager, isChild bool, depth int) *Agent {
+	return &Agent{manager: m, isChild: isChild, depth: depth}
 }
 
 func (t *Agent) Name() string               { return "Agent" }
@@ -74,6 +81,11 @@ func (t *Agent) ParameterSchema() string {
 func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	if t.manager == nil {
 		return types.ToolResult{Error: "Agent tool: subagent manager not configured"}, nil
+	}
+
+	// Enforce depth limit (L2)
+	if t.depth >= MaxAgentDepth {
+		return types.ToolResult{Error: fmt.Sprintf("Agent: maximum subagent depth (%d) reached. Use foreground mode or handle the task directly.", MaxAgentDepth)}, nil
 	}
 
 	var req struct {
@@ -210,7 +222,7 @@ func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.Permiss
 			return nil, err
 		}
 		if manager != nil {
-			if err := d.Register(NewAgent(manager, true)); err != nil {
+			if err := d.Register(NewAgent(manager, true, 1)); err != nil {
 				d.Stop()
 				return nil, err
 			}
