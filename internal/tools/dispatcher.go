@@ -51,22 +51,22 @@ type Dispatcher struct {
 // goroutine leaks (e.g., during session restart or app shutdown).
 func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
-		tools:              make(map[string]types.Tool),
-		permissions:        make(map[string]bool),
-		requestCh:          make(chan PermissionRequest, PermissionChannelBuffer),
-		responseCh:         make(chan PermissionResponse, PermissionChannelBuffer),
-		questionReqCh:      make(chan QuestionRequest, QuestionChannelBuffer),
-		questionRespCh:     make(chan QuestionResponse, QuestionChannelBuffer),
-		rules:              []config.PermissionRule{},
-		originalRules:      []config.PermissionRule{},
-		agents:             make(map[string]config.PermissionsAgentConfig),
-		activeAgent:        DefaultAgentName,
-		permissionTimeout:  types.DefaultPermissionTimeout,
-		rateTokens:         make(chan struct{}, ToolRateLimitBurst),
-		rateDone:           make(chan struct{}),
+		tools:               make(map[string]types.Tool),
+		permissions:         make(map[string]bool),
+		requestCh:           make(chan PermissionRequest, PermissionChannelBuffer),
+		responseCh:          make(chan PermissionResponse, PermissionChannelBuffer),
+		questionReqCh:       make(chan QuestionRequest, QuestionChannelBuffer),
+		questionRespCh:      make(chan QuestionResponse, QuestionChannelBuffer),
+		rules:               []config.PermissionRule{},
+		originalRules:       []config.PermissionRule{},
+		agents:              make(map[string]config.PermissionsAgentConfig),
+		activeAgent:         DefaultAgentName,
+		permissionTimeout:   types.DefaultPermissionTimeout,
+		rateTokens:          make(chan struct{}, ToolRateLimitBurst),
+		rateDone:            make(chan struct{}),
 		dangerousRateTokens: make(chan struct{}, DangerousRateLimitBurst),
 		dangerousRateDone:   make(chan struct{}),
-		concurrencySem:     make(chan struct{}, MaxConcurrentTools),
+		concurrencySem:      make(chan struct{}, MaxConcurrentTools),
 	}
 	// Initialize token bucket for rate limiting.
 	for i := 0; i < ToolRateLimitBurst; i++ {

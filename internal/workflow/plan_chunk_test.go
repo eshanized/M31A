@@ -6,11 +6,11 @@ import (
 
 func TestParseOutline(t *testing.T) {
 	tests := []struct {
-		name       string
-		content    string
-		wantWaves  int
-		wantTasks  int
-		wantErr    bool
+		name      string
+		content   string
+		wantWaves int
+		wantTasks int
+		wantErr   bool
 	}{
 		{
 			name: "valid outline",
@@ -36,8 +36,8 @@ func TestParseOutline(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "in code block",
-			content: "```json\n{\"title\": \"Test\", \"waves\": [{\"wave\": 1, \"tasks\": [{\"id\": 1, \"action\": \"Create\", \"description\": \"A\", \"dependencies\": [], \"category\": \"X\"}]}]}\n```",
+			name:      "in code block",
+			content:   "```json\n{\"title\": \"Test\", \"waves\": [{\"wave\": 1, \"tasks\": [{\"id\": 1, \"action\": \"Create\", \"description\": \"A\", \"dependencies\": [], \"category\": \"X\"}]}]}\n```",
 			wantWaves: 1,
 			wantTasks: 1,
 			wantErr:   false,

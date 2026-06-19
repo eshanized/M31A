@@ -69,7 +69,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/plan-check.md":           &r.PlanCheck,
 		"prompts/plan-revise.md":          &r.PlanRevise,
 		"prompts/plan-outline.md":         &r.PlanOutline,
-		"prompts/discuss-followup.md":   &r.DiscussFollowup,
+		"prompts/discuss-followup.md":     &r.DiscussFollowup,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -131,8 +131,8 @@ type Engine struct {
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
 	// Codebase intelligence layer (lazy-built, invalidated between execute groups)
-	codeIntel   *codeintel.Indexer
-	codeIntelMu sync.Mutex
+	codeIntel      *codeintel.Indexer
+	codeIntelMu    sync.Mutex
 	codeIntelBuilt bool
 	// Shared ledger instance for session record persistence (uses the
 	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).

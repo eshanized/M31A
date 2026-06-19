@@ -441,50 +441,50 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		}
 
 		// ── Per-task quality gate ───────────────────────────────────────────
-			qualityEnabled := e.cfg != nil && e.cfg.Features.ExecuteQualityGate
-			if qualityEnabled && len(task.AcceptanceCriteria) > 0 {
-				qgResult := e.checkAcceptanceCriteria(*task)
-				e.emit(ExecuteQualityGateMsg{
-					TaskID:  task.ID,
-					Passed:  qgResult.Passed,
-					Checked: qgResult.Checked,
-					Failed:  qgResult.Failed,
-				})
-				if !qgResult.Passed {
-					e.logger.Warn("quality gate failed for task",
-						"task_id", task.ID, "failed", qgResult.Failed, "checked", qgResult.Checked)
-					for _, detail := range qgResult.Details {
-						if strings.HasPrefix(detail, "FAIL:") {
-							e.logger.Warn("quality gate detail", "detail", detail)
-						}
-					}
-					// Feed quality gate failures back as a heal trigger
-					if task.HealsAttempted < m31types.MaxHealAttempts {
-						failureReason := fmt.Sprintf("Quality gate failed: %s",
-							strings.Join(qgResult.Details, "; "))
-						task.HealsAttempted++
-						e.emit(SelfHealStartMsg{
-							TaskID:  task.ID,
-							Attempt: task.HealsAttempted,
-							Max:     m31types.MaxHealAttempts,
-						})
-						healResult := e.healTask(ctx, *task, failureReason, goal)
-						e.emit(SelfHealCompleteMsg{
-							TaskID:  task.ID,
-							Attempt: task.HealsAttempted,
-							Max:     m31types.MaxHealAttempts,
-							Success: healResult.Success,
-							Error:   healResult.Error,
-						})
-						if !healResult.Success {
-							return healResult
-						}
-						continue
+		qualityEnabled := e.cfg != nil && e.cfg.Features.ExecuteQualityGate
+		if qualityEnabled && len(task.AcceptanceCriteria) > 0 {
+			qgResult := e.checkAcceptanceCriteria(*task)
+			e.emit(ExecuteQualityGateMsg{
+				TaskID:  task.ID,
+				Passed:  qgResult.Passed,
+				Checked: qgResult.Checked,
+				Failed:  qgResult.Failed,
+			})
+			if !qgResult.Passed {
+				e.logger.Warn("quality gate failed for task",
+					"task_id", task.ID, "failed", qgResult.Failed, "checked", qgResult.Checked)
+				for _, detail := range qgResult.Details {
+					if strings.HasPrefix(detail, "FAIL:") {
+						e.logger.Warn("quality gate detail", "detail", detail)
 					}
 				}
+				// Feed quality gate failures back as a heal trigger
+				if task.HealsAttempted < m31types.MaxHealAttempts {
+					failureReason := fmt.Sprintf("Quality gate failed: %s",
+						strings.Join(qgResult.Details, "; "))
+					task.HealsAttempted++
+					e.emit(SelfHealStartMsg{
+						TaskID:  task.ID,
+						Attempt: task.HealsAttempted,
+						Max:     m31types.MaxHealAttempts,
+					})
+					healResult := e.healTask(ctx, *task, failureReason, goal)
+					e.emit(SelfHealCompleteMsg{
+						TaskID:  task.ID,
+						Attempt: task.HealsAttempted,
+						Max:     m31types.MaxHealAttempts,
+						Success: healResult.Success,
+						Error:   healResult.Error,
+					})
+					if !healResult.Success {
+						return healResult
+					}
+					continue
+				}
 			}
+		}
 
-			// Guard: fail file-changing tasks that produced no tool calls and no commit
+		// Guard: fail file-changing tasks that produced no tool calls and no commit
 		if toolCallCount == 0 && len(task.Files) > 0 && commitHash == "" {
 			return taskrunner.TaskResult{
 				Success:    false,

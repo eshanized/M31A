@@ -207,8 +207,8 @@ type VerifyReportMsg struct {
 
 // ShipPreflightMsg is emitted when the pre-ship checklist runs.
 type ShipPreflightMsg struct {
-	Passed  bool
-	Issues  []string
+	Passed bool
+	Issues []string
 }
 
 // ShipChangelogMsg is emitted when the changelog is generated.
@@ -219,22 +219,22 @@ type ShipChangelogMsg struct {
 
 // InitAnalysisMsg is emitted when deep project analysis completes.
 type InitAnalysisMsg struct {
-	ProjectType    string
-	Framework      string
-	Language       string
+	ProjectType     string
+	Framework       string
+	Language        string
 	DependencyCount int
-	TestFileRatio  float64
-	FileCount      int
-	HealthScore    int // 0-100
+	TestFileRatio   float64
+	FileCount       int
+	HealthScore     int // 0-100
 }
 
 // InitPreflightMsg is emitted when environment pre-flight checks complete.
 type InitPreflightMsg struct {
-	Passed        bool
+	Passed         bool
 	RuntimeVersion string
-	DiskSpaceOK   bool
-	GitRemoteOK   bool
-	Issues        []string
+	DiskSpaceOK    bool
+	GitRemoteOK    bool
+	Issues         []string
 }
 
 // VerificationResult holds the outcome of verifying a task.

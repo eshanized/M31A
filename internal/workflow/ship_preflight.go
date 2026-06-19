@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/git"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // ShipPreflightResult holds the outcome of the pre-ship checklist.

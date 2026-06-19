@@ -135,8 +135,8 @@ func TestCalculateTestRatioEmpty(t *testing.T) {
 
 func TestCalculateHealthScore(t *testing.T) {
 	tests := []struct {
-		name    string
-		a       ProjectAnalysis
+		name     string
+		a        ProjectAnalysis
 		minScore int
 		maxScore int
 	}{

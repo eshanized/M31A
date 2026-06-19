@@ -66,67 +66,67 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	// ── Standard Plan Generation (retry loop) ─────────────────────────────
 	if !chunkSucceeded {
 		for attempt := 0; attempt < m31types.MaxPlanRetries; attempt++ {
-		if !isRefinement {
-			e.emit(IntermediateProgressMsg{
-				Phase:   "plan",
-				Message: fmt.Sprintf("Creating implementation plan... (attempt %d)", attempt+1),
-			})
-		}
+			if !isRefinement {
+				e.emit(IntermediateProgressMsg{
+					Phase:   "plan",
+					Message: fmt.Sprintf("Creating implementation plan... (attempt %d)", attempt+1),
+				})
+			}
 
-		messages := e.buildPlanContext(ctx, goal, tasks, valErrs, rawResponse)
+			messages := e.buildPlanContext(ctx, goal, tasks, valErrs, rawResponse)
 
-		content, err := e.streamLLM(ctx, messages, false)
-		if err != nil {
-			lastErr = err
-			e.logger.Warn("LLM error in plan phase", "attempt", attempt, "error", err)
-			valErrs = []string{err.Error()}
-			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d LLM error: %s", attempt+1, err.Error()))
-			rawResponse = ""
-			continue
-		}
-
-		plan, parseErr := ParsePlan(content)
-		if parseErr != nil {
-			parsed, jsonErr := parseTasksFromJSON(content)
-			if jsonErr != nil {
-				lastErr = fmt.Errorf("parse error: %w", parseErr)
-				e.logger.Warn("plan parse error", "attempt", attempt, "error", parseErr)
-				valErrs = []string{lastErr.Error()}
-				allValErrs = append(allValErrs, fmt.Sprintf("attempt %d parse error: %s", attempt+1, lastErr.Error()))
-				rawResponse = content
+			content, err := e.streamLLM(ctx, messages, false)
+			if err != nil {
+				lastErr = err
+				e.logger.Warn("LLM error in plan phase", "attempt", attempt, "error", err)
+				valErrs = []string{err.Error()}
+				allValErrs = append(allValErrs, fmt.Sprintf("attempt %d LLM error: %s", attempt+1, err.Error()))
+				rawResponse = ""
 				continue
 			}
-			tasks = parsed
-			planMarkdown = content
-		} else {
-			tasks = plan.Tasks
-			planMarkdown = content
 
-			if len(tasks) == 0 {
+			plan, parseErr := ParsePlan(content)
+			if parseErr != nil {
 				parsed, jsonErr := parseTasksFromJSON(content)
-				if jsonErr == nil {
-					tasks = parsed
-				} else {
-					lastErr = fmt.Errorf("no tasks found in plan: %w", jsonErr)
-					valErrs = []string{"no tasks found in plan output"}
-					allValErrs = append(allValErrs, fmt.Sprintf("attempt %d: no tasks found", attempt+1))
+				if jsonErr != nil {
+					lastErr = fmt.Errorf("parse error: %w", parseErr)
+					e.logger.Warn("plan parse error", "attempt", attempt, "error", parseErr)
+					valErrs = []string{lastErr.Error()}
+					allValErrs = append(allValErrs, fmt.Sprintf("attempt %d parse error: %s", attempt+1, lastErr.Error()))
 					rawResponse = content
 					continue
 				}
+				tasks = parsed
+				planMarkdown = content
+			} else {
+				tasks = plan.Tasks
+				planMarkdown = content
+
+				if len(tasks) == 0 {
+					parsed, jsonErr := parseTasksFromJSON(content)
+					if jsonErr == nil {
+						tasks = parsed
+					} else {
+						lastErr = fmt.Errorf("no tasks found in plan: %w", jsonErr)
+						valErrs = []string{"no tasks found in plan output"}
+						allValErrs = append(allValErrs, fmt.Sprintf("attempt %d: no tasks found", attempt+1))
+						rawResponse = content
+						continue
+					}
+				}
 			}
-		}
 
-		valErrs = validateTasks(tasks)
-		if len(valErrs) > 0 {
-			lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
-			e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
-			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
-			rawResponse = content
-			tasks = nil
-			continue
-		}
+			valErrs = validateTasks(tasks)
+			if len(valErrs) > 0 {
+				lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
+				e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
+				allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
+				rawResponse = content
+				tasks = nil
+				continue
+			}
 
-		break
+			break
 		}
 	}
 
