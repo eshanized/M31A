@@ -110,6 +110,13 @@ func (b *BaseClient) CachedModels() []types.ModelInfo {
 	return CachedModels(b.Cache)
 }
 
+// EvictModel removes a model from the cache by ID. Used for self-healing
+// when a chat completion request fails because the model is unavailable,
+// deprecated, or incompatible — preventing it from appearing in the selector.
+func (b *BaseClient) EvictModel(id string) {
+	b.Cache.Remove(id)
+}
+
 // MakeIterator wraps an SSEParser into a StreamIterator.
 func (b *BaseClient) MakeIterator(sse *SSEParser, modelID string) *types.StreamIterator {
 	return &types.StreamIterator{

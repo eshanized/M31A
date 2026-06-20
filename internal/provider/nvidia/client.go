@@ -94,6 +94,9 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		}
 		models := make([]types.ModelInfo, 0, len(apiResp.Data))
 		for _, m := range apiResp.Data {
+			if provider.IsNonChatModel(m.ID) {
+				continue
+			}
 			info := types.ModelInfo{
 				ID:            m.ID,
 				Name:          m.ID,
@@ -198,6 +201,17 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 			return nil, m31errors.ErrInvalidKey
 		case http.StatusPaymentRequired:
 			return nil, fmt.Errorf("%w: insufficient credits on NVIDIA NIM", m31errors.ErrNoCredits)
+		case http.StatusNotFound:
+			c.Cache.Remove(req.Model)
+			slog.Info("nvidia: evicted unavailable model", "model", req.Model, "status", resp.StatusCode)
+			return nil, fmt.Errorf("%w: model %q is unavailable or deprecated on NVIDIA NIM", m31errors.ErrModelNotFound, req.Model)
+		case http.StatusBadRequest:
+			if !provider.IsContextExceeded(resp.StatusCode, bodyStr) {
+				c.Cache.Remove(req.Model)
+				slog.Info("nvidia: evicted incompatible model", "model", req.Model, "body", bodyStr)
+			}
+			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, "nvidia")
+			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 		case http.StatusServiceUnavailable:
 			return nil, m31errors.ErrProviderUnreachable
 		default:

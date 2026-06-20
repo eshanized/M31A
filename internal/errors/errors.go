@@ -117,6 +117,8 @@ func UserMessage(e error) string {
 		return "Request cancelled"
 	case strings.Contains(errStr, "eof") || strings.Contains(errStr, "unexpected end of json"):
 		return "Connection lost — try again"
+	case strings.Contains(errStr, "closed network connection") || strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "connection reset"):
+		return "Connection lost — try again"
 	case strings.Contains(errStr, "i/o timeout") || strings.Contains(errStr, "dial tcp"):
 		return "Connection timed out — check your internet connection"
 	case strings.Contains(errStr, "tls:") || strings.Contains(errStr, "certificate") || strings.Contains(errStr, "tls handshake"):

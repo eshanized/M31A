@@ -218,4 +218,3 @@ func countIssuesByType(issues []PlanIssue) (blockers, warnings int) {
 func isPlanCheckStalled(current, previous int) bool {
 	return previous > 0 && current >= previous
 }
-

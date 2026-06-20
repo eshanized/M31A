@@ -972,6 +972,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeProvider = msg.To
 		slog.Info("provider fallback", "from", msg.From, "to", msg.To, "reason", msg.Reason)
 		m.addToast(fmt.Sprintf("Switched from %s to %s (provider unavailable)", msg.From, msg.To), "warning")
+		// Persist provider switch to config so it survives restarts.
+		if m.config != nil {
+			m.config.Provider.Default = msg.To
+			if m.configPath != "" {
+				if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
+					slog.Warn("failed to save provider to config", "error", err)
+				}
+			}
+		}
 		// Re-validate the active model against the new provider
 		if m.registry != nil && m.activeModel != nil {
 			if p, err := m.registry.Get(msg.To); err == nil && p != nil {
@@ -2228,6 +2237,18 @@ func (m *AppState) handleAppMsg(msg AppMsg) tea.Cmd {
 		if m.registry != nil {
 			_ = m.registry.SetActive(msg.ModelSelected.Provider)
 		}
+
+		// Persist the selected model and provider to config so they survive restarts.
+		if m.config != nil {
+			m.config.Model.Default = msg.ModelSelected.Model.ID
+			m.config.Provider.Default = msg.ModelSelected.Provider
+			if m.configPath != "" {
+				if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
+					slog.Warn("failed to save model selection to config", "error", err)
+				}
+			}
+		}
+
 		var providerCmd tea.Cmd
 		if m.replModel != nil {
 			m.replModel.activeModel = &msg.ModelSelected.Model
@@ -2701,6 +2722,17 @@ func (m *AppState) applyTheme(themeName string) {
 	case "auto":
 		m.themeManager = theme.NewManager(theme.ModeAuto)
 	}
+
+	// Persist theme selection to config so it survives restarts.
+	if m.config != nil {
+		m.config.UI.Theme = themeName
+		if m.configPath != "" {
+			if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
+				slog.Warn("failed to save theme to config", "error", err)
+			}
+		}
+	}
+
 	t := m.themeManager.Current()
 	if m.replModel != nil {
 		m.replModel.SetTheme(t)

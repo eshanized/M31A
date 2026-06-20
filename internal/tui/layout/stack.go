@@ -134,4 +134,3 @@ func RenderModalOverlay(base string, modal string, width, height int, t theme.Th
 
 	return strings.Join(dimmedLines, "\n")
 }
-

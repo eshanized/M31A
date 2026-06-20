@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"strings"
-	"time"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -47,24 +44,10 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		borderColor = t.Brand
 	}
 
-	icon := ""
-	switch toast.Type {
-	case "success":
-		icon = "✓ "
-	case "error":
-		icon = "✗ "
-	case "warning":
-		icon = "⚠ "
-	default:
-		icon = "● "
-	}
-
 	offset := 0
 	if toast.Frame < 2 {
 		offset = (2 - toast.Frame) * 10
 	}
-
-	progressBar := renderToastProgress(toast, t)
 
 	// Card width: front toast widest, each subsequent 2 cols narrower
 	contentWidth := 40 - (index * 2)
@@ -78,7 +61,7 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		contentWidth = 20
 	}
 
-	content := icon + toast.Text
+	content := toast.Text
 	if lipgloss.Width(content) > contentWidth-2 {
 		content = content[:contentWidth-5] + "..."
 	}
@@ -92,10 +75,6 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		Background(t.SurfaceElevated).
 		Width(contentWidth).
 		Render(content)
-
-	if progressBar != "" {
-		toastContent += "\n" + progressBar
-	}
 
 	if offset > 0 {
 		toastContent = lipgloss.NewStyle().PaddingLeft(offset).Render(toastContent)
@@ -111,51 +90,4 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 	}
 
 	return toastContent
-}
-
-// renderToastProgress renders a progress bar for auto-dismiss
-func renderToastProgress(toast Toast, t theme.Theme) string {
-	elapsed := time.Since(toast.CreatedAt)
-	duration := toast.Duration
-	if duration <= 0 {
-		duration = 5 * time.Second
-	}
-
-	progress := float64(elapsed) / float64(duration)
-	if progress > 1 {
-		progress = 1
-	}
-	if progress < 0 {
-		progress = 0
-	}
-
-	// Create progress bar
-	barWidth := 20
-	filledWidth := int(progress * float64(barWidth))
-	emptyWidth := barWidth - filledWidth
-
-	// Choose color based on toast type
-	var barColor lipgloss.Color
-	switch toast.Type {
-	case "success":
-		barColor = t.Success
-	case "error":
-		barColor = t.Error
-	case "warning":
-		barColor = t.Warning
-	default:
-		barColor = t.Brand
-	}
-
-	// Render progress bar
-	filled := lipgloss.NewStyle().
-		Foreground(barColor).
-		Render(strings.Repeat("━", filledWidth))
-	empty := lipgloss.NewStyle().
-		Foreground(t.Border).
-		Render(strings.Repeat("─", emptyWidth))
-
-	return lipgloss.NewStyle().
-		PaddingLeft(2).
-		Render(filled + empty)
 }

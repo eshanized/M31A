@@ -128,3 +128,12 @@ func (c *ModelCache) Models() map[string]*types.ModelInfo {
 	}
 	return result
 }
+
+// Remove evicts a single model from the cache by ID.
+// Used for self-healing when a model is discovered to be non-functional
+// (e.g., NVIDIA NIM returns 404 for deprecated models still listed by /models).
+func (c *ModelCache) Remove(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.models, id)
+}

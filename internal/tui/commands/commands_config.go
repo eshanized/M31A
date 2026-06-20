@@ -89,6 +89,14 @@ func handleCost(_ []string, ctx CommandContext) CommandResult {
 	if !ctx.Config.UI.ShowCostEstimate {
 		state = "disabled"
 	}
+	if ctx.ConfigPath != "" {
+		if err := ctx.Config.SaveWithKeychain(ctx.ConfigPath, ctx.Keychain); err != nil {
+			return CommandResult{
+				Success: true,
+				Message: fmt.Sprintf("Cost display **%s** (save failed: %v).", state, err),
+			}
+		}
+	}
 	return CommandResult{
 		Success: true,
 		Message: fmt.Sprintf("Cost display **%s**.", state),

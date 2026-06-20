@@ -152,4 +152,3 @@ func (b *Box) WithBackground(bg lipgloss.Color) *Box {
 	b.Background = bg
 	return b
 }
-
