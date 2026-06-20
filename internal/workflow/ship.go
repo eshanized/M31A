@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -274,13 +273,8 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
 		// Use flock to prevent interleaved writes from concurrent sessions.
-		if lockErr := syscall.Flock(int(memFile.Fd()), syscall.LOCK_EX); lockErr == nil {
-			if _, writeErr := memFile.WriteString(memEntry); writeErr != nil {
-				e.logger.Warn("memory write failed", "error", writeErr)
-			}
-			_ = syscall.Flock(int(memFile.Fd()), syscall.LOCK_UN)
-		} else {
-			e.logger.Warn("memory file lock failed", "error", lockErr)
+		if writeErr := flockWrite(memFile, memEntry); writeErr != nil {
+			e.logger.Warn("memory write failed", "error", writeErr)
 		}
 		_ = memFile.Close()
 	}
