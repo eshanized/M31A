@@ -24,11 +24,11 @@ const (
 // It is designed for a single-session lifetime: create once at session start,
 // record events during the session, and flush/stop at session end.
 type Collector struct {
-	mu           sync.Mutex
-	sessionID    string
-	sessionsDir  string
-	metrics      *SessionMetrics
-	enabled      bool
+	mu          sync.Mutex
+	sessionID   string
+	sessionsDir string
+	metrics     *SessionMetrics
+	enabled     bool
 }
 
 // NewCollector creates a new Collector scoped to the given session.
