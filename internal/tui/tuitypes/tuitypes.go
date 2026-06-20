@@ -478,3 +478,12 @@ type WorkflowEngine interface {
 	SetWorkflowMode(mode types.WorkflowMode)
 	WorkflowMode() types.WorkflowMode
 }
+
+// ─── Intent classification ─────────────────────────────────────────────────────
+
+// IntentClassifiedMsg carries the result of an async LLM intent classification.
+type IntentClassifiedMsg struct {
+	Result types.IntentResult
+	Input  string
+	Err    error
+}

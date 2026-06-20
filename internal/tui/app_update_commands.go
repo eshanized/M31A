@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -190,6 +191,21 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 
 	_ = t
 
+	// Intent classification: when enabled, pre-classify the input to route
+	// between workflow and chat modes intelligently.
+	if m.config != nil && m.config.Features.IntentClassification {
+		// Ensure prompt registry is loaded for the classifier
+		if m.promptRegistry == nil {
+			registry, err := workflow.LoadPrompts()
+			if err == nil {
+				m.promptRegistry = registry
+			}
+		}
+		if m.promptRegistry != nil {
+			return m.classifyAndRoute(p, input)
+		}
+	}
+
 	// Autonomous agent mode: use agent loop with tool definitions
 	if m.agentMode {
 		return m.startAgentLoop(p, input)
@@ -312,4 +328,108 @@ func (m *AppState) sendPlainTextChat(p provider.LLMProvider, input string) tea.C
 	}
 
 	return cmd
+}
+
+// classifyAndRoute triggers an async LLM intent classification and returns
+// the result as a tea.Cmd. The IntentClassifiedMsg handler in Update routes
+// the input based on the classification result.
+func (m *AppState) classifyAndRoute(p provider.LLMProvider, input string) tea.Cmd {
+	if m.replModel != nil {
+		m.replModel.lastStatus = "Classifying intent..."
+	}
+
+	modelID := m.activeModel.ID
+	prompts := m.promptRegistry
+	ctx := m.shutdownCtx
+
+	return func() tea.Msg {
+		result, err := workflow.ClassifyIntent(ctx, p, modelID, input, prompts)
+		if err != nil || result == nil {
+			return IntentClassifiedMsg{
+				Input: input,
+				Err:   err,
+			}
+		}
+		return IntentClassifiedMsg{
+			Result: *result,
+			Input:  input,
+		}
+	}
+}
+
+// handleIntentClassified processes the async intent classification result and
+// routes the input to the appropriate handler based on the detected intent.
+func (m *AppState) handleIntentClassified(msg IntentClassifiedMsg) tea.Cmd {
+	// Classification failed — fall back to existing behavior
+	if msg.Err != nil {
+		slog.Warn("intent classification failed, using fallback", "error", msg.Err)
+		p := m.registry.ActiveProvider()
+		if p == nil {
+			return nil
+		}
+		if m.agentMode {
+			return m.startAgentLoop(p, msg.Input)
+		}
+		return m.sendPlainTextChat(p, msg.Input)
+	}
+
+	result := msg.Result
+	intentLabel := string(result.Intent)
+	if m.replModel != nil {
+		m.replModel.lastStatus = fmt.Sprintf("Intent: %s (%.0f%%)", intentLabel, result.Confidence*100)
+	}
+
+	// Store the intent result on the engine for downstream enrichment
+	if m.workflowEngine != nil {
+		if eng, ok := m.workflowEngine.(*workflow.Engine); ok {
+			eng.SetIntentResult(&result)
+		}
+	}
+
+	// Workflow-worthy intents (feature, bugfix, refactor) with high confidence
+	// get a confirmation prompt before starting the full workflow.
+	if workflow.ShouldStartWorkflow(&result) && result.Intent != types.IntentChore {
+		m.pendingIntent = &result
+		m.pendingIntentInput = msg.Input
+		prompt := fmt.Sprintf("This looks like a **%s** request (confidence: %.0f%%). Start a structured workflow? (y/n)",
+			intentLabel, result.Confidence*100)
+		if m.replModel != nil {
+			m.replModel.AddMessage(makeAssistantMsg(prompt))
+		}
+		return nil
+	}
+
+	// Chore intents auto-start workflow in Direct mode (no confirmation needed)
+	if result.Intent == types.IntentChore && result.Confidence >= 0.7 {
+		m.workflowMode = types.ModeDirect
+		return m.runWorkflowFromGoal(msg.Input)
+	}
+
+	// Question/explanation intents go to plain chat (no tools needed)
+	if result.Intent == types.IntentQuestion || result.Intent == types.IntentExplanation {
+		p := m.registry.ActiveProvider()
+		if p == nil {
+			return nil
+		}
+		return m.sendPlainTextChat(p, msg.Input)
+	}
+
+	// Exploration intents go to agent loop (tools enabled, no workflow)
+	if result.Intent == types.IntentExploration {
+		p := m.registry.ActiveProvider()
+		if p == nil {
+			return nil
+		}
+		return m.startAgentLoop(p, msg.Input)
+	}
+
+	// Low confidence or unknown — fall back to agent mode or plain chat
+	p := m.registry.ActiveProvider()
+	if p == nil {
+		return nil
+	}
+	if m.agentMode {
+		return m.startAgentLoop(p, msg.Input)
+	}
+	return m.sendPlainTextChat(p, msg.Input)
 }

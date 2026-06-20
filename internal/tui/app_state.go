@@ -203,6 +203,10 @@ type AppState struct {
 	agentMode      bool // when true, plain text triggers agent loop (default)
 	promptRegistry *workflow.PromptRegistry
 	agentCh        <-chan tea.Msg // agent loop channel for cmd chain
+
+	// Intent classification state (pending confirmation from user)
+	pendingIntent      *types.IntentResult
+	pendingIntentInput string // original user input pending classification routing
 }
 
 // SetResumeSessionID configures the app to auto-resume a session on startup.

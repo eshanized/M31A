@@ -60,6 +60,7 @@ func DefaultConfig() *Config {
 			RateLimitBackoffSecs:   120,
 			PlanCheckMaxIter:       3,
 			PlanChunkThreshold:     10,
+			IntentClassification:   true,
 		},
 		Tools: ToolsConfig{
 			MaxGlobResults:       types.DefaultMaxGlobResults,

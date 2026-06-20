@@ -48,6 +48,7 @@ type PromptRegistry struct {
 	PlanRevise       string
 	PlanOutline      string
 	DiscussFollowup  string
+	IntentClassify   string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -70,6 +71,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/plan-revise.md":          &r.PlanRevise,
 		"prompts/plan-outline.md":         &r.PlanOutline,
 		"prompts/discuss-followup.md":     &r.DiscussFollowup,
+		"prompts/intent-classify.md":      &r.IntentClassify,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -134,6 +136,9 @@ type Engine struct {
 	codeIntel      *codeintel.Indexer
 	codeIntelMu    sync.Mutex
 	codeIntelBuilt bool
+	// Intent classification result from the LLM-based classifier.
+	// Set before the workflow starts; used to enrich discuss/research/plan context.
+	intentResult *m31types.IntentResult
 	// Shared ledger instance for session record persistence (uses the
 	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).
 	ledger *ledger.Ledger
@@ -205,6 +210,16 @@ func (e *Engine) SetWorkflowMode(mode m31types.WorkflowMode) {
 // WorkflowMode returns the current workflow mode.
 func (e *Engine) WorkflowMode() m31types.WorkflowMode {
 	return e.workflowMode
+}
+
+// SetIntentResult stores the LLM-classified intent result for downstream enrichment.
+func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
+	e.intentResult = ir
+}
+
+// IntentResult returns the stored intent classification result, or nil if unset.
+func (e *Engine) IntentResult() *m31types.IntentResult {
+	return e.intentResult
 }
 
 // EngineOptions holds all parameters for creating a new Engine.

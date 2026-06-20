@@ -320,6 +320,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SlashCommandMsg:
 		cmds = append(cmds, m.handleSlashCommand(msg.Command, msg.AttachedFiles))
 
+	// ── Intent classification result ──────────────────────────────────────────
+	case IntentClassifiedMsg:
+		cmds = append(cmds, m.handleIntentClassified(msg))
+
 	// ── Streaming ─────────────────────────────────────────────────────────────
 	case StreamMsg:
 		if m.replModel != nil {
@@ -1962,6 +1966,39 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	// Intent classification confirmation active — intercept y/n
+	if m.pendingIntent != nil {
+		switch msg.String() {
+		case "y", "Y":
+			intent := m.pendingIntent
+			input := m.pendingIntentInput
+			m.pendingIntent = nil
+			m.pendingIntentInput = ""
+			mode := types.WorkflowModeForIntent(*intent)
+			m.workflowMode = mode
+			if m.workflowEngine != nil {
+				m.workflowEngine.SetWorkflowMode(mode)
+			}
+			return m.runWorkflowFromGoal(input)
+		case "n", "N", "esc":
+			input := m.pendingIntentInput
+			m.pendingIntent = nil
+			m.pendingIntentInput = ""
+			if m.replModel != nil {
+				m.replModel.AddMessage(makeAssistantMsg("Proceeding in chat mode."))
+			}
+			p := m.registry.ActiveProvider()
+			if p != nil && m.agentMode {
+				return m.startAgentLoop(p, input)
+			}
+			if p != nil {
+				return m.sendPlainTextChat(p, input)
+			}
+			return nil
+		}
+		return nil
+	}
+
 	// Sidebar focus toggle — works from any screen
 	if msg.String() == "ctrl+g" && m.sidebarModel != nil && m.sidebarModel.IsVisible() {
 		m.sidebarModel.ToggleFocus()
@@ -2993,7 +3030,8 @@ func (m *AppState) runWorkflowFromGoal(goal string) tea.Cmd {
 
 // resolveWorkflowMode determines the appropriate workflow mode.
 // If the user has set an explicit mode via config, that takes precedence.
-// Otherwise, the goal is classified automatically.
+// If a prior intent classification result is available, it uses that.
+// Otherwise, the goal is classified with keyword heuristics.
 func (m *AppState) resolveWorkflowMode(goal string) types.WorkflowMode {
 	// Config override takes highest precedence
 	if m.config != nil {
@@ -3005,6 +3043,20 @@ func (m *AppState) resolveWorkflowMode(goal string) types.WorkflowMode {
 		case string(types.ModeDirect):
 			return types.ModeDirect
 		}
+	}
+
+	// Use intent result from the workflow engine if available (LLM-classified)
+	if m.workflowEngine != nil {
+		if eng, ok := m.workflowEngine.(*workflow.Engine); ok {
+			if ir := eng.IntentResult(); ir != nil {
+				return types.WorkflowModeForIntent(*ir)
+			}
+		}
+	}
+
+	// Use pending intent if available (from REPL classification)
+	if m.pendingIntent != nil {
+		return types.WorkflowModeForIntent(*m.pendingIntent)
 	}
 
 	// Classify based on goal content when mode is auto or unset

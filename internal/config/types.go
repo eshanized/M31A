@@ -228,6 +228,9 @@ type FeaturesConfig struct {
 	// Initialize phase enhancements
 	InitDeepAnalysis bool `toml:"init_deep_analysis"` // Deep project analysis
 	InitPreflight    bool `toml:"init_preflight"`     // Environment pre-flight checks
+
+	// Intent classification (LLM-based prompt routing)
+	IntentClassification bool `toml:"intent_classification"` // Pre-classify REPL input for routing
 }
 
 type LedgerConfig struct {

@@ -52,6 +52,16 @@ func (e *Engine) buildResearchContext(goal string) []m31types.Message {
 	var userCtx strings.Builder
 	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
+	// Inject intent classification if available
+	if e.intentResult != nil {
+		fmt.Fprintf(&userCtx, "## Intent Classification\nIntent: %s | Complexity: %s | Confidence: %.0f%%\nSummary: %s\n",
+			e.intentResult.Intent, e.intentResult.Complexity, e.intentResult.Confidence*100, e.intentResult.Summary)
+		if len(e.intentResult.Scope) > 0 {
+			fmt.Fprintf(&userCtx, "Scope: %s\n", strings.Join(e.intentResult.Scope, ", "))
+		}
+		userCtx.WriteString("\n")
+	}
+
 	// Project info
 	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
 	if projErr == nil && project != nil {

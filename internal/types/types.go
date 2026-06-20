@@ -47,6 +47,62 @@ const (
 	ModeDirect WorkflowMode = "direct" // skip Discuss, Plan, Verify: Init→Exec→Ship
 )
 
+// IntentType classifies the user's prompt intent for routing.
+type IntentType string
+
+const (
+	IntentFeature     IntentType = "feature"
+	IntentBugfix      IntentType = "bugfix"
+	IntentRefactor    IntentType = "refactor"
+	IntentQuestion    IntentType = "question"
+	IntentExplanation IntentType = "explanation"
+	IntentExploration IntentType = "exploration"
+	IntentChore       IntentType = "chore"
+)
+
+// IntentResult holds the outcome of LLM-based intent classification.
+type IntentResult struct {
+	Intent     IntentType      `json:"intent"`
+	Complexity ComplexityLevel `json:"complexity"`
+	Confidence float64         `json:"confidence"`
+	Scope      []string        `json:"scope"`
+	Summary    string          `json:"summary"`
+}
+
+// WorkflowModeForIntent returns the recommended workflow mode for an intent result.
+func WorkflowModeForIntent(ir IntentResult) WorkflowMode {
+	switch ir.Intent {
+	case IntentChore:
+		return ModeDirect
+	case IntentFeature, IntentBugfix, IntentRefactor:
+		return WorkflowModeForIntentComplexity(ir.Complexity)
+	default:
+		return ModeFull
+	}
+}
+
+// WorkflowModeForIntentComplexity maps complexity to workflow mode (intent-aware).
+func WorkflowModeForIntentComplexity(c ComplexityLevel) WorkflowMode {
+	switch c {
+	case ComplexityTrivial:
+		return ModeDirect
+	case ComplexitySimple:
+		return ModeFast
+	default:
+		return ModeFull
+	}
+}
+
+// IsWorkflowWorthy returns true if the intent should trigger a structured workflow.
+func (ir IntentResult) IsWorkflowWorthy() bool {
+	switch ir.Intent {
+	case IntentFeature, IntentBugfix, IntentRefactor, IntentChore:
+		return true
+	default:
+		return false
+	}
+}
+
 type TaskStatus string
 
 const (

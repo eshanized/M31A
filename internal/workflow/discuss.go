@@ -240,6 +240,15 @@ func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 
 	userCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s", goal, projectType, framework)
 
+	// Inject intent classification if available
+	if e.intentResult != nil {
+		userCtx += fmt.Sprintf("\n\n## Intent Classification\n- Intent: %s\n- Complexity: %s\n- Confidence: %.0f%%\n- Summary: %s",
+			e.intentResult.Intent, e.intentResult.Complexity, e.intentResult.Confidence*100, e.intentResult.Summary)
+		if len(e.intentResult.Scope) > 0 {
+			userCtx += "\n- Scope: " + strings.Join(e.intentResult.Scope, ", ")
+		}
+	}
+
 	// Inject file listing so the LLM can see what's already in the codebase
 	fileSchema := listCwdFiles(e.workDir)
 	if fileSchema != "" {
