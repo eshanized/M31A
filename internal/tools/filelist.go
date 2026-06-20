@@ -206,28 +206,37 @@ func humanSize(b int64) string {
 // sortEntries sorts directory entries by the given criteria.
 // Directories always come first, then sorted by the specified field.
 func sortEntries(entries []os.DirEntry, sortBy string) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		ii, _ := entries[i].Info()
-		ji, _ := entries[j].Info()
-
+	type entryInfo struct {
+		entry os.DirEntry
+		info  os.FileInfo
+	}
+	infos := make([]entryInfo, len(entries))
+	for i, e := range entries {
+		info, _ := e.Info()
+		infos[i] = entryInfo{entry: e, info: info}
+	}
+	sort.SliceStable(infos, func(i, j int) bool {
 		// Directories always come first
-		if entries[i].IsDir() != entries[j].IsDir() {
-			return entries[i].IsDir()
+		if infos[i].entry.IsDir() != infos[j].entry.IsDir() {
+			return infos[i].entry.IsDir()
 		}
 
 		switch sortBy {
 		case "size":
-			if ii != nil && ji != nil {
-				return ii.Size() > ji.Size() // largest first
+			if infos[i].info != nil && infos[j].info != nil {
+				return infos[i].info.Size() > infos[j].info.Size() // largest first
 			}
-			return entries[i].Name() < entries[j].Name()
+			return infos[i].entry.Name() < infos[j].entry.Name()
 		case "modified":
-			if ii != nil && ji != nil {
-				return ii.ModTime().After(ji.ModTime()) // newest first
+			if infos[i].info != nil && infos[j].info != nil {
+				return infos[i].info.ModTime().After(infos[j].info.ModTime()) // newest first
 			}
-			return entries[i].Name() < entries[j].Name()
+			return infos[i].entry.Name() < infos[j].entry.Name()
 		default: // "name"
-			return entries[i].Name() < entries[j].Name()
+			return infos[i].entry.Name() < infos[j].entry.Name()
 		}
 	})
+	for i, ei := range infos {
+		entries[i] = ei.entry
+	}
 }

@@ -27,23 +27,25 @@ type flatNode struct {
 
 // FileTree renders a tree-view of files with indentation.
 type FileTree struct {
-	Root     *FileNode
-	Cursor   int
-	Expanded map[string]bool
-	Theme    theme.Theme
-	Width    int
-	Height   int
-	flatList []flatNode
+	Root      *FileNode
+	Cursor    int
+	Expanded  map[string]bool
+	Theme     theme.Theme
+	Width     int
+	Height    int
+	flatList  []flatNode
+	flatDirty bool
 }
 
 // NewFileTree creates a FileTree with all directories expanded by default.
 func NewFileTree(root *FileNode, t theme.Theme, w, h int) *FileTree {
 	ft := &FileTree{
-		Root:     root,
-		Expanded: make(map[string]bool),
-		Theme:    t,
-		Width:    w,
-		Height:   h,
+		Root:      root,
+		Expanded:  make(map[string]bool),
+		Theme:     t,
+		Width:     w,
+		Height:    h,
+		flatDirty: true,
 	}
 	// Expand all directories by default
 	ft.expandAll(root)
@@ -66,6 +68,7 @@ func (ft *FileTree) expandAll(node *FileNode) {
 // ExpandAll expands all directories in the tree starting from Root.
 func (ft *FileTree) ExpandAll() {
 	ft.expandAll(ft.Root)
+	ft.flatDirty = true
 }
 
 // Toggle expands/collapses a directory.
@@ -74,14 +77,14 @@ func (ft *FileTree) Toggle() {
 		flat := ft.flatList[ft.Cursor]
 		if flat.node.IsDir {
 			ft.Expanded[flat.node.Path] = !ft.Expanded[flat.node.Path]
-			ft.flatten()
+			ft.flatDirty = true
 		}
 	}
 }
 
 // MoveCursor moves the cursor up/down.
 func (ft *FileTree) MoveCursor(delta int) {
-	ft.flatten()
+	ft.ensureFlat()
 	ft.Cursor += delta
 	if ft.Cursor < 0 {
 		ft.Cursor = 0
@@ -101,7 +104,7 @@ func (ft *FileTree) SelectedNode() *FileNode {
 
 // FlatList returns the flattened list of nodes.
 func (ft *FileTree) FlatList() []*FileNode {
-	ft.flatten()
+	ft.ensureFlat()
 	result := make([]*FileNode, len(ft.flatList))
 	for i, flat := range ft.flatList {
 		result[i] = flat.node
@@ -109,7 +112,19 @@ func (ft *FileTree) FlatList() []*FileNode {
 	return result
 }
 
+func (ft *FileTree) ensureFlat() {
+	if !ft.flatDirty {
+		return
+	}
+	ft.flatDirty = false
+	ft.flatList = nil
+	if ft.Root != nil {
+		ft.flattenNode(ft.Root, 0, nil)
+	}
+}
+
 func (ft *FileTree) flatten() {
+	ft.flatDirty = false
 	ft.flatList = nil
 	if ft.Root != nil {
 		ft.flattenNode(ft.Root, 0, nil)
@@ -142,7 +157,7 @@ func (ft *FileTree) flattenNode(node *FileNode, depth int, parentEnd []bool) {
 // View renders the file tree.
 func (ft *FileTree) View() string {
 	t := ft.Theme
-	ft.flatten()
+	ft.ensureFlat()
 
 	if len(ft.flatList) == 0 {
 		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).

@@ -15,9 +15,10 @@ import (
 // FrecentHistory tracks prompt history by frecency (frequency + recency).
 // Entries are persisted as JSON in the user's session directory.
 type FrecentHistory struct {
-	mu       sync.RWMutex
-	entries  []FrecentEntry
-	filePath string
+	mu        sync.RWMutex
+	entries   []FrecentEntry
+	textIndex map[string]int // text → index in entries for O(1) lookup
+	filePath  string
 }
 
 // FrecentEntry is a single history entry with scoring metadata.
@@ -36,7 +37,15 @@ func NewFrecentHistory(filePath string) *FrecentHistory {
 		// Log corrupt history file but continue with empty history
 		slog.Warn("failed to load history, starting fresh", "error", err)
 	}
+	fh.rebuildIndex()
 	return fh
+}
+
+func (fh *FrecentHistory) rebuildIndex() {
+	fh.textIndex = make(map[string]int, len(fh.entries))
+	for i, e := range fh.entries {
+		fh.textIndex[e.Text] = i
+	}
 }
 
 // Upsert adds or updates an entry in the history and persists to disk.
@@ -48,16 +57,14 @@ func (fh *FrecentHistory) Upsert(text string) {
 		return
 	}
 	now := time.Now()
-	for i := range fh.entries {
-		if fh.entries[i].Text == text {
-			fh.entries[i].UseCount++
-			fh.entries[i].LastUsed = now
-			fh.entries[i].Score = fh.computeScore(fh.entries[i])
-			if err := fh.Save(); err != nil {
-				slog.Warn("failed to save history after upsert", "error", err)
-			}
-			return
+	if idx, ok := fh.textIndex[text]; ok {
+		fh.entries[idx].UseCount++
+		fh.entries[idx].LastUsed = now
+		fh.entries[idx].Score = fh.computeScore(fh.entries[idx])
+		if err := fh.Save(); err != nil {
+			slog.Warn("failed to save history after upsert", "error", err)
 		}
+		return
 	}
 	entry := FrecentEntry{
 		Text:     text,
@@ -66,10 +73,13 @@ func (fh *FrecentHistory) Upsert(text string) {
 	}
 	entry.Score = fh.computeScore(entry)
 	fh.entries = append(fh.entries, entry)
+	fh.textIndex[text] = len(fh.entries) - 1
 	// Keep at most 500 entries
 	if len(fh.entries) > 500 {
 		fh.sort()
+		fh.rebuildIndex()
 		fh.entries = fh.entries[:500]
+		fh.rebuildIndex()
 	}
 	if err := fh.Save(); err != nil {
 		slog.Warn("failed to save history after upsert", "error", err)

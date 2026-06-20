@@ -367,45 +367,78 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 			return nil
 		}
 
-		// Read all lines for context support
 		scanner := bufio.NewScanner(f)
-		var allLines []string
-		for scanner.Scan() {
-			allLines = append(allLines, scanner.Text())
+
+		if contextLines == 0 {
+			// Stream mode: O(1) memory when no context needed
+			lineNum := 0
+			for scanner.Scan() {
+				lineNum++
+				line := scanner.Text()
+				if re.MatchString(line) {
+					if len(results) >= maxResults {
+						truncated = true
+						return filepath.SkipAll
+					}
+					relPath, _ := filepath.Rel(t.workDir, path)
+					results = append(results, fmt.Sprintf("%s:%d: %s", relPath, lineNum, line))
+				}
+			}
+		} else {
+			// Ring buffer mode: O(contextLines) memory instead of O(fileSize)
+			windowSize := 2*contextLines + 1
+			ring := make([]string, windowSize)
+			ringLine := make([]int, windowSize)
+			rIdx := 0
+			rCount := 0
+			lineNum := 0
+			lastMatchEnd := -1
+
+			for scanner.Scan() {
+				lineNum++
+				line := scanner.Text()
+				ring[rIdx] = line
+				ringLine[rIdx] = lineNum
+				rIdx = (rIdx + 1) % windowSize
+				if rCount < windowSize {
+					rCount++
+				}
+
+				if re.MatchString(line) {
+					if len(results) >= maxResults {
+						truncated = true
+						return filepath.SkipAll
+					}
+					relPath, _ := filepath.Rel(t.workDir, path)
+
+					ctxStart := lineNum - contextLines
+					if ctxStart < 1 {
+						ctxStart = 1
+					}
+					if lastMatchEnd >= 0 && ctxStart <= lastMatchEnd {
+						ctxStart = lastMatchEnd + 1
+					}
+
+					for ln := ctxStart; ln < lineNum; ln++ {
+						if len(results) >= maxResults {
+							truncated = true
+							break
+						}
+						bufIdx := (rIdx - 1 - (lineNum - ln) + windowSize) % windowSize
+						if ringLine[bufIdx] == ln {
+							results = append(results, fmt.Sprintf("%s:%d %s", relPath, ln, ring[bufIdx]))
+						}
+					}
+
+					if len(results) < maxResults {
+						results = append(results, fmt.Sprintf("%s:%d: %s", relPath, lineNum, line))
+					}
+					lastMatchEnd = lineNum + contextLines
+				}
+			}
 		}
 		if err := scanner.Err(); err != nil {
 			slog.Debug("grep: scanner error", "path", path, "error", err)
-		}
-
-		// Find matches with context
-		for i, line := range allLines {
-			if len(results) >= maxResults {
-				truncated = true
-				return filepath.SkipAll
-			}
-			if re.MatchString(line) {
-				relPath, _ := filepath.Rel(t.workDir, path)
-				startLine := i - contextLines
-				if startLine < 0 {
-					startLine = 0
-				}
-				endLine := i + contextLines
-				if endLine >= len(allLines) {
-					endLine = len(allLines) - 1
-				}
-				// Emit context window
-				for j := startLine; j <= endLine; j++ {
-					if len(results) >= maxResults {
-						truncated = true
-						break
-					}
-					marker := " "
-					if j == i {
-						marker = ":"
-					}
-					results = append(results, fmt.Sprintf("%s:%d%s %s", relPath, j+1, marker, allLines[j]))
-				}
-			}
 		}
 		return nil
 	})

@@ -111,7 +111,8 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
-	// Apply type filter
+	// Apply type filter and cache FileInfo for display formatting
+	infoCache := make(map[string]os.FileInfo, len(matches))
 	if typeFilter != "all" {
 		var filtered []string
 		for _, m := range matches {
@@ -123,6 +124,7 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 			if err != nil {
 				continue
 			}
+			infoCache[m] = fi
 			switch typeFilter {
 			case "file":
 				if !fi.IsDir() {
@@ -155,13 +157,17 @@ func (t *Glob) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	b.Grow(64 * len(matches)) // pre-allocate for ~64 bytes per line
 	fmt.Fprintf(&b, "%-50s %10s %s\n", "path", "size", "modified")
 	for _, m := range matches {
-		fullPath := m
-		if !filepath.IsAbs(m) {
-			fullPath = filepath.Join(t.workDir, m)
-		}
-		fi, err := os.Stat(fullPath)
-		if err != nil {
-			continue
+		fi, ok := infoCache[m]
+		if !ok {
+			fullPath := m
+			if !filepath.IsAbs(m) {
+				fullPath = filepath.Join(t.workDir, m)
+			}
+			var err error
+			fi, err = os.Stat(fullPath)
+			if err != nil {
+				continue
+			}
 		}
 		fmt.Fprintf(&b, "%-50s %10d %s\n", m, fi.Size(), fi.ModTime().Format(types.DateTimeFormat))
 	}

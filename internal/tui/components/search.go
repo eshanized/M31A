@@ -43,7 +43,7 @@ func FuzzyHighlight(query, text string, brandColor lipgloss.Color) string {
 	queryLower := strings.ToLower(query)
 	textLower := strings.ToLower(text)
 
-	matched := make([]bool, len(text))
+	matched := make(map[int]bool, len(queryLower))
 	qi := 0
 	for ti := 0; ti < len(text) && qi < len(queryLower); ti++ {
 		if ti < len(textLower) && textLower[ti] == queryLower[qi] {
@@ -62,7 +62,7 @@ func FuzzyHighlight(query, text string, brandColor lipgloss.Color) string {
 	var b strings.Builder
 	runes := []rune(text)
 	for i, r := range runes {
-		if i < len(matched) && matched[i] {
+		if matched[i] {
 			b.WriteString(highlightStyle.Render(string(r)))
 		} else {
 			b.WriteRune(r)

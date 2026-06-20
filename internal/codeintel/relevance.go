@@ -216,18 +216,19 @@ func splitCamelCase(s string) []string {
 	return parts
 }
 
+var stopWords = map[string]bool{
+	"the": true, "and": true, "for": true, "with": true,
+	"that": true, "this": true, "from": true, "are": true,
+	"was": true, "will": true, "can": true, "has": true,
+	"but": true, "not": true, "all": true, "new": true,
+	"add": true, "create": true, "delete": true, "update": true,
+	"modify": true, "implement": true, "build": true, "make": true,
+	"file": true, "files": true, "code": true, "function": true,
+	"test": true, "tests": true, "using": true, "use": true,
+}
+
 func isStopWord(w string) bool {
-	stops := map[string]bool{
-		"the": true, "and": true, "for": true, "with": true,
-		"that": true, "this": true, "from": true, "are": true,
-		"was": true, "will": true, "can": true, "has": true,
-		"but": true, "not": true, "all": true, "new": true,
-		"add": true, "create": true, "delete": true, "update": true,
-		"modify": true, "implement": true, "build": true, "make": true,
-		"file": true, "files": true, "code": true, "function": true,
-		"test": true, "tests": true, "using": true, "use": true,
-	}
-	return stops[w]
+	return stopWords[w]
 }
 
 func sortByScore(files []ScoredFile) {

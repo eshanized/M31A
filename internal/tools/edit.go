@@ -642,9 +642,38 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 			return strings.Join(newLines, "\n"), nil
 		}
 
+		// Pre-allocate buffers for levenshtein to avoid per-line allocations
+		maxLineLen := 0
+		for _, l := range middleOld {
+			if n := len(strings.TrimSpace(l)); n > maxLineLen {
+				maxLineLen = n
+			}
+		}
+		for _, l := range middleContent {
+			if n := len(strings.TrimSpace(l)); n > maxLineLen {
+				maxLineLen = n
+			}
+		}
+		prev := make([]int, maxLineLen+1)
+		curr := make([]int, maxLineLen+1)
+
 		totalSimilarity := 0.0
 		for j := range middleOld {
-			sim := levenshteinSimilarity(strings.TrimSpace(middleOld[j]), strings.TrimSpace(middleContent[j]))
+			a := strings.TrimSpace(middleOld[j])
+			b := strings.TrimSpace(middleContent[j])
+			var sim float64
+			if a == b {
+				sim = 1.0
+			} else if len(a) == 0 || len(b) == 0 {
+				sim = 0.0
+			} else {
+				dist := levenshteinBuf(a, b, prev, curr)
+				ml := len(a)
+				if len(b) > ml {
+					ml = len(b)
+				}
+				sim = 1.0 - float64(dist)/float64(ml)
+			}
 			totalSimilarity += sim
 		}
 		avgSimilarity := totalSimilarity / float64(len(middleOld))
@@ -709,6 +738,31 @@ func levenshteinDistance(a, b string) int {
 	return prev[len(b)]
 }
 
+// levenshteinBuf is like levenshteinDistance but reuses pre-allocated buffers.
+func levenshteinBuf(a, b string, prev, curr []int) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	for j := 0; j <= len(b); j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(curr[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
 func leadingWhitespace(s string) string {
 	var indent strings.Builder
 	for _, ch := range s {
@@ -741,11 +795,17 @@ func toInt(v any) (int, bool) {
 	}
 }
 
+// maxLCSMatrixSize caps the LCS matrix at ~16MB (4M cells × 4 bytes/int).
+const maxLCSMatrixSize = 2000 * 2000
+
 func generateDiffSummary(path, oldContent, newContent string) string {
 	oldLines := strings.Split(oldContent, "\n")
 	newLines := strings.Split(newContent, "\n")
 
-	// Build LCS table for line-level diff
+	if len(oldLines)*len(newLines) > maxLCSMatrixSize {
+		return fmt.Sprintf("--- %s\n+++ %s\n(%d lines removed, %d lines added)", path, path, len(oldLines), len(newLines))
+	}
+
 	lcs := buildLCS(oldLines, newLines)
 	hunks := diffHunks(oldLines, newLines, lcs, 3)
 
@@ -789,36 +849,29 @@ const (
 	diffInsert
 )
 
-func diffLines(a, b []string, lcs [][]int) []struct {
+type diffEntry struct {
 	op   diffOp
 	line string
-} {
-	var ops []struct {
-		op   diffOp
-		line string
-	}
+}
+
+func diffLines(a, b []string, lcs [][]int) []diffEntry {
+	var ops []diffEntry
 	i, j := len(a), len(b)
 	for i > 0 || j > 0 {
 		if i > 0 && j > 0 && a[i-1] == b[j-1] {
-			ops = append([]struct {
-				op   diffOp
-				line string
-			}{{diffEqual, a[i-1]}}, ops...)
+			ops = append(ops, diffEntry{diffEqual, a[i-1]})
 			i--
 			j--
 		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {
-			ops = append([]struct {
-				op   diffOp
-				line string
-			}{{diffInsert, b[j-1]}}, ops...)
+			ops = append(ops, diffEntry{diffInsert, b[j-1]})
 			j--
 		} else if i > 0 {
-			ops = append([]struct {
-				op   diffOp
-				line string
-			}{{diffDelete, a[i-1]}}, ops...)
+			ops = append(ops, diffEntry{diffDelete, a[i-1]})
 			i--
 		}
+	}
+	for l, r := 0, len(ops)-1; l < r; l, r = l+1, r-1 {
+		ops[l], ops[r] = ops[r], ops[l]
 	}
 	return ops
 }

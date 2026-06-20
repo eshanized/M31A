@@ -529,14 +529,15 @@ func normalizeToolName(name string) string {
 // normalizeTrailingCommas removes trailing commas before ] or } in JSON text.
 // LLMs sometimes produce trailing commas which are invalid in strict JSON.
 func normalizeTrailingCommas(s string) string {
-	runes := []rune(s)
-	var out []rune
+	var out strings.Builder
+	out.Grow(len(s))
 	inString := false
 	escaped := false
 
-	for i, c := range runes {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
 		if escaped {
-			out = append(out, c)
+			out.WriteByte(c)
 			escaped = false
 			continue
 		}
@@ -547,46 +548,45 @@ func normalizeTrailingCommas(s string) string {
 			case '"':
 				inString = false
 			}
-			out = append(out, c)
+			out.WriteByte(c)
 			continue
 		}
 		if c == '"' {
 			inString = true
-			out = append(out, c)
+			out.WriteByte(c)
 			continue
 		}
-		// Skip comma if followed by ] or } (with optional whitespace)
 		if c == ',' {
 			j := i + 1
-			for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
 				j++
 			}
-			if j < len(runes) && (runes[j] == ']' || runes[j] == '}') {
-				continue // skip the trailing comma
+			if j < len(s) && (s[j] == ']' || s[j] == '}') {
+				continue
 			}
 		}
-		out = append(out, c)
+		out.WriteByte(c)
 	}
-	return string(out)
+	return out.String()
 }
 
 // stripJSONComments removes // line comments and /* ... */ block comments from
 // JSON text while preserving content inside double-quoted string literals.
 // LLM responses may contain comments that cause json.Unmarshal to fail.
 func stripJSONComments(s string) string {
-	var out []rune
+	var out strings.Builder
+	out.Grow(len(s))
 	inString := false
 	escaped := false
 	i := 0
-	runes := []rune(s)
-	n := len(runes)
+	n := len(s)
 	commentsStripped := false
 
 	for i < n {
-		c := runes[i]
+		c := s[i]
 
 		if escaped {
-			out = append(out, c)
+			out.WriteByte(c)
 			escaped = false
 			i++
 			continue
@@ -599,36 +599,32 @@ func stripJSONComments(s string) string {
 			case '"':
 				inString = false
 			}
-			out = append(out, c)
+			out.WriteByte(c)
 			i++
 			continue
 		}
 
-		// Not inside a string
 		if c == '"' {
 			inString = true
-			out = append(out, c)
+			out.WriteByte(c)
 			i++
 			continue
 		}
 
-		// Check for // line comment
-		if c == '/' && i+1 < n && runes[i+1] == '/' {
+		if c == '/' && i+1 < n && s[i+1] == '/' {
 			commentsStripped = true
-			// Skip to end of line
-			for i < n && runes[i] != '\n' {
+			for i < n && s[i] != '\n' {
 				i++
 			}
 			continue
 		}
 
-		// Check for /* ... */ block comment
-		if c == '/' && i+1 < n && runes[i+1] == '*' {
+		if c == '/' && i+1 < n && s[i+1] == '*' {
 			commentsStripped = true
-			i += 2 // skip past /*
+			i += 2
 			for i < n {
-				if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
-					i += 2 // skip past */
+				if s[i] == '*' && i+1 < n && s[i+1] == '/' {
+					i += 2
 					break
 				}
 				i++
@@ -636,7 +632,7 @@ func stripJSONComments(s string) string {
 			continue
 		}
 
-		out = append(out, c)
+		out.WriteByte(c)
 		i++
 	}
 
@@ -644,7 +640,7 @@ func stripJSONComments(s string) string {
 		slog.Warn("extractJSONObject: stripped comments from LLM response (model regression signal)")
 	}
 
-	return string(out)
+	return out.String()
 }
 
 // extractJSONObject finds and returns the first complete JSON object starting

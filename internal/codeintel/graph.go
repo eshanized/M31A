@@ -10,10 +10,11 @@ import (
 
 // Node represents a single file in the import graph.
 type Node struct {
-	Path       string
-	Imports    []string // files this file imports (direct edges)
-	ImportedBy []string // files that import this file (reverse edges)
-	Language   string
+	Path          string
+	Imports       []string // files this file imports (direct edges)
+	ImportedBy    []string // files that import this file (reverse edges)
+	importedBySet map[string]struct{}
+	Language      string
 }
 
 // ImportGraph is a directed dependency graph between source files.
@@ -53,12 +54,13 @@ func (g *ImportGraph) addReverseEdge(target, source string) {
 		node = &Node{Path: target}
 		g.nodes[target] = node
 	}
-	// Avoid duplicates
-	for _, s := range node.ImportedBy {
-		if s == source {
-			return
-		}
+	if node.importedBySet == nil {
+		node.importedBySet = make(map[string]struct{})
 	}
+	if _, exists := node.importedBySet[source]; exists {
+		return
+	}
+	node.importedBySet[source] = struct{}{}
 	node.ImportedBy = append(node.ImportedBy, source)
 }
 
@@ -105,9 +107,8 @@ func (g *ImportGraph) traverse(start string, maxDepth int, next func(*Node) []st
 	queue := []entry{{path: start, depth: 0}}
 	var result []string
 
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
+	for front := 0; front < len(queue); front++ {
+		cur := queue[front]
 
 		if maxDepth > 0 && cur.depth >= maxDepth {
 			continue

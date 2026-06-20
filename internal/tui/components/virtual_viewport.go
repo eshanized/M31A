@@ -9,19 +9,26 @@ import (
 // VirtualViewport renders only visible items in a scrollable list,
 // avoiding full re-render of off-screen content.
 type VirtualViewport struct {
-	Items       []string
-	ItemHeights []int
-	ScrollTop   int
-	ViewportH   int
-	ViewportW   int
+	Items             []string
+	ItemHeights       []int
+	ScrollTop         int
+	ViewportH         int
+	ViewportW         int
+	cachedTotalHeight int
+	heightCacheValid  bool
 }
 
 // TotalHeight returns the sum of all item heights.
 func (v *VirtualViewport) TotalHeight() int {
+	if v.heightCacheValid {
+		return v.cachedTotalHeight
+	}
 	total := 0
 	for i, item := range v.Items {
 		total += v.itemHeight(i, item)
 	}
+	v.cachedTotalHeight = total
+	v.heightCacheValid = true
 	return total
 }
 
@@ -154,4 +161,5 @@ func (v *VirtualViewport) itemHeight(idx int, content string) int {
 // InvalidateHeightCache clears the cached heights, forcing recomputation.
 func (v *VirtualViewport) InvalidateHeightCache() {
 	v.ItemHeights = nil
+	v.heightCacheValid = false
 }

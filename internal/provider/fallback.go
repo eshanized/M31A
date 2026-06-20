@@ -66,16 +66,19 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 	// one is found after all results arrive.
 	results := make(map[string]types.HealthStatus, len(candidates))
 	var slowFallback string
+	priorityIdx := 0
 	for i := 0; i < len(candidates); i++ {
 		r := <-ch
 		results[r.name] = r.status
 
-		// Check priority order after each result arrives
-		for _, c := range candidates {
+		// Advance through priority list only for newly arrived results
+		for priorityIdx < len(candidates) {
+			c := candidates[priorityIdx]
 			status, ok := results[c.name]
 			if !ok {
-				continue
+				break // haven't received this candidate's result yet
 			}
+			priorityIdx++
 			if status.Status == "live" {
 				cancel()
 				if _, err := registry.TrySetActive(c.name); err != nil {

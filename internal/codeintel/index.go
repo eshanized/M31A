@@ -31,9 +31,11 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 	}
 
 	var symbols []SymbolInfo
+	seen := make(map[string]bool, len(info.Exports)+len(info.Funcs)+len(info.Types))
 
 	for _, s := range info.Exports {
 		symbols = append(symbols, s)
+		seen[s.Name] = true
 		idx.byName[s.Name] = append(idx.byName[s.Name], SymbolLocation{
 			File: info.Path,
 			Kind: s.Kind,
@@ -41,17 +43,11 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 	}
 
 	for _, f := range info.Funcs {
-		alreadyExported := false
-		for _, s := range symbols {
-			if s.Name == f.Name {
-				alreadyExported = true
-				break
-			}
-		}
-		if !alreadyExported {
+		if !seen[f.Name] {
 			symbols = append(symbols, SymbolInfo{
 				Name: f.Name, Kind: "func", Exported: f.Exported,
 			})
+			seen[f.Name] = true
 			idx.byName[f.Name] = append(idx.byName[f.Name], SymbolLocation{
 				File: info.Path, Kind: "func",
 			})
@@ -59,17 +55,11 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 	}
 
 	for _, ti := range info.Types {
-		alreadyExported := false
-		for _, s := range symbols {
-			if s.Name == ti.Name {
-				alreadyExported = true
-				break
-			}
-		}
-		if !alreadyExported {
+		if !seen[ti.Name] {
 			symbols = append(symbols, SymbolInfo{
 				Name: ti.Name, Kind: ti.Kind, Exported: true,
 			})
+			seen[ti.Name] = true
 			idx.byName[ti.Name] = append(idx.byName[ti.Name], SymbolLocation{
 				File: info.Path, Kind: ti.Kind,
 			})
@@ -99,13 +89,15 @@ func (idx *SymbolIndex) FileSymbols(path string) []SymbolInfo {
 	return idx.byFile[path]
 }
 
+// typeKinds is the set of symbol kinds that represent type definitions.
+var typeKinds = map[string]bool{
+	"struct": true, "interface": true, "type": true,
+	"class": true, "enum": true, "trait": true,
+}
+
 // FindTypes returns all type/struct/interface/class/enum definitions matching the name.
 func (idx *SymbolIndex) FindTypes(name string) []SymbolLocation {
 	var results []SymbolLocation
-	typeKinds := map[string]bool{
-		"struct": true, "interface": true, "type": true,
-		"class": true, "enum": true, "trait": true,
-	}
 	for _, loc := range idx.byName[name] {
 		if typeKinds[loc.Kind] {
 			results = append(results, loc)
