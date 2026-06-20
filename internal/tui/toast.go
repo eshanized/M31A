@@ -29,8 +29,7 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 	return stack
 }
 
-// renderSingleToast renders one toast as a card with rounded border, colored accent,
-// and depth-based shadow for stacking effect.
+// renderSingleToast renders one toast as a card with rounded border and colored accent.
 func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) string {
 	var borderColor lipgloss.Color
 	switch toast.Type {
@@ -78,15 +77,6 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 
 	if offset > 0 {
 		toastContent = lipgloss.NewStyle().PaddingLeft(offset).Render(toastContent)
-	}
-
-	// Depth-based shadow: front gets full shadow, deeper toasts get less
-	shadowDepth := 2 - index
-	if shadowDepth < 0 {
-		shadowDepth = 0
-	}
-	if shadowDepth > 0 {
-		toastContent = theme.RenderWithShadow(toastContent, t.ShadowColor, shadowDepth, shadowDepth)
 	}
 
 	return toastContent
