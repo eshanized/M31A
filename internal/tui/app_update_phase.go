@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -55,6 +57,21 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		m.workflowPhase = types.PhaseIdle
 		m.screen = ScreenREPL
 		return nil
+	}
+
+	// Inline phase completion feedback in the REPL
+	if m.replModel != nil {
+		summary := fmt.Sprintf("**Phase: %s** — complete ✓", msg.Phase)
+		if len(msg.Tasks) > 0 {
+			done := 0
+			for _, t := range msg.Tasks {
+				if t.Status == types.StatusDone {
+					done++
+				}
+			}
+			summary += fmt.Sprintf(" (%d/%d tasks)", done, len(msg.Tasks))
+		}
+		m.replModel.AddMessage(makeAssistantMsg(summary))
 	}
 
 	// Use the mode from the phase result, falling back to the stored mode
@@ -176,6 +193,35 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		if m.workflowEngine != nil {
 			m.planModel.SetPlanContent(m.workflowEngine.PlanContent())
 			m.planModel.SetPlanVersion(m.workflowEngine.PlanVersion())
+		}
+		// Populate sidebar with plan tasks so the user sees the task list immediately
+		if m.sidebarModel != nil && len(msg.Tasks) > 0 {
+			m.sidebarModel.SetMode(SidebarModeTodo)
+			m.sidebarModel.SetCurrentPhase(string(types.PhasePlan))
+			m.sidebarModel.InitTaskProgress(len(msg.Tasks))
+			for _, task := range msg.Tasks {
+				m.sidebarModel.AddTodoItem(SidebarTodoItem{
+					Content:  task.Description,
+					Status:   "pending",
+					Priority: "medium",
+					Source:   "task",
+					TaskID:   task.ID,
+				})
+			}
+		}
+		// Show plan summary in the REPL for inline visibility
+		if m.replModel != nil && len(msg.Tasks) > 0 {
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "**Plan: %d tasks generated**\n\n", len(msg.Tasks))
+			for i, task := range msg.Tasks {
+				if i >= 15 {
+					fmt.Fprintf(&sb, "... and %d more tasks\n", len(msg.Tasks)-15)
+					break
+				}
+				fmt.Fprintf(&sb, "  %d. [%s] %s\n", task.ID, task.Action, task.Description)
+			}
+			sb.WriteString("\nPress `r` to refine or approve to execute.")
+			m.replModel.AddMessage(makeAssistantMsg(sb.String()))
 		}
 		m.persistWorkflowState()
 		return nil

@@ -194,6 +194,11 @@ type FeaturesConfig struct {
 	// When set, workflow phases check cumulative cost before proceeding.
 	BudgetLimitUSD float64 `toml:"budget_limit_usd"`
 
+	// Metrics collection (observability pipeline). Enabled by default.
+	// When true, the session records tool execution, LLM token usage,
+	// and workflow phase metrics to METRICS.json in the session directory.
+	MetricsEnabled bool `toml:"metrics_enabled"`
+
 	// Plan enhancements (GSD-inspired sub-steps within the Plan phase)
 	PlanResearch       bool `toml:"plan_research"`        // Pre-plan research step
 	PlanCheck          bool `toml:"plan_check"`           // Plan quality checker + revision loop

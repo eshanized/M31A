@@ -237,6 +237,9 @@ func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 	if m.replModel != nil {
 		m.replModel.lastStatus = "Phase: " + string(phase)
 	}
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetCurrentPhase(string(phase))
+	}
 }
 
 // RunPhaseCmd runs a workflow phase in a goroutine and returns a tea.Cmd.
@@ -255,6 +258,13 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 	m.workflowCancel = cancel
 
 	m.checkAutoArbitrage()
+
+	// Inline phase starting feedback in the REPL
+	if m.replModel != nil {
+		m.replModel.AddMessage(makeAssistantMsg(
+			fmt.Sprintf("**Phase: %s** — starting...", phase),
+		))
+	}
 
 	engine := m.workflowEngine
 	goal := m.workflowGoal

@@ -48,6 +48,7 @@ func DefaultConfig() *Config {
 			DefaultContextLength:    types.DefaultContextLength,
 		},
 		Features: FeaturesConfig{
+			MetricsEnabled:         true,
 			ModelCacheTTLMinutes:   5,
 			ModelCacheStaleHours:   24,
 			SessionIDLength:        types.SessionIDLength,
