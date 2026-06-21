@@ -43,6 +43,7 @@ const (
 	ScreenChatHistory      = tuitypes.ScreenChatHistory
 	ScreenCommandPalette   = tuitypes.ScreenCommandPalette
 	ScreenRuntimeCheck     = tuitypes.ScreenRuntimeCheck
+	ScreenHome             = tuitypes.ScreenHome
 )
 
 // Message type re-exports
@@ -74,6 +75,7 @@ type (
 	PhaseModelPickedMsg     = tuitypes.PhaseModelPickedMsg
 	StreamChunkMsg          = tuitypes.StreamChunkMsg
 	SlashCommandMsg         = tuitypes.SlashCommandMsg
+	HomeSubmitMsg           = tuitypes.HomeSubmitMsg
 	ThemeChangedMsg         = tuitypes.ThemeChangedMsg
 	ToastMsg                = tuitypes.ToastMsg
 	ToastExpiryMsg          = tuitypes.ToastExpiryMsg

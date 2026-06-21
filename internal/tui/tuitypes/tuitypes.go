@@ -55,6 +55,7 @@ const (
 	ScreenChatHistory      Screen = 29   // chat history table browser
 	ScreenCommandPalette   Screen = 30   // dedicated command palette with detail panel
 	ScreenRuntimeCheck     Screen = 31   // runtime verification (dev server + smoke tests)
+	ScreenHome             Screen = 32   // landing screen with logo, prompt, and tips
 )
 
 // Label returns a human-readable name for the screen.
@@ -124,6 +125,8 @@ func (s Screen) Label() string {
 		return "Commands"
 	case ScreenRuntimeCheck:
 		return "Runtime Check"
+	case ScreenHome:
+		return "Home"
 	default:
 		return "Unknown"
 	}
@@ -309,6 +312,11 @@ type StreamChunkMsg = types.StreamChunkMsg
 type SlashCommandMsg struct {
 	Command       string
 	AttachedFiles int // number of files attached via @-mention (0 if none)
+}
+
+// HomeSubmitMsg is emitted when the user submits text from the Home screen prompt.
+type HomeSubmitMsg struct {
+	Text string
 }
 
 // ThemeChangedMsg is emitted when the theme is switched.
