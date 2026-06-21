@@ -97,6 +97,9 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			if provider.IsNonChatModel(m.ID) {
 				continue
 			}
+			if provider.IsLikelyBrokenOnNvidia(m.ID) {
+				continue
+			}
 			info := types.ModelInfo{
 				ID:            m.ID,
 				Name:          m.ID,
@@ -164,8 +167,66 @@ func isRetryable(err error) bool {
 		strings.Contains(msg, "temporarily unavailable")
 }
 
-func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
+// isMultimodalModel checks whether a model ID indicates multimodal capabilities
+// (image, video, or audio input). These models return 400 on text-only requests.
+func isMultimodalModel(modelID string) bool {
+	id := strings.ToLower(modelID)
+	return strings.Contains(id, "multimodal") || strings.Contains(id, "vision")
+}
+
+// hasImageContent reports whether any message in the request contains
+// image content (base64 or URL). Used to decide whether a multimodal
+// model needs force_text hints.
+func hasImageContent(msgs []types.Message) bool {
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "image_url") ||
+			strings.Contains(m.Content, "data:image/") ||
+			strings.Contains(m.Content, "[image") {
+			return true
+		}
+	}
+	return false
+}
+
+// buildNvidiaBody constructs a chat completion request body tailored for
+// NVIDIA NIM. It starts from the standard OpenAI-compatible body and adds
+// NVIDIA-specific fields:
+//   - ExtraBodyParams from the reasoning config are nested under "extra_body"
+//   - Multimodal models with text-only messages get force_text hints
+func (c *Client) buildNvidiaBody(req provider.ChatRequest) map[string]any {
 	body := provider.BuildChatBody(req)
+
+	cfg, hasCfg := provider.GetReasoningConfig(req.Model)
+	if hasCfg && len(cfg.ExtraBodyParams) > 0 {
+		extraBody, _ := body["extra_body"].(map[string]any)
+		if extraBody == nil {
+			extraBody = make(map[string]any, len(cfg.ExtraBodyParams))
+		}
+		for k, v := range cfg.ExtraBodyParams {
+			extraBody[k] = v
+		}
+		body["extra_body"] = extraBody
+	}
+
+	if isMultimodalModel(req.Model) && !hasImageContent(req.Messages) {
+		extraBody, _ := body["extra_body"].(map[string]any)
+		if extraBody == nil {
+			extraBody = make(map[string]any)
+		}
+		kwargs, _ := extraBody["chat_template_kwargs"].(map[string]any)
+		if kwargs == nil {
+			kwargs = make(map[string]any)
+		}
+		kwargs["force_text"] = true
+		extraBody["chat_template_kwargs"] = kwargs
+		body["extra_body"] = extraBody
+	}
+
+	return body
+}
+
+func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
+	body := c.buildNvidiaBody(req)
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -211,6 +272,9 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 				slog.Info("nvidia: evicted incompatible model", "model", req.Model, "body", bodyStr)
 			}
 			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, "nvidia")
+			if isMultimodalModel(req.Model) {
+				msg += " — this model requires image, video, or audio input"
+			}
 			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 		case http.StatusServiceUnavailable:
 			return nil, m31errors.ErrProviderUnreachable
