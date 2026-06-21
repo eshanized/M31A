@@ -123,14 +123,6 @@ func (ft *FileTree) ensureFlat() {
 	}
 }
 
-func (ft *FileTree) flatten() {
-	ft.flatDirty = false
-	ft.flatList = nil
-	if ft.Root != nil {
-		ft.flattenNode(ft.Root, 0, nil)
-	}
-}
-
 func (ft *FileTree) flattenNode(node *FileNode, depth int, parentEnd []bool) {
 	for i, child := range node.Children {
 		isLast := i == len(node.Children)-1

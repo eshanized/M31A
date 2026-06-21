@@ -97,9 +97,9 @@ func (t *MetricsTool) Execute(ctx context.Context, input types.ToolInput) (types
 func formatSummary(snap *metrics.SessionMetrics) string {
 	var sb strings.Builder
 	sb.WriteString("# Session Metrics Summary\n\n")
-	sb.WriteString(fmt.Sprintf("Session: %s\n", snap.SessionID))
-	sb.WriteString(fmt.Sprintf("Started: %s\n", snap.StartedAt.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("Last updated: %s\n\n", snap.UpdatedAt.Format(time.RFC3339)))
+	fmt.Fprintf(&sb, "Session: %s\n", snap.SessionID)
+	fmt.Fprintf(&sb, "Started: %s\n", snap.StartedAt.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "Last updated: %s\n\n", snap.UpdatedAt.Format(time.RFC3339))
 
 	// Tool totals
 	var totalCalls, totalSuccess, totalFail int64
@@ -108,14 +108,14 @@ func formatSummary(snap *metrics.SessionMetrics) string {
 		totalSuccess += t.SuccessCount
 		totalFail += t.FailCount
 	}
-	sb.WriteString(fmt.Sprintf("## Tools\n"))
-	sb.WriteString(fmt.Sprintf("  Tool types used: %d\n", len(snap.Tools)))
-	sb.WriteString(fmt.Sprintf("  Total calls: %d\n", totalCalls))
-	sb.WriteString(fmt.Sprintf("  Successes: %d\n", totalSuccess))
-	sb.WriteString(fmt.Sprintf("  Failures: %d\n", totalFail))
+	sb.WriteString("## Tools\n")
+	fmt.Fprintf(&sb, "  Tool types used: %d\n", len(snap.Tools))
+	fmt.Fprintf(&sb, "  Total calls: %d\n", totalCalls)
+	fmt.Fprintf(&sb, "  Successes: %d\n", totalSuccess)
+	fmt.Fprintf(&sb, "  Failures: %d\n", totalFail)
 	if totalCalls > 0 {
 		successRate := float64(totalSuccess) / float64(totalCalls) * 100
-		sb.WriteString(fmt.Sprintf("  Success rate: %.1f%%\n", successRate))
+		fmt.Fprintf(&sb, "  Success rate: %.1f%%\n", successRate)
 	}
 
 	// LLM totals
@@ -125,16 +125,16 @@ func formatSummary(snap *metrics.SessionMetrics) string {
 		totalTokens += l.TotalTokens
 		totalCost += l.Cost
 	}
-	sb.WriteString(fmt.Sprintf("\n## LLM\n"))
-	sb.WriteString(fmt.Sprintf("  Interactions: %d\n", totalInteractions(snap)))
-	sb.WriteString(fmt.Sprintf("  Total tokens: %d\n", totalTokens))
-	sb.WriteString(fmt.Sprintf("  Total cost: $%.4f\n", totalCost))
+	sb.WriteString("\n## LLM\n")
+	fmt.Fprintf(&sb, "  Interactions: %d\n", totalInteractions(snap))
+	fmt.Fprintf(&sb, "  Total tokens: %d\n", totalTokens)
+	fmt.Fprintf(&sb, "  Total cost: $%.4f\n", totalCost)
 
 	// Phase totals
-	sb.WriteString(fmt.Sprintf("\n## Phases\n"))
-	sb.WriteString(fmt.Sprintf("  Phases tracked: %d\n", len(snap.Phases)))
+	sb.WriteString("\n## Phases\n")
+	fmt.Fprintf(&sb, "  Phases tracked: %d\n", len(snap.Phases))
 	for _, p := range snap.Phases {
-		sb.WriteString(fmt.Sprintf("  - %s: %dms", p.Phase, p.DurationMs))
+		fmt.Fprintf(&sb, "  - %s: %dms", p.Phase, p.DurationMs)
 		if !p.Success {
 			sb.WriteString(" (failed)")
 		}
@@ -159,10 +159,10 @@ func formatToolStats(snap *metrics.SessionMetrics) string {
 		if t.CallCount > 0 {
 			rate = float64(t.SuccessCount) / float64(t.CallCount) * 100
 		}
-		sb.WriteString(fmt.Sprintf("## %s\n", t.Name))
-		sb.WriteString(fmt.Sprintf("  Calls: %d (success: %d, fail: %d)\n", t.CallCount, t.SuccessCount, t.FailCount))
-		sb.WriteString(fmt.Sprintf("  Success rate: %.1f%%\n", rate))
-		sb.WriteString(fmt.Sprintf("  Avg duration: %.1fms\n", t.AvgDurMs))
+		fmt.Fprintf(&sb, "## %s\n", t.Name)
+		fmt.Fprintf(&sb, "  Calls: %d (success: %d, fail: %d)\n", t.CallCount, t.SuccessCount, t.FailCount)
+		fmt.Fprintf(&sb, "  Success rate: %.1f%%\n", rate)
+		fmt.Fprintf(&sb, "  Avg duration: %.1fms\n", t.AvgDurMs)
 		sb.WriteString("\n")
 	}
 
@@ -180,11 +180,11 @@ func formatPhaseStats(snap *metrics.SessionMetrics) string {
 	}
 
 	for _, p := range snap.Phases {
-		sb.WriteString(fmt.Sprintf("## %s\n", p.Phase))
-		sb.WriteString(fmt.Sprintf("  Duration: %dms\n", p.DurationMs))
-		sb.WriteString(fmt.Sprintf("  Transitions: %d\n", p.TransitionCount))
-		sb.WriteString(fmt.Sprintf("  Heal triggers: %d\n", p.HealTriggerCount))
-		sb.WriteString(fmt.Sprintf("  Bisect triggers: %d\n", p.BisectTriggerCount))
+		fmt.Fprintf(&sb, "## %s\n", p.Phase)
+		fmt.Fprintf(&sb, "  Duration: %dms\n", p.DurationMs)
+		fmt.Fprintf(&sb, "  Transitions: %d\n", p.TransitionCount)
+		fmt.Fprintf(&sb, "  Heal triggers: %d\n", p.HealTriggerCount)
+		fmt.Fprintf(&sb, "  Bisect triggers: %d\n", p.BisectTriggerCount)
 		if !p.Success {
 			sb.WriteString("  Status: FAILED\n")
 		} else {
@@ -210,20 +210,20 @@ func formatCostReport(snap *metrics.SessionMetrics) string {
 	var grandCost float64
 
 	for _, l := range snap.LLMs {
-		sb.WriteString(fmt.Sprintf("## %s\n", l.Phase))
-		sb.WriteString(fmt.Sprintf("  Interactions: %d\n", l.InteractionCount))
-		sb.WriteString(fmt.Sprintf("  Prompt tokens: %d\n", l.PromptTokens))
-		sb.WriteString(fmt.Sprintf("  Completion tokens: %d\n", l.CompletionTokens))
-		sb.WriteString(fmt.Sprintf("  Total tokens: %d\n", l.TotalTokens))
-		sb.WriteString(fmt.Sprintf("  Cost: $%.4f\n", l.Cost))
+		fmt.Fprintf(&sb, "## %s\n", l.Phase)
+		fmt.Fprintf(&sb, "  Interactions: %d\n", l.InteractionCount)
+		fmt.Fprintf(&sb, "  Prompt tokens: %d\n", l.PromptTokens)
+		fmt.Fprintf(&sb, "  Completion tokens: %d\n", l.CompletionTokens)
+		fmt.Fprintf(&sb, "  Total tokens: %d\n", l.TotalTokens)
+		fmt.Fprintf(&sb, "  Cost: $%.4f\n", l.Cost)
 		sb.WriteString("\n")
 		grandTokens += l.TotalTokens
 		grandCost += l.Cost
 	}
 
 	sb.WriteString("## Totals\n")
-	sb.WriteString(fmt.Sprintf("  Total tokens: %d\n", grandTokens))
-	sb.WriteString(fmt.Sprintf("  Total cost: $%.4f\n", grandCost))
+	fmt.Fprintf(&sb, "  Total tokens: %d\n", grandTokens)
+	fmt.Fprintf(&sb, "  Total cost: $%.4f\n", grandCost)
 
 	return sb.String()
 }
