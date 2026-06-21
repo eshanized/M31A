@@ -27,6 +27,7 @@ const (
 	PhasePlan    = "◬"
 	PhaseExecute = "△"
 	PhaseVerify  = "▽"
+	PhaseRuntime = "◎"
 	PhaseShip    = "◈"
 )
 
@@ -140,6 +141,8 @@ func GetPhaseIcon(phase string) string {
 		return PhaseExecute
 	case "verify":
 		return PhaseVerify
+	case "runtime":
+		return PhaseRuntime
 	case "ship":
 		return PhaseShip
 	default:
