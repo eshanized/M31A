@@ -95,6 +95,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.verifyModel = newVerify
 				cmds = append(cmds, cmd)
 			}
+		case ScreenRuntimeCheck:
+			if m.runtimeModel != nil {
+				newRuntime, cmd := m.runtimeModel.Update(msg)
+				m.runtimeModel = newRuntime
+				cmds = append(cmds, cmd)
+			}
 		case ScreenShip:
 			if m.shipModel != nil {
 				newShip, cmd := m.shipModel.Update(msg)
@@ -537,6 +543,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenVerify && m.verifyModel != nil {
 			m.verifyModel.TickSpinner()
 		}
+		// Forward to runtime screen for spinner animation
+		if m.screen == ScreenRuntimeCheck && m.runtimeModel != nil {
+			newRuntime, cmd := m.runtimeModel.Update(msg)
+			m.runtimeModel = newRuntime
+			cmds = append(cmds, cmd)
+		}
 		// Forward to plan screen for animations
 		if m.screen == ScreenPlan && m.planModel != nil {
 			newPlan, cmd := m.planModel.Update(msg)
@@ -823,6 +835,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.verifyModel != nil {
 			m.verifyModel.StopHealing()
+		}
+		cmds = append(cmds, m.drainEmitterCmd())
+	case workflow.RuntimeCheckCompleteMsg:
+		if m.runtimeModel != nil {
+			m.runtimeModel.SetSummary(msg.Summary)
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.PhaseTransitionStartMsg:
@@ -1635,6 +1652,13 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			m.verifyModel.width = cw
 			m.verifyModel.height = ch
+		}
+		return nil
+	case ScreenRuntimeCheck:
+		if m.runtimeModel != nil {
+			cw, ch := m.contentDimensions()
+			m.runtimeModel.width = cw
+			m.runtimeModel.height = ch
 		}
 		return nil
 	case ScreenShip:
@@ -2466,6 +2490,12 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.verifyModel.height = ch
 		}
 		return nil
+	case ScreenRuntimeCheck:
+		if m.runtimeModel != nil {
+			m.runtimeModel.width = cw
+			m.runtimeModel.height = ch
+		}
+		return nil
 	case ScreenShip:
 		if m.shipModel != nil {
 			m.shipModel.width = cw
@@ -2743,6 +2773,29 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 			}
 		}
 		return nil
+	case "runtime_continue":
+		m.setWorkflowPhase(types.PhaseShip)
+		m.screen = ScreenShip
+		if m.workflowEngine != nil {
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseRuntime, types.PhaseShip); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseRuntime, "to", types.PhaseShip, "error", err)
+			}
+		}
+		tasks, _ := m.sessionManager.LoadTasks(m.sessionID)
+		modelName := ""
+		if m.activeModel != nil {
+			modelName = m.activeModel.Name
+		}
+		summary := ShipSummary{
+			SessionID: m.sessionID,
+			TaskDone:  countDone(tasks),
+			TaskTotal: len(tasks),
+			Model:     modelName,
+			Provider:  m.activeProvider,
+		}
+		m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
+		m.persistWorkflowState()
+		return m.RunPhaseCmd(types.PhaseShip)
 	}
 	return nil
 }
