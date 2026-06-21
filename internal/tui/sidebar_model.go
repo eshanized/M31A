@@ -333,7 +333,7 @@ func (s *SidebarModel) SetCurrentPhase(phase string) {
 // GetPhasePipeline returns the list of all phases for display.
 // Keys are lowercase to match workflow.WorkflowPhase constants.
 func (s *SidebarModel) GetPhasePipeline() []string {
-	return []string{"initialize", "discuss", "plan", "execute", "verify", "ship"}
+	return []string{"initialize", "discuss", "plan", "execute", "verify", "runtime", "ship"}
 }
 
 // IsPhaseCompleted checks if a phase is in the history.
@@ -1184,6 +1184,8 @@ func (s *SidebarModel) View() string {
 		hints = []string{"ctrl+b:sidebar", "ctrl+g:focus"}
 	case "verify":
 		hints = []string{"y:yes", "n:no"}
+	case "runtime":
+		hints = []string{"enter:continue", "j/k:scroll"}
 	case "ship":
 		hints = []string{"ctrl+b:sidebar"}
 	case "settings":
