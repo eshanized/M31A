@@ -89,6 +89,8 @@ func DefaultConfig() *Config {
 			SkipDirs:             types.SkipDirs,
 			WebSearchBaseURL:     "https://search.sagibo.net",
 			WebSearchEnabled:     true,
+			OutputMaxLines:       types.DefaultOutputMaxLines,
+			OutputMaxBytes:       types.DefaultOutputMaxBytes,
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",
@@ -96,6 +98,14 @@ func DefaultConfig() *Config {
 			ShipPrefix:   "chore",
 			UserName:     "M31A",
 			UserEmail:    "m31a@local",
+		},
+		Compaction: CompactionConfig{
+			Auto:       true,
+			Buffer:     20000,
+			KeepTokens: 8000,
+		},
+		Instructions: InstructionsConfig{
+			Enabled: true,
 		},
 	}
 }
@@ -620,7 +630,7 @@ func knownConfigKeys() map[string]bool {
 		knownKeysMap = map[string]bool{
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
-			"ghost": true, "agents": true, "verify": true,
+			"ghost": true, "agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true,
 		}

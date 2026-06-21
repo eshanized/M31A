@@ -13,6 +13,27 @@ type Config struct {
 	Agents      AgentsConfig      `toml:"agents"`
 	Git         GitConfig         `toml:"git"`
 	Verify      VerifyConfig      `toml:"verify"`
+	Compaction  CompactionConfig  `toml:"compaction"`
+	Instructions InstructionsConfig `toml:"instructions"`
+	Skills       SkillsConfig       `toml:"skills"`
+}
+
+// CompactionConfig holds automatic session compaction settings.
+type CompactionConfig struct {
+	Auto       bool `toml:"auto"`
+	Buffer     int  `toml:"buffer"`
+	KeepTokens int  `toml:"keep_tokens"`
+}
+
+// InstructionsConfig controls AGENTS.md file discovery for project-aware context.
+type InstructionsConfig struct {
+	Enabled        bool `toml:"enabled"`
+	DisableProject bool `toml:"disable_project"`
+}
+
+// SkillsConfig controls skill discovery directories for composable slash commands.
+type SkillsConfig struct {
+	Sources []string `toml:"sources"`
 }
 
 // GitConfig holds configurable git commit message prefixes and user identity.
@@ -150,6 +171,7 @@ type PermissionsConfig struct {
 
 type PermissionRule struct {
 	Tool      string          `toml:"tool"`
+	Resource  string          `toml:"resource"`
 	Pattern   string          `toml:"pattern"`
 	RiskLevel types.RiskLevel `toml:"risk_level"`
 	Action    string          `toml:"action"`
@@ -253,6 +275,8 @@ type ToolsConfig struct {
 	SkipDirs             []string `toml:"skip_dirs"`
 	WebSearchBaseURL     string   `toml:"websearch_base_url"`
 	WebSearchEnabled     bool     `toml:"websearch_enabled"`
+	OutputMaxLines       int      `toml:"output_max_lines"`
+	OutputMaxBytes       int      `toml:"output_max_bytes"`
 }
 
 type AgentsConfig struct {
