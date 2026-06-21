@@ -100,6 +100,7 @@ type AppState struct {
 	planModel     *PlanModel
 	executeModel  *ExecuteModel
 	verifyModel   *VerifyModel
+	runtimeModel  *RuntimeModel
 	shipModel     *ShipModel
 	settingsModel *SettingsModel
 	resumeModel   *ResumeModel
