@@ -2,8 +2,10 @@ package subagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ type loop struct {
 	modelID    string
 	maxTools   int
 	maxTokens  int
+	maxTurns_  int // profile-overridable turn limit
 
 	// runtime state
 	messages     []types.Message
@@ -31,6 +34,15 @@ type loop struct {
 	inputToks    int
 	outputToks   int
 	lastUsage    *types.Usage
+}
+
+// toolCallAcc accumulates streaming tool call deltas from the provider.
+// Mirrors the approach in internal/tui/streaming/agent_loop.go.
+type toolCallAcc struct {
+	id    string
+	name  string
+	args  strings.Builder
+	index int
 }
 
 // maxTurns caps the number of LLM round-trips a subagent can make even if it
@@ -53,7 +65,7 @@ func (l *loop) run(ctx context.Context) {
 	}
 
 	budgetExhausted := false
-	for turn := 0; turn < maxTurns; turn++ {
+	for turn := 0; turn < l.maxTurns_; turn++ {
 		if err := ctx.Err(); err != nil {
 			l.finishCancelled(err)
 			return
@@ -88,7 +100,7 @@ func (l *loop) run(ctx context.Context) {
 			return
 		}
 	}
-	l.manager.failAgent(l.agent, fmt.Errorf("subagent: exceeded %d turns", maxTurns))
+	l.manager.failAgent(l.agent, fmt.Errorf("subagent: exceeded %d turns", l.maxTurns_))
 }
 
 // runOneTurn performs a single LLM request + tool dispatch round.
@@ -114,7 +126,7 @@ func (l *loop) runOneTurn(ctx context.Context, budgetExhausted bool) (bool, erro
 		return false, fmt.Errorf("chat stream: %w", err)
 	}
 
-	content, thinking, usage, err := l.consume(iterator)
+	content, thinking, usage, nativeToolCalls, err := l.consume(iterator)
 	if err != nil {
 		return false, fmt.Errorf("consume stream: %w", err)
 	}
@@ -131,15 +143,23 @@ func (l *loop) runOneTurn(ctx context.Context, budgetExhausted bool) (bool, erro
 		})
 	}
 
-	toolCalls, parseErr := l.parseToolCalls(content)
-	if parseErr != nil && len(toolCalls) == 0 && content != "" {
-		l.messages = append(l.messages, types.Message{
-			Role:      "assistant",
-			Content:   content,
-			CreatedAt: time.Now(),
-			Usage:     usage,
-		})
-		return true, nil
+	// Use native tool calls from the provider stream. Fall back to
+	// text-embedded JSON parsing only when no native calls are detected.
+	var toolCalls []ToolCallInput
+	if len(nativeToolCalls) > 0 {
+		toolCalls = nativeToolCalls
+	} else {
+		var parseErr error
+		toolCalls, parseErr = l.parseToolCalls(content)
+		if parseErr != nil && len(toolCalls) == 0 && content != "" {
+			l.messages = append(l.messages, types.Message{
+				Role:      "assistant",
+				Content:   content,
+				CreatedAt: time.Now(),
+				Usage:     usage,
+			})
+			return true, nil
+		}
 	}
 
 	if len(toolCalls) == 0 {
@@ -246,13 +266,16 @@ func (l *loop) updateLastTool(name, status string) {
 	l.agent.mu.Unlock()
 }
 
-// consume reads a StreamIterator to completion.
-func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, error) {
+// consume reads a StreamIterator to completion. It returns the accumulated
+// text content, thinking text, token usage, and any native tool calls
+// streamed by the provider.
+func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, []ToolCallInput, error) {
 	defer it.Close() //nolint:errcheck
 
 	var content, thinking strings.Builder
 	var lastUsage *types.Usage
 	lastChunkType := ""
+	accMap := make(map[int]*toolCallAcc)
 
 	for {
 		chunk, err := it.Next()
@@ -263,7 +286,7 @@ func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, 
 			if chunk != nil && chunk.Delta != "" {
 				content.WriteString(chunk.Delta)
 			}
-			return content.String(), thinking.String(), lastUsage, err
+			return content.String(), thinking.String(), lastUsage, buildToolCallsFromAcc(accMap), err
 		}
 		if chunk == nil {
 			continue
@@ -274,6 +297,19 @@ func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, 
 		switch chunk.Type {
 		case "thinking":
 			thinking.WriteString(chunk.Delta)
+		case "tool_call":
+			acc, ok := accMap[chunk.Index]
+			if !ok {
+				acc = &toolCallAcc{index: chunk.Index}
+				accMap[chunk.Index] = acc
+			}
+			if chunk.ToolCallID != "" {
+				acc.id = chunk.ToolCallID
+			}
+			if chunk.ToolName != "" {
+				acc.name = chunk.ToolName
+			}
+			acc.args.WriteString(chunk.ToolInput)
 		case "content", "":
 			content.WriteString(chunk.Delta)
 			if lastChunkType != "content" {
@@ -286,7 +322,37 @@ func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, 
 		}
 		lastChunkType = chunk.Type
 	}
-	return content.String(), thinking.String(), lastUsage, nil
+	return content.String(), thinking.String(), lastUsage, buildToolCallsFromAcc(accMap), nil
+}
+
+// buildToolCallsFromAcc converts accumulated tool call deltas into
+// ToolCallInput entries sorted by index.
+func buildToolCallsFromAcc(accMap map[int]*toolCallAcc) []ToolCallInput {
+	if len(accMap) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(accMap))
+	for idx := range accMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	var result []ToolCallInput
+	for _, idx := range indices {
+		acc := accMap[idx]
+		id := acc.id
+		if id == "" {
+			id = acc.name
+		}
+		if acc.name == "" {
+			continue
+		}
+		result = append(result, ToolCallInput{
+			ID:    id,
+			Name:  acc.name,
+			Input: json.RawMessage(acc.args.String()),
+		})
+	}
+	return result
 }
 
 func (l *loop) finishDone() {
@@ -337,8 +403,15 @@ func (l *loop) extractSummary() string {
 
 func (l *loop) buildSystemPrompt() string {
 	var sb strings.Builder
-	sb.WriteString("You are a focused subagent running inside a parallel exploration swarm.\n")
-	sb.WriteString("Your parent has given you a single, well-defined task. Execute it efficiently.\n\n")
+
+	// Use the profile's specialized system prompt, or fall back to generic.
+	if l.agent.Profile.SystemPrompt != "" {
+		sb.WriteString(l.agent.Profile.SystemPrompt)
+	} else {
+		sb.WriteString("You are a focused subagent running inside a parallel exploration swarm.\n")
+		sb.WriteString("Your parent has given you a single, well-defined task. Execute it efficiently.")
+	}
+	sb.WriteString("\n\n")
 
 	// Provide workspace context so the subagent can orient itself.
 	fmt.Fprintf(&sb, "Working directory: %s\n", l.agent.Info.Worktree)
@@ -348,13 +421,13 @@ func (l *loop) buildSystemPrompt() string {
 		sb.WriteString("You share the parent's working directory — file changes affect the parent directly.\n")
 	}
 	sb.WriteString("\nGuidelines:\n")
-	sb.WriteString("- Prefer parallel-friendly tools (Glob, Grep, FileRead, Bash with read-only commands).\n")
 	sb.WriteString("- Do not ask the user questions; you run autonomously.\n")
 	sb.WriteString("- When you have enough information, stop calling tools and write a clear summary.\n")
 	sb.WriteString("- Keep tool calls minimal; every call costs tokens and time.\n")
 	sb.WriteString("- Read files before editing them to understand existing code.\n")
 	fmt.Fprintf(&sb, "- Tool-call budget: %d calls. Stop before exhausting it.\n", l.maxTools)
 	fmt.Fprintf(&sb, "- Token budget: %d tokens (input + output).\n", l.maxTokens)
+	fmt.Fprintf(&sb, "- Agent type: %s\n", l.agent.Info.SubagentType)
 	fmt.Fprintf(&sb, "- Describe: %s\n", l.agent.req.Description)
 	if l.agent.req.Name != "" {
 		fmt.Fprintf(&sb, "- Name: %s\n", l.agent.req.Name)
