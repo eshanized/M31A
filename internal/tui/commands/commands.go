@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/pkg/skills"
 )
 
 // CommandInfo describes a slash command for autocomplete and help.
@@ -318,6 +321,9 @@ func DefaultCommands() *CommandRegistry {
 	// Analysis
 	_ = r.Register("complexity", handleComplexity, "Show codebase complexity report")
 
+	// Discover and register skills as dynamic slash commands
+	discoverAndRegisterSkills(r)
+
 	return r
 }
 
@@ -358,5 +364,33 @@ func handleGhost(_ []string, ctx CommandContext) CommandResult {
 		Success: true,
 		Screen:  &screen,
 		Message: "Opening ghost write file selector...",
+	}
+}
+
+// discoverAndRegisterSkills scans for skill files and registers them as
+// dynamic slash commands in the command registry.
+func discoverAndRegisterSkills(r *CommandRegistry) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	baseDir := filepath.Join(homeDir, ".m31a")
+
+	cwd, _ := os.Getwd()
+	projectDir := cwd
+
+	discovered := skills.Discover(baseDir, projectDir)
+	for _, skill := range discovered {
+		if !skill.Slash || !skill.IsValid() {
+			continue
+		}
+		skillContent := skill.Content
+		skillName := skill.Name
+		_ = r.Register(skillName, func(args []string, ctx CommandContext) CommandResult {
+			return CommandResult{
+				Success: true,
+				Message: skillContent,
+			}
+		}, skill.Description)
 	}
 }
