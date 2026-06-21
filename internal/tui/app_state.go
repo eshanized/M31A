@@ -140,6 +140,9 @@ type AppState struct {
 	// Dedicated command palette screen (ctrl+p)
 	commandPaletteScreenModel *CommandPaletteScreenModel
 
+	// Home screen (landing with logo, prompt, tips)
+	homeModel *HomeModel
+
 	// Command system
 	cmdRegistry *CommandRegistry
 	keyRegistry *KeyRegistry

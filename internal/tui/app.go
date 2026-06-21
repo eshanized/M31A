@@ -37,7 +37,7 @@ func (m *AppState) Init() tea.Cmd {
 	// Startup routing decision: skip first-run if provider is already configured.
 	hasProvider := m.registry != nil && m.activeProvider != ""
 	if hasProvider {
-		m.screen = ScreenREPL
+		m.screen = ScreenHome
 		m.ensureReplModel()
 
 		// Populate activeModel from config.Model.Default so the REPL can

@@ -301,6 +301,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmds = append(cmds, cmd)
 			}
+		case ScreenHome:
+			if m.homeModel != nil {
+				newHome, cmd := m.homeModel.Update(msg)
+				if nh, ok := newHome.(*HomeModel); ok {
+					m.homeModel = nh
+				}
+				cmds = append(cmds, cmd)
+			}
 		}
 
 	// ── Screen routing ─────────────────────────────────────────────────────────
@@ -325,6 +333,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Slash command ─────────────────────────────────────────────────────────
 	case SlashCommandMsg:
 		cmds = append(cmds, m.handleSlashCommand(msg.Command, msg.AttachedFiles))
+
+	// ── Home screen submit ───────────────────────────────────────────────────
+	case HomeSubmitMsg:
+		m.ensureReplModel()
+		if m.replModel != nil {
+			m.replModel.textarea.SetValue(msg.Text)
+			m.replModel.textarea.Focus()
+			m.replModel.updateAutoExpandHeight()
+		}
+		cmds = append(cmds, m.navigateToScreen(ScreenREPL))
 
 	// ── Intent classification result ──────────────────────────────────────────
 	case IntentClassifiedMsg:
@@ -1592,6 +1610,14 @@ func (m *AppState) forwardMsgToScreen(msg tea.Msg) tea.Cmd {
 			}
 			return cmd
 		}
+	case ScreenHome:
+		if m.homeModel != nil {
+			newHome, cmd := m.homeModel.Update(msg)
+			if nh, ok := newHome.(*HomeModel); ok {
+				m.homeModel = nh
+			}
+			return cmd
+		}
 	}
 	return nil
 }
@@ -1813,6 +1839,12 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.commandPaletteScreenModel = NewCommandPaletteScreenModel(m.cmdRegistry, m.themeManager.Current(), cw, ch)
 		}
 		return m.commandPaletteScreenModel.Init()
+	case ScreenHome:
+		if m.homeModel == nil {
+			cw, ch := m.contentDimensions()
+			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
+		}
+		return m.homeModel.Init()
 	default:
 		return nil
 	}
@@ -1946,6 +1978,9 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	if m.commandPaletteScreenModel != nil {
 		m.commandPaletteScreenModel.SetDimensions(contentW, contentH)
+	}
+	if m.homeModel != nil {
+		m.homeModel.SetDimensions(contentW, contentH)
 	}
 
 	// UX-38: Notify when sidebar auto-hides due to narrow terminal
@@ -2283,6 +2318,14 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			newCP, cmd := m.commandPaletteScreenModel.Update(msg)
 			if ncp, ok := newCP.(*CommandPaletteScreenModel); ok {
 				m.commandPaletteScreenModel = ncp
+			}
+			return cmd
+		}
+	case ScreenHome:
+		if m.homeModel != nil {
+			newHome, cmd := m.homeModel.Update(msg)
+			if nh, ok := newHome.(*HomeModel); ok {
+				m.homeModel = nh
 			}
 			return cmd
 		}
@@ -2677,6 +2720,13 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.commandPaletteScreenModel.SetDimensions(cw, ch)
 		}
 		return m.commandPaletteScreenModel.Init()
+	case ScreenHome:
+		if m.homeModel == nil {
+			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
+		} else {
+			m.homeModel.SetDimensions(cw, ch)
+		}
+		return m.homeModel.Init()
 	default:
 		return nil
 	}
@@ -2685,6 +2735,8 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 // handleKeyAction processes KeyActionMsg strings.
 func (m *AppState) handleKeyAction(action string) tea.Cmd {
 	switch action {
+	case "open_home":
+		return m.navigateToScreen(ScreenHome)
 	case "open_settings":
 		return m.navigateToScreen(ScreenSettings)
 	case "open_help":

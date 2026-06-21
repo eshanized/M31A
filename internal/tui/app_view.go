@@ -76,6 +76,40 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 		return m.renderPermissionModal()
 	}
 
+	// Model Selector as centered dialog overlay on dimmed REPL background
+	if m.screen == ScreenModelSelector {
+		bgFrame := ""
+		if m.replModel != nil {
+			chrome := layout.PageChrome{Width: m.width, Height: m.height}
+			m.ensureReplModel()
+			m.syncReplSize(chrome)
+			bgFrame = m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
+		}
+		if bgFrame != "" && m.msModel != nil {
+			modalW := m.width * 4 / 5
+			modalH := m.height * 3 / 4
+			if modalW < 40 {
+				modalW = 40
+			}
+			if modalH < 10 {
+				modalH = 10
+			}
+			if modalW > m.width-4 {
+				modalW = m.width - 4
+			}
+			m.msModel.SetDimensions(modalW-4, modalH-4)
+			modalContent := m.msModel.View()
+			modal := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(t.Brand).
+				Background(t.SurfaceElevated).
+				Width(modalW - 2).
+				MaxHeight(modalH).
+				Render(modalContent)
+			return layout.RenderModalOverlay(bgFrame, modal, m.width, m.height, t)
+		}
+	}
+
 	// Minimum screen guard: refuse to render below 40 cols or below 10 rows
 	bp := layout.Detect(m.width)
 	if bp == layout.UltraNarrow {
@@ -297,6 +331,8 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"j/k navigate", "enter continue", "g/G top/bottom", "esc back"}
 	case ScreenCommandPalette:
 		info.KeyboardHints = []string{"j/k navigate", "enter execute", "type to filter", "esc close"}
+	case ScreenHome:
+		info.KeyboardHints = []string{"enter submit", "ctrl+p cmds", "ctrl+m models"}
 	}
 	if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
@@ -415,6 +451,8 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderChatHistoryContent(chrome)
 	case ScreenCommandPalette:
 		return m.renderCommandPaletteContent(chrome)
+	case ScreenHome:
+		return m.renderHomeContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -706,6 +744,14 @@ func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string 
 	return m.commandPaletteScreenModel.View()
 }
 
+func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {
+	if m.homeModel == nil {
+		m.homeModel = NewHomeModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight(), m.version)
+	}
+	m.homeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.homeModel.renderHome()
+}
+
 // renderPermissionModalContent returns the modal card without centering,
 // for use with RenderModalOverlay.
 func (m *AppState) renderPermissionModalContent() string {
@@ -887,6 +933,8 @@ func screenName(s Screen) string {
 		return "ledger"
 	case ScreenThemePicker:
 		return "themepicker"
+	case ScreenHome:
+		return "home"
 	default:
 		return ""
 	}
