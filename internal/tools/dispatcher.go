@@ -44,6 +44,8 @@ type Dispatcher struct {
 	concurrencySem chan struct{}
 	// C-12: sync.Once prevents TOCTOU race in Stop().
 	stopOnce sync.Once
+	// outputStore bounds tool output to prevent context window exhaustion.
+	outputStore *OutputStore
 }
 
 // NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
@@ -262,11 +264,21 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	slog.Debug("tool executed", "tool", call.Name, "duration_ms", elapsed, "error", err)
 
+	output := result.Output
+	truncated := result.Truncated
+	if d.outputStore != nil && err == nil {
+		bounded, _, wasBounded := d.outputStore.Bound(output)
+		if wasBounded {
+			output = bounded
+			truncated = true
+		}
+	}
+
 	res := types.ToolResult{
 		ToolCallID: call.ID,
-		Output:     result.Output,
+		Output:     output,
 		DurationMs: elapsed,
-		Truncated:  result.Truncated,
+		Truncated:  truncated,
 	}
 	if err != nil {
 		res.Error = err.Error()
@@ -317,6 +329,13 @@ func (d *Dispatcher) SetTodoWriteCallback(fn func(items []TodoItem)) {
 	if d.todoWrite != nil {
 		d.todoWrite.SetOnUpdate(fn)
 	}
+}
+
+// SetOutputStore configures the output store for bounding tool output.
+func (d *Dispatcher) SetOutputStore(store *OutputStore) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.outputStore = store
 }
 
 // workDir returns the working directory for cwd-aware permission caching.

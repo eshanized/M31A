@@ -47,4 +47,8 @@ const (
 	MaxSearchQueryLength    = 500
 	DefaultMaxSearchResults = 5
 	MaxSearchResults        = 10
+
+	DefaultOutputMaxLines = 2000
+	DefaultOutputMaxBytes = 51200
+	OutputRetentionDays   = 7
 )

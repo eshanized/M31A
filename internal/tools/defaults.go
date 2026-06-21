@@ -1,10 +1,32 @@
 package tools
 
-import "github.com/eshanized/M31A/internal/config"
+import (
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/eshanized/M31A/internal/config"
+)
 
 func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) (*Dispatcher, error) {
 	d := NewDispatcher(cfg)
 	d.workDir_ = workDir
+
+	// Initialize output store for tool output bounding
+	outputDir := filepath.Join(homeDir(), ".m31a", "tool-output")
+	store := NewOutputStore(outputDir, DefaultOutputMaxLines, DefaultOutputMaxBytes)
+	d.SetOutputStore(store)
+	// Best-effort cleanup of old output files on startup
+	store.Cleanup(OutputRetentionDays * 24 * time.Hour)
+
+	// Load persistent permissions for this project
+	pp := NewPersistentPermissions()
+	if saved := pp.Load(workDir); len(saved) > 0 {
+		d.mu.Lock()
+		d.rules = append(d.rules, saved...)
+		d.mu.Unlock()
+	}
+
 	if err := d.Register(NewBash(workDir)); err != nil {
 		return nil, err
 	}
@@ -59,4 +81,11 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 		return nil, err
 	}
 	return d, nil
+}
+
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return h
+	}
+	return filepath.Join(os.TempDir(), ".m31a")
 }
