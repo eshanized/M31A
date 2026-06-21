@@ -21,6 +21,8 @@ var complexIndicators = []string{
 	"full stack", "full-stack", "end to end", "e2e",
 	"authentication", "authorization", "database", "api",
 	"multi-step", "multi phase", "multi-phase",
+	"build a website", "build an app", "create a website", "create an app",
+	"from scratch", "new project", "greenfield",
 }
 
 // codeComplexitySignals are terms that indicate non-trivial code work even when
@@ -83,6 +85,9 @@ func ClassifyPrompt(goal string, workDir string) m31types.ComplexityLevel {
 
 	// Check project size as a complexity signal
 	fileCount := countProjectFiles(workDir)
+	if fileCount == 0 && (strings.Contains(lower, "build ") || strings.Contains(lower, "create ")) {
+		return m31types.ComplexityComplex
+	}
 	if fileCount > 30 {
 		// Large project + non-trivial goal verb => moderate
 		if strings.Contains(lower, "add ") || strings.Contains(lower, "implement ") || strings.Contains(lower, "create ") {
