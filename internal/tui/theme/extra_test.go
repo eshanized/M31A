@@ -47,6 +47,7 @@ func TestGetPhaseIcon(t *testing.T) {
 		{"plan", PhasePlan},
 		{"execute", PhaseExecute},
 		{"verify", PhaseVerify},
+		{"runtime", PhaseRuntime},
 		{"ship", PhaseShip},
 		{"unknown", PhaseInit},
 		{"", PhaseInit},
