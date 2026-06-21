@@ -108,6 +108,9 @@ type PhaseResult struct {
 
 	// Demonstration content (populated by Ship phase)
 	Demonstration string
+
+	// Runtime verification results (populated by Runtime phase)
+	RuntimeSummary *RuntimeSummary
 }
 
 // DemonstrationReadyMsg carries the generated demonstration content to the TUI.
@@ -203,6 +206,11 @@ type ExecuteLoopDetectMsg struct {
 type VerifyReportMsg struct {
 	Report   string
 	PassRate int // percentage 0-100
+}
+
+// RuntimeCheckCompleteMsg is emitted when runtime smoke tests complete.
+type RuntimeCheckCompleteMsg struct {
+	Summary RuntimeSummary
 }
 
 // ShipPreflightMsg is emitted when the pre-ship checklist runs.
