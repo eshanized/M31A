@@ -254,15 +254,16 @@ func run() int {
 		ActiveModel: activeModelForSubagents,
 		Logger:      logger,
 		Worktrees:   &subagent.GitWorktrees{},
+		Profiles:    cfg.Agents.Profiles,
 		NewDispatcher: tools.NewDispatcherFactory(
-			backupDir, backupDir, &cfg.Permissions, nil,
+			backupDir, backupDir, &cfg.Permissions, nil, cfg.Agents.Profiles,
 		),
 	})
 	// Register the Agent tool on the parent dispatcher (non-child so it can
 	// spawn in background). The factory passes nil for the child-side manager
 	// reference to avoid a registration cycle; children created by the
 	// factory get isChild=true and cannot spawn grandchildren in background.
-	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false, 0)); err != nil {
+	if err := dispatcher.Register(tools.NewAgent(subagentMgr, false, 0, cfg.Agents.Profiles)); err != nil {
 		logger.Error("failed to register Agent tool on parent dispatcher", "error", err)
 		return 1
 	}
