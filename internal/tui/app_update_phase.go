@@ -38,6 +38,12 @@ func nextPhaseForMode(from types.WorkflowPhase, mode types.WorkflowMode) (types.
 		return types.PhaseVerify, true
 
 	case types.PhaseVerify:
+		if mode == types.ModeDirect {
+			return types.PhaseShip, true
+		}
+		return types.PhaseRuntime, true
+
+	case types.PhaseRuntime:
 		return types.PhaseShip, true
 
 	case types.PhaseShip:
@@ -270,27 +276,35 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		return m.RunPhaseCmd(types.PhaseVerify)
 
 	case types.PhaseVerify:
-		m.setWorkflowPhase(types.PhaseShip)
-		m.screen = ScreenShip
+		m.setWorkflowPhase(types.PhaseRuntime)
+		m.screen = ScreenRuntimeCheck
 		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseShip); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseVerify, "to", types.PhaseShip, "error", err)
+			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseRuntime); err != nil {
+				slog.Error("phase transition failed", "from", types.PhaseVerify, "to", types.PhaseRuntime, "error", err)
 			}
 		}
-		summary := ShipSummary{
-			SessionID: m.sessionID,
-			TaskDone:  countDone(msg.Tasks),
-			TaskTotal: len(msg.Tasks),
-			Model:     modelName,
-			Provider:  m.activeProvider,
+		if m.runtimeModel == nil {
+			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), m.width, m.height)
 		}
-		if msg.Usage != nil {
-			summary.TotalTokens = msg.Usage.TotalTokens
-		}
-		summary.TotalCost = msg.Cost
-		m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(types.PhaseShip)
+		return m.RunPhaseCmd(types.PhaseRuntime)
+
+	case types.PhaseRuntime:
+		// Update runtime model with results
+		if m.runtimeModel != nil && msg.RuntimeSummary != nil {
+			m.runtimeModel.SetSummary(*msg.RuntimeSummary)
+		} else if m.runtimeModel != nil {
+			m.runtimeModel.SetSummary(workflow.RuntimeSummary{
+				TotalPassed: 0,
+				TotalFailed: 0,
+				TotalTests:  0,
+				Errors:      []string{"runtime verification skipped — no dev server could be started"},
+			})
+		}
+		// Show runtime screen and wait for user to continue
+		m.screen = ScreenRuntimeCheck
+		m.persistWorkflowState()
+		return nil
 
 	case types.PhaseShip:
 		m.setWorkflowPhase(types.PhaseIdle)
