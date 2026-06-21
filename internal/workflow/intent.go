@@ -69,7 +69,10 @@ func consumeClassifyStream(iterator *m31types.StreamIterator) (string, error) {
 			if chunk != nil && chunk.Delta != "" {
 				sb.WriteString(chunk.Delta)
 			}
-			break
+			if err.Error() == "EOF" || strings.Contains(err.Error(), "EOF") {
+				return sb.String(), nil
+			}
+			return sb.String(), fmt.Errorf("classify stream error: %w", err)
 		}
 		if chunk != nil && chunk.Delta != "" {
 			sb.WriteString(chunk.Delta)
@@ -78,7 +81,6 @@ func consumeClassifyStream(iterator *m31types.StreamIterator) (string, error) {
 			}
 		}
 	}
-	return sb.String(), nil
 }
 
 // parseIntentJSON extracts an IntentResult from raw LLM JSON output.
