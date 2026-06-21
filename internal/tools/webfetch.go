@@ -168,10 +168,17 @@ func isPrivateIP(ip net.IP) bool {
 	if ip.IsPrivate() {
 		return true
 	}
-	// Explicit cloud metadata endpoint check (defense in depth)
+	// Check for link-local range 169.254.0.0/16 (cloud metadata and other services)
 	if ip4 := ip.To4(); ip4 != nil {
-		if ip4[0] == 169 && ip4[1] == 254 && ip4[2] == 169 && ip4[3] == 254 {
+		if ip4[0] == 169 && ip4[1] == 254 {
 			return true
+		}
+	} else {
+		// IPv6 cloud metadata: AWS uses fd00:ec2::254
+		if ip6 := ip.To16(); ip6 != nil {
+			if ip6[0] == 0xfd && ip6[1] == 0x00 && ip6[2] == 0x0e && ip6[3] == 0xc2 {
+				return true
+			}
 		}
 	}
 	return false

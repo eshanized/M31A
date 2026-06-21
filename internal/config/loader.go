@@ -201,15 +201,12 @@ func Load(path string) (*Config, error) {
 
 	// Check for unresolved ${VAR} patterns — these are almost certainly
 	// user mistakes (typo in env var name, forgot to export, etc.).
+	// Log warnings but don't block startup; the unresolved patterns are
+	// preserved as-is so the user can see them in the running config.
 	if len(unresolvedVars) > 0 {
-		var b strings.Builder
-		b.WriteString("Unresolved environment variable references in config:\n")
 		for _, msg := range unresolvedVars {
-			b.WriteString("- ")
-			b.WriteString(msg)
-			b.WriteString("\n")
+			slog.Warn(msg)
 		}
-		return nil, fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
 
 	return cfg, nil

@@ -32,6 +32,18 @@ import (
 
 var Version = "dev"
 
+// restoreTerminal writes ANSI escape sequences to undo alt-screen mode,
+// mouse capture, and hidden cursor. Called before os.Exit in the hard
+// fallback path so the user's terminal is not left in a broken state.
+func restoreTerminal() {
+	fmt.Fprint(os.Stderr,
+		"\033[?1049l", // exit alt-screen
+		"\033[?1003l", // disable mouse tracking
+		"\033[?25h",   // show cursor
+		"\033[0m",     // reset attributes
+	)
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -105,6 +117,14 @@ func run() int {
 	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
+	}
+
+	// Detect previous unclean shutdown from force-exit sentinel.
+	// The signal handler writes this when the TUI doesn't exit within 5 seconds.
+	sentinelPath := filepath.Join(filepath.Dir(configPath), ".force-exit")
+	if _, serr := os.Stat(sentinelPath); serr == nil {
+		logger.Warn("detected previous unclean shutdown (force-exit sentinel present); cleaning up")
+		_ = os.Remove(sentinelPath)
 	}
 
 	// Keychain
@@ -295,6 +315,7 @@ func run() int {
 					sentinel := filepath.Join(filepath.Dir(configPath), ".force-exit")
 					_ = os.WriteFile(sentinel, []byte("force-exit"), 0o644)
 					cleanup()
+					restoreTerminal()
 					os.Exit(1)
 				}
 			case <-sigDone:

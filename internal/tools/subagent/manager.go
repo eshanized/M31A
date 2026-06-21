@@ -266,6 +266,11 @@ func (m *Manager) emit(ev SubagentEvent) {
 		select {
 		case m.eventCh <- ev:
 		default:
+			// Text deltas and progress events are dropped under backpressure.
+			// Log at debug level to avoid noise during normal high-throughput
+			// operation, but allow diagnostics when events are lost.
+			m.deps.Logger.Debug("subagent: non-lifecycle event dropped (channel full)",
+				"type", ev.Type, "id", ev.AgentID)
 		}
 	}
 }

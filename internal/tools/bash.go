@@ -368,9 +368,9 @@ var dangerousCommandPatterns = []struct {
 	{"dd if=", "raw disk write"},
 	{"dd of=/dev/", "raw disk write to device"},
 	{"> /dev/sda", "raw disk overwrite"},
-	{"chmod -R 777 /", "recursive permission change on root"},
-	{"chmod -R 777 /*", "recursive permission change on root"},
-	{"chown -R", "recursive ownership change"},
+	{"chmod -r 777 /", "recursive permission change on root"},
+	{"chmod -r 777 /*", "recursive permission change on root"},
+	{"chown -r", "recursive ownership change"},
 	{"curl | sh", "piping remote code to shell"},
 	{"curl | bash", "piping remote code to shell"},
 	{"wget | sh", "piping remote code to shell"},
@@ -388,11 +388,34 @@ var dangerousCommandPatterns = []struct {
 	{"mv /* ", "moving from root filesystem"},
 }
 
+// dangerousObfuscationPatterns catches commands that use shell features
+// to hide destructive intent: variable expansion, command substitution,
+// base64/hex decode piping, and eval/exec with dangerous payloads.
+var dangerousObfuscationPatterns = []struct {
+	pattern string
+	reason  string
+}{
+	{"base64 -d", "base64 decode (potential payload obfuscation)"},
+	{"base64 --decode", "base64 decode (potential payload obfuscation)"},
+	{"| eval", "piping to eval (arbitrary code execution)"},
+	{"| exec", "piping to exec (arbitrary code execution)"},
+	{"eval $", "eval with variable expansion"},
+	{"eval \"$", "eval with variable expansion"},
+	{"$(eval", "command substitution with eval"},
+	{"xargs rm", "xargs with rm (batch deletion)"},
+	{"xargs -0 rm", "xargs with rm (batch deletion)"},
+}
+
 // checkDangerousCommand checks if a command matches any dangerous patterns.
 // Returns the reason and true if blocked, or empty string and false if allowed.
 func checkDangerousCommand(command string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(command))
 	for _, dp := range dangerousCommandPatterns {
+		if strings.Contains(normalized, dp.pattern) {
+			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
+		}
+	}
+	for _, dp := range dangerousObfuscationPatterns {
 		if strings.Contains(normalized, dp.pattern) {
 			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
 		}

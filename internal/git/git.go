@@ -91,12 +91,63 @@ func sanitizeCommitMessage(msg string) string {
 	return strings.TrimSpace(msg)
 }
 
+// sensitiveFilePatterns lists file name patterns that should never be
+// committed automatically. Commit() checks for these after AddAll and
+// refuses to commit if any are staged.
+var sensitiveFilePatterns = []string{
+	".env",
+	".env.local",
+	".env.production",
+	".env.staging",
+	".env.development",
+	"credentials.json",
+	"credentials.yaml",
+	"credentials.yml",
+	"service-account.json",
+	"service_account.json",
+	"id_rsa",
+	"id_ed25519",
+	"id_ecdsa",
+	"id_dsa",
+	".npmrc",
+	".pypirc",
+	"google-application-credentials.json",
+	"firebase-adminsdk",
+}
+
+// hasSensitiveFiles checks the staged changes for files that look like
+// secrets or credentials. Returns the list of suspicious paths.
+func (g *Git) hasSensitiveFiles() ([]string, error) {
+	out, err := g.run("diff", "--cached", "--name-only")
+	if err != nil {
+		return nil, err
+	}
+	var suspicious []string
+	for _, file := range strings.Split(strings.TrimSpace(out), "\n") {
+		if file == "" {
+			continue
+		}
+		base := strings.ToLower(filepath.Base(file))
+		for _, pattern := range sensitiveFilePatterns {
+			if strings.Contains(base, pattern) {
+				suspicious = append(suspicious, file)
+				break
+			}
+		}
+	}
+	return suspicious, nil
+}
+
 // Commit stages all changes and creates a commit with the given message.
 // WARNING: This stages the entire worktree. Use CommitWithFiles or
 // CommitStaged for scoped commits.
+// Refuses to commit if sensitive files (credentials, keys, .env) are staged.
 func (g *Git) Commit(message string) error {
 	if err := g.AddAll(); err != nil {
 		return err
+	}
+	if suspicious, err := g.hasSensitiveFiles(); err == nil && len(suspicious) > 0 {
+		return fmt.Errorf("refusing to commit: sensitive files detected in staged changes: %s. Use CommitWithFiles to commit specific files, or remove these files first", strings.Join(suspicious, ", "))
 	}
 	_, err := g.run("commit", "--message="+sanitizeCommitMessage(message))
 	if err != nil {
@@ -235,6 +286,8 @@ func parseLog(out string, oneline bool) ([]CommitInfo, error) {
 }
 
 // validateGitRef checks that a string is a safe git ref name.
+// Rejects empty refs, refs with shell metacharacters, path traversal,
+// and other patterns that could enable command injection or unintended behavior.
 func validateGitRef(ref string) bool {
 	if ref == "" {
 		return true
@@ -242,10 +295,25 @@ func validateGitRef(ref string) bool {
 	if strings.HasPrefix(ref, "--") {
 		return false
 	}
+	if strings.HasPrefix(ref, "-") {
+		return false
+	}
 	if strings.Contains(ref, "..") {
 		return false
 	}
 	if strings.ContainsAny(ref, "\x00\n\r") {
+		return false
+	}
+	// Reject shell metacharacters that could enable injection
+	if strings.ContainsAny(ref, ";|&$`<>(){}[]!#~") {
+		return false
+	}
+	// Reject spaces and tabs (could split arguments)
+	if strings.ContainsAny(ref, " \t") {
+		return false
+	}
+	// Reject refs starting with dot (hidden path traversal)
+	if strings.HasPrefix(ref, ".") {
 		return false
 	}
 	return true

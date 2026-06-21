@@ -27,7 +27,7 @@ type Manager struct {
 	sessionIDBytes  int           // number of random bytes for session IDs (default 4 = 8 hex chars)
 	maxRecentModels int           // max recent models to track (default 10)
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
-
+	lock            *fileutil.FileLock
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -49,12 +49,14 @@ func NewManager(baseDir, workDir string, opts ManagerOpts) *Manager {
 	if opts.SessionCacheTTL <= 0 {
 		opts.SessionCacheTTL = types.DefaultSessionCacheTTL
 	}
+	projectDir := filepath.Join(workDir, ".m31a")
 	return &Manager{
 		baseDir:         baseDir,
 		workDir:         workDir,
 		sessionIDBytes:  opts.SessionIDBytes,
 		maxRecentModels: opts.MaxRecentModels,
 		sessionCacheTTL: opts.SessionCacheTTL,
+		lock:            fileutil.NewFileLock(filepath.Join(projectDir, "session.lock")),
 	}
 }
 
@@ -134,6 +136,11 @@ func generateID(numBytes int) (string, error) {
 // NewSession creates a new session in <workDir>/.m31a/. If a session already
 // exists, the existing session.json is backed up to session.json.bak.
 func (m *Manager) NewSession(model, provider string) (*Session, error) {
+	if err := m.lock.Lock(); err != nil {
+		return nil, fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	id, err := generateID(m.sessionIDBytes)
 	if err != nil {
 		return nil, err
@@ -176,6 +183,11 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 // The id parameter is accepted for API compatibility but ignored — the project
 // directory contains at most one session.
 func (m *Manager) LoadSession(id string) (*Session, error) {
+	if err := m.lock.Lock(); err != nil {
+		return nil, fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	sessPath := m.sessionJSONPath()
 	data, err := readFileLimited(sessPath, types.MaxSessionFileSize)
 	if err != nil {
@@ -215,7 +227,12 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 		var messages []types.Message
 		if err := json.Unmarshal(msgData, &messages); err == nil {
 			session.Messages = messages
+		} else {
+			slog.Warn("messages.json parse failed, loading empty message history",
+				"session", session.ID, "error", err)
 		}
+	} else if msgErr != nil && !os.IsNotExist(msgErr) {
+		slog.Warn("messages.json read failed", "session", session.ID, "error", msgErr)
 	}
 	if session.Messages == nil {
 		session.Messages = make([]types.Message, 0)
@@ -330,13 +347,26 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 	return []SessionInfo{info}, nil
 }
 
-// DeleteSession removes the project-local .m31a/ directory.
+// DeleteSession removes the project-local session files without deleting
+// the entire .m31a/ directory (which may contain backups, planning data, etc.).
 func (m *Manager) DeleteSession(id string) error {
-	return os.RemoveAll(m.projectDir())
+	dir := m.projectDir()
+	for _, name := range []string{"session.json", "session.json.bak", "messages.json"} {
+		path := filepath.Join(dir, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // SaveSession writes session.json and messages.json to <workDir>/.m31a/.
 func (m *Manager) SaveSession(s *Session) error {
+	if err := m.lock.Lock(); err != nil {
+		return fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	if s.Messages == nil {
 		s.Messages = make([]types.Message, 0)
 	}
@@ -362,6 +392,11 @@ func (m *Manager) SaveSession(s *Session) error {
 
 // SaveMessages writes messages.json to <workDir>/.m31a/.
 func (m *Manager) SaveMessages(sessionID string, messages []types.Message) error {
+	if err := m.lock.Lock(); err != nil {
+		return fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	if messages == nil {
 		messages = make([]types.Message, 0)
 	}
