@@ -127,6 +127,9 @@ func UserMessage(e error) string {
 		return "Bad request — check your input parameters"
 	case strings.Contains(errStr, "forbidden") || strings.Contains(errStr, "status 403"):
 		return "Access forbidden — check API key scope or permissions"
+	case strings.Contains(errStr, "unavailable or deprecated") ||
+		(strings.Contains(errStr, "not found") && strings.Contains(errStr, "model")):
+		return "Model not found — run /models to see available models"
 	case strings.Contains(errStr, "not found") || strings.Contains(errStr, "status 404"):
 		return "Resource not found — check the model or endpoint"
 	case strings.Contains(errStr, "provider error"):
