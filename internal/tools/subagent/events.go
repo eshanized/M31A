@@ -51,14 +51,15 @@ const (
 
 // SpawnRequest is the input to Manager.Spawn.
 type SpawnRequest struct {
-	Description string    // short 3-5 word label
-	Prompt      string    // full task description
-	Name        string    // optional stable name
-	Isolation   Isolation // worktree or default
-	Background  bool      // if true, return immediately; if false, block until done
-	ModelID     string    // empty = inherit parent
-	MaxTools    int       // 0 = default (50)
-	MaxTokens   int       // 0 = default (50_000)
+	Description  string    // short 3-5 word label
+	Prompt       string    // full task description
+	Name         string    // optional stable name
+	SubagentType string    // agent profile name ("explore", "general", etc.); empty = "general"
+	Isolation    Isolation // worktree or default
+	Background   bool      // if true, return immediately; if false, block until done
+	ModelID      string    // empty = inherit parent
+	MaxTools     int       // 0 = default (50)
+	MaxTokens    int       // 0 = default (50_000)
 }
 
 // SubagentEvent is emitted by a running subagent. Consumers (the TUI, the
@@ -66,10 +67,11 @@ type SpawnRequest struct {
 //
 // Tagged union — interpret fields based on Type.
 type SubagentEvent struct {
-	Type      EventType `json:"type"`
-	AgentID   string    `json:"agent_id"`
-	Name      string    `json:"name,omitempty"`
-	Timestamp time.Time `json:"ts"`
+	Type         EventType `json:"type"`
+	AgentID      string    `json:"agent_id"`
+	Name         string    `json:"name,omitempty"`
+	SubagentType string    `json:"subagent_type,omitempty"`
+	Timestamp    time.Time `json:"ts"`
 
 	// Spawned
 	Worktree string `json:"worktree,omitempty"`
@@ -98,15 +100,16 @@ type SubagentEvent struct {
 
 // SubagentInfo is a snapshot for TUI rendering and /agent listing.
 type SubagentInfo struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name,omitempty"`
-	Description string    `json:"description"`
-	Status      Status    `json:"status"`
-	Isolation   Isolation `json:"isolation"`
-	Worktree    string    `json:"worktree,omitempty"`
-	ModelID     string    `json:"model_id"`
-	StartedAt   time.Time `json:"started_at"`
-	FinishedAt  time.Time `json:"finished_at,omitempty"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name,omitempty"`
+	SubagentType string    `json:"subagent_type,omitempty"`
+	Description  string    `json:"description"`
+	Status       Status    `json:"status"`
+	Isolation    Isolation `json:"isolation"`
+	Worktree     string    `json:"worktree,omitempty"`
+	ModelID      string    `json:"model_id"`
+	StartedAt    time.Time `json:"started_at"`
+	FinishedAt   time.Time `json:"finished_at,omitempty"`
 
 	// Counters
 	ToolCalls  int `json:"tool_calls"`
@@ -148,6 +151,7 @@ type ToolCallOutput struct {
 type ToolDispatcher interface {
 	Execute(ctx context.Context, call ToolCallInput) (ToolCallOutput, error)
 	ListTools() []ToolDescriptor
+	UnregisterTool(name string)
 	Stop()
 }
 
