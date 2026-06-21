@@ -39,14 +39,11 @@ var nonChatModelPatterns = []string{
 
 // deprecatedNvidiaModels are known models that NVIDIA's /models endpoint still
 // returns but that do not work with the standard chat completions API. This
-// includes deprecated models, omni-modal models with non-standard APIs, reward
-// models, and other specialty endpoints.
+// includes deprecated models, reward models, and other specialty endpoints.
+// NOTE: nemotron-3-nano-omni and phi-4-multimodal were removed — they now
+// support standard chat completions with the correct request parameters.
 var deprecatedNvidiaModels = []string{
 	"01-ai/yi-large",
-	// Omni-modal models (non-standard API, not chat-compatible)
-	"nemotron-3-nano-omni",
-	// Multimodal models requiring non-standard request parameters (400 on text-only)
-	"phi-4-multimodal",
 	"phi-3-vision",
 	"diffusiongemma",
 	// Reward / scoring models (not chat-compatible)
@@ -60,6 +57,15 @@ var deprecatedNvidiaModels = []string{
 	"nvidia/llama3-chatqa-1.5-70b",
 }
 
+// brokenOnNvidiaNIM are models that appear in NVIDIA's /models endpoint but
+// fail at runtime with 404, empty responses, or other errors. These are
+// separate from deprecatedNvidiaModels because they ARE technically
+// chat-capable but the hosted NIM endpoint does not serve them correctly.
+// Reported on NVIDIA developer forums and confirmed via M31A testing.
+var brokenOnNvidiaNIM = []string{
+	"ibm/granite",
+}
+
 // IsNonChatModel reports whether a model ID belongs to a model that does not
 // support chat completions (embeddings, vision-only, safety classifiers, etc.)
 // or is a known deprecated model on NVIDIA NIM.
@@ -71,6 +77,19 @@ func IsNonChatModel(modelID string) bool {
 		}
 	}
 	for _, p := range deprecatedNvidiaModels {
+		if strings.Contains(id, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsLikelyBrokenOnNvidia reports whether a model ID is known to fail at
+// runtime on NVIDIA NIM despite appearing in the /models endpoint. These
+// models return 404 or empty responses when used with /chat/completions.
+func IsLikelyBrokenOnNvidia(modelID string) bool {
+	id := strings.ToLower(modelID)
+	for _, p := range brokenOnNvidiaNIM {
 		if strings.Contains(id, p) {
 			return true
 		}
