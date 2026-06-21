@@ -168,11 +168,15 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 	// 2. AgentsConfig from config.toml
 	var override string
 	switch phase {
+	case m31types.PhaseInitialize:
+		override = e.cfg.Agents.Initialize
 	case m31types.PhasePlan:
 		override = e.cfg.Agents.Plan
 	case m31types.PhaseExecute:
 		override = e.cfg.Agents.Execute
 	case m31types.PhaseVerify:
+		override = e.cfg.Agents.Verify
+	case m31types.PhaseRuntime:
 		override = e.cfg.Agents.Verify
 	case m31types.PhaseShip:
 		override = e.cfg.Agents.Ship
@@ -318,6 +322,8 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		result, err = e.runExecute(ctx, goal)
 	case m31types.PhaseVerify:
 		result, err = e.runVerify(ctx, goal)
+	case m31types.PhaseRuntime:
+		result, err = e.runRuntime(ctx, goal)
 	case m31types.PhaseShip:
 		result, err = e.runShip(ctx, goal)
 	default:
@@ -359,7 +365,8 @@ var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhasePlan, m31types.PhaseDiscuss, m31types.PhaseIdle},
 	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseShip, m31types.PhaseIdle},
-	m31types.PhaseVerify:     {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
+	m31types.PhaseVerify:     {m31types.PhaseRuntime, m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
+	m31types.PhaseRuntime:    {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
 	m31types.PhaseShip:       {m31types.PhaseIdle},
 }
 
@@ -506,18 +513,18 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 				Success: healResult.Success,
 				Error:   healResult.Error,
 			})
-			if healResult.Success {
-				newResult := e.verifyTask(verifyCtx, task)
-				if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
-					tasks[i].Status = m31types.StatusDone
-				} else {
-					tasks[i].Status = m31types.StatusFailed
-				}
+		if healResult.Success {
+			newResult := e.verifyTask(verifyCtx, tasks[i])
+			if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+				tasks[i].Status = m31types.StatusDone
 			} else {
-				if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
-					tasks[i].Status = m31types.StatusUnrecoverable
-				}
+				tasks[i].Status = m31types.StatusFailed
 			}
+		} else {
+			if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
+				tasks[i].Status = m31types.StatusUnrecoverable
+			}
+		}
 			if saveErr := e.sessionMgr.SaveTasks(e.sessionID, tasks); saveErr != nil {
 				return true, fmt.Errorf("heal attempted but failed to save tasks: %w", saveErr)
 			}
@@ -589,14 +596,15 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	if estimated > threshold80 {
 		keepRecent := 6
 		if len(msgs) > keepRecent+1 {
-			removed := 0
-			for i := 1; i < len(msgs)-keepRecent && estimated > threshold80; i++ {
-				if msgs[i-removed].Role == "system" {
+			idx := 1 // start after the first (system) message
+			for idx < len(msgs)-keepRecent && estimated > threshold80 {
+				if msgs[idx].Role == "system" {
+					idx++
 					continue
 				}
-				msgs = append(msgs[:i-removed], msgs[i-removed+1:]...)
-				removed++
+				msgs = append(msgs[:idx], msgs[idx+1:]...)
 				estimated = e.tokens.EstimateMessages(msgs)
+				// Don't increment idx — next message slides into same position
 			}
 		}
 	}
@@ -991,9 +999,14 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 // StreamIterator. The caller is responsible for iterating via Next()
 // and emitting each chunk to the TUI (typically via MsgEmitter).
 func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (*m31types.StreamIterator, error) {
+	msgs, err := e.preflightContextCheck(messages)
+	if err != nil {
+		return nil, err
+	}
+
 	req := provider.ChatRequest{
 		Model:            e.modelForPhase(e.activePhase),
-		Messages:         messages,
+		Messages:         msgs,
 		ReasoningEnabled: true,
 	}
 	if toolsEnabled {
