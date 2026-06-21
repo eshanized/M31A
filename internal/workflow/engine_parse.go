@@ -239,6 +239,8 @@ func detectProjectType(workDir string) string {
 		{"pyproject.toml", "python"},
 		{"requirements.txt", "python"},
 		{"pom.xml", "java"},
+		{"Gemfile", "ruby"},
+		{"composer.json", "php"},
 		{"package.json", "nodejs"},
 		{"CMakeLists.txt", "cc"},
 		{"Makefile", "cc"},
@@ -248,6 +250,33 @@ func detectProjectType(workDir string) string {
 			return d.typ
 		}
 	}
+
+	// Check for static HTML projects (index.html without a build system)
+	for _, candidate := range []string{"index.html", "public/index.html", "dist/index.html"} {
+		if _, err := os.Stat(filepath.Join(workDir, candidate)); err == nil {
+			return "static"
+		}
+	}
+
+	// Check for common source files to infer project type
+	srcPatterns := []struct {
+		glob string
+		typ  string
+	}{
+		{"*.go", "go"},
+		{"*.py", "python"},
+		{"*.rs", "rust"},
+		{"*.rb", "ruby"},
+		{"*.php", "php"},
+		{"*.html", "static"},
+	}
+	for _, sp := range srcPatterns {
+		matches, _ := filepath.Glob(filepath.Join(workDir, sp.glob))
+		if len(matches) > 0 {
+			return sp.typ
+		}
+	}
+
 	return "unknown"
 }
 
