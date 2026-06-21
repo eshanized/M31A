@@ -24,6 +24,7 @@ const (
 	PhasePlan       WorkflowPhase = "plan"
 	PhaseExecute    WorkflowPhase = "execute"
 	PhaseVerify     WorkflowPhase = "verify"
+	PhaseRuntime    WorkflowPhase = "runtime"
 	PhaseShip       WorkflowPhase = "ship"
 )
 
