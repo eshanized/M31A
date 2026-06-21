@@ -266,6 +266,30 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	}
 
 	// Configured build/test commands take precedence over auto-detection
+	// ── Content validation ──────────────────────────────────────────────────
+	placeholderSignals := []string{"TODO", "FIXME", "XXX", "PLACEHOLDER", "lorem ipsum", "Lorem ipsum"}
+	for _, f := range task.Files {
+		path := filepath.Join(e.workDir, f)
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		text := string(content)
+
+		// Check for suspiciously small files (likely stubs)
+		if len(content) < 20 && !isConfigFile(f) {
+			result.Errors = append(result.Errors, fmt.Sprintf("file %s appears incomplete (%d bytes)", f, len(content)))
+		}
+
+		// Check for placeholder content
+		for _, signal := range placeholderSignals {
+			if strings.Contains(text, signal) {
+				result.Errors = append(result.Errors, fmt.Sprintf("file %s contains placeholder: %q", f, signal))
+				break
+			}
+		}
+	}
+
 	hasCustomBuild := e.cfg != nil && e.cfg.Verify.BuildCommand != ""
 	hasCustomTest := e.cfg != nil && e.cfg.Verify.TestCommand != ""
 
@@ -381,6 +405,25 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				result.SyntaxOK = false
 			}
 		}
+	case "static":
+		for _, f := range task.Files {
+			if strings.HasSuffix(f, ".html") || strings.HasSuffix(f, ".htm") {
+				path := filepath.Join(e.workDir, f)
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					continue
+				}
+				text := string(content)
+				if !strings.Contains(strings.ToLower(text), "<html") && !strings.Contains(strings.ToLower(text), "<!doctype") {
+					result.Errors = append(result.Errors, fmt.Sprintf("HTML file %s missing <html> or <!DOCTYPE> tag", f))
+					result.SyntaxOK = false
+				}
+				if !strings.Contains(strings.ToLower(text), "<body") {
+					result.Errors = append(result.Errors, fmt.Sprintf("HTML file %s missing <body> tag", f))
+					result.SyntaxOK = false
+				}
+			}
+		}
 	}
 
 	// Test execution
@@ -425,4 +468,19 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	}
 
 	return result
+}
+
+// isConfigFile returns true for small config files where <50 bytes is normal.
+func isConfigFile(path string) bool {
+	base := filepath.Base(path)
+	configFiles := []string{
+		".gitignore", ".env", ".editorconfig", ".nvmrc", ".node-version",
+		".ruby-version", ".python-version", "Procfile", ".dockerignore",
+	}
+	for _, cf := range configFiles {
+		if base == cf {
+			return true
+		}
+	}
+	return false
 }
