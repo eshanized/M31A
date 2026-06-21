@@ -98,12 +98,12 @@ func FormatDiffSummary(ds *m31types.DiffSummary) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Files changed: %d (+%d/-%d)\n",
-		len(ds.Files), ds.Additions, ds.Deletions))
+	fmt.Fprintf(&sb, "Files changed: %d (+%d/-%d)\n",
+		len(ds.Files), ds.Additions, ds.Deletions)
 
 	for _, f := range ds.Files {
-		sb.WriteString(fmt.Sprintf("  %s %s (+%d/-%d)\n",
-			statusIcon(f.Status), f.File, f.Additions, f.Deletions))
+		fmt.Fprintf(&sb, "  %s %s (+%d/-%d)\n",
+			statusIcon(f.Status), f.File, f.Additions, f.Deletions)
 	}
 
 	return sb.String()

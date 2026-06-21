@@ -314,7 +314,7 @@ func (e *Engine) waitForServerReady(ctx context.Context, url string, timeout tim
 		}
 		resp, err := client.Do(req)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode < 500 {
 				return true
 			}
@@ -379,11 +379,11 @@ func (e *Engine) smokeTestRoute(ctx context.Context, url string) SmokeTestResult
 			DurationMs: time.Since(start).Milliseconds(),
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body := make([]byte, 1024*1024)
 	n, _ := resp.Body.Read(body)
-	body = body[:n]
+	_ = body[:n]
 
 	passed := resp.StatusCode >= 200 && resp.StatusCode < 400
 	hasContent := n > 100
@@ -493,7 +493,7 @@ func findFreePort() int {
 		return 0
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 	return port
 }
 

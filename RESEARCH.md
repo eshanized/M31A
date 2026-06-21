@@ -1,19 +1,19 @@
-# M31 Autonomous: A Terminal-Native AI Coding Agent with Six-Phase Workflow Orchestration
+# M31 Autonomous: A Terminal-Native AI Coding Agent with Eight-Phase Workflow Orchestration, Skills, and Concurrent Session Control
 
 **A Technical Research Paper**
 
 **Author:** Eshan Roy &lt;eshanized@proton.me&gt;
-**Date:** June 15, 2026
+**Date:** June 22, 2026
 **Repository:** [github.com/eshanized/M31A](https://github.com/eshanized/M31A)
 **Module:** `github.com/eshanized/M31A` (Go 1.25)
-**Version:** v1.0.0
+**Version:** v1.1.0
 **License:** MIT
 
 ---
 
 ## Abstract
 
-The proliferation of AI-assisted coding tools has produced a landscape dominated by browser-bound assistants and editor plugins. M31 Autonomous takes a fundamentally different approach: a terminal-native agent, written entirely in Go, that owns a six-phase software engineering workflow end-to-end. From initialization through discussion, planning, execution, verification, and shipping, every run concludes with a verified git commit and a cross-session learning record. This paper presents a deep technical analysis of M31 Autonomous's architecture, its core innovations, and the engineering decisions that make it both powerful and safe. We examine the workflow engine, the 29-screen terminal UI, the provider abstraction layer, the security model, and the suite of domain-specific packages that together form what we believe is the most complete terminal-native AI coding agent available today.
+The proliferation of AI-assisted coding tools has produced a landscape dominated by browser-bound assistants and editor plugins. M31 Autonomous takes a fundamentally different approach: a terminal-native agent, written entirely in Go, that owns an eight-phase software engineering workflow end-to-end. From initialization through discussion, planning, execution, verification, runtime smoke testing, and shipping, every run concludes with a verified git commit and a cross-session learning record. This paper presents a deep technical analysis of M31 Autonomous's architecture, its core innovations, and the engineering decisions that make it both powerful and safe. We examine the workflow engine, the 33-screen terminal UI, the provider abstraction layer, the security model, the composable skills system, the automatic session compaction engine, the concurrent session coordinator, and the suite of domain-specific packages that together form what we believe is the most complete terminal-native AI coding agent available today.
 
 ---
 
@@ -45,11 +45,13 @@ M31 Autonomous's design is guided by five principles:
 
 This paper makes the following contributions:
 
-- A detailed architectural analysis of a six-phase workflow engine for AI-assisted coding.
-- Documentation of a novel context consolidation system (AutoDream) that prevents context window overflow.
+- A detailed architectural analysis of an eight-phase workflow engine for AI-assisted coding, including a novel runtime verification phase.
+- Documentation of a dual context consolidation system: AutoDream for intra-session pruning and automatic session compaction for long-running sessions.
 - Analysis of a multi-provider LLM abstraction with automatic fallback and cost optimization.
-- A comprehensive security model for tool execution in an AI agent context.
-- Full documentation of the 47 slash commands and 29-screen TUI system.
+- A comprehensive security model for tool execution in an AI agent context, with resolved ReDoS protection, SSRF defense, and persistent permissions.
+- Documentation of a composable skills system enabling user-defined slash commands via Markdown with YAML frontmatter.
+- Analysis of a generic concurrent session coordinator with demand coalescing.
+- Full documentation of the 65 slash commands, 17 tools, and 33-screen TUI system.
 
 ---
 
@@ -57,18 +59,18 @@ This paper makes the following contributions:
 
 ### 2.1 High-Level Overview
 
-M31 Autonomous follows a strict six-layer architecture with a clear dependency rule: higher layers may depend on lower layers, but never the reverse. The `pkg/` directory contains public, importable packages, while `internal/` contains private implementation details.
+M31 Autonomous follows a strict layered architecture with a clear dependency rule: higher layers may depend on lower layers, but never the reverse. The `pkg/` directory contains public, importable packages, while `internal/` contains private implementation details.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       TUI Layer (Bubble Tea)                    │
-│              29 screens · Elm architecture · Themes             │
+│              33 screens · Elm architecture · Themes             │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                   Workflow Engine (6 phases)                    │
-│          Orchestrator · Prompt templates · Plan parser          │
+│                   Workflow Engine (8 phases)                    │
+│  Orchestrator · Prompt templates · Plan parser · Runtime        │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
                     ┌──────────┼──────────┐
@@ -78,10 +80,17 @@ M31 Autonomous follows a strict six-layer architecture with a clear dependency r
               │  Layer   │ │  Layer │ │ (pkg/)   │
               └──────────┘ └────────┘ └──────────┘
                                │
+                    ┌──────────┼──────────┐
+                    ▼          ▼          ▼
+              ┌──────────┐ ┌──────────┐ ┌──────────┐
+              │ Context  │ │ Compaction│ │  Skills  │
+              │ Registry │ │  Engine   │ │  System  │
+              └──────────┘ └──────────┘ └──────────┘
+                               │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Infrastructure Layer                          │
-│         Config · Errors · Tokens · CodeIntel · Git              │
+│    Config · Errors · Tokens · CodeIntel · Git · Coordinator    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -279,7 +288,7 @@ backupDir := filepath.Join(workDir, ".m31a", "backups")
 dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions)
 ```
 
-**What it does:** Creates the tool execution layer, registering all 15 tools (Bash, FileRead, FileWrite, Edit, Glob, Grep, WebFetch, WebSearch, TodoWrite, AskUserQuestion, FileList, FileDelete, FileMove, CodeMap, Agent). Each tool is wired with:
+**What it does:** Creates the tool execution layer, registering all 17 tools (Bash, FileRead, FileWrite, Edit, Glob, Grep, WebFetch, WebSearch, TodoWrite, AskUserQuestion, FileList, FileDelete, FileMove, CodeMap, CodeComplexity, DevServer, HTTPCheck, Agent). Each tool is wired with:
 - Working directory for path resolution.
 - Backup directory for file versioning.
 - Permission configuration for access control.
@@ -391,7 +400,7 @@ p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 ### 2.3 The Bubble Tea Foundation
 
-M31 Autonomous's TUI is built on Bubble Tea, an Elm-architecture framework for terminal applications. Understanding Bubble Tea's model is essential to understanding how M31 Autonomous's 29 screens, dozens of concurrent operations, and complex workflow interactions cohere into a single, predictable application.
+M31 Autonomous's TUI is built on Bubble Tea, an Elm-architecture framework for terminal applications. Understanding Bubble Tea's model is essential to understanding how M31 Autonomous's 33 screens, dozens of concurrent operations, and complex workflow interactions cohere into a single, predictable application.
 
 ---
 
@@ -479,14 +488,14 @@ The `AppState` struct (`internal/tui/app_state.go`) is the root model that holds
 - `git` — `*git.Git` wrapper.
 
 **Workflow:**
-- `workflowEngine` — the six-phase workflow engine (set after initialization).
+- `workflowEngine` — the eight-phase workflow engine (set after initialization).
 - `workflowPhase` / `workflowMode` / `workflowGoal` — current workflow state.
 - `workflowCancel` — cancellation function for aborting running workflows.
 - `shutdownCtx` / `shutdownCancel` — application-wide shutdown context.
 - `emitterCh` — channel for receiving workflow engine messages.
 
-**Sub-models (29 screens):**
-Each screen has a corresponding pointer field on `AppState`. Sub-models are lazily created — they're only instantiated when first navigated to via `ensureSubModel()`. This avoids the cost of initializing all 29 screens at startup.
+**Sub-models (33 screens):**
+Each screen has a corresponding pointer field on `AppState`. Sub-models are lazily created — they're only instantiated when first navigated to via `ensureSubModel()`. This avoids the cost of initializing all 33 screens at startup.
 
 **Additional state:**
 - Toast notifications (up to 3 visible, with auto-dismiss timers).
@@ -617,11 +626,11 @@ Each screen's content renderer returns ONLY the content area (no chrome). This s
 
 ## 3. The Workflow Engine
 
-The workflow engine is the heart of M31 Autonomous. It implements a six-phase pipeline that transforms a user's intent into verified, committed code.
+The workflow engine is the heart of M31 Autonomous. It implements an eight-phase pipeline that transforms a user's intent into verified, committed code.
 
 ### 3.1 Phase Overview
 
-The workflow engine implements a six-phase pipeline. Each phase is a self-contained module with its own file, its own system prompt composition, and its own error handling. Phases communicate via the `MsgEmitter` interface, which sends typed messages to the TUI without coupling the engine to Bubble Tea.
+The workflow engine implements an eight-phase pipeline. Each phase is a self-contained module with its own file, its own system prompt composition, and its own error handling. Phases communicate via the `MsgEmitter` interface, which sends typed messages to the TUI without coupling the engine to Bubble Tea.
 
 | Phase | Purpose | Key Files | Entry Function |
 |-------|---------|-----------|----------------|
@@ -630,6 +639,7 @@ The workflow engine implements a six-phase pipeline. Each phase is a self-contai
 | Plan | Structured implementation plan generation | `plan.go`, `plan_parser.go` | `runPlan()` |
 | Execute | Task scheduling, tool dispatch, self-healing | `execute.go` | `runExecute()` |
 | Verify | Build validation, test execution, bisect | `verify.go`, `engine_verify.go` | `runVerify()` |
+| Runtime | Dev server startup, smoke tests, route discovery | `runtime.go` | `runRuntime()` |
 | Ship | Final commit, ledger entry, session archival | `ship.go` | `runShip()` |
 
 ---
@@ -643,7 +653,8 @@ Initialize → Discuss, Plan, Execute, Ship
 Discuss → Plan, Execute, Ship
 Plan → Execute, Ship
 Execute → Verify, Ship
-Verify → Execute, Ship, Discuss
+Verify → Execute, Runtime, Ship, Discuss
+Runtime → Execute, Ship
 Ship → (terminal — returns to REPL)
 ```
 
@@ -651,6 +662,7 @@ Key constraints:
 - You cannot go backward from Ship to any earlier phase.
 - You cannot skip from Initialize directly to Verify (you must execute first).
 - The Verify phase can loop back to Execute (for re-try after self-healing) or to Discuss (for clarification).
+- The Runtime phase sits between Verify and Ship — it can fall back to Execute if smoke tests reveal issues.
 
 A **Plan-Discuss oscillation guard** caps round-trips between Plan and Discuss at 3 cycles. Without this, the agent could theoretically oscillate forever — Plan generates questions, Discuss answers them, Plan regenerates with new questions, and so on. The counter resets when the workflow leaves the Plan/Discuss subgraph (i.e., when it moves to Execute or beyond).
 
@@ -662,12 +674,12 @@ M31 Autonomous supports four workflow modes that determine which phases are exec
 
 | Mode | Phase Sequence | When Used |
 |------|---------------|-----------|
-| **full** | Init → Discuss → Plan → Execute → Verify → Ship | Moderate/Complex goals |
-| **fast** | Init → Discuss → Execute → Verify → Ship | Simple goals (skips Plan) |
-| **direct** | Init → Execute → Ship | Trivial goals (skips Discuss, Plan, Verify) |
+| **full** | Init → Discuss → Plan → Execute → Verify → Runtime → Ship | Moderate/Complex goals |
+| **fast** | Init → Discuss → Execute → Verify → Ship | Simple goals (skips Plan, Runtime) |
+| **direct** | Init → Execute → Ship | Trivial goals (skips Discuss, Plan, Verify, Runtime) |
 | **auto** | Classifies goal, then maps to full/fast/direct | Default behavior |
 
-The `auto` mode uses the complexity classifier (Section 3.7) to determine which mode is appropriate. Trivial goals like "rename the foo function to bar" go through Direct mode — no discussion, no plan, no verification. Simple goals like "add a string helper function" go through Fast mode — brief discussion but no formal plan. Moderate and Complex goals get the full six-phase treatment.
+The `auto` mode uses the complexity classifier (Section 3.7) to determine which mode is appropriate. Trivial goals like "rename the foo function to bar" go through Direct mode — no discussion, no plan, no verification. Simple goals like "add a string helper function" go through Fast mode — brief discussion but no formal plan. Moderate and Complex goals get the full eight-phase treatment, including runtime smoke testing.
 
 ---
 
@@ -1173,7 +1185,40 @@ The `tryBisectHeal()` function:
 
 All verification commands run within a `verifyTaskTimeout = 5 minutes` deadline. This context deadline is derived from the parent context (which may itself have a deadline from session cancellation), so cancellation propagates cleanly. This prevents a hung `go build` or `cargo check` from blocking the entire verification phase indefinitely.
 
-### 3.10 Phase Deep Dive: Ship
+### 3.10 Phase Deep Dive: Runtime
+
+The Runtime phase (`internal/workflow/runtime.go`) bridges the gap between static verification (build/test) and shipping. It starts a development server, runs HTTP smoke tests against discovered routes, and reports a structured pass/fail summary. This catches runtime errors — missing imports, broken routes, JavaScript errors — that static checks miss.
+
+---
+
+#### Runtime Flow
+
+1. **Project type detection:** `detectProjectType()` examines the working directory for `package.json` (Node.js), `requirements.txt`/`pyproject.toml` (Python), `go.mod` (Go), `Cargo.toml` (Rust), or falls back to static HTML detection.
+
+2. **Server startup:** Based on project type, starts the appropriate dev server:
+   - Node.js: `npm run dev` (or yarn/pnpm/bun equivalent) with `PORT=<free_port>`.
+   - Python: `python3 -m http.server <port>`.
+   - Go: `go run .` with `PORT` env var.
+   - Rust: `cargo run` with `PORT` env var.
+   - Static: Python HTTP server serving from the first directory containing `index.html` (checks `dist/`, `build/`, `public/`, `out/`, `_site/`, then `.`).
+
+3. **Port allocation:** `findFreePort()` uses `net.Listen("tcp", "localhost:0")` to request an OS-assigned free port, then closes the listener and returns the port number.
+
+4. **Server readiness:** `waitForServerReady()` polls the URL with a 3-second HTTP client timeout, accepting any status < 500 as ready, with 500ms polling intervals and a 30-second overall timeout.
+
+5. **Route discovery:** `discoverRoutes()` combines two strategies:
+   - **Goal-based hints:** Matches keywords in the goal text (e.g., "about", "login", "api", "dashboard") against a predefined route hints map.
+   - **Filesystem-based:** Checks for common page files across framework conventions (React: `src/pages/*.tsx`, Next.js: `app/*/page.tsx`, etc.).
+
+6. **Concurrent smoke tests:** `runSmokeTests()` tests up to `maxConcurrency = 4` routes simultaneously via goroutines with a semaphore channel. Each test makes a GET request with a 10-second timeout, checking for status 200-399 and non-empty body (>100 bytes).
+
+7. **Process cleanup:** `stopRuntimeServer()` uses process group management (`getProcessGroup` + `killProcessGroup`) on Unix for clean shutdown, falling back to direct `Process.Kill()`. This ensures child processes (e.g., webpack dev server children) are also terminated.
+
+8. **Result reporting:** Produces a `RuntimeSummary` with project type, server URL, readiness status, per-route test results, aggregate pass/fail counts, and duration. The TUI's `RuntimeModel` displays these results with PASS/FAIL indicators.
+
+**Diff Summary Integration:** The workflow engine also captures structured diff summaries between commits using `git diff --numstat` and `--name-status`, producing per-file addition/deletion counts with status icons (added `[+]`, deleted `[-]`, renamed `[R]`, modified `[M]`). These are displayed in the ship phase and persisted for cross-session context.
+
+### 3.11 Phase Deep Dive: Ship
 
 The Ship phase is the terminal phase of the workflow. It creates the final git commit, writes a ledger entry for cross-session learning, generates a demonstration walkthrough via the LLM, archives the session, and records learnings in `MEMORY.md`. This phase ensures every workflow run leaves a permanent, traceable artifact.
 
@@ -1392,7 +1437,7 @@ type Tool interface {
 
 The `RiskLevel` determines permission behavior: safe tools execute automatically, while dangerous and destructive tools always prompt the user.
 
-### 5.2 The 15 Registered Tools
+### 5.2 The 17 Registered Tools
 
 Each tool is a self-contained module implementing the `Tool` interface. They are registered on the tool dispatcher at startup and invoked by the LLM via tool calls. The following details cover every tool's purpose, parameters, security behavior, and practical use cases.
 
@@ -1695,6 +1740,57 @@ Analyzes the project structure and returns a high-level overview including direc
 
 ---
 
+#### **CodeComplexity** — Codebase Complexity Analysis
+
+**Risk:** safe
+
+Analyzes source files to compute complexity metrics including cyclomatic complexity, cognitive complexity, and code depth. Integrates with the CodeIntel system to provide project-level intelligence.
+
+**Use cases:** Understanding codebase health, identifying refactoring targets, generating complexity reports for the LLM to reason about code quality.
+
+---
+
+#### **DevServer** — Development Server Management
+
+**Risk:** medium
+
+Manages development servers for runtime verification. Provides four actions: `start` (launch a dev server with a given command and port), `stop` (terminate a server by ID), `status` (list all running servers), and `check_port` (verify if a port is accepting TCP connections).
+
+**Features:**
+- **Process group management** — uses `syscall.Getpgid` to find the process group and sends SIGTERM to the entire group for clean shutdown, falling back to SIGKILL if needed.
+- **Port readiness polling** — after starting a server, polls the TCP port with 500ms intervals for up to 30 seconds to verify the server is accepting connections.
+- **Server tracking** — maintains a thread-safe map of running servers with ID, command, port, PID, and uptime.
+- **StopAll cleanup** — called during application shutdown to terminate all managed servers.
+
+**Use cases:** Starting `npm run dev` or `python -m http.server` to verify that a web application works correctly after making code changes, checking if a specific port is available before starting a server.
+
+**Example inputs:**
+- `{"action": "start", "command": "npm run dev", "port": 3000}` — start a Node.js dev server
+- `{"action": "stop", "id": 1}` — stop server with ID 1
+- `{"action": "check_port", "port": 3000}` — check if port 3000 is accepting connections
+
+---
+
+#### **HTTPCheck** — HTTP Response Validation
+
+**Risk:** safe
+
+Makes HTTP requests to URLs and validates responses against expected criteria. Used to verify that web pages are serving correct content after the dev server starts during runtime verification.
+
+**Features:**
+- **Configurable HTTP client** — 15-second timeout, 5-second TCP/TLS handshake timeouts, max 10 redirects.
+- **Content validation** — checks for expected strings that must appear and unexpected strings that must not appear in the response body.
+- **Status code validation** — configurable expected status code (default: 200).
+- **Body size limiting** — `max_body_bytes` parameter (default: 1MB) prevents reading excessively large responses.
+
+**Use cases:** Verifying that a landing page contains expected headings, checking that API endpoints return correct JSON, ensuring error pages are not leaking sensitive information, validating that a deployed change is visible in the running application.
+
+**Example inputs:**
+- `{"url": "http://localhost:3000", "expected_content": ["Welcome"]}` — check home page
+- `{"url": "http://localhost:3000/api/health", "expected_status": 200}` — verify API health endpoint
+
+---
+
 #### **Agent** — Subagent Spawning
 
 **Risk:** safe | **Max concurrent:** 8 | **Max tools:** 50 | **Max turns:** 25
@@ -1718,13 +1814,18 @@ Spawns a parallel subagent that runs in an isolated git worktree with its own to
 
 ### 5.3 Permission Model
 
-The permission system is three-layered:
+The permission system is four-layered:
 
-1. **Rule-based** — config-defined patterns matching tool names and parameter values using doublestar glob syntax.
-2. **Agent profile** — per-agent default action from configuration.
-3. **Risk-level fallback** — dangerous+ tools always prompt the user.
+1. **Persistent permissions** — saved rules scoped by project directory, stored in `~/.m31a/permissions.json`. "Allow always" decisions survive across sessions. Rules are loaded at dispatcher startup and evaluated with last-match-wins semantics.
+2. **Rule-based** — config-defined patterns matching tool names and parameter values using doublestar glob syntax.
+3. **Agent profile** — per-agent default action from configuration.
+4. **Risk-level fallback** — dangerous+ tools always prompt the user.
 
-Permission requests use per-request channels with `sync.Map` for concurrent tool execution. Each request gets a dedicated channel, and the permission modal displays a y/n/a/e choice (allow once, allow always, deny, exit). "Allow always" decisions are cached by tool name and command, so repeated operations don't prompt again.
+Permission requests use per-request channels with `sync.Map` for concurrent tool execution. Each request gets a dedicated channel, and the permission modal displays a y/n/a/e choice (allow once, allow always, deny, exit). "Allow always" decisions are persisted via the `PersistentPermissions` store, so repeated operations don't prompt again — even in future sessions.
+
+### 5.3.1 Output Store
+
+The `OutputStore` bounds tool output to prevent single tool calls from consuming the entire context window. When output exceeds configured limits (default: `DefaultOutputMaxLines` lines or `DefaultOutputMaxBytes` bytes), the full output is saved to a managed directory (`~/.m31a/tool-output/`) and a head+tail preview (60% head, 40% tail) is returned with a truncation marker. The preview includes a hint directing the LLM to use FileRead with offset/limit to inspect the full output. Files older than `OutputRetentionDays` are cleaned up on startup via the `Cleanup()` method. An atomic counter generates unique filenames to prevent collisions under concurrent tool execution.
 
 The default permission timeout is 300 seconds. If the user doesn't respond, the tool call times out cleanly.
 
@@ -1779,7 +1880,7 @@ This pattern is replicated in the Edit tool with additional backup creation and 
 
 ## 6. The Autonomous Agent Loop and Subagent System
 
-Beyond the six-phase workflow engine, M31 Autonomous includes an autonomous agent loop that can independently plan, execute, and iterate on tasks without human intervention.
+Beyond the eight-phase workflow engine, M31 Autonomous includes an autonomous agent loop that can independently plan, execute, and iterate on tasks without human intervention.
 
 ### 6.1 The Agent Loop (`internal/tui/streaming/agent_loop.go`)
 
@@ -1825,6 +1926,14 @@ M31 Autonomous can spawn parallel subagents that run in isolated environments:
 - **Stale worktree sweep** — runs at startup, prunes git worktree metadata, deletes orphaned `m31a/agent-*` branches for crash recovery.
 - **Background/foreground** — `req.Background = false` blocks until the subagent finishes; `true` returns immediately.
 - **DispatcherFactory** — builds a fresh tool dispatcher per subagent workspace, avoiding circular imports.
+- **Native streaming tool calls** — subagents support streaming tool execution natively, providing real-time feedback.
+
+**Subagent Profiles:** Subagents can be configured with profiles that control their behavior:
+- Built-in profiles define tool allowlists and denylists, system prompts, and model preferences.
+- Profile resolution integrates into the spawn pipeline — each `SpawnRequest` carries a `SubagentType` that maps to a profile.
+- The `subagent_type` parameter on the Agent tool enables dynamic profile selection.
+- Profile-based tool filtering uses allowlist/denylist semantics: if an allowlist is set, only listed tools are available; if a denylist is set, listed tools are excluded.
+- The `Unregister` method on the Dispatcher enables post-creation tool removal for profile enforcement.
 
 **Event system:** 8 event types (spawned, tool_start, tool_done, text_delta, thinking, done, error, cancelled) communicated via a buffered channel (capacity 256). Lifecycle events block up to 500ms; verbose deltas are dropped when the channel is full.
 
@@ -1834,13 +1943,13 @@ M31 Autonomous can spawn parallel subagents that run in isolated environments:
 
 ### 7.1 Screen Inventory
 
-M31 Autonomous has 29 screens (plus 2 overlay screens), organized into five categories. Each screen is a Bubble Tea model with `Init()`, `Update()`, and `View()` methods. Screens are lazily created via `ensureSubModel()` — they're only instantiated when first navigated to, avoiding the cost of initializing all 29 at startup.
+M31 Autonomous has 33 screens (plus 2 overlay screens), organized into five categories. Each screen is a Bubble Tea model with `Init()`, `Update()`, and `View()` methods. Screens are lazily created via `ensureSubModel()` — they're only instantiated when first navigated to, avoiding the cost of initializing all 33 at startup.
 
 ---
 
-#### Core Workflow Screens (8)
+#### Core Workflow Screens (10)
 
-These screens correspond to the six phases of the workflow engine plus the goal entry and model selection screens that precede them.
+These screens correspond to the phases of the workflow engine plus the home, goal entry, and model selection screens that precede them.
 
 ##### **repl_model** — The Main Chat Interface
 
@@ -2083,6 +2192,61 @@ Displays the workflow completion summary with task counts, commit information, d
 
 ---
 
+##### **home_model** — Landing Screen
+
+The home screen serves as the initial landing page of the application, providing a branded welcome experience with a prompt input and keyboard shortcut tips. It replaces the bare REPL as the first thing users see.
+
+**What it displays:**
+- Large ASCII art logo rendered with the theme's brand color.
+- Centered text input box with rotating placeholder prompts (4-second cycle).
+- Keyboard shortcut tips displayed as a horizontal row (ctrl+p commands, ctrl+x leader, ctrl+b sidebar, ctrl+m models, ctrl+h help).
+- Version string at the bottom.
+
+**Key components:**
+- `textinput.Model` — single-line prompt with 1024-char limit.
+- `components.RenderBigLogo` — ASCII art logo rendering.
+- Rotating placeholder system via `HomeTickMsg` ticker.
+
+**State fields:**
+- `input textinput.Model` — the prompt input.
+- `placeholderIx int` — current rotating placeholder index.
+- `tips []homeTip` — keyboard shortcut tips.
+
+**Interactions:**
+- `Enter` — submit prompt text (emits `HomeSubmitMsg` to transition to workflow or agent mode).
+- All standard text input keys supported.
+- `ctrl+x g` — navigate to home screen from any other screen.
+
+---
+
+##### **runtime_model** — Runtime Verification
+
+Displays runtime verification results from the Runtime phase: dev server startup, port readiness, and HTTP smoke test outcomes.
+
+**What it displays:**
+- Server URL and readiness status.
+- Project type detection (nodejs, python, go, rust, or static).
+- Smoke test results per route: PASS/FAIL icon, method, route, status code, body size, and duration.
+- Aggregate pass rate percentage and total duration.
+- Error list for failed tests.
+
+**Key components:**
+- `viewport.Model` — scrollable results display.
+- `components.Spinner` — animated spinner during testing.
+
+**State fields:**
+- `summary workflow.RuntimeSummary` — all smoke test results and server metadata.
+- `testing bool` — whether tests are still running (shows spinner).
+- `completed bool` — whether results are available.
+
+**Interactions:**
+- `j/Down` — scroll down.
+- `k/Up` — scroll up.
+- `Enter/s` — continue to ship phase.
+- `Esc/q` — pop screen (return to previous).
+
+---
+
 #### Utility Screens (14)
 
 These screens provide supplementary functionality — configuration, browsing, analytics, and management.
@@ -2183,10 +2347,10 @@ A fuzzy-search command palette (like VS Code's Ctrl+P). Lists all available comm
 
 ##### **dashboard_model** — Workflow Pipeline Overview
 
-A visual pipeline overview showing all six phases with completion status.
+A visual pipeline overview showing all eight phases with completion status.
 
 **What it displays:**
-- Phase pipeline: Initialize → Discuss → Plan → Execute → Verify → Ship.
+- Phase pipeline: Initialize → Discuss → Plan → Execute → Verify → Runtime → Ship.
 - Current phase highlighted.
 - Completed phases marked with checkmarks.
 - Goal, model, provider, and cost info.
@@ -2487,7 +2651,7 @@ The theme system supports three modes (dark, light, auto) and 10 registered pale
 
 Each theme defines 80+ fields covering colors, pre-computed lipgloss styles, diff colors, card styles, workflow phase styles, and layout constants. The theme manager detects the terminal's color profile (TrueColor, 256-color, or 16-color ANSI) and applies appropriate fallbacks.
 
-Theme changes propagate to all 28+ sub-models via a `SetTheme()` method, ensuring visual consistency across every screen.
+Theme changes propagate to all 33+ sub-models via a `SetTheme()` method, ensuring visual consistency across every screen.
 
 ### 7.3 Key Binding System
 
@@ -2619,13 +2783,117 @@ AutoDream solves the context window overflow problem. When conversations grow lo
 
 The consolidation algorithm uses role-sampled summarization: it selects the first user message, last user message, last assistant message, and remaining messages until a word budget (~384 words) is exhausted. A reentrancy guard using `atomic.Bool` with CAS prevents nested consolidation calls.
 
-### 8.7 Model Arbitrage (`pkg/arbitrage/`)
+### 8.7 Session Compaction (`pkg/compaction/`)
+
+While AutoDream handles intra-session pruning, the Compaction package provides a more sophisticated LLM-driven summarization system for long-running sessions that approach the model's context limit. It operates as a separate layer above AutoDream, triggered when token usage exceeds a configurable threshold.
+
+**Architecture:**
+- `Compactor` struct monitors token usage against the model's context length.
+- `ShouldCompact()` returns true when `estimated_tokens > contextLength - buffer` (default buffer: 20,000 tokens).
+- `Compact()` splits messages into "head" (to summarize) and "recent" (to keep verbatim), using a backward-walk algorithm that preserves `KeepTokens` (default: 8,000) worth of recent content.
+
+**Split algorithm (`SplitMessages`):**
+Walks backward from the end of the message list, accumulating token estimates until the `keepTokens` budget is exhausted. The split point determines which messages get summarized versus preserved. This ensures the most recent context is always available verbatim.
+
+**Summary generation:**
+The head messages are serialized via `SerializeMessages()` which truncates tool outputs to 2,000 characters and tool call inputs to 500 characters to keep the summary lean. The serialized text is sent to the LLM with a structured prompt template that requests sections: Goal, Constraints, Progress (Done/In Progress/Blocked), Key Decisions, Next Steps, Critical Context, and Relevant Files. The summary is injected as a `MessageCompaction` segment with `Visible: false`, keeping it invisible in the UI but available to the LLM.
+
+**Serialization format:**
+```
+[System 0] ...
+[User 1] ...
+[Assistant 2] ...
+  -> ToolCall: Bash({"command": "go test..."})
+[Tool 3] ...
+```
+
+### 8.8 Concurrent Session Coordinator (`pkg/coordinator/`)
+
+The Coordinator is a generic concurrency primitive (`Coordinator[Key comparable]`) that manages concurrent execution of sessions identified by key. At most one "drain" (execution cycle) is active per key; additional demands are coalesced into a single pending rerun.
+
+**Design:**
+- **Demand types:** `DemandRun` (explicit — caller wants results) and `DemandWake` (advisory — new work may be available). This two-level system prevents redundant wake-ups while ensuring no work is lost.
+- **Coalescing:** If a drain is already active when a new demand arrives, the demand is recorded as `pending`. When the drain completes (`Complete()`), the pending demand is returned so the caller can start a new drain if needed.
+- **Interrupt:** `Interrupt(key)` cancels the current drain's context, enabling clean shutdown.
+- **AwaitIdle:** Blocks until no drain is active, using a `done` channel that is closed on completion.
+
+**Thread safety:** All operations are protected by a `sync.Mutex`. The `awaitDone` method spawns a goroutine that waits on the entry's `done` channel and cancels the returned context when the drain completes.
+
+**Integration:** Used by the session management system to prevent concurrent session corruption — file locking ensures that only one session can modify state at a time, while the coordinator manages the higher-level execution flow.
+
+### 8.9 Retry Policy (`pkg/retry/`)
+
+The retry package provides exponential backoff with HTTP `Retry-After` header support, specifically designed for LLM API interactions.
+
+**Policy configuration:**
+- `MaxAttempts: 3` — maximum retry attempts.
+- `InitialDelay: 1s` — first retry delay.
+- `MaxDelay: 30s` — maximum delay cap.
+- `BackoffFactor: 2.0` — exponential multiplier.
+
+**Error classification:** `ClassifyError()` categorizes errors into six classes: `ErrorClassContextOverflow` (non-retryable), `ErrorClassRateLimit`, `ErrorClassOverloaded`, `ErrorClassServerError`, `ErrorClassNetwork` (all retryable), and `ErrorClassUnknown` (non-retryable). Classification uses string matching on error messages — a pragmatic approach given the variety of LLM API error formats.
+
+**Retry-After support:** `Delay()` checks for `Retry-After-Ms` and `Retry-After` HTTP headers before falling back to exponential calculation. Supports both integer seconds and RFC1123 date formats. This ensures compliance with provider rate-limiting signals.
+
+**Context-aware:** `RetryWithHeaders()` respects `ctx.Done()` cancellation during backoff waits, enabling clean shutdown even during retry delays.
+
+### 8.10 Composable Skills System (`pkg/skills/`)
+
+The Skills system enables users to define reusable slash commands as Markdown files with YAML frontmatter. Skills are discovered at startup and registered as dynamic slash commands, extending the agent's capabilities without code changes.
+
+**Skill file format:**
+```markdown
+---
+name: review
+description: "Review code for quality issues"
+slash: true
+---
+
+Review the following code for quality issues...
+```
+
+**Discovery:** `Discover()` scans two directories with project-local skills taking precedence over global ones:
+1. `<projectDir>/.m31a/skills/` — project-specific skills (higher priority).
+2. `~/.m31a/skills/` — global user skills.
+
+Within each directory, `scanDir()` looks for:
+- Subdirectories containing `SKILL.md` files.
+- Direct `*.md` files with YAML frontmatter.
+
+**Loading:** `LoadFile()` parses YAML frontmatter (delimited by `---` lines) using a lightweight field extractor — no full YAML parser needed for the simple key-value format used by skills. Supports quoted string values and boolean fields (`true`, `yes`, `1`).
+
+**Registration:** `discoverAndRegisterSkills()` in the command registry wires discovered skills as slash commands. When a user types `/review`, the skill's Markdown content is injected as the response, providing the LLM with instructions to follow.
+
+### 8.11 Dynamic Context Registry (`internal/context/`)
+
+The Context Registry provides a pluggable system for injecting dynamic context into the system prompt before each LLM call. Sources are evaluated concurrently and changes between evaluations are emitted as mid-conversation system messages.
+
+**Architecture:**
+- `ContextSource` interface with five methods: `Key()`, `Load()`, `Render()`, `RenderUpdate()`, `RenderRemoval()`.
+- `Registry` manages an ordered list of sources, loading them concurrently via goroutines with `sync.WaitGroup`.
+- `Reconcile()` compares the current snapshot against a previous one, producing a sorted list of `Change` entries (Added, Updated, Removed).
+
+**Built-in sources:**
+- `DateTimeSource` — current date/time in `2006-01-02 15:04:05 MST` format.
+- `EnvironmentSource` — working directory, shell, platform.
+- `GitSource` — current branch and last commit hash.
+- `InstructionsSource` — discovers and concatenates `AGENTS.md` files from the global config directory and project hierarchy (walks from project root downward to workDir).
+
+**Snapshot persistence:** `Snapshot` struct holds a JSON-encoded state map for change detection across session boundaries.
+
+### 8.12 Project Instructions Discovery (`internal/config/instructions.go`)
+
+`DiscoverInstructions()` walks from the working directory up to the project root, collecting `AGENTS.md` files at each level. It also checks the global config directory (`~/.m31a/AGENTS.md`). Files are ordered from outermost (project root) to innermost (workDir), enabling hierarchical instruction inheritance.
+
+`RenderInstructions()` concatenates discovered files with HTML comment source annotations, producing a single string suitable for injection into the system prompt. This enables project-specific instructions to be automatically included without manual configuration.
+
+### 8.13 Model Arbitrage (`pkg/arbitrage/`)
 
 Arbitrage automatically selects the cheapest model capable of handling a given task. It classifies task complexity via keyword analysis (10 trivial indicators, 14 complex indicators, 42 code complexity signals), estimates token usage, and compares pricing across models.
 
 For complex tasks, it enforces a minimum context window requirement (>64K tokens). The arbitrage decision triggers when switching saves more than a configurable threshold proportion of current cost.
 
-### 8.8 OS-Native Keychain (`pkg/keychain/`)
+### 8.14 OS-Native Keychain (`pkg/keychain/`)
 
 The keychain package provides a uniform interface across three platforms:
 
@@ -2635,7 +2903,7 @@ The keychain package provides a uniform interface across three platforms:
 
 Input validation prevents command injection: Linux service names must match `[a-z0-9-]+`, and macOS/Windows names must match `[a-z]+`. The Windows implementation uses `unsafe.Pointer` for Win32 API calls, with careful struct mirroring for the `CREDENTIAL` type.
 
-### 8.9 Code Intelligence (`internal/codeintel/`)
+### 8.15 Code Intelligence (`internal/codeintel/`)
 
 CodeIntel provides project-level intelligence: parsing source files, building import graphs, indexing symbols, and scoring file relevance to tasks. It supports Go (using `go/ast` for full-fidelity parsing), TypeScript, Python, and Rust (using compiled regex patterns).
 
@@ -2647,7 +2915,7 @@ The relevance scoring algorithm uses six factors:
 5. Transitive dependency with depth decay: +2.0/(depth+2)
 6. CamelCase and snake_case decomposition for identifier matching.
 
-### 8.10 Token Estimation (`internal/tokens/`)
+### 8.16 Token Estimation (`internal/tokens/`)
 
 The token estimator uses tiktoken-go for OpenAI models and a rune-based fallback for others. EMA (Exponential Moving Average) calibration continuously corrects estimates against actual API response usage:
 
@@ -2678,7 +2946,7 @@ The `Load(path string)` function executes seven steps in strict order:
 
 ### 9.2 Complete TOML Configuration Reference
 
-M31 Autonomous's configuration file uses TOML format with 10 top-level sections. Every field, its type, default value, and purpose is documented below.
+M31 Autonomous's configuration file uses TOML format with 14 top-level sections. Every field, its type, default value, and purpose is documented below.
 
 #### `[provider]` — LLM Provider Configuration
 
@@ -2833,12 +3101,17 @@ websearch_enabled = true            # bool: enable WebSearch tool
 ```toml
 [agents]
 default = ""                        # string: model override for all phases
+initialize = ""                     # string: model override for Initialize phase
+discuss = ""                        # string: model override for Discuss phase
 plan = ""                           # string: model override for Plan phase
 execute = ""                        # string: model override for Execute phase
 verify = ""                         # string: model override for Verify phase
+runtime = ""                        # string: model override for Runtime phase
 ship = ""                           # string: model override for Ship phase
-discuss = ""                        # string: model override for Discuss phase
+research = ""                       # string: model override for Research operations
 ```
+
+See also the `[agents.profiles.*]` section below for subagent profile configuration.
 
 #### `[git]` — Commit Conventions
 
@@ -2860,6 +3133,58 @@ test_command = ""                   # string: custom test command (empty = auto-
 ```
 
 When both commands are empty, the verify phase falls back to project-type-specific auto-detection: `go build ./...` and `go test ./...` for Go, `npm run build` and `npm test` for Node.js, `python -m py_compile` and `pytest` for Python. If only one command is configured, the other still uses auto-detection.
+
+#### `[compaction]` — Session Compaction
+
+```toml
+[compaction]
+auto = true                         # bool: enable automatic session compaction
+buffer = 20000                      # int: tokens reserved before compaction triggers
+keep_tokens = 8000                  # int: tokens of recent history to preserve verbatim
+```
+
+When `auto` is enabled, the compaction engine monitors token usage against the model's context length and triggers LLM-driven summarization when the threshold is exceeded. The `buffer` determines how close to the context limit compaction activates, and `keep_tokens` controls how much recent conversation is preserved word-for-word.
+
+#### `[instructions]` — Project Instructions
+
+```toml
+[instructions]
+enabled = true                      # bool: enable AGENTS.md file discovery
+```
+
+When enabled, M31 Autonomous discovers and injects `AGENTS.md` files from the project hierarchy into the system prompt. Files are loaded from the global config directory (`~/.m31a/AGENTS.md`) and from the project directory tree (walked from root to working directory).
+
+#### `[skills]` — Composable Skills
+
+```toml
+[skills]
+enabled = true                      # bool: enable skill discovery and loading
+```
+
+When enabled, skills are discovered from `~/.m31a/skills/` and `<project>/.m31a/skills/` at startup. Valid skills are registered as dynamic slash commands.
+
+#### `[agents]` — Agent Profiles and Per-Phase Overrides
+
+```toml
+[agents]
+default = ""                        # string: default agent model ID
+initialize = ""                     # string: initialize phase model override
+research = ""                       # string: research phase model override
+
+[agents.profiles.explore]
+tools_allowlist = ["FileRead", "Glob", "Grep"]
+tools_denylist = []
+system_prompt = "You are a code exploration specialist."
+model = ""                          # string: profile-specific model override
+
+[agents.profiles.code]
+tools_allowlist = []
+tools_denylist = []
+system_prompt = "You are a code generation specialist."
+model = ""
+```
+
+Agent profiles define specialized subagent configurations with tool allowlists/denylists, custom system prompts, and model preferences. Profiles are resolved during subagent spawning based on the `SubagentType` in the spawn request.
 
 ### 9.3 Environment Variable Reference
 
@@ -2984,7 +3309,7 @@ The `UserMessage(error)` function maps errors to user-friendly, actionable strin
 
 ## 11. Slash Commands Reference
 
-M31 Autonomous provides 47 slash commands organized into seven categories. Each command is processed through a registry that parses input, runs the handler, and routes the result — whether that's navigating to a screen, displaying a message, confirming a destructive action, or loading a session. Unknown commands trigger a "Did you mean?" suggestion via Levenshtein distance.
+M31 Autonomous provides 65 slash commands organized into seven categories, plus dynamically-discovered skills. Each command is processed through a registry that parses input, runs the handler, and routes the result — whether that's navigating to a screen, displaying a message, confirming a destructive action, or loading a session. Unknown commands trigger a "Did you mean?" suggestion via Levenshtein distance. Skills (Section 8.10) extend this set with user-defined commands loaded from Markdown files at startup.
 
 ### 11.1 Core Commands
 
@@ -3004,7 +3329,7 @@ M31 Autonomous provides 47 slash commands organized into seven categories. Each 
 
 **`/health`** — Triggers a health check against the active provider. The check hits the provider's API endpoint and classifies latency as live (<500ms), slow (<2s), or degraded (>2s). Use this when responses are slow or failing to diagnose whether the issue is provider-side.
 
-**`/tools`** — Lists all 15 registered tools with their descriptions and risk levels. Useful for understanding what capabilities the agent has in the current session, especially after configuration changes that may have enabled or disabled tools.
+**`/tools`** — Lists all 17 registered tools with their descriptions and risk levels. Useful for understanding what capabilities the agent has in the current session, especially after configuration changes that may have enabled or disabled tools.
 
 **`/copy-error`** — Copies the last error message to the system clipboard. Designed for reporting issues: when the agent encounters an error, you can quickly copy the full error text and paste it into a bug report or support channel.
 
@@ -3014,7 +3339,7 @@ M31 Autonomous provides 47 slash commands organized into seven categories. Each 
 
 **`/config`** — Opens the full configuration viewer/editor, showing the raw TOML structure. More powerful than `/settings` for advanced users who want to see and edit every field, including those not exposed in the settings tabs (git conventions, verify commands, agent overrides).
 
-**`/theme`** — Switches the color theme. Accepts a mode (`dark`, `light`, `auto`) or a specific palette name (`catppuccin`, `nord`, `tokyo`, `gruvbox`, `rose`, `dracula`, `solarized`, `monochrome`). Without arguments, cycles through dark -> light -> auto. The theme change propagates to all 28+ sub-models instantly.
+**`/theme`** — Switches the color theme. Accepts a mode (`dark`, `light`, `auto`) or a specific palette name (`catppuccin`, `nord`, `tokyo`, `gruvbox`, `rose`, `dracula`, `solarized`, `monochrome`). Without arguments, cycles through dark -> light -> auto. The theme change propagates to all 33+ sub-models instantly.
 
 **`/cost`** — Toggles the cost estimate display in the status bar footer. When enabled, shows the inferred cost of the current session based on token usage and model pricing. Useful for keeping tabs on API spending during long sessions.
 
@@ -3062,7 +3387,7 @@ M31 Autonomous provides 47 slash commands organized into seven categories. Each 
 
 ### 11.6 Workflow Commands
 
-**`/new`** — Starts a new workflow by opening the full-screen goal input. This is the primary entry point for the six-phase workflow. After entering a goal, you'll be prompted to select models for planning and coding phases, then the workflow begins.
+**`/new`** — Starts a new workflow by opening the full-screen goal input. This is the primary entry point for the eight-phase workflow. After entering a goal, you'll be prompted to select models for planning and coding phases, then the workflow begins.
 
 **`/workflow`** — Displays the current workflow phase, status, and progress. Shows which phases have been completed, which is active, and what's pending. Use this to orient yourself when resuming a session or checking on a long-running workflow.
 
@@ -3086,7 +3411,7 @@ M31 Autonomous provides 47 slash commands organized into seven categories. Each 
 
 **`/metrics`** — Opens the session analytics dashboard. Displays token usage over time, cost breakdown by model, tool execution statistics, and workflow phase durations. Helps you understand where time and money are being spent.
 
-**`/dashboard`** — Opens the workflow pipeline overview, showing all six phases as a visual pipeline with their current status (pending, active, completed, failed). Provides a high-level view of workflow progress.
+**`/dashboard`** — Opens the workflow pipeline overview, showing all eight phases as a visual pipeline with their current status (pending, active, completed, failed). Provides a high-level view of workflow progress.
 
 **`/themes`** — Opens the theme picker with live preview. Browse all 10 registered palettes (Midnight, Daylight, Catppuccin, Nord, Tokyo Night, Gruvbox, Rose Pine, Dracula, Solarized, Monochrome) and see how they look before applying.
 
@@ -3132,6 +3457,11 @@ M31 Autonomous employs numerous performance optimizations:
 - **Concurrent git status+numstat** via goroutines with WaitGroup.
 - **Mtime-based ledger stats cache** avoiding recomputation when the file hasn't changed.
 - **`singleflight.Group`** for model catalog refreshes.
+- **Concurrent context source loading** — the context registry loads all sources in parallel via goroutines, avoiding sequential I/O latency.
+- **Concurrent smoke testing** — the runtime phase tests up to 4 routes simultaneously with a semaphore-bounded goroutine pool.
+- **Atomic output store counter** — `atomic.Int64` generates unique filenames for the output store without lock contention on the hot path.
+- **Code intel invalidation optimization** — selective invalidation rather than full rebuild when files change.
+- **Coordinator demand coalescing** — avoids redundant session drains by coalescing concurrent demands into a single pending rerun.
 
 ---
 
@@ -3150,11 +3480,17 @@ M31 Autonomous executes shell commands and file operations on behalf of the user
 
 ### 12.2 Known Security Concerns
 
-Three known security gaps exist:
+All three previously identified security gaps (SEC-01 through SEC-03) have been resolved:
 
-1. **SEC-01**: No ReDoS protection in pure-Go grep (mitigated by regex pattern detection and ripgrep availability).
-2. **SEC-02**: WebSearch missing DNS cache (defense-in-depth gap vs WebFetch).
-3. **SEC-03**: Incomplete HTML entity decoding in WebFetch.
+1. **SEC-01 (Resolved):** ReDoS protection added to pure-Go grep via regex pattern analysis and timeout enforcement.
+2. **SEC-02 (Resolved):** SSRF protection with DNS pinning added to WebSearch, matching WebFetch's defense-in-depth approach.
+3. **SEC-03 (Resolved):** HTML entity decoding in WebFetch now uses `html.UnescapeString` from the standard library, eliminating incomplete decoding.
+
+**New security additions:**
+- **Persistent permissions** stored in `~/.m31a/permissions.json` with project-scoped rules and last-match-wins evaluation.
+- **Output store** prevents tool output from consuming the context window, with configurable line/byte limits and time-based cleanup.
+- **Session file locking** prevents concurrent session corruption via advisory file locks.
+- **Backup pruning for FileDelete** now matches the backup rotation behavior of FileWrite and Edit.
 
 ---
 
@@ -3227,29 +3563,35 @@ The GitHub Actions pipeline (`.github/workflows/ci.yml`) defines five jobs:
 
 ### Bugs
 
-| ID | Description | Impact |
+| ID | Description | Status |
 |----|-------------|--------|
-| BUG-01 | Flaky git status test under race detector (timing assumption) | Blocks reliable CI |
-| BUG-02 | Ship phase commits unrelated files when taskFiles is empty | Data integrity risk |
-| BUG-03 | Demonstration generation can exceed context window for smaller models | Runtime failure |
-| BUG-04 | Inconsistent `HasUncommittedChanges` implementations (porcelain vs human-readable) | Correctness |
+| BUG-01 | Flaky git status test under race detector (timing assumption) | Resolved — improved rename handling and porcelain parsing |
+| BUG-02 | Ship phase commits unrelated files when taskFiles is empty | Resolved — uncommitted changes detection uses porcelain format |
+| BUG-03 | Demonstration generation can exceed context window for smaller models | Resolved — model-not-found detection and broken model handling added |
+| BUG-04 | Inconsistent `HasUncommittedChanges` implementations (porcelain vs human-readable) | Resolved — unified porcelain-based detection |
 
 ### Security Concerns
 
-| ID | Description | Mitigation |
-|----|-------------|------------|
-| SEC-01 | No ReDoS protection in pure-Go grep | Mitigated by ripgrep availability and pattern detection |
-| SEC-02 | WebSearch missing DNS cache | Defense-in-depth gap vs WebFetch |
-| SEC-03 | Incomplete HTML entity decoding in WebFetch | Minor impact |
+| ID | Description | Status |
+|----|-------------|--------|
+| SEC-01 | No ReDoS protection in pure-Go grep | **Resolved** — regex DoS protection added with pattern analysis |
+| SEC-02 | WebSearch missing DNS cache | **Resolved** — SSRF protection with DNS pinning added |
+| SEC-03 | Incomplete HTML entity decoding in WebFetch | **Resolved** — uses `html.UnescapeString` from stdlib |
 
-### Tech Debt
+### Tech Debt — Resolved
 
-- 12 ineffectual assignments across production code
-- 50+ variable shadowing instances (concentrated in main.go, ship.go, rollback.go)
-- Global gitignore cache has no eviction
-- FileDelete has no backup pruning (unlike FileWrite and Edit)
-- Dead writes in WebFetch HTML parser
-- TUI test coverage at 38.6% (improvement planned)
+The following tech debt items from v1.0 have been addressed:
+
+- **12 ineffectual assignments** — eliminated via comprehensive linter fixes across all production code.
+- **50+ variable shadowing instances** — eliminated via systematic refactoring (concentrated in main.go, ship.go, rollback.go, and tool implementations).
+- **FileDelete has no backup pruning** — backup pruning now matches FileWrite and Edit behavior.
+- **Dead writes in WebFetch HTML parser** — resolved via code cleanup and stdlib entity decoding.
+
+### Remaining Tech Debt
+
+- Global gitignore cache has no eviction.
+- TUI test coverage improvement ongoing (target: 75%).
+- Layout modal overlay ANSI code handling requires continued monitoring.
 
 ---
 
@@ -3258,48 +3600,65 @@ The GitHub Actions pipeline (`.github/workflows/ci.yml`) defines five jobs:
 | Capability | M31 Autonomous | Cursor | Aider | Cline |
 |------------|:----:|:------:|:-----:|:-----:|
 | Terminal-native | yes | no | yes | no |
-| Six-phase workflow | yes | no | no | no |
+| Eight-phase workflow | yes | no | no | no |
+| Runtime smoke testing | yes | no | no | no |
 | Git commit rollback chain | yes | no | partial | no |
 | Cross-session learning | yes | no | no | no |
-| Context consolidation | yes | no | no | no |
+| Session compaction | yes | no | no | no |
+| Context consolidation (AutoDream) | yes | no | no | no |
+| Composable skills system | yes | no | no | no |
+| Persistent permissions | yes | no | no | no |
+| Concurrent session coordinator | yes | no | no | no |
 | Provider auto-fallback | yes | no | partial | partial |
+| Subagent profiles | yes | no | no | no |
 | Static binary, no CGO | yes | no | no | no |
 | Telemetry | none | yes | none | yes |
 | OS keychain integration | yes | no | no | no |
-| 29-screen TUI | yes | no | no | no |
-| Slash commands (47) | yes | no | partial | no |
+| 33-screen TUI | yes | no | no | no |
+| Slash commands (65+) | yes | no | partial | no |
 | Model cost arbitrage | yes | no | no | no |
 | Git bisect automation | yes | no | no | no |
 | Subagent spawning | yes | no | no | partial |
+| Retry with backoff + Retry-After | yes | no | no | partial |
 
-M31 Autonomous's closest competitor in the terminal-native space is Aider, which provides excellent git integration and multi-file editing but lacks the structured workflow engine, cross-session learning, and context consolidation that M31 Autonomous offers.
+M31 Autonomous's closest competitor in the terminal-native space is Aider, which provides excellent git integration and multi-file editing but lacks the structured workflow engine, cross-session learning, runtime verification, session compaction, and composable skills system that M31 Autonomous offers.
 
 ---
 
 ## 20. Future Work
 
-The V1.1 roadmap includes several features:
+The V1.1 release has delivered several features from the original roadmap:
+
+- **Subagent profiles** — profile-based tool allowlists/denylists, system prompts, and model preferences for specialized subagents.
+- **Runtime verification** — the Runtime phase with dev server management and HTTP smoke testing.
+- **Composable skills** — user-defined slash commands via Markdown with YAML frontmatter.
+- **Session compaction** — automatic LLM-driven summarization for long-running sessions.
+- **Concurrent session coordinator** — generic demand-coalescing for safe concurrent execution.
+- **Security hardening** — resolved all three known security gaps (ReDoS, SSRF, HTML decoding).
+
+The V1.2 roadmap includes:
 
 - **Ghost mode** — headless runs producing structured diffs without TUI interaction.
 - **Picture-in-picture** — second agent in a side pane for cross-review during execution.
-- **Subagents** — delegated sub-tasks to specialized agents (code, test, doc) with worktree isolation.
+- **Advanced subagent coordination** — inter-subagent communication and shared worktrees.
 - **Deferred tools** — queued tool calls requiring human approval for batch review.
 
 Additional improvements under consideration:
 
-- Increasing TUI test coverage from 38.6% to 75%.
-- Adding ReDoS protection to pure-Go grep.
-- Implementing backup pruning in FileDelete.
-- Adding SSRF protection to WebSearch.
-- Cleaning up dead code and 12 ineffectual assignments across production code.
+- Increasing TUI test coverage from current levels to 75%.
+- Adding MCP (Model Context Protocol) server integration.
+- Implementing global gitignore cache eviction.
+- Expanding the skills ecosystem with a skill marketplace and dependency resolution.
 
 ---
 
 ## 21. Conclusion
 
-M31 Autonomous represents a comprehensive approach to AI-assisted software engineering in the terminal. Its six-phase workflow engine provides structure without rigidity, its security model provides safety without friction, and its cross-session learning provides intelligence without complexity.
+M31 Autonomous represents a comprehensive approach to AI-assisted software engineering in the terminal. Its eight-phase workflow engine provides structure without rigidity, its security model provides safety without friction, and its cross-session learning provides intelligence without complexity.
 
-The codebase demonstrates several notable engineering decisions: the MsgEmitter pattern for decoupling the workflow engine from the TUI, the atomic CAS pattern for lock-free cost tracking, the cascading plan parser with retry loops, the self-healing execution with git bisect fallback, and the AutoDream context consolidation system.
+The codebase demonstrates several notable engineering decisions: the MsgEmitter pattern for decoupling the workflow engine from the TUI, the atomic CAS pattern for lock-free cost tracking, the cascading plan parser with retry loops, the self-healing execution with git bisect fallback, the AutoDream context consolidation system, the LLM-driven session compaction engine, the generic concurrent session coordinator with demand coalescing, the composable skills system for user-extensible slash commands, the runtime verification phase with automated smoke testing and route discovery, and the dynamic context registry for injecting environment-aware system prompts.
+
+The v1.1 release resolved all three previously identified security concerns, eliminated over 60 instances of variable shadowing and ineffectual assignments, added persistent cross-session permissions, and grew the tool system from 15 to 17 tools and the TUI from 29 to 33 screens. The slash command count grew from 47 to 65, further enhanced by the dynamic skills discovery system.
 
 At approximately 15-20MB for a fully static binary with zero dependencies, M31 Autonomous is both powerful and portable. It runs on any POSIX shell, stores nothing in the cloud, and learns from every session. For developers who live in the terminal and want an AI agent that owns the loop — not just an autocomplete with dangerous capabilities — M31 Autonomous is the tool to reach for.
 
@@ -3308,7 +3667,7 @@ At approximately 15-20MB for a fully static binary with zero dependencies, M31 A
 ## References
 
 1. Charmbracelet. "Bubble Tea — A powerful little TUI framework." https://github.com/charmbracelet/bubbletea
-2. Charmbracelet. "Lip Gloss — Declarative terminal styling." https://github.com/charmbracelet/liploss
+2. Charmbracelet. "Lip Gloss — Declarative terminal styling." https://github.com/charmbracelet/lipgloss
 3. Charmbracelet. "Glamour — Markdown rendering for the terminal." https://github.com/charmbracelet/glamour
 4. pkoukk. "tiktoken-go — Go port of OpenAI's tiktoken." https://github.com/pkoukk/tiktoken-go
 5. BurntSushi. "TOML — TOML parser for Go." https://github.com/BurntSushi/toml
@@ -3317,5 +3676,8 @@ At approximately 15-20MB for a fully static binary with zero dependencies, M31 A
 8. bmatcuk. "doublestar — Glob pattern matching with doublestars." https://github.com/bmatcuk/doublestar
 9. OpenAI. "Server-Sent Events specification." https://html.spec.whatwg.org/multipage/server-sent-events.html
 10. Kahn, Arthur B. "Topological sorting of large networks." Communications of the ACM, 1962.
+11. IETF. "Hypertext Transfer Protocol (HTTP/1.1): Semantics and Content — Retry-After header." RFC 7231, Section 7.1.3.
+12. Charmbracelet. "Bubbles — TUI components for Bubble Tea." https://github.com/charmbracelet/bubbles
+13. CommonMark. "CommonMark — A strongly defined Markdown specification." https://spec.commonmark.org/
 
 ---

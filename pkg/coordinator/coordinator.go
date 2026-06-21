@@ -45,9 +45,6 @@ func (c *Coordinator[Key]) Run(key Key) context.Context {
 
 	if e.running {
 		e.pending = DemandRun
-		if e.cancel != nil {
-			// Upgrade: cancel current to force restart
-		}
 		c.mu.Unlock()
 		return c.awaitDone(e)
 	}

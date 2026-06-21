@@ -108,7 +108,7 @@ func (s *OutputStore) headTailPreview(output string) string {
 		sb.WriteByte('\n')
 	}
 
-	sb.WriteString(fmt.Sprintf("\n... %d lines omitted ...\n\n", totalLines-headCount-tailCount))
+	fmt.Fprintf(&sb, "\n... %d lines omitted ...\n\n", totalLines-headCount-tailCount)
 
 	start := totalLines - tailCount
 	if start < headCount {

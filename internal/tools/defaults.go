@@ -17,7 +17,7 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	store := NewOutputStore(outputDir, DefaultOutputMaxLines, DefaultOutputMaxBytes)
 	d.SetOutputStore(store)
 	// Best-effort cleanup of old output files on startup
-	store.Cleanup(OutputRetentionDays * 24 * time.Hour)
+	_, _ = store.Cleanup(OutputRetentionDays * 24 * time.Hour)
 
 	// Load persistent permissions for this project
 	pp := NewPersistentPermissions()

@@ -93,7 +93,7 @@ func (p *PersistentPermissions) Remove(projectDir string) error {
 	if err != nil {
 		return nil
 	}
-	if err := json.Unmarshal(data, &pd); err != nil {
+	if unmarshalErr := json.Unmarshal(data, &pd); unmarshalErr != nil {
 		return nil
 	}
 

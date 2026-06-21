@@ -2,12 +2,6 @@
 # M31A — Terminal AI Coding Agent
 # ==============================================================================
 
-# Terminal colors
-GREEN     := \033[0;32m
-YELLOW    := \033[0;33m
-RED       := \033[0;31m
-NC        := \033[0m
-
 BINARY      := m31a
 MODULE      := github.com/eshanized/M31A
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -65,40 +59,40 @@ dev: build
 
 ## test              — Run all tests with race detector and coverage
 test:
-	@echo "$(GREEN)[test]$(NC) Running tests with race detector..."
+	@printf "\033[0;32m[test]\033[0m Running tests with race detector...\n"
 	@$(GO) test -race -cover -coverprofile=$(COVER_OUT) ./...
-	@echo "$(GREEN)[test]$(NC) Coverage report: $(COVER_OUT)"
+	@printf "\033[0;32m[test]\033[0m Coverage report: $(COVER_OUT)\n"
 
 ## test-fast         — Run tests without race detector (faster)
 test-fast:
-	@echo "$(GREEN)[test]$(NC) Running tests (fast mode)..."
+	@printf "\033[0;32m[test]\033[0m Running tests (fast mode)...\n"
 	@$(GO) test -cover ./...
 
 ## test-verbose      — Run tests with verbose output
 test-verbose:
-	@echo "$(GREEN)[test]$(NC) Running tests (verbose)..."
+	@printf "\033[0;32m[test]\033[0m Running tests (verbose)...\n"
 	@$(GO) test -v -race -cover ./...
 
 ## test-specific     — Run specific test (e.g., make test-specific TEST=TestReplModel)
 test-specific:
-	@echo "$(GREEN)[test]$(NC) Running: $(TEST)"
+	@printf "\033[0;32m[test]\033[0m Running: $(TEST)\n"
 	@$(GO) test -v -race -run $(TEST) ./...
 
 ## bench             — Run benchmarks
 bench:
-	@echo "$(GREEN)[bench]$(NC) Running benchmarks..."
+	@printf "\033[0;32m[bench]\033[0m Running benchmarks...\n"
 	@$(GO) test -bench=. -benchmem -run=^$$ ./...
 
 ## bench-verbose     — Run benchmarks with verbose output
 bench-verbose:
-	@echo "$(GREEN)[bench]$(NC) Running benchmarks (verbose)..."
+	@printf "\033[0;32m[bench]\033[0m Running benchmarks (verbose)...\n"
 	@$(GO) test -v -bench=. -benchmem -run=^$$ ./...
 
 ## cover             — Generate HTML coverage report
 cover: test
-	@echo "$(GREEN)[cover]$(NC) Generating HTML coverage report..."
+	@printf "\033[0;32m[cover]\033[0m Generating HTML coverage report...\n"
 	@$(GO) tool cover -html=$(COVER_OUT) -o $(COVER_HTML)
-	@echo "$(GREEN)[cover]$(NC) Report: $(COVER_HTML)"
+	@printf "\033[0;32m[cover]\033[0m Report: $(COVER_HTML)\n"
 
 # ==============================================================================
 # Code quality
@@ -106,33 +100,33 @@ cover: test
 
 ## lint              — Run golangci-lint
 lint:
-	@echo "$(GREEN)[lint]$(NC) Running golangci-lint..."
+	@printf "\033[0;32m[lint]\033[0m Running golangci-lint...\n"
 	@golangci-lint run ./... --timeout=5m
 
 ## lint-fix          — Run linter with auto-fix
 lint-fix:
-	@echo "$(GREEN)[lint]$(NC) Running golangci-lint with auto-fix..."
+	@printf "\033[0;32m[lint]\033[0m Running golangci-lint with auto-fix...\n"
 	@golangci-lint run ./... --fix --timeout=5m
 
 ## vet               — Run go vet
 vet:
-	@echo "$(GREEN)[vet]$(NC) Running go vet..."
+	@printf "\033[0;32m[vet]\033[0m Running go vet...\n"
 	@$(GO) vet ./...
 
 ## fmt               — Format all Go files
 fmt:
-	@echo "$(GREEN)[fmt]$(NC) Formatting Go files..."
+	@printf "\033[0;32m[fmt]\033[0m Formatting Go files...\n"
 	@$(GO) fmt ./...
 	@goimports -w $$(find . -name '*.go' -not -path './vendor/*') 2>/dev/null || true
 
 ## tidy              — Clean up go.mod dependencies
 tidy:
-	@echo "$(GREEN)[tidy]$(NC) Running go mod tidy..."
+	@printf "\033[0;32m[tidy]\033[0m Running go mod tidy...\n"
 	@$(GO) mod tidy
 
 ## check             — Run fmt, vet, lint, test in sequence
 check: fmt tidy vet test
-	@echo "$(GREEN)[check]$(NC) All checks passed!"
+	@printf "\033[0;32m[check]\033[0m All checks passed!\n"
 
 # ==============================================================================
 # Cross-compilation
@@ -142,27 +136,27 @@ check: fmt tidy vet test
 cross: $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(arch)))
 
 build-linux-amd64:
-	@echo "$(GREEN)[cross]$(NC) Building linux/amd64..."
+	@printf "\033[0;32m[cross]\033[0m Building linux/amd64...\n"
 	@GOOS=linux GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-amd64 $(CMD_DIR)
 
 build-linux-arm64:
-	@echo "$(GREEN)[cross]$(NC) Building linux/arm64..."
+	@printf "\033[0;32m[cross]\033[0m Building linux/arm64...\n"
 	@GOOS=linux GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-arm64 $(CMD_DIR)
 
 build-darwin-amd64:
-	@echo "$(GREEN)[cross]$(NC) Building darwin/amd64..."
+	@printf "\033[0;32m[cross]\033[0m Building darwin/amd64...\n"
 	@GOOS=darwin GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-amd64 $(CMD_DIR)
 
 build-darwin-arm64:
-	@echo "$(GREEN)[cross]$(NC) Building darwin/arm64..."
+	@printf "\033[0;32m[cross]\033[0m Building darwin/arm64...\n"
 	@GOOS=darwin GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-arm64 $(CMD_DIR)
 
 build-windows-amd64:
-	@echo "$(GREEN)[cross]$(NC) Building windows/amd64..."
+	@printf "\033[0;32m[cross]\033[0m Building windows/amd64...\n"
 	@GOOS=windows GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-amd64.exe $(CMD_DIR)
 
 build-windows-arm64:
-	@echo "$(GREEN)[cross]$(NC) Building windows/arm64..."
+	@printf "\033[0;32m[cross]\033[0m Building windows/arm64...\n"
 	@GOOS=windows GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-arm64.exe $(CMD_DIR)
 
 # ==============================================================================
@@ -171,12 +165,12 @@ build-windows-arm64:
 
 ## release           — Create release via goreleaser (snapshot)
 release:
-	@echo "$(GREEN)[release]$(NC) Running goreleaser..."
+	@printf "\033[0;32m[release]\033[0m Running goreleaser...\n"
 	@goreleaser release --snapshot --clean
 
 ## release-dry       — Dry run goreleaser
 release-dry:
-	@echo "$(GREEN)[release]$(NC) Running goreleaser (dry run)..."
+	@printf "\033[0;32m[release]\033[0m Running goreleaser (dry run)...\n"
 	@goreleaser release --snapshot --clean --skip=validate --skip=publish
 
 # ==============================================================================
@@ -185,43 +179,43 @@ release-dry:
 
 ## deps              — Update dependencies
 deps:
-	@echo "$(GREEN)[deps]$(NC) Updating dependencies..."
+	@printf "\033[0;32m[deps]\033[0m Updating dependencies...\n"
 	@$(GO) get -u ./...
 	@$(GO) mod tidy
 
 ## deps-verify       — Verify dependency checksums
 deps-verify:
-	@echo "$(GREEN)[deps]$(NC) Verifying dependencies..."
+	@printf "\033[0;32m[deps]\033[0m Verifying dependencies...\n"
 	@$(GO) mod verify
 
 ## size              — Show binary size
 size: build
-	@echo "$(GREEN)[size]$(NC) Binary size:"
+	@printf "\033[0;32m[size]\033[0m Binary size:\n"
 	@du -h $(BINARY)
-	@echo "$(GREEN)[size]$(NC) Stripped size:"
+	@printf "\033[0;32m[size]\033[0m Stripped size:\n"
 	@ls -lh $(BINARY) | awk '{print $$5}'
 
 ## clean             — Remove build artifacts
 clean:
-	@echo "$(YELLOW)[clean]$(NC) Removing build artifacts..."
+	@printf "\033[0;33m[clean]\033[0m Removing build artifacts...\n"
 	@rm -f $(BINARY) $(BINARY)-debug
 	@rm -rf $(DIST_DIR)
 	@rm -f $(COVER_OUT) $(COVER_HTML)
 	@rm -rf cmd/m31a/cover.out
-	@echo "$(YELLOW)[clean]$(NC) Done"
+	@printf "\033[0;33m[clean]\033[0m Done\n"
 
 ## nuke              — Clean everything including vendor and cache
 nuke: clean
-	@echo "$(RED)[nuke]$(NC) Removing vendor, cache, and build cache..."
+	@printf "\033[0;31m[nuke]\033[0m Removing vendor, cache, and build cache...\n"
 	@rm -rf vendor
 	@$(GO) clean -cache -modcache -testcache
-	@echo "$(RED)[nuke]$(NC) Done"
+	@printf "\033[0;31m[nuke]\033[0m Done\n"
 
 ## install           — Install binary to GOBIN
 install:
-	@echo "$(GREEN)[install]$(NC) Installing via go install..."
+	@printf "\033[0;32m[install]\033[0m Installing via go install...\n"
 	@CGO_ENABLED=0 $(GO) install $(LDFLAGS) $(CMD_DIR)
-	@echo "$(GREEN)[install]$(NC) Done"
+	@printf "\033[0;32m[install]\033[0m Done\n"
 
 # ==============================================================================
 # Platform-specific installation
@@ -231,55 +225,55 @@ INSTALL_PREFIX ?= /usr/local
 
 ## install-linux-amd64    — Install linux/amd64 binary to $(INSTALL_PREFIX)/bin
 install-linux-amd64: build-linux-amd64
-	@echo "$(GREEN)[install]$(NC) Installing linux/amd64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing linux/amd64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-linux-amd64 $(INSTALL_PREFIX)/bin/$(BINARY)
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY)\n"
 
 ## install-linux-arm64    — Install linux/arm64 binary to $(INSTALL_PREFIX)/bin
 install-linux-arm64: build-linux-arm64
-	@echo "$(GREEN)[install]$(NC) Installing linux/arm64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing linux/arm64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-linux-arm64 $(INSTALL_PREFIX)/bin/$(BINARY)
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY)\n"
 
 ## install-darwin-amd64   — Install darwin/amd64 binary to $(INSTALL_PREFIX)/bin
 install-darwin-amd64: build-darwin-amd64
-	@echo "$(GREEN)[install]$(NC) Installing darwin/amd64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing darwin/amd64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-darwin-amd64 $(INSTALL_PREFIX)/bin/$(BINARY)
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY)\n"
 
 ## install-darwin-arm64   — Install darwin/arm64 binary to $(INSTALL_PREFIX)/bin
 install-darwin-arm64: build-darwin-arm64
-	@echo "$(GREEN)[install]$(NC) Installing darwin/arm64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing darwin/arm64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-darwin-arm64 $(INSTALL_PREFIX)/bin/$(BINARY)
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY)"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY)\n"
 
 ## install-windows-amd64  — Install windows/amd64 binary to $(INSTALL_PREFIX)/bin
 install-windows-amd64: build-windows-amd64
-	@echo "$(GREEN)[install]$(NC) Installing windows/amd64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing windows/amd64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-windows-amd64.exe $(INSTALL_PREFIX)/bin/$(BINARY).exe
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe\n"
 
 ## install-windows-arm64  — Install windows/arm64 binary to $(INSTALL_PREFIX)/bin
 install-windows-arm64: build-windows-arm64
-	@echo "$(GREEN)[install]$(NC) Installing windows/arm64 to $(INSTALL_PREFIX)/bin..."
+	@printf "\033[0;32m[install]\033[0m Installing windows/arm64 to $(INSTALL_PREFIX)/bin...\n"
 	@install -d $(INSTALL_PREFIX)/bin
 	@install -m 755 $(DIST_DIR)/$(BINARY)-windows-arm64.exe $(INSTALL_PREFIX)/bin/$(BINARY).exe
-	@echo "$(GREEN)[install]$(NC) Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe"
+	@printf "\033[0;32m[install]\033[0m Done: $(INSTALL_PREFIX)/bin/$(BINARY).exe\n"
 
 ## install-all           — Build and install all platform binaries
 install-all: install-linux-amd64 install-linux-arm64 install-darwin-amd64 install-darwin-arm64 install-windows-amd64 install-windows-arm64
-	@echo "$(GREEN)[install]$(NC) All platforms installed to $(INSTALL_PREFIX)/bin"
+	@printf "\033[0;32m[install]\033[0m All platforms installed to $(INSTALL_PREFIX)/bin\n"
 
 ## uninstall            — Remove installed binary from $(INSTALL_PREFIX)/bin
 uninstall:
-	@echo "$(YELLOW)[uninstall]$(NC) Removing $(INSTALL_PREFIX)/bin/$(BINARY)..."
+	@printf "\033[0;33m[uninstall]\033[0m Removing $(INSTALL_PREFIX)/bin/$(BINARY)...\n"
 	@rm -f $(INSTALL_PREFIX)/bin/$(BINARY) $(INSTALL_PREFIX)/bin/$(BINARY).exe
-	@echo "$(YELLOW)[uninstall]$(NC) Done"
+	@printf "\033[0;33m[uninstall]\033[0m Done\n"
 
 ## version           — Show version info
 version:

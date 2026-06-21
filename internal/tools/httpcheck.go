@@ -132,7 +132,7 @@ func (h *HTTPCheck) Execute(ctx context.Context, input types.ToolInput) (types.T
 			DurationMs: time.Since(start).Milliseconds(),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {

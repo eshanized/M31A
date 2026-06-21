@@ -397,9 +397,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cs := m.replModel.handleStreamMsg(sm)
 			// cs[0] reads from m.replModel.streamCh which is nil during agent
 			// loop — discard it to prevent goroutine leak. Keep StreamTickCmd.
-			for _, c := range cs[1:] {
-				cmds = append(cmds, c)
-			}
+			cmds = append(cmds, cs[1:]...)
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentThinkingMsg:

@@ -20,24 +20,24 @@ func SerializeMessages(messages []types.Message) string {
 		}
 		switch msg.Role {
 		case "system":
-			sb.WriteString(fmt.Sprintf("[System %d] %s\n", i, truncate(msg.Content, maxToolOutputChars)))
+			fmt.Fprintf(&sb, "[System %d] %s\n", i, truncate(msg.Content, maxToolOutputChars))
 		case "user":
-			sb.WriteString(fmt.Sprintf("[User %d] %s\n", i, msg.Content))
+			fmt.Fprintf(&sb, "[User %d] %s\n", i, msg.Content)
 		case "assistant":
-			sb.WriteString(fmt.Sprintf("[Assistant %d] %s\n", i, msg.Content))
+			fmt.Fprintf(&sb, "[Assistant %d] %s\n", i, msg.Content)
 			for _, tc := range msg.ToolCalls {
 				input := string(tc.Input)
 				if len(input) > 500 {
 					input = input[:500] + "..."
 				}
-				sb.WriteString(fmt.Sprintf("  -> ToolCall: %s(%s)\n", tc.Name, input))
+				fmt.Fprintf(&sb, "  -> ToolCall: %s(%s)\n", tc.Name, input)
 			}
 		case "tool":
 			content := msg.Content
 			if len(content) > maxToolOutputChars {
 				content = content[:maxToolOutputChars] + "...[truncated]"
 			}
-			sb.WriteString(fmt.Sprintf("[Tool %d] %s\n", i, content))
+			fmt.Fprintf(&sb, "[Tool %d] %s\n", i, content)
 		}
 		sb.WriteByte('\n')
 	}

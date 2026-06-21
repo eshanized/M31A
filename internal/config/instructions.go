@@ -21,7 +21,7 @@ func DiscoverInstructions(projectRoot, workDir string) []InstructionFile {
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		globalPath := filepath.Join(homeDir, ".m31a", "AGENTS.md")
-		if content, err := os.ReadFile(globalPath); err == nil {
+		if content, readErr := os.ReadFile(globalPath); readErr == nil {
 			text := strings.TrimSpace(string(content))
 			if text != "" {
 				files = append(files, InstructionFile{Path: globalPath, Content: text})

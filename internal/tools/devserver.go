@@ -142,7 +142,7 @@ func (d *DevServer) startServer(ctx context.Context, input types.ToolInput, star
 	if port > 0 {
 		ready := waitForPort(port, 30*time.Second)
 		if !ready {
-			d.stopByID(id)
+			_ = d.stopByID(id)
 			return types.ToolResult{
 				Output:     fmt.Sprintf("Server started (id=%d) but port %d not ready after 30s", id, port),
 				Error:      fmt.Sprintf("port %d not accepting connections after 30s timeout", port),
@@ -258,7 +258,7 @@ func (d *DevServer) checkPort(input types.ToolInput, start time.Time) (types.Too
 			DurationMs: time.Since(start).Milliseconds(),
 		}, nil
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	return types.ToolResult{
 		Output:     fmt.Sprintf("Port %d is accepting connections", port),
@@ -287,7 +287,7 @@ func waitForPort(port int, timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return true
 		}
 		time.Sleep(500 * time.Millisecond)
