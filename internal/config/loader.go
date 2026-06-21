@@ -132,10 +132,16 @@ func Load(path string) (*Config, error) {
 			// Missing global config is not an error
 		} else {
 			// Warn on unknown TOML keys so typos like [providr] don't silently fail.
+			// meta.Keys() returns fully-qualified dotted paths (e.g. "provider.default"),
+			// so we check only the top-level section name against the known set.
 			knownKeys := knownConfigKeys()
 			for _, key := range meta.Keys() {
 				k := key.String()
-				if !knownKeys[k] {
+				topLevel := k
+				if dotIdx := strings.IndexByte(k, '.'); dotIdx >= 0 {
+					topLevel = k[:dotIdx]
+				}
+				if !knownKeys[topLevel] {
 					slog.Warn("unknown config key, check for typos", "key", k, "file", path)
 				}
 			}

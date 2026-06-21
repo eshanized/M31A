@@ -11,7 +11,7 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
-const intentClassifyTimeout = 5 * time.Second
+const intentClassifyTimeout = 10 * time.Second
 
 // ClassifyIntent uses an LLM to classify the user's input intent.
 // Falls back to the keyword-based ClassifyPrompt on failure or timeout.
@@ -240,7 +240,11 @@ func guessIntentFromKeywords(input string) m31types.IntentType {
 // defaultIntentClassifyPrompt returns a fallback prompt when the embedded
 // template is not available.
 func defaultIntentClassifyPrompt() string {
-	return `You classify user prompts into intent categories. Respond with ONLY a JSON object.
+	return `You are a JSON-only classifier. You MUST respond with exactly one JSON object and nothing else.
+No explanation, no markdown, no code fences — just raw JSON.
 Categories: "feature", "bugfix", "refactor", "question", "explanation", "exploration", "chore".
-Format: {"intent":"...","complexity":"trivial|simple|moderate|complex","confidence":0.0-1.0,"scope":[],"summary":"..."}`
+Complexity: "trivial", "simple", "moderate", "complex".
+Format: {"intent":"...","complexity":"...","confidence":0.0-1.0,"scope":[],"summary":"..."}
+Example input: "add a dark mode toggle"
+Example output: {"intent":"feature","complexity":"simple","confidence":0.9,"scope":["ui"],"summary":"Add dark mode toggle"}`
 }

@@ -67,3 +67,4 @@ image_99999.png
 config.local.toml
 promotion/
 space.txt
+*.log

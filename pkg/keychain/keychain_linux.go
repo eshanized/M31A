@@ -300,7 +300,7 @@ func fmtSecret(sessionPath dbus.ObjectPath, value string) map[string]any {
 }
 
 // isDBusUnavailable returns true if the error indicates D-Bus is not available
-// (session bus not running, no keyring daemon, etc.).
+// (session bus not running, no keyring daemon, incompatible implementation, etc.).
 func isDBusUnavailable(err error) bool {
 	if err == nil {
 		return false
@@ -309,11 +309,16 @@ func isDBusUnavailable(err error) bool {
 	if err == dbus.ErrClosed {
 		return true
 	}
-	// Also catch "connection refused" style errors
-	errStr := err.Error()
+	// Also catch "connection refused" style errors and method-not-implemented
+	// errors from incompatible Secret Service daemons (e.g. gnome-keyring
+	// lacking CreateItem, or older implementations missing expected methods).
+	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "no such file or directory") ||
-		strings.Contains(errStr, "dbus")
+		strings.Contains(errStr, "dbus") ||
+		strings.Contains(errStr, "no such method") ||
+		strings.Contains(errStr, "method not found") ||
+		strings.Contains(errStr, "not implemented")
 }
 
 // isPassUnavailable returns true if the pass CLI is not installed or not available.
