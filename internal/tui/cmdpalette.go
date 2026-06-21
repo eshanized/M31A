@@ -98,7 +98,7 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 		case "diff", "rollback":
 			catMap[cmd.Name] = CatGit
 		// Workflow
-		case "workflow", "plan", "execute", "verify", "ship", "phase", "pause", "metrics", "resume-task":
+		case "workflow", "plan", "execute", "verify", "runtime", "ship", "phase", "pause", "metrics", "resume-task":
 			catMap[cmd.Name] = CatWorkflow
 		default:
 			catMap[cmd.Name] = CatCore
