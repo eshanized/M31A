@@ -169,6 +169,14 @@ func (d *Dispatcher) Register(tool types.Tool) error {
 	return nil
 }
 
+// Unregister removes a tool by name. Used by profile-based filtering to
+// strip tools that a subagent profile should not access.
+func (d *Dispatcher) Unregister(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.tools, name)
+}
+
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
 	start := time.Now()
 
