@@ -13,7 +13,11 @@ import (
 type ReasoningConfig struct {
 	ModelFamily   string         `json:"model_family"`
 	RequestParams map[string]any `json:"request_params"`
-	SSEField      string         `json:"sse_field"`
+	// ExtraBodyParams are nested under "extra_body" in the request body.
+	// Used by NVIDIA NIM which requires chat_template_kwargs and
+	// reasoning_budget inside extra_body rather than at the top level.
+	ExtraBodyParams map[string]any `json:"extra_body_params,omitempty"`
+	SSEField        string         `json:"sse_field"`
 	// Pre-computed field path parts to avoid per-chunk strings.Split
 	SSEFieldParts []string `json:"-"`
 }
@@ -43,6 +47,17 @@ var reasoningParamMap = map[string]ReasoningConfig{
 		ModelFamily:   "qwen",
 		RequestParams: map[string]any{},
 		SSEField:      "choices.0.delta.reasoning_content",
+	},
+	"nvidia/nemotron-3-nano-omni": {
+		ModelFamily:   "nvidia",
+		RequestParams: map[string]any{},
+		ExtraBodyParams: map[string]any{
+			"reasoning_budget": 16384,
+			"chat_template_kwargs": map[string]any{
+				"enable_thinking": true,
+			},
+		},
+		SSEField: "choices.0.delta.reasoning_content",
 	},
 }
 
