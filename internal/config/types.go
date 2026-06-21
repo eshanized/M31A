@@ -256,10 +256,12 @@ type ToolsConfig struct {
 }
 
 type AgentsConfig struct {
-	Default string `toml:"default"`
-	Plan    string `toml:"plan"`
-	Execute string `toml:"execute"`
-	Verify  string `toml:"verify"`
-	Ship    string `toml:"ship"`
-	Discuss string `toml:"discuss"`
+	Default    string `toml:"default"`
+	Initialize string `toml:"initialize"`
+	Research   string `toml:"research"`
+	Plan       string `toml:"plan"`
+	Execute    string `toml:"execute"`
+	Verify     string `toml:"verify"`
+	Ship       string `toml:"ship"`
+	Discuss    string `toml:"discuss"`
 }
