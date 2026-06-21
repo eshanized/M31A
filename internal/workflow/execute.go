@@ -89,12 +89,14 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	var execErrors []string
 	totalToolCalls := 0
 	for _, group := range groups {
+		groupToolCalls := 0
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
 			// H16 fix: removed pre-task checkpoint — too expensive (10+ read+parse+write
 			// cycles per plan). Checkpoints now only at phase boundaries and on heal.
 
 			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
 			totalToolCalls += result.ToolCalls
+			groupToolCalls += result.ToolCalls
 			// Propagate HealsAttempted mutations back to the tasks slice
 			for i := range tasks {
 				if tasks[i].ID == task.ID {
@@ -110,12 +112,13 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			e.logger.Error("execute group failed", "error", err)
 		}
 
-		// Invalidate code intel so next group gets a fresh index reflecting
-		// files written by this group.
-		e.codeIntelMu.Lock()
-		e.codeIntel = nil
-		e.codeIntelBuilt = false
-		e.codeIntelMu.Unlock()
+		// Invalidate code intel only when tool calls were made (files may have changed)
+		if groupToolCalls > 0 {
+			e.codeIntelMu.Lock()
+			e.codeIntel = nil
+			e.codeIntelBuilt = false
+			e.codeIntelMu.Unlock()
+		}
 
 		// M38 fix: only save state after group, not tasks (tasks saved once at end)
 		if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseExecute,
@@ -167,7 +170,43 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		tracker = NewToolCallTracker(3)
 	}
 
+	// Track whether we need to re-check quality gate after a heal
+	qualityGatePending := false
+
 	for task.HealsAttempted < m31types.MaxHealAttempts {
+		// Re-check quality gate after a successful heal before calling LLM again
+		if qualityGatePending {
+			qualityGatePending = false
+			qualityEnabled := e.cfg != nil && e.cfg.Features.ExecuteQualityGate
+			if qualityEnabled && len(task.AcceptanceCriteria) > 0 {
+				qgResult := e.checkAcceptanceCriteria(*task)
+				e.emit(ExecuteQualityGateMsg{
+					TaskID:  task.ID,
+					Passed:  qgResult.Passed,
+					Checked: qgResult.Checked,
+					Failed:  qgResult.Failed,
+				})
+				if qgResult.Passed {
+					// Quality gate now passes — commit and return
+					if len(task.Files) > 0 && e.git != nil {
+						_, err := e.git.CommitWithFiles(
+							fmt.Sprintf("%s: %s", e.gitConfig().CommitPrefix, task.Description),
+							task.Files...,
+						)
+						if err != nil {
+							e.logger.Warn("commit failed", "task", task.ID, "error", err)
+						}
+					}
+					return taskrunner.TaskResult{
+						Success:    true,
+						Output:     "quality gate passed after heal",
+						DurationMs: time.Since(start).Milliseconds(),
+					}
+				}
+				// Still failing — will re-enter LLM loop for another heal attempt
+			}
+		}
+
 		// Build context
 		messages := e.buildExecuteContext(ctx, *task, allTasks, goal)
 
@@ -476,6 +515,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					if !healResult.Success {
 						return healResult
 					}
+					qualityGatePending = true
 					continue
 				}
 			}
@@ -542,17 +582,22 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	}
 	if planMarkdown != "" {
 		var plan *m31types.Plan
-		planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
-		if e.cachedPlan != nil && e.cachedPlanMD5 == planHash {
+		// Use the pre-computed MD5 cache to avoid re-hashing the same plan
+		if e.cachedPlan != nil && e.cachedPlanMD5 != "" && e.planMarkdown == planMarkdown {
 			plan = e.cachedPlan
 		} else {
-			var parseErr error
-			plan, parseErr = ParsePlan(planMarkdown)
-			if parseErr != nil {
-				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
+			planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
+			if e.cachedPlan != nil && e.cachedPlanMD5 == planHash {
+				plan = e.cachedPlan
+			} else {
+				var parseErr error
+				plan, parseErr = ParsePlan(planMarkdown)
+				if parseErr != nil {
+					e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
+				}
+				e.cachedPlan = plan
+				e.cachedPlanMD5 = planHash
 			}
-			e.cachedPlan = plan
-			e.cachedPlanMD5 = planHash
 		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"
@@ -686,12 +731,27 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 			DurationMs: time.Since(start).Milliseconds(),
 		}
 	}
-	for _, tc := range toolCalls {
-		_, err := e.dispatcher.Execute(ctx, tc)
-		if err != nil {
+	// Execute heal tool calls in parallel for faster healing
+	type healResult struct {
+		result m31types.ToolResult
+		err    error
+	}
+	healResults := make([]healResult, len(toolCalls))
+	var wg sync.WaitGroup
+	for i, tc := range toolCalls {
+		wg.Add(1)
+		go func(idx int, call m31types.ToolCall) {
+			defer wg.Done()
+			r, err := e.dispatcher.Execute(ctx, call)
+			healResults[idx] = healResult{result: r, err: err}
+		}(i, tc)
+	}
+	wg.Wait()
+	for i, hr := range healResults {
+		if hr.err != nil {
 			return taskrunner.TaskResult{
 				Success:    false,
-				Error:      fmt.Sprintf("heal tool %s: %v", tc.Name, err),
+				Error:      fmt.Sprintf("heal tool %s: %v", toolCalls[i].Name, hr.err),
 				DurationMs: time.Since(start).Milliseconds(),
 			}
 		}
