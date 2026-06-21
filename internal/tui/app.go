@@ -134,7 +134,7 @@ func (m *AppState) startFileWatcher() tea.Cmd {
 	ch := make(chan tea.Msg, 16)
 	fw, err := NewFileWatcher(workDir, ch)
 	if err != nil {
-		slog.Debug("file watcher init failed", "error", err)
+		slog.Warn("file watcher init failed — sidebar auto-refresh disabled", "error", err)
 		return nil
 	}
 	m.fileWatcher = fw
@@ -298,6 +298,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			Demonstration:           result.Demonstration,
 			ManualVerificationSteps: result.ManualVerificationSteps,
 			WorkflowMode:            result.WorkflowMode,
+				RuntimeSummary:          result.RuntimeSummary,
 		}
 	}
 	// Bootstrap the emitter drain chain so intermediate workflow messages
@@ -568,7 +569,7 @@ func (m *AppState) checkAutoArbitrage() {
 	}
 
 	// Only switch if the savings exceed the threshold (use ShouldArbitrage).
-	currentCost := rec.RecommendedModel.TotalCost
+	currentCost := 0.0
 	if m.activeModel != nil && len(rec.Alternatives) > 0 {
 		// Find current model's cost in alternatives to compare against recommended
 		for _, alt := range rec.Alternatives {
@@ -577,6 +578,18 @@ func (m *AppState) checkAutoArbitrage() {
 				break
 			}
 		}
+	}
+	// If active model not found in alternatives, compute its cost from pricing
+	if currentCost == 0 && m.activeModel != nil {
+		// Estimate tokens using the same method as arbitrage
+		inputTokens := len(m.workflowGoal) / 4
+		outputTokens := inputTokens * 2
+		inputCost := float64(inputTokens) * (m.activeModel.Pricing.InputPerMToken / 1_000_000.0)
+		outputCost := float64(outputTokens) * (m.activeModel.Pricing.OutputPerMToken / 1_000_000.0)
+		currentCost = inputCost + outputCost
+	}
+	if currentCost == 0 {
+		return // cannot determine current model cost, skip arbitrage
 	}
 	if !arbitrage.ShouldArbitrage(currentCost, rec.RecommendedModel.TotalCost, threshold) {
 		return
