@@ -298,7 +298,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 			Demonstration:           result.Demonstration,
 			ManualVerificationSteps: result.ManualVerificationSteps,
 			WorkflowMode:            result.WorkflowMode,
-				RuntimeSummary:          result.RuntimeSummary,
+			RuntimeSummary:          result.RuntimeSummary,
 		}
 	}
 	// Bootstrap the emitter drain chain so intermediate workflow messages

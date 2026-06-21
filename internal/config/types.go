@@ -3,17 +3,17 @@ package config
 import "github.com/eshanized/M31A/internal/types"
 
 type Config struct {
-	Provider    ProviderConfig    `toml:"provider"`
-	Model       ModelConfig       `toml:"model"`
-	UI          UIConfig          `toml:"ui"`
-	Permissions PermissionsConfig `toml:"permissions"`
-	Features    FeaturesConfig    `toml:"features"`
-	Ledger      LedgerConfig      `toml:"ledger"`
-	Tools       ToolsConfig       `toml:"tools"`
-	Agents      AgentsConfig      `toml:"agents"`
-	Git         GitConfig         `toml:"git"`
-	Verify      VerifyConfig      `toml:"verify"`
-	Compaction  CompactionConfig  `toml:"compaction"`
+	Provider     ProviderConfig     `toml:"provider"`
+	Model        ModelConfig        `toml:"model"`
+	UI           UIConfig           `toml:"ui"`
+	Permissions  PermissionsConfig  `toml:"permissions"`
+	Features     FeaturesConfig     `toml:"features"`
+	Ledger       LedgerConfig       `toml:"ledger"`
+	Tools        ToolsConfig        `toml:"tools"`
+	Agents       AgentsConfig       `toml:"agents"`
+	Git          GitConfig          `toml:"git"`
+	Verify       VerifyConfig       `toml:"verify"`
+	Compaction   CompactionConfig   `toml:"compaction"`
 	Instructions InstructionsConfig `toml:"instructions"`
 	Skills       SkillsConfig       `toml:"skills"`
 }

@@ -37,7 +37,7 @@ func NewDevServer(workDir string) *DevServer {
 	}
 }
 
-func (d *DevServer) Name() string        { return "DevServer" }
+func (d *DevServer) Name() string               { return "DevServer" }
 func (d *DevServer) RiskLevel() types.RiskLevel { return types.RiskMedium }
 
 func (d *DevServer) Description() string {

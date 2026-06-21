@@ -43,8 +43,8 @@ type Dependencies struct {
 	Registry      *provider.Registry
 	ActiveModel   *types.ModelInfo
 	Logger        *slog.Logger
-	Worktrees     WorktreeOps       // optional; nil = always use IsolationDefault
-	NewDispatcher DispatcherFactory // required: builds a dispatcher per workspace
+	Worktrees     WorktreeOps                             // optional; nil = always use IsolationDefault
+	NewDispatcher DispatcherFactory                       // required: builds a dispatcher per workspace
 	Profiles      map[string]config.SubagentProfileConfig // optional: user profile overrides
 }
 

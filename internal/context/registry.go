@@ -17,7 +17,7 @@ type Change struct {
 type ChangeType int
 
 const (
-	ChangeAdded   ChangeType = iota
+	ChangeAdded ChangeType = iota
 	ChangeUpdated
 	ChangeRemoved
 )

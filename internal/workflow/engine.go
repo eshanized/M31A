@@ -291,7 +291,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		logger:      slog.Default(),
 		startTime:   time.Now(),
 		execCommand: exec.Command,
-		compactor:       compaction.New(compactionConfig(opts.Config), opts.TokenEst),
+		compactor:   compaction.New(compactionConfig(opts.Config), opts.TokenEst),
 		contextRegistry: ctxsrc.NewRegistry(
 			ctxsrc.DateTimeSource{},
 			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
@@ -581,18 +581,18 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 				Success: healResult.Success,
 				Error:   healResult.Error,
 			})
-		if healResult.Success {
-			newResult := e.verifyTask(verifyCtx, tasks[i])
-			if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
-				tasks[i].Status = m31types.StatusDone
+			if healResult.Success {
+				newResult := e.verifyTask(verifyCtx, tasks[i])
+				if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
+					tasks[i].Status = m31types.StatusDone
+				} else {
+					tasks[i].Status = m31types.StatusFailed
+				}
 			} else {
-				tasks[i].Status = m31types.StatusFailed
+				if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
+					tasks[i].Status = m31types.StatusUnrecoverable
+				}
 			}
-		} else {
-			if tasks[i].HealsAttempted >= m31types.MaxHealAttempts {
-				tasks[i].Status = m31types.StatusUnrecoverable
-			}
-		}
 			if saveErr := e.sessionMgr.SaveTasks(e.sessionID, tasks); saveErr != nil {
 				return true, fmt.Errorf("heal attempted but failed to save tasks: %w", saveErr)
 			}

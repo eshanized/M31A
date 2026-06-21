@@ -114,31 +114,31 @@ Guidelines:
 func BuiltinProfiles() map[string]AgentProfile {
 	return map[string]AgentProfile{
 		"build": {
-			Name:        "build",
-			Description: "Default agent. Full tool access for executing tasks.",
-			Mode:        ModePrimary,
+			Name:         "build",
+			Description:  "Default agent. Full tool access for executing tasks.",
+			Mode:         ModePrimary,
 			SystemPrompt: promptBuild,
 		},
 		"plan": {
-			Name:        "plan",
-			Description: "Planning agent. Read-only except plan documents.",
-			Mode:        ModePrimary,
+			Name:         "plan",
+			Description:  "Planning agent. Read-only except plan documents.",
+			Mode:         ModePrimary,
 			SystemPrompt: promptPlan,
 			DeniedTools: []string{
 				"Bash", "FileWrite", "Edit", "FileDelete", "FileMove", "DevServer",
 			},
 		},
 		"general": {
-			Name:        "general",
-			Description: "General-purpose agent for multi-step tasks and parallel work.",
-			Mode:        ModeSubagent,
+			Name:         "general",
+			Description:  "General-purpose agent for multi-step tasks and parallel work.",
+			Mode:         ModeSubagent,
 			SystemPrompt: promptGeneral,
-			DeniedTools: []string{"TodoWrite", "Agent"},
+			DeniedTools:  []string{"TodoWrite", "Agent"},
 		},
 		"explore": {
-			Name:        "explore",
-			Description: "Fast codebase exploration. Read-only search tools.",
-			Mode:        ModeSubagent,
+			Name:         "explore",
+			Description:  "Fast codebase exploration. Read-only search tools.",
+			Mode:         ModeSubagent,
 			SystemPrompt: promptExplore,
 			AllowedTools: []string{
 				"Glob", "Grep", "FileRead", "FileList",
@@ -146,9 +146,9 @@ func BuiltinProfiles() map[string]AgentProfile {
 			},
 		},
 		"security": {
-			Name:        "security",
-			Description: "Security audit agent for vulnerability scanning and code security review.",
-			Mode:        ModeSubagent,
+			Name:         "security",
+			Description:  "Security audit agent for vulnerability scanning and code security review.",
+			Mode:         ModeSubagent,
 			SystemPrompt: promptSecurity,
 			AllowedTools: []string{
 				"Glob", "Grep", "FileRead", "FileList",
@@ -159,9 +159,9 @@ func BuiltinProfiles() map[string]AgentProfile {
 			},
 		},
 		"review": {
-			Name:        "review",
-			Description: "Code review agent for quality and correctness analysis.",
-			Mode:        ModeSubagent,
+			Name:         "review",
+			Description:  "Code review agent for quality and correctness analysis.",
+			Mode:         ModeSubagent,
 			SystemPrompt: promptReview,
 			AllowedTools: []string{
 				"Glob", "Grep", "FileRead", "FileList",

@@ -39,7 +39,7 @@ func NewHTTPCheck() *HTTPCheck {
 }
 
 func (h *HTTPCheck) Name() string               { return "HTTPCheck" }
-func (h *HTTPCheck) RiskLevel() types.RiskLevel  { return types.RiskSafe }
+func (h *HTTPCheck) RiskLevel() types.RiskLevel { return types.RiskSafe }
 
 func (h *HTTPCheck) Description() string {
 	return `Make HTTP requests to URLs and validate responses.

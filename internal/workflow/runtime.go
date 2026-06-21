@@ -30,15 +30,15 @@ type SmokeTestResult struct {
 
 // RuntimeSummary holds the overall runtime verification results.
 type RuntimeSummary struct {
-	ProjectType string              `json:"project_type"`
-	ServerURL   string              `json:"server_url"`
-	ServerReady bool                `json:"server_ready"`
-	Tests       []SmokeTestResult   `json:"tests"`
-	TotalPassed int                 `json:"total_passed"`
-	TotalFailed int                 `json:"total_failed"`
-	TotalTests  int                 `json:"total_tests"`
-	Errors      []string            `json:"errors,omitempty"`
-	DurationMs  int64               `json:"duration_ms"`
+	ProjectType string            `json:"project_type"`
+	ServerURL   string            `json:"server_url"`
+	ServerReady bool              `json:"server_ready"`
+	Tests       []SmokeTestResult `json:"tests"`
+	TotalPassed int               `json:"total_passed"`
+	TotalFailed int               `json:"total_failed"`
+	TotalTests  int               `json:"total_tests"`
+	Errors      []string          `json:"errors,omitempty"`
+	DurationMs  int64             `json:"duration_ms"`
 }
 
 // runtimeServerEntry tracks a managed dev server process.
@@ -414,22 +414,22 @@ func (e *Engine) discoverRoutes(goal string) []string {
 	lower := strings.ToLower(goal)
 
 	routeHints := map[string][]string{
-		"about":    {"/about"},
-		"menu":     {"/menu"},
-		"contact":  {"/contact"},
-		"blog":     {"/blog"},
-		"login":    {"/login"},
-		"signup":   {"/signup", "/register"},
-		"api":      {"/api", "/api/health"},
-		"docs":     {"/docs"},
-		"home":     {"/"},
-		"product":  {"/products"},
-		"cart":     {"/cart"},
-		"checkout": {"/checkout"},
-		"search":   {"/search"},
-		"profile":  {"/profile"},
-		"settings": {"/settings"},
-		"admin":    {"/admin"},
+		"about":     {"/about"},
+		"menu":      {"/menu"},
+		"contact":   {"/contact"},
+		"blog":      {"/blog"},
+		"login":     {"/login"},
+		"signup":    {"/signup", "/register"},
+		"api":       {"/api", "/api/health"},
+		"docs":      {"/docs"},
+		"home":      {"/"},
+		"product":   {"/products"},
+		"cart":      {"/cart"},
+		"checkout":  {"/checkout"},
+		"search":    {"/search"},
+		"profile":   {"/profile"},
+		"settings":  {"/settings"},
+		"admin":     {"/admin"},
 		"dashboard": {"/dashboard"},
 	}
 

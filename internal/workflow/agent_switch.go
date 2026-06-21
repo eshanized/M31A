@@ -13,9 +13,9 @@ import (
 // AgentSwitchMsg is emitted when the engine suggests switching from planner
 // to builder agent after plan completion.
 type AgentSwitchMsg struct {
-	FromAgent string
-	ToAgent   string
-	PlanPath  string
+	FromAgent   string
+	ToAgent     string
+	PlanPath    string
 	PlanContent string
 }
 
