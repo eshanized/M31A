@@ -50,6 +50,10 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			continue
 		}
 
+		// Reset heal counter for verify phase — execute-phase heals
+		// should not consume the verify-phase heal budget
+		tasks[i].HealsAttempted = 0
+
 		result := e.verifyTask(ctx, task)
 		verifyResults[task.ID] = result
 
@@ -227,6 +231,11 @@ func (e *Engine) findRootCommit() (string, error) {
 func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, task m31types.Task, verifyResult VerificationResult, goal string) bool {
 	if e.git == nil {
 		return false
+	}
+
+	// Clean up any leftover bisect state from a previous interrupted run
+	if _, resetErr := e.git.Run("bisect", "reset"); resetErr == nil {
+		e.logger.Info("cleaned up leftover bisect state from previous run")
 	}
 
 	headHash, err := e.git.HeadHash()
