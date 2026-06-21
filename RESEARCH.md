@@ -82,15 +82,15 @@ M31 Autonomous follows a strict layered architecture with a clear dependency rul
                                │
                     ┌──────────┼──────────┐
                     ▼          ▼          ▼
-              ┌──────────┐ ┌──────────┐ ┌──────────┐
+              ┌──────────┐ ┌───────────┐ ┌──────────┐
               │ Context  │ │ Compaction│ │  Skills  │
               │ Registry │ │  Engine   │ │  System  │
-              └──────────┘ └──────────┘ └──────────┘
+              └──────────┘ └───────────┘ └──────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Infrastructure Layer                          │
-│    Config · Errors · Tokens · CodeIntel · Git · Coordinator    │
+│    Config · Errors · Tokens · CodeIntel · Git · Coordinator     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -410,25 +410,25 @@ Bubble Tea implements the Elm architecture (also known as The Elm Architecture o
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Bubble Tea Runtime                 │
-│                                                       │
+│                    Bubble Tea Runtime               │
+│                                                     │
 │   ┌─────────┐    msg     ┌─────────────────────┐    │
 │   │         │ ─────────> │                     │    │
 │   │  Model  │            │   Update(msg)       │    │
 │   │ (state) │ <───────── │   → (newModel, cmd) │    │
 │   │         │  new state │                     │    │
 │   └─────────┘            └────────┬────────────┘    │
-│        │                          │                   │
-│        │ View()                   │ cmd               │
-│        ▼                          ▼                   │
-│   ┌──────────┐            ┌──────────────┐           │
-│   │ Terminal │            │  Command     │           │
-│   │ Output   │            │  (side effect)│           │
-│   └──────────┘            └──────────────┘           │
-│                                  │                    │
-│                                  │ produces new msg   │
-│                                  ▼                    │
-│                           Back to Update()            │
+│        │                          │                 │
+│        │ View()                   │ cmd             │
+│        ▼                          ▼                 │
+│   ┌──────────┐            ┌───────────────┐         │
+│   │ Terminal │            │  Command      │         │
+│   │ Output   │            │  (side effect)│         │
+│   └──────────┘            └───────────────┘         │
+│                                  │                  │
+│                                  │ produces new msg │
+│                                  ▼                  │
+│                           Back to Update()          │
 └─────────────────────────────────────────────────────┘
 ```
 
