@@ -297,6 +297,7 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("refine", handleRefine, "Refine the current plan with feedback")
 	_ = r.Register("execute", handlePhase, "Alias for /phase execute")
 	_ = r.Register("verify", handlePhase, "Alias for /phase verify")
+	_ = r.Register("runtime", handlePhase, "Alias for /phase runtime")
 	_ = r.Register("ship", handlePhase, "Alias for /phase ship")
 	_ = r.Register("phase", handlePhase, "Show or transition phase")
 	_ = r.Register("pause", handlePause, "Pause workflow")
