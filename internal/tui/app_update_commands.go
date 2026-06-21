@@ -273,6 +273,12 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 	// instead of the file tree while the agent loop is running.
 	if m.sidebarModel != nil {
 		m.sidebarModel.SetMode(SidebarModeTodo)
+		m.sidebarModel.AddTodoItem(SidebarTodoItem{
+			Content:  input,
+			Status:   "in_progress",
+			Priority: "medium",
+			Source:   "agent",
+		})
 	}
 
 	cmd, ch := AgentLoop(ctx, p, m.activeModel.ID, m.dispatcher, msgs, sysContent, m.activeModel.ContextLength)
