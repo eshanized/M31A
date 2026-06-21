@@ -16,6 +16,7 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/fileutil"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/coordinator"
 )
 
 // Manager provides session operations. Sessions are stored project-locally
@@ -28,6 +29,7 @@ type Manager struct {
 	maxRecentModels int           // max recent models to track (default 10)
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
 	lock            *fileutil.FileLock
+	coordinator     *coordinator.Coordinator[string] // per-session concurrency control
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -57,6 +59,7 @@ func NewManager(baseDir, workDir string, opts ManagerOpts) *Manager {
 		maxRecentModels: opts.MaxRecentModels,
 		sessionCacheTTL: opts.SessionCacheTTL,
 		lock:            fileutil.NewFileLock(filepath.Join(projectDir, "session.lock")),
+		coordinator:     coordinator.New[string](),
 	}
 }
 
@@ -73,6 +76,12 @@ func (m *Manager) BaseDir() string {
 // WorkDir returns the project root directory.
 func (m *Manager) WorkDir() string {
 	return m.workDir
+}
+
+// Coordinator returns the session run coordinator for managing concurrent
+// session execution. Use Run/Interrupt/AwaitIdle to control session drains.
+func (m *Manager) Coordinator() *coordinator.Coordinator[string] {
+	return m.coordinator
 }
 
 // sessionJSONPath returns the path to session.json in the project directory.
