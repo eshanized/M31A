@@ -158,6 +158,9 @@ type MessageSegment struct {
 	StartedAt  time.Time `json:"started_at,omitempty"`
 }
 
+// MessageCompaction is the segment type for auto-compaction summaries.
+const MessageCompaction = "compaction"
+
 type ToolCall struct {
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
@@ -316,4 +319,19 @@ type HealthStatus struct {
 	Status    string `json:"status"`
 	LatencyMs int64  `json:"latency_ms"`
 	Error     string `json:"error,omitempty"`
+}
+
+// DiffSummary holds the diff footprint of a session turn.
+type DiffSummary struct {
+	Files     []FileDiff `json:"files"`
+	Additions int        `json:"additions"`
+	Deletions int        `json:"deletions"`
+}
+
+// FileDiff holds per-file diff metadata.
+type FileDiff struct {
+	File      string `json:"file"`
+	Status    string `json:"status"` // added, deleted, modified
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
 }

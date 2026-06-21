@@ -71,6 +71,10 @@ const (
 	DefaultMaxBackupsPerFile    = 10
 	DefaultWebfetchMaxRedirects = 5
 
+	// Tool output bounding defaults
+	DefaultOutputMaxLines = 2000
+	DefaultOutputMaxBytes = 51200
+
 	// CompressCooldown is the cooldown between /compress commands
 	CompressCooldown = 60 * time.Second
 	// ChannelSendTimeout is the timeout for sending on tea.Cmd channels
