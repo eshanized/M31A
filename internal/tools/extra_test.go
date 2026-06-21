@@ -3279,7 +3279,7 @@ func TestNormalizeWhitespace_TrailingWhitespace(t *testing.T) {
 
 func TestAgent_Name(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	if a.Name() != "Agent" {
 		t.Errorf("expected 'Agent', got %s", a.Name())
 	}
@@ -3287,7 +3287,7 @@ func TestAgent_Name(t *testing.T) {
 
 func TestAgent_RiskLevel(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	if a.RiskLevel() != types.RiskSafe {
 		t.Errorf("expected RiskSafe, got %s", a.RiskLevel())
 	}
@@ -3295,7 +3295,7 @@ func TestAgent_RiskLevel(t *testing.T) {
 
 func TestAgent_Description(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	if a.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -3303,7 +3303,7 @@ func TestAgent_Description(t *testing.T) {
 
 func TestAgent_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	schema := a.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty schema")
@@ -3316,7 +3316,7 @@ func TestAgent_ParameterSchema(t *testing.T) {
 
 func TestAgent_Execute_NilManager(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3334,7 +3334,7 @@ func TestAgent_Execute_NilManager(t *testing.T) {
 
 func TestAgent_Execute_MissingDescription(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3352,7 +3352,7 @@ func TestAgent_Execute_MissingDescription(t *testing.T) {
 
 func TestAgent_Execute_MissingPrompt(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3370,7 +3370,7 @@ func TestAgent_Execute_MissingPrompt(t *testing.T) {
 
 func TestAgent_Execute_UnknownIsolation(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nil, false, 0)
+	a := NewAgent(nil, false, 0, nil)
 	result, err := a.Execute(context.Background(), types.ToolInput{
 		Name: "Agent",
 		Params: map[string]any{
@@ -3434,7 +3434,7 @@ func TestDispatcherAdapter_Stop(t *testing.T) {
 func TestNewDispatcherFactory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	factory := NewDispatcherFactory(dir, dir, nil, nil)
+	factory := NewDispatcherFactory(dir, dir, nil, nil, nil)
 	d, err := factory(dir)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
@@ -3449,7 +3449,7 @@ func TestNewDispatcherFactory_WithManager(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	// Manager requires Dependencies, but factory just passes nil manager check
-	factory := NewDispatcherFactory(dir, dir, nil, nil)
+	factory := NewDispatcherFactory(dir, dir, nil, nil, nil)
 	d, err := factory(dir)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)

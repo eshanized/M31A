@@ -33,6 +33,8 @@ func (f *fakeDispatcher) ListTools() []ToolDescriptor {
 	}
 }
 
+func (f *fakeDispatcher) UnregisterTool(_ string) {}
+
 func (f *fakeDispatcher) Stop() { f.stop.Store(true) }
 
 // stubProvider is a minimal LLMProvider for tests that need a registry.

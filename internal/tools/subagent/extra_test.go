@@ -698,6 +698,16 @@ func (d *mockDispatcher) ListTools() []ToolDescriptor {
 	return d.tools
 }
 
+func (d *mockDispatcher) UnregisterTool(name string) {
+	filtered := d.tools[:0]
+	for _, t := range d.tools {
+		if t.Name != name {
+			filtered = append(filtered, t)
+		}
+	}
+	d.tools = filtered
+}
+
 func (d *mockDispatcher) Stop() {}
 
 type mockWorktreeOps struct {
