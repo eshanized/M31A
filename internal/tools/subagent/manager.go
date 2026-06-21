@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -44,6 +45,7 @@ type Dependencies struct {
 	Logger        *slog.Logger
 	Worktrees     WorktreeOps       // optional; nil = always use IsolationDefault
 	NewDispatcher DispatcherFactory // required: builds a dispatcher per workspace
+	Profiles      map[string]config.SubagentProfileConfig // optional: user profile overrides
 }
 
 // Manager orchestrates subagent lifecycles.
@@ -57,11 +59,12 @@ type Manager struct {
 
 // Subagent is the live handle for a running child agent.
 type Subagent struct {
-	Info   SubagentInfo
-	cancel context.CancelFunc
-	done   chan struct{} // closed when the loop exits
-	req    SpawnRequest
-	mu     sync.Mutex // protects Info mutations from the loop goroutine
+	Info    SubagentInfo
+	Profile AgentProfile // resolved agent profile
+	cancel  context.CancelFunc
+	done    chan struct{} // closed when the loop exits
+	req     SpawnRequest
+	mu      sync.Mutex // protects Info mutations from the loop goroutine
 }
 
 // NewManager creates a Manager ready to accept spawns.
@@ -91,11 +94,30 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 	if req.Isolation == "" {
 		req.Isolation = IsolationDefault
 	}
+	if req.SubagentType == "" {
+		req.SubagentType = "general"
+	}
+
+	// Resolve agent profile.
+	profile, ok := ResolveProfile(req.SubagentType, m.deps.Profiles)
+	if !ok {
+		return "", nil, errors.New("subagent: unknown agent type: " + req.SubagentType)
+	}
+
+	// Apply profile budget overrides (request-level takes precedence).
 	if req.MaxTools <= 0 {
-		req.MaxTools = DefaultMaxTools
+		if profile.MaxTools > 0 {
+			req.MaxTools = profile.MaxTools
+		} else {
+			req.MaxTools = DefaultMaxTools
+		}
 	}
 	if req.MaxTokens <= 0 {
-		req.MaxTokens = DefaultMaxTokens
+		if profile.MaxTokens > 0 {
+			req.MaxTokens = profile.MaxTokens
+		} else {
+			req.MaxTokens = DefaultMaxTokens
+		}
 	}
 
 	if m.resolveProvider() == nil {
@@ -114,7 +136,11 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 		return "", nil, errors.New("subagent: generate id: " + err.Error())
 	}
 
+	// Model: request > profile > parent active model.
 	modelID := req.ModelID
+	if modelID == "" && profile.Model != "" {
+		modelID = profile.Model
+	}
 	if modelID == "" && m.deps.ActiveModel != nil {
 		modelID = m.deps.ActiveModel.ID
 	}
@@ -138,27 +164,30 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 	ctx, cancel := context.WithCancel(parentCtx)
 	sa := &Subagent{
 		Info: SubagentInfo{
-			ID:          id,
-			Name:        req.Name,
-			Description: req.Description,
-			Status:      StatusRunning,
-			Isolation:   req.Isolation,
-			Worktree:    worktree,
-			ModelID:     modelID,
-			StartedAt:   time.Now(),
+			ID:           id,
+			Name:         req.Name,
+			SubagentType: req.SubagentType,
+			Description:  req.Description,
+			Status:       StatusRunning,
+			Isolation:    req.Isolation,
+			Worktree:     worktree,
+			ModelID:      modelID,
+			StartedAt:    time.Now(),
 		},
-		cancel: cancel,
-		done:   make(chan struct{}),
-		req:    req,
+		Profile: profile,
+		cancel:  cancel,
+		done:    make(chan struct{}),
+		req:     req,
 	}
 	m.agents.Store(id, sa)
 
 	m.emit(SubagentEvent{
-		Type:      EventSpawned,
-		AgentID:   id,
-		Name:      req.Name,
-		Timestamp: time.Now(),
-		Worktree:  worktree,
+		Type:         EventSpawned,
+		AgentID:      id,
+		Name:         req.Name,
+		SubagentType: req.SubagentType,
+		Timestamp:    time.Now(),
+		Worktree:     worktree,
 	})
 
 	go m.runLoop(ctx, sa)
@@ -290,6 +319,14 @@ func (m *Manager) runLoop(ctx context.Context, sa *Subagent) {
 	}
 	defer dispatcher.Stop()
 
+	// Apply profile-based tool filtering (allowlist/denylist).
+	ApplyToolFilter(dispatcher, sa.Profile)
+
+	effectiveMaxTurns := maxTurns
+	if sa.Profile.MaxTurns > 0 {
+		effectiveMaxTurns = sa.Profile.MaxTurns
+	}
+
 	l := &loop{
 		manager:    m,
 		agent:      sa,
@@ -298,6 +335,7 @@ func (m *Manager) runLoop(ctx context.Context, sa *Subagent) {
 		modelID:    sa.Info.ModelID,
 		maxTools:   sa.req.MaxTools,
 		maxTokens:  sa.req.MaxTokens,
+		maxTurns_:  effectiveMaxTurns,
 	}
 	l.run(ctx)
 }
