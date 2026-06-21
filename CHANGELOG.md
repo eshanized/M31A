@@ -4,7 +4,65 @@ All notable changes to M31 Autonomous will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [Released]
+
+## [1.2.0] - 2026-06-21
+
+### Added
+- LLM-based intent classification for REPL input routing
+- Comprehensive session observability pipeline (metrics)
+- Chunked plan generation with outline and wave expansion
+- Pre-plan research step and pre-ship checklist with memory flock
+- Deep project analysis and environment preflight
+- Execute preflight, quality gates, and loop detection
+- Discuss quality checking and completeness scoring
+- Plan checker with revision loop and coverage gates
+- Structured verification report generation
+- Prompt templates and extended PromptRegistry
+- Workflow enhancement feature flags and event message types
+- Auto-compression for context window overflow
+- Context overflow detection patterns for providers
+- Context usage sparkline in header context meter
+- Visual screen transitions with slide-left/right and cross-fade effects
+- Improved toast notification styling with rounded cards and depth-based shadows
+- Incremental render diff engine using ANSI cursor positioning
+- Flex box model with row/column solver, card renderer, modal overlay, and Z-order stack compositing
+- Base Context/Component interface, fuzzy search, focus ring, empty state, shortcut tips, and virtual viewport
+- High-contrast accessibility theme and StyleCache for pre-computed lipgloss styles
+- Screen reader announcement helpers using iTerm2 protocol
+- `reduced_motion` accessibility option in UIConfig
+- Subagent depth limit (`MaxAgentDepth=2`)
+- Subagent token budget enforcement and workspace context in system prompt
+- Subagent orphaned worktree directory cleanup
+- Dispatcher concurrency limit and per-risk-level rate limits
+- `ToolError` type for structured error returns with hints
+- FileMove context cancellation check
+- FileList sorting control
+- Glob file type filtering
+- Grep context lines and fixed-string search
+- FileRead line-level offset/limit for efficient partial reads
+- Edit 7-strategy cascade, replace-all, and collision-safe backups
+- Bash dangerous command blocklist for defense-in-depth
+- WebSearch DNS cache to prevent TOCTOU rebinding
+- CodeComplexity polyglot support (multiple languages)
+
+### Fixed
+- Drain stale responses from channels on dispatcher stop
+- Short-circuit fallback search on first live provider
+- Use staleTTL for cache expiry check
+- Recursively skip empty SSE events
+- Fix `/flush` to use `tea.ClearScreen` instead of screen switch
+- Log subagent cleanup errors and fix transition tick to use configurable FPS
+
+### Changed
+- Unified file locking abstraction for cross-platform support
+- Optimize import graph and symbol indexing
+- Replace `WriteString` with `fmt.Fprintf` in metrics and workflow
+- Auto-truncation to preflight context check
+- Remove redundant agent tool progress tracking from sidebar
+- Extract `forwardMsgToScreen` helper
+- Consolidate subagent budget exhaustion messages
+- Update README workflow, features, and docs for major enhancements
 
 ## [1.1.0] - 2026-06-18
 
