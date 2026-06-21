@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tools/subagent"
@@ -28,6 +29,9 @@ type Agent struct {
 	isChild bool
 	// depth tracks nesting depth (0 = root, 1 = child, 2 = grandchild).
 	depth int
+	// profiles holds user-configurable agent profile overrides for
+	// dynamic description generation.
+	profiles map[string]config.SubagentProfileConfig
 }
 
 // MaxAgentDepth is the maximum nesting depth for subagents.
@@ -36,30 +40,49 @@ type Agent struct {
 const MaxAgentDepth = 2
 
 // NewAgent creates an Agent tool backed by the given manager.
-func NewAgent(m *subagent.Manager, isChild bool, depth int) *Agent {
-	return &Agent{manager: m, isChild: isChild, depth: depth}
+func NewAgent(m *subagent.Manager, isChild bool, depth int, profiles map[string]config.SubagentProfileConfig) *Agent {
+	return &Agent{manager: m, isChild: isChild, depth: depth, profiles: profiles}
 }
 
 func (t *Agent) Name() string               { return "Agent" }
 func (t *Agent) RiskLevel() types.RiskLevel { return types.RiskSafe }
 
 func (t *Agent) Description() string {
-	return `Spawn a parallel subagent to perform an independent task.
+	var sb strings.Builder
+	sb.WriteString(`Launch a new agent to handle complex, multistep tasks autonomously.
 
-Use this when:
-- You need to explore multiple code paths in parallel (grep + read + bash).
-- You want to delegate a well-scoped investigation to a focused child agent.
-- The task can run without user interaction.
+When using the Agent tool, you must specify a subagent_type parameter to select which agent type to use.
 
+When NOT to use the Agent tool:
+- If you want to read a specific file path, use FileRead or Glob instead
+- If you are searching for a specific pattern, use Grep instead
+- If no available agent is a good fit for the task, use other tools directly
+
+Usage notes:
+1. Launch multiple agents concurrently whenever possible to maximize performance
+2. Once you have delegated work, do not duplicate that work yourself
+3. When the agent is done, it returns a single message with its findings
+4. Each agent invocation starts fresh unless you provide task_id to resume
+5. Clearly tell the agent whether you expect it to write code or just research
+
+Available agent types:`)
+	sb.WriteString("\n")
+
+	for _, p := range subagent.ListSubagentProfiles(t.profiles) {
+		fmt.Fprintf(&sb, "- %s: %s\n", p.Name, p.Description)
+	}
+
+	sb.WriteString(`
 Parameters:
 - description (required, 3-5 words): short task label shown in the TUI.
 - prompt (required): full task description with concrete objectives.
-- name (optional): stable label for the subagent (e.g., "tui-explorer").
+- subagent_type (required): the type of specialized agent to use.
+- name (optional): stable label for the subagent.
 - isolation: "worktree" (own git worktree, default) or "default" (shared dir).
 - run_in_background: true (default, async) or false (block until done).
 
-Each subagent runs in its own git worktree with full tool access. Max 8 run
-concurrently. Do not spawn more than needed — each subagent costs tokens.`
+Max 8 run concurrently. Do not spawn more than needed — each subagent costs tokens.`)
+	return sb.String()
 }
 
 // ParameterSchema returns the JSON schema exposed to the LLM.
@@ -67,13 +90,14 @@ func (t *Agent) ParameterSchema() string {
 	return `{
   "type": "object",
   "properties": {
-    "description": {"type": "string", "description": "Short 3-5 word task label"},
-    "prompt":      {"type": "string", "description": "Full task description"},
-    "name":        {"type": "string", "description": "Optional stable label"},
-    "isolation":   {"type": "string", "enum": ["worktree","default"], "default": "worktree"},
+    "description":     {"type": "string", "description": "Short 3-5 word task label"},
+    "prompt":          {"type": "string", "description": "Full task description"},
+    "subagent_type":   {"type": "string", "description": "The type of specialized agent to use"},
+    "name":            {"type": "string", "description": "Optional stable label"},
+    "isolation":       {"type": "string", "enum": ["worktree","default"], "default": "worktree"},
     "run_in_background": {"type": "boolean", "default": true}
   },
-  "required": ["description", "prompt"]
+  "required": ["description", "prompt", "subagent_type"]
 }`
 }
 
@@ -91,6 +115,7 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 	var req struct {
 		Description     string `json:"description"`
 		Prompt          string `json:"prompt"`
+		SubagentType    string `json:"subagent_type"`
 		Name            string `json:"name"`
 		Isolation       string `json:"isolation"`
 		RunInBackground *bool  `json:"run_in_background"`
@@ -107,6 +132,9 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 	}
 	if req.Prompt == "" {
 		return types.ToolResult{Error: "Agent: 'prompt' is required"}, nil
+	}
+	if req.SubagentType == "" {
+		req.SubagentType = "general"
 	}
 
 	var iso subagent.Isolation
@@ -129,11 +157,12 @@ func (t *Agent) Execute(ctx context.Context, input types.ToolInput) (types.ToolR
 	}
 
 	spawnReq := subagent.SpawnRequest{
-		Description: req.Description,
-		Prompt:      req.Prompt,
-		Name:        req.Name,
-		Isolation:   iso,
-		Background:  background,
+		Description:  req.Description,
+		Prompt:       req.Prompt,
+		SubagentType: req.SubagentType,
+		Name:         req.Name,
+		Isolation:    iso,
+		Background:   background,
 	}
 
 	id, sa, err := t.manager.Spawn(ctx, spawnReq)
@@ -208,6 +237,8 @@ func (a *dispatcherAdapter) ListTools() []subagent.ToolDescriptor {
 
 func (a *dispatcherAdapter) Stop() { a.d.Stop() }
 
+func (a *dispatcherAdapter) UnregisterTool(name string) { a.d.Unregister(name) }
+
 // NewDispatcherFactory returns a DispatcherFactory that creates a fresh
 // tools.Dispatcher for each subagent workspace. The factory registers the
 // Agent tool (with isChild=true) on every dispatcher so a subagent can
@@ -215,14 +246,14 @@ func (a *dispatcherAdapter) Stop() { a.d.Stop() }
 //
 // backupDir and sessionsDir are shared across all dispatchers; permCfg is
 // reused verbatim so permission rules apply uniformly.
-func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.PermissionsConfig, manager *subagent.Manager) subagent.DispatcherFactory {
+func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.PermissionsConfig, manager *subagent.Manager, profiles map[string]config.SubagentProfileConfig) subagent.DispatcherFactory {
 	return func(workDir string) (subagent.ToolDispatcher, error) {
 		d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg)
 		if err != nil {
 			return nil, err
 		}
 		if manager != nil {
-			if err := d.Register(NewAgent(manager, true, 1)); err != nil {
+			if err := d.Register(NewAgent(manager, true, 1, profiles)); err != nil {
 				d.Stop()
 				return nil, err
 			}
