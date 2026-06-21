@@ -55,6 +55,11 @@ func TestUserMessage(t *testing.T) {
 		{"HTTP 429", errors.New("HTTP 429 Too Many Requests"), "Rate limited — retry in a moment"},
 		{"HTTP 503", errors.New("HTTP 503 Service Unavailable"), "Provider temporarily unavailable — try again later"},
 
+		// NVIDIA-specific model-not-found patterns
+		{"model unavailable or deprecated", fmt.Errorf("model %q is unavailable or deprecated on NVIDIA NIM", "01-ai/yi-large"), "Model not found — run /models to see available models"},
+		{"model not found generic", errors.New("model not found: some-model"), "Model not found — run /models to see available models"},
+		{"generic not found", errors.New("resource not found"), "Resource not found — check the model or endpoint"},
+
 		// Unknown error
 		{"unknown", errors.New("something completely unexpected"), "An unexpected error occurred — check the logs or try again"},
 	}
