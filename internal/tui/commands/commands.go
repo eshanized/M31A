@@ -67,6 +67,7 @@ type CommandContext struct {
 	FrecentHistory  *history.FrecentHistory
 	SubagentManager *subagent.Manager
 	ClearMessages   func()
+	FlushViewport   func()
 	CopyError       func() tea.Cmd
 	AgentMode       *bool
 	SetAgentMode    func(bool)

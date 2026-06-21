@@ -68,6 +68,7 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 			}
 			if m.replModel != nil {
 				ctx.ClearMessages = m.replModel.ClearMessages
+				ctx.FlushViewport = m.replModel.FlushViewport
 				ctx.CopyError = m.replModel.copyLastError
 			}
 			result, handled := m.cmdRegistry.Execute(input, ctx)

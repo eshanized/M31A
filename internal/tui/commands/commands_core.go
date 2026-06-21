@@ -240,15 +240,15 @@ func handleChat(_ []string, ctx CommandContext) CommandResult {
 	}
 }
 
-// handleFlush clears the terminal screen and scrolls to the top, preserving
-// conversation messages but giving a clean viewport.
-func handleFlush(_ []string, _ CommandContext) CommandResult {
+// handleFlush resets the viewport scroll position to the bottom, preserving
+// conversation messages but giving a clean viewport state.
+func handleFlush(_ []string, ctx CommandContext) CommandResult {
+	if ctx.FlushViewport != nil {
+		ctx.FlushViewport()
+	}
 	return CommandResult{
 		Success: true,
 		Message: "Screen flushed.",
-		Cmd: func() tea.Msg {
-			return tea.ClearScreen()
-		},
 	}
 }
 

@@ -273,6 +273,16 @@ func (m *ReplModel) RefreshViewport() {
 	m.renderMessages()
 }
 
+// FlushViewport resets the viewport scroll position to the bottom and forces
+// a full re-render of the message content. Messages are preserved.
+func (m *ReplModel) FlushViewport() {
+	m.cachedMessageContent = ""
+	m.cachedMessageCount = 0
+	m.renderMessages()
+	m.viewport.GotoBottom()
+	m.userScrolled = false
+}
+
 // ─── Status getters ───────────────────────────────────────────────────────────
 
 // SpinnerTick returns a tea.Cmd that ticks the spinner at 10fps.
