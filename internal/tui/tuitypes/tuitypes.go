@@ -54,6 +54,7 @@ const (
 	ScreenConfirmQuit      Screen = 28   // confirm quit dialog
 	ScreenChatHistory      Screen = 29   // chat history table browser
 	ScreenCommandPalette   Screen = 30   // dedicated command palette with detail panel
+	ScreenRuntimeCheck     Screen = 31   // runtime verification (dev server + smoke tests)
 )
 
 // Label returns a human-readable name for the screen.
@@ -121,6 +122,8 @@ func (s Screen) Label() string {
 		return "Chat History"
 	case ScreenCommandPalette:
 		return "Commands"
+	case ScreenRuntimeCheck:
+		return "Runtime Check"
 	default:
 		return "Unknown"
 	}
@@ -251,6 +254,7 @@ type PhaseResultMsg struct {
 	Demonstration           string
 	ManualVerificationSteps []string
 	WorkflowMode            types.WorkflowMode
+	RuntimeSummary          *workflow.RuntimeSummary
 }
 
 // PlanReadyMsg is emitted when the plan phase completes with valid tasks.
