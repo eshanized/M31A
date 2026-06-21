@@ -96,6 +96,8 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 		targetPhase = types.PhaseExecute
 	case "verify":
 		targetPhase = types.PhaseVerify
+	case "runtime":
+		targetPhase = types.PhaseRuntime
 	case "ship":
 		targetPhase = types.PhaseShip
 	case "idle":
@@ -103,7 +105,7 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 	default:
 		return CommandResult{
 			Success: false,
-			Message: fmt.Sprintf("Unknown phase %q. Valid: discuss, plan, execute, verify, ship.", target),
+			Message: fmt.Sprintf("Unknown phase %q. Valid: discuss, plan, execute, verify, runtime, ship.", target),
 		}
 	}
 
@@ -118,6 +120,8 @@ func handlePhase(args []string, ctx CommandContext) CommandResult {
 		screen = tuitypes.ScreenExecute
 	case types.PhaseVerify:
 		screen = tuitypes.ScreenVerify
+	case types.PhaseRuntime:
+		screen = tuitypes.ScreenRuntimeCheck
 	case types.PhaseShip:
 		screen = tuitypes.ScreenShip
 	default:
