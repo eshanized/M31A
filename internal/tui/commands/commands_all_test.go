@@ -66,7 +66,7 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 		"compress", "memory", "optimize", "model", "models", "fallback", "provider",
 		"diff", "rollback", "bisect",
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
-		"new", "workflow", "plan", "refine", "execute", "verify", "ship", "phase", "pause", "resume-task", "agent-mode",
+		"new", "workflow", "plan", "refine", "execute", "verify", "runtime", "ship", "phase", "pause", "resume-task", "agent-mode",
 		"metrics", "dashboard", "themes", "notifications", "files", "ghost",
 		"agent", "agent-cancel", "complexity",
 	}
@@ -420,7 +420,7 @@ func TestHandlePhase_NoArgs_NoSession(t *testing.T) {
 
 func TestHandlePhase_AllPhases(t *testing.T) {
 	t.Parallel()
-	phases := []string{"discuss", "plan", "execute", "verify", "ship", "idle"}
+	phases := []string{"discuss", "plan", "execute", "verify", "runtime", "ship", "idle"}
 	for _, p := range phases {
 		t.Run(p, func(t *testing.T) {
 			t.Parallel()
