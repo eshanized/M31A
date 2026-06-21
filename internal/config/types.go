@@ -264,4 +264,25 @@ type AgentsConfig struct {
 	Verify     string `toml:"verify"`
 	Ship       string `toml:"ship"`
 	Discuss    string `toml:"discuss"`
+
+	// Profiles holds user-configurable overrides for subagent profiles.
+	// Keys are profile names (e.g., "explore", "general", "security").
+	// Built-in profiles can be overridden; new profiles can be added.
+	Profiles map[string]SubagentProfileConfig `toml:"profiles,omitempty"`
+}
+
+// SubagentProfileConfig defines user-configurable overrides for a subagent
+// profile. Zero-value fields inherit from the built-in default.
+type SubagentProfileConfig struct {
+	Description  string   `toml:"description,omitempty"`
+	Mode         string   `toml:"mode,omitempty"`
+	SystemPrompt string   `toml:"system_prompt,omitempty"`
+	Model        string   `toml:"model,omitempty"`
+	Hidden       *bool    `toml:"hidden,omitempty"`
+	AllowedTools []string `toml:"allowed_tools,omitempty"`
+	DeniedTools  []string `toml:"denied_tools,omitempty"`
+	MaxTools     int      `toml:"max_tools,omitempty"`
+	MaxTokens    int      `toml:"max_tokens,omitempty"`
+	MaxTurns     int      `toml:"max_turns,omitempty"`
+	Disabled     bool     `toml:"disabled,omitempty"`
 }
