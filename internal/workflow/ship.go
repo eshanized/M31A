@@ -29,6 +29,7 @@ type ShipSummary struct {
 
 // runShip finalizes the session, writes ledger entry, and archives.
 func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error) {
+	phaseStart := time.Now()
 	e.logger.Info("ship phase starting", "goal", goal)
 
 	// Emit intermediate progress
@@ -124,7 +125,23 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		}
 	}
 
-	// 3. Build summary
+	// 3. Post-ship validation
+	if e.git != nil {
+		hash, hashErr := e.git.HeadHash()
+		if hashErr != nil {
+			e.logger.Warn("post-ship: cannot verify commit", "error", hashErr)
+		} else {
+			e.logger.Info("post-ship: commit verified", "hash", hash[:min(len(hash), 7)])
+		}
+		dirty, dirtyErr := e.git.HasUncommittedChanges()
+		if dirtyErr != nil {
+			e.logger.Warn("post-ship: failed to check working tree", "error", dirtyErr)
+		} else if dirty {
+			e.logger.Warn("post-ship: working tree has uncommitted changes after ship")
+		}
+	}
+
+	// 4. Build summary
 	duration := time.Since(e.startTime)
 
 	var commits []git.CommitInfo
@@ -271,7 +288,13 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 	// Record duration and efficiency
 	memEntry += fmt.Sprintf("- Duration: %s\n", duration.Round(time.Second))
 
-	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
+	// Rotate MEMORY.md if it exceeds max size (512KB) to prevent unbounded growth
+	const maxMemorySize = 512 * 1024
+	if info, statErr := os.Stat(memPath); statErr == nil && info.Size() > maxMemorySize {
+		e.rotateMemoryFile(memPath)
+	}
+
+	if memFile, openErr := os.OpenFile(memPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); openErr == nil {
 		// Use flock to prevent interleaved writes from concurrent sessions.
 		if writeErr := flockWrite(memFile, memEntry); writeErr != nil {
 			e.logger.Warn("memory write failed", "error", writeErr)
@@ -297,7 +320,7 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		Success:       true,
 		Commits:       commits,
 		DiffStats:     diffStats,
-		DurationMs:    duration.Milliseconds(),
+		DurationMs:    time.Since(phaseStart).Milliseconds(),
 		Demonstration: demonstration,
 	}
 	if failed > 0 {
@@ -497,4 +520,44 @@ func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks [
 		return ""
 	}
 	return content
+}
+
+// rotateMemoryFile trims MEMORY.md to its most recent entries when it
+// exceeds maxMemorySize, preventing unbounded growth across sessions.
+func (e *Engine) rotateMemoryFile(memPath string) {
+	data, err := os.ReadFile(memPath)
+	if err != nil {
+		e.logger.Warn("failed to read MEMORY.md for rotation", "error", err)
+		return
+	}
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	// Find all session headers (## Session ...) and keep only the last 20
+	type sessionBlock struct {
+		start, end int
+	}
+	var blocks []sessionBlock
+	for i, line := range lines {
+		if strings.HasPrefix(line, "## Session ") {
+			if len(blocks) > 0 {
+				blocks[len(blocks)-1].end = i
+			}
+			blocks = append(blocks, sessionBlock{start: i, end: len(lines)})
+		}
+	}
+	if len(blocks) <= 20 {
+		return // not enough entries to rotate
+	}
+
+	// Keep only the last 20 session blocks
+	keep := blocks[len(blocks)-20:]
+	rotated := lines[keep[0].start:]
+	rotatedContent := strings.Join(rotated, "\n")
+
+	if writeErr := os.WriteFile(memPath, []byte(rotatedContent), 0600); writeErr != nil {
+		e.logger.Warn("failed to write rotated MEMORY.md", "error", writeErr)
+	} else {
+		e.logger.Info("rotated MEMORY.md", "removed_sessions", len(blocks)-20, "new_size", len(rotatedContent))
+	}
 }
