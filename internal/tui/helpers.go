@@ -16,6 +16,14 @@ import (
 
 // ─── Message helpers ──────────────────────────────────────────────────────────
 
+// activeModelID safely extracts the model ID from a potentially nil ModelInfo.
+func activeModelID(m *types.ModelInfo) string {
+	if m == nil {
+		return ""
+	}
+	return m.ID
+}
+
 // makeAssistantMsg creates a standard assistant message with role, content, and segment.
 func makeAssistantMsg(content string) types.Message {
 	return types.Message{

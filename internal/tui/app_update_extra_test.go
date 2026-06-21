@@ -548,15 +548,17 @@ func TestShutdown_WithCancel(t *testing.T) {
 
 func TestHandlePermissionTick_ZeroCountdown(t *testing.T) {
 	m := testAppState()
+	m.permRequest = &tools.PermissionRequest{ID: 1, TimeoutSecs: 10}
 	m.permCountdown = 0
 	cmd := m.handlePermissionTick()
 	if cmd == nil {
-		t.Error("handlePermissionTick always returns a Cmd for next tick")
+		t.Error("handlePermissionTick should return a tick cmd when permRequest is active")
 	}
 }
 
 func TestHandlePermissionTick_PositiveCountdown(t *testing.T) {
 	m := testAppState()
+	m.permRequest = &tools.PermissionRequest{ID: 1, TimeoutSecs: 10}
 	m.permCountdown = 5
 	cmd := m.handlePermissionTick()
 	if m.permCountdown != 4 {
@@ -568,13 +570,10 @@ func TestHandlePermissionTick_PositiveCountdown(t *testing.T) {
 func TestHandlePermissionTick_Timeout(t *testing.T) {
 	m := testAppState()
 	m.permCountdown = 1
-	// permRequest is nil → should return nil after timeout
+	// permRequest is nil → should return nil immediately
 	cmd := m.handlePermissionTick()
-	if m.permCountdown != 0 {
-		t.Errorf("countdown = %d, want 0", m.permCountdown)
-	}
 	if cmd != nil {
-		t.Error("nil permRequest with timeout should return nil cmd")
+		t.Error("nil permRequest should return nil cmd")
 	}
 }
 

@@ -485,7 +485,8 @@ func (m *AppState) renderREPLContent(chrome layout.PageChrome) string {
 	if replH < 4 {
 		replH = 4
 	}
-	m.syncReplSize(chrome)
+	replChrome := layout.PageChrome{Width: chrome.ContentWidth(), Height: replH + layout.ChromeHeight}
+	m.syncReplSize(replChrome)
 	replContent := m.replModel.ViewContent(replH, chrome.ContentWidth())
 	if panel == "" {
 		return replContent

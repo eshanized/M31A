@@ -151,13 +151,14 @@ func (c *Coordinator[Key]) getOrCreate(key Key) *entry {
 }
 
 func (c *Coordinator[Key]) awaitDone(e *entry) context.Context {
-	// Return a context that resolves when the entry's done channel closes
 	ctx, cancel := context.WithCancel(context.Background())
 	if e.done != nil {
 		go func() {
 			<-e.done
 			cancel()
 		}()
+	} else {
+		cancel()
 	}
 	return ctx
 }

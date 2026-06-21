@@ -386,17 +386,20 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Agent loop ────────────────────────────────────────────────────────
 	case AgentStreamMsg:
 		if m.replModel != nil && msg.Chunk != nil {
-			// Start token burn tracking on the first chunk of a new response.
 			if !m.replModel.streaming && m.sidebarModel != nil {
 				m.sidebarModel.StartTokenBurn()
 			}
 			sm := StreamMsg{
 				Chunk:     msg.Chunk,
-				ModelID:   m.activeModel.ID,
+				ModelID:   activeModelID(m.activeModel),
 				SessionID: m.sessionID,
 			}
 			cs := m.replModel.handleStreamMsg(sm)
-			cmds = append(cmds, cs...)
+			// cs[0] reads from m.replModel.streamCh which is nil during agent
+			// loop — discard it to prevent goroutine leak. Keep StreamTickCmd.
+			for _, c := range cs[1:] {
+				cmds = append(cmds, c)
+			}
 		}
 		cmds = append(cmds, m.readAgentCh())
 	case AgentThinkingMsg:
@@ -480,7 +483,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			doneMsg := StreamDoneMsg{
 				Message:   msg.Message,
 				Usage:     msg.Usage,
-				ModelID:   m.activeModel.ID,
+				ModelID:   activeModelID(m.activeModel),
 				SessionID: m.sessionID,
 			}
 			collapsed := m.replModel.handleStreamDoneMsg(doneMsg)
@@ -516,7 +519,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.replModel.streaming = false
 			m.replModel.thinking = false
 			m.replModel.thinkingStartAt = time.Time{}
-			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: m.activeModel.ID, ProviderName: m.activeProvider}
+			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: activeModelID(m.activeModel), ProviderName: m.activeProvider}
 			m.replModel.handleStreamErrorMsg(errMsg)
 		}
 		m.streamCancelFn = nil
@@ -1685,6 +1688,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			m.runtimeModel.width = cw
 			m.runtimeModel.height = ch
+			return func() tea.Msg { return RuntimeTickMsg{} }
 		}
 		return nil
 	case ScreenShip:
@@ -2845,7 +2849,8 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 			Model:     modelName,
 			Provider:  m.activeProvider,
 		}
-		m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
+		cw, ch := m.contentDimensions()
+		m.shipModel = NewShipModel(summary, m.themeManager.Current(), cw, ch)
 		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseShip)
 	}
@@ -3201,6 +3206,9 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 
 // handlePermissionTick decrements the permission countdown.
 func (m *AppState) handlePermissionTick() tea.Cmd {
+	if m.permRequest == nil {
+		return nil
+	}
 	if m.permCountdown > 0 {
 		m.permCountdown--
 		if m.permModal != nil {
@@ -3353,7 +3361,8 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 			}
 		}
 		if m.executeModel == nil {
-			m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
 		} else {
 			m.executeModel.tasks = tasks
 		}

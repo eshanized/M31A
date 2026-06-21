@@ -161,7 +161,8 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			m.screen = ScreenExecute
 			tasks := msg.Tasks
 			if m.executeModel == nil {
-				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+				cw, ch := m.contentDimensions()
+				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
 			} else {
 				m.executeModel.tasks = tasks
 			}
@@ -260,11 +261,13 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				summary.TotalTokens = msg.Usage.TotalTokens
 			}
 			summary.TotalCost = msg.Cost
-			m.shipModel = NewShipModel(summary, m.themeManager.Current(), m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.shipModel = NewShipModel(summary, m.themeManager.Current(), cw, ch)
 			m.persistWorkflowState()
 			return m.RunPhaseCmd(types.PhaseShip)
 		}
-		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), m.width, m.height)
+		cw, ch := m.contentDimensions()
+		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
 		if len(msg.ManualVerificationSteps) > 0 {
 			m.verifyModel.SetManualSteps(msg.ManualVerificationSteps)
 		}
@@ -284,7 +287,8 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 		}
 		if m.runtimeModel == nil {
-			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), m.width, m.height)
+			cw, ch := m.contentDimensions()
+			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
 		}
 		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseRuntime)
@@ -349,7 +353,8 @@ func (m *AppState) handlePlanApprove() tea.Cmd {
 		tasks = m.planModel.tasks
 	}
 	if m.executeModel == nil {
-		m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), m.width, m.height)
+		cw, ch := m.contentDimensions()
+		m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
 	} else {
 		m.executeModel.tasks = tasks
 	}
