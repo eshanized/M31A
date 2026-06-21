@@ -1,12 +1,12 @@
 {
-    "version": "1.1.0",
+    "version": "1.2.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/eshanized/M31A/releases/download/v1.1.0/m31a_1.1.0_windows_amd64.tar.gz",
+            "url": "https://github.com/eshanized/M31A/releases/download/v1.2.0/m31a_1.2.0_windows_amd64.tar.gz",
             "bin": [
                 "m31a.exe"
             ],
-            "hash": "2c3eea95d480f3d410f79a62dc4fa158023e926013b005963eedfa25dbe1dbc9"
+            "hash": "5fdc4824496507743cfcbcb70a725ac8edc2128892bfe72779400582864a10dd"
         }
     },
     "homepage": "https://github.com/eshanized/M31A",
