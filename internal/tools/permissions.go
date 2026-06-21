@@ -63,9 +63,24 @@ func (d *Dispatcher) SelectAgent(agent string) error {
 }
 
 func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bool, *PermissionContext, error) {
+	// Last-match-wins evaluation: iterate all rules, the last matching rule
+	// determines the outcome. This allows more specific rules to override
+	// general ones by ordering them later in the list.
+	var lastMatch *struct {
+		allowed bool
+		pctx    *PermissionContext
+		err     error
+	}
+
 	for _, rule := range d.rules {
 		if rule.Tool != "" && !matchToolName(rule.Tool, toolName) {
 			continue
+		}
+
+		if rule.Resource != "" {
+			if !matchAnyParamValue(rule.Resource, input.Params) {
+				continue
+			}
 		}
 
 		if rule.Pattern != "" {
@@ -84,16 +99,34 @@ func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bo
 
 		switch rule.Action {
 		case "allow":
-			return true, pctx, nil
+			lastMatch = &struct {
+				allowed bool
+				pctx    *PermissionContext
+				err     error
+			}{true, pctx, nil}
 		case "deny":
-			return false, pctx, m31errors.ErrPermissionDenied
+			lastMatch = &struct {
+				allowed bool
+				pctx    *PermissionContext
+				err     error
+			}{false, pctx, m31errors.ErrPermissionDenied}
 		case "ask":
-			return false, pctx, nil
+			lastMatch = &struct {
+				allowed bool
+				pctx    *PermissionContext
+				err     error
+			}{false, pctx, nil}
 		default:
-			// Empty or unrecognized action defaults to "ask" — prompt the user
-			// rather than silently allowing or denying.
-			return false, pctx, nil
+			lastMatch = &struct {
+				allowed bool
+				pctx    *PermissionContext
+				err     error
+			}{false, pctx, nil}
 		}
+	}
+
+	if lastMatch != nil {
+		return lastMatch.allowed, lastMatch.pctx, lastMatch.err
 	}
 
 	if d.activeAgent != "default" {
