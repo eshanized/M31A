@@ -255,6 +255,8 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"j/k scroll", "p pause", "ctrl+c cancel", "esc back"}
 	case ScreenVerify:
 		info.KeyboardHints = []string{"h heal", "enter/s ship", "esc back"}
+	case ScreenRuntimeCheck:
+		info.KeyboardHints = []string{"j/k scroll", "enter continue", "esc back"}
 	case ScreenShip:
 		info.KeyboardHints = []string{"enter confirm", "esc back"}
 	case ScreenModelSelector:
@@ -363,6 +365,8 @@ func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
 		return m.renderExecuteContent(chrome)
 	case ScreenVerify:
 		return m.renderVerifyContent(chrome)
+	case ScreenRuntimeCheck:
+		return m.renderRuntimeContent(chrome)
 	case ScreenShip:
 		return m.renderShipContent(chrome)
 	case ScreenResume:
@@ -843,6 +847,8 @@ func screenName(s Screen) string {
 		return "plan"
 	case ScreenVerify:
 		return "verify"
+	case ScreenRuntimeCheck:
+		return "runtime"
 	case ScreenShip:
 		return "ship"
 	case ScreenDiscuss:
