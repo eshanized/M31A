@@ -213,11 +213,11 @@ func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	}
 
 	names := d.List()
-	if len(names) != 15 {
-		t.Errorf("expected 15 tools, got %d: %v", len(names), names)
+	if len(names) != 17 {
+		t.Errorf("expected 17 tools, got %d: %v", len(names), names)
 	}
 
-	expectedTools := []string{"Bash", "FileRead", "FileWrite", "Edit", "TodoWrite", "WebFetch", "WebSearch", "AskUserQuestion", "Glob", "Grep", "FileList", "FileDelete", "FileMove", "CodeMap", "CodeComplexity"}
+	expectedTools := []string{"Bash", "FileRead", "FileWrite", "Edit", "TodoWrite", "WebFetch", "WebSearch", "AskUserQuestion", "Glob", "Grep", "FileList", "FileDelete", "FileMove", "CodeMap", "CodeComplexity", "DevServer", "HTTPCheck"}
 	for _, expected := range expectedTools {
 		found := false
 		for _, name := range names {
