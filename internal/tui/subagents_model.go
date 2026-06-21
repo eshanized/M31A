@@ -69,6 +69,7 @@ func (m *SubagentsModel) ApplyEvent(ev subagent.SubagentEvent) {
 		m.upsert(ev.AgentID, func(r *SubagentRow) {
 			r.Info.ID = ev.AgentID
 			r.Info.Name = ev.Name
+			r.Info.SubagentType = ev.SubagentType
 			r.Info.Status = subagent.StatusRunning
 			r.Info.Worktree = ev.Worktree
 			r.Info.StartedAt = ev.Timestamp
@@ -233,13 +234,19 @@ func (m *SubagentsModel) View() string {
 		if r.Info.ToolCalls > 0 {
 			tools = fmt.Sprintf("%d tools", r.Info.ToolCalls)
 		}
+		badge := ""
+		if r.Info.SubagentType != "" {
+			badgeStyle := lipgloss.NewStyle().Foreground(t.Accent)
+			badge = badgeStyle.Render("[" + r.Info.SubagentType + "]")
+		}
 		marker := "▸"
 		if r.Expanded {
 			marker = "▾"
 		}
-		line := fmt.Sprintf("%s %-32s  %-8s  %-10s  %s",
+		line := fmt.Sprintf("%s %-10s %-28s  %-8s  %-10s  %s",
 			marker,
-			abbrev(label, 32),
+			badge,
+			abbrev(label, 28),
 			status,
 			tools,
 			dim.Render(tokens),
