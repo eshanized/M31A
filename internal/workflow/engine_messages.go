@@ -253,3 +253,16 @@ type VerificationResult struct {
 	TestsOK    bool
 	Errors     []string
 }
+
+// CompactionCompleteMsg is emitted when automatic session compaction completes.
+type CompactionCompleteMsg struct {
+	TokensBefore    int
+	TokensAfter     int
+	MessagesRemoved int
+}
+
+// TaskDiffSummaryMsg is emitted after a task commit to report file changes.
+type TaskDiffSummaryMsg struct {
+	TaskID  int
+	Summary *m31types.DiffSummary
+}

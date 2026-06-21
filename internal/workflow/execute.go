@@ -464,7 +464,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 		// Commit changes scoped to task files only
 		var commitHash string
+		var beforeHash string
 		if len(task.Files) > 0 && e.git != nil {
+			if h, err := e.git.HeadHash(); err == nil {
+				beforeHash = h
+			}
 			hash, err := e.git.CommitWithFiles(
 				fmt.Sprintf("%s: %s", e.gitConfig().CommitPrefix, task.Description),
 				task.Files...,
@@ -473,6 +477,14 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				e.logger.Warn("commit failed", "task", task.ID, "error", err)
 			} else {
 				commitHash = hash
+				if beforeHash != "" {
+					if ds, err := CaptureDiffSummary(e.git, beforeHash, hash); err == nil {
+						e.emit(TaskDiffSummaryMsg{
+							TaskID:  task.ID,
+							Summary: ds,
+						})
+					}
+				}
 			}
 		}
 

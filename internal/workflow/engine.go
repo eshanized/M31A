@@ -17,13 +17,16 @@ import (
 
 	"github.com/eshanized/M31A/internal/codeintel"
 	"github.com/eshanized/M31A/internal/config"
+	ctxsrc "github.com/eshanized/M31A/internal/context"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/compaction"
 	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/pkg/retry"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -142,6 +145,14 @@ type Engine struct {
 	// Shared ledger instance for session record persistence (uses the
 	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).
 	ledger *ledger.Ledger
+	// compactor manages automatic session compaction when context fills up.
+	compactor *compaction.Compactor
+	// contextRegistry manages dynamic system context sources.
+	contextRegistry *ctxsrc.Registry
+	// contextSnapshot stores the last evaluated context state for change detection.
+	contextSnapshot map[string]string
+	// cachedDynamicContext stores the rendered dynamic context to avoid re-rendering on every call.
+	cachedDynamicContext string
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -280,7 +291,64 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		logger:      slog.Default(),
 		startTime:   time.Now(),
 		execCommand: exec.Command,
+		compactor:       compaction.New(compactionConfig(opts.Config), opts.TokenEst),
+		contextRegistry: ctxsrc.NewRegistry(
+			ctxsrc.DateTimeSource{},
+			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
+			ctxsrc.GitSource{WorkDir: opts.WorkDir},
+		),
 	}, nil
+}
+
+// compactionConfig converts a config.CompactionConfig to a compaction.Config.
+func compactionConfig(cfg *config.Config) compaction.Config {
+	if cfg == nil {
+		return compaction.DefaultConfig()
+	}
+	c := cfg.Compaction
+	if c.Buffer <= 0 {
+		c.Buffer = 20000
+	}
+	if c.KeepTokens <= 0 {
+		c.KeepTokens = 8000
+	}
+	return compaction.Config{
+		Auto:       c.Auto,
+		Buffer:     c.Buffer,
+		KeepTokens: c.KeepTokens,
+	}
+}
+
+// compactedMessages builds a new message list with the compaction summary
+// prepended and old messages replaced. Keeps the last N messages based on
+// the compactor's KeepTokens setting.
+func (e *Engine) compactedMessages(original []m31types.Message, summary string) []m31types.Message {
+	if e.compactor == nil || e.tokens == nil {
+		return original
+	}
+	keepTokens := 8000
+	if e.cfg != nil && e.cfg.Compaction.KeepTokens > 0 {
+		keepTokens = e.cfg.Compaction.KeepTokens
+	}
+	_, recent := compaction.SplitMessages(original, keepTokens, e.tokens.Estimate)
+
+	summaryMsg := m31types.Message{
+		Role:    "system",
+		Content: "[Compacted Session History]\n" + summary,
+		Segments: []m31types.MessageSegment{
+			{
+				Type:    m31types.MessageCompaction,
+				Content: summary,
+				Visible: false,
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	result := make([]m31types.Message, 0, len(recent)+1)
+	result = append(result, summaryMsg)
+	result = append(result, recent...)
+	return result
 }
 
 // SetModel updates the active model ID and provider for the engine.
@@ -567,9 +635,39 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 		return messages, nil
 	}
 
+	var msgs []m31types.Message
+
+	// Try auto-compaction before falling back to crude truncation
+	if e.compactor != nil && e.compactor.ShouldCompact(messages, contextLength) {
+		slog.Info("auto-compaction triggered", "estimated_tokens", estimated, "context_length", contextLength)
+		compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.activePhase))
+		compactCancel()
+		if compactErr == nil && result.Compacted {
+			e.emit(CompactionCompleteMsg{
+				TokensBefore:    result.TokensBefore,
+				TokensAfter:     result.TokensAfter,
+				MessagesRemoved: result.MessagesRemoved,
+			})
+			// Re-estimate on the compacted messages
+			compactedMsgs := e.compactedMessages(messages, result.Summary)
+			compactedEstimate := e.tokens.EstimateMessages(compactedMsgs)
+			if compactedEstimate <= threshold95 {
+				return compactedMsgs, nil
+			}
+			// Compaction wasn't sufficient, fall through to truncation with compacted messages
+			msgs = compactedMsgs
+			estimated = compactedEstimate
+		} else if compactErr != nil {
+			slog.Warn("auto-compaction failed, falling back to truncation", "error", compactErr)
+		}
+	}
+
 	// Work on a shallow copy to avoid mutating the caller's slice.
-	msgs := make([]m31types.Message, len(messages))
-	copy(msgs, messages)
+	if msgs == nil {
+		msgs = make([]m31types.Message, len(messages))
+		copy(msgs, messages)
+	}
 
 	// Try progressive truncation before giving up
 	// Pass 1: truncate old tool results
@@ -745,13 +843,65 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 	e.cachedBasePromptOnce.Do(func() {
 		e.cachedBasePrompt = e.prompts.Base
 	})
+
 	parts := []string{e.cachedBasePrompt}
+
+	// Inject model-specific template
+	if modelTemplate := SelectTemplate(e.modelForPhase(e.activePhase)); modelTemplate != "" {
+		parts = append(parts, modelTemplate)
+	}
+
+	// Inject AGENTS.md instructions if enabled
+	if e.cfg != nil && e.cfg.Instructions.Enabled {
+		files := config.DiscoverInstructions(e.workDir, e.workDir)
+		if rendered := config.RenderInstructions(files); rendered != "" {
+			parts = append(parts, rendered)
+		}
+	}
+
+	// Reconcile dynamic context sources and include current state
+	if e.contextRegistry != nil {
+		ctx := context.Background()
+		changes := e.contextRegistry.Reconcile(ctx, e.contextSnapshot)
+		snapshot := e.contextRegistry.LoadAll(ctx)
+
+		if e.contextSnapshot == nil || len(changes) > 0 {
+			e.contextSnapshot = snapshot
+			e.cachedDynamicContext = e.renderDynamicContext(snapshot)
+		}
+
+		if e.cachedDynamicContext != "" {
+			parts = append(parts, e.cachedDynamicContext)
+		}
+	}
+
 	for _, p := range extra {
 		if p != "" {
 			parts = append(parts, p)
 		}
 	}
 	return strings.Join(parts, "\n\n---\n\n")
+}
+
+// renderDynamicContext formats a context snapshot map into a prompt section.
+// Values are joined in key-sorted order for deterministic output.
+func (e *Engine) renderDynamicContext(snapshot map[string]string) string {
+	if len(snapshot) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(snapshot))
+	for k := range snapshot {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		if v := snapshot[k]; v != "" {
+			sb.WriteString(v)
+			sb.WriteString("\n\n")
+		}
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // getCodeIntel lazily builds the codebase intelligence indexer.
@@ -945,10 +1095,13 @@ func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Mes
 
 	iterator, err := e.provider.ChatCompletionStream(ctx, req)
 	if err != nil {
-		e.emit(ThinkingCompleteMsg{
-			Context: "LLM processing failed",
-		})
-		return "", nil, err
+		iterator, err = e.retryChatStream(ctx, req, err)
+		if err != nil {
+			e.emit(ThinkingCompleteMsg{
+				Context: "LLM processing failed",
+			})
+			return "", nil, err
+		}
 	}
 
 	content, toolCalls, err := e.consumeStreamWithTools(iterator)
@@ -982,10 +1135,13 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 
 	iterator, err := e.provider.ChatCompletionStream(ctx, req)
 	if err != nil {
-		e.emit(ThinkingCompleteMsg{
-			Context: "LLM processing failed",
-		})
-		return "", err
+		iterator, err = e.retryChatStream(ctx, req, err)
+		if err != nil {
+			e.emit(ThinkingCompleteMsg{
+				Context: "LLM processing failed",
+			})
+			return "", err
+		}
 	}
 
 	result, err := e.consumeStream(iterator)
@@ -1013,5 +1169,49 @@ func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Mes
 		req.Tools = e.buildToolDefinitions()
 	}
 
-	return e.provider.ChatCompletionStream(ctx, req)
+	iterator, err := e.provider.ChatCompletionStream(ctx, req)
+	if err != nil {
+		iterator, err = e.retryChatStream(ctx, req, err)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return iterator, nil
+}
+
+// retryChatStream retries a failed ChatCompletionStream call using exponential
+// backoff. The firstErr is the error from the initial attempt. Returns the
+// iterator from a successful retry or the last error if all retries fail.
+func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, firstErr error) (*m31types.StreamIterator, error) {
+	class, reason := retry.ClassifyError(firstErr)
+	if !retry.IsRetryable(class) {
+		return nil, firstErr
+	}
+
+	policy := retry.DefaultPolicy()
+	var lastErr = firstErr
+
+	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+		delay := policy.Delay(attempt, nil)
+		slog.Info("retrying LLM request", "attempt", attempt, "max", policy.MaxAttempts, "delay", delay, "reason", reason)
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+		case <-time.After(delay):
+		}
+
+		iterator, err := e.provider.ChatCompletionStream(ctx, req)
+		if err == nil {
+			return iterator, nil
+		}
+		lastErr = err
+
+		class, reason = retry.ClassifyError(err)
+		if !retry.IsRetryable(class) {
+			return nil, err
+		}
+	}
+
+	return nil, lastErr
 }

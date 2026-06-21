@@ -165,6 +165,18 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("save plan.md failed", "error", err)
 	}
 
+	// Prepare plan file for agent switching (plan mode → build mode)
+	if planPath, err := e.PreparePlanFile(planMarkdown); err == nil {
+		e.emit(AgentSwitchMsg{
+			FromAgent:   "plan",
+			ToAgent:     "build",
+			PlanPath:    planPath,
+			PlanContent: planMarkdown,
+		})
+	} else {
+		e.logger.Warn("prepare plan file failed", "error", err)
+	}
+
 	if err := e.sessionMgr.SaveTasks(e.sessionID, tasks); err != nil {
 		return nil, fmt.Errorf("save tasks: %w", err)
 	}
