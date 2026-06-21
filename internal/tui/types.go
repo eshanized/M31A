@@ -42,6 +42,7 @@ const (
 	ScreenConfirmQuit      = tuitypes.ScreenConfirmQuit
 	ScreenChatHistory      = tuitypes.ScreenChatHistory
 	ScreenCommandPalette   = tuitypes.ScreenCommandPalette
+	ScreenRuntimeCheck     = tuitypes.ScreenRuntimeCheck
 )
 
 // Message type re-exports
