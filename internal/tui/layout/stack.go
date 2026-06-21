@@ -74,8 +74,10 @@ func RenderDimmedOverlay(base string, overlay string, width, height int, t theme
 }
 
 // RenderModalOverlay renders a modal centered on a dimmed background.
+// Uses string-based line composition (left + modal + right segments joined by
+// concatenation) to avoid corrupting ANSI escape codes that rune-by-rune
+// stamping would break.
 func RenderModalOverlay(base string, modal string, width, height int, t theme.Theme) string {
-	dimmed := RenderDimmed(base, t)
 	modalLines := strings.Split(modal, "\n")
 	modalH := len(modalLines)
 	modalW := 0
@@ -86,51 +88,83 @@ func RenderModalOverlay(base string, modal string, width, height int, t theme.Th
 		}
 	}
 
-	// Center the modal
 	x := (width - modalW) / 2
-	y := (height - modalH) / 2
 	if x < 0 {
 		x = 0
 	}
+	y := (height - modalH) / 2
 	if y < 0 {
 		y = 0
 	}
 
-	dimmedLines := strings.Split(dimmed, "\n")
-	// Pad dimmed to exact dimensions
-	for len(dimmedLines) < height {
-		dimmedLines = append(dimmedLines, strings.Repeat(" ", width))
+	baseLines := strings.Split(base, "\n")
+	for len(baseLines) < height {
+		baseLines = append(baseLines, "")
 	}
-	if len(dimmedLines) > height {
-		dimmedLines = dimmedLines[:height]
+	if len(baseLines) > height {
+		baseLines = baseLines[:height]
 	}
 
-	for dy, modalLine := range modalLines {
-		absY := y + dy
-		if absY < 0 || absY >= height {
+	faintOn := "\x1b[2m"
+	faintOff := "\x1b[22m"
+
+	var result []string
+	for i := 0; i < height; i++ {
+		baseLine := baseLines[i]
+		baseVW := lipgloss.Width(baseLine)
+
+		inModal := i >= y && i < y+modalH
+		if !inModal {
+			// Non-modal row: dim the full base line
+			if baseVW >= width {
+				result = append(result, faintOn+baseLine+faintOff)
+			} else {
+				result = append(result, faintOn+baseLine+strings.Repeat(" ", width-baseVW)+faintOff)
+			}
 			continue
 		}
-		baseLine := dimmedLines[absY]
-		baseRunes := []rune(baseLine)
 
-		// Ensure base line is wide enough
-		for len(baseRunes) < x+modalW {
-			baseRunes = append(baseRunes, ' ')
-		}
+		// Modal row: dim left/right padding, modal at normal brightness
+		modalLine := modalLines[i-y]
+		mVW := lipgloss.Width(modalLine)
+		rightStart := x + mVW
 
-		// Stamp modal line
-		col := 0
-		for _, r := range modalLine {
-			absX := x + col
-			if absX >= 0 && absX < len(baseRunes) {
-				baseRunes[absX] = r
+		var left string
+		if x > 0 {
+			if baseVW >= x {
+				left = truncateToWidth(baseLine, x)
+			} else {
+				left = baseLine + strings.Repeat(" ", x-baseVW)
 			}
-			col++
 		}
 
-		// Rebuild line, preserving ANSI in non-modal areas
-		dimmedLines[absY] = string(baseRunes)
+		var right string
+		if rightStart < width {
+			rightW := width - rightStart
+			if baseVW > rightStart {
+				rightContent := baseLine
+				if baseVW > width {
+					rightContent = truncateToWidth(baseLine, width)
+				}
+				right = rightContent
+				rightVW := lipgloss.Width(right)
+				if rightVW > rightW {
+					right = truncateToWidth(right, rightW)
+				} else if rightVW < rightW {
+					right += strings.Repeat(" ", rightW-rightVW)
+				}
+			} else {
+				right = strings.Repeat(" ", rightW)
+			}
+		}
+
+		// Pad modal line to exact visual width if needed
+		if mVW < modalW {
+			modalLine += strings.Repeat(" ", modalW-mVW)
+		}
+
+		result = append(result, faintOn+left+faintOff+modalLine+faintOn+right+faintOff)
 	}
 
-	return strings.Join(dimmedLines, "\n")
+	return strings.Join(result, "\n")
 }
