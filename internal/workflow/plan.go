@@ -435,6 +435,15 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 
 	planCtx := fmt.Sprintf("Goal: %s\nProject Type: %s\nFramework: %s\n\n", goal, projectType, framework)
 
+	// Extract and inject website template path when scope includes "website"
+	if e.ScopeIncludes("website") {
+		if templateDir, err := e.ExtractWebsiteTemplateTo(); err == nil {
+			planCtx += fmt.Sprintf("## Website Template\nA bundled Next.js template has been extracted to: %s\n\nThis template contains: package.json, next.config.ts, tsconfig.json, postcss.config.mjs, app/globals.css (full design system), app/layout.tsx, app/page.tsx, app/not-found.tsx, lib/utils.ts, lib/constants.ts, hooks/use-media-query.ts, hooks/use-scroll.ts.\n\nYou MUST copy these files to the working directory as the starting point. Then create additional components and pages as needed.\n\n", templateDir)
+		} else {
+			e.logger.Warn("failed to extract website template", "error", err)
+		}
+	}
+
 	// Inject pre-plan research output if available
 	if e.researchOutput != "" {
 		planCtx += "## Research Findings\n" + e.researchOutput + "\n\n"

@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +35,9 @@ import (
 
 //go:embed prompts/*.md
 var promptFS embed.FS
+
+//go:embed templates/website-nextjs/*
+var websiteTemplateFS embed.FS
 
 // PromptRegistry holds all loaded prompt templates.
 type PromptRegistry struct {
@@ -144,6 +150,9 @@ type Engine struct {
 	// Intent classification result from the LLM-based classifier.
 	// Set before the workflow starts; used to enrich discuss/research/plan context.
 	intentResult *m31types.IntentResult
+	// websiteTemplateDir holds the path to the extracted website template directory.
+	// Set when scope includes "website"; used to inject template path into plan/execute context.
+	websiteTemplateDir string
 	// Shared ledger instance for session record persistence (uses the
 	// application-configured path, not a hardcoded ~/.m31a/LEDGER.md).
 	ledger *ledger.Ledger
@@ -250,6 +259,25 @@ func (e *Engine) ScopeIncludes(term string) bool {
 		}
 	}
 	return false
+}
+
+// ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
+// directory and stores the path for later injection into the plan/execute context.
+// Returns the path to the extracted template, or an error if extraction fails.
+func (e *Engine) ExtractWebsiteTemplateTo() (string, error) {
+	if e.websiteTemplateDir != "" {
+		return e.websiteTemplateDir, nil
+	}
+	tmpDir, err := os.MkdirTemp("", "m31a-website-template-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	if err := ExtractWebsiteTemplate(tmpDir); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("extract template: %w", err)
+	}
+	e.websiteTemplateDir = tmpDir
+	return tmpDir, nil
 }
 
 // EngineOptions holds all parameters for creating a new Engine.
@@ -1229,4 +1257,37 @@ func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, 
 	}
 
 	return nil, lastErr
+}
+
+// ExtractWebsiteTemplate extracts the bundled Next.js website template to the
+// specified directory. It creates the directory structure and writes all template
+// files. Returns an error if extraction fails.
+func ExtractWebsiteTemplate(destDir string) error {
+	srcDir := "templates/website-nextjs"
+	return fs.WalkDir(websiteTemplateFS, srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Compute the relative path within the template
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+		dest := filepath.Join(destDir, relPath)
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+		data, err := websiteTemplateFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0o644)
+	})
 }

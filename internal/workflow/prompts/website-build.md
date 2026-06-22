@@ -360,23 +360,22 @@ public/
 
 ## Implementation Order
 
-1. Initialize project: `npx create-next-app@latest . --typescript --tailwind --app --src-dir=no --import-alias="@/*"`
-2. Install deps: `framer-motion`, `next-themes`, `lucide-react` (icons), `clsx` + `tailwind-merge` (for cn())
-3. Create `app/globals.css` with full design token system
-4. Create `lib/utils.ts` with `cn()` helper
-5. Create `lib/constants.ts` with site config, nav links, pricing data
-6. Create `app/layout.tsx` with fonts, providers, navbar/footer slots
-7. Create UI components in `components/ui/`
-8. Create layout components (navbar, footer, mobile-menu)
-9. Create section components (hero, features, pricing, etc.)
-10. Create pages (home → about → features → pricing → contact → blog → 404)
-11. Add animations and micro-interactions
-12. Test responsive at all breakpoints
-13. Verify dark/light mode toggle works
-14. Run `npm run build` to verify no errors
+1. **Copy template files** from the extracted template directory to the working directory. The template includes: package.json, next.config.ts, tsconfig.json, postcss.config.mjs, app/globals.css, app/layout.tsx, app/page.tsx, app/not-found.tsx, lib/utils.ts, lib/constants.ts, hooks/use-media-query.ts, hooks/use-scroll.ts
+2. **Install dependencies**: `npm install`
+3. **Customize globals.css** color tokens to match the website type (see Color Tokens section above)
+4. **Customize lib/constants.ts** with the actual site name, tagline, navigation links, pricing, features, testimonials
+5. **Create UI components** in `components/ui/` (button, card, input, textarea, badge, modal, accordion, tabs)
+6. **Create layout components** (navbar, footer, mobile-menu)
+7. **Create section components** (hero, features, pricing, testimonials, cta, stats, partners, faq, team, newsletter)
+8. **Create pages** (home → about → features → pricing → contact → blog → 404) — each with FULL content
+9. **Add animations** with framer-motion (scroll reveals, hover effects, stagger, marquee)
+10. **Test responsive** at all breakpoints
+11. **Verify dark/light mode** toggle works
+12. **Run `npm run build`** to verify no errors
 
 ## Critical Rules
 
+- **Use the template.** Copy all files from the extracted template directory before writing any code. The template provides the foundation — customize it, don't recreate it.
 - **No placeholder pages.** Every page gets real content, real layout, real styling.
 - **No empty divs.** Every visual element must have content or a styled background.
 - **No broken imports.** Read `package.json` before using any library. Only use dependencies you installed.

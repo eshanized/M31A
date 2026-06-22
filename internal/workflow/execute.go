@@ -569,6 +569,14 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	if goal != "" {
 		systemPrompt += "\n\n## Original Goal\n" + goal
 	}
+	// Inject website template path when scope includes "website"
+	if e.ScopeIncludes("website") {
+		if templateDir, err := e.ExtractWebsiteTemplateTo(); err == nil {
+			systemPrompt += fmt.Sprintf("\n\n## Website Template\nBundled Next.js template at: %s\nCopy files from this directory to the working directory before implementing.\n", templateDir)
+		} else {
+			e.logger.Warn("failed to extract website template", "error", err)
+		}
+	}
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	// Load PROJECT.md for project context (H15 fix: cache on first load per session)
