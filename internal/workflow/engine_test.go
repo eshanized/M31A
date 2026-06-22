@@ -695,6 +695,7 @@ func TestVerifyTask_ContextTimeout(t *testing.T) {
 	// Create a Go file that compiles
 	goFile := filepath.Join(engine.workDir, "main.go")
 	os.WriteFile(goFile, []byte("package main\nfunc main() {}\n"), 0644)
+	os.WriteFile(filepath.Join(engine.workDir, "go.mod"), []byte("module testmod\ngo 1.21\n"), 0644)
 
 	task := m31types.Task{
 		ID:          1,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 )
 
@@ -12,6 +13,7 @@ import (
 // shared session files in the same project directory.
 type FileLock struct {
 	path string
+	mu   sync.Mutex
 	file *os.File
 }
 
@@ -35,7 +37,9 @@ func (fl *FileLock) Lock() error {
 		_ = f.Close()
 		return fmt.Errorf("flock %s: %w", fl.path, err)
 	}
+	fl.mu.Lock()
 	fl.file = f
+	fl.mu.Unlock()
 	return nil
 }
 
@@ -56,18 +60,23 @@ func (fl *FileLock) TryLock() (bool, error) {
 		}
 		return false, fmt.Errorf("flock %s: %w", fl.path, err)
 	}
+	fl.mu.Lock()
 	fl.file = f
+	fl.mu.Unlock()
 	return true, nil
 }
 
 // Unlock releases the lock and closes the file.
 func (fl *FileLock) Unlock() error {
-	if fl.file == nil {
+	fl.mu.Lock()
+	f := fl.file
+	fl.file = nil
+	fl.mu.Unlock()
+	if f == nil {
 		return nil
 	}
-	err := syscall.Flock(int(fl.file.Fd()), syscall.LOCK_UN)
-	closeErr := fl.file.Close()
-	fl.file = nil
+	err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	closeErr := f.Close()
 	if err != nil {
 		return fmt.Errorf("unlock %s: %w", fl.path, err)
 	}
