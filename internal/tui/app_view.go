@@ -520,6 +520,9 @@ func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 	if m.planModel == nil {
+		if m.workflowPhase == types.PhasePlan {
+			return renderLoading("Generating plan…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		}
 		return renderEmptyState("No plan available", "Run /plan or start a workflow with /new", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.planModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
