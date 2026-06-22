@@ -3,10 +3,19 @@ package codeintel
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eshanized/M31A/internal/codeintel/efie"
 )
+
+// useEFIE reports whether EFIE should be used as the backend.
+// Set USE_EFIE=true to enable the EFIE backend.
+func useEFIE() bool {
+	return os.Getenv("USE_EFIE") == "true"
+}
 
 // Indexer provides a unified API for codebase intelligence: parsing, import
 // graph traversal, symbol lookup, and relevance scoring.
@@ -20,20 +29,32 @@ type Indexer struct {
 	scorer  *RelevanceScorer
 	builtAt time.Time
 	files   []*FileInfo
+
+	// EFIE backend (optional)
+	efieIndexer *efie.EFIEIndexer
 }
 
 // NewIndexer creates a new codebase indexer for the given working directory.
 // The indexer is lazy — call Build() before using query methods.
+// When USE_EFIE=true, the EFIE backend is used instead.
 func NewIndexer(workDir string) *Indexer {
-	return &Indexer{
+	idx := &Indexer{
 		workDir: workDir,
 		parsers: AllParsers(),
 	}
+	if useEFIE() {
+		idx.efieIndexer = efie.NewEFIEIndexer(workDir)
+	}
+	return idx
 }
 
 // Build parses all source files in the working directory and builds the
 // import graph, symbol index, and relevance scorer.
 func (idx *Indexer) Build(ctx context.Context) error {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.Build(ctx)
+	}
+
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -59,6 +80,9 @@ func (idx *Indexer) Build(ctx context.Context) error {
 
 // IsBuilt reports whether the indexer has been built.
 func (idx *Indexer) IsBuilt() bool {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.IsBuilt()
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.graph != nil
@@ -66,6 +90,9 @@ func (idx *Indexer) IsBuilt() bool {
 
 // BuiltAt returns when the indexer was last built.
 func (idx *Indexer) BuiltAt() time.Time {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.BuiltAt()
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.builtAt
@@ -73,6 +100,9 @@ func (idx *Indexer) BuiltAt() time.Time {
 
 // FileCount returns the number of parsed source files.
 func (idx *Indexer) FileCount() int {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.FileCount()
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -83,6 +113,9 @@ func (idx *Indexer) FileCount() int {
 
 // SymbolCount returns the number of unique symbols.
 func (idx *Indexer) SymbolCount() int {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.SymbolCount()
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -93,6 +126,9 @@ func (idx *Indexer) SymbolCount() int {
 
 // Upstream returns files that the given path depends on, up to depth levels.
 func (idx *Indexer) Upstream(path string, depth int) []string {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.Upstream(path, depth)
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -103,6 +139,9 @@ func (idx *Indexer) Upstream(path string, depth int) []string {
 
 // Downstream returns files that depend on the given path, up to depth levels.
 func (idx *Indexer) Downstream(path string, depth int) []string {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.Downstream(path, depth)
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -113,6 +152,9 @@ func (idx *Indexer) Downstream(path string, depth int) []string {
 
 // Neighbors returns direct imports and importers of a file.
 func (idx *Indexer) Neighbors(path string) (imports []string, importedBy []string) {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.Neighbors(path)
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -123,6 +165,17 @@ func (idx *Indexer) Neighbors(path string) (imports []string, importedBy []strin
 
 // Define returns where a symbol is defined.
 func (idx *Indexer) Define(symbol string) []SymbolLocation {
+	if idx.efieIndexer != nil {
+		locs := idx.efieIndexer.Define(symbol)
+		if locs == nil {
+			return nil
+		}
+		result := make([]SymbolLocation, len(locs))
+		for i, loc := range locs {
+			result[i] = SymbolLocation{File: loc.File, Kind: loc.Kind}
+		}
+		return result
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -133,6 +186,17 @@ func (idx *Indexer) Define(symbol string) []SymbolLocation {
 
 // FileSymbols returns all symbols defined in a file.
 func (idx *Indexer) FileSymbols(path string) []SymbolInfo {
+	if idx.efieIndexer != nil {
+		syms := idx.efieIndexer.FileSymbols(path)
+		if syms == nil {
+			return nil
+		}
+		result := make([]SymbolInfo, len(syms))
+		for i, s := range syms {
+			result[i] = SymbolInfo{Name: s.Name, Kind: s.Kind, Exported: s.Exported}
+		}
+		return result
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -143,6 +207,9 @@ func (idx *Indexer) FileSymbols(path string) []SymbolInfo {
 
 // SymbolsMatching returns symbols whose names contain the query substring.
 func (idx *Indexer) SymbolsMatching(query string) []string {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.SymbolsMatching(query)
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -154,6 +221,17 @@ func (idx *Indexer) SymbolsMatching(query string) []string {
 // RelevantFiles returns the top-N files most relevant to a task described
 // by target files and a text description.
 func (idx *Indexer) RelevantFiles(targetFiles []string, description string, topN int) []ScoredFile {
+	if idx.efieIndexer != nil {
+		efieScored := idx.efieIndexer.RelevantFiles(targetFiles, description, topN)
+		if efieScored == nil {
+			return nil
+		}
+		result := make([]ScoredFile, len(efieScored))
+		for i, sf := range efieScored {
+			result[i] = ScoredFile{Path: sf.Path, Score: sf.Score, Reasons: sf.Reasons}
+		}
+		return result
+	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.scorer == nil {
@@ -166,6 +244,10 @@ func (idx *Indexer) RelevantFiles(targetFiles []string, description string, topN
 // intelligence for a set of target files and a task description.
 // The output is capped at maxBytes.
 func (idx *Indexer) FormatContext(targetFiles []string, description string, topN int, maxBytes int) string {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.FormatContext(targetFiles, description, topN, maxBytes)
+	}
+
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -231,6 +313,10 @@ func (idx *Indexer) FormatContext(targetFiles []string, description string, topN
 // ProjectSummary returns a high-level summary of the project structure
 // suitable for the plan phase context.
 func (idx *Indexer) ProjectSummary(maxBytes int) string {
+	if idx.efieIndexer != nil {
+		return idx.efieIndexer.ProjectSummary(maxBytes)
+	}
+
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
