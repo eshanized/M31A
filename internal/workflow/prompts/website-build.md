@@ -147,41 +147,61 @@ Implement using CSS custom properties and `next-themes`:
 3. Add a toggle button in the Navbar with sun/moon icon transition
 4. Default to system preference, persist user choice in localStorage
 
-## Component Library
+## Pre-built Components (shadcn/ui)
 
-Create reusable components in `components/ui/`:
+The template includes pre-built shadcn/ui components in `components/ui/`. **Use these directly — do NOT recreate them.** Import from `@/components/ui/<component>`.
+
+| Component | Import | Variants / Notes |
+|-----------|--------|------------------|
+| Button | `@/components/ui/button` | `default`, `destructive`, `outline`, `secondary`, `ghost`, `link` + sizes `sm`, `default`, `lg`, `icon` |
+| Card | `@/components/ui/card` | `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter` |
+| Input | `@/components/ui/input` | Standard text input with focus ring |
+| Textarea | `@/components/ui/textarea` | Multi-line input |
+| Badge | `@/components/ui/badge` | `default`, `secondary`, `destructive`, `outline` |
+| Accordion | `@/components/ui/accordion` | `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent` |
+| Tabs | `@/components/ui/tabs` | `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent` |
+| Dialog | `@/components/ui/dialog` | Modal dialog with overlay, header, footer |
+| Sheet | `@/components/ui/sheet` | Slide-in panel (top/bottom/left/right) |
+| Select | `@/components/ui/select` | Dropdown select with items |
+| Label | `@/components/ui/label` | Form field label |
+| Separator | `@/components/ui/separator` | Horizontal/vertical divider |
+| NavigationMenu | `@/components/ui/navigation-menu` | Full navigation menu system |
+| Toaster | `@/components/ui/sonner` | Toast notifications (sonner) |
+
+## Custom Components to Create
+
+These are NOT in the template — you must create them in `components/sections/`:
 
 ### Layout Components
-- **Navbar**: Sticky header with glassmorphic backdrop-blur, logo, navigation links, CTA button, mobile hamburger menu with slide-in drawer
+- **Navbar**: Sticky header with glassmorphic backdrop-blur, logo, navigation links (use `NavigationMenu`), CTA button, mobile hamburger menu using `Sheet` for slide-in drawer
 - **Footer**: Multi-column with logo, link groups, newsletter signup form, social icons, copyright
 - **Container**: Max-width wrapper (`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8`)
 - **Section**: Vertical padding wrapper (`py-16 sm:py-20 lg:py-24`)
 
 ### Hero Components
-- **HeroSection**: Full-width with gradient background or image overlay, headline, subheadline, CTA buttons (primary + secondary), optional floating illustration or 3D element
+- **HeroSection**: Full-width with gradient background or image overlay, headline, subheadline, CTA buttons (use `Button`), optional floating illustration
 - **HeroWithGrid**: Split layout — text left, image/grid of cards right
 - **HeroWithVideo**: Background video or animated gradient with centered text
 
 ### Content Components
-- **FeatureCard**: Icon + title + description, hover lift effect
-- **PricingCard**: Price + features list, CTA button, "popular" badge variant
-- **TestimonialCard**: Quote + author avatar + name + role
-- **TeamCard**: Photo + name + role + social links
-- **BlogCard**: Featured image + category tag + title + excerpt + date + read time
+- **FeatureCard**: Icon + title + description, hover lift effect (use `Card`)
+- **PricingCard**: Price + features list, CTA `Button`, "popular" `Badge` variant
+- **TestimonialCard**: Quote + author avatar + name + role (use `Card`)
+- **TeamCard**: Photo + name + role + social links (use `Card`)
+- **BlogCard**: Featured image + category `Badge` + title + excerpt + date + read time (use `Card`)
 - **StatCard**: Large number + label + optional trend indicator
-- **FAQItem**: Accordion with chevron rotation
+- **FAQSection**: Uses `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent`
 
 ### Interactive Components
-- **Button**: Variants (primary, secondary, ghost, outline) + sizes (sm, md, lg) + loading state
-- **Input**: Label + input + helper text + error state + focus ring
-- **Textarea**: Multi-line input with character count
-- **Select**: Dropdown with search
-- **Modal**: Overlay + centered panel + close button + animation
-- **Tabs**: Horizontal tabs with active indicator animation
-- **Accordion**: Expand/collapse with smooth height animation
+- **ContactForm**: Uses `Input`, `Textarea`, `Label`, `Select`, `Button`
+- **NewsletterForm**: Uses `Input`, `Button`
 
-### Feedback Components
-- **Badge**: Small label (e.g., "New", "Pro", category tags)
+### Visual Components
+- **GradientText**: Text with gradient fill
+- **GlowCard**: Card with subtle glow on hover
+- **BentoGrid**: Asymmetric grid layout for features/showcase
+- **Marquee**: Infinite scroll animation for logos or testimonials
+- **AnimatedCounter**: Number counting animation on scroll into view
 - **Alert**: Info/success/warning/error variants with icon
 - **Toast**: Floating notification with auto-dismiss
 
@@ -323,21 +343,27 @@ app/
       page.tsx
   not-found.tsx       — custom 404
 components/
-  ui/
+  ui/                 — PRE-BUILT shadcn/ui (do NOT recreate)
+    accordion.tsx
+    badge.tsx
     button.tsx
     card.tsx
+    dialog.tsx
     input.tsx
-    textarea.tsx
-    badge.tsx
-    modal.tsx
-    accordion.tsx
+    label.tsx
+    navigation-menu.tsx
+    select.tsx
+    separator.tsx
+    sheet.tsx
+    sonner.tsx
     tabs.tsx
-  layout/
+    textarea.tsx
+  layout/             — YOU CREATE these
     navbar.tsx
     footer.tsx
     container.tsx
     mobile-menu.tsx
-  sections/
+  sections/           — YOU CREATE these
     hero.tsx
     features.tsx
     pricing.tsx
@@ -349,29 +375,28 @@ components/
     team.tsx
     newsletter.tsx
 lib/
-  utils.ts            — cn() helper, formatters
-  constants.ts        — site config, navigation links, pricing data
+  utils.ts            — cn() helper (pre-built)
+  constants.ts        — site config, navigation links, pricing data (YOU CUSTOMIZE)
 hooks/
-  use-media-query.ts  — responsive breakpoint hook
-  use-scroll.ts       — scroll position hook
+  use-media-query.ts  — responsive breakpoint hook (pre-built)
+  use-scroll.ts       — scroll position hook (pre-built)
 public/
   (placeholder images or gradient SVGs)
 ```
 
 ## Implementation Order
 
-1. **Copy template files** from the extracted template directory to the working directory. The template includes: package.json, next.config.ts, tsconfig.json, postcss.config.mjs, app/globals.css, app/layout.tsx, app/page.tsx, app/not-found.tsx, lib/utils.ts, lib/constants.ts, hooks/use-media-query.ts, hooks/use-scroll.ts
+1. **Copy template files** from the extracted template directory to the working directory. The template includes ALL config, design system, AND pre-built shadcn/ui components in `components/ui/`
 2. **Install dependencies**: `npm install`
-3. **Customize globals.css** color tokens to match the website type (see Color Tokens section above)
+3. **Customize globals.css** HSL color tokens to match the website type (see Color Tokens section above). The CSS variables use HSL format (e.g., `--primary: 262 83% 58%` for purple)
 4. **Customize lib/constants.ts** with the actual site name, tagline, navigation links, pricing, features, testimonials
-5. **Create UI components** in `components/ui/` (button, card, input, textarea, badge, modal, accordion, tabs)
-6. **Create layout components** (navbar, footer, mobile-menu)
-7. **Create section components** (hero, features, pricing, testimonials, cta, stats, partners, faq, team, newsletter)
-8. **Create pages** (home → about → features → pricing → contact → blog → 404) — each with FULL content
-9. **Add animations** with framer-motion (scroll reveals, hover effects, stagger, marquee)
-10. **Test responsive** at all breakpoints
-11. **Verify dark/light mode** toggle works
-12. **Run `npm run build`** to verify no errors
+5. **Create layout components** in `components/layout/` (navbar using `NavigationMenu` + `Sheet` for mobile, footer, container, mobile-menu)
+6. **Create section components** in `components/sections/` (hero, features using `Card`, pricing using `Card` + `Badge`, testimonials, cta using `Button`, stats, partners, faq using `Accordion`, team, newsletter using `Input` + `Button`)
+7. **Create pages** (home → about → features → pricing → contact → blog → 404) — each with FULL content using the section components
+8. **Add animations** with framer-motion (scroll reveals, hover effects, stagger, marquee)
+9. **Test responsive** at all breakpoints
+10. **Verify dark/light mode** toggle works
+11. **Run `npm run build`** to verify no errors
 
 ## Critical Rules
 
