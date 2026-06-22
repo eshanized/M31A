@@ -52,6 +52,7 @@ type PromptRegistry struct {
 	PlanOutline      string
 	DiscussFollowup  string
 	IntentClassify   string
+	WebsiteBuild     string
 }
 
 // LoadPrompts reads all embedded prompt files and returns a registry.
@@ -75,6 +76,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 		"prompts/plan-outline.md":         &r.PlanOutline,
 		"prompts/discuss-followup.md":     &r.DiscussFollowup,
 		"prompts/intent-classify.md":      &r.IntentClassify,
+		"prompts/website-build.md":        &r.WebsiteBuild,
 	}
 	for path, ptr := range files {
 		data, err := promptFS.ReadFile(path)
@@ -235,6 +237,19 @@ func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
 // IntentResult returns the stored intent classification result, or nil if unset.
 func (e *Engine) IntentResult() *m31types.IntentResult {
 	return e.intentResult
+}
+
+// ScopeIncludes returns true if the intent result's scope contains the given term.
+func (e *Engine) ScopeIncludes(term string) bool {
+	if e.intentResult == nil {
+		return false
+	}
+	for _, s := range e.intentResult.Scope {
+		if strings.EqualFold(s, term) {
+			return true
+		}
+	}
+	return false
 }
 
 // EngineOptions holds all parameters for creating a new Engine.

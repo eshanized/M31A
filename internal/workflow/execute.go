@@ -561,7 +561,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 // buildExecuteContext creates messages for task execution.
 func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
 	var messages []m31types.Message
-	systemPrompt := e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.ExecuteTask, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)
+	extras := []string{e.prompts.ToolUse, e.prompts.ExecuteTask, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence}
+	if e.ScopeIncludes("website") && e.prompts.WebsiteBuild != "" {
+		extras = append(extras, e.prompts.WebsiteBuild)
+	}
+	systemPrompt := e.buildSystemPrompt(extras...)
 	if goal != "" {
 		systemPrompt += "\n\n## Original Goal\n" + goal
 	}

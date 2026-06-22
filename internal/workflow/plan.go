@@ -416,7 +416,11 @@ func composeChunkedPlanMarkdown(outline *PlanOutline, tasks []m31types.Task, sec
 // On refinement, the previous plan and user feedback are injected.
 func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.prompts.ToolUse, e.prompts.PlanFormat, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence)})
+	extras := []string{e.prompts.ToolUse, e.prompts.PlanFormat, e.prompts.ContextAwareness, e.prompts.CodeQuality, e.prompts.CodeIntelligence}
+	if e.ScopeIncludes("website") && e.prompts.WebsiteBuild != "" {
+		extras = append(extras, e.prompts.WebsiteBuild)
+	}
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(extras...)})
 
 	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
 	if projErr != nil {

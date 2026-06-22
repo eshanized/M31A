@@ -31,6 +31,6 @@ Respond with ONLY a valid JSON object. No markdown, no explanation, no extra tex
 ## Rules
 - Be decisive. Pick the single most likely intent.
 - complexity: "trivial" = single-file change, "simple" = few files, "moderate" = multi-file with design decisions, "complex" = architectural or cross-cutting concerns
-- scope: list specific files, modules, or concepts mentioned. Use an empty array if none are identifiable.
+- scope: list specific files, modules, or concepts mentioned. Use an empty array if none are identifiable. IMPORTANT: If the goal involves building, creating, or designing a website, web app, landing page, frontend UI, or uses frameworks like Next.js, React, Vue, or similar — you MUST include "website" in the scope array (e.g., ["website", "nextjs", "ui"]).
 - summary: rewrite the user's goal in one clear, actionable sentence.
 - confidence: 0.0 to 1.0. Use lower values when the prompt is ambiguous or could mean multiple things.
