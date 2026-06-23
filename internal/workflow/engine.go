@@ -138,8 +138,8 @@ type Engine struct {
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once
 	// Cached full system prompts per extras signature (PERF-24 extension)
-	cachedFullPrompts    map[string]string
-	cachedFullPromptsMu  sync.Mutex
+	cachedFullPrompts   map[string]string
+	cachedFullPromptsMu sync.Mutex
 	// Cached project state for execute phase (H15 fix)
 	cachedProject   *m31types.ProjectState
 	cachedProjectID string // session ID for invalidation
@@ -279,7 +279,7 @@ func (e *Engine) ExtractWebsiteTemplateTo() (string, error) {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 	if err := ExtractWebsiteTemplate(tmpDir); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("extract template: %w", err)
 	}
 	e.websiteTemplateDir = tmpDir

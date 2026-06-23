@@ -1,7 +1,6 @@
 package efie
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,30 +242,4 @@ type TypeInfo struct {
 	Methods []string
 }
 
-// WalkDir implementation using filepath.WalkDir
-func walkDir(root string, skipDirs map[string]bool, maxDepth int, fn func(path string, relPath string, p Parser) error) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			depth := strings.Count(path[len(root):], string(filepath.Separator))
-			if depth > maxDepth {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relPath, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return nil
-		}
-		p := ParserForFile(relPath, AllParsers())
-		if p == nil {
-			return nil
-		}
-		return fn(path, relPath, p)
-	})
-}
+

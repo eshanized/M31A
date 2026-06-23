@@ -24,9 +24,7 @@ type WeightedNode struct {
 
 // WeightedImportGraph is a directed dependency graph with precomputed metrics.
 type WeightedImportGraph struct {
-	nodes         map[string]*WeightedNode
-	nCommunities  int
-	maxCentrality float64
+	nodes map[string]*WeightedNode
 }
 
 // NewWeightedImportGraph creates an empty weighted import graph.

@@ -329,13 +329,6 @@ func sortFloat64s(s []float64) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

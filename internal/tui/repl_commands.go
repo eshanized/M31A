@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/shell"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/shell"
 )
 
 // executeShellCommand runs a shell command (prefixed with !) and adds the result to messages.
