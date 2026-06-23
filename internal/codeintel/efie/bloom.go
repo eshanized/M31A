@@ -89,7 +89,7 @@ func (bf *BloomFilter) Contains(item string) bool {
 func (bf *BloomFilter) hash(item string, seed int) uint {
 	// Use two different FNV offset basis values mixed with seed
 	h1 := uint64(14695981039346656037) // FNV-1a offset basis
-	h2 := uint64(1099511628211)       // FNV offset basis
+	h2 := uint64(1099511628211)        // FNV offset basis
 	seed64 := uint64(seed)
 
 	for i := 0; i < len(item); i++ {

@@ -238,9 +238,7 @@ func (e *EFIEIndex) parallelParse(ctx context.Context) ([]*fileInfo, map[string]
 					Symbols:  make([]SymbolInfo, 0),
 				}
 				for _, s := range info.Exports {
-					fi.Symbols = append(fi.Symbols, SymbolInfo{
-						Name: s.Name, Kind: s.Kind, Exported: s.Exported,
-					})
+					fi.Symbols = append(fi.Symbols, SymbolInfo(s))
 				}
 				for _, f := range info.Funcs {
 					found := false

@@ -17,10 +17,10 @@ func BenchmarkCodeComplexity(b *testing.B) {
 	tmpDir := b.TempDir()
 
 	sizes := []struct {
-		name      string
-		numFiles  int
-		linesPer  int
-		packages  int
+		name     string
+		numFiles int
+		linesPer int
+		packages int
 	}{
 		{"small_10files", 10, 100, 2},
 		{"medium_50files", 50, 200, 5},

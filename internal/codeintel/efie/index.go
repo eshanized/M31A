@@ -1,7 +1,5 @@
 package efie
 
-
-
 // MultiResIndex provides three-level indexing: File -> Package -> Community.
 type MultiResIndex struct {
 	// Level 0: File -> FileInfo

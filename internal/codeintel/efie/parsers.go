@@ -14,7 +14,7 @@ import (
 
 type GoParser struct{}
 
-func (p *GoParser) Language() string  { return "go" }
+func (p *GoParser) Language() string          { return "go" }
 func (p *GoParser) CanParse(path string) bool { return filepath.Ext(path) == ".go" }
 
 func (p *GoParser) Parse(path string, content []byte) (*FileInfo, error) {
@@ -140,7 +140,7 @@ func typeKindString(expr ast.Expr) string {
 
 type TypeScriptParser struct{}
 
-func (p *TypeScriptParser) Language() string  { return "typescript" }
+func (p *TypeScriptParser) Language() string { return "typescript" }
 func (p *TypeScriptParser) CanParse(path string) bool {
 	ext := filepath.Ext(path)
 	return ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs"
@@ -238,7 +238,7 @@ func (p *TypeScriptParser) Parse(path string, content []byte) (*FileInfo, error)
 
 type PythonParser struct{}
 
-func (p *PythonParser) Language() string  { return "python" }
+func (p *PythonParser) Language() string          { return "python" }
 func (p *PythonParser) CanParse(path string) bool { return filepath.Ext(path) == ".py" }
 
 var (
@@ -362,7 +362,7 @@ func cleanPyParams(params string) string {
 
 type RustParser struct{}
 
-func (p *RustParser) Language() string  { return "rust" }
+func (p *RustParser) Language() string          { return "rust" }
 func (p *RustParser) CanParse(path string) bool { return filepath.Ext(path) == ".rs" }
 
 var (

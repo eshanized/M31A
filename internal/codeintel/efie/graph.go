@@ -12,9 +12,9 @@ type WeightedNode struct {
 	Language string
 
 	// Precomputed importance metrics
-	PageRank       float64
-	Betweenness    float64
-	Community      int
+	PageRank         float64
+	Betweenness      float64
+	Community        int
 	DegreeCentrality float64
 
 	// Semantic fingerprint
@@ -24,8 +24,8 @@ type WeightedNode struct {
 
 // WeightedImportGraph is a directed dependency graph with precomputed metrics.
 type WeightedImportGraph struct {
-	nodes        map[string]*WeightedNode
-	nCommunities int
+	nodes         map[string]*WeightedNode
+	nCommunities  int
 	maxCentrality float64
 }
 

@@ -70,9 +70,9 @@ func bfsQuery(efie *EFIEIndex, targets []string, edgeType string, topN int) []Sc
 				if !visited[neighbor] {
 					visited[neighbor] = true
 					result = append(result, ScoredFile{
-						Path:  neighbor,
-						Score: float64(10 - cur.depth),
-						Reasons: []string{"depth " + itoa(cur.depth + 1)},
+						Path:    neighbor,
+						Score:   float64(10 - cur.depth),
+						Reasons: []string{"depth " + itoa(cur.depth+1)},
 					})
 					queue = append(queue, entry{path: neighbor, depth: cur.depth + 1})
 				}
@@ -296,19 +296,30 @@ func computeMedianPageRank(g *WeightedImportGraph) float64 {
 
 // Max-heap for scored entries
 type scoredEntry struct {
-	path      string
-	score     float64
+	path       string
+	score      float64
 	scoredFile ScoredFile
-	index     int
+	index      int
 }
 
 type maxHeap []*scoredEntry
 
-func (h maxHeap) Len() int            { return len(h) }
-func (h maxHeap) Less(i, j int) bool  { return h[i].score > h[j].score }
-func (h maxHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i]; h[i].index = i; h[j].index = j }
-func (h *maxHeap) Push(x interface{}) { entry := x.(*scoredEntry); entry.index = len(*h); *h = append(*h, entry) }
-func (h *maxHeap) Pop() interface{}   { old := *h; n := len(old); entry := old[n-1]; old[n-1] = nil; *h = old[:n-1]; return entry }
+func (h maxHeap) Len() int           { return len(h) }
+func (h maxHeap) Less(i, j int) bool { return h[i].score > h[j].score }
+func (h maxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i]; h[i].index = i; h[j].index = j }
+func (h *maxHeap) Push(x interface{}) {
+	entry := x.(*scoredEntry)
+	entry.index = len(*h)
+	*h = append(*h, entry)
+}
+func (h *maxHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	entry := old[n-1]
+	old[n-1] = nil
+	*h = old[:n-1]
+	return entry
+}
 
 func sortFloat64s(s []float64) {
 	for i := 1; i < len(s); i++ {
