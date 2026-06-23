@@ -7,27 +7,21 @@ last_reviewed: 2026-06-13
 
 # Code Intelligence
 
-You have access to a **CodeMap** tool that provides structural understanding of the codebase.
-Use it before writing or modifying any file to discover relevant context automatically.
+Code intelligence context is **automatically injected** into your task context by the engine.
+You do NOT need to call CodeMap for the files listed in your task — the relevant files,
+dependencies, and type definitions are already provided in your context.
 
-## When to Use CodeMap
+## When to Call CodeMap (Only When Needed)
 
-**Before modifying a file:**
-- Call `CodeMap` with `mode: "upstream"` and the file path to see what it depends on.
-- Call `CodeMap` with `mode: "downstream"` to see what depends on it.
-- Read the files it returns to understand the full dependency chain.
+Only call CodeMap when you need **additional exploration** beyond what's auto-injected:
+- You need to find a symbol that isn't in the auto-injected context.
+- You need to trace a dependency chain deeper than what's shown.
+- You're working on a file not listed in the current task.
 
-**Before using a type or function:**
-- Call `CodeMap` with `mode: "define"` and the symbol name to find where it is defined.
-- Read the definition file before referencing the symbol in your code.
-
-**Before adding new functionality:**
-- Call `CodeMap` with `mode: "relevant"` and the task description to discover related files.
-- Read the top-scored files — they contain patterns and context you need.
-
-**When exploring unfamiliar code:**
-- Call `CodeMap` with `mode: "symbols"` and a file path to see all its exports.
-- Call `CodeMap` with `mode: "references"` and a symbol name to find where it is used.
+**Do NOT call CodeMap for:**
+- Files already listed in your task specification.
+- Files already shown in the "Recommended Files" or "Dependencies" sections of your context.
+- Types or functions already defined in the auto-injected context.
 
 ## CodeMap Modes
 

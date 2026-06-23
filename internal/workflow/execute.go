@@ -127,12 +127,19 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 		}
 	}
 
-	// 5. Save checkpoint
+	// 5. Save checkpoint — critical for crash recovery; retry on failure
 	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseExecute,
 		Timestamp: time.Now(),
 	}); err != nil {
-		e.logger.Warn("save checkpoint failed", "error", err)
+		e.logger.Error("save checkpoint failed (session may not resume after crash)", "error", err)
+		// Retry once before giving up
+		if retryErr := e.sessionMgr.SaveCheckpoint(e.sessionID, session.Checkpoint{
+			Phase:     m31types.PhaseExecute,
+			Timestamp: time.Now(),
+		}); retryErr != nil {
+			return nil, fmt.Errorf("save checkpoint (critical, retry failed): %w", retryErr)
+		}
 	}
 
 	// 6. Final state
@@ -579,16 +586,12 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	}
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
-	// Load PROJECT.md for project context (H15 fix: cache on first load per session)
+	// Load PROJECT.md for project context — use shared cache
 	var project *m31types.ProjectState
 	if e.cachedProjectID == e.sessionID {
 		project = e.cachedProject
 	} else {
-		var projErr error
-		project, projErr = e.sessionMgr.LoadProject(e.sessionID)
-		if projErr != nil {
-			e.logger.Warn("execute context: failed to load project", "error", projErr)
-		}
+		project = e.loadProjectCached()
 		e.cachedProject = project
 		e.cachedProjectID = e.sessionID
 	}
@@ -778,6 +781,17 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 				Error:      fmt.Sprintf("heal tool %s: %v", toolCalls[i].Name, hr.err),
 				DurationMs: time.Since(start).Milliseconds(),
 			}
+		}
+		// Check for tool-level errors and truncation that aren't surfaced as Go errors
+		if hr.result.Error != "" {
+			return taskrunner.TaskResult{
+				Success:    false,
+				Error:      fmt.Sprintf("heal tool %s returned error: %s", toolCalls[i].Name, hr.result.Error),
+				DurationMs: time.Since(start).Milliseconds(),
+			}
+		}
+		if hr.result.Truncated {
+			e.logger.Warn("heal tool produced truncated output", "tool", toolCalls[i].Name, "task", task.ID)
 		}
 	}
 

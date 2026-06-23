@@ -59,4 +59,9 @@ better implementation decisions that align with the plan's design intent.
 - **Atomic commits**: One commit per task.
 - **On failure**: The engine will trigger a self-heal loop with a fresh LLM call and the error context.
   In that call you will receive the failure reason and current file state — diagnose and fix.
+  In the heal call: (1) Read the error message carefully — it tells you exactly what went wrong.
+  (2) Check if the error is in the file you just wrote, or in a different file — compiler errors cascade.
+  (3) Try a fundamentally different approach — don't repeat the same edit.
 - **Tool discipline**: Use tools purposefully. Each call should advance the task.
+- **Code changes budget**: Aim for under 200 lines of code changes per task. If the task requires
+  more, focus on the critical path first and report what remains.

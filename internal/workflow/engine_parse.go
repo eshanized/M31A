@@ -187,7 +187,8 @@ func hasCycle(tasks []m31types.Task) bool {
 		stack := []stackEntry{{id: t.ID, firstVisit: true}}
 
 		for len(stack) > 0 {
-			entry := &stack[len(stack)-1]
+			topIdx := len(stack) - 1
+			entry := &stack[topIdx]
 
 			if entry.firstVisit {
 				entry.firstVisit = false
@@ -195,7 +196,7 @@ func hasCycle(tasks []m31types.Task) bool {
 					return true
 				}
 				if visited[entry.id] {
-					stack = stack[:len(stack)-1]
+					stack = stack[:topIdx]
 					continue
 				}
 				visited[entry.id] = true
@@ -218,7 +219,7 @@ func hasCycle(tasks []m31types.Task) bool {
 			}
 			if !found {
 				inStack[entry.id] = false
-				stack = stack[:len(stack)-1]
+				stack = stack[:topIdx]
 			}
 		}
 	}

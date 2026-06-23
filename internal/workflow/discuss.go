@@ -158,8 +158,8 @@ func (e *Engine) CheckDiscussCompleteness() DiscussCompleteness {
 	}
 
 	goal := ""
-	project, err := e.sessionMgr.LoadProject(e.sessionID)
-	if err == nil && project != nil {
+	project := e.loadProjectCached()
+	if project != nil {
 		goal = project.Goal
 	}
 
@@ -183,8 +183,8 @@ func (e *Engine) CheckDiscussCompleteness() DiscussCompleteness {
 // Called by the TUI after CheckDiscussCompleteness if score is low.
 func (e *Engine) GenerateFollowUpsIfNeeded(ctx context.Context) ([]string, error) {
 	goal := ""
-	project, err := e.sessionMgr.LoadProject(e.sessionID)
-	if err == nil && project != nil {
+	project := e.loadProjectCached()
+	if project != nil {
 		goal = project.Goal
 	}
 
@@ -225,10 +225,7 @@ func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 	}
 
 	// Load PROJECT.md
-	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
-	if projErr != nil {
-		e.logger.Warn("failed to load project for discuss context", "error", projErr)
-	}
+	project := e.loadProjectCached()
 	projectType := "unknown"
 	framework := ""
 	if project != nil {

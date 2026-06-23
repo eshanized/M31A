@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -35,6 +36,8 @@ type Consolidator struct {
 	// Reentrancy guard — CAS prevents nested /compress calls from
 	// entering a double-summary state.
 	consolidating atomic.Bool
+	// tokenEst provides accurate token counting instead of word-count heuristics.
+	tokenEst *tokens.Estimator
 }
 
 // ErrAlreadyConsolidating is returned when a consolidation is already in
@@ -51,6 +54,14 @@ func New(messages []types.Message) *Consolidator {
 	return &Consolidator{
 		messages: cp,
 	}
+}
+
+// NewWithEstimator creates a Consolidator with an accurate token estimator.
+// When provided, token counts use the real tokenizer instead of word-count heuristics.
+func NewWithEstimator(messages []types.Message, est *tokens.Estimator) *Consolidator {
+	c := New(messages)
+	c.tokenEst = est
+	return c
 }
 
 // SetMessages replaces the Consolidator's internal message list with a
@@ -169,10 +180,17 @@ func (c *Consolidator) Consolidate() *ConsolidationResult {
 		targetMsgs[i] = c.messages[idx]
 	}
 
-	// Estimate tokens saved
-	rawContent := c.rawText(targetMsgs)
-	wordCount := len(strings.Fields(rawContent))
-	tokensSaved := int(math.Ceil(float64(wordCount) * 1.3))
+	// Estimate tokens saved — use real tokenizer when available, fall back to word-count heuristic
+	var tokensSaved int
+	if c.tokenEst != nil {
+		for _, msg := range targetMsgs {
+			tokensSaved += c.tokenEst.Estimate(msg.Content)
+		}
+	} else {
+		rawContent := c.rawText(targetMsgs)
+		wordCount := len(strings.Fields(rawContent))
+		tokensSaved = int(math.Ceil(float64(wordCount) * 1.3))
+	}
 
 	// Build summary text: prefix + timeframe + role-sampled content (~500 tokens)
 	timeFrame := c.timeframeDescription(targetMsgs)
@@ -261,7 +279,11 @@ func (c *Consolidator) Stats() map[string]any {
 
 	estTokens := 0
 	for _, msg := range c.messages {
-		estTokens += int(math.Ceil(float64(len(strings.Fields(msg.Content))) * 1.3))
+		if c.tokenEst != nil {
+			estTokens += c.tokenEst.Estimate(msg.Content)
+		} else {
+			estTokens += int(math.Ceil(float64(len(strings.Fields(msg.Content))) * 1.3))
+		}
 	}
 
 	return map[string]any{

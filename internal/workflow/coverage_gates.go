@@ -278,10 +278,11 @@ func extractKeyPhrases(goal string) []string {
 	for i := 0; i < len(words)-1; i++ {
 		phrase := words[i] + " " + words[i+1]
 		lower := strings.ToLower(phrase)
-		// Skip phrases that are mostly stop words
-		if !containsAny(lower, []string{"the ", "a ", "an ", "and ", "or ", "to "}) ||
-			strings.Contains(lower, " api") || strings.Contains(lower, "auth") ||
-			strings.Contains(lower, "test") || strings.Contains(lower, "database") {
+		// Skip phrases that are mostly stop words, unless they contain domain terms
+		isStopPhrase := containsAny(lower, []string{"the ", "a ", "an ", "and ", "or ", "to "})
+		isDomainTerm := strings.Contains(lower, "api") || strings.Contains(lower, "auth") ||
+			strings.Contains(lower, "test") || strings.Contains(lower, "database")
+		if !isStopPhrase || isDomainTerm {
 			phrases = append(phrases, phrase)
 		}
 	}

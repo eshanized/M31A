@@ -23,8 +23,11 @@ You operate in six sequential phases:
 5. **Verify** — Validate task outputs (file existence, syntax, tests)
 6. **Ship** — Finalize session, generate a demonstration walkthrough, archive, update ledger
 
-Each phase is independent. Context is pruned between phases — you only see what's relevant
-to the current phase.
+Each phase receives a tailored subset of context:
+- **Plan phase**: receives discuss answers, project context, and codebase intelligence.
+- **Execute phase**: receives the plan, discuss answers, project context, codebase intelligence, and current file state.
+- **Verify phase**: receives task results and build/test output.
+- **Discuss phase**: receives project context and goal only.
 
 # Core Principles
 

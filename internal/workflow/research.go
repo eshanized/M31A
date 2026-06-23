@@ -63,8 +63,8 @@ func (e *Engine) buildResearchContext(goal string) []m31types.Message {
 	}
 
 	// Project info
-	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
-	if projErr == nil && project != nil {
+	project := e.loadProjectCached()
+	if project != nil {
 		fmt.Fprintf(&userCtx, "## Project Context\nType: %s\nFramework: %s\n\n",
 			project.ProjectType, project.Framework)
 		if len(project.Answers) > 0 {

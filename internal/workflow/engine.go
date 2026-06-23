@@ -137,9 +137,15 @@ type Engine struct {
 	// Cached system prompt static portions
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once
+	// Cached full system prompts per extras signature (PERF-24 extension)
+	cachedFullPrompts    map[string]string
+	cachedFullPromptsMu  sync.Mutex
 	// Cached project state for execute phase (H15 fix)
 	cachedProject   *m31types.ProjectState
 	cachedProjectID string // session ID for invalidation
+	// Cached project state shared across all context builders (PERF-29)
+	cachedProjectShared   *m31types.ProjectState
+	cachedProjectSharedID string
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
@@ -392,6 +398,23 @@ func (e *Engine) compactedMessages(original []m31types.Message, summary string) 
 	result = append(result, summaryMsg)
 	result = append(result, recent...)
 	return result
+}
+
+// loadProjectCached returns the cached project state, loading it from disk
+// on first access per session. Avoids redundant disk I/O + JSON parse across
+// buildDiscussContext, buildPlanContext, buildResearchContext, and buildExecuteContext.
+func (e *Engine) loadProjectCached() *m31types.ProjectState {
+	if e.cachedProjectSharedID == e.sessionID && e.cachedProjectShared != nil {
+		return e.cachedProjectShared
+	}
+	project, err := e.sessionMgr.LoadProject(e.sessionID)
+	if err != nil {
+		e.logger.Warn("failed to load project", "error", err)
+		return nil
+	}
+	e.cachedProjectShared = project
+	e.cachedProjectSharedID = e.sessionID
+	return project
 }
 
 // SetModel updates the active model ID and provider for the engine.
@@ -700,7 +723,6 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 			}
 			// Compaction wasn't sufficient, fall through to truncation with compacted messages
 			msgs = compactedMsgs
-			estimated = compactedEstimate
 		} else if compactErr != nil {
 			slog.Warn("auto-compaction failed, falling back to truncation", "error", compactErr)
 		}
@@ -712,13 +734,29 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 		copy(msgs, messages)
 	}
 
+	// Cache per-message token counts to avoid O(N*K) recomputation in truncation loops.
+	// Each message's token count is estimated once, then updated incrementally after truncation.
+	msgTokens := make([]int, len(msgs))
+	for i, msg := range msgs {
+		msgTokens[i] = e.tokens.Estimate(msg.Content)
+	}
+	estimateTotal := func() int {
+		total := 0
+		for _, t := range msgTokens {
+			total += t
+		}
+		return total
+	}
+	estimated = estimateTotal()
+
 	// Try progressive truncation before giving up
 	// Pass 1: truncate old tool results
 	if estimated > threshold80 {
 		for i := 0; i < len(msgs) && estimated > threshold80; i++ {
 			if msgs[i].Role == "tool" && len(msgs[i].Content) > 500 {
 				msgs[i].Content = msgs[i].Content[:500] + "\n...[truncated for context]"
-				estimated = e.tokens.EstimateMessages(msgs)
+				msgTokens[i] = e.tokens.Estimate(msgs[i].Content)
+				estimated = estimateTotal()
 			}
 		}
 	}
@@ -728,7 +766,8 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 		for i := 0; i < len(msgs) && estimated > threshold80; i++ {
 			if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) == 0 && len(msgs[i].Content) > 1000 {
 				msgs[i].Content = msgs[i].Content[:1000] + "\n...[truncated for context]"
-				estimated = e.tokens.EstimateMessages(msgs)
+				msgTokens[i] = e.tokens.Estimate(msgs[i].Content)
+				estimated = estimateTotal()
 			}
 		}
 	}
@@ -744,7 +783,8 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 					continue
 				}
 				msgs = append(msgs[:idx], msgs[idx+1:]...)
-				estimated = e.tokens.EstimateMessages(msgs)
+				msgTokens = append(msgTokens[:idx], msgTokens[idx:]...)
+				estimated = estimateTotal()
 				// Don't increment idx — next message slides into same position
 			}
 		}
@@ -800,10 +840,7 @@ func (e *Engine) SkipDiscuss() error {
 }
 
 func (e *Engine) FinalizeDiscuss() error {
-	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
-	if projErr != nil {
-		e.logger.Warn("failed to load project for discuss finalization", "error", projErr)
-	}
+	project := e.loadProjectCached()
 	var questions, answers []string
 	for i, q := range e.discussState.Questions {
 		questions = append(questions, q)
@@ -879,13 +916,24 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
 // The base prompt is cached since it doesn't change during a session (PERF-24).
-// cachedBasePromptOnce caches e.prompts.Base for the lifetime of this Engine
-// instance. Since prompts are loaded once at engine creation and never reloaded,
-// this is correct. Do not reuse an Engine across different prompt configurations.
+// Full assembled prompts are cached per extras signature to avoid repeated string building.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
 	e.cachedBasePromptOnce.Do(func() {
 		e.cachedBasePrompt = e.prompts.Base
 	})
+
+	// Build cache key from extras
+	key := strings.Join(extra, "|")
+
+	e.cachedFullPromptsMu.Lock()
+	if e.cachedFullPrompts == nil {
+		e.cachedFullPrompts = make(map[string]string)
+	}
+	if cached, ok := e.cachedFullPrompts[key]; ok {
+		e.cachedFullPromptsMu.Unlock()
+		return cached
+	}
+	e.cachedFullPromptsMu.Unlock()
 
 	parts := []string{e.cachedBasePrompt}
 
@@ -923,7 +971,13 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 			parts = append(parts, p)
 		}
 	}
-	return strings.Join(parts, "\n\n---\n\n")
+	result := strings.Join(parts, "\n\n---\n\n")
+
+	e.cachedFullPromptsMu.Lock()
+	e.cachedFullPrompts[key] = result
+	e.cachedFullPromptsMu.Unlock()
+
+	return result
 }
 
 // renderDynamicContext formats a context snapshot map into a prompt section.
@@ -970,6 +1024,7 @@ func (e *Engine) getCodeIntel(ctx context.Context) *codeintel.Indexer {
 
 // consumeStream reads all chunks from the iterator and returns the concatenated content.
 // Enforces MaxLLMResponseBytes limit to prevent OOM from pathological responses.
+// Returns partial content before non-EOF errors so callers can inspect what was received.
 func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error) {
 	var sb strings.Builder
 	defer iterator.Close() //nolint:errcheck
@@ -980,7 +1035,7 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 			break
 		}
 		if err != nil {
-			// Preserve partial content before non-EOF errors
+			// Preserve partial content before non-EOF errors for caller inspection
 			if chunk != nil && chunk.Delta != "" {
 				sb.WriteString(chunk.Delta)
 			}

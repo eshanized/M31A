@@ -422,10 +422,7 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 	}
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(extras...)})
 
-	project, projErr := e.sessionMgr.LoadProject(e.sessionID)
-	if projErr != nil {
-		e.logger.Warn("plan context: failed to load project", "error", projErr)
-	}
+	project := e.loadProjectCached()
 	projectType := "unknown"
 	framework := ""
 	if project != nil {

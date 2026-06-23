@@ -2,8 +2,10 @@ package codeintel
 
 import (
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -140,10 +142,19 @@ func (g *ImportGraph) AllPaths() []string {
 	return paths
 }
 
+// fileJob holds a file to be parsed by a worker goroutine.
+type fileJob struct {
+	relPath string
+	absPath string
+	parser  Parser
+}
+
 // BuildGraph parses all source files in workDir and builds the import graph.
 // It resolves local imports to relative file paths where possible.
+// Uses a worker pool parallelized across available CPUs for faster indexing.
 func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, error) {
 	graph := NewImportGraph()
+	var mu sync.Mutex
 	var allFiles []*FileInfo
 
 	skipDirs := map[string]bool{
@@ -152,6 +163,8 @@ func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, er
 		".venv": true, "venv": true, "__pycache__": true,
 	}
 
+	// Phase 1: Collect all parseable files via WalkDir (fast, no I/O)
+	var jobs []fileJob
 	err := filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -177,31 +190,85 @@ func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, er
 			return nil
 		}
 
-		content, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil
-		}
-
-		info, parseErr := p.Parse(relPath, content)
-		if parseErr != nil {
-			return nil
-		}
-
-		var resolvedImports []string
-		for _, imp := range info.Imports {
-			resolved := resolveImport(workDir, relPath, imp.Path, p.Language())
-			if resolved != "" {
-				resolvedImports = append(resolvedImports, resolved)
-			}
-		}
-
-		graph.AddNode(relPath, resolvedImports, info.Language)
-		allFiles = append(allFiles, info)
-
+		jobs = append(jobs, fileJob{relPath: relPath, absPath: path, parser: p})
 		return nil
 	})
+	if err != nil {
+		return graph, allFiles, err
+	}
 
-	return graph, allFiles, err
+	if len(jobs) == 0 {
+		return graph, allFiles, nil
+	}
+
+	// Phase 2: Parse files in parallel using a bounded worker pool
+	type parseResult struct {
+		info    *FileInfo
+		imports []string
+	}
+	results := make([]parseResult, len(jobs))
+
+	workerCount := runtime.NumCPU()
+	if workerCount > len(jobs) {
+		workerCount = len(jobs)
+	}
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	var wg sync.WaitGroup
+	jobCh := make(chan int, len(jobs))
+	for i := range jobs {
+		jobCh <- i
+	}
+	close(jobCh)
+
+	for w := 0; w < workerCount; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobCh {
+				job := jobs[idx]
+				content, readErr := os.ReadFile(job.absPath)
+				if readErr != nil {
+					continue
+				}
+
+				info, parseErr := job.parser.Parse(job.relPath, content)
+				if parseErr != nil {
+					// Log parse error but add as isolated node so file isn't invisible
+					slog.Debug("BuildGraph: parse error, adding as isolated node",
+						"file", job.relPath, "error", parseErr)
+					mu.Lock()
+					graph.AddNode(job.relPath, nil, job.parser.Language())
+					mu.Unlock()
+					continue
+				}
+
+				var resolvedImports []string
+				for _, imp := range info.Imports {
+					resolved := resolveImport(workDir, job.relPath, imp.Path, job.parser.Language())
+					if resolved != "" {
+						resolvedImports = append(resolvedImports, resolved)
+					}
+				}
+
+				results[idx] = parseResult{info: info, imports: resolvedImports}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Phase 3: Assemble graph (sequential, lock-free via single-threaded assembly)
+	for _, r := range results {
+		if r.info == nil {
+			continue
+		}
+		graph.AddNode(r.info.Path, r.imports, r.info.Language)
+		allFiles = append(allFiles, r.info)
+	}
+
+	return graph, allFiles, nil
 }
 
 // resolveImport attempts to map an import path to a local file path.
