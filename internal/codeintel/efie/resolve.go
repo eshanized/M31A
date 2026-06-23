@@ -241,5 +241,3 @@ type TypeInfo struct {
 	Fields  []string
 	Methods []string
 }
-
-
