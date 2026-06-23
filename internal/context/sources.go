@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -34,12 +35,16 @@ func (EnvironmentSource) Key() string { return "core/environment" }
 func (e EnvironmentSource) Load(_ context.Context) (string, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/bash"
+		if runtime.GOOS == "windows" {
+			shell = os.Getenv("COMSPEC")
+			if shell == "" {
+				shell = "cmd"
+			}
+		} else {
+			shell = "/bin/bash"
+		}
 	}
-	platform := fmt.Sprintf("%s/%s", os.Getenv("GOOS"), os.Getenv("GOARCH"))
-	if platform == "/" {
-		platform = "linux/amd64"
-	}
+	platform := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 	return fmt.Sprintf("cwd: %s\nshell: %s\nplatform: %s", e.WorkDir, shell, platform), nil
 }
 func (EnvironmentSource) Render(value string) string {

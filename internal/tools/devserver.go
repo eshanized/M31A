@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/eshanized/M31A/internal/shell"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -116,7 +116,7 @@ func (d *DevServer) startServer(ctx context.Context, input types.ToolInput, star
 		port = int(p)
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := shell.Command(command)
 	cmd.Dir = d.workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -193,9 +193,9 @@ func (d *DevServer) stopByID(id int) error {
 	d.mu.Unlock()
 
 	if entry.cmd.Process != nil {
-		pgid, err := syscall.Getpgid(entry.cmd.Process.Pid)
-		if err == nil {
-			_ = syscall.Kill(-pgid, syscall.SIGTERM)
+		pgid, err := getProcessGroup(entry.cmd.Process.Pid)
+		if err == nil && pgid > 0 {
+			_ = killProcessGroup(pgid)
 		} else {
 			_ = entry.cmd.Process.Kill()
 		}

@@ -2,10 +2,10 @@ package tui
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/shell"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -22,7 +22,7 @@ func (m *ReplModel) executeShellCommand(input string, ctx context.Context) tea.C
 		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
-		out, err := exec.CommandContext(timeoutCtx, "sh", "-c", cmd).CombinedOutput()
+		out, err := shell.CommandContext(timeoutCtx, cmd).CombinedOutput()
 		var result string
 		if err != nil {
 			result = "Error: " + err.Error()

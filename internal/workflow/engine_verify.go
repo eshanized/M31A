@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/shell"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -297,7 +298,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	// from verifyTaskContext(). Creating nested WithTimeout calls causes
 	// confusing overlapping deadlines.
 	if hasCustomBuild {
-		cmd := exec.CommandContext(ctx, "sh", "-c", e.cfg.Verify.BuildCommand)
+		cmd := shell.CommandContext(ctx, e.cfg.Verify.BuildCommand)
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("configured build command failed: %s", string(out)))
@@ -306,7 +307,7 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	}
 
 	if hasCustomTest {
-		cmd := exec.CommandContext(ctx, "sh", "-c", e.cfg.Verify.TestCommand)
+		cmd := shell.CommandContext(ctx, e.cfg.Verify.TestCommand)
 		cmd.Dir = e.workDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("configured test command failed: %s", string(out)))
@@ -353,12 +354,12 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				pm := detectPackageManager(e.workDir)
 				if pm != "" {
 					// Try the package manager's build command first, fall back to tsc
-					cmd := exec.CommandContext(ctx, "sh", "-c", pm+" build 2>&1")
+					cmd := shell.CommandContext(ctx, pm+" build 2>&1")
 					cmd.Dir = e.workDir
 					out, buildErr := cmd.CombinedOutput()
 					if buildErr != nil {
 						// Try tsc as fallback (uses same parent context, C-7)
-						tscCmd := exec.CommandContext(ctx, "sh", "-c", "tsc --noEmit 2>&1")
+						tscCmd := shell.CommandContext(ctx, "tsc --noEmit 2>&1")
 						tscCmd.Dir = e.workDir
 						tscOut, tscErr := tscCmd.CombinedOutput()
 						if tscErr != nil {
@@ -451,14 +452,14 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 					testCmd = "bun test 2>&1"
 				}
 			}
-			cmd := exec.CommandContext(ctx, "sh", "-c", testCmd)
+			cmd := shell.CommandContext(ctx, testCmd)
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("%s failed: %s", strings.Split(testCmd, " ")[0], string(out)))
 				result.TestsOK = false
 			}
 		case "python":
-			cmd := exec.CommandContext(ctx, "sh", "-c", "python3 -m pytest 2>&1")
+			cmd := shell.CommandContext(ctx, "python3 -m pytest 2>&1")
 			cmd.Dir = e.workDir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("pytest failed: %s", string(out)))

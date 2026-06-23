@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eshanized/M31A/internal/shell"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -183,7 +184,7 @@ func (e *Engine) startNodeJSServer(ctx context.Context) (*runtimeServerEntry, st
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("PORT=%d %s", port, devCmd))
+	cmd := shell.CommandContext(ctx, devCmd)
 	cmd.Dir = e.workDir
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
 
