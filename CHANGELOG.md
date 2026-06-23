@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.3.0] - 2026-06-24
+
+### Added
+- **EFIE backend**: Enhanced File Intelligence Engine with graph analysis, bloom filters, centrality scoring, community detection, and polyglot parsers
+- **EFIE integration**: `USE_EFIE` environment toggle for code intelligence backend selection
+- **Runtime verification phase**: Dev server lifecycle management with smoke tests and HTTP endpoint validation
+- **Home screen**: New UI with logo, prompt input, and shortcut tips
+- **Subagent profiles**: Built-in agent profiles with profile resolution, allowlist/denylist filtering, and native streaming tool calls
+- **Session coordinator**: Concurrent session control with file locking to prevent corruption
+- **Session compaction**: Automatic context compaction with serialization and template-based summarization
+- **Dynamic context registry**: Environment and git sources for context injection
+- **Retry policy**: Exponential backoff with error classification
+- **Skill discovery**: Package for loading and registering skills as slash commands
+- **Persistent permissions**: Last-match-wins rule evaluation for tool permissions
+- **Output store**: Bounding tool output size to prevent context overflow
+- **DevServer tool**: Managing dev servers with process group cleanup (Unix/Windows)
+- **HTTPCheck tool**: Validating HTTP endpoints during runtime phase
+- **Diff summaries**: Workflow integration for change summarization
+- **Agent switching**: Dynamic agent profile switching during workflow execution
+- **Compaction config**: Instructions, skills, and compaction configuration sections
+- **Website template**: Embedded Next.js website template with shadcn/ui components
+- **Post-ship validation**: Content validation, placeholder detection, and HTML checks
+- **Model prompt templates**: Per-provider prompt customization
+- **Runtime UI**: RuntimeModel, runtime view renderer, and sidebar pipeline phase
+
+### Fixed
+- **errcheck**: Wrap `os.RemoveAll` return value in `engine.go`
+- **unused**: Remove `nCommunities`, `maxCentrality` fields, `min` function, and `walkDir` function
+- **layout**: Fix modal overlay ANSI code corruption in `RenderModalOverlay`
+- **workflow**: Fix intent classify stream EOF handling
+- **workflow**: Optimize code intel invalidation and add quality gate re-check after heal
+- **workflow**: Reset heal counter for verify phase and clean bisect state
+- **config**: Warn on unknown top-level config keys
+- **provider**: Add model-not-found detection for unavailable/deprecated models
+- **tui**: Update dimension handling and permission tick logic
+
+### Changed
+- **perf**: Parallelize `BuildGraph` file parsing with worker pool
+- **refactor**: Unify shell command execution across platforms
+- **refactor**: Clean up code and fix error handling in codeintel
+- **config**: Enable all quality features by default
+- **workflow**: Improve greenfield project complexity classification and project type detection
+- **ci**: Bump `actions/checkout` from v4 to v7
+
 ## [1.2.0] - 2026-06-21
 
 ### Added
