@@ -3,17 +3,22 @@
 **A Technical Research Paper**
 
 **Author:** Eshan Roy &lt;eshanized@proton.me&gt;
+
 **Date:** June 22, 2026
+
 **Repository:** [github.com/eshanized/M31A](https://github.com/eshanized/M31A)
+
 **Module:** `github.com/eshanized/M31A` (Go 1.25)
+
 **Version:** v1.1.0
+
 **License:** MIT
 
 ---
 
 ## Abstract
 
-The proliferation of AI-assisted coding tools has produced a landscape dominated by browser-bound assistants and editor plugins. M31 Autonomous takes a fundamentally different approach: a terminal-native agent, written entirely in Go, that owns an eight-phase software engineering workflow end-to-end. From initialization through discussion, planning, execution, verification, runtime smoke testing, and shipping, every run concludes with a verified git commit and a cross-session learning record. This paper presents a deep technical analysis of M31 Autonomous's architecture, its core innovations, and the engineering decisions that make it both powerful and safe. We examine the workflow engine, the 33-screen terminal UI, the provider abstraction layer, the security model, the composable skills system, the automatic session compaction engine, the concurrent session coordinator, and the suite of domain-specific packages that together form what we believe is the most complete terminal-native AI coding agent available today.
+The landscape of AI-assisted coding tools has largely settled into two familiar patterns: browser-based assistants and editor plugins that extend existing development environments. M31 Autonomous takes a different path entirely — a terminal-native agent, written from the ground up in Go, that manages an eight-phase software engineering workflow from start to finish. From the moment a user describes a goal through discussion, planning, execution, verification, runtime testing, and final shipping, every session concludes with a verified git commit and a record of lessons learned across sessions. This paper provides a thorough technical examination of M31 Autonomous's architecture, its key innovations, and the engineering choices that make it both capable and safe to use. We explore the workflow engine, the 33-screen terminal user interface, the provider abstraction layer, the security model, the composable skills system, the automatic session compaction engine, the concurrent session coordinator, and the collection of domain-specific packages that together make up what we consider the most fully featured terminal-native AI coding agent available today.
 
 ---
 
@@ -21,9 +26,9 @@ The proliferation of AI-assisted coding tools has produced a landscape dominated
 
 ### 1.1 The Problem Space
 
-Modern software development increasingly relies on AI to assist with code generation, refactoring, and debugging. However, most existing tools operate within one of two constrained paradigms: either they are embedded inside an editor (losing the flexibility of the terminal), or they are simple command-line wrappers around a single LLM call (lacking the structured workflow that real engineering tasks demand).
+Software development today leans heavily on AI to help with code generation, refactoring, and debugging. Yet most existing tools operate within one of two constrained paradigms: they are either embedded inside an editor, losing the flexibility of the terminal, or they are simple command-line wrappers around a single LLM call, lacking the structured workflow that real engineering tasks demand.
 
-Consider a typical refactoring task: migrating an authentication middleware from session-based to JWT-based auth. This is not a single-turn interaction. It requires understanding the existing codebase, discussing tradeoffs, creating a plan, executing changes across multiple files, verifying correctness through tests, and committing the result. Each phase demands different capabilities, different levels of autonomy, and different safety guarantees.
+Think about a typical refactoring task — say, migrating an authentication middleware from session-based to JWT-based auth. This is not a single-turn conversation. It requires understanding the existing codebase, weighing tradeoffs through discussion, creating a plan, executing changes across multiple files, verifying correctness with tests, and committing the result. Each phase demands different capabilities, different levels of autonomy, and different safety guarantees.
 
 M31 Autonomous was designed from the ground up to solve this exact problem. It is not an autocomplete with shell access. It is a structured workflow engine that happens to live in your terminal.
 
@@ -49,7 +54,7 @@ This paper makes the following contributions:
 - Documentation of a dual context consolidation system: AutoDream for intra-session pruning and automatic session compaction for long-running sessions.
 - Analysis of a multi-provider LLM abstraction with automatic fallback and cost optimization.
 - A comprehensive security model for tool execution in an AI agent context, with resolved ReDoS protection, SSRF defense, and persistent permissions.
-- Documentation of a composable skills system enabling user-defined slash commands via Markdown with YAML frontmatter.
+- Documentation of a composable skills system that enables user-defined slash commands via Markdown with YAML frontmatter.
 - Analysis of a generic concurrent session coordinator with demand coalescing.
 - Full documentation of the 65 slash commands, 17 tools, and 33-screen TUI system.
 
@@ -59,39 +64,28 @@ This paper makes the following contributions:
 
 ### 2.1 High-Level Overview
 
-M31 Autonomous follows a strict layered architecture with a clear dependency rule: higher layers may depend on lower layers, but never the reverse. The `pkg/` directory contains public, importable packages, while `internal/` contains private implementation details.
+M31 Autonomous follows a strict layered architecture with a clear dependency rule: higher layers may depend on lower layers, but never the reverse. Public, importable packages live in `pkg/`, while private implementation details are kept in `internal/`.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       TUI Layer (Bubble Tea)                    │
-│              33 screens · Elm architecture · Themes             │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Workflow Engine (8 phases)                    │
-│  Orchestrator · Prompt templates · Plan parser · Runtime        │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                    ┌──────────┼──────────┐
-                    ▼          ▼          ▼
-              ┌──────────┐ ┌────────┐ ┌──────────┐
-              │ Provider │ │  Tools │ │ Packages │
-              │  Layer   │ │  Layer │ │ (pkg/)   │
-              └──────────┘ └────────┘ └──────────┘
-                               │
-                    ┌──────────┼──────────┐
-                    ▼          ▼          ▼
-              ┌──────────┐ ┌───────────┐ ┌──────────┐
-              │ Context  │ │ Compaction│ │  Skills  │
-              │ Registry │ │  Engine   │ │  System  │
-              └──────────┘ └───────────┘ └──────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Infrastructure Layer                          │
-│    Config · Errors · Tokens · CodeIntel · Git · Coordinator     │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    TUI["TUI Layer (Bubble Tea)<br/>33 screens · Elm architecture · Themes"]
+    Workflow["Workflow Engine (8 phases)<br/>Orchestrator · Prompt templates · Plan parser · Runtime"]
+    Provider["Provider Layer"]
+    Tools["Tools Layer"]
+    Packages["Packages (pkg/)"]
+    Context["Context Registry"]
+    Compaction["Compaction Engine"]
+    Skills["Skills System"]
+    Infra["Infrastructure Layer<br/>Config · Errors · Tokens · CodeIntel · Git · Coordinator"]
+
+    TUI --> Workflow
+    Workflow --> Provider
+    Workflow --> Tools
+    Workflow --> Packages
+    Tools --> Context
+    Tools --> Compaction
+    Tools --> Skills
+    Packages --> Infra
 ```
 
 The entry point, `cmd/m31a/main.go`, orchestrates a 15-step initialization sequence that wires together all these layers. This sequence is worth examining in detail because it reveals the system's dependency ordering.
@@ -99,6 +93,30 @@ The entry point, `cmd/m31a/main.go`, orchestrates a 15-step initialization seque
 ### 2.2 Initialization Pipeline
 
 The `run()` function (the entire `main.go` is a single `run()` function with deferred cleanup) executes the following 15-step sequence. Each step is deliberately ordered — dependencies flow downward, and failures at critical points cause an immediate exit with a descriptive error. The `run()` pattern ensures all `defer` statements execute before `os.Exit(0)`, guaranteeing cleanup even on error paths.
+
+```mermaid
+graph TD
+    S1["1. Command Registry"]
+    S2["2. CLI Flag Parsing"]
+    S3["3. Environment Loading (.env)"]
+    S4["4. Logger Initialization"]
+    S5["5. Configuration Resolution"]
+    S6["6. Keychain Integration"]
+    S7["7. Provider Registry"]
+    S8["8. Working Directory"]
+    S9["9. Session Manager"]
+    S10["10. Tool Dispatcher"]
+    S11["11. Git Client"]
+    S12["12. Domain Packages"]
+    S13["13. Theme Selection"]
+    S14["14. Subagent System"]
+    S15["15. TUI Launch"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9 --> S10 --> S11 --> S12 --> S13 --> S14 --> S15
+
+    style S1 fill:#e1f5fe
+    style S15 fill:#c8e6c9
+```
 
 ---
 
@@ -408,28 +426,22 @@ M31 Autonomous's TUI is built on Bubble Tea, an Elm-architecture framework for t
 
 Bubble Tea implements the Elm architecture (also known as The Elm Architecture or TEA), a pattern that enforces unidirectional data flow:
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    Bubble Tea Runtime               │
-│                                                     │
-│   ┌─────────┐    msg     ┌─────────────────────┐    │
-│   │         │ ─────────> │                     │    │
-│   │  Model  │            │   Update(msg)       │    │
-│   │ (state) │ <───────── │   → (newModel, cmd) │    │
-│   │         │  new state │                     │    │
-│   └─────────┘            └────────┬────────────┘    │
-│        │                          │                 │
-│        │ View()                   │ cmd             │
-│        ▼                          ▼                 │
-│   ┌──────────┐            ┌───────────────┐         │
-│   │ Terminal │            │  Command      │         │
-│   │ Output   │            │  (side effect)│         │
-│   └──────────┘            └───────────────┘         │
-│                                  │                  │
-│                                  │ produces new msg │
-│                                  ▼                  │
-│                           Back to Update()          │
-└─────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph Bubble Tea Runtime
+        M["Model<br/>(state)"]
+        U["Update(msg)<br/>→ (newModel, cmd)"]
+        V["View()<br/>→ string"]
+        C["Command<br/>(side effect)"]
+        TO["Terminal Output"]
+    end
+
+    M -->|"msg"| U
+    U -->|"new state"| M
+    M -->|"View()"| V
+    V --> TO
+    U -->|"cmd"| C
+    C -->|"produces new msg"| U
 ```
 
 Every Bubble Tea model is a Go struct implementing three methods:
@@ -440,6 +452,50 @@ func NewXxxModel(...) Model { return Model{...} }
 func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) { ... }
 func (m Model) View() string { ... }
+```
+
+**Equivalent in C++:**
+```cpp
+struct Model {
+    // state fields
+    virtual void init() {}
+    virtual std::pair<Model, Command> update(Msg msg) = 0;
+    virtual std::string view() const = 0;
+};
+```
+
+**Equivalent in Python:**
+```python
+from abc import ABC, abstractmethod
+from typing import Tuple
+
+class Model(ABC):
+    @abstractmethod
+    def init(self) -> None: ...
+    
+    @abstractmethod
+    def update(self, msg: 'Msg') -> Tuple['Model', 'Command']: ...
+    
+    @abstractmethod
+    def view(self) -> str: ...
+```
+
+**Equivalent in Rust:**
+```rust
+trait Model {
+    fn init(&self) -> Option<Command> { None }
+    fn update(self, msg: Msg) -> (Self, Option<Command>) where Self: Sized;
+    fn view(&self) -> String;
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface Model {
+    init(): Command | null;
+    update(msg: Msg): [Model, Command | null];
+    view(): string;
+}
 ```
 
 **`Init()`** — returns an initial command to execute when the model is created. Most models return `nil` (no initial command). Some return a `tea.Batch()` of multiple commands to kick off concurrent operations.
@@ -560,6 +616,54 @@ type ScreenTransition struct {
 }
 ```
 
+**Equivalent in C++:**
+```cpp
+#include <chrono>
+
+struct ScreenTransition {
+    bool active;
+    double progress;  // 0.0 to 1.0
+    std::chrono::duration<double> duration;
+    std::chrono::steady_clock::time_point start;
+};
+```
+
+**Equivalent in Python:**
+```python
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+@dataclass
+class ScreenTransition:
+    active: bool = False
+    progress: float = 0.0
+    duration: timedelta = timedelta(milliseconds=200)
+    start: datetime = None
+```
+
+**Equivalent in Rust:**
+```rust
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone)]
+struct ScreenTransition {
+    active: bool,
+    progress: f64,
+    duration: Duration,
+    start: Instant,
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface ScreenTransition {
+    active: boolean;
+    progress: number;  // 0.0 to 1.0
+    duration: number;  // milliseconds
+    start: number;     // timestamp
+}
+```
+
 When `navigateToScreen` is called for a real screen change (not just a refresh), a `ScreenTransition` is created with a 200ms duration. The `TransitionTick()` function advances the animation on each `TickMsg`, dimming the current screen and revealing the new one. When progress reaches 1.0, the transition completes and the screen switch is finalized.
 
 This animation is purely visual — it has no effect on state or behavior. But it provides an important UX benefit: the user always sees a smooth transition rather than an abrupt screen swap, which reduces cognitive load during fast navigation.
@@ -626,11 +730,11 @@ Each screen's content renderer returns ONLY the content area (no chrome). This s
 
 ## 3. The Workflow Engine
 
-The workflow engine is the heart of M31 Autonomous. It implements an eight-phase pipeline that transforms a user's intent into verified, committed code.
+The workflow engine sits at the heart of M31 Autonomous. It implements an eight-phase pipeline that takes a user's intent and transforms it into verified, committed code.
 
 ### 3.1 Phase Overview
 
-The workflow engine implements an eight-phase pipeline. Each phase is a self-contained module with its own file, its own system prompt composition, and its own error handling. Phases communicate via the `MsgEmitter` interface, which sends typed messages to the TUI without coupling the engine to Bubble Tea.
+The workflow engine is organized into eight phases. Each phase is a self-contained module with its own source file, its own system prompt composition, and its own error handling. Phases communicate through the `MsgEmitter` interface, which sends typed messages to the TUI without coupling the engine to Bubble Tea.
 
 | Phase | Purpose | Key Files | Entry Function |
 |-------|---------|-----------|----------------|
@@ -648,14 +752,33 @@ The workflow engine implements an eight-phase pipeline. Each phase is a self-con
 
 Not all phase transitions are legal. A `validPhaseTransitions` map enforces the allowed paths:
 
-```
-Initialize → Discuss, Plan, Execute, Ship
-Discuss → Plan, Execute, Ship
-Plan → Execute, Ship
-Execute → Verify, Ship
-Verify → Execute, Runtime, Ship, Discuss
-Runtime → Execute, Ship
-Ship → (terminal — returns to REPL)
+```mermaid
+stateDiagram-v2
+    [*] --> Initialize
+    Initialize --> Discuss
+    Initialize --> Plan
+    Initialize --> Execute
+    Initialize --> Ship
+
+    Discuss --> Plan
+    Discuss --> Execute
+    Discuss --> Ship
+
+    Plan --> Execute
+    Plan --> Ship
+
+    Execute --> Verify
+    Execute --> Ship
+
+    Verify --> Execute
+    Verify --> Runtime
+    Verify --> Ship
+    Verify --> Discuss
+
+    Runtime --> Execute
+    Runtime --> Ship
+
+    Ship --> [*]
 ```
 
 Key constraints:
@@ -671,6 +794,24 @@ A **Plan-Discuss oscillation guard** caps round-trips between Plan and Discuss a
 #### Workflow Modes
 
 M31 Autonomous supports four workflow modes that determine which phases are executed:
+
+```mermaid
+graph LR
+    subgraph "full"
+        F1[Init] --> F2[Discuss] --> F3[Plan] --> F4[Execute] --> F5[Verify] --> F6[Runtime] --> F7[Ship]
+    end
+    subgraph "fast"
+        FS1[Init] --> FS2[Discuss] --> FS3[Execute] --> FS4[Verify] --> FS5[Ship]
+    end
+    subgraph "direct"
+        D1[Init] --> D2[Execute] --> D3[Ship]
+    end
+    subgraph "auto"
+        A1[Classify Goal] -->|Trivial| D1
+        A1 -->|Simple| FS1
+        A1 -->|Moderate/Complex| F1
+    end
+```
 
 | Mode | Phase Sequence | When Used |
 |------|---------------|-----------|
@@ -713,6 +854,93 @@ for {
         break
     }
     oldBits = atomic.LoadUint64(&e.totalCostBits)
+}
+```
+
+**Equivalent in C++:**
+```cpp
+std::atomic<uint64_t> totalCostBits{0};
+
+void addCost(double cost) {
+    uint64_t oldBits = totalCostBits.load(std::memory_order_relaxed);
+    while (true) {
+        double oldCost = std::bit_cast<double>(oldBits);
+        double newCost = oldCost + cost;
+        uint64_t newBits = std::bit_cast<uint64_t>(newCost);
+        if (totalCostBits.compare_exchange_weak(oldBits, newBits,
+                std::memory_order_relaxed)) {
+            break;
+        }
+    }
+}
+```
+
+**Equivalent in Python:**
+```python
+import struct
+import threading
+
+class CostTracker:
+    def __init__(self):
+        self._bits = 0
+        self._lock = threading.Lock()
+    
+    def add_cost(self, cost: float) -> None:
+        with self._lock:
+            old_bits = self._bits
+            old_cost = struct.unpack('d', struct.pack('Q', old_bits))[0]
+            new_cost = old_cost + cost
+            self._bits = struct.unpack('Q', struct.pack('d', new_cost))[0]
+```
+
+**Equivalent in Rust:**
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub struct CostTracker {
+    total_cost_bits: AtomicU64,
+}
+
+impl CostTracker {
+    pub fn add_cost(&self, cost: f64) {
+        let mut old_bits = self.total_cost_bits.load(Ordering::Relaxed);
+        loop {
+            let old_cost = f64::from_bits(old_bits);
+            let new_cost = old_cost + cost;
+            let new_bits = new_cost.to_bits();
+            match self.total_cost_bits.compare_exchange_weak(
+                old_bits, new_bits, Ordering::Relaxed, Ordering::Relaxed
+            ) {
+                Ok(_) => break,
+                Err(actual) => old_bits = actual,
+            }
+        }
+    }
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+class CostTracker {
+    private totalCostBits: bigint = 0n;
+    
+    addCost(cost: number): void {
+        const view = new DataView(new ArrayBuffer(8));
+        let oldBits = this.totalCostBits;
+        while (true) {
+            view.setFloat64(0, Number(BigInt.asUintN(64, oldBits)));
+            const oldCost = view.getFloat64(0);
+            const newCost = oldCost + cost;
+            view.setFloat64(0, newCost);
+            const newBits = BigInt(view.getUint32(0)) << 32n | 
+                           BigInt(view.getUint32(4));
+            if (this.totalCostBits === oldBits) {
+                this.totalCostBits = newBits;
+                break;
+            }
+            oldBits = this.totalCostBits;
+        }
+    }
 }
 ```
 
@@ -804,6 +1032,27 @@ Every step checks for context cancellation, allowing the user to abort cleanly a
 
 The Discuss phase bridges the gap between the user's initial goal and the implementation plan. Rather than jumping straight to planning, it streams clarifying questions from the LLM to ensure the plan is well-informed.
 
+```mermaid
+graph TD
+    A["Context Assembly<br/>(system prompt + MEMORY.md + PROJECT.md + goal)"] --> B["LLM Streaming<br/>(token-by-token rendering)"]
+    B --> C{"Question Parsing<br/>(3 cascading strategies)"}
+    C -->|"Numbered + ?"| D["High confidence"]
+    C -->|"Numbered, no ?"| E["Fallback"]
+    C -->|"Any line with ?"| F["Last resort"]
+    D --> G["Cap at 4 questions"]
+    E --> G
+    F --> G
+    G --> H["Display in TUI"]
+    H --> I{"User Response"}
+    I -->|"Answer"| J["Store Answer"]
+    I -->|"/skip"| K["Skip Remaining"]
+    J --> L{"More Questions?"}
+    K --> L
+    L -->|"Yes"| H
+    L -->|"No"| M["FinalizeDiscuss()"]
+    M --> N["Append Q&A to PROJECT.md"]
+```
+
 ---
 
 #### The Discuss Flow
@@ -837,6 +1086,48 @@ type DiscussState struct {
 }
 ```
 
+**Equivalent in C++:**
+```cpp
+struct DiscussState {
+    std::vector<std::string> questions;
+    std::unordered_map<int, std::string> answers;
+    bool needsAnswers;
+};
+```
+
+**Equivalent in Python:**
+```python
+from dataclasses import dataclass, field
+from typing import Dict, List
+
+@dataclass
+class DiscussState:
+    questions: List[str] = field(default_factory=list)
+    answers: Dict[int, str] = field(default_factory=dict)
+    needs_answers: bool = False
+```
+
+**Equivalent in Rust:**
+```rust
+use std::collections::HashMap;
+
+#[derive(Debug, Default, Clone)]
+struct DiscussState {
+    questions: Vec<String>,
+    answers: HashMap<i32, String>,
+    needs_answers: bool,
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface DiscussState {
+    questions: string[];
+    answers: Map<number, string>;
+    needsAnswers: boolean;
+}
+```
+
 The `NeedsAnswers` flag controls whether the TUI shows the answer input or proceeds to the next phase. When all questions are answered (or skipped), `FinalizeDiscuss()` is called, which:
 1. Formats the Q&A as markdown.
 2. Appends it to `PROJECT.md`.
@@ -862,6 +1153,21 @@ The `autonomous.md` prompt template is injected in these modes to instruct the L
 ### 3.6 Phase Deep Dive: Plan
 
 The Plan phase is the most sophisticated component of the workflow engine. It generates a structured implementation plan from the user's goal, discuss answers, and project context — then validates, retries, and refines until the plan is correct.
+
+```mermaid
+graph TD
+    A["Context Assembly<br/>(system prompts + MEMORY.md + CWD schema + CodeIntel + Discuss answers)"] --> B["LLM Streaming<br/>(structured plan generation)"]
+    B --> C["Plan Parser<br/>(regex-based section extraction)"]
+    C --> D["Validation<br/>(6 criteria)"]
+    D -->|"Pass"| E["Present to User"]
+    D -->|"Fail"| F["Retry Loop<br/>(max 3 attempts)"]
+    F -->|"Feed errors back to LLM"| B
+    E --> G{"User Action"}
+    G -->|"Approve"| H["Proceed to Execute"]
+    G -->|"/refine"| I["Refinement Loop<br/>(max 5 iterations)"]
+    I --> J["Inject feedback + previous plan"]
+    J --> B
+```
 
 ---
 
@@ -908,6 +1214,60 @@ The plan parser uses regex-based section extraction with cached compiled pattern
 var compiledPatterns = sync.Map{}  // cache compiled regex patterns
 ```
 
+**Equivalent in C++:**
+```cpp
+#include <regex>
+#include <unordered_map>
+#include <mutex>
+
+class PatternCache {
+private:
+    std::unordered_map<std::string, std::regex> cache;
+    std::mutex mu;
+
+public:
+    std::regex get(const std::string& pattern) {
+        std::lock_guard<std::mutex> lock(mu);
+        if (cache.find(pattern) == cache.end()) {
+            cache[pattern] = std::regex(pattern);
+        }
+        return cache[pattern];
+    }
+};
+```
+
+**Equivalent in Python:**
+```python
+import re
+from functools import lru_cache
+
+@lru_cache(maxsize=128)
+def get_compiled_pattern(pattern: str) -> re.Pattern:
+    return re.compile(pattern)
+```
+
+**Equivalent in Rust:**
+```rust
+use std::sync::LazyLock;
+use regex::Regex;
+
+static COMPILED_PATTERNS: LazyLock<regex::Set> = LazyLock::new(|| {
+    regex::Set::empty()
+});
+```
+
+**Equivalent in TypeScript:**
+```typescript
+const compiledPatterns = new Map<string, RegExp>();
+
+function getCompiledPattern(pattern: string): RegExp {
+    if (!compiledPatterns.has(pattern)) {
+        compiledPatterns.set(pattern, new RegExp(pattern));
+    }
+    return compiledPatterns.get(pattern)!;
+}
+```
+
 **Extraction strategy:**
 - Sections are identified by markdown heading levels (H1, H2, H3, H4).
 - Task lists are extracted from JSON in fenced code blocks (```json ... ```).
@@ -929,6 +1289,54 @@ type Task struct {
     Dependencies []string `json:"dependencies"`
     Files       []string `json:"files"`
     Type        string   `json:"type"`  // "create", "modify", "delete"
+}
+```
+
+**Equivalent in C++:**
+```cpp
+struct Task {
+    std::string id;
+    std::string description;
+    std::vector<std::string> dependencies;
+    std::vector<std::string> files;
+    std::string type;
+};
+```
+
+**Equivalent in Python:**
+```python
+from dataclasses import dataclass, field
+from typing import List
+
+@dataclass
+class Task:
+    id: str
+    description: str
+    dependencies: List[str] = field(default_factory=list)
+    files: List[str] = field(default_factory=list)
+    type: str = ""
+```
+
+**Equivalent in Rust:**
+```rust
+#[derive(Debug, Clone, serde::Deserialize)]
+struct Task {
+    id: String,
+    description: String,
+    dependencies: Vec<String>,
+    files: Vec<String>,
+    r#type: String,
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface Task {
+    id: string;
+    description: string;
+    dependencies: string[];
+    files: string[];
+    type: string;
 }
 ```
 
@@ -956,6 +1364,66 @@ type Plan struct {
     VerificationPlan VerificationPlan
     Tasks           []Task
     RawMarkdown     string
+}
+```
+
+**Equivalent in C++:**
+```cpp
+struct Plan {
+    std::string title;
+    std::string summary;
+    std::vector<std::string> reviewNotes;
+    std::vector<Question> openQuestions;
+    std::vector<ChangeCategory> proposedChanges;
+    VerificationPlan verificationPlan;
+    std::vector<Task> tasks;
+    std::string rawMarkdown;
+};
+```
+
+**Equivalent in Python:**
+```python
+from dataclasses import dataclass, field
+from typing import List
+
+@dataclass
+class Plan:
+    title: str = ""
+    summary: str = ""
+    review_notes: List[str] = field(default_factory=list)
+    open_questions: List['Question'] = field(default_factory=list)
+    proposed_changes: List['ChangeCategory'] = field(default_factory=list)
+    verification_plan: 'VerificationPlan' = None
+    tasks: List['Task'] = field(default_factory=list)
+    raw_markdown: str = ""
+```
+
+**Equivalent in Rust:**
+```rust
+#[derive(Debug, Default, Clone)]
+struct Plan {
+    title: String,
+    summary: String,
+    review_notes: Vec<String>,
+    open_questions: Vec<Question>,
+    proposed_changes: Vec<ChangeCategory>,
+    verification_plan: VerificationPlan,
+    tasks: Vec<Task>,
+    raw_markdown: String,
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface Plan {
+    title: string;
+    summary: string;
+    reviewNotes: string[];
+    openQuestions: Question[];
+    proposedChanges: ChangeCategory[];
+    verificationPlan: VerificationPlan;
+    tasks: Task[];
+    rawMarkdown: string;
 }
 ```
 
@@ -1060,6 +1528,99 @@ func WorkflowModeForComplexity(level ComplexityLevel) types.WorkflowMode {
 }
 ```
 
+**Equivalent in C++:**
+```cpp
+WorkflowMode WorkflowModeForComplexity(ComplexityLevel level) {
+    switch (level) {
+        case ComplexityLevel::Trivial:
+            return WorkflowMode::Direct;
+        case ComplexityLevel::Simple:
+            return WorkflowMode::Fast;
+        case ComplexityLevel::Moderate:
+        case ComplexityLevel::Complex:
+            return WorkflowMode::Full;
+        default:
+            return WorkflowMode::Full;
+    }
+}
+```
+
+**Equivalent in Python:**
+```python
+from enum import Enum
+
+class ComplexityLevel(Enum):
+    TRIVIAL = "trivial"
+    SIMPLE = "simple"
+    MODERATE = "moderate"
+    COMPLEX = "complex"
+
+class WorkflowMode(Enum):
+    DIRECT = "direct"
+    FAST = "fast"
+    FULL = "full"
+
+def workflow_mode_for_complexity(level: ComplexityLevel) -> WorkflowMode:
+    if level == ComplexityLevel.TRIVIAL:
+        return WorkflowMode.DIRECT
+    elif level == ComplexityLevel.SIMPLE:
+        return WorkflowMode.FAST
+    else:  # MODERATE or COMPLEX
+        return WorkflowMode.FULL
+```
+
+**Equivalent in Rust:**
+```rust
+enum ComplexityLevel {
+    Trivial,
+    Simple,
+    Moderate,
+    Complex,
+}
+
+enum WorkflowMode {
+    Direct,
+    Fast,
+    Full,
+}
+
+fn workflow_mode_for_complexity(level: ComplexityLevel) -> WorkflowMode {
+    match level {
+        ComplexityLevel::Trivial => WorkflowMode::Direct,
+        ComplexityLevel::Simple => WorkflowMode::Fast,
+        ComplexityLevel::Moderate | ComplexityLevel::Complex => WorkflowMode::Full,
+    }
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+enum ComplexityLevel {
+    Trivial = "trivial",
+    Simple = "simple",
+    Moderate = "moderate",
+    Complex = "complex",
+}
+
+enum WorkflowMode {
+    Direct = "direct",
+    Fast = "fast",
+    Full = "full",
+}
+
+function workflowModeForComplexity(level: ComplexityLevel): WorkflowMode {
+    switch (level) {
+        case ComplexityLevel.Trivial:
+            return WorkflowMode.Direct;
+        case ComplexityLevel.Simple:
+            return WorkflowMode.Fast;
+        case ComplexityLevel.Moderate:
+        case ComplexityLevel.Complex:
+            return WorkflowMode.Full;
+    }
+}
+```
+
 This mapping is applied in `auto` mode. In `full`, `fast`, or `direct` modes, the classification is bypassed and the user's explicit choice is used.
 
 ---
@@ -1078,6 +1639,27 @@ This mapping is applied in `auto` mode. In `full`, `fast`, or `direct` modes, th
 
 The Execute phase is where the engine earns its keep. It creates a `taskrunner` that uses Kahn's algorithm for topological sorting, organizing tasks into dependency groups. Within each group, tasks execute in parallel with bounded concurrency (default: 4 concurrent goroutines via a semaphore channel).
 
+```mermaid
+graph TD
+    A["Topological Sort<br/>(Kahn's algorithm)"] --> B["Dependency Groups"]
+    B --> C["Execute Tasks<br/>(bounded parallelism: 4 goroutines)"]
+    C --> D["Build Context<br/>(system prompt + plan + CodeIntel + file content)"]
+    D --> E["Call LLM with Tool Definitions"]
+    E --> F["Parse Tool Calls<br/>(native or text-based JSON fallback)"]
+    F --> G["Execute Tools in Parallel<br/>(semaphore-bounded)"]
+    G --> H["Feed ALL Results Back to LLM"]
+    H --> I{"Tools Failed?"}
+    I -->|"No"| J["Commit Changes<br/>(scoped to task files)"]
+    I -->|"Yes"| K["healTask()<br/>(enhanced context + acceptance criteria)"]
+    K --> L{"Heal Attempts < 2?"}
+    L -->|"Yes"| E
+    L -->|"No"| M["Mark Task Failed"]
+    J --> N{"More Tasks?"}
+    M --> N
+    N -->|"Yes"| C
+    N -->|"No"| O["Complete"]
+```
+
 Each task goes through a self-heal loop with up to 2 retry attempts:
 
 1. Build execution context with system prompt, project state, plan narrative, task specification, codebase intelligence, and fresh file content from disk (capped at 32KB).
@@ -1093,6 +1675,30 @@ The engine guards against degenerate cases: file-changing tasks that produce zer
 ### 3.9 Phase Deep Dive: Verify
 
 The Verify phase validates that the Execute phase actually delivered working code. It runs four independent checks per completed task, attempts self-healing on failures, and falls back to git bisect when standard healing doesn't work. This is the quality gate between execution and shipping.
+
+```mermaid
+graph TD
+    A["Load TASKS.md"] --> B["Per-Task Verification"]
+    B --> C{"File Existence<br/>(os.Stat)"}
+    C -->|"Pass"| D{"Semantic Check<br/>(git diff --name-only)"}
+    C -->|"Fail"| K["Self-Heal"]
+    D -->|"Pass"| E{"Build Validation<br/>(go build / tsc / py_compile)"}
+    D -->|"Fail"| K
+    E -->|"Pass"| F{"Test Execution<br/>(go test / npm test / pytest)"}
+    E -->|"Fail"| K
+    F -->|"Pass"| G["Task Verified"]
+    F -->|"Fail"| K
+    K --> L{"Heal Successful?"}
+    L -->|"Yes"| M{"Re-verify"}
+    L -->|"No"| N["Try Bisect Fallback"]
+    N --> O{"Bisect + Heal Successful?"}
+    O -->|"Yes"| M
+    O -->|"No"| P["Mark Unrecoverable"]
+    M -->|"Pass"| G
+    M -->|"Fail"| Q{"Heal Attempts < 2?"}
+    Q -->|"Yes"| K
+    Q -->|"No"| P
+```
 
 ---
 
@@ -1189,6 +1795,23 @@ All verification commands run within a `verifyTaskTimeout = 5 minutes` deadline.
 
 The Runtime phase (`internal/workflow/runtime.go`) bridges the gap between static verification (build/test) and shipping. It starts a development server, runs HTTP smoke tests against discovered routes, and reports a structured pass/fail summary. This catches runtime errors — missing imports, broken routes, JavaScript errors — that static checks miss.
 
+```mermaid
+graph TD
+    A["Detect Project Type<br/>(Node.js / Python / Go / Rust / Static)"] --> B["Start Dev Server<br/>(find free port, launch process)"]
+    B --> C["Wait for Server Ready<br/>(poll with 30s timeout)"]
+    C --> D{"Ready?"}
+    D -->|"Yes"| E["Discover Routes<br/>(goal-based hints + filesystem)"]
+    D -->|"No (timeout)"| F["Report Failure"]
+    E --> G["Concurrent Smoke Tests<br/>(max 4 goroutines)"]
+    G --> H["GET Request<br/>(10s timeout, check status 200-399)"]
+    H --> I{"Body > 100 bytes?"}
+    I -->|"Yes"| J["PASS"]
+    I -->|"No"| K["FAIL"]
+    J --> L["Runtime Summary<br/>(pass/fail counts, duration)"]
+    K --> L
+    L --> M["Stop Dev Server<br/>(process group cleanup)"]
+```
+
 ---
 
 #### Runtime Flow
@@ -1221,6 +1844,18 @@ The Runtime phase (`internal/workflow/runtime.go`) bridges the gap between stati
 ### 3.11 Phase Deep Dive: Ship
 
 The Ship phase is the terminal phase of the workflow. It creates the final git commit, writes a ledger entry for cross-session learning, generates a demonstration walkthrough via the LLM, archives the session, and records learnings in `MEMORY.md`. This phase ensures every workflow run leaves a permanent, traceable artifact.
+
+```mermaid
+graph TD
+    A["Load Tasks & Compute Summary"] --> B["Final Git Commit<br/>(scoped to task files)"]
+    B --> C["Build Summary<br/>(duration + commit log)"]
+    C --> D["Update Ledger<br/>(~/.m31a/LEDGER.md)"]
+    D --> E["Save State<br/>(STATE.md: phase=Ship)"]
+    E --> F["Save Checkpoint"]
+    F --> G["Generate Demonstration<br/>(LLM walkthrough)"]
+    G --> H["Write MEMORY.md<br/>(cross-session learnings)"]
+    H --> I["Archive Session"]
+```
 
 ---
 
@@ -1299,6 +1934,53 @@ type DiffStats struct {
 }
 ```
 
+**Equivalent in C++:**
+```cpp
+struct DiffStats {
+    int insertions;
+    int deletions;
+    int filesAdded;
+    int filesDeleted;
+    int filesModified;
+};
+```
+
+**Equivalent in Python:**
+```python
+from dataclasses import dataclass
+
+@dataclass
+class DiffStats:
+    insertions: int = 0
+    deletions: int = 0
+    files_added: int = 0
+    files_deleted: int = 0
+    files_modified: int = 0
+```
+
+**Equivalent in Rust:**
+```rust
+#[derive(Debug, Default, Clone, Copy)]
+struct DiffStats {
+    insertions: i32,
+    deletions: i32,
+    files_added: i32,
+    files_deleted: i32,
+    files_modified: i32,
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface DiffStats {
+    insertions: number;
+    deletions: number;
+    filesAdded: number;
+    filesDeleted: number;
+    filesModified: number;
+}
+```
+
 ---
 
 #### Ledger Entry
@@ -1366,7 +2048,7 @@ The only hard failure is the git commit itself — if `CommitStaged()` returns a
 
 ### 4.1 Provider Abstraction
 
-M31 Autonomous abstracts LLM providers behind a clean interface:
+M31 Autonomous abstracts LLM providers behind a clean, uniform interface:
 
 ```go
 type LLMProvider interface {
@@ -1381,11 +2063,86 @@ type LLMProvider interface {
 }
 ```
 
+**Equivalent in C++:**
+```cpp
+class LLMProvider {
+public:
+    virtual ~LLMProvider() = default;
+    virtual std::string name() const = 0;
+    virtual std::string apiKey() const = 0;
+    virtual std::vector<ModelInfo> fetchModels() = 0;
+    virtual std::vector<ModelInfo> cachedModels() const = 0;
+    virtual StreamIterator chatCompletionStream(const ChatRequest& req) = 0;
+    virtual double estimateCost(const std::string& modelID, const Usage& usage) = 0;
+    virtual HealthStatus healthCheck() = 0;
+    virtual std::optional<ModelInfo> getModel(const std::string& id) = 0;
+};
+```
+
+**Equivalent in Python:**
+```python
+from abc import ABC, abstractmethod
+from typing import List, Optional
+
+class LLMProvider(ABC):
+    @abstractmethod
+    def name(self) -> str: ...
+    
+    @abstractmethod
+    def api_key(self) -> str: ...
+    
+    @abstractmethod
+    def fetch_models(self) -> List['ModelInfo']: ...
+    
+    @abstractmethod
+    def cached_models(self) -> List['ModelInfo']: ...
+    
+    @abstractmethod
+    def chat_completion_stream(self, req: 'ChatRequest') -> 'StreamIterator': ...
+    
+    @abstractmethod
+    def estimate_cost(self, model_id: str, usage: 'Usage') -> float: ...
+    
+    @abstractmethod
+    def health_check(self) -> 'HealthStatus': ...
+    
+    @abstractmethod
+    def get_model(self, model_id: str) -> Optional['ModelInfo']: ...
+```
+
+**Equivalent in Rust:**
+```rust
+trait LLMProvider {
+    fn name(&self) -> &str;
+    fn api_key(&self) -> &str;
+    fn fetch_models(&self) -> Result<Vec<ModelInfo>>;
+    fn cached_models(&self) -> Vec<ModelInfo>;
+    fn chat_completion_stream(&self, req: &ChatRequest) -> Result<StreamIterator>;
+    fn estimate_cost(&self, model_id: &str, usage: &Usage) -> f64;
+    fn health_check(&self) -> HealthStatus;
+    fn get_model(&self, id: &str) -> Option<ModelInfo>;
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+interface LLMProvider {
+    name: string;
+    apiKey: string;
+    fetchModels(): Promise<ModelInfo[]>;
+    cachedModels(): ModelInfo[];
+    chatCompletionStream(req: ChatRequest): StreamIterator;
+    estimateCost(modelID: string, usage: Usage): number;
+    healthCheck(): HealthStatus;
+    getModel(id: string): ModelInfo | null;
+}
+```
+
 Two providers ship out of the box: OpenRouter (primary) and Zen (secondary). Both implement the same interface, making them interchangeable.
 
 ### 4.2 SSE Streaming Architecture
 
-The SSE (Server-Sent Events) parser is a critical component. It reads streaming responses from LLM providers using `bufio.Scanner` with a 1MB line buffer. Key features include:
+The SSE (Server-Sent Events) parser is a critical component. It reads streaming responses from LLM providers using `bufio.Scanner` with a 1MB line buffer. Notable features include:
 
 - **Watchdog timer** — a 30-second `time.AfterFunc` closes the HTTP body if no data arrives, preventing indefinite blocking on dead connections. The watchdog resets on every successful read.
 - **Context cancellation** — checked between lines for clean abort.
@@ -1424,7 +2181,7 @@ The `ParseSSEChunk()` function extracts thinking, content, tool_call, done, and 
 
 ### 5.1 Tool Interface
 
-Every tool implements a simple interface:
+Every tool implements a straightforward interface:
 
 ```go
 type Tool interface {
@@ -1432,6 +2189,102 @@ type Tool interface {
     Description() string
     RiskLevel() RiskLevel  // safe, medium, dangerous, destructive
     Execute(ctx context.Context, input ToolInput) (ToolResult, error)
+}
+```
+
+**Equivalent in C++:**
+```cpp
+enum class RiskLevel { Safe, Medium, Dangerous, Destructive };
+
+struct ToolResult {
+    bool success;
+    std::string output;
+};
+
+class Tool {
+public:
+    virtual ~Tool() = default;
+    virtual std::string name() const = 0;
+    virtual std::string description() const = 0;
+    virtual RiskLevel riskLevel() const = 0;
+    virtual ToolResult execute(const std::string& input) = 0;
+};
+```
+
+**Equivalent in Python:**
+```python
+from abc import ABC, abstractmethod
+from enum import Enum
+from dataclasses import dataclass
+
+class RiskLevel(Enum):
+    SAFE = "safe"
+    MEDIUM = "medium"
+    DANGEROUS = "dangerous"
+    DESTRUCTIVE = "destructive"
+
+@dataclass
+class ToolResult:
+    success: bool
+    output: str
+
+class Tool(ABC):
+    @abstractmethod
+    def name(self) -> str: ...
+    
+    @abstractmethod
+    def description(self) -> str: ...
+    
+    @abstractmethod
+    def risk_level(self) -> RiskLevel: ...
+    
+    @abstractmethod
+    def execute(self, input_data: str) -> ToolResult: ...
+```
+
+**Equivalent in Rust:**
+```rust
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RiskLevel {
+    Safe,
+    Medium,
+    Dangerous,
+    Destructive,
+}
+
+#[derive(Debug)]
+struct ToolResult {
+    success: bool,
+    output: String,
+}
+
+trait Tool {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn risk_level(&self) -> RiskLevel;
+    fn execute(&self, input: &str) -> ToolResult;
+}
+```
+
+**Equivalent in TypeScript:**
+```typescript
+enum RiskLevel {
+    Safe = "safe",
+    Medium = "medium",
+    Dangerous = "dangerous",
+    Destructive = "destructive",
+}
+
+interface ToolResult {
+    success: boolean;
+    output: string;
+}
+
+interface Tool {
+    name: string;
+    description: string;
+    riskLevel: RiskLevel;
+    execute(input: string): ToolResult;
 }
 ```
 
@@ -1816,6 +2669,19 @@ Spawns a parallel subagent that runs in an isolated git worktree with its own to
 
 The permission system is four-layered:
 
+```mermaid
+graph TD
+    A["Tool Request"] --> B{"Layer 1:<br/>Persistent Permissions<br/>(~/.m31a/permissions.json)"}
+    B -->|"Match found"| C["Return Decision"]
+    B -->|"No match"| D{"Layer 2:<br/>Rule-Based Config<br/>(doublestar glob patterns)"}
+    D -->|"Match found"| C
+    D -->|"No match"| E{"Layer 3:<br/>Agent Profile<br/>(per-agent default)"}
+    E -->|"Found"| C
+    E -->|"Not found"| F{"Layer 4:<br/>Risk-Level Fallback"}
+    F -->|"safe"| G["Auto-allow"]
+    F -->|"dangerous/destructive"| H["Prompt User"]
+```
+
 1. **Persistent permissions** — saved rules scoped by project directory, stored in `~/.m31a/permissions.json`. "Allow always" decisions survive across sessions. Rules are loaded at dispatcher startup and evaluated with last-match-wins semantics.
 2. **Rule-based** — config-defined patterns matching tool names and parameter values using doublestar glob syntax.
 3. **Agent profile** — per-agent default action from configuration.
@@ -1880,11 +2746,23 @@ This pattern is replicated in the Edit tool with additional backup creation and 
 
 ## 6. The Autonomous Agent Loop and Subagent System
 
-Beyond the eight-phase workflow engine, M31 Autonomous includes an autonomous agent loop that can independently plan, execute, and iterate on tasks without human intervention.
+Beyond the eight-phase workflow engine, M31 Autonomous includes an autonomous agent loop that can independently plan, execute, and iterate on tasks without requiring human intervention at each step.
 
 ### 6.1 The Agent Loop (`internal/tui/streaming/agent_loop.go`)
 
 The `AgentLoop()` function implements a self-directed tool-use cycle:
+
+```mermaid
+graph TD
+    A["Send Messages to LLM"] --> B["Parse Response"]
+    B --> C{"Tool Calls?"}
+    C -->|"Yes"| D["Execute Tool Calls"]
+    D --> E["Feed Results Back"]
+    E --> F{"Limits Hit?<br/>(50 iterations / 50 tools / 50K tokens / 25 turns)"}
+    F -->|"No"| A
+    F -->|"Yes"| G["AgentComplete"]
+    C -->|"No (final response)"| G
+```
 
 1. Send messages to the LLM.
 2. Parse tool calls from the response (native function calling or text-based JSON fallback).
@@ -1943,7 +2821,7 @@ M31 Autonomous can spawn parallel subagents that run in isolated environments:
 
 ### 7.1 Screen Inventory
 
-M31 Autonomous has 33 screens (plus 2 overlay screens), organized into five categories. Each screen is a Bubble Tea model with `Init()`, `Update()`, and `View()` methods. Screens are lazily created via `ensureSubModel()` — they're only instantiated when first navigated to, avoiding the cost of initializing all 33 at startup.
+M31 Autonomous presents 33 screens (plus 2 overlay screens), organized into five categories. Each screen is a Bubble Tea model with `Init()`, `Update()`, and `View()` methods. Screens are created lazily through `ensureSubModel()` — they are only instantiated when first navigated to, which avoids the overhead of initializing all 33 at startup.
 
 ---
 
@@ -2736,7 +3614,7 @@ The REPL's streaming display manages three segment types: `"thinking"` (reasonin
 
 ### 8.1 Session Management (`pkg/session/`)
 
-Sessions are project-local, stored in `<workDir>/.m31a/` as flat JSON and Markdown files. This design makes sessions portable alongside project directories and avoids the complexity of a global session database.
+Sessions are stored locally within each project, in `<workDir>/.m31a/` as flat JSON and Markdown files. This design keeps sessions alongside the project directory and avoids the complexity of a centralized session database.
 
 Key features:
 - **Checkpoint/restore** — lightweight snapshots (phase, timestamp, message count) with a maximum of 2 retained checkpoints.
@@ -2748,7 +3626,7 @@ Key features:
 
 ### 8.2 Cross-Session Learning Ledger (`pkg/ledger/`)
 
-Every shipped session's metadata is recorded to a persistent markdown table at `~/.m31a/LEDGER.md`. This enables the system to learn from past sessions: identifying which models work best for which project types, computing average costs, and tracking failure patterns.
+Every shipped session's metadata is recorded to a persistent markdown table at `~/.m31a/LEDGER.md`. This gives the system a way to learn from past sessions — identifying which models work best for which project types, computing average costs, and tracking patterns of failure over time.
 
 The ledger uses append-only writes for efficiency (only the new row is appended to the existing file) with a fallback to full rewrite on append failure. An mtime-based cache avoids recomputing statistics when the file hasn't changed.
 
@@ -2772,7 +3650,7 @@ The task runner implements Kahn's algorithm for topological sorting, organizing 
 
 ### 8.6 AutoDream Context Consolidation (`pkg/autodream/`)
 
-AutoDream solves the context window overflow problem. When conversations grow long, older messages are summarized into a compact "memory segment." The system protects critical messages from consolidation:
+AutoDream tackles the context window overflow problem. When conversations grow long, older messages are summarized into a compact "memory segment." The system protects critical messages from consolidation:
 
 - First message (initial goal)
 - All system messages
@@ -2930,7 +3808,7 @@ This uses lock-free atomic CAS for thread-safe concurrent updates, with the corr
 
 ## 9. Configuration System
 
-M31 Autonomous's configuration system is a meticulously engineered pipeline that balances flexibility, safety, and ease of use. It operates on a 7-step loading sequence, supports hot-reload, and enforces comprehensive validation to catch misconfigurations before they cause runtime issues.
+M31 Autonomous's configuration system is a carefully designed pipeline that balances flexibility, safety, and ease of use. It operates through a 7-step loading sequence, supports hot-reload, and enforces comprehensive validation to catch misconfigurations before they cause runtime issues.
 
 ### 9.1 Loading Pipeline
 
@@ -3220,7 +4098,7 @@ On save (`SaveWithKeychain`), the system attempts to store keys in the OS keycha
 
 ### 9.5 Reflection-Based Merge Algorithm
 
-The `mergeConfig` function uses Go's `reflect` package for recursive struct merging. The merge rules depend on field type:
+The `mergeConfig` function uses Go's `reflect` package for recursive struct merging. The merge rules depend on the field type:
 
 | Type | Merge Rule |
 |------|-----------|
@@ -3232,7 +4110,7 @@ The `mergeConfig` function uses Go's `reflect` package for recursive struct merg
 | `map` | Overlay entries merged into base (additive) |
 | `struct` | Recursive merge |
 
-The `defined` set is the critical innovation here. It is built from TOML metadata keys during decode, enabling the distinction between "user explicitly set `auto_backup = false`" versus "user omitted the field entirely." Without this, it would be impossible to distinguish a deliberate `false` from a Go zero value, since both are identical in Go's type system.
+The `defined` set is the critical innovation here. It is built from TOML metadata keys during decode, enabling the distinction between a user explicitly setting `auto_backup = false` versus leaving the field entirely unset. Without this mechanism, it would be impossible to tell a deliberate `false` from a Go zero value, since both are identical in Go's type system.
 
 ### 9.6 .env File Handling
 
@@ -3297,7 +4175,7 @@ The config loader caches a set of known top-level TOML keys (`provider`, `model`
 
 ## 10. Error Handling
 
-M31 Autonomous uses a dual error matching strategy:
+M31 Autonomous uses a two-tier error matching strategy:
 
 **Tier 1 — Sentinel errors.** 22+ sentinel errors defined in `internal/errors/errors.go` with specific user messages. These cover provider failures, rate limiting, invalid keys, context overflow, session corruption, circular dependencies, and more.
 
@@ -3309,7 +4187,7 @@ The `UserMessage(error)` function maps errors to user-friendly, actionable strin
 
 ## 11. Slash Commands Reference
 
-M31 Autonomous provides 65 slash commands organized into seven categories, plus dynamically-discovered skills. Each command is processed through a registry that parses input, runs the handler, and routes the result — whether that's navigating to a screen, displaying a message, confirming a destructive action, or loading a session. Unknown commands trigger a "Did you mean?" suggestion via Levenshtein distance. Skills (Section 8.10) extend this set with user-defined commands loaded from Markdown files at startup.
+M31 Autonomous provides 65 slash commands organized into seven categories, plus dynamically-discovered skills. Each command is processed through a registry that parses input, runs the handler, and routes the result — whether that means navigating to a screen, displaying a message, confirming a destructive action, or loading a session. Unknown commands trigger a "Did you mean?" suggestion via Levenshtein distance. Skills (Section 8.10) extend this set with user-defined commands loaded from Markdown files at startup.
 
 ### 11.1 Core Commands
 
@@ -3444,7 +4322,7 @@ The `!` prefix executes shell commands directly without going through the LLM. F
 
 ## 12. Performance Optimizations
 
-M31 Autonomous employs numerous performance optimizations:
+M31 Autonomous employs a range of performance optimizations across its codebase:
 
 - **Pre-compiled regexes** at package level for plan parsing, tool call extraction, and error matching.
 - **Pre-parsed tool schemas** (`ParametersParsed` field) to avoid repeated `json.Unmarshal` during request building.
@@ -3469,7 +4347,7 @@ M31 Autonomous employs numerous performance optimizations:
 
 ### 12.1 Threat Model
 
-M31 Autonomous executes shell commands and file operations on behalf of the user. The threat model addresses:
+M31 Autonomous executes shell commands and file operations on the user's behalf. The threat model addresses the following concerns:
 
 1. **Unintended file modifications** — path traversal guards, permission gating, atomic writes.
 2. **Shell injection** — non-interactive environment, stdin closure, process group management.
@@ -3496,7 +4374,7 @@ All three previously identified security gaps (SEC-01 through SEC-03) have been 
 
 ## 14. Testing Strategy
 
-M31 Autonomous uses Go's standard `testing` package with table-driven tests and `t.Parallel()`. Coverage targets are 75% overall and 90% for critical packages.
+M31 Autonomous uses Go's standard `testing` package with table-driven tests and `t.Parallel()`. The coverage targets are 75% overall and 90% for critical packages.
 
 | Package | Coverage | Notes |
 |---------|----------|-------|
@@ -3514,7 +4392,7 @@ The CI pipeline runs on every push to master and on PRs, executing lint (golangc
 
 ## 15. Planning File System
 
-M31 Autonomous maintains six planning files in the `.m31a/` directory that track workflow state and enable cross-session continuity:
+M31 Autonomous maintains six planning files in the `.m31a/` directory that track workflow state and enable continuity across sessions:
 
 | File | Written By | Contents |
 |------|-----------|----------|
@@ -3621,7 +4499,7 @@ The following tech debt items from v1.0 have been addressed:
 | Subagent spawning | yes | no | no | partial |
 | Retry with backoff + Retry-After | yes | no | no | partial |
 
-M31 Autonomous's closest competitor in the terminal-native space is Aider, which provides excellent git integration and multi-file editing but lacks the structured workflow engine, cross-session learning, runtime verification, session compaction, and composable skills system that M31 Autonomous offers.
+M31 Autonomous's closest competitor in the terminal-native space is Aider, which provides strong git integration and multi-file editing but lacks the structured workflow engine, cross-session learning, runtime verification, session compaction, and composable skills system that M31 Autonomous brings to the table.
 
 ---
 
@@ -3629,7 +4507,7 @@ M31 Autonomous's closest competitor in the terminal-native space is Aider, which
 
 The V1.1 release has delivered several features from the original roadmap:
 
-- **Subagent profiles** — profile-based tool allowlists/denylists, system prompts, and model preferences for specialized subagents.
+- **Subagent profiles** — profile-based tool allowlists and denylists, custom system prompts, and model preferences for specialized subagents.
 - **Runtime verification** — the Runtime phase with dev server management and HTTP smoke testing.
 - **Composable skills** — user-defined slash commands via Markdown with YAML frontmatter.
 - **Session compaction** — automatic LLM-driven summarization for long-running sessions.
@@ -3654,13 +4532,13 @@ Additional improvements under consideration:
 
 ## 21. Conclusion
 
-M31 Autonomous represents a comprehensive approach to AI-assisted software engineering in the terminal. Its eight-phase workflow engine provides structure without rigidity, its security model provides safety without friction, and its cross-session learning provides intelligence without complexity.
+M31 Autonomous represents a comprehensive approach to AI-assisted software engineering in the terminal. Its eight-phase workflow engine provides structure without rigidity, its security model offers safety without friction, and its cross-session learning delivers intelligence without unnecessary complexity.
 
 The codebase demonstrates several notable engineering decisions: the MsgEmitter pattern for decoupling the workflow engine from the TUI, the atomic CAS pattern for lock-free cost tracking, the cascading plan parser with retry loops, the self-healing execution with git bisect fallback, the AutoDream context consolidation system, the LLM-driven session compaction engine, the generic concurrent session coordinator with demand coalescing, the composable skills system for user-extensible slash commands, the runtime verification phase with automated smoke testing and route discovery, and the dynamic context registry for injecting environment-aware system prompts.
 
-The v1.1 release resolved all three previously identified security concerns, eliminated over 60 instances of variable shadowing and ineffectual assignments, added persistent cross-session permissions, and grew the tool system from 15 to 17 tools and the TUI from 29 to 33 screens. The slash command count grew from 47 to 65, further enhanced by the dynamic skills discovery system.
+The v1.1 release resolved all three previously identified security concerns, eliminated over 60 instances of variable shadowing and ineffectual assignments, added persistent cross-session permissions, and expanded the tool system from 15 to 17 tools and the TUI from 29 to 33 screens. The slash command count grew from 47 to 65, further extended by the dynamic skills discovery system.
 
-At approximately 15-20MB for a fully static binary with zero dependencies, M31 Autonomous is both powerful and portable. It runs on any POSIX shell, stores nothing in the cloud, and learns from every session. For developers who live in the terminal and want an AI agent that owns the loop — not just an autocomplete with dangerous capabilities — M31 Autonomous is the tool to reach for.
+At roughly 15-20MB for a fully static binary with zero external dependencies, M31 Autonomous is both capable and portable. It runs on any POSIX shell, stores nothing in the cloud, and learns from every session. For developers who live in the terminal and want an AI agent that truly owns the loop — not just an autocomplete with dangerous capabilities — M31 Autonomous is the tool to reach for.
 
 ---
 
