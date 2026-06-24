@@ -62,7 +62,7 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 
 	content := toast.Text
 	if lipgloss.Width(content) > contentWidth-2 {
-		content = content[:contentWidth-5] + "..."
+		content = TruncateWithEllipsis(content, contentWidth-2)
 	}
 
 	// Rounded card with surface background

@@ -225,7 +225,7 @@ func blendLine(line string, blendChar rune, width int) string {
 		col++
 	}
 
-	// Pad to width
+	// Pad to width (only visible characters count toward width)
 	for col < width {
 		b.WriteRune(' ')
 		col++
@@ -282,6 +282,7 @@ func sliceVisibleHead(s string, n int) string {
 func transitionTruncate(s string, maxW int) string {
 	var out strings.Builder
 	visible := 0
+	truncated := false
 	inEsc := false
 	esc := strings.Builder{}
 	for _, r := range s {
@@ -300,27 +301,35 @@ func transitionTruncate(s string, maxW int) string {
 			continue
 		}
 		if visible >= maxW {
+			truncated = true
 			break
 		}
 		out.WriteRune(r)
 		visible++
 	}
-	out.WriteString("\x1b[0m")
+	if truncated {
+		out.WriteString("\x1b[0m")
+	}
 	return out.String()
 }
 
 // skipVisible skips `n` visible characters from a styled string, preserving ANSI codes.
+// Escape sequences in the skipped region are discarded; only those at or after
+// position n are forwarded to the output. The last active style from the skipped
+// region is applied to the first output character to maintain visual continuity.
 func skipVisible(s string, n int) string {
 	var b strings.Builder
 	skipped := 0
 	inEsc := false
 	pendingEsc := strings.Builder{}
+	lastStyle := ""       // tracks the most recent complete SGR sequence
+	styleEmitted := false // whether we've emitted the style for the output portion
 
 	for _, r := range s {
 		if inEsc {
 			pendingEsc.WriteRune(r)
 			if r == 'm' {
-				b.WriteString(pendingEsc.String())
+				lastStyle = pendingEsc.String()
 				pendingEsc.Reset()
 				inEsc = false
 			}
@@ -334,6 +343,11 @@ func skipVisible(s string, n int) string {
 		if skipped < n {
 			skipped++
 			continue
+		}
+		// Emit the last active style before the first visible output character
+		if !styleEmitted && lastStyle != "" {
+			b.WriteString(lastStyle)
+			styleEmitted = true
 		}
 		b.WriteRune(r)
 	}

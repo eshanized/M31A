@@ -756,6 +756,23 @@ func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {
 	return m.homeModel.renderHome()
 }
 
+// clampPermissionModalWidth computes the clamped modal width from the
+// configured permModalWidth and the current terminal width. Extracted to
+// avoid duplicating the clamping logic in both render paths.
+func (m *AppState) clampPermissionModalWidth() int {
+	w := m.permModalWidth
+	if w < MinModalWidth {
+		w = MinModalWidth
+	}
+	if w > m.width-4 {
+		w = m.width - 4
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
 // renderPermissionModalContent returns the modal card without centering,
 // for use with RenderModalOverlay.
 func (m *AppState) renderPermissionModalContent() string {
@@ -766,16 +783,7 @@ func (m *AppState) renderPermissionModalContent() string {
 		return ""
 	}
 
-	modalWidth := m.permModalWidth
-	if modalWidth < 40 {
-		modalWidth = 60
-	}
-	if modalWidth > m.width-4 {
-		modalWidth = m.width - 4
-	}
-	if modalWidth < 20 {
-		modalWidth = 20
-	}
+	modalWidth := m.clampPermissionModalWidth()
 
 	if m.permModal != nil {
 		return m.permModal.Render(modalWidth, 0)
@@ -798,16 +806,7 @@ func (m *AppState) renderPermissionModal() string {
 		return m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
 	}
 
-	modalWidth := m.permModalWidth
-	if modalWidth < 40 {
-		modalWidth = 60
-	}
-	if modalWidth > m.width-4 {
-		modalWidth = m.width - 4
-	}
-	if modalWidth < 20 {
-		modalWidth = 20
-	}
+	modalWidth := m.clampPermissionModalWidth()
 
 	if m.permModal != nil {
 		return m.permModal.Render(m.width, m.height)
@@ -922,7 +921,7 @@ func screenName(s Screen) string {
 	case ScreenCommandPalette:
 		return "cmdpalette"
 	case ScreenPhaseModelPicker:
-		return "phasem picker"
+		return "phasempicker"
 	case ScreenSessionDetail:
 		return "session"
 	case ScreenFileExplorer:

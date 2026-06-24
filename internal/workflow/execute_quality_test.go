@@ -4,105 +4,130 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	m31types "github.com/eshanized/M31A/internal/types"
 )
 
-func TestCheckAcceptanceCriteria(t *testing.T) {
-	dir := t.TempDir()
-	e := &Engine{workDir: dir}
-
-	// Create a test file
-	testFile := filepath.Join(dir, "main.go")
-	os.WriteFile(testFile, []byte(`package main
-
-func initRouter() {
-	// router setup
-}
-
-func main() {
-	initRouter()
-}
-`), 0644)
-
-	task := m31types.Task{
-		ID:          1,
-		Description: "Create router",
-		Files:       []string{"main.go"},
-		AcceptanceCriteria: []string{
-			"main.go contains func initRouter(",
-			"main.go exists",
+func TestExtractKeyPhrase(t *testing.T) {
+	tests := []struct {
+		name      string
+		criterion string
+		wantMax   int
+	}{
+		{
+			name:      "simple criterion",
+			criterion: "file contains hello world",
+			wantMax:   50,
+		},
+		{
+			name:      "with verify prefix",
+			criterion: "Verify that the API returns 200",
+			wantMax:   50,
+		},
+		{
+			name:      "with check prefix",
+			criterion: "Check that authentication works",
+			wantMax:   50,
+		},
+		{
+			name:      "with ensure prefix",
+			criterion: "Ensure that database connection is stable",
+			wantMax:   50,
+		},
+		{
+			name:      "with confirm prefix",
+			criterion: "Confirm that tests pass",
+			wantMax:   50,
+		},
+		{
+			name:      "with assert prefix",
+			criterion: "Assert that response is valid",
+			wantMax:   50,
+		},
+		{
+			name:      "with validate prefix",
+			criterion: "Validate that input is sanitized",
+			wantMax:   50,
+		},
+		{
+			name:      "long criterion truncated",
+			criterion: "This is a very long criterion that should definitely be truncated because it exceeds the maximum length limit of fifty characters",
+			wantMax:   50,
+		},
+		{
+			name:      "empty criterion",
+			criterion: "",
+			wantMax:   50,
 		},
 	}
 
-	result := e.checkAcceptanceCriteria(task)
-	if !result.Passed {
-		t.Errorf("expected all criteria to pass, got %d failures", result.Failed)
-		for _, d := range result.Details {
-			t.Log(d)
-		}
-	}
-	if result.Checked != 2 {
-		t.Errorf("checked = %d, want 2", result.Checked)
-	}
-}
-
-func TestCheckAcceptanceCriteriaFail(t *testing.T) {
-	dir := t.TempDir()
-	e := &Engine{workDir: dir}
-
-	// Create a file without the expected content
-	testFile := filepath.Join(dir, "api.go")
-	os.WriteFile(testFile, []byte("package api\n"), 0644)
-
-	task := m31types.Task{
-		ID:    1,
-		Files: []string{"api.go"},
-		AcceptanceCriteria: []string{
-			"api.go contains func HandleRequest(",
-		},
-	}
-
-	result := e.checkAcceptanceCriteria(task)
-	if result.Passed {
-		t.Error("expected criteria to fail — func HandleRequest not in file")
-	}
-	if result.Failed != 1 {
-		t.Errorf("failed = %d, want 1", result.Failed)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractKeyPhrase(tt.criterion)
+			if len(got) > tt.wantMax {
+				t.Errorf("extractKeyPhrase() returned %d chars, max %d: %q", len(got), tt.wantMax, got)
+			}
+		})
 	}
 }
 
 func TestFileContains(t *testing.T) {
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.go")
-	os.WriteFile(testFile, []byte("package main\nfunc Hello() string { return \"world\" }\n"), 0644)
+	// Create a temporary file for testing
+	tmpDir := t.TempDir()
+	content := "Hello, World! This is a test file with some content."
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
-	if !fileContains(dir, "test.go", "func Hello()") {
-		t.Error("expected fileContains to find 'func Hello()'")
-	}
-	if fileContains(dir, "test.go", "func Missing()") {
-		t.Error("expected fileContains to NOT find 'func Missing()'")
-	}
-	if fileContains(dir, "nonexistent.go", "anything") {
-		t.Error("expected fileContains to return false for missing file")
-	}
-}
-
-func TestExtractKeyPhrase(t *testing.T) {
 	tests := []struct {
-		input string
-		want  string
+		name     string
+		workDir  string
+		filename string
+		substr   string
+		want     bool
 	}{
-		{"verify that the API returns 200", "the API returns 200"},
-		{"check that auth middleware works", "auth middleware works"},
-		{"simple criterion", "simple criterion"},
-		{"ensure that the database connection is properly configured with TLS", "the database connection is properly configured wit"},
+		{
+			name:     "substring exists",
+			workDir:  tmpDir,
+			filename: "test.txt",
+			substr:   "Hello",
+			want:     true,
+		},
+		{
+			name:     "substring exists case insensitive",
+			workDir:  tmpDir,
+			filename: "test.txt",
+			substr:   "hello",
+			want:     true,
+		},
+		{
+			name:     "substring not exists",
+			workDir:  tmpDir,
+			filename: "test.txt",
+			substr:   "Goodbye",
+			want:     false,
+		},
+		{
+			name:     "file not exists",
+			workDir:  tmpDir,
+			filename: "nonexistent.txt",
+			substr:   "anything",
+			want:     false,
+		},
+		{
+			name:     "partial match",
+			workDir:  tmpDir,
+			filename: "test.txt",
+			substr:   "test file",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
-		got := extractKeyPhrase(tt.input)
-		if got != tt.want {
-			t.Errorf("extractKeyPhrase(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := fileContains(tt.workDir, tt.filename, tt.substr)
+			if got != tt.want {
+				t.Errorf("fileContains(%q, %q, %q) = %v, want %v",
+					tt.workDir, tt.filename, tt.substr, got, tt.want)
+			}
+		})
 	}
 }

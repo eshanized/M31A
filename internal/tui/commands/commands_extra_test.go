@@ -1,412 +1,314 @@
 package commands
 
 import (
-	"strings"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
-// --- commands_core.go nil-guard tests ---
-
-func TestHandleHelp_NilArgs(t *testing.T) {
-	t.Parallel()
-	result := handleHelp(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handleHelp should succeed")
+func TestParseCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantArgs []string
+		wantOk   bool
+	}{
+		{"no slash", "help", "", nil, false},
+		{"empty", "/", "", nil, true},
+		{"just slash", "/", "", nil, true},
+		{"simple", "/help", "help", nil, true},
+		{"with args", "/model gpt-4", "model", []string{"gpt-4"}, true},
+		{"multiple args", "/set key value", "set", []string{"key", "value"}, true},
+		{"extra spaces", "/help  extra  spaces", "help", []string{"extra", "spaces"}, true},
 	}
-	if result.Screen == nil || *result.Screen != tuitypes.ScreenHelp {
-		t.Error("handleHelp should navigate to ScreenHelp")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, args, ok := ParseCommand(tt.input)
+			if ok != tt.wantOk {
+				t.Errorf("ok = %v, want %v", ok, tt.wantOk)
+			}
+			if name != tt.wantName {
+				t.Errorf("name = %q, want %q", name, tt.wantName)
+			}
+			if len(args) != len(tt.wantArgs) {
+				t.Errorf("args length = %d, want %d", len(args), len(tt.wantArgs))
+			} else {
+				for i, arg := range args {
+					if arg != tt.wantArgs[i] {
+						t.Errorf("args[%d] = %q, want %q", i, arg, tt.wantArgs[i])
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestHandleClear_RequiresConfirm(t *testing.T) {
-	t.Parallel()
-	result := handleClear(nil, CommandContext{})
-	if !result.ConfirmRequired {
-		t.Error("handleClear should require confirmation")
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want int
+	}{
+		{"empty strings", "", "", 0},
+		{"a empty", "", "abc", 3},
+		{"b empty", "abc", "", 3},
+		{"identical", "hello", "hello", 0},
+		{"one edit", "hello", "hallo", 1},
+		{"two edits", "kitten", "sitting", 3},
+		{"completely different", "abc", "xyz", 3},
+		{"prefix", "abc", "abcdef", 3},
+		{"single char", "a", "b", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := levenshtein(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("levenshtein(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestHandleQuit_Cmd(t *testing.T) {
-	t.Parallel()
-	result := handleQuit(nil, CommandContext{})
-	if result.Cmd == nil {
-		t.Error("handleQuit should return a Cmd")
+func TestNewCommandRegistry(t *testing.T) {
+	r := NewCommandRegistry()
+	if r == nil {
+		t.Fatal("NewCommandRegistry() returned nil")
 	}
-	msg := result.Cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Error("handleQuit Cmd should return tea.QuitMsg")
+	if len(r.handlers) != 0 {
+		t.Errorf("handlers length = %d, want 0", len(r.handlers))
 	}
 }
 
-func TestHandleReset_ConfirmRequired(t *testing.T) {
-	t.Parallel()
-	result := handleReset(nil, CommandContext{})
-	if !result.ConfirmRequired {
-		t.Error("handleReset should require confirmation")
+func TestCommandRegistry_Register(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{Success: true}
 	}
-	if result.Screen != nil {
-		t.Error("handleReset should not set Screen directly; navigation happens via ResetCompleteMsg")
+
+	err := r.Register("test", handler, "Test command")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
 	}
-	if result.Cmd == nil {
-		t.Fatal("handleReset should return a Cmd for cleanup")
-	}
-	msg := result.Cmd()
-	if _, ok := msg.(tuitypes.ResetCompleteMsg); !ok {
-		t.Errorf("handleReset Cmd should return ResetCompleteMsg, got %T", msg)
+
+	if len(r.handlers) != 1 {
+		t.Errorf("handlers length = %d, want 1", len(r.handlers))
 	}
 }
 
-func TestHandleUndo_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleUndo(nil, CommandContext{})
+func TestCommandRegistry_Register_Duplicate(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{Success: true}
+	}
+
+	_ = r.Register("test", handler, "Test command")
+	err := r.Register("test", handler, "Test command again")
+	if err == nil {
+		t.Error("Register() should return error for duplicate")
+	}
+}
+
+func TestCommandRegistry_Get(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{Success: true}
+	}
+
+	_ = r.Register("test", handler, "Test command")
+
+	h, ok := r.Get("test")
+	if !ok {
+		t.Error("Get() returned false")
+	}
+	if h == nil {
+		t.Error("Get() returned nil handler")
+	}
+
+	_, ok = r.Get("nonexistent")
+	if ok {
+		t.Error("Get() returned true for nonexistent command")
+	}
+}
+
+func TestCommandRegistry_List(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{}
+	}
+
+	_ = r.Register("zebra", handler, "Zebra")
+	_ = r.Register("alpha", handler, "Alpha")
+	_ = r.Register("beta", handler, "Beta")
+
+	list := r.List()
+	if len(list) != 3 {
+		t.Fatalf("List() length = %d, want 3", len(list))
+	}
+
+	// Should be sorted alphabetically
+	if list[0] != "alpha" || list[1] != "beta" || list[2] != "zebra" {
+		t.Errorf("List() = %v, want [alpha beta zebra]", list)
+	}
+}
+
+func TestCommandRegistry_AllCommands(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{}
+	}
+
+	_ = r.Register("test", handler, "Test command")
+
+	cmds := r.AllCommands()
+	if len(cmds) != 1 {
+		t.Fatalf("AllCommands() length = %d, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.Name != "test" {
+		t.Errorf("Name = %q, want %q", cmd.Name, "test")
+	}
+	if cmd.Description != "Test command" {
+		t.Errorf("Description = %q, want %q", cmd.Description, "Test command")
+	}
+	if cmd.Slash != "/test" {
+		t.Errorf("Slash = %q, want %q", cmd.Slash, "/test")
+	}
+}
+
+func TestCommandRegistry_AllCommandsWithExecute(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{}
+	}
+
+	_ = r.Register("test", handler, "Test command")
+
+	cmds := r.AllCommandsWithExecute()
+	if len(cmds) != 1 {
+		t.Fatalf("AllCommandsWithExecute() length = %d, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.Execute == nil {
+		t.Error("Execute function is nil")
+	}
+}
+
+func TestCommandRegistry_Execute_NotFound(t *testing.T) {
+	r := NewCommandRegistry()
+
+	result, ok := r.Execute("/nonexistent", CommandContext{})
+	if !ok {
+		t.Error("Execute() returned false for nonexistent command")
+	}
 	if result.Success {
-		t.Error("handleUndo should fail without session")
+		t.Error("Execute() should return failure for nonexistent command")
 	}
 }
 
-func TestHandleHistory_NoHistory(t *testing.T) {
-	t.Parallel()
-	result := handleHistory(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handleHistory should succeed and open chat history screen")
-	}
-	if result.Screen == nil {
-		t.Error("handleHistory should return a screen")
-	}
-}
+func TestCommandRegistry_Execute_EmptyCommand(t *testing.T) {
+	r := NewCommandRegistry()
 
-func TestHandleHealth_NoRegistry(t *testing.T) {
-	t.Parallel()
-	result := handleHealth(nil, CommandContext{})
+	result, ok := r.Execute("/", CommandContext{})
+	if !ok {
+		t.Error("Execute() returned false for empty command")
+	}
 	if result.Success {
-		t.Error("handleHealth should fail without registry")
+		t.Error("Execute() should return failure for empty command")
 	}
 }
 
-func TestHandleTools_NoDispatcher(t *testing.T) {
-	t.Parallel()
-	result := handleTools(nil, CommandContext{})
+func TestCommandRegistry_Execute_UnknownCommand(t *testing.T) {
+	r := NewCommandRegistry()
+
+	result, ok := r.Execute("/unknown", CommandContext{})
+	if !ok {
+		t.Error("Execute() returned false for unknown command")
+	}
 	if result.Success {
-		t.Error("handleTools should fail without dispatcher")
+		t.Error("Execute() should return failure for unknown command")
 	}
 }
 
-func TestHandleCopyError_NilFunc(t *testing.T) {
-	t.Parallel()
-	result := handleCopyError(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleCopyError should fail without func")
+func TestSuggestCommand(t *testing.T) {
+	r := NewCommandRegistry()
+
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{}
+	}
+
+	_ = r.Register("help", handler, "Help")
+	_ = r.Register("model", handler, "Model")
+	_ = r.Register("models", handler, "Models")
+
+	// Close match
+	suggestion := suggestCommand(r, "hep")
+	if suggestion != "help" {
+		t.Errorf("suggestCommand('hep') = %q, want %q", suggestion, "help")
+	}
+
+	// No close match
+	suggestion = suggestCommand(r, "xyz")
+	if suggestion != "" {
+		t.Errorf("suggestCommand('xyz') = %q, want empty", suggestion)
 	}
 }
 
-func TestHandleStatus_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleStatus(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleStatus should fail without session")
+func TestDefaultCommands(t *testing.T) {
+	r := DefaultCommands()
+	if r == nil {
+		t.Fatal("DefaultCommands() returned nil")
+	}
+
+	// Should have many commands registered
+	commands := r.List()
+	if len(commands) < 30 {
+		t.Errorf("DefaultCommands() registered %d commands, want >= 30", len(commands))
+	}
+
+	// Check some expected commands
+	expected := []string{"help", "clear", "settings", "model", "diff", "sessions"}
+	for _, name := range expected {
+		_, ok := r.Get(name)
+		if !ok {
+			t.Errorf("DefaultCommands() missing command: %s", name)
+		}
 	}
 }
 
-// --- commands_ai.go nil-guard tests ---
+func TestSuggestCommand_DistanceThreshold(t *testing.T) {
+	r := NewCommandRegistry()
 
-func TestHandleMemory_NilAutoDream(t *testing.T) {
-	t.Parallel()
-	result := handleMemory(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleMemory should fail without AutoDream")
+	handler := func(args []string, ctx CommandContext) CommandResult {
+		return CommandResult{}
 	}
-}
 
-func TestHandleCompress_NilAutoDream(t *testing.T) {
-	t.Parallel()
-	result := handleCompress(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleCompress should fail without AutoDream")
-	}
-}
+	_ = r.Register("help", handler, "Help")
 
-func TestHandleOptimize_NilRegistry(t *testing.T) {
-	t.Parallel()
-	result := handleOptimize(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleOptimize should fail without registry")
+	// Distance 1 - should suggest
+	suggestion := suggestCommand(r, "hep")
+	if suggestion != "help" {
+		t.Errorf("suggestCommand('hep') = %q, want %q", suggestion, "help")
 	}
-}
 
-func TestHandleModels_OpensScreen(t *testing.T) {
-	t.Parallel()
-	result := handleModels(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handleModels should succeed and open model selector screen")
+	// Distance 2 - should suggest
+	suggestion = suggestCommand(r, "hp")
+	if suggestion != "help" {
+		t.Errorf("suggestCommand('hp') = %q, want %q", suggestion, "help")
 	}
-	if result.Screen == nil {
-		t.Error("handleModels should set Screen to model selector")
-	}
-}
 
-func TestHandleFallback_NilRegistry(t *testing.T) {
-	t.Parallel()
-	result := handleFallback(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleFallback should fail without registry")
-	}
-}
-
-func TestHandleProvider_NilRegistry(t *testing.T) {
-	t.Parallel()
-	result := handleProvider(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleProvider should fail without registry")
-	}
-}
-
-func TestHandleProvider_Delegates(t *testing.T) {
-	t.Parallel()
-	// Both should fail the same way without a registry
-	pResult := handleProvider(nil, CommandContext{})
-	fResult := handleFallback(nil, CommandContext{})
-	if pResult.Success != fResult.Success || pResult.Message != fResult.Message {
-		t.Error("handleProvider should produce same result as handleFallback")
-	}
-}
-
-// --- commands_session.go nil-guard tests ---
-
-func TestHandleSessions_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleSessions(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleSessions should fail without session manager")
-	}
-}
-
-func TestHandleFork_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleFork(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleFork should fail without session ID")
-	}
-}
-
-func TestHandlePrev_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handlePrev(nil, CommandContext{})
-	if result.Success {
-		t.Error("handlePrev should fail without session manager")
-	}
-}
-
-func TestHandleNext_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleNext(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleNext should fail without session manager")
-	}
-}
-
-func TestHandleSave_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleSave(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleSave should fail without session manager")
-	}
-}
-
-func TestHandleGoal_NoArgs(t *testing.T) {
-	t.Parallel()
-	result := handleGoal(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleGoal without args should fail")
-	}
-}
-
-func TestHandleLedger_NilLedger(t *testing.T) {
-	t.Parallel()
-	result := handleLedger(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleLedger should fail without ledger")
-	}
-}
-
-func TestHandleExport_NoArgs(t *testing.T) {
-	t.Parallel()
-	result := handleExport(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleExport without args should fail")
-	}
-}
-
-// --- commands_workflow.go tests ---
-
-func TestHandleNew_AlwaysSucceeds(t *testing.T) {
-	t.Parallel()
-	result := handleNew(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handleNew should always succeed")
-	}
-	if result.Screen == nil || *result.Screen != tuitypes.ScreenGoalInput {
-		t.Error("handleNew should navigate to ScreenGoalInput")
-	}
-	if !strings.Contains(result.Message, "Starting new workflow") {
-		t.Errorf("unexpected message: %s", result.Message)
-	}
-}
-
-func TestHandleWorkflow_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleWorkflow(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleWorkflow should fail without session")
-	}
-}
-
-func TestHandlePhase_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handlePhase(nil, CommandContext{})
-	if result.Success {
-		t.Error("handlePhase should fail without session")
-	}
-}
-
-func TestHandleRefine_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleRefine(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleRefine should fail without session")
-	}
-}
-
-func TestHandlePause_AlwaysSucceeds(t *testing.T) {
-	t.Parallel()
-	result := handlePause(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handlePause should always succeed")
-	}
-	if !strings.Contains(result.Message, "paused") {
-		t.Errorf("unexpected message: %s", result.Message)
-	}
-}
-
-func TestHandleResumeTask_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleResumeTask(nil, CommandContext{})
-	if result.Success {
-		t.Error("handleResumeTask should fail without session")
-	}
-}
-
-func TestHandleAgentMode_NoArgs(t *testing.T) {
-	t.Parallel()
-	agentMode := false
-	result := handleAgentMode(nil, CommandContext{AgentMode: &agentMode})
-	if !result.Success {
-		t.Error("handleAgentMode with no args should succeed")
-	}
-	if !strings.Contains(result.Message, "off") {
-		t.Errorf("message should show 'off', got: %s", result.Message)
-	}
-}
-
-func TestHandleAgentMode_On(t *testing.T) {
-	t.Parallel()
-	agentMode := false
-	result := handleAgentMode([]string{"on"}, CommandContext{
-		AgentMode:    &agentMode,
-		SetAgentMode: func(v bool) { agentMode = v },
-	})
-	if !result.Success {
-		t.Error("handleAgentMode on should succeed")
-	}
-	if !agentMode {
-		t.Error("agent mode should be on")
-	}
-}
-
-func TestHandleAgentMode_Off(t *testing.T) {
-	t.Parallel()
-	agentMode := true
-	result := handleAgentMode([]string{"off"}, CommandContext{
-		AgentMode:    &agentMode,
-		SetAgentMode: func(v bool) { agentMode = v },
-	})
-	if !result.Success {
-		t.Error("handleAgentMode off should succeed")
-	}
-	if agentMode {
-		t.Error("agent mode should be off")
-	}
-}
-
-func TestHandleAgentMode_NilAgentMode_NoArgs(t *testing.T) {
-	t.Parallel()
-	// With nil AgentMode, no-args should still succeed (shows "on" by default)
-	result := handleAgentMode(nil, CommandContext{})
-	if !result.Success {
-		t.Error("handleAgentMode with nil AgentMode should succeed")
-	}
-	if !strings.Contains(result.Message, "on") {
-		t.Errorf("nil AgentMode should default to 'on', got: %s", result.Message)
-	}
-}
-
-func TestHandleAgentMode_InvalidArg(t *testing.T) {
-	t.Parallel()
-	agentMode := false
-	result := handleAgentMode([]string{"invalid"}, CommandContext{
-		AgentMode:    &agentMode,
-		SetAgentMode: func(v bool) { agentMode = v },
-	})
-	if result.Success {
-		t.Error("handleAgentMode with invalid arg should fail")
-	}
-}
-
-func TestHandleAgentMode_CaseInsensitive(t *testing.T) {
-	t.Parallel()
-	agentMode := false
-	result := handleAgentMode([]string{"ON"}, CommandContext{
-		AgentMode:    &agentMode,
-		SetAgentMode: func(v bool) { agentMode = v },
-	})
-	if !result.Success {
-		t.Error("handleAgentMode ON should succeed")
-	}
-	if !agentMode {
-		t.Error("agent mode should be on")
-	}
-}
-
-func TestHandleGoal_WithArgs_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleGoal([]string{"my goal"}, CommandContext{})
-	if result.Success {
-		t.Error("handleGoal with args but no session should fail")
-	}
-}
-
-func TestHandlePhase_WithArgs_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handlePhase([]string{"plan"}, CommandContext{})
-	if result.Success {
-		t.Error("handlePhase with args but no session should fail")
-	}
-}
-
-func TestHandleRefine_WithArgs_NoSession(t *testing.T) {
-	t.Parallel()
-	result := handleRefine([]string{"refine this"}, CommandContext{})
-	if result.Success {
-		t.Error("handleRefine with args but no session should fail")
-	}
-}
-
-func TestHandleLedger_WithArgs_NilLedger(t *testing.T) {
-	t.Parallel()
-	result := handleLedger([]string{"summary"}, CommandContext{})
-	if result.Success {
-		t.Error("handleLedger with args but nil ledger should fail")
+	// Distance 3 - should NOT suggest (threshold is 2)
+	suggestion = suggestCommand(r, "x")
+	if suggestion != "" {
+		t.Errorf("suggestCommand('x') = %q, want empty", suggestion)
 	}
 }

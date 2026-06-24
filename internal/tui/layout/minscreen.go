@@ -84,10 +84,12 @@ func RenderOverlay(base string, overlay string, width, height, overlayWidth int,
 	return strings.Join(result, "\n")
 }
 
-// truncateToWidth truncates a styled string to at most maxW visible cells.
+// truncateToWidth truncates a styled string to at most maxW visible cells,
+// preserving ANSI escape sequences.
 func truncateToWidth(s string, maxW int) string {
 	var out strings.Builder
 	visible := 0
+	truncated := false
 	inEsc := false
 	esc := strings.Builder{}
 	for _, r := range s {
@@ -106,11 +108,14 @@ func truncateToWidth(s string, maxW int) string {
 			continue
 		}
 		if visible >= maxW {
+			truncated = true
 			break
 		}
 		out.WriteRune(r)
 		visible++
 	}
-	out.WriteString("\x1b[0m")
+	if truncated {
+		out.WriteString("\x1b[0m")
+	}
 	return out.String()
 }

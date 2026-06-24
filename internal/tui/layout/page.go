@@ -308,7 +308,8 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 	result := strings.Join(zones, sep)
 	resultW := lipgloss.Width(result)
 
-	// Overflow: drop right, then center, then truncate left
+	// Overflow: progressively drop zones then truncate.
+	// 1. Drop right zone
 	if resultW > width && right != "" {
 		zones2 := zones[:0]
 		if left != "" {
@@ -320,10 +321,12 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 		result = strings.Join(zones2, sep)
 		resultW = lipgloss.Width(result)
 	}
-	if resultW > width && center != "" {
+	// 2. Drop center zone (keep only left)
+	if resultW > width && left != "" {
 		result = left
 		resultW = lipgloss.Width(result)
 	}
+	// 3. Truncate whatever remains
 	if resultW > width {
 		result = truncateToWidth(result, width)
 		resultW = lipgloss.Width(result)
@@ -415,12 +418,10 @@ func shortProviderName(name string) string {
 
 func formatTokenCount(n int) string {
 	if n >= 1000 {
-		return strings.TrimRight(strings.TrimRight(
-			strings.ReplaceAll(
-				strings.Replace(
-					formatFloat1(float64(n)/1000), ".", ".", 1),
-				"0", "0"),
-			"0"), ".") + "K ctx"
+		f := formatFloat1(float64(n) / 1000)
+		// Trim trailing zero after decimal (e.g. "1.0" → "1") but keep non-zero fractions
+		f = strings.TrimSuffix(f, ".0")
+		return f + "K ctx"
 	}
 	return intToStr(n) + " ctx"
 }

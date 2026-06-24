@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +41,10 @@ var _ workflow.MsgEmitter = (*channelEmitter)(nil)
 // AppState is the top-level Bubble Tea model.
 // All state mutations go through Update(). No goroutine may mutate AppState directly.
 type AppState struct {
+	// Mutex protects concurrent access to state fields.
+	// All goroutines must acquire this lock before reading or writing state.
+	mu sync.RWMutex
+
 	// Layout
 	width  int
 	height int
@@ -236,6 +241,8 @@ func (a *AppState) SetSubagentManager(m *subagent.Manager) {
 // SetCwd stores the working directory so it can be propagated to the REPL
 // model for @-mention file resolution.
 func (a *AppState) SetCwd(cwd string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.cwd = cwd
 }
 
