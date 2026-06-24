@@ -148,8 +148,7 @@ func (l *Ledger) Append(entry LedgerEntry) error {
 func (l *Ledger) appendEntry(entry LedgerEntry) error {
 	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND, types.FilePermission)
 	if err != nil {
-		// Fallback to full rewrite if append fails
-		return l.rewriteFile()
+		return fmt.Errorf("append entry (open): %w", err)
 	}
 	defer f.Close() //nolint:errcheck
 
@@ -257,8 +256,8 @@ func matchesAnyKeyword(entryKeywords, queryKeywords []string) bool {
 // Uses mtime-based caching: if LEDGER.md hasn't been modified since
 // the last call, returns the cached result (M-16).
 func (l *Ledger) Stats() LedgerStats {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// Check mtime-based cache
 	if info, err := os.Stat(l.path); err == nil {

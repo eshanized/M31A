@@ -178,7 +178,10 @@ func (m *Manager) NewSession(model, provider string) (*Session, error) {
 	}
 
 	// Write empty messages.json
-	msgData, _ := json.Marshal([]types.Message{})
+	msgData, jsonErr := json.Marshal([]types.Message{})
+	if jsonErr != nil {
+		return nil, fmt.Errorf("cannot marshal empty messages: %w", jsonErr)
+	}
 	if err := m.atomicWrite(m.messagesJSONPath(), msgData); err != nil {
 		return nil, fmt.Errorf("cannot write messages.json: %w", err)
 	}
@@ -504,7 +507,9 @@ func (m *Manager) ensureGitIgnore() {
 	existing, err := os.ReadFile(gitignorePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			_ = os.WriteFile(gitignorePath, []byte("# M31A session data\n.m31a/\n"), types.FilePermission)
+			if writeErr := os.WriteFile(gitignorePath, []byte("# M31A session data\n.m31a/\n"), types.FilePermission); writeErr != nil {
+				slog.Warn("failed to create .gitignore", "error", writeErr)
+			}
 		}
 		return
 	}
@@ -522,9 +527,14 @@ func (m *Manager) ensureGitIgnore() {
 
 	content := string(existing)
 	if !strings.HasSuffix(content, "\n") {
-		_, _ = f.WriteString("\n")
+		if _, err := f.WriteString("\n"); err != nil {
+			slog.Warn("failed to update .gitignore", "error", err)
+			return
+		}
 	}
-	_, _ = f.WriteString("# M31A session data\n.m31a/\n")
+	if _, err := f.WriteString("# M31A session data\n.m31a/\n"); err != nil {
+		slog.Warn("failed to update .gitignore", "error", err)
+	}
 }
 
 // ── Recent Models (global, stored in ~/.m31a/) ─────────────────────────────

@@ -88,7 +88,10 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	// Bisect loop
 	for {
 		// Check if bisect is complete
-		logOut, _ := b.run("bisect", "log")
+		logOut, logErr := b.run("bisect", "log")
+		if logErr != nil {
+			return nil, fmt.Errorf("bisect log: %w", logErr)
+		}
 		if strings.Contains(logOut, "first bad commit") {
 			break
 		}
@@ -127,7 +130,10 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	}
 
 	// Get diff
-	diff, _ := b.run("diff", offending+"^.."+offending)
+	diff, diffErr := b.run("diff", offending+"^.."+offending)
+	if diffErr != nil {
+		slog.Warn("bisect: failed to get diff", "commit", offending, "error", diffErr)
+	}
 
 	return &BisectResult{
 		OffendingCommit: git.CommitInfo{

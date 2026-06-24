@@ -276,7 +276,10 @@ func (r *Rollback) buildResult(prevHead, newHead string, stashed bool, stashWord
 		shortNew = shortNew[:7]
 	}
 
-	commitsUndone, _ := r.countCommitsBetween(newHead, prevHead)
+	commitsUndone, countErr := r.countCommitsBetween(newHead, prevHead)
+	if countErr != nil {
+		commitsUndone = 0
+	}
 
 	msg := fmt.Sprintf("Rolled back from %s to %s. %d commits undone.",
 		shortPrev, shortNew, commitsUndone)

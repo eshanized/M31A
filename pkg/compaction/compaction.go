@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eshanized/M31A/internal/provider"
@@ -34,6 +35,7 @@ func DefaultConfig() Config {
 type Compactor struct {
 	cfg        Config
 	tokenEst   *tokens.Estimator
+	mu         sync.RWMutex
 	lastResult *Result
 }
 
@@ -127,7 +129,9 @@ func (c *Compactor) Compact(ctx context.Context, messages []types.Message, p pro
 		DurationMs:      time.Since(start).Milliseconds(),
 	}
 
+	c.mu.Lock()
 	c.lastResult = result
+	c.mu.Unlock()
 	slog.Info("session compacted",
 		"tokens_before", tokensBefore,
 		"tokens_after", tokensAfter,
@@ -172,7 +176,9 @@ func (c *Compactor) generateSummary(ctx context.Context, headText string, p prov
 		chunk, err := iterator.Next()
 		if err != nil {
 			if sb.Len() > 0 {
-				break
+				// Return partial content with the error so callers can decide
+				// whether to use the truncated summary.
+				return sb.String(), fmt.Errorf("compaction stream (partial content returned): %w", err)
 			}
 			return "", fmt.Errorf("compaction stream: %w", err)
 		}
@@ -195,5 +201,7 @@ func (c *Compactor) generateSummary(ctx context.Context, headText string, p prov
 // LastResult returns the most recent compaction result, or nil if no
 // compaction has been performed.
 func (c *Compactor) LastResult() *Result {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.lastResult
 }

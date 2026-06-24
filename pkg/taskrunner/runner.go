@@ -244,9 +244,9 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 			var result TaskResult
 			maxAttempts := r.MaxRetries + 1
 			for attempt := 0; attempt < maxAttempts; attempt++ {
-				var taskCtx context.Context
 				var cancel context.CancelFunc
 				if fn != nil {
+					var taskCtx context.Context
 					if r.TaskTimeout > 0 {
 						taskCtx, cancel = context.WithTimeout(ctx, r.TaskTimeout)
 					} else {
@@ -254,7 +254,7 @@ func (r *Runner) ExecuteGroup(ctx context.Context, group []int, fn ExecuteFunc) 
 					}
 					result = fn(taskCtx, task)
 				} else {
-					_, cancel = context.WithCancel(ctx)
+					cancel = func() {}
 					result = TaskResult{Success: true}
 				}
 

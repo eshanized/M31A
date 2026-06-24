@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -98,7 +99,9 @@ func (m *Manager) LoadCheckpoints(sessionID string) ([]Checkpoint, error) {
 		// Rewrite the file to persist the pruned set
 		data, err := json.Marshal(checkpoints)
 		if err == nil {
-			_ = m.atomicWrite(path, data)
+			if writeErr := m.atomicWrite(path, data); writeErr != nil {
+				slog.Warn("failed to persist pruned checkpoints", "error", writeErr)
+			}
 		}
 	}
 

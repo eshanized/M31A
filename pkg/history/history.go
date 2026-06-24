@@ -107,6 +107,7 @@ func (fh *FrecentHistory) Search(query string, limit int) []FrecentEntry {
 }
 
 // Save persists the history to disk.
+// The caller must hold fh.mu (either RLock or Lock).
 func (fh *FrecentHistory) Save() error {
 	if fh.filePath == "" {
 		return nil

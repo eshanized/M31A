@@ -126,6 +126,12 @@ func (c *Coordinator[Key]) Complete(key Key) DemandType {
 
 	pending := e.pending
 	e.pending = 0
+
+	// Clean up the entry if there's no pending demand to avoid unbounded map growth.
+	if pending == 0 {
+		delete(c.entries, key)
+	}
+
 	return pending
 }
 

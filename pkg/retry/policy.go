@@ -154,10 +154,12 @@ func (p *Policy) RetryWithHeaders(ctx context.Context, fn func() (http.Header, e
 		delay := p.Delay(attempt, headers)
 		slog.Debug("retry: backing off", "attempt", attempt, "max", p.MaxAttempts, "delay", delay, "reason", reason)
 
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 	}
 	return lastErr

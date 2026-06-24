@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -115,9 +116,6 @@ func run() int {
 		logger.Error("failed to load config", "error", err)
 		return 1
 	}
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
 
 	// Detect previous unclean shutdown from force-exit sentinel.
 	// The signal handler writes this when the TUI doesn't exit within 5 seconds.
@@ -205,13 +203,11 @@ func run() int {
 
 	// Theme
 	themeMode := theme.ModeDark
-	if cfg != nil {
-		switch cfg.UI.Theme {
-		case "light":
-			themeMode = theme.ModeLight
-		case "auto":
-			themeMode = theme.ModeAuto
-		}
+	switch cfg.UI.Theme {
+	case "light":
+		themeMode = theme.ModeLight
+	case "auto":
+		themeMode = theme.ModeAuto
 	}
 
 	// Build and launch TUI app
@@ -238,7 +234,7 @@ func run() int {
 	// Each subagent gets its own dispatcher + worktree; the parent dispatcher
 	// exposes the Agent tool so the LLM can spawn children directly.
 	var activeModelForSubagents *types.ModelInfo
-	if cfg != nil && cfg.Model.Default != "" && registry != nil {
+	if cfg.Model.Default != "" {
 		if p := registry.ActiveProvider(); p != nil {
 			if info, err := p.GetModel(cfg.Model.Default); err == nil {
 				activeModelForSubagents = info
@@ -270,7 +266,9 @@ func run() int {
 	app.SetSubagentManager(subagentMgr)
 
 	// Best-effort sweep of stale agent worktrees/branches from prior crashes.
-	if err := subagent.Sweep(context.Background(), workDir); err != nil {
+	sweepCtx, sweepCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer sweepCancel()
+	if err := subagent.Sweep(sweepCtx, workDir); err != nil {
 		logger.Warn("subagent worktree sweep failed", "error", err)
 	}
 
@@ -293,7 +291,9 @@ func run() int {
 	// Bubble Tea's single-threaded contract and preventing session corruption.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigCh)
 	sigDone := make(chan struct{})
+	var programExited atomic.Bool
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -303,6 +303,9 @@ func run() int {
 		for {
 			select {
 			case <-sigCh:
+				if programExited.Load() {
+					return
+				}
 				slog.Info("received shutdown signal, sending quit to TUI...")
 				p.Send(tea.QuitMsg{})
 				// H-24: Hard fallback — force exit after 5 seconds if TUI doesn't quit.
@@ -312,6 +315,9 @@ func run() int {
 				case <-sigDone:
 					return
 				case <-time.After(5 * time.Second):
+					if programExited.Load() {
+						return
+					}
 					slog.Warn("TUI did not exit within timeout, forcing exit")
 					sentinel := filepath.Join(filepath.Dir(configPath), ".force-exit")
 					_ = os.WriteFile(sentinel, []byte("force-exit"), 0o644)
@@ -326,6 +332,7 @@ func run() int {
 	}()
 
 	if _, err := p.Run(); err != nil {
+		programExited.Store(true)
 		logger.Error("TUI exited with error", "error", err)
 		close(sigDone)
 		return 1
@@ -333,6 +340,7 @@ func run() int {
 
 	// Cancel the signal goroutine before Shutdown to prevent the 5-second
 	// os.Exit(1) timer from racing with cleanup.
+	programExited.Store(true)
 	close(sigDone)
 	app.Shutdown()
 	return 0
