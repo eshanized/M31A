@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,6 +26,7 @@ export default function RootLayout({
           <div className="flex min-h-screen flex-col">
             {children}
           </div>
+          <Toaster richColors position="bottom-right" />
         </ThemeProvider>
       </body>
     </html>
