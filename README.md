@@ -483,6 +483,22 @@ If M31 Autonomous saves you time, [drop a star](https://github.com/eshanized/M31
 
 [![Star History Chart](https://api.star-history.com/svg?repos=eshanized/M31A&type=Date)](https://star-history.com/#eshanized/M31A&Date)
 
+## Citing M31 Autonomous
+
+If you use M31 Autonomous in your research, please cite it:
+
+```bibtex
+@software{m31a2026,
+  author       = {Eshan Roy},
+  title        = {M31 Autonomous: A Terminal-Native AI Coding Agent with Eight-Phase Workflow Orchestration},
+  year         = {2026},
+  url          = {https://github.com/eshanized/M31A},
+  version      = {v1.3.0}
+}
+```
+
+Or use the `CITATION.cff` file in this repository for automatic citation generation on GitHub.
+
 ## Thanks
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss](https://github.com/charmbracelet/lipgloss), [Glamour](https://github.com/charmbracelet/glamour), and [tiktoken-go](https://github.com/pkoukk/tiktoken-go).
