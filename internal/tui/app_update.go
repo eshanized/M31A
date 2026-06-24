@@ -3001,7 +3001,10 @@ func (m *AppState) startNewSession() tea.Cmd {
 	m.replModel.SetSessionID(sess.ID)
 	m.workflowPhase = types.PhaseIdle
 	m.workflowGoal = ""
-	m.screen = ScreenREPL
+	// Only switch to REPL if not already on a dedicated landing/startup screen.
+	if m.screen != ScreenHome && m.screen != ScreenFirstRun {
+		m.screen = ScreenREPL
+	}
 
 	return m.syncReplProvider(sess.ID)
 }
