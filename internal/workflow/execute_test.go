@@ -364,3 +364,66 @@ func TestExecute_OneAssistantPerTurn(t *testing.T) {
 		t.Errorf("expected 3 tool calls dispatched, got %d", result.ToolCalls)
 	}
 }
+
+func TestLooksLikeCode_GoCode(t *testing.T) {
+	t.Parallel()
+	code := `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println("Hello, World!")
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	return nil
+}`
+	if !looksLikeCode(code) {
+		t.Error("expected Go code to be detected")
+	}
+}
+
+func TestLooksLikeCode_PythonCode(t *testing.T) {
+	t.Parallel()
+	code := `import os
+import sys
+
+def main():
+    print("Hello, World!")
+    if __name__ == "__main__":
+        main()
+`
+	if !looksLikeCode(code) {
+		t.Error("expected Python code to be detected")
+	}
+}
+
+func TestLooksLikeCode_CodeFences(t *testing.T) {
+	t.Parallel()
+	code := "Here is the code for the noteflow CLI tool:\n```go\npackage main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n\tif err := run(); err != nil {\n\t\tfmt.Fprintf(os.Stderr, \"error: %v\\n\", err)\n\t\tos.Exit(1)\n\t}\n}\n```"
+	if !looksLikeCode(code) {
+		t.Error("expected fenced code to be detected")
+	}
+}
+
+func TestLooksLikeCode_PlainText(t *testing.T) {
+	t.Parallel()
+	text := "I will create a CLI tool called noteflow. It will manage notes with a SQLite backend. The tool will support adding, listing, showing, deleting, and exporting notes."
+	if looksLikeCode(text) {
+		t.Error("expected plain text to NOT be detected as code")
+	}
+}
+
+func TestLooksLikeCode_ShortContent(t *testing.T) {
+	t.Parallel()
+	if looksLikeCode("hello") {
+		t.Error("expected short content to NOT be detected as code")
+	}
+}

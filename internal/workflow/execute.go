@@ -33,13 +33,16 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	if len(tasks) == 0 && e.workflowMode != "" && e.workflowMode != m31types.ModeFull {
 		tasks = []m31types.Task{
 			{
-				ID:                 1,
-				Description:        goal,
-				Action:             "implement",
-				Dependencies:       []int{},
-				Files:              []string{},
-				AcceptanceCriteria: []string{goal},
-				Status:             m31types.StatusPending,
+				ID:          1,
+				Description: goal,
+				Action:      "implement",
+				Dependencies: []int{},
+				Files:       []string{"main.go"},
+				AcceptanceCriteria: []string{
+					"code compiles with go build",
+					"all required files are created using FileWrite tool",
+				},
+				Status: m31types.StatusPending,
 			},
 		}
 		e.logger.Info("auto-generated task for fast/direct mode", "task_id", 1, "goal", goal)
@@ -269,36 +272,71 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 		// Fall back to text-based parsing if no native tool calls
 		if len(toolCalls) == 0 {
-			parsedCalls, parseErr := e.parseToolCalls(content)
-			if parseErr != nil {
-				failureReason := fmt.Sprintf("tool call parsing failed: %v", parseErr)
-				if task.HealsAttempted >= m31types.MaxHealAttempts {
-					return taskrunner.TaskResult{Success: false, Error: failureReason}
-				}
+			// HARD ENFORCEMENT: Detect code-as-text output from weak models.
+			// If the LLM printed code instead of using FileWrite, force a retry
+			// with an explicit tool-use prompt.
+			if looksLikeCode(content) && task.HealsAttempted < m31types.MaxHealAttempts {
+				e.logger.Warn("detected code-as-text output, forcing tool-use retry",
+					"task", task.ID, "content_len", len(content))
 				task.HealsAttempted++
-				e.logger.Info("self-healing task after parse failure", "task", task.ID, "attempt", task.HealsAttempted)
 				e.emit(SelfHealStartMsg{
 					TaskID:  task.ID,
 					Attempt: task.HealsAttempted,
 					Max:     m31types.MaxHealAttempts,
 				})
-				healResult := e.healTask(ctx, *task, failureReason, goal)
+				// Inject the code-as-text as context and demand FileWrite usage
+				forcedMsg := append(messages, m31types.Message{
+					Role:    "user",
+					Content: "CRITICAL: You output code as plain text. This is WRONG. You MUST use the FileWrite tool to create files. Here is the code you wrote — now create each file using FileWrite tool calls. Do NOT output code as text again. Create the files using FileWrite.",
+				})
+				forcedContent, forcedToolCalls, forcedErr := e.streamLLMWithTools(ctx, forcedMsg)
+				if forcedErr == nil && len(forcedToolCalls) > 0 {
+					content = forcedContent
+					toolCalls = forcedToolCalls
+					e.logger.Info("code-as-text retry produced tool calls", "task", task.ID, "count", len(forcedToolCalls))
+				} else {
+					e.logger.Warn("code-as-text retry still failed", "task", task.ID, "err", forcedErr, "toolCalls", len(forcedToolCalls))
+				}
 				e.emit(SelfHealCompleteMsg{
 					TaskID:  task.ID,
 					Attempt: task.HealsAttempted,
 					Max:     m31types.MaxHealAttempts,
-					Success: healResult.Success,
-					Error:   healResult.Error,
+					Success: len(toolCalls) > 0,
 				})
-				if !healResult.Success {
-					return healResult
-				}
-				if !e.healCreatedExpectedFiles(task) {
-					e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
-				}
-				continue
 			}
-			toolCalls = parsedCalls
+
+			if len(toolCalls) == 0 {
+				parsedCalls, parseErr := e.parseToolCalls(content)
+				if parseErr != nil {
+					failureReason := fmt.Sprintf("tool call parsing failed: %v", parseErr)
+					if task.HealsAttempted >= m31types.MaxHealAttempts {
+						return taskrunner.TaskResult{Success: false, Error: failureReason}
+					}
+					task.HealsAttempted++
+					e.logger.Info("self-healing task after parse failure", "task", task.ID, "attempt", task.HealsAttempted)
+					e.emit(SelfHealStartMsg{
+						TaskID:  task.ID,
+						Attempt: task.HealsAttempted,
+						Max:     m31types.MaxHealAttempts,
+					})
+					healResult := e.healTask(ctx, *task, failureReason, goal)
+					e.emit(SelfHealCompleteMsg{
+						TaskID:  task.ID,
+						Attempt: task.HealsAttempted,
+						Max:     m31types.MaxHealAttempts,
+						Success: healResult.Success,
+						Error:   healResult.Error,
+					})
+					if !healResult.Success {
+						return healResult
+					}
+					if !e.healCreatedExpectedFiles(task) {
+						e.logger.Warn("heal succeeded but expected files missing, retrying", "task", task.ID)
+					}
+					continue
+				}
+				toolCalls = parsedCalls
+			}
 		}
 
 		// Dispatch tool calls — C-6: execute ALL tool calls and collect results
@@ -664,6 +702,11 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	if len(task.AcceptanceCriteria) > 0 {
 		taskSpec += "\nAcceptance criteria: " + strings.Join(task.AcceptanceCriteria, "; ")
 	}
+	// CRITICAL: When no files are specified, explicitly require tool use.
+	// Without this, the LLM prints code as text instead of creating files.
+	if len(task.Files) == 0 {
+		taskSpec += "\n\n**IMPORTANT**: You MUST use the FileWrite tool to create all necessary files. Do NOT output code as text in your response. Each file must be created via a FileWrite tool call."
+	}
 	messages = append(messages, m31types.Message{
 		Role:    "user",
 		Content: taskSpec,
@@ -853,4 +896,96 @@ func (e *Engine) healCreatedExpectedFiles(task *m31types.Task) bool {
 		}
 	}
 	return true
+}
+
+// looksLikeCode detects when an LLM has printed code as plain text instead of
+// using FileWrite/Edit tools. Uses heuristic pattern matching on common code
+// structures. Returns true when the output looks like source code but contains
+// no tool calls.
+func looksLikeCode(content string) bool {
+	if len(content) < 100 {
+		return false
+	}
+
+	lower := strings.ToLower(content)
+
+	// Go code patterns
+	goPatterns := []string{
+		"package main",
+		"import (",
+		"func main(",
+		"func (",
+		":=",
+		"fmt.println(",
+		"fmt.printf(",
+		"if err != nil {",
+		"return fmt.errorf(",
+		"cobra.command{",
+		"&cobra.command{",
+	}
+
+	// Python code patterns
+	pythonPatterns := []string{
+		"import ",
+		"def main(",
+		"if __name__",
+		"print(",
+		"class ",
+		"def __init__",
+	}
+
+	// JavaScript/TypeScript code patterns
+	jsPatterns := []string{
+		"const ",
+		"let ",
+		"function ",
+		"export ",
+		"import {",
+		"from '",
+		"require(",
+	}
+
+	// Generic code indicators
+	genericPatterns := []string{
+		"{\n",
+		"}\n",
+		"()\n",
+		"  }",
+		"  {",
+		"  return ",
+		"  if (",
+	}
+
+	// Count matches across all pattern families
+	score := 0
+	for _, p := range goPatterns {
+		if strings.Contains(lower, p) {
+			score++
+		}
+	}
+	for _, p := range pythonPatterns {
+		if strings.Contains(lower, p) {
+			score++
+		}
+	}
+	for _, p := range jsPatterns {
+		if strings.Contains(lower, p) {
+			score++
+		}
+	}
+	for _, p := range genericPatterns {
+		if strings.Contains(content, p) {
+			score++
+		}
+	}
+
+	// Also check for code fences with language tags (model wrapping code in ```go etc.)
+	if strings.Contains(content, "```go") || strings.Contains(content, "```python") ||
+		strings.Contains(content, "```javascript") || strings.Contains(content, "```typescript") ||
+		strings.Contains(content, "```js") || strings.Contains(content, "```ts") {
+		score += 3
+	}
+
+	// Threshold: 3+ code-like patterns means this is code, not tool calls
+	return score >= 3
 }

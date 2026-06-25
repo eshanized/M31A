@@ -87,6 +87,8 @@ You have nine tools at your disposal. Use the right tool for the job:
 
 **When modifying an existing file, use Edit (not FileWrite) unless rewriting the entire file.**
 
+**CRITICAL: You MUST use FileWrite or Edit to create/modify files. NEVER output code as plain text in your response. Code written as text is not saved to disk and the task will fail.**
+
 Never run destructive commands (git reset --hard, rm -rf) without explicit confirmation.
 
 # Code Style

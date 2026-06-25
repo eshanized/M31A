@@ -1,8 +1,8 @@
 ---
-version: 1.1
+version: 1.2
 phase: execute
 injected_in: execute.go/buildExecuteContext
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-25
 ---
 
 # Execute Phase Task Instructions
@@ -50,6 +50,13 @@ better implementation decisions that align with the plan's design intent.
 6. **Commit your changes**. Use git to commit the files with a descriptive message.
    The engine applies the project's configured prefix automatically.
    Example format: `<prefix>: <short description of what changed>`
+
+## Critical Rule: No Code As Text
+
+**NEVER output code as plain text in your response.** Every file must be created or modified
+using the **FileWrite** or **Edit** tool. If you write code in your response text, it will not
+be saved to disk and the task will fail. The only acceptable way to produce code is through
+tool calls.
 
 ## Important
 
