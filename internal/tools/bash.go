@@ -79,6 +79,14 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		)
 	}
 
+	// Validate command syntax (unbalanced quotes, etc.)
+	if err := validateCommandSyntax(command); err != nil {
+		return types.ToolResult{}, types.NewToolError(
+			fmt.Errorf("invalid command syntax: %w", err),
+			"Fix the command syntax. Ensure all quotes are properly closed.",
+		)
+	}
+
 	timeoutSec := int(types.BashTimeout.Seconds())
 	if customRaw, ok := input.Params["timeout"]; ok {
 		if customFloat, ok := customRaw.(float64); ok {
@@ -335,20 +343,75 @@ func (lw *limitWriter) Written() int64 {
 	return lw.written
 }
 
-// isBinary checks if a string contains null bytes (binary content).
+// isBinary checks if a string contains binary content.
+// Uses multiple detection methods: null bytes, high ratio of non-printable
+// characters, and common binary file signatures.
 func isBinary(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
+
+	// Check for null bytes (most reliable indicator)
 	checkLen := len(s)
-	if checkLen > 512 {
-		checkLen = 512
+	if checkLen > 1024 {
+		checkLen = 1024
 	}
 	for i := 0; i < checkLen; i++ {
 		if s[i] == 0 {
 			return true
 		}
 	}
+
+	// Check for high ratio of non-printable characters
+	nonPrintable := 0
+	total := 0
+	for i := 0; i < checkLen && i < len(s); i++ {
+		b := s[i]
+		// Allow common whitespace and printable ASCII
+		if b >= 32 && b < 127 || b == '\n' || b == '\r' || b == '\t' || b == '\f' || b == '\v' {
+			continue
+		}
+		// Allow common UTF-8 continuation bytes
+		if b >= 0x80 && b < 0xC0 {
+			continue
+		}
+		nonPrintable++
+		total++
+	}
+
+	// If more than 10% non-printable in first 1KB, likely binary
+	if total > 0 && float64(nonPrintable)/float64(total) > 0.1 {
+		return true
+	}
+
+	// Check for common binary file signatures (magic bytes)
+	if len(s) >= 4 {
+		// ELF executable
+		if s[0] == '\x7f' && s[1] == 'E' && s[2] == 'L' && s[3] == 'F' {
+			return true
+		}
+		// PDF
+		if s[0] == '%' && s[1] == 'P' && s[2] == 'D' && s[3] == 'F' {
+			return true
+		}
+		// ZIP/JAR/APK
+		if s[0] == 'P' && s[1] == 'K' && s[2] == '\x03' && s[3] == '\x04' {
+			return true
+		}
+		// PNG
+		if s[0] == '\x89' && s[1] == 'P' && s[2] == 'N' && s[3] == 'G' {
+			return true
+		}
+		// GIF
+		if s[0] == 'G' && s[1] == 'I' && s[2] == 'F' {
+			return true
+		}
+		// JPEG
+		if s[0] == '\xff' && s[1] == '\xd8' && s[2] == '\xff' {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -404,6 +467,9 @@ var dangerousObfuscationPatterns = []struct {
 	{"$(eval", "command substitution with eval"},
 	{"xargs rm", "xargs with rm (batch deletion)"},
 	{"xargs -0 rm", "xargs with rm (batch deletion)"},
+	{"${", "shell variable expansion (potential injection)"},
+	{"$(", "command substitution (potential injection)"},
+	{"`", "backtick command substitution (potential injection)"},
 }
 
 // checkDangerousCommand checks if a command matches any dangerous patterns.
@@ -421,4 +487,39 @@ func checkDangerousCommand(command string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// validateCommandSyntax performs basic syntax validation on shell commands.
+// Returns an error if the command contains unbalanced quotes or other syntax issues.
+func validateCommandSyntax(command string) error {
+	inSingleQuote := false
+	inDoubleQuote := false
+	escaped := false
+
+	for _, ch := range command {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && !inSingleQuote {
+			escaped = true
+			continue
+		}
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+	}
+
+	if inSingleQuote {
+		return fmt.Errorf("unbalanced single quotes in command")
+	}
+	if inDoubleQuote {
+		return fmt.Errorf("unbalanced double quotes in command")
+	}
+	return nil
 }

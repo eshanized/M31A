@@ -225,6 +225,7 @@ func (d *Dispatcher) askPermissionFallback(ctx context.Context, call types.ToolC
 	workDir := d.workDir()
 	cacheKey := workDir + ":" + call.Name + ":" + cmd
 
+	// Use RLock for read-only check first (optimistic path)
 	d.mu.RLock()
 	allowed, remembered := d.permissions[cacheKey]
 	if !remembered {

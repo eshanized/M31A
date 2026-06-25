@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -83,12 +82,6 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 	dstAbs := dst
 	if !filepath.IsAbs(dst) {
 		dstAbs = filepath.Join(t.workDir, dst)
-	}
-
-	// Security: resolve symlinks and verify both paths are within workDir
-	workDirPrefix := t.workDir
-	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-		workDirPrefix += string(filepath.Separator)
 	}
 
 	// Source must exist and resolve within workDir

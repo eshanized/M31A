@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -23,6 +24,12 @@ const (
 	DefaultMaxTools = 50
 	// DefaultMaxTokens is the per-subagent token budget (input + output).
 	DefaultMaxTokens = 50_000
+	// MaxTotalSubagents is the maximum total subagents that can be spawned
+	// in a single session to prevent runaway resource consumption.
+	MaxTotalSubagents = 50
+	// MaxSpawnRate is the maximum number of subagents that can be spawned
+	// per minute to prevent rapid resource exhaustion.
+	MaxSpawnRate = 10
 )
 
 // ErrMaxConcurrent is returned when Spawn cannot acquire a slot.
@@ -50,11 +57,13 @@ type Dependencies struct {
 
 // Manager orchestrates subagent lifecycles.
 type Manager struct {
-	deps    Dependencies
-	sem     chan struct{}
-	agents  sync.Map // id -> *Subagent
-	eventCh chan SubagentEvent
-	spawnMu sync.Mutex
+	deps         Dependencies
+	sem          chan struct{}
+	agents       sync.Map // id -> *Subagent
+	eventCh      chan SubagentEvent
+	spawnMu      sync.Mutex
+	totalSpawned int32       // total subagents spawned in this session
+	spawnTimes   []time.Time // timestamps of recent spawns for rate limiting
 }
 
 // Subagent is the live handle for a running child agent.
@@ -97,6 +106,30 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 	if req.SubagentType == "" {
 		req.SubagentType = "general"
 	}
+
+	// Check total spawn limit
+	m.spawnMu.Lock()
+	if m.totalSpawned >= MaxTotalSubagents {
+		m.spawnMu.Unlock()
+		return "", nil, fmt.Errorf("subagent: maximum total subagents (%d) reached", MaxTotalSubagents)
+	}
+
+	// Check spawn rate limit (max MaxSpawnRate per minute)
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Minute)
+	validTimes := make([]time.Time, 0, len(m.spawnTimes))
+	for _, t := range m.spawnTimes {
+		if t.After(cutoff) {
+			validTimes = append(validTimes, t)
+		}
+	}
+	if len(validTimes) >= MaxSpawnRate {
+		m.spawnMu.Unlock()
+		return "", nil, fmt.Errorf("subagent: spawn rate limit exceeded (%d per minute)", MaxSpawnRate)
+	}
+	m.spawnTimes = append(validTimes, now)
+	m.totalSpawned++
+	m.spawnMu.Unlock()
 
 	// Resolve agent profile.
 	profile, ok := ResolveProfile(req.SubagentType, m.deps.Profiles)

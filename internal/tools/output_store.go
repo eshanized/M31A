@@ -70,6 +70,8 @@ func (s *OutputStore) Bound(output string) (string, string, bool) {
 }
 
 // saveFull writes the full output to the managed directory and returns the path.
+// Uses restrictive permissions (0600) to prevent other users from reading
+// potentially sensitive tool output.
 func (s *OutputStore) saveFull(output string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -82,7 +84,8 @@ func (s *OutputStore) saveFull(output string) (string, error) {
 	filename := fmt.Sprintf("%d_%d.txt", time.Now().UnixMilli(), id)
 	path := filepath.Join(s.baseDir, filename)
 
-	if err := os.WriteFile(path, []byte(output), FilePermission); err != nil {
+	// Use restrictive permissions (0600) for sensitive tool output
+	if err := os.WriteFile(path, []byte(output), 0600); err != nil {
 		return "", fmt.Errorf("write tool output: %w", err)
 	}
 

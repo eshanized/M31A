@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -14,6 +15,51 @@ const (
 	filePermission = 0644
 	dateFormat     = "2006-01-02"
 )
+
+// SanitizeLogValue removes control characters and potential log injection
+// patterns from user-provided values before logging.
+func SanitizeLogValue(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		// Allow printable characters except control characters
+		if unicode.IsPrint(r) || r == '\n' || r == '\t' {
+			b.WriteRune(r)
+		} else if r == '\r' {
+			// Replace carriage return with escaped representation
+			b.WriteString("\\r")
+		} else if r == '\x00' {
+			// Replace null byte with escaped representation
+			b.WriteString("\\0")
+		}
+		// Skip other control characters
+	}
+	result := b.String()
+
+	// Remove potential log injection patterns
+	suspiciousPatterns := []string{
+		"\x1b[", // ANSI escape sequences
+		"\r\n",  // CRLF injection
+		"\n",    // Newline injection (replaced with space)
+	}
+	for _, pattern := range suspiciousPatterns {
+		result = strings.ReplaceAll(result, pattern, " ")
+	}
+
+	return strings.TrimSpace(result)
+}
+
+// SanitizeLogKey removes control characters from log keys.
+func SanitizeLogKey(key string) string {
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range key {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 func NewLogger(version string) (*slog.Logger, func(), error) {
 	homeDir, err := os.UserHomeDir()

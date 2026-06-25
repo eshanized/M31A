@@ -17,9 +17,9 @@ const (
 )
 
 // validServiceName checks that the service parameter contains only lowercase
-// ASCII letters (a-z) after the m31a/ prefix. This prevents command injection
-// when passing the service name to the pass CLI.
-var validServiceName = regexp.MustCompile(`^[a-z0-9-]+$`)
+// ASCII letters (a-z) and numbers (0-9) after the m31a/ prefix. This prevents
+// command injection when passing the service name to the pass CLI.
+var validServiceName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 type linuxKeychain struct{}
 
@@ -118,6 +118,7 @@ func (k *linuxKeychain) dbusGet(service string) (string, error) {
 }
 
 func (k *linuxKeychain) passGet(service string) (string, error) {
+	// Use exec.Command with separate arguments to prevent command injection
 	out, err := exec.Command("pass", "show", servicePrefix+service).Output()
 	if err != nil {
 		if isPassNotFound(err) {
@@ -209,6 +210,7 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 }
 
 func (k *linuxKeychain) passSet(service, value string) error {
+	// Use exec.Command with separate arguments to prevent command injection
 	cmd := exec.Command("pass", "insert", "-U", "-f", servicePrefix+service)
 	cmd.Stdin = strings.NewReader(value)
 	err := cmd.Run()
@@ -275,6 +277,7 @@ func (k *linuxKeychain) dbusDelete(service string) error {
 }
 
 func (k *linuxKeychain) passDelete(service string) error {
+	// Use exec.Command with separate arguments to prevent command injection
 	err := exec.Command("pass", "rm", "-f", servicePrefix+service).Run()
 	if err != nil {
 		if isPassNotFound(err) {

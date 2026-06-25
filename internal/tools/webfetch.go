@@ -76,8 +76,8 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 				// Check ALL resolved IPs against private range (not just the first)
 				if !wf.allowPrivateIPs {
 					for _, addr := range addrs {
-						if isPrivateIP(addr.IP) {
-							return nil, fmt.Errorf("access to private IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
+						if isPrivateIP(addr.IP) || isReservedIP(addr.IP) {
+							return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
 						}
 					}
 				}
@@ -95,9 +95,9 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 				// Re-check after connect (paranoid check)
 				if tcpConn, ok := conn.(*net.TCPConn); ok {
 					remoteAddr := tcpConn.RemoteAddr().(*net.TCPAddr)
-					if !wf.allowPrivateIPs && isPrivateIP(remoteAddr.IP) {
+					if !wf.allowPrivateIPs && (isPrivateIP(remoteAddr.IP) || isReservedIP(remoteAddr.IP)) {
 						_ = conn.Close()
-						return nil, fmt.Errorf("connected to private IP %s is blocked: %w", remoteAddr.IP, errors.ErrPrivateIPBlocked)
+						return nil, fmt.Errorf("connected to private/reserved IP %s is blocked: %w", remoteAddr.IP, errors.ErrPrivateIPBlocked)
 					}
 				}
 
@@ -123,10 +123,10 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 			}
 			if !wf.allowPrivateIPs {
 				for _, addr := range addrs {
-					if isPrivateIP(addr.IP) {
+					if isPrivateIP(addr.IP) || isReservedIP(addr.IP) {
 						slog.Warn("WebFetch redirect blocked by SSRF protection",
 							"url", req.URL.String(), "ip", addr.IP)
-						return fmt.Errorf("redirect to private IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
+						return fmt.Errorf("redirect to private/reserved IP %s is blocked: %w", addr.IP, errors.ErrPrivateIPBlocked)
 					}
 				}
 			}
@@ -166,6 +166,22 @@ func isPrivateIP(ip net.IP) bool {
 			if ip6[0] == 0xfd && ip6[1] == 0x00 && ip6[2] == 0x0e && ip6[3] == 0xc2 {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// isReservedIP checks if an IP is in a reserved range that should never
+// be the target of an outbound connection.
+func isReservedIP(ip net.IP) bool {
+	// Check for multicast addresses
+	if ip.IsMulticast() {
+		return true
+	}
+	// Check for broadcast address (255.255.255.255)
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 255 && ip4[1] == 255 && ip4[2] == 255 && ip4[3] == 255 {
+			return true
 		}
 	}
 	return false

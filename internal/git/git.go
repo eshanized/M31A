@@ -316,6 +316,24 @@ func validateGitRef(ref string) bool {
 	if strings.HasPrefix(ref, ".") {
 		return false
 	}
+	// Reject refs containing path separators (could enable traversal)
+	if strings.Contains(ref, "/") && !strings.HasPrefix(ref, "refs/") {
+		return false
+	}
+	// Reject refs containing backslashes (Windows path issues)
+	if strings.Contains(ref, "\\") {
+		return false
+	}
+	// Reject refs with unicode control characters
+	for _, r := range ref {
+		if r < 32 || (r >= 0x7F && r < 0xA0) {
+			return false
+		}
+	}
+	// Reject extremely long refs (potential buffer overflow)
+	if len(ref) > 256 {
+		return false
+	}
 	return true
 }
 

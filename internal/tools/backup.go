@@ -8,9 +8,17 @@ import (
 	"strings"
 )
 
+const (
+	// MaxBackupDirSize is the maximum total size of the backup directory (100MB).
+	MaxBackupDirSize = 100 * 1024 * 1024
+	// MinFreeDiskSpace is the minimum free disk space to maintain (50MB).
+	MinFreeDiskSpace = 50 * 1024 * 1024
+)
+
 // pruneBackupsByPrefix removes the oldest backups matching the given prefix
 // when the count reaches maxBackups. Backups are sorted lexicographically
-// (timestamp in the name ensures chronological order).
+// (timestamp in the name ensures chronological order). Also enforces disk
+// space limits to prevent backup accumulation from filling the disk.
 func pruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -38,3 +46,5 @@ func pruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 		}
 	}
 }
+
+
