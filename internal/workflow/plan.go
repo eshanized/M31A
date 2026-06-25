@@ -181,6 +181,12 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		return nil, fmt.Errorf("save tasks: %w", err)
 	}
 
+	// Auto-generate initial TODO.md from plan tasks so the user sees progress
+	// tracking from the start, before execution begins.
+	if syncErr := e.dispatcher.SyncTodoFromTasks(tasks); syncErr != nil {
+		e.logger.Warn("initial todo sync from plan failed", "error", syncErr)
+	}
+
 	if err := e.sessionMgr.SaveTasksCheckbox(e.sessionID, tasks); err != nil {
 		e.logger.Warn("save checkbox tasks.md failed", "error", err)
 	}

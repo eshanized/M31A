@@ -125,6 +125,11 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			"executing tasks", "group complete"); err != nil {
 			e.logger.Warn("save state failed", "error", err)
 		}
+
+		// Auto-sync TODO.md from task runner state after each group
+		if syncErr := e.dispatcher.SyncTodoFromTasks(runner.Tasks()); syncErr != nil {
+			e.logger.Warn("todo sync after group failed", "error", syncErr)
+		}
 	}
 
 	// 5. Save checkpoint — critical for crash recovery; retry on failure
@@ -146,6 +151,11 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	updatedTasks := runner.Tasks()
 	if err := e.sessionMgr.SaveTasks(e.sessionID, updatedTasks); err != nil {
 		e.logger.Warn("save tasks failed", "error", err)
+	}
+
+	// Final TODO sync from completed task state
+	if syncErr := e.dispatcher.SyncTodoFromTasks(updatedTasks); syncErr != nil {
+		e.logger.Warn("final todo sync failed", "error", syncErr)
 	}
 
 	total, done, failed, skipped := runner.Summary()

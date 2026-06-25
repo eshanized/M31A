@@ -161,3 +161,124 @@ func TestTodoWrite_Execute_WithPriority(t *testing.T) {
 		t.Error("expected 'High priority' in TODO.md")
 	}
 }
+
+func TestTodoWrite_SyncTodoFromTasks(t *testing.T) {
+	t.Parallel()
+	sessionsDir := t.TempDir()
+	tw := NewTodoWrite(sessionsDir, "sync-test")
+
+	tasks := []types.Task{
+		{ID: 1, Description: "Setup project", Action: "Create", Status: types.StatusDone, Dependencies: []int{}},
+		{ID: 2, Description: "Implement auth", Action: "Add", Status: types.StatusRunning, Dependencies: []int{1}},
+		{ID: 3, Description: "Write tests", Action: "Add", Status: types.StatusPending, Dependencies: []int{2}},
+		{ID: 4, Description: "Fix bug", Action: "Modify", Status: types.StatusFailed, Dependencies: []int{}},
+	}
+
+	err := tw.SyncTodoFromTasks(tasks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sessionDir := filepath.Join(sessionsDir, "sync-test")
+	data, err := os.ReadFile(filepath.Join(sessionDir, "TODO.md"))
+	if err != nil {
+		t.Fatalf("TODO.md should exist: %v", err)
+	}
+	content := string(data)
+
+	// Verify all tasks appear
+	if !strings.Contains(content, "Setup project") {
+		t.Error("expected 'Setup project' in TODO.md")
+	}
+	if !strings.Contains(content, "Implement auth") {
+		t.Error("expected 'Implement auth' in TODO.md")
+	}
+	if !strings.Contains(content, "Write tests") {
+		t.Error("expected 'Write tests' in TODO.md")
+	}
+	if !strings.Contains(content, "Fix bug") {
+		t.Error("expected 'Fix bug' in TODO.md")
+	}
+
+	// Verify status mapping
+	if !strings.Contains(content, "[x]") {
+		t.Error("expected completed icon [x] for done task")
+	}
+	if !strings.Contains(content, "[~]") {
+		t.Error("expected in_progress icon [~] for running task")
+	}
+	if !strings.Contains(content, "[-]") {
+		t.Error("expected cancelled icon [-] for failed task")
+	}
+
+	// Verify task ID prefix
+	if !strings.Contains(content, "[Task 1]") {
+		t.Error("expected '[Task 1]' prefix")
+	}
+}
+
+func TestTodoWrite_SyncTodoFromTasks_Empty(t *testing.T) {
+	t.Parallel()
+	sessionsDir := t.TempDir()
+	tw := NewTodoWrite(sessionsDir, "empty-sync")
+
+	err := tw.SyncTodoFromTasks([]types.Task{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sessionDir := filepath.Join(sessionsDir, "empty-sync")
+	data, err := os.ReadFile(filepath.Join(sessionDir, "TODO.md"))
+	if err != nil {
+		t.Fatalf("TODO.md should exist: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "# TODO") {
+		t.Error("expected '# TODO' header even for empty list")
+	}
+}
+
+func TestTodoWrite_SyncTodoFromTasks_NilSessionID(t *testing.T) {
+	t.Parallel()
+	sessionsDir := t.TempDir()
+	tw := NewTodoWrite(sessionsDir, "")
+
+	err := tw.SyncTodoFromTasks([]types.Task{{ID: 1, Description: "test"}})
+	if err == nil {
+		t.Fatal("expected error for empty session ID")
+	}
+}
+
+func TestTodoWrite_SyncTodoFromTasks_CallsOnUpdate(t *testing.T) {
+	t.Parallel()
+	sessionsDir := t.TempDir()
+	tw := NewTodoWrite(sessionsDir, "callback-test")
+
+	var callbackItems []TodoItem
+	tw.SetOnUpdate(func(items []TodoItem) {
+		callbackItems = items
+	})
+
+	tasks := []types.Task{
+		{ID: 1, Description: "Task A", Status: types.StatusDone},
+		{ID: 2, Description: "Task B", Status: types.StatusPending},
+	}
+
+	err := tw.SyncTodoFromTasks(tasks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(callbackItems) != 2 {
+		t.Fatalf("expected 2 callback items, got %d", len(callbackItems))
+	}
+	if callbackItems[0].Content != "[Task 1] Task A" {
+		t.Errorf("expected '[Task 1] Task A', got %q", callbackItems[0].Content)
+	}
+	if callbackItems[0].Status != "completed" {
+		t.Errorf("expected status 'completed', got %q", callbackItems[0].Status)
+	}
+	if callbackItems[1].Status != "pending" {
+		t.Errorf("expected status 'pending', got %q", callbackItems[1].Status)
+	}
+}

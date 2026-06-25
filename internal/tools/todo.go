@@ -216,6 +216,98 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}, nil
 }
 
+// SyncTodoFromTasks generates TODO.md from a task runner's current state.
+// This bridges the gap between the task runner (which tracks execution state)
+// and the TODO.md file (which provides user-visible progress tracking).
+// It is called automatically after each execution group and at phase boundaries.
+func (t *TodoWrite) SyncTodoFromTasks(tasks []types.Task) error {
+	start := time.Now()
+
+	items := make([]TodoItem, len(tasks))
+	for i, task := range tasks {
+		status := taskStatusToTodoStatus(task.Status)
+		priority := taskActionToPriority(task.Action)
+		items[i] = TodoItem{
+			Content:  fmt.Sprintf("[Task %d] %s", task.ID, task.Description),
+			Status:   status,
+			Priority: priority,
+		}
+	}
+
+	// Build markdown table
+	var b strings.Builder
+	b.WriteString("# TODO\n\n")
+	b.WriteString("| # | Status | Priority | Content |\n")
+	b.WriteString("|---|--------|----------|---------|\n")
+
+	for i, item := range items {
+		icon := statusIcon(item.Status)
+		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, icon, item.Priority, item.Content)
+	}
+
+	// Write to session directory
+	sid := t.getSessionID()
+	if !sessionIDRe.MatchString(sid) {
+		return fmt.Errorf("invalid session ID: must be alphanumeric")
+	}
+	sessionDir := filepath.Join(t.sessionsDir, sid)
+	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
+		return fmt.Errorf("cannot create session directory: %w", err)
+	}
+
+	todoPath := filepath.Join(sessionDir, "TODO.md")
+	content := []byte(b.String())
+
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return fmt.Errorf("cannot generate temp name: %w", err)
+	}
+	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
+	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
+		return fmt.Errorf("cannot write temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, todoPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("cannot write TODO.md: %w", err)
+	}
+
+	// Notify sidebar
+	if t.onUpdate != nil {
+		t.onUpdate(items)
+	}
+
+	_ = time.Since(start).Milliseconds() // timing for debugging if needed
+	return nil
+}
+
+// taskStatusToTodoStatus maps a task runner status to a TODO status string.
+func taskStatusToTodoStatus(s types.TaskStatus) string {
+	switch s {
+	case types.StatusDone:
+		return "completed"
+	case types.StatusRunning:
+		return "in_progress"
+	case types.StatusFailed, types.StatusUnrecoverable:
+		return "cancelled"
+	case types.StatusSkipped:
+		return "cancelled"
+	default:
+		return "pending"
+	}
+}
+
+// taskActionToPriority maps a task action to a TODO priority string.
+func taskActionToPriority(action string) string {
+	switch strings.ToLower(action) {
+	case "delete", "modify":
+		return "high"
+	case "create", "add":
+		return "medium"
+	default:
+		return "medium"
+	}
+}
+
 func statusIcon(status string) string {
 	switch status {
 	case "completed":

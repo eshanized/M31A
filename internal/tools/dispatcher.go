@@ -331,6 +331,15 @@ func (d *Dispatcher) SetTodoWriteCallback(fn func(items []TodoItem)) {
 	}
 }
 
+// SyncTodoFromTasks updates TODO.md from the task runner's current state.
+// Called automatically after each execution group to keep the TODO in sync.
+func (d *Dispatcher) SyncTodoFromTasks(tasks []types.Task) error {
+	if d.todoWrite == nil {
+		return nil
+	}
+	return d.todoWrite.SyncTodoFromTasks(tasks)
+}
+
 // SetOutputStore configures the output store for bounding tool output.
 func (d *Dispatcher) SetOutputStore(store *OutputStore) {
 	d.mu.Lock()
