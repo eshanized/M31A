@@ -94,7 +94,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 	return r, nil
 }
 
-// Engine orchestrates the six-phase workflow.
+// Engine orchestrates the seven active workflow phases (Initialize, Discuss, Plan, Execute, Verify, Runtime, Ship).
 type Engine struct {
 	sessionID        string
 	workDir          string

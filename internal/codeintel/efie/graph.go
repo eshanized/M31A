@@ -1,5 +1,7 @@
 package efie
 
+import "time"
+
 // ExternalNode is the sentinel path for unresolved/external imports.
 const ExternalNode = "__external__"
 
@@ -20,6 +22,9 @@ type WeightedNode struct {
 	// Semantic fingerprint
 	SymbolBloom *BloomFilter
 	ImportSet   map[string]bool
+
+	// Modification time for incremental mtime-based indexing
+	Mtime time.Time
 }
 
 // WeightedImportGraph is a directed dependency graph with precomputed metrics.

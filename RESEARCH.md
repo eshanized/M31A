@@ -126,7 +126,7 @@ graph TD
 cmdRegistry := tui.DefaultCommands()
 ```
 
-**What it does:** Builds the slash command registry containing all 47 commands. Each command is registered with its name, description, category, and handler function. The registry is used both for the TUI's command processing and for the `--help` flag's usage display.
+**What it does:** Builds the slash command registry containing all 65 commands. Each command is registered with its name, description, category, and handler function. The registry is used both for the TUI's command processing and for the `--help` flag's usage display.
 
 **Why it's first:** The command registry is needed for the `--help` flag's `printUsage()` function, which must be available before any other initialization. It has no dependencies on other components.
 
@@ -246,12 +246,15 @@ if cfg.Provider.OpenRouter.APIKey != "" {
 if cfg.Provider.Zen.APIKey != "" {
     tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey, Version)
 }
+if cfg.Provider.Nvidia.APIKey != "" {
+    tui.RegisterProvider(registry, cfg, "nvidia", cfg.Provider.Nvidia.APIKey, Version)
+}
 if cfg.Provider.Default != "" {
     registry.SetActive(cfg.Provider.Default)
 }
 ```
 
-**What it does:** Creates a thread-safe provider registry and registers OpenRouter and Zen providers if their API keys are configured. Each provider is initialized with:
+**What it does:** Creates a thread-safe provider registry and registers OpenRouter, Zen, and NVIDIA NIM providers if their API keys are configured. Each provider is initialized with:
 - API key (from the resolution chain).
 - Custom base URL (if configured).
 - HTTP headers (OpenRouter's `HTTP-Referer` and `X-Title`).
@@ -948,7 +951,7 @@ class CostTracker {
 
 ### 3.3 Prompt System
 
-M31 Autonomous's prompt system is built on eleven markdown templates embedded into the binary at compile time via Go's `embed.FS`. This approach ensures prompts are always available (no filesystem dependency), versioned with the code, and never accidentally modified by users.
+M31 Autonomous's prompt system is built on eighteen markdown templates embedded into the binary at compile time via Go's `embed.FS`. This approach ensures prompts are always available (no filesystem dependency), versioned with the code, and never accidentally modified by users.
 
 ---
 
@@ -967,6 +970,13 @@ M31 Autonomous's prompt system is built on eleven markdown templates embedded in
 | `context-awareness.md` | Plan, Execute | Context window management awareness |
 | `code-quality.md` | Plan, Execute, Heal | Code quality guidelines and standards |
 | `code-intelligence.md` | Plan, Execute, Heal | Codebase intelligence integration instructions |
+| `research.md` | Research phases | Research workflow guidance and methodology |
+| `plan-check.md` | Plan | Plan validation criteria and checklist |
+| `plan-revise.md` | Plan | Plan revision and refinement instructions |
+| `plan-outline.md` | Plan | High-level plan outline generation |
+| `discuss-followup.md` | Discuss | Follow-up question generation after initial Q&A |
+| `intent-classify.md` | Initialize | User intent classification and routing |
+| `website-build.md` | Execute | Website scaffolding and build instructions |
 
 ---
 
@@ -2138,7 +2148,7 @@ interface LLMProvider {
 }
 ```
 
-Two providers ship out of the box: OpenRouter (primary) and Zen (secondary). Both implement the same interface, making them interchangeable.
+Three providers ship out of the box: OpenRouter (primary), Zen (secondary), and NVIDIA NIM (tertiary). All three implement the same interface, making them interchangeable. The NVIDIA provider includes additional handling for multimodal models (which require image/video/audio input) and NVIDIA-specific body parameters.
 
 ### 4.2 SSE Streaming Architecture
 
@@ -3560,7 +3570,7 @@ The TUI's `drainEmitterCmd()` function reads from this channel in a loop, proces
 
 ### 7.5 The Command Palette
 
-Activated via `ctrl+p`, the command palette (`internal/tui/cmdpalette.go`) provides fuzzy search across all 47 commands organized into 6 categories: Core, AI, Config, Session, Git, and Workflow.
+Activated via `ctrl+p`, the command palette (`internal/tui/cmdpalette.go`) provides fuzzy search across all 65 commands organized into 6 categories: Core, AI, Config, Session, Git, and Workflow.
 
 **Fuzzy scoring** awards bonuses for consecutive character matches (+1) and word boundary matches (+2). The palette renders at 2/3 terminal width (min 40, max 72 columns), bottom-anchored above the status bar with a rounded border in the brand color. Matched characters are highlighted in bold brand color. The palette also maps 18 keyboard shortcuts for quick access (e.g., `?` for help, `ctrl+m` for model, `ctrl+x d` for dashboard).
 

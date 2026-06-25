@@ -101,6 +101,52 @@ func (t *Trie) PrefixSearch(prefix string) []string {
 	return result
 }
 
+// FuzzySearch finds all symbols within maxEditDistance edits of query using Levenshtein distance. O(K x E) time.
+func (t *Trie) FuzzySearch(query string, maxEditDistance int) []string {
+	var result []string
+	seen := make(map[string]bool)
+	// Generate all prefixes of the query and search with each
+	for i := 1; i <= len(query); i++ {
+		prefix := query[:i]
+		matches := t.fuzzyCollect(t.root, prefix, maxEditDistance, maxEditDistance)
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				result = append(result, m)
+			}
+		}
+	}
+	return result
+}
+
+func (t *Trie) fuzzyCollect(node *TrieNode, remaining string, editsLeft int, maxEdits int) []string {
+	var result []string
+	if len(remaining) == 0 {
+		if node.isEnd {
+			result = append(result, node.symbols...)
+		}
+		for _, child := range node.children {
+			if child != nil && child.isEnd {
+				result = append(result, child.symbols...)
+			}
+		}
+		return result
+	}
+
+	char := remaining[0]
+	for c, child := range node.children {
+		if child == nil {
+			continue
+		}
+		if byte(c) == char {
+			result = append(result, t.fuzzyCollect(child, remaining[1:], editsLeft, maxEdits)...)
+		} else if editsLeft > 0 {
+			result = append(result, t.fuzzyCollect(child, remaining, editsLeft-1, maxEdits)...)
+		}
+	}
+	return result
+}
+
 func collectSymbols(node *TrieNode, result *[]string) {
 	if node == nil {
 		return
