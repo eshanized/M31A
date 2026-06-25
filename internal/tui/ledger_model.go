@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/ledger"
 )
@@ -102,10 +103,12 @@ func (lm *LedgerModel) View() string {
 
 	body := ""
 	if !lm.loaded {
-		body = lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("Loading...")
+		body = components.LoadingIndicator{Label: "Loading ledger", Theme: t}.Render()
 	} else if len(lm.entries) == 0 {
-		body = lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("No ledger entries yet. Complete a workflow to record your first session.")
+		body = components.InlineEmptyState{
+			Message: "No ledger entries yet. Complete a workflow to record your first session.",
+			Theme:   t,
+		}.Render()
 	} else {
 		body = lm.viewport.View()
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eshanized/M31A/internal/fileutil"
 )
 
 // EFIEIndex is the main EFIE index containing the graph and multi-resolution index.
@@ -564,7 +566,7 @@ func (e *EFIEIndex) ProjectSummary(maxBytes int) string {
 
 	pkgFiles := make(map[string]int)
 	for _, fi := range e.files {
-		dir := dirOf(fi.Path)
+		dir := fileutil.DirOf(fi.Path)
 		pkgFiles[dir]++
 	}
 	if len(pkgFiles) > 0 {

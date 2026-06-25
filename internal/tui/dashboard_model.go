@@ -13,17 +13,18 @@ import (
 
 // DashboardModel shows the workflow pipeline overview.
 type DashboardModel struct {
-	theme     theme.Theme
-	phases    []string
-	current   string
-	completed map[string]bool
-	goal      string
-	modelName string
-	provider  string
-	cost      float64
-	activity  []components.TimelineEntry
-	width     int
-	height    int
+	theme       theme.Theme
+	phases      []string
+	current     string
+	completed   map[string]bool
+	goal        string
+	modelName   string
+	provider    string
+	cost        float64
+	totalTokens int
+	activity    []components.TimelineEntry
+	width       int
+	height      int
 }
 
 // NewDashboardModel creates a DashboardModel.
@@ -62,6 +63,12 @@ func (dm *DashboardModel) SetWorkflowState(phase types.WorkflowPhase, goal, mode
 			dm.completed[p] = true
 		}
 	}
+}
+
+// SetTokenInfo updates token count and cost for metric display.
+func (dm *DashboardModel) SetTokenInfo(tokens int, cost float64) {
+	dm.totalTokens = tokens
+	dm.cost = cost
 }
 
 // SetTheme updates the theme.
@@ -124,21 +131,67 @@ func (dm *DashboardModel) View() string {
 		Width:     w,
 	}.View()
 
-	var info []string
-	if dm.goal != "" {
-		info = append(info, fmt.Sprintf("  Goal:     %s", dm.goal))
-	}
-	if dm.modelName != "" {
-		info = append(info, fmt.Sprintf("  Model:    %s", dm.modelName))
-	}
-	if dm.provider != "" {
-		info = append(info, fmt.Sprintf("  Provider: %s", dm.provider))
-	}
-	if dm.current != "" {
-		info = append(info, fmt.Sprintf("  Phase:    %s", dm.current))
+	// Metric cards row
+	var metrics []components.MetricCard
+	if dm.totalTokens > 0 {
+		metrics = append(metrics, components.MetricCard{
+			Value: components.FormatMetric(dm.totalTokens),
+			Label: "Tokens",
+			Theme: t,
+		})
 	}
 	if dm.cost > 0 {
-		info = append(info, fmt.Sprintf("  Cost:     $%.4f", dm.cost))
+		metrics = append(metrics, components.MetricCard{
+			Value: components.FormatCost(dm.cost),
+			Label: "Cost",
+			Theme: t,
+		})
+	}
+	// Calculate progress percentage
+	completedCount := 0
+	for _, done := range dm.completed {
+		if done {
+			completedCount++
+		}
+	}
+	if dm.current != "" {
+		progressPct := fmt.Sprintf("%d%%", int(float64(completedCount)/float64(len(dm.phases))*100))
+		metrics = append(metrics, components.MetricCard{
+			Value: progressPct,
+			Label: "Complete",
+			Theme: t,
+		})
+	}
+	if dm.modelName != "" {
+		metrics = append(metrics, components.MetricCard{
+			Value: dm.modelName,
+			Label: "Model",
+			Theme: t,
+		})
+	}
+
+	metricRow := ""
+	if len(metrics) > 0 {
+		metricRow = components.MetricRow(metrics, w-4)
+	}
+
+	// Info section using KeyValueGrid style
+	var info []string
+	if dm.goal != "" {
+		goalDisplay := dm.goal
+		if len(goalDisplay) > w-16 {
+			goalDisplay = goalDisplay[:w-19] + "..."
+		}
+		info = append(info, lipgloss.NewStyle().Foreground(t.TextSecondary).Render("  Goal:     ")+
+			lipgloss.NewStyle().Foreground(t.TextPrimary).Render(goalDisplay))
+	}
+	if dm.provider != "" {
+		info = append(info, lipgloss.NewStyle().Foreground(t.TextSecondary).Render("  Provider: ")+
+			lipgloss.NewStyle().Foreground(t.Brand).Render(dm.provider))
+	}
+	if dm.current != "" {
+		info = append(info, lipgloss.NewStyle().Foreground(t.TextSecondary).Render("  Phase:    ")+
+			lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(dm.current))
 	}
 
 	timeline := ""
@@ -147,7 +200,7 @@ func (dm *DashboardModel) View() string {
 			Entries: dm.activity,
 			Theme:   t,
 			Width:   w,
-			Height:  dm.height - 12,
+			Height:  dm.height - 16,
 		}.View()
 	}
 
@@ -155,6 +208,9 @@ func (dm *DashboardModel) View() string {
 		Render("[enter] Go to current phase   [esc] Back")
 
 	parts := []string{"", phaseBar, ""}
+	if metricRow != "" {
+		parts = append(parts, "  "+metricRow, "")
+	}
 	if len(info) > 0 {
 		parts = append(parts, strings.Join(info, "\n"), "")
 	}

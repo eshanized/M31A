@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ func TestPlanValidator_RejectsDuplicateIDs(t *testing.T) {
 	errs := validateTasks(tasks)
 	found := false
 	for _, e := range errs {
-		if contains(e, "duplicate") || contains(e, "Duplicate") {
+		if strings.Contains(e, "duplicate") || strings.Contains(e, "Duplicate") {
 			found = true
 			break
 		}
@@ -91,7 +92,7 @@ func TestPlanValidator_RejectsUnknownDep(t *testing.T) {
 	errs := validateTasks(tasks)
 	found := false
 	for _, e := range errs {
-		if contains(e, "non-existent dependency 99") {
+		if strings.Contains(e, "non-existent dependency 99") {
 			found = true
 			break
 		}
@@ -108,7 +109,7 @@ func TestPlanValidator_RejectsSelfRef(t *testing.T) {
 	errs := validateTasks(tasks)
 	found := false
 	for _, e := range errs {
-		if contains(e, "self-reference") {
+		if strings.Contains(e, "self-reference") {
 			found = true
 			break
 		}
@@ -226,10 +227,10 @@ func TestLedger_AppendIsAtomic(t *testing.T) {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 	content := string(data)
-	if !contains(content, "sess0001") {
+	if !strings.Contains(content, "sess0001") {
 		t.Error("ledger file missing session entry")
 	}
-	if !contains(content, "# Cross-Session Learning Ledger") {
+	if !strings.Contains(content, "# Cross-Session Learning Ledger") {
 		t.Error("ledger file missing header")
 	}
 
@@ -254,7 +255,7 @@ func TestLedger_AppendIsAtomic(t *testing.T) {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 	content = string(data)
-	if !contains(content, "sess0001") || !contains(content, "sess0002") {
+	if !strings.Contains(content, "sess0001") || !strings.Contains(content, "sess0002") {
 		t.Error("ledger file missing entries after second append")
 	}
 }
@@ -352,18 +353,4 @@ func TestSession_Load_AcceptsEmptyPhase(t *testing.T) {
 	if sess.WorkflowPhase != types.PhaseIdle {
 		t.Errorf("expected PhaseIdle for empty phase, got %s", sess.WorkflowPhase)
 	}
-}
-
-// contains is a simple substring check for test assertions.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

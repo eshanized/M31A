@@ -6,6 +6,20 @@ import (
 	"path/filepath"
 )
 
+// DirOf returns the directory component of path, similar to filepath.Dir
+// but optimized for simple path strings without calling filepath.Dir.
+func DirOf(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			if i == 0 {
+				return "."
+			}
+			return path[:i]
+		}
+	}
+	return "."
+}
+
 // AtomicWrite writes data to path atomically using a temp file in the same
 // directory followed by a rename. This ensures that a crash mid-write leaves
 // the existing file intact. If the target file already exists, its permissions

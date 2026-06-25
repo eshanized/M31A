@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/codeintel/efie"
+	"github.com/eshanized/M31A/internal/fileutil"
 )
 
 // useEFIE reports whether EFIE should be used as the backend.
@@ -331,7 +332,7 @@ func (idx *Indexer) ProjectSummary(maxBytes int) string {
 
 	pkgFiles := make(map[string]int)
 	for _, f := range idx.files {
-		dir := dirOf(f.Path)
+		dir := fileutil.DirOf(f.Path)
 		pkgFiles[dir]++
 	}
 	if len(pkgFiles) > 0 {
@@ -367,18 +368,6 @@ func (idx *Indexer) ProjectSummary(maxBytes int) string {
 		result = result[:maxBytes] + "\n... (truncated)"
 	}
 	return result
-}
-
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			if i == 0 {
-				return "."
-			}
-			return path[:i]
-		}
-	}
-	return "."
 }
 
 func isExportedSymbol(name string) bool {

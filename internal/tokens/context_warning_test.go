@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestContextWarning(t *testing.T) {
 			t.Error("expected non-empty banner")
 		}
 		// Check that banner contains remaining tokens
-		if !contains(banner, "20000 tokens remaining") {
+		if !strings.Contains(banner, "20000 tokens remaining") {
 			t.Errorf("expected banner to contain '20000 tokens remaining', got '%s'", banner)
 		}
 	})
@@ -34,7 +35,7 @@ func TestContextWarning(t *testing.T) {
 			t.Error("expected non-empty banner")
 		}
 		// Check that banner contains percentage
-		if !contains(banner, "80%") {
+		if !strings.Contains(banner, "80%") {
 			t.Errorf("expected banner to contain '80%%', got '%s'", banner)
 		}
 	})
@@ -77,21 +78,8 @@ func TestContextWarning(t *testing.T) {
 			t.Error("expected non-empty banner")
 		}
 		// Check that banner contains compress suggestion
-		if !contains(banner, "/compress") {
+		if !strings.Contains(banner, "/compress") {
 			t.Errorf("expected banner to contain '/compress', got '%s'", banner)
 		}
 	})
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

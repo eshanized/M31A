@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -129,15 +130,13 @@ func (bm *BisectModel) View() string {
 		w = 80
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Git Bisect")
+	title := components.ScreenTitle{Text: "Git Bisect", Theme: t}.Render()
 
 	var lines []string
 	lines = append(lines, "", title, "")
 
 	if bm.errMsg != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(t.Error).PaddingLeft(2).
-			Render("! "+bm.errMsg))
+		lines = append(lines, components.ErrorBanner{Message: bm.errMsg, Theme: t}.Render())
 	}
 
 	if len(bm.commits) == 0 {
@@ -187,16 +186,15 @@ func (bm *BisectModel) View() string {
 			hashStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Render(hash)
 			msgStyled := lipgloss.NewStyle().Foreground(t.Text).Render(
 				TruncateWithEllipsis(c.Message, w-30))
-			prefix := "    "
-			if selected {
-				prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("  ▶ ")
-			}
+			prefix := components.CursorIndicator{Selected: selected, Theme: t}.Render()
 			lines = append(lines, fmt.Sprintf("%s%s  %s  %s", prefix, iconStyled, hashStyled, msgStyled))
 		}
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("[g] Good   [b] Bad   [s] Skip   [r] Reset   [esc] Back")
+	footer := components.HintBar{
+		Hints: []string{"g Good", "b Bad", "s Skip", "r Reset", "esc Back"},
+		Theme: t,
+	}.Render()
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")

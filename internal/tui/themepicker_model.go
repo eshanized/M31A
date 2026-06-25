@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -103,8 +104,7 @@ func (tp *ThemePickerModel) View() string {
 	}
 
 	var lines []string
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Theme Presets")
+	title := components.ScreenTitle{Text: "Theme Presets", Theme: t}.Render()
 	lines = append(lines, "", title, "")
 
 	for i, preset := range tp.themes {
@@ -119,10 +119,7 @@ func (tp *ThemePickerModel) View() string {
 			nameStyle = nameStyle.Foreground(t.Brand).Bold(true)
 		}
 
-		prefix := "    "
-		if selected {
-			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("  ▶ ")
-		}
+		prefix := components.CursorIndicator{Selected: selected, Theme: t}.Render()
 
 		line := prefix + nameStyle.Render(preset.Name) + swatches
 		lines = append(lines, line)

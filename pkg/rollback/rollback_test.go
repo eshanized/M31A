@@ -465,10 +465,10 @@ func TestRollbackResult_MessageFormat(t *testing.T) {
 	}
 
 	// Check message contains expected format patterns
-	if !contains(result.Message, "Rolled back from") {
+	if !strings.Contains(result.Message, "Rolled back from") {
 		t.Errorf("Expected message to contain 'Rolled back from', got: %s", result.Message)
 	}
-	if !contains(result.Message, "commits undone") {
+	if !strings.Contains(result.Message, "commits undone") {
 		t.Errorf("Expected message to contain 'commits undone', got: %s", result.Message)
 	}
 }
@@ -1119,12 +1119,6 @@ func TestErrorPaths_DestroyedRepo(t *testing.T) {
 	})
 }
 
-// contains reports whether substr is within s.
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-// ---------------------------------------------------------------------------
 // M-28: SoftReset callback
 // ---------------------------------------------------------------------------
 

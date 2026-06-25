@@ -2,7 +2,10 @@ package efie
 
 import (
 	"container/heap"
+	"strings"
 	"testing"
+
+	"github.com/eshanized/M31A/internal/fileutil"
 )
 
 // --- query.go tests ---
@@ -163,9 +166,9 @@ func TestDirOf(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := dirOf(tt.path)
+		got := fileutil.DirOf(tt.path)
 		if got != tt.want {
-			t.Errorf("dirOf(%q) = %q, want %q", tt.path, got, tt.want)
+			t.Errorf("DirOf(%q) = %q, want %q", tt.path, got, tt.want)
 		}
 	}
 }
@@ -206,9 +209,9 @@ func TestContains(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := contains(tt.s, tt.substr)
+		got := strings.Contains(tt.s, tt.substr)
 		if got != tt.want {
-			t.Errorf("contains(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
+			t.Errorf("Contains(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
 		}
 	}
 }

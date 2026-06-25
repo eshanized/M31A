@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -247,6 +248,27 @@ func StaleFallback(cache *ModelCache) ([]types.ModelInfo, error) {
 		return CachedModels(cache), nil
 	}
 	return nil, m31errors.ErrProviderUnreachable
+}
+
+// IsRetryable reports whether an error is a transient server error that should be retried.
+// It checks for HTTP status-based errors first, then falls back to string matching
+// for network-level errors (connection resets, unexpected EOF, etc.).
+func IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *HTTPStatusError
+	if errors.As(err, &httpErr) {
+		return httpErr.IsRetryable()
+	}
+	// Fallback: string matching for network-level errors that don't
+	// carry an HTTP status code (connection resets, unexpected EOF, etc.)
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "unexpected EOF") ||
+		strings.Contains(msg, "server error") ||
+		strings.Contains(msg, "gateway error") ||
+		strings.Contains(msg, "temporarily unavailable")
 }
 
 // stripHTMLTags removes HTML tags from a string using a single-pass scanner.

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -76,8 +77,7 @@ func (sd *SessionDetailModel) View() string {
 	s := sd.sess
 	var lines []string
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Session Detail")
+	title := components.ScreenTitle{Text: "Session Detail", Theme: t}.Render()
 	lines = append(lines, "", title, "")
 
 	info := []struct{ label, value string }{

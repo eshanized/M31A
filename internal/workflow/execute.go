@@ -33,11 +33,11 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	if len(tasks) == 0 && e.workflowMode != "" && e.workflowMode != m31types.ModeFull {
 		tasks = []m31types.Task{
 			{
-				ID:          1,
-				Description: goal,
-				Action:      "implement",
+				ID:           1,
+				Description:  goal,
+				Action:       "implement",
 				Dependencies: []int{},
-				Files:       []string{"main.go"},
+				Files:        []string{"main.go"},
 				AcceptanceCriteria: []string{
 					"code compiles with go build",
 					"all required files are created using FileWrite tool",

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/fileutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -367,53 +368,27 @@ func (l *Ledger) Truncate(maxEntries int) error {
 
 // rewriteFile writes all in-memory entries to the ledger file atomically.
 func (l *Ledger) rewriteFile() error {
-	tmpPath := l.path + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+	var sb strings.Builder
+	if _, err := fmt.Fprintln(&sb, "# Cross-Session Learning Ledger"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(&sb, ""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(&sb, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(&sb, "|---|---|---|---|---|---|---|---|---|---|"); err != nil {
+		return err
+	}
+	for _, entry := range l.entries {
+		if _, err := fmt.Fprintln(&sb, formatEntry(entry)); err != nil {
+			return err
+		}
 	}
 
-	writeLines := func() error {
-		w := bufio.NewWriter(f)
-		if _, err := fmt.Fprintln(w, "# Cross-Session Learning Ledger"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w, ""); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w, "| Session ID | Timestamp | Model | Project Type | Tasks | Failed | Skipped | Cost | Duration | Commits |"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|"); err != nil {
-			return err
-		}
-		for _, entry := range l.entries {
-			if _, err := fmt.Fprintln(w, formatEntry(entry)); err != nil {
-				return err
-			}
-		}
-		return w.Flush()
-	}
-
-	if err := writeLines(); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmpPath)
+	if err := fileutil.AtomicWrite(l.path, []byte(sb.String())); err != nil {
 		return fmt.Errorf("write ledger: %w", err)
-	}
-
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("sync ledger: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close ledger: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, l.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename ledger: %w", err)
 	}
 
 	return nil

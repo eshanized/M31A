@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -81,11 +81,12 @@ func (td *ToolDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (td *ToolDetailModel) View() string {
 	t := td.theme
 
-	header := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render(td.title)
+	header := components.ScreenTitle{Text: td.title, Theme: t}.Render()
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("[g/G] Top/Bottom   [esc] Back")
+	footer := components.HintBar{
+		Hints: []string{"g/G Top/Bottom", "esc Back"},
+		Theme: t,
+	}.Render()
 
 	return strings.Join([]string{"", header, "", td.viewport.View(), "", footer}, "\n")
 }

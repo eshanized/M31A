@@ -739,8 +739,8 @@ func (s *SidebarModel) View() string {
 		Render(" " + version)
 	lines = append(lines, title+versionBadge)
 
-	// ── Thin separator ────────────────────────────────────────────────────────
-	lines = append(lines, lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", contentW)))
+	// ── Section divider ──────────────────────────────────────────────────────
+	lines = append(lines, components.SectionDivider{Width: contentW, Theme: t}.Render())
 
 	// ── Git branch + status ───────────────────────────────────────────────────
 	if s.branch != "" {
@@ -785,15 +785,9 @@ func (s *SidebarModel) View() string {
 
 	// ── Token usage ───────────────────────────────────────────────────────────
 	if s.totalTokens > 0 {
-		lines = append(lines, "")
-		usageLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("USAGE")
-		lines = append(lines, usageLabel)
+		lines = append(lines, components.SectionDivider{Title: "USAGE", Width: contentW, Theme: t}.Render())
 
-		// Context pressure gauge (enhanced with animation hint)
+		// Context pressure gauge with color-coded urgency
 		if s.contextLen > 0 {
 			pct := float64(s.totalTokens) / float64(s.contextLen)
 			if pct > 1 {
@@ -801,41 +795,62 @@ func (s *SidebarModel) View() string {
 			}
 			const barSegments = 8
 			filled := int(pct * barSegments)
-			var ctxColor lipgloss.Color
 			var pressureIcon string
 			switch {
 			case pct >= 0.9:
-				ctxColor = t.Error
 				pressureIcon = " !!"
 			case pct >= 0.7:
-				ctxColor = t.Warning
 				pressureIcon = " !"
 			default:
-				ctxColor = t.TextMuted
 				pressureIcon = ""
 			}
-			bar := "["
-			bar += strings.Repeat("█", filled)
-			bar += strings.Repeat("░", barSegments-filled)
-			bar += "]"
+			// Build color-coded bar segments
+			var bar string
+			for i := 0; i < barSegments; i++ {
+				var segColor lipgloss.Color
+				switch {
+				case i >= 7:
+					segColor = t.Error
+				case i >= 5:
+					segColor = t.Warning
+				case i >= 3:
+					segColor = t.Brand
+				default:
+					segColor = t.Success
+				}
+				if i < filled {
+					bar += lipgloss.NewStyle().Foreground(segColor).Render("█")
+				} else {
+					bar += lipgloss.NewStyle().Foreground(t.Border).Render("░")
+				}
+			}
 			pctStr := fmt.Sprintf("%d%%", int(pct*100))
 			meterLine := lipgloss.NewStyle().
-				Foreground(ctxColor).
 				PaddingLeft(1).
-				Render(bar + " " + pctStr + pressureIcon)
+				Render("[" + bar + "] " + pctStr + pressureIcon)
 			lines = append(lines, meterLine)
 		}
 
-		// Token count + burn rate
+		// Token count + burn rate with sparkline
 		tokStr := formatTokenCountSidebar(s.totalTokens)
-		if s.tokenBurnRate > 0 {
-			tokStr += fmt.Sprintf(" (%.0f/s)", s.tokenBurnRate)
-		}
 		tokLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
 			PaddingLeft(1).
 			Render(tokStr)
 		lines = append(lines, tokLine)
+
+		// Burn rate sparkline
+		if s.tokenBurnRate > 0 {
+			burnStr := fmt.Sprintf("%.0f tok/s", s.tokenBurnRate)
+			if s.tokenBurnCostRate > 0 {
+				burnStr += fmt.Sprintf(" · $%.3f/s", s.tokenBurnCostRate)
+			}
+			burnLine := lipgloss.NewStyle().
+				Foreground(t.Brand).
+				PaddingLeft(1).
+				Render(burnStr)
+			lines = append(lines, burnLine)
+		}
 
 		// Cost accumulator with trend
 		if s.showCost && s.cost > 0 {
@@ -878,13 +893,7 @@ func (s *SidebarModel) View() string {
 
 	// ── Phase Pipeline (when in todo mode) ───────────────────────────────────
 	if s.mode == SidebarModeTodo && s.currentPhase != "" {
-		lines = append(lines, "")
-		phaseLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("PHASE")
-		lines = append(lines, phaseLabel)
+		lines = append(lines, components.SectionDivider{Title: "PHASE", Width: contentW, Theme: t}.Render())
 
 		phases := s.GetPhasePipeline()
 		var phaseParts []string
@@ -917,26 +926,32 @@ func (s *SidebarModel) View() string {
 
 	// ── Tool Call Timeline (when in todo mode) ────────────────────────────────
 	if s.mode == SidebarModeTodo && len(s.toolCalls) > 0 {
-		lines = append(lines, "")
-		toolLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("TOOLS")
-		lines = append(lines, toolLabel)
+		lines = append(lines, components.SectionDivider{Title: "TOOLS", Width: contentW, Theme: t}.Render())
 
 		for _, tc := range s.toolCalls {
 			var icon string
 			var durationStr string
+			var durationColor lipgloss.Color
 			if tc.Active {
 				icon = lipgloss.NewStyle().Foreground(t.Brand).Render("●")
 				durationStr = "..."
+				durationColor = t.Brand
 			} else if tc.Success {
 				icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
 				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
+				// Color-code by duration: green < 1s, yellow 1-5s, red > 5s
+				switch {
+				case tc.Duration < time.Second:
+					durationColor = t.Success
+				case tc.Duration < 5*time.Second:
+					durationColor = t.Warning
+				default:
+					durationColor = t.Error
+				}
 			} else {
 				icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
 				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
+				durationColor = t.Error
 			}
 			descDisplay := tc.Description
 			if descDisplay == "" {
@@ -952,20 +967,15 @@ func (s *SidebarModel) View() string {
 			toolLine := lipgloss.NewStyle().
 				Foreground(t.Text).
 				PaddingLeft(1).
-				Render(fmt.Sprintf("%s %-16s %s", icon, descDisplay, durationStr))
+				Render(fmt.Sprintf("%s %-16s ", icon, descDisplay)) +
+				lipgloss.NewStyle().Foreground(durationColor).Render(durationStr)
 			lines = append(lines, toolLine)
 		}
 	}
 
 	// ── Execution Speed Metrics (when in todo mode) ──────────────────────────
 	if s.mode == SidebarModeTodo && s.tasksPerMinute > 0 {
-		lines = append(lines, "")
-		speedLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("SPEED")
-		lines = append(lines, speedLabel)
+		lines = append(lines, components.SectionDivider{Title: "SPEED", Width: contentW, Theme: t}.Render())
 
 		speedLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
@@ -1006,15 +1016,9 @@ func (s *SidebarModel) View() string {
 	}
 
 	// ── File tree or Todo list ────────────────────────────────────────────────
-	lines = append(lines, "")
 	if s.mode == SidebarModeTodo {
 		// Progress section
-		progressLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("PROGRESS")
-		lines = append(lines, progressLabel)
+		lines = append(lines, components.SectionDivider{Title: "PROGRESS", Width: contentW, Theme: t}.Render())
 
 		// Progress bar
 		pTotal, pDone, pFailed, _ := s.computeProgress()
@@ -1079,13 +1083,7 @@ func (s *SidebarModel) View() string {
 		}
 
 		// Todo items
-		lines = append(lines, "")
-		todoLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("TODO")
-		lines = append(lines, todoLabel)
+		lines = append(lines, components.SectionDivider{Title: "TODO", Width: contentW, Theme: t}.Render())
 
 		if len(s.todoItems) == 0 {
 			emptyTodo := lipgloss.NewStyle().
@@ -1132,11 +1130,7 @@ func (s *SidebarModel) View() string {
 		}
 	} else {
 		// File tree (existing behavior)
-		filesLabel := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Bold(true).
-			PaddingLeft(1).
-			Render("FILES")
+		filesLabel := components.SectionDivider{Title: "FILES", Width: contentW, Theme: t}.Render()
 		if s.focused {
 			filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓")
 		}
@@ -1223,20 +1217,46 @@ func (s *SidebarModel) View() string {
 	}
 	panel := lipgloss.NewStyle().Render(strings.Join(paddedLines, "\n"))
 
-	// Build right border
+	// Calculate line count for borders
 	lineCount := len(lines)
-	borderColor := t.TextMuted
+
+	// Build left border accent when focused
+	var leftBorder string
 	if s.focused {
-		borderColor = t.Brand
+		var leftBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			leftBorderParts = append(leftBorderParts,
+				lipgloss.NewStyle().Foreground(t.Brand).Render("│"))
+		}
+		leftBorder = lipgloss.NewStyle().Render(strings.Join(leftBorderParts, "\n"))
 	}
-	var rightBorderParts []string
-	for i := 0; i < lineCount; i++ {
-		rightBorderParts = append(rightBorderParts,
-			lipgloss.NewStyle().Foreground(borderColor).Render("│"))
+
+	// Build right border — use gradient style when focused
+	var rightBorderStr string
+	if s.focused {
+		// Gradient border: brand color on top, accent color in middle, brand on bottom
+		gradientColors := []lipgloss.Color{t.Brand, t.Accent, t.Brand}
+		var rightBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			colorIdx := i % len(gradientColors)
+			rightBorderParts = append(rightBorderParts,
+				lipgloss.NewStyle().Foreground(gradientColors[colorIdx]).Render("│"))
+		}
+		rightBorderStr = strings.Join(rightBorderParts, "\n")
+	} else {
+		var rightBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			rightBorderParts = append(rightBorderParts,
+				lipgloss.NewStyle().Foreground(t.TextMuted).Render("│"))
+		}
+		rightBorderStr = strings.Join(rightBorderParts, "\n")
 	}
-	rightBorderStr := strings.Join(rightBorderParts, "\n")
 	rightBorder := lipgloss.NewStyle().Render(rightBorderStr)
 
+	// Join with left border (when focused), panel, and right border
+	if s.focused {
+		return lipgloss.JoinHorizontal(lipgloss.Top, leftBorder, panel, rightBorder)
+	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, panel, rightBorder)
 }
 

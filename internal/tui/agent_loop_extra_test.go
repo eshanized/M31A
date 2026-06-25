@@ -227,7 +227,7 @@ func TestBisectModel_View_WithCommits(t *testing.T) {
 	if !strings.Contains(view, "Git Bisect") {
 		t.Error("view should contain 'Git Bisect'")
 	}
-	if !strings.Contains(view, "[g] Good") {
+	if !strings.Contains(view, "[g Good]") {
 		t.Error("view should contain footer hints")
 	}
 }

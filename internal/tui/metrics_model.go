@@ -146,8 +146,7 @@ func (mm *MetricsModel) View() string {
 	}
 
 	if !mm.loaded {
-		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("Loading metrics...")
+		return components.LoadingIndicator{Label: "Loading metrics", Theme: t}.Render()
 	}
 
 	s := mm.stats

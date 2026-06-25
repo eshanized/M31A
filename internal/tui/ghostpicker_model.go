@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -129,8 +130,7 @@ func (gp *GhostPickerModel) clampScroll() {
 func (gp *GhostPickerModel) View() string {
 	t := gp.theme
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Ghost Write Files")
+	title := components.ScreenTitle{Text: "Ghost Write Files", Theme: t}.Render()
 
 	subtitle := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
 		Render("Select files to generate:")
@@ -163,7 +163,7 @@ func (gp *GhostPickerModel) View() string {
 
 			prefix := "    "
 			if selected {
-				prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("  ▶ ")
+				prefix = components.CursorIndicator{Selected: true, Theme: t}.Render()
 			}
 
 			pathStyle := lipgloss.NewStyle().Foreground(t.Text)

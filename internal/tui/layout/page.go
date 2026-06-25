@@ -171,8 +171,8 @@ func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 		return ""
 	}
 	pct := float64(used) / float64(total)
-	// Only show meter when usage is notable (>30%)
-	if pct < 0.30 {
+	// Show meter when usage is notable (>15%)
+	if pct < 0.15 {
 		return ""
 	}
 

@@ -16,70 +16,70 @@ import (
 
 func TestIsRetryable_Nil(t *testing.T) {
 	t.Parallel()
-	if isRetryable(nil) {
-		t.Error("isRetryable(nil) should be false")
+	if provider.IsRetryable(nil) {
+		t.Error("IsRetryable(nil) should be false")
 	}
 }
 
 func TestIsRetryable_500(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(&provider.HTTPStatusError{StatusCode: 500, Message: "Internal Server Error"}) {
+	if !provider.IsRetryable(&provider.HTTPStatusError{StatusCode: 500, Message: "Internal Server Error"}) {
 		t.Error("should retry on 500")
 	}
 }
 
 func TestIsRetryable_502(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(&provider.HTTPStatusError{StatusCode: 502, Message: "Bad Gateway"}) {
+	if !provider.IsRetryable(&provider.HTTPStatusError{StatusCode: 502, Message: "Bad Gateway"}) {
 		t.Error("should retry on 502")
 	}
 }
 
 func TestIsRetryable_503(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(&provider.HTTPStatusError{StatusCode: 503, Message: "Service Unavailable"}) {
+	if !provider.IsRetryable(&provider.HTTPStatusError{StatusCode: 503, Message: "Service Unavailable"}) {
 		t.Error("should retry on 503")
 	}
 }
 
 func TestIsRetryable_ConnectionReset(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("connection reset by peer")) {
+	if !provider.IsRetryable(errors.New("connection reset by peer")) {
 		t.Error("should retry on connection reset")
 	}
 }
 
 func TestIsRetryable_UnexpectedEOF(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("unexpected EOF")) {
+	if !provider.IsRetryable(errors.New("unexpected EOF")) {
 		t.Error("should retry on unexpected EOF")
 	}
 }
 
 func TestIsRetryable_ServerError(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("server error")) {
+	if !provider.IsRetryable(errors.New("server error")) {
 		t.Error("should retry on server error")
 	}
 }
 
 func TestIsRetryable_GatewayError(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("bad gateway error")) {
+	if !provider.IsRetryable(errors.New("bad gateway error")) {
 		t.Error("should retry on gateway error")
 	}
 }
 
 func TestIsRetryable_TemporarilyUnavailable(t *testing.T) {
 	t.Parallel()
-	if !isRetryable(errors.New("service temporarily unavailable")) {
+	if !provider.IsRetryable(errors.New("service temporarily unavailable")) {
 		t.Error("should retry on temporarily unavailable")
 	}
 }
 
 func TestIsRetryable_NotRetryable(t *testing.T) {
 	t.Parallel()
-	if isRetryable(errors.New("invalid API key")) {
+	if provider.IsRetryable(errors.New("invalid API key")) {
 		t.Error("should not retry on invalid API key")
 	}
 }
@@ -88,7 +88,7 @@ func TestIsRetryable_WrappedError(t *testing.T) {
 	t.Parallel()
 	inner := errors.New("connection reset by peer")
 	wrapped := fmt.Errorf("send request: %w", inner)
-	if !isRetryable(wrapped) {
+	if !provider.IsRetryable(wrapped) {
 		t.Error("should retry on wrapped connection reset")
 	}
 }

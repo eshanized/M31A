@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -74,9 +73,10 @@ func (nm *NotificationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model.
 func (nm *NotificationModel) View() string {
 	t := nm.theme
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Notification History")
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("[j/k] Navigate   [esc] Back")
+	title := components.ScreenTitle{Text: "Notification History", Theme: t}.Render()
+	footer := components.HintBar{
+		Hints: []string{"j/k Navigate", "esc Back"},
+		Theme: t,
+	}.Render()
 	return strings.Join([]string{"", title, "", nm.list.View(), "", footer}, "\n")
 }

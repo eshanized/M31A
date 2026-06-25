@@ -32,15 +32,25 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 // renderSingleToast renders one toast as a card with rounded border and colored accent.
 func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) string {
 	var borderColor lipgloss.Color
+	var icon string
+	var title string
 	switch toast.Type {
 	case "success":
 		borderColor = t.Success
+		icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+		title = "Success"
 	case "error":
 		borderColor = t.Error
+		icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
+		title = "Error"
 	case "warning":
 		borderColor = t.Warning
+		icon = lipgloss.NewStyle().Foreground(t.Warning).Render("⚠")
+		title = "Warning"
 	default:
 		borderColor = t.Brand
+		icon = lipgloss.NewStyle().Foreground(t.Brand).Render("ℹ")
+		title = "Info"
 	}
 
 	offset := 0
@@ -60,17 +70,27 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		contentWidth = 20
 	}
 
-	content := toast.Text
-	if lipgloss.Width(content) > contentWidth-2 {
-		content = TruncateWithEllipsis(content, contentWidth-2)
+	// Build content with icon, title, and message
+	titleStyle := lipgloss.NewStyle().
+		Foreground(t.TextPrimary).
+		Bold(true)
+	msgStyle := lipgloss.NewStyle().
+		Foreground(t.TextSecondary)
+
+	content := icon + " " + titleStyle.Render(title)
+	if toast.Text != "" {
+		msgText := toast.Text
+		if lipgloss.Width(msgText) > contentWidth-6 {
+			msgText = TruncateWithEllipsis(msgText, contentWidth-6)
+		}
+		content += "\n" + msgStyle.Render("  "+msgText)
 	}
 
-	// Rounded card with surface background
+	// Rounded card with surface background and shadow hint
 	toastContent := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1).
-		Foreground(t.TextPrimary).
 		Background(t.SurfaceElevated).
 		Width(contentWidth).
 		Render(content)

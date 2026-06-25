@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -215,8 +216,7 @@ func (hm *HelpModel) renderContent() string {
 		keyColW = max(10, w/4)
 	}
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(1).
-		Render("M31A Keyboard Shortcuts")
+	title := components.ScreenTitle{Text: "M31A Keyboard Shortcuts", Theme: t}.Render()
 	divider := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w-2))
 
 	var sectionParts []string
@@ -234,8 +234,10 @@ func (hm *HelpModel) renderContent() string {
 		sectionParts = append(sectionParts, strings.Join(rows, "\n"))
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).PaddingTop(1).
-		Render("up/down scroll  g/G top/bottom  esc close")
+	footer := components.HintBar{
+		Hints: []string{"up/down scroll", "g/G top/bottom", "esc close"},
+		Theme: t,
+	}.Render()
 
 	return strings.Join(append([]string{title, divider}, append(sectionParts, "", divider, footer)...), "\n")
 }

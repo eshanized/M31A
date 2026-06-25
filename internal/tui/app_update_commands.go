@@ -275,7 +275,7 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 	if m.sidebarModel != nil {
 		m.sidebarModel.SetMode(SidebarModeTodo)
 		m.sidebarModel.AddTodoItem(SidebarTodoItem{
-			Content:  input,
+			Content:  formatAgentTodoContent(input),
 			Status:   "in_progress",
 			Priority: "medium",
 			Source:   "agent",
@@ -290,6 +290,41 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 	}
 
 	return cmd
+}
+
+// formatAgentTodoContent creates a descriptive TODO item from the user's prompt.
+// Instead of showing raw prompt text, it formats as an actionable task.
+func formatAgentTodoContent(input string) string {
+	lower := strings.ToLower(strings.TrimSpace(input))
+
+	// Map common exploration patterns to structured descriptions
+	switch {
+	case strings.Contains(lower, "study") || strings.Contains(lower, "explore") || strings.Contains(lower, "understand"):
+		return "Explore codebase structure and key files"
+	case strings.Contains(lower, "find") || strings.Contains(lower, "search") || strings.Contains(lower, "locate"):
+		return "Search for: " + truncateText(input, 50)
+	case strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "debug"):
+		return "Debug and fix: " + truncateText(input, 50)
+	case strings.Contains(lower, "explain") || strings.Contains(lower, "how") || strings.Contains(lower, "what"):
+		return "Analyze: " + truncateText(input, 50)
+	case strings.Contains(lower, "build") || strings.Contains(lower, "create") || strings.Contains(lower, "implement"):
+		return "Implement: " + truncateText(input, 50)
+	case strings.Contains(lower, "test"):
+		return "Run tests and verify"
+	case strings.Contains(lower, "review") || strings.Contains(lower, "audit"):
+		return "Review: " + truncateText(input, 50)
+	default:
+		return "Execute: " + truncateText(input, 60)
+	}
+}
+
+// truncateText shortens text to maxLen, adding "..." if truncated.
+func truncateText(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // sendPlainTextChat sends a chat request without tools (original behavior).

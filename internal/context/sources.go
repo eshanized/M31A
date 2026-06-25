@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/git"
 )
 
 // DateTimeSource provides the current date and time.
@@ -62,11 +63,12 @@ type GitSource struct {
 
 func (GitSource) Key() string { return "core/git" }
 func (g GitSource) Load(_ context.Context) (string, error) {
-	branch, err := runGit(g.WorkDir, "branch", "--show-current")
+	gitClient := git.New(g.WorkDir)
+	branch, err := gitClient.Run("branch", "--show-current")
 	if err != nil {
 		return "", err
 	}
-	lastCommit, _ := runGit(g.WorkDir, "log", "-1", "--format=%h %s")
+	lastCommit, _ := gitClient.Run("log", "-1", "--format=%h %s")
 	return fmt.Sprintf("branch: %s\nlast_commit: %s", strings.TrimSpace(branch), strings.TrimSpace(lastCommit)), nil
 }
 func (GitSource) Render(value string) string {
@@ -126,11 +128,4 @@ func (InstructionsSource) RenderUpdate(_, newVal string) string {
 }
 func (InstructionsSource) RenderRemoval(_ string) string {
 	return "Project instructions are no longer available."
-}
-
-func runGit(workDir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = workDir
-	out, err := cmd.Output()
-	return string(out), err
 }

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
@@ -74,8 +75,7 @@ func (go_ *GhostOutputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (go_ *GhostOutputModel) View() string {
 	t := go_.theme
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Ghost Write Output")
+	title := components.ScreenTitle{Text: "Ghost Write Output", Theme: t}.Render()
 
 	var lines []string
 	lines = append(lines, "", title, "")
@@ -106,10 +106,7 @@ func (go_ *GhostOutputModel) View() string {
 			f := go_.result.Files[i]
 			selected := i == go_.cursor
 
-			prefix := "    "
-			if selected {
-				prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("  ▶ ")
-			}
+			prefix := components.CursorIndicator{Selected: selected, Theme: t}.Render()
 
 			icon := lipgloss.NewStyle().Foreground(t.Success).Render("✓")
 			path := lipgloss.NewStyle().Foreground(t.Text).Render(f.Path)
@@ -150,8 +147,10 @@ func (go_ *GhostOutputModel) View() string {
 		}
 	}
 
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("[j/k] Navigate   [esc] Back")
+	footer := components.HintBar{
+		Hints: []string{"j/k Navigate", "esc Back"},
+		Theme: t,
+	}.Render()
 	lines = append(lines, "", footer)
 
 	return strings.Join(lines, "\n")

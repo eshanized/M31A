@@ -20,7 +20,19 @@ func (hm *HomeModel) renderHome() string {
 		h = 24
 	}
 
+	// Logo with glow effect
 	logoBlock := components.RenderBigLogo(t.Brand, true, w)
+
+	// Add gradient glow line below logo
+	glowWidth := w / 2
+	if glowWidth > 40 {
+		glowWidth = 40
+	}
+	glowStyle := lipgloss.NewStyle().
+		Foreground(t.Brand).
+		Faint(true)
+	glowLine := glowStyle.Render(strings.Repeat("·", glowWidth))
+	glowBlock := lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowLine)
 
 	promptMaxW := w * 7 / 10
 	if promptMaxW > 75 {
@@ -48,7 +60,8 @@ func (hm *HomeModel) renderHome() string {
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Center,
-		logoBlock,
+		"",
+		glowBlock,
 		"",
 		"",
 		inputBox,

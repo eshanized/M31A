@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -76,10 +75,11 @@ func (fe *FileExplorerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model.
 func (fe *FileExplorerModel) View() string {
 	t := fe.theme
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("File Explorer")
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("[j/k] Navigate   [enter] Toggle dir   [esc] Back")
+	title := components.ScreenTitle{Text: "File Explorer", Theme: t}.Render()
+	footer := components.HintBar{
+		Hints: []string{"j/k Navigate", "enter Toggle dir", "esc Back"},
+		Theme: t,
+	}.Render()
 	return strings.Join([]string{"", title, "", fe.tree.View(), "", footer}, "\n")
 }
 

@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
@@ -143,7 +141,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 			return iter, nil
 		}
 
-		if attempt < maxRetries && isRetryable(err) {
+		if attempt < maxRetries && provider.IsRetryable(err) {
 			delay := time.Duration(1<<uint(attempt)) * time.Second
 			select {
 			case <-ctx.Done():
@@ -155,24 +153,6 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 		return nil, err
 	}
 	return nil, fmt.Errorf("max retries exceeded")
-}
-
-func isRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var httpErr *provider.HTTPStatusError
-	if errors.As(err, &httpErr) {
-		return httpErr.IsRetryable()
-	}
-	// Fallback: string matching for network-level errors that don't
-	// carry an HTTP status code (connection resets, unexpected EOF, etc.)
-	msg := err.Error()
-	return strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "unexpected EOF") ||
-		strings.Contains(msg, "server error") ||
-		strings.Contains(msg, "gateway error") ||
-		strings.Contains(msg, "temporarily unavailable")
 }
 
 func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {

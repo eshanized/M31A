@@ -5,37 +5,37 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 )
 
 // renderChatHistory renders the chat history table screen content.
 func (ch *ChatHistoryModel) renderChatHistory() string {
 	t := ch.theme
 
-	title := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).PaddingLeft(2).
-		Render("Chat History")
+	title := components.ScreenTitle{Text: "Chat History", Theme: t}.Render()
 
 	if !ch.loaded {
 		return lipgloss.JoinVertical(lipgloss.Left, "",
 			title, "",
-			lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("Loading..."))
+			components.LoadingIndicator{Label: "Loading...", Theme: t, Inline: true}.Render())
 	}
 
 	if len(ch.messages) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, "",
 			title, "",
-			lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-				Render("No messages in this session yet."))
+			components.InlineEmptyState{Message: "No messages in this session yet.", Theme: t}.Render())
 	}
 
 	// Update viewport content
 	ch.viewport.SetContent(ch.renderTable())
 
 	// Status line
-	countInfo := fmt.Sprintf("%d/%d messages", ch.cursor+1, len(ch.messages))
-	statusLine := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render(countInfo)
+	statusLine := components.ScrollIndicator{Cursor: ch.cursor, Total: len(ch.messages), Theme: t}.Render()
 
-	hints := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render("↑↓ navigate · enter continue from here · g top · G bottom · q back")
+	hints := components.HintBar{
+		Hints: []string{"↑↓ navigate", "enter continue from here", "g top", "G bottom", "q back"},
+		Theme: t,
+	}.Render()
 
 	parts := []string{
 		"",
@@ -118,11 +118,11 @@ func (ch *ChatHistoryModel) renderTable() string {
 
 		if i == ch.cursor {
 			// Selected row — highlighted
-			rows = append(rows, lipgloss.NewStyle().
-				Foreground(t.Brand).Bold(true).
-				Render("▶ "+strings.TrimPrefix(row, "  ")))
+			rows = append(rows, components.CursorIndicator{Selected: true, Theme: t}.Render()+
+				strings.TrimPrefix(row, "  "))
 		} else {
-			rows = append(rows, lipgloss.NewStyle().Foreground(t.Text).Render(row))
+			rows = append(rows, components.CursorIndicator{Selected: false, Theme: t}.Render()+
+				lipgloss.NewStyle().Foreground(t.Text).Render(row))
 		}
 	}
 

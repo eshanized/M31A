@@ -1,5 +1,11 @@
 package efie
 
+import (
+	"strings"
+
+	"github.com/eshanized/M31A/internal/fileutil"
+)
+
 // MultiResIndex provides three-level indexing: File -> Package -> Community.
 type MultiResIndex struct {
 	// Level 0: File -> FileInfo
@@ -71,7 +77,7 @@ func (idx *MultiResIndex) AddFile(path, language string, symbols []SymbolInfo) {
 	idx.files[path] = fi
 
 	// Package-level
-	pkg := dirOf(path)
+	pkg := fileutil.DirOf(path)
 	idx.packages[pkg] = append(idx.packages[pkg], path)
 
 	// Symbol-level
@@ -161,7 +167,7 @@ func (idx *MultiResIndex) SymbolsMatching(query string) []string {
 	seen := make(map[string]bool)
 	queryLower := toLower(query)
 	for name := range idx.byName {
-		if contains(toLower(name), queryLower) && !seen[name] {
+		if strings.Contains(toLower(name), queryLower) && !seen[name] {
 			matches = append(matches, name)
 			seen[name] = true
 		}
@@ -191,18 +197,6 @@ func (idx *MultiResIndex) CommunityAdj() map[int]map[int]bool {
 	return idx.communityAdj
 }
 
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			if i == 0 {
-				return "."
-			}
-			return path[:i]
-		}
-	}
-	return "."
-}
-
 func toLower(s string) string {
 	b := make([]byte, len(s))
 	for i := 0; i < len(s); i++ {
@@ -213,16 +207,4 @@ func toLower(s string) string {
 		b[i] = c
 	}
 	return string(b)
-}
-
-func contains(s, substr string) bool {
-	if len(substr) > len(s) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
