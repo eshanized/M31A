@@ -429,10 +429,13 @@ func (m *AppState) wireTodoWriteCallback() {
 				Source:   "llm",
 			}
 		}
-		// Non-blocking send to emitter
+		msg := SidebarTodoUpdateMsg{Items: sidebarItems}
+		// Try non-blocking send first; if channel is full, use a goroutine
+		// to avoid dropping updates under load.
 		select {
-		case m.emitterCh <- SidebarTodoUpdateMsg{Items: sidebarItems}:
+		case m.emitterCh <- msg:
 		default:
+			go func() { m.emitterCh <- msg }()
 		}
 	})
 }

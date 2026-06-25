@@ -754,7 +754,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sidebarModel.InitTaskProgress(len(m.executeModel.tasks))
 			}
 			m.sidebarModel.AddTodoItem(SidebarTodoItem{
-				Content:  msg.Task.Action,
+				Content:  fmt.Sprintf("[Task %d] %s", msg.Task.ID, msg.Task.Description),
 				Status:   "in_progress",
 				Priority: "high",
 				Source:   "task",
@@ -782,7 +782,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				todoStatus = "completed"
 			}
 			m.sidebarModel.AddTodoItem(SidebarTodoItem{
-				Content:  msg.Task.Action,
+				Content:  fmt.Sprintf("[Task %d] %s", msg.Task.ID, msg.Task.Description),
 				Status:   todoStatus,
 				Priority: "high",
 				Source:   "task",

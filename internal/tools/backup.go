@@ -46,5 +46,3 @@ func pruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 		}
 	}
 }
-
-

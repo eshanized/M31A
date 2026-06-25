@@ -79,7 +79,7 @@ func (t *TodoWrite) ParameterSchema() string {
 					"type": "object",
 					"properties": {
 						"content": {"type": "string"},
-						"status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+						"status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
 						"priority": {"type": "string", "enum": ["high", "medium", "low"]}
 					}
 				},
@@ -141,41 +141,8 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		})
 	}
 
-	// Build markdown table
-	var b strings.Builder
-	b.WriteString("# TODO\n\n")
-	b.WriteString("| # | Status | Priority | Content |\n")
-	b.WriteString("|---|--------|----------|---------|\n")
-
-	for i, item := range items {
-		statusIcon := statusIcon(item.Status)
-		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, statusIcon, item.Priority, item.Content)
-	}
-
-	// Write to session directory
-	sid := t.getSessionID()
-	if !sessionIDRe.MatchString(sid) {
-		return types.ToolResult{}, fmt.Errorf("%w: invalid session ID: must be alphanumeric", m31errors.ErrToolExecution)
-	}
-	sessionDir := filepath.Join(t.sessionsDir, sid)
-	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot create session directory: %v", m31errors.ErrToolExecution, err)
-	}
-
-	todoPath := filepath.Join(sessionDir, "TODO.md")
-	content := []byte(b.String())
-
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, err)
-	}
-	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot write temp file: %v", m31errors.ErrToolExecution, err)
-	}
-	if err := os.Rename(tmpPath, todoPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return types.ToolResult{}, fmt.Errorf("%w: cannot write TODO.md: %v", m31errors.ErrToolExecution, err)
+	if err := t.writeTodoFile(items); err != nil {
+		return types.ToolResult{}, err
 	}
 
 	// Build summary
@@ -221,8 +188,6 @@ func (t *TodoWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 // and the TODO.md file (which provides user-visible progress tracking).
 // It is called automatically after each execution group and at phase boundaries.
 func (t *TodoWrite) SyncTodoFromTasks(tasks []types.Task) error {
-	start := time.Now()
-
 	items := make([]TodoItem, len(tasks))
 	for i, task := range tasks {
 		status := taskStatusToTodoStatus(task.Status)
@@ -234,41 +199,8 @@ func (t *TodoWrite) SyncTodoFromTasks(tasks []types.Task) error {
 		}
 	}
 
-	// Build markdown table
-	var b strings.Builder
-	b.WriteString("# TODO\n\n")
-	b.WriteString("| # | Status | Priority | Content |\n")
-	b.WriteString("|---|--------|----------|---------|\n")
-
-	for i, item := range items {
-		icon := statusIcon(item.Status)
-		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, icon, item.Priority, item.Content)
-	}
-
-	// Write to session directory
-	sid := t.getSessionID()
-	if !sessionIDRe.MatchString(sid) {
-		return fmt.Errorf("invalid session ID: must be alphanumeric")
-	}
-	sessionDir := filepath.Join(t.sessionsDir, sid)
-	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
-		return fmt.Errorf("cannot create session directory: %w", err)
-	}
-
-	todoPath := filepath.Join(sessionDir, "TODO.md")
-	content := []byte(b.String())
-
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return fmt.Errorf("cannot generate temp name: %w", err)
-	}
-	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
-		return fmt.Errorf("cannot write temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, todoPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("cannot write TODO.md: %w", err)
+	if err := t.writeTodoFile(items); err != nil {
+		return err
 	}
 
 	// Notify sidebar
@@ -276,7 +208,6 @@ func (t *TodoWrite) SyncTodoFromTasks(tasks []types.Task) error {
 		t.onUpdate(items)
 	}
 
-	_ = time.Since(start).Milliseconds() // timing for debugging if needed
 	return nil
 }
 
@@ -306,6 +237,45 @@ func taskActionToPriority(action string) string {
 	default:
 		return "medium"
 	}
+}
+
+// writeTodoFile writes items as a Markdown table to TODO.md in the session directory.
+// Uses atomic write (temp file + rename) to prevent partial reads.
+func (t *TodoWrite) writeTodoFile(items []TodoItem) error {
+	var b strings.Builder
+	b.WriteString("# TODO\n\n")
+	b.WriteString("| # | Status | Priority | Content |\n")
+	b.WriteString("|---|--------|----------|---------|\n")
+
+	for i, item := range items {
+		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, statusIcon(item.Status), item.Priority, item.Content)
+	}
+
+	sid := t.getSessionID()
+	if !sessionIDRe.MatchString(sid) {
+		return fmt.Errorf("%w: invalid session ID: must be alphanumeric", m31errors.ErrToolExecution)
+	}
+	sessionDir := filepath.Join(t.sessionsDir, sid)
+	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
+		return fmt.Errorf("%w: cannot create session directory: %v", m31errors.ErrToolExecution, err)
+	}
+
+	todoPath := filepath.Join(sessionDir, "TODO.md")
+	content := []byte(b.String())
+
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, err)
+	}
+	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
+	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
+		return fmt.Errorf("%w: cannot write temp file: %v", m31errors.ErrToolExecution, err)
+	}
+	if err := os.Rename(tmpPath, todoPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%w: cannot write TODO.md: %v", m31errors.ErrToolExecution, err)
+	}
+	return nil
 }
 
 func statusIcon(status string) string {
