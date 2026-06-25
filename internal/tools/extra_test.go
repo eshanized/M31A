@@ -3088,8 +3088,8 @@ func TestEdit_Execute_LineRange_OutOfRange(t *testing.T) {
 func TestWebFetch_ResolveAndCache_ExpiredCache(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), false)
-	// Store an expired entry
-	wf.dnsCache.Store("expired.example.com", &dnsCacheEntry{
+	// Store an expired entry directly in the shared cache
+	wf.dnsCache.cache.Store("expired.example.com", &dnsCacheEntry{
 		addrs:   []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
 		expires: time.Now().Add(-time.Minute), // expired
 	})

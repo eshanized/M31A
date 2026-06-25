@@ -2,10 +2,8 @@ package subagent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -38,12 +36,7 @@ type loop struct {
 
 // toolCallAcc accumulates streaming tool call deltas from the provider.
 // Mirrors the approach in internal/tui/streaming/agent_loop.go.
-type toolCallAcc struct {
-	id    string
-	name  string
-	args  strings.Builder
-	index int
-}
+type toolCallAcc = types.ToolCallAcc
 
 // maxTurns caps the number of LLM round-trips a subagent can make even if it
 // keeps asking for tools.
@@ -300,16 +293,16 @@ func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, 
 		case "tool_call":
 			acc, ok := accMap[chunk.Index]
 			if !ok {
-				acc = &toolCallAcc{index: chunk.Index}
+				acc = &toolCallAcc{Index: chunk.Index}
 				accMap[chunk.Index] = acc
 			}
 			if chunk.ToolCallID != "" {
-				acc.id = chunk.ToolCallID
+				acc.ID = chunk.ToolCallID
 			}
 			if chunk.ToolName != "" {
-				acc.name = chunk.ToolName
+				acc.Name = chunk.ToolName
 			}
-			acc.args.WriteString(chunk.ToolInput)
+			acc.Args.WriteString(chunk.ToolInput)
 		case "content", "":
 			content.WriteString(chunk.Delta)
 			if lastChunkType != "content" {
@@ -328,29 +321,17 @@ func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, 
 // buildToolCallsFromAcc converts accumulated tool call deltas into
 // ToolCallInput entries sorted by index.
 func buildToolCallsFromAcc(accMap map[int]*toolCallAcc) []ToolCallInput {
-	if len(accMap) == 0 {
+	toolCalls := types.BuildToolCallsFromAccFiltered(accMap)
+	if len(toolCalls) == 0 {
 		return nil
 	}
-	indices := make([]int, 0, len(accMap))
-	for idx := range accMap {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-	var result []ToolCallInput
-	for _, idx := range indices {
-		acc := accMap[idx]
-		id := acc.id
-		if id == "" {
-			id = acc.name
+	result := make([]ToolCallInput, len(toolCalls))
+	for i, tc := range toolCalls {
+		result[i] = ToolCallInput{
+			ID:    tc.ID,
+			Name:  tc.Name,
+			Input: tc.Input,
 		}
-		if acc.name == "" {
-			continue
-		}
-		result = append(result, ToolCallInput{
-			ID:    id,
-			Name:  acc.name,
-			Input: json.RawMessage(acc.args.String()),
-		})
 	}
 	return result
 }

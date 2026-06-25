@@ -5,10 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -186,40 +184,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 }
 
 func (t *Edit) resolvePath(path string) (string, error) {
-	joined := path
-	if !filepath.IsAbs(path) {
-		joined = filepath.Join(t.workDir, path)
-	}
-	targetPath, err := filepath.Abs(joined)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve path: %w", err)
-	}
-
-	resolved := targetPath
-	if _, err := os.Stat(targetPath); err == nil {
-		resolved, err = filepath.EvalSymlinks(targetPath)
-		if err != nil {
-			return "", fmt.Errorf("cannot resolve symlinks: %w", err)
-		}
-	} else if os.IsNotExist(err) {
-		// File doesn't exist — resolve parent directory through symlinks
-		parentDir := filepath.Dir(targetPath)
-		if resolvedParent, parentErr := filepath.EvalSymlinks(parentDir); parentErr == nil {
-			resolved = filepath.Join(resolvedParent, filepath.Base(targetPath))
-		}
-	} else {
-		return "", fmt.Errorf("cannot stat path: %w", err)
-	}
-
-	workDirPrefix := t.workDir
-	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-		workDirPrefix += string(filepath.Separator)
-	}
-	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return "", fmt.Errorf("path resolves outside working directory")
-	}
-
-	return resolved, nil
+	return ResolveAndContainPath(path, t.workDir)
 }
 
 func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) error {
@@ -284,32 +249,7 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 }
 
 func (t *Edit) pruneBackups(sanitizedPrefix string) {
-	entries, err := os.ReadDir(t.backupDir)
-	if err != nil {
-		slog.Warn("edit: cannot read backup directory for pruning", "dir", t.backupDir, "error", err)
-		return
-	}
-
-	var matches []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), sanitizedPrefix+".") && strings.HasSuffix(e.Name(), ".bak") {
-			matches = append(matches, e.Name())
-		}
-	}
-
-	if len(matches) < MaxBackupsPerFile {
-		return
-	}
-
-	sort.Strings(matches)
-
-	toDelete := matches[:len(matches)-MaxBackupsPerFile]
-	for _, name := range toDelete {
-		path := filepath.Join(t.backupDir, name)
-		if err := os.Remove(path); err != nil {
-			slog.Warn("edit: failed to prune old backup", "path", path, "error", err)
-		}
-	}
+	pruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
 }
 
 func replaceByLineRange(content string, startLine, endLine int, newContent string) (string, error) {
@@ -708,59 +648,12 @@ func levenshteinSimilarity(a, b string) float64 {
 }
 
 func levenshteinDistance(a, b string) int {
-	if len(a) == 0 {
-		return len(b)
-	}
-	if len(b) == 0 {
-		return len(a)
-	}
-
-	// Use single row for space efficiency
-	prev := make([]int, len(b)+1)
-	curr := make([]int, len(b)+1)
-
-	for j := 0; j <= len(b); j++ {
-		prev[j] = j
-	}
-
-	for i := 1; i <= len(a); i++ {
-		curr[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			curr[j] = min(curr[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
-		}
-		prev, curr = curr, prev
-	}
-
-	return prev[len(b)]
+	return LevenshteinDistance(a, b)
 }
 
 // levenshteinBuf is like levenshteinDistance but reuses pre-allocated buffers.
 func levenshteinBuf(a, b string, prev, curr []int) int {
-	if len(a) == 0 {
-		return len(b)
-	}
-	if len(b) == 0 {
-		return len(a)
-	}
-	for j := 0; j <= len(b); j++ {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		curr[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			curr[j] = min(curr[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
-		}
-		prev, curr = curr, prev
-	}
-	return prev[len(b)]
+	return LevenshteinBuf(a, b, prev, curr)
 }
 
 func leadingWhitespace(s string) string {

@@ -96,43 +96,10 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}
 
 	// Resolve target path relative to workDir
-	joined := path
-	if !filepath.IsAbs(path) {
-		joined = filepath.Join(t.workDir, path)
-	}
-	targetPath, err := filepath.Abs(joined)
+	targetPath, err := ResolveAndContainPath(path, t.workDir)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
 	}
-
-	// Path safety: verify resolved path is within workDir
-	// If file exists, resolve its symlinks; otherwise resolve the parent directory
-	resolved := targetPath
-	if _, statErr := os.Stat(targetPath); statErr == nil {
-		// File exists — resolve symlinks
-		resolved, err = filepath.EvalSymlinks(targetPath)
-		if err != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
-		}
-	} else if !os.IsNotExist(statErr) {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot stat path: %v", m31errors.ErrToolExecution, statErr)
-	} else {
-		// File doesn't exist — resolve parent directory through symlinks
-		parentDir := filepath.Dir(targetPath)
-		if resolvedParent, parentErr := filepath.EvalSymlinks(parentDir); parentErr == nil {
-			resolved = filepath.Join(resolvedParent, filepath.Base(targetPath))
-		}
-		// If parent also doesn't exist, we'll create it; use targetPath as-is
-	}
-
-	workDirPrefix := t.workDir
-	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-		workDirPrefix += string(filepath.Separator)
-	}
-	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("%w: path resolves outside working directory", m31errors.ErrToolExecution)
-	}
-	targetPath = resolved
 
 	// Backup existing file
 	if _, backupStatErr := os.Stat(targetPath); backupStatErr == nil {

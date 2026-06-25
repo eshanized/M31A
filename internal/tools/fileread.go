@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -110,31 +109,9 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}
 
 	// Resolve relative to workDir; absolute paths used as-is
-	joined := path
-	if !filepath.IsAbs(path) {
-		joined = filepath.Join(t.workDir, path)
-	}
-	absPath, err := filepath.Abs(joined)
+	resolved, err := ResolveAndContainPathExists(path, t.workDir)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
-	}
-
-	// Resolve symlinks
-	resolved, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return types.ToolResult{}, fmt.Errorf("%w: file not found: %s", m31errors.ErrToolExecution, path)
-		}
-		return types.ToolResult{}, fmt.Errorf("%w: cannot resolve path: %v", m31errors.ErrToolExecution, err)
-	}
-
-	// Verify resolved path is within workDir (with separator guard)
-	workDirPrefix := t.workDir
-	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-		workDirPrefix += string(filepath.Separator)
-	}
-	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("%w: path resolves outside working directory", m31errors.ErrToolExecution)
+		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
 	}
 
 	// Check if it's a directory

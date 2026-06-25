@@ -19,9 +19,9 @@ func TestBuildAgentToolCalls_Empty(t *testing.T) {
 func TestBuildAgentToolCalls_Single(t *testing.T) {
 	t.Parallel()
 	accMap := map[int]*agentToolCallAcc{
-		0: {id: "call_1", name: "Bash", args: strings.Builder{}, index: 0},
+		0: {ID: "call_1", Name: "Bash", Args: strings.Builder{}, Index: 0},
 	}
-	accMap[0].args.WriteString(`{"command":"ls"}`)
+	accMap[0].Args.WriteString(`{"command":"ls"}`)
 	result := buildAgentToolCalls(accMap)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(result))
@@ -37,9 +37,9 @@ func TestBuildAgentToolCalls_Single(t *testing.T) {
 func TestBuildAgentToolCalls_SortedByIndex(t *testing.T) {
 	t.Parallel()
 	accMap := map[int]*agentToolCallAcc{
-		2: {id: "c2", name: "Grep", args: strings.Builder{}, index: 2},
-		0: {id: "c0", name: "Bash", args: strings.Builder{}, index: 0},
-		1: {id: "c1", name: "FileRead", args: strings.Builder{}, index: 1},
+		2: {ID: "c2", Name: "Grep", Args: strings.Builder{}, Index: 2},
+		0: {ID: "c0", Name: "Bash", Args: strings.Builder{}, Index: 0},
+		1: {ID: "c1", Name: "FileRead", Args: strings.Builder{}, Index: 1},
 	}
 	result := buildAgentToolCalls(accMap)
 	if len(result) != 3 {
@@ -53,7 +53,7 @@ func TestBuildAgentToolCalls_SortedByIndex(t *testing.T) {
 func TestBuildAgentToolCalls_MissingID_FallbackToName(t *testing.T) {
 	t.Parallel()
 	accMap := map[int]*agentToolCallAcc{
-		0: {id: "", name: "Bash", args: strings.Builder{}, index: 0},
+		0: {ID: "", Name: "Bash", Args: strings.Builder{}, Index: 0},
 	}
 	result := buildAgentToolCalls(accMap)
 	if len(result) != 1 {
@@ -67,7 +67,7 @@ func TestBuildAgentToolCalls_MissingID_FallbackToName(t *testing.T) {
 func TestBuildAgentToolCalls_EmptyArgs_DefaultJSON(t *testing.T) {
 	t.Parallel()
 	accMap := map[int]*agentToolCallAcc{
-		0: {id: "c1", name: "Test", args: strings.Builder{}, index: 0},
+		0: {ID: "c1", Name: "Test", Args: strings.Builder{}, Index: 0},
 	}
 	result := buildAgentToolCalls(accMap)
 	if len(result) != 1 {
@@ -83,7 +83,7 @@ func TestBuildAgentToolCalls_ValidJSONArgs(t *testing.T) {
 	var args strings.Builder
 	args.WriteString(`{"key":"value"}`)
 	accMap := map[int]*agentToolCallAcc{
-		0: {id: "c1", name: "Test", args: args, index: 0},
+		0: {ID: "c1", Name: "Test", Args: args, Index: 0},
 	}
 	result := buildAgentToolCalls(accMap)
 	if len(result) != 1 {

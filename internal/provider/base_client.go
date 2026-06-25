@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -137,5 +140,117 @@ func (b *BaseClient) MakeIterator(sse *SSEParser, modelID string) *types.StreamI
 		Close: func() error {
 			return sse.Close()
 		},
+	}
+}
+
+// HealthCheck performs a GET request to the given endpoint and returns a
+// HealthStatus based on latency thresholds. Shared by all provider clients.
+func (b *BaseClient) HealthCheck(ctx context.Context, endpoint string) types.HealthStatus {
+	start := time.Now()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.BaseURLField+endpoint, nil)
+	if err != nil {
+		return types.HealthStatus{Status: types.HealthStatusOffline, Error: err.Error()}
+	}
+	SetCommonHeaders(req, b.APIKeyField, b.Version)
+
+	resp, err := b.CatalogClient.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+
+	if resp.StatusCode != http.StatusOK {
+		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: fmt.Sprintf("status %d", resp.StatusCode)}
+	}
+
+	switch {
+	case latency < b.HealthLiveMs:
+		return types.HealthStatus{Status: types.HealthStatusLive, LatencyMs: latency}
+	case latency < b.HealthSlowMs:
+		return types.HealthStatus{Status: types.HealthStatusSlow, LatencyMs: latency}
+	default:
+		return types.HealthStatus{Status: types.HealthStatusDegraded, LatencyMs: latency}
+	}
+}
+
+// HandleChatHTTPError interprets a non-200 HTTP response from a chat completion
+// request and returns the appropriate sentinel error. Shared by all provider
+// clients. Provider-specific error handling (e.g. model eviction) should be
+// done by the caller after this function returns.
+func (b *BaseClient) HandleChatHTTPError(resp *http.Response, providerName string, extraHandling func(statusCode int, bodyStr string)) error {
+	bodyBytes, _ := ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+	retryAfter := GetRetryAfter(resp)
+	_ = resp.Body.Close()
+	bodyStr := string(bodyBytes)
+
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		if retryAfter != "" {
+			return fmt.Errorf("%w (retry-after: %s)", m31errors.ErrRateLimited, retryAfter)
+		}
+		return m31errors.ErrRateLimited
+	case http.StatusUnauthorized:
+		return m31errors.ErrInvalidKey
+	case http.StatusServiceUnavailable:
+		return m31errors.ErrProviderUnreachable
+	default:
+		if extraHandling != nil {
+			extraHandling(resp.StatusCode, bodyStr)
+		}
+		if IsContextExceeded(resp.StatusCode, bodyStr) {
+			return m31errors.ErrContextExceeded
+		}
+		msg := SanitizeProviderError(resp.StatusCode, bodyStr, providerName)
+		return &HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
+	}
+}
+
+// HandleChatHTTPErrorWithCredits is like HandleChatHTTPError but also handles
+// StatusPaymentRequired by mapping it to ErrNoCredits with a provider-specific
+// message. Use this for providers (OpenRouter, NVIDIA) that return 402 for
+// insufficient credits.
+func (b *BaseClient) HandleChatHTTPErrorWithCredits(resp *http.Response, providerName string, extraHandling func(statusCode int, bodyStr string)) error {
+	bodyBytes, _ := ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+	retryAfter := GetRetryAfter(resp)
+	_ = resp.Body.Close()
+	bodyStr := string(bodyBytes)
+
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		if retryAfter != "" {
+			return fmt.Errorf("%w (retry-after: %s)", m31errors.ErrRateLimited, retryAfter)
+		}
+		return m31errors.ErrRateLimited
+	case http.StatusUnauthorized:
+		return m31errors.ErrInvalidKey
+	case http.StatusPaymentRequired:
+		return fmt.Errorf("%w: insufficient credits on %s", m31errors.ErrNoCredits, providerName)
+	case http.StatusServiceUnavailable:
+		return m31errors.ErrProviderUnreachable
+	default:
+		if extraHandling != nil {
+			extraHandling(resp.StatusCode, bodyStr)
+		}
+		if IsContextExceeded(resp.StatusCode, bodyStr) {
+			return m31errors.ErrContextExceeded
+		}
+		msg := SanitizeProviderError(resp.StatusCode, bodyStr, providerName)
+		return &HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
+	}
+}
+
+// ClassifyHealthStatus returns the health status for a given latency value
+// based on the configured thresholds.
+func (b *BaseClient) ClassifyHealthStatus(latencyMs int64) string {
+	switch {
+	case latencyMs < b.HealthLiveMs:
+		return types.HealthStatusLive
+	case latencyMs < b.HealthSlowMs:
+		return types.HealthStatusSlow
+	default:
+		return types.HealthStatusDegraded
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tools"
 )
 
 // ─── Mention suggestion management ───────────────────────────────────────────
@@ -200,16 +201,5 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 
 // humanSize formats bytes into a human-readable string.
 func humanSize(b int64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-	)
-	switch {
-	case b >= MB:
-		return fmt.Sprintf("%.1fMB", float64(b)/float64(MB))
-	case b >= KB:
-		return fmt.Sprintf("%.1fKB", float64(b)/float64(KB))
-	default:
-		return fmt.Sprintf("%dB", b)
-	}
+	return tools.HumanSize(b)
 }

@@ -231,25 +231,16 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
-		retryAfter := provider.GetRetryAfter(resp)
-		_ = resp.Body.Close()
-		bodyStr := string(bodyBytes)
+		// Handle NVIDIA-specific status codes first
 		switch resp.StatusCode {
-		case http.StatusTooManyRequests:
-			if retryAfter != "" {
-				return nil, fmt.Errorf("%w (retry-after: %s)", m31errors.ErrRateLimited, retryAfter)
-			}
-			return nil, m31errors.ErrRateLimited
-		case http.StatusUnauthorized:
-			return nil, m31errors.ErrInvalidKey
-		case http.StatusPaymentRequired:
-			return nil, fmt.Errorf("%w: insufficient credits on NVIDIA NIM", m31errors.ErrNoCredits)
 		case http.StatusNotFound:
 			c.Cache.Remove(req.Model)
 			slog.Info("nvidia: evicted unavailable model", "model", req.Model, "status", resp.StatusCode)
 			return nil, fmt.Errorf("%w: model %q is unavailable or deprecated on NVIDIA NIM", m31errors.ErrModelNotFound, req.Model)
 		case http.StatusBadRequest:
+			bodyBytes, _ := provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
+			_ = resp.Body.Close()
+			bodyStr := string(bodyBytes)
 			if !provider.IsContextExceeded(resp.StatusCode, bodyStr) {
 				c.Cache.Remove(req.Model)
 				slog.Info("nvidia: evicted incompatible model", "model", req.Model, "body", bodyStr)
@@ -259,15 +250,9 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 				msg += " — this model requires image, video, or audio input"
 			}
 			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
-		case http.StatusServiceUnavailable:
-			return nil, m31errors.ErrProviderUnreachable
-		default:
-			if provider.IsContextExceeded(resp.StatusCode, bodyStr) {
-				return nil, m31errors.ErrContextExceeded
-			}
-			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, "nvidia")
-			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 		}
+		// Fall through to shared handler for 429, 401, 402, 503, and others
+		return nil, c.HandleChatHTTPErrorWithCredits(resp, "nvidia", nil)
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)
@@ -275,32 +260,5 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 }
 
 func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
-	start := time.Now()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURLField+"/models", nil)
-	if err != nil {
-		return types.HealthStatus{Status: types.HealthStatusOffline, Error: err.Error()}
-	}
-	provider.SetCommonHeaders(req, c.APIKeyField, c.Version)
-
-	resp, err := c.CatalogClient.Do(req)
-	latency := time.Since(start).Milliseconds()
-	if err != nil {
-		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
-	}
-	defer resp.Body.Close() //nolint:errcheck
-	_, _ = provider.ReadBodyLimited(resp, types.MaxLLMResponseBytes)
-
-	if resp.StatusCode != http.StatusOK {
-		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: fmt.Sprintf("status %d", resp.StatusCode)}
-	}
-
-	switch {
-	case latency < c.HealthLiveMs:
-		return types.HealthStatus{Status: types.HealthStatusLive, LatencyMs: latency}
-	case latency < c.HealthSlowMs:
-		return types.HealthStatus{Status: types.HealthStatusSlow, LatencyMs: latency}
-	default:
-		return types.HealthStatus{Status: types.HealthStatusDegraded, LatencyMs: latency}
-	}
+	return c.BaseClient.HealthCheck(ctx, "/models")
 }

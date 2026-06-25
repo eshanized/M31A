@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -64,28 +63,12 @@ func (t *FileDelete) Execute(ctx context.Context, input types.ToolInput) (types.
 		return types.ToolResult{}, fmt.Errorf("parameter path must be a string")
 	}
 
-	absPath := path
-	if !filepath.IsAbs(path) {
-		absPath = filepath.Join(t.workDir, path)
-	}
-
 	// Resolve symlinks before containment check to prevent symlink bypass
-	resolved, err := filepath.EvalSymlinks(absPath)
+	resolved, err := ResolveAndContainPathExists(path, t.workDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return types.ToolResult{}, fmt.Errorf("file not found: %s", path)
-		}
-		return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
+		return types.ToolResult{}, err
 	}
-
-	workDirPrefix := t.workDir
-	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
-		workDirPrefix += string(filepath.Separator)
-	}
-	if resolved != t.workDir && !strings.HasPrefix(resolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("path resolves outside working directory")
-	}
-	absPath = resolved
+	absPath := resolved
 
 	info, err := os.Stat(absPath)
 	if err != nil {

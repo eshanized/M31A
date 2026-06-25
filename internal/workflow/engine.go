@@ -1171,53 +1171,15 @@ func finalizeToolCalls(builders map[int]*toolCallBuilder, e *Engine) []m31types.
 	return calls
 }
 
-// streamLLMWithTools sends a chat request with tool definitions and returns
-// both the text content and any native tool calls from the response.
-// Used by execute and heal phases for structured tool dispatch.
-func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Message) (string, []m31types.ToolCall, error) {
+// prepareStreamRequest handles the shared preamble for all streamLLM variants:
+// preflight context check, build ChatRequest, emit thinking start, and open
+// the stream with retry. Returns the iterator on success.
+func (e *Engine) prepareStreamRequest(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (*m31types.StreamIterator, error) {
 	msgs, err := e.preflightContextCheck(messages)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
-	e.emit(ThinkingStartMsg{
-		Context: "LLM processing...",
-	})
-
-	req := provider.ChatRequest{
-		Model:            e.modelForPhase(e.activePhase),
-		Messages:         msgs,
-		ReasoningEnabled: true,
-		Tools:            e.buildToolDefinitions(),
-	}
-
-	iterator, err := e.provider.ChatCompletionStream(ctx, req)
-	if err != nil {
-		iterator, err = e.retryChatStream(ctx, req, err)
-		if err != nil {
-			e.emit(ThinkingCompleteMsg{
-				Context: "LLM processing failed",
-			})
-			return "", nil, err
-		}
-	}
-
-	content, toolCalls, err := e.consumeStreamWithTools(iterator)
-	e.emit(ThinkingCompleteMsg{
-		Context: "LLM processing complete",
-	})
-	return content, toolCalls, err
-}
-
-// streamLLM sends a chat request and returns the full response content.
-func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
-	// preflight context check before sending to LLM
-	msgs, err := e.preflightContextCheck(messages)
-	if err != nil {
-		return "", err
-	}
-
-	// Emit thinking start message
 	e.emit(ThinkingStartMsg{
 		Context: "LLM processing...",
 	})
@@ -1238,14 +1200,42 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 			e.emit(ThinkingCompleteMsg{
 				Context: "LLM processing failed",
 			})
-			return "", err
+			return nil, err
 		}
 	}
+	return iterator, nil
+}
 
-	result, err := e.consumeStream(iterator)
+// emitThinkingDone emits the thinking complete message.
+func (e *Engine) emitThinkingDone() {
 	e.emit(ThinkingCompleteMsg{
 		Context: "LLM processing complete",
 	})
+}
+
+// streamLLMWithTools sends a chat request with tool definitions and returns
+// both the text content and any native tool calls from the response.
+// Used by execute and heal phases for structured tool dispatch.
+func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Message) (string, []m31types.ToolCall, error) {
+	iterator, err := e.prepareStreamRequest(ctx, messages, true)
+	if err != nil {
+		return "", nil, err
+	}
+
+	content, toolCalls, err := e.consumeStreamWithTools(iterator)
+	e.emitThinkingDone()
+	return content, toolCalls, err
+}
+
+// streamLLM sends a chat request and returns the full response content.
+func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (string, error) {
+	iterator, err := e.prepareStreamRequest(ctx, messages, toolsEnabled)
+	if err != nil {
+		return "", err
+	}
+
+	result, err := e.consumeStream(iterator)
+	e.emitThinkingDone()
 	return result, err
 }
 
@@ -1253,28 +1243,7 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 // StreamIterator. The caller is responsible for iterating via Next()
 // and emitting each chunk to the TUI (typically via MsgEmitter).
 func (e *Engine) streamLLMStreaming(ctx context.Context, messages []m31types.Message, toolsEnabled bool) (*m31types.StreamIterator, error) {
-	msgs, err := e.preflightContextCheck(messages)
-	if err != nil {
-		return nil, err
-	}
-
-	req := provider.ChatRequest{
-		Model:            e.modelForPhase(e.activePhase),
-		Messages:         msgs,
-		ReasoningEnabled: true,
-	}
-	if toolsEnabled {
-		req.Tools = e.buildToolDefinitions()
-	}
-
-	iterator, err := e.provider.ChatCompletionStream(ctx, req)
-	if err != nil {
-		iterator, err = e.retryChatStream(ctx, req, err)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return iterator, nil
+	return e.prepareStreamRequest(ctx, messages, toolsEnabled)
 }
 
 // retryChatStream retries a failed ChatCompletionStream call using exponential

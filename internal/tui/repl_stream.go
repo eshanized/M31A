@@ -155,34 +155,72 @@ func (m *ReplModel) handleStreamDoneMsg(msg StreamDoneMsg) int {
 	return collapsedCount
 }
 
+// errorClass classifies an error into a known sentinel category.
+type errorClass int
+
+const (
+	errClassUnknown errorClass = iota
+	errClassContextExceeded
+	errClassInvalidKey
+	errClassRateLimited
+	errClassProviderUnreachable
+	errClassStreamTruncated
+	errClassModelNotFound
+	errClassToolExecution
+	errClassPermissionDenied
+)
+
+// classifyError returns the error class for the given error.
+func classifyError(err error) errorClass {
+	switch {
+	case errors.Is(err, m31errors.ErrContextExceeded):
+		return errClassContextExceeded
+	case errors.Is(err, m31errors.ErrInvalidKey):
+		return errClassInvalidKey
+	case errors.Is(err, m31errors.ErrRateLimited):
+		return errClassRateLimited
+	case errors.Is(err, m31errors.ErrProviderUnreachable):
+		return errClassProviderUnreachable
+	case errors.Is(err, m31errors.ErrStreamTruncated):
+		return errClassStreamTruncated
+	case errors.Is(err, m31errors.ErrModelNotFound):
+		return errClassModelNotFound
+	case errors.Is(err, m31errors.ErrToolExecution):
+		return errClassToolExecution
+	case errors.Is(err, m31errors.ErrPermissionDenied):
+		return errClassPermissionDenied
+	default:
+		return errClassUnknown
+	}
+}
+
 // renderErrorBanner returns a styled error message based on the typed sentinel.
 func renderErrorBanner(err error, t theme.Theme, providerName string) string {
 	providerSuffix := ""
 	if providerName != "" {
 		providerSuffix = fmt.Sprintf(" (%s)", providerName)
 	}
-	switch {
-	case errors.Is(err, m31errors.ErrContextExceeded):
-		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-			Render("⚠ Context window exceeded. Use /compress to free space.")
-	case errors.Is(err, m31errors.ErrInvalidKey):
-		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
-			Render(fmt.Sprintf("✗ Invalid API key%s. Run /settings to update.", providerSuffix))
-	case errors.Is(err, m31errors.ErrRateLimited):
-		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-			Render(fmt.Sprintf("⚠ Rate limited%s. Auto-fallback in progress or retry in a moment.", providerSuffix))
-	case errors.Is(err, m31errors.ErrProviderUnreachable):
-		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-			Render(fmt.Sprintf("⚠ Provider unreachable%s — check connection or try /fallback.", providerSuffix))
-	case errors.Is(err, m31errors.ErrStreamTruncated):
-		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
-			Render("⚠ Stream interrupted — try sending your message again.")
-	case errors.Is(err, m31errors.ErrModelNotFound):
-		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
-			Render(fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix))
+	style := func(s string) string {
+		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).Render(s)
+	}
+	warnStyle := func(s string) string {
+		return lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render(s)
+	}
+	switch classifyError(err) {
+	case errClassContextExceeded:
+		return warnStyle("⚠ Context window exceeded. Use /compress to free space.")
+	case errClassInvalidKey:
+		return style(fmt.Sprintf("✗ Invalid API key%s. Run /settings to update.", providerSuffix))
+	case errClassRateLimited:
+		return warnStyle(fmt.Sprintf("⚠ Rate limited%s. Auto-fallback in progress or retry in a moment.", providerSuffix))
+	case errClassProviderUnreachable:
+		return warnStyle(fmt.Sprintf("⚠ Provider unreachable%s — check connection or try /fallback.", providerSuffix))
+	case errClassStreamTruncated:
+		return warnStyle("⚠ Stream interrupted — try sending your message again.")
+	case errClassModelNotFound:
+		return style(fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix))
 	default:
-		return lipgloss.NewStyle().Foreground(t.Error).Bold(true).
-			Render("✗ " + m31errors.UserMessage(err))
+		return style("✗ " + m31errors.UserMessage(err))
 	}
 }
 
@@ -195,18 +233,18 @@ func plainErrorBanner(err error, providerName string) string {
 	if providerName != "" {
 		providerSuffix = fmt.Sprintf(" (%s)", providerName)
 	}
-	switch {
-	case errors.Is(err, m31errors.ErrContextExceeded):
+	switch classifyError(err) {
+	case errClassContextExceeded:
 		return "⚠ Context window exceeded. Use /compress to free space."
-	case errors.Is(err, m31errors.ErrInvalidKey):
+	case errClassInvalidKey:
 		return fmt.Sprintf("✗ Invalid API key%s. Run /settings to update.", providerSuffix)
-	case errors.Is(err, m31errors.ErrRateLimited):
+	case errClassRateLimited:
 		return fmt.Sprintf("⚠ Rate limited%s. Auto-fallback in progress or retry in a moment.", providerSuffix)
-	case errors.Is(err, m31errors.ErrProviderUnreachable):
+	case errClassProviderUnreachable:
 		return fmt.Sprintf("⚠ Provider unreachable%s — check connection or try /fallback.", providerSuffix)
-	case errors.Is(err, m31errors.ErrStreamTruncated):
+	case errClassStreamTruncated:
 		return "⚠ Stream interrupted — try sending your message again."
-	case errors.Is(err, m31errors.ErrModelNotFound):
+	case errClassModelNotFound:
 		return fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix)
 	default:
 		return "✗ " + m31errors.UserMessage(err)
@@ -215,20 +253,20 @@ func plainErrorBanner(err error, providerName string) string {
 
 // typedErrorName returns the sentinel name for debug logging.
 func typedErrorName(err error) string {
-	switch {
-	case errors.Is(err, m31errors.ErrContextExceeded):
+	switch classifyError(err) {
+	case errClassContextExceeded:
 		return "ErrContextExceeded"
-	case errors.Is(err, m31errors.ErrInvalidKey):
+	case errClassInvalidKey:
 		return "ErrInvalidKey"
-	case errors.Is(err, m31errors.ErrRateLimited):
+	case errClassRateLimited:
 		return "ErrRateLimited"
-	case errors.Is(err, m31errors.ErrProviderUnreachable):
+	case errClassProviderUnreachable:
 		return "ErrProviderUnreachable"
-	case errors.Is(err, m31errors.ErrModelNotFound):
+	case errClassModelNotFound:
 		return "ErrModelNotFound"
-	case errors.Is(err, m31errors.ErrToolExecution):
+	case errClassToolExecution:
 		return "ErrToolExecution"
-	case errors.Is(err, m31errors.ErrPermissionDenied):
+	case errClassPermissionDenied:
 		return "ErrPermissionDenied"
 	default:
 		return "unknown"

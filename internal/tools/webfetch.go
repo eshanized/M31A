@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,30 +39,18 @@ func getVersion() string {
 	return "dev"
 }
 
-// dnsCacheEntry caches DNS resolution results for a hostname to prevent
-// DNS rebinding (TOCTOU) attacks. The 5-minute TTL ensures stale entries
-// are refreshed while still pinning IPs for the duration of a request.
-type dnsCacheEntry struct {
-	addrs   []net.IPAddr
-	expires time.Time
-}
-
 type WebFetch struct {
 	sessionsDir     string
 	allowPrivateIPs bool
 	client          *http.Client
-	dnsCache        sync.Map // map[string]*dnsCacheEntry; key=hostname
-	// dnsInsertsSinceEvict counts Store calls; eviction runs when it exceeds
-	// dnsEvictThreshold. Prevents unbounded memory growth of dnsCache (BUG-08).
-	dnsInsertsSinceEvict atomic.Int32
+	dnsCache        *DNSCache
 }
-
-const dnsEvictThreshold int32 = 64
 
 func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 	wf := &WebFetch{
 		sessionsDir:     sessionsDir,
 		allowPrivateIPs: allowPrivateIPs,
+		dnsCache:        NewDNSCache(DNSCacheTTL, 64),
 	}
 	wf.client = &http.Client{
 		Transport: &http.Transport{
@@ -223,59 +210,9 @@ func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
 	return nil
 }
 
-// resolveAndCache resolves DNS for a hostname using a sync.Map cache with
-// 5-minute TTL. Caching pins IPs for the request lifecycle, preventing DNS
-// rebinding (TOCTOU) attacks where an attacker changes DNS between resolution
-// and connection.
+// resolveAndCache resolves DNS for a hostname using the shared DNS cache.
 func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IPAddr, error) {
-	// Check for literal IP — no caching needed
-	if ip := net.ParseIP(host); ip != nil {
-		return []net.IPAddr{{IP: ip}}, nil
-	}
-
-	now := time.Now()
-	ttl := DNSCacheTTL
-
-	// Check cache
-	if cached, ok := t.dnsCache.Load(host); ok {
-		entry := cached.(*dnsCacheEntry)
-		if now.Before(entry.expires) {
-			return entry.addrs, nil
-		}
-		// Expired — fall through to re-resolve
-	}
-
-	// Resolve
-	resolver := &net.Resolver{PreferGo: true}
-	addrs, err := resolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
-	}
-	if len(addrs) == 0 {
-		return nil, fmt.Errorf("no IP addresses found for %s", host)
-	}
-
-	// Store in cache
-	entry := &dnsCacheEntry{
-		addrs:   addrs,
-		expires: now.Add(ttl),
-	}
-	t.dnsCache.Store(host, entry)
-
-	// Periodic eviction: prevents unbounded growth when many unique hosts
-	// are fetched over a long session. Threshold-gated so it rarely runs.
-	if t.dnsInsertsSinceEvict.Add(1) >= dnsEvictThreshold {
-		t.dnsInsertsSinceEvict.Store(0)
-		t.dnsCache.Range(func(key, value any) bool {
-			e := value.(*dnsCacheEntry)
-			if now.After(e.expires) {
-				t.dnsCache.Delete(key)
-			}
-			return true
-		})
-	}
-
-	return addrs, nil
+	return t.dnsCache.Resolve(ctx, host)
 }
 
 func (t *WebFetch) Name() string {

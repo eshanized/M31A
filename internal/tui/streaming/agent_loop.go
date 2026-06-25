@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -84,12 +83,7 @@ type AgentToolProgressMsg struct {
 }
 
 // AgentToolCallAcc accumulates streaming tool call deltas by index.
-type agentToolCallAcc struct {
-	id    string
-	name  string
-	args  strings.Builder
-	index int
-}
+type agentToolCallAcc = types.ToolCallAcc
 
 // AgentLoop runs an autonomous tool-use loop: send to LLM, execute tool calls,
 // feed results back, repeat until the LLM produces a text-only response.
@@ -247,16 +241,16 @@ func AgentLoop(
 				if chunk.Type == "tool_call" {
 					acc, ok := accMap[chunk.Index]
 					if !ok {
-						acc = &agentToolCallAcc{index: chunk.Index}
+						acc = &agentToolCallAcc{Index: chunk.Index}
 						accMap[chunk.Index] = acc
 					}
 					if chunk.ToolCallID != "" {
-						acc.id = chunk.ToolCallID
+						acc.ID = chunk.ToolCallID
 					}
 					if chunk.ToolName != "" {
-						acc.name = chunk.ToolName
+						acc.Name = chunk.ToolName
 					}
-					acc.args.WriteString(chunk.ToolInput)
+					acc.Args.WriteString(chunk.ToolInput)
 				}
 
 				if chunk.Type == "content" {
@@ -375,35 +369,7 @@ func AgentLoop(
 
 // buildAgentToolCalls converts accumulated tool call deltas into []ToolCall sorted by index.
 func buildAgentToolCalls(accMap map[int]*agentToolCallAcc) []types.ToolCall {
-	if len(accMap) == 0 {
-		return nil
-	}
-	indices := make([]int, 0, len(accMap))
-	for idx := range accMap {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-	var result []types.ToolCall
-	for _, idx := range indices {
-		acc := accMap[idx]
-		id := acc.id
-		if id == "" {
-			id = acc.name
-		}
-		argsStr := acc.args.String()
-		var input json.RawMessage
-		if argsStr != "" {
-			input = json.RawMessage(argsStr)
-		} else {
-			input = json.RawMessage("{}")
-		}
-		result = append(result, types.ToolCall{
-			ID:    id,
-			Name:  acc.name,
-			Input: input,
-		})
-	}
-	return result
+	return types.BuildToolCallsFromAcc(accMap)
 }
 
 // BuildAgentMessages constructs the initial message slice for the agent loop

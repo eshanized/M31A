@@ -96,8 +96,8 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("source file not found: %s", src)
 	}
-	if srcResolved != t.workDir && !strings.HasPrefix(srcResolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("source path resolves outside working directory")
+	if err := ContainedInWorkDir(srcResolved, t.workDir); err != nil {
+		return types.ToolResult{}, fmt.Errorf("source %w", err)
 	}
 	srcAbs = srcResolved
 
@@ -114,8 +114,8 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 			dstResolved = filepath.Join(resolvedParent, filepath.Base(dstAbs))
 		}
 	}
-	if dstResolved != t.workDir && !strings.HasPrefix(dstResolved, workDirPrefix) {
-		return types.ToolResult{}, fmt.Errorf("destination path resolves outside working directory")
+	if err := ContainedInWorkDir(dstResolved, t.workDir); err != nil {
+		return types.ToolResult{}, fmt.Errorf("destination %w", err)
 	}
 	dstAbs = dstResolved
 

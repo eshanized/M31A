@@ -22,14 +22,12 @@ package streaming
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -66,12 +64,7 @@ type TickMsg struct {
 // ─── Streaming commands ───────────────────────────────────────────────────────
 
 // toolCallAcc accumulates streaming tool call deltas by index.
-type toolCallAcc struct {
-	id    string
-	name  string
-	args  strings.Builder
-	index int
-}
+type toolCallAcc = types.ToolCallAcc
 
 // StartStreamCmd starts a streaming LLM request in a goroutine.
 // The goroutine owns the channel; it creates it, writes to it, and closes it.
@@ -119,35 +112,7 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 
 		// buildToolCalls converts accumulated deltas into []ToolCall sorted by index.
 		buildToolCalls := func() []types.ToolCall {
-			if len(toolCalls) == 0 {
-				return nil
-			}
-			indices := make([]int, 0, len(toolCalls))
-			for idx := range toolCalls {
-				indices = append(indices, idx)
-			}
-			sort.Ints(indices)
-			var result []types.ToolCall
-			for _, idx := range indices {
-				acc := toolCalls[idx]
-				id := acc.id
-				if id == "" {
-					id = acc.name
-				}
-				argsStr := acc.args.String()
-				var input json.RawMessage
-				if argsStr != "" {
-					input = json.RawMessage(argsStr)
-				} else {
-					input = json.RawMessage("{}")
-				}
-				result = append(result, types.ToolCall{
-					ID:    id,
-					Name:  acc.name,
-					Input: input,
-				})
-			}
-			return result
+			return types.BuildToolCallsFromAcc(toolCalls)
 		}
 
 		for {
@@ -194,16 +159,16 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 			if chunk.Type == "tool_call" {
 				acc, ok := toolCalls[chunk.Index]
 				if !ok {
-					acc = &toolCallAcc{index: chunk.Index}
+					acc = &toolCallAcc{Index: chunk.Index}
 					toolCalls[chunk.Index] = acc
 				}
 				if chunk.ToolCallID != "" {
-					acc.id = chunk.ToolCallID
+					acc.ID = chunk.ToolCallID
 				}
 				if chunk.ToolName != "" {
-					acc.name = chunk.ToolName
+					acc.Name = chunk.ToolName
 				}
-				acc.args.WriteString(chunk.ToolInput)
+				acc.Args.WriteString(chunk.ToolInput)
 			}
 
 			select {
