@@ -45,7 +45,7 @@ func LoadCache(workDir string) *IndexCache {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var cache IndexCache
 	if err := gob.NewDecoder(f).Decode(&cache); err != nil {
@@ -70,7 +70,7 @@ func SaveCache(workDir string, cache *IndexCache) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	cache.Version = 1
 	cache.BuiltAt = time.Now()
@@ -104,7 +104,7 @@ func CheckIncremental(workDir string, parsers []Parser, cachedFiles map[string]*
 	// Track which files we've seen
 	seen := make(map[string]bool)
 
-	filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -173,7 +173,9 @@ func CheckIncremental(workDir string, parsers []Parser, cachedFiles map[string]*
 		// File is new or changed — needs reparsing
 		result.New = append(result.New, relPath)
 		return nil
-	})
+	}); err != nil {
+		return nil
+	}
 
 	// Find deleted files (in cache but not on disk)
 	for relPath := range cachedFiles {
