@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -33,11 +34,21 @@ func (m *ReplModel) copyLastAssistantMessage() tea.Cmd {
 }
 
 // copyLastError copies the last error message from the conversation to the clipboard.
+// Error banners use "✗ " or "⚠ " prefixes (not "Error: ").
 func (m *ReplModel) copyLastError() tea.Cmd {
 	var lastErr string
 	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Role == "assistant" && len(m.messages[i].Content) > 7 && m.messages[i].Content[:7] == "Error: " {
-			lastErr = m.messages[i].Content[7:]
+		if m.messages[i].Role != "assistant" || m.messages[i].Content == "" {
+			continue
+		}
+		content := m.messages[i].Content
+		// Match actual error banner prefixes used by makeErrorBannerMsg
+		if strings.HasPrefix(content, "✗ ") {
+			lastErr = content[2:]
+			break
+		}
+		if strings.HasPrefix(content, "⚠ ") {
+			lastErr = content[2:]
 			break
 		}
 	}

@@ -169,8 +169,13 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 		// File metadata: size or line count
 		metaPart := ""
 		if !entry.IsDir {
-			if entry.LineCount > 0 {
-				metaPart = metaStyle.Render(fmt.Sprintf("  %dL", entry.LineCount))
+			// PERF-44: Use lazy line count computation
+			lineCount := 0
+			if m.mentionCompleter != nil {
+				lineCount = m.mentionCompleter.GetLineCount(&entry)
+			}
+			if lineCount > 0 {
+				metaPart = metaStyle.Render(fmt.Sprintf("  %dL", lineCount))
 			} else if entry.Size > 0 {
 				metaPart = metaStyle.Render(fmt.Sprintf("  %s", humanSize(entry.Size)))
 			}

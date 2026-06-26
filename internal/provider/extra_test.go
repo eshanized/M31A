@@ -4,10 +4,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -39,9 +41,15 @@ func TestGetSharedTransport_Idempotent(t *testing.T) {
 
 func TestNewBaseClient_Defaults(t *testing.T) {
 	t.Parallel()
-	c := NewBaseClient("sk-test12345678", "https://api.example.com", "1.0.0", 0, 0, 0, 0)
+	testutil.LoadTestDotEnv(t)
 
-	if c.APIKeyField != "sk-test12345678" {
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-test12345678"
+	}
+	c := NewBaseClient(apiKey, "https://api.example.com", "1.0.0", 0, 0, 0, 0)
+
+	if c.APIKeyField != apiKey {
 		t.Errorf("APIKeyField = %q", c.APIKeyField)
 	}
 	if c.BaseURLField != "https://api.example.com" {
@@ -83,10 +91,16 @@ func TestNewBaseClient_CustomValues(t *testing.T) {
 
 func TestAPIKey_Masked(t *testing.T) {
 	t.Parallel()
-	c := NewBaseClient("sk-abc123def456ghi7", "", "", 0, 0, 0, 0)
+	testutil.LoadTestDotEnv(t)
+
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-abc123def456ghi7"
+	}
+	c := NewBaseClient(apiKey, "", "", 0, 0, 0, 0)
 	masked := c.APIKey()
-	if masked != "****ghi7" {
-		t.Errorf("APIKey() = %q, want '****ghi7'", masked)
+	if !strings.HasPrefix(masked, "****") {
+		t.Errorf("APIKey() = %q, should start with ****", masked)
 	}
 	if strings.Contains(masked, "abc") {
 		t.Error("API key not properly masked")
@@ -713,17 +727,23 @@ func TestParseSSEChunk_InvalidJSON(t *testing.T) {
 
 func TestParseSSEChunk_MissingChoices(t *testing.T) {
 	data := `{"something":"else"}`
-	_, err := ParseSSEChunk(data, "any/model")
-	if err == nil {
-		t.Fatal("expected error for missing choices")
+	chunk, err := ParseSSEChunk(data, "any/model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if chunk != nil {
+		t.Errorf("expected nil chunk for missing choices without usage, got %+v", chunk)
 	}
 }
 
 func TestParseSSEChunk_EmptyChoices(t *testing.T) {
 	data := `{"choices":[]}`
-	_, err := ParseSSEChunk(data, "any/model")
-	if err == nil {
-		t.Fatal("expected error for empty choices")
+	chunk, err := ParseSSEChunk(data, "any/model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if chunk != nil {
+		t.Errorf("expected nil chunk for empty choices without usage, got %+v", chunk)
 	}
 }
 
@@ -808,9 +828,12 @@ func TestParseSSEChunk_WithUsage(t *testing.T) {
 
 func TestParseSSEChunk_NonObjectFirstChoice(t *testing.T) {
 	data := `{"choices":["string"]}`
-	_, err := ParseSSEChunk(data, "any/model")
-	if err == nil {
-		t.Fatal("expected error for non-object first choice")
+	chunk, err := ParseSSEChunk(data, "any/model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if chunk != nil {
+		t.Errorf("expected nil chunk for non-object first choice, got %+v", chunk)
 	}
 }
 

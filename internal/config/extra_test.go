@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/eshanized/M31A/internal/testutil"
 )
 
 // ── LocalConfigPath ──────────────────────────────────────────────────────────
@@ -25,12 +27,22 @@ func TestLocalConfigPath(t *testing.T) {
 // ── SaveProject ──────────────────────────────────────────────────────────────
 
 func TestSaveProject_ClearsAPIKeys(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "m31a.toml")
 
 	cfg := DefaultConfig()
-	cfg.Provider.OpenRouter.APIKey = "sk-or-secret123"
-	cfg.Provider.Zen.APIKey = "sk-zen-secret456"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-or-secret123"
+	}
+	zenKey := os.Getenv("ZEN_API_KEY")
+	if zenKey == "" {
+		zenKey = "sk-zen-secret456"
+	}
+	cfg.Provider.OpenRouter.APIKey = orKey
+	cfg.Provider.Zen.APIKey = zenKey
 	cfg.Provider.Default = "openrouter"
 
 	if err := cfg.SaveProject(path); err != nil {
@@ -279,12 +291,22 @@ func TestSubstituteVars_MixedResolved(t *testing.T) {
 // ── SaveWithKeychain ─────────────────────────────────────────────────────────
 
 func TestSaveWithKeychain_NilKeychain(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
 	cfg := DefaultConfig()
-	cfg.Provider.OpenRouter.APIKey = "sk-or-test"
-	cfg.Provider.Zen.APIKey = "sk-zen-test"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-or-test"
+	}
+	zenKey := os.Getenv("ZEN_API_KEY")
+	if zenKey == "" {
+		zenKey = "sk-zen-test"
+	}
+	cfg.Provider.OpenRouter.APIKey = orKey
+	cfg.Provider.Zen.APIKey = zenKey
 	cfg.Provider.Default = "openrouter"
 
 	if err := cfg.SaveWithKeychain(path, nil); err != nil {
@@ -295,18 +317,28 @@ func TestSaveWithKeychain_NilKeychain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if loaded.Provider.OpenRouter.APIKey != "sk-or-test" {
+	if loaded.Provider.OpenRouter.APIKey != orKey {
 		t.Errorf("expected key preserved with nil keychain, got %q", loaded.Provider.OpenRouter.APIKey)
 	}
 }
 
 func TestSaveWithKeychain_AvailableKeychain(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
 	cfg := DefaultConfig()
-	cfg.Provider.OpenRouter.APIKey = "sk-or-key123"
-	cfg.Provider.Zen.APIKey = "sk-zen-key456"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-or-key123"
+	}
+	zenKey := os.Getenv("ZEN_API_KEY")
+	if zenKey == "" {
+		zenKey = "sk-zen-key456"
+	}
+	cfg.Provider.OpenRouter.APIKey = orKey
+	cfg.Provider.Zen.APIKey = zenKey
 	cfg.Provider.Default = "openrouter"
 
 	kc := newMockKeychain()
@@ -315,7 +347,7 @@ func TestSaveWithKeychain_AvailableKeychain(t *testing.T) {
 	}
 
 	// Keys should be in keychain
-	if v, _ := kc.Get("openrouter"); v != "sk-or-key123" {
+	if v, _ := kc.Get("openrouter"); v != orKey {
 		t.Errorf("expected key in keychain, got %q", v)
 	}
 

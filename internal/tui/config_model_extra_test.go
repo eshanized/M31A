@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/testutil"
 )
 
 func testConfigModel(t *testing.T) *ConfigModel {
@@ -147,12 +149,18 @@ func TestConfigGetFieldValueText(t *testing.T) {
 }
 
 func TestConfigGetFieldValuePassword(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	cm := testConfigModel(t)
-	cm.cfg.Provider.OpenRouter.APIKey = "sk-123"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-123"
+	}
+	cm.cfg.Provider.OpenRouter.APIKey = orKey
 	f := cfgField{key: "provider.openrouter.api_key", fieldType: cfgPassword}
 	v := cm.getFieldValue(f)
-	if v != "sk-123" {
-		t.Errorf("value=%s, want sk-123", v)
+	if v != orKey {
+		t.Errorf("value=%s, want %s", v, orKey)
 	}
 }
 

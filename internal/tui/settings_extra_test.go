@@ -1,14 +1,18 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/testutil"
 )
 
 func TestSettingsGetFieldValueAllKeys(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	cfg := config.DefaultConfig()
 	cfg.Provider.Default = "zen"
 	cfg.Provider.AutoFallback = true
@@ -25,8 +29,16 @@ func TestSettingsGetFieldValueAllKeys(t *testing.T) {
 	cfg.UI.LeaderKey = "ctrl+g"
 	cfg.UI.MaxMessageHistory = 777
 	cfg.UI.MaxIterations = 200
-	cfg.Provider.OpenRouter.APIKey = "sk-or-xxx"
-	cfg.Provider.Zen.APIKey = "sk-zen-xxx"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-or-xxx"
+	}
+	zenKey := os.Getenv("ZEN_API_KEY")
+	if zenKey == "" {
+		zenKey = "sk-zen-xxx"
+	}
+	cfg.Provider.OpenRouter.APIKey = orKey
+	cfg.Provider.Zen.APIKey = zenKey
 	cfg.Permissions.DefaultMode = "ask"
 	cfg.Permissions.TimeoutSeconds = 45
 	cfg.Features.AutoBackup = true
@@ -51,8 +63,8 @@ func TestSettingsGetFieldValueAllKeys(t *testing.T) {
 		{"sidebar_width", "42"},
 		{"leader_key", "ctrl+g"},
 		{"max_history", "777"},
-		{"apikey_or", "sk-or-xxx"},
-		{"apikey_zen", "sk-zen-xxx"},
+		{"apikey_or", orKey},
+		{"apikey_zen", zenKey},
 		{"perm_mode", "ask"},
 		{"perm_timeout", "45"},
 		{"max_iterations", "200"},
@@ -76,9 +88,21 @@ func TestSettingsGetFieldValueNilConfig(t *testing.T) {
 }
 
 func TestSettingsSetFieldValueAllKeys(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	cfg := config.DefaultConfig()
 	s := &SettingsModel{config: cfg}
 	s.editValue = textinput.New()
+
+	newOrKey := "sk-new"
+	newZenKey := "sk-zen-new"
+	// If real keys are available, use them for set tests
+	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+		newOrKey = v
+	}
+	if v := os.Getenv("ZEN_API_KEY"); v != "" {
+		newZenKey = v
+	}
 
 	setTests := []struct {
 		key   string
@@ -99,8 +123,8 @@ func TestSettingsSetFieldValueAllKeys(t *testing.T) {
 		{"sidebar_width", "35", func() bool { return cfg.UI.SidebarWidth == 35 }},
 		{"leader_key", "ctrl+z", func() bool { return cfg.UI.LeaderKey == "ctrl+z" }},
 		{"max_history", "200", func() bool { return cfg.UI.MaxMessageHistory == 200 }},
-		{"apikey_or", "sk-new", func() bool { return cfg.Provider.OpenRouter.APIKey == "sk-new" }},
-		{"apikey_zen", "sk-zen-new", func() bool { return cfg.Provider.Zen.APIKey == "sk-zen-new" }},
+		{"apikey_or", newOrKey, func() bool { return cfg.Provider.OpenRouter.APIKey == newOrKey }},
+		{"apikey_zen", newZenKey, func() bool { return cfg.Provider.Zen.APIKey == newZenKey }},
 		{"perm_mode", "auto", func() bool { return cfg.Permissions.DefaultMode == "auto" }},
 		{"perm_timeout", "60", func() bool { return cfg.Permissions.TimeoutSeconds == 60 }},
 		{"max_iterations", "100", func() bool { return cfg.UI.MaxIterations == 100 }},

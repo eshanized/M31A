@@ -15,9 +15,11 @@ type ScoredFile struct {
 // Score computes the EFIE relevance score for a file.
 // It combines 6 weighted components: centrality, direct relevance,
 // import proximity, symbol match, community boost, and Bloom cross-check.
+// PERF-34: targetSet is pre-computed once per query and passed in to avoid
+// rebuilding the map on every Score() call.
 func Score(file string, targets []string, description string,
 	graph *WeightedImportGraph, index *MultiResIndex,
-	targetCommunities map[int]bool) ScoredFile {
+	targetCommunities map[int]bool, targetSet map[string]bool) ScoredFile {
 
 	sf := ScoredFile{Path: file}
 	node, hasNode := graph.nodes[file]
@@ -39,10 +41,6 @@ func Score(file string, targets []string, description string,
 	}
 
 	// Component 2: Direct Relevance (35% weight)
-	targetSet := make(map[string]bool, len(targets))
-	for _, t := range targets {
-		targetSet[t] = true
-	}
 	if targetSet[file] {
 		sf.Score += 35.0
 		sf.Reasons = append(sf.Reasons, "directly mentioned")

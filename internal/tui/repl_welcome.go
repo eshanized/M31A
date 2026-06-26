@@ -218,7 +218,7 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 func (m *ReplModel) renderProjectCard(cardWidth int) string {
 	t := m.theme
 
-	projectName := pathBase(m.cwd)
+	projectName := filepath.Base(m.cwd)
 	if projectName == "" {
 		projectName = "project"
 	}
@@ -283,7 +283,7 @@ func (m *ReplModel) welcomePrompts() []struct{ prompt, hint string } {
 			"review",
 		}
 	}
-	if proj := pathBase(m.cwd); proj != "" {
+	if proj := filepath.Base(m.cwd); proj != "" {
 		prompts[2] = suggestion{
 			fmt.Sprintf("Explain the %s architecture", proj),
 			"explore",

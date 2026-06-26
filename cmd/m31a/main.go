@@ -45,6 +45,62 @@ func restoreTerminal() {
 	)
 }
 
+// runHeadless sends a single prompt to the active LLM provider and prints
+// the response to stdout. Used for scripting and E2E testing.
+func runHeadless(prompt string, registry *provider.Registry, defaultModel string, logger *slog.Logger) int {
+	p := registry.ActiveProvider()
+	if p == nil {
+		fmt.Fprintln(os.Stderr, "error: no active provider")
+		return 1
+	}
+
+	modelID := defaultModel
+	if modelID == "" {
+		// Try to auto-detect: fetch models and use the first one
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		models, err := p.FetchModels(ctx)
+		cancel()
+		if err == nil && len(models) > 0 {
+			modelID = models[0].ID
+		} else {
+			modelID = "default"
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	req := provider.ChatRequest{
+		Model: modelID,
+		Messages: []types.Message{
+			{Role: "user", Content: prompt},
+		},
+	}
+
+	stream, err := p.ChatCompletionStream(ctx, req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: chat completion failed: %v\n", err)
+		return 1
+	}
+	defer stream.Close()
+
+	var response strings.Builder
+	for {
+		chunk, chunkErr := stream.Next()
+		if chunkErr != nil {
+			break
+		}
+		if chunk == nil {
+			continue
+		}
+		response.WriteString(chunk.Delta)
+	}
+
+	fmt.Println(response.String())
+	logger.Info("headless mode completed", "model", modelID, "response_length", response.Len())
+	return 0
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -58,6 +114,8 @@ func run() int {
 	// Parse CLI flags
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	helpFlag := flag.Bool("help", false, "Show usage information")
+	promptFlag := flag.String("prompt", "", "Run in headless mode: send prompt to LLM and print response")
+	modelFlag := flag.String("model", "", "Model ID for headless mode (default: config model or first available)")
 	flag.Usage = func() {
 		printUsage(cmdRegistry)
 	}
@@ -167,6 +225,19 @@ func run() int {
 	hasProvider := registry.Active() != ""
 	if !hasProvider {
 		logger.Warn("no active provider configured — LLM features will be unavailable")
+	}
+
+	// Headless mode: --prompt sends a single prompt to the LLM and prints the response
+	if *promptFlag != "" {
+		if !hasProvider {
+			fmt.Fprintln(os.Stderr, "error: no provider configured — set an API key environment variable")
+			return 1
+		}
+		model := *modelFlag
+		if model == "" {
+			model = cfg.Model.Default
+		}
+		return runHeadless(*promptFlag, registry, model, logger)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/pkg/history"
 )
 
 // ─── REPL keyboard handling ───────────────────────────────────────────────────
@@ -109,8 +110,39 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKeyMsg handles key events when NOT streaming.
 func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
+	// Handle search mode first
+	if m.search.visible {
+		return m.handleSearchKey(msg)
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
+		return nil
+
+	// PERF-40: Emacs-style input editing shortcuts
+	case "ctrl+a":
+		// Move cursor to beginning of line
+		m.textarea.CursorStart()
+		return nil
+
+	case "ctrl+e":
+		// Move cursor to end of line
+		m.textarea.CursorEnd()
+		return nil
+
+	case "ctrl+k":
+		// Kill from cursor to end of line
+		m.killToLineEnd()
+		return nil
+
+	case "ctrl+w":
+		// Delete previous word
+		m.deletePreviousWord()
+		return nil
+
+	case "ctrl+f":
+		// Toggle inline viewport search
+		m.toggleSearch()
 		return nil
 
 	case "enter":
@@ -184,6 +216,11 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			m.slashVisible = false
 			m.slashSuggestions = nil
 			return nil
+		}
+		// PERF-41: Save input before clearing for undo
+		current := m.textarea.Value()
+		if current != "" && m.savedInput == "" {
+			m.savedInput = current
 		}
 		m.textarea.SetValue("")
 
@@ -380,6 +417,7 @@ func (m *ReplModel) handleSlashComplete() tea.Cmd {
 }
 
 // navigateHistoryUp moves to the previous command in frecent history.
+// PERF-42: Filters history by current input prefix for relevant results.
 func (m *ReplModel) navigateHistoryUp() {
 	if m.frecentHistory == nil {
 		return
@@ -388,14 +426,25 @@ func (m *ReplModel) navigateHistoryUp() {
 	if len(entries) == 0 {
 		return
 	}
+	// Filter by prefix if user has typed something
+	prefix := strings.ToLower(strings.TrimSpace(m.textarea.Value()))
+	var filtered []history.FrecentEntry
+	for _, e := range entries {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(e.Text), prefix) {
+			filtered = append(filtered, e)
+		}
+	}
+	if len(filtered) == 0 {
+		return
+	}
 	if m.historyIndex == -1 {
 		m.savedInput = m.textarea.Value()
 	}
 	m.historyIndex++
-	if m.historyIndex >= len(entries) {
-		m.historyIndex = len(entries) - 1
+	if m.historyIndex >= len(filtered) {
+		m.historyIndex = len(filtered) - 1
 	}
-	m.textarea.SetValue(entries[m.historyIndex].Text)
+	m.textarea.SetValue(filtered[m.historyIndex].Text)
 	m.textarea.CursorEnd()
 }
 
@@ -420,6 +469,44 @@ func (m *ReplModel) navigateHistoryDown() {
 			m.textarea.CursorEnd()
 		}
 	}
+}
+
+// killToLineEnd deletes from cursor to end of line (Ctrl+K).
+func (m *ReplModel) killToLineEnd() {
+	val := m.textarea.Value()
+	pos := m.cursorPosition()
+	if pos >= len(val) {
+		return
+	}
+	// Find end of current line
+	lineEnd := pos
+	for lineEnd < len(val) && val[lineEnd] != '\n' {
+		lineEnd++
+	}
+	if lineEnd < len(val) && val[lineEnd] == '\n' {
+		lineEnd++ // include the newline
+	}
+	m.textarea.SetValue(val[:pos] + val[lineEnd:])
+}
+
+// deletePreviousWord deletes the previous word (Ctrl+W).
+func (m *ReplModel) deletePreviousWord() {
+	val := m.textarea.Value()
+	pos := m.cursorPosition()
+	if pos == 0 {
+		return
+	}
+	// Skip trailing whitespace
+	i := pos - 1
+	for i >= 0 && val[i] == ' ' {
+		i--
+	}
+	// Skip word characters
+	for i >= 0 && val[i] != ' ' && val[i] != '\n' {
+		i--
+	}
+	i++ // back to first char of word
+	m.textarea.SetValue(val[:i] + val[pos:])
 }
 
 // ThinkingBlockToggleMsg is emitted when the user toggles a thinking block.

@@ -1,6 +1,9 @@
 package efie
 
-import "math/rand"
+import (
+	"math/rand"
+	"sort"
+)
 
 // LouvainDetect_Deterministic runs one-pass Louvain community detection
 // with a fixed seed for reproducible output.
@@ -19,6 +22,17 @@ func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]
 	m := g.EdgeCount()
 	if m == 0 {
 		return communityOf
+	}
+
+	// PERF-33: Precompute community total degrees to avoid O(N²) recomputation
+	communityDegree := make(map[int]int)
+	for _, node := range g.nodes {
+		if node.Path == ExternalNode {
+			continue
+		}
+		if c, ok := communityOf[node.Path]; ok {
+			communityDegree[c] += len(node.Imports) + len(node.ImportedBy)
+		}
 	}
 
 	for pass := 0; pass < 10; pass++ {
@@ -56,7 +70,7 @@ func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]
 			}
 
 			for targetComm := range neighborComms {
-				gain := modularityGain(nodePath, targetComm, g, communityOf, m)
+				gain := modularityGainCached(nodePath, targetComm, g, communityOf, m, communityDegree)
 				if gain > bestGain {
 					bestGain = gain
 					bestCommunity = targetComm
@@ -64,6 +78,11 @@ func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]
 			}
 
 			if bestCommunity != communityOf[nodePath] {
+				oldComm := communityOf[nodePath]
+				nodeDegree := len(node.Imports) + len(node.ImportedBy)
+				// Update community degrees incrementally
+				communityDegree[oldComm] -= nodeDegree
+				communityDegree[bestCommunity] += nodeDegree
 				communityOf[nodePath] = bestCommunity
 				improved = true
 			}
@@ -98,7 +117,7 @@ func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]
 	return communityOf
 }
 
-func modularityGain(nodePath string, targetComm int, g *WeightedImportGraph, communityOf map[string]int, m int) float64 {
+func modularityGainCached(nodePath string, targetComm int, g *WeightedImportGraph, communityOf map[string]int, m int, communityDegree map[int]int) float64 {
 	kin := 0
 	node := g.nodes[nodePath]
 	nodeDegree := len(node.Imports) + len(node.ImportedBy)
@@ -115,16 +134,8 @@ func modularityGain(nodePath string, targetComm int, g *WeightedImportGraph, com
 		}
 	}
 
-	// Community total degree
-	sigmaTot := 0
-	for _, n := range g.nodes {
-		if n.Path == ExternalNode {
-			continue
-		}
-		if c, ok := communityOf[n.Path]; ok && c == targetComm {
-			sigmaTot += len(n.Imports) + len(n.ImportedBy)
-		}
-	}
+	// PERF-33: Use cached community degree instead of recomputing
+	sigmaTot := communityDegree[targetComm]
 
 	gain := (2*float64(kin) - float64(sigmaTot)*float64(nodeDegree)/float64(m)) / (2 * float64(m))
 	return gain
@@ -142,9 +153,5 @@ func hashString(s string) int {
 }
 
 func sortedStringSlice(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
+	sort.Strings(s)
 }

@@ -196,17 +196,21 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 		if usage != nil {
 			return &types.StreamChunk{Type: "usage", Usage: usage}, nil
 		}
-		return nil, fmt.Errorf("missing 'choices' field in SSE payload")
+		return nil, nil // skip chunk silently
 	}
 
 	choicesArr, ok := choices.([]any)
 	if !ok || len(choicesArr) == 0 {
-		return nil, fmt.Errorf("empty or malformed 'choices' array in SSE payload")
+		// Some providers send empty choices in the final chunk (e.g. only usage).
+		if usage != nil {
+			return &types.StreamChunk{Type: "usage", Usage: usage}, nil
+		}
+		return nil, nil // skip chunk silently
 	}
 
 	firstChoice, ok := choicesArr[0].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("first choice in 'choices' array is not an object")
+		return nil, nil // malformed choice, skip silently
 	}
 
 	delta, deltaOk := firstChoice["delta"]

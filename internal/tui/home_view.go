@@ -71,7 +71,58 @@ func (hm *HomeModel) renderHome() string {
 		versionLine,
 	)
 
+	// Overlay slash suggestions if visible
+	if hm.slashVisible && len(hm.slashSuggestions) > 0 {
+		suggestionsBox := hm.renderSlashSuggestions(promptMaxW)
+		content = lipgloss.JoinVertical(lipgloss.Center,
+			"",
+			glowBlock,
+			"",
+			"",
+			inputBox,
+			suggestionsBox,
+			"",
+			tipsBlock,
+			"",
+			versionLine,
+		)
+	}
+
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
+}
+
+// renderSlashSuggestions renders the slash command autocomplete dropdown.
+func (hm *HomeModel) renderSlashSuggestions(width int) string {
+	t := hm.theme
+	var lines []string
+
+	for i, cmd := range hm.slashSuggestions {
+		slashStyle := lipgloss.NewStyle().Foreground(t.Brand)
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
+		descStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+
+		if i == hm.slashSelected {
+			nameStyle = nameStyle.Background(t.Brand).Foreground(t.Background)
+			slashStyle = slashStyle.Background(t.Brand).Foreground(t.Background)
+			descStyle = descStyle.Background(t.Brand).Foreground(t.Background)
+		}
+
+		slash := slashStyle.Render(cmd.Slash)
+		desc := descStyle.Render("  " + cmd.Description)
+		line := "  " + nameStyle.Render(slash) + desc
+		if lipgloss.Width(line) > width {
+			line = TruncateWithEllipsis(line, width)
+		}
+		lines = append(lines, line)
+	}
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	return box
 }
 
 // renderTips renders the keyboard shortcut tips as a horizontal row.

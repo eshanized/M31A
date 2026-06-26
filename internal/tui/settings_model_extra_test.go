@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -579,8 +581,14 @@ func TestSettingsViewStatus(t *testing.T) {
 // ═══ keySource ═══
 
 func TestKeySource(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	s := testSettingsModel(t)
-	s.config.Provider.OpenRouter.APIKey = "sk-123"
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "sk-123"
+	}
+	s.config.Provider.OpenRouter.APIKey = orKey
 	v := s.keySource("apikey_or")
 	if v != "config" {
 		t.Errorf("keySource=%s, want config", v)

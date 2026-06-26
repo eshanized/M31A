@@ -239,18 +239,17 @@ func (e *EFIEIndex) parallelParse(ctx context.Context) ([]*fileInfo, map[string]
 					Language: info.Language,
 					Symbols:  make([]SymbolInfo, 0),
 				}
+				// PERF-37: Use map for O(1) deduplication instead of O(N) linear scan
+				seenSymbols := make(map[string]bool)
 				for _, s := range info.Exports {
-					fi.Symbols = append(fi.Symbols, SymbolInfo(s))
+					if !seenSymbols[s.Name] {
+						seenSymbols[s.Name] = true
+						fi.Symbols = append(fi.Symbols, SymbolInfo(s))
+					}
 				}
 				for _, f := range info.Funcs {
-					found := false
-					for _, s := range fi.Symbols {
-						if s.Name == f.Name {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if !seenSymbols[f.Name] {
+						seenSymbols[f.Name] = true
 						fi.Symbols = append(fi.Symbols, SymbolInfo{
 							Name: f.Name, Kind: "func", Exported: f.Exported,
 						})

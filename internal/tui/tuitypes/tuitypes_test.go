@@ -1,9 +1,11 @@
 package tuitypes
 
 import (
+	"os"
 	"testing"
 	"time"
 
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -118,23 +120,35 @@ func TestModelSelectedMsg(t *testing.T) {
 }
 
 func TestProviderEntry(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-123"
+	}
 	entry := ProviderEntry{
 		ID:     "openai",
-		APIKey: "sk-123",
+		APIKey: apiKey,
 	}
 
 	if entry.ID != "openai" {
 		t.Errorf("ID = %q, want %q", entry.ID, "openai")
 	}
-	if entry.APIKey != "sk-123" {
-		t.Errorf("APIKey = %q, want %q", entry.APIKey, "sk-123")
+	if entry.APIKey != apiKey {
+		t.Errorf("APIKey = %q, want %q", entry.APIKey, apiKey)
 	}
 }
 
 func TestFirstRunCompleteMsg(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-123"
+	}
 	msg := FirstRunCompleteMsg{
 		Providers: []ProviderEntry{
-			{ID: "openai", APIKey: "sk-123"},
+			{ID: "openai", APIKey: apiKey},
 		},
 		ModelID:         "gpt-4",
 		SaveKeychain:    true,

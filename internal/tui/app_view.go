@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -243,7 +244,7 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 
 	// Working directory
 	if m.replModel != nil && m.replModel.cwd != "" {
-		info.Cwd = pathBase(m.replModel.cwd)
+		info.Cwd = filepath.Base(m.replModel.cwd)
 	}
 
 	// Git branch
@@ -751,6 +752,7 @@ func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string 
 func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {
 	if m.homeModel == nil {
 		m.homeModel = NewHomeModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight(), m.version)
+		m.homeModel.SetCommandRegistry(m.cmdRegistry)
 	}
 	m.homeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.homeModel.renderHome()

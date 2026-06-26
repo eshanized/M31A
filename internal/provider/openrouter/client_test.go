@@ -7,17 +7,25 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestNew_ValidKey(t *testing.T) {
-	c, err := New("sk-or-v1-testkey", Options{})
+	testutil.LoadTestDotEnv(t)
+
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-or-v1-testkey"
+	}
+	c, err := New(apiKey, Options{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

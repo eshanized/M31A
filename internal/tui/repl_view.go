@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -117,6 +118,12 @@ func (m *ReplModel) View() string {
 	}
 	viewportContent = compositeOverlays(viewportContent, overlays, rw, m.viewport.Height)
 
+	// ── Inline search bar (Ctrl+F) ──────────────────────────────────────────
+	var searchBar string
+	if m.search.visible {
+		searchBar = m.renderSearchBar(rw)
+	}
+
 	// Floating new-messages pill anchored to the TOP of the viewport.
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
 		pill := lipgloss.NewStyle().
@@ -151,7 +158,7 @@ func (m *ReplModel) View() string {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)
 	}
 	if m.cwd != "" {
-		info.CwdName = pathBase(m.cwd)
+		info.CwdName = filepath.Base(m.cwd)
 	}
 	if m.sidebarBranch != "" {
 		info.GitBranch = m.sidebarBranch
@@ -173,7 +180,11 @@ func (m *ReplModel) View() string {
 	statusBar := RenderStatusBar(t, rw, info)
 
 	// ── Assemble all parts ─────────────────────────────────────────────────
-	parts := []string{viewportContent, inputBorder, textareaView, statusBar}
+	parts := []string{viewportContent, inputBorder, textareaView}
+	if searchBar != "" {
+		parts = append(parts, searchBar)
+	}
+	parts = append(parts, statusBar)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -326,19 +337,17 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 	waveChars := []rune{'▁', '▂', '▃', '▄', '▃', '▂'}
 	waveLen := len(waveChars)
 
-	// Pre-compute the style once instead of per-character.
-	brandStyle := lipgloss.NewStyle().Foreground(t.Brand)
-	var sb strings.Builder
+	// PERF-38: Build raw string first, then render once (1 call instead of width calls)
+	var raw strings.Builder
+	raw.Grow(width)
 	for i := 0; i < width; i++ {
-		// Position in the wave cycle, offset by position + global offset
 		phase := (i + m.waveOffset) % waveLen
 		if phase < 0 {
 			phase += waveLen
 		}
-		ch := string(waveChars[phase])
-		sb.WriteString(brandStyle.Render(ch))
+		raw.WriteRune(waveChars[phase])
 	}
-	return sb.String()
+	return lipgloss.NewStyle().Foreground(t.Brand).Render(raw.String())
 }
 
 func (m *ReplModel) renderSlashSuggestions(width int) string {
@@ -372,21 +381,4 @@ func (m *ReplModel) renderSlashSuggestions(width int) string {
 		Render(strings.Join(lines, "\n"))
 
 	return box
-}
-
-// pathBase returns the last path component of a file path.
-func pathBase(p string) string {
-	if p == "" {
-		return ""
-	}
-	// Trim trailing slashes
-	for len(p) > 0 && (p[len(p)-1] == '/' || p[len(p)-1] == '\\') {
-		p = p[:len(p)-1]
-	}
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' || p[i] == '\\' {
-			return p[i+1:]
-		}
-	}
-	return p
 }

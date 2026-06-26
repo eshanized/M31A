@@ -639,6 +639,35 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case HealthCheckResultMsg:
 		m.healthStatus = msg.Result
 		m.lastHealth = time.Now()
+		// Display health check result to the user
+		if m.replModel != nil {
+			result := msg.Result
+			var emoji, status string
+			switch result.Status {
+			case types.HealthStatusLive:
+				emoji = "✓"
+				status = "healthy"
+			case types.HealthStatusSlow:
+				emoji = "⚠"
+				status = "slow"
+			case types.HealthStatusOffline:
+				emoji = "✗"
+				status = "offline"
+			case types.HealthStatusDegraded:
+				emoji = "⚠"
+				status = "degraded"
+			default:
+				emoji = "?"
+				status = result.Status
+			}
+			var msg string
+			if result.Error != "" {
+				msg = fmt.Sprintf("%s Health check: %s (%s) — %s", emoji, status, fmt.Sprintf("%dms", result.LatencyMs), result.Error)
+			} else {
+				msg = fmt.Sprintf("%s Health check: %s (%s)", emoji, status, fmt.Sprintf("%dms", result.LatencyMs))
+			}
+			m.replModel.AddMessage(makeAssistantMsg(msg))
+		}
 
 	// ── Cache refresh ─────────────────────────────────────────────────────────
 	case RefreshCacheMsg:
@@ -1845,6 +1874,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.homeModel == nil {
 			cw, ch := m.contentDimensions()
 			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
+			m.homeModel.SetCommandRegistry(m.cmdRegistry)
 		}
 		return m.homeModel.Init()
 	default:
@@ -2725,6 +2755,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenHome:
 		if m.homeModel == nil {
 			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
+			m.homeModel.SetCommandRegistry(m.cmdRegistry)
 		} else {
 			m.homeModel.SetDimensions(cw, ch)
 		}

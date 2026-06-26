@@ -137,6 +137,12 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 		seeds[t] = true
 	}
 
+	// PERF-34: Pre-compute targetSet once for all Score() calls
+	targetSet := make(map[string]bool, len(targetFiles))
+	for _, t := range targetFiles {
+		targetSet[t] = true
+	}
+
 	// Direct neighbor expansion
 	for _, target := range targetFiles {
 		node, ok := efie.graph.nodes[target]
@@ -201,7 +207,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 	var expanded []scoredEntry
 
 	for seed := range seeds {
-		sf := Score(seed, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities)
+		sf := Score(seed, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
 		entry := scoredEntry{path: seed, score: sf.Score, scoredFile: sf}
 		heap.Push(&candidates, &entry)
 		visited[seed] = true
@@ -234,7 +240,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 
 			neighborNode, ok := efie.graph.nodes[neighbor]
 			if ok && neighborNode.PageRank > expansionThreshold {
-				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities)
+				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
 				heap.Push(&candidates, &scoredEntry{path: neighbor, score: sf.Score, scoredFile: sf})
 				explored++
 			}
@@ -248,7 +254,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 
 			neighborNode, ok := efie.graph.nodes[neighbor]
 			if ok && neighborNode.PageRank > expansionThreshold {
-				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities)
+				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
 				heap.Push(&candidates, &scoredEntry{path: neighbor, score: sf.Score, scoredFile: sf})
 				explored++
 			}
@@ -322,11 +328,7 @@ func (h *maxHeap) Pop() interface{} {
 }
 
 func sortFloat64s(s []float64) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
+	sort.Float64s(s)
 }
 
 func itoa(n int) string {

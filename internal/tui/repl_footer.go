@@ -268,7 +268,8 @@ func renderContextRing(used, total int, t theme.Theme) string {
 		barColor = t.Brand
 	}
 
-	const segments = 8
+	// PERF-43: Increased from 8 to 16 segments for finer granularity
+	const segments = 16
 	filled := int(math.Round(pct * segments))
 	if filled > segments {
 		filled = segments

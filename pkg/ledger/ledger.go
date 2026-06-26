@@ -256,11 +256,24 @@ func matchesAnyKeyword(entryKeywords, queryKeywords []string) bool {
 // Returns zero-valued stats for an empty ledger (never panics).
 // Uses mtime-based caching: if LEDGER.md hasn't been modified since
 // the last call, returns the cached result (M-16).
+// PERF-35: Uses RLock for cache-hit path to avoid lock contention.
 func (l *Ledger) Stats() LedgerStats {
+	// PERF-35: Fast path - check cache with read lock first
+	l.mu.RLock()
+	if info, err := os.Stat(l.path); err == nil {
+		if l.statsCacheMtime.Equal(info.ModTime()) && l.statsCache.TotalSessions == len(l.entries) {
+			stats := l.statsCache
+			l.mu.RUnlock()
+			return stats
+		}
+	}
+	l.mu.RUnlock()
+
+	// Slow path - need write lock for recomputation
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Check mtime-based cache
+	// Double-check after acquiring write lock (another goroutine may have updated)
 	if info, err := os.Stat(l.path); err == nil {
 		if l.statsCacheMtime.Equal(info.ModTime()) && l.statsCache.TotalSessions == len(l.entries) {
 			return l.statsCache

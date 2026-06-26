@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/eshanized/M31A/internal/testutil"
 )
 
 // mockKeychain implements the keychain.Keychain interface for testing.
@@ -273,26 +274,44 @@ func TestConfig_SaveEnvOverride(t *testing.T) {
 }
 
 func TestConfig_KeyResolutionEnvVar(t *testing.T) {
+	testutil.LoadTestDotEnv(t)
+
 	cfg := &Config{}
 	kc := newMockKeychain()
 
-	// Set env var
-	t.Setenv("M31A_OPENROUTER_API_KEY", "env-or-key")
-	t.Setenv("M31A_ZEN_API_KEY", "env-zen-key")
+	// Use env vars from .env.test if available, otherwise use test defaults
+	orKey := os.Getenv("M31A_OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = "env-or-key"
+	}
+	zenKey := os.Getenv("M31A_ZEN_API_KEY")
+	if zenKey == "" {
+		zenKey = "env-zen-key"
+	}
+	t.Setenv("M31A_OPENROUTER_API_KEY", orKey)
+	t.Setenv("M31A_ZEN_API_KEY", zenKey)
 
 	if err := cfg.ResolveAPIKeys(kc); err != nil {
 		t.Fatalf("ResolveAPIKeys failed: %v", err)
 	}
 
-	if cfg.Provider.OpenRouter.APIKey != "env-or-key" {
-		t.Errorf("expected 'env-or-key', got %q", cfg.Provider.OpenRouter.APIKey)
+	if cfg.Provider.OpenRouter.APIKey != orKey {
+		t.Errorf("expected %q, got %q", orKey, cfg.Provider.OpenRouter.APIKey)
 	}
-	if cfg.Provider.Zen.APIKey != "env-zen-key" {
-		t.Errorf("expected 'env-zen-key', got %q", cfg.Provider.Zen.APIKey)
+	if cfg.Provider.Zen.APIKey != zenKey {
+		t.Errorf("expected %q, got %q", zenKey, cfg.Provider.Zen.APIKey)
 	}
 }
 
 func TestConfig_KeyResolutionKeychain(t *testing.T) {
+	// Ensure real env vars don't interfere with keychain-only test
+	t.Setenv("M31A_OPENROUTER_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("M31A_ZEN_API_KEY", "")
+	t.Setenv("ZEN_API_KEY", "")
+	t.Setenv("M31A_NVIDIA_API_KEY", "")
+	t.Setenv("NVIDIA_API_KEY", "")
+
 	cfg := &Config{}
 	kc := newMockKeychain()
 	kc.store["openrouter"] = "kc-or-key"
@@ -313,6 +332,14 @@ func TestConfig_KeyResolutionKeychain(t *testing.T) {
 }
 
 func TestConfig_KeyResolutionConfigFile(t *testing.T) {
+	// Ensure real env vars don't interfere with config-file-only test
+	t.Setenv("M31A_OPENROUTER_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("M31A_ZEN_API_KEY", "")
+	t.Setenv("ZEN_API_KEY", "")
+	t.Setenv("M31A_NVIDIA_API_KEY", "")
+	t.Setenv("NVIDIA_API_KEY", "")
+
 	cfg := &Config{}
 	cfg.Provider.OpenRouter.APIKey = "cfg-or-key"
 	cfg.Provider.Zen.APIKey = "cfg-zen-key"
@@ -355,6 +382,14 @@ func TestConfig_KeyResolutionOrder(t *testing.T) {
 }
 
 func TestConfig_KeyResolutionNoKeys(t *testing.T) {
+	// Ensure real env vars don't interfere with no-keys test
+	t.Setenv("M31A_OPENROUTER_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("M31A_ZEN_API_KEY", "")
+	t.Setenv("ZEN_API_KEY", "")
+	t.Setenv("M31A_NVIDIA_API_KEY", "")
+	t.Setenv("NVIDIA_API_KEY", "")
+
 	cfg := &Config{}
 
 	// No env vars, no keychain, no config file keys

@@ -52,6 +52,7 @@ var mentionSkipDirs = map[string]bool{
 const maxMentionEntries = 500
 
 // Scan (re)scans the working directory, populating entries up to maxMentionEntries.
+// PERF-44: Defers line count calculation to avoid reading every file during scan.
 func (c *MentionCompleter) Scan() {
 	c.entries = c.entries[:0]
 	if c.cwd == "" {
@@ -87,16 +88,26 @@ func (c *MentionCompleter) Scan() {
 			DisplayName: base,
 			Size:        info.Size(),
 		}
-		if !info.IsDir() && info.Size() < 100_000 {
-			if data, err := os.ReadFile(path); err == nil {
-				entry.LineCount = strings.Count(string(data), "\n") + 1
-			}
-		}
+		// LineCount is computed lazily when GetLineCount() is called
 		c.entries = append(c.entries, entry)
 		return nil
 	})
 	c.scanned = true
 	c.lastScan = time.Now()
+}
+
+// GetLineCount returns the line count for an entry, computing it lazily if needed.
+func (c *MentionCompleter) GetLineCount(entry *MentionEntry) int {
+	if entry.LineCount > 0 || entry.IsDir {
+		return entry.LineCount
+	}
+	absPath := filepath.Join(c.cwd, entry.Path)
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return 0
+	}
+	entry.LineCount = strings.Count(string(data), "\n") + 1
+	return entry.LineCount
 }
 
 // Filter returns up to 8 entries whose path/name matches query (fuzzy prefix + contains).

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -156,7 +158,13 @@ func TestNew_ShortKey(t *testing.T) {
 
 func TestOptions_Defaults(t *testing.T) {
 	t.Parallel()
-	c, err := New("sk-or-v1-testkey1234567890", Options{})
+	testutil.LoadTestDotEnv(t)
+
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-or-v1-testkey1234567890"
+	}
+	c, err := New(apiKey, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

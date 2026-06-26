@@ -89,6 +89,9 @@ type ReplModel struct {
 	// Quick actions overlay state (ctrl+q toggles the dropdown)
 	quickActionsVisible bool
 
+	// Inline viewport search state (ctrl+f toggles)
+	search searchState
+
 	// Activity tracking
 	lastActivity     time.Time
 	lastStatus       string

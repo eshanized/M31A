@@ -33,8 +33,10 @@ func (m *ReplModel) executeShellCommand(input string, ctx context.Context) tea.C
 			result = string(out)
 		}
 
-		if len(result) > 4000 {
-			result = result[:4000] + "\n...(truncated)"
+		// PERF-39: Increased from 4KB to 8KB to show more output
+		const maxShellOutput = 8192
+		if len(result) > maxShellOutput {
+			result = result[:maxShellOutput] + "\n...(truncated)"
 		}
 		return SlashCommandMsg{Command: "!result:" + result}
 	}

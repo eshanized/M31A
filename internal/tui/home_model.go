@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -45,6 +46,12 @@ type HomeModel struct {
 
 	width  int
 	height int
+
+	// Slash command autocomplete state
+	cmdRegistry      *CommandRegistry
+	slashVisible     bool
+	slashSuggestions []CommandInfo
+	slashSelected    int
 }
 
 // NewHomeModel creates a HomeModel.
@@ -75,6 +82,11 @@ func (hm *HomeModel) SetTheme(t theme.Theme) {
 	hm.theme = t
 }
 
+// SetCommandRegistry sets the command registry for slash command suggestions.
+func (hm *HomeModel) SetCommandRegistry(registry *CommandRegistry) {
+	hm.cmdRegistry = registry
+}
+
 // View implements tea.Model. Delegates to renderHome in home_view.go.
 func (hm *HomeModel) View() string {
 	return hm.renderHome()
@@ -91,6 +103,64 @@ func homeTickCmd() tea.Cmd {
 	})
 }
 
+// updateSlashSuggestions updates slash command autocomplete based on current input.
+func (hm *HomeModel) updateSlashSuggestions() {
+	if hm.cmdRegistry == nil {
+		return
+	}
+
+	current := hm.input.Value()
+	if !strings.HasPrefix(current, "/") {
+		hm.slashVisible = false
+		hm.slashSuggestions = nil
+		return
+	}
+
+	parts := strings.Fields(current)
+	partial := ""
+	if len(parts) > 0 {
+		partial = strings.TrimPrefix(parts[0], "/")
+	}
+
+	allCmds := hm.cmdRegistry.AllCommands()
+	hm.slashSuggestions = nil
+
+	if partial == "" {
+		hm.slashSuggestions = allCmds
+	} else {
+		q := strings.ToLower(partial)
+		for _, cmd := range allCmds {
+			name := strings.ToLower(cmd.Name)
+			slash := strings.ToLower(strings.TrimPrefix(cmd.Slash, "/"))
+			if strings.HasPrefix(slash, q) || strings.HasPrefix(name, q) || strings.Contains(name, q) {
+				hm.slashSuggestions = append(hm.slashSuggestions, cmd)
+			}
+		}
+	}
+
+	if len(hm.slashSuggestions) > 0 {
+		hm.slashVisible = true
+		hm.slashSelected = 0
+		if len(hm.slashSuggestions) > 8 {
+			hm.slashSuggestions = hm.slashSuggestions[:8]
+		}
+	} else {
+		hm.slashVisible = false
+	}
+}
+
+// handleSlashComplete completes the selected slash suggestion.
+func (hm *HomeModel) handleSlashComplete() tea.Cmd {
+	if hm.slashSelected >= len(hm.slashSuggestions) {
+		return nil
+	}
+	chosen := hm.slashSuggestions[hm.slashSelected]
+	hm.input.SetValue(chosen.Slash + " ")
+	hm.slashVisible = false
+	hm.slashSuggestions = nil
+	return nil
+}
+
 // Update handles key and tick messages.
 func (hm *HomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -105,6 +175,27 @@ func (hm *HomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return hm, homeTickCmd()
 
 	case tea.KeyMsg:
+		// Handle slash suggestion navigation when visible
+		if hm.slashVisible && len(hm.slashSuggestions) > 0 {
+			switch msg.String() {
+			case "tab":
+				return hm, hm.handleSlashComplete()
+			case "esc":
+				hm.slashVisible = false
+				hm.slashSuggestions = nil
+			case "up":
+				if hm.slashSelected > 0 {
+					hm.slashSelected--
+				}
+				return hm, nil
+			case "down":
+				if hm.slashSelected < len(hm.slashSuggestions)-1 {
+					hm.slashSelected++
+				}
+				return hm, nil
+			}
+		}
+
 		switch msg.String() {
 		case "enter":
 			text := hm.input.Value()
@@ -117,5 +208,9 @@ func (hm *HomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	hm.input, cmd = hm.input.Update(msg)
+
+	// Update slash suggestions after input changes
+	hm.updateSlashSuggestions()
+
 	return hm, cmd
 }

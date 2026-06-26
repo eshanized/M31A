@@ -270,13 +270,14 @@ func TestScore(t *testing.T) {
 	idx.SetCommunity("other.go", 1)
 
 	targetComms := map[int]bool{0: true}
+	targetSet := map[string]bool{"target.go": true}
 
-	sf := Score("target.go", []string{"target.go"}, "", g, idx, targetComms)
+	sf := Score("target.go", []string{"target.go"}, "", g, idx, targetComms, targetSet)
 	if sf.Score < 35.0 {
 		t.Errorf("target file should score >= 35 (direct mention), got %.1f", sf.Score)
 	}
 
-	sf = Score("dep.go", []string{"target.go"}, "", g, idx, targetComms)
+	sf = Score("dep.go", []string{"target.go"}, "", g, idx, targetComms, targetSet)
 	if sf.Score < 5.0 {
 		t.Errorf("dep file should score > 0, got %.1f", sf.Score)
 	}

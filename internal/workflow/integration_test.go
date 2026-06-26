@@ -56,7 +56,6 @@ func (m *multiTurnMockProvider) GetModel(id string) (*m31types.ModelInfo, error)
 func (m *multiTurnMockProvider) CachedModels() []m31types.ModelInfo { return nil }
 
 func TestFullWorkflow(t *testing.T) {
-	t.Skip("requires update for project-local session paths")
 	dir := t.TempDir()
 
 	// Init git repo
@@ -68,16 +67,15 @@ func TestFullWorkflow(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\ngo 1.22"), 0644)
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}"), 0644)
 
-	// Create session
-	sessionBaseDir := filepath.Join(dir, "sessions")
-	os.MkdirAll(sessionBaseDir, 0755)
-	mgr := session.NewManager(sessionBaseDir, sessionBaseDir, session.ManagerOpts{})
+	// Create session manager — workDir is the project root; sessions live in <workDir>/.m31a/
+	mgr := session.NewManager(dir, dir, session.ManagerOpts{})
 
 	s, err := mgr.NewSession("test-model", "test-provider")
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
+	// planningDir must match the session manager's projectDir() = <workDir>/.m31a
 	planningDir := filepath.Join(dir, ".m31a")
 
 	// Create dispatcher

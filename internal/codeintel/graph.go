@@ -234,6 +234,13 @@ func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, er
 					continue
 				}
 
+				// PERF-36: Limit file size to prevent excessive memory usage
+				// for large generated files. Follow EFIE indexer pattern.
+				const maxFileSize = 4096
+				if len(content) > maxFileSize {
+					content = content[:maxFileSize]
+				}
+
 				info, parseErr := job.parser.Parse(job.relPath, content)
 				if parseErr != nil {
 					// Log parse error but add as isolated node so file isn't invisible

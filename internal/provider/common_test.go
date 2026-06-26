@@ -2,11 +2,13 @@ package provider
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -134,11 +136,17 @@ func TestUserAgent(t *testing.T) {
 
 func TestSetCommonHeaders(t *testing.T) {
 	t.Parallel()
-	req, _ := http.NewRequest("GET", "http://example.com", nil)
-	SetCommonHeaders(req, "sk-test123", "1.0")
+	testutil.LoadTestDotEnv(t)
 
-	if got := req.Header.Get("Authorization"); got != "Bearer sk-test123" {
-		t.Errorf("Authorization = %q, want %q", got, "Bearer sk-test123")
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk-test123"
+	}
+	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	SetCommonHeaders(req, apiKey, "1.0")
+
+	if got := req.Header.Get("Authorization"); got != "Bearer "+apiKey {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer "+apiKey)
 	}
 	if got := req.Header.Get("User-Agent"); got != "M31A/1.0" {
 		t.Errorf("User-Agent = %q, want %q", got, "M31A/1.0")
