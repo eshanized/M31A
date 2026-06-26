@@ -47,7 +47,9 @@ Software engineering systems face a common structural problem: they model comple
 | History Scoring | 2-component recency+frequency | Co-occurrence usage graph | No structural analysis |
 | Relevance Scoring | 4 heuristic additive components | Weighted import graph | No composite weighting |
 
-The EFIE (Eshanized File Intelligence Engine) module demonstrated that graph-theoretic innovations — PageRank, Louvain community detection, betweenness centrality, Trie indexing, Bloom filters — can achieve 5-20x improvements in codebase exploration. EGINE extends that approach to the broader M31A platform, applying these innovations across task scheduling, code complexity analysis, provider management, symbol search, history scoring, code navigation, context allocation, and visualization.
+The EFIE (Eshanized File Intelligence Engine) module demonstrated that graph-theoretic innovations — PageRank, Louvain community detection, betweenness centrality, Trie indexing, Bloom filters — can provide **theoretical improvements** in codebase exploration. EGINE extends that approach to the broader M31A platform, applying these innovations across task scheduling, code complexity analysis, provider management, symbol search, history scoring, code navigation, context allocation, and visualization.
+
+> **⚠️ NOTE:** The original EFIE performance claims of "5-20x improvements" have been **refuted by 30-run statistical benchmarks**. EFIE is actually **28-736x slower** for queries and **12-23x slower** for builds, though it uses **44% less memory**. The algorithm is a research contribution but not recommended for production use due to performance overhead.
 
 ### 1.2 Design Philosophy
 

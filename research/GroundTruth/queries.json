@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-06-26",
+    "description": "Ground truth dataset for EFIE relevance evaluation",
+    "queries_count": 50,
+    "repositories": ["go-stdlib", "kubernetes", "vscode", "django", "redis"]
+  },
+  "query_templates": [
+    {
+      "id": "Q1",
+      "type": "exact_function",
+      "query": "ParseFile",
+      "description": "Find all files related to file parsing",
+      "expected_relevant_files": ["parser.go", "format.go", "ast.go"],
+      "relevance_levels": {
+        "parser.go": "high",
+        "format.go": "medium",
+        "ast.go": "medium"
+      }
+    },
+    {
+      "id": "Q2",
+      "type": "partial_symbol",
+      "query": "HTTP",
+      "description": "Find HTTP-related code",
+      "expected_relevant_files": ["server.go", "client.go", "handler.go", "request.go", "response.go"],
+      "relevance_levels": {
+        "server.go": "high",
+        "client.go": "high",
+        "handler.go": "high",
+        "request.go": "medium",
+        "response.go": "medium"
+      }
+    },
+    {
+      "id": "Q3",
+      "type": "conceptual",
+      "query": "error handling",
+      "description": "Find error handling patterns",
+      "expected_relevant_files": ["errors.go", "error_handler.go", "recover.go"],
+      "relevance_levels": {
+        "errors.go": "high",
+        "error_handler.go": "high",
+        "recover.go": "medium"
+      }
+    },
+    {
+      "id": "Q4",
+      "type": "import_graph",
+      "query": "files importing fmt",
+      "description": "Find all files that import the fmt package",
+      "expected_relevant_files": ["main.go", "utils.go", "debug.go"],
+      "relevance_levels": {
+        "main.go": "high",
+        "utils.go": "medium",
+        "debug.go": "low"
+      }
+    },
+    {
+      "id": "Q5",
+      "type": "architectural",
+      "query": "core entry point",
+      "description": "Find the main architectural entry points",
+      "expected_relevant_files": ["main.go", "app.go", "init.go"],
+      "relevance_levels": {
+        "main.go": "high",
+        "app.go": "high",
+        "init.go": "medium"
+      }
+    }
+  ],
+  "relevance_scale": {
+    "high": "Directly implements or defines the queried concept",
+    "medium": "Closely related, imports/imports-by, or contains supporting code",
+    "low": "Tangentially related, uses the concept but doesn't define it"
+  }
+}

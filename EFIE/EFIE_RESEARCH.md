@@ -18,7 +18,9 @@
 
 ## Abstract
 
-Traditional codebase exploration systems treat source files as a flat, unstructured collection, relying on brute-force breadth-first search and linear scanning to answer queries about code relationships, relevance, and structure. This approach scales poorly: build times grow linearly with codebase size, symbol searches execute in O(N) time, and relevance scoring evaluates every file regardless of architectural importance. This paper presents EFIE (Eshanized File Intelligence Engine), a novel algorithm that replaces flat graph scanning with community-structured, importance-weighted, adaptive expansion. EFIE models a codebase as a weighted, multi-resolution graph where architectural importance is precomputed via PageRank and betweenness centrality, natural file clusters are discovered through deterministic Louvain community detection, and queries are answered by following the most relevant paths first via an adaptive expansion strategy. We formalize each mathematical component — the modularity gain function for Louvain detection, the stationary distribution computation for PageRank, the Brandes approximate betweenness centrality algorithm, the optimal Bloom filter sizing equations, and the composite scoring function — providing proofs of correctness, convergence guarantees, and complexity bounds. Empirical analysis on representative codebases of 1,000 to 10,000 files demonstrates 5-20x faster queries with only 16% additional memory overhead, while build times remain under 5 seconds through parallelism and incremental indexing.
+Traditional codebase exploration systems treat source files as a flat, unstructured collection, relying on brute-force breadth-first search and linear scanning to answer queries about code relationships, relevance, and structure. This approach scales poorly: build times grow linearly with codebase size, symbol searches execute in O(N) time, and relevance scoring evaluates every file regardless of architectural importance. This paper presents EFIE (Eshanized File Intelligence Engine), a novel algorithm that replaces flat graph scanning with community-structured, importance-weighted, adaptive expansion. EFIE models a codebase as a weighted, multi-resolution graph where architectural importance is precomputed via PageRank and betweenness centrality, natural file clusters are discovered through deterministic Louvain community detection, and queries are answered by following the most relevant paths first via an adaptive expansion strategy. We formalize each mathematical component — the modularity gain function for Louvain detection, the stationary distribution computation for PageRank, the Brandes approximate betweenness centrality algorithm, the optimal Bloom filter sizing equations, and the composite scoring function — providing proofs of correctness, convergence guarantees, and complexity bounds.
+
+> **⚠️ CORRECTION:** The original claim of "5-20x faster queries with only 16% additional memory overhead" has been **refuted by 30-run statistical benchmarks** on 4 real Go repositories. EFIE is actually **28-736x slower** for queries and **12-23x slower** for builds, though it uses **44% less memory**. See Section 12 for corrected empirical results.
 
 ---
 
@@ -946,16 +948,16 @@ where $u$ is the parent of $v$ in the BFS tree. This avoids the $O(|V| \times |E
 
 ### 11.1 Build Phase
 
-| Operation | Current | EFIE | Improvement |
-|-----------|---------|------|-------------|
-| File discovery | $O(N)$ sequential | $O(N)$ sequential | Same |
-| File parsing | $O(N \times F)$ sequential | $O(N \times F / P)$ parallel | $P\times$ speedup |
-| Import resolution | $O(I \times S)$ stat calls | $O(I)$ map lookup | $S\times$ speedup |
-| Graph construction | $O(N \times I)$ | $O(N \times I)$ | Same |
-| Community detection | N/A | $O(E \times \log V)$ | New capability |
-| Centrality computation | N/A | $O(E \times 20 + V \times S)$ | New capability |
-| Index construction | $O(N \times K)$ | $O(N \times K)$ | Same |
-| **Total build** | $O(N \times F)$ | $O(N \times F / P + E \times \log V)$ | **$P\times$ speedup** |
+| Operation | Current | EFIE v2.0 | EFIE v2.1 | Improvement |
+|-----------|---------|-----------|-----------|-------------|
+| File discovery | $O(N)$ sequential | $O(N)$ sequential | $O(N)$ sequential | Same |
+| File parsing | $O(N \times F)$ sequential | $O(N \times F / P)$ parallel | $O(N \times F / P)$ parallel | $P\times$ speedup |
+| Import resolution | $O(I \times S)$ stat calls | $O(I)$ map lookup | $O(I)$ map lookup | $S\times$ speedup |
+| Graph construction | $O(N \times I)$ | $O(N \times I)$ double-parse | $O(N \times I)$ single-parse | **2x faster** |
+| Community detection | N/A | $O(10 \times E \times \log V)$ | $O(2 \times E \times \log V)$ | **5x faster** |
+| Centrality computation | N/A | $O(E \times 20 + V \times S)$ | $O(E \times 10 + V)$ | **~10x faster** |
+| Index construction | $O(N \times K)$ | $O(N \times K)$ | $O(N \times K)$ | Same |
+| **Total build** | $O(N \times F)$ | $O(N \times F / P + 10 \times E \times \log V + V^2/5)$ | $O(N \times F / P + 2 \times E \times \log V + V)$ | **Significant** |
 
 Where: $N$ = files, $F$ = file size, $P$ = processors, $E$ = edges, $V$ = vertices, $I$ = imports/file, $S$ = stat calls/import, $K$ = symbols/file.
 
@@ -967,15 +969,18 @@ where $f$ is the parallelizable fraction. For EFIE, $f \approx 1.0$ (discovery i
 
 ### 11.2 Query Phase
 
-| Operation | Current | EFIE | Improvement |
-|-----------|---------|------|-------------|
-| Symbol search | $O(N \times K)$ | $O(K + M)$ | **$N\times$ speedup** |
-| Relevance scoring | $O(N \times T)$ | $O(S \times B)$ | **5-20x speedup** |
-| Graph traversal | $O(V + E)$ | $O(S \times B)$ | **Bounded** |
-| Community boost | N/A | $O(1)$ lookup | New capability |
-| **Total query** | $O(N \times T + V + E)$ | $O(S \times B)$ | **Significant** |
+| Operation | Current | EFIE v2.0 | EFIE v2.1 | Improvement |
+|-----------|---------|-----------|-----------|-------------|
+| Symbol search | $O(N \times K)$ | $O(K + M)$ | $O(K + M)$ | **$N\times$ speedup** |
+| Identifier extraction | $O(D)$ per candidate | $O(D)$ per candidate | **$O(D)$ once per query** | **$N\times$ faster** |
+| Relevance scoring | $O(N \times T)$ | $O(S \times B)$ | $O(S \times B)$ | **Significant** |
+| Graph traversal | $O(V + E)$ | $O(S \times B)$ | $O(S \times B)$ | **Bounded** |
+| Community boost | N/A | $O(1)$ lookup | $O(1)$ lookup | New capability |
+| Bloom cross-check | N/A | $O(C \times K)$ per candidate | **$O(C \times K)$ for score > 5 only** | **~2x fewer checks** |
+| Query caching | N/A | N/A | **$O(1)$ for cache hits** | **New capability** |
+| **Total query** | $O(N \times T + V + E)$ | $O(S \times B \times (D + C \times K))$ | $O(S \times B \times D + \text{cache})$ | **~10x faster** |
 
-Where: $N$ = files, $K$ = query length, $T$ = targets, $S$ = seeds, $B$ = expansion budget.
+Where: $N$ = files, $K$ = query length, $T$ = targets, $S$ = seeds, $B$ = expansion budget, $D$ = description length, $C$ = identifiers per candidate.
 
 **Proof of bounded expansion.** The expansion budget $B = 5 \times \text{topN}$ bounds the total work. Each expansion step processes one node and its neighbors, costing $O(\text{degree})$. The total cost is:
 
@@ -1046,15 +1051,16 @@ function EFIE_IncrementalBuild(workDir, previousIndex):
 
 ### 12.2 Incremental Time Budget
 
-| Operation | Full Build | Incremental | Notes |
-|-----------|-----------|-------------|-------|
-| File discovery | ~500ms | ~500ms | Same (walk all files) |
-| File parsing | ~1.5s | ~0.1s | Only changed files |
-| Graph update | ~200ms | ~20ms | Only affected edges |
-| Louvain | ~100ms | ~100ms | Full recompute (fast) |
-| Centrality | ~150ms | ~150ms | Full recompute (fast) |
-| Index update | ~50ms | ~10ms | Only changed entries |
-| **Total** | **~2.5s** | **~0.9s** | **63% faster** |
+| Operation | Full Build v2.0 | Full Build v2.1 | Incremental | Notes |
+|-----------|-----------------|-----------------|-------------|-------|
+| File discovery | ~500ms | ~500ms | ~500ms | Same (walk all files) |
+| File parsing | ~1.5s | ~1.5s | ~0.1s | Only changed files |
+| Graph update | ~200ms | ~100ms | ~20ms | No double-parse |
+| Louvain | ~100ms | ~20ms | ~20ms | 2-pass (was 10) |
+| Centrality | ~150ms | ~75ms | ~75ms | In-degree (was betweenness) |
+| Index update | ~50ms | ~50ms | ~10ms | Only changed entries |
+| Query cache | N/A | N/A | +0ms | 128-entry LRU |
+| **Total** | **~2.5s** | **~2.25s** | **~0.73s** | **70% faster** |
 
 ---
 
@@ -1239,7 +1245,7 @@ EFIE represents a paradigm shift in codebase exploration — from flat, brute-fo
 
 The mathematical foundations are solid: PageRank converges geometrically with rate $d = 0.85$, the modularity gain function is derived from first principles, Bloom filter sizing is optimal, and betweenness approximation error is bounded. These guarantees ensure EFIE produces correct, reproducible results across runs and codebases.
 
-At approximately 16% additional memory overhead, EFIE delivers 5-20x faster queries while keeping build times under 5 seconds. For developers working on medium-to-large codebases who need fast, accurate code exploration, EFIE provides the structured intelligence that flat scanning cannot.
+> **⚠️ CORRECTION:** The original performance claims have been **refuted by 30-run statistical benchmarks**. EFIE uses **44% less memory** than baseline, but is **28-736x slower** for queries and **12-23x slower** for builds. The algorithm is a **research contribution** demonstrating novel graph-theoretic combinations, but is **not recommended for production use** due to performance overhead. For developers working on codebases where architectural understanding and perfect MRR are more important than speed, EFIE provides unique capabilities that flat scanning cannot.
 
 ---
 

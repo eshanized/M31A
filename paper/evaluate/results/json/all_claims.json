@@ -1,0 +1,150 @@
+[
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 100 files)",
+    "status": "VERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": 25.662200549375395,
+    "unit": "percent",
+    "confidence_lo": 18.791459239969612,
+    "confidence_hi": 32.53294185878118,
+    "std_dev": 0.12244151499833611,
+    "sample_size": 5,
+    "notes": "EFIE=2.0MB Orig=1.6MB"
+  },
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 500 files)",
+    "status": "PARTIALLY_VERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": -2.2371712782533253,
+    "unit": "percent",
+    "confidence_lo": -5.19777168879218,
+    "confidence_hi": 0.7234291322855291,
+    "std_dev": 0.10399449650637928,
+    "sample_size": 5,
+    "notes": "EFIE=3.0MB Orig=3.1MB"
+  },
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 1000 files)",
+    "status": "UNVERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": -35.8324760649389,
+    "unit": "percent",
+    "confidence_lo": -37.2407985690308,
+    "confidence_hi": -34.424153560847,
+    "std_dev": 0.10893420843125444,
+    "sample_size": 5,
+    "notes": "EFIE=4.4MB Orig=6.8MB"
+  },
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 2000 files)",
+    "status": "UNVERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": -30.595246179267317,
+    "unit": "percent",
+    "confidence_lo": -35.58144821972291,
+    "confidence_hi": -25.609044138811726,
+    "std_dev": 0.6327277914133466,
+    "sample_size": 5,
+    "notes": "EFIE=7.7MB Orig=11.1MB"
+  },
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 5000 files)",
+    "status": "UNVERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": -36.75482952029242,
+    "unit": "percent",
+    "confidence_lo": -39.01974453794249,
+    "confidence_hi": -34.48991450264234,
+    "std_dev": 0.709576372620928,
+    "sample_size": 5,
+    "notes": "EFIE=17.4MB Orig=27.5MB"
+  },
+  {
+    "claim_id": "C1",
+    "claim_text": "For a codebase of 10,000 files, the full build completes in approximately 2.5 seconds",
+    "status": "UNVERIFIED",
+    "evidence_type": "wall_clock_measurement",
+    "value": 5679.156800000001,
+    "unit": "ms",
+    "confidence_lo": 5502.669707620688,
+    "confidence_hi": 5855.643892379313,
+    "std_dev": 201.34547740378957,
+    "sample_size": 5,
+    "raw_values": [
+      5451.582,
+      5662.977,
+      5478.56,
+      5977.768,
+      5824.897
+    ]
+  },
+  {
+    "claim_id": "C4",
+    "claim_text": "16% additional memory overhead (measured at 10000 files)",
+    "status": "UNVERIFIED",
+    "evidence_type": "memory_measurement",
+    "value": -45.141663228881114,
+    "unit": "percent",
+    "confidence_lo": -49.41036933543242,
+    "confidence_hi": -40.87295712232981,
+    "std_dev": 2.662856753492579,
+    "sample_size": 5,
+    "notes": "EFIE=30.0MB Orig=54.7MB"
+  },
+  {
+    "claim_id": "C3",
+    "claim_text": "5-20x faster relevance queries",
+    "status": "UNVERIFIED",
+    "evidence_type": "head_to_head_comparison",
+    "value": 0.016842740791423096,
+    "unit": "x",
+    "confidence_lo": 0.008881114818928199,
+    "confidence_hi": 0.024804366763917993,
+    "std_dev": 0.10009479817763871,
+    "sample_size": 5,
+    "raw_values": [
+      12.614433333333332,
+      13.717833333333333,
+      9.488233333333334,
+      10.226299999999998,
+      9.0531
+    ]
+  },
+  {
+    "claim_id": "C3",
+    "claim_text": "5-20x faster relevance queries",
+    "status": "UNVERIFIED",
+    "evidence_type": "head_to_head_comparison",
+    "value": 0.016541279150867793,
+    "unit": "x",
+    "confidence_lo": 0.01250708476217232,
+    "confidence_hi": 0.020575473539563266,
+    "std_dev": 0.08204500770241227,
+    "sample_size": 5,
+    "raw_values": [
+      18.578433333333333,
+      17.472066666666667,
+      17.716566666666665,
+      17.850166666666667,
+      17.51533333333333
+    ]
+  },
+  {
+    "claim_id": "C5",
+    "claim_text": "O(N × F / P + E × log V) build time — empirical: linear in N",
+    "status": "VERIFIED",
+    "evidence_type": "empirical_complexity_fit",
+    "value": 0.9671041401421684,
+    "unit": "R_squared",
+    "confidence_lo": 0,
+    "confidence_hi": 0,
+    "std_dev": 0,
+    "sample_size": 6,
+    "notes": "Linear fit R²=0.9671, slope=0.5091 ms/file"
+  }
+]

@@ -68,3 +68,4 @@ config.local.toml
 promotion/
 space.txt
 *.log
+*.zip

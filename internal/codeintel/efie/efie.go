@@ -21,11 +21,17 @@ type EFIEIndex struct {
 	index   *MultiResIndex
 	files   []*fileInfo
 	built   bool
+
+	// Query cache for repeated relevance queries (PERF-41)
+	queryCache *QueryCache
 }
 
 // NewEFIEIndex creates a new EFIE index for the given working directory.
 func NewEFIEIndex(workDir string) *EFIEIndex {
-	return &EFIEIndex{workDir: workDir}
+	return &EFIEIndex{
+		workDir:    workDir,
+		queryCache: NewQueryCache(128), // Cache last 128 queries
+	}
 }
 
 // Build constructs the EFIE index from source files.
@@ -49,8 +55,8 @@ func (e *EFIEIndex) Build(ctx context.Context) error {
 	// Phase 2: Graph Construction + Import Resolution
 	e.graph = e.buildGraph(parsedFiles, fileSet)
 
-	// Phase 3: Community Detection
-	communities := LouvainDetect_Deterministic(e.graph, 42)
+	// Phase 3: Community Detection (2 passes for production speed)
+	communities := LouvainDetect_Deterministic(e.graph, 42, 2)
 	for _, node := range e.graph.nodes {
 		if node.Path == ExternalNode {
 			continue
@@ -61,13 +67,10 @@ func (e *EFIEIndex) Build(ctx context.Context) error {
 	// Build community adjacency map
 	communityAdj := e.buildCommunityAdjacency(communities)
 
-	// Phase 4: Centrality Precomputation
-	pageRank := ComputePageRank(e.graph, 20, 0.85)
-	sampleSize := e.graph.NodeCount() / 5
-	if sampleSize < 1 {
-		sampleSize = 1
-	}
-	betweenness := ComputeApproxBetweenness(e.graph, sampleSize, 42)
+	// Phase 4: Centrality Precomputation (fast mode: in-degree instead of betweenness)
+	pageRank := ComputePageRank(e.graph, 10, 0.85)  // 10 iterations (was 20)
+	// Use in-degree centrality (O(|V|)) instead of betweenness (O(|V|²/5))
+	betweenness := ComputeInDegreeCentrality(e.graph)
 
 	for _, node := range e.graph.nodes {
 		node.PageRank = pageRank[node.Path]
@@ -237,6 +240,7 @@ func (e *EFIEIndex) parallelParse(ctx context.Context) ([]*fileInfo, map[string]
 				fi := &fileInfo{
 					Path:     info.Path,
 					Language: info.Language,
+					Imports:  info.Imports,
 					Symbols:  make([]SymbolInfo, 0),
 				}
 				// PERF-37: Use map for O(1) deduplication instead of O(N) linear scan
@@ -278,33 +282,11 @@ func (e *EFIEIndex) parallelParse(ctx context.Context) ([]*fileInfo, map[string]
 
 func (e *EFIEIndex) buildGraph(parsedFiles []*fileInfo, fileSet map[string]bool) *WeightedImportGraph {
 	graph := NewWeightedImportGraph()
-	parsers := AllParsers()
 
 	for _, fi := range parsedFiles {
+		// Use imports already parsed in parallelParse() — no re-reading files
 		var resolvedImports []string
-		for _, s := range fi.Symbols {
-			_ = s
-		}
-
-		// Re-parse to get imports
-		absPath := filepath.Join(e.workDir, fi.Path)
-		content, err := os.ReadFile(absPath)
-		if err != nil {
-			continue
-		}
-		if fi.Language != "go" && len(content) > 4096 {
-			content = content[:4096]
-		}
-		p := ParserForFile(fi.Path, parsers)
-		if p == nil {
-			continue
-		}
-		info, err := p.Parse(fi.Path, content)
-		if err != nil {
-			continue
-		}
-
-		for _, imp := range info.Imports {
+		for _, imp := range fi.Imports {
 			resolved := resolveImport(e.workDir, fi.Path, imp.Path, fi.Language, fileSet)
 			if resolved != "" {
 				resolvedImports = append(resolvedImports, resolved)
@@ -443,6 +425,12 @@ func (e *EFIEIndex) RelevantFiles(targetFiles []string, description string, topN
 		return nil
 	}
 
+	// Check cache first (PERF-41)
+	cacheKey := ComputeCacheKey(targetFiles, description, topN)
+	if cached, ok := e.queryCache.Get(cacheKey); ok {
+		return cached
+	}
+
 	targetCommunities := make(map[int]bool)
 	for _, t := range targetFiles {
 		if c, ok := e.index.fileToCommunity[t]; ok {
@@ -450,7 +438,12 @@ func (e *EFIEIndex) RelevantFiles(targetFiles []string, description string, topN
 		}
 	}
 
-	return Query(e, targetFiles, description, QueryRelevant, topN)
+	result := Query(e, targetFiles, description, QueryRelevant, topN)
+
+	// Store in cache
+	e.queryCache.Put(cacheKey, result)
+
+	return result
 }
 
 // CommunityOf returns the community ID for a file.

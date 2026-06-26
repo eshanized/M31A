@@ -18,7 +18,11 @@
 
 The Eshanized File Intelligence Engine (EFIE) is a computer-implemented method and system for intelligently exploring, indexing, and querying software codebases. The invention addresses the technical problem of efficiently navigating large-scale software repositories by combining graph-based community detection, precomputed centrality metrics, and adaptive expansion query strategies into a unified codebase intelligence framework.
 
-EFIE achieves 5-20x improvement in query response times and 6-12x improvement in index build times compared to existing brute-force approaches, while maintaining sub-5-second build budgets for codebases containing up to 10,000 source files. The system employs a novel combination of deterministic Louvain community detection, PageRank-based importance scoring, approximate betweenness centrality, Trie-based symbol indexing, and Bloom filter probabilistic membership testing within a multi-resolution index architecture.
+EFIE achieves **theoretical improvements** in query response times and index build times compared to existing brute-force approaches, while maintaining sub-5-second build budgets for codebases containing up to 10,000 source files.
+
+> **⚠️ CORRECTION:** The original claims of "5-20x improvement in query response times and 6-12x improvement in index build times" have been **refuted by 30-run statistical benchmarks** on 4 real Go repositories. EFIE is actually **28-736x slower** for queries and **12-23x slower** for builds, though it uses **44% less memory**. The algorithm is a research contribution but not recommended for production use due to performance overhead.
+
+The system employs a novel combination of deterministic Louvain community detection, PageRank-based importance scoring, approximate betweenness centrality, Trie-based symbol indexing, and Bloom filter probabilistic membership testing within a multi-resolution index architecture.
 
 The claimed invention comprises: (1) a parallel file parsing pipeline with incremental modification-time-based delta rebuilding; (2) deterministic community detection with canonical identifier renumbering for reproducible caching; (3) a query-type dispatch system that applies traversal-strategy-specific algorithms based on query semantics; (4) an adaptive expansion algorithm using max-heap priority queues with auto-calibrated expansion thresholds; and (5) a gradient community boosting mechanism applied during seed generation rather than post-query scoring.
 
@@ -542,8 +546,10 @@ EFIE is expected to achieve equal or higher precision than the current system du
 
 ## 7. Advantages of the Invention
 
-1. **Performance:** 5-20× faster queries and 6-12× faster builds compared to prior art
-2. **Scalability:** Handles codebases up to 10,000 files within 5-second build budget
+> **⚠️ CORRECTION:** The performance claims below have been **refuted by 30-run statistical benchmarks**. EFIE is actually **28-736x slower** for queries and **12-23x slower** for builds, though it uses **44% less memory**. The algorithm is a research contribution but not recommended for production use.
+
+1. **Performance:** ~~5-20× faster queries and 6-12× faster builds~~ **28-736x slower queries and 12-23x slower builds**
+2. **Scalability:** Handles codebases up to 17,266 files (measured on kubernetes)
 3. **Incrementality:** Avoids full rebuilds by tracking file modification timestamps
 4. **Precision:** Community-aware and importance-weighted scoring reduces irrelevant results
 5. **Reproducibility:** Deterministic community detection ensures stable index across rebuilds

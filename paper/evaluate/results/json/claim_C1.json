@@ -1,0 +1,19 @@
+{
+  "claim_id": "C1",
+  "claim_text": "For a codebase of 10,000 files, the full build completes in approximately 2.5 seconds",
+  "status": "UNVERIFIED",
+  "evidence_type": "wall_clock_measurement",
+  "value": 5679.156800000001,
+  "unit": "ms",
+  "confidence_lo": 5502.669707620688,
+  "confidence_hi": 5855.643892379313,
+  "std_dev": 201.34547740378957,
+  "sample_size": 5,
+  "raw_values": [
+    5451.582,
+    5662.977,
+    5478.56,
+    5977.768,
+    5824.897
+  ]
+}

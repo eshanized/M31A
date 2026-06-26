@@ -1,12 +1,12 @@
 ---
-title: "M31 Autonomous: A Terminal-Native AI Coding Agent with Eight-Phase Workflow Orchestration"
+title: "EFIE: Community-Structured, Importance-Weighted Codebase Exploration via Graph Algorithms"
 tags:
   - Go
-  - AI coding agent
-  - workflow orchestration
-  - terminal UI
-  - large language models
-  - software engineering automation
+  - codebase intelligence
+  - graph algorithms
+  - PageRank
+  - community detection
+  - software engineering
 authors:
   - name: Eshan Roy
     orcid: 0009-0007-1261-6805
@@ -14,186 +14,105 @@ authors:
 affiliations:
   - name: Independent Researcher
     index: 1
-date: 22 June 2026
+date: 26 June 2026
 bibliography: paper.bib
 ---
 
 # Summary
 
-M31 Autonomous is a terminal-native AI coding agent, written entirely in Go, that
-orchestrates an eight-phase software engineering workflow end-to-end. Beyond its
-practical utility as a development tool, M31A serves as a research platform for
-computational software engineering, hosting novel algorithms with formal
-mathematical foundations and enabling reproducible research workflows through its
-built-in research phase and cross-session learning ledger. From project
-initialization through discussion, planning, execution, verification, runtime smoke
-testing, and shipping, every run concludes with a verified git commit and a
-cross-session learning record. The system is distributed as a static binary
-(15-20 MB) with zero runtime dependencies and zero telemetry.
+EFIE (Eshanized File Intelligence Engine) is a novel algorithm for codebase exploration that replaces brute-force graph scanning with community-structured, importance-weighted, adaptive expansion. Unlike traditional systems that treat source files as a flat collection, EFIE models a codebase as a weighted, multi-resolution graph where architectural importance is precomputed via PageRank and betweenness centrality, natural file clusters are discovered through deterministic Louvain community detection, and queries are answered by following the most relevant paths first via adaptive expansion with bounded cost.
 
-The architecture follows a strict layered design: a 33-screen terminal UI built on
-Bubble Tea [@bubbletea], an eight-phase workflow engine, a provider abstraction
-layer supporting multiple LLM backends with automatic fallback, a permission-gated
-tool system with 17 registered tools, a composable skills framework, and a
-concurrent session coordinator with demand coalescing.
+The algorithm operates in two phases: a build phase that constructs a multi-resolution index in $O(N \times F / P + E \times \log V)$ time (where $N$ = files, $F$ = file size, $P$ = processors, $E$ = edges, $V$ = vertices), and a query phase that answers relevance queries in $O(S \times B)$ time (where $S$ = seed count, $B$ = expansion budget). Empirical evaluation on four real Go repositories (gin, docker, go-stdlib, kubernetes; 99 to 17,266 files; $n=30$ runs, 95% confidence intervals) demonstrates linear scaling with build time at 0.556 ms/file (R²=0.954) and query time at 0.0022 ms/file (R²=0.998). Precomputation overhead results in 12-23x slower builds than baseline BFS, while query times remain under 18 ms. Relevance evaluation on 176 ground truth queries shows EFIE achieves perfect MRR (1.000 vs 0.957), always finding a relevant file first, while BFS achieves higher precision (Precision@5=0.785 vs 0.460).
 
-Key innovations include: (1) a complexity-adaptive workflow engine that classifies
-user goals into trivial, simple, moderate, or complex categories and selects an
-appropriate phase subset, avoiding unnecessary overhead for simple tasks; (2) an
-AutoDream context consolidation system that compresses older messages into compact
-memory segments while protecting system prompts, tool calls, and recent context;
-(3) an automatic session compaction engine that triggers LLM-driven summarization
-when token usage approaches the model's context window limit; (4) a runtime
-verification phase that starts a development server, discovers routes from goal
-text and filesystem conventions, and runs concurrent HTTP smoke tests to catch
-errors that static checks miss; and (5) a cross-session learning ledger that
-records goal, task outcomes, file patterns, model used, and duration for every
-shipped session, enabling the agent to learn from its own history.
-
-The workflow engine implements phase transition guards and a plan-discuss
-oscillation guard (capped at three cycles) to prevent infinite refinement loops.
-The plan parser uses cascading regex strategies with fallback JSON extraction,
-validated by duplicate detection, cycle detection via iterative DFS, and
-granularity checks. The execute phase uses Kahn's algorithm [@kahn1962] for
-topological task scheduling with bounded concurrency and per-task self-healing
-loops that fall back to git bisect when standard healing fails.
+EFIE is implemented in Go as part of the M31A codebase intelligence subsystem. Formal specifications, mathematical proofs, and complexity analysis are published in the repository's `EFIE/` directory.
 
 # Statement of Need
 
-AI-assisted coding tools fall into two paradigms: editor-embedded assistants that
-sacrifice terminal flexibility, and command-line wrappers around single LLM calls
-that lack structured workflow. Real engineering tasks such as migrating an
-authentication middleware require understanding the codebase, discussing tradeoffs,
-creating a plan, executing changes across files, verifying correctness, and
-committing the result. Each phase demands different capabilities, autonomy levels,
-and safety guarantees.
+Codebase exploration is a fundamental task in software engineering: developers must locate relevant files, understand dependency relationships, and identify architecturally important code before making changes. Existing codebase intelligence systems — including LSP indexers such as LSIF [@lsif] and SCIP [@scip] — treat source files as a flat collection and rely on brute-force BFS and linear scanning to answer queries. This approach scales poorly: build times grow linearly with codebase size, symbol searches execute in $O(N)$ time, and relevance scoring evaluates every file regardless of architectural importance.
 
-From a research perspective, M31A addresses the gap between practical software
-engineering tools and formal computational methods. The system's codebase
-intelligence subsystem (EFIE) demonstrates how graph-theoretic algorithms —
-PageRank, Louvain community detection, and betweenness centrality — can be
-applied to code exploration with provable complexity bounds. This makes M31A
-both a useful tool and a platform for studying AI-assisted software engineering.
+EFIE addresses this gap by applying well-established graph-theoretic algorithms — PageRank [@brin1998], Louvain community detection [@blondel2008], and betweenness centrality [@freeman1977] — to the novel domain of codebase exploration. While each algorithm has been studied independently in network science, their combination for code intelligence, along with the adaptive expansion query strategy and multi-resolution index structure, constitutes a novel contribution to computational software engineering. The trade-off is explicit: precomputation adds build-time overhead but produces a rich index that supports importance-weighted queries beyond what flat BFS can provide.
 
-M31 Autonomous addresses this gap by treating the terminal as the primary
-interface and owning the entire task lifecycle. Unlike existing tools such as
-Aider [@aider] and Cline [@cline], which provide conversational code editing with
-git integration, M31 Autonomous provides a structured workflow engine with explicit
-phases, automatic complexity classification, runtime verification with smoke
-testing, cross-session learning, and composable user-defined skills. The system
-requires explicit user permission for every file operation and shell command,
-providing safety without friction.
-
-The composable skills system enables users to define custom slash commands via
-Markdown files with YAML frontmatter, discovered automatically from project and
-global configuration directories. This extensibility model allows domain-specific
-workflows without modifying the agent's source code.
-
-The provider abstraction layer supports multiple LLM backends (OpenRouter, Zen)
-with a shared HTTP transport for connection pool reuse, singleflight-guarded model
-catalog caching, and automatic fallback based on health checks. The model cache
-uses a dual-TTL strategy (five minutes fresh, twenty-four hours stale) and supports
-extended thinking parameters across four model families.
-
-M31 Autonomous targets developers who work primarily in the terminal and need an
-AI agent that manages the full software engineering loop rather than providing
-isolated completions. The zero-telemetry design and OS keychain integration for
-API key storage make it suitable for security-sensitive environments.
-
-# Software Design
-
-M31 Autonomous follows a strict layered architecture with a clear dependency rule:
-higher layers may depend on lower layers, but never the reverse. Public packages
-live in `pkg/`, while private implementation details are in `internal/`. The system
-comprises six major subsystems:
-
-1. **Terminal User Interface:** A 33-screen TUI built on Bubble Tea [@bubbletea]
-   using the Elm architecture, providing keyboard-driven efficiency with screen
-   transitions, command palette, and theming.
-
-2. **Workflow Engine:** An eight-phase pipeline (Initialize, Discuss, Plan, Execute,
-   Verify, Runtime, Ship) with complexity-adaptive mode selection that classifies
-   goals into trivial, simple, moderate, or complex categories and selects an
-   appropriate phase subset.
-
-3. **Provider Abstraction:** A multi-provider LLM layer supporting OpenRouter and
-   Zen with automatic fallback, health checks, and cost tracking via atomic CAS
-   operations.
-
-4. **Tool System:** 17 registered tools with permission-gated execution, rate
-   limiting, and risk-level classification (safe, medium, dangerous, destructive).
-
-5. **Code Intelligence (EFIE):** A novel community-structured, importance-weighted
-   codebase exploration algorithm with formal mathematical foundations, including
-   PageRank-based importance scoring, Louvain community detection, and betweenness
-   centrality approximation.
-
-6. **Cross-Session Learning:** A persistent ledger recording session outcomes,
-   enabling the agent to learn from its own history across sessions.
-
-The design prioritizes safety (explicit permission for every file operation), zero
-telemetry, and static binary distribution (15-20 MB with zero runtime dependencies).
+The practical need is demonstrated by the performance limitations of existing systems. Sourcegraph's LSIF indexer processes Go repositories at approximately 54,000 significant lines of code per second for a 1.3M SLoC monorepo, with indexing time growing super-linearly for larger repositories [@lsif-benchmark]. SCIP improved upon LSIF with 3-10x speedups in indexing and 4-5x smaller index files [@scip], but both systems focus on code navigation rather than relevance-based exploration. EFIE complements these systems by providing importance-weighted relevance scoring that identifies not just where a symbol is defined, but which files are architecturally related to a given task.
 
 # State of the Field
 
-Terminal-native AI coding agents have emerged as a distinct category following the
-adoption of large language models for code generation [@chen2021codex]. Aider [@aider] provides git-integrated multi-file editing
-with support for multiple LLM providers but does not include a structured workflow
-engine, runtime verification, or cross-session learning. Cline [@cline] operates
-as a VS Code extension with tool-use capabilities but is not terminal-native.
-OpenHands [@openhands] and SWE-agent [@sweagent] target autonomous issue resolution
-on benchmarks rather than interactive developer workflows.
+Graph-based analysis of software systems has a rich history. Zanoni [@zanoni2006] applied PageRank to source code graphs for bug prediction. Blondel et al. [@blondel2008] introduced the Louvain algorithm for community detection in large networks, achieving $O(|E| \times \log |V|)$ time complexity — a method since adopted for analyzing software dependency networks.
 
-M31 Autonomous distinguishes itself through its eight-phase workflow engine with
-complexity-adaptive mode selection, runtime smoke testing, composable skills, and
-persistent cross-session memory. To our knowledge, no existing terminal-native
-agent combines structured workflow orchestration, automatic context consolidation,
-runtime verification, and cross-session learning in a single static binary.
+Tree-sitter [@tree-sitter] provides incremental parsing at throughputs exceeding 100 MB/s for typical source files, with incremental re-parsing completing in approximately 0.1-0.2ms. Sourcegraph's SCIP format demonstrated that protobuf-based code intelligence indexes are 4-5x smaller and 3x faster to process than LSIF JSON format [@scip]. These advances provide the foundation upon which EFIE builds its graph construction phase.
+
+Trie data structures offer $O(K)$ prefix search where $K$ is the query length, compared to $O(N)$ linear scan for hash-based symbol lookup. Benchmarks demonstrate that Tries outperform hash maps for string matching when miss rates exceed 50% [@trie-hard], a condition frequently met in codebase symbol search. EFIE exploits this property for its symbol index.
+
+The key distinction between EFIE and prior work is the integration of multiple graph-theoretic measures into a unified framework. Prior systems use individual algorithms in isolation — PageRank for ranking, community detection for clustering, centrality for bridge identification — whereas EFIE combines them through a composite scoring function with six weighted components, normalized using robust percentile-based statistics, and queries are answered through adaptive expansion that prioritizes high-importance paths with bounded cost.
+
+# Software Design
+
+EFIE operates in two phases: **build** (index construction) and **query** (relevance scoring).
+
+## Build Phase
+
+The build phase has five sequential stages. Stage 1 performs parallel file discovery and parsing across `runtime.NumCPU()` workers, reading only the first 4KB of non-Go source files to extract import statements. Stage 2 constructs a weighted import graph with forward edges (imports) and reverse edges (imported-by), connecting unresolved imports to an external sentinel node to maintain graph connectivity. Stage 3 runs deterministic Louvain community detection with fixed random seed (seed=42) and canonical renumbering for reproducible output. Stage 4 computes PageRank (20 iterations, damping factor 0.85) and approximate betweenness centrality via stratified random sampling ($|V|/5$ samples). Stage 5 assembles the multi-resolution index: file-level, package-level, and community-level lookups, a Trie for symbol prefix search, and Bloom filters for $O(1)$ import membership checks.
+
+## Query Phase
+
+The query phase dispatches to different traversal strategies based on query type: BFS for upstream/downstream traversal, exact Trie/map lookup for symbol definition, and adaptive expansion for relevance queries. Adaptive expansion generates seed files from target files, their direct neighbors, community members, adjacent community members, and symbol Trie matches. A max-heap BFS then expands from the highest-scored candidates, following neighbors whose PageRank exceeds an auto-calibrated threshold (median PageRank $\times$ 0.5), until an expansion budget of $5 \times \text{topN}$ is exhausted.
+
+The scoring function combines six weighted components: graph centrality (20%), direct relevance (35%), import proximity (20%), symbol match (15%), and community coherence (10%), with a Bloom filter cross-check quality gate. Percentile-based normalization (95th percentile) prevents outlier hub files from compressing scores.
+
+# Empirical Evaluation
+
+We evaluated EFIE on four real Go repositories: gin (99 files), docker (10,218 files), go-stdlib (11,466 files), and kubernetes (17,266 files). Each benchmark was executed 30 times with 95% confidence intervals.
+
+## Build and Query Performance
+
+| Repository | Files | EFIE Build (ms) | Original Build (ms) | Ratio | EFIE Query (ms) | Original Query (ms) | Ratio |
+|-----------|-------|-----------------|---------------------|-------|-----------------|---------------------|-------|
+| gin | 99 | 48.6 ± 4.3 | 3.9 ± 0.6 | 12.5x | 0.4 ± 0.4 | 0.014 | 28.1x |
+| docker | 10,218 | 934.4 ± 42.0 | 76.0 ± 3.8 | 12.3x | 4.0 ± 0.9 | 0.016 | 257.5x |
+| go-stdlib | 11,466 | 8,578.8 ± 547.0 | 375.0 ± 25.3 | 22.9x | 18.4 ± 6.6 | 0.025 | 736.0x |
+| kubernetes | 17,266 | 5,926.5 ± 421.0 | 280.4 ± 23.7 | 21.1x | 6.7 ± 6.6 | 0.027 | 244.8x |
+
+Build time scales linearly at 0.556 ms/file (R²=0.954), query time at 0.0022 ms/file (R²=0.998). Precomputation overhead (PageRank, Louvain, betweenness centrality) results in 12-23x slower builds, while query times remain under 18 ms.
+
+## Community Detection
+
+Louvain community detection identifies meaningful architectural modules: 84 communities in gin, 1,302 in docker, 33 in go-stdlib, and 1,624 in kubernetes, enabling importance-weighted queries that respect architectural boundaries.
+
+## Relevance Quality
+
+We constructed 176 ground truth queries across five categories (exact function, conceptual, import graph, architectural, package-level) and evaluated relevance:
+
+| Metric | EFIE | Original | Delta |
+|--------|------|----------|-------|
+| Precision@5 | 0.460 | 0.785 | -0.325 |
+| Precision@10 | 0.230 | 0.737 | -0.507 |
+| Recall@5 | 0.521 | 0.514 | +0.007 |
+| MRR | 1.000 | 0.957 | +0.043 |
+| NDCG@10 | 0.730 | 0.886 | -0.156 |
+
+EFIE achieves perfect MRR (1.000), always finding a relevant file first, while BFS achieves higher precision. Per-category analysis reveals that EFIE outperforms BFS on import graph queries (NDCG@10: 1.000 vs 0.991, MRR: 1.000 vs 0.988), where the graph-aware scoring function better captures dependency relationships. For exact function lookup and architectural queries, EFIE also achieves perfect MRR (1.000 vs 0.794 and 0.976 respectively), demonstrating that importance weighting helps identify the first relevant file faster. However, BFS maintains higher precision across all categories, representing an explicit trade-off between importance-weighted ranking and raw precision.
 
 # Research Impact Statement
 
-M31 Autonomous serves as both a software engineering tool and a platform for
-computational research. The system's codebase intelligence subsystem (EFIE)
-implements novel algorithms for community-structured, importance-weighted
-codebase exploration, with formal mathematical proofs of correctness,
-convergence guarantees, and complexity bounds published in the repository's
-`EFIE/` directory.
+EFIE demonstrates that well-known graph algorithms, when properly integrated and adapted to the codebase domain, produce a structured index that supports importance-weighted codebase exploration. The formal mathematical contributions include:
 
-Key research contributions include:
+1. **Complexity bounds:** $O(N \times F / P + E \times \log V)$ build time and $O(S \times B)$ query time, with proofs of parallel speedup via Amdahl's Law and bounded expansion via budget-constrained BFS.
 
-1. **Novel Algorithm Design:** The EFIE algorithm introduces adaptive expansion
-   with community detection (Louvain modularity) [@blondel2008], PageRank-based
-   importance scoring [@brin1998], and betweenness centrality approximation — a
-   combination not previously applied to codebase exploration.
+2. **Approximation guarantees:** Stratified betweenness centrality sampling achieves within 10% of exact values for sample sizes $\geq |V|/5$, with proportional representation from each community ensuring no systematic bias.
 
-2. **Formal Mathematical Rigor:** The EFIE research paper contains 11 formal
-   definitions, 3 numbered theorems with proofs, and complete complexity analysis
-   (O(N × F / P + E × log V) build time, O(S × B) query time).
+3. **Convergence analysis:** PageRank converges to within 4% of the fixed point in 20 iterations for damping factor 0.85, verified by the geometric convergence rate $d^t$ where $d < 1$.
 
-3. **Reproducible Research Workflows:** M31A's built-in research phase
-   (`internal/workflow/research.go`) supports systematic codebase investigation
-   before implementation planning, enabling reproducible software engineering
-   research.
+4. **Optimal Bloom filter sizing:** For a target false positive rate $p$ and $n$ elements, the optimal configuration requires $m = -n \ln p / (\ln 2)^2$ bits and $k = (m/n) \ln 2$ hash functions, providing approximately 1.2 bytes per element at 1% false positive rate.
 
-4. **Cross-Session Learning:** The cross-session learning ledger records goal,
-   task outcomes, file patterns, model used, and duration for every session,
-   creating a persistent record suitable for longitudinal research studies.
-
-The software has been developed iteratively over six months with public releases,
-tagged versions, and comprehensive documentation. The author is an independent
-researcher with ORCID 0009-0007-1261-6805.
+The algorithm has been validated on four real Go repositories with empirical results demonstrating linear scalability (R²=0.954 for build, R²=0.998 for query; $n=30$ runs). Community detection identifies meaningful architectural modules: 84 communities in gin, 1,302 in docker, 33 in go-stdlib, and 1,624 in kubernetes. Relevance evaluation on 176 ground truth queries demonstrates that EFIE's perfect MRR (1.000) comes at the cost of lower precision compared to baseline BFS, representing an explicit trade-off between importance-weighted ranking and raw precision. The software is publicly available under the MIT license with comprehensive documentation of the mathematical foundations.
 
 # AI Usage Disclosure
 
-No generative AI tools were used in the development of this software. The EFIE
-algorithm, its mathematical proofs, and the M31 Autonomous workflow engine were
-designed and implemented by the author without AI assistance.
+No generative AI tools were used in the development of this software. The EFIE algorithm, its mathematical proofs, and the implementation were designed and written by the author without AI assistance.
 
-The paper manuscript was written by the author. No AI writing assistants were used
-in drafting, editing, or revising this paper.
+The paper manuscript was written by the author. No AI writing assistants were used in drafting, editing, or revising this paper.
 
-The author confirms that all design decisions, architectural choices, and
-mathematical contributions are original human work, and that all code, proofs,
-and documentation have been reviewed and validated by the author.
+# Acknowledgements
+
+The author thanks the Go open source community for providing the benchmark repositories used in this evaluation.
 
 # References

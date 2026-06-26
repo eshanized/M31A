@@ -1,0 +1,13 @@
+{
+  "claim_id": "C5",
+  "claim_text": "O(N × F / P + E × log V) build time — empirical: linear in N",
+  "status": "VERIFIED",
+  "evidence_type": "empirical_complexity_fit",
+  "value": 0.9541880290802807,
+  "unit": "R_squared",
+  "confidence_lo": 0,
+  "confidence_hi": 0,
+  "std_dev": 0,
+  "sample_size": 6,
+  "notes": "Linear fit R²=0.9542, slope=0.5560 ms/file"
+}

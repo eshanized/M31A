@@ -45,6 +45,7 @@ type SymbolLocation struct {
 type fileInfo struct {
 	Path     string
 	Language string
+	Imports  []ImportInfo
 	Symbols  []SymbolInfo
 }
 

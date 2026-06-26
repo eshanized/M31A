@@ -1,0 +1,12 @@
+[
+  {
+    "component": "EFIE Full Build",
+    "build_ms": 361.054,
+    "build_runs": 10
+  },
+  {
+    "component": "Original Full Build",
+    "build_ms": 47.861,
+    "build_runs": 10
+  }
+]

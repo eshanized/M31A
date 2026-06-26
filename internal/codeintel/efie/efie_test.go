@@ -166,8 +166,8 @@ func TestLouvainDeterministic(t *testing.T) {
 	g.AddNode("routes.go", nil, "go")
 	g.AddNode("store.go", []string{"types.go"}, "go")
 
-	c1 := LouvainDetect_Deterministic(g, 42)
-	c2 := LouvainDetect_Deterministic(g, 42)
+	c1 := LouvainDetect_Deterministic(g, 42, 10)
+	c2 := LouvainDetect_Deterministic(g, 42, 10)
 
 	for path := range c1 {
 		if c1[path] != c2[path] {
@@ -192,8 +192,12 @@ func TestComputePageRank(t *testing.T) {
 	hubPR := pr["hub.go"]
 	aPR := pr["a.go"]
 
-	if hubPR <= aPR {
-		t.Errorf("hub should have higher PageRank than leaf: hub=%.4f leaf=%.4f", hubPR, aPR)
+	// With standard PageRank: importance flows from importer to imported.
+	// hub.go distributes its importance to a.go, b.go, c.go (dangling nodes).
+	// Dangling nodes redistribute their accumulated importance to all nodes.
+	// So a.go, b.go, c.go should have higher PR than hub.go (which is a source, not a sink).
+	if hubPR >= aPR {
+		t.Errorf("leaf should have higher PageRank than hub (importance flows to imported): hub=%.4f leaf=%.4f", hubPR, aPR)
 	}
 }
 
@@ -272,12 +276,12 @@ func TestScore(t *testing.T) {
 	targetComms := map[int]bool{0: true}
 	targetSet := map[string]bool{"target.go": true}
 
-	sf := Score("target.go", []string{"target.go"}, "", g, idx, targetComms, targetSet)
+	sf := Score("target.go", []string{"target.go"}, nil, g, idx, targetComms, targetSet)
 	if sf.Score < 35.0 {
 		t.Errorf("target file should score >= 35 (direct mention), got %.1f", sf.Score)
 	}
 
-	sf = Score("dep.go", []string{"target.go"}, "", g, idx, targetComms, targetSet)
+	sf = Score("dep.go", []string{"target.go"}, nil, g, idx, targetComms, targetSet)
 	if sf.Score < 5.0 {
 		t.Errorf("dep file should score > 0, got %.1f", sf.Score)
 	}

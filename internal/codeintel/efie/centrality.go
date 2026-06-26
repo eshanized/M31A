@@ -25,19 +25,19 @@ func ComputePageRank(g *WeightedImportGraph, iterations int, damping float64) ma
 		}
 
 		for _, node := range g.nodes {
-			importers := node.ImportedBy
-			if len(importers) > 0 {
-				share := PR[node.Path] / float64(len(importers))
-				for _, importer := range importers {
-					newPR[importer] += damping * share
+			imports := node.Imports
+			if len(imports) > 0 {
+				share := PR[node.Path] / float64(len(imports))
+				for _, imported := range imports {
+					newPR[imported] += damping * share
 				}
 			}
 		}
 
-		// Handle dangling nodes
+		// Handle dangling nodes (no outgoing edges / no imports)
 		danglingSum := 0.0
 		for _, node := range g.nodes {
-			if len(node.ImportedBy) == 0 {
+			if len(node.Imports) == 0 {
 				danglingSum += PR[node.Path]
 			}
 		}
@@ -183,4 +183,22 @@ func ComputePercentile(values []float64, p float64) float64 {
 	sort.Float64s(sorted)
 	idx := int(float64(len(sorted)-1) * p / 100.0)
 	return sorted[idx]
+}
+
+// ComputeInDegreeCentrality computes a fast approximation of betweenness centrality
+// using in-degree as a proxy. This is O(|V|) instead of O(|V| × |V|/5).
+// For production use where speed matters more than exact centrality.
+func ComputeInDegreeCentrality(g *WeightedImportGraph) map[string]float64 {
+	N := g.NodeCount()
+	if N == 0 {
+		return nil
+	}
+
+	betweenness := make(map[string]float64, N)
+	for _, node := range g.nodes {
+		// In-degree centrality: fraction of nodes that import this file
+		betweenness[node.Path] = float64(len(node.ImportedBy)) / float64(N)
+	}
+
+	return betweenness
 }

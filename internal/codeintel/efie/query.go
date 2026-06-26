@@ -143,6 +143,12 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 		targetSet[t] = true
 	}
 
+	// PERF-40: Pre-compute identifiers once for all Score() calls
+	var identifiers []string
+	if taskDescription != "" {
+		identifiers = extractIdentifiers(taskDescription)
+	}
+
 	// Direct neighbor expansion
 	for _, target := range targetFiles {
 		node, ok := efie.graph.nodes[target]
@@ -186,8 +192,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 	}
 
 	// Symbol-based seed expansion
-	if taskDescription != "" {
-		identifiers := extractIdentifiers(taskDescription)
+	if len(identifiers) > 0 {
 		for _, id := range identifiers {
 			if efie.index.symbolTrie != nil {
 				matches := efie.index.symbolTrie.PrefixSearch(id)
@@ -207,7 +212,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 	var expanded []scoredEntry
 
 	for seed := range seeds {
-		sf := Score(seed, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
+		sf := Score(seed, targetFiles, identifiers, efie.graph, efie.index, targetCommunities, targetSet)
 		entry := scoredEntry{path: seed, score: sf.Score, scoredFile: sf}
 		heap.Push(&candidates, &entry)
 		visited[seed] = true
@@ -240,7 +245,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 
 			neighborNode, ok := efie.graph.nodes[neighbor]
 			if ok && neighborNode.PageRank > expansionThreshold {
-				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
+				sf := Score(neighbor, targetFiles, identifiers, efie.graph, efie.index, targetCommunities, targetSet)
 				heap.Push(&candidates, &scoredEntry{path: neighbor, score: sf.Score, scoredFile: sf})
 				explored++
 			}
@@ -254,7 +259,7 @@ func adaptiveExpansionQuery(efie *EFIEIndex, targetFiles []string,
 
 			neighborNode, ok := efie.graph.nodes[neighbor]
 			if ok && neighborNode.PageRank > expansionThreshold {
-				sf := Score(neighbor, targetFiles, taskDescription, efie.graph, efie.index, targetCommunities, targetSet)
+				sf := Score(neighbor, targetFiles, identifiers, efie.graph, efie.index, targetCommunities, targetSet)
 				heap.Push(&candidates, &scoredEntry{path: neighbor, score: sf.Score, scoredFile: sf})
 				explored++
 			}

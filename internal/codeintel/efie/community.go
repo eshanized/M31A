@@ -7,7 +7,8 @@ import (
 
 // LouvainDetect_Deterministic runs one-pass Louvain community detection
 // with a fixed seed for reproducible output.
-func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]int {
+// maxPasses controls the number of optimization passes (2 for prod, 10 for research).
+func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64, maxPasses int) map[string]int {
 	rng := rand.New(rand.NewSource(seed))
 
 	// Each node starts in its own community
@@ -35,7 +36,7 @@ func LouvainDetect_Deterministic(g *WeightedImportGraph, seed int64) map[string]
 		}
 	}
 
-	for pass := 0; pass < 10; pass++ {
+	for pass := 0; pass < maxPasses; pass++ {
 		improved := false
 		// Deterministic order: sort first, then shuffle with fixed seed
 		paths := g.AllPaths()

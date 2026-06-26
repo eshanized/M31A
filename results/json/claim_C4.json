@@ -1,0 +1,13 @@
+{
+  "claim_id": "C4",
+  "claim_text": "16% additional memory overhead (measured at 10000 files)",
+  "status": "UNVERIFIED",
+  "evidence_type": "memory_measurement",
+  "value": -43.85039526270686,
+  "unit": "percent",
+  "confidence_lo": -45.34971995305382,
+  "confidence_hi": -42.3510705723599,
+  "std_dev": 2.31098596044863,
+  "sample_size": 30,
+  "notes": "EFIE=31.0MB Orig=55.2MB"
+}

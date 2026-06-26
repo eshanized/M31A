@@ -361,7 +361,7 @@ func TestLouvainDeterministic_SingleNode(t *testing.T) {
 	g := NewWeightedImportGraph()
 	g.AddNode("a.go", nil, "go")
 
-	result := LouvainDetect_Deterministic(g, 42)
+	result := LouvainDetect_Deterministic(g, 42, 10)
 	if len(result) != 1 {
 		t.Errorf("single node result len = %d, want 1", len(result))
 	}
@@ -375,7 +375,7 @@ func TestLouvainDeterministic_NoEdges(t *testing.T) {
 	g.AddNode("a.go", nil, "go")
 	g.AddNode("b.go", nil, "go")
 
-	result := LouvainDetect_Deterministic(g, 42)
+	result := LouvainDetect_Deterministic(g, 42, 10)
 	if len(result) != 2 {
 		t.Errorf("no edges result len = %d, want 2", len(result))
 	}

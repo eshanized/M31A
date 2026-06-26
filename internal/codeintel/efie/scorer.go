@@ -17,7 +17,10 @@ type ScoredFile struct {
 // import proximity, symbol match, community boost, and Bloom cross-check.
 // PERF-34: targetSet is pre-computed once per query and passed in to avoid
 // rebuilding the map on every Score() call.
-func Score(file string, targets []string, description string,
+// PERF-40: identifiers should be pre-computed once per query via
+// extractIdentifiers(description) and passed in to avoid re-tokenizing
+// the description string on every Score() call.
+func Score(file string, targets []string, identifiers []string,
 	graph *WeightedImportGraph, index *MultiResIndex,
 	targetCommunities map[int]bool, targetSet map[string]bool) ScoredFile {
 
@@ -46,43 +49,45 @@ func Score(file string, targets []string, description string,
 		sf.Reasons = append(sf.Reasons, "directly mentioned")
 	}
 
-	// Component 3: Import Proximity (20% weight)
+	// Component 3: Import Proximity (20% weight, capped at 20.0)
 	if hasNode {
+		proximityScore := 0.0
 		for _, target := range targets {
 			for _, imp := range node.Imports {
 				if imp == target {
-					sf.Score += 10.0
+					proximityScore += 10.0
 					sf.Reasons = append(sf.Reasons, "imports "+target)
 					break
 				}
 			}
 			for _, ib := range node.ImportedBy {
 				if ib == target {
-					sf.Score += 10.0
+					proximityScore += 10.0
 					sf.Reasons = append(sf.Reasons, "imported by "+target)
 					break
 				}
 			}
 		}
+		if proximityScore > 20.0 {
+			proximityScore = 20.0
+		}
+		sf.Score += proximityScore
 	}
 
 	// Component 4: Symbol Match (15% weight, capped)
-	if description != "" {
-		identifiers := extractIdentifiers(description)
-		if len(identifiers) > 0 {
-			matchCount := 0
-			for _, id := range identifiers {
-				if index.symbolTrie != nil && index.symbolTrie.HasPrefix(id) {
-					matchCount++
-					sf.Reasons = append(sf.Reasons, "symbol match: "+id)
-				}
+	if len(identifiers) > 0 {
+		matchCount := 0
+		for _, id := range identifiers {
+			if index.symbolTrie != nil && index.symbolTrie.HasPrefix(id) {
+				matchCount++
+				sf.Reasons = append(sf.Reasons, "symbol match: "+id)
 			}
-			symbolScore := float64(matchCount) * (15.0 / float64(len(identifiers)))
-			if symbolScore > 15.0 {
-				symbolScore = 15.0
-			}
-			sf.Score += symbolScore
 		}
+		symbolScore := float64(matchCount) * (15.0 / float64(len(identifiers)))
+		if symbolScore > 15.0 {
+			symbolScore = 15.0
+		}
+		sf.Score += symbolScore
 	}
 
 	// Component 5: Gradient Community Boost (10% weight)
@@ -103,8 +108,8 @@ func Score(file string, targets []string, description string,
 	}
 
 	// Component 6: Bloom Filter Cross-Check (quality gate, not scoring component)
-	if hasNode && node.SymbolBloom != nil && description != "" {
-		identifiers := extractIdentifiers(description)
+	// Only check Bloom for candidates that have a chance of being in top-N
+	if hasNode && node.SymbolBloom != nil && len(identifiers) > 0 && sf.Score > 5.0 {
 		for _, id := range identifiers {
 			if node.SymbolBloom.Contains(id) {
 				// Verify with exact match to avoid false positive over-scoring
