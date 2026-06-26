@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.4.0] - 2026-06-26
+
+### Added
+- **TODO cancelled status**: New `cancelled` state for TODO items with refactored file writing
+- **TODO sync**: Auto-sync TODO.md from task runner state
+- **NVIDIA provider**: NVIDIA NIM provider support in TUI command registry
+- **CITATION.cff**: Citation file, instructions, and arXiv paper link
+- **Security policy**: GitHub community health security policy
+
+### Fixed
+- **security**: Enhanced input validation and resource usage limits
+- **workflow**: Enforce FileWrite tool to prevent code-as-text output
+- **main**: Improved signal handling and config checks
+
+### Changed
+- **provider**: Centralized health check and error handling in BaseClient
+- **tui**: Unified UI components and improved dashboard metrics display
+- **tui**: Updated screen navigation order and improved REPL screen switch
+- **website**: Updated Next.js build instructions and UI components
+- **docs(joss)**: Added required sections for JOSS submission
+- **test**: Added extensive unit tests for codeintel, config, and context packages
+- **chore**: Updated wiki submodule reference, removed obsolete files
+
 ## [1.3.0] - 2026-06-24
 
 ### Added
