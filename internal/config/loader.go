@@ -630,9 +630,9 @@ func knownConfigKeys() map[string]bool {
 		knownKeysMap = map[string]bool{
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
-			"ghost": true, "agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
+			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			// Common typos / sub-tables that appear in user configs
-			"openrouter": true, "zen": true,
+			"openrouter": true, "zen": true, "nvidia": true,
 		}
 	})
 	return knownKeysMap
