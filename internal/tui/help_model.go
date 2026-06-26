@@ -115,7 +115,7 @@ func defaultHelpSections() []helpSection {
 			title: "AI & Model",
 			items: [][2]string{
 				{"/model", "Show or switch model"},
-				{"/models", "List all cached models"},
+				{"/model", "Open model selector"},
 				{"/provider", "Show or switch provider"},
 				{"/fallback", "Provider fallback status"},
 				{"/optimize", "Suggest cheaper model"},

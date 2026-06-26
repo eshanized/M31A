@@ -248,7 +248,6 @@ func TestSuggestCommand(t *testing.T) {
 
 	_ = r.Register("help", handler, "Help")
 	_ = r.Register("model", handler, "Model")
-	_ = r.Register("models", handler, "Models")
 
 	// Close match
 	suggestion := suggestCommand(r, "hep")

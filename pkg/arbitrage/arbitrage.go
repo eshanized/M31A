@@ -192,15 +192,19 @@ func Recommend(models []types.ModelInfo, task types.Task, threshold float64) (*A
 		reason = fmt.Sprintf("Cheapest model suitable for %s task.", complexity)
 	}
 
-	// Collect up to 3 alternatives cheaper than the recommended model.
+	// Collect up to 3 alternatives within the price threshold of the recommended model.
+	// Skip the recommended model itself; pick the closest alternatives in price range.
 	for _, est := range estimates {
 		if est.ModelID == recommended.ModelID {
-			break
+			continue
 		}
 		if len(alternatives) >= 3 {
 			break
 		}
-		alternatives = append(alternatives, est)
+		// Include models within (1 + threshold) of the recommended price.
+		if est.TotalCost <= recommended.TotalCost*(1+threshold) {
+			alternatives = append(alternatives, est)
+		}
 	}
 
 	// Savings vs the most expensive model.

@@ -10,7 +10,7 @@ import (
 
 // modelselector_list.go — model list rendering for the Model Selector.
 
-// renderModelList renders the scrollable list of models with compact rows.
+// renderModelList renders the scrollable list of models as a table with aligned columns.
 func (ms *ModelSelector) renderModelList() string {
 	if ms.loading {
 		spin := ms.spinner.Peek()
@@ -33,17 +33,47 @@ func (ms *ModelSelector) renderModelList() string {
 	}
 	visible := ms.filtered[ms.offset:end]
 
+	// Compute column widths for alignment.
+	nameWidth, ctxWidth, priceWidth := ms.computeColumnWidths(visible)
+
 	var rows []string
 	for i, m := range visible {
 		globalIdx := ms.offset + i
 		selected := globalIdx == ms.cursor
-		rows = append(rows, ms.renderModelRow(m, selected))
+		rows = append(rows, ms.renderModelRow(m, selected, nameWidth, ctxWidth, priceWidth))
 	}
 	return strings.Join(rows, "\n")
 }
 
-// renderModelRow renders a single compact model row with name, pricing, context, and capabilities.
-func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string {
+// computeColumnWidths calculates the max width for each table column.
+func (ms *ModelSelector) computeColumnWidths(visible []types.ModelInfo) (nameW, ctxW, priceW int) {
+	for _, m := range visible {
+		displayName := m.Name
+		if displayName == "" {
+			displayName = m.ID
+		}
+		n := len(displayName + " [" + ProviderShortName(m.Provider) + "]")
+		if n > nameW {
+			nameW = n
+		}
+		if m.ContextLength > 0 {
+			c := len(fmt.Sprintf("%dK ctx", m.ContextLength/1000))
+			if c > ctxW {
+				ctxW = c
+			}
+		}
+		if m.Pricing.InputPerMToken > 0 || m.Pricing.OutputPerMToken > 0 {
+			p := len(formatModelPricing(m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken))
+			if p > priceW {
+				priceW = p
+			}
+		}
+	}
+	return
+}
+
+// renderModelRow renders a single table row with aligned columns.
+func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool, nameW, ctxW, priceW int) string {
 	t := ms.theme
 	avail := ms.width - 10
 	if avail < 40 {
@@ -55,18 +85,18 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string
 	if displayName == "" {
 		displayName = m.ID
 	}
-	provBadge := " [" + ProviderShortName(m.Provider) + "]"
+	nameCol := displayName + " [" + ProviderShortName(m.Provider) + "]"
 
 	// Context length
-	ctxStr := ""
+	ctxCol := ""
 	if m.ContextLength > 0 {
-		ctxStr = fmt.Sprintf("%dK ctx", m.ContextLength/1000)
+		ctxCol = fmt.Sprintf("%dK ctx", m.ContextLength/1000)
 	}
 
 	// Pricing
-	pricingStr := ""
+	priceCol := ""
 	if m.Pricing.InputPerMToken > 0 || m.Pricing.OutputPerMToken > 0 {
-		pricingStr = formatModelPricing(m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken)
+		priceCol = formatModelPricing(m.Pricing.InputPerMToken, m.Pricing.OutputPerMToken)
 	}
 
 	// Capability badges
@@ -78,31 +108,26 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string
 		capBadges = append(capBadges, "👁")
 	}
 
-	// Build row parts
-	var parts []string
-	parts = append(parts, displayName+provBadge)
-	if ctxStr != "" {
-		parts = append(parts, ctxStr)
-	}
-	if pricingStr != "" {
-		parts = append(parts, pricingStr)
-	}
+	// Pad columns to aligned widths.
+	paddedName := padRight(nameCol, nameW)
+	paddedCtx := padRight(ctxCol, ctxW)
+	paddedPrice := padRight(priceCol, priceW)
+
+	rowContent := paddedName + "  " + paddedCtx + "  " + paddedPrice
 	if len(capBadges) > 0 {
-		parts = append(parts, strings.Join(capBadges, " "))
+		rowContent += "  " + strings.Join(capBadges, " ")
 	}
 
-	rowContent := strings.Join(parts, "  ")
-
-	// Truncate to available width using TruncateEnd
+	// Truncate to available width.
 	if len(rowContent) > avail {
 		rowContent = TruncateEnd(rowContent, avail)
 	}
 
 	var nameStyle lipgloss.Style
 	if selected {
-		nameStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-	} else {
 		nameStyle = lipgloss.NewStyle().Foreground(t.Text)
+	} else {
+		nameStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
 	}
 
 	prefix := "  "
@@ -111,6 +136,14 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool) string
 	}
 
 	return prefix + nameStyle.Render(rowContent)
+}
+
+// padRight pads a string to the given width with spaces.
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
 }
 
 // renderProviderTabs renders provider filter pills at the top.

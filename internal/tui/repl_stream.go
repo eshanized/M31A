@@ -218,7 +218,7 @@ func renderErrorBanner(err error, t theme.Theme, providerName string) string {
 	case errClassStreamTruncated:
 		return warnStyle("⚠ Stream interrupted — try sending your message again.")
 	case errClassModelNotFound:
-		return style(fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix))
+		return style(fmt.Sprintf("✗ Model not found%s — run /model to see available models.", providerSuffix))
 	default:
 		return style("✗ " + m31errors.UserMessage(err))
 	}
@@ -245,7 +245,7 @@ func plainErrorBanner(err error, providerName string) string {
 	case errClassStreamTruncated:
 		return "⚠ Stream interrupted — try sending your message again."
 	case errClassModelNotFound:
-		return fmt.Sprintf("✗ Model not found%s — run /models to see available models.", providerSuffix)
+		return fmt.Sprintf("✗ Model not found%s — run /model to see available models.", providerSuffix)
 	default:
 		return "✗ " + m31errors.UserMessage(err)
 	}

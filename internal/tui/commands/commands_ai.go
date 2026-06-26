@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func handleCompress(_ []string, ctx CommandContext) CommandResult {
 }
 
 // handleOptimize suggests cheaper model alternatives via the arbitrage engine.
-func handleOptimize(_ []string, ctx CommandContext) CommandResult {
+func handleOptimize(args []string, ctx CommandContext) CommandResult {
 	if ctx.Registry == nil {
 		return CommandResult{Success: false, Message: "Provider registry not available."}
 	}
@@ -96,9 +97,13 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "No active provider."}
 	}
 
-	// Build a representative task for scoring
+	// Build task from user-provided description, or use a generic default.
+	desc := "general optimization"
+	if len(args) > 0 {
+		desc = strings.Join(args, " ")
+	}
 	task := types.Task{
-		Description: "optimize model selection",
+		Description: desc,
 		Action:      "implement",
 	}
 
@@ -106,12 +111,19 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 		Success: true,
 		Message: "Analyzing model alternatives...",
 		Cmd: func() tea.Msg {
-			models, err := activeProvider.FetchModels(ctx.Ctx)
-			if err != nil || len(models) == 0 {
-				return tuitypes.ToastMsg{
-					Text:     "Could not fetch model list for optimization.",
-					Duration: 3 * time.Second,
-					Type:     "error",
+			// Try cached models first for instant results.
+			models := activeProvider.CachedModels()
+			if len(models) == 0 {
+				// Fall back to fetch with timeout.
+				fetchCtx, cancel := context.WithTimeout(ctx.Ctx, types.FetchModelsTimeout)
+				defer cancel()
+				models, err = activeProvider.FetchModels(fetchCtx)
+				if err != nil || len(models) == 0 {
+					return tuitypes.ToastMsg{
+						Text:     "Could not fetch model list for optimization.",
+						Duration: 3 * time.Second,
+						Type:     "error",
+					}
 				}
 			}
 			threshold := 0.2
@@ -131,7 +143,7 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 
 			// Build result message
 			var sb strings.Builder
-			fmt.Fprintf(&sb, "**Optimization Analysis** (%s complexity):\n\n", rec.Complexity)
+			fmt.Fprintf(&sb, "**Optimization Analysis** (%s task, %s complexity):\n\n", desc, rec.Complexity)
 			fmt.Fprintf(&sb, "**Recommended:** %s ($%.6f)\n", rec.RecommendedModel.ModelID, rec.RecommendedModel.TotalCost)
 			fmt.Fprintf(&sb, "**Reason:** %s\n", rec.Reason)
 			if rec.Savings > 0 {
@@ -144,37 +156,17 @@ func handleOptimize(_ []string, ctx CommandContext) CommandResult {
 				}
 			}
 
-			// Emit OptimizedMsg for the notification system
-			return tea.Batch(
-				func() tea.Msg {
-					return tuitypes.OptimizedMsg{
-						Recommendations: []arbitrage.ArbitrageRecommendation{*rec},
-					}
-				},
-				func() tea.Msg {
-					return tuitypes.ToastMsg{
-						Text:     sb.String(),
-						Duration: 8 * time.Second,
-						Type:     "info",
-					}
-				},
-			)
+			return tuitypes.ToastMsg{
+				Text:     sb.String(),
+				Duration: 10 * time.Second,
+				Type:     "info",
+			}
 		},
 	}
 }
 
 // handleModel opens the model selector screen.
 func handleModel(args []string, ctx CommandContext) CommandResult {
-	screen := tuitypes.ScreenModelSelector
-	return CommandResult{
-		Success: true,
-		Screen:  &screen,
-		Message: "Opening model selector...",
-	}
-}
-
-// handleModels opens the model selector screen.
-func handleModels(_ []string, ctx CommandContext) CommandResult {
 	screen := tuitypes.ScreenModelSelector
 	return CommandResult{
 		Success: true,

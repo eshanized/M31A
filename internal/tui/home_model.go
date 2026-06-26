@@ -28,7 +28,7 @@ var homeTips = []homeTip{
 	{"ctrl+p", "commands"},
 	{"ctrl+x", "leader"},
 	{"ctrl+b", "sidebar"},
-	{"ctrl+m", "models"},
+	{"ctrl+m", "model"},
 	{"ctrl+h", "help"},
 }
 

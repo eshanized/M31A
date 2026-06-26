@@ -251,7 +251,6 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("memory", handleMemory, "Manage context memory")
 	_ = r.Register("optimize", handleOptimize, "Suggest cheaper model alternatives")
 	_ = r.Register("model", handleModel, "Show or switch model")
-	_ = r.Register("models", handleModels, "List all cached models")
 	_ = r.Register("fallback", handleFallback, "Switch provider / show fallback status")
 	_ = r.Register("provider", handleProvider, "Show or switch provider")
 
