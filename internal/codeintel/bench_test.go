@@ -275,7 +275,7 @@ func main() { println("changed") }
 }
 
 func BenchmarkParallelBuild(b *testing.B) {
- CPUs := []int{1, 2, 4}
+	CPUs := []int{1, 2, 4}
 	for _, cpus := range CPUs {
 		b.Run(fmt.Sprintf("CPUs=%d", cpus), func(b *testing.B) {
 			dir := b.TempDir()
@@ -322,7 +322,7 @@ func BenchmarkFormatContext(b *testing.B) {
 		graph:  graph,
 		index:  idx,
 		scorer: NewRelevanceScorer(graph, idx),
-		files: make([]*FileInfo, 20),
+		files:  make([]*FileInfo, 20),
 	}
 
 	b.ResetTimer()

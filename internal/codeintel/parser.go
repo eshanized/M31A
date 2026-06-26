@@ -204,13 +204,14 @@ func extractImport(node *gotreesitter.Node, content []byte, lang *gotreesitter.L
 					continue
 				}
 				specType := spec.Type(lang)
-				if specType == "import_path" || specType == "interpreted_string_literal" || specType == "raw_string_literal" {
+				switch specType {
+				case "import_path", "interpreted_string_literal", "raw_string_literal":
 					path := extractStringContent(spec, content, lang)
 					if path != "" && !seen[path] {
 						info.Imports = append(info.Imports, ImportInfo{Path: path})
 						seen[path] = true
 					}
-				} else if specType == "import_spec" {
+				case "import_spec":
 					if importPath := spec.ChildByFieldName("path", lang); importPath != nil {
 						path := extractStringContent(importPath, content, lang)
 						if path != "" && !seen[path] {
@@ -398,11 +399,12 @@ func extractInterface(node *gotreesitter.Node, content []byte, lang *gotreesitte
 				continue
 			}
 			memberType := member.Type(lang)
-			if memberType == "method_signature" {
+			switch memberType {
+			case "method_signature":
 				if methodName := fieldByName(member, content, lang); methodName != "" {
 					ti.Methods = append(ti.Methods, methodName)
 				}
-			} else if memberType == "property_signature" {
+			case "property_signature":
 				if fieldName := fieldByName(member, content, lang); fieldName != "" {
 					ti.Fields = append(ti.Fields, fieldName)
 				}
@@ -443,11 +445,12 @@ func extractClass(node *gotreesitter.Node, content []byte, lang *gotreesitter.La
 				continue
 			}
 			memberType := member.Type(lang)
-			if memberType == "field_definition" || memberType == "property_definition" || memberType == "property_signature" {
+			switch memberType {
+			case "field_definition", "property_definition", "property_signature":
 				if fieldName := fieldByName(member, content, lang); fieldName != "" {
 					ti.Fields = append(ti.Fields, fieldName)
 				}
-			} else if memberType == "method_definition" || memberType == "method_signature" {
+			case "method_definition", "method_signature":
 				if methodName := fieldByName(member, content, lang); methodName != "" {
 					ti.Methods = append(ti.Methods, methodName)
 				}

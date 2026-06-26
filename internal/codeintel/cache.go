@@ -81,10 +81,10 @@ func SaveCache(workDir string, cache *IndexCache) error {
 // IncrementalBuild checks which files have changed and returns only those
 // that need to be reparsed. Unchanged files are loaded from cache.
 type IncrementalResult struct {
-	Changed   []string       // files that need reparsing
-	Unchanged []string       // files that can be loaded from cache
-	New       []string       // files not in cache
-	Deleted   []string       // files in cache but not on disk
+	Changed   []string             // files that need reparsing
+	Unchanged []string             // files that can be loaded from cache
+	New       []string             // files not in cache
+	Deleted   []string             // files in cache but not on disk
 	Cache     map[string]*FileInfo // cached parse results for unchanged files
 }
 
