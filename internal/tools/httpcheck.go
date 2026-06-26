@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -47,10 +48,14 @@ Use this to verify that web pages are serving correct content after the dev serv
 
 Parameters:
 - url (required): The URL to check (e.g., "http://localhost:3000")
-- method (optional): HTTP method, defaults to "GET"
+- method (optional): HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD), defaults to "GET"
+- headers (optional): Request headers as KEY=VALUE array
+- body (optional): Request body string (for POST/PUT/PATCH)
 - expected_status (optional): Expected HTTP status code, defaults to 200
 - expected_content (optional): List of strings that must appear in the response body
 - not_expected_content (optional): List of strings that must NOT appear in the response body
+- json_path (optional): JSONPath expression to validate in response (e.g., "$.data.id")
+- json_value (optional): Expected value at json_path (used with json_path)
 - max_body_bytes (optional): Max response body to read, defaults to 1MB`
 }
 
@@ -65,7 +70,16 @@ func (h *HTTPCheck) ParameterSchema() string {
 			"method": {
 				"type": "string",
 				"description": "HTTP method (default: GET)",
-				"enum": ["GET", "POST", "HEAD"]
+				"enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+			},
+			"headers": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Request headers as KEY=VALUE strings"
+			},
+			"body": {
+				"type": "string",
+				"description": "Request body (for POST, PUT, PATCH)"
 			},
 			"expected_status": {
 				"type": "integer",
@@ -80,6 +94,14 @@ func (h *HTTPCheck) ParameterSchema() string {
 				"type": "array",
 				"items": {"type": "string"},
 				"description": "Strings that must NOT appear in the response body"
+			},
+			"json_path": {
+				"type": "string",
+				"description": "JSONPath-like expression to validate (e.g., '$.data.id', '$.results[0].name')"
+			},
+			"json_value": {
+				"type": "string",
+				"description": "Expected value at json_path (string comparison)"
 			},
 			"max_body_bytes": {
 				"type": "integer",
@@ -116,12 +138,36 @@ func (h *HTTPCheck) Execute(ctx context.Context, input types.ToolInput) (types.T
 		maxBody = int64(m)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	// Build request body
+	var bodyReader io.Reader
+	if body, ok := input.Params["body"].(string); ok && body != "" {
+		bodyReader = strings.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return types.ToolResult{
 			Error:      fmt.Sprintf("failed to create request: %v", err),
 			DurationMs: time.Since(start).Milliseconds(),
 		}, nil
+	}
+
+	// Set headers
+	if headers, ok := input.Params["headers"].([]any); ok {
+		for _, h := range headers {
+			if s, ok := h.(string); ok {
+				if idx := strings.IndexByte(s, '='); idx > 0 {
+					req.Header.Set(s[:idx], s[idx+1:])
+				}
+			}
+		}
+	}
+
+	// Set Content-Type for body if not already set
+	if bodyReader != nil && req.Header.Get("Content-Type") == "" {
+		if _, ok := input.Params["body"].(string); ok {
+			req.Header.Set("Content-Type", "application/json")
+		}
 	}
 
 	resp, err := h.client.Do(req)
@@ -167,6 +213,14 @@ func (h *HTTPCheck) Execute(ctx context.Context, input types.ToolInput) (types.T
 		}
 	}
 
+	// JSON path validation
+	if jsonPath, ok := input.Params["json_path"].(string); ok && jsonPath != "" {
+		jsonValue, _ := input.Params["json_value"].(string)
+		if err := validateJSONPath(bodyStr, jsonPath, jsonValue); err != nil {
+			issues = append(issues, fmt.Sprintf("json_path validation failed: %v", err))
+		}
+	}
+
 	duration := time.Since(start).Milliseconds()
 
 	if len(issues) > 0 {
@@ -183,4 +237,65 @@ func (h *HTTPCheck) Execute(ctx context.Context, input types.ToolInput) (types.T
 			method, url, resp.StatusCode, len(body), duration),
 		DurationMs: duration,
 	}, nil
+}
+
+// validateJSONPath validates a simple JSONPath-like expression against JSON content.
+// Supports: $.key, $.key.nested, $.array[0], $.array[0].key
+func validateJSONPath(bodyStr, path, expectedValue string) error {
+	var data any
+	if err := json.Unmarshal([]byte(bodyStr), &data); err != nil {
+		return fmt.Errorf("response is not valid JSON: %w", err)
+	}
+
+	// Parse simple JSONPath: split by . and handle array indices
+	parts := strings.Split(strings.TrimPrefix(path, "$."), ".")
+	current := data
+
+	for _, part := range parts {
+		// Handle array index: key[0]
+		if idxStart := strings.IndexByte(part, '['); idxStart >= 0 {
+			key := part[:idxStart]
+			idxEnd := strings.IndexByte(part, ']')
+			if idxEnd < 0 {
+				return fmt.Errorf("invalid JSONPath syntax: %s", part)
+			}
+			idxStr := part[idxStart+1 : idxEnd]
+			idx := 0
+			if _, err := fmt.Sscanf(idxStr, "%d", &idx); err != nil {
+				return fmt.Errorf("invalid array index: %s", idxStr)
+			}
+
+			// Navigate to the key first if non-empty
+			if key != "" {
+				obj, ok := current.(map[string]any)
+				if !ok {
+					return fmt.Errorf("expected object at key %q", key)
+				}
+				current = obj[key]
+			}
+
+			arr, ok := current.([]any)
+			if !ok {
+				return fmt.Errorf("expected array, got %T", current)
+			}
+			if idx < 0 || idx >= len(arr) {
+				return fmt.Errorf("array index %d out of bounds (length %d)", idx, len(arr))
+			}
+			current = arr[idx]
+		} else {
+			obj, ok := current.(map[string]any)
+			if !ok {
+				return fmt.Errorf("expected object at key %q, got %T", part, current)
+			}
+			current = obj[part]
+		}
+	}
+
+	// Compare with expected value
+	actualValue := fmt.Sprintf("%v", current)
+	if expectedValue != "" && actualValue != expectedValue {
+		return fmt.Errorf("expected %q, got %q", expectedValue, actualValue)
+	}
+
+	return nil
 }

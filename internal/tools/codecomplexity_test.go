@@ -237,8 +237,10 @@ func TestCodeComplexity_ComplexityScore(t *testing.T) {
 		{10000, "moderate (10K\u201350K lines)"},
 		{30000, "moderate (10K\u201350K lines)"},
 		{49999, "moderate (10K\u201350K lines)"},
-		{50000, "complex (50K+ lines)"},
-		{100000, "complex (50K+ lines)"},
+		{50000, "large (50K\u2013200K lines)"},
+		{100000, "large (50K\u2013200K lines)"},
+		{200000, "complex (200K+ lines)"},
+		{300000, "complex (200K+ lines)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {

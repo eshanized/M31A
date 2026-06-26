@@ -24,6 +24,7 @@ type ComplexityReport struct {
 	Packages   []PackageStat
 	Files      []FileStat
 	Score      string
+	Languages  map[string]int // extension → file count
 }
 
 // PackageStat holds aggregate stats for a single package (directory).
@@ -39,9 +40,17 @@ type FileStat struct {
 	Lines int
 }
 
-// CodeComplexity is a tool that analyzes the M31A Go codebase and returns
+// DefaultExtensions are the common source file extensions to analyze
+// when no extensions are specified. Covers Go, Python, JS/TS, Rust, Java, C/C++.
+var DefaultExtensions = []string{
+	".go", ".py", ".js", ".ts", ".jsx", ".tsx",
+	".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+	".rb", ".php", ".cs", ".swift", ".kt",
+}
+
+// CodeComplexity is a tool that analyzes the codebase and returns
 // a complexity report with file counts, line counts, top packages, top files,
-// and a complexity score.
+// and a complexity score. Default extensions cover all common languages.
 type CodeComplexity struct {
 	workDir  string
 	skipDirs []string
@@ -62,7 +71,8 @@ func (t *CodeComplexity) Name() string {
 
 func (t *CodeComplexity) Description() string {
 	return "Analyze the codebase and display a complexity report showing total source files and lines, " +
-		"top packages and files by size, and a complexity score."
+		"top packages and files by size, language breakdown, and a complexity score. " +
+		"Default: all common languages (Go, Python, JS/TS, Rust, Java, C/C++, etc.)"
 }
 
 func (t *CodeComplexity) RiskLevel() types.RiskLevel {
@@ -81,7 +91,7 @@ func (t *CodeComplexity) ParameterSchema() string {
 			"extensions": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "File extensions to analyze (default: Go only). E.g. ['*.go', '*.py', '*.js', '*.ts']"
+				"description": "File extensions to analyze (default: all common languages). E.g. ['*.go', '*.py', '*.js']"
 			}
 		},
 		"required": []
@@ -108,6 +118,11 @@ func (t *CodeComplexity) Execute(ctx context.Context, input types.ToolInput) (ty
 				}
 			}
 		}
+	}
+
+	// Default to all common languages if no extensions specified
+	if len(extensions) == 0 {
+		extensions = DefaultExtensions
 	}
 
 	report, err := t.analyze(ctx, skip, extensions)
@@ -149,18 +164,15 @@ func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool, 
 	// Always skip .m31a-worktrees
 	skipDirs[".m31a-worktrees"] = true
 
-	// Default to Go files if no extensions specified
-	if len(extensions) == 0 {
-		extensions = []string{".go"}
-	}
-
 	// Build extension lookup set
 	extSet := make(map[string]bool, len(extensions))
 	for _, ext := range extensions {
 		extSet[ext] = true
 	}
 
-	report := &ComplexityReport{}
+	report := &ComplexityReport{
+		Languages: make(map[string]int),
+	}
 	pkgMap := make(map[string]*PackageStat) // directory path → stats
 	fileStats := make([]FileStat, 0)
 
@@ -207,8 +219,11 @@ func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool, 
 		// Skip test files (common convention across languages)
 		name := d.Name()
 		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".test.js") ||
-			strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, "_test.py") ||
-			strings.Contains(name, ".spec.") {
+			strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.jsx") ||
+			strings.HasSuffix(name, ".test.tsx") || strings.HasSuffix(name, "_test.py") ||
+			strings.HasSuffix(name, "_test.rs") || strings.HasSuffix(name, "_test.java") ||
+			strings.HasSuffix(name, "Test.java") || strings.HasSuffix(name, "_test.rb") ||
+			strings.Contains(name, ".spec.") || strings.HasSuffix(name, "_test.go") {
 			return nil
 		}
 
@@ -219,6 +234,10 @@ func (t *CodeComplexity) analyze(ctx context.Context, skipDirs map[string]bool, 
 
 		report.TotalFiles++
 		report.TotalLines += lines
+
+		// Track language
+		ext := filepath.Ext(d.Name())
+		report.Languages[ext]++
 
 		fileStats = append(fileStats, FileStat{
 			Path:  relPath,
@@ -293,8 +312,10 @@ func complexityScore(totalLines int) string {
 		return "simple (< 10K lines)"
 	case totalLines < 50_000:
 		return "moderate (10K–50K lines)"
+	case totalLines < 200_000:
+		return "large (50K–200K lines)"
 	default:
-		return "complex (50K+ lines)"
+		return "complex (200K+ lines)"
 	}
 }
 
@@ -306,6 +327,27 @@ func formatComplexityReport(r *ComplexityReport) string {
 	fmt.Fprintf(&sb, "**Source files:** %d  \n", r.TotalFiles)
 	fmt.Fprintf(&sb, "**Total lines:** %s  \n", formatNumber(r.TotalLines))
 	fmt.Fprintf(&sb, "**Complexity score:** %s\n\n", r.Score)
+
+	// Language breakdown
+	if len(r.Languages) > 0 {
+		type langStat struct {
+			Ext   string
+			Count int
+		}
+		var langs []langStat
+		for ext, count := range r.Languages {
+			langs = append(langs, langStat{ext, count})
+		}
+		sort.Slice(langs, func(i, j int) bool { return langs[i].Count > langs[j].Count })
+
+		fmt.Fprintf(&sb, "### Language Breakdown\n\n")
+		fmt.Fprintf(&sb, "| Language | Files |\n")
+		fmt.Fprintf(&sb, "|----------|-------|\n")
+		for _, l := range langs {
+			fmt.Fprintf(&sb, "| %s | %d |\n", l.Ext, l.Count)
+		}
+		sb.WriteString("\n")
+	}
 
 	// Top packages table
 	if len(r.Packages) > 0 {

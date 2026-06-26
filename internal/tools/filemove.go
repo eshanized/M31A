@@ -2,9 +2,12 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -14,11 +17,12 @@ import (
 var _ types.Tool = (*FileMove)(nil)
 
 type FileMove struct {
-	workDir string
+	workDir   string
+	backupDir string
 }
 
-func NewFileMove(workDir string) *FileMove {
-	return &FileMove{workDir: workDir}
+func NewFileMove(workDir, backupDir string) *FileMove {
+	return &FileMove{workDir: workDir, backupDir: backupDir}
 }
 
 func (t *FileMove) Name() string {
@@ -26,7 +30,7 @@ func (t *FileMove) Name() string {
 }
 
 func (t *FileMove) Description() string {
-	return "Move or rename a file. Both source and destination must be within the working directory."
+	return "Move or rename a file with automatic backup. Both source and destination must be within the working directory."
 }
 
 func (t *FileMove) RiskLevel() types.RiskLevel {
@@ -111,6 +115,26 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("destination %w", err)
 	}
 	dstAbs = dstResolved
+
+	// Backup the source file before moving
+	if _, statErr := os.Stat(srcAbs); statErr == nil {
+		relPath, _ := filepath.Rel(t.workDir, srcAbs)
+		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
+		randBytes := make([]byte, 4)
+		if _, randErr := rand.Read(randBytes); randErr == nil {
+			backupName := fmt.Sprintf("%s.move.%s.%s", sanitized, time.Now().Format("20060102T150405.000"), hex.EncodeToString(randBytes))
+			backupPath := filepath.Join(t.backupDir, backupName)
+
+			if backupDirErr := os.MkdirAll(t.backupDir, DirPermission); backupDirErr == nil {
+				existingContent, readErr := os.ReadFile(srcAbs)
+				if readErr == nil {
+					_ = os.WriteFile(backupPath, existingContent, FilePermission)
+					// Prune old backups for this file
+					pruneBackupsByPrefix(t.backupDir, sanitized, MaxBackupsPerFile)
+				}
+			}
+		}
+	}
 
 	// Ensure destination directory exists
 	dstDir := filepath.Dir(dstAbs)

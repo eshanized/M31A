@@ -964,7 +964,7 @@ func TestFileMove_SimpleMove(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	result, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -986,7 +986,7 @@ func TestFileMove_SimpleMove(t *testing.T) {
 func TestFileMove_MissingSource(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name:   "FileMove",
 		Params: map[string]any{},
@@ -999,7 +999,7 @@ func TestFileMove_MissingSource(t *testing.T) {
 func TestFileMove_SourceNotString(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1015,7 +1015,7 @@ func TestFileMove_SourceNotString(t *testing.T) {
 func TestFileMove_MissingDestination(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1030,7 +1030,7 @@ func TestFileMove_MissingDestination(t *testing.T) {
 func TestFileMove_DestinationNotString(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1046,7 +1046,7 @@ func TestFileMove_DestinationNotString(t *testing.T) {
 func TestFileMove_SourceNotFound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1065,7 +1065,7 @@ func TestFileMove_SourceNotFound(t *testing.T) {
 func TestFileMove_SourceOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1082,7 +1082,7 @@ func TestFileMove_DestinationOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1099,7 +1099,7 @@ func TestFileMove_WithSubdirectory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1117,7 +1117,7 @@ func TestFileMove_WithSubdirectory(t *testing.T) {
 
 func TestFileMove_Name(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir())
+	fm := NewFileMove(t.TempDir(), t.TempDir())
 	if fm.Name() != "FileMove" {
 		t.Errorf("expected name 'FileMove', got %s", fm.Name())
 	}
@@ -1125,7 +1125,7 @@ func TestFileMove_Name(t *testing.T) {
 
 func TestFileMove_Description(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir())
+	fm := NewFileMove(t.TempDir(), t.TempDir())
 	if fm.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -1133,7 +1133,7 @@ func TestFileMove_Description(t *testing.T) {
 
 func TestFileMove_RiskLevel(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir())
+	fm := NewFileMove(t.TempDir(), t.TempDir())
 	if fm.RiskLevel() != types.RiskDangerous {
 		t.Errorf("expected RiskDangerous, got %s", fm.RiskLevel())
 	}
@@ -2258,8 +2258,8 @@ func TestBuildToolDefs(t *testing.T) {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
 	defs := BuildToolDefs(d)
-	if len(defs) != 17 {
-		t.Errorf("expected 17 tool defs, got %d", len(defs))
+	if len(defs) != 18 {
+		t.Errorf("expected 18 tool defs, got %d", len(defs))
 	}
 	for _, def := range defs {
 		if def.Name == "" {
@@ -2475,7 +2475,7 @@ func TestFileDelete_ParameterSchema(t *testing.T) {
 
 func TestFileMove_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir())
+	fm := NewFileMove(t.TempDir(), t.TempDir())
 	schema := fm.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -3835,7 +3835,7 @@ func TestFileMove_DestinationExists(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("source"), 0644)
 	os.WriteFile(filepath.Join(dir, "dst.txt"), []byte("dest"), 0644)
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 	result, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{

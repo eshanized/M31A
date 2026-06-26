@@ -13,7 +13,7 @@ import (
 func TestFileMove_Execute_RelativePaths(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 
 	src := filepath.Join(dir, "old.txt")
 	dst := filepath.Join(dir, "new.txt")
@@ -45,7 +45,7 @@ func TestFileMove_Execute_RelativePaths(t *testing.T) {
 func TestFileMove_Execute_CreatesDirs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir)
+	fm := NewFileMove(dir, t.TempDir())
 
 	src := filepath.Join(dir, "a.txt")
 	dst := filepath.Join(dir, "sub", "b.txt")

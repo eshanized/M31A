@@ -23,6 +23,7 @@ type Dispatcher struct {
 	responseCh        chan PermissionResponse
 	pendingResponses  sync.Map // map[int64]chan PermissionResponse — per-request routing
 	todoWrite         *TodoWrite
+	todoRead          *TodoRead
 	questionReqCh     chan QuestionRequest
 	questionRespCh    chan QuestionResponse
 	pendingQuestions  sync.Map // map[int64]chan QuestionResponse — per-request routing
@@ -321,6 +322,9 @@ func (d *Dispatcher) QuestionResponseCh() chan QuestionResponse {
 func (d *Dispatcher) SetSessionID(id string) {
 	if d.todoWrite != nil {
 		d.todoWrite.SetSessionID(id)
+	}
+	if d.todoRead != nil {
+		d.todoRead.SetSessionID(id)
 	}
 }
 

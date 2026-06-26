@@ -34,7 +34,7 @@ func (t *FileWrite) Name() string {
 }
 
 func (t *FileWrite) Description() string {
-	return "Write content to a file atomically with backup and path safety."
+	return "Write content to a file atomically with backup and path safety. Supports full overwrite (default) or append mode."
 }
 
 func (t *FileWrite) RiskLevel() types.RiskLevel {
@@ -53,6 +53,14 @@ func (t *FileWrite) ParameterSchema() string {
 			"content": {
 				"type": "string",
 				"description": "The content to write to the file"
+			},
+			"create_dirs": {
+				"type": "boolean",
+				"description": "Create parent directories if they don't exist (default true)"
+			},
+			"append": {
+				"type": "boolean",
+				"description": "Append content to end of file instead of overwriting (default false)"
 			}
 		},
 		"required": ["path", "content"]
@@ -87,6 +95,13 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		}
 	}
 
+	appendMode := false
+	if aRaw, ok := input.Params["append"]; ok {
+		if aBool, ok := aRaw.(bool); ok {
+			appendMode = aBool
+		}
+	}
+
 	// Binary content check
 	contentBytes := []byte(content)
 	for _, b := range contentBytes {
@@ -101,7 +116,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
 	}
 
-	// Backup existing file
+	// Backup existing file (before append or overwrite)
 	if _, backupStatErr := os.Stat(targetPath); backupStatErr == nil {
 		relPath, _ := filepath.Rel(t.workDir, targetPath)
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
@@ -134,6 +149,17 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	if createDirs {
 		if dirErr := os.MkdirAll(filepath.Dir(targetPath), DirPermission); dirErr != nil {
 			return types.ToolResult{}, fmt.Errorf("%w: cannot create directories: %v", m31errors.ErrToolExecution, dirErr)
+		}
+	}
+
+	// For append mode: read existing content and prepend
+	if appendMode {
+		existingContent, readErr := os.ReadFile(targetPath)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return types.ToolResult{}, fmt.Errorf("%w: cannot read file for append: %v", m31errors.ErrToolExecution, readErr)
+		}
+		if readErr == nil {
+			contentBytes = append(existingContent, contentBytes...)
 		}
 	}
 
@@ -175,8 +201,13 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 
 	elapsed := time.Since(start).Milliseconds()
 
+	action := "Wrote"
+	if appendMode {
+		action = "Appended to"
+	}
+
 	return types.ToolResult{
-		Output:     fmt.Sprintf("Wrote %d bytes to %s", len(contentBytes), path),
+		Output:     fmt.Sprintf("%s %d bytes to %s", action, len(contentBytes), path),
 		DurationMs: elapsed,
 	}, nil
 }

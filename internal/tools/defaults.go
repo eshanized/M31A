@@ -44,6 +44,11 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(todo); err != nil {
 		return nil, err
 	}
+	todoRead := NewTodoRead(sessionsDir, "")
+	d.todoRead = todoRead
+	if err := d.Register(todoRead); err != nil {
+		return nil, err
+	}
 	if err := d.Register(NewWebFetch(sessionsDir, false)); err != nil {
 		return nil, err
 	}
@@ -65,7 +70,7 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewFileDelete(workDir, backupDir)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewFileMove(workDir)); err != nil {
+	if err := d.Register(NewFileMove(workDir, backupDir)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewCodeMap(workDir)); err != nil {
