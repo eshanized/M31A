@@ -18,24 +18,24 @@ import (
 
 // GenerateConfig controls the synthetic codebase generator.
 type GenerateConfig struct {
-	Dir         string
-	FileCount   int
-	AvgImports  int   // average imports per file
-	MaxImports  int   // max imports per file
-	MinSymbols  int   // min symbols per file
-	MaxSymbols  int   // max symbols per file
-	PackageCount int  // number of packages (directories)
-	Seed        int64
+	Dir          string
+	FileCount    int
+	AvgImports   int // average imports per file
+	MaxImports   int // max imports per file
+	MinSymbols   int // min symbols per file
+	MaxSymbols   int // max symbols per file
+	PackageCount int // number of packages (directories)
+	Seed         int64
 }
 
 // GeneratedRepo holds metadata about a generated repository.
 type GeneratedRepo struct {
-	Dir         string
-	FileCount   int
+	Dir          string
+	FileCount    int
 	TotalSymbols int
-	TotalEdges  int
+	TotalEdges   int
 	PackageCount int
-	Languages   map[string]int
+	Languages    map[string]int
 }
 
 // GenerateRepo creates a synthetic codebase of the given size.

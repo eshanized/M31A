@@ -363,6 +363,13 @@ func main() {
 	fmt.Println("Done.")
 }
 
+// Run all evaluation modes when invoked directly
+func runAllEvaluations() {
+	runGroundTruthGen()
+	runRealBenchmarks()
+	runRelevanceEval()
+}
+
 // --- Helpers ---
 
 type Stats struct {

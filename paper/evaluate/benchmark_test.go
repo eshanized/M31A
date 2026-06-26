@@ -35,13 +35,13 @@ type BenchmarkResult struct {
 
 // BenchmarkSuite holds all results from a benchmark suite.
 type BenchmarkSuite struct {
-	Hostname    string              `json:"hostname"`
-	GoVersion   string              `json:"go_version"`
-	NumCPU      int                 `json:"num_cpu"`
-	OS          string              `json:"os"`
-	Arch        string              `json:"arch"`
-	Timestamp   string              `json:"timestamp"`
-	Results     []BenchmarkResult   `json:"results"`
+	Hostname  string            `json:"hostname"`
+	GoVersion string            `json:"go_version"`
+	NumCPU    int               `json:"num_cpu"`
+	OS        string            `json:"os"`
+	Arch      string            `json:"arch"`
+	Timestamp string            `json:"timestamp"`
+	Results   []BenchmarkResult `json:"results"`
 }
 
 func memStats() (heapAlloc, heapSys int64, gcCycles uint32) {
@@ -195,13 +195,13 @@ func TestScalability(t *testing.T) {
 
 	sizes := []int{100, 500, 1000, 2000, 5000}
 	results := make([]struct {
-		Size         int
-		EFIEBuildMs  float64
-		OrigBuildMs  float64
-		EFIEQueryMs  float64
-		OrigQueryMs  float64
-		EFIEHeapMB   float64
-		OrigHeapMB   float64
+		Size        int
+		EFIEBuildMs float64
+		OrigBuildMs float64
+		EFIEQueryMs float64
+		OrigQueryMs float64
+		EFIEHeapMB  float64
+		OrigHeapMB  float64
 	}, len(sizes))
 
 	for i, size := range sizes {
@@ -261,13 +261,13 @@ func TestScalability(t *testing.T) {
 			})
 
 			results[i] = struct {
-				Size         int
-				EFIEBuildMs  float64
-				OrigBuildMs  float64
-				EFIEQueryMs  float64
-				OrigQueryMs  float64
-				EFIEHeapMB   float64
-				OrigHeapMB   float64
+				Size        int
+				EFIEBuildMs float64
+				OrigBuildMs float64
+				EFIEQueryMs float64
+				OrigQueryMs float64
+				EFIEHeapMB  float64
+				OrigHeapMB  float64
 			}{
 				Size:        size,
 				EFIEBuildMs: efieBuildMs,
@@ -448,13 +448,13 @@ func benchQuery(b testing.TB, fn func()) float64 {
 }
 
 func writeScalabilityResults(results []struct {
-	Size         int
-	EFIEBuildMs  float64
-	OrigBuildMs  float64
-	EFIEQueryMs  float64
-	OrigQueryMs  float64
-	EFIEHeapMB   float64
-	OrigHeapMB   float64
+	Size        int
+	EFIEBuildMs float64
+	OrigBuildMs float64
+	EFIEQueryMs float64
+	OrigQueryMs float64
+	EFIEHeapMB  float64
+	OrigHeapMB  float64
 }) {
 	data, _ := json.MarshalIndent(results, "", "  ")
 	os.WriteFile("scalability_results.json", data, 0o644)
@@ -462,10 +462,10 @@ func writeScalabilityResults(results []struct {
 
 func writeAblationResults(efieTime, origTime float64, efieCount, origCount int) {
 	type AblationResult struct {
-		Component    string  `json:"component"`
-		QueryTimeMs  float64 `json:"query_time_ms"`
-		ResultCount  int     `json:"result_count"`
-		Removed      bool    `json:"removed"`
+		Component   string  `json:"component"`
+		QueryTimeMs float64 `json:"query_time_ms"`
+		ResultCount int     `json:"result_count"`
+		Removed     bool    `json:"removed"`
 	}
 	results := []AblationResult{
 		{Component: "full_efie", QueryTimeMs: efieTime, ResultCount: efieCount, Removed: false},

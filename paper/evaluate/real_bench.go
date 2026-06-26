@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,33 +16,33 @@ import (
 )
 
 type RealRepoResult struct {
-	Repository   string  `json:"repository"`
-	FileCount    int     `json:"file_count"`
-	Backend      string  `json:"backend"`
-	BuildMs      float64 `json:"build_ms"`
-	BuildCI95Lo  float64 `json:"build_ci95_lo"`
-	BuildCI95Hi  float64 `json:"build_ci95_hi"`
-	BuildStdDev  float64 `json:"build_std_dev"`
-	QueryMs      float64 `json:"query_ms"`
-	QueryCI95Lo  float64 `json:"query_ci95_lo"`
-	QueryCI95Hi  float64 `json:"query_ci95_hi"`
-	QueryStdDev  float64 `json:"query_std_dev"`
-	HeapMB       float64 `json:"heap_mb"`
-	Communities  int     `json:"communities"`
-	SampleSize   int     `json:"sample_size"`
+	Repository  string  `json:"repository"`
+	FileCount   int     `json:"file_count"`
+	Backend     string  `json:"backend"`
+	BuildMs     float64 `json:"build_ms"`
+	BuildCI95Lo float64 `json:"build_ci95_lo"`
+	BuildCI95Hi float64 `json:"build_ci95_hi"`
+	BuildStdDev float64 `json:"build_std_dev"`
+	QueryMs     float64 `json:"query_ms"`
+	QueryCI95Lo float64 `json:"query_ci95_lo"`
+	QueryCI95Hi float64 `json:"query_ci95_hi"`
+	QueryStdDev float64 `json:"query_std_dev"`
+	HeapMB      float64 `json:"heap_mb"`
+	Communities int     `json:"communities"`
+	SampleSize  int     `json:"sample_size"`
 }
 
-type Stats struct {
+type BenchStats struct {
 	Mean   float64
 	StdDev float64
 	CI95Lo float64
 	CI95Hi float64
 }
 
-func computeStats(values []float64) Stats {
+func computeBenchStats(values []float64) BenchStats {
 	n := len(values)
 	if n == 0 {
-		return Stats{}
+		return BenchStats{}
 	}
 
 	sum := 0.0
@@ -62,7 +61,7 @@ func computeStats(values []float64) Stats {
 	se := stddev / math.Sqrt(float64(n))
 	ci95 := 1.96 * se // approximation for large n
 
-	return Stats{
+	return BenchStats{
 		Mean:   mean,
 		StdDev: stddev,
 		CI95Lo: mean - ci95,
@@ -70,7 +69,7 @@ func computeStats(values []float64) Stats {
 	}
 }
 
-func main() {
+func runRealBenchmarks() {
 	fmt.Println("=== EFIE Real Repository Benchmarks ===")
 	fmt.Printf("Go: %s, CPUs: %d\n\n", runtime.Version(), runtime.NumCPU())
 
@@ -134,8 +133,8 @@ func main() {
 			}
 		}
 
-		efieBuildStats := computeStats(efieBuildTimes)
-		efieQueryStats := computeStats(efieQueryTimes)
+		efieBuildStats := computeBenchStats(efieBuildTimes)
+		efieQueryStats := computeBenchStats(efieQueryTimes)
 
 		// Original benchmarks
 		fmt.Printf("  Running Original (%d runs)...\n", runCount)
@@ -161,8 +160,8 @@ func main() {
 			}
 		}
 
-		origBuildStats := computeStats(origBuildTimes)
-		origQueryStats := computeStats(origQueryTimes)
+		origBuildStats := computeBenchStats(origBuildTimes)
+		origQueryStats := computeBenchStats(origQueryTimes)
 
 		// Print results
 		fmt.Printf("  EFIE  build: %8.1f ± %5.1f ms (95%% CI: [%.1f, %.1f])\n",
@@ -233,24 +232,6 @@ func countGoFiles(dir string) int {
 		return nil
 	})
 	return count
-}
-
-func getTestTargets(repoDir string, count int) []string {
-	var files []string
-	filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && filepath.Ext(path) == ".go" {
-			files = append(files, path)
-		}
-		return nil
-	})
-	sort.Strings(files)
-	if len(files) > count {
-		files = files[:count]
-	}
-	return files
 }
 
 func writeRealRepoSummary(results []RealRepoResult) {

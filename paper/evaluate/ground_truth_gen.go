@@ -9,32 +9,32 @@ import (
 )
 
 type GroundTruthQuery struct {
-	ID                  string            `json:"id"`
-	Repository          string            `json:"repository"`
-	Query               string            `json:"query"`
-	Category            string            `json:"category"`
-	Description         string            `json:"description"`
-	TargetFiles         []string          `json:"target_files"`
-	RelevantFiles       []string          `json:"relevant_files"`
-	RelevanceLevels     map[string]string `json:"relevance_levels"`
-	ExpectedTopK        int               `json:"expected_top_k"`
+	ID              string            `json:"id"`
+	Repository      string            `json:"repository"`
+	Query           string            `json:"query"`
+	Category        string            `json:"category"`
+	Description     string            `json:"description"`
+	TargetFiles     []string          `json:"target_files"`
+	RelevantFiles   []string          `json:"relevant_files"`
+	RelevanceLevels map[string]string `json:"relevance_levels"`
+	ExpectedTopK    int               `json:"expected_top_k"`
 }
 
 type GroundTruthDataset struct {
-	Version   string             `json:"version"`
-	Created   string             `json:"created"`
-	Queries   []GroundTruthQuery `json:"queries"`
-	Stats     DatasetStats       `json:"stats"`
+	Version string             `json:"version"`
+	Created string             `json:"created"`
+	Queries []GroundTruthQuery `json:"queries"`
+	Stats   DatasetStats       `json:"stats"`
 }
 
 type DatasetStats struct {
-	TotalQueries    int            `json:"total_queries"`
-	ByCategory      map[string]int `json:"by_category"`
-	ByRepository    map[string]int `json:"by_repository"`
-	AvgRelevantFiles float64      `json:"avg_relevant_files"`
+	TotalQueries     int            `json:"total_queries"`
+	ByCategory       map[string]int `json:"by_category"`
+	ByRepository     map[string]int `json:"by_repository"`
+	AvgRelevantFiles float64        `json:"avg_relevant_files"`
 }
 
-func main() {
+func runGroundTruthGen() {
 	fmt.Println("=== Ground Truth Dataset Construction ===")
 
 	os.MkdirAll("results/ground_truth", 0o755)
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// Compute stats
-	dataset.Stats = computeStats(dataset.Queries)
+	dataset.Stats = computeGroundTruthStats(dataset.Queries)
 
 	// Write dataset
 	data, _ := json.MarshalIndent(dataset, "", "  ")
@@ -88,8 +88,8 @@ func generateQueriesForRepo(repoName, repoDir string, queryID *int) []GroundTrut
 
 	// Category 1: Exact function name queries (10 queries)
 	exactFuncQueries := []struct {
-		Query     string
-		Relevant  []string
+		Query    string
+		Relevant []string
 	}{
 		{"ServeHTTP", filterFiles(files, "serve", "http", "handler")},
 		{"Parse", filterFiles(files, "parse")},
@@ -122,8 +122,8 @@ func generateQueriesForRepo(repoName, repoDir string, queryID *int) []GroundTrut
 
 	// Category 2: Conceptual queries (10 queries)
 	conceptQueries := []struct {
-		Query     string
-		Keywords  []string
+		Query    string
+		Keywords []string
 	}{
 		{"error handling", []string{"error", "err", "handle"}},
 		{"HTTP server", []string{"http", "server", "listen"}},
@@ -158,7 +158,7 @@ func generateQueriesForRepo(repoName, repoDir string, queryID *int) []GroundTrut
 	// Category 3: Import graph queries (10 queries)
 	if len(files) > 10 {
 		for i := 0; i < 10 && i < len(files)-1; i++ {
-			target := files[i*10 % len(files)]
+			target := files[i*10%len(files)]
 			queries = append(queries, GroundTruthQuery{
 				ID:              fmt.Sprintf("Q%03d", *queryID),
 				Repository:      repoName,
@@ -326,7 +326,7 @@ func generateRelevanceLevels(files []string) map[string]string {
 	return levels
 }
 
-func computeStats(queries []GroundTruthQuery) DatasetStats {
+func computeGroundTruthStats(queries []GroundTruthQuery) DatasetStats {
 	stats := DatasetStats{
 		TotalQueries: len(queries),
 		ByCategory:   make(map[string]int),

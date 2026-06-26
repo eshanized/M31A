@@ -14,17 +14,17 @@ import (
 )
 
 type QueryResult struct {
-	QueryID        string             `json:"query_id"`
-	Repository     string             `json:"repository"`
-	Backend        string             `json:"backend"`
-	PrecisionAt5   float64            `json:"precision_at_5"`
-	PrecisionAt10  float64            `json:"precision_at_10"`
-	RecallAt5      float64            `json:"recall_at_5"`
-	RecallAt10     float64            `json:"recall_at_10"`
-	MRR            float64            `json:"mrr"`
-	NDCGAt10       float64            `json:"ndcg_at_10"`
-	ReturnedFiles  int                `json:"returned_files"`
-	RelevantFiles  int                `json:"relevant_files"`
+	QueryID       string  `json:"query_id"`
+	Repository    string  `json:"repository"`
+	Backend       string  `json:"backend"`
+	PrecisionAt5  float64 `json:"precision_at_5"`
+	PrecisionAt10 float64 `json:"precision_at_10"`
+	RecallAt5     float64 `json:"recall_at_5"`
+	RecallAt10    float64 `json:"recall_at_10"`
+	MRR           float64 `json:"mrr"`
+	NDCGAt10      float64 `json:"ndcg_at_10"`
+	ReturnedFiles int     `json:"returned_files"`
+	RelevantFiles int     `json:"relevant_files"`
 }
 
 type RelevanceStats struct {
@@ -38,19 +38,7 @@ type RelevanceStats struct {
 	QueryCount        int     `json:"query_count"`
 }
 
-type GroundTruthQuery struct {
-	ID              string            `json:"id"`
-	Repository      string            `json:"repository"`
-	Query           string            `json:"query"`
-	Category        string            `json:"category"`
-	Description     string            `json:"description"`
-	TargetFiles     []string          `json:"target_files"`
-	RelevantFiles   []string          `json:"relevant_files"`
-	RelevanceLevels map[string]string `json:"relevance_levels"`
-	ExpectedTopK    int               `json:"expected_top_k"`
-}
-
-func main() {
+func runRelevanceEval() {
 	fmt.Println("=== EFIE Relevance Quality Evaluation ===")
 
 	os.MkdirAll("results/relevance", 0o755)
@@ -92,7 +80,7 @@ func main() {
 	os.WriteFile("results/relevance/aggregate_stats.json", statsJSON, 0o644)
 
 	// Write summary table
- writeSummaryTable(efieResults, origResults, efieStats, origStats)
+	writeRelevanceSummary(efieResults, origResults, efieStats, origStats)
 
 	fmt.Println("\nResults written to results/relevance/")
 }
@@ -274,7 +262,7 @@ func computeNDCGAtK(returned []string, relevanceLevels map[string]string, k int)
 
 func computeAggregateStats(backend string, results []QueryResult) RelevanceStats {
 	stats := RelevanceStats{
-		Backend:     backend,
+		Backend:    backend,
 		QueryCount: len(results),
 	}
 
@@ -313,7 +301,7 @@ func printStats(backend string, stats RelevanceStats) {
 	fmt.Printf("  NDCG@10:      %.3f\n", stats.MeanNDCGAt10)
 }
 
-func writeSummaryTable(efieResults, origResults []QueryResult, efieStats, origStats RelevanceStats) {
+func writeRelevanceSummary(efieResults, origResults []QueryResult, efieStats, origStats RelevanceStats) {
 	var sb strings.Builder
 	sb.WriteString("# Relevance Quality Evaluation Results\n\n")
 	sb.WriteString("**Methodology:** 176 queries across 4 repositories, 5 categories\n\n")

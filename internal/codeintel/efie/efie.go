@@ -68,7 +68,7 @@ func (e *EFIEIndex) Build(ctx context.Context) error {
 	communityAdj := e.buildCommunityAdjacency(communities)
 
 	// Phase 4: Centrality Precomputation (fast mode: in-degree instead of betweenness)
-	pageRank := ComputePageRank(e.graph, 10, 0.85)  // 10 iterations (was 20)
+	pageRank := ComputePageRank(e.graph, 10, 0.85) // 10 iterations (was 20)
 	// Use in-degree centrality (O(|V|)) instead of betweenness (O(|V|²/5))
 	betweenness := ComputeInDegreeCentrality(e.graph)
 
