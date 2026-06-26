@@ -77,6 +77,41 @@ func (g *ImportGraph) NodeCount() int {
 	return len(g.nodes)
 }
 
+// RemoveNode removes a file from the graph and all its edges.
+func (g *ImportGraph) RemoveNode(path string) {
+	node, ok := g.nodes[path]
+	if !ok {
+		return
+	}
+	delete(g.nodes, path)
+
+	// Remove reverse edges (files that imported this node)
+	for _, importer := range node.ImportedBy {
+		if impNode, ok := g.nodes[importer]; ok {
+			delete(impNode.importedBySet, path)
+			for i, p := range impNode.ImportedBy {
+				if p == path {
+					impNode.ImportedBy = append(impNode.ImportedBy[:i], impNode.ImportedBy[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+
+	// Remove forward edges (imports this node references)
+	for _, imported := range node.Imports {
+		if impNode, ok := g.nodes[imported]; ok {
+			delete(impNode.importedBySet, path)
+			for i, p := range impNode.ImportedBy {
+				if p == path {
+					impNode.ImportedBy = append(impNode.ImportedBy[:i], impNode.ImportedBy[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+}
+
 // Neighbors returns direct imports and direct importers of a file.
 func (g *ImportGraph) Neighbors(path string) (imports []string, importedBy []string) {
 	node, ok := g.nodes[path]
@@ -154,7 +189,6 @@ type fileJob struct {
 // Uses a worker pool parallelized across available CPUs for faster indexing.
 func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, error) {
 	graph := NewImportGraph()
-	var mu sync.Mutex
 	var allFiles []*FileInfo
 
 	skipDirs := map[string]bool{
@@ -235,7 +269,7 @@ func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, er
 				}
 
 				// PERF-36: Limit file size to prevent excessive memory usage
-				// for large generated files. Follow EFIE indexer pattern.
+				// for large generated files.
 				const maxFileSize = 4096
 				if len(content) > maxFileSize {
 					content = content[:maxFileSize]
@@ -246,9 +280,6 @@ func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, er
 					// Log parse error but add as isolated node so file isn't invisible
 					slog.Debug("BuildGraph: parse error, adding as isolated node",
 						"file", job.relPath, "error", parseErr)
-					mu.Lock()
-					graph.AddNode(job.relPath, nil, job.parser.Language())
-					mu.Unlock()
 					continue
 				}
 

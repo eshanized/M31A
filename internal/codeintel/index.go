@@ -14,6 +14,7 @@ type SymbolLocation struct {
 type SymbolIndex struct {
 	byName map[string][]SymbolLocation // symbol name → definition locations
 	byFile map[string][]SymbolInfo     // file → exported symbols
+	trie   *SymbolTrie                 // O(K) prefix search
 }
 
 // NewSymbolIndex creates an empty symbol index.
@@ -21,6 +22,7 @@ func NewSymbolIndex() *SymbolIndex {
 	return &SymbolIndex{
 		byName: make(map[string][]SymbolLocation),
 		byFile: make(map[string][]SymbolInfo),
+		trie:   NewSymbolTrie(),
 	}
 }
 
@@ -40,6 +42,7 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 			File: info.Path,
 			Kind: s.Kind,
 		})
+		idx.trie.Insert(s.Name)
 	}
 
 	for _, f := range info.Funcs {
@@ -51,6 +54,7 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 			idx.byName[f.Name] = append(idx.byName[f.Name], SymbolLocation{
 				File: info.Path, Kind: "func",
 			})
+			idx.trie.Insert(f.Name)
 		}
 	}
 
@@ -63,6 +67,7 @@ func (idx *SymbolIndex) AddFile(info *FileInfo) {
 			idx.byName[ti.Name] = append(idx.byName[ti.Name], SymbolLocation{
 				File: info.Path, Kind: ti.Kind,
 			})
+			idx.trie.Insert(ti.Name)
 		}
 	}
 
@@ -136,9 +141,49 @@ func (idx *SymbolIndex) FileCount() int {
 	return len(idx.byFile)
 }
 
+// RemoveFile removes all symbols defined in the given file from the index.
+func (idx *SymbolIndex) RemoveFile(path string) {
+	symbols, ok := idx.byFile[path]
+	if !ok {
+		return
+	}
+	delete(idx.byFile, path)
+
+	for _, s := range symbols {
+		locs := idx.byName[s.Name]
+		for i := len(locs) - 1; i >= 0; i-- {
+			if locs[i].File == path {
+				idx.byName[s.Name] = append(locs[:i], locs[i+1:]...)
+			}
+		}
+		if len(idx.byName[s.Name]) == 0 {
+			delete(idx.byName, s.Name)
+			idx.trie.Delete(s.Name)
+		}
+	}
+}
+
 // SymbolsMatching returns symbols whose names contain the given substring (case-insensitive).
+// Uses Trie for O(K + M) performance instead of O(N) linear scan.
 func (idx *SymbolIndex) SymbolsMatching(query string) []string {
 	query = strings.ToLower(query)
+
+	// Exact match: O(1) via hash map
+	if _, ok := idx.byName[query]; ok {
+		return []string{query}
+	}
+
+	// Prefix match via Trie: O(K + M)
+	prefixMatches := idx.trie.PrefixSearch(query)
+
+	// Also check for substring matches (Trie only does prefix)
+	// For substring matching, we still need to scan, but we can use the Trie's
+	// collected symbols as a starting point for common prefixes
+	if len(prefixMatches) > 0 {
+		return prefixMatches
+	}
+
+	// Fallback: substring match (for cases like "user" matching "GetUser")
 	var matches []string
 	seen := make(map[string]bool)
 	for name := range idx.byName {
@@ -157,4 +202,18 @@ func BuildIndex(files []*FileInfo) *SymbolIndex {
 		idx.AddFile(f)
 	}
 	return idx
+}
+
+// RemoveFiles removes multiple files from the index.
+func (idx *SymbolIndex) RemoveFiles(paths []string) {
+	for _, p := range paths {
+		idx.RemoveFile(p)
+	}
+}
+
+// AddFiles indexes multiple parsed files into an existing index.
+func (idx *SymbolIndex) AddFiles(files []*FileInfo) {
+	for _, f := range files {
+		idx.AddFile(f)
+	}
 }

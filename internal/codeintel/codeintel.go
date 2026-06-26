@@ -4,19 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/codeintel/efie"
 	"github.com/eshanized/M31A/internal/fileutil"
 )
-
-// useEFIE reports whether EFIE should be used as the backend.
-// Set USE_EFIE=true to enable the EFIE backend.
-func useEFIE() bool {
-	return os.Getenv("USE_EFIE") == "true"
-}
 
 // Indexer provides a unified API for codebase intelligence: parsing, import
 // graph traversal, symbol lookup, and relevance scoring.
@@ -30,32 +24,21 @@ type Indexer struct {
 	scorer  *RelevanceScorer
 	builtAt time.Time
 	files   []*FileInfo
-
-	// EFIE backend (optional)
-	efieIndexer *efie.EFIEIndexer
 }
 
 // NewIndexer creates a new codebase indexer for the given working directory.
 // The indexer is lazy — call Build() before using query methods.
-// When USE_EFIE=true, the EFIE backend is used instead.
 func NewIndexer(workDir string) *Indexer {
-	idx := &Indexer{
+	return &Indexer{
 		workDir: workDir,
 		parsers: AllParsers(),
 	}
-	if useEFIE() {
-		idx.efieIndexer = efie.NewEFIEIndexer(workDir)
-	}
-	return idx
 }
 
 // Build parses all source files in the working directory and builds the
-// import graph, symbol index, and relevance scorer.
+// import graph, symbol index, and relevance scorer. Uses incremental
+// builds when a previous cache exists — only changed files are reparsed.
 func (idx *Indexer) Build(ctx context.Context) error {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.Build(ctx)
-	}
-
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -63,6 +46,22 @@ func (idx *Indexer) Build(ctx context.Context) error {
 		return err
 	}
 
+	// Try incremental build first
+	if idx.graph != nil && idx.files != nil {
+		return idx.buildIncremental(ctx)
+	}
+
+	// Try loading from disk cache
+	if cached := LoadCache(idx.workDir); cached != nil {
+		return idx.buildFromCache(ctx, cached)
+	}
+
+	// Full build
+	return idx.buildFull(ctx)
+}
+
+// buildFull performs a full index build from scratch.
+func (idx *Indexer) buildFull(ctx context.Context) error {
 	graph, files, err := BuildGraph(idx.workDir, idx.parsers)
 	if err != nil {
 		return fmt.Errorf("build graph: %w", err)
@@ -76,14 +75,195 @@ func (idx *Indexer) Build(ctx context.Context) error {
 	idx.files = files
 	idx.builtAt = time.Now()
 
+	// Save cache
+	fileCaches := BuildCacheFromFiles(idx.workDir, files, nil)
+	cache := &IndexCache{Files: fileCaches}
+	_ = SaveCache(idx.workDir, cache)
+
 	return nil
+}
+
+// buildFromCache rebuilds from a disk cache, using cached results for unchanged files.
+func (idx *Indexer) buildFromCache(ctx context.Context, cached *IndexCache) error {
+	inc := CheckIncremental(idx.workDir, idx.parsers, cached.Files)
+
+	graph := NewImportGraph()
+	var allFiles []*FileInfo
+
+	// Add unchanged files from cache
+	for _, info := range inc.Cache {
+		allFiles = append(allFiles, info)
+	}
+
+	// Parse changed/new files
+	if len(inc.Changed) > 0 {
+		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
+		if err != nil {
+			return err
+		}
+		allFiles = append(allFiles, changedFiles...)
+	}
+
+	// Build graph from all files
+	for _, f := range allFiles {
+		var resolvedImports []string
+		for _, imp := range f.Imports {
+			p := ParserForFile(f.Path, idx.parsers)
+			if p == nil {
+				continue
+			}
+			resolved := resolveImport(idx.workDir, f.Path, imp.Path, p.Language())
+			if resolved != "" {
+				resolvedImports = append(resolvedImports, resolved)
+			}
+		}
+		graph.AddNode(f.Path, resolvedImports, f.Language)
+	}
+
+	symIndex := BuildIndex(allFiles)
+
+	idx.graph = graph
+	idx.index = symIndex
+	idx.scorer = NewRelevanceScorer(graph, symIndex)
+	idx.files = allFiles
+	idx.builtAt = time.Now()
+
+	// Save updated cache
+	fileCaches := BuildCacheFromFiles(idx.workDir, allFiles, nil)
+	// Merge with unchanged cache entries
+	for path, fc := range cached.Files {
+		if _, ok := fileCaches[path]; !ok {
+			fileCaches[path] = fc
+		}
+	}
+	cache := &IndexCache{Files: fileCaches}
+	_ = SaveCache(idx.workDir, cache)
+
+	return nil
+}
+
+// buildIncremental updates an existing in-memory index with only changed files.
+func (idx *Indexer) buildIncremental(ctx context.Context) error {
+	cached := LoadCache(idx.workDir)
+	if cached == nil {
+		// No cache available — fall back to full build
+		return idx.buildFull(ctx)
+	}
+
+	// Build file cache from current in-memory files
+	currentCache := make(map[string]*FileCache)
+	for _, f := range idx.files {
+		absPath := filepath.Join(idx.workDir, f.Path)
+		hash, err := fileHash(absPath)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(absPath)
+		if err != nil {
+			continue
+		}
+		currentCache[f.Path] = &FileCache{
+			Path:    f.Path,
+			Hash:    hash,
+			ModTime: info.ModTime(),
+			Info:    f,
+		}
+	}
+
+	inc := CheckIncremental(idx.workDir, idx.parsers, currentCache)
+
+	// Remove deleted files from graph and index
+	if len(inc.Deleted) > 0 {
+		for _, path := range inc.Deleted {
+			idx.graph.RemoveNode(path)
+		}
+		idx.index.RemoveFiles(inc.Deleted)
+	}
+
+	// Parse changed/new files
+	if len(inc.Changed) > 0 {
+		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
+		if err != nil {
+			return err
+		}
+
+		// Update graph and index with changed files
+		for _, f := range changedFiles {
+			// Remove old entries if file was previously indexed
+			idx.graph.RemoveNode(f.Path)
+			idx.index.RemoveFile(f.Path)
+
+			var resolvedImports []string
+			for _, imp := range f.Imports {
+				p := ParserForFile(f.Path, idx.parsers)
+				if p == nil {
+					continue
+				}
+				resolved := resolveImport(idx.workDir, f.Path, imp.Path, p.Language())
+				if resolved != "" {
+					resolvedImports = append(resolvedImports, resolved)
+				}
+			}
+			idx.graph.AddNode(f.Path, resolvedImports, f.Language)
+			idx.index.AddFile(f)
+
+			// Update files list
+			found := false
+			for i, existing := range idx.files {
+				if existing.Path == f.Path {
+					idx.files[i] = f
+					found = true
+					break
+				}
+			}
+			if !found {
+				idx.files = append(idx.files, f)
+			}
+		}
+	}
+
+	idx.scorer = NewRelevanceScorer(idx.graph, idx.index)
+	idx.builtAt = time.Now()
+
+	// Save updated cache
+	fileCaches := BuildCacheFromFiles(idx.workDir, idx.files, nil)
+	cache := &IndexCache{Files: fileCaches}
+	_ = SaveCache(idx.workDir, cache)
+
+	return nil
+}
+
+// parseFiles parses a list of relative file paths and returns their FileInfo.
+func (idx *Indexer) parseFiles(ctx context.Context, paths []string) ([]*FileInfo, error) {
+	var results []*FileInfo
+	for _, relPath := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		absPath := filepath.Join(idx.workDir, relPath)
+		p := ParserForFile(absPath, idx.parsers)
+		if p == nil {
+			continue
+		}
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+		const maxFileSize = 4096
+		if len(content) > maxFileSize {
+			content = content[:maxFileSize]
+		}
+		info, err := p.Parse(relPath, content)
+		if err != nil {
+			continue
+		}
+		results = append(results, info)
+	}
+	return results, nil
 }
 
 // IsBuilt reports whether the indexer has been built.
 func (idx *Indexer) IsBuilt() bool {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.IsBuilt()
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.graph != nil
@@ -91,9 +271,6 @@ func (idx *Indexer) IsBuilt() bool {
 
 // BuiltAt returns when the indexer was last built.
 func (idx *Indexer) BuiltAt() time.Time {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.BuiltAt()
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.builtAt
@@ -101,9 +278,6 @@ func (idx *Indexer) BuiltAt() time.Time {
 
 // FileCount returns the number of parsed source files.
 func (idx *Indexer) FileCount() int {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.FileCount()
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -114,9 +288,6 @@ func (idx *Indexer) FileCount() int {
 
 // SymbolCount returns the number of unique symbols.
 func (idx *Indexer) SymbolCount() int {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.SymbolCount()
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -127,9 +298,6 @@ func (idx *Indexer) SymbolCount() int {
 
 // Upstream returns files that the given path depends on, up to depth levels.
 func (idx *Indexer) Upstream(path string, depth int) []string {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.Upstream(path, depth)
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -140,9 +308,6 @@ func (idx *Indexer) Upstream(path string, depth int) []string {
 
 // Downstream returns files that depend on the given path, up to depth levels.
 func (idx *Indexer) Downstream(path string, depth int) []string {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.Downstream(path, depth)
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -153,9 +318,6 @@ func (idx *Indexer) Downstream(path string, depth int) []string {
 
 // Neighbors returns direct imports and importers of a file.
 func (idx *Indexer) Neighbors(path string) (imports []string, importedBy []string) {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.Neighbors(path)
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.graph == nil {
@@ -166,17 +328,6 @@ func (idx *Indexer) Neighbors(path string) (imports []string, importedBy []strin
 
 // Define returns where a symbol is defined.
 func (idx *Indexer) Define(symbol string) []SymbolLocation {
-	if idx.efieIndexer != nil {
-		locs := idx.efieIndexer.Define(symbol)
-		if locs == nil {
-			return nil
-		}
-		result := make([]SymbolLocation, len(locs))
-		for i, loc := range locs {
-			result[i] = SymbolLocation{File: loc.File, Kind: loc.Kind}
-		}
-		return result
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -187,17 +338,6 @@ func (idx *Indexer) Define(symbol string) []SymbolLocation {
 
 // FileSymbols returns all symbols defined in a file.
 func (idx *Indexer) FileSymbols(path string) []SymbolInfo {
-	if idx.efieIndexer != nil {
-		syms := idx.efieIndexer.FileSymbols(path)
-		if syms == nil {
-			return nil
-		}
-		result := make([]SymbolInfo, len(syms))
-		for i, s := range syms {
-			result[i] = SymbolInfo{Name: s.Name, Kind: s.Kind, Exported: s.Exported}
-		}
-		return result
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -208,9 +348,6 @@ func (idx *Indexer) FileSymbols(path string) []SymbolInfo {
 
 // SymbolsMatching returns symbols whose names contain the query substring.
 func (idx *Indexer) SymbolsMatching(query string) []string {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.SymbolsMatching(query)
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.index == nil {
@@ -222,17 +359,6 @@ func (idx *Indexer) SymbolsMatching(query string) []string {
 // RelevantFiles returns the top-N files most relevant to a task described
 // by target files and a text description.
 func (idx *Indexer) RelevantFiles(targetFiles []string, description string, topN int) []ScoredFile {
-	if idx.efieIndexer != nil {
-		efieScored := idx.efieIndexer.RelevantFiles(targetFiles, description, topN)
-		if efieScored == nil {
-			return nil
-		}
-		result := make([]ScoredFile, len(efieScored))
-		for i, sf := range efieScored {
-			result[i] = ScoredFile{Path: sf.Path, Score: sf.Score, Reasons: sf.Reasons}
-		}
-		return result
-	}
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if idx.scorer == nil {
@@ -245,10 +371,6 @@ func (idx *Indexer) RelevantFiles(targetFiles []string, description string, topN
 // intelligence for a set of target files and a task description.
 // The output is capped at maxBytes.
 func (idx *Indexer) FormatContext(targetFiles []string, description string, topN int, maxBytes int) string {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.FormatContext(targetFiles, description, topN, maxBytes)
-	}
-
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -314,10 +436,6 @@ func (idx *Indexer) FormatContext(targetFiles []string, description string, topN
 // ProjectSummary returns a high-level summary of the project structure
 // suitable for the plan phase context.
 func (idx *Indexer) ProjectSummary(maxBytes int) string {
-	if idx.efieIndexer != nil {
-		return idx.efieIndexer.ProjectSummary(maxBytes)
-	}
-
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 

@@ -38,7 +38,8 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 		return sf
 	}
 
-	targetSet := make(map[string]bool)
+	// Precompute target set and direct scores
+	targetSet := make(map[string]bool, len(targetFiles))
 	for _, f := range targetFiles {
 		targetSet[f] = true
 		sf := getOrCreate(f)
@@ -46,9 +47,15 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 		sf.Reasons = append(sf.Reasons, "directly mentioned in task")
 	}
 
+	// Precompute package map: file → directory
+	pkgMap := make(map[string]string, len(scores))
+	for path := range scores {
+		pkgMap[path] = filepath.Dir(path)
+	}
+
+	// Direct neighbors (depth 1) — bounded BFS
 	for _, target := range targetFiles {
-		upstream := s.graph.Upstream(target, 1)
-		for _, u := range upstream {
+		for _, u := range s.graph.Upstream(target, 1) {
 			if targetSet[u] {
 				continue
 			}
@@ -56,9 +63,7 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 			sf.Score += 5.0
 			sf.Reasons = append(sf.Reasons, "imported by "+target)
 		}
-
-		downstream := s.graph.Downstream(target, 1)
-		for _, d := range downstream {
+		for _, d := range s.graph.Downstream(target, 1) {
 			if targetSet[d] {
 				continue
 			}
@@ -68,11 +73,11 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 		}
 	}
 
+	// Symbol matching from task description
 	if taskDescription != "" {
 		words := extractIdentifiers(taskDescription)
 		for _, word := range words {
-			locs := s.index.Define(word)
-			for _, loc := range locs {
+			for _, loc := range s.index.Define(word) {
 				if targetSet[loc.File] {
 					continue
 				}
@@ -83,23 +88,30 @@ func (s *RelevanceScorer) Score(targetFiles []string, taskDescription string, to
 		}
 	}
 
+	// Same-package bonus — use precomputed package map
 	for _, target := range targetFiles {
-		targetDir := filepath.Dir(target)
-		for path := range scores {
+		targetDir := pkgMap[target]
+		if targetDir == "" {
+			targetDir = filepath.Dir(target)
+		}
+		for path, sf := range scores {
 			if targetSet[path] {
 				continue
 			}
-			if filepath.Dir(path) == targetDir {
-				sf := scores[path]
+			dir := pkgMap[path]
+			if dir == "" {
+				dir = filepath.Dir(path)
+			}
+			if dir == targetDir {
 				sf.Score += 3.0
 				sf.Reasons = append(sf.Reasons, "same package as "+target)
 			}
 		}
 	}
 
+	// Transitive dependencies — bounded to depth 3 instead of unlimited
 	for _, target := range targetFiles {
-		upstream := s.graph.Upstream(target, 0)
-		for depth, u := range upstream {
+		for depth, u := range s.graph.Upstream(target, 3) {
 			if _, already := scores[u]; already {
 				continue
 			}

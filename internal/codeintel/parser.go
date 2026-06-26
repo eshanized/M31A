@@ -1,13 +1,13 @@
 package codeintel
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
+
+	gotreesitter "github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // ImportInfo represents a single import declaration in a source file.
@@ -58,12 +58,12 @@ type Parser interface {
 }
 
 // AllParsers returns the default set of language parsers.
+// Tree-sitter is last so regex parsers take priority for Python/Rust.
 func AllParsers() []Parser {
 	return []Parser{
-		&GoParser{},
-		&TypeScriptParser{},
 		&PythonParser{},
 		&RustParser{},
+		&TreeSitterParser{},
 	}
 }
 
@@ -77,252 +77,564 @@ func ParserForFile(path string, parsers []Parser) Parser {
 	return nil
 }
 
-// ── Go Parser (go/ast) ─────────────────────────────────────────────────────
+// ── Tree-Sitter Parser (gotreesitter, pure Go) ──────────────────────────────
 
-// GoParser uses Go's standard go/ast package for full-fidelity parsing.
-type GoParser struct{}
-
-func (p *GoParser) Language() string { return "go" }
-
-func (p *GoParser) CanParse(path string) bool {
-	return filepath.Ext(path) == ".go"
+// supportedTreeSitterLangs limits tree-sitter to languages where we extract meaningful info.
+var supportedTreeSitterLangs = map[string]bool{
+	"go": true, "typescript": true, "javascript": true,
+	"python": true, "rust": true, "java": true,
+	"cpp": true, "c": true, "c_sharp": true,
+	"ruby": true, "php": true, "swift": true, "kotlin": true,
 }
 
-func (p *GoParser) Parse(path string, content []byte) (*FileInfo, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, content, parser.ParseComments)
+// TreeSitterParser uses gotreesitter for multi-language parsing.
+type TreeSitterParser struct{}
+
+func (p *TreeSitterParser) Language() string { return "" }
+
+func (p *TreeSitterParser) CanParse(path string) bool {
+	entry := grammars.DetectLanguage(filepath.Base(path))
+	if entry == nil {
+		return false
+	}
+	return supportedTreeSitterLangs[entry.Name]
+}
+
+func (p *TreeSitterParser) Parse(path string, content []byte) (*FileInfo, error) {
+	entry := grammars.DetectLanguage(filepath.Base(path))
+	if entry == nil {
+		return nil, nil
+	}
+	if !supportedTreeSitterLangs[entry.Name] {
+		return nil, nil
+	}
+
+	lang := entry.Language()
+	parser := gotreesitter.NewParser(lang)
+	tree, err := parser.Parse(content)
 	if err != nil {
 		return nil, err
 	}
+	defer tree.Release()
 
 	info := &FileInfo{
 		Path:     path,
-		Language: "go",
+		Language: entry.Name,
 	}
 
-	for _, imp := range f.Imports {
-		impPath := strings.Trim(imp.Path.Value, `"`)
-		info.Imports = append(info.Imports, ImportInfo{Path: impPath})
+	root := tree.RootNode()
+	walkAST(root, content, lang, entry.Name, info)
+
+	return info, nil
+}
+
+// walkAST traverses the syntax tree and extracts imports, functions, types, and exports.
+func walkAST(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	if node == nil {
+		return
 	}
 
-	for _, decl := range f.Decls {
-		switch d := decl.(type) {
-		case *ast.FuncDecl:
-			sig := FuncSignature{
-				Name:     d.Name.Name,
-				Exported: ast.IsExported(d.Name.Name),
-			}
-			if d.Recv != nil && len(d.Recv.List) > 0 {
-				sig.Receiver = exprString(d.Recv.List[0].Type)
-			}
-			if d.Type.Params != nil {
-				sig.Params = fieldListString(d.Type.Params)
-			}
-			if d.Type.Results != nil {
-				sig.Returns = fieldListString(d.Type.Results)
-			}
-			info.Funcs = append(info.Funcs, sig)
-			info.Exports = append(info.Exports, SymbolInfo{
-				Name:     d.Name.Name,
-				Kind:     "func",
-				Exported: sig.Exported,
-			})
+	nodeType := node.Type(lang)
 
-		case *ast.GenDecl:
-			for _, spec := range d.Specs {
-				switch s := spec.(type) {
-				case *ast.TypeSpec:
-					ti := TypeInfo{
-						Name: s.Name.Name,
-						Kind: typeKindString(s.Type),
-					}
-					switch t := s.Type.(type) {
-					case *ast.StructType:
-						for _, field := range t.Fields.List {
-							for _, name := range field.Names {
-								ti.Fields = append(ti.Fields, name.Name)
-							}
-						}
-					case *ast.InterfaceType:
-						for _, method := range t.Methods.List {
-							for _, name := range method.Names {
-								ti.Methods = append(ti.Methods, name.Name)
-							}
-						}
-					}
-					info.Types = append(info.Types, ti)
-					info.Exports = append(info.Exports, SymbolInfo{
-						Name:     s.Name.Name,
-						Kind:     ti.Kind,
-						Exported: ast.IsExported(s.Name.Name),
-					})
+	switch nodeType {
+	case "import_declaration", "import_statement":
+		extractImport(node, content, lang, langName, info)
+	case "use_declaration":
+		extractUseDeclaration(node, content, lang, langName, info)
+	case "export_statement":
+		// TS/JS: export wraps declaration — recurse into children
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child != nil && child.IsNamed() && child.Type(lang) != "export" {
+				walkAST(child, content, lang, langName, info)
+			}
+		}
+		return
+	case "function_declaration", "method_declaration", "function":
+		extractFunction(node, content, lang, langName, info)
+	case "type_declaration", "type_spec":
+		extractType(node, content, lang, langName, info)
+	case "struct_declaration":
+		extractStruct(node, content, lang, langName, info)
+	case "interface_declaration":
+		extractInterface(node, content, lang, langName, info)
+	case "class_declaration":
+		extractClass(node, content, lang, langName, info)
+	case "enum_declaration":
+		extractEnum(node, content, lang, langName, info)
+	case "const_declaration", "var_declaration", "lexical_declaration":
+		extractConstVar(node, content, lang, langName, info)
+	case "function_definition", "async_function_definition":
+		extractPythonFunc(node, content, lang, info)
+	case "class_definition":
+		extractPythonClass(node, content, lang, langName, info)
+	case "decorated_definition":
+		for i := 0; i < int(node.ChildCount()); i++ {
+			walkAST(node.Child(i), content, lang, langName, info)
+		}
+		return
+	}
 
-				case *ast.ValueSpec:
-					kind := "var"
-					if d.Tok == token.CONST {
-						kind = "const"
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child != nil && child.IsNamed() {
+			walkAST(child, content, lang, langName, info)
+		}
+	}
+}
+
+// extractImport handles Go/TS/JS import declarations.
+func extractImport(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	seen := make(map[string]bool)
+
+	// For Go: import_declaration contains import_spec_list > import_spec > import_path
+	// For TS/JS: import_statement has source field
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		childType := child.Type(lang)
+
+		switch childType {
+		case "import_spec", "import_spec_list":
+			for j := 0; j < int(child.NamedChildCount()); j++ {
+				spec := child.NamedChild(j)
+				if spec == nil {
+					continue
+				}
+				specType := spec.Type(lang)
+				if specType == "import_path" || specType == "interpreted_string_literal" || specType == "raw_string_literal" {
+					path := extractStringContent(spec, content, lang)
+					if path != "" && !seen[path] {
+						info.Imports = append(info.Imports, ImportInfo{Path: path})
+						seen[path] = true
 					}
-					for _, name := range s.Names {
-						info.Exports = append(info.Exports, SymbolInfo{
-							Name:     name.Name,
-							Kind:     kind,
-							Exported: ast.IsExported(name.Name),
-						})
+				} else if specType == "import_spec" {
+					if importPath := spec.ChildByFieldName("path", lang); importPath != nil {
+						path := extractStringContent(importPath, content, lang)
+						if path != "" && !seen[path] {
+							info.Imports = append(info.Imports, ImportInfo{Path: path})
+							seen[path] = true
+						}
+					}
+				}
+			}
+		case "import_path", "source", "module":
+			path := extractStringContent(child, content, lang)
+			if path != "" && !seen[path] {
+				info.Imports = append(info.Imports, ImportInfo{Path: path})
+				seen[path] = true
+			}
+		case "interpreted_string_literal", "raw_string_literal", "string":
+			path := extractStringContent(child, content, lang)
+			if path != "" && !seen[path] {
+				info.Imports = append(info.Imports, ImportInfo{Path: path})
+				seen[path] = true
+			}
+		}
+	}
+}
+
+// extractUseDeclaration handles Rust use statements.
+func extractUseDeclaration(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	text := node.Text(content)
+	// Extract "use crate::..." path
+	if idx := strings.Index(text, "use "); idx >= 0 {
+		rest := text[idx+4:]
+		rest = strings.TrimSpace(rest)
+		// Remove trailing semicolon and braces
+		rest = strings.TrimRight(rest, ";{")
+		rest = strings.TrimSpace(rest)
+		if strings.HasPrefix(rest, "crate::") {
+			path := strings.ReplaceAll(rest, "::", "/")
+			path = strings.TrimPrefix(path, "crate/")
+			info.Imports = append(info.Imports, ImportInfo{Path: path})
+		}
+	}
+}
+
+// extractFunction handles Go/TS/JS function declarations.
+func extractFunction(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
+	}
+	if name == "" {
+		name = childByName(node, content, lang, "identifier", "property_identifier")
+	}
+	if name == "" {
+		return
+	}
+
+	exported := isExported(name, langName)
+	sig := FuncSignature{Name: name, Exported: exported}
+
+	// Extract parameters
+	if params := node.ChildByFieldName("parameters", lang); params != nil {
+		sig.Params = strings.Trim(params.Text(content), "()")
+	}
+
+	// Extract return type
+	if result := node.ChildByFieldName("result", lang); result != nil {
+		sig.Returns = strings.Trim(result.Text(content), "()")
+	}
+
+	// Extract receiver (Go methods)
+	if receiver := node.ChildByFieldName("receiver", lang); receiver != nil {
+		sig.Receiver = strings.Trim(receiver.Text(content), "()")
+	}
+
+	info.Funcs = append(info.Funcs, sig)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "func",
+		Exported: exported,
+	})
+}
+
+// extractType handles Go type declarations.
+func extractType(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		childType := child.Type(lang)
+		if childType == "type_spec" || childType == "type_identifier" {
+			name := ""
+			if nameNode := child.ChildByFieldName("name", lang); nameNode != nil {
+				name = nameNode.Text(content)
+			}
+			if name == "" {
+				name = child.Text(content)
+			}
+			if name != "" {
+				kind := "type"
+				typeNode := child.ChildByFieldName("type", lang)
+				if typeNode != nil {
+					kind = typeNode.Type(lang)
+				}
+				info.Types = append(info.Types, TypeInfo{Name: name, Kind: kind})
+				info.Exports = append(info.Exports, SymbolInfo{
+					Name:     name,
+					Kind:     kind,
+					Exported: isExported(name, langName),
+				})
+			}
+		}
+	}
+}
+
+// extractStruct handles struct declarations (TS/JS/Rust).
+func extractStruct(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
+	}
+	if name == "" {
+		name = childByName(node, content, lang, "type_identifier", "identifier")
+	}
+	if name == "" {
+		return
+	}
+
+	ti := TypeInfo{Name: name, Kind: "struct"}
+
+	// Extract fields
+	body := node.ChildByFieldName("body", lang)
+	if body == nil {
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			child := node.NamedChild(i)
+			if child != nil && (child.Type(lang) == "field_declaration_list" || child.Type(lang) == "class_body" || child.Type(lang) == "block") {
+				body = child
+				break
+			}
+		}
+	}
+	if body != nil {
+		for i := 0; i < int(body.NamedChildCount()); i++ {
+			field := body.NamedChild(i)
+			if field != nil {
+				fieldType := field.Type(lang)
+				if fieldType == "field_declaration" || fieldType == "property_definition" || fieldType == "field_definition" || fieldType == "property_signature" {
+					if fname := fieldByName(field, content, lang); fname != "" {
+						ti.Fields = append(ti.Fields, fname)
 					}
 				}
 			}
 		}
 	}
 
-	return info, nil
+	info.Types = append(info.Types, ti)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "struct",
+		Exported: isExported(name, langName),
+	})
 }
 
-func exprString(expr ast.Expr) string {
-	switch e := expr.(type) {
-	case *ast.Ident:
-		return e.Name
-	case *ast.StarExpr:
-		return "*" + exprString(e.X)
-	case *ast.SelectorExpr:
-		return exprString(e.X) + "." + e.Sel.Name
-	default:
-		return ""
+// extractInterface handles interface declarations.
+func extractInterface(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
 	}
-}
+	if name == "" {
+		name = childByName(node, content, lang, "type_identifier", "identifier")
+	}
+	if name == "" {
+		return
+	}
 
-func fieldListString(fl *ast.FieldList) string {
-	var parts []string
-	for _, f := range fl.List {
-		typeStr := exprString(f.Type)
-		if len(f.Names) == 0 {
-			parts = append(parts, typeStr)
-		} else {
-			for _, name := range f.Names {
-				parts = append(parts, name.Name+" "+typeStr)
+	ti := TypeInfo{Name: name, Kind: "interface"}
+
+	// Extract methods and properties
+	body := node.ChildByFieldName("body", lang)
+	if body != nil {
+		for i := 0; i < int(body.NamedChildCount()); i++ {
+			member := body.NamedChild(i)
+			if member == nil {
+				continue
+			}
+			memberType := member.Type(lang)
+			if memberType == "method_signature" {
+				if methodName := fieldByName(member, content, lang); methodName != "" {
+					ti.Methods = append(ti.Methods, methodName)
+				}
+			} else if memberType == "property_signature" {
+				if fieldName := fieldByName(member, content, lang); fieldName != "" {
+					ti.Fields = append(ti.Fields, fieldName)
+				}
 			}
 		}
 	}
-	return strings.Join(parts, ", ")
+
+	info.Types = append(info.Types, ti)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "interface",
+		Exported: isExported(name, langName),
+	})
 }
 
-func typeKindString(expr ast.Expr) string {
-	switch expr.(type) {
-	case *ast.StructType:
-		return "struct"
-	case *ast.InterfaceType:
-		return "interface"
-	default:
-		return "type"
+// extractClass handles class declarations.
+func extractClass(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	// Try "name" field first (Go), then look for type_identifier/identifier child (TS)
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
 	}
-}
-
-// ── TypeScript/JavaScript Parser (regex) ────────────────────────────────────
-
-// TypeScriptParser extracts imports, exports, functions, and types from
-// TypeScript and JavaScript files using regex patterns.
-type TypeScriptParser struct{}
-
-func (p *TypeScriptParser) Language() string { return "typescript" }
-
-func (p *TypeScriptParser) CanParse(path string) bool {
-	ext := filepath.Ext(path)
-	return ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs"
-}
-
-var (
-	tsImportRe     = regexp.MustCompile(`import\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+\w+))?\s+from\s+['"]([^'"]+)['"]`)
-	tsSideImportRe = regexp.MustCompile(`import\s+['"]([^'"]+)['"]`)
-	tsExportRe     = regexp.MustCompile(`export\s+(?:default\s+)?(?:const|let|var|function|class|enum|type|interface|abstract\s+class)\s+(\w+)`)
-	tsFuncRe       = regexp.MustCompile(`(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)(?:\s*:\s*([^{]+))?`)
-	tsArrowRe      = regexp.MustCompile(`(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*\w+)?\s*=\s*(?:async\s+)?\(([^)]*)\)(?:\s*:\s*([^{=]+))?\s*=>`)
-	tsClassRe      = regexp.MustCompile(`(?:export\s+)?(?:abstract\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?(?:\s+implements\s+([^{]+))?`)
-	tsInterfaceRe  = regexp.MustCompile(`(?:export\s+)?interface\s+(\w+)(?:\s+extends\s+([^{]+))?\s*\{([^}]*)\}`)
-	tsTypeRe       = regexp.MustCompile(`(?:export\s+)?type\s+(\w+)(?:<[^>]*>)?\s*=\s*([^;]+)`)
-	tsEnumRe       = regexp.MustCompile(`(?:export\s+)?enum\s+(\w+)\s*\{([^}]*)\}`)
-)
-
-func (p *TypeScriptParser) Parse(path string, content []byte) (*FileInfo, error) {
-	src := string(content)
-	info := &FileInfo{
-		Path:     path,
-		Language: "typescript",
+	if name == "" {
+		name = childByName(node, content, lang, "type_identifier", "identifier", "name")
+	}
+	if name == "" {
+		return
 	}
 
-	seen := make(map[string]bool)
-	for _, m := range tsImportRe.FindAllStringSubmatch(src, -1) {
-		if !seen[m[1]] {
-			info.Imports = append(info.Imports, ImportInfo{Path: m[1]})
-			seen[m[1]] = true
-		}
-	}
-	for _, m := range tsSideImportRe.FindAllStringSubmatch(src, -1) {
-		if !seen[m[1]] {
-			info.Imports = append(info.Imports, ImportInfo{Path: m[1]})
-			seen[m[1]] = true
-		}
-	}
+	ti := TypeInfo{Name: name, Kind: "class"}
 
-	for _, m := range tsExportRe.FindAllStringSubmatch(src, -1) {
-		info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "export", Exported: true})
-	}
-
-	for _, m := range tsFuncRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		ret := strings.TrimSpace(m[3])
-		info.Funcs = append(info.Funcs, FuncSignature{
-			Name: m[1], Params: strings.TrimSpace(m[2]), Returns: ret, Exported: exported,
-		})
-		if !exported {
-			info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "func", Exported: false})
-		}
-	}
-
-	for _, m := range tsArrowRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		ret := strings.TrimSpace(m[3])
-		info.Funcs = append(info.Funcs, FuncSignature{
-			Name: m[1], Params: strings.TrimSpace(m[2]), Returns: ret, Exported: exported,
-		})
-	}
-
-	for _, m := range tsClassRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		ti := TypeInfo{Name: m[1], Kind: "class"}
-		info.Types = append(info.Types, ti)
-		info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "class", Exported: exported})
-	}
-
-	for _, m := range tsInterfaceRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		var fields []string
-		body := m[3]
-		for _, line := range strings.Split(body, "\n") {
-			line = strings.TrimSpace(line)
-			if idx := strings.IndexAny(line, ":?"); idx > 0 {
-				fields = append(fields, strings.TrimSpace(line[:idx]))
+	// Extract fields/properties
+	body := node.ChildByFieldName("body", lang)
+	if body != nil {
+		for i := 0; i < int(body.NamedChildCount()); i++ {
+			member := body.NamedChild(i)
+			if member == nil {
+				continue
+			}
+			memberType := member.Type(lang)
+			if memberType == "field_definition" || memberType == "property_definition" || memberType == "property_signature" {
+				if fieldName := fieldByName(member, content, lang); fieldName != "" {
+					ti.Fields = append(ti.Fields, fieldName)
+				}
+			} else if memberType == "method_definition" || memberType == "method_signature" {
+				if methodName := fieldByName(member, content, lang); methodName != "" {
+					ti.Methods = append(ti.Methods, methodName)
+				}
 			}
 		}
-		ti := TypeInfo{Name: m[1], Kind: "interface", Fields: fields}
-		info.Types = append(info.Types, ti)
-		info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "interface", Exported: exported})
 	}
 
-	for _, m := range tsTypeRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		info.Types = append(info.Types, TypeInfo{Name: m[1], Kind: "type"})
-		info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "type", Exported: exported})
-	}
-
-	for _, m := range tsEnumRe.FindAllStringSubmatch(src, -1) {
-		exported := strings.Contains(m[0], "export")
-		info.Types = append(info.Types, TypeInfo{Name: m[1], Kind: "enum"})
-		info.Exports = append(info.Exports, SymbolInfo{Name: m[1], Kind: "enum", Exported: exported})
-	}
-
-	return info, nil
+	info.Types = append(info.Types, ti)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "class",
+		Exported: isExported(name, langName),
+	})
 }
 
-// ── Python Parser (regex) ───────────────────────────────────────────────────
+// extractEnum handles enum declarations.
+func extractEnum(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
+	}
+	if name == "" {
+		name = childByName(node, content, lang, "identifier", "type_identifier")
+	}
+	if name == "" {
+		return
+	}
+
+	info.Types = append(info.Types, TypeInfo{Name: name, Kind: "enum"})
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "enum",
+		Exported: isExported(name, langName),
+	})
+}
+
+// extractConstVar handles const/var declarations (Go, TS).
+func extractConstVar(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	nodeType := node.Type(lang)
+	kind := "var"
+	if nodeType == "const_declaration" || (nodeType == "lexical_declaration" && strings.HasPrefix(strings.TrimSpace(node.Text(content)), "const")) {
+		kind = "const"
+	}
+
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		childType := child.Type(lang)
+		if childType == "const_spec" || childType == "var_spec" || childType == "variable_declarator" {
+			name := ""
+			if nameNode := child.ChildByFieldName("name", lang); nameNode != nil {
+				name = nameNode.Text(content)
+			}
+			if name == "" {
+				name = childByName(child, content, lang, "identifier", "type_identifier")
+			}
+			if name != "" {
+				info.Exports = append(info.Exports, SymbolInfo{
+					Name:     name,
+					Kind:     kind,
+					Exported: isExported(name, langName),
+				})
+			}
+		}
+	}
+}
+
+// extractPythonFunc handles Python function definitions.
+func extractPythonFunc(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
+	}
+	if name == "" {
+		return
+	}
+
+	exported := !strings.HasPrefix(name, "_")
+	sig := FuncSignature{Name: name, Exported: exported}
+
+	if params := node.ChildByFieldName("parameters", lang); params != nil {
+		sig.Params = strings.Trim(params.Text(content), "()")
+	}
+
+	if returnType := node.ChildByFieldName("return_type", lang); returnType != nil {
+		sig.Returns = strings.TrimPrefix(returnType.Text(content), "->")
+		sig.Returns = strings.TrimSpace(sig.Returns)
+	}
+
+	info.Funcs = append(info.Funcs, sig)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "func",
+		Exported: exported,
+	})
+}
+
+// extractPythonClass handles Python class definitions.
+func extractPythonClass(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	name := ""
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		name = nameNode.Text(content)
+	}
+	if name == "" {
+		return
+	}
+
+	ti := TypeInfo{Name: name, Kind: "class"}
+
+	// Extract superclass
+	if superclasses := node.ChildByFieldName("superclasses", lang); superclasses != nil {
+		for i := 0; i < int(superclasses.NamedChildCount()); i++ {
+			arg := superclasses.NamedChild(i)
+			if arg != nil {
+				ti.Fields = append(ti.Fields, arg.Text(content))
+			}
+		}
+	}
+
+	info.Types = append(info.Types, ti)
+	info.Exports = append(info.Exports, SymbolInfo{
+		Name:     name,
+		Kind:     "class",
+		Exported: !strings.HasPrefix(name, "_"),
+	})
+}
+
+// childByName finds the first named child matching any of the given types.
+func childByName(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, types ...string) string {
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		childType := child.Type(lang)
+		for _, t := range types {
+			if childType == t {
+				return child.Text(content)
+			}
+		}
+	}
+	return ""
+}
+
+// fieldByName tries ChildByFieldName("name"), then falls back to identifier-like children.
+func fieldByName(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language) string {
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		return nameNode.Text(content)
+	}
+	return childByName(node, content, lang, "property_identifier", "identifier", "type_identifier")
+}
+
+// extractStringContent extracts the string content from a string literal node.
+func extractStringContent(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language) string {
+	text := node.Text(content)
+	// Remove quotes
+	if len(text) >= 2 {
+		if (text[0] == '"' && text[len(text)-1] == '"') ||
+			(text[0] == '\'' && text[len(text)-1] == '\'') ||
+			(text[0] == '`' && text[len(text)-1] == '`') {
+			text = text[1 : len(text)-1]
+		}
+	}
+	return text
+}
+
+// isExported determines if a symbol name is exported based on language rules.
+func isExported(name string, language string) bool {
+	if name == "" {
+		return false
+	}
+	switch language {
+	case "go":
+		return unicode.IsUpper(rune(name[0]))
+	case "python":
+		return !strings.HasPrefix(name, "_")
+	case "rust":
+		return !strings.HasPrefix(name, "_")
+	default:
+		// TypeScript/JavaScript: assume exported if not prefixed with _
+		return !strings.HasPrefix(name, "_")
+	}
+}
+
+// ── Python Parser (regex, for files not handled well by tree-sitter) ────────
 
 // PythonParser extracts imports, classes, and functions from Python files.
 type PythonParser struct{}
@@ -453,7 +765,7 @@ func cleanPyParams(params string) string {
 	return strings.TrimSpace(params)
 }
 
-// ── Rust Parser (regex) ─────────────────────────────────────────────────────
+// ── Rust Parser (regex, for files not handled well by tree-sitter) ──────────
 
 // RustParser extracts use statements, pub items, and type definitions from Rust files.
 type RustParser struct{}
@@ -543,20 +855,4 @@ func (p *RustParser) Parse(path string, content []byte) (*FileInfo, error) {
 	}
 
 	return info, nil
-}
-
-// IsExported reports whether a symbol name is exported in its language.
-// For Go: starts with uppercase. For others: heuristic based on leading underscore.
-func IsExported(name string, language string) bool {
-	if name == "" {
-		return false
-	}
-	switch language {
-	case "go":
-		return unicode.IsUpper(rune(name[0]))
-	case "python":
-		return !strings.HasPrefix(name, "_")
-	default:
-		return !strings.HasPrefix(name, "_")
-	}
 }
