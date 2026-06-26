@@ -4,7 +4,7 @@
 
 ### The terminal-native AI coding agent that ships, not just suggests.
 
-**Six-phase workflow · Git rollback chain · Zero telemetry · One static binary**
+**Seven-phase workflow · Git rollback chain · Zero telemetry · One static binary**
 
 [![Go](https://img.shields.io/github/go-mod/go-version/eshanized/M31A?style=flat-square&logo=go&logoColor=white)](go.mod)
 [![License](https://img.shields.io/github/license/eshanized/M31A?style=flat-square)](LICENSE)
@@ -23,7 +23,7 @@
   <img src=".images/image_0.png" alt="M31 Autonomous TUI" width="700">
 </p>
 
-M31 Autonomous is a terminal-based AI coding agent written in Go. Unlike browser-bound assistants, it runs inside your shell, owns the six-phase workflow end-to-end — **Initialize, Discuss, Plan, Execute, Verify, Ship** — and commits verified changes to your git tree. One static binary, zero telemetry, any POSIX shell.
+M31 Autonomous is a terminal-based AI coding agent written in Go. Unlike browser-bound assistants, it runs inside your shell, owns the seven-phase workflow end-to-end — **Initialize, Discuss, Plan, Execute, Verify, Runtime, Ship** — and commits verified changes to your git tree. One static binary, zero telemetry, any POSIX shell.
 
 ```
 $ m31a
@@ -36,7 +36,7 @@ $ m31a
    RS256, keep backward compat for 30 days
 ```
 
-> **Status:** v1.0.0 — core feature complete. V1.1 features (ghost mode, picture-in-picture, deferred tools) are on the roadmap.
+> **Status:** v1.3.0 — core feature complete. V1.1 features (ghost mode, picture-in-picture, deferred tools) are on the roadmap.
 
 ## Install
 
@@ -64,7 +64,7 @@ Every AI coding tool generates code and walks away. You verify, test, and commit
 | | M31 Autonomous | Cursor | Aider | Cline |
 |---|:---:|:---:|:---:|:---:|
 | Terminal-native (no Electron) | **yes** | no | yes | no |
-| Six-phase workflow engine | **yes** | no | no | no |
+| Seven-phase workflow engine | **yes** | no | no | no |
 | Git commit rollback chain | **yes** | no | partial | no |
 | Cross-session learning ledger | **yes** | no | no | no |
 | AutoDream context consolidation | **yes** | no | no | no |
@@ -80,7 +80,7 @@ M31 Autonomous is the tool you reach for when you want an agent that **owns the 
 
 ## How It Works
 
-Every coding task goes through six phases. The workflow engine supports four modes — **auto** (adaptive), **full** (all 6 phases), **fast** (skip Plan), and **direct** (skip Discuss, Plan, Verify) — so you can dial the process to match the task.
+Every coding task goes through seven phases. The workflow engine supports four modes — **auto** (adaptive), **full** (all 7 phases), **fast** (skip Plan), and **direct** (skip Discuss, Plan, Verify) — so you can dial the process to match the task.
 
 ```mermaid
 flowchart LR
@@ -110,7 +110,7 @@ flowchart LR
     subgraph Phase4["4 · Execute"]
         E0["Pre-flight validation*"]
         E1["Topological sort"]
-        E2["LLM + 16 tools"]
+        E2["LLM + 18 tools"]
         E3["Loop detection*"]
         E4["Quality gates*"]
         E0 --> E1 --> E2 --> E3 --> E4
@@ -124,7 +124,12 @@ flowchart LR
         V1 --> V2 --> V3 --> V4
     end
 
-    subgraph Phase6["6 · Ship"]
+    subgraph Phase5b["6 · Runtime"]
+        R1["Runtime checks*"]
+        R1 --> R1
+    end
+
+    subgraph Phase6["7 · Ship"]
         S1["Pre-ship checklist*"]
         S2["Git commit"]
         S3["Changelog*"]
@@ -132,13 +137,14 @@ flowchart LR
         S1 --> S2 --> S3 --> S4
     end
 
-    Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5 --> Phase6
+    Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5 --> Phase5b --> Phase6
 
     style Phase1 fill:#1a1b26,stroke:#7aa2f7,color:#c0caf5
     style Phase2 fill:#1a1b26,stroke:#bb9af7,color:#c0caf5
     style Phase3 fill:#1a1b26,stroke:#e0af68,color:#c0caf5
     style Phase4 fill:#1a1b26,stroke:#9ece6a,color:#c0caf5
     style Phase5 fill:#1a1b26,stroke:#f7768e,color:#c0caf5
+    style Phase5b fill:#1a1b26,stroke:#73daca,color:#c0caf5
     style Phase6 fill:#1a1b26,stroke:#73daca,color:#c0caf5
 ```
 
@@ -149,19 +155,20 @@ flowchart LR
 | **Initialize** | Detects project type (Go/Node/Rust/Python), builds code intelligence index — import graphs, symbol lookup, relevance scoring across 4 languages. Optional deep project analysis and environment pre-flight checks. |
 | **Discuss** | LLM asks clarifying questions, you answer in the TUI. Built-in quality scoring and answer completeness checks ensure the LLM gathers enough context. |
 | **Plan** | Optional pre-plan research step, then structured task plan with file predictions (`[NEW]`/`[MODIFY]`), dependencies, and acceptance criteria. Plan checker runs revision loops with coverage and security gates. Large plans auto-chunk for reliability. |
-| **Execute** | Tasks run in dependency order (Kahn's topological sort) with bounded parallelism. The LLM makes tool calls via 16 built-in tools, sees results, iterates. Includes pre-flight validation, tool-call loop detection, and per-task quality gates. |
+| **Execute** | Tasks run in dependency order (Kahn's topological sort) with bounded parallelism. The LLM makes tool calls via 18 built-in tools, sees results, iterates. Includes pre-flight validation, tool-call loop detection, and per-task quality gates. |
 | **Verify** | Runs your build and test suite. Failed tasks trigger self-healing — error output goes back to the LLM, up to 2 retries. Generates a structured verification report and optional security file scanning. |
+| **Runtime** | Runtime checks and validation during execution. |
 | **Ship** | Pre-ship checklist, final verified commit, auto-generated changelog, and session metrics recorded in the cross-session learning ledger. |
 
 ## Features
 
 ### Workflow & Intelligence
 
-- **Six-phase workflow** — `Initialize → Discuss → Plan → Execute → Verify → Ship` with four modes (`auto`, `full`, `fast`, `direct`) to match task complexity. Every run ends with a verified git commit and a ledger entry.
+- **Seven-phase workflow** — `Initialize → Discuss → Plan → Execute → Verify → Runtime → Ship` with four modes (`auto`, `full`, `fast`, `direct`) to match task complexity. Every run ends with a verified git commit and a ledger entry.
 - **Workflow quality gates** — Plan checker with revision loops, coverage gates, security heuristics, and gap analysis. Discuss-phase quality scoring and completeness checks. Execute-phase pre-flight validation and tool-call loop detection.
-- **Code intelligence** — Parses Go (via `go/ast`), TypeScript, Python, and Rust. Builds import dependency graphs, indexes symbols, scores file relevance. The LLM gets context about which files matter for the current task.
+- **Code intelligence** — Parses Go (via tree-sitter), TypeScript, Python, and Rust. Builds import dependency graphs, indexes symbols, scores file relevance. The LLM gets context about which files matter for the current task.
 - **Code complexity analysis** — `CodeComplexity` tool classifies your codebase as simple (<10K lines), moderate (10K–50K), or complex (50K+) across all 4 languages, informing model selection.
-- **16 built-in tools** — `Bash`, `FileRead`, `FileWrite`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `CodeMap`, `CodeComplexity`, `FileDelete`, `FileMove`, `FileList`, `TodoWrite`, `AskUserQuestion`, `Agent`. All gated by a permission system with rate limiting and concurrency control.
+- **18 built-in tools** — `Bash`, `FileRead`, `FileWrite`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `CodeMap`, `CodeComplexity`, `FileDelete`, `FileMove`, `FileList`, `TodoWrite`, `TodoRead`, `DevServer`, `HTTPCheck`, `AskUserQuestion`. All gated by a permission system with rate limiting and concurrency control.
 - **Parallel subagents** — The LLM can spawn child agents (up to depth 2) that run in isolated git worktrees, each with their own dispatcher and permissions.
 - **Task runner** — Kahn's algorithm for topological sort, bounded parallelism (4 concurrent), per-task timeouts, retry support.
 
@@ -169,7 +176,7 @@ flowchart LR
 
 - **Triple provider support** — OpenRouter (300+ models), OpenCode Zen, and Nvidia NIM gateways with automatic fallback when a provider degrades. Configurable custom base URLs for self-hosted or proxied gateways.
 - **Model arbitrage** — Classifies task complexity (simple/moderate/complex) and recommends the cheapest model that meets quality requirements. Complex tasks require 64K+ context windows.
-- **Per-phase model assignment** — Use a cheap model for Discuss/Plan, powerful model for Execute/Verify/Ship. Six configurable phase slots.
+- **Per-phase model assignment** — Use a cheap model for Discuss/Plan, powerful model for Execute/Verify/Ship. Eight configurable phase slots.
 - **AutoDream context compression** — Long conversations get automatically consolidated. Protected messages (initial goal, tool calls, plans, last 5 messages) are never compressed. Auto-compression triggers on context window overflow.
 - **Token estimation** — tiktoken-based with EMA self-calibration. Context warning banner at 80%, hard reject at 95%. Configurable warning threshold and EMA alpha.
 
@@ -185,7 +192,7 @@ flowchart LR
 
 ### Terminal UI
 
-- **31-screen Bubble Tea TUI** — 10 themes (Midnight, Daylight, Catppuccin, Nord, Tokyo Night, Gruvbox Dark, Rosé Pine, Dracula, Solarized Dark, Monochrome), Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
+- **33-screen Bubble Tea TUI** — 11 themes (Midnight, Daylight, Catppuccin Mocha, Nord Frost, Tokyo Night, Gruvbox Dark, Rose Pine, Dracula, Solarized Dark, Pure Mono, High Contrast), Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
 - **Fuzzy model selector** — search with per-token cost comparison and live context-warning.
 - **Diff viewer** — browse git diffs inline with syntax highlighting.
 - **Rollback browser** — view commit chain, soft/hard reset with preview.
@@ -201,7 +208,7 @@ flowchart LR
 
 ```
  /help          list all commands
- /workflow      kick off the six-phase flow
+ /workflow      kick off the seven-phase flow
  /model         open the model selector (fuzzy search)
  /provider      switch provider (openrouter/zen/nvidia)
  /ledger stats  show your cross-session ledger
@@ -322,10 +329,10 @@ graph TB
 
     subgraph internal["internal/ (private)"]
         direction TB
-        tui["tui/<br/>31 screens · 10 themes<br/>Bubble Tea app"]
-        workflow["workflow/<br/>six-phase engine<br/>quality gates · chunked plans"]
+        tui["tui/<br/>33 screens · 11 themes<br/>Bubble Tea app"]
+        workflow["workflow/<br/>seven-phase engine<br/>quality gates · chunked plans"]
         provider["provider/<br/>openrouter · zen · nvidia<br/>fallback · cache · SSE"]
-        tools["tools/<br/>16 tools · permissions<br/>rate limiting · concurrency"]
+        tools["tools/<br/>18 tools · permissions<br/>rate limiting · concurrency"]
         subagent["tools/subagent/<br/>parallel subagents<br/>worktree isolation · depth=2"]
         codeintel["codeintel/<br/>4-language parser<br/>import graph · relevance"]
         config["config/<br/>TOML loader · hot-reload<br/>project context detection"]
@@ -365,10 +372,10 @@ graph TB
 | Package | Description |
 |---------|-------------|
 | `cmd/m31a/` | Binary entry point with CLI flags |
-| `internal/tui/` | Bubble Tea TUI app — 31 screens, 10 themes, responsive layout, command palette |
-| `internal/workflow/` | Six-phase orchestration engine with quality gates, chunked plans, and pre-flight checks |
+| `internal/tui/` | Bubble Tea TUI app — 33 screens, 11 themes, responsive layout, command palette |
+| `internal/workflow/` | Seven-phase orchestration engine with quality gates, chunked plans, and pre-flight checks |
 | `internal/provider/` | OpenRouter, Zen, and Nvidia clients with auto-fallback, model cache, and SSE streaming |
-| `internal/tools/` | 16 tools with permission system, token-bucket rate limiting, and concurrency control |
+| `internal/tools/` | 18 tools with permission system, token-bucket rate limiting, and concurrency control |
 | `internal/tools/subagent/` | Parallel subagent manager with git worktree isolation (max depth 2) |
 | `internal/codeintel/` | 4-language parser (Go, TypeScript, Python, Rust) with import graph and relevance scoring |
 | `internal/config/` | TOML loader with project context detection, hot-reload, and workflow enhancement flags |
@@ -411,17 +418,34 @@ Deep dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [Wiki](https://gith
 ├── internal/          private packages (not importable)
 │   ├── codeintel/     4-language parser, import graph, relevance scoring
 │   ├── config/        TOML loader, project context, hot-reload
+│   ├── context/       context management
 │   ├── errors/        sentinel errors
 │   ├── fileutil/      atomic file operations
 │   ├── git/           commit, rollback, diff, stash, branch
 │   ├── log/           structured logging, daily rotation
 │   ├── provider/      openrouter, zen, nvidia clients
+│   ├── shell/         shell integration
+│   ├── testutil/      test utilities
 │   ├── tokens/        tiktoken estimation, EMA calibration
-│   ├── tools/         16 tools + subagent manager
-│   ├── tui/           Bubble Tea app (31 screens, 10 themes)
+│   ├── tools/         18 tools + subagent manager
+│   ├── tui/           Bubble Tea app (33 screens, 11 themes)
 │   ├── types/         shared types, constants, workflow modes
-│   └── workflow/      six-phase engine, quality gates
+│   └── workflow/      seven-phase engine, quality gates
 ├── pkg/               public packages (importable)
+│   ├── autodream/     context consolidation, reentrancy guard
+│   ├── arbitrage/     model-cost optimizer
+│   ├── bisect/        git-bisect wrapper
+│   ├── compaction/    compaction utilities
+│   ├── coordinator/   coordination logic
+│   ├── history/       frecent prompt history, scoring
+│   ├── keychain/      OS keychain abstraction
+│   ├── ledger/        cross-session learning store
+│   ├── metrics/       metrics collection
+│   ├── retry/         retry logic
+│   ├── rollback/      commit-chain manager
+│   ├── session/       session lifecycle, persistence
+│   ├── skills/        skill management
+│   └── taskrunner/    Kahn's algorithm, bounded parallelism
 ├── scripts/           verify_v1.sh acceptance suite
 ├── install.sh         one-liner installer
 ├── Makefile           build / test / lint / release targets
@@ -490,7 +514,7 @@ If you use M31 Autonomous in your research, please cite it:
 ```bibtex
 @software{m31a2026,
   author       = {Eshan Roy},
-  title        = {M31 Autonomous: A Terminal-Native AI Coding Agent with Eight-Phase Workflow Orchestration},
+  title        = {M31 Autonomous: A Terminal-Native AI Coding Agent with Seven-Phase Workflow Orchestration},
   year         = {2026},
   url          = {https://github.com/eshanized/M31A},
   version      = {v1.3.0}
