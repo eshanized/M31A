@@ -32,7 +32,10 @@
 17. [Innovation 10: Usage-Graph Importance Weighting](#17-innovation-10-usage-graph-importance-weighting)
 18. [Innovation 11: Task Graph Visualization](#18-innovation-11-task-graph-visualization)
 19. [Innovation 12: Context Registry Optimization](#19-innovation-12-context-registry-optimization)
-20. [Changelog](#20-changelog)
+20. [Incremental Update Algorithms](#20-incremental-update-algorithms)
+21. [Concurrency and Thread-Safety Model](#21-concurrency-and-thread-safety-model)
+22. [Error Handling and Edge Cases](#22-error-handling-and-edge-cases)
+23. [Changelog](#23-changelog)
 
 ---
 
@@ -101,11 +104,11 @@ type MultiResIndex struct {
 
 ### 1.3 Trie
 
-Efficient prefix-based symbol search.
+Efficient prefix-based symbol search with Unicode support.
 
 ```go
 type TrieNode struct {
-    children [128]*TrieNode
+    children map[rune]*TrieNode  // Unicode support (UTF-8)
     symbols  []string
     isEnd    bool
 }
@@ -116,6 +119,7 @@ type Trie struct {
 
 // Operations:
 // Insert:   O(K) where K = symbol name length
+// Delete:   O(K) where K = symbol name length
 // Search:   O(K) exact match
 // Prefix:   O(K + M) where M = number of matches
 // Fuzzy:    O(K x E) where E = edit distance budget
@@ -123,18 +127,21 @@ type Trie struct {
 
 ### 1.4 BloomFilter
 
-Probabilistic set membership.
+Probabilistic set membership with unbiased hash indexing.
 
 ```go
 type BloomFilter struct {
     bits    []uint64
     numHash int
     size    uint
+    seeds   []uint64  // Per-hash-function seeds
 }
 
-// Check:    O(1)
+// Insert:    O(k) where k = number of hash functions (typically 7)
+// Contains:  O(k) with zero allocations
 // False positive rate: ~1% with optimal sizing
 // Memory: ~1.2 bytes per element at 1% FP rate
+// Uses Lemire's fast range reduction for unbiased bit indexing
 ```
 
 ### 1.5 CompositeScorer
@@ -165,7 +172,7 @@ type ScoreStatistics struct {
 
 ## 2. Sub-Algorithm: PageRank
 
-Computes stationary distribution probability for each node.
+Computes stationary distribution probability for each node. For code dependency graphs, uses **reverse-edge distribution** — importance flows from dependents to their dependencies (a file imported by many important files receives high rank).
 
 ```
 ALGORITHM ComputePageRank(graph, iterations=20, damping=0.85):
@@ -176,6 +183,9 @@ ALGORITHM ComputePageRank(graph, iterations=20, damping=0.85):
   FOR i IN range(iterations):
     newPR ← map[node → (1 - damping) / N]
 
+    // Distribute PR along REVERSE edges (ImportedBy)
+    // File A imports File B => edge A -> B
+    // B's importance flows to A (the importer)
     FOR EACH node IN graph:
       importers ← node.ImportedBy
       IF len(importers) > 0:
@@ -183,7 +193,7 @@ ALGORITHM ComputePageRank(graph, iterations=20, damping=0.85):
         FOR EACH importer IN importers:
           newPR[importer] += damping × share
 
-    // Dangling node redistribution
+    // Dangling node redistribution (nodes with no incoming edges)
     danglingSum ← 0.0
     FOR EACH node IN graph:
       IF len(node.ImportedBy) == 0:
@@ -425,22 +435,45 @@ ALGORITHM BloomFilter_Create(expectedItems, falsePositiveRate):
   p ← falsePositiveRate
   m ← ceil(-n × ln(p) / (ln2 × ln2))
   k ← ceil(m/n × ln2)
+  seeds ← generateRandomSeeds(k)
 
-  RETURN BloomFilter{bits: make([]uint64, (m+63)/64), numHash: k, size: m}
+  RETURN BloomFilter{bits: make([]uint64, (m+63)/64), numHash: k, size: m, seeds: seeds}
 
 ALGORITHM BloomFilter_Add(filter, item):
 
   FOR i IN range(filter.numHash):
-    h ← hash(item, seed=i) % filter.size
-    filter.bits[h/64] |= 1 << (h % 64)
+    h ← hash(item, filter.seeds[i])
+    idx ← fastRange(h, filter.size)  // Lemire's method
+    filter.bits[idx/64] |= 1 << (idx % 64)
 
 ALGORITHM BloomFilter_Contains(filter, item):
 
   FOR i IN range(filter.numHash):
-    h ← hash(item, seed=i) % filter.size
-    IF filter.bits[h/64] & (1 << (h % 64)) == 0:
+    h ← hash(item, filter.seeds[i])
+    idx ← fastRange(h, filter.size)
+    IF filter.bits[idx/64] & (1 << (idx % 64)) == 0:
       RETURN false
   RETURN true
+
+FUNCTION fastRange(hash, size):
+  // Unbiased range reduction (Lemire's method)
+  IF size is power of 2:
+    RETURN hash & (size-1)
+  ELSE:
+    RETURN (hash × size) >> 64
+
+FUNCTION hash(item, seed):
+  // FNV-1a inspired with xxhash mixing
+  h ← seed
+  FOR EACH byte IN item:
+    h ← h XOR byte
+    h ← h × 0x100000001b3  // FNV prime
+  h ← h XOR (h >> 33)
+  h ← h × 0xff51afd7ed558ccd
+  h ← h XOR (h >> 33)
+  h ← h × 0xc4ceb9fe1a85ec53
+  h ← h XOR (h >> 33)
+  RETURN h
 ```
 
 ### False Positive Mitigation
@@ -1138,7 +1171,329 @@ ALGORITHM BuildSourceIndex(sources):
 
 ---
 
-## 20. Changelog
+## 20. Incremental Update Algorithms
+
+Recomputing all metrics from scratch on every file change is prohibitively expensive for large codebases. The following algorithms enable incremental updates.
+
+### 20.1 Incremental PageRank
+
+When a single file changes (add/remove import), only nodes within distance 2 of the change are affected.
+
+```
+ALGORITHM IncrementalPageRank(graph, changedNode, oldPR, iterations=5):
+  affected ← set()
+  affected.add(changedNode)
+  FOR EACH neighbor IN graph.Neighbors(changedNode):
+    affected.add(neighbor)
+    FOR EACH neighbor2 IN graph.Neighbors(neighbor):
+      affected.add(neighbor2)
+
+  // Initialize affected nodes with current PR values
+  newPR ← copy(oldPR)
+  FOR EACH node IN affected:
+    newPR[node] ← (1 - damping) / graph.NodeCount()
+
+  // Run reduced iterations on affected subgraph
+  FOR i IN range(iterations):
+    FOR EACH node IN affected:
+      importers ← node.ImportedBy INTERSECT affected
+      IF len(importers) > 0:
+        share ← oldPR[node] / len(importers)
+        FOR EACH importer IN importers:
+          newPR[importer] += damping × share
+
+  RETURN newPR
+```
+
+**Complexity:** O(|affected| × E_affected × 5) where |affected| ≤ 2-hop radius, typically O(100 × 5) = O(500) vs O(V × E × 20) for full recomputation.
+
+### 20.2 Incremental Louvain
+
+When edges change, only the communities of affected nodes and their neighbors need recomputation.
+
+```
+ALGORITHM IncrementalLouvain(graph, changedEdges, oldCommunities):
+  affectedNodes ← set()
+  FOR EACH edge IN changedEdges:
+    affectedNodes.add(edge.source)
+    affectedNodes.add(edge.target)
+    FOR EACH neighbor IN graph.Neighbors(edge.source):
+      affectedNodes.add(neighbor)
+    FOR EACH neighbor IN graph.Neighbors(edge.target):
+      affectedNodes.add(neighbor)
+
+  // Extract affected subgraph
+  subgraph ← graph.ExtractSubgraph(affectedNodes)
+
+  // Run Louvain on subgraph only
+  subCommunities ← LouvainDetect_Deterministic(subgraph, seed=42)
+
+  // Merge back: use subgraph communities for affected nodes,
+  // keep original communities for unaffected nodes
+  newCommunities ← copy(oldCommunities)
+  FOR EACH node IN affectedNodes:
+    newCommunities[node] ← subCommunities[node]
+
+  RETURN newCommunities
+```
+
+### 20.3 Incremental Trie Update
+
+Trie supports O(K) insert and delete without rebuilding.
+
+```
+ALGORITHM TrieDelete(trie, name):
+  current ← trie.root
+  path ← []
+  FOR EACH char IN name:
+    IF current.children[char] == nil:
+      RETURN false  // not found
+    path.append({node: current, char: char})
+    current ← current.children[char]
+
+  IF !current.isEnd:
+    RETURN false  // not found
+
+  current.isEnd ← false
+  current.symbols ← remove(current.symbols, name)
+
+  // Prune empty paths (optional, saves memory)
+  FOR i IN REVERSE(path):
+    node ← path[i].node
+    child ← node.children[path[i].char]
+    IF !child.isEnd AND len(child.children) == 0:
+      delete node.children[path[i].char]
+
+  RETURN true
+```
+
+### 20.4 Incremental Bloom Filter
+
+Bloom filters do not support deletion. For dynamic sets, use a counting Bloom filter or rotating filter pair.
+
+```
+ALGORITHM RotatingBloomFilter:
+  primary ← BloomFilter(expectedItems, fpRate)
+  secondary ← BloomFilter(expectedItems, fpRate)
+
+  // On insert: add to primary
+  func Add(item):
+    primary.Add(item)
+
+  // On contains: check both
+  func Contains(item):
+    RETURN primary.Contains(item) || secondary.Contains(item)
+
+  // On rotation (periodic): swap primary/secondary, rebuild primary
+  func Rotate(allItems):
+    secondary ← primary
+    primary ← NewBloomFilter(len(allItems), fpRate)
+    FOR EACH item IN allItems:
+      primary.Add(item)
+```
+
+---
+
+## 21. Concurrency and Thread-Safety Model
+
+### 21.1 Read-Write Separation
+
+Most EGINE operations are read-heavy (many queries, few updates). The concurrency model uses RWMutex for shared structures:
+
+```go
+type SafeIndex struct {
+    mu          sync.RWMutex
+    trie        *Trie
+    bloom       *BloomFilter
+    pagerank    map[string]float64
+    communities map[string]int
+}
+
+// Read path: concurrent, no lock contention
+func (idx *SafeIndex) Search(query string) []string {
+    idx.mu.RLock()
+    defer idx.mu.RUnlock()
+    return idx.trie.PrefixSearch(query)
+}
+
+// Write path: exclusive lock, batch updates
+func (idx *SafeIndex) Update(changedFiles []string) {
+    idx.mu.Lock()
+    defer idx.mu.Unlock()
+    for _, f := range changedFiles {
+        idx.trie.Delete(f)
+        idx.trie.Insert(f, nil)
+        idx.bloom.Add(f)
+    }
+}
+```
+
+### 21.2 Parallel PageRank
+
+PageRank iterations can be parallelized across nodes:
+
+```go
+func ParallelPageRank(graph *WeightedGraph, iterations int, damping float64, numWorkers int) map[string]float64 {
+    n := graph.NodeCount()
+    pr := make(map[string]float64)
+    for _, node := range graph.Nodes() {
+        pr[node.ID] = 1.0 / float64(n)
+    }
+
+    for i := 0; i < iterations; i++ {
+        newPR := make(map[string]float64)
+        for _, node := range graph.Nodes() {
+            newPR[node.ID] = (1 - damping) / float64(n)
+        }
+
+        // Parallel distribution
+        var wg sync.WaitGroup
+        ch := make(chan *WeightedNode, numWorkers)
+        
+        // Workers compute partial contributions
+        for w := 0; w < numWorkers; w++ {
+            wg.Add(1)
+            go func() {
+                defer wg.Done()
+                for node := range ch {
+                    importers := node.ImportedBy
+                    if len(importers) > 0 {
+                        share := pr[node.ID] / float64(len(importers))
+                        for _, importer := range importers {
+                            atomicAdd(&newPR[importer], damping*share)
+                        }
+                    }
+                }
+            }()
+        }
+
+        for _, node := range graph.Nodes() {
+            ch <- node
+        }
+        close(ch)
+        wg.Wait()
+
+        // Dangling redistribution (sequential, small)
+        // ... same as sequential version ...
+
+        pr = newPR
+    }
+    return pr
+}
+```
+
+### 21.3 Lock-Free Bloom Filter Reads
+
+Bloom filter `Contains` is naturally thread-safe for read-only access (no writes during query). This enables lock-free pre-filtering:
+
+```go
+func (idx *SafeIndex) FastMembershipCheck(item string) bool {
+    // Lock-free Bloom check (snapshot of bits is consistent)
+    if !idx.bloom.Contains(item) {
+        return false  // definitely not in set
+    }
+    
+    // Expensive exact check requires lock
+    idx.mu.RLock()
+    defer idx.mu.RUnlock()
+    return idx.exactMap[item]
+}
+```
+
+### 21.4 Batch Update Protocol
+
+For file-watcher triggered updates, use a batched update protocol:
+
+```
+ALGORITHM BatchedUpdate(watcher, index):
+  pendingChanges ← new Queue()
+  
+  FOR EACH event IN watcher:
+    pendingChanges.enqueue(event)
+    
+    // Debounce: wait 100ms for more changes
+    IF pendingChanges.size() > 0:
+      sleep(100ms)
+      CONTINUE
+    
+    // Process batch
+    batch ← pendingChanges.drain()
+    affectedFiles ← extractFiles(batch)
+    
+    // Phase 1: Update Trie and Bloom (fast, per-file)
+    FOR EACH file IN affectedFiles:
+      index.trie.Delete(oldName)
+      index.trie.Insert(newName)
+      index.bloom.Add(newName)
+    
+    // Phase 2: Rebuild graph edges (incremental)
+    graph ← index.graph
+    FOR EACH file IN affectedFiles:
+      graph.UpdateImports(file, newImports)
+    
+    // Phase 3: Incremental PageRank (bounded iterations)
+    FOR EACH file IN affectedFiles:
+      IncrementalPageRank(graph, file, index.pagerank, iterations=5)
+    
+    // Phase 4: Periodic full rebuild (every 1000 changes)
+    IF changeCount % 1000 == 0:
+      FullRebuild(graph, index)
+```
+
+---
+
+## 22. Error Handling and Edge Cases
+
+### 22.1 Disconnected Graphs
+
+PageRank on disconnected graphs still converges. The damping factor redistributes rank from dangling nodes uniformly. No special handling needed.
+
+### 22.2 Cyclic Dependencies
+
+Task scheduling assumes DAG (directed acyclic graph). Cycle detection is mandatory:
+
+```
+ALGORITHM DetectCycles(graph):
+  WHITE ← 0; GRAY ← 1; BLACK ← 2
+  color ← map[node → WHITE]
+  parent ← map[node → nil]
+  
+  FOR EACH node IN graph:
+    IF color[node] == WHITE:
+      IF DFS_CycleCheck(node, color, parent):
+        RETURN cyclePath
+  
+  RETURN nil  // no cycles
+
+FUNCTION DFS_CycleCheck(node, color, parent):
+  color[node] ← GRAY
+  FOR EACH neighbor IN graph.Successors(node):
+    IF color[neighbor] == GRAY:
+      // Found cycle: reconstruct path
+      RETURN reconstructCycle(parent, node, neighbor)
+    IF color[neighbor] == WHITE:
+      parent[neighbor] ← node
+      IF DFS_CycleCheck(neighbor, color, parent):
+        RETURN true
+  color[node] ← BLACK
+  RETURN false
+```
+
+### 22.3 Empty Graphs
+
+All algorithms gracefully handle empty graphs (0 nodes, 0 edges). PageRank returns empty map, Louvain returns empty communities, Trie returns empty results.
+
+### 22.4 Single-Node Graphs
+
+PageRank on a single node returns 1.0. Louvain returns single community. Betweenness returns 0.0 (no paths through a single node).
+
+### 22.5 Numerical Stability
+
+PageRank uses float64 (64-bit IEEE 754) with ~15 decimal digits of precision. For graphs with 10K nodes, the smallest meaningful PageRank is ~10⁻⁵ (1/N), well above float64 epsilon (~2.2×10⁻¹⁶). No numerical stability issues for practical graph sizes.
+
+---
+
+## 23. Changelog
 
 ### v1.0 (Initial Release)
 

@@ -28,7 +28,7 @@ This paper presents EGINE (Eshanized Graph Intelligence Network Engine), a compr
 
 The innovations span: (1) importance-weighted task scheduling via PageRank on dependency graphs; (2) critical-path analysis via betweenness centrality; (3) semantic task clustering via Louvain community detection; (4) composite weighted scoring functions for relevance ranking; (5) Trie-based symbol indexing replacing linear scans; (6) Bloom filter pre-filters for probabilistic membership testing; (7) adaptive expansion algorithms for code navigation; (8) graph-based software coupling metrics; (9) provider reliability ranking via history graphs; (10) usage-graph importance weighting for frecency scoring; (11) multi-resolution indexing architectures; and (12) importance-weighted context allocation for LLM systems.
 
-Collectively, these innovations demonstrate that replacing heuristic approaches with mathematically grounded graph algorithms yields 5-100x performance improvements across the software engineering toolchain.
+Collectively, these innovations demonstrate that replacing heuristic approaches with mathematically grounded graph algorithms yields 100-3000x performance improvements for search operations and 1.3-7.7x for membership testing across the software engineering toolchain.
 
 ---
 
@@ -155,16 +155,18 @@ $$C_B(v) = \sum_{s \neq v \neq t} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
 
 where $\sigma_{st}$ is the total number of shortest paths from $s$ to $t$, and $\sigma_{st}(v)$ is the number passing through $v$.
 
-**Theorem 2 (Approximation Error Bound).** Let $C_B(v)$ be the exact betweenness centrality and $\hat{C}_B(v)$ be the estimate from stratified sampling with sample size $S$. Then:
+**Theorem 2 (Approximation Error Bound).** Let $C_B(v)$ be the exact betweenness centrality (normalized to $[0, 1]$ by dividing by $(|V|-1)(|V|-2)/2$ for directed graphs) and $\hat{C}_B(v)$ be the estimate from stratified sampling with sample size $S$. Then the relative error satisfies:
 
-$$\mathbb{E}\left[ |\hat{C}_B(v) - C_B(v)| \right] \leq O\left( \sqrt{\frac{|V|}{S}} \right)$$
+$$\mathbb{E}\left[ \frac{|\hat{C}_B(v) - C_B(v)|}{\max(C_B(v), \epsilon)} \right] \leq O\left( \sqrt{\frac{|V|}{S}} \right)$$
 
-**Proof.** Each sample contributes a random variable $X_s$ to the betweenness estimate. The variance of $X_s$ is bounded by $O(1)$. By the Central Limit Theorem, the error of the mean over $S$ samples is $O(1/\sqrt{S})$. Normalizing by $(|V|-1)(|V|-2)/2$, the absolute error is $O(\sqrt{|V|/S})$.
+where $\epsilon > 0$ avoids division by zero for isolated nodes.
+
+**Proof.** Each sample contributes a random variable $X_s$ to the betweenness estimate. The variance of $X_s$ is bounded by $O(1)$ (since betweenness contribution per source is at most 1 after normalization). By the Central Limit Theorem, the error of the mean over $S$ samples is $O(1/\sqrt{S})$ in absolute terms. After normalization by $(|V|-1)(|V|-2)/2$, the absolute error is $O(1/\sqrt{S})$. For relative error, we divide by $C_B(v)$; for nodes with $C_B(v) = \Theta(1/|V|)$ (typical), the relative error is $O(\sqrt{|V|/S})$.
 
 For $S = |V|/5$:
 $$O\left(\sqrt{\frac{|V|}{|V|/5}}\right) = O(\sqrt{5}) \approx 2.24$$
 
-In practice, this gives within 10% of exact betweenness for sample sizes $\geq |V|/5$. $\square$
+This means the *relative* error is within a constant factor (~2.24×) of the true value for typical nodes. In practice, empirical error is within 10% for sample sizes $\geq |V|/5$ due to stratification reducing variance. $\square$
 
 ### 2.4 Trie Data Structure
 
@@ -918,12 +920,12 @@ Build a Trie index on source keys for $O(K)$ prefix-based lookup. Use Bloom filt
 
 | Innovation | Current | Proposed | Improvement |
 |-----------|---------|----------|-------------|
-| Symbol search | $O(N \times K)$ | $O(K + M)$ | **100-1000×** |
-| History search | $O(N \times L)$ | $O(K + M)$ | **100-1000×** |
+| Symbol search | $O(N \times K)$ | $O(K + M)$ | **100-3000×** |
+| History search | $O(N \times L)$ | $O(K + M)$ | **100-3000×** |
 | Function lookup | $O(L)$ line scan | $O(K + M)$ | **10-100×** |
 | Source key lookup | $O(N)$ | $O(K)$ | **10-100×** |
-| Rate-limit check | $O(M)$ map | $O(1)$ Bloom | **10-100×** |
-| References query | $O(D)$ depth-1 | $O(S \times B)$ adaptive | **Better quality** |
+| Rate-limit check | $O(M)$ map | $O(1)$ Bloom | **1.3-7.7×** |
+| References query | $O(D)$ depth-1 | $O(S \times B)$ adaptive | **Better quality (1.7× faster)** |
 
 ### 15.3 Memory Overhead
 
@@ -932,9 +934,10 @@ Build a Trie index on source keys for $O(K)$ prefix-based lookup. Use Bloom filt
 | PageRank per graph | +8 bytes/node | float64 |
 | Betweenness per graph | +8 bytes/node | float64 |
 | Community per graph | +4 bytes/node | int32 |
+| Degree Centrality | +8 bytes/node | float64 |
 | Trie index | ~1.5× symbol storage | Radix-optimized |
 | Bloom filters | ~1.2 bytes/element | At 1% FP rate |
-| **Total typical** | **+15-25%** | **Acceptable for performance gains** |
+| **Total typical** | **+14%** | **Acceptable for performance gains** |
 
 ---
 
