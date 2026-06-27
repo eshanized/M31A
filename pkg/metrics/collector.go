@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -127,6 +129,46 @@ func (c *Collector) RecordLLMInteraction(phase m31types.WorkflowPhase, usage *m3
 	c.metrics.UpdatedAt = time.Now()
 }
 
+// RecordLLMInteractionWithPrompt records an LLM call with prompt hash and truncation info.
+func (c *Collector) RecordLLMInteractionWithPrompt(phase m31types.WorkflowPhase, usage *m31types.Usage, cost float64, promptHash string, truncated bool) {
+	if !c.enabled || usage == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.LLMs {
+		if c.metrics.LLMs[i].Phase == phase {
+			c.metrics.LLMs[i].PromptTokens += int64(usage.PromptTokens)
+			c.metrics.LLMs[i].CompletionTokens += int64(usage.CompletionTokens)
+			c.metrics.LLMs[i].TotalTokens += int64(usage.TotalTokens)
+			c.metrics.LLMs[i].Cost += cost
+			c.metrics.LLMs[i].InteractionCount++
+			if promptHash != "" && c.metrics.LLMs[i].PromptHash == "" {
+				c.metrics.LLMs[i].PromptHash = promptHash
+			}
+			if truncated {
+				c.metrics.LLMs[i].TruncatedInput = true
+			}
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	// New phase entry
+	lm := LLMMetric{
+		Phase:            phase,
+		PromptTokens:     int64(usage.PromptTokens),
+		CompletionTokens: int64(usage.CompletionTokens),
+		TotalTokens:      int64(usage.TotalTokens),
+		Cost:             cost,
+		InteractionCount: 1,
+		PromptHash:       promptHash,
+		TruncatedInput:   truncated,
+	}
+	c.metrics.LLMs = append(c.metrics.LLMs, lm)
+	c.metrics.UpdatedAt = time.Now()
+}
+
 // RecordPhaseTransition records a phase transition event.
 func (c *Collector) RecordPhaseTransition(phase m31types.WorkflowPhase) {
 	if !c.enabled {
@@ -217,6 +259,132 @@ func (c *Collector) RecordBisectTrigger(phase m31types.WorkflowPhase) {
 	c.metrics.UpdatedAt = time.Now()
 }
 
+// RecordEditStrategy records which edit replacement strategy was used.
+func (c *Collector) RecordEditStrategy(strategy string) {
+	if !c.enabled || strategy == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.EditStrategies {
+		if c.metrics.EditStrategies[i].Strategy == strategy {
+			c.metrics.EditStrategies[i].Count++
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	c.metrics.EditStrategies = append(c.metrics.EditStrategies, EditStrategyMetric{
+		Strategy: strategy,
+		Count:    1,
+	})
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordHealOutcome records whether a self-heal attempt succeeded or failed.
+func (c *Collector) RecordHealOutcome(phase m31types.WorkflowPhase, success bool) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.Phases {
+		if c.metrics.Phases[i].Phase == phase {
+			if success {
+				c.metrics.Phases[i].HealSuccessCount++
+			} else {
+				c.metrics.Phases[i].HealFailCount++
+			}
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	// New phase entry
+	pm := PhaseMetric{Phase: phase}
+	if success {
+		pm.HealSuccessCount = 1
+	} else {
+		pm.HealFailCount = 1
+	}
+	c.metrics.Phases = append(c.metrics.Phases, pm)
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordHealDuration adds heal duration to the phase metric.
+func (c *Collector) RecordHealDuration(phase m31types.WorkflowPhase, durationMs int64) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.Phases {
+		if c.metrics.Phases[i].Phase == phase {
+			c.metrics.Phases[i].HealDurationMs += durationMs
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	c.metrics.Phases = append(c.metrics.Phases, PhaseMetric{
+		Phase:          phase,
+		HealDurationMs: durationMs,
+	})
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordHealLoop records a detected heal loop (same error repeating).
+func (c *Collector) RecordHealLoop(phase m31types.WorkflowPhase) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.Phases {
+		if c.metrics.Phases[i].Phase == phase {
+			c.metrics.Phases[i].HealLoopCount++
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	c.metrics.Phases = append(c.metrics.Phases, PhaseMetric{
+		Phase:          phase,
+		HealLoopCount: 1,
+	})
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordBisectOutcome records whether a bisect heal attempt succeeded or failed.
+func (c *Collector) RecordBisectOutcome(phase m31types.WorkflowPhase, success bool) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range c.metrics.Phases {
+		if c.metrics.Phases[i].Phase == phase {
+			if success {
+				c.metrics.Phases[i].BisectSuccessCount++
+			} else {
+				c.metrics.Phases[i].BisectFailCount++
+			}
+			c.metrics.UpdatedAt = time.Now()
+			return
+		}
+	}
+	// New phase entry
+	pm := PhaseMetric{Phase: phase}
+	if success {
+		pm.BisectSuccessCount = 1
+	} else {
+		pm.BisectFailCount = 1
+	}
+	c.metrics.Phases = append(c.metrics.Phases, pm)
+	c.metrics.UpdatedAt = time.Now()
+}
+
 // Snapshot returns a deep copy of the current metrics state.
 // The returned copy is safe for concurrent reads without holding the lock.
 func (c *Collector) Snapshot() *SessionMetrics {
@@ -227,14 +395,16 @@ func (c *Collector) Snapshot() *SessionMetrics {
 	defer c.mu.Unlock()
 
 	clone := &SessionMetrics{
-		SessionID: c.metrics.SessionID,
-		StartedAt: c.metrics.StartedAt,
-		UpdatedAt: c.metrics.UpdatedAt,
-		Tools:     make([]ToolMetric, len(c.metrics.Tools)),
-		LLMs:      make([]LLMMetric, len(c.metrics.LLMs)),
-		Phases:    make([]PhaseMetric, len(c.metrics.Phases)),
+		SessionID:      c.metrics.SessionID,
+		StartedAt:      c.metrics.StartedAt,
+		UpdatedAt:      c.metrics.UpdatedAt,
+		Tools:          make([]ToolMetric, len(c.metrics.Tools)),
+		EditStrategies: make([]EditStrategyMetric, len(c.metrics.EditStrategies)),
+		LLMs:           make([]LLMMetric, len(c.metrics.LLMs)),
+		Phases:         make([]PhaseMetric, len(c.metrics.Phases)),
 	}
 	copy(clone.Tools, c.metrics.Tools)
+	copy(clone.EditStrategies, c.metrics.EditStrategies)
 	copy(clone.LLMs, c.metrics.LLMs)
 	copy(clone.Phases, c.metrics.Phases)
 	return clone
@@ -314,4 +484,11 @@ func (c *Collector) Stop() {
 		"phases", len(snap.Phases),
 		"llm_interactions", len(snap.LLMs),
 	)
+}
+
+// HashPrompt computes a short SHA-256 hash of a prompt string.
+// Returns the first 16 hex characters for compactness.
+func HashPrompt(prompt string) string {
+	h := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(h[:])[:16]
 }

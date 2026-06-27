@@ -699,13 +699,13 @@ func (d *mockDispatcher) ListTools() []ToolDescriptor {
 }
 
 func (d *mockDispatcher) UnregisterTool(name string) {
-	filtered := d.tools[:0]
+	newTools := make([]ToolDescriptor, 0, len(d.tools))
 	for _, t := range d.tools {
 		if t.Name != name {
-			filtered = append(filtered, t)
+			newTools = append(newTools, t)
 		}
 	}
-	d.tools = filtered
+	d.tools = newTools
 }
 
 func (d *mockDispatcher) Stop() {}

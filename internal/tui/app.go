@@ -15,6 +15,7 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
+	"github.com/eshanized/M31A/pkg/metrics"
 )
 
 // ─── Bubble Tea Model interface ───────────────────────────────────────────────
@@ -161,6 +162,10 @@ func (m *AppState) Shutdown() {
 		if err := m.frecentHistory.Save(); err != nil {
 			slog.Warn("failed to save history on shutdown", "error", err)
 		}
+	}
+	// Flush metrics before shutting down
+	if m.collector != nil {
+		m.collector.Stop()
 	}
 	if m.workflowCancel != nil {
 		m.workflowCancel()
@@ -374,6 +379,15 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 
 	tokenEst := tokens.NewEstimator(modelID)
 
+	// Create metrics collector if enabled
+	metricsEnabled := m.config != nil && m.config.Features.MetricsEnabled
+	if m.collector == nil && metricsEnabled && m.sessionManager != nil {
+		m.collector = metrics.NewCollector(m.sessionID, m.sessionManager.BaseDir(), true)
+		m.dispatcher.SetCollector(m.collector)
+		// Register MetricsTool so the LLM can query session metrics
+		_ = m.dispatcher.Register(tools.NewMetricsTool(m.collector))
+	}
+
 	engine, err := workflow.NewEngine(
 		m.sessionID,
 		workDir,
@@ -397,6 +411,9 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	}
 	if m.ledger != nil {
 		engine.SetLedger(m.ledger)
+	}
+	if m.collector != nil {
+		engine.SetCollector(m.collector)
 	}
 
 	// Connect the MsgEmitter so workflow events reach the TUI

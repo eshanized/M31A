@@ -79,6 +79,9 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			Attempt: tasks[i].HealsAttempted,
 			Max:     m31types.MaxHealAttempts,
 		})
+		if e.collector != nil {
+			e.collector.RecordHealTrigger(m31types.PhaseVerify)
+		}
 		healResult := e.healTask(ctx, task, failure, goal)
 		e.emit(SelfHealCompleteMsg{
 			TaskID:  task.ID,
@@ -87,6 +90,9 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 			Success: healResult.Success,
 			Error:   healResult.Error,
 		})
+		if e.collector != nil {
+			e.collector.RecordHealOutcome(m31types.PhaseVerify, healResult.Success)
+		}
 
 		if healResult.Success {
 			// Re-verify
@@ -233,6 +239,11 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 		return false
 	}
 
+	// Record bisect trigger
+	if e.collector != nil {
+		e.collector.RecordBisectTrigger(m31types.PhaseVerify)
+	}
+
 	// Clean up any leftover bisect state from a previous interrupted run
 	if _, resetErr := e.git.Run("bisect", "reset"); resetErr == nil {
 		e.logger.Info("cleaned up leftover bisect state from previous run")
@@ -288,10 +299,16 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 	if newResult.FilesExist && newResult.SyntaxOK && newResult.TestsOK {
 		taskEntry.Status = m31types.StatusDone
 		e.logger.Info("task healed after bisect", "id", task.ID)
+		if e.collector != nil {
+			e.collector.RecordBisectOutcome(m31types.PhaseVerify, true)
+		}
 		return true
 	}
 
 	e.logger.Warn("post-bisect heal did not fix task", "id", task.ID)
+	if e.collector != nil {
+		e.collector.RecordBisectOutcome(m31types.PhaseVerify, false)
+	}
 	if taskEntry.HealsAttempted >= m31types.MaxHealAttempts {
 		taskEntry.Status = m31types.StatusUnrecoverable
 	}

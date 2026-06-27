@@ -249,6 +249,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
+			if e.collector != nil {
+				e.collector.RecordHealTrigger(m31types.PhaseExecute)
+			}
 			healResult := e.healTask(ctx, *task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
@@ -257,6 +260,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				Success: healResult.Success,
 				Error:   healResult.Error,
 			})
+			if e.collector != nil {
+				e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+			}
 			if !healResult.Success {
 				return healResult
 			}
@@ -284,6 +290,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					Attempt: task.HealsAttempted,
 					Max:     m31types.MaxHealAttempts,
 				})
+				if e.collector != nil {
+					e.collector.RecordHealTrigger(m31types.PhaseExecute)
+				}
 				// Inject the code-as-text as context and demand FileWrite usage
 				forcedMsg := append(messages, m31types.Message{
 					Role:    "user",
@@ -303,6 +312,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					Max:     m31types.MaxHealAttempts,
 					Success: len(toolCalls) > 0,
 				})
+				if e.collector != nil {
+					e.collector.RecordHealOutcome(m31types.PhaseExecute, len(toolCalls) > 0)
+				}
 			}
 
 			if len(toolCalls) == 0 {
@@ -319,6 +331,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 						Attempt: task.HealsAttempted,
 						Max:     m31types.MaxHealAttempts,
 					})
+					if e.collector != nil {
+						e.collector.RecordHealTrigger(m31types.PhaseExecute)
+					}
 					healResult := e.healTask(ctx, *task, failureReason, goal)
 					e.emit(SelfHealCompleteMsg{
 						TaskID:  task.ID,
@@ -327,6 +342,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 						Success: healResult.Success,
 						Error:   healResult.Error,
 					})
+					if e.collector != nil {
+						e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+					}
 					if !healResult.Success {
 						return healResult
 					}
@@ -496,6 +514,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				Attempt: task.HealsAttempted,
 				Max:     m31types.MaxHealAttempts,
 			})
+			if e.collector != nil {
+				e.collector.RecordHealTrigger(m31types.PhaseExecute)
+			}
 			healResult := e.healTask(ctx, *task, failureReason, goal)
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
@@ -504,6 +525,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				Success: healResult.Success,
 				Error:   healResult.Error,
 			})
+			if e.collector != nil {
+				e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+			}
 			if !healResult.Success {
 				return healResult
 			}
@@ -571,6 +595,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 						Attempt: task.HealsAttempted,
 						Max:     m31types.MaxHealAttempts,
 					})
+					if e.collector != nil {
+						e.collector.RecordHealTrigger(m31types.PhaseExecute)
+					}
 					healResult := e.healTask(ctx, *task, failureReason, goal)
 					e.emit(SelfHealCompleteMsg{
 						TaskID:  task.ID,
@@ -579,6 +606,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 						Success: healResult.Success,
 						Error:   healResult.Error,
 					})
+					if e.collector != nil {
+						e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+					}
 					if !healResult.Success {
 						return healResult
 					}

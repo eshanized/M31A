@@ -12,6 +12,7 @@ import (
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/metrics"
 )
 
 // Compile-time interface check
@@ -20,10 +21,16 @@ var _ types.Tool = (*Edit)(nil)
 type Edit struct {
 	workDir   string
 	backupDir string
+	collector *metrics.Collector
 }
 
 func NewEdit(workDir, backupDir string) *Edit {
 	return &Edit{workDir: workDir, backupDir: backupDir}
+}
+
+// SetCollector attaches a metrics collector for recording edit strategy usage.
+func (t *Edit) SetCollector(c *metrics.Collector) {
+	t.collector = c
 }
 
 func (t *Edit) Name() string {
@@ -156,6 +163,11 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		normalizedOldString := strings.ReplaceAll(oldString, "\r\n", "\n")
 
 		newContent, strategy, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll)
+	}
+
+	// Record edit strategy usage
+	if t.collector != nil && strategy != "" {
+		t.collector.RecordEditStrategy(strategy)
 	}
 
 	if matchErr != nil {

@@ -29,6 +29,7 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/compaction"
 	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/pkg/metrics"
 	"github.com/eshanized/M31A/pkg/retry"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -170,6 +171,8 @@ type Engine struct {
 	contextSnapshot map[string]string
 	// cachedDynamicContext stores the rendered dynamic context to avoid re-rendering on every call.
 	cachedDynamicContext string
+	// collector captures session metrics (tool calls, LLM usage, phase durations, heals).
+	collector *metrics.Collector
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -298,6 +301,7 @@ type EngineOptions struct {
 	TokenEst    *tokens.Estimator
 	SessionMgr  *session.Manager
 	Config      *config.Config
+	Collector   *metrics.Collector
 }
 
 // NewEngine creates a workflow engine.
@@ -315,6 +319,11 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 		SessionMgr:  sessionMgr,
 		Config:      cfg,
 	})
+}
+
+// NewEngineWithCollector creates a workflow engine with metrics collection.
+func NewEngineWithCollector(opts EngineOptions) (*Engine, error) {
+	return NewEngineFromOptions(opts)
 }
 
 // NewEngineFromOptions creates a workflow engine from an EngineOptions struct.
@@ -346,6 +355,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
 			ctxsrc.GitSource{WorkDir: opts.WorkDir},
 		),
+		collector: opts.Collector,
 	}, nil
 }
 
@@ -425,6 +435,12 @@ func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
 	}
 }
 
+// SetCollector attaches a metrics collector to the engine for recording
+// tool calls, LLM interactions, phase durations, and heal/bisect events.
+func (e *Engine) SetCollector(c *metrics.Collector) {
+	e.collector = c
+}
+
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	// Budget guardrail: check cumulative cost before each phase
@@ -441,6 +457,11 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 
 	start := time.Now()
 	e.activePhase = phase
+
+	// Record phase transition
+	if e.collector != nil {
+		e.collector.RecordPhaseTransition(phase)
+	}
 
 	var result *PhaseResult
 	var err error
@@ -476,6 +497,13 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 				if atomic.CompareAndSwapUint64(&e.totalCostBits, old, new) {
 					break
 				}
+			}
+		}
+		// Record metrics
+		if e.collector != nil {
+			e.collector.RecordPhaseDuration(phase, result.DurationMs, result.Success)
+			if result.Usage != nil {
+				e.collector.RecordLLMInteraction(phase, result.Usage, result.Cost)
 			}
 		}
 	}

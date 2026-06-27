@@ -24,6 +24,7 @@ import (
 	"github.com/eshanized/M31A/pkg/history"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/pkg/metrics"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -216,6 +217,9 @@ type AppState struct {
 	// Intent classification state (pending confirmation from user)
 	pendingIntent      *types.IntentResult
 	pendingIntentInput string // original user input pending classification routing
+
+	// Metrics collector for session observability
+	collector *metrics.Collector
 }
 
 // SetResumeSessionID configures the app to auto-resume a session on startup.

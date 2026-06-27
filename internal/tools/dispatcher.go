@@ -13,6 +13,7 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/metrics"
 )
 
 type Dispatcher struct {
@@ -47,6 +48,8 @@ type Dispatcher struct {
 	stopOnce sync.Once
 	// outputStore bounds tool output to prevent context window exhaustion.
 	outputStore *OutputStore
+	// collector captures tool execution metrics (call count, success/fail, duration).
+	collector *metrics.Collector
 }
 
 // NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
@@ -172,6 +175,20 @@ func (d *Dispatcher) Register(tool types.Tool) error {
 	return nil
 }
 
+// SetCollector attaches a metrics collector for recording tool execution metrics.
+// Also propagates the collector to tools that support it (e.g., Edit for strategy tracking).
+func (d *Dispatcher) SetCollector(c *metrics.Collector) {
+	d.collector = c
+	// Propagate collector to tools that support metric recording
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, tool := range d.tools {
+		if edit, ok := tool.(*Edit); ok {
+			edit.SetCollector(c)
+		}
+	}
+}
+
 // Unregister removes a tool by name. Used by profile-based filtering to
 // strip tools that a subagent profile should not access.
 func (d *Dispatcher) Unregister(name string) {
@@ -262,6 +279,11 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	result, err := tool.Execute(ctx, input)
 	elapsed := time.Since(start).Milliseconds()
+
+	// Record tool execution metrics
+	if d.collector != nil {
+		d.collector.RecordToolCall(call.Name, err == nil, elapsed)
+	}
 
 	slog.Debug("tool executed", "tool", call.Name, "duration_ms", elapsed, "error", err)
 

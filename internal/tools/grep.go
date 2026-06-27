@@ -77,6 +77,10 @@ func (t *Grep) ParameterSchema() string {
 			"fixed_string": {
 				"type": "boolean",
 				"description": "Treat pattern as a literal string, not a regex (default false)"
+			},
+			"skip_comments": {
+				"type": "boolean",
+				"description": "Skip lines that are comments (//, #, /*, *, --, ;) (default false)"
 			}
 		},
 		"required": ["pattern"]
@@ -167,12 +171,19 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 	}
 
+	skipComments := false
+	if scRaw, ok := input.Params["skip_comments"]; ok {
+		if scBool, ok := scRaw.(bool); ok {
+			skipComments = scBool
+		}
+	}
+
 	var result types.ToolResult
 	var err error
 	if t.hasRg {
-		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults, contextLines)
+		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults, contextLines, skipComments)
 	} else {
-		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults, contextLines)
+		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults, contextLines, skipComments)
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
@@ -194,7 +205,7 @@ type rgDataMatch struct {
 	LineNumber int `json:"line_number"`
 }
 
-func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int) (types.ToolResult, error) {
+func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int, skipComments bool) (types.ToolResult, error) {
 	args := []string{"--json", "--no-heading", "--line-number", "--max-count", fmt.Sprintf("%d", maxResults)}
 	if contextLines > 0 {
 		args = append(args, "--context", fmt.Sprintf("%d", contextLines))
@@ -241,6 +252,9 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 				continue
 			}
 			content := strings.TrimRight(data.Lines.Text, "\n\r")
+			if skipComments && isCommentLine(content) {
+				continue
+			}
 			results = append(results, fmt.Sprintf("%s:%d: %s", data.Path.Text, data.LineNumber, content))
 			count++
 			seenMatch[fmt.Sprintf("%s:%d", data.Path.Text, data.LineNumber)] = true
@@ -295,7 +309,7 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	return types.ToolResult{Output: output, Truncated: truncated}, nil
 }
 
-func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int) (types.ToolResult, error) {
+func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string, maxResults, contextLines int, skipComments bool) (types.ToolResult, error) {
 	if err := checkRedos(pattern); err != nil {
 		return types.ToolResult{}, err
 	}
@@ -375,6 +389,9 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 			for scanner.Scan() {
 				lineNum++
 				line := scanner.Text()
+				if skipComments && isCommentLine(line) {
+					continue
+				}
 				if re.MatchString(line) {
 					if len(results) >= maxResults {
 						truncated = true
@@ -404,6 +421,9 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 					rCount++
 				}
 
+				if skipComments && isCommentLine(line) {
+					continue
+				}
 				if re.MatchString(line) {
 					if len(results) >= maxResults {
 						truncated = true
@@ -541,6 +561,25 @@ var redosDetector = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*{]`)
 // adjacentQuantifierDetector matches adjacent quantifier characters (e.g., a++,
 // a*+, a+*) which can cause catastrophic backtracking.
 var adjacentQuantifierDetector = regexp.MustCompile(`[+*][+*]`)
+
+// isCommentLine returns true if the line is a comment in common languages.
+// Supports: //, #, /*, *, --, ; at the start of a line (after optional whitespace).
+func isCommentLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	// Single-line comments
+	if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") ||
+		strings.HasPrefix(trimmed, "--") || strings.HasPrefix(trimmed, ";") {
+		return true
+	}
+	// Block comment lines: /* ... */ or * ... (continuation)
+	if strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
+		return true
+	}
+	return false
+}
 
 // checkRedos rejects regex patterns that contain nested quantifiers likely
 // to cause catastrophic backtracking. This protects the pure-Go grep from
