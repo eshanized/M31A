@@ -81,6 +81,11 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 		}
 	}
 
+	// /rollback file <hash> [path...] — revert specific files from a commit
+	if args[0] == "file" {
+		return handleRollbackFile(args[1:], ctx)
+	}
+
 	// Perform soft reset to the given commit hash
 	hash := args[0]
 	return CommandResult{
@@ -102,6 +107,75 @@ func handleRollback(args []string, ctx CommandContext) CommandResult {
 			}
 		},
 	}
+}
+
+// handleRollbackFile reverts specific files from a commit.
+// Usage: /rollback file <hash> [path...]
+func handleRollbackFile(args []string, ctx CommandContext) CommandResult {
+	if ctx.Rollback == nil {
+		return CommandResult{Success: false, Message: "Rollback not available in this context."}
+	}
+
+	if len(args) < 1 {
+		return CommandResult{
+			Success: false,
+			Message: "Usage: /rollback file <commit-hash> [file-path...]",
+		}
+	}
+
+	hash := args[0]
+	paths := args[1:]
+
+	// If no paths specified, list changed files in the commit
+	if len(paths) == 0 {
+		files, err := ctx.Rollback.ChangedFiles(hash)
+		if err != nil {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to list changed files: %v", err),
+			}
+		}
+		if len(files) == 0 {
+			return CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("No files changed in commit %s", hash[:min(7, len(hash))]),
+			}
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Files changed in %s:\n\n", hash[:min(7, len(hash))]))
+		for _, f := range files {
+			b.WriteString(fmt.Sprintf("  %s\n", f))
+		}
+		b.WriteString("\nUsage: /rollback file <hash> <file-path> [file-path...]")
+		return CommandResult{Success: true, Message: b.String()}
+	}
+
+	// Revert the specified files
+	return CommandResult{
+		Success:         true,
+		ConfirmRequired: true,
+		ConfirmPrompt:   fmt.Sprintf("Revert %d file(s) from commit %s?", len(paths), hash[:min(7, len(hash))]),
+		Message:         fmt.Sprintf("Reverting files from commit **%s**...", hash[:min(7, len(hash))]),
+		Cmd: func() tea.Msg {
+			if err := ctx.Rollback.RevertFiles(hash, paths); err != nil {
+				return tuitypes.ToastMsg{
+					Text: fmt.Sprintf("File revert failed: %v", err),
+					Type: "error",
+				}
+			}
+			return tuitypes.ToastMsg{
+				Text: fmt.Sprintf("Reverted %d file(s) from commit %s", len(paths), hash[:min(7, len(hash))]),
+				Type: "success",
+			}
+		},
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // handleBisect provides git bisect information or starts interactive bisect.

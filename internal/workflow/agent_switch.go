@@ -70,5 +70,5 @@ func truncatePlan(content string, maxChars int) string {
 
 // IsPlanComplete checks if the engine's plan phase produced a valid plan.
 func (e *Engine) IsPlanComplete() bool {
-	return e.planMarkdown != "" && strings.Contains(e.planMarkdown, "##")
+	return e.state.planMarkdown != "" && strings.Contains(e.state.planMarkdown, "##")
 }

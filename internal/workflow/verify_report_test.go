@@ -11,7 +11,7 @@ import (
 )
 
 func TestGenerateVerifyReport(t *testing.T) {
-	e := &Engine{sessionID: "test123", planMarkdown: "# Plan\n## Verification Plan\n### Manual\n- Check the UI"}
+	e := &Engine{sessionID: "test123", state: &WorkflowState{planMarkdown: "# Plan\n## Verification Plan\n### Manual\n- Check the UI"}}
 
 	tasks := []m31types.Task{
 		{ID: 1, Description: "Create API", Status: m31types.StatusDone, Files: []string{"api.go"}},

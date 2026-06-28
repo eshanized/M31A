@@ -20,6 +20,8 @@ type Checkpoint struct {
 	Timestamp    time.Time           `json:"timestamp"`
 	MessageCount int                 `json:"message_count"`
 	TaskCount    int                 `json:"task_count"`
+	Goal         string              `json:"goal,omitempty"`
+	PlanVersion  int                 `json:"plan_version,omitempty"`
 }
 
 // SaveCheckpoint appends a checkpoint to checkpoint.json for the given session.

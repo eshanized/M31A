@@ -451,46 +451,46 @@ func TestFinalizeDiscuss_NoQuestions(t *testing.T) {
 
 func TestSetRefinementFeedback_NewFeedback(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.planVersion = 1
+	engine.state.planVersion = 1
 	engine.SetRefinementFeedback("make it simpler")
-	if engine.refineFeedback != "make it simpler" {
-		t.Errorf("expected feedback stored, got %q", engine.refineFeedback)
+	if engine.state.refineFeedback != "make it simpler" {
+		t.Errorf("expected feedback stored, got %q", engine.state.refineFeedback)
 	}
-	if engine.planVersion != 2 {
-		t.Errorf("expected planVersion to bump to 2, got %d", engine.planVersion)
+	if engine.state.planVersion != 2 {
+		t.Errorf("expected planVersion to bump to 2, got %d", engine.state.planVersion)
 	}
 }
 
 func TestSetRefinementFeedback_DuplicateIgnored(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.planVersion = 1
+	engine.state.planVersion = 1
 	engine.SetRefinementFeedback("feedback")
-	if engine.planVersion != 2 {
-		t.Fatalf("expected version 2, got %d", engine.planVersion)
+	if engine.state.planVersion != 2 {
+		t.Fatalf("expected version 2, got %d", engine.state.planVersion)
 	}
 	// Same feedback should not bump version
 	engine.SetRefinementFeedback("feedback")
-	if engine.planVersion != 2 {
-		t.Errorf("expected version to stay 2 with duplicate feedback, got %d", engine.planVersion)
+	if engine.state.planVersion != 2 {
+		t.Errorf("expected version to stay 2 with duplicate feedback, got %d", engine.state.planVersion)
 	}
 }
 
 func TestSetRefinementFeedback_EmptyClearsFeedback(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.refineFeedback = "old feedback"
-	engine.planVersion = 3
+	engine.state.refineFeedback = "old feedback"
+	engine.state.planVersion = 3
 	engine.SetRefinementFeedback("")
-	if engine.refineFeedback != "" {
-		t.Errorf("expected empty feedback, got %q", engine.refineFeedback)
+	if engine.state.refineFeedback != "" {
+		t.Errorf("expected empty feedback, got %q", engine.state.refineFeedback)
 	}
-	if engine.planVersion != 3 {
-		t.Errorf("expected version to stay 3 with empty feedback, got %d", engine.planVersion)
+	if engine.state.planVersion != 3 {
+		t.Errorf("expected version to stay 3 with empty feedback, got %d", engine.state.planVersion)
 	}
 }
 
 func TestPlanContent(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.planMarkdown = "# My Plan\nSome content"
+	engine.state.planMarkdown = "# My Plan\nSome content"
 	got := engine.PlanContent()
 	if got != "# My Plan\nSome content" {
 		t.Errorf("expected plan content, got %q", got)
@@ -499,7 +499,7 @@ func TestPlanContent(t *testing.T) {
 
 func TestPlanVersion(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.planVersion = 5
+	engine.state.planVersion = 5
 	if got := engine.PlanVersion(); got != 5 {
 		t.Errorf("expected 5, got %d", got)
 	}
@@ -1912,7 +1912,7 @@ func TestBuildExecuteContext_WithPlanMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	engine.planMarkdown = "# Plan\n## Summary\nBuild a web server\n### Core\n#### [NEW] main.go\n- Entry point"
+	engine.state.planMarkdown = "# Plan\n## Summary\nBuild a web server\n### Core\n#### [NEW] main.go\n- Entry point"
 
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"main.go"}}
 	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
@@ -2101,9 +2101,9 @@ func TestBuildPlanContext_WithRefinement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	engine.planMarkdown = "# Old Plan\nOld content"
-	engine.planVersion = 1
-	engine.refineFeedback = "make it simpler"
+	engine.state.planMarkdown = "# Old Plan\nOld content"
+	engine.state.planVersion = 1
+	engine.state.refineFeedback = "make it simpler"
 
 	messages := engine.buildPlanContext(context.Background(), "Test", nil, nil, "")
 	found := false
@@ -2415,7 +2415,7 @@ func TestRunVerify_FailedTasksReported(t *testing.T) {
 
 func TestBuildExecuteContext_NoPlanMarkdown(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.planMarkdown = ""
+	engine.state.planMarkdown = ""
 	task := m31types.Task{ID: 1, Action: "Create", Description: "test", Files: []string{"a.go"}}
 	messages := engine.buildExecuteContext(context.Background(), task, []m31types.Task{task}, "goal")
 	if len(messages) < 2 {
@@ -2888,9 +2888,9 @@ func TestBuildPlanContext_AllFeatures(t *testing.T) {
 	engine.sessionMgr.SaveProject(engine.sessionID, project)
 
 	// Set refinement
-	engine.planMarkdown = "# Old plan"
-	engine.planVersion = 1
-	engine.refineFeedback = "simplify"
+	engine.state.planMarkdown = "# Old plan"
+	engine.state.planVersion = 1
+	engine.state.refineFeedback = "simplify"
 
 	existingTasks := []m31types.Task{{ID: 1, Action: "Create", Description: "test"}}
 	valErrs := []string{"error 1"}
@@ -2920,9 +2920,9 @@ func TestBuildPlanContext_LongPlanTruncation(t *testing.T) {
 
 	// Set plan > 4000 chars to trigger truncation
 	longPlan := strings.Repeat("x", 5000)
-	engine.planMarkdown = longPlan
-	engine.planVersion = 1
-	engine.refineFeedback = "revise"
+	engine.state.planMarkdown = longPlan
+	engine.state.planVersion = 1
+	engine.state.refineFeedback = "revise"
 
 	messages := engine.buildPlanContext(context.Background(), "Goal", nil, nil, "")
 	for _, m := range messages {
@@ -2997,7 +2997,7 @@ func TestGenerateDemonstration_LongPlanTruncation(t *testing.T) {
 	_, _ = engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
 
 	longPlan := strings.Repeat("# Plan\n", 500)
-	engine.planMarkdown = longPlan
+	engine.state.planMarkdown = longPlan
 	engine.sessionMgr.SavePlan(engine.sessionID, 1, longPlan)
 
 	tasks := []m31types.Task{

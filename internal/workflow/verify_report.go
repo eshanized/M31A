@@ -77,7 +77,7 @@ func (e *Engine) generateVerifyReport(tasks []m31types.Task, verifyResults map[i
 	}
 
 	// Collect manual verification steps from plan
-	if plan, err := ParsePlan(e.planMarkdown); err == nil && plan != nil {
+	if plan, err := ParsePlan(e.state.planMarkdown); err == nil && plan != nil {
 		report.ManualSteps = plan.Verification.Manual
 	}
 

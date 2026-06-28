@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -56,6 +57,7 @@ const (
 	ScreenCommandPalette   Screen = 30   // dedicated command palette with detail panel
 	ScreenRuntimeCheck     Screen = 31   // runtime verification (dev server + smoke tests)
 	ScreenHome             Screen = 32   // landing screen with logo, prompt, and tips
+	ScreenDecisions        Screen = 33   // decision log browser
 )
 
 // Label returns a human-readable name for the screen.
@@ -127,6 +129,8 @@ func (s Screen) Label() string {
 		return "Runtime Check"
 	case ScreenHome:
 		return "Home"
+	case ScreenDecisions:
+		return "Decisions"
 	default:
 		return "Unknown"
 	}
@@ -202,6 +206,8 @@ func (s Screen) Name() string {
 		return "bisect"
 	case ScreenPermission:
 		return "permission"
+	case ScreenDecisions:
+		return "decisions"
 	default:
 		return ""
 	}
@@ -565,6 +571,7 @@ type WorkflowEngine interface {
 	SetRefinementFeedback(feedback string)
 	SetWorkflowMode(mode types.WorkflowMode)
 	WorkflowMode() types.WorkflowMode
+	SnapshotDecisions() []decision.DecisionReceipt
 }
 
 // ─── Intent classification ─────────────────────────────────────────────────────

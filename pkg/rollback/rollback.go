@@ -3,6 +3,7 @@ package rollback
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eshanized/M31A/internal/git"
@@ -295,4 +296,53 @@ func (r *Rollback) buildResult(prevHead, newHead string, stashed bool, stashWord
 		ChangesStashed: stashed,
 		Message:        msg,
 	}
+}
+
+// ChangedFiles returns the list of files changed in the given commit.
+func (r *Rollback) ChangedFiles(hash string) ([]string, error) {
+	out, err := r.git.Run("diff-tree", "--no-commit-id", "-r", "--name-only", hash)
+	if err != nil {
+		return nil, fmt.Errorf("changed files: %w", err)
+	}
+	if out == "" {
+		return []string{}, nil
+	}
+	lines := splitLines(out)
+	return lines, nil
+}
+
+// FileDiff returns the diff for a single file at the given commit.
+// The diff shows changes introduced by that commit for the specified path.
+func (r *Rollback) FileDiff(hash string, path string) (string, error) {
+	out, err := r.git.Run("diff-tree", "--no-commit-id", "-p", hash, "--", path)
+	if err != nil {
+		return "", fmt.Errorf("file diff: %w", err)
+	}
+	return out, nil
+}
+
+// RevertFiles restores specific files from a given commit without changing HEAD.
+// Uses `git checkout <commit> -- <files>` to restore individual files.
+func (r *Rollback) RevertFiles(hash string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := make([]string, 0, 3+len(paths))
+	args = append(args, "checkout", hash, "--")
+	args = append(args, paths...)
+	if _, err := r.git.Run(args...); err != nil {
+		return fmt.Errorf("revert files: %w", err)
+	}
+	return nil
+}
+
+// splitLines splits a string on newlines, filtering empty lines.
+func splitLines(s string) []string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }

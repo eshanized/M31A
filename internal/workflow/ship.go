@@ -191,6 +191,14 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("ledger update skipped: cannot load session", "error", err)
 	}
 
+	// 4b. Generate session summary (template-based, no LLM call)
+	sessionSummary := e.generateSessionSummary(tasks, commits, goal, summary)
+	if sessionSummary != "" {
+		if err := e.sessionMgr.SaveSessionSummary(e.sessionID, sessionSummary); err != nil {
+			e.logger.Warn("save session summary failed", "error", err)
+		}
+	}
+
 	// 5. Write final STATE.md and checkpoint before archiving (fix write ordering)
 	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhaseShip, "complete", "session shipped"); err != nil {
 		e.logger.Warn("save state failed", "error", err)
@@ -461,7 +469,7 @@ func (e *Engine) BuildSummary() ShipSummary {
 func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks []m31types.Task, done, failed int, commits []git.CommitInfo) string {
 	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
 	if planMarkdown == "" {
-		planMarkdown = e.planMarkdown
+		planMarkdown = e.state.planMarkdown
 	}
 
 	var sb strings.Builder
@@ -560,4 +568,63 @@ func (e *Engine) rotateMemoryFile(memPath string) {
 	} else {
 		e.logger.Info("rotated MEMORY.md", "removed_sessions", len(blocks)-20, "new_size", len(rotatedContent))
 	}
+}
+
+// generateSessionSummary creates a template-based session summary.
+// No LLM call — uses structured data from task list, decision log, and git log.
+func (e *Engine) generateSessionSummary(tasks []m31types.Task, commits []git.CommitInfo, goal string, summary ShipSummary) string {
+	var b strings.Builder
+
+	b.WriteString("# Session Summary\n\n")
+	b.WriteString(fmt.Sprintf("**Goal:** %s\n\n", goal))
+	b.WriteString(fmt.Sprintf("**Duration:** %s\n\n", summary.Duration.Round(time.Second)))
+
+	// Task summary
+	b.WriteString("## Tasks\n\n")
+	b.WriteString(fmt.Sprintf("- Total: %d\n", summary.TaskTotal))
+	b.WriteString(fmt.Sprintf("- Completed: %d\n", summary.TaskDone))
+	if summary.TaskFailed > 0 {
+		b.WriteString(fmt.Sprintf("- Failed: %d\n", summary.TaskFailed))
+	}
+	if summary.TaskSkipped > 0 {
+		b.WriteString(fmt.Sprintf("- Skipped: %d\n", summary.TaskSkipped))
+	}
+	b.WriteString("\n")
+
+	// Decision summary
+	decisions := e.SnapshotDecisions()
+	if len(decisions) > 0 {
+		b.WriteString("## Decisions\n\n")
+		categories := make(map[string]int)
+		for _, d := range decisions {
+			categories[string(d.Category)]++
+		}
+		for cat, count := range categories {
+			b.WriteString(fmt.Sprintf("- %s: %d\n", cat, count))
+		}
+		b.WriteString(fmt.Sprintf("- Total: %d\n\n", len(decisions)))
+	}
+
+	// Git commits
+	if len(commits) > 0 {
+		b.WriteString("## Commits\n\n")
+		for _, c := range commits {
+			b.WriteString(fmt.Sprintf("- %s: %s\n", c.Hash[:min(7, len(c.Hash))], c.Message))
+		}
+		b.WriteString("\n")
+	}
+
+	// Key learnings from knowledge
+	if e.state.decisionLog != nil {
+		healReport := e.LastHealReport()
+		if healReport != nil {
+			b.WriteString("## Self-Heal Summary\n\n")
+			b.WriteString(fmt.Sprintf("- Task %d healed successfully\n", healReport.TaskID))
+			b.WriteString(fmt.Sprintf("- Error type: %s\n", healReport.ErrorType))
+			b.WriteString(fmt.Sprintf("- Strategy: %s\n", healReport.Strategy))
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
 }

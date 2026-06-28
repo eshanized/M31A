@@ -43,6 +43,7 @@ const (
 	ScreenCommandPalette   = tuitypes.ScreenCommandPalette
 	ScreenRuntimeCheck     = tuitypes.ScreenRuntimeCheck
 	ScreenHome             = tuitypes.ScreenHome
+	ScreenDecisions        = tuitypes.ScreenDecisions
 )
 
 // Message type re-exports

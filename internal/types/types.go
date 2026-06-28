@@ -225,6 +225,19 @@ func NewToolError(err error, hint string) *ToolError {
 	return &ToolError{Err: err, Hint: hint}
 }
 
+// HealReport records the outcome of a self-healing attempt.
+type HealReport struct {
+	TaskID     int       `json:"task_id"`
+	Attempt    int       `json:"attempt"`
+	Success    bool      `json:"success"`
+	ErrorType  string    `json:"error_type"`
+	ErrorMsg   string    `json:"error_msg"`
+	Strategy   string    `json:"strategy"`
+	FilesUsed  []string  `json:"files_used,omitempty"`
+	DurationMs int64     `json:"duration_ms"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
 type Tool interface {
 	Name() string
 	Description() string

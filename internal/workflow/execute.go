@@ -13,6 +13,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/decision"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
@@ -443,6 +444,17 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					duration: toolDuration,
 				}
 
+				// Log tool execution decision
+				e.LogDecision(decision.DecisionReceipt{
+					Decision:  fmt.Sprintf("tool:%s", call.Name),
+					Rationale: fmt.Sprintf("task:%d", task.ID),
+					Category:  decision.CategoryTool,
+					Cost: decision.Cost{
+						Duration: float64(toolDuration) / 1000.0,
+						Attempts: 1,
+					},
+				})
+
 				// Extract the file path from the tool call input for file-writing tools
 				// so the TUI can track recently changed files in the sidebar.
 				var affectedPath string
@@ -666,12 +678,12 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 
 	// Load PROJECT.md for project context — use shared cache
 	var project *m31types.ProjectState
-	if e.cachedProjectID == e.sessionID {
-		project = e.cachedProject
+	if e.state.cachedProjectID == e.sessionID {
+		project = e.state.cachedProject
 	} else {
 		project = e.loadProjectCached()
-		e.cachedProject = project
-		e.cachedProjectID = e.sessionID
+		e.state.cachedProject = project
+		e.state.cachedProjectID = e.sessionID
 	}
 	projectCtx := ""
 	if project != nil {
@@ -683,25 +695,25 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	planCtx := ""
 	planMarkdown, _ := e.sessionMgr.LoadPlan(e.sessionID)
 	if planMarkdown == "" {
-		planMarkdown = e.planMarkdown
+		planMarkdown = e.state.planMarkdown
 	}
 	if planMarkdown != "" {
 		var plan *m31types.Plan
 		// Use the pre-computed MD5 cache to avoid re-hashing the same plan
-		if e.cachedPlan != nil && e.cachedPlanMD5 != "" && e.planMarkdown == planMarkdown {
-			plan = e.cachedPlan
+		if e.state.cachedPlan != nil && e.state.cachedPlanMD5 != "" && e.state.planMarkdown == planMarkdown {
+			plan = e.state.cachedPlan
 		} else {
 			planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
-			if e.cachedPlan != nil && e.cachedPlanMD5 == planHash {
-				plan = e.cachedPlan
+			if e.state.cachedPlan != nil && e.state.cachedPlanMD5 == planHash {
+				plan = e.state.cachedPlan
 			} else {
 				var parseErr error
 				plan, parseErr = ParsePlan(planMarkdown)
 				if parseErr != nil {
 					e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
 				}
-				e.cachedPlan = plan
-				e.cachedPlanMD5 = planHash
+				e.state.cachedPlan = plan
+				e.state.cachedPlanMD5 = planHash
 			}
 		}
 		if plan != nil {
@@ -900,6 +912,33 @@ func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure strin
 		}
 	}
 
+	// Generate HealReport for self-heal explanation
+	errorType := classifyError(failure)
+	healReport := &m31types.HealReport{
+		TaskID:     task.ID,
+		Attempt:    task.HealsAttempted,
+		Success:    true,
+		ErrorType:  errorType,
+		ErrorMsg:   truncateForLog(failure, 500),
+		Strategy:   describeHealStrategy(toolCalls),
+		FilesUsed:  task.Files,
+		DurationMs: time.Since(start).Milliseconds(),
+		Timestamp:  time.Now(),
+	}
+	e.state.lastHealReport = healReport
+
+	// Log decision for self-heal
+	e.LogDecision(decision.DecisionReceipt{
+		Decision:  fmt.Sprintf("self-heal succeeded for task %d (attempt %d)", task.ID, task.HealsAttempted),
+		Rationale: fmt.Sprintf("error type: %s, strategy: %s", errorType, healReport.Strategy),
+		Category:  decision.CategoryRetry,
+		Cost: decision.Cost{
+			Duration:   float64(healReport.DurationMs) / 1000.0,
+			Attempts:   task.HealsAttempted,
+			RetryCount: task.HealsAttempted,
+		},
+	})
+
 	return taskrunner.TaskResult{
 		Success:    true,
 		Output:     content,
@@ -926,6 +965,43 @@ func (e *Engine) healCreatedExpectedFiles(task *m31types.Task) bool {
 		}
 	}
 	return true
+}
+
+// classifyError categorizes an error message for the HealReport.
+func classifyError(errMsg string) string {
+	lower := strings.ToLower(errMsg)
+	switch {
+	case strings.Contains(lower, "build") || strings.Contains(lower, "compile"):
+		return "build_error"
+	case strings.Contains(lower, "test") || strings.Contains(lower, "fail"):
+		return "test_failure"
+	case strings.Contains(lower, "syntax") || strings.Contains(lower, "parse"):
+		return "syntax_error"
+	case strings.Contains(lower, "undefined") || strings.Contains(lower, "unresolved"):
+		return "undefined_symbol"
+	case strings.Contains(lower, "import") || strings.Contains(lower, "require"):
+		return "import_error"
+	case strings.Contains(lower, "permission") || strings.Contains(lower, "denied"):
+		return "permission_error"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline"):
+		return "timeout"
+	case strings.Contains(lower, "context window") || strings.Contains(lower, "token"):
+		return "context_overflow"
+	default:
+		return "unknown"
+	}
+}
+
+// describeHealStrategy returns a human-readable description of the heal tool calls.
+func describeHealStrategy(toolCalls []m31types.ToolCall) string {
+	if len(toolCalls) == 0 {
+		return "no tools used"
+	}
+	var tools []string
+	for _, tc := range toolCalls {
+		tools = append(tools, tc.Name)
+	}
+	return fmt.Sprintf("used %s", strings.Join(tools, ", "))
 }
 
 // looksLikeCode detects when an LLM has printed code as plain text instead of

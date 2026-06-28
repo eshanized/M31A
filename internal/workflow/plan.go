@@ -9,16 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/decision"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
 // runPlan generates a rich implementation plan and task list to accomplish the goal.
 // Integrates GSD-inspired sub-steps: research → plan → check → gates.
-// On refinement (when e.refineFeedback is non-empty), the previous plan is injected
+// On refinement (when e.state.refineFeedback is non-empty), the previous plan is injected
 // into the LLM context along with the user's feedback for revision.
 func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error) {
-	e.logger.Info("plan phase starting", "version", e.planVersion+1)
+	e.logger.Info("plan phase starting", "version", e.state.planVersion+1)
 
 	var tasks []m31types.Task
 	var planMarkdown string
@@ -27,11 +28,11 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	var valErrs []string
 	var allValErrs []string
 
-	isRefinement := e.refineFeedback != ""
+	isRefinement := e.state.refineFeedback != ""
 	if isRefinement {
 		e.emit(IntermediateProgressMsg{
 			Phase:   "plan",
-			Message: fmt.Sprintf("Refining plan (v%d)...", e.planVersion+1),
+			Message: fmt.Sprintf("Refining plan (v%d)...", e.state.planVersion+1),
 		})
 	}
 
@@ -43,7 +44,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		if researchErr != nil {
 			e.logger.Warn("pre-plan research failed, continuing without", "error", researchErr)
 		} else if research != "" {
-			e.researchOutput = research
+			e.state.researchOutput = research
 			e.logger.Info("pre-plan research complete", "output_len", len(research))
 		}
 	}
@@ -156,12 +157,12 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		tasks[i].Status = m31types.StatusPending
 	}
 
-	e.planMarkdown = planMarkdown
+	e.state.planMarkdown = planMarkdown
 	if !isRefinement {
-		e.planVersion = 1
+		e.state.planVersion = 1
 	}
 
-	if err := e.sessionMgr.SavePlan(e.sessionID, e.planVersion, planMarkdown); err != nil {
+	if err := e.sessionMgr.SavePlan(e.sessionID, e.state.planVersion, planMarkdown); err != nil {
 		e.logger.Warn("save plan.md failed", "error", err)
 	}
 
@@ -198,13 +199,23 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("checkpoint save failed", "error", err)
 	}
 
-	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhasePlan, fmt.Sprintf("%d tasks generated (v%d)", len(tasks), e.planVersion), "plan complete"); err != nil {
+	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhasePlan, fmt.Sprintf("%d tasks generated (v%d)", len(tasks), e.state.planVersion), "plan complete"); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
 
-	e.refineFeedback = ""
+	e.state.refineFeedback = ""
 
-	e.logger.Info("plan phase complete", "task_count", len(tasks), "version", e.planVersion)
+	e.logger.Info("plan phase complete", "task_count", len(tasks), "version", e.state.planVersion)
+
+	// Log plan decision
+	e.LogDecision(decision.DecisionReceipt{
+		Decision:  fmt.Sprintf("plan generated: %d tasks (v%d)", len(tasks), e.state.planVersion),
+		Rationale: "plan phase complete",
+		Category:  decision.CategoryPlan,
+		Cost: decision.Cost{
+			Attempts: e.state.planVersion,
+		},
+	})
 
 	return &PhaseResult{
 		Phase:   m31types.PhasePlan,
@@ -241,12 +252,22 @@ func (e *Engine) runPlanChecker(ctx context.Context, tasks []m31types.Task, plan
 
 		if checkResult.Passed {
 			e.logger.Info("plan check passed", "iteration", iteration)
+			e.LogDecision(decision.DecisionReceipt{
+				Decision:  fmt.Sprintf("plan check passed (iteration %d)", iteration),
+				Rationale: fmt.Sprintf("%d issues resolved", prevIssueCount),
+				Category:  decision.CategoryPlan,
+			})
 			break
 		}
 
 		if isPlanCheckStalled(len(checkResult.Issues), prevIssueCount) {
 			e.logger.Warn("plan check stalled, breaking revision loop",
 				"iteration", iteration, "issues", len(checkResult.Issues), "prev", prevIssueCount)
+			e.LogDecision(decision.DecisionReceipt{
+				Decision:  "plan check stalled, accepting current plan",
+				Rationale: fmt.Sprintf("%d issues remain after %d iterations", len(checkResult.Issues), iteration),
+				Category:  decision.CategoryPlan,
+			})
 			break
 		}
 		prevIssueCount = len(checkResult.Issues)
@@ -448,8 +469,8 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 	}
 
 	// Inject pre-plan research output if available
-	if e.researchOutput != "" {
-		planCtx += "## Research Findings\n" + e.researchOutput + "\n\n"
+	if e.state.researchOutput != "" {
+		planCtx += "## Research Findings\n" + e.state.researchOutput + "\n\n"
 	}
 
 	sessionDir := filepath.Dir(e.planningDir)
@@ -478,13 +499,13 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 		planCtx += "\n"
 	}
 
-	if e.refineFeedback != "" && e.planMarkdown != "" {
-		prevPlan := e.planMarkdown
+	if e.state.refineFeedback != "" && e.state.planMarkdown != "" {
+		prevPlan := e.state.planMarkdown
 		if len(prevPlan) > 4000 {
 			prevPlan = "... (summary truncated)\n" + prevPlan[len(prevPlan)-4000:]
 		}
-		planCtx += "## Previous Plan (v" + fmt.Sprintf("%d", e.planVersion) + ")\n" + prevPlan + "\n\n"
-		planCtx += "## User Refinement Feedback\n" + e.refineFeedback + "\n\n"
+		planCtx += "## Previous Plan (v" + fmt.Sprintf("%d", e.state.planVersion) + ")\n" + prevPlan + "\n\n"
+		planCtx += "## User Refinement Feedback\n" + e.state.refineFeedback + "\n\n"
 		planCtx += "Please revise the plan above based on the user's feedback. Return the complete revised plan in the same format.\n\n"
 	}
 

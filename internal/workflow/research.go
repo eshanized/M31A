@@ -31,7 +31,7 @@ func (e *Engine) runResearch(ctx context.Context, goal string) (string, error) {
 		return "", fmt.Errorf("research LLM call failed: %w", err)
 	}
 
-	e.researchOutput = content
+	e.state.researchOutput = content
 
 	e.emit(ResearchProgressMsg{
 		Phase:    "plan",
@@ -53,11 +53,11 @@ func (e *Engine) buildResearchContext(goal string) []m31types.Message {
 	fmt.Fprintf(&userCtx, "## Goal\n%s\n\n", goal)
 
 	// Inject intent classification if available
-	if e.intentResult != nil {
+	if e.state.intentResult != nil {
 		fmt.Fprintf(&userCtx, "## Intent Classification\nIntent: %s | Complexity: %s | Confidence: %.0f%%\nSummary: %s\n",
-			e.intentResult.Intent, e.intentResult.Complexity, e.intentResult.Confidence*100, e.intentResult.Summary)
-		if len(e.intentResult.Scope) > 0 {
-			fmt.Fprintf(&userCtx, "Scope: %s\n", strings.Join(e.intentResult.Scope, ", "))
+			e.state.intentResult.Intent, e.state.intentResult.Complexity, e.state.intentResult.Confidence*100, e.state.intentResult.Summary)
+		if len(e.state.intentResult.Scope) > 0 {
+			fmt.Fprintf(&userCtx, "Scope: %s\n", strings.Join(e.state.intentResult.Scope, ", "))
 		}
 		userCtx.WriteString("\n")
 	}

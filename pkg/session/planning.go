@@ -348,6 +348,30 @@ func (m *Manager) SaveDemonstration(sessionID string, markdown string) error {
 	return m.atomicWrite(path, []byte(markdown))
 }
 
+// SaveSessionSummary writes the session summary markdown to planning/SUMMARY.md.
+func (m *Manager) SaveSessionSummary(sessionID string, markdown string) error {
+	planningDir := m.planningDirPath()
+	if err := m.ensureDir(planningDir); err != nil {
+		return fmt.Errorf("cannot create planning directory: %w", err)
+	}
+	path := filepath.Join(planningDir, "SUMMARY.md")
+	return m.atomicWrite(path, []byte(markdown))
+}
+
+// LoadSessionSummary reads planning/SUMMARY.md for the given session.
+// Returns empty string without error if the file does not exist.
+func (m *Manager) LoadSessionSummary(sessionID string) (string, error) {
+	path := filepath.Join(m.planningDirPath(), "SUMMARY.md")
+	data, err := readFileLimited(path, types.MaxSessionFileSize)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("cannot read SUMMARY.md: %w", err)
+	}
+	return string(data), nil
+}
+
 // LoadDemonstration reads planning/DEMONSTRATION.md for the given session.
 // Returns empty string without error if the file does not exist.
 func (m *Manager) LoadDemonstration(sessionID string) (string, error) {

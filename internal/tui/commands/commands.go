@@ -294,6 +294,7 @@ func DefaultCommands() *CommandRegistry {
 
 	// Analysis
 	_ = r.Register("complexity", handleComplexity, "Show codebase complexity report")
+	_ = r.Register("decisions", handleDecisions, "Show decision log for current session")
 
 	// Discover and register skills as dynamic slash commands
 	discoverAndRegisterSkills(r)
@@ -333,6 +334,12 @@ func handleGhost(_ []string, ctx CommandContext) CommandResult {
 		Screen:  &screen,
 		Message: "Opening ghost write file selector...",
 	}
+}
+
+// handleDecisions opens ScreenDecisions to browse the decision log.
+func handleDecisions(_ []string, _ CommandContext) CommandResult {
+	screen := tuitypes.ScreenDecisions
+	return CommandResult{Success: true, Screen: &screen, Message: "Opening decision log..."}
 }
 
 // discoverAndRegisterSkills scans for skill files and registers them as

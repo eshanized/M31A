@@ -21,6 +21,7 @@ import (
 	"github.com/eshanized/M31A/internal/codeintel"
 	"github.com/eshanized/M31A/internal/config"
 	ctxsrc "github.com/eshanized/M31A/internal/context"
+	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
@@ -95,6 +96,69 @@ func LoadPrompts() (*PromptRegistry, error) {
 	return r, nil
 }
 
+// WorkflowState groups mutable session state extracted from Engine.
+// This struct owns plan state, cached data, intent classification,
+// and v1.5 subsystems (decision log, knowledge, budget tracker).
+// The Engine retains phase dispatch, LLM streaming, and subsystem orchestration.
+type WorkflowState struct {
+	// Plan state
+	planMarkdown    string // current plan content for refinement context
+	planVersion     int    // current plan version (increments on refine)
+	refineFeedback  string // pending refinement feedback from user
+	researchOutput  string // pre-plan research results for injection into plan context
+	discussPlanCycles int  // Plan→Discuss→Plan round-trips (capped at maxDiscussPlanCycles)
+
+	// Cached tool definitions (built once, reused for all LLM calls)
+	cachedToolDefs     []provider.ToolDefinition
+	cachedToolDefsOnce sync.Once
+
+	// Cached system prompt static portions
+	cachedBasePrompt     string
+	cachedBasePromptOnce sync.Once
+
+	// Cached full system prompts per extras signature (PERF-24 extension)
+	cachedFullPrompts   map[string]string
+	cachedFullPromptsMu sync.Mutex
+
+	// Cached project state for execute phase (H15 fix)
+	cachedProject   *m31types.ProjectState
+	cachedProjectID string // session ID for invalidation
+
+	// Cached project state shared across all context builders (PERF-29)
+	cachedProjectShared   *m31types.ProjectState
+	cachedProjectSharedID string
+
+	// Cached parsed plan for execute phase (H15 fix)
+	cachedPlan    *m31types.Plan
+	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
+
+	// Intent classification result from the LLM-based classifier.
+	// Set before the workflow starts; used to enrich discuss/research/plan context.
+	intentResult *m31types.IntentResult
+
+	// Dynamic context change detection
+	contextSnapshot     map[string]string
+	cachedDynamicContext string
+
+	// v1.5: Decision logging
+	decisionLog *decision.Logger
+
+	// v1.5: Self-heal explanation
+	lastHealReport *m31types.HealReport
+
+	// v1.5: Checkpoint resume
+	checkpointData *CheckpointData
+}
+
+// CheckpointData holds data that can be saved/restored across checkpoints.
+type CheckpointData struct {
+	Phase        m31types.WorkflowPhase `json:"phase"`
+	Goal         string                 `json:"goal"`
+	PlanVersion  int                    `json:"plan_version"`
+	Decisions    []decision.DecisionReceipt `json:"decisions,omitempty"`
+	Timestamp    time.Time              `json:"timestamp"`
+}
+
 // Engine orchestrates the seven active workflow phases (Initialize, Discuss, Plan, Execute, Verify, Runtime, Ship).
 type Engine struct {
 	sessionID        string
@@ -118,45 +182,16 @@ type Engine struct {
 	msgEmitter       MsgEmitter
 	callCounter      int64
 	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
-	planMarkdown     string // current plan content for refinement context
-	planVersion      int    // current plan version (increments on refine)
-	refineFeedback   string // pending refinement feedback from user
-	// researchOutput holds the pre-plan research results for injection into plan context.
-	researchOutput string
-	// discussPlanCycles counts Plan→Discuss→Plan round-trips. Capped at
-	// maxDiscussPlanCycles to prevent infinite oscillation (BUG-12).
-	discussPlanCycles int
 	// workflowMode controls phase-skipping behaviour based on prompt complexity.
 	workflowMode m31types.WorkflowMode
 	// perPhaseModels holds per-phase model overrides set by the TUI via SetPhaseModel.
 	// Keys are WorkflowPhase values; values are model ID strings.
 	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
 	perPhaseModels map[m31types.WorkflowPhase]string
-	// Cached tool definitions (built once, reused for all LLM calls)
-	cachedToolDefs     []provider.ToolDefinition
-	cachedToolDefsOnce sync.Once
-	// Cached system prompt static portions
-	cachedBasePrompt     string
-	cachedBasePromptOnce sync.Once
-	// Cached full system prompts per extras signature (PERF-24 extension)
-	cachedFullPrompts   map[string]string
-	cachedFullPromptsMu sync.Mutex
-	// Cached project state for execute phase (H15 fix)
-	cachedProject   *m31types.ProjectState
-	cachedProjectID string // session ID for invalidation
-	// Cached project state shared across all context builders (PERF-29)
-	cachedProjectShared   *m31types.ProjectState
-	cachedProjectSharedID string
-	// Cached parsed plan for execute phase (H15 fix)
-	cachedPlan    *m31types.Plan
-	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
 	// Codebase intelligence layer (lazy-built, invalidated between execute groups)
 	codeIntel      *codeintel.Indexer
 	codeIntelMu    sync.Mutex
 	codeIntelBuilt bool
-	// Intent classification result from the LLM-based classifier.
-	// Set before the workflow starts; used to enrich discuss/research/plan context.
-	intentResult *m31types.IntentResult
 	// websiteTemplateDir holds the path to the extracted website template directory.
 	// Set when scope includes "website"; used to inject template path into plan/execute context.
 	websiteTemplateDir string
@@ -167,12 +202,10 @@ type Engine struct {
 	compactor *compaction.Compactor
 	// contextRegistry manages dynamic system context sources.
 	contextRegistry *ctxsrc.Registry
-	// contextSnapshot stores the last evaluated context state for change detection.
-	contextSnapshot map[string]string
-	// cachedDynamicContext stores the rendered dynamic context to avoid re-rendering on every call.
-	cachedDynamicContext string
 	// collector captures session metrics (tool calls, LLM usage, phase durations, heals).
 	collector *metrics.Collector
+	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
+	state *WorkflowState
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -249,25 +282,124 @@ func (e *Engine) WorkflowMode() m31types.WorkflowMode {
 
 // SetIntentResult stores the LLM-classified intent result for downstream enrichment.
 func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
-	e.intentResult = ir
+	e.state.intentResult = ir
+		// Log intent classification decision
+		if ir != nil {
+			e.LogDecision(decision.DecisionReceipt{
+				Decision:  fmt.Sprintf("intent:%s (complexity:%s, confidence:%.0f%%)", ir.Intent, ir.Complexity, ir.Confidence*100),
+				Rationale: ir.Summary,
+				Category:  decision.CategoryIntent,
+			})
+		}
 }
 
 // IntentResult returns the stored intent classification result, or nil if unset.
 func (e *Engine) IntentResult() *m31types.IntentResult {
-	return e.intentResult
+	return e.state.intentResult
 }
 
 // ScopeIncludes returns true if the intent result's scope contains the given term.
 func (e *Engine) ScopeIncludes(term string) bool {
-	if e.intentResult == nil {
+	if e.state.intentResult == nil {
 		return false
 	}
-	for _, s := range e.intentResult.Scope {
+	for _, s := range e.state.intentResult.Scope {
 		if strings.EqualFold(s, term) {
 			return true
 		}
 	}
 	return false
+}
+
+// LogDecision records a decision in the session log.
+func (e *Engine) LogDecision(r decision.DecisionReceipt) {
+	if e.state.decisionLog != nil {
+		e.state.decisionLog.Log(r)
+	}
+}
+
+// FlushDecisions synchronously returns all logged decisions and resets the buffer.
+func (e *Engine) FlushDecisions() []decision.DecisionReceipt {
+	if e.state.decisionLog == nil {
+		return nil
+	}
+	return e.state.decisionLog.Flush()
+}
+
+// SnapshotDecisions returns a copy of buffered decisions without flushing.
+func (e *Engine) SnapshotDecisions() []decision.DecisionReceipt {
+	if e.state.decisionLog == nil {
+		return nil
+	}
+	return e.state.decisionLog.Snapshot()
+}
+
+// LastHealReport returns the most recent self-heal report, or nil if none.
+func (e *Engine) LastHealReport() *m31types.HealReport {
+	return e.state.lastHealReport
+}
+
+// SaveCheckpointData saves current workflow state for checkpoint resume.
+// It persists to both in-memory state and disk via the session manager.
+func (e *Engine) SaveCheckpointData(goal string) {
+	decisions := e.SnapshotDecisions()
+	cp := &CheckpointData{
+		Phase:       e.activePhase,
+		Goal:        goal,
+		PlanVersion: e.state.planVersion,
+		Decisions:   decisions,
+		Timestamp:   time.Now(),
+	}
+	e.state.checkpointData = cp
+
+	// Persist to disk so checkpoint data survives process crashes.
+	sessCheckpoint := session.Checkpoint{
+		Phase:       cp.Phase,
+		Timestamp:   cp.Timestamp,
+		Goal:        cp.Goal,
+		PlanVersion: cp.PlanVersion,
+	}
+	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, sessCheckpoint); err != nil {
+		e.logger.Warn("failed to persist checkpoint to disk", "error", err)
+	}
+}
+
+// LoadCheckpointData restores workflow state from a checkpoint.
+// If data is nil, it attempts to load from disk via the session manager.
+func (e *Engine) LoadCheckpointData(data *CheckpointData) {
+	if data == nil {
+		// Attempt to load from disk if no in-memory checkpoint exists.
+		checkpoints, err := e.sessionMgr.LoadCheckpoints(e.sessionID)
+		if err != nil {
+			e.logger.Warn("failed to load checkpoints from disk", "error", err)
+			return
+		}
+		if len(checkpoints) == 0 {
+			return
+		}
+		// Use the most recent checkpoint (first element, sorted newest-first).
+		cp := checkpoints[0]
+		data = &CheckpointData{
+			Phase:       cp.Phase,
+			Goal:        cp.Goal,
+			PlanVersion: cp.PlanVersion,
+			Timestamp:   cp.Timestamp,
+		}
+	}
+	e.state.checkpointData = data
+	e.activePhase = data.Phase
+	e.state.planVersion = data.PlanVersion
+	// Restore decisions to the log
+	if data.Decisions != nil && e.state.decisionLog != nil {
+		for _, d := range data.Decisions {
+			e.state.decisionLog.Log(d)
+		}
+	}
+}
+
+// GetCheckpointData returns the current checkpoint data, or nil if none.
+func (e *Engine) GetCheckpointData() *CheckpointData {
+	return e.state.checkpointData
 }
 
 // ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
@@ -356,6 +488,9 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 			ctxsrc.GitSource{WorkDir: opts.WorkDir},
 		),
 		collector: opts.Collector,
+		state: &WorkflowState{
+			decisionLog: decision.NewLogger(256),
+		},
 	}, nil
 }
 
@@ -414,16 +549,16 @@ func (e *Engine) compactedMessages(original []m31types.Message, summary string) 
 // on first access per session. Avoids redundant disk I/O + JSON parse across
 // buildDiscussContext, buildPlanContext, buildResearchContext, and buildExecuteContext.
 func (e *Engine) loadProjectCached() *m31types.ProjectState {
-	if e.cachedProjectSharedID == e.sessionID && e.cachedProjectShared != nil {
-		return e.cachedProjectShared
+	if e.state.cachedProjectSharedID == e.sessionID && e.state.cachedProjectShared != nil {
+		return e.state.cachedProjectShared
 	}
 	project, err := e.sessionMgr.LoadProject(e.sessionID)
 	if err != nil {
 		e.logger.Warn("failed to load project", "error", err)
 		return nil
 	}
-	e.cachedProjectShared = project
-	e.cachedProjectSharedID = e.sessionID
+	e.state.cachedProjectShared = project
+	e.state.cachedProjectSharedID = e.sessionID
 	return project
 }
 
@@ -555,14 +690,14 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 	// reject beyond maxDiscussPlanCycles. The counter resets whenever the
 	// workflow leaves the Plan/Discuss subgraph for Execute/Ship/Idle.
 	if from == m31types.PhasePlan && to == m31types.PhaseDiscuss {
-		e.discussPlanCycles++
-		if e.discussPlanCycles > maxDiscussPlanCycles {
+		e.state.discussPlanCycles++
+		if e.state.discussPlanCycles > maxDiscussPlanCycles {
 			return fmt.Errorf("plan↔discuss cycle limit exceeded (%d): %w",
 				maxDiscussPlanCycles, m31errors.ErrPhaseTransition)
 		}
 	}
 	if to == m31types.PhaseExecute || to == m31types.PhaseShip || to == m31types.PhaseIdle {
-		e.discussPlanCycles = 0
+		e.state.discussPlanCycles = 0
 	}
 
 	// Emit phase transition start message
@@ -888,23 +1023,32 @@ func (e *Engine) FinalizeDiscuss() error {
 // The plan phase reads this field to inject feedback into the LLM context.
 // Duplicate feedback is ignored — only new feedback bumps the plan version.
 func (e *Engine) SetRefinementFeedback(feedback string) {
-	if feedback != "" && feedback != e.refineFeedback {
-		e.refineFeedback = feedback
-		e.planVersion++
+	if feedback != "" && feedback != e.state.refineFeedback {
+		e.state.refineFeedback = feedback
+		e.state.planVersion++
+		// Log plan revision decision
+		e.LogDecision(decision.DecisionReceipt{
+			Decision:  fmt.Sprintf("plan revision requested (v%d)", e.state.planVersion),
+			Rationale: truncateForLog(feedback, 200),
+			Category:  decision.CategoryPlan,
+			Cost: decision.Cost{
+				Attempts: e.state.planVersion,
+			},
+		})
 	} else if feedback == "" {
-		e.refineFeedback = feedback
+		e.state.refineFeedback = feedback
 	}
 }
 
 // PlanContent returns the current plan markdown content.
 func (e *Engine) PlanContent() string {
-	return e.planMarkdown
+	return e.state.planMarkdown
 }
 
 // PlanVersion returns the current plan version number.
 // Version 1 is the initial plan; each refinement increments it.
 func (e *Engine) PlanVersion() int {
-	return e.planVersion
+	return e.state.planVersion
 }
 
 // buildToolDefinitions returns the tool definitions for the LLM.
@@ -913,7 +1057,7 @@ func (e *Engine) PlanVersion() int {
 // ParametersParsed field is populated once to avoid repeated
 // json.Unmarshal in BuildChatBody (PERF-25).
 func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
-	e.cachedToolDefsOnce.Do(func() {
+	e.state.cachedToolDefsOnce.Do(func() {
 		var defs []provider.ToolDefinition
 		for _, name := range e.dispatcher.List() {
 			tool, ok := e.dispatcher.GetTool(name)
@@ -937,33 +1081,33 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 			}
 			defs = append(defs, def)
 		}
-		e.cachedToolDefs = defs
+		e.state.cachedToolDefs = defs
 	})
-	return e.cachedToolDefs
+	return e.state.cachedToolDefs
 }
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
 // The base prompt is cached since it doesn't change during a session (PERF-24).
 // Full assembled prompts are cached per extras signature to avoid repeated string building.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
-	e.cachedBasePromptOnce.Do(func() {
-		e.cachedBasePrompt = e.prompts.Base
+	e.state.cachedBasePromptOnce.Do(func() {
+		e.state.cachedBasePrompt = e.prompts.Base
 	})
 
 	// Build cache key from extras
 	key := strings.Join(extra, "|")
 
-	e.cachedFullPromptsMu.Lock()
-	if e.cachedFullPrompts == nil {
-		e.cachedFullPrompts = make(map[string]string)
+	e.state.cachedFullPromptsMu.Lock()
+	if e.state.cachedFullPrompts == nil {
+		e.state.cachedFullPrompts = make(map[string]string)
 	}
-	if cached, ok := e.cachedFullPrompts[key]; ok {
-		e.cachedFullPromptsMu.Unlock()
+	if cached, ok := e.state.cachedFullPrompts[key]; ok {
+		e.state.cachedFullPromptsMu.Unlock()
 		return cached
 	}
-	e.cachedFullPromptsMu.Unlock()
+	e.state.cachedFullPromptsMu.Unlock()
 
-	parts := []string{e.cachedBasePrompt}
+	parts := []string{e.state.cachedBasePrompt}
 
 	// Inject model-specific template
 	if modelTemplate := SelectTemplate(e.modelForPhase(e.activePhase)); modelTemplate != "" {
@@ -981,16 +1125,16 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 	// Reconcile dynamic context sources and include current state
 	if e.contextRegistry != nil {
 		ctx := context.Background()
-		changes := e.contextRegistry.Reconcile(ctx, e.contextSnapshot)
+		changes := e.contextRegistry.Reconcile(ctx, e.state.contextSnapshot)
 		snapshot := e.contextRegistry.LoadAll(ctx)
 
-		if e.contextSnapshot == nil || len(changes) > 0 {
-			e.contextSnapshot = snapshot
-			e.cachedDynamicContext = e.renderDynamicContext(snapshot)
+		if e.state.contextSnapshot == nil || len(changes) > 0 {
+			e.state.contextSnapshot = snapshot
+			e.state.cachedDynamicContext = e.renderDynamicContext(snapshot)
 		}
 
-		if e.cachedDynamicContext != "" {
-			parts = append(parts, e.cachedDynamicContext)
+		if e.state.cachedDynamicContext != "" {
+			parts = append(parts, e.state.cachedDynamicContext)
 		}
 	}
 
@@ -1001,9 +1145,9 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 	}
 	result := strings.Join(parts, "\n\n---\n\n")
 
-	e.cachedFullPromptsMu.Lock()
-	e.cachedFullPrompts[key] = result
-	e.cachedFullPromptsMu.Unlock()
+	e.state.cachedFullPromptsMu.Lock()
+	e.state.cachedFullPrompts[key] = result
+	e.state.cachedFullPromptsMu.Unlock()
 
 	return result
 }
@@ -1342,4 +1486,12 @@ func ExtractWebsiteTemplate(destDir string) error {
 		}
 		return os.WriteFile(dest, data, 0o644)
 	})
+}
+
+// truncateForLog truncates a string to maxLen, adding ellipsis if needed.
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }

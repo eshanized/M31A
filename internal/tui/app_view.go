@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
@@ -180,6 +181,8 @@ func (m *AppState) renderScreenContent(screen Screen, chrome layout.PageChrome) 
 		return m.renderCommandPaletteContent(chrome)
 	case ScreenHome:
 		return m.renderHomeContent(chrome)
+	case ScreenDecisions:
+		return m.renderDecisionsContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -1035,4 +1038,82 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 	}
 
 	return lipgloss.Place(termW, termH, lipgloss.Center, lipgloss.Center, card)
+}
+
+func (m *AppState) renderDecisionsContent(chrome layout.PageChrome) string {
+	width := chrome.ContentWidth()
+	height := chrome.ContentHeight()
+	theme := m.themeManager.Current()
+
+	if m.workflowEngine == nil {
+		return renderEmptyState("Decisions", "No workflow engine available", width, height, theme)
+	}
+
+	decisions := m.workflowEngine.SnapshotDecisions()
+	if len(decisions) == 0 {
+		return renderEmptyState("Decisions", "No decisions recorded yet — start a workflow with /new", width, height, theme)
+	}
+
+	// Build table
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Primary).
+		MarginBottom(1)
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.TextPrimary).
+		BorderBottom(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(theme.BorderSubtle)
+
+	rowStyle := lipgloss.NewStyle().
+		Foreground(theme.TextPrimary)
+
+	catStyle := map[decision.Category]lipgloss.Style{
+		decision.CategoryTool:     lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		decision.CategoryPlan:     lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		decision.CategoryIntent:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+		decision.CategoryRetry:    lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		decision.CategoryStrategy: lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+		decision.CategoryModel:    lipgloss.NewStyle().Foreground(lipgloss.Color("133")),
+	}
+
+	b.WriteString(titleStyle.Render("Decision Log"))
+	b.WriteString("\n\n")
+
+	// Header row
+	b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-8s %s", "Time", "Category", "Decision")))
+	b.WriteString("\n")
+
+	// Data rows
+	for _, d := range decisions {
+		ts := d.Timestamp.Format("15:04:05")
+		cat := string(d.Category)
+		if s, ok := catStyle[d.Category]; ok {
+			cat = s.Render(cat)
+		}
+		decision := d.Decision
+		if len(decision) > width-40 {
+			decision = decision[:width-43] + "..."
+		}
+		b.WriteString(rowStyle.Render(fmt.Sprintf("%-20s %-8s %s", ts, cat, decision)))
+		b.WriteString("\n")
+	}
+
+	// Summary
+	totalCost := decision.CostSummary(decisions)
+	summaryStyle := lipgloss.NewStyle().
+		Foreground(theme.TextMuted).
+		MarginTop(1)
+	b.WriteString(summaryStyle.Render(fmt.Sprintf(
+		"%d decisions | %d tokens | %.1fs total duration",
+		len(decisions), totalCost.Tokens, totalCost.Duration,
+	)))
+
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Render(b.String())
 }

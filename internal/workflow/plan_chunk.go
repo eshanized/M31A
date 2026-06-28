@@ -132,9 +132,9 @@ func (e *Engine) buildOutlineContext(ctx context.Context, goal string) []m31type
 	}
 
 	// Inject research output if available
-	if e.researchOutput != "" {
+	if e.state.researchOutput != "" {
 		userCtx.WriteString("## Research Findings\n")
-		userCtx.WriteString(e.researchOutput)
+		userCtx.WriteString(e.state.researchOutput)
 		userCtx.WriteString("\n")
 	}
 
