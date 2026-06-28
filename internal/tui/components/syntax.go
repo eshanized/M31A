@@ -57,41 +57,41 @@ func DetectLanguage(code string) string {
 }
 
 // RenderCodeBlock renders a syntax-highlighted code block with language label and line numbers.
+// Uses semantic styles for consistent appearance across themes.
 func RenderCodeBlock(code, language string, t theme.Theme, width int) string {
 	if width < 20 {
 		width = 80
 	}
+	s := theme.BuildSemanticStyles(t)
 
-	var headerParts []string
-
+	// Language label — refined pill badge
+	var headerLeft string
 	if language != "" {
-		label := lipgloss.NewStyle().
-			Foreground(t.BadgeForeground).
-			Background(t.Brand).
+		headerLeft = s.CodeKeyword.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
 			Padding(0, 1).
-			Bold(true).
 			Render(language)
-		headerParts = append(headerParts, label)
 	}
 
-	copyHint := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Faint(true).
-		Render("⎚ press c to copy")
+	// Copy hint — subtle, right-aligned
+	copyHint := s.Muted.Render("c  copy")
 
-	if len(headerParts) > 0 {
-		left := strings.Join(headerParts, " ")
-		leftW := lipgloss.Width(left)
+	var header string
+	if headerLeft != "" {
+		leftW := lipgloss.Width(headerLeft)
 		rightW := lipgloss.Width(copyHint)
 		gap := width - leftW - rightW - 4
 		if gap < 1 {
 			gap = 1
 		}
-		header := left + strings.Repeat(" ", gap) + copyHint
-		return header + "\n" + renderCodeLines(code, language, t, width)
+		header = headerLeft + strings.Repeat(" ", gap) + copyHint
+	} else {
+		header = copyHint
 	}
 
-	return copyHint + "\n" + renderCodeLines(code, language, t, width)
+	codeLines := renderCodeLines(code, language, t, width)
+	return header + "\n" + codeLines
 }
 
 func renderCodeLines(code, language string, t theme.Theme, width int) string {
@@ -103,17 +103,17 @@ func renderCodeLines(code, language string, t theme.Theme, width int) string {
 		lineNumWidth = 2
 	}
 
+	s := theme.BuildSemanticStyles(t)
+	codeWidth := width - lineNumWidth - 3
+
 	var lines []string
 	for i, line := range codeLines {
-		lineNum := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Faint(true).
+		lineNum := s.CodeLineNum.
 			Width(lineNumWidth).
 			Align(lipgloss.Right).
 			Render(fmt.Sprintf("%d", i+1))
-		styled := lipgloss.NewStyle().
-			Background(t.CodeBG).
-			Width(width - lineNumWidth - 3).
+		styled := s.CodeBlock.
+			Width(codeWidth).
 			Render(" " + line)
 		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, lineNum, styled))
 	}

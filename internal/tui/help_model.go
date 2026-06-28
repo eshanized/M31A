@@ -66,7 +66,7 @@ func defaultHelpSections() []helpSection {
 			},
 		},
 		{
-			title: "Leader Key (ctrl+x ...)",
+			title: "Leader Key (ctrl+x …)",
 			items: [][2]string{
 				{"x h", "Help screen"},
 				{"x s", "Settings"},

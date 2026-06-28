@@ -11,8 +11,8 @@ import (
 // RenderPhaseBadge renders a compact phase indicator for the header.
 // Shows e.g. "[init]" in brand color with brand border when workflow is active.
 func RenderPhaseBadge(t theme.Theme, phase string) string {
-	return lipgloss.NewStyle().
-		Foreground(t.Brand).
+	s := theme.BuildSemanticStyles(t)
+	return s.BrandBold.
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
 		Padding(0, 1).
@@ -25,6 +25,8 @@ func RenderPhaseBreadcrumb(t theme.Theme, phase types.WorkflowPhase) string {
 		return ""
 	}
 
+	s := theme.BuildSemanticStyles(t)
+
 	phases := []types.WorkflowPhase{
 		types.PhaseInitialize,
 		types.PhaseDiscuss,
@@ -34,7 +36,6 @@ func RenderPhaseBreadcrumb(t theme.Theme, phase types.WorkflowPhase) string {
 		types.PhaseShip,
 	}
 
-	// Find position of current phase
 	currentIdx := -1
 	for i, p := range phases {
 		if p == phase {
@@ -45,28 +46,14 @@ func RenderPhaseBreadcrumb(t theme.Theme, phase types.WorkflowPhase) string {
 
 	var parts []string
 	for i, p := range phases {
-		var style lipgloss.Style
+		var style = s.Muted
 		if p == phase {
-			// Active phase: use theme.PhaseActive (brand + bold)
-			style = t.PhaseActive
-			if style.GetForeground() == (lipgloss.Color("")) {
-				style = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-			}
+			style = s.BrandBold
 		} else if currentIdx >= 0 && i < currentIdx {
-			// Past phase: use theme.PhasePast (muted)
-			style = t.PhasePast
-			if style.GetForeground() == (lipgloss.Color("")) {
-				style = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
-			}
-		} else {
-			// Future phase: use theme.PhaseFuture (even more muted)
-			style = t.PhaseFuture
-			if style.GetForeground() == (lipgloss.Color("")) {
-				style = lipgloss.NewStyle().Foreground(t.TextMuted)
-			}
+			style = s.Muted.Faint(true)
 		}
 		parts = append(parts, style.Render(string(p)))
 	}
-	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" › ")
+	sep := s.SeparatorV.Render(" › ")
 	return strings.Join(parts, sep)
 }

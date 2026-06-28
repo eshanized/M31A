@@ -85,13 +85,13 @@ func TestReplGetStatusText(t *testing.T) {
 		t.Errorf("empty: want '', got %q", got)
 	}
 	rm.streaming = true
-	if got := rm.GetStatusText(); got != "Streaming..." {
-		t.Errorf("streaming: want 'Streaming...', got %q", got)
+	if got := rm.GetStatusText(); got != "streaming…" {
+		t.Errorf("streaming: want 'streaming…', got %q", got)
 	}
 	rm.streaming = false
 	rm.thinking = true
-	if got := rm.GetStatusText(); got != "Thinking..." {
-		t.Errorf("thinking: want 'Thinking...', got %q", got)
+	if got := rm.GetStatusText(); got != "thinking…" {
+		t.Errorf("thinking: want 'thinking…', got %q", got)
 	}
 	rm.thinking = false
 	rm.lastStatus = "Building..."

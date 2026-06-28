@@ -14,7 +14,7 @@ import (
 //
 // Characters used:
 //
-//	░  track (empty portion of the scroll track)
+//	·  track (empty portion of the scroll track)
 //	█  thumb (visible window)
 //
 // The scrollbar is only rendered when the content exceeds the viewport height.
@@ -28,6 +28,8 @@ func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width i
 	if totalLines <= vp.Height {
 		return rendered
 	}
+
+	s := theme.BuildSemanticStyles(t)
 
 	lines := strings.Split(rendered, "\n")
 
@@ -54,10 +56,8 @@ func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width i
 	}
 	thumbBottom := thumbTop + thumbSize
 
-	trackStyle := lipgloss.NewStyle().Foreground(t.BorderSubtle)
-	thumbStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-	trackChar := trackStyle.Render("·")
-	thumbChar := thumbStyle.Render("█")
+	trackChar := s.ScrollbarTrack.Render("·")
+	thumbChar := s.Scrollbar.Render("█")
 
 	// Pad or clip lines to exactly vp.Height rows.
 	for len(lines) < vp.Height {
@@ -82,13 +82,10 @@ func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width i
 
 		switch {
 		case lineW <= scrollCol:
-			// Pad with spaces to the scroll column, then place the char.
 			line = line + strings.Repeat(" ", scrollCol-lineW) + ch
 		case lineW == scrollCol+1:
-			// Line already fills to the scroll column — replace last visible cell.
 			line = truncateStyledToWidth(line, scrollCol) + ch
 		default:
-			// Line overflows — truncate so (truncated + scrollbar char) ≤ width.
 			line = truncateStyledToWidth(line, scrollCol-1) + " " + ch
 		}
 

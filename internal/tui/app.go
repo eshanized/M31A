@@ -267,7 +267,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 	// Inline phase starting feedback in the REPL
 	if m.replModel != nil {
 		m.replModel.AddMessage(makeAssistantMsg(
-			fmt.Sprintf("**Phase: %s** — starting...", phase),
+			fmt.Sprintf("**Phase: %s** — starting…", phase),
 		))
 	}
 

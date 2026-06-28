@@ -267,7 +267,7 @@ func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string
 		Background(t.Secondary).
 		Bold(true).
 		Padding(0, 1).
-		Render("you")
+		Render("You")
 	gutter := lipgloss.JoinHorizontal(lipgloss.Top, borderChar, " ", roleBadge)
 
 	if msg.Content == "" {

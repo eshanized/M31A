@@ -318,13 +318,13 @@ func formatAgentTodoContent(input string) string {
 	}
 }
 
-// truncateText shortens text to maxLen, adding "..." if truncated.
+// truncateText shortens text to maxLen, adding "…" if truncated.
 func truncateText(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return s[:maxLen-3] + "…"
 }
 
 // sendPlainTextChat sends a chat request without tools (original behavior).
@@ -377,7 +377,7 @@ func (m *AppState) sendPlainTextChat(p provider.LLMProvider, input string) tea.C
 // the input based on the classification result.
 func (m *AppState) classifyAndRoute(p provider.LLMProvider, input string) tea.Cmd {
 	if m.replModel != nil {
-		m.replModel.lastStatus = "Classifying intent..."
+		m.replModel.lastStatus = "Classifying intent…"
 	}
 
 	modelID := m.activeModel.ID

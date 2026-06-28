@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -26,7 +25,7 @@ func (m *ReplModel) updatePlaceholder() {
 	case m.newMessagesWhileScrolled > 0 && m.userScrolled:
 		m.textarea.Placeholder = "Type a message… (ctrl+l to jump to latest)"
 	default:
-		m.textarea.Placeholder = "Type a message, /command, or goal..."
+		m.textarea.Placeholder = "Type a message, /command, or goal…"
 	}
 }
 
@@ -293,10 +292,10 @@ func (m *ReplModel) SpinnerTick() tea.Cmd {
 // GetStatusText returns the current status text for the status bar.
 func (m *ReplModel) GetStatusText() string {
 	if m.streaming {
-		return "Streaming..."
+		return "streaming…"
 	}
 	if m.thinking {
-		return "Thinking..."
+		return "thinking…"
 	}
 	if m.lastStatus != "" {
 		return m.lastStatus
@@ -389,7 +388,6 @@ func (m *ReplModel) renderMessages() {
 	offsets := make([]int, len(m.messages))
 	lineCount := 0
 
-	prevRole := ""
 	var prevTime time.Time
 	for i, msg := range m.messages {
 		offsets[i] = lineCount
@@ -398,31 +396,23 @@ func (m *ReplModel) renderMessages() {
 			offsets[i] = -1
 			continue
 		}
-		// Write separator AFTER confirming message has content.
+		// Breathing rhythm: whitespace separates messages naturally.
+		// The gutter system (┃ you / ┃ ◆) already distinguishes roles,
+		// so we don't need decorative dot separators.
 		if i > 0 {
 			timeGap := !msg.CreatedAt.IsZero() && !prevTime.IsZero() &&
-				msg.CreatedAt.Sub(prevTime) > 60*time.Second
-			if prevRole != "" && msg.Role != prevRole {
-				sepChar := "·"
-				sepLine := lipgloss.NewStyle().
-					Foreground(m.theme.BorderSubtle).
-					Faint(true).
-					Render(strings.Repeat(sepChar, rw/2))
-				sb.WriteString("\n")
-				sb.WriteString(sepLine)
-				sb.WriteString("\n")
-				lineCount += 2
-			} else if timeGap {
+				msg.CreatedAt.Sub(prevTime) > 90*time.Second
+			if timeGap {
+				// Long gap: minimal centered timestamp, no decoration
+				s := theme.BuildSemanticStyles(m.theme)
 				timeLabel := msg.CreatedAt.Format("15:04")
-				timeGapLine := lipgloss.NewStyle().
-					Foreground(m.theme.TextMuted).
-					Faint(true).
-					Render("── " + timeLabel + " " + strings.Repeat("─", rw/2-8))
+				timeLine := s.Faint.Render(timeLabel)
 				sb.WriteString("\n")
-				sb.WriteString(timeGapLine)
+				sb.WriteString(timeLine)
 				sb.WriteString("\n")
 				lineCount += 2
 			} else {
+				// Normal: single blank line for breathing
 				sb.WriteString("\n")
 				lineCount++
 			}
@@ -431,7 +421,6 @@ func (m *ReplModel) renderMessages() {
 		lineCount += strings.Count(rendered, "\n") + 1
 		sb.WriteString("\n")
 		lineCount++
-		prevRole = msg.Role
 		if !msg.CreatedAt.IsZero() {
 			prevTime = msg.CreatedAt
 		}
@@ -477,8 +466,6 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 	streamContent := m.streamContent.String()
 	if streamContent != "" {
 		if m.activeSegmentType == "thinking" {
-			// Cache ThinkingBlock to avoid re-allocating on every tick.
-			// Only recreate when content has actually changed.
 			if m.cachedThinkingBlock == nil || m.cachedThinkingContent != streamContent {
 				m.cachedThinkingBlock = components.NewThinkingBlock(
 					types.MessageSegment{
@@ -491,28 +478,21 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 			}
 			return m.cachedThinkingBlock.Render(rw)
 		}
-		// Plain lipgloss rendering during streaming — bypass Glamour entirely.
-		// Apply basic text styling: brand color for the content, no markdown parsing.
-		contentWidth := rw - 6 // account for gutter + padding
+		s := theme.BuildSemanticStyles(m.theme)
+		contentWidth := rw - 6
 		if contentWidth < 20 {
 			contentWidth = 20
 		}
-		// Animated block cursor: alternates between █ and ░ for visibility
-		cursorFrames := []string{"█", "▓", "▒", "░", "▒", "▓"}
-		frameIdx := int(time.Now().UnixMilli()/150) % len(cursorFrames)
-		cursorChar := cursorFrames[frameIdx]
-		cursor := lipgloss.NewStyle().Foreground(m.theme.Brand).Render(cursorChar)
-		rendered := lipgloss.NewStyle().
-			Foreground(m.theme.TextPrimary).
+		cursorChar := "█"
+		cursor := s.StreamingCursor.Render(cursorChar)
+		rendered := s.StreamingText.
 			Width(contentWidth).
 			Render(streamContent + cursor)
 		return rendered
 	}
-	// Show spinner when streaming but no content yet
+	s := theme.BuildSemanticStyles(m.theme)
 	spinnerFrame := m.spinner.Peek()
-	return lipgloss.NewStyle().
-		Foreground(m.theme.TextMuted).
-		Render("  " + spinnerFrame + " generating response…")
+	return s.Muted.Render("  " + spinnerFrame + " responding…")
 }
 
 // TrackLiveTool registers an in-progress agent loop tool card by name,

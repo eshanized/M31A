@@ -222,7 +222,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			fmt.Fprintf(&sb, "**Plan: %d tasks generated**\n\n", len(msg.Tasks))
 			for i, task := range msg.Tasks {
 				if i >= 15 {
-					fmt.Fprintf(&sb, "... and %d more tasks\n", len(msg.Tasks)-15)
+					fmt.Fprintf(&sb, "… and %d more tasks\n", len(msg.Tasks)-15)
 					break
 				}
 				fmt.Fprintf(&sb, "  %d. [%s] %s\n", task.ID, task.Action, task.Description)

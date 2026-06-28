@@ -91,18 +91,20 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 		return strings.Repeat(" ", width)
 	}
 
-	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
+	s := theme.BuildSemanticStyles(t)
+
+	sep := s.SeparatorV.Render(" │ ")
 	sepW := 3 // visible width of " │ "
 
 	// Left zone: brand name
-	brand := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(info.Brand)
+	brand := s.HeaderBrand.Render(info.Brand)
 	brandW := lipgloss.Width(brand)
 
 	// Center zone: breadcrumb (Standard+)
 	var crumb string
 	crumbW := 0
 	if bp >= Standard && info.Breadcrumb != "" {
-		crumb = lipgloss.NewStyle().Foreground(t.TextSecondary).Render(info.Breadcrumb)
+		crumb = s.HeaderCrumb.Render(info.Breadcrumb)
 		crumbW = lipgloss.Width(crumb)
 	}
 
@@ -111,7 +113,6 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 	rightW := 0
 	if bp >= Full {
 		var parts []string
-		// Context meter — show when usage is meaningful
 		if info.CtxTotal > 0 && info.CtxUsed > 0 {
 			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, info.CtxHistory, t)
 			if ctxMeter != "" {
@@ -119,8 +120,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 			}
 		}
 		if info.ModelName != "" {
-			parts = append(parts,
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.ModelName))
+			parts = append(parts, s.Muted.Render(info.ModelName))
 		}
 		if info.Provider != "" {
 			parts = append(parts, renderProvBadge(t, info.Provider))
@@ -132,7 +132,6 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 	}
 
 	// Compute leader-dot fill between crumb and right zone.
-	// Total line: brand sep crumb dots sep right
 	leftFixed := brandW + sepW + crumbW
 	rightFixed := 0
 	if right != "" {
@@ -142,7 +141,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 	if fillW < 1 {
 		fillW = 1
 	}
-	dots := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("·", fillW))
+	dots := s.HeaderDots.Render(strings.Repeat("·", fillW))
 
 	var result string
 	if crumb != "" {
@@ -165,13 +164,13 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 }
 
 // renderContextMeter renders a compact inline context usage bar for the header.
-// Returns empty string when usage is low or total is unknown.
 func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 	if total <= 0 || used <= 0 {
 		return ""
 	}
+	s := theme.BuildSemanticStyles(t)
+
 	pct := float64(used) / float64(total)
-	// Show meter when usage is notable (>15%)
 	if pct < 0.15 {
 		return ""
 	}
@@ -185,21 +184,20 @@ func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 		filled = 0
 	}
 
-	var ctxColor lipgloss.Color
+	var ctxColor lipgloss.Style
 	switch {
 	case pct >= 0.90:
-		ctxColor = t.Error
+		ctxColor = s.ErrorText
 	case pct >= 0.70:
-		ctxColor = t.Warning
+		ctxColor = s.WarningText
 	default:
-		ctxColor = t.TextMuted
+		ctxColor = s.Muted
 	}
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
 	pctLabel := intToStr(int(pct*100)) + "%"
-	result := lipgloss.NewStyle().Foreground(ctxColor).Render(bar + " " + pctLabel)
+	result := ctxColor.Render(bar + " " + pctLabel)
 
-	// Append sparkline of recent usage history
 	if len(history) > 1 {
 		sparkW := 5
 		if len(history) < sparkW {
@@ -221,8 +219,10 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 		return strings.Repeat(" ", width)
 	}
 
-	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
-	dotSep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" · ")
+	s := theme.BuildSemanticStyles(t)
+
+	sep := s.SeparatorV.Render(" │ ")
+	dotSep := s.SeparatorLine.Render(" · ")
 
 	// Left zone: ⌂ cwd  ⎇ branch
 	var leftParts []string
@@ -232,12 +232,10 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 			parts := strings.Split(cwd, "/")
 			cwd = parts[len(parts)-1]
 		}
-		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render("⌂ "+cwd))
+		leftParts = append(leftParts, s.FooterCwd.Render("⌂ "+cwd))
 	}
 	if bp >= Standard && info.GitBranch != "" {
-		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("⎇ "+info.GitBranch))
+		leftParts = append(leftParts, s.FooterBranch.Render("⎇ "+info.GitBranch))
 	}
 	left := strings.Join(leftParts, "  ")
 
@@ -246,21 +244,19 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 	if bp >= Compact {
 		switch {
 		case info.LeaderActive:
-			center = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("LEADER") +
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render(" awaiting key")
+			center = s.FooterLeader.Render("LEADER") +
+				s.FooterOp.Render(" awaiting key")
 		case info.Operation != "":
 			spinner := info.SpinnerFrame
 			if spinner == "" {
 				spinner = "⋯"
 			}
 			isThinking := strings.HasPrefix(info.Operation, "thinking")
-			var opStyle lipgloss.Style
+			var opStyle = s.FooterOp
 			if isThinking {
-				opStyle = lipgloss.NewStyle().Foreground(t.Thinking).Italic(true)
-			} else {
-				opStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+				opStyle = s.Thinking
 			}
-			spinStyle := lipgloss.NewStyle().Foreground(t.Brand)
+			spinStyle := s.SpinnerBrand
 			center = spinStyle.Render(spinner) + " " + opStyle.Render(info.Operation)
 		}
 	}
@@ -270,16 +266,14 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 	if ShowFooterHints(width) {
 		hintStrs := make([]string, 0, len(info.KeyboardHints))
 		for _, hint := range info.KeyboardHints {
-			hintStrs = append(hintStrs,
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render(hint))
+			hintStrs = append(hintStrs, s.FooterHint.Render(hint))
 		}
 		if len(hintStrs) > 0 {
 			rightParts = append(rightParts, strings.Join(hintStrs, dotSep))
 		}
 	}
 	if ShowFooterCost(width) && info.ShowCost && info.TokenCount > 0 {
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatTokenCount(info.TokenCount)))
+		rightParts = append(rightParts, s.FooterHint.Render(formatTokenCount(info.TokenCount)))
 		if info.Cost > 0 {
 			var costStr string
 			if info.Cost < 0.01 {
@@ -287,8 +281,7 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 			} else {
 				costStr = "$" + formatCost(info.Cost)
 			}
-			rightParts = append(rightParts,
-				lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
+			rightParts = append(rightParts, s.WarningText.Render(costStr))
 		}
 	}
 	right := strings.Join(rightParts, "  ")
@@ -309,7 +302,6 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 	resultW := lipgloss.Width(result)
 
 	// Overflow: progressively drop zones then truncate.
-	// 1. Drop right zone
 	if resultW > width && right != "" {
 		zones2 := zones[:0]
 		if left != "" {
@@ -321,12 +313,10 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) strin
 		result = strings.Join(zones2, sep)
 		resultW = lipgloss.Width(result)
 	}
-	// 2. Drop center zone (keep only left)
 	if resultW > width && left != "" {
 		result = left
 		resultW = lipgloss.Width(result)
 	}
-	// 3. Truncate whatever remains
 	if resultW > width {
 		result = truncateToWidth(result, width)
 		resultW = lipgloss.Width(result)
@@ -395,10 +385,10 @@ func assembleThreeZone(left, center, right string, width int) string {
 }
 
 func renderProvBadge(t theme.Theme, provider string) string {
+	s := theme.BuildSemanticStyles(t)
 	short := shortProviderName(provider)
-	// Render as a subtle [tag] with border-colored brackets
-	bracket := lipgloss.NewStyle().Foreground(t.Border).Render
-	text := lipgloss.NewStyle().Foreground(t.TextMuted).Render(short)
+	bracket := s.SeparatorV.Render
+	text := s.Muted.Render(short)
 	return bracket("[") + text + bracket("]")
 }
 

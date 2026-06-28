@@ -352,8 +352,8 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		}
 
 		m.messages = append(m.messages, makeUserMsg(input))
-		// Add temporary "Running..." feedback
-		m.messages = append(m.messages, makeAssistantMsg("*Running shell command...*"))
+		// Add temporary "Running…" feedback
+		m.messages = append(m.messages, makeAssistantMsg("*Running shell command…*"))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false

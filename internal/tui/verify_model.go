@@ -257,7 +257,7 @@ func (vm *VerifyModel) renderResults() string {
 		if vm.healingTaskID >= 0 && task.ID == vm.healingTaskID {
 			frame := vm.spinner.Peek()
 			healLine := lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(6).
-				Render(fmt.Sprintf("%s Heal attempt %d/2...", frame, vm.healAttempt))
+				Render(fmt.Sprintf("%s Heal attempt %d/2…", frame, vm.healAttempt))
 			lines = append(lines, healLine)
 		}
 

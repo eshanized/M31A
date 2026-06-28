@@ -107,10 +107,9 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 		return ""
 	}
 
-	// Create style once outside the loop to avoid per-character allocation
-	brandStyle := lipgloss.NewStyle().Foreground(t.Brand)
+	s := theme.BuildSemanticStyles(t)
+	brandStyle := s.BrandText
 
-	// Clean gradient: fade from center outward
 	fadeChars := []rune{'█', '▓', '▒', '░', '·'}
 	halfW := width / 2
 	var left strings.Builder
@@ -136,12 +135,12 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 // renderProviderCard shows current model/provider status or a setup prompt.
 func (m *ReplModel) renderProviderCard(cardWidth int) string {
 	t := m.theme
+	s := theme.BuildSemanticStyles(t)
 
 	if m.activeModel == nil || m.activeProvider == "" {
-		warningDot := lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("⚠")
-		title := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(" No provider configured")
-		subtitle := lipgloss.NewStyle().Foreground(t.TextSecondary).Render("Run /settings to get started")
-		content := lipgloss.JoinVertical(lipgloss.Left, warningDot+title, subtitle)
+		title := s.WarningText.Render("⚠") + " " + s.Heading.Render("No provider configured")
+		subtitle := s.SecondaryText.Render("Run /settings to get started")
+		content := lipgloss.JoinVertical(lipgloss.Left, title, subtitle)
 		return components.Card{
 			Content: content,
 			Width:   cardWidth,
@@ -151,12 +150,12 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 		}.Render()
 	}
 
-	modelBadge := lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).Render(m.activeModel.Name)
-	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrandPreset, m.theme).Render()
+	modelBadge := s.Heading.Render(m.activeModel.Name)
+	providerBadge := components.NewBadge(m.activeProvider, components.BadgeBrandPreset, t).Render()
 
 	pricingText := ""
 	if m.activeModel.Pricing.InputPerMToken > 0 || m.activeModel.Pricing.OutputPerMToken > 0 {
-		pricingText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(
+		pricingText = s.Muted.Render(
 			"in $" + formatFloat(m.activeModel.Pricing.InputPerMToken) + "/M  " +
 				"out $" + formatFloat(m.activeModel.Pricing.OutputPerMToken) + "/M",
 		)
@@ -164,34 +163,18 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 
 	contextText := ""
 	if m.activeModel.ContextLength > 0 {
-		contextText = lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("ctx " + components.FormatMetric(int(m.activeModel.ContextLength)))
+		contextText = s.Muted.Render("ctx " + components.FormatMetric(int(m.activeModel.ContextLength)))
 	}
 
 	var caps []string
 	if m.activeModel.Capabilities.Tools {
-		caps = append(caps, lipgloss.NewStyle().
-			Foreground(t.Success).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Success).
-			Padding(0, 1).
-			Render("tools"))
+		caps = append(caps, s.SuccessText.Border(lipgloss.RoundedBorder()).BorderForeground(t.Success).Padding(0, 1).Render("tools"))
 	}
 	if m.activeModel.Capabilities.Vision {
-		caps = append(caps, lipgloss.NewStyle().
-			Foreground(t.Info).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Info).
-			Padding(0, 1).
-			Render("vision"))
+		caps = append(caps, s.InfoBanner.Border(lipgloss.RoundedBorder()).BorderForeground(t.Info).Padding(0, 1).Render("vision"))
 	}
 	if m.activeModel.Capabilities.Reasoning {
-		caps = append(caps, lipgloss.NewStyle().
-			Foreground(t.Secondary).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Secondary).
-			Padding(0, 1).
-			Render("reasoning"))
+		caps = append(caps, s.SecondaryText.Border(lipgloss.RoundedBorder()).BorderForeground(t.Secondary).Padding(0, 1).Render("reasoning"))
 	}
 
 	parts := []string{modelBadge + " " + providerBadge}
@@ -205,7 +188,7 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 		parts = append(parts, strings.Join(caps, " "))
 	}
 	if m.sessionSparkline != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextSecondary).Render(m.sessionSparkline))
+		parts = append(parts, s.SecondaryText.Render(m.sessionSparkline))
 	}
 
 	return components.Card{
@@ -220,38 +203,31 @@ func (m *ReplModel) renderProviderCard(cardWidth int) string {
 // renderProjectCard shows project name, git branch, changed-file count, and language.
 func (m *ReplModel) renderProjectCard(cardWidth int) string {
 	t := m.theme
+	s := theme.BuildSemanticStyles(t)
 
 	projectName := filepath.Base(m.cwd)
 	if projectName == "" {
 		projectName = "project"
 	}
 
-	// Project name row
-	nameRow := lipgloss.NewStyle().
-		Foreground(t.TextPrimary).Bold(true).
-		Render("▸ " + projectName)
+	nameRow := s.Heading.Render("▸ " + projectName)
 
-	// Git branch row
 	branchRow := ""
 	if m.sidebarBranch != "" {
-		branchRow = lipgloss.NewStyle().Foreground(t.TextSecondary).
-			Render("⎇  " + m.sidebarBranch)
+		branchRow = s.SecondaryText.Render("⎇  " + m.sidebarBranch)
 	}
 
-	// Changed files row
 	var changedRow string
 	if m.changedFiles > 0 {
-		changedRow = lipgloss.NewStyle().Foreground(t.Warning).
-			Render(fmt.Sprintf("● %d file(s) changed", m.changedFiles))
+		changedRow = s.WarningText.Render(fmt.Sprintf("● %d file(s) changed", m.changedFiles))
 	} else {
-		changedRow = lipgloss.NewStyle().Foreground(t.Success).Render("✓ working tree clean")
+		changedRow = s.SuccessText.Render("✓ working tree clean")
 	}
 
-	// Language detection
 	lang := detectProjectLanguage(m.cwd)
 	langRow := ""
 	if lang != "" {
-		langRow = lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + lang)
+		langRow = s.Muted.Render("  " + lang)
 	}
 
 	parts := []string{nameRow}
@@ -297,10 +273,9 @@ func (m *ReplModel) welcomePrompts() []struct{ prompt, hint string } {
 
 func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 	t := m.theme
+	s := theme.BuildSemanticStyles(t)
 
-	title := lipgloss.NewStyle().
-		Foreground(t.Brand).Bold(true).
-		Render("Getting started")
+	title := s.BrandBold.Render("Getting started")
 
 	prompts := m.welcomePrompts()
 
@@ -310,25 +285,23 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 		revealed := i < m.welcomeRevealCount
 		var numStyle, body, hint string
 		if revealed {
-			numStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(nums[i])
-			body = lipgloss.NewStyle().Foreground(t.TextPrimary).Render(" " + p.prompt)
-			hint = lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("  ·" + p.hint)
+			numStyle = s.BrandBold.Render(nums[i])
+			body = s.Body.Render(" " + p.prompt)
+			hint = s.Muted.Italic(true).Render("  ·" + p.hint)
 		} else {
-			numStyle = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(nums[i])
-			body = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(" " + p.prompt)
-			hint = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Italic(true).Render("  ·" + p.hint)
+			numStyle = s.Muted.Render(nums[i])
+			body = s.Muted.Render(" " + p.prompt)
+			hint = s.Muted.Italic(true).Render("  ·" + p.hint)
 		}
 		lines = append(lines, "  "+numStyle+body+hint)
 	}
 
-	// Separator width tied to card width, not hardcoded
 	sepWidth := cardWidth - 4
 	if sepWidth < 10 {
 		sepWidth = 10
 	}
-	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("─", sepWidth))
-	footer := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("  Type a message, @file, /command, or goal…")
+	sep := s.SeparatorH.Render(strings.Repeat("─", sepWidth))
+	footer := s.Muted.Render("  Type a message, @file, /command, or goal…")
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		title,
@@ -350,39 +323,42 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 
 // renderKeyboardHints renders keyboard shortcut hints with branded separator dots.
 func renderKeyboardHints(t theme.Theme) string {
+	s := theme.BuildSemanticStyles(t)
 	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "/help"}
 	parts := make([]string, len(hints))
 	for i, h := range hints {
-		parts[i] = lipgloss.NewStyle().Foreground(t.TextMuted).Render(h)
+		parts[i] = s.KeyboardHint.Render(h)
 	}
-	sep := lipgloss.NewStyle().Foreground(t.Brand).Render(" · ")
+	sep := s.BrandText.Render(" · ")
 	return strings.Join(parts, sep)
 }
 
 // renderBottomBar renders a bottom bar showing cwd basename and version with │ separator.
 func (m *ReplModel) renderBottomBar() string {
-	t := m.theme
+	s := theme.BuildSemanticStyles(m.theme)
 
-	cwdLabel := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("⌂ " + filepath.Base(m.cwd))
+	cwdLabel := s.FooterCwd.Render("⌂ " + filepath.Base(m.cwd))
 
-	version := m.version
-	if version == "" {
-		version = "dev"
+	versionLabel := ""
+	if m.version != "" {
+		versionLabel = "v" + m.version
 	}
-	versionLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("v" + version)
-	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" │ ")
+	versionWidth := lipgloss.Width(versionLabel)
+	sep := s.SeparatorV.Render(" │ ")
 
-	spacer := m.replWidth() - lipgloss.Width(cwdLabel) - lipgloss.Width(sep) - lipgloss.Width(versionLabel) - 4
+	spacer := m.replWidth() - lipgloss.Width(cwdLabel) - lipgloss.Width(sep) - versionWidth - 4
 	if spacer < 0 {
 		spacer = 0
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Left,
-		"  "+cwdLabel,
-		strings.Repeat(" ", spacer),
-		sep+versionLabel+"  ",
-	)
+	if versionLabel != "" {
+		return lipgloss.JoinHorizontal(lipgloss.Left,
+			"  "+cwdLabel,
+			strings.Repeat(" ", spacer),
+			sep+s.FooterCwd.Render(versionLabel)+"  ",
+		)
+	}
+	return "  " + cwdLabel
 }
 
 // formatFloat formats a float64 to 2 decimal places.

@@ -2075,7 +2075,7 @@ func extractToolInputSnippet(tc types.ToolCall) string {
 			if s, ok := v.(string); ok && s != "" {
 				snippet := strings.ReplaceAll(s, "\n", " ")
 				if len(snippet) > 40 {
-					snippet = snippet[:37] + "..."
+					snippet = snippet[:37] + "…"
 				}
 				return snippet
 			}

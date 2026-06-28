@@ -11,7 +11,7 @@ import (
 
 // homePlaceholders are rotating placeholder prompts for the home input.
 var homePlaceholders = []string{
-	"Type a goal or question...",
+	"Type a goal or question…",
 	"Fix a bug in the codebase",
 	"Start a workflow with /new",
 	"What is the tech stack of this project?",

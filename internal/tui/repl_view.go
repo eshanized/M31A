@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -126,13 +127,11 @@ func (m *ReplModel) View() string {
 
 	// Floating new-messages pill anchored to the TOP of the viewport.
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		pill := lipgloss.NewStyle().
-			Foreground(t.Background).
-			Background(t.Brand).
-			Bold(true).
+		s := theme.BuildSemanticStyles(m.theme)
+		pill := s.BrandBold.
 			Align(lipgloss.Center).
 			Width(rw).
-			Render(fmt.Sprintf(" ● %d new message(s) — ctrl+l or end to jump ", m.newMessagesWhileScrolled))
+			Render(fmt.Sprintf("● %d new message(s) — ctrl+l or end to jump", m.newMessagesWhileScrolled))
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, m.viewport.Height)
 	}
 
@@ -255,13 +254,11 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 
 	// ── Floating new-messages indicator — anchored to the TOP of viewport ─
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		pill := lipgloss.NewStyle().
-			Foreground(t.Background).
-			Background(t.Brand).
-			Bold(true).
+		s := theme.BuildSemanticStyles(m.theme)
+		pill := s.BrandBold.
 			Align(lipgloss.Center).
 			Width(rw).
-			Render(fmt.Sprintf(" ● %d new message(s) — ctrl+l or end to jump ", m.newMessagesWhileScrolled))
+			Render(fmt.Sprintf("● %d new message(s) — ctrl+l or end to jump", m.newMessagesWhileScrolled))
 		viewportContent = compositeOverlaysTop(viewportContent, []string{pill}, rw, vpH)
 	}
 
@@ -325,19 +322,17 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	t := m.theme
+	s := theme.BuildSemanticStyles(m.theme)
 
 	if !m.streaming && !m.thinking {
 		// Idle: clean, subtle line
-		return lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(strings.Repeat("▁", width))
+		return s.SeparatorH.Render(strings.Repeat("▁", width))
 	}
 
 	// Active: travelling sine-wave using block chars
-	// Wave pattern: ▁▂▃▄▃▂ cycling with waveOffset
 	waveChars := []rune{'▁', '▂', '▃', '▄', '▃', '▂'}
 	waveLen := len(waveChars)
 
-	// PERF-38: Build raw string first, then render once (1 call instead of width calls)
 	var raw strings.Builder
 	raw.Grow(width)
 	for i := 0; i < width; i++ {
@@ -347,22 +342,22 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 		}
 		raw.WriteRune(waveChars[phase])
 	}
-	return lipgloss.NewStyle().Foreground(t.Brand).Render(raw.String())
+	return s.BrandText.Render(raw.String())
 }
 
 func (m *ReplModel) renderSlashSuggestions(width int) string {
-	t := m.theme
+	s := theme.BuildSemanticStyles(m.theme)
 	var lines []string
 
 	for i, cmd := range m.slashSuggestions {
-		slashStyle := lipgloss.NewStyle().Foreground(t.Brand)
-		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
-		descStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+		slashStyle := s.BrandText
+		nameStyle := s.Body
+		descStyle := s.Muted
 
 		if i == m.slashSelected {
-			nameStyle = nameStyle.Background(t.Brand).Foreground(t.Background)
-			slashStyle = slashStyle.Background(t.Brand).Foreground(t.Background)
-			descStyle = descStyle.Background(t.Brand).Foreground(t.Background)
+			nameStyle = nameStyle.Background(m.theme.Brand).Foreground(m.theme.Background)
+			slashStyle = slashStyle.Background(m.theme.Brand).Foreground(m.theme.Background)
+			descStyle = descStyle.Background(m.theme.Brand).Foreground(m.theme.Background)
 		}
 
 		slash := slashStyle.Render(cmd.Slash)
@@ -376,7 +371,7 @@ func (m *ReplModel) renderSlashSuggestions(width int) string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Brand).
+		BorderForeground(m.theme.Brand).
 		Width(width - 2).
 		Render(strings.Join(lines, "\n"))
 

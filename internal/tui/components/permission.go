@@ -51,7 +51,7 @@ func (m *PermissionModal) Render(width, height int) string {
 
 	// ── Title ─────────────────────────────────────────────────────────────
 	titleLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		s.PermLock.Render("🔒"),
+		s.PermLock.Render("key"),
 		" ",
 		s.PermTitle.Render("Permission Required"),
 	)
@@ -105,8 +105,6 @@ func (m *PermissionModal) Render(width, height int) string {
 		countdown = s.PermCountdown.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	}
 
-	countdownBar := m.renderCountdownBar(modalWidth - 6)
-
 	// ── Rule context ──────────────────────────────────────────────────────
 	var ruleInfo string
 	if m.request.RuleTool != "" || m.request.RulePattern != "" {
@@ -137,7 +135,6 @@ func (m *PermissionModal) Render(width, height int) string {
 		"",
 		keys,
 		"",
-		countdownBar,
 		countdown,
 	)
 

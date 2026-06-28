@@ -922,7 +922,7 @@ func (s *SidebarModel) renderTokenUsage(contentW int) []string {
 	if s.modelName != "" {
 		modelDisplay := s.modelName
 		if len(modelDisplay) > contentW-2 {
-			modelDisplay = modelDisplay[:contentW-5] + "..."
+			modelDisplay = modelDisplay[:contentW-5] + "…"
 		}
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(modelDisplay))
 	}
@@ -977,7 +977,7 @@ func (s *SidebarModel) renderToolTimeline(contentW int) []string {
 		var durationColor lipgloss.Color
 		if tc.Active {
 			icon = lipgloss.NewStyle().Foreground(t.Brand).Render("●")
-			durationStr = "..."
+			durationStr = "…"
 			durationColor = t.Brand
 		} else if tc.Success {
 			icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
@@ -1004,7 +1004,7 @@ func (s *SidebarModel) renderToolTimeline(contentW int) []string {
 			maxDescLen = 8
 		}
 		if len(descDisplay) > maxDescLen {
-			descDisplay = descDisplay[:maxDescLen-3] + "..."
+			descDisplay = descDisplay[:maxDescLen-3] + "…"
 		}
 		toolLine := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(1).Render(fmt.Sprintf("%s %-16s ", icon, descDisplay)) +
 			lipgloss.NewStyle().Foreground(durationColor).Render(durationStr)
@@ -1097,7 +1097,7 @@ func (s *SidebarModel) renderFileTreeOrTodo(contentW int) []string {
 			lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render(bar+" "+pctStr))
 			lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary))
 		} else {
-			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("waiting..."))
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("waiting…"))
 		}
 
 		if !s.taskProgress.StartedAt.IsZero() {
@@ -1131,7 +1131,7 @@ func (s *SidebarModel) renderFileTreeOrTodo(contentW int) []string {
 					maxDescW = 8
 				}
 				if lipgloss.Width(desc) > maxDescW {
-					desc = desc[:maxDescW-3] + "..."
+					desc = desc[:maxDescW-3] + "…"
 				}
 				descColor := t.Text
 				if item.Status == "completed" {
@@ -1165,7 +1165,7 @@ func (s *SidebarModel) renderSession(contentW int) []string {
 	}
 	sessDisplay := s.sessionID
 	if len(sessDisplay) > contentW-2 {
-		sessDisplay = sessDisplay[:contentW-5] + "..."
+		sessDisplay = sessDisplay[:contentW-5] + "…"
 	}
 	return []string{"", lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(sessDisplay)}
 }

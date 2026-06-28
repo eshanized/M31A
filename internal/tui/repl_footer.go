@@ -48,6 +48,8 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		info = &StatusBarInfo{}
 	}
 
+	s := theme.BuildSemanticStyles(t)
+
 	// Clone info to avoid mutating the original (narrow terminal adaptations)
 	cloned := *info
 	info = &cloned
@@ -71,12 +73,10 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 	// ── Left zone: cwd + branch ───────────────────────────────────────────────
 	var leftParts []string
 	if info.CwdName != "" {
-		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render("⌂ "+info.CwdName))
+		leftParts = append(leftParts, s.FooterCwd.Render("⌂ "+info.CwdName))
 	}
 	if info.GitBranch != "" {
-		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(t.TextSecondary).Render("⎇ "+info.GitBranch))
+		leftParts = append(leftParts, s.FooterBranch.Render("⎇ "+info.GitBranch))
 	}
 	leftText := strings.Join(leftParts, "  ")
 
@@ -88,39 +88,36 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 	}
 	switch {
 	case info.LeaderActive:
-		centerText = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("ctrl+x") +
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ─ waiting ─")
+		centerText = s.FooterLeader.Render("ctrl+x") +
+			s.FooterOp.Render(" ─ waiting ─")
 	case info.IsThinking:
-		thinkingLabel := "thinking..."
+		thinkingLabel := "thinking…"
 		if info.ThinkingDuration > 0 {
-			thinkingLabel = "thinking· " + formatDurationMs(info.ThinkingDuration)
+			thinkingLabel = "thinking · " + formatDurationMs(info.ThinkingDuration)
 		}
-		centerText = t.Spinner.Render(spinnerChar) + " " +
-			lipgloss.NewStyle().Foreground(t.Thinking).Italic(true).Render(thinkingLabel)
+		centerText = s.SpinnerBrand.Render(spinnerChar) + " " +
+			s.Thinking.Render(thinkingLabel)
 	case info.IsStreaming:
-		centerText = t.Spinner.Render(spinnerChar) + " " +
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render("responding...")
+		centerText = s.SpinnerBrand.Render(spinnerChar) + " " +
+			s.FooterOp.Render("streaming…")
 	case info.WorkflowPhase != "":
 		phaseText := "▸ " + info.WorkflowPhase
 		if info.QuestionProgress != "" {
 			phaseText += " · " + info.QuestionProgress
 		}
-		centerText = lipgloss.NewStyle().Foreground(t.Brand).Render(phaseText)
+		centerText = s.BrandText.Render(phaseText)
 	case info.WhichKey != "":
-		centerText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(info.WhichKey)
+		centerText = s.FooterOp.Render(info.WhichKey)
 	}
-	// When idle and no operation, centerText stays empty (no "Ready" label).
 
 	// ── Right zone: hints + cost/tokens ──────────────────────────────────────
 	var rightParts []string
 	for _, hint := range info.KeyboardHints {
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(hint))
+		rightParts = append(rightParts, s.FooterHint.Render(hint))
 	}
 	if info.ShowCost && info.TotalTokens > 0 {
 		tokStr := formatTokenCount(info.TotalTokens)
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(t.TextMuted).Render(tokStr))
+		rightParts = append(rightParts, s.FooterHint.Render(tokStr))
 		if info.Cost > 0 {
 			var costStr string
 			if info.Cost < 0.01 {
@@ -128,8 +125,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 			} else {
 				costStr = fmt.Sprintf("$%.2f", info.Cost)
 			}
-			rightParts = append(rightParts,
-				lipgloss.NewStyle().Foreground(t.Warning).Render(costStr))
+			rightParts = append(rightParts, s.WarningText.Render(costStr))
 		}
 	}
 	if info.ContextMax > 0 && info.ContextUsed > 0 {
@@ -150,7 +146,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		displayParts = append(displayParts, rightText)
 	}
 
-	result := strings.Join(displayParts, " · ")
+	result := strings.Join(displayParts, " │ ")
 	resultWidth := lipgloss.Width(result)
 
 	// ── Overflow: drop right zone first, then center, then truncate left ─────
@@ -162,7 +158,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		if centerText != "" {
 			displayParts = append(displayParts, centerText)
 		}
-		result = strings.Join(displayParts, " · ")
+		result = strings.Join(displayParts, " │ ")
 		resultWidth = lipgloss.Width(result)
 	}
 
@@ -171,7 +167,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		if leftText != "" {
 			displayParts = append(displayParts, leftText)
 		}
-		result = strings.Join(displayParts, " · ")
+		result = strings.Join(displayParts, " │ ")
 		resultWidth = lipgloss.Width(result)
 	}
 
@@ -194,22 +190,24 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 
 // RenderPromptMetadata renders the agent · model · provider row above the textarea.
 func RenderPromptMetadata(agentName, modelName, providerName string, t theme.Theme, width int) string {
+	s := theme.BuildSemanticStyles(t)
+
 	var parts []string
 	if agentName != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.Text).Render(agentName))
+		parts = append(parts, s.Body.Render(agentName))
 	}
 	if modelName != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(modelName))
+		parts = append(parts, s.Muted.Render(modelName))
 	}
 	if providerName != "" {
 		providerShort := ProviderShortName(providerName)
-		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render("["+providerShort+"]"))
+		parts = append(parts, s.Muted.Render("["+providerShort+"]"))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
 
-	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render("·")
+	sep := s.Muted.Render(" · ")
 	var result strings.Builder
 	for i, p := range parts {
 		if i > 0 {
@@ -220,8 +218,7 @@ func RenderPromptMetadata(agentName, modelName, providerName string, t theme.The
 		result.WriteString(p)
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
+	return s.Muted.
 		PaddingTop(1).
 		Width(width).
 		Render(result.String())
@@ -253,23 +250,24 @@ func renderContextRing(used, total int, t theme.Theme) string {
 	if total <= 0 {
 		return ""
 	}
+	s := theme.BuildSemanticStyles(t)
+
 	pct := float64(used) / float64(total)
 	if pct > 1.0 {
 		pct = 1.0
 	}
 
-	var barColor lipgloss.Color
+	var barColor lipgloss.Style
 	switch {
 	case pct >= 0.9:
-		barColor = t.Error
+		barColor = s.ErrorText
 	case pct >= 0.7:
-		barColor = t.Warning
+		barColor = s.WarningText
 	default:
-		barColor = t.Brand
+		barColor = s.BrandText
 	}
 
-	// PERF-43: Increased from 8 to 16 segments for finer granularity
-	const segments = 16
+	const segments = 8
 	filled := int(math.Round(pct * segments))
 	if filled > segments {
 		filled = segments
@@ -280,7 +278,7 @@ func renderContextRing(used, total int, t theme.Theme) string {
 
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", segments-filled) + "]"
 
-	return lipgloss.NewStyle().Foreground(barColor).Render(
+	return barColor.Render(
 		fmt.Sprintf("ctx %s %d%%", bar, int(pct*100)),
 	)
 }

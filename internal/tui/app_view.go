@@ -364,10 +364,10 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 			if dur > 0 {
 				info.Operation = "thinking " + formatDurationMs(dur)
 			} else {
-				info.Operation = "thinking..."
+				info.Operation = "thinking…"
 			}
 		} else if m.replModel.streaming {
-			info.Operation = "responding..."
+			info.Operation = "streaming…"
 		}
 		info.SpinnerFrame = m.replModel.spinner.Peek()
 	}
@@ -546,7 +546,7 @@ func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 	if m.msModel == nil {
-		return renderLoading("Loading model selector...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderLoading("Loading model selector…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.msModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.msModel.View()
@@ -592,7 +592,7 @@ func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
 	if m.resumeModel == nil {
-		return renderLoading("Loading sessions...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderLoading("Loading sessions…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.resumeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.resumeModel.View()
@@ -608,7 +608,7 @@ func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 	if m.firstRunModel == nil {
-		return renderLoading("Loading first-run wizard...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderLoading("Loading first-run wizard…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.firstRunModel.SetContentWidth(chrome.ContentWidth())
 	return m.firstRunModel.View()
@@ -668,7 +668,7 @@ func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 	if m.helpModel == nil {
-		return renderEmptyState("Help", "Loading keyboard shortcuts...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Help", "Loading keyboard shortcuts…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.helpModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.helpModel.View()
@@ -724,7 +724,7 @@ func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 
 func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
 	if m.phaseModelPicker == nil {
-		return renderEmptyState("Model picker", "Loading models...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		return renderEmptyState("Model picker", "Loading models…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.phaseModelPicker.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.phaseModelPicker.View()
@@ -998,7 +998,7 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 	if goal != "" {
 		goalSnippet := goal
 		if len(goalSnippet) > width-12 {
-			goalSnippet = goalSnippet[:width-15] + "..."
+			goalSnippet = goalSnippet[:width-15] + "…"
 		}
 		goalLine := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render("  Goal:  " + goalSnippet)

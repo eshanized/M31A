@@ -111,7 +111,7 @@ func (rm *RuntimeModel) renderContent() string {
 
 	if rm.testing {
 		frame := rm.spinner.Peek()
-		sections = append(sections, fmt.Sprintf("\n%s Starting dev server and running smoke tests...", frame))
+		sections = append(sections, fmt.Sprintf("\n%s Starting dev server and running smoke tests…", frame))
 		return lipgloss.JoinVertical(lipgloss.Left, sections...)
 	}
 
