@@ -3,7 +3,6 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -21,6 +20,7 @@ func (h HintBar) Render() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := h.PaddingLeft
 	if padLeft == 0 {
@@ -37,10 +37,7 @@ func (h HintBar) Render() string {
 		formatted = append(formatted, "["+hint+"]")
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		PaddingLeft(padLeft).
-		Render(strings.Join(formatted, " "))
+	return s.KeyboardHint.PaddingLeft(padLeft).Render(strings.Join(formatted, " "))
 }
 
 // HintBarFromMap creates a HintBar from a map of key->action pairs.

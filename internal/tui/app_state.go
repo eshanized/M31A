@@ -119,7 +119,6 @@ type AppState struct {
 
 	// New screens (Phase 3)
 	bisectModel        *BisectModel
-	themePickerModel   *ThemePickerModel
 	notifModel         *NotificationModel
 	dashboardModel     *DashboardModel
 	sessionDetailModel *SessionDetailModel

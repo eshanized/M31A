@@ -30,7 +30,6 @@ const (
 	ScreenConfig           = tuitypes.ScreenConfig
 	ScreenHelp             = tuitypes.ScreenHelp
 	ScreenBisect           = tuitypes.ScreenBisect
-	ScreenThemePicker      = tuitypes.ScreenThemePicker
 	ScreenNotifications    = tuitypes.ScreenNotifications
 	ScreenDashboard        = tuitypes.ScreenDashboard
 	ScreenSessionDetail    = tuitypes.ScreenSessionDetail
@@ -76,7 +75,6 @@ type (
 	StreamChunkMsg          = tuitypes.StreamChunkMsg
 	SlashCommandMsg         = tuitypes.SlashCommandMsg
 	HomeSubmitMsg           = tuitypes.HomeSubmitMsg
-	ThemeChangedMsg         = tuitypes.ThemeChangedMsg
 	ToastMsg                = tuitypes.ToastMsg
 	ToastExpiryMsg          = tuitypes.ToastExpiryMsg
 	Toast                   = tuitypes.Toast

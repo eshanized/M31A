@@ -142,7 +142,6 @@ func (m *ConfigModel) buildSections() {
 		{
 			title: "UI",
 			fields: []cfgField{
-				{key: "ui.theme", label: "Theme", fieldType: cfgChoice, choices: []string{"dark", "light", "auto"}, hint: "Terminal color scheme"},
 				{key: "ui.compact_mode", label: "Compact mode", fieldType: cfgBool, hint: "Reduce spacing for dense terminals"},
 				{key: "ui.show_token_usage", label: "Show token usage", fieldType: cfgBool, hint: "Display token count in status bar"},
 				{key: "ui.show_cost_estimate", label: "Show cost estimate", fieldType: cfgBool, hint: "Display inferred cost in status bar"},

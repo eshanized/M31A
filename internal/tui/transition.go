@@ -380,7 +380,6 @@ var screenOrder = map[Screen]int{
 	ScreenMetrics:          16,
 	ScreenConfig:           17,
 	ScreenBisect:           18,
-	ScreenThemePicker:      19,
 	ScreenNotifications:    20,
 	ScreenChatHistory:      21,
 	ScreenFileExplorer:     22,

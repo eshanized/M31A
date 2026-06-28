@@ -30,184 +30,217 @@ func DetectColorProfile() ColorProfile {
 }
 
 // PaletteForProfile returns a Theme suitable for the given color profile.
-// TrueColor and 256-color profiles use the full hex-based palette.
-// 16-color profiles use ANSI named colors for reliable rendering.
 func PaletteForProfile(profile ColorProfile) Theme {
 	switch profile {
 	case Profile16:
 		return ansiPalette()
 	default:
-		return Default()
+		return M31A()
 	}
 }
 
-// ansiPalette returns a Theme that uses ANSI 16-color names (0–7, 0–15)
+// ansiPalette returns a Theme that uses ANSI 16-color names
 // for reliable rendering on terminals without 256-color or truecolor support.
 func ansiPalette() Theme {
-	t := Dark() // start from dark palette
-	// Override key color fields with ANSI color codes
-	t.Brand = lipgloss.Color("208")  // ANSI orange (256-color index)
-	t.Success = lipgloss.Color("2")  // ANSI green
-	t.Error = lipgloss.Color("1")    // ANSI red
-	t.Warning = lipgloss.Color("3")  // ANSI yellow
-	t.Thinking = lipgloss.Color("4") // ANSI blue
+	t := M31A()
+	t.Brand = lipgloss.Color("208")
+	t.Success = lipgloss.Color("2")
+	t.Error = lipgloss.Color("1")
+	t.Warning = lipgloss.Color("3")
+	t.Thinking = lipgloss.Color("4")
 	applyThemeStyles(&t)
 	return t
 }
 
-func Dark() Theme {
+// M31A returns the single official M31A theme.
+// Apple-inspired: calm, elegant, premium, understated.
+func M31A() Theme {
 	t := Theme{
 		Mode:              ModeDark,
-		Background:        lipgloss.Color("#0d0f1a"), // deep blue-black
-		Surface:           lipgloss.Color("#141520"), // slightly lighter
-		SurfaceElevated:   lipgloss.Color("#1f2133"), // elevated panels
-		Border:            lipgloss.Color("#3C4043"),
-		Brand:             lipgloss.Color("#7C6AF7"), // electric indigo — modern AI aesthetic
-		TextPrimary:       lipgloss.Color("#E8EAED"),
-		TextSecondary:     lipgloss.Color("#9AA0A6"),
-		Thinking:          lipgloss.Color("#5BC8F5"), // electric cyan for thinking
-		Success:           lipgloss.Color("#81C995"),
-		Error:             lipgloss.Color("#F28B82"),
-		Warning:           lipgloss.Color("#FDD663"),
-		CodeBG:            lipgloss.Color("#1A1C28"),
+		Background:        lipgloss.Color(BgBase),
+		Surface:           lipgloss.Color(BgSurface),
+		SurfaceElevated:   lipgloss.Color(BgSurfaceHigh),
+		Border:            lipgloss.Color(BorderDefault),
+		Brand:             lipgloss.Color(AccentPrimary),
+		TextPrimary:       lipgloss.Color(TextPrimary),
+		TextSecondary:     lipgloss.Color(TextSecondary),
+		Thinking:          lipgloss.Color(Thinking),
+		Success:           lipgloss.Color(Success),
+		Error:             lipgloss.Color(Error),
+		Warning:           lipgloss.Color(Warning),
+		CodeBG:            lipgloss.Color(CodeBg),
 		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#141520"),
-		BackgroundElement: lipgloss.Color("#1f2133"),
-		Text:              lipgloss.Color("#E8EAED"),
-		TextMuted:         lipgloss.Color("#6B7280"),
-		BorderActive:      lipgloss.Color("#7C6AF7"), // brand color on active borders
-		BorderSubtle:      lipgloss.Color("#2A2D3E"),
-		Primary:           lipgloss.Color("#7C6AF7"),
-		Secondary:         lipgloss.Color("#5BC8F5"), // electric cyan
-		Accent:            lipgloss.Color("#5BC8F5"),
-		Info:              lipgloss.Color("#5BC8F5"),
+		BackgroundPanel:   lipgloss.Color(BgSurface),
+		BackgroundElement: lipgloss.Color(BgSurfaceHigh),
+		Text:              lipgloss.Color(TextPrimary),
+		TextMuted:         lipgloss.Color(TextMuted),
+		BorderActive:      lipgloss.Color(AccentPrimary),
+		BorderSubtle:      lipgloss.Color(BorderSubtle),
+		Primary:           lipgloss.Color(AccentPrimary),
+		Secondary:         lipgloss.Color(Thinking),
+		Accent:            lipgloss.Color(Thinking),
+		Info:              lipgloss.Color(Thinking),
 		ThinkingOpacity:   0.7,
-		DiffAdded:         lipgloss.Color("#81C995"),
-		DiffRemoved:       lipgloss.Color("#F28B82"),
-		DiffAddedBg:       lipgloss.Color("#81C99520"),
-		DiffRemovedBg:     lipgloss.Color("#F28B8220"),
-		DiffContextBg:     lipgloss.Color("#1f2133"),
-		BadgeForeground:   lipgloss.Color("#FFFFFF"), // white on indigo badges
+		DiffAdded:         lipgloss.Color(DiffAdded),
+		DiffRemoved:       lipgloss.Color(DiffRemoved),
+		DiffAddedBg:       lipgloss.Color(DiffAddedBg),
+		DiffRemovedBg:     lipgloss.Color(DiffRemovedBg),
+		DiffContextBg:     lipgloss.Color(DiffContextBg),
+		BadgeForeground:   lipgloss.Color("#FFFFFF"),
 		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
 		BadgeTextDark:     lipgloss.Color("#000000"),
 
 		DividerChar:  "─",
 		HeaderHeight: 1,
-		ShadowColor:  lipgloss.Color("#00000060"),
+		ShadowColor:  lipgloss.Color(Shadow),
 		CompactMode:  false,
-		SelectionBg:  lipgloss.Color("#2A2D3E"),
+		SelectionBg:  lipgloss.Color(Selection),
 		CardPadding:  1,
 		TabWidth:     4,
 	}
 	applyThemeStyles(&t)
-
 	return t
 }
 
+// Dark returns the M31A theme (backward compatibility alias).
+func Dark() Theme {
+	return M31A()
+}
+
+// Light is deprecated. M31A ships with a single dark theme.
+// Returns M31A() for backward compatibility.
 func Light() Theme {
-	t := Theme{
-		Mode:              ModeLight,
-		Background:        lipgloss.Color("#fafaf8"), // warm white
-		Surface:           lipgloss.Color("#f5f5f0"), // warm surface
-		SurfaceElevated:   lipgloss.Color("#ffffff"), // pure white for elevation
-		Border:            lipgloss.Color("#DADCE0"), // was #E0E0E0
-		Brand:             lipgloss.Color("#D77757"), // was #7C3AED (same as dark — brand is brand)
-		TextPrimary:       lipgloss.Color("#202124"), // was #1E293B
-		TextSecondary:     lipgloss.Color("#5F6368"), // was #64748B
-		Thinking:          lipgloss.Color("#1A73E8"), // was #7C3AED
-		Success:           lipgloss.Color("#137333"), // was #059669
-		Error:             lipgloss.Color("#C5221F"), // was #DC2626
-		Warning:           lipgloss.Color("#EA8600"), // was #D97706
-		CodeBG:            lipgloss.Color("#F1F3F4"), // keep
-		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#F8F9FA"),   // keep
-		BackgroundElement: lipgloss.Color("#FFFFFF"),   // keep
-		Text:              lipgloss.Color("#202124"),   // was #1E293B
-		TextMuted:         lipgloss.Color("#9AA0A6"),   // was #94A3B8
-		BorderActive:      lipgloss.Color("#D77757"),   // was #C0C0C0
-		BorderSubtle:      lipgloss.Color("#E8E8E8"),   // keep
-		Primary:           lipgloss.Color("#D77757"),   // was #7C3AED
-		Secondary:         lipgloss.Color("#1A73E8"),   // was #0891B2
-		Accent:            lipgloss.Color("#1A73E8"),   // was #0891B2
-		Info:              lipgloss.Color("#1A73E8"),   // was #0891B2
-		ThinkingOpacity:   0.6,                         // keep
-		DiffAdded:         lipgloss.Color("#137333"),   // was #059669
-		DiffRemoved:       lipgloss.Color("#C5221F"),   // was #DC2626
-		DiffAddedBg:       lipgloss.Color("#13733320"), // was #05966920
-		DiffRemovedBg:     lipgloss.Color("#C5221F20"), // was #DC262620
-		DiffContextBg:     lipgloss.Color("#F8F9FA"),   // keep
-		BadgeForeground:   lipgloss.Color("#000000"),   // keep
-		BadgeTextLight:    lipgloss.Color("#FFFFFF"),   // keep
-		BadgeTextDark:     lipgloss.Color("#000000"),   // keep
+	return M31A()
+}
 
-		DividerChar:  "─",
-		HeaderHeight: 1,
-		ShadowColor:  lipgloss.Color("#00000040"),
-		CompactMode:  false,
-		SelectionBg:  lipgloss.Color("#DADCE0"),
-		CardPadding:  1,
-		TabWidth:     4,
-	}
-	applyThemeStyles(&t)
+// Auto is deprecated. M31A ships with a single dark theme.
+// Returns M31A() for backward compatibility.
+func Auto() Theme {
+	return M31A()
+}
 
-	return t
+// HighContrast is deprecated. M31A ships with a single theme.
+// Returns M31A() for backward compatibility.
+func HighContrast() Theme {
+	return M31A()
 }
 
 // buildBadgeStyles sets all badge/label styles using the theme's BadgeForeground color.
 func buildBadgeStyles(t *Theme) {
 	fg := lipgloss.Color(t.BadgeForeground)
-	// Execution tools
-	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["Agent"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Secondary)).Foreground(fg).Padding(0, 1).Bold(true)
-	// File tools
-	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileDelete"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileMove"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["FileList"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	// Execution tools — calm, muted backgrounds
+	t.ToolLabel["Bash"] = lipgloss.NewStyle().Background(lipgloss.Color(Warning)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["Agent"] = lipgloss.NewStyle().Background(lipgloss.Color(Autonomous)).Foreground(fg).Padding(0, 1)
+	// File tools — distinct but not loud
+	t.ToolLabel["FileRead"] = lipgloss.NewStyle().Background(lipgloss.Color(Thinking)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["FileWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(AccentPrimary)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["FileDelete"] = lipgloss.NewStyle().Background(lipgloss.Color(Error)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["FileMove"] = lipgloss.NewStyle().Background(lipgloss.Color(Warning)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["FileList"] = lipgloss.NewStyle().Background(lipgloss.Color(TextSecondary)).Foreground(fg).Padding(0, 1)
 	// Code analysis tools
-	t.ToolLabel["CodeMap"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["Edit"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["CodeMap"] = lipgloss.NewStyle().Background(lipgloss.Color(Success)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["Edit"] = lipgloss.NewStyle().Background(lipgloss.Color(AccentPrimary)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["Glob"] = lipgloss.NewStyle().Background(lipgloss.Color(TextSecondary)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["Grep"] = lipgloss.NewStyle().Background(lipgloss.Color(Thinking)).Foreground(fg).Padding(0, 1)
 	// Web tools
-	t.ToolLabel["WebFetch"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Thinking)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["WebSearch"] = lipgloss.NewStyle().Background(lipgloss.Color(t.TextSecondary)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["WebFetch"] = lipgloss.NewStyle().Background(lipgloss.Color(Thinking)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["WebSearch"] = lipgloss.NewStyle().Background(lipgloss.Color(TextSecondary)).Foreground(fg).Padding(0, 1)
 	// User interaction tools
-	t.ToolLabel["AskUserQuestion"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ToolLabel["TodoWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Success)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Error)).Foreground(fg).Padding(0, 1).Bold(true)
-	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Warning)).Foreground(fg).Padding(0, 1).Bold(true)
+	t.ToolLabel["AskUserQuestion"] = lipgloss.NewStyle().Background(lipgloss.Color(AccentPrimary)).Foreground(fg).Padding(0, 1)
+	t.ToolLabel["TodoWrite"] = lipgloss.NewStyle().Background(lipgloss.Color(Success)).Foreground(fg).Padding(0, 1)
+	// Badge styles
+	t.SuccessBadge = lipgloss.NewStyle().Background(lipgloss.Color(Success)).Foreground(fg).Padding(0, 1)
+	t.ErrorBadge = lipgloss.NewStyle().Background(lipgloss.Color(Error)).Foreground(fg).Padding(0, 1)
+	t.WarningBadge = lipgloss.NewStyle().Background(lipgloss.Color(Warning)).Foreground(fg).Padding(0, 1)
 }
 
 // applyThemeStyles sets all computed styles that depend on base colors.
 func applyThemeStyles(t *Theme) {
+	// Header — bold brand
 	t.Header = lipgloss.NewStyle().Bold(true)
-	t.ModelBadge = lipgloss.NewStyle().Background(lipgloss.Color(t.Brand)).Foreground(lipgloss.Color(t.BadgeTextLight)).Padding(0, 1).Bold(true)
-	t.ContextBar = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextSecondary)).Padding(0, 1)
-	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
-	t.StatusSlow = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Bold(true)
-	t.StatusOffline = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Bold(true)
-	t.UserBubble = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
-	t.AssistantBubble = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(t.Border))
-	t.InputArea = lipgloss.NewStyle().Background(lipgloss.Color(t.Surface)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1)
-	t.Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Thinking))
-	t.ThinkingBlock = lipgloss.NewStyle().Background(lipgloss.Color(t.CodeBG)).Foreground(lipgloss.Color(t.Thinking)).Padding(0, 1).Italic(true)
-	t.ToolCard = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(0, 1).Border(ThinBorder).BorderForeground(lipgloss.Color(t.Border))
-	buildBadgeStyles(t)
-	t.ProgressBar = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.Brand))
-	t.Modal = lipgloss.NewStyle().Background(lipgloss.Color(t.SurfaceElevated)).Foreground(lipgloss.Color(t.TextPrimary)).Padding(1, 2).Border(NormalBorder).BorderForeground(lipgloss.Color(t.Brand))
-	t.ModalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 
-	// New card border styles
+	// Model badge — filled accent background
+	t.ModelBadge = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Brand)).
+		Foreground(lipgloss.Color(t.BadgeTextLight)).
+		Padding(0, 1).
+		Bold(true)
+
+	// Context bar — subtle surface background
+	t.ContextBar = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Surface)).
+		Foreground(lipgloss.Color(t.TextSecondary)).
+		Padding(0, 1)
+
+	// Status indicators — calm, semantic
+	t.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(Success)).Bold(true)
+	t.StatusSlow = lipgloss.NewStyle().Foreground(lipgloss.Color(Warning)).Bold(true)
+	t.StatusOffline = lipgloss.NewStyle().Foreground(lipgloss.Color(Error)).Bold(true)
+
+	// Message bubbles — subtle elevation
+	t.UserBubble = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.SurfaceElevated)).
+		Foreground(lipgloss.Color(t.TextPrimary)).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Border))
+	t.AssistantBubble = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Surface)).
+		Foreground(lipgloss.Color(t.TextPrimary)).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Border))
+
+	// Input area — surface background
+	t.InputArea = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Surface)).
+		Foreground(lipgloss.Color(t.TextPrimary)).
+		Padding(0, 1)
+
+	// Spinner — thinking color
+	t.Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Thinking))
+
+	// Thinking block — code background, thinking color
+	t.ThinkingBlock = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.CodeBG)).
+		Foreground(lipgloss.Color(t.Thinking)).
+		Padding(0, 1).
+		Italic(true)
+
+	// Tool card — elevated surface, thin border
+	t.ToolCard = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.SurfaceElevated)).
+		Foreground(lipgloss.Color(t.TextPrimary)).
+		Padding(0, 1).
+		Border(ThinBorder).
+		BorderForeground(lipgloss.Color(t.Border))
+
+	// Badge styles
+	buildBadgeStyles(t)
+
+	// Progress bar — accent foreground on surface
+	t.ProgressBar = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.SurfaceElevated)).
+		Foreground(lipgloss.Color(t.Brand))
+
+	// Modal — elevated surface, accent border
+	t.Modal = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.SurfaceElevated)).
+		Foreground(lipgloss.Color(t.TextPrimary)).
+		Padding(1, 2).
+		Border(NormalBorder).
+		BorderForeground(lipgloss.Color(t.Brand))
+	t.ModalTitle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.Brand)).
+		Bold(true)
+
+	// Card border styles — rounded, semantic colors
 	t.CardBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(t.Brand))
+		BorderForeground(lipgloss.Color(t.Border))
 	t.CardBorderActive = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(t.Brand)).
-		Bold(true)
+		BorderForeground(lipgloss.Color(t.Brand))
 	t.CardBorderError = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.Error))
@@ -215,7 +248,7 @@ func applyThemeStyles(t *Theme) {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.Warning))
 
-	// Workflow phase styles
+	// Workflow phase styles — subtle hierarchy
 	t.PhaseActive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 	t.PhasePast = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
 	t.PhaseFuture = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
@@ -225,70 +258,14 @@ func applyThemeStyles(t *Theme) {
 	t.MetricValue = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand)).Bold(true)
 	t.MetricLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(t.TextMuted))
 
-	// Block character constants for progress bars, sparklines, density indicators
+	// Block character constants for progress bars
 	t.BlockFull = "█"
 	t.BlockHigh = "▓"
-	t.BlockMed = "▒"
-	t.BlockLow = "░"
+	t.BlockMed  = "▒"
+	t.BlockLow  = "░"
 }
 
-func Auto() Theme {
-	if lipgloss.HasDarkBackground() {
-		return Dark()
-	}
-	return Light()
-}
-
-// HighContrast returns a high-contrast theme for accessibility.
-// Uses maximum contrast colors: white background, black text, vivid accents.
-func HighContrast() Theme {
-	t := Theme{
-		Mode:              ModeLight,
-		Background:        lipgloss.Color("#FFFFFF"),
-		Surface:           lipgloss.Color("#F0F0F0"),
-		SurfaceElevated:   lipgloss.Color("#FFFFFF"),
-		Border:            lipgloss.Color("#000000"),
-		Brand:             lipgloss.Color("#0000CC"), // vivid blue
-		TextPrimary:       lipgloss.Color("#000000"),
-		TextSecondary:     lipgloss.Color("#333333"),
-		Thinking:          lipgloss.Color("#0066CC"),
-		Success:           lipgloss.Color("#006600"), // vivid green
-		Error:             lipgloss.Color("#CC0000"), // vivid red
-		Warning:           lipgloss.Color("#CC6600"), // vivid orange
-		CodeBG:            lipgloss.Color("#F0F0F0"),
-		ToolLabel:         make(map[string]lipgloss.Style),
-		BackgroundPanel:   lipgloss.Color("#F0F0F0"),
-		BackgroundElement: lipgloss.Color("#E0E0E0"),
-		Text:              lipgloss.Color("#000000"),
-		TextMuted:         lipgloss.Color("#555555"),
-		BorderActive:      lipgloss.Color("#0000CC"),
-		BorderSubtle:      lipgloss.Color("#888888"),
-		Primary:           lipgloss.Color("#0000CC"),
-		Secondary:         lipgloss.Color("#0066CC"),
-		Accent:            lipgloss.Color("#0066CC"),
-		Info:              lipgloss.Color("#0066CC"),
-		ThinkingOpacity:   0.8,
-		DiffAdded:         lipgloss.Color("#006600"),
-		DiffRemoved:       lipgloss.Color("#CC0000"),
-		DiffAddedBg:       lipgloss.Color("#CCFFCC"),
-		DiffRemovedBg:     lipgloss.Color("#FFCCCC"),
-		DiffContextBg:     lipgloss.Color("#F0F0F0"),
-		BadgeForeground:   lipgloss.Color("#FFFFFF"),
-		BadgeTextLight:    lipgloss.Color("#FFFFFF"),
-		BadgeTextDark:     lipgloss.Color("#000000"),
-		DividerChar:       "─",
-		HeaderHeight:      1,
-		ShadowColor:       lipgloss.Color("#00000040"),
-		CompactMode:       false,
-		SelectionBg:       lipgloss.Color("#CCCCFF"),
-		CardPadding:       1,
-		TabWidth:          4,
-	}
-	applyThemeStyles(&t)
-	return t
-}
-
-// WithAccent returns a new Theme with the accent color overridden
+// WithAccent returns a new Theme with the accent color overridden.
 func (t *Theme) WithAccent(hex string) Theme {
 	newTheme := *t
 	newTheme.Brand = lipgloss.Color(hex)

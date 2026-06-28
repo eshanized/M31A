@@ -27,6 +27,7 @@ func calcContentWidth(width int) int {
 
 type MessageRenderer struct {
 	theme    theme.Theme
+	styles   theme.SemanticStyles
 	renderer *glamour.TermRenderer
 	width    int
 
@@ -38,6 +39,7 @@ type MessageRenderer struct {
 func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 	mr := &MessageRenderer{
 		theme:         t,
+		styles:        theme.BuildSemanticStyles(t),
 		width:         width,
 		toolCallCache: make(map[string]*types.ToolCall),
 	}
@@ -238,14 +240,13 @@ func RenderTimestampBarWithSummary(t theme.Theme, ts time.Time, width int, summa
 		return ""
 	}
 	timeStr := ts.Format("15:04")
-
-	barStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
+	s := theme.BuildSemanticStyles(t)
 
 	if summary == "" {
-		return barStyle.Render("── " + timeStr + " ──")
+		return s.Faint.Render("── " + timeStr + " ──")
 	}
 
-	return barStyle.Render("── " + timeStr + " ── " + summary)
+	return s.Faint.Render("── " + timeStr + " ── " + summary)
 }
 
 // renderUserMessage renders a user message with a distinct right-aligned badge.
@@ -255,12 +256,11 @@ func RenderTimestampBarWithSummary(t theme.Theme, ts time.Time, width int, summa
 //	┃ ● you
 //	┃   <content>
 func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string {
+	s := r.styles
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
-	borderChar := lipgloss.NewStyle().
-		Foreground(t.Secondary).
-		Render("┃")
+	borderChar := s.SecondaryText.Render("┃")
 
 	roleBadge := lipgloss.NewStyle().
 		Foreground(t.Surface).
@@ -274,15 +274,14 @@ func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string
 		return ""
 	}
 
-	contentStyle := lipgloss.NewStyle().
-		Foreground(t.TextPrimary).
+	contentStyle := s.Body.
 		Background(t.Surface).
 		PaddingLeft(2).
 		Width(contentWidth - 2).
 		MaxWidth(contentWidth - 2)
 
 	contentLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(t.Secondary).Render("┃"),
+		s.SecondaryText.Render("┃"),
 		contentStyle.Render(msg.Content),
 	)
 
@@ -298,6 +297,7 @@ func (r *MessageRenderer) renderUserMessage(msg types.Message, width int) string
 //
 // Tool-only messages (no text content) are collapsed into a single summary line.
 func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) string {
+	s := r.styles
 	t := r.theme
 	contentWidth := calcContentWidth(width)
 
@@ -395,10 +395,7 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 		}
 		// Fallback: just show the badges
 		toolBadges := strings.Join(toolSegments, " ")
-		summary := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Faint(true).
-			Render("  " + toolBadges)
+		summary := s.Faint.Render("  " + toolBadges)
 		return lipgloss.JoinVertical(lipgloss.Top, gutter, summary)
 	}
 
@@ -444,11 +441,7 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 
 	rendered, err := r.renderer.Render(content)
 	if err != nil {
-		return lipgloss.NewStyle().
-			Foreground(r.theme.Text).
-			Width(width).
-			PaddingLeft(2).
-			Render(content)
+		return r.styles.Body.Width(width).PaddingLeft(2).Render(content)
 	}
 
 	return lipgloss.NewStyle().
@@ -464,8 +457,6 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 // Input format: "**Agent iteration N** — tools: X, Y, Z"
 // Returns "" if the content doesn't match the expected format.
 func (r *MessageRenderer) renderAgentIteration(content string, width int) string {
-	t := r.theme
-
 	idx := strings.Index(content, "** — tools: ")
 	if idx < 0 {
 		return ""
@@ -493,38 +484,9 @@ func (r *MessageRenderer) renderAgentIteration(content string, width int) string
 	iterNum := strings.TrimPrefix(title, "Agent iteration ")
 
 	// Compact single-line: superscript iteration number + tool names
-	superscript := ""
-	for _, ch := range iterNum {
-		switch ch {
-		case '0':
-			superscript += "⁰"
-		case '1':
-			superscript += "¹"
-		case '2':
-			superscript += "²"
-		case '3':
-			superscript += "³"
-		case '4':
-			superscript += "⁴"
-		case '5':
-			superscript += "⁵"
-		case '6':
-			superscript += "⁶"
-		case '7':
-			superscript += "⁷"
-		case '8':
-			superscript += "⁸"
-		case '9':
-			superscript += "⁹"
-		default:
-			superscript += string(ch)
-		}
-	}
+	superscript := toSuperscript(iterNum)
 
-	line := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Faint(true).
-		PaddingLeft(2).
+	line := r.styles.Faint.PaddingLeft(2).
 		Render(superscript + " " + strings.Join(badges, " "))
 
 	return lipgloss.NewStyle().Width(width).Render(line)
@@ -534,6 +496,7 @@ func (r *MessageRenderer) renderAgentIteration(content string, width int) string
 //
 //	⚡⁴  FileRead commands.go · FileRead app.go · Bash go test
 func (r *MessageRenderer) renderIterationChips(content string, width int) string {
+	s := r.styles
 	t := r.theme
 
 	// Parse format: "iter:N:chips:..." or legacy "iter:N:tools:..."
@@ -549,37 +512,8 @@ func (r *MessageRenderer) renderIterationChips(content string, width int) string
 	}
 
 	// Iteration badge: ⚡ with superscript number
-	superscript := ""
-	for _, ch := range iterNum {
-		switch ch {
-		case '0':
-			superscript += "⁰"
-		case '1':
-			superscript += "¹"
-		case '2':
-			superscript += "²"
-		case '3':
-			superscript += "³"
-		case '4':
-			superscript += "⁴"
-		case '5':
-			superscript += "⁵"
-		case '6':
-			superscript += "⁶"
-		case '7':
-			superscript += "⁷"
-		case '8':
-			superscript += "⁸"
-		case '9':
-			superscript += "⁹"
-		default:
-			superscript += string(ch)
-		}
-	}
-	badge := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Bold(true).
-		Render("⚡" + superscript)
+	superscript := toSuperscript(iterNum)
+	badge := s.BrandBold.Render("⚡" + superscript)
 
 	var chips []string
 
@@ -601,13 +535,11 @@ func (r *MessageRenderer) renderIterationChips(content string, width int) string
 			// Tool name badge
 			chipStyle, ok := t.ToolLabel[name]
 			if !ok {
-				chipStyle = lipgloss.NewStyle().
-					Foreground(t.TextMuted).
-					Bold(true)
+				chipStyle = s.Muted.Bold(true)
 			}
 			chip := chipStyle.Render(name)
 			if input != "" {
-				chip += " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(input)
+				chip += " " + s.Muted.Render(input)
 			}
 			chips = append(chips, chip)
 		}
@@ -621,9 +553,7 @@ func (r *MessageRenderer) renderIterationChips(content string, width int) string
 			}
 			chipStyle, ok := t.ToolLabel[name]
 			if !ok {
-				chipStyle = lipgloss.NewStyle().
-					Foreground(t.TextMuted).
-					Bold(true)
+				chipStyle = s.Muted.Bold(true)
 			}
 			chips = append(chips, chipStyle.Render(name))
 		}
@@ -634,11 +564,43 @@ func (r *MessageRenderer) renderIterationChips(content string, width int) string
 	}
 
 	// Join chips with separator
-	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).Render(" · ")
+	sep := s.Muted.Render(" · ")
 	chipsStr := strings.Join(chips, sep)
 	line := badge + "  " + chipsStr
 
 	return lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(line)
+}
+
+// toSuperscript converts a string of digits to superscript characters.
+func toSuperscript(s string) string {
+	var result strings.Builder
+	for _, ch := range s {
+		switch ch {
+		case '0':
+			result.WriteString("⁰")
+		case '1':
+			result.WriteString("¹")
+		case '2':
+			result.WriteString("²")
+		case '3':
+			result.WriteString("³")
+		case '4':
+			result.WriteString("⁴")
+		case '5':
+			result.WriteString("⁵")
+		case '6':
+			result.WriteString("⁶")
+		case '7':
+			result.WriteString("⁷")
+		case '8':
+			result.WriteString("⁸")
+		case '9':
+			result.WriteString("⁹")
+		default:
+			result.WriteRune(ch)
+		}
+	}
+	return result.String()
 }
 
 // renderErrorSegment styles an error banner directly via lipgloss, bypassing
@@ -648,10 +610,7 @@ func (r *MessageRenderer) renderErrorSegment(content string, width int) string {
 	if content == "" {
 		return ""
 	}
-	styled := lipgloss.NewStyle().
-		Foreground(r.theme.Error).
-		Bold(true).
-		Render(content)
+	styled := r.styles.ErrorText.Bold(true).Render(content)
 	return lipgloss.NewStyle().
 		Width(width).
 		PaddingLeft(2).

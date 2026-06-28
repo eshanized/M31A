@@ -56,10 +56,10 @@ func (nl *NotificationList) MoveCursor(delta int) {
 // View renders the notification list.
 func (nl *NotificationList) View() string {
 	t := nl.Theme
+	s := theme.BuildSemanticStyles(t)
 
 	if len(nl.Items) == 0 {
-		return lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-			Render("No notifications.")
+		return s.ListEmpty.PaddingLeft(2).Render("No notifications.")
 	}
 
 	end := nl.Offset + nl.Height
@@ -73,40 +73,40 @@ func (nl *NotificationList) View() string {
 		selected := i == nl.Cursor
 
 		var icon string
-		var color lipgloss.Color
+		var iconStyle lipgloss.Style
 		switch item.Type {
 		case "success":
 			icon = "✓"
-			color = t.Success
+			iconStyle = s.ToastSuccess
 		case "warning":
 			icon = "⚠"
-			color = t.Warning
+			iconStyle = s.ToastWarning
 		case "error":
 			icon = "✗"
-			color = t.Error
+			iconStyle = s.ToastError
 		default:
 			icon = "ℹ"
-			color = t.Info
+			iconStyle = s.ToastInfo
 		}
 
 		timeStr := item.Timestamp.Format("15:04:05")
-		iconStyled := lipgloss.NewStyle().Foreground(color).Render(icon)
-		timeStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Width(10).Render(timeStr)
-		textStyle := lipgloss.NewStyle().Foreground(t.Text)
+		iconStyled := iconStyle.Render(icon)
+		timeStyled := s.NotificationTime.Width(10).Render(timeStr)
+		textStyle := s.NotificationText
 		if selected {
-			textStyle = textStyle.Foreground(t.Brand).Bold(true)
+			textStyle = s.NotificationSelected
 		}
 		textStyled := textStyle.Render(item.Text)
 
 		prefix := "  "
 		if selected {
-			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▶ ")
+			prefix = s.Cursor.Render("▶ ")
 		}
 
 		lines = append(lines, fmt.Sprintf("%s%s %s %s", prefix, iconStyled, timeStyled, textStyled))
 	}
 
-	info := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
+	info := s.Muted.PaddingLeft(2).
 		Render(fmt.Sprintf("%d/%d notifications", nl.Cursor+1, len(nl.Items)))
 	lines = append(lines, "", info)
 

@@ -25,7 +25,6 @@ func TestParseCommand_VariousInputs(t *testing.T) {
 		{"empty prefix", "", "", nil, false},
 		{"bare slash", "/", "", nil, true},
 		{"single command", "/help", "help", nil, true},
-		{"command with args", "/theme dark", "theme", []string{"dark"}, true},
 		{"command with multiple args", "/diff HEAD~1 HEAD", "diff", []string{"HEAD~1", "HEAD"}, true},
 		{"non-slash input", "hello", "", nil, false},
 		{"extra spaces", "/model  ", "model", nil, true},
@@ -62,12 +61,12 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 	expected := []string{
 		"help", "clear", "status", "reset", "quit", "exit", "chat", "flush", "search", "about",
 		"undo", "history", "prompt-history", "health", "tools", "copy-error",
-		"settings", "config", "theme", "cost", "log", "key", "keychain", "tokens", "dream",
+		"settings", "config", "cost", "log", "key", "keychain", "tokens", "dream",
 		"compress", "memory", "optimize", "model", "fallback", "provider",
 		"diff", "rollback", "bisect",
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
 		"new", "workflow", "plan", "refine", "execute", "verify", "runtime", "ship", "phase", "pause", "resume-task", "agent-mode",
-		"metrics", "dashboard", "themes", "notifications", "files", "ghost",
+		"metrics", "dashboard", "notifications", "files", "ghost",
 		"agent", "agent-cancel", "complexity",
 	}
 	registered := r.List()
@@ -126,7 +125,6 @@ func TestSuggestCommand_CloseMatch(t *testing.T) {
 	}{
 		{"hep", "help"},
 		{"statu", "status"},
-		{"the", "theme"},
 		{"modl", "model"},
 		{"cler", "clear"},
 		{"quit", "exit"},
@@ -207,14 +205,6 @@ func TestHandleCopyError_WithFunc(t *testing.T) {
 }
 
 // ─── Config commands — extended tests ────────────────────────────────────────
-
-func TestHandleTheme_InvalidPaletteID(t *testing.T) {
-	t.Parallel()
-	r := handleTheme([]string{"neon"}, CommandContext{})
-	if r.Success {
-		t.Error("should fail for invalid theme name")
-	}
-}
 
 func TestHandleCost_TogglesToFalse(t *testing.T) {
 	t.Parallel()
@@ -502,14 +492,6 @@ func TestHandleDashboard_OpensScreen(t *testing.T) {
 	}
 }
 
-func TestHandleThemes_OpensScreen(t *testing.T) {
-	t.Parallel()
-	r := handleThemes(nil, CommandContext{})
-	if !r.Success || r.Screen == nil || *r.Screen != tuitypes.ScreenThemePicker {
-		t.Errorf("handleThemes: got %+v", r)
-	}
-}
-
 func TestHandleNotifications_OpensScreen(t *testing.T) {
 	t.Parallel()
 	r := handleNotifications(nil, CommandContext{})
@@ -593,7 +575,7 @@ func TestAllCommandsWithExecute_AllHaveFunc(t *testing.T) {
 func TestRegistry_Execute_CoreCommands(t *testing.T) {
 	t.Parallel()
 	r := DefaultCommands()
-	commands := []string{"/help", "/quit", "/settings", "/config", "/model", "/new", "/resume", "/metrics", "/dashboard", "/themes", "/notifications", "/files", "/ghost", "/pause"}
+	commands := []string{"/help", "/quit", "/settings", "/config", "/model", "/new", "/resume", "/metrics", "/dashboard", "/notifications", "/files", "/ghost", "/pause"}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			t.Parallel()
@@ -673,21 +655,6 @@ func TestRegistry_Execute_Key_WithConfig(t *testing.T) {
 	}
 	if !result.Success {
 		t.Error("key with config should succeed")
-	}
-}
-
-func TestRegistry_Execute_Theme_Dark(t *testing.T) {
-	t.Parallel()
-	r := DefaultCommands()
-	result, handled := r.Execute("/theme dark", CommandContext{})
-	if !handled {
-		t.Error("theme should be handled")
-	}
-	if !result.Success {
-		t.Error("theme dark should succeed")
-	}
-	if result.Cmd == nil {
-		t.Error("theme should return Cmd")
 	}
 }
 
@@ -1119,35 +1086,6 @@ func TestRegistry_Execute_Undo_NoSession(t *testing.T) {
 	}
 	if result.Success {
 		t.Error("undo should fail without session")
-	}
-}
-
-func TestRegistry_Execute_Theme_NoArgs_Toggles(t *testing.T) {
-	t.Parallel()
-	r := DefaultCommands()
-	result, handled := r.Execute("/theme", CommandContext{
-		Config: &config.Config{UI: config.UIConfig{Theme: "dark"}},
-	})
-	if !handled {
-		t.Error("theme should be handled")
-	}
-	if !result.Success {
-		t.Error("theme with no args should succeed (toggle)")
-	}
-	if result.Cmd == nil {
-		t.Error("theme should return Cmd")
-	}
-}
-
-func TestRegistry_Execute_Theme_Invalid(t *testing.T) {
-	t.Parallel()
-	r := DefaultCommands()
-	result, handled := r.Execute("/theme neon", CommandContext{})
-	if !handled {
-		t.Error("theme should be handled")
-	}
-	if result.Success {
-		t.Error("theme with invalid name should fail")
 	}
 }
 

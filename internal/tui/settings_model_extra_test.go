@@ -90,8 +90,8 @@ func TestBuildFieldsTabUI(t *testing.T) {
 	s := testSettingsModel(t)
 	s.activeTab = TabUI
 	s.buildFields()
-	if len(s.fields) != 7 {
-		t.Errorf("fields=%d, want 7", len(s.fields))
+	if len(s.fields) != 6 {
+		t.Errorf("fields=%d, want 6", len(s.fields))
 	}
 }
 
@@ -159,15 +159,21 @@ func TestGetFieldValueModel(t *testing.T) {
 	}
 }
 
-func TestGetFieldValueTheme(t *testing.T) {
+func TestGetFieldValueShowCost(t *testing.T) {
 	s := testSettingsModel(t)
 	s.activeTab = TabUI
 	s.buildFields()
-	s.config.UI.Theme = "light"
-	v := s.getFieldValue(s.fields[0])
-	if v != "light" {
-		t.Errorf("value=%s, want light", v)
+	s.config.UI.ShowCostEstimate = true
+	for _, f := range s.fields {
+		if f.key == "show_cost" {
+			v := s.getFieldValue(f)
+			if v != "yes" {
+				t.Errorf("value=%s, want yes", v)
+			}
+			return
+		}
 	}
+	t.Skip("show_cost field not found")
 }
 
 func TestGetFieldValueContextLength(t *testing.T) {
@@ -224,15 +230,22 @@ func TestSetFieldValueContextLengthInvalid(t *testing.T) {
 	}
 }
 
-func TestSetFieldValueTheme(t *testing.T) {
+func TestSetFieldValueShowCost(t *testing.T) {
 	s := testSettingsModel(t)
 	s.activeTab = TabUI
 	s.buildFields()
-	cmd, _ := s.setFieldValue(s.fields[0], "light")
-	_ = cmd
-	if s.config.UI.Theme != "light" {
-		t.Errorf("theme=%s, want light", s.config.UI.Theme)
+	// Find the show_cost field
+	for _, f := range s.fields {
+		if f.key == "show_cost" {
+			cmd, _ := s.setFieldValue(f, "no")
+			_ = cmd
+			if s.config.UI.ShowCostEstimate {
+				t.Error("show_cost should be false after setting to 'no'")
+			}
+			return
+		}
 	}
+	t.Skip("show_cost field not found in UI tab")
 }
 
 func TestSetFieldValueMaxIterations(t *testing.T) {

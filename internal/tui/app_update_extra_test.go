@@ -342,11 +342,6 @@ func TestRouteAppMsgActionToggleSidebar(t *testing.T) {
 	_ = m.routeAppMsgAction(AppMsg{Action: "toggle_sidebar"})
 }
 
-func TestRouteAppMsgActionToggleTheme(t *testing.T) {
-	m := testAppState()
-	_ = m.routeAppMsgAction(AppMsg{Action: "toggle_theme"})
-}
-
 func TestRouteAppMsgActionCancelStream(t *testing.T) {
 	m := testAppState()
 	m.streamCancelFn = func() {}

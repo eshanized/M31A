@@ -71,6 +71,40 @@ type StyleCache struct {
 	// Misc
 	FocusRing    lipgloss.Style
 	FocusRingOff lipgloss.Style
+
+	// Typography (pre-computed from tokens)
+	Heading       lipgloss.Style
+	Subheading    lipgloss.Style
+	Body          lipgloss.Style
+	Caption       lipgloss.Style
+	Faint         lipgloss.Style
+	BrandText     lipgloss.Style
+	MutedText     lipgloss.Style
+	SecondaryText lipgloss.Style
+
+	// Button-like styles
+	ButtonPrimary   lipgloss.Style
+	ButtonSecondary lipgloss.Style
+	ButtonGhost     lipgloss.Style
+
+	// Separator
+	SeparatorH lipgloss.Style
+	SeparatorV lipgloss.Style
+
+	// Status
+	StatusLive    lipgloss.Style
+	StatusSlow    lipgloss.Style
+	StatusOffline lipgloss.Style
+
+	// Code
+	CodeInline lipgloss.Style
+
+	// Overlay
+	DimOverlay lipgloss.Style
+
+	// S is the complete semantic component style library.
+	// Components should use S.* instead of creating styles inline.
+	S SemanticStyles
 }
 
 // NewStyleCache builds a StyleCache from a Theme. Call this once per theme
@@ -115,7 +149,7 @@ func NewStyleCache(t Theme) *StyleCache {
 	c.FooterHint = lipgloss.NewStyle().Foreground(t.TextMuted)
 	c.FooterLeader = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
 
-	// Badges
+	// Badges — subtle border, semantic color
 	c.BadgeSuccess = lipgloss.NewStyle().Foreground(t.Success).Border(lipgloss.RoundedBorder()).BorderForeground(t.Success).Padding(0, 1)
 	c.BadgeError = lipgloss.NewStyle().Foreground(t.Error).Border(lipgloss.RoundedBorder()).BorderForeground(t.Error).Padding(0, 1)
 	c.BadgeWarning = lipgloss.NewStyle().Foreground(t.Warning).Border(lipgloss.RoundedBorder()).BorderForeground(t.Warning).Padding(0, 1)
@@ -141,8 +175,51 @@ func NewStyleCache(t Theme) *StyleCache {
 	c.CardWarning = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Warning)
 
 	// Misc
-	c.FocusRing = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Brand).Bold(true)
+	c.FocusRing = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Brand)
 	c.FocusRingOff = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.BorderSubtle)
+
+	// Typography — pre-computed from token palette
+	c.Heading = lipgloss.NewStyle().Bold(true).Foreground(t.TextPrimary)
+	c.Subheading = lipgloss.NewStyle().Bold(true).Foreground(t.TextSecondary)
+	c.Body = lipgloss.NewStyle().Foreground(t.TextPrimary)
+	c.Caption = lipgloss.NewStyle().Foreground(t.TextMuted)
+	c.Faint = lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true)
+	c.BrandText = lipgloss.NewStyle().Foreground(t.Brand)
+	c.MutedText = lipgloss.NewStyle().Foreground(t.TextMuted)
+	c.SecondaryText = lipgloss.NewStyle().Foreground(t.TextSecondary)
+
+	// Button-like styles
+	c.ButtonPrimary = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Brand)).
+		Foreground(lipgloss.Color(t.BadgeTextLight)).
+		Padding(0, 2).
+		Bold(true)
+	c.ButtonSecondary = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand)).
+		Foreground(lipgloss.Color(t.Brand)).
+		Padding(0, 1)
+	c.ButtonGhost = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.TextMuted)).
+		Padding(0, 1)
+
+	// Separators
+	c.SeparatorH = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Border))
+	c.SeparatorV = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Border))
+
+	// Status
+	c.StatusLive = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Bold(true)
+	c.StatusSlow = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Bold(true)
+	c.StatusOffline = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Bold(true)
+
+	// Code
+	c.CodeInline = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Brand))
+
+	// Overlay
+	c.DimOverlay = lipgloss.NewStyle().Faint(true)
+
+	// Semantic component library
+	c.S = BuildSemanticStyles(t)
 
 	return c
 }

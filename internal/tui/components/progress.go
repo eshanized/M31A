@@ -39,6 +39,7 @@ func (p ProgressBar) Render() string {
 	if t.Text == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 	pct := p.Progress
 	if pct < 0 {
 		pct = 0
@@ -82,26 +83,18 @@ func (p ProgressBar) Render() string {
 		bar = filled + empty
 	}
 
-	// Apply gradient fill for brand color
+	// Apply semantic styles
 	if pct > 0 && pct < 1.0 {
-		// Create gradient from brand to lighter shade
-		gradientStyle := lipgloss.NewStyle().Foreground(t.Brand)
-		bar = gradientStyle.Render(bar)
+		bar = s.ProgressFill.Render(bar)
 	} else if pct >= 1.0 {
-		// Success color for completion
-		progressStyle := lipgloss.NewStyle().Foreground(t.Success)
-		bar = progressStyle.Render(bar)
+		bar = s.ProgressDone.Render(bar)
 	} else {
-		// Empty state
-		progressStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
-		bar = progressStyle.Render(bar)
+		bar = s.ProgressEmpty.Render(bar)
 	}
 
 	if p.ShowPct {
 		pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
-		pctStyle := lipgloss.NewStyle().
-			Foreground(t.TextSecondary)
-		bar = bar + " " + pctStyle.Render(pctStr)
+		bar = bar + " " + s.ProgressLabel.Render(pctStr)
 	}
 
 	return bar
@@ -117,6 +110,7 @@ func (p ProgressBar) RenderWithLabel(label string) string {
 	if t.Text == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 	pct := p.Progress
 	if pct < 0 {
 		pct = 0
@@ -152,23 +146,18 @@ func (p ProgressBar) RenderWithLabel(label string) string {
 	empty := strings.Repeat("░", emptyWidth)
 	bar = filled + empty
 
-	// Apply gradient fill
+	// Apply semantic styles
 	if pct > 0 && pct < 1.0 {
-		gradientStyle := lipgloss.NewStyle().Foreground(t.Brand)
-		bar = gradientStyle.Render(bar)
+		bar = s.ProgressFill.Render(bar)
 	} else if pct >= 1.0 {
-		progressStyle := lipgloss.NewStyle().Foreground(t.Success)
-		bar = progressStyle.Render(bar)
+		bar = s.ProgressDone.Render(bar)
 	} else {
-		progressStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
-		bar = progressStyle.Render(bar)
+		bar = s.ProgressEmpty.Render(bar)
 	}
 
 	if p.ShowPct {
 		pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
-		pctStyle := lipgloss.NewStyle().
-			Foreground(t.TextSecondary)
-		bar = bar + " " + pctStyle.Render(pctStr)
+		bar = bar + " " + s.ProgressLabel.Render(pctStr)
 	}
 
 	return bar
@@ -223,11 +212,8 @@ func (s SegmentedBar) Render() string {
 
 	// Fill remaining with background
 	if remaining > 0 {
-		t := s.Theme
-		if t.Text == "" {
-			t = theme.Default()
-		}
-		bar.WriteString(lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("░", remaining)))
+		ts := theme.BuildSemanticStyles(s.Theme)
+		bar.WriteString(ts.ProgressEmpty.Render(strings.Repeat("░", remaining)))
 	}
 
 	return bar.String()
@@ -334,6 +320,7 @@ func (b *AnimatedProgressBar) Render() string {
 	if t.Text == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 	w := b.Width
 	if w <= 0 {
 		w = 30
@@ -349,25 +336,23 @@ func (b *AnimatedProgressBar) Render() string {
 	}
 	emptyWidth := w - filledWidth
 
-	// Determine bar color
-	var barColor lipgloss.Color
+	// Determine bar style
+	var fillStyle lipgloss.Style
 	if b.Flash.active {
-		barColor = b.Flash.color
+		fillStyle = lipgloss.NewStyle().Foreground(b.Flash.color)
 	} else if pct >= 1.0 {
-		barColor = t.Success
+		fillStyle = s.ProgressDone
 	} else {
-		barColor = t.Brand
+		fillStyle = s.ProgressFill
 	}
 
-	filled := strings.Repeat("█", filledWidth)
-	empty := strings.Repeat("░", emptyWidth)
-	bar := lipgloss.NewStyle().Foreground(barColor).Render(filled) +
-		lipgloss.NewStyle().Foreground(t.Border).Render(empty)
+	filled := fillStyle.Render(strings.Repeat("█", filledWidth))
+	empty := s.ProgressEmpty.Render(strings.Repeat("░", emptyWidth))
+	bar := filled + empty
 
 	if b.ShowPct {
 		pctStr := fmt.Sprintf("%d%%", int(math.Round(pct*100)))
-		pctStyle := lipgloss.NewStyle().Foreground(t.TextSecondary)
-		bar = bar + " " + pctStyle.Render(pctStr)
+		bar = bar + " " + s.ProgressLabel.Render(pctStr)
 	}
 
 	return bar

@@ -238,7 +238,6 @@ func DefaultCommands() *CommandRegistry {
 	// Config/settings
 	_ = r.Register("settings", handleSettings, "Open settings editor")
 	_ = r.Register("config", handleConfig, "Open full config editor (all sections, editable)")
-	_ = r.Register("theme", handleTheme, "Switch dark/light theme")
 	_ = r.Register("cost", handleCost, "Toggle cost display")
 	_ = r.Register("log", handleLog, "Show recent log entries")
 	_ = r.Register("key", handleKey, "Show API key status")
@@ -285,7 +284,6 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("agent-mode", handleAgentMode, "Toggle autonomous agent mode")
 	_ = r.Register("metrics", handleMetrics, "Open session analytics")
 	_ = r.Register("dashboard", handleDashboard, "Open workflow dashboard")
-	_ = r.Register("themes", handleThemes, "Open theme picker")
 	_ = r.Register("notifications", handleNotifications, "Open notification center")
 	_ = r.Register("files", handleFiles, "Open file explorer")
 	_ = r.Register("ghost", handleGhost, "Ghost write files")
@@ -313,12 +311,6 @@ func handleMetrics(_ []string, _ CommandContext) CommandResult {
 func handleDashboard(_ []string, _ CommandContext) CommandResult {
 	screen := tuitypes.ScreenDashboard
 	return CommandResult{Success: true, Screen: &screen, Message: "Opening workflow dashboard..."}
-}
-
-// handleThemes opens ScreenThemePicker.
-func handleThemes(_ []string, _ CommandContext) CommandResult {
-	screen := tuitypes.ScreenThemePicker
-	return CommandResult{Success: true, Screen: &screen, Message: "Opening theme picker..."}
 }
 
 // handleNotifications opens ScreenNotifications.

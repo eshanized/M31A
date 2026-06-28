@@ -20,6 +20,7 @@ type ToolRenderer interface {
 type BaseRenderer struct {
 	toolName string
 	theme    theme.Theme
+	styles   theme.SemanticStyles
 }
 
 func (b *BaseRenderer) Name() string {
@@ -29,31 +30,26 @@ func (b *BaseRenderer) Name() string {
 func (b *BaseRenderer) RenderHeader(width int) string {
 	labelStyle, ok := b.theme.ToolLabel[b.toolName]
 	if !ok {
-		labelStyle = lipgloss.NewStyle().
-			Background(b.theme.TextSecondary).
-			Foreground(b.theme.BadgeForeground).
-			Padding(0, 1).
-			Bold(true)
+		labelStyle = b.styles.ToolLabel
 	}
 	label := labelStyle.Render(fmt.Sprintf(" %s ", b.toolName))
 	return lipgloss.NewStyle().Width(width).Render(label)
 }
 
 func (b *BaseRenderer) RenderStatus(state ToolState, durationMs int64, width int, errMsg string) string {
+	s := b.styles
 	var badge string
 	switch state {
 	case ToolRunning:
-		badge = b.theme.Spinner.Render("[..] Running...")
+		badge = s.Spinner.Render("[..] Running...")
 	case ToolSuccess:
 		dur := fmt.Sprintf("%.2fs", float64(durationMs)/1000.0)
 		badge = lipgloss.JoinHorizontal(lipgloss.Top,
-			b.theme.SuccessBadge.Render(" OK "),
-			lipgloss.NewStyle().
-				Foreground(b.theme.TextSecondary).
-				Render(fmt.Sprintf(" Completed in %s", dur)),
+			s.BadgeSuccess.Render(" OK "),
+			s.SecondaryText.Render(fmt.Sprintf(" Completed in %s", dur)),
 		)
 	case ToolError:
-		badge = b.theme.ErrorBadge.Render(" ERR ")
+		badge = s.BadgeError.Render(" ERR ")
 	}
 	status := lipgloss.NewStyle().Width(width).Padding(0, 1).Render(badge)
 
@@ -64,17 +60,9 @@ func (b *BaseRenderer) RenderStatus(state ToolState, durationMs int64, width int
 		if len(errLines) > maxLines {
 			errLines = errLines[:maxLines]
 			truncatedMsg := strings.Join(errLines, "\n") + "\n..."
-			status += "\n" + lipgloss.NewStyle().
-				Foreground(b.theme.Error).
-				Width(width).
-				Padding(0, 1).
-				Render(truncatedMsg)
+			status += "\n" + s.ErrorText.Width(width).Padding(0, 1).Render(truncatedMsg)
 		} else {
-			status += "\n" + lipgloss.NewStyle().
-				Foreground(b.theme.Error).
-				Width(width).
-				Padding(0, 1).
-				Render(errMsg)
+			status += "\n" + s.ErrorText.Width(width).Padding(0, 1).Render(errMsg)
 		}
 	}
 
@@ -85,51 +73,45 @@ func (b *BaseRenderer) RenderGenericOutput(output string, truncated bool, collap
 	if output == "" {
 		return ""
 	}
+	s := b.styles
 	if collapsed {
 		lineCount := strings.Count(output, "\n") + 1
 		hidden := lineCount - 3
 		if hidden < 1 {
 			hidden = 1
 		}
-		return lipgloss.NewStyle().
-			Foreground(b.theme.TextSecondary).
-			Italic(true).
+		return s.SecondaryText.Italic(true).
 			Render(fmt.Sprintf("[+%d lines hidden — Space to expand]", hidden))
 	}
 	if truncated {
-		output += "\n" + lipgloss.NewStyle().
-			Foreground(b.theme.Warning).
-			Italic(true).
+		output += "\n" + s.WarningText.Italic(true).
 			Render("[... output truncated, full output in session log]")
 	}
-	return lipgloss.NewStyle().
-		Foreground(b.theme.TextSecondary).
-		Width(width).
-		Padding(0, 1).
-		Render(output)
+	return s.SecondaryText.Width(width).Padding(0, 1).Render(output)
 }
 
 func RendererForTool(toolName string, t theme.Theme) ToolRenderer {
+	s := theme.BuildSemanticStyles(t)
 	switch toolName {
 	case "Bash":
-		return NewBashRenderer(t)
+		return &BashRenderer{BaseRenderer: BaseRenderer{toolName: "Bash", theme: t, styles: s}}
 	case "Edit":
-		return NewEditRenderer(t)
+		return &EditRenderer{BaseRenderer: BaseRenderer{toolName: "Edit", theme: t, styles: s}}
 	case "FileRead":
-		return NewFileReadRenderer(t)
+		return &FileReadRenderer{BaseRenderer: BaseRenderer{toolName: "FileRead", theme: t, styles: s}}
 	case "FileWrite":
-		return NewFileWriteRenderer(t)
+		return &FileWriteRenderer{BaseRenderer: BaseRenderer{toolName: "FileWrite", theme: t, styles: s}}
 	case "TodoWrite":
-		return NewTodoWriteRenderer(t)
+		return &TodoWriteRenderer{BaseRenderer: BaseRenderer{toolName: "TodoWrite", theme: t, styles: s}}
 	case "Grep":
-		return NewGrepRenderer(t)
+		return &GrepRenderer{BaseRenderer: BaseRenderer{toolName: "Grep", theme: t, styles: s}}
 	case "Glob":
-		return NewGlobRenderer(t)
+		return &GlobRenderer{BaseRenderer: BaseRenderer{toolName: "Glob", theme: t, styles: s}}
 	case "WebFetch":
-		return NewWebFetchRenderer(t)
+		return &WebFetchRenderer{BaseRenderer: BaseRenderer{toolName: "WebFetch", theme: t, styles: s}}
 	case "AskUserQuestion":
-		return NewAskUserQuestionRenderer(t)
+		return &AskUserQuestionRenderer{BaseRenderer: BaseRenderer{toolName: "AskUserQuestion", theme: t, styles: s}}
 	default:
-		return NewGenericRenderer(toolName, t)
+		return &GenericRenderer{BaseRenderer: BaseRenderer{toolName: toolName, theme: t, styles: s}}
 	}
 }

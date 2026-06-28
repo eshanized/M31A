@@ -89,7 +89,7 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 		case "compress", "optimize", "model", "fallback", "provider":
 			catMap[cmd.Name] = CatAI
 		// Config
-		case "settings", "config", "theme", "cost", "log", "key", "tokens":
+		case "settings", "config", "cost", "log", "key", "tokens":
 			catMap[cmd.Name] = CatConfig
 		// Session
 		case "sessions", "fork", "prev", "next", "save", "goal", "resume", "ledger":

@@ -20,6 +20,7 @@ type ConfirmDialog struct {
 // View renders the confirmation dialog centered in the given dimensions.
 func (cd ConfirmDialog) View(screenW, screenH int) string {
 	t := cd.Theme
+	s := theme.BuildSemanticStyles(t)
 
 	confirmText := cd.ConfirmText
 	if confirmText == "" {
@@ -31,42 +32,23 @@ func (cd ConfirmDialog) View(screenW, screenH int) string {
 	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(t.Text).Width(cd.Width-4).Render(cd.Message),
+		s.Body.Width(cd.Width-4).Render(cd.Message),
 		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render(
+		s.KeyboardHint.Render(
 			"[y] "+confirmText+"   [n/esc] "+cancelText,
 		),
 	)
 
-	borderColor := t.Brand
-	if cd.Danger {
-		borderColor = t.Error
-	} else if cd.Warning {
-		borderColor = t.Warning
+	var card lipgloss.Style
+	switch {
+	case cd.Danger:
+		card = s.DialogDanger
+	case cd.Warning:
+		card = s.DialogWarning
+	default:
+		card = s.Dialog
 	}
 
-	cardStyle := CardBrand
-	if cd.Warning {
-		cardStyle = CardWarning
-	}
-
-	card := Card{
-		Title:   cd.Title,
-		Content: body,
-		Width:   cd.Width,
-		Border:  theme.NormalBorder,
-		Style:   cardStyle,
-		Theme:   t,
-	}.Render()
-
-	if cd.Danger {
-		card = lipgloss.NewStyle().
-			Border(theme.NormalBorder).
-			BorderForeground(borderColor).
-			Padding(1, 2).
-			Width(cd.Width).
-			Render(body)
-	}
-
-	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, card)
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center,
+		card.Width(cd.Width).Render(body))
 }

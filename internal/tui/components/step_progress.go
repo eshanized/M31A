@@ -25,6 +25,7 @@ func (sp StepProgress) RenderDots() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := sp.PaddingLeft
 	if padLeft == 0 {
@@ -36,14 +37,11 @@ func (sp StepProgress) RenderDots() string {
 		var dot string
 		switch {
 		case i < sp.Current:
-			// Completed
-			dot = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+			dot = s.ProgressDone.Render("✓")
 		case i == sp.Current:
-			// Current
-			dot = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("●")
+			dot = s.ProgressFill.Bold(true).Render("●")
 		default:
-			// Pending
-			dot = lipgloss.NewStyle().Foreground(t.TextMuted).Render("○")
+			dot = s.ProgressStep.Render("○")
 		}
 		parts = append(parts, dot)
 	}
@@ -59,6 +57,7 @@ func (sp StepProgress) RenderBar() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := sp.PaddingLeft
 	if padLeft == 0 {
@@ -82,12 +81,8 @@ func (sp StepProgress) RenderBar() string {
 		filled = (sp.Current + 1) * barWidth / sp.Total
 	}
 
-	bar := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Render(strings.Repeat("━", filled)) +
-		lipgloss.NewStyle().
-			Foreground(t.Border).
-			Render(strings.Repeat("─", barWidth-filled))
+	bar := s.ProgressFill.Render(strings.Repeat("━", filled)) +
+		s.ProgressEmpty.Render(strings.Repeat("─", barWidth-filled))
 
 	// Add step info
 	info := fmt.Sprintf(" %d/%d", sp.Current+1, sp.Total)
@@ -103,6 +98,7 @@ func (sp StepProgress) RenderLabeled() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := sp.PaddingLeft
 	if padLeft == 0 {
@@ -116,23 +112,23 @@ func (sp StepProgress) RenderLabeled() string {
 		var dot string
 		switch {
 		case i < sp.Current:
-			dot = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+			dot = s.ProgressDone.Render("✓")
 		case i == sp.Current:
-			dot = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("●")
+			dot = s.ProgressFill.Bold(true).Render("●")
 		default:
-			dot = lipgloss.NewStyle().Foreground(t.TextMuted).Render("○")
+			dot = s.ProgressStep.Render("○")
 		}
 		dotParts = append(dotParts, dot)
 
 		// Label
 		if i < len(sp.Labels) && sp.Labels[i] != "" {
-			color := t.TextMuted
+			labelStyle := s.Muted
 			if i == sp.Current {
-				color = t.TextPrimary
+				labelStyle = s.Body
 			} else if i < sp.Current {
-				color = t.Success
+				labelStyle = s.SuccessText
 			}
-			labelParts = append(labelParts, lipgloss.NewStyle().Foreground(color).Render(sp.Labels[i]))
+			labelParts = append(labelParts, labelStyle.Render(sp.Labels[i]))
 		} else {
 			labelParts = append(labelParts, "")
 		}

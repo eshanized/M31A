@@ -156,8 +156,6 @@ func (m *AppState) renderScreenContent(screen Screen, chrome layout.PageChrome) 
 		return m.renderHelpContent(chrome)
 	case ScreenBisect:
 		return m.renderBisectContent(chrome)
-	case ScreenThemePicker:
-		return m.renderThemePickerContent(chrome)
 	case ScreenNotifications:
 		return m.renderNotificationsContent(chrome)
 	case ScreenDashboard:
@@ -416,8 +414,6 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.KeyboardHints = []string{"j/k scroll", "esc back"}
 	case ScreenBisect:
 		info.KeyboardHints = []string{"g good", "b bad", "s skip", "esc back"}
-	case ScreenThemePicker:
-		info.KeyboardHints = []string{"j/k select", "enter apply", "esc back"}
 	case ScreenNotifications:
 		info.KeyboardHints = []string{"j/k scroll", "esc back"}
 	case ScreenDashboard:
@@ -684,14 +680,6 @@ func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
 	}
 	m.bisectModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.bisectModel.View()
-}
-
-func (m *AppState) renderThemePickerContent(chrome layout.PageChrome) string {
-	if m.themePickerModel == nil {
-		return renderEmptyState("Theme picker", "Loading themes...", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
-	}
-	m.themePickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.themePickerModel.View()
 }
 
 func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {

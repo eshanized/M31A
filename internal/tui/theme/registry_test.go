@@ -8,8 +8,9 @@ func TestAvailable_ReturnsThemes(t *testing.T) {
 	if len(themes) == 0 {
 		t.Fatal("Available() returned empty slice")
 	}
-	if len(themes) < 5 {
-		t.Errorf("expected at least 5 themes, got %d", len(themes))
+	// M31A ships with exactly one theme
+	if len(themes) != 1 {
+		t.Errorf("expected 1 theme, got %d", len(themes))
 	}
 }
 
@@ -64,17 +65,6 @@ func TestLight_HasRequiredFields(t *testing.T) {
 	}
 	if theme.TextPrimary == "" {
 		t.Error("Light() TextPrimary should not be empty")
-	}
-}
-
-func TestCatppuccin_IsDarkMode(t *testing.T) {
-	t.Parallel()
-	theme := Catppuccin()
-	if theme.Background == "" {
-		t.Error("Catppuccin() Background should not be empty")
-	}
-	if theme.Mode != ModeDark {
-		t.Errorf("Catppuccin() Mode = %d, want ModeDark (%d)", theme.Mode, ModeDark)
 	}
 }
 

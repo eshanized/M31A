@@ -80,13 +80,6 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 		m.shipModel = newShip
 		cmds = append(cmds, cmd)
 	}
-	if m.screen == ScreenThemePicker && m.themePickerModel != nil {
-		newTP, cmd := m.themePickerModel.Update(msg)
-		if nt, ok := newTP.(*ThemePickerModel); ok {
-			m.themePickerModel = nt
-		}
-		cmds = append(cmds, cmd)
-	}
 	if m.screen == ScreenDashboard && m.dashboardModel != nil {
 		newDash, cmd := m.dashboardModel.Update(msg)
 		if nd, ok := newDash.(*DashboardModel); ok {

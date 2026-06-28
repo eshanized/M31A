@@ -237,15 +237,6 @@ func TestViewBisect(t *testing.T) {
 	}
 }
 
-func TestViewThemePicker(t *testing.T) {
-	m := testAppState()
-	m.screen = ScreenThemePicker
-	r := m.View()
-	if r == "" {
-		t.Error("View should not be empty")
-	}
-}
-
 func TestViewNotifications(t *testing.T) {
 	m := testAppState()
 	m.screen = ScreenNotifications

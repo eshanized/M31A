@@ -1,7 +1,6 @@
 package components
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -21,6 +20,7 @@ func (e ErrorBanner) Render() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	prefix := e.Prefix
 	if prefix == "" {
@@ -36,15 +36,12 @@ func (e ErrorBanner) Render() string {
 		padLeft = 2
 	}
 
-	color := t.Error
+	style := s.ErrorBanner
 	if e.Warning {
-		color = t.Warning
+		style = s.WarningBanner
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(color).
-		PaddingLeft(padLeft).
-		Render(prefix + e.Message)
+	return style.PaddingLeft(padLeft).Render(prefix + e.Message)
 }
 
 // InlineEmptyState renders a simple inline empty state message.
@@ -61,14 +58,12 @@ func (i InlineEmptyState) Render() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := i.PaddingLeft
 	if padLeft == 0 {
 		padLeft = 2
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		PaddingLeft(padLeft).
-		Render(i.Message)
+	return s.Muted.PaddingLeft(padLeft).Render(i.Message)
 }

@@ -23,22 +23,19 @@ func (m MetricCard) Render() string {
 	if t.Text == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
-	valueStyle := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Bold(true)
+	valueStyle := s.BrandBold
 
-	labelStyle := lipgloss.NewStyle().
-		Foreground(t.TextSecondary)
+	labelStyle := s.SecondaryText
 
-	trendStyle := lipgloss.NewStyle().
-		Foreground(t.Success)
+	trendStyle := s.SuccessText
 
 	// Parse trend to determine if it's positive or negative
 	if m.Trend != "" {
 		firstRune := []rune(m.Trend)[0]
 		if firstRune == '-' || firstRune == '↓' {
-			trendStyle = trendStyle.Foreground(t.Error)
+			trendStyle = s.ErrorText
 		}
 	}
 

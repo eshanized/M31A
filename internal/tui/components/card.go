@@ -49,6 +49,10 @@ func (c Card) Render() string {
 	if c.Border == (lipgloss.Border{}) {
 		c.Border = lipgloss.RoundedBorder()
 	}
+
+	s := theme.BuildSemanticStyles(c.Theme)
+
+	// Determine border color from style
 	borderColor := c.Theme.Border
 	switch c.Style {
 	case CardBrand:
@@ -84,30 +88,21 @@ func (c Card) Render() string {
 
 	// Add footer if provided
 	if c.Footer != "" {
-		footerStyle := lipgloss.NewStyle().
-			Foreground(c.Theme.TextMuted).
-			Italic(true)
-		content = content + "\n" + footerStyle.Render(c.Footer)
+		content = content + "\n" + s.Muted.Italic(true).Render(c.Footer)
 	}
 
 	switch c.Variant {
 	case CardElevated:
 		// Border + background + shadow
-		style := lipgloss.NewStyle().
+		style := s.CardElevated.
 			Border(c.Border).
 			BorderForeground(borderColor).
-			Width(c.Width).
-			Padding(0, 1).
-			Background(lipgloss.Color(c.Theme.SurfaceElevated))
+			Width(c.Width)
 		return theme.RenderWithShadow(style.Render(content), c.Theme.ShadowColor, 1, 1)
 	case CardHeader:
 		// Filled header bar + border body
 		if c.Title != "" {
-			headerStyle := lipgloss.NewStyle().
-				Background(borderColor).
-				Foreground(c.Theme.BadgeForeground).
-				Padding(0, 1).
-				Bold(true)
+			headerStyle := s.CardHeader
 			header := headerStyle.Render(c.Title)
 			bodyStyle := lipgloss.NewStyle().
 				Border(c.Border).
@@ -118,9 +113,7 @@ func (c Card) Render() string {
 		}
 	case CardMinimal:
 		// Top gradient line only, no side borders
-		gradientStyle := lipgloss.NewStyle().
-			Foreground(c.Theme.Brand).
-			Bold(true)
+		gradientStyle := s.BrandBold
 		gradientW := c.Width - 2
 		if gradientW < 1 {
 			gradientW = 1

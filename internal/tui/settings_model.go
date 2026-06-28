@@ -52,11 +52,6 @@ type settingsHealthMsg struct {
 	Results []providerHealthStatus
 }
 
-// settingsThemeChanged emits when the user toggles the theme.
-type settingsThemeChanged struct {
-	ThemeName string
-}
-
 // SettingsModel manages the settings editor (6-tab layout).
 type SettingsModel struct {
 	theme     theme.Theme
@@ -131,7 +126,6 @@ func (s *SettingsModel) buildFields() {
 		}
 	case TabUI:
 		s.fields = []settingsField{
-			{key: "theme", label: "Theme", fieldType: "choice", choices: []string{"dark", "light", "auto"}},
 			{key: "show_cost", label: "Show cost estimate", fieldType: "bool"},
 			{key: "show_tokens", label: "Show token usage", fieldType: "bool"},
 			{key: "compact_mode", label: "Compact mode", fieldType: "bool"},
@@ -387,11 +381,6 @@ func (s *SettingsModel) getFieldValue(f settingsField) string {
 		return boolStr(s.config.Model.AutoArbitrage)
 	case "context_length":
 		return fmt.Sprintf("%d", s.config.Model.DefaultContextLength)
-	case "theme":
-		if s.config.UI.Theme == "" {
-			return "dark"
-		}
-		return s.config.UI.Theme
 	case "show_cost":
 		return boolStr(s.config.UI.ShowCostEstimate)
 	case "show_tokens":
@@ -445,9 +434,6 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (*SettingsMod
 		if n, err := strconv.Atoi(val); err == nil {
 			s.config.Model.DefaultContextLength = n
 		}
-	case "theme":
-		s.config.UI.Theme = val
-		cmd = func() tea.Msg { return settingsThemeChanged{ThemeName: val} }
 	case "show_cost":
 		s.config.UI.ShowCostEstimate = val == "yes"
 	case "show_tokens":

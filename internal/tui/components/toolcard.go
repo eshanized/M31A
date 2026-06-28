@@ -69,6 +69,7 @@ type ToolCard struct {
 	durationMs int64
 	truncated  bool
 	theme      theme.Theme
+	styles     theme.SemanticStyles
 	collapsed  bool
 	renderer   ToolRenderer
 	lineCount  int // output line count (for header display)
@@ -111,6 +112,7 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		state:     state,
 		truncated: truncated,
 		theme:     t,
+		styles:    theme.BuildSemanticStyles(t),
 		collapsed: isBinary,
 		renderer:  renderer,
 	}
@@ -176,14 +178,12 @@ func (c *ToolCard) Render(width int) string {
 //
 //	⟳ [ FileRead ] reading path/to/file.go
 func (c *ToolCard) renderInline(width int) string {
+	s := c.styles
+
 	// Tool name badge with per-tool colors
 	labelStyle, ok := c.theme.ToolLabel[c.toolName]
 	if !ok {
-		labelStyle = lipgloss.NewStyle().
-			Foreground(c.theme.TextSecondary).
-			Background(c.theme.SurfaceElevated).
-			Padding(0, 1).
-			Bold(true)
+		labelStyle = s.ToolLabel
 	}
 	badge := labelStyle.Render(c.toolName)
 
@@ -193,25 +193,25 @@ func (c *ToolCard) renderInline(width int) string {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
 		short = TruncateEnd(short, 50)
-		inputStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
+		inputStr = s.Muted.Render(short)
 	}
 
 	// Status indicator
 	var statusStr string
 	switch c.state {
 	case ToolRunning:
-		statusStr = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("⟳")
+		statusStr = s.WarningText.Render("⟳")
 	case ToolSuccess:
 		if c.truncated {
-			statusStr = lipgloss.NewStyle().Foreground(c.theme.Warning).Render("✓ truncated")
+			statusStr = s.WarningText.Render("✓ truncated")
 		} else if c.collapsed && c.output != "" {
 			lineCount := strings.Count(c.output, "\n") + 1
-			statusStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(fmt.Sprintf("✓ +%d lines", lineCount))
+			statusStr = s.Muted.Render(fmt.Sprintf("✓ +%d lines", lineCount))
 		} else {
-			statusStr = lipgloss.NewStyle().Foreground(c.theme.Success).Render("✓")
+			statusStr = s.SuccessText.Render("✓")
 		}
 	case ToolError:
-		statusStr = lipgloss.NewStyle().Foreground(c.theme.Error).Render("✗ failed")
+		statusStr = s.ErrorText.Render("✗ failed")
 	}
 
 	// Assemble: badge + input + status
@@ -230,6 +230,8 @@ func (c *ToolCard) renderInline(width int) string {
 // renderBlock renders a tool as a thin-border block with status and timing.
 // Uses ThinBorder (┌─┐) — opencode-style compact tool cards.
 func (c *ToolCard) renderBlock(width int) string {
+	s := c.styles
+
 	// Build single-line header: status icon + tool badge + truncated input + timing
 	header := c.renderThinBorderHeader(width)
 
@@ -237,9 +239,7 @@ func (c *ToolCard) renderBlock(width int) string {
 	var bodyLines []string
 
 	if c.input != "" {
-		inputStr := lipgloss.NewStyle().
-			Foreground(c.theme.TextMuted).
-			Render(c.input)
+		inputStr := s.ToolInput.Render(c.input)
 		bodyLines = append(bodyLines, inputStr)
 	}
 
@@ -283,14 +283,12 @@ func (c *ToolCard) renderBlock(width int) string {
 //	┌─ Bash ── input ... ──────────────── ✓ 120ms ─┐
 //	(tool badge + truncated input on left, status icon + timing on right)
 func (c *ToolCard) renderThinBorderHeader(width int) string {
+	s := c.styles
+
 	// Tool label badge (use the pre-existing per-tool label colors)
 	labelStyle, ok := c.theme.ToolLabel[c.toolName]
 	if !ok {
-		labelStyle = lipgloss.NewStyle().
-			Background(c.theme.TextSecondary).
-			Foreground(c.theme.BadgeForeground).
-			Padding(0, 1).
-			Bold(true)
+		labelStyle = s.ToolLabel
 	}
 	label := labelStyle.Render(fmt.Sprintf(" %s ", c.toolName))
 
@@ -300,21 +298,22 @@ func (c *ToolCard) renderThinBorderHeader(width int) string {
 		short := c.input
 		short = strings.ReplaceAll(short, "\n", " ")
 		short = TruncateEnd(short, 50)
-		inputSnippet = " " + lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(short)
+		inputSnippet = " " + s.Muted.Render(short)
 	}
 
 	// Status icon (right side)
 	statusIcon := ToolStatusIcons[c.state]
-	statusColor := c.theme.TextMuted
+	var statusStr string
 	switch c.state {
 	case ToolSuccess:
-		statusColor = c.theme.Success
+		statusStr = s.ToolStatusOK.Render(statusIcon)
 	case ToolError:
-		statusColor = c.theme.Error
+		statusStr = s.ToolStatusErr.Render(statusIcon)
 	case ToolRunning:
-		statusColor = c.theme.Warning
+		statusStr = s.ToolStatusRun.Render(statusIcon)
+	default:
+		statusStr = s.Muted.Render(statusIcon)
 	}
-	statusStr := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 
 	// Right-side info: timing + line count
 	var infoParts []string
@@ -330,7 +329,7 @@ func (c *ToolCard) renderThinBorderHeader(width int) string {
 	}
 	infoStr := ""
 	if len(infoParts) > 0 {
-		infoStr = lipgloss.NewStyle().Foreground(c.theme.TextMuted).Render(strings.Join(infoParts, " · "))
+		infoStr = s.ToolMeta.Render(strings.Join(infoParts, " · "))
 	}
 
 	// Assemble left side: tool badge + input

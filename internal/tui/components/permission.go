@@ -17,6 +17,7 @@ var DefaultPermissionTimeout = time.Duration(types.DefaultPermissionTimeout) * t
 type PermissionModal struct {
 	request tools.PermissionRequest
 	theme   theme.Theme
+	styles  theme.SemanticStyles
 	elapsed time.Duration
 	timeout time.Duration
 }
@@ -28,6 +29,7 @@ func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout 
 	return &PermissionModal{
 		request: request,
 		theme:   t,
+		styles:  theme.BuildSemanticStyles(t),
 		timeout: timeout,
 	}
 }
@@ -38,6 +40,7 @@ func (m *PermissionModal) Clear() {
 }
 
 func (m *PermissionModal) Render(width, height int) string {
+	s := m.styles
 	modalWidth := 60
 	if width < modalWidth+4 {
 		modalWidth = width - 4
@@ -47,26 +50,20 @@ func (m *PermissionModal) Render(width, height int) string {
 	}
 
 	// ── Title ─────────────────────────────────────────────────────────────
-	lockBadge := lipgloss.NewStyle().
-		Foreground(m.theme.Warning).
-		Bold(true).
-		Render("🔒")
-
-	title := lipgloss.NewStyle().
-		Foreground(m.theme.Warning).
-		Bold(true).
-		Render("Permission Required")
-
-	titleLine := lipgloss.JoinHorizontal(lipgloss.Top, lockBadge, " ", title)
+	titleLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		s.PermLock.Render("🔒"),
+		" ",
+		s.PermTitle.Render("Permission Required"),
+	)
 
 	// ── Tool & risk info ──────────────────────────────────────────────────
 	riskBadge := m.riskStyle().Render(fmt.Sprintf(" %s ", riskLabel(m.request.RiskLevel)))
 
 	toolLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Tool  "),
-		lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Bold(true).Render(m.request.ToolName),
-		lipgloss.NewStyle().Render("  "),
-		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Risk  "),
+		s.Caption.Render("Tool  "),
+		s.Heading.Render(m.request.ToolName),
+		"  ",
+		s.Caption.Render("Risk  "),
 		riskBadge,
 	)
 
@@ -77,27 +74,23 @@ func (m *PermissionModal) Render(width, height int) string {
 	}
 	highlighted := highlightCommand(m.request.Command, m.theme)
 	highlighted = TruncateWithEllipsis(highlighted, cmdContentW)
-	cmdBox := lipgloss.NewStyle().
-		Border(theme.DoubleBorder).
-		BorderForeground(m.theme.Border).
-		Padding(0, 1).
+	cmdBox := s.InputCode.
 		Width(modalWidth - 6).
 		Render(highlighted)
 
 	// ── Keybindings ───────────────────────────────────────────────────────
-	keyStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
 	keys := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top,
-			keyStyle.Render("[Y]"),
-			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Allow once    "),
-			keyStyle.Render("[A]"),
-			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Always allow"),
+			s.PermKey.Render("[Y]"),
+			s.PermHint.Render(" Allow once    "),
+			s.PermKey.Render("[A]"),
+			s.PermHint.Render(" Always allow"),
 		),
 		lipgloss.JoinHorizontal(lipgloss.Top,
-			keyStyle.Render("[N]"),
-			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Deny          "),
-			keyStyle.Render("[Esc]"),
-			lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render(" Exit"),
+			s.PermKey.Render("[N]"),
+			s.PermHint.Render(" Deny          "),
+			s.PermKey.Render("[Esc]"),
+			s.PermHint.Render(" Exit"),
 		),
 	)
 
@@ -105,18 +98,11 @@ func (m *PermissionModal) Render(width, height int) string {
 	remaining := m.Remaining()
 	var countdown string
 	if remaining <= 0 {
-		countdown = lipgloss.NewStyle().
-			Foreground(m.theme.Error).
-			Bold(true).
-			Render("Tool will be rejected")
+		countdown = s.PermCountdownErr.Render("Tool will be rejected")
 	} else if remaining <= 30*time.Second {
-		countdown = lipgloss.NewStyle().
-			Foreground(m.theme.Error).
-			Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
+		countdown = s.PermCountdownWarn.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	} else {
-		countdown = lipgloss.NewStyle().
-			Foreground(m.theme.Warning).
-			Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
+		countdown = s.PermCountdown.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	}
 
 	countdownBar := m.renderCountdownBar(modalWidth - 6)
@@ -124,7 +110,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	// ── Rule context ──────────────────────────────────────────────────────
 	var ruleInfo string
 	if m.request.RuleTool != "" || m.request.RulePattern != "" {
-		ruleInfo = lipgloss.NewStyle().Faint(true).Render(
+		ruleInfo = s.PermRuleMatch.Render(
 			fmt.Sprintf("  Matched rule: tool=%q pattern=%q action=%q",
 				m.request.RuleTool, m.request.RulePattern, m.request.RuleAction),
 		)
@@ -136,7 +122,7 @@ func (m *PermissionModal) Render(width, height int) string {
 		"",
 		toolLine,
 		"",
-		lipgloss.NewStyle().Foreground(m.theme.TextMuted).Render("Command"),
+		s.Caption.Render("Command"),
 		cmdBox,
 	)
 	if ruleInfo != "" {
@@ -155,12 +141,7 @@ func (m *PermissionModal) Render(width, height int) string {
 		countdown,
 	)
 
-	modal := lipgloss.NewStyle().
-		Background(m.theme.SurfaceElevated).
-		Foreground(m.theme.TextPrimary).
-		Padding(1, 2).
-		Border(theme.DoubleBorder).
-		BorderForeground(m.theme.Brand).
+	modal := s.Dialog.
 		Width(modalWidth).
 		Render(modalContent)
 
@@ -190,8 +171,9 @@ func (m *PermissionModal) renderCountdownBar(maxWidth int) string {
 	}
 	emptyWidth := maxWidth - filledWidth
 
-	filled := lipgloss.NewStyle().Foreground(m.theme.Warning).Render(strings.Repeat("█", filledWidth))
-	empty := lipgloss.NewStyle().Foreground(m.theme.Border).Render(strings.Repeat("░", emptyWidth))
+	s := m.styles
+	filled := s.PermBarFill.Render(strings.Repeat("█", filledWidth))
+	empty := s.PermBarEmpty.Render(strings.Repeat("░", emptyWidth))
 
 	return filled + empty
 }
@@ -223,32 +205,15 @@ func (m *PermissionModal) Remaining() time.Duration {
 func (m *PermissionModal) riskStyle() lipgloss.Style {
 	switch m.request.RiskLevel {
 	case types.RiskDangerous:
-		return lipgloss.NewStyle().
-			Background(m.theme.Warning).
-			Foreground(m.theme.BadgeForeground).
-			Bold(true).
-			Padding(0, 1)
+		return m.styles.PermRiskDanger
 	case types.RiskDestructive:
-		return lipgloss.NewStyle().
-			Background(m.theme.Error).
-			Foreground(m.theme.BadgeForeground).
-			Bold(true).
-			Padding(0, 1)
+		return m.styles.PermRiskDestruct
 	case types.RiskMedium:
-		return lipgloss.NewStyle().
-			Background(m.theme.Warning).
-			Foreground(m.theme.BadgeForeground).
-			Padding(0, 1)
+		return m.styles.PermRiskMedium
 	case types.RiskSafe:
-		return lipgloss.NewStyle().
-			Background(m.theme.TextSecondary).
-			Foreground(m.theme.BadgeForeground).
-			Padding(0, 1)
+		return m.styles.PermRiskSafe
 	default:
-		return lipgloss.NewStyle().
-			Background(m.theme.TextSecondary).
-			Foreground(m.theme.BadgeForeground).
-			Padding(0, 1)
+		return m.styles.PermRiskSafe
 	}
 }
 
@@ -279,25 +244,20 @@ func highlightCommand(cmd string, t theme.Theme) string {
 	if cmd == "" {
 		return cmd
 	}
+	s := theme.BuildSemanticStyles(t)
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
 		return cmd
 	}
 
 	var result strings.Builder
-	cmdStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-	argStyle := lipgloss.NewStyle().Foreground(t.TextPrimary)
-	pipeStyle := lipgloss.NewStyle().Foreground(t.Warning)
-
-	result.WriteString(cmdStyle.Render(parts[0]))
+	result.WriteString(s.BrandBold.Render(parts[0]))
 	for _, part := range parts[1:] {
 		result.WriteString(" ")
 		if part == "|" || part == "&&" || part == "||" || part == ">" || part == ">>" || part == "<" {
-			result.WriteString(pipeStyle.Render(part))
-		} else if strings.HasPrefix(part, "-") {
-			result.WriteString(argStyle.Render(part))
+			result.WriteString(s.WarningText.Render(part))
 		} else {
-			result.WriteString(argStyle.Render(part))
+			result.WriteString(s.Body.Render(part))
 		}
 	}
 	return result.String()

@@ -33,7 +33,6 @@ func TestScreen_Label(t *testing.T) {
 		{ScreenConfig, "Config"},
 		{ScreenHelp, "Help"},
 		{ScreenBisect, "Bisect"},
-		{ScreenThemePicker, "Themes"},
 		{ScreenNotifications, "Notifications"},
 		{ScreenDashboard, "Dashboard"},
 		{ScreenSessionDetail, "Session"},

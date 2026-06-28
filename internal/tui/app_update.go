@@ -301,14 +301,6 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case config.ConfigReloadMsg:
 		cmds = append(cmds, m.handleConfigReload(msg)...)
 
-	// ── Theme changed ─────────────────────────────────────────────────────────
-	case ThemeChangedMsg:
-		m.applyTheme(msg.Theme)
-
-	// ── Settings theme change (from settings screen) ────────────────────────
-	case settingsThemeChanged:
-		m.applyTheme(msg.ThemeName)
-
 	// ── Fallback event ────────────────────────────────────────────────────────
 	case FallbackEventMsg:
 		cmds = append(cmds, m.handleFallbackEvent(msg)...)
@@ -618,12 +610,6 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
 		}
 		return nil
-	case ScreenThemePicker:
-		if m.themePickerModel == nil {
-			cw, ch := m.contentDimensions()
-			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), cw, ch)
-		}
-		return nil
 	case ScreenNotifications:
 		if m.notifModel == nil {
 			cw, ch := m.contentDimensions()
@@ -807,9 +793,6 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	if m.bisectModel != nil {
 		m.bisectModel.SetDimensions(contentW, contentH)
-	}
-	if m.themePickerModel != nil {
-		m.themePickerModel.SetDimensions(contentW, contentH)
 	}
 	if m.notifModel != nil {
 		m.notifModel.SetDimensions(contentW, contentH)
@@ -1027,17 +1010,6 @@ func (m *AppState) routeAppMsgAction(msg AppMsg) tea.Cmd {
 			}
 		}
 		return nil
-	case "toggle_theme":
-		newMode := m.themeManager.Cycle()
-		themeName := "dark"
-		switch newMode {
-		case theme.ModeLight:
-			themeName = "light"
-		case theme.ModeAuto:
-			themeName = "auto"
-		}
-		m.applyTheme(themeName)
-		return nil
 	case "cancel_stream":
 		if m.streamCancelFn != nil {
 			m.streamCancelFn()
@@ -1228,13 +1200,6 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.bisectModel.SetDimensions(cw, ch)
 		}
 		return nil
-	case ScreenThemePicker:
-		if m.themePickerModel == nil {
-			m.themePickerModel = NewThemePickerModel(m.themeManager.Current(), cw, ch)
-		} else {
-			m.themePickerModel.SetDimensions(cw, ch)
-		}
-		return nil
 	case ScreenNotifications:
 		if m.notifModel == nil {
 			m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
@@ -1372,8 +1337,6 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return m.navigateToScreen(ScreenRollback)
 	case "open_dashboard":
 		return m.navigateToScreen(ScreenDashboard)
-	case "open_themes":
-		return m.navigateToScreen(ScreenThemePicker)
 	case "open_notifications":
 		return m.navigateToScreen(ScreenNotifications)
 	case "open_files":
@@ -1424,17 +1387,6 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return m.navigateToScreen(ScreenModelSelector)
 	case "cycle_model_backward":
 		return m.navigateToScreen(ScreenModelSelector)
-	case "toggle_theme":
-		newMode := m.themeManager.Cycle()
-		themeName := "dark"
-		switch newMode {
-		case theme.ModeLight:
-			themeName = "light"
-		case theme.ModeAuto:
-			themeName = "auto"
-		}
-		m.applyTheme(themeName)
-		return nil
 	case "cancel_stream":
 		if m.streamCancelFn != nil {
 			m.streamCancelFn()
@@ -1561,9 +1513,6 @@ func (m *AppState) applyTheme(themeName string) {
 	}
 	if m.bisectModel != nil {
 		m.bisectModel.SetTheme(t)
-	}
-	if m.themePickerModel != nil {
-		m.themePickerModel.SetTheme(t)
 	}
 	if m.notifModel != nil {
 		m.notifModel.SetTheme(t)

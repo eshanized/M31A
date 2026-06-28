@@ -31,6 +31,7 @@ func (e EmptyState) Render() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	w := e.Width
 	if w < 20 {
@@ -47,21 +48,18 @@ func (e EmptyState) Render() string {
 	}
 
 	// Icon + brand
-	iconLine := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
-		Render(icon + "  M 3 1 A")
+	iconLine := s.EmptyStateIcon.Render(icon + "  M 3 1 A")
 
 	// Title
 	titleLine := ""
 	if e.Title != "" {
-		titleLine = lipgloss.NewStyle().Foreground(t.TextPrimary).Bold(true).
-			Render(e.Title)
+		titleLine = s.EmptyStateTitle.Render(e.Title)
 	}
 
 	// Subtitle
 	subtitleLine := ""
 	if e.Subtitle != "" {
-		subtitleLine = lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render(e.Subtitle)
+		subtitleLine = s.EmptyStateHint.Render(e.Subtitle)
 	}
 
 	// Actions
@@ -70,11 +68,10 @@ func (e EmptyState) Render() string {
 		// Build action card
 		var items []string
 		for _, a := range e.Actions {
-			label := lipgloss.NewStyle().Foreground(t.TextPrimary).Render("▸ " + a.Label)
+			label := s.EmptyStateAction.Render("▸ " + a.Label)
 			hint := ""
 			if a.Hint != "" {
-				hint = lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).
-					Render("  · " + a.Hint)
+				hint = s.EmptyStateHint.Italic(true).Render("  · " + a.Hint)
 			}
 			items = append(items, "  "+label+hint)
 		}
@@ -97,8 +94,7 @@ func (e EmptyState) Render() string {
 	}
 
 	// Keyboard hint
-	hintLine := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("Type a message or press ctrl+p for commands")
+	hintLine := s.EmptyStateHint.Render("Type a message or press ctrl+p for commands")
 
 	// Compose vertically
 	var parts []string

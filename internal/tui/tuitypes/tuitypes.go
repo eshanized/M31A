@@ -42,7 +42,7 @@ const (
 	ScreenConfig           Screen = 16   // full config viewer
 	ScreenHelp             Screen = 17   // keybinding help overlay
 	ScreenBisect           Screen = 18   // git bisect interactive
-	ScreenThemePicker      Screen = 19   // theme browser/preview
+	ScreenThemePicker      Screen = 19   // deprecated — M31A has a single theme
 	ScreenNotifications    Screen = 20   // notification history
 	ScreenDashboard        Screen = 21   // workflow pipeline overview
 	ScreenSessionDetail    Screen = 22   // session detail preview
@@ -394,9 +394,10 @@ type HomeSubmitMsg struct {
 	Text string
 }
 
-// ThemeChangedMsg is emitted when the theme is switched.
+// ThemeChangedMsg is deprecated. M31A has a single theme.
+// Kept for backward compatibility.
 type ThemeChangedMsg struct {
-	Theme string // "dark", "light", or "auto"
+	Theme string // ignored
 }
 
 // ToastMsg displays a transient notification.

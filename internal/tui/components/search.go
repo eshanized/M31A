@@ -93,8 +93,8 @@ func FuzzyMatch(query, text string) bool {
 
 // FuzzyScore returns a match score (higher = better match).
 // Returns -1 if no match. Score is based on:
-// - consecutive matches bonus
-// - start-of-word matches bonus
+//   - consecutive matches bonus
+//   - start-of-word matches bonus
 func FuzzyScore(query, text string) int {
 	if query == "" {
 		return 0

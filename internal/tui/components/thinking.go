@@ -14,6 +14,7 @@ type ThinkingBlock struct {
 	id           int
 	segment      types.MessageSegment
 	theme        theme.Theme
+	styles       theme.SemanticStyles
 	expanded     bool
 	focused      bool
 	startedAt    time.Time
@@ -32,6 +33,7 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 		id:        id,
 		segment:   segment,
 		theme:     t,
+		styles:    theme.BuildSemanticStyles(t),
 		expanded:  expanded,
 		focused:   false,
 		startedAt: startedAt,
@@ -43,14 +45,15 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 // Collapsed:  ╭─ ⠹ Thinking · 1.2s ──────────────────╮
 // Expanded:   full panel with ┃ left-gutter content
 func (b *ThinkingBlock) Render(width int) string {
+	s := b.styles
 	contentWidth := width - 4 // account for padding
 
 	if !b.expanded {
 		// Collapsed: styled capsule with content preview
 		durStr := b.Duration()
 		spinner := "⠹" // static thinking indicator; parent spinner provides animation
-		spinnerStyled := lipgloss.NewStyle().Foreground(b.theme.Thinking).Bold(true).Render(spinner)
-		labelStyled := lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(" Thinking · " + durStr)
+		spinnerStyled := s.ThinkingToggle.Bold(true).Render(spinner)
+		labelStyled := s.ThinkingLabel.Render(" Thinking · " + durStr)
 
 		// Content preview: first line truncated to fit
 		preview := ""
@@ -63,7 +66,7 @@ func (b *ThinkingBlock) Render(width int) string {
 					if len(firstLine) > maxPreview {
 						firstLine = firstLine[:maxPreview-1] + "…"
 					}
-					preview = " " + lipgloss.NewStyle().Foreground(b.theme.TextMuted).Faint(true).Render(firstLine)
+					preview = " " + s.ThinkingMuted.Render(firstLine)
 				}
 			}
 		}
@@ -81,7 +84,6 @@ func (b *ThinkingBlock) Render(width int) string {
 			dashW = 1
 		}
 
-		capStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
 		// Animated dashes: alternate between ╌ and ┄ for a subtle breathing effect
 		dashChar := "╌"
 		if time.Now().UnixMilli()/500%2 == 1 {
@@ -89,7 +91,7 @@ func (b *ThinkingBlock) Render(width int) string {
 		}
 		dashes := strings.Repeat(dashChar, dashW)
 
-		line := capStyle.Render(prefixRaw) + inner + capStyle.Render(suffixRaw+dashes+"╮")
+		line := s.ThinkingBorder.Render(prefixRaw) + inner + s.ThinkingBorder.Render(suffixRaw+dashes+"╮")
 
 		return lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(line)
 	}
@@ -125,9 +127,7 @@ func (b *ThinkingBlock) Render(width int) string {
 
 	visibleContent := strings.Join(lines[startLine:endLine], "\n")
 
-	bodyContent := lipgloss.NewStyle().
-		Foreground(b.theme.Thinking).
-		Italic(true).
+	bodyContent := s.Thinking.
 		Padding(0, 2).
 		Width(contentWidth).
 		Render(visibleContent)
@@ -142,8 +142,7 @@ func (b *ThinkingBlock) Render(width int) string {
 			scrollParts = append(scrollParts, fmt.Sprintf("↓ %d lines below", totalLines-endLine))
 		}
 		if len(scrollParts) > 0 {
-			scrollInfo := lipgloss.NewStyle().
-				Foreground(b.theme.TextSecondary).
+			scrollInfo := s.SecondaryText.
 				Padding(0, 2).
 				Render(strings.Join(scrollParts, " · "))
 			bodyContent += "\n" + scrollInfo
@@ -169,7 +168,7 @@ func (b *ThinkingBlock) Render(width int) string {
 		BorderTop(false).BorderBottom(true).BorderLeft(true).BorderRight(true).
 		Padding(0, 1).
 		Width(contentWidth + 2).
-		Render(lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(durStr))
+		Render(s.ThinkingLabel.Render(durStr))
 
 	return header + "\n" + body + "\n" + footer
 }
@@ -254,6 +253,7 @@ func (b *ThinkingBlock) Duration() string {
 
 // Header returns the toggle + label + duration text for the thinking block header.
 func (b *ThinkingBlock) Header(width int) string {
+	s := b.styles
 	toggle := "▸"
 	hint := ""
 	if b.expanded {
@@ -265,12 +265,12 @@ func (b *ThinkingBlock) Header(width int) string {
 
 	durStr := b.Duration()
 
-	toggleStyle := lipgloss.NewStyle().Foreground(b.theme.Thinking)
+	toggleStyle := s.ThinkingToggle
 	if b.focused {
-		toggleStyle = toggleStyle.Foreground(b.theme.Brand).Bold(true)
+		toggleStyle = s.BrandBold
 	}
 
 	return toggleStyle.Render(toggle) +
-		lipgloss.NewStyle().Foreground(b.theme.TextMuted).Render(fmt.Sprintf(" Thinking · %s", durStr)) +
-		lipgloss.NewStyle().Foreground(b.theme.BorderSubtle).Render(hint)
+		s.ThinkingLabel.Render(fmt.Sprintf(" Thinking · %s", durStr)) +
+		s.ThinkingMuted.Render(hint)
 }

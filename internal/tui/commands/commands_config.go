@@ -8,8 +8,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
@@ -41,42 +39,6 @@ func handleSettings(_ []string, _ CommandContext) CommandResult {
 func handleConfig(_ []string, _ CommandContext) CommandResult {
 	screen := tuitypes.ScreenConfig
 	return CommandResult{Success: true, Screen: &screen, Message: "Opening full config..."}
-}
-
-// handleTheme switches between dark and light themes.
-func handleTheme(args []string, ctx CommandContext) CommandResult {
-	themeName := "dark"
-	if len(args) > 0 {
-		t := strings.ToLower(args[0])
-		if t == "dark" || t == "light" || t == "auto" {
-			themeName = t
-		} else {
-			// Check if it's a palette ID
-			if _, ok := theme.ByID(t); ok {
-				themeName = t
-			} else {
-				return CommandResult{
-					Success: false,
-					Message: fmt.Sprintf("Unknown theme %q. Valid values: dark, light, auto, or palette name (catppuccin, nord, tokyo, gruvbox, rose, dracula, solarized, monochrome).", args[0]),
-				}
-			}
-		}
-	} else if ctx.Config != nil {
-		// Toggle
-		if ctx.Config.UI.Theme == "dark" {
-			themeName = "light"
-		} else {
-			themeName = "dark"
-		}
-	}
-
-	return CommandResult{
-		Success: true,
-		Message: fmt.Sprintf("Switching to **%s** theme.", themeName),
-		Cmd: func() tea.Msg {
-			return tuitypes.ThemeChangedMsg{Theme: themeName}
-		},
-	}
 }
 
 // handleCost toggles the cost estimate display.

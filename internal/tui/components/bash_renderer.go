@@ -22,18 +22,18 @@ type BashRenderer struct {
 }
 
 func NewBashRenderer(t theme.Theme) *BashRenderer {
-	return &BashRenderer{BaseRenderer: BaseRenderer{toolName: "Bash", theme: t}}
+	return &BashRenderer{BaseRenderer: BaseRenderer{toolName: "Bash", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *BashRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if cmd, ok := params["command"].(string); ok {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(bashPrefix() + cmd)
+		return r.styles.ToolInput.Width(width).Render(bashPrefix() + cmd)
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *BashRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -52,15 +52,10 @@ func (r *BashRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 		lang := DetectLanguage(output)
 		highlighted := HighlightCode(output, lang, r.theme)
 		if truncated {
-			highlighted += "\n" + lipgloss.NewStyle().
-				Foreground(r.theme.Warning).
-				Italic(true).
+			highlighted += "\n" + r.styles.WarningText.Italic(true).
 				Render("[... output truncated, full output in session log]")
 		}
-		parts = append(parts, lipgloss.NewStyle().
-			Foreground(r.theme.TextSecondary).
-			Width(width).
-			Padding(0, 1).
+		parts = append(parts, r.styles.SecondaryText.Width(width).Padding(0, 1).
 			Render(highlighted))
 	}
 	parts = append(parts, r.RenderStatus(state, durationMs, width, errMsg))

@@ -22,6 +22,7 @@ func (l LoadingIndicator) Render() string {
 	if t.Brand == "" {
 		t = theme.Default()
 	}
+	s := theme.BuildSemanticStyles(t)
 
 	padLeft := l.PaddingLeft
 	if padLeft == 0 && l.Inline {
@@ -34,8 +35,8 @@ func (l LoadingIndicator) Render() string {
 	}
 
 	// Spinner frame (static representation)
-	spinner := lipgloss.NewStyle().Foreground(t.Brand).Render("⠋")
-	content := spinner + " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(label)
+	spinner := s.SpinnerBrand.Render("⠋")
+	content := spinner + " " + s.Loading.Render(label)
 
 	if l.Inline {
 		return lipgloss.NewStyle().

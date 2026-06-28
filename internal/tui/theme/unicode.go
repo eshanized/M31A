@@ -1,52 +1,55 @@
 package theme
 
-// Section markers
+// ── Section Markers ──────────────────────────────────────────────────────────
+// Simple, monochrome, meaningful.
 const (
-	SectionMarker1 = "◈"
+	SectionMarker1 = "◆"
 	SectionMarker2 = "◇"
-	SectionMarker3 = "◆"
-	SectionMarker4 = "◉"
-	SectionMarker5 = "⊕"
-	SectionMarker6 = "⊗"
+	SectionMarker3 = "●"
+	SectionMarker4 = "○"
 )
 
-// File type icons
+// ── File Type Icons ──────────────────────────────────────────────────────────
+// Monochrome indicators for file extensions.
 const (
-	FileGo      = "◇"
-	FileJS      = "◆"
-	FileMD      = "▤"
-	FileJSON    = "◈"
-	FileYAML    = "▥"
-	FileDefault = "▣"
+	FileGo      = "◆"
+	FileJS      = "◇"
+	FileMD      = "▬"
+	FileJSON    = "●"
+	FileYAML    = "▭"
+	FileDefault = "□"
 )
 
-// Workflow phase icons
+// ── Workflow Phase Icons ─────────────────────────────────────────────────────
+// Each phase has a distinct shape for pipeline visualization.
 const (
-	PhaseInit    = "⬡"
-	PhaseDiscuss = "⬢"
-	PhasePlan    = "◬"
-	PhaseExecute = "△"
-	PhaseVerify  = "▽"
-	PhaseRuntime = "◎"
-	PhaseShip    = "◈"
+	PhaseInit    = "○"
+	PhaseDiscuss = "◎"
+	PhasePlan    = "◇"
+	PhaseExecute = "▶"
+	PhaseVerify  = "✓"
+	PhaseRuntime = "●"
+	PhaseShip    = "◆"
 )
 
-// Navigation icons
+// ── Navigation Icons ─────────────────────────────────────────────────────────
+// Directional indicators.
 const (
 	NavCursor  = "▸"
 	NavArrow   = "▹"
-	NavPlay    = "►"
+	NavPlay    = "▶"
 	NavForward = "▻"
 	NavRight   = "❯"
 	NavLeft    = "❮"
 )
 
-// Status icons
+// ── Status Icons ─────────────────────────────────────────────────────────────
+// Clear, universally understood status indicators.
 const (
 	StatusPass    = "✓"
 	StatusFail    = "✗"
 	StatusWarn    = "⚠"
-	StatusPending = "●"
+	StatusPending = "○"
 	StatusHalf    = "◐"
 	StatusCircle  = "◑"
 	StatusQuarter = "◒"
@@ -55,7 +58,7 @@ const (
 	StatusRefresh = "⟳"
 )
 
-// Arrow icons
+// ── Arrow Icons ──────────────────────────────────────────────────────────────
 const (
 	ArrowUpRight   = "↗"
 	ArrowDownRight = "↘"
@@ -65,7 +68,7 @@ const (
 	ArrowDown      = "⇣"
 )
 
-// Decorative lines
+// ── Line Characters ──────────────────────────────────────────────────────────
 const (
 	LineDashed1 = "╌"
 	LineDashed2 = "╎"
@@ -73,7 +76,8 @@ const (
 	LineDashed4 = "┈"
 )
 
-// Block characters for progress bars and density indicators
+// ── Block Characters ─────────────────────────────────────────────────────────
+// Density indicators for progress bars and sparklines.
 const (
 	BlockFull = "█"
 	BlockHigh = "▓"
@@ -81,28 +85,21 @@ const (
 	BlockLow  = "░"
 )
 
-// Spinner characters
+// ── Spinner Characters ───────────────────────────────────────────────────────
+// Reduced to two: active (braille) and idle (dots).
 const (
-	SpinnerBraille  = "⠋"
-	SpinnerDots     = "⣾"
-	SpinnerArc      = "◜"
-	SpinnerBouncing = "⠁"
-	SpinnerLine     = "|"
-	SpinnerGrow     = "▏"
-	SpinnerPulse    = "◐"
+	SpinnerBraille = "⠋"
+	SpinnerDots    = "⣾"
 )
 
-// Card and border characters
+// ── Card and Border Characters ───────────────────────────────────────────────
+// Use standard box-drawing characters, not decorative ones.
 const (
-	CardTopLeft     = "╭"
-	CardTopRight    = "╮"
-	CardBottomLeft  = "╰"
-	CardBottomRight = "╯"
-	CardHorizontal  = "─"
-	CardVertical    = "│"
+	CardHorizontal = "─"
+	CardVertical   = "│"
 )
 
-// Gradient characters
+// ── Gradient Characters ──────────────────────────────────────────────────────
 const (
 	GradientLight  = "░"
 	GradientMedium = "▒"
@@ -110,7 +107,7 @@ const (
 	GradientFull   = "█"
 )
 
-// GetFileTypeIcon returns the icon for a given file extension
+// GetFileTypeIcon returns the icon for a given file extension.
 func GetFileTypeIcon(ext string) string {
 	switch ext {
 	case ".go":
@@ -128,7 +125,7 @@ func GetFileTypeIcon(ext string) string {
 	}
 }
 
-// GetPhaseIcon returns the icon for a workflow phase
+// GetPhaseIcon returns the icon for a workflow phase.
 func GetPhaseIcon(phase string) string {
 	switch phase {
 	case "initialize":
@@ -150,7 +147,7 @@ func GetPhaseIcon(phase string) string {
 	}
 }
 
-// GetStatusIcon returns the icon for a status
+// GetStatusIcon returns the icon for a status.
 func GetStatusIcon(status string) string {
 	switch status {
 	case "done", "pass", "complete":

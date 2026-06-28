@@ -56,7 +56,6 @@ func TestSettingsGetFieldValueAllKeys(t *testing.T) {
 		{"show_thinking", "yes"},
 		{"auto_arbitrage", "yes"},
 		{"context_length", "99999"},
-		{"theme", "light"},
 		{"show_cost", "yes"},
 		{"show_tokens", "yes"},
 		{"compact_mode", "yes"},
@@ -116,7 +115,6 @@ func TestSettingsSetFieldValueAllKeys(t *testing.T) {
 		{"show_thinking", "yes", func() bool { return cfg.Model.ShowThinkingByDefault }},
 		{"auto_arbitrage", "yes", func() bool { return cfg.Model.AutoArbitrage }},
 		{"context_length", "50000", func() bool { return cfg.Model.DefaultContextLength == 50000 }},
-		{"theme", "dark", func() bool { return cfg.UI.Theme == "dark" }},
 		{"show_cost", "yes", func() bool { return cfg.UI.ShowCostEstimate }},
 		{"show_tokens", "yes", func() bool { return cfg.UI.ShowTokenUsage }},
 		{"compact_mode", "yes", func() bool { return cfg.UI.CompactMode }},
@@ -155,33 +153,6 @@ func TestSettingsSetFieldValueInvalidNumber(t *testing.T) {
 	s.setFieldValue(settingsField{key: "context_length"}, "not-a-number")
 	if cfg.Model.DefaultContextLength != 128000 {
 		t.Error("should not change on invalid number")
-	}
-}
-
-func TestSettingsCycleChoiceWrapping(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.UI.Theme = "auto"
-	s := &SettingsModel{config: cfg}
-	s.fields = []settingsField{
-		{key: "theme", fieldType: "choice", choices: []string{"dark", "light", "auto"}},
-	}
-	s.fieldCursor = 0
-
-	s, _ = s.cycleChoice(1)
-	if cfg.UI.Theme != "dark" {
-		t.Errorf("want dark, got %s", cfg.UI.Theme)
-	}
-	s, _ = s.cycleChoice(1)
-	if cfg.UI.Theme != "light" {
-		t.Errorf("want light, got %s", cfg.UI.Theme)
-	}
-	s, _ = s.cycleChoice(1)
-	if cfg.UI.Theme != "auto" {
-		t.Errorf("want auto (wrap), got %s", cfg.UI.Theme)
-	}
-	_, _ = s.cycleChoice(-1)
-	if cfg.UI.Theme != "light" {
-		t.Errorf("want light (back), got %s", cfg.UI.Theme)
 	}
 }
 

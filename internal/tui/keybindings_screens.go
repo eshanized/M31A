@@ -20,7 +20,6 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 	r.Register(CtxGlobal, "ctrl+x l", "Ledger", emit("open_ledger"))
 	r.Register(CtxGlobal, "ctrl+x k", "Rollback", emit("open_rollback"))
 	r.Register(CtxGlobal, "ctrl+x d", "Dashboard", emit("open_dashboard"))
-	r.Register(CtxGlobal, "ctrl+x p", "Theme picker", emit("open_themes"))
 	r.Register(CtxGlobal, "ctrl+x !", "Notifications", emit("open_notifications"))
 	r.Register(CtxGlobal, "ctrl+x f", "File explorer", emit("open_files"))
 	r.Register(CtxGlobal, "ctrl+x a", "Subagents panel", emit("toggle_subagents"))
@@ -34,7 +33,6 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 	r.Register(CtxREPL, "ctrl+x n", "New session", emit("new_session"))
 	r.Register(CtxREPL, "ctrl+x r", "Session list", emit("session_list"))
 	r.Register(CtxREPL, "ctrl+x m", "Select model", emit("cycle_model"))
-	r.Register(CtxREPL, "ctrl+x t", "Toggle theme", emit("toggle_theme"))
 	r.Register(CtxREPL, "ctrl+x [", "Widen sidebar", emit("sidebar_wider"))
 	r.Register(CtxREPL, "ctrl+x ]", "Narrow sidebar", emit("sidebar_narrower"))
 }

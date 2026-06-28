@@ -51,6 +51,7 @@ type SimpleBadge struct {
 
 // Render returns the badge as a styled string.
 func (b SimpleBadge) Render() string {
+	s := theme.BuildSemanticStyles(b.Theme)
 	style := lipgloss.NewStyle().Bold(true)
 	if !b.Compact {
 		style = style.PaddingLeft(1).PaddingRight(1)
@@ -59,13 +60,13 @@ func (b SimpleBadge) Render() string {
 	case BadgeBrand:
 		return style.Foreground(b.Theme.Brand).Render(b.Text)
 	case BadgeSuccess:
-		return style.Foreground(b.Theme.Success).Render("✓ " + b.Text)
+		return s.BadgeSuccess.Render("✓ " + b.Text)
 	case BadgeError:
-		return style.Foreground(b.Theme.Error).Render("✗ " + b.Text)
+		return s.BadgeError.Render("✗ " + b.Text)
 	case BadgeWarning:
-		return style.Foreground(b.Theme.Warning).Render("⚠ " + b.Text)
+		return s.BadgeWarning.Render("⚠ " + b.Text)
 	case BadgeInfo:
-		return style.Foreground(b.Theme.Thinking).Render(b.Text)
+		return s.BadgeInfo.Render(b.Text)
 	default:
 		return style.Foreground(b.Theme.TextMuted).Render(b.Text)
 	}
@@ -79,6 +80,7 @@ type EnhancedBadge struct {
 
 // Render returns the enhanced badge as a styled string
 func (b EnhancedBadge) Render() string {
+	s := theme.BuildSemanticStyles(b.Theme)
 	text := b.Options.Text
 	if b.Options.Icon != "" {
 		text = b.Options.Icon + " " + text
@@ -118,8 +120,7 @@ func (b EnhancedBadge) Render() string {
 		dotStyle := lipgloss.NewStyle().
 			Foreground(b.Options.Color).
 			Bold(true)
-		textStyle := lipgloss.NewStyle().
-			Foreground(b.Theme.TextPrimary)
+		textStyle := s.Body
 		if b.Options.Compact {
 			dotStyle = dotStyle.Inline(true)
 			textStyle = textStyle.Inline(true)
@@ -171,29 +172,22 @@ const (
 
 // NewBadge creates a badge from a preset using the provided theme.
 func NewBadge(label string, preset BadgePreset, t theme.Theme) Badge {
+	s := theme.BuildSemanticStyles(t)
 	var style lipgloss.Style
 
 	switch preset {
 	case BadgeSuccessPreset:
-		style = t.SuccessBadge
+		style = s.BadgeSuccess
 	case BadgeWarningPreset:
-		style = t.WarningBadge
+		style = s.BadgeWarning
 	case BadgeErrorPreset:
-		style = t.ErrorBadge
+		style = s.BadgeError
 	case BadgeInfoPreset:
-		style = lipgloss.NewStyle().
-			Background(t.Thinking).
-			Foreground(t.BadgeForeground).
-			Padding(0, 1).
-			Bold(true)
+		style = s.BadgeInfo
 	case BadgeBrandPreset:
-		style = t.ModelBadge
+		style = s.BadgeBrand
 	case BadgeMutedPreset:
-		style = lipgloss.NewStyle().
-			Background(t.Border).
-			Foreground(t.TextSecondary).
-			Padding(0, 1).
-			Bold(true)
+		style = s.BadgeMuted
 	default:
 		style = lipgloss.NewStyle().
 			Background(t.Surface).
@@ -215,10 +209,8 @@ func RenderBadges(badges []Badge) string {
 
 // CapabilityBadge returns a badge for a model capability.
 func CapabilityBadge(capability string, t theme.Theme) Badge {
-	style := lipgloss.NewStyle().
-		Foreground(t.TextSecondary).
-		Padding(0, 1)
-	return Badge{Label: capability, Style: style}
+	s := theme.BuildSemanticStyles(t)
+	return Badge{Label: capability, Style: s.SecondaryText.Padding(0, 1)}
 }
 
 // StatusBadge returns a badge for a task/operation status.

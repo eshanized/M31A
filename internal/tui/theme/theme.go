@@ -2,19 +2,22 @@ package theme
 
 import "github.com/charmbracelet/lipgloss"
 
+// Mode represents the theme mode.
+// M31A ships with a single dark theme.
 type Mode int
 
 const (
-	ModeDark Mode = iota
-	ModeLight
-	ModeAuto
+	ModeDark  Mode = iota // the only supported mode
+	ModeLight             // deprecated — returns ModeDark
+	ModeAuto              // deprecated — returns ModeDark
 )
 
 // Standard borders used across the TUI
 var (
-	NormalBorder = lipgloss.RoundedBorder() // ╭─╮ for cards, modals
+	// NormalBorder is the default rounded border for cards and modals.
+	NormalBorder = lipgloss.RoundedBorder()
 
-	// ThinBorder is a lighter border for compact cards and tool cards
+	// ThinBorder is a lighter border for compact cards and tool cards.
 	ThinBorder = lipgloss.Border{
 		Top:         "─",
 		Bottom:      "─",
@@ -26,10 +29,11 @@ var (
 		BottomRight: "┘",
 	}
 
-	// DoubleBorder is reserved for important modals only
+	// DoubleBorder is reserved for important modals only.
 	DoubleBorder = lipgloss.DoubleBorder()
 )
 
+// SplitBorder is a vertical separator border.
 var SplitBorder = lipgloss.Border{
 	Top:         "",
 	Bottom:      "",
@@ -41,6 +45,7 @@ var SplitBorder = lipgloss.Border{
 	BottomRight: "",
 }
 
+// Theme holds all visual tokens for the M31A interface.
 type Theme struct {
 	Mode              Mode
 	Background        lipgloss.Color
@@ -90,54 +95,55 @@ type Theme struct {
 	DiffAddedBg       lipgloss.Color
 	DiffRemovedBg     lipgloss.Color
 	DiffContextBg     lipgloss.Color
-	BadgeForeground   lipgloss.Color // foreground color for colored badges (black on both dark/light)
-	BadgeTextLight    lipgloss.Color // white text for dark-themed badges
-	BadgeTextDark     lipgloss.Color // black text for light-themed badges
+	BadgeForeground   lipgloss.Color
+	BadgeTextLight    lipgloss.Color
+	BadgeTextDark     lipgloss.Color
 
-	// DividerChar is the unicode character used for horizontal dividers
+	// DividerChar is the unicode character used for horizontal dividers.
 	DividerChar string
 
-	// HeaderHeight is the number of rows the header occupies
+	// HeaderHeight is the number of rows the header occupies.
 	HeaderHeight int
 
-	// ShadowColor is used for modal drop shadows
+	// ShadowColor is used for modal drop shadows.
 	ShadowColor lipgloss.Color
 
-	// CompactMode enables reduced spacing for dense terminals
+	// CompactMode enables reduced spacing for dense terminals.
 	CompactMode bool
 
-	// SelectionBg is the background color for selected/highlighted items
+	// SelectionBg is the background color for selected/highlighted items.
 	SelectionBg lipgloss.Color
 
-	// CardPadding is the default padding for all card-style components
+	// CardPadding is the default padding for all card-style components.
 	CardPadding int
 
-	// Card border styles for panel/card rendering
-	CardBorder       lipgloss.Style // rounded card border, default brand color
-	CardBorderActive lipgloss.Style // focused card border, brand + bold
-	CardBorderError  lipgloss.Style // error card border, error color
-	CardBorderWarn   lipgloss.Style // warning card border, warning color
+	// Card border styles for panel/card rendering.
+	CardBorder       lipgloss.Style
+	CardBorderActive lipgloss.Style
+	CardBorderError  lipgloss.Style
+	CardBorderWarn   lipgloss.Style
 
 	// Workflow phase styles
-	PhaseActive lipgloss.Style // current workflow phase, brand + bold
-	PhasePast   lipgloss.Style // completed workflow phases, muted
-	PhaseFuture lipgloss.Style // upcoming workflow phases, muted
+	PhaseActive lipgloss.Style
+	PhasePast   lipgloss.Style
+	PhaseFuture lipgloss.Style
 
 	// Timeline and metric styles
-	TimelineDate lipgloss.Style // session timeline date headers
-	MetricValue  lipgloss.Style // large metric numbers, brand foreground
-	MetricLabel  lipgloss.Style // metric label below value, muted
+	TimelineDate lipgloss.Style
+	MetricValue  lipgloss.Style
+	MetricLabel  lipgloss.Style
 
 	// Block character constants for progress bars, sparklines, and density indicators
-	BlockFull string // "█" full block
-	BlockHigh string // "▓" high density
-	BlockMed  string // "▒" medium density
-	BlockLow  string // "░" low density
+	BlockFull string
+	BlockHigh string
+	BlockMed  string
+	BlockLow  string
 
-	// TabWidth is the number of spaces a tab character represents
+	// TabWidth is the number of spaces a tab character represents.
 	TabWidth int
 }
 
+// Manager manages the active theme.
 type Manager struct {
 	current     Theme
 	mode        Mode
@@ -147,9 +153,12 @@ type Manager struct {
 	cache       *StyleCache // lazily built, invalidated on theme change
 }
 
+// NewManager creates a new theme manager.
+// M31A ships with a single dark theme. Mode is accepted for backward
+// compatibility but always produces the M31A dark theme.
 func NewManager(mode Mode) *Manager {
 	m := &Manager{
-		mode:        mode,
+		mode:        ModeDark,
 		profile:     DetectColorProfile(),
 		borderStyle: "rounded",
 		accentColor: "",
@@ -158,39 +167,29 @@ func NewManager(mode Mode) *Manager {
 	return m
 }
 
-// SetBorderStyle sets the border style for the theme manager
+// SetBorderStyle sets the border style for the theme manager.
 func (m *Manager) SetBorderStyle(style string) {
 	m.borderStyle = style
 	m.resolve()
 }
 
-// SetAccentColor sets the accent color override for the theme manager
+// SetAccentColor sets the accent color override for the theme manager.
 func (m *Manager) SetAccentColor(hex string) {
 	m.accentColor = hex
 	m.resolve()
 }
 
-// CurrentBorder returns the current border style based on config
+// CurrentBorder returns the current border style based on config.
 func (m *Manager) CurrentBorder() lipgloss.Border {
 	return BorderByName(m.borderStyle)
 }
 
 func (m *Manager) resolve() {
-	var base Theme
-	switch m.mode {
-	case ModeDark:
-		base = Dark()
-	case ModeLight:
-		base = Light()
-	case ModeAuto:
-		base = Auto()
-	default:
-		base = Dark()
-	}
+	// M31A ships with a single dark theme
+	base := M31A()
 
 	// Apply 16-color ANSI fallback if terminal doesn't support 256/truecolor
 	if m.profile == Profile16 {
-		// Copy base and override with ANSI colors
 		base.Brand = lipgloss.Color("208")
 		base.Success = lipgloss.Color("2")
 		base.Error = lipgloss.Color("1")
@@ -208,25 +207,20 @@ func (m *Manager) resolve() {
 	m.invalidateCache()
 }
 
+// Cycle is deprecated. M31A has a single theme.
+// Kept for backward compatibility — always returns ModeDark.
 func (m *Manager) Cycle() Mode {
-	switch m.mode {
-	case ModeDark:
-		m.mode = ModeLight
-	case ModeLight:
-		m.mode = ModeAuto
-	case ModeAuto:
-		m.mode = ModeDark
-	default:
-		m.mode = ModeDark
-	}
+	m.mode = ModeDark
 	m.resolve()
 	return m.mode
 }
 
+// Current returns the active theme.
 func (m *Manager) Current() Theme {
 	return m.current
 }
 
+// Default returns the default M31A theme.
 func Default() Theme {
-	return Dark()
+	return M31A()
 }

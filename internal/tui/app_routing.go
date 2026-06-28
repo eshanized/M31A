@@ -228,16 +228,6 @@ func (m *AppState) initScreenUpdaters() {
 		}
 		return cmd
 	}
-	m.screenUpdaters[ScreenThemePicker] = func(msg tea.Msg) tea.Cmd {
-		if m.themePickerModel == nil {
-			return nil
-		}
-		newModel, cmd := m.themePickerModel.Update(msg)
-		if r, ok := newModel.(*ThemePickerModel); ok {
-			m.themePickerModel = r
-		}
-		return cmd
-	}
 	m.screenUpdaters[ScreenResume] = func(msg tea.Msg) tea.Cmd {
 		if m.resumeModel == nil {
 			return nil

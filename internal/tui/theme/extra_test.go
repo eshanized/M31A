@@ -95,7 +95,6 @@ func TestBorderByName(t *testing.T) {
 		{"double"},
 		{"heavy"},
 		{"dashed"},
-		{"shadow"},
 		{"none"},
 		{"normal"},
 		{"unknown"},
@@ -222,7 +221,6 @@ func TestUnicodeConstants(t *testing.T) {
 		"LineDashed1":    LineDashed1,
 		"BlockFull":      BlockFull,
 		"SpinnerBraille": SpinnerBraille,
-		"CardTopLeft":    CardTopLeft,
 		"GradientLight":  GradientLight,
 	}
 	for name, val := range constants {
@@ -240,15 +238,6 @@ func TestBorderVariables(t *testing.T) {
 	}
 	if DashedBorder.Top == "" {
 		t.Error("DashedBorder.Top is empty")
-	}
-	if ShadowBorder.Top == "" {
-		t.Error("ShadowBorder.Top is empty")
-	}
-	if BrandGradientBorder.Top == "" {
-		t.Error("BrandGradientBorder.Top is empty")
-	}
-	if ThinkingGradientBorder.Top == "" {
-		t.Error("ThinkingGradientBorder.Top is empty")
 	}
 }
 

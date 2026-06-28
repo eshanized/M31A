@@ -15,13 +15,13 @@ type TodoWriteRenderer struct {
 }
 
 func NewTodoWriteRenderer(t theme.Theme) *TodoWriteRenderer {
-	return &TodoWriteRenderer{BaseRenderer: BaseRenderer{toolName: "TodoWrite", theme: t}}
+	return &TodoWriteRenderer{BaseRenderer: BaseRenderer{toolName: "TodoWrite", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *TodoWriteRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if todos, ok := params["todos"].([]any); ok {
 		pending, completed := 0, 0
@@ -45,10 +45,10 @@ func (r *TodoWriteRenderer) RenderInput(call types.ToolCall, width int) string {
 			filled = (completed * barWidth) / total
 		}
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(
+		return r.styles.ToolInput.Width(width).Render(
 			fmt.Sprintf("todos: %d/%d completed  [%s]", completed, total, bar))
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *TodoWriteRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -60,18 +60,18 @@ type GrepRenderer struct {
 }
 
 func NewGrepRenderer(t theme.Theme) *GrepRenderer {
-	return &GrepRenderer{BaseRenderer: BaseRenderer{toolName: "Grep", theme: t}}
+	return &GrepRenderer{BaseRenderer: BaseRenderer{toolName: "Grep", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *GrepRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if pattern, ok := params["pattern"].(string); ok {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("grep " + pattern)
+		return r.styles.ToolInput.Width(width).Render("grep " + pattern)
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *GrepRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -82,9 +82,7 @@ func (r *GrepRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 	if collapsed {
 		matchCount := strings.Count(result.Output, "\n") + 1
 		return lipgloss.JoinVertical(lipgloss.Top,
-			lipgloss.NewStyle().
-				Foreground(r.theme.TextSecondary).
-				Italic(true).
+			r.styles.SecondaryText.Italic(true).
 				Render(fmt.Sprintf("[%d matches]", matchCount)),
 			r.RenderStatus(state, durationMs, width, ""),
 		)
@@ -101,18 +99,18 @@ type GlobRenderer struct {
 }
 
 func NewGlobRenderer(t theme.Theme) *GlobRenderer {
-	return &GlobRenderer{BaseRenderer: BaseRenderer{toolName: "Glob", theme: t}}
+	return &GlobRenderer{BaseRenderer: BaseRenderer{toolName: "Glob", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *GlobRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if pattern, ok := params["pattern"].(string); ok {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("glob " + pattern)
+		return r.styles.ToolInput.Width(width).Render("glob " + pattern)
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *GlobRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -123,9 +121,7 @@ func (r *GlobRenderer) RenderOutput(result *types.ToolResult, state ToolState, d
 	if collapsed {
 		fileCount := strings.Count(result.Output, "\n") + 1
 		return lipgloss.JoinVertical(lipgloss.Top,
-			lipgloss.NewStyle().
-				Foreground(r.theme.TextSecondary).
-				Italic(true).
+			r.styles.SecondaryText.Italic(true).
 				Render(fmt.Sprintf("[%d files]", fileCount)),
 			r.RenderStatus(state, durationMs, width, ""),
 		)
@@ -142,13 +138,13 @@ type GenericRenderer struct {
 }
 
 func NewGenericRenderer(toolName string, t theme.Theme) *GenericRenderer {
-	return &GenericRenderer{BaseRenderer: BaseRenderer{toolName: toolName, theme: t}}
+	return &GenericRenderer{BaseRenderer: BaseRenderer{toolName: toolName, theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *GenericRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	var parts []string
 	for k, v := range params {
@@ -158,9 +154,9 @@ func (r *GenericRenderer) RenderInput(call types.ToolCall, width int) string {
 		}
 	}
 	if len(parts) == 0 {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(strings.Join(parts, ", "))
+	return r.styles.ToolInput.Width(width).Render(strings.Join(parts, ", "))
 }
 
 func (r *GenericRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -187,18 +183,18 @@ type WebFetchRenderer struct {
 }
 
 func NewWebFetchRenderer(t theme.Theme) *WebFetchRenderer {
-	return &WebFetchRenderer{BaseRenderer: BaseRenderer{toolName: "WebFetch", theme: t}}
+	return &WebFetchRenderer{BaseRenderer: BaseRenderer{toolName: "WebFetch", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *WebFetchRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if url, ok := params["url"].(string); ok {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("fetch " + url)
+		return r.styles.ToolInput.Width(width).Render("fetch " + url)
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *WebFetchRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
@@ -216,18 +212,18 @@ type AskUserQuestionRenderer struct {
 }
 
 func NewAskUserQuestionRenderer(t theme.Theme) *AskUserQuestionRenderer {
-	return &AskUserQuestionRenderer{BaseRenderer: BaseRenderer{toolName: "AskUserQuestion", theme: t}}
+	return &AskUserQuestionRenderer{BaseRenderer: BaseRenderer{toolName: "AskUserQuestion", theme: t, styles: theme.BuildSemanticStyles(t)}}
 }
 
 func (r *AskUserQuestionRenderer) RenderInput(call types.ToolCall, width int) string {
 	var params map[string]any
 	if err := json.Unmarshal(call.Input, &params); err != nil {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+		return r.styles.ToolInput.Width(width).Render(string(call.Input))
 	}
 	if question, ok := params["question"].(string); ok {
-		return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render("ask: " + question)
+		return r.styles.ToolInput.Width(width).Render("ask: " + question)
 	}
-	return lipgloss.NewStyle().Foreground(r.theme.TextPrimary).Width(width).Padding(0, 1).Render(string(call.Input))
+	return r.styles.ToolInput.Width(width).Render(string(call.Input))
 }
 
 func (r *AskUserQuestionRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
