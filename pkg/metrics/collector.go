@@ -349,7 +349,7 @@ func (c *Collector) RecordHealLoop(phase m31types.WorkflowPhase) {
 		}
 	}
 	c.metrics.Phases = append(c.metrics.Phases, PhaseMetric{
-		Phase:          phase,
+		Phase:         phase,
 		HealLoopCount: 1,
 	})
 	c.metrics.UpdatedAt = time.Now()

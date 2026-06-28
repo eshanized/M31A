@@ -16,27 +16,27 @@ import "github.com/charmbracelet/lipgloss"
 // and the design system decides HOW they look.
 type SemanticStyles struct {
 	// ── Typography ──────────────────────────────────────────────────────────
-	PageTitle      lipgloss.Style // full-width title text
-	SectionTitle   lipgloss.Style // section heading
-	Subsection     lipgloss.Style // sub-section heading
-	Heading        lipgloss.Style // bold primary text
-	Subheading     lipgloss.Style // bold secondary text
-	Body           lipgloss.Style // normal body text
-	Caption        lipgloss.Style // small muted text
-	Muted          lipgloss.Style // very muted text
-	Faint          lipgloss.Style // decorative dim text
-	Hint           lipgloss.Style // hint/placeholder text
-	Metadata       lipgloss.Style // metadata labels
-	BrandText      lipgloss.Style // accent-colored text
-	BrandBold      lipgloss.Style // bold accent text
-	SecondaryText  lipgloss.Style // secondary text
-	ErrorText      lipgloss.Style // error-colored text
-	SuccessText    lipgloss.Style // success-colored text
-	WarningText    lipgloss.Style // warning-colored text
-	ThinkingText   lipgloss.Style // thinking-colored text
-	CodeInline     lipgloss.Style // inline code references
-	Link           lipgloss.Style // hyperlink text
-	KeyboardHint   lipgloss.Style // keyboard shortcut hint
+	PageTitle     lipgloss.Style // full-width title text
+	SectionTitle  lipgloss.Style // section heading
+	Subsection    lipgloss.Style // sub-section heading
+	Heading       lipgloss.Style // bold primary text
+	Subheading    lipgloss.Style // bold secondary text
+	Body          lipgloss.Style // normal body text
+	Caption       lipgloss.Style // small muted text
+	Muted         lipgloss.Style // very muted text
+	Faint         lipgloss.Style // decorative dim text
+	Hint          lipgloss.Style // hint/placeholder text
+	Metadata      lipgloss.Style // metadata labels
+	BrandText     lipgloss.Style // accent-colored text
+	BrandBold     lipgloss.Style // bold accent text
+	SecondaryText lipgloss.Style // secondary text
+	ErrorText     lipgloss.Style // error-colored text
+	SuccessText   lipgloss.Style // success-colored text
+	WarningText   lipgloss.Style // warning-colored text
+	ThinkingText  lipgloss.Style // thinking-colored text
+	CodeInline    lipgloss.Style // inline code references
+	Link          lipgloss.Style // hyperlink text
+	KeyboardHint  lipgloss.Style // keyboard shortcut hint
 
 	// ── Buttons ─────────────────────────────────────────────────────────────
 	ButtonPrimary   lipgloss.Style // filled primary action
@@ -54,8 +54,8 @@ type SemanticStyles struct {
 	CardHeader   lipgloss.Style // filled header bar
 
 	// ── Panels ──────────────────────────────────────────────────────────────
-	Panel        lipgloss.Style // generic panel
-	PanelBorder  lipgloss.Style // panel with border
+	Panel         lipgloss.Style // generic panel
+	PanelBorder   lipgloss.Style // panel with border
 	PanelElevated lipgloss.Style // elevated panel
 
 	// ── Dialogs ─────────────────────────────────────────────────────────────
@@ -64,14 +64,14 @@ type SemanticStyles struct {
 	DialogWarning lipgloss.Style // warning dialog
 
 	// ── Badges ──────────────────────────────────────────────────────────────
-	BadgeBrand    lipgloss.Style // brand badge
-	BadgeSuccess  lipgloss.Style // success badge
-	BadgeError    lipgloss.Style // error badge
-	BadgeWarning  lipgloss.Style // warning badge
-	BadgeInfo     lipgloss.Style // info badge
-	BadgeNeutral  lipgloss.Style // neutral badge
-	BadgeMuted    lipgloss.Style // muted badge
-	BadgeRunning  lipgloss.Style // running state badge
+	BadgeBrand   lipgloss.Style // brand badge
+	BadgeSuccess lipgloss.Style // success badge
+	BadgeError   lipgloss.Style // error badge
+	BadgeWarning lipgloss.Style // warning badge
+	BadgeInfo    lipgloss.Style // info badge
+	BadgeNeutral lipgloss.Style // neutral badge
+	BadgeMuted   lipgloss.Style // muted badge
+	BadgeRunning lipgloss.Style // running state badge
 
 	// ── Status Indicators ───────────────────────────────────────────────────
 	StatusLive    lipgloss.Style // live/active indicator
@@ -80,13 +80,13 @@ type SemanticStyles struct {
 	StatusBadge   lipgloss.Style // generic status badge
 
 	// ── Input ───────────────────────────────────────────────────────────────
-	Input          lipgloss.Style // text input
-	InputFocused   lipgloss.Style // focused text input
-	InputSearch    lipgloss.Style // search input
-	InputCursor    lipgloss.Style // cursor in input
-	InputLabel     lipgloss.Style // input label
-	InputPrompt    lipgloss.Style // input prompt character
-	InputCode      lipgloss.Style // code/command input
+	Input        lipgloss.Style // text input
+	InputFocused lipgloss.Style // focused text input
+	InputSearch  lipgloss.Style // search input
+	InputCursor  lipgloss.Style // cursor in input
+	InputLabel   lipgloss.Style // input label
+	InputPrompt  lipgloss.Style // input prompt character
+	InputCode    lipgloss.Style // code/command input
 
 	// ── Toolbar ─────────────────────────────────────────────────────────────
 	Toolbar         lipgloss.Style // toolbar background
@@ -95,21 +95,21 @@ type SemanticStyles struct {
 	ToolbarInactive lipgloss.Style // inactive toolbar item
 
 	// ── Sidebar ─────────────────────────────────────────────────────────────
-	Sidebar         lipgloss.Style // sidebar container
-	SidebarItem     lipgloss.Style // sidebar item
-	SidebarActive   lipgloss.Style // active sidebar item
-	SidebarBorder   lipgloss.Style // sidebar border
+	Sidebar       lipgloss.Style // sidebar container
+	SidebarItem   lipgloss.Style // sidebar item
+	SidebarActive lipgloss.Style // active sidebar item
+	SidebarBorder lipgloss.Style // sidebar border
 
 	// ── Tabs ────────────────────────────────────────────────────────────────
 	TabActive   lipgloss.Style // active tab
 	TabInactive lipgloss.Style // inactive tab
 
 	// ── Lists ───────────────────────────────────────────────────────────────
-	ListItem       lipgloss.Style // list item
-	ListSelected   lipgloss.Style // selected list item
-	ListCursor     lipgloss.Style // list cursor
-	ListEmpty      lipgloss.Style // empty list state
-	ListSeparator  lipgloss.Style // list separator
+	ListItem      lipgloss.Style // list item
+	ListSelected  lipgloss.Style // selected list item
+	ListCursor    lipgloss.Style // list cursor
+	ListEmpty     lipgloss.Style // empty list state
+	ListSeparator lipgloss.Style // list separator
 
 	// ── Table ───────────────────────────────────────────────────────────────
 	TableHeader lipgloss.Style // table header
@@ -117,64 +117,64 @@ type SemanticStyles struct {
 	TableCell   lipgloss.Style // table cell
 
 	// ── Progress ────────────────────────────────────────────────────────────
-	ProgressFill   lipgloss.Style // progress bar fill
-	ProgressEmpty  lipgloss.Style // progress bar empty
-	ProgressLabel  lipgloss.Style // progress percentage label
-	ProgressStep   lipgloss.Style // step indicator
-	ProgressDone   lipgloss.Style // completed step
+	ProgressFill  lipgloss.Style // progress bar fill
+	ProgressEmpty lipgloss.Style // progress bar empty
+	ProgressLabel lipgloss.Style // progress percentage label
+	ProgressStep  lipgloss.Style // step indicator
+	ProgressDone  lipgloss.Style // completed step
 
 	// ── Spinner / Loading ──────────────────────────────────────────────────
-	Spinner       lipgloss.Style // spinner character
-	SpinnerBrand  lipgloss.Style // brand-colored spinner
-	SpinnerMuted  lipgloss.Style // muted spinner
-	Loading       lipgloss.Style // loading indicator text
+	Spinner      lipgloss.Style // spinner character
+	SpinnerBrand lipgloss.Style // brand-colored spinner
+	SpinnerMuted lipgloss.Style // muted spinner
+	Loading      lipgloss.Style // loading indicator text
 
 	// ── Thinking ────────────────────────────────────────────────────────────
-	Thinking         lipgloss.Style // thinking content
-	ThinkingBorder   lipgloss.Style // thinking panel border
-	ThinkingHeader   lipgloss.Style // thinking panel header
-	ThinkingLabel    lipgloss.Style // thinking label text
-	ThinkingToggle   lipgloss.Style // thinking toggle icon
-	ThinkingMuted    lipgloss.Style // thinking muted text
+	Thinking       lipgloss.Style // thinking content
+	ThinkingBorder lipgloss.Style // thinking panel border
+	ThinkingHeader lipgloss.Style // thinking panel header
+	ThinkingLabel  lipgloss.Style // thinking label text
+	ThinkingToggle lipgloss.Style // thinking toggle icon
+	ThinkingMuted  lipgloss.Style // thinking muted text
 
 	// ── Streaming ───────────────────────────────────────────────────────────
 	StreamingCursor lipgloss.Style // streaming cursor
 	StreamingText   lipgloss.Style // streaming text
 
 	// ── Tool Output ─────────────────────────────────────────────────────────
-	ToolInput        lipgloss.Style // tool input text
-	ToolOutput       lipgloss.Style // tool output text
-	ToolLabel        lipgloss.Style // tool label badge
-	ToolStatusOK     lipgloss.Style // tool success status
-	ToolStatusErr    lipgloss.Style // tool error status
-	ToolStatusRun    lipgloss.Style // tool running status
-	ToolMeta         lipgloss.Style // tool metadata (duration, lines)
+	ToolInput     lipgloss.Style // tool input text
+	ToolOutput    lipgloss.Style // tool output text
+	ToolLabel     lipgloss.Style // tool label badge
+	ToolStatusOK  lipgloss.Style // tool success status
+	ToolStatusErr lipgloss.Style // tool error status
+	ToolStatusRun lipgloss.Style // tool running status
+	ToolMeta      lipgloss.Style // tool metadata (duration, lines)
 
 	// ── Permission ──────────────────────────────────────────────────────────
-	PermTitle        lipgloss.Style // permission dialog title
-	PermLock         lipgloss.Style // lock icon
-	PermKey          lipgloss.Style // key binding hint
-	PermHint         lipgloss.Style // key binding description
-	PermCountdown    lipgloss.Style // countdown text
+	PermTitle         lipgloss.Style // permission dialog title
+	PermLock          lipgloss.Style // lock icon
+	PermKey           lipgloss.Style // key binding hint
+	PermHint          lipgloss.Style // key binding description
+	PermCountdown     lipgloss.Style // countdown text
 	PermCountdownWarn lipgloss.Style // urgent countdown text
-	PermCountdownErr lipgloss.Style // expired countdown text
-	PermBarFill      lipgloss.Style // countdown bar fill
-	PermBarEmpty     lipgloss.Style // countdown bar empty
-	PermRuleMatch    lipgloss.Style // matched rule text
-	PermCommand      lipgloss.Style // command text in dialog
-	PermCommandOp    lipgloss.Style // command operator (pipe, &&)
-	PermCommandArg   lipgloss.Style // command argument
-	PermRiskDanger   lipgloss.Style // dangerous risk badge
-	PermRiskDestruct lipgloss.Style // destructive risk badge
-	PermRiskMedium   lipgloss.Style // medium risk badge
-	PermRiskSafe     lipgloss.Style // safe risk badge
+	PermCountdownErr  lipgloss.Style // expired countdown text
+	PermBarFill       lipgloss.Style // countdown bar fill
+	PermBarEmpty      lipgloss.Style // countdown bar empty
+	PermRuleMatch     lipgloss.Style // matched rule text
+	PermCommand       lipgloss.Style // command text in dialog
+	PermCommandOp     lipgloss.Style // command operator (pipe, &&)
+	PermCommandArg    lipgloss.Style // command argument
+	PermRiskDanger    lipgloss.Style // dangerous risk badge
+	PermRiskDestruct  lipgloss.Style // destructive risk badge
+	PermRiskMedium    lipgloss.Style // medium risk badge
+	PermRiskSafe      lipgloss.Style // safe risk badge
 
 	// ── Toast / Notification ────────────────────────────────────────────────
-	Toast        lipgloss.Style // toast background
-	ToastSuccess lipgloss.Style // success toast
-	ToastError   lipgloss.Style // error toast
-	ToastWarning lipgloss.Style // warning toast
-	ToastInfo    lipgloss.Style // info toast
+	Toast                lipgloss.Style // toast background
+	ToastSuccess         lipgloss.Style // success toast
+	ToastError           lipgloss.Style // error toast
+	ToastWarning         lipgloss.Style // warning toast
+	ToastInfo            lipgloss.Style // info toast
 	NotificationIcon     lipgloss.Style // notification icon
 	NotificationText     lipgloss.Style // notification text
 	NotificationTime     lipgloss.Style // notification timestamp
@@ -186,16 +186,16 @@ type SemanticStyles struct {
 	InfoBanner    lipgloss.Style // info banner
 
 	// ── Headers / Footers ───────────────────────────────────────────────────
-	Header        lipgloss.Style // header bar
-	HeaderBrand   lipgloss.Style // brand in header
-	HeaderCrumb   lipgloss.Style // breadcrumb text
-	HeaderDots    lipgloss.Style // breadcrumb separator dots
-	Footer        lipgloss.Style // footer bar
-	FooterCwd     lipgloss.Style // working directory
-	FooterBranch  lipgloss.Style // git branch
-	FooterOp      lipgloss.Style // operation status
-	FooterHint    lipgloss.Style // footer hint
-	FooterLeader  lipgloss.Style // leader key indicator
+	Header       lipgloss.Style // header bar
+	HeaderBrand  lipgloss.Style // brand in header
+	HeaderCrumb  lipgloss.Style // breadcrumb text
+	HeaderDots   lipgloss.Style // breadcrumb separator dots
+	Footer       lipgloss.Style // footer bar
+	FooterCwd    lipgloss.Style // working directory
+	FooterBranch lipgloss.Style // git branch
+	FooterOp     lipgloss.Style // operation status
+	FooterHint   lipgloss.Style // footer hint
+	FooterLeader lipgloss.Style // leader key indicator
 
 	// ── Separators ──────────────────────────────────────────────────────────
 	SeparatorH    lipgloss.Style // horizontal separator
@@ -204,30 +204,30 @@ type SemanticStyles struct {
 	Divider       lipgloss.Style // section divider
 
 	// ── Selection / Cursor ──────────────────────────────────────────────────
-	Selection     lipgloss.Style // selected text/item
-	Cursor        lipgloss.Style // text cursor
-	CursorLine    lipgloss.Style // cursor line highlight
+	Selection  lipgloss.Style // selected text/item
+	Cursor     lipgloss.Style // text cursor
+	CursorLine lipgloss.Style // cursor line highlight
 
 	// ── Focus ───────────────────────────────────────────────────────────────
-	FocusRing     lipgloss.Style // focus ring
-	FocusRingOff  lipgloss.Style // unfocused ring
+	FocusRing    lipgloss.Style // focus ring
+	FocusRingOff lipgloss.Style // unfocused ring
 
 	// ── Disabled ────────────────────────────────────────────────────────────
-	Disabled      lipgloss.Style // disabled text
+	Disabled       lipgloss.Style // disabled text
 	DisabledButton lipgloss.Style // disabled button
 
 	// ── Empty State ─────────────────────────────────────────────────────────
-	EmptyState        lipgloss.Style // empty state container
-	EmptyStateIcon    lipgloss.Style // empty state icon
-	EmptyStateTitle   lipgloss.Style // empty state title
-	EmptyStateHint    lipgloss.Style // empty state hint
-	EmptyStateAction  lipgloss.Style // empty state action item
+	EmptyState       lipgloss.Style // empty state container
+	EmptyStateIcon   lipgloss.Style // empty state icon
+	EmptyStateTitle  lipgloss.Style // empty state title
+	EmptyStateHint   lipgloss.Style // empty state hint
+	EmptyStateAction lipgloss.Style // empty state action item
 
 	// ── Diff ────────────────────────────────────────────────────────────────
-	DiffAdded     lipgloss.Style // added line
-	DiffRemoved   lipgloss.Style // removed line
-	DiffContext   lipgloss.Style // context line
-	DiffHunk      lipgloss.Style // hunk header
+	DiffAdded   lipgloss.Style // added line
+	DiffRemoved lipgloss.Style // removed line
+	DiffContext lipgloss.Style // context line
+	DiffHunk    lipgloss.Style // hunk header
 
 	// ── Code ────────────────────────────────────────────────────────────────
 	CodeBlock   lipgloss.Style // code block container
@@ -240,22 +240,22 @@ type SemanticStyles struct {
 	CodeType    lipgloss.Style // syntax type
 
 	// ── Markdown ────────────────────────────────────────────────────────────
-	MarkdownH1    lipgloss.Style // markdown H1
-	MarkdownH2    lipgloss.Style // markdown H2
-	MarkdownH3    lipgloss.Style // markdown H3
-	MarkdownBold  lipgloss.Style // bold text
+	MarkdownH1     lipgloss.Style // markdown H1
+	MarkdownH2     lipgloss.Style // markdown H2
+	MarkdownH3     lipgloss.Style // markdown H3
+	MarkdownBold   lipgloss.Style // bold text
 	MarkdownItalic lipgloss.Style // italic text
-	MarkdownLink  lipgloss.Style // link text
-	MarkdownQuote lipgloss.Style // blockquote
-	MarkdownList  lipgloss.Style // list item
+	MarkdownLink   lipgloss.Style // link text
+	MarkdownQuote  lipgloss.Style // blockquote
+	MarkdownList   lipgloss.Style // list item
 
 	// ── Scroll ──────────────────────────────────────────────────────────────
-	Scrollbar     lipgloss.Style // scrollbar thumb
+	Scrollbar      lipgloss.Style // scrollbar thumb
 	ScrollbarTrack lipgloss.Style // scrollbar track
 
 	// ── Overlay ─────────────────────────────────────────────────────────────
-	DimOverlay    lipgloss.Style // dimmed overlay background
-	Shadow        lipgloss.Style // shadow effect
+	DimOverlay lipgloss.Style // dimmed overlay background
+	Shadow     lipgloss.Style // shadow effect
 }
 
 // BuildSemanticStyles creates a complete SemanticStyles from a Theme.

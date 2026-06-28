@@ -234,7 +234,7 @@ func TestEdit_Execute_Integration_Fuzzy(t *testing.T) {
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.go",
-			"old_string": "func foo() {\n\treturn 2\n}",  // line 2 differs
+			"old_string": "func foo() {\n\treturn 2\n}", // line 2 differs
 			"new_string": "func foo() {\n\treturn 42\n}",
 		},
 	})

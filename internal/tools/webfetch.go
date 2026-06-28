@@ -715,10 +715,10 @@ func convertOrderedList(rawHTML string) string {
 // convertImages converts <img> tags to markdown image syntax.
 func convertImages(rawHTML, lower string) string {
 	type imgMatch struct {
-		start    int
-		end      int
-		alt      string
-		src      string
+		start int
+		end   int
+		alt   string
+		src   string
 	}
 	var matches []imgMatch
 

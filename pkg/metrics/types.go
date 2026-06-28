@@ -55,11 +55,11 @@ type PhaseMetric struct {
 
 // SessionMetrics is the top-level metrics container persisted per session.
 type SessionMetrics struct {
-	SessionID     string              `json:"session_id"`
-	StartedAt     time.Time           `json:"started_at"`
-	UpdatedAt     time.Time           `json:"updated_at"`
-	Tools         []ToolMetric        `json:"tools"`
+	SessionID      string               `json:"session_id"`
+	StartedAt      time.Time            `json:"started_at"`
+	UpdatedAt      time.Time            `json:"updated_at"`
+	Tools          []ToolMetric         `json:"tools"`
 	EditStrategies []EditStrategyMetric `json:"edit_strategies,omitempty"`
-	LLMs          []LLMMetric         `json:"llms"`
-	Phases        []PhaseMetric       `json:"phases"`
+	LLMs           []LLMMetric          `json:"llms"`
+	Phases         []PhaseMetric        `json:"phases"`
 }

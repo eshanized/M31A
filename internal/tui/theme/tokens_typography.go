@@ -19,8 +19,8 @@ var (
 
 	// StyleSubheading is bold text in secondary color — for section headers.
 	StyleSubheading = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color(TextSecondary))
+			Bold(true).
+			Foreground(lipgloss.Color(TextSecondary))
 
 	// StyleBody is normal-weight text in primary color — for main content.
 	StyleBody = lipgloss.NewStyle().

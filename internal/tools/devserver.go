@@ -26,24 +26,24 @@ const (
 )
 
 type devServerEntry struct {
-	cmd       *exec.Cmd
-	command   string
-	port      int
-	started   time.Time
-	env       []string
-	logs      *ringBuffer
-	exited    bool
-	exitCode  int
-	exitedAt  time.Time
-	crashed   bool
-	mu        sync.Mutex
+	cmd      *exec.Cmd
+	command  string
+	port     int
+	started  time.Time
+	env      []string
+	logs     *ringBuffer
+	exited   bool
+	exitCode int
+	exitedAt time.Time
+	crashed  bool
+	mu       sync.Mutex
 }
 
 type ringBuffer struct {
-	mu      sync.Mutex
-	buf     []byte
+	mu       sync.Mutex
+	buf      []byte
 	maxBytes int
-	lines   int
+	lines    int
 }
 
 func newRingBuffer(maxBytes int) *ringBuffer {
@@ -368,15 +368,15 @@ func (d *DevServer) listServers(start time.Time) (types.ToolResult, error) {
 	defer d.mu.Unlock()
 
 	type serverInfo struct {
-		ID        int    `json:"id"`
-		Command   string `json:"command"`
-		Port      int    `json:"port"`
-		PID       int    `json:"pid"`
-		Uptime    string `json:"uptime"`
-		Running   bool   `json:"running"`
-		Crashed   bool   `json:"crashed,omitempty"`
-		ExitCode  int    `json:"exit_code,omitempty"`
-		LogLines  int    `json:"log_lines,omitempty"`
+		ID       int    `json:"id"`
+		Command  string `json:"command"`
+		Port     int    `json:"port"`
+		PID      int    `json:"pid"`
+		Uptime   string `json:"uptime"`
+		Running  bool   `json:"running"`
+		Crashed  bool   `json:"crashed,omitempty"`
+		ExitCode int    `json:"exit_code,omitempty"`
+		LogLines int    `json:"log_lines,omitempty"`
 	}
 
 	var servers []serverInfo

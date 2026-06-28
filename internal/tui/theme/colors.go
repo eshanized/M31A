@@ -261,8 +261,8 @@ func applyThemeStyles(t *Theme) {
 	// Block character constants for progress bars
 	t.BlockFull = "█"
 	t.BlockHigh = "▓"
-	t.BlockMed  = "▒"
-	t.BlockLow  = "░"
+	t.BlockMed = "▒"
+	t.BlockLow = "░"
 }
 
 // WithAccent returns a new Theme with the accent color overridden.
