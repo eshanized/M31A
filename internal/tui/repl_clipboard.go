@@ -36,6 +36,12 @@ func (m *ReplModel) copyLastAssistantMessage() tea.Cmd {
 // copyLastError copies the last error message from the conversation to the clipboard.
 // Error banners use "✗ " or "⚠ " prefixes (not "Error: ").
 func (m *ReplModel) copyLastError() tea.Cmd {
+	// Use rune-aware prefix stripping to handle multi-byte UTF-8 correctly.
+	// "✗ " is 4 bytes (U+2717 = 3 bytes + space), "⚠ " is also 4 bytes (U+26A0 = 3 bytes + space).
+	const (
+		errPrefix  = "✗ "
+		warnPrefix = "⚠ "
+	)
 	var lastErr string
 	for i := len(m.messages) - 1; i >= 0; i-- {
 		if m.messages[i].Role != "assistant" || m.messages[i].Content == "" {
@@ -43,12 +49,12 @@ func (m *ReplModel) copyLastError() tea.Cmd {
 		}
 		content := m.messages[i].Content
 		// Match actual error banner prefixes used by makeErrorBannerMsg
-		if strings.HasPrefix(content, "✗ ") {
-			lastErr = content[2:]
+		if strings.HasPrefix(content, errPrefix) {
+			lastErr = strings.TrimPrefix(content, errPrefix)
 			break
 		}
-		if strings.HasPrefix(content, "⚠ ") {
-			lastErr = content[2:]
+		if strings.HasPrefix(content, warnPrefix) {
+			lastErr = strings.TrimPrefix(content, warnPrefix)
 			break
 		}
 	}

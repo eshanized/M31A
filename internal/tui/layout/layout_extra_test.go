@@ -197,14 +197,16 @@ func TestSplitHorizontal_NoFixed(t *testing.T) {
 
 func TestSplitHorizontal_WithGap(t *testing.T) {
 	t.Parallel()
-	// 100 width, 3 children, gap 10: totalGap=20, remaining=80, each=26
+	// 100 width, 3 children, gap 10: totalGap=20, remaining=80
+	// Each gets 26 (80/3 integer division), last gets 26+2 remainder = 28
 	result := SplitHorizontal(100, 3, 10)
 	if len(result) != 3 {
 		t.Fatalf("len = %d, want 3", len(result))
 	}
+	expected := []int{26, 26, 28}
 	for i, w := range result {
-		if w != 26 {
-			t.Errorf("result[%d] = %d, want 26", i, w)
+		if w != expected[i] {
+			t.Errorf("result[%d] = %d, want %d", i, w, expected[i])
 		}
 	}
 }

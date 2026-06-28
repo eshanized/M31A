@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -127,7 +128,7 @@ func (rm *RuntimeModel) renderContent() string {
 
 	if len(s.Errors) > 0 {
 		errStyle := lipgloss.NewStyle().Foreground(t.Error)
-		sections = append(sections, errStyle.Render(fmt.Sprintf("\nErrors:\n  - %s", joinStrings(s.Errors, "\n  - "))))
+		sections = append(sections, errStyle.Render(fmt.Sprintf("\nErrors:\n  - %s", strings.Join(s.Errors, "\n  - "))))
 	}
 
 	if len(s.Tests) > 0 {
@@ -164,15 +165,4 @@ func (rm *RuntimeModel) renderContent() string {
 	sections = append(sections, "\n[enter] continue to ship  [esc] back")
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
-}
-
-func joinStrings(ss []string, sep string) string {
-	if len(ss) == 0 {
-		return ""
-	}
-	result := ss[0]
-	for _, s := range ss[1:] {
-		result += sep + s
-	}
-	return result
 }

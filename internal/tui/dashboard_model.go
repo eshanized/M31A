@@ -96,12 +96,18 @@ func (dm *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Navigate to the current workflow phase screen
 			var screen Screen
 			switch types.WorkflowPhase(dm.current) {
+			case types.PhaseInitialize:
+				screen = ScreenREPL
+			case types.PhaseDiscuss:
+				screen = ScreenDiscuss
 			case types.PhasePlan:
 				screen = ScreenPlan
 			case types.PhaseExecute:
 				screen = ScreenExecute
 			case types.PhaseVerify:
 				screen = ScreenVerify
+			case types.PhaseRuntime:
+				screen = ScreenRuntimeCheck
 			case types.PhaseShip:
 				screen = ScreenShip
 			default:

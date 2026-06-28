@@ -74,10 +74,11 @@ type ConfigModel struct {
 	editInput textinput.Model
 
 	// Status
-	dirty      bool
-	statusMsg  string
-	statusTime time.Time
-	saveErr    string
+	dirty          bool
+	confirmingExit bool
+	statusMsg      string
+	statusTime     time.Time
+	saveErr        string
 }
 
 // NewConfigModel creates a ConfigModel.
@@ -621,6 +622,9 @@ func (m *ConfigModel) Init() tea.Cmd { return nil }
 func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.confirmingExit {
+			return m.updateConfirmExit(msg)
+		}
 		if m.editing {
 			return m.updateEditing(msg)
 		}
@@ -643,9 +647,24 @@ func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		return m, func() tea.Msg { return PopScreenMsg{} }
+	case "n", "N", "esc":
+		m.confirmingExit = false
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
+		if m.dirty {
+			m.confirmingExit = true
+			return m, nil
+		}
 		return m, func() tea.Msg { return PopScreenMsg{} }
 
 	case "tab", "]":
@@ -880,13 +899,29 @@ func (m *ConfigModel) View() string {
 	}
 	footer := lipgloss.NewStyle().PaddingLeft(2).Render(strings.Join(footerParts, ""))
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	content := lipgloss.JoinVertical(lipgloss.Left,
 		tabs,
 		fieldArea,
 		bottom,
 		status,
 		footer,
 	)
+
+	if m.confirmingExit {
+		prompt := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(t.Warning).
+			Padding(0, 1).
+			Render("Unsaved changes. Discard? (y/n)")
+		overlay := lipgloss.Place(
+			m.width, 3,
+			lipgloss.Center, lipgloss.Center,
+			prompt,
+		)
+		return lipgloss.JoinVertical(lipgloss.Left, content, overlay)
+	}
+
+	return content
 }
 
 func (m *ConfigModel) renderTabs() string {

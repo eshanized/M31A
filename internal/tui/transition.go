@@ -50,8 +50,10 @@ func (m *AppState) StartTransition(to Screen, _ string) {
 		tt = TransitionSlideRight
 	}
 
-	// Capture current frame before switching
-	prevFrame := m.View()
+	// Capture current frame by rendering the current screen directly,
+	// avoiding the recursive m.View() call which would check the transition
+	// state and potentially cause infinite recursion.
+	prevFrame := m.renderFrame()
 
 	m.transition = &ScreenTransition{
 		Active:     true,

@@ -28,14 +28,11 @@ func (m *AppState) View() string {
 
 	// Visual screen transition: composite old → new frame with slide/fade
 	if m.transition != nil && m.transition.Active {
-		// Render the new (target) screen frame
+		// Render the new (target) screen frame without mutating m.screen.
+		// We pass the target screen to renderFrameForScreen which delegates
+		// to the appropriate content renderer without touching m.screen.
 		prevFrame := m.transition.PrevFrame
-		// Temporarily switch screen to render target
-		savedScreen := m.screen
-		m.screen = m.transition.ToScreen
-		defer func() { m.screen = savedScreen }()
-		nextFrame := m.renderFrame()
-		m.screen = savedScreen
+		nextFrame := m.renderFrameForScreen(m.transition.ToScreen)
 
 		progress := m.transition.Progress()
 		t := m.themeManager.Current()
@@ -47,11 +44,169 @@ func (m *AppState) View() string {
 	return m.renderFrameWithTheme(t)
 }
 
+// renderFrameForScreen renders the full frame as if `targetScreen` were active,
+// without mutating m.screen. Used by the transition system to render the target
+// screen while preserving Elm architecture purity.
+func (m *AppState) renderFrameForScreen(targetScreen Screen) string {
+	t := m.themeManager.Current()
+	headerInfo := m.buildHeaderInfo()
+	footerInfo := m.buildFooterInfo()
+
+	chrome, sidebarStr := m.buildSidebarAndChrome(targetScreen)
+	content := m.renderScreenContent(targetScreen, chrome)
+
+	// Toast overlay
+	if len(m.toasts) > 0 {
+		toastOverlay := ""
+		if m.width >= WidthCompact {
+			toastOverlay = renderToastStack(m.toasts, t, m.width)
+		} else {
+			last := m.toasts[len(m.toasts)-1]
+			toastOverlay = renderSingleToast(last, t, 0, m.width)
+		}
+		if toastOverlay != "" {
+			content = overlayToastOnContent(content, toastOverlay, chrome.Width)
+		}
+	}
+
+	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
+	return m.applySidebar(main, sidebarStr, targetScreen)
+}
+
+// buildSidebarAndChrome computes sidebar state and returns the PageChrome dimensions.
+// Used by both renderFrameWithTheme and renderFrameForScreen to avoid duplication.
+func (m *AppState) buildSidebarAndChrome(screen Screen) (layout.PageChrome, string) {
+	m.ensureSidebarModel()
+	sidebarVisible := m.sidebarModel != nil && m.sidebarModel.IsVisible()
+	hasSidebar := sidebarVisible && layout.ShowSidebar(m.width) && screen != ScreenFirstRun
+	sidebarStr := ""
+
+	contentWidth := m.width
+	if hasSidebar {
+		m.sidebarModel.SetHeight(m.height)
+		m.sidebarModel.SetCurrentScreen(screen.Name())
+		sidebarStr = m.sidebarModel.View()
+		contentWidth = m.width - m.sidebarModel.GetWidth()
+	}
+
+	return layout.PageChrome{Width: contentWidth, Height: m.height}, sidebarStr
+}
+
+// applySidebar composes the main content with the sidebar (or sidebar overlay).
+func (m *AppState) applySidebar(main, sidebarStr string, screen Screen) string {
+	if sidebarStr != "" {
+		return lipgloss.JoinHorizontal(lipgloss.Top, sidebarStr, main)
+	}
+
+	m.ensureSidebarModel()
+	sidebarVisible := m.sidebarModel != nil && m.sidebarModel.IsVisible()
+	sidebarOverlay := sidebarVisible && !layout.ShowSidebar(m.width) && screen != ScreenFirstRun
+	if sidebarOverlay {
+		m.sidebarModel.SetHeight(m.height)
+		overlayContent := m.sidebarModel.View()
+		overlayW := m.sidebarModel.GetWidth()
+		if overlayW > m.width-10 {
+			overlayW = m.width - 10
+		}
+		t := m.themeManager.Current()
+		return layout.RenderOverlay(main, overlayContent, m.width, m.height, overlayW, t)
+	}
+
+	return main
+}
+
+// renderScreenContent returns the content for a given screen without touching m.screen.
+func (m *AppState) renderScreenContent(screen Screen, chrome layout.PageChrome) string {
+	switch screen {
+	case ScreenREPL:
+		return m.renderREPLContent(chrome)
+	case ScreenSettings:
+		return m.renderSettingsContent(chrome)
+	case ScreenModelSelector:
+		return m.renderModelSelectorContent(chrome)
+	case ScreenPlan:
+		return m.renderPlanContent(chrome)
+	case ScreenExecute:
+		return m.renderExecuteContent(chrome)
+	case ScreenVerify:
+		return m.renderVerifyContent(chrome)
+	case ScreenRuntimeCheck:
+		return m.renderRuntimeContent(chrome)
+	case ScreenShip:
+		return m.renderShipContent(chrome)
+	case ScreenResume:
+		return m.renderResumeContent(chrome)
+	case ScreenGoalInput:
+		return m.renderGoalInputContent(chrome)
+	case ScreenFirstRun:
+		return m.renderFirstRunContent(chrome)
+	case ScreenLedger:
+		return m.renderLedgerContent(chrome)
+	case ScreenRollback:
+		return m.renderRollbackContent(chrome)
+	case ScreenMetrics:
+		return m.renderMetricsContent(chrome)
+	case ScreenDiscuss:
+		return m.renderDiscussContent(chrome)
+	case ScreenConfig:
+		return m.renderConfigContent(chrome)
+	case ScreenDiff:
+		return m.renderDiffContent(chrome)
+	case ScreenHelp:
+		return m.renderHelpContent(chrome)
+	case ScreenBisect:
+		return m.renderBisectContent(chrome)
+	case ScreenThemePicker:
+		return m.renderThemePickerContent(chrome)
+	case ScreenNotifications:
+		return m.renderNotificationsContent(chrome)
+	case ScreenDashboard:
+		return m.renderDashboardContent(chrome)
+	case ScreenSessionDetail:
+		return m.renderSessionDetailContent(chrome)
+	case ScreenFileExplorer:
+		return m.renderFileExplorerContent(chrome)
+	case ScreenToolDetail:
+		return m.renderToolDetailContent(chrome)
+	case ScreenPhaseModelPicker:
+		return m.renderPhaseModelPickerContent(chrome)
+	case ScreenGhostPicker:
+		return m.renderGhostPickerContent(chrome)
+	case ScreenGhostOutput:
+		return m.renderGhostOutputContent(chrome)
+	case ScreenConfirmQuit:
+		return m.renderConfirmQuitContent(chrome)
+	case ScreenChatHistory:
+		return m.renderChatHistoryContent(chrome)
+	case ScreenCommandPalette:
+		return m.renderCommandPaletteContent(chrome)
+	case ScreenHome:
+		return m.renderHomeContent(chrome)
+	default:
+		return m.renderREPLContent(chrome)
+	}
+}
+
 // renderFrame renders the full frame for the current screen.
-// Used by the transition system to capture the target screen.
 func (m *AppState) renderFrame() string {
 	t := m.themeManager.Current()
 	return m.renderFrameWithTheme(t)
+}
+
+// renderDimmedModal renders a modal overlay on top of a dimmed REPL background.
+// Returns empty string if the REPL background cannot be rendered.
+func (m *AppState) renderDimmedModal(modalContent string, t theme.Theme) string {
+	bgFrame := ""
+	if m.replModel != nil {
+		chrome := layout.PageChrome{Width: m.width, Height: m.height}
+		m.ensureReplModel()
+		m.syncReplSize(chrome)
+		bgFrame = m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
+	}
+	if bgFrame == "" {
+		return ""
+	}
+	return layout.RenderModalOverlay(bgFrame, modalContent, m.width, m.height, t)
 }
 
 // renderFrameWithTheme renders the full frame with the given theme.
@@ -62,52 +217,37 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 
 	// Permission/question modal (top priority overlay)
 	if m.screen == ScreenPermission {
-		// Render dimmed background behind the modal
-		bgFrame := ""
-		if m.replModel != nil {
-			chrome := layout.PageChrome{Width: m.width, Height: m.height}
-			m.ensureReplModel()
-			m.syncReplSize(chrome)
-			bgFrame = m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
-		}
-		if bgFrame != "" {
-			modalContent := m.renderPermissionModalContent()
-			return layout.RenderModalOverlay(bgFrame, modalContent, m.width, m.height, t)
+		modalContent := m.renderPermissionModalContent()
+		if result := m.renderDimmedModal(modalContent, t); result != "" {
+			return result
 		}
 		return m.renderPermissionModal()
 	}
 
 	// Model Selector as centered dialog overlay on dimmed REPL background
-	if m.screen == ScreenModelSelector {
-		bgFrame := ""
-		if m.replModel != nil {
-			chrome := layout.PageChrome{Width: m.width, Height: m.height}
-			m.ensureReplModel()
-			m.syncReplSize(chrome)
-			bgFrame = m.replModel.ViewContent(chrome.ContentHeight(), chrome.ContentWidth())
+	if m.screen == ScreenModelSelector && m.msModel != nil {
+		modalW := m.width * 4 / 5
+		modalH := m.height * 3 / 4
+		if modalW < 40 {
+			modalW = 40
 		}
-		if bgFrame != "" && m.msModel != nil {
-			modalW := m.width * 4 / 5
-			modalH := m.height * 3 / 4
-			if modalW < 40 {
-				modalW = 40
-			}
-			if modalH < 10 {
-				modalH = 10
-			}
-			if modalW > m.width-4 {
-				modalW = m.width - 4
-			}
-			m.msModel.SetDimensions(modalW-4, modalH-4)
-			modalContent := m.msModel.View()
-			modal := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(t.Brand).
-				Background(t.SurfaceElevated).
-				Width(modalW - 2).
-				MaxHeight(modalH).
-				Render(modalContent)
-			return layout.RenderModalOverlay(bgFrame, modal, m.width, m.height, t)
+		if modalH < 10 {
+			modalH = 10
+		}
+		if modalW > m.width-4 {
+			modalW = m.width - 4
+		}
+		m.msModel.SetDimensions(modalW-4, modalH-4)
+		modalContent := m.msModel.View()
+		modal := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Brand).
+			Background(t.SurfaceElevated).
+			Width(modalW - 2).
+			MaxHeight(modalH).
+			Render(modalContent)
+		if result := m.renderDimmedModal(modal, t); result != "" {
+			return result
 		}
 	}
 
@@ -124,28 +264,7 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 	headerInfo := m.buildHeaderInfo()
 	footerInfo := m.buildFooterInfo()
 
-	// Sidebar composition — hide sidebar on first-run welcome screen so the
-	// setup wizard gets the full terminal width.
-	m.ensureSidebarModel()
-	sidebarVisible := m.sidebarModel != nil && m.sidebarModel.IsVisible()
-	hasSidebar := sidebarVisible && layout.ShowSidebar(m.width) && m.screen != ScreenFirstRun
-	sidebarOverlay := sidebarVisible && !hasSidebar && m.screen != ScreenFirstRun // narrow terminal, overlay mode
-	sidebarStr := ""
-
-	contentWidth := m.width
-	if hasSidebar {
-		m.sidebarModel.SetHeight(m.height)
-		// Update sidebar with current screen for shortcut hints
-		m.sidebarModel.SetCurrentScreen(screenName(m.screen))
-		sidebarStr = m.sidebarModel.View()
-		contentWidth = m.width - m.sidebarModel.GetWidth()
-	}
-
-	// PageChrome defines the dimensions for the unified layout
-	chrome := layout.PageChrome{
-		Width:  contentWidth,
-		Height: m.height,
-	}
+	chrome, sidebarStr := m.buildSidebarAndChrome(m.screen)
 
 	// Render active screen content (content-only, no chrome)
 	content := m.renderActiveScreen(chrome)
@@ -160,29 +279,14 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 			toastOverlay = renderSingleToast(last, t, 0, m.width)
 		}
 		if toastOverlay != "" {
-			content = overlayToastOnContent(content, toastOverlay, contentWidth)
+			content = overlayToastOnContent(content, toastOverlay, chrome.Width)
 		}
 	}
 
 	// Compose the full page
 	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
 
-	if hasSidebar {
-		return lipgloss.JoinHorizontal(lipgloss.Top, sidebarStr, main)
-	}
-
-	// Sidebar overlay mode: render sidebar on top of the page (narrow terminals)
-	if sidebarOverlay {
-		m.sidebarModel.SetHeight(m.height)
-		overlayContent := m.sidebarModel.View()
-		overlayW := m.sidebarModel.GetWidth()
-		if overlayW > m.width-10 {
-			overlayW = m.width - 10
-		}
-		return layout.RenderOverlay(main, overlayContent, m.width, m.height, overlayW, t)
-	}
-
-	return main
+	return m.applySidebar(main, sidebarStr, m.screen)
 }
 
 // buildHeaderInfo constructs the unified header data from AppState.
@@ -389,74 +493,7 @@ func truncateToVisibleWidth(s string, maxW int) string {
 // renderActiveScreen delegates to the active screen's content renderer.
 // Each screen returns ONLY its content area — no header, footer, or chrome.
 func (m *AppState) renderActiveScreen(chrome layout.PageChrome) string {
-	switch m.screen {
-	case ScreenREPL:
-		return m.renderREPLContent(chrome)
-	case ScreenSettings:
-		return m.renderSettingsContent(chrome)
-	case ScreenModelSelector:
-		return m.renderModelSelectorContent(chrome)
-	case ScreenPlan:
-		return m.renderPlanContent(chrome)
-	case ScreenExecute:
-		return m.renderExecuteContent(chrome)
-	case ScreenVerify:
-		return m.renderVerifyContent(chrome)
-	case ScreenRuntimeCheck:
-		return m.renderRuntimeContent(chrome)
-	case ScreenShip:
-		return m.renderShipContent(chrome)
-	case ScreenResume:
-		return m.renderResumeContent(chrome)
-	case ScreenGoalInput:
-		return m.renderGoalInputContent(chrome)
-	case ScreenFirstRun:
-		return m.renderFirstRunContent(chrome)
-	case ScreenLedger:
-		return m.renderLedgerContent(chrome)
-	case ScreenRollback:
-		return m.renderRollbackContent(chrome)
-	case ScreenMetrics:
-		return m.renderMetricsContent(chrome)
-	case ScreenDiscuss:
-		return m.renderDiscussContent(chrome)
-	case ScreenConfig:
-		return m.renderConfigContent(chrome)
-	case ScreenDiff:
-		return m.renderDiffContent(chrome)
-	case ScreenHelp:
-		return m.renderHelpContent(chrome)
-	case ScreenBisect:
-		return m.renderBisectContent(chrome)
-	case ScreenThemePicker:
-		return m.renderThemePickerContent(chrome)
-	case ScreenNotifications:
-		return m.renderNotificationsContent(chrome)
-	case ScreenDashboard:
-		return m.renderDashboardContent(chrome)
-	case ScreenSessionDetail:
-		return m.renderSessionDetailContent(chrome)
-	case ScreenFileExplorer:
-		return m.renderFileExplorerContent(chrome)
-	case ScreenToolDetail:
-		return m.renderToolDetailContent(chrome)
-	case ScreenPhaseModelPicker:
-		return m.renderPhaseModelPickerContent(chrome)
-	case ScreenGhostPicker:
-		return m.renderGhostPickerContent(chrome)
-	case ScreenGhostOutput:
-		return m.renderGhostOutputContent(chrome)
-	case ScreenConfirmQuit:
-		return m.renderConfirmQuitContent(chrome)
-	case ScreenChatHistory:
-		return m.renderChatHistoryContent(chrome)
-	case ScreenCommandPalette:
-		return m.renderCommandPaletteContent(chrome)
-	case ScreenHome:
-		return m.renderHomeContent(chrome)
-	default:
-		return m.renderREPLContent(chrome)
-	}
+	return m.renderScreenContent(m.screen, chrome)
 }
 
 // ─── Per-screen content renderers ─────────────────────────────────────────────
@@ -885,64 +922,6 @@ func (m *AppState) updateSidebarUsage() {
 	m.sidebarModel.UpdateContextPressure()
 	m.sidebarModel.UpdateCostAccumulator()
 	m.sidebarModel.UpdateExecutionMetrics()
-}
-
-// screenName returns a lowercase screen name for sidebar shortcut hints.
-func screenName(s Screen) string {
-	switch s {
-	case ScreenREPL:
-		return "repl"
-	case ScreenExecute:
-		return "execute"
-	case ScreenPlan:
-		return "plan"
-	case ScreenVerify:
-		return "verify"
-	case ScreenRuntimeCheck:
-		return "runtime"
-	case ScreenShip:
-		return "ship"
-	case ScreenDiscuss:
-		return "discuss"
-	case ScreenSettings:
-		return "settings"
-	case ScreenHelp:
-		return "help"
-	case ScreenChatHistory:
-		return "chathistory"
-	case ScreenConfig:
-		return "config"
-	case ScreenResume:
-		return "resume"
-	case ScreenRollback:
-		return "rollback"
-	case ScreenDiff:
-		return "diff"
-	case ScreenModelSelector:
-		return "modelselector"
-	case ScreenCommandPalette:
-		return "cmdpalette"
-	case ScreenPhaseModelPicker:
-		return "phasempicker"
-	case ScreenSessionDetail:
-		return "session"
-	case ScreenFileExplorer:
-		return "fileexplorer"
-	case ScreenConfirmQuit:
-		return "confirmquit"
-	case ScreenDashboard:
-		return "dashboard"
-	case ScreenMetrics:
-		return "metrics"
-	case ScreenLedger:
-		return "ledger"
-	case ScreenThemePicker:
-		return "themepicker"
-	case ScreenHome:
-		return "home"
-	default:
-		return ""
-	}
 }
 
 // ─── Render helpers ───────────────────────────────────────────────────────────

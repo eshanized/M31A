@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,12 +39,9 @@ var _ workflowEngineInterface = (*workflow.Engine)(nil)
 var _ workflow.MsgEmitter = (*channelEmitter)(nil)
 
 // AppState is the top-level Bubble Tea model.
-// All state mutations go through Update(). No goroutine may mutate AppState directly.
+// All state mutations go through Update(). The Bubble Tea runtime guarantees
+// single-threaded access to the model, so no mutex is needed.
 type AppState struct {
-	// Mutex protects concurrent access to state fields.
-	// All goroutines must acquire this lock before reading or writing state.
-	mu sync.RWMutex
-
 	// Layout
 	width  int
 	height int
@@ -220,6 +216,9 @@ type AppState struct {
 
 	// Metrics collector for session observability
 	collector *metrics.Collector
+
+	// Screen routing map: eliminates duplicated per-screen switches.
+	screenUpdaters map[Screen]screenUpdateFunc
 }
 
 // SetResumeSessionID configures the app to auto-resume a session on startup.
@@ -245,8 +244,6 @@ func (a *AppState) SetSubagentManager(m *subagent.Manager) {
 // SetCwd stores the working directory so it can be propagated to the REPL
 // model for @-mention file resolution.
 func (a *AppState) SetCwd(cwd string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.cwd = cwd
 }
 
@@ -325,6 +322,9 @@ func NewApp(
 	if cfg != nil && cfg.UI.SidebarWidth > 0 {
 		a.sidebarModel.SetWidth(cfg.UI.SidebarWidth)
 	}
+
+	// Initialize screen routing map (closures capture m, so nil models are safe)
+	a.initScreenUpdaters()
 
 	return a
 }

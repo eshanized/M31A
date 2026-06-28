@@ -132,6 +132,81 @@ func (s Screen) Label() string {
 	}
 }
 
+// Name returns a lowercase slug for the screen, used for sidebar hints
+// and programmatic lookups.
+func (s Screen) Name() string {
+	switch s {
+	case ScreenREPL:
+		return "repl"
+	case ScreenExecute:
+		return "execute"
+	case ScreenPlan:
+		return "plan"
+	case ScreenVerify:
+		return "verify"
+	case ScreenRuntimeCheck:
+		return "runtime"
+	case ScreenShip:
+		return "ship"
+	case ScreenDiscuss:
+		return "discuss"
+	case ScreenSettings:
+		return "settings"
+	case ScreenHelp:
+		return "help"
+	case ScreenChatHistory:
+		return "chathistory"
+	case ScreenConfig:
+		return "config"
+	case ScreenResume:
+		return "resume"
+	case ScreenRollback:
+		return "rollback"
+	case ScreenDiff:
+		return "diff"
+	case ScreenModelSelector:
+		return "modelselector"
+	case ScreenCommandPalette:
+		return "cmdpalette"
+	case ScreenPhaseModelPicker:
+		return "phasempicker"
+	case ScreenSessionDetail:
+		return "session"
+	case ScreenFileExplorer:
+		return "fileexplorer"
+	case ScreenConfirmQuit:
+		return "confirmquit"
+	case ScreenDashboard:
+		return "dashboard"
+	case ScreenMetrics:
+		return "metrics"
+	case ScreenLedger:
+		return "ledger"
+	case ScreenThemePicker:
+		return "themepicker"
+	case ScreenHome:
+		return "home"
+	case ScreenFirstRun:
+		return "firstrun"
+	case ScreenGoalInput:
+		return "goalinput"
+	case ScreenGhostPicker:
+		return "ghostpicker"
+	case ScreenGhostOutput:
+		return "ghostoutput"
+	case ScreenToolDetail:
+		return "tooldetail"
+	case ScreenNotifications:
+		return "notifications"
+	case ScreenBisect:
+		return "bisect"
+	case ScreenPermission:
+		return "permission"
+	default:
+		return ""
+	}
+}
+
 // ─── App-level messages ──────────────────────────────────────────────────────
 
 // AppMsg is the general routing message from sub-models to AppState.

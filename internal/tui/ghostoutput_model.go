@@ -46,6 +46,25 @@ func (go_ *GhostOutputModel) SetDimensions(w, h int) {
 	go_.height = h
 }
 
+// clampScroll ensures the scroll offset keeps the cursor visible.
+func (go_ *GhostOutputModel) clampScroll() {
+	if go_.result == nil {
+		return
+	}
+	visible := go_.height - 10
+	if visible < 1 {
+		visible = 1
+	}
+	// Scroll down if cursor is below visible area
+	if go_.cursor >= go_.scroll+visible {
+		go_.scroll = go_.cursor - visible + 1
+	}
+	// Scroll up if cursor is above visible area
+	if go_.cursor < go_.scroll {
+		go_.scroll = go_.cursor
+	}
+}
+
 // Init implements tea.Model.
 func (go_ *GhostOutputModel) Init() tea.Cmd { return nil }
 
@@ -61,10 +80,12 @@ func (go_ *GhostOutputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if go_.cursor > 0 {
 				go_.cursor--
+				go_.clampScroll()
 			}
 		case "down", "j":
 			if go_.result != nil && go_.cursor < len(go_.result.Files)-1 {
 				go_.cursor++
+				go_.clampScroll()
 			}
 		}
 	}

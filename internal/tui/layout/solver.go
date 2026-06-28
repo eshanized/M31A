@@ -75,9 +75,20 @@ func solveRow(b *Box, availW, availH int) string {
 		remaining = 0
 	}
 	if totalFlex > 0 {
+		flexTotal := 0
 		for i, child := range children {
 			if child.Flex > 0 && child.Width == 0 {
 				allocated[i] = remaining * child.Flex / totalFlex
+				flexTotal += allocated[i]
+			}
+		}
+		// Distribute any remainder from integer truncation to the last flex child
+		if remainder := remaining - flexTotal; remainder > 0 {
+			for i := len(children) - 1; i >= 0; i-- {
+				if children[i].Flex > 0 && children[i].Width == 0 {
+					allocated[i] += remainder
+					break
+				}
 			}
 		}
 	}
@@ -165,9 +176,20 @@ func solveColumn(b *Box, availW, availH int) string {
 		remaining = 0
 	}
 	if totalFlex > 0 {
+		flexTotal := 0
 		for i, child := range children {
 			if child.Flex > 0 && child.Height == 0 {
 				allocated[i] = remaining * child.Flex / totalFlex
+				flexTotal += allocated[i]
+			}
+		}
+		// Distribute any remainder from integer truncation to the last flex child
+		if remainder := remaining - flexTotal; remainder > 0 {
+			for i := len(children) - 1; i >= 0; i-- {
+				if children[i].Flex > 0 && children[i].Height == 0 {
+					allocated[i] += remainder
+					break
+				}
 			}
 		}
 	}

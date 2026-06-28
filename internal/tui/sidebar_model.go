@@ -724,7 +724,75 @@ func (s *SidebarModel) View() string {
 
 	var lines []string
 
-	// ── Header: brand + version ───────────────────────────────────────────────
+	lines = append(lines, s.renderHeader(contentW)...)
+	lines = append(lines, s.renderGitStatus(contentW)...)
+	lines = append(lines, s.renderTokenUsage(contentW)...)
+	lines = append(lines, s.renderPhasePipeline(contentW)...)
+	lines = append(lines, s.renderToolTimeline(contentW)...)
+	lines = append(lines, s.renderSpeedMetrics(contentW)...)
+	lines = append(lines, s.renderSubAgentBadge(contentW)...)
+	lines = append(lines, s.renderFileTreeOrTodo(contentW)...)
+	lines = append(lines, s.renderSession(contentW)...)
+	lines = append(lines, s.renderHints(contentW)...)
+
+	// Pad each line to exactly contentW characters for consistent border alignment.
+	var paddedLines []string
+	for _, line := range lines {
+		lineW := lipgloss.Width(line)
+		if lineW < contentW {
+			line += strings.Repeat(" ", contentW-lineW)
+		}
+		paddedLines = append(paddedLines, line)
+	}
+	panel := lipgloss.NewStyle().Render(strings.Join(paddedLines, "\n"))
+
+	// Calculate line count for borders
+	lineCount := len(lines)
+
+	// Build left border accent when focused
+	var leftBorder string
+	if s.focused {
+		var leftBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			leftBorderParts = append(leftBorderParts,
+				lipgloss.NewStyle().Foreground(t.Brand).Render("│"))
+		}
+		leftBorder = lipgloss.NewStyle().Render(strings.Join(leftBorderParts, "\n"))
+	}
+
+	// Build right border — use gradient style when focused
+	var rightBorderStr string
+	if s.focused {
+		gradientColors := []lipgloss.Color{t.Brand, t.Accent, t.Brand}
+		var rightBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			colorIdx := i % len(gradientColors)
+			rightBorderParts = append(rightBorderParts,
+				lipgloss.NewStyle().Foreground(gradientColors[colorIdx]).Render("│"))
+		}
+		rightBorderStr = strings.Join(rightBorderParts, "\n")
+	} else {
+		var rightBorderParts []string
+		for i := 0; i < lineCount; i++ {
+			rightBorderParts = append(rightBorderParts,
+				lipgloss.NewStyle().Foreground(t.TextMuted).Render("│"))
+		}
+		rightBorderStr = strings.Join(rightBorderParts, "\n")
+	}
+	rightBorder := lipgloss.NewStyle().Render(rightBorderStr)
+
+	// Join with left border (when focused), panel, and right border
+	if s.focused {
+		return lipgloss.JoinHorizontal(lipgloss.Top, leftBorder, panel, rightBorder)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, panel, rightBorder)
+}
+
+// ─── Sidebar rendering sections ────────────────────────────────────────────────
+
+// renderHeader renders the brand name and version badge.
+func (s *SidebarModel) renderHeader(contentW int) []string {
+	t := s.theme
 	version := s.version
 	if version == "" {
 		version = "dev"
@@ -737,290 +805,255 @@ func (s *SidebarModel) View() string {
 	versionBadge := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
 		Render(" " + version)
-	lines = append(lines, title+versionBadge)
+	return []string{title + versionBadge, components.SectionDivider{Width: contentW, Theme: t}.Render()}
+}
 
-	// ── Section divider ──────────────────────────────────────────────────────
-	lines = append(lines, components.SectionDivider{Width: contentW, Theme: t}.Render())
-
-	// ── Git branch + status ───────────────────────────────────────────────────
-	if s.branch != "" {
-		branchLine := lipgloss.NewStyle().
-			Foreground(t.TextSecondary).
-			PaddingLeft(1).
-			Width(contentW).
-			Render("⎇ " + s.branch)
-		lines = append(lines, branchLine)
-
-		modCount, addCount, delCount, untracked := countFileStatuses(s.files)
-		if modCount+addCount+delCount+untracked > 0 {
-			var pills []string
-			if modCount > 0 {
-				pills = append(pills, lipgloss.NewStyle().
-					Foreground(t.Warning).
-					Render(fmt.Sprintf("●%d", modCount)))
-			}
-			if addCount > 0 {
-				pills = append(pills, lipgloss.NewStyle().
-					Foreground(t.Success).
-					Render(fmt.Sprintf("+%d", addCount)))
-			}
-			if delCount > 0 {
-				pills = append(pills, lipgloss.NewStyle().
-					Foreground(t.Error).
-					Render(fmt.Sprintf("-%d", delCount)))
-			}
-			if untracked > 0 {
-				untrackedColor := t.TextMuted
-				if untracked >= 5 {
-					untrackedColor = t.Warning
-				}
-				pills = append(pills, lipgloss.NewStyle().
-					Foreground(untrackedColor).
-					Render(fmt.Sprintf("?%d", untracked)))
-			}
-			countLine := lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(pills, " "))
-			lines = append(lines, countLine)
-		}
+// renderGitStatus renders the git branch and file status pills.
+func (s *SidebarModel) renderGitStatus(contentW int) []string {
+	t := s.theme
+	var lines []string
+	if s.branch == "" {
+		return lines
 	}
+	branchLine := lipgloss.NewStyle().
+		Foreground(t.TextSecondary).
+		PaddingLeft(1).
+		Width(contentW).
+		Render("⎇ " + s.branch)
+	lines = append(lines, branchLine)
 
-	// ── Token usage ───────────────────────────────────────────────────────────
-	if s.totalTokens > 0 {
-		lines = append(lines, components.SectionDivider{Title: "USAGE", Width: contentW, Theme: t}.Render())
-
-		// Context pressure gauge with color-coded urgency
-		if s.contextLen > 0 {
-			pct := float64(s.totalTokens) / float64(s.contextLen)
-			if pct > 1 {
-				pct = 1
+	modCount, addCount, delCount, untracked := countFileStatuses(s.files)
+	if modCount+addCount+delCount+untracked > 0 {
+		var pills []string
+		if modCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("●%d", modCount)))
+		}
+		if addCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Success).Render(fmt.Sprintf("+%d", addCount)))
+		}
+		if delCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf("-%d", delCount)))
+		}
+		if untracked > 0 {
+			untrackedColor := t.TextMuted
+			if untracked >= 5 {
+				untrackedColor = t.Warning
 			}
-			const barSegments = 8
-			filled := int(pct * barSegments)
-			var pressureIcon string
+			pills = append(pills, lipgloss.NewStyle().Foreground(untrackedColor).Render(fmt.Sprintf("?%d", untracked)))
+		}
+		lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(pills, " ")))
+	}
+	return lines
+}
+
+// renderTokenUsage renders the token usage section with context gauge, burn rate, and cost.
+func (s *SidebarModel) renderTokenUsage(contentW int) []string {
+	t := s.theme
+	var lines []string
+	if s.totalTokens <= 0 {
+		return lines
+	}
+	lines = append(lines, components.SectionDivider{Title: "USAGE", Width: contentW, Theme: t}.Render())
+
+	if s.contextLen > 0 {
+		pct := float64(s.totalTokens) / float64(s.contextLen)
+		if pct > 1 {
+			pct = 1
+		}
+		const barSegments = 8
+		filled := int(pct * barSegments)
+		var pressureIcon string
+		switch {
+		case pct >= 0.9:
+			pressureIcon = " !!"
+		case pct >= 0.7:
+			pressureIcon = " !"
+		}
+		var bar string
+		for i := 0; i < barSegments; i++ {
+			var segColor lipgloss.Color
 			switch {
-			case pct >= 0.9:
-				pressureIcon = " !!"
-			case pct >= 0.7:
-				pressureIcon = " !"
+			case i >= 7:
+				segColor = t.Error
+			case i >= 5:
+				segColor = t.Warning
+			case i >= 3:
+				segColor = t.Brand
 			default:
-				pressureIcon = ""
+				segColor = t.Success
 			}
-			// Build color-coded bar segments
-			var bar string
-			for i := 0; i < barSegments; i++ {
-				var segColor lipgloss.Color
-				switch {
-				case i >= 7:
-					segColor = t.Error
-				case i >= 5:
-					segColor = t.Warning
-				case i >= 3:
-					segColor = t.Brand
-				default:
-					segColor = t.Success
-				}
-				if i < filled {
-					bar += lipgloss.NewStyle().Foreground(segColor).Render("█")
-				} else {
-					bar += lipgloss.NewStyle().Foreground(t.Border).Render("░")
-				}
-			}
-			pctStr := fmt.Sprintf("%d%%", int(pct*100))
-			meterLine := lipgloss.NewStyle().
-				PaddingLeft(1).
-				Render("[" + bar + "] " + pctStr + pressureIcon)
-			lines = append(lines, meterLine)
-		}
-
-		// Token count + burn rate with sparkline
-		tokStr := formatTokenCountSidebar(s.totalTokens)
-		tokLine := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			PaddingLeft(1).
-			Render(tokStr)
-		lines = append(lines, tokLine)
-
-		// Burn rate sparkline
-		if s.tokenBurnRate > 0 {
-			burnStr := fmt.Sprintf("%.0f tok/s", s.tokenBurnRate)
-			if s.tokenBurnCostRate > 0 {
-				burnStr += fmt.Sprintf(" · $%.3f/s", s.tokenBurnCostRate)
-			}
-			burnLine := lipgloss.NewStyle().
-				Foreground(t.Brand).
-				PaddingLeft(1).
-				Render(burnStr)
-			lines = append(lines, burnLine)
-		}
-
-		// Cost accumulator with trend
-		if s.showCost && s.cost > 0 {
-			var costStr string
-			if s.cost < 0.01 {
-				costStr = "<$0.01"
+			if i < filled {
+				bar += lipgloss.NewStyle().Foreground(segColor).Render("█")
 			} else {
-				costStr = fmt.Sprintf("$%.2f", s.cost)
+				bar += lipgloss.NewStyle().Foreground(t.Border).Render("░")
 			}
-			// Show cost trend arrow
-			if s.costTrend > 0.001 {
-				costStr += lipgloss.NewStyle().Foreground(t.Error).Render(" ↑")
-			} else if s.costTrend < -0.001 {
-				costStr += lipgloss.NewStyle().Foreground(t.Success).Render(" ↓")
-			}
-			// Show cost rate if streaming
-			if s.tokenBurnCostRate > 0 {
-				costStr += fmt.Sprintf(" ($%.3f/s)", s.tokenBurnCostRate)
-			}
-			costLine := lipgloss.NewStyle().
-				Foreground(t.Warning).
-				PaddingLeft(1).
-				Render(costStr)
-			lines = append(lines, costLine)
 		}
-
-		// Model name
-		if s.modelName != "" {
-			modelDisplay := s.modelName
-			if len(modelDisplay) > contentW-2 {
-				modelDisplay = modelDisplay[:contentW-5] + "..."
-			}
-			modelLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(1).
-				Render(modelDisplay)
-			lines = append(lines, modelLine)
-		}
+		lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render("["+bar+"] "+fmt.Sprintf("%d%%", int(pct*100))+pressureIcon))
 	}
 
-	// ── Phase Pipeline (when in todo mode) ───────────────────────────────────
-	if s.mode == SidebarModeTodo && s.currentPhase != "" {
-		lines = append(lines, components.SectionDivider{Title: "PHASE", Width: contentW, Theme: t}.Render())
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(formatTokenCountSidebar(s.totalTokens)))
 
-		phases := s.GetPhasePipeline()
-		var phaseParts []string
-		for _, phase := range phases {
-			label := strings.ToUpper(phase[:1])
-			var styledPhase string
+	if s.tokenBurnRate > 0 {
+		burnStr := fmt.Sprintf("%.0f tok/s", s.tokenBurnRate)
+		if s.tokenBurnCostRate > 0 {
+			burnStr += fmt.Sprintf(" · $%.3f/s", s.tokenBurnCostRate)
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).PaddingLeft(1).Render(burnStr))
+	}
+
+	if s.showCost && s.cost > 0 {
+		var costStr string
+		if s.cost < 0.01 {
+			costStr = "<$0.01"
+		} else {
+			costStr = fmt.Sprintf("$%.2f", s.cost)
+		}
+		if s.costTrend > 0.001 {
+			costStr += lipgloss.NewStyle().Foreground(t.Error).Render(" ↑")
+		} else if s.costTrend < -0.001 {
+			costStr += lipgloss.NewStyle().Foreground(t.Success).Render(" ↓")
+		}
+		if s.tokenBurnCostRate > 0 {
+			costStr += fmt.Sprintf(" ($%.3f/s)", s.tokenBurnCostRate)
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.Warning).PaddingLeft(1).Render(costStr))
+	}
+
+	if s.modelName != "" {
+		modelDisplay := s.modelName
+		if len(modelDisplay) > contentW-2 {
+			modelDisplay = modelDisplay[:contentW-5] + "..."
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(modelDisplay))
+	}
+	return lines
+}
+
+// renderPhasePipeline renders the workflow phase pipeline indicator.
+func (s *SidebarModel) renderPhasePipeline(contentW int) []string {
+	t := s.theme
+	var lines []string
+	if s.mode != SidebarModeTodo || s.currentPhase == "" {
+		return lines
+	}
+	lines = append(lines, components.SectionDivider{Title: "PHASE", Width: contentW, Theme: t}.Render())
+
+	phases := s.GetPhasePipeline()
+	var phaseParts []string
+	for _, phase := range phases {
+		label := strings.ToUpper(phase[:1])
+		var styledPhase string
+		switch {
+		case s.IsPhaseCompleted(phase):
+			styledPhase = lipgloss.NewStyle().Foreground(t.Success).Render("✓" + label)
+		case phase == s.currentPhase:
+			styledPhase = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("●" + label)
+		default:
+			styledPhase = lipgloss.NewStyle().Foreground(t.TextMuted).Render("○" + label)
+		}
+		phaseParts = append(phaseParts, styledPhase)
+	}
+	lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(phaseParts, " ")))
+
+	if !s.phaseStartedAt.IsZero() {
+		phaseElapsed := time.Since(s.phaseStartedAt)
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(fmt.Sprintf("%ds in %s", int(phaseElapsed.Seconds()), s.currentPhase)))
+	}
+	return lines
+}
+
+// renderToolTimeline renders the active tool call timeline.
+func (s *SidebarModel) renderToolTimeline(contentW int) []string {
+	t := s.theme
+	var lines []string
+	if s.mode != SidebarModeTodo || len(s.toolCalls) == 0 {
+		return lines
+	}
+	lines = append(lines, components.SectionDivider{Title: "TOOLS", Width: contentW, Theme: t}.Render())
+
+	for _, tc := range s.toolCalls {
+		var icon string
+		var durationStr string
+		var durationColor lipgloss.Color
+		if tc.Active {
+			icon = lipgloss.NewStyle().Foreground(t.Brand).Render("●")
+			durationStr = "..."
+			durationColor = t.Brand
+		} else if tc.Success {
+			icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+			durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
 			switch {
-			case s.IsPhaseCompleted(phase):
-				styledPhase = lipgloss.NewStyle().Foreground(t.Success).Render("✓" + label)
-			case phase == s.currentPhase:
-				styledPhase = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("●" + label)
+			case tc.Duration < time.Second:
+				durationColor = t.Success
+			case tc.Duration < 5*time.Second:
+				durationColor = t.Warning
 			default:
-				styledPhase = lipgloss.NewStyle().Foreground(t.TextMuted).Render("○" + label)
-			}
-			phaseParts = append(phaseParts, styledPhase)
-		}
-		phaseLine := lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(phaseParts, " "))
-		lines = append(lines, phaseLine)
-
-		// Phase elapsed time
-		if !s.phaseStartedAt.IsZero() {
-			phaseElapsed := time.Since(s.phaseStartedAt)
-			phaseTimeLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(1).
-				Render(fmt.Sprintf("%ds in %s", int(phaseElapsed.Seconds()), s.currentPhase))
-			lines = append(lines, phaseTimeLine)
-		}
-	}
-
-	// ── Tool Call Timeline (when in todo mode) ────────────────────────────────
-	if s.mode == SidebarModeTodo && len(s.toolCalls) > 0 {
-		lines = append(lines, components.SectionDivider{Title: "TOOLS", Width: contentW, Theme: t}.Render())
-
-		for _, tc := range s.toolCalls {
-			var icon string
-			var durationStr string
-			var durationColor lipgloss.Color
-			if tc.Active {
-				icon = lipgloss.NewStyle().Foreground(t.Brand).Render("●")
-				durationStr = "..."
-				durationColor = t.Brand
-			} else if tc.Success {
-				icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
-				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
-				// Color-code by duration: green < 1s, yellow 1-5s, red > 5s
-				switch {
-				case tc.Duration < time.Second:
-					durationColor = t.Success
-				case tc.Duration < 5*time.Second:
-					durationColor = t.Warning
-				default:
-					durationColor = t.Error
-				}
-			} else {
-				icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
-				durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
 				durationColor = t.Error
 			}
-			descDisplay := tc.Description
-			if descDisplay == "" {
-				descDisplay = tc.Name
-			}
-			maxDescLen := contentW - 12
-			if maxDescLen < 8 {
-				maxDescLen = 8
-			}
-			if len(descDisplay) > maxDescLen {
-				descDisplay = descDisplay[:maxDescLen-3] + "..."
-			}
-			toolLine := lipgloss.NewStyle().
-				Foreground(t.Text).
-				PaddingLeft(1).
-				Render(fmt.Sprintf("%s %-16s ", icon, descDisplay)) +
-				lipgloss.NewStyle().Foreground(durationColor).Render(durationStr)
-			lines = append(lines, toolLine)
-		}
-	}
-
-	// ── Execution Speed Metrics (when in todo mode) ──────────────────────────
-	if s.mode == SidebarModeTodo && s.tasksPerMinute > 0 {
-		lines = append(lines, components.SectionDivider{Title: "SPEED", Width: contentW, Theme: t}.Render())
-
-		speedLine := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			PaddingLeft(1).
-			Render(fmt.Sprintf("%.1f tasks/min", s.tasksPerMinute))
-		lines = append(lines, speedLine)
-
-		if s.avgTaskDuration > 0 {
-			avgLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(1).
-				Render(fmt.Sprintf("avg %ds/task", int(s.avgTaskDuration.Seconds())))
-			lines = append(lines, avgLine)
-		}
-
-		if s.estimatedTimeRem > 0 {
-			etaLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(1).
-				Render(fmt.Sprintf("ETA %ds", int(s.estimatedTimeRem.Seconds())))
-			lines = append(lines, etaLine)
-		}
-	}
-
-	// ── Sub-Agent Badge (compact, when active) ───────────────────────────────
-	if s.subAgentCount > 0 {
-		var agentText string
-		if s.subAgentActive > 0 {
-			agentText = fmt.Sprintf("⬡ %d/%d agents", s.subAgentActive, s.subAgentCount)
 		} else {
-			agentText = fmt.Sprintf("⬡ %d agents", s.subAgentCount)
+			icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
+			durationStr = fmt.Sprintf("%dms", tc.Duration.Milliseconds())
+			durationColor = t.Error
 		}
-		agentLine := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			PaddingLeft(1).
-			Render(agentText)
-		lines = append(lines, agentLine)
+		descDisplay := tc.Description
+		if descDisplay == "" {
+			descDisplay = tc.Name
+		}
+		maxDescLen := contentW - 12
+		if maxDescLen < 8 {
+			maxDescLen = 8
+		}
+		if len(descDisplay) > maxDescLen {
+			descDisplay = descDisplay[:maxDescLen-3] + "..."
+		}
+		toolLine := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(1).Render(fmt.Sprintf("%s %-16s ", icon, descDisplay)) +
+			lipgloss.NewStyle().Foreground(durationColor).Render(durationStr)
+		lines = append(lines, toolLine)
 	}
+	return lines
+}
 
-	// ── File tree or Todo list ────────────────────────────────────────────────
+// renderSpeedMetrics renders execution speed metrics (tasks/min, avg, ETA).
+func (s *SidebarModel) renderSpeedMetrics(contentW int) []string {
+	t := s.theme
+	var lines []string
+	if s.mode != SidebarModeTodo || s.tasksPerMinute <= 0 {
+		return lines
+	}
+	lines = append(lines, components.SectionDivider{Title: "SPEED", Width: contentW, Theme: t}.Render())
+	lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(fmt.Sprintf("%.1f tasks/min", s.tasksPerMinute)))
+	if s.avgTaskDuration > 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(fmt.Sprintf("avg %ds/task", int(s.avgTaskDuration.Seconds()))))
+	}
+	if s.estimatedTimeRem > 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(fmt.Sprintf("ETA %ds", int(s.estimatedTimeRem.Seconds()))))
+	}
+	return lines
+}
+
+// renderSubAgentBadge renders the sub-agent status badge.
+func (s *SidebarModel) renderSubAgentBadge(_ int) []string {
+	t := s.theme
+	if s.subAgentCount <= 0 {
+		return nil
+	}
+	var agentText string
+	if s.subAgentActive > 0 {
+		agentText = fmt.Sprintf("⬡ %d/%d agents", s.subAgentActive, s.subAgentCount)
+	} else {
+		agentText = fmt.Sprintf("⬡ %d agents", s.subAgentCount)
+	}
+	return []string{lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(agentText)}
+}
+
+// renderFileTreeOrTodo renders either the file tree or the todo list depending on mode.
+func (s *SidebarModel) renderFileTreeOrTodo(contentW int) []string {
+	t := s.theme
+	var lines []string
+
 	if s.mode == SidebarModeTodo {
-		// Progress section
 		lines = append(lines, components.SectionDivider{Title: "PROGRESS", Width: contentW, Theme: t}.Render())
 
-		// Progress bar
 		pTotal, pDone, pFailed, _ := s.computeProgress()
 		if pTotal > 0 || s.taskProgress.Total > 0 {
 			total := pTotal
@@ -1061,36 +1094,21 @@ func (s *SidebarModel) View() string {
 			} else if s.taskProgress.Running > 0 && done+failed < total {
 				summary += lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf(" (%d pending)", total-done-failed))
 			}
-			barLine := lipgloss.NewStyle().PaddingLeft(1).Render(bar + " " + pctStr)
-			summaryLine := lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary)
-			lines = append(lines, barLine, summaryLine)
+			lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render(bar+" "+pctStr))
+			lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Foreground(t.TextMuted).Render(summary))
 		} else {
-			noTasks := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(2).
-				Render("waiting...")
-			lines = append(lines, noTasks)
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("waiting..."))
 		}
 
-		// Elapsed time
 		if !s.taskProgress.StartedAt.IsZero() {
 			elapsed := time.Since(s.taskProgress.StartedAt)
-			elapsedLine := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(1).
-				Render(fmt.Sprintf("%ds elapsed", int(elapsed.Seconds())))
-			lines = append(lines, elapsedLine)
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(fmt.Sprintf("%ds elapsed", int(elapsed.Seconds()))))
 		}
 
-		// Todo items
 		lines = append(lines, components.SectionDivider{Title: "TODO", Width: contentW, Theme: t}.Render())
 
 		if len(s.todoItems) == 0 {
-			emptyTodo := lipgloss.NewStyle().
-				Foreground(t.TextMuted).
-				PaddingLeft(2).
-				Render("no items yet")
-			lines = append(lines, emptyTodo)
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).Render("no items yet"))
 		} else {
 			items := s.todoItems
 			maxTodoItems := s.height - sidebarFixedOverhead - 6
@@ -1106,9 +1124,7 @@ func (s *SidebarModel) View() string {
 				num := fmt.Sprintf("%d.", idx+1)
 				var sourceBadge string
 				if item.Source != "" && item.Source != "agent" {
-					sourceBadge = lipgloss.NewStyle().
-						Foreground(t.TextMuted).
-						Render(" " + item.Source)
+					sourceBadge = lipgloss.NewStyle().Foreground(t.TextMuted).Render(" " + item.Source)
 				}
 				maxDescW := contentW - 10
 				if maxDescW < 8 {
@@ -1121,15 +1137,10 @@ func (s *SidebarModel) View() string {
 				if item.Status == "completed" {
 					descColor = t.TextMuted
 				}
-				itemLine := lipgloss.NewStyle().
-					Foreground(descColor).
-					PaddingLeft(1).
-					Render(fmt.Sprintf("%s %s %s", num, icon, desc) + sourceBadge)
-				lines = append(lines, itemLine)
+				lines = append(lines, lipgloss.NewStyle().Foreground(descColor).PaddingLeft(1).Render(fmt.Sprintf("%s %s %s", num, icon, desc)+sourceBadge))
 			}
 		}
 	} else {
-		// File tree (existing behavior)
 		filesLabel := components.SectionDivider{Title: "FILES", Width: contentW, Theme: t}.Render()
 		if s.focused {
 			filesLabel += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" ↑↓")
@@ -1137,37 +1148,31 @@ func (s *SidebarModel) View() string {
 		lines = append(lines, filesLabel)
 
 		if len(s.files) == 0 {
-			noFiles := lipgloss.NewStyle().
-				Foreground(t.Success).
-				PaddingLeft(2).
-				Width(contentW).
-				Render("✓ clean")
-			lines = append(lines, noFiles)
-		} else {
-			if s.tree != nil {
-				s.tree.Width = contentW
-				treeView := s.tree.View()
-				lines = append(lines, strings.Split(treeView, "\n")...)
-			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.Success).PaddingLeft(2).Width(contentW).Render("✓ clean"))
+		} else if s.tree != nil {
+			s.tree.Width = contentW
+			lines = append(lines, strings.Split(s.tree.View(), "\n")...)
 		}
 	}
+	return lines
+}
 
-	// ── Session (compact) ─────────────────────────────────────────────────────
-	if s.sessionID != "" {
-		lines = append(lines, "")
-		sessDisplay := s.sessionID
-		if len(sessDisplay) > contentW-2 {
-			sessDisplay = sessDisplay[:contentW-5] + "..."
-		}
-		sessLine := lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			PaddingLeft(1).
-			Render(sessDisplay)
-		lines = append(lines, sessLine)
+// renderSession renders the session ID display.
+func (s *SidebarModel) renderSession(contentW int) []string {
+	t := s.theme
+	if s.sessionID == "" {
+		return nil
 	}
+	sessDisplay := s.sessionID
+	if len(sessDisplay) > contentW-2 {
+		sessDisplay = sessDisplay[:contentW-5] + "..."
+	}
+	return []string{"", lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(sessDisplay)}
+}
 
-	// ── Keyboard Shortcut Hints ──────────────────────────────────────────────
-	lines = append(lines, "")
+// renderHints renders keyboard shortcut hints for the current screen.
+func (s *SidebarModel) renderHints(_ int) []string {
+	t := s.theme
 	var hints []string
 	switch s.currentScreen {
 	case "execute":
@@ -1200,67 +1205,8 @@ func (s *SidebarModel) View() string {
 	if s.focused {
 		hints = append(hints, "esc:unfocus")
 	}
-	hintLine := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		PaddingLeft(1).
-		Render(strings.Join(hints, " "))
-	lines = append(lines, hintLine)
-
-	// Pad each line to exactly contentW characters for consistent border alignment.
-	var paddedLines []string
-	for _, line := range lines {
-		lineW := lipgloss.Width(line)
-		if lineW < contentW {
-			line += strings.Repeat(" ", contentW-lineW)
-		}
-		paddedLines = append(paddedLines, line)
-	}
-	panel := lipgloss.NewStyle().Render(strings.Join(paddedLines, "\n"))
-
-	// Calculate line count for borders
-	lineCount := len(lines)
-
-	// Build left border accent when focused
-	var leftBorder string
-	if s.focused {
-		var leftBorderParts []string
-		for i := 0; i < lineCount; i++ {
-			leftBorderParts = append(leftBorderParts,
-				lipgloss.NewStyle().Foreground(t.Brand).Render("│"))
-		}
-		leftBorder = lipgloss.NewStyle().Render(strings.Join(leftBorderParts, "\n"))
-	}
-
-	// Build right border — use gradient style when focused
-	var rightBorderStr string
-	if s.focused {
-		// Gradient border: brand color on top, accent color in middle, brand on bottom
-		gradientColors := []lipgloss.Color{t.Brand, t.Accent, t.Brand}
-		var rightBorderParts []string
-		for i := 0; i < lineCount; i++ {
-			colorIdx := i % len(gradientColors)
-			rightBorderParts = append(rightBorderParts,
-				lipgloss.NewStyle().Foreground(gradientColors[colorIdx]).Render("│"))
-		}
-		rightBorderStr = strings.Join(rightBorderParts, "\n")
-	} else {
-		var rightBorderParts []string
-		for i := 0; i < lineCount; i++ {
-			rightBorderParts = append(rightBorderParts,
-				lipgloss.NewStyle().Foreground(t.TextMuted).Render("│"))
-		}
-		rightBorderStr = strings.Join(rightBorderParts, "\n")
-	}
-	rightBorder := lipgloss.NewStyle().Render(rightBorderStr)
-
-	// Join with left border (when focused), panel, and right border
-	if s.focused {
-		return lipgloss.JoinHorizontal(lipgloss.Top, leftBorder, panel, rightBorder)
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, panel, rightBorder)
+	return []string{"", lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(strings.Join(hints, " "))}
 }
-
-// countFileStatuses returns counts of modified, added, deleted, and untracked files.
 func countFileStatuses(files []git.FileStatus) (mod, add, del, untracked int) {
 	for _, f := range files {
 		switch {

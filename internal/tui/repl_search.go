@@ -11,14 +11,21 @@ import (
 // repl_search.go — inline viewport search (Ctrl+F).
 //
 // When active, a search bar appears at the bottom of the viewport.
-// Typing filters visible content; Enter/Escape closes the search.
+// Typing highlights matches; Enter navigates to the next match.
+
+// searchMatch records the line number and column offset of a match.
+type searchMatch struct {
+	line int // 0-indexed line number in viewport content
+	col  int // byte offset within the line
+}
 
 // searchState holds the state for inline viewport search.
 type searchState struct {
-	visible bool
-	query   string
-	matches int
-	current int // 0-indexed current match index
+	visible   bool
+	query     string
+	matches   int
+	current   int           // 0-indexed current match index
+	positions []searchMatch // line positions of matches
 }
 
 // toggleSearch toggles the search bar visibility.
@@ -28,6 +35,7 @@ func (m *ReplModel) toggleSearch() {
 		m.search.query = ""
 		m.search.matches = 0
 		m.search.current = 0
+		m.search.positions = nil
 	}
 }
 
@@ -39,21 +47,29 @@ func (m *ReplModel) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 		m.search.query = ""
 		m.search.matches = 0
 		m.search.current = 0
+		m.search.positions = nil
 		return nil
 
 	case "enter":
-		// Navigate to next match
 		if m.search.matches > 0 {
 			m.search.current = (m.search.current + 1) % m.search.matches
+			m.scrollToCurrentMatch()
+		}
+		return nil
+
+	case "shift+tab":
+		if m.search.matches > 0 {
+			m.search.current = (m.search.current - 1 + m.search.matches) % m.search.matches
+			m.scrollToCurrentMatch()
 		}
 		return nil
 
 	case "ctrl+f":
-		// Toggle search off
 		m.search.visible = false
 		m.search.query = ""
 		m.search.matches = 0
 		m.search.current = 0
+		m.search.positions = nil
 		return nil
 
 	case "backspace":
@@ -72,17 +88,45 @@ func (m *ReplModel) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// updateSearchMatches counts matches in the viewport content.
+// updateSearchMatches counts matches and records their line positions.
 func (m *ReplModel) updateSearchMatches() {
 	if m.search.query == "" {
 		m.search.matches = 0
 		m.search.current = 0
+		m.search.positions = nil
 		return
 	}
-	content := m.viewport.View()
+	content := m.viewportContent
 	query := strings.ToLower(m.search.query)
-	m.search.matches = strings.Count(strings.ToLower(content), query)
-	m.search.current = 0
+	lines := strings.Split(content, "\n")
+
+	var positions []searchMatch
+	for lineIdx, line := range lines {
+		lower := strings.ToLower(line)
+		offset := 0
+		for {
+			idx := strings.Index(lower[offset:], query)
+			if idx < 0 {
+				break
+			}
+			positions = append(positions, searchMatch{line: lineIdx, col: offset + idx})
+			offset += idx + 1
+		}
+	}
+	m.search.matches = len(positions)
+	m.search.positions = positions
+	if m.search.current >= m.search.matches {
+		m.search.current = 0
+	}
+}
+
+// scrollToCurrentMatch scrolls the viewport to the line of the current match.
+func (m *ReplModel) scrollToCurrentMatch() {
+	if m.search.current < 0 || m.search.current >= len(m.search.positions) {
+		return
+	}
+	line := m.search.positions[m.search.current].line
+	m.viewport.SetYOffset(line)
 }
 
 // renderSearchBar renders the inline search bar.
@@ -102,10 +146,10 @@ func (m *ReplModel) renderSearchBar(width int) string {
 	if m.search.query != "" {
 		countText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(
 			lipgloss.PlaceHorizontal(width-40, lipgloss.Right,
-				fmt.Sprintf("%d matches", m.search.matches)))
+				fmt.Sprintf("%d/%d matches", m.search.current+1, m.search.matches)))
 	}
 
-	hint := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  esc to close, enter for next")
+	hint := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  esc close, enter next, shift+tab prev")
 
 	content := label + queryText + cursor + countText + hint
 	if lipgloss.Width(content) > width {

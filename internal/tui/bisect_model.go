@@ -44,7 +44,8 @@ func (bm *BisectModel) SetCommits(commits []bisectCommit) {
 	bm.total = len(commits)
 	bm.current = len(commits) / 2
 	bm.status = "testing"
-	if bm.current < len(bm.commits) {
+	// Mark the initial midpoint as "testing" for visual feedback
+	if bm.current < len(bm.commits) && bm.commits[bm.current].Status == "pending" {
 		bm.commits[bm.current].Status = "testing"
 	}
 }
@@ -91,24 +92,68 @@ func (bm *BisectModel) markCurrent(status string) {
 }
 
 func (bm *BisectModel) advance() {
-	// Simple binary search: find midpoint of remaining range
-	low := 0
-	high := len(bm.commits) - 1
+	if len(bm.commits) == 0 {
+		bm.status = "done"
+		return
+	}
+
+	// Find the range of untested commits between last known good and first known bad.
+	// low = index of last "good" commit (or -1 if none)
+	// high = index of first "bad" commit (or len if none)
+	low := -1
+	high := len(bm.commits)
 	for i, c := range bm.commits {
-		if c.Status == "good" && i > low {
+		switch c.Status {
+		case "good":
 			low = i
-		}
-		if c.Status == "bad" && i < high {
-			high = i
+		case "bad":
+			if high == len(bm.commits) || i < high {
+				high = i
+			}
 		}
 	}
-	bm.current = low + (high-low)/2
-	if bm.current < len(bm.commits) && bm.commits[bm.current].Status == "pending" {
-		bm.commits[bm.current].Status = "testing"
-	}
+
+	// All commits tested or range is converged
 	if low >= high-1 {
 		bm.status = "done"
+		return
 	}
+
+	// Compute midpoint
+	mid := low + (high-low)/2
+
+	// isUntested returns true for commits that haven't been judged (good/bad/skip)
+	isUntested := func(c bisectCommit) bool {
+		return c.Status != "good" && c.Status != "bad" && c.Status != "skip"
+	}
+
+	// Find the next untested commit near the midpoint
+	found := -1
+	// Search right from mid
+	for i := mid; i < high; i++ {
+		if isUntested(bm.commits[i]) {
+			found = i
+			break
+		}
+	}
+	// Search left from mid if not found
+	if found < 0 {
+		for i := mid - 1; i > low; i-- {
+			if isUntested(bm.commits[i]) {
+				found = i
+				break
+			}
+		}
+	}
+
+	if found < 0 {
+		// No untested commits in range — all tested, we're done
+		bm.status = "done"
+		return
+	}
+
+	bm.current = found
+	bm.commits[found].Status = "testing"
 }
 
 func (bm *BisectModel) reset() {
@@ -117,7 +162,8 @@ func (bm *BisectModel) reset() {
 	}
 	bm.current = len(bm.commits) / 2
 	bm.status = "testing"
-	if bm.current < len(bm.commits) {
+	// Mark the initial midpoint as "testing" for visual feedback
+	if bm.current < len(bm.commits) && bm.commits[bm.current].Status == "pending" {
 		bm.commits[bm.current].Status = "testing"
 	}
 }
@@ -126,8 +172,8 @@ func (bm *BisectModel) reset() {
 func (bm *BisectModel) View() string {
 	t := bm.theme
 	w := bm.width
-	if w < 30 {
-		w = 80
+	if w <= 0 {
+		w = 80 // only when uninitialized
 	}
 
 	title := components.ScreenTitle{Text: "Git Bisect", Theme: t}.Render()

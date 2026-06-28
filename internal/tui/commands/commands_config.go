@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -242,12 +243,13 @@ func handleTokens(_ []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: fmt.Sprintf("Failed to load session: %v", err)}
 	}
 
-	totalChars := 0
+	// Use rune count for accurate non-ASCII estimation, then apply ~4 chars/token heuristic.
+	// len() counts bytes which underestimates for CJK/emoji; rune count is more accurate.
+	totalRunes := 0
 	for _, msg := range sess.Messages {
-		totalChars += len(msg.Content)
+		totalRunes += utf8.RuneCountInString(msg.Content)
 	}
-	// Rough estimate: ~4 chars per token
-	estTokens := totalChars / 4
+	estTokens := totalRunes / 4
 
 	sessDir := ""
 	if ctx.SessionManager != nil {

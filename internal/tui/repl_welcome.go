@@ -107,6 +107,9 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 		return ""
 	}
 
+	// Create style once outside the loop to avoid per-character allocation
+	brandStyle := lipgloss.NewStyle().Foreground(t.Brand)
+
 	// Clean gradient: fade from center outward
 	fadeChars := []rune{'█', '▓', '▒', '░', '·'}
 	halfW := width / 2
@@ -116,7 +119,7 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 		if idx >= len(fadeChars) {
 			idx = len(fadeChars) - 1
 		}
-		left.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(string(fadeChars[idx])))
+		left.WriteString(brandStyle.Render(string(fadeChars[idx])))
 	}
 	var right strings.Builder
 	for i := halfW - 1; i >= 0; i-- {
@@ -124,7 +127,7 @@ func renderGradientSeparator(width int, t theme.Theme) string {
 		if idx >= len(fadeChars) {
 			idx = len(fadeChars) - 1
 		}
-		right.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(string(fadeChars[idx])))
+		right.WriteString(brandStyle.Render(string(fadeChars[idx])))
 	}
 
 	return left.String() + right.String()

@@ -311,9 +311,11 @@ func AgentLoop(
 
 				start := time.Now()
 
-				// Progress ticker: send elapsed time every 500ms
+				// Progress ticker: send elapsed time every 500ms.
+				// progressDone is closed after tool execution completes,
+				// stopping the ticker goroutine immediately rather than
+				// deferring until the agent loop exits.
 				progressDone := make(chan struct{})
-				defer close(progressDone)
 				go func(toolCall types.ToolCall) {
 					ticker := time.NewTicker(500 * time.Millisecond)
 					defer ticker.Stop()
@@ -332,6 +334,7 @@ func AgentLoop(
 
 				result, execErr := dispatcher.Execute(ctx, tc)
 				duration := time.Since(start).Milliseconds()
+				close(progressDone) // stop ticker goroutine immediately
 
 				ch <- AgentToolDoneMsg{
 					ToolCall:   tc,

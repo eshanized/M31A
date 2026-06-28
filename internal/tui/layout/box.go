@@ -96,9 +96,20 @@ func SplitHorizontal(totalW int, count int, gap int, fixed ...int) []int {
 	}
 	if flexCount > 0 {
 		each := remaining / flexCount
+		flexTotal := 0
 		for i := 0; i < count; i++ {
 			if i >= len(fixed) || fixed[i] <= 0 {
 				widths[i] = each
+				flexTotal += each
+			}
+		}
+		// Distribute remainder from integer truncation to the last flex slot
+		if remainder := remaining - flexTotal; remainder > 0 {
+			for i := count - 1; i >= 0; i-- {
+				if i >= len(fixed) || fixed[i] <= 0 {
+					widths[i] += remainder
+					break
+				}
 			}
 		}
 	}
@@ -131,9 +142,20 @@ func SplitVertical(totalH int, count int, gap int, fixed ...int) []int {
 	}
 	if flexCount > 0 {
 		each := remaining / flexCount
+		flexTotal := 0
 		for i := 0; i < count; i++ {
 			if i >= len(fixed) || fixed[i] <= 0 {
 				heights[i] = each
+				flexTotal += each
+			}
+		}
+		// Distribute remainder from integer truncation to the last flex slot
+		if remainder := remaining - flexTotal; remainder > 0 {
+			for i := count - 1; i >= 0; i-- {
+				if i >= len(fixed) || fixed[i] <= 0 {
+					heights[i] += remainder
+					break
+				}
 			}
 		}
 	}

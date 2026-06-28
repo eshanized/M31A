@@ -13,7 +13,6 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -57,258 +56,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Mouse ─────────────────────────────────────────────────────────────────
 	case tea.MouseMsg:
-		// Route sidebar clicks before passing to active screen
-		if m.sidebarModel != nil && m.sidebarModel.IsVisible() && m.screen == ScreenREPL {
-			sidebarW := m.sidebarModel.GetWidth()
-			if sidebarW > 0 && msg.X < sidebarW {
-				if c := m.sidebarModel.HandleMouse(msg, 0); c != nil {
-					cmds = append(cmds, c)
-					return m, tea.Batch(cmds...)
-				}
-			}
-		}
-		// Forward mouse events to the active screen's sub-model
-		switch m.screen {
-		case ScreenREPL:
-			if m.replModel != nil {
-				newRepl, cmd := m.replModel.Update(msg)
-				if r, ok := newRepl.(*ReplModel); ok {
-					m.replModel = r
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenPlan:
-			if m.planModel != nil {
-				newPlan, cmd := m.planModel.Update(msg)
-				m.planModel = newPlan
-				cmds = append(cmds, cmd)
-			}
-		case ScreenExecute:
-			if m.executeModel != nil {
-				newExec, cmd := m.executeModel.Update(msg)
-				m.executeModel = newExec
-				cmds = append(cmds, cmd)
-			}
-		case ScreenVerify:
-			if m.verifyModel != nil {
-				newVerify, cmd := m.verifyModel.Update(msg)
-				m.verifyModel = newVerify
-				cmds = append(cmds, cmd)
-			}
-		case ScreenRuntimeCheck:
-			if m.runtimeModel != nil {
-				newRuntime, cmd := m.runtimeModel.Update(msg)
-				m.runtimeModel = newRuntime
-				cmds = append(cmds, cmd)
-			}
-		case ScreenShip:
-			if m.shipModel != nil {
-				newShip, cmd := m.shipModel.Update(msg)
-				m.shipModel = newShip
-				cmds = append(cmds, cmd)
-			}
-		case ScreenLedger:
-			if m.ledgerModel != nil {
-				newLedger, cmd := m.ledgerModel.Update(msg)
-				if nl, ok := newLedger.(*LedgerModel); ok {
-					m.ledgerModel = nl
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenRollback:
-			if m.rollbackModel != nil {
-				newRB, cmd := m.rollbackModel.Update(msg)
-				if nr, ok := newRB.(*RollbackModel); ok {
-					m.rollbackModel = nr
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenConfig:
-			if m.configModel != nil {
-				newCfg, cmd := m.configModel.Update(msg)
-				m.configModel = newCfg
-				cmds = append(cmds, cmd)
-			}
-		case ScreenDiff:
-			if m.diffModel != nil {
-				newDiff, cmd := m.diffModel.Update(msg)
-				if nd, ok := newDiff.(*DiffModel); ok {
-					m.diffModel = nd
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenHelp:
-			if m.helpModel != nil {
-				newHelp, cmd := m.helpModel.Update(msg)
-				if nh, ok := newHelp.(*HelpModel); ok {
-					m.helpModel = nh
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenToolDetail:
-			if m.toolDetailModel != nil {
-				newTD, cmd := m.toolDetailModel.Update(msg)
-				if nt, ok := newTD.(*ToolDetailModel); ok {
-					m.toolDetailModel = nt
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenCommandPalette:
-			if m.commandPaletteScreenModel != nil {
-				newCP, cmd := m.commandPaletteScreenModel.Update(msg)
-				if ncp, ok := newCP.(*CommandPaletteScreenModel); ok {
-					m.commandPaletteScreenModel = ncp
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenFileExplorer:
-			if m.fileExplorerModel != nil {
-				newFE, cmd := m.fileExplorerModel.Update(msg)
-				if nf, ok := newFE.(*FileExplorerModel); ok {
-					m.fileExplorerModel = nf
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenBisect:
-			if m.bisectModel != nil {
-				newBisect, cmd := m.bisectModel.Update(msg)
-				if nb, ok := newBisect.(*BisectModel); ok {
-					m.bisectModel = nb
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenDashboard:
-			if m.dashboardModel != nil {
-				newDash, cmd := m.dashboardModel.Update(msg)
-				if nd, ok := newDash.(*DashboardModel); ok {
-					m.dashboardModel = nd
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenNotifications:
-			if m.notifModel != nil {
-				newNotif, cmd := m.notifModel.Update(msg)
-				if nn, ok := newNotif.(*NotificationModel); ok {
-					m.notifModel = nn
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenMetrics:
-			if m.metricsModel != nil {
-				newMetrics, cmd := m.metricsModel.Update(msg)
-				if nm, ok := newMetrics.(*MetricsModel); ok {
-					m.metricsModel = nm
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenThemePicker:
-			if m.themePickerModel != nil {
-				newTP, cmd := m.themePickerModel.Update(msg)
-				if nt, ok := newTP.(*ThemePickerModel); ok {
-					m.themePickerModel = nt
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenResume:
-			if m.resumeModel != nil {
-				newResume, cmd := m.resumeModel.Update(msg)
-				if nr, ok := newResume.(*ResumeModel); ok {
-					m.resumeModel = nr
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenSettings:
-			if m.settingsModel != nil {
-				newSettings, cmd := m.settingsModel.Update(msg)
-				m.settingsModel = newSettings
-				cmds = append(cmds, cmd)
-			}
-		case ScreenModelSelector:
-			if m.msModel != nil {
-				newMs, cmd := m.msModel.Update(msg)
-				if nm, ok := newMs.(*ModelSelector); ok {
-					m.msModel = nm
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenDiscuss:
-			if m.discussModel != nil {
-				newDiscuss, cmd := m.discussModel.Update(msg)
-				if nd, ok := newDiscuss.(*DiscussModel); ok {
-					m.discussModel = nd
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenGoalInput:
-			if m.goalInput != nil {
-				newGoal, cmd := m.goalInput.Update(msg)
-				if ng, ok := newGoal.(*GoalInputModel); ok {
-					m.goalInput = ng
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenFirstRun:
-			if m.firstRunModel != nil {
-				newFR, cmd := m.firstRunModel.Update(msg)
-				if nfr, ok := newFR.(*FirstRunModel); ok {
-					m.firstRunModel = nfr
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenGhostPicker:
-			if m.ghostPickerModel != nil {
-				newGP, cmd := m.ghostPickerModel.Update(msg)
-				if ngp, ok := newGP.(*GhostPickerModel); ok {
-					m.ghostPickerModel = ngp
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenGhostOutput:
-			if m.ghostOutputModel != nil {
-				newGO, cmd := m.ghostOutputModel.Update(msg)
-				if ngo, ok := newGO.(*GhostOutputModel); ok {
-					m.ghostOutputModel = ngo
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenConfirmQuit:
-			if m.confirmQuitModel != nil {
-				newCQ, cmd := m.confirmQuitModel.Update(msg)
-				if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
-					m.confirmQuitModel = ncq
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenPhaseModelPicker:
-			if m.phaseModelPicker != nil {
-				newPMP, cmd := m.phaseModelPicker.Update(msg)
-				m.phaseModelPicker = newPMP
-				cmds = append(cmds, cmd)
-			}
-		case ScreenSessionDetail:
-			if m.sessionDetailModel != nil {
-				newSD, cmd := m.sessionDetailModel.Update(msg)
-				if ns, ok := newSD.(*SessionDetailModel); ok {
-					m.sessionDetailModel = ns
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenChatHistory:
-			if m.chatHistoryModel != nil {
-				newCH, cmd := m.chatHistoryModel.Update(msg)
-				if nch, ok := newCH.(*ChatHistoryModel); ok {
-					m.chatHistoryModel = nch
-				}
-				cmds = append(cmds, cmd)
-			}
-		case ScreenHome:
-			if m.homeModel != nil {
-				newHome, cmd := m.homeModel.Update(msg)
-				if nh, ok := newHome.(*HomeModel); ok {
-					m.homeModel = nh
-				}
-				cmds = append(cmds, cmd)
-			}
+		if c := m.forwardMouseToScreen(msg); c != nil {
+			cmds = append(cmds, c)
 		}
 
 	// ── Screen routing ─────────────────────────────────────────────────────────
@@ -384,248 +133,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// ── Agent loop ────────────────────────────────────────────────────────
-	case AgentStreamMsg:
-		if m.replModel != nil && msg.Chunk != nil {
-			if !m.replModel.streaming && m.sidebarModel != nil {
-				m.sidebarModel.StartTokenBurn()
-			}
-			sm := StreamMsg{
-				Chunk:     msg.Chunk,
-				ModelID:   activeModelID(m.activeModel),
-				SessionID: m.sessionID,
-			}
-			cs := m.replModel.handleStreamMsg(sm)
-			// cs[0] reads from m.replModel.streamCh which is nil during agent
-			// loop — discard it to prevent goroutine leak. Keep StreamTickCmd.
-			cmds = append(cmds, cs[1:]...)
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentThinkingMsg:
-		if m.replModel != nil {
-			m.replModel.lastStatus = fmt.Sprintf("⟳ Iteration %d — thinking…", msg.Iteration)
-			m.replModel.thinking = true
-			if m.replModel.thinkingStartAt.IsZero() {
-				m.replModel.thinkingStartAt = time.Now()
-			}
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentToolStartMsg:
-		if m.replModel != nil {
-			tcJSON, _ := json.Marshal(types.ToolCall{
-				ID:    msg.ToolCall.ID,
-				Name:  msg.ToolCall.Name,
-				Input: msg.ToolCall.Input,
-			})
-			toolMsg := types.Message{
-				Role: "assistant",
-				Segments: []types.MessageSegment{{
-					Type:    "tool_use",
-					Content: string(tcJSON),
-					Visible: true,
-				}},
-				CreatedAt: time.Now(),
-			}
-			m.replModel.AddMessage(toolMsg)
-			m.replModel.TrackLiveTool(msg.ToolCall.Name, len(m.replModel.Messages())-1)
-		}
-		if m.sidebarModel != nil {
-			m.sidebarModel.AddToolCallStart(msg.ToolCall.Name, "")
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentToolProgressMsg:
-		if m.replModel != nil {
-			elapsed := float64(msg.ElapsedMs) / 1000.0
-			m.replModel.lastStatus = fmt.Sprintf("⏳ %s — %.1fs", msg.ToolCall.Name, elapsed)
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentToolDoneMsg:
-		if m.replModel != nil {
-			m.replModel.UpdateLiveTool(msg.ToolCall.Name, msg.Err, msg.DurationMs)
-		}
-		if m.sidebarModel != nil {
-			m.sidebarModel.CompleteToolCall(msg.ToolCall.Name, msg.Err == nil, time.Duration(msg.DurationMs)*time.Millisecond)
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentIterationDoneMsg:
-		if m.replModel != nil {
-			m.replModel.streaming = false
-			m.replModel.thinking = false
-			m.replModel.thinkingStartAt = time.Time{}
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentIterationMsg:
-		if m.replModel != nil {
-			var chips []string
-			for _, tc := range msg.ToolCalls {
-				inputSnippet := extractToolInputSnippet(tc)
-				chips = append(chips, tc.Name+"|"+inputSnippet)
-			}
-			iterContent := fmt.Sprintf("iter:%d:chips:%s", msg.Iteration, strings.Join(chips, ","))
-			iterMsg := types.Message{
-				Role: "assistant",
-				Segments: []types.MessageSegment{{
-					Type:    "content",
-					Content: iterContent,
-					Visible: true,
-				}},
-				CreatedAt: time.Now(),
-			}
-			m.replModel.AddMessage(iterMsg)
-		}
-		cmds = append(cmds, m.readAgentCh())
-	case AgentDoneMsg:
-		if m.replModel != nil {
-			m.replModel.streaming = false
-			m.replModel.thinking = false
-			m.replModel.thinkingStartAt = time.Time{}
-			doneMsg := StreamDoneMsg{
-				Message:   msg.Message,
-				Usage:     msg.Usage,
-				ModelID:   activeModelID(m.activeModel),
-				SessionID: m.sessionID,
-			}
-			collapsed := m.replModel.handleStreamDoneMsg(doneMsg)
-			m.checkAutoDream()
-			if collapsed > 0 {
-				cmds = append(cmds, m.addToastCmd(
-					fmt.Sprintf("↓ %d tool output(s) collapsed — press Enter to expand", collapsed),
-					"info", 3*time.Second))
-			}
-		}
-		m.streamCancelFn = nil
-		m.agentCh = nil
-		// Revert sidebar from todo mode back to file tree after agent completes
-		if m.sidebarModel != nil && m.sidebarModel.GetMode() == SidebarModeTodo {
-			m.sidebarModel.RevertToFiles()
-		}
-		// Persist agent conversation to session
-		m.saveAgentSession()
-	case AgentErrorMsg:
-		// Auto-recover from context overflow: compress messages and re-send
-		if stderrors.Is(msg.Err, m31errors.ErrContextExceeded) && m.autoDream != nil && m.replModel != nil {
-			msgs := m.replModel.Messages()
-			m.autoDream.SetMessages(msgs)
-			if m.autoDream.CanConsolidate() {
-				result := m.autoDream.Consolidate()
-				if result.Success {
-					m.replModel.SetMessages(m.autoDream.Messages())
-					m.addToast(fmt.Sprintf("Context compressed: %d messages removed, ~%d tokens saved. Re-send your message to retry.", result.MessagesRemoved, result.TokensSaved), "info")
-				}
-			}
-		}
-		if m.replModel != nil {
-			m.replModel.streaming = false
-			m.replModel.thinking = false
-			m.replModel.thinkingStartAt = time.Time{}
-			errMsg := StreamErrorMsg{Err: msg.Err, ModelID: activeModelID(m.activeModel), ProviderName: m.activeProvider}
-			m.replModel.handleStreamErrorMsg(errMsg)
-		}
-		m.streamCancelFn = nil
-		m.agentCh = nil
-		// Revert sidebar from todo mode back to file tree on agent error
-		if m.sidebarModel != nil && m.sidebarModel.GetMode() == SidebarModeTodo {
-			m.sidebarModel.RevertToFiles()
-		}
-
-	case AgentCompressedMsg:
-		m.addToast(fmt.Sprintf("Auto-compressed: %d messages removed, ~%d tokens saved", msg.MessagesRemoved, msg.TokensSaved), "info")
+	case AgentStreamMsg, AgentThinkingMsg, AgentToolStartMsg, AgentToolProgressMsg,
+		AgentToolDoneMsg, AgentIterationDoneMsg, AgentIterationMsg,
+		AgentDoneMsg, AgentErrorMsg, AgentCompressedMsg:
+		cmds = append(cmds, m.handleAgentMsg(msg))
 
 	case TickMsg:
-		if m.replModel != nil && (m.replModel.streaming || m.replModel.thinking) {
-			replM, cmd := m.replModel.Update(msg)
-			if r, ok := replM.(*ReplModel); ok {
-				m.replModel = r
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Forward to execute screen for animated progress bar
-		if m.screen == ScreenExecute && m.executeModel != nil {
-			execM, cmd := m.executeModel.Update(msg)
-			m.executeModel = execM
-			cmds = append(cmds, cmd)
-		}
-		// Forward to phase model picker for spinner animation
-		if m.screen == ScreenPhaseModelPicker && m.phaseModelPicker != nil {
-			newPMP, cmd := m.phaseModelPicker.Update(msg)
-			m.phaseModelPicker = newPMP
-			cmds = append(cmds, cmd)
-		}
-		// Forward to model selector screen for spinner animation
-		if m.screen == ScreenModelSelector && m.msModel != nil {
-			newMS, cmd := m.msModel.Update(msg)
-			if r, ok := newMS.(*ModelSelector); ok {
-				m.msModel = r
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Forward to verify screen for heal spinner animation
-		if m.screen == ScreenVerify && m.verifyModel != nil {
-			m.verifyModel.TickSpinner()
-		}
-		// Forward to runtime screen for spinner animation
-		if m.screen == ScreenRuntimeCheck && m.runtimeModel != nil {
-			newRuntime, cmd := m.runtimeModel.Update(msg)
-			m.runtimeModel = newRuntime
-			cmds = append(cmds, cmd)
-		}
-		// Forward to plan screen for animations
-		if m.screen == ScreenPlan && m.planModel != nil {
-			newPlan, cmd := m.planModel.Update(msg)
-			m.planModel = newPlan
-			cmds = append(cmds, cmd)
-		}
-		// Forward to ship screen for animations
-		if m.screen == ScreenShip && m.shipModel != nil {
-			newShip, cmd := m.shipModel.Update(msg)
-			m.shipModel = newShip
-			cmds = append(cmds, cmd)
-		}
-		// Forward to theme picker for animations
-		if m.screen == ScreenThemePicker && m.themePickerModel != nil {
-			newTP, cmd := m.themePickerModel.Update(msg)
-			if nt, ok := newTP.(*ThemePickerModel); ok {
-				m.themePickerModel = nt
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Forward to dashboard for animations
-		if m.screen == ScreenDashboard && m.dashboardModel != nil {
-			newDash, cmd := m.dashboardModel.Update(msg)
-			if nd, ok := newDash.(*DashboardModel); ok {
-				m.dashboardModel = nd
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Forward to chat history for scroll animations
-		if m.screen == ScreenChatHistory && m.chatHistoryModel != nil {
-			newCH, cmd := m.chatHistoryModel.Update(msg)
-			if nch, ok := newCH.(*ChatHistoryModel); ok {
-				m.chatHistoryModel = nch
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Forward to ghost output for scroll animations
-		if m.screen == ScreenGhostOutput && m.ghostOutputModel != nil {
-			newGO, cmd := m.ghostOutputModel.Update(msg)
-			if ngo, ok := newGO.(*GhostOutputModel); ok {
-				m.ghostOutputModel = ngo
-			}
-			cmds = append(cmds, cmd)
-		}
-		// Screen transition tick
-		if m.transition != nil && m.transition.Active {
-			if m.transition.TransitionTick() {
-				// Transition complete — switch to target screen
-				// Sub-model was already created in navigateToScreen → ensureSubModel
-				m.screen = m.transition.ToScreen
-				m.transition = nil
-			} else {
-				// Keep ticking at transition FPS for smooth animation
-				cmds = append(cmds, tea.Tick(transitionTickInterval, func(t time.Time) tea.Msg {
-					return TickMsg{Time: t}
-				}))
-			}
-		}
+		cmds = append(cmds, m.handleTickMsg(msg)...)
 
 	// ── Health ────────────────────────────────────────────────────────────────
 	case HealthCheckTickMsg:
@@ -637,37 +151,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, NextHealthTick(m.shutdownCtx, types.HealthCheckInterval))
 
 	case HealthCheckResultMsg:
-		m.healthStatus = msg.Result
-		m.lastHealth = time.Now()
-		// Display health check result to the user
-		if m.replModel != nil {
-			result := msg.Result
-			var emoji, status string
-			switch result.Status {
-			case types.HealthStatusLive:
-				emoji = "✓"
-				status = "healthy"
-			case types.HealthStatusSlow:
-				emoji = "⚠"
-				status = "slow"
-			case types.HealthStatusOffline:
-				emoji = "✗"
-				status = "offline"
-			case types.HealthStatusDegraded:
-				emoji = "⚠"
-				status = "degraded"
-			default:
-				emoji = "?"
-				status = result.Status
-			}
-			var msg string
-			if result.Error != "" {
-				msg = fmt.Sprintf("%s Health check: %s (%s) — %s", emoji, status, fmt.Sprintf("%dms", result.LatencyMs), result.Error)
-			} else {
-				msg = fmt.Sprintf("%s Health check: %s (%s)", emoji, status, fmt.Sprintf("%dms", result.LatencyMs))
-			}
-			m.replModel.AddMessage(makeAssistantMsg(msg))
-		}
+		cmds = append(cmds, m.handleHealthCheckResult(msg)...)
 
 	// ── Cache refresh ─────────────────────────────────────────────────────────
 	case RefreshCacheMsg:
@@ -756,154 +240,26 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case workflow.TaskStartMsg:
-		if m.executeModel != nil {
-			found := false
-			for i, t := range m.executeModel.tasks {
-				if t.ID == msg.Task.ID {
-					m.executeModel.SetCurrentTask(i)
-					m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
-					found = true
-					break
-				}
-			}
-			if !found {
-				// Task was auto-generated (e.g. Fast/Direct mode without Plan).
-				// Append it to the model's task list so progress tracking works.
-				m.executeModel.tasks = append(m.executeModel.tasks, msg.Task)
-				m.executeModel.SetCurrentTask(len(m.executeModel.tasks) - 1)
-				m.executeModel.UpdateTaskStatus(msg.Task.ID, types.StatusRunning)
-			}
-		}
-		// Update sidebar todo list
-		if m.sidebarModel != nil {
-			if m.sidebarModel.GetMode() == SidebarModeFiles {
-				m.sidebarModel.SetMode(SidebarModeTodo)
-			}
-			if m.executeModel != nil && m.sidebarModel.taskProgress.Total == 0 {
-				m.sidebarModel.InitTaskProgress(len(m.executeModel.tasks))
-			}
-			m.sidebarModel.AddTodoItem(SidebarTodoItem{
-				Content:  fmt.Sprintf("[Task %d] %s", msg.Task.ID, msg.Task.Description),
-				Status:   "in_progress",
-				Priority: "high",
-				Source:   "task",
-				TaskID:   msg.Task.ID,
-			})
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowTaskStart(msg)...)
 	case workflow.TaskUpdateMsg:
-		if m.executeModel != nil {
-			var status types.TaskStatus
-			switch msg.Status {
-			case "done":
-				status = types.StatusDone
-			case "failed":
-				status = types.StatusFailed
-			default:
-				status = types.StatusRunning
-			}
-			m.executeModel.UpdateTaskStatus(msg.Task.ID, status)
-		}
-		// Update sidebar todo list
-		if m.sidebarModel != nil {
-			todoStatus := msg.Status
-			if todoStatus == "done" {
-				todoStatus = "completed"
-			}
-			m.sidebarModel.AddTodoItem(SidebarTodoItem{
-				Content:  fmt.Sprintf("[Task %d] %s", msg.Task.ID, msg.Task.Description),
-				Status:   todoStatus,
-				Priority: "high",
-				Source:   "task",
-				TaskID:   msg.Task.ID,
-			})
-			// Update progress counters from the full Task struct.
-			m.sidebarModel.UpdateTaskProgress(msg.Task)
-			// Auto-revert to file tree when all tasks complete
-			if m.sidebarModel.IsAllTasksDone() {
-				cmds = append(cmds, func() tea.Msg {
-					return SidebarRevertMsg{}
-				})
-			}
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowTaskUpdate(msg)...)
 	case workflow.ToolStartMsg:
-		if m.executeModel != nil {
-			detail := msg.Description
-			if detail == "" {
-				detail = msg.ToolName
-			}
-			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("→ %s: %s", msg.ToolName, detail),
-			})
-		}
-		// Update sidebar tool call timeline
-		if m.sidebarModel != nil {
-			m.sidebarModel.AddToolCallStart(msg.ToolName, msg.Description)
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowToolStart(msg)...)
 	case workflow.ToolCompleteMsg:
-		if m.executeModel != nil {
-			status := "ok"
-			if !msg.Success {
-				status = "failed"
-			}
-			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("  %s %s (%dms)", status, msg.ToolName, msg.DurationMs),
-			})
-		}
-		// Update sidebar tool call timeline
-		if m.sidebarModel != nil {
-			m.sidebarModel.CompleteToolCall(msg.ToolName, msg.Success, time.Duration(msg.DurationMs)*time.Millisecond)
-			// Track recently changed files for the smart file watcher section.
-			if msg.Success && msg.FilePath != "" {
-				m.sidebarModel.MarkFileChanged(msg.FilePath)
-			}
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowToolComplete(msg)...)
 	case workflow.SelfHealStartMsg:
-		if m.executeModel != nil {
-			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("  [warn] Self-heal attempt %d/%d for task %d", msg.Attempt, msg.Max, msg.TaskID),
-			})
-		}
-		if m.verifyModel != nil {
-			m.verifyModel.StartHealing(msg.TaskID, msg.Attempt)
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowSelfHealStart(msg)...)
 	case workflow.SelfHealCompleteMsg:
-		if m.executeModel != nil {
-			status := "ok"
-			if !msg.Success {
-				status = "failed"
-			}
-			m.executeModel.AppendLiveOutput([]string{
-				fmt.Sprintf("  Self-heal %s (attempt %d/%d)", status, msg.Attempt, msg.Max),
-			})
-		}
-		if m.verifyModel != nil {
-			m.verifyModel.StopHealing()
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handleWorkflowSelfHealComplete(msg)...)
 	case workflow.RuntimeCheckCompleteMsg:
 		if m.runtimeModel != nil {
 			m.runtimeModel.SetSummary(msg.Summary)
 		}
 		cmds = append(cmds, m.drainEmitterCmd())
 	case workflow.PhaseTransitionStartMsg:
-		// Update sidebar phase pipeline
-		if m.sidebarModel != nil {
-			m.sidebarModel.SetCurrentPhase(msg.To)
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handlePhaseTransitionStart(msg)...)
 	case workflow.PhaseTransitionCompleteMsg:
-		// Mark the just-completed phase in the sidebar pipeline so that the
-		// final phase (Ship) — which has no successor to trigger SetCurrentPhase
-		// — is still shown as completed.
-		if m.sidebarModel != nil && msg.To != "" {
-			m.sidebarModel.MarkPhaseCompleted(msg.To)
-		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.handlePhaseTransitionComplete(msg)...)
 	case workflow.IntermediateProgressMsg,
 		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
 		cmds = append(cmds, m.drainEmitterCmd())
@@ -919,38 +275,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Phase model picked (from dual-model picker) ────────────────────────────
 	case PhaseModelPickedMsg:
-		m.planningModelID = msg.PlanningModelID
-		m.codingModelID = msg.CodingModelID
-		// Inject per-phase model overrides into the workflow engine.
-		if m.workflowEngine != nil && msg.PlanningModelID != "" {
-			m.workflowEngine.SetPhaseModel(types.PhaseDiscuss, msg.PlanningModelID)
-			m.workflowEngine.SetPhaseModel(types.PhasePlan, msg.PlanningModelID)
-			m.workflowEngine.SetPhaseModel(types.PhaseVerify, msg.PlanningModelID)
-		}
-		if m.workflowEngine != nil && msg.CodingModelID != "" {
-			m.workflowEngine.SetPhaseModel(types.PhaseExecute, msg.CodingModelID)
-			m.workflowEngine.SetPhaseModel(types.PhaseShip, msg.CodingModelID)
-		}
-		// Resume the workflow from the REPL screen.
-		m.screen = ScreenREPL
-		cmds = append(cmds, m.runWorkflowFromGoal(m.workflowGoal))
+		cmds = append(cmds, m.handlePhaseModelPicked(msg)...)
 
 	// ── Toast ─────────────────────────────────────────────────────────────────
 	case ToastMsg:
-		id := m.addToast(msg.Text, msg.Type)
-		duration := msg.Duration
-		if duration <= 0 {
-			duration = 3 * time.Second
-		}
-		for i := len(m.toasts) - 1; i >= 0; i-- {
-			if m.toasts[i].ID == id {
-				m.toasts[i].Duration = duration
-				break
-			}
-		}
-		cmds = append(cmds, tea.Tick(duration, func(time.Time) tea.Msg {
-			return ToastExpiryMsg{ToastID: id}
-		}))
+		cmds = append(cmds, m.handleToast(msg)...)
 
 	case ToastExpiryMsg:
 		m.removeToastByID(msg.ToastID)
@@ -964,69 +293,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Settings saved ────────────────────────────────────────────────────────
 	case SettingsSavedMsg:
-		if m.configModel != nil {
-			m.configModel.buildContent()
-		} else {
-			cw, ch := m.contentDimensions()
-			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
-		}
-		// Re-register providers with updated API keys from settings
-		m.reRegisterProvidersFromConfig()
-		cmds = append(cmds, m.popScreen())
-
-	// ── Reset complete ───────────────────────────────────────────────────────
+		cmds = append(cmds, m.handleSettingsSaved()...)
 	case ResetCompleteMsg:
-		m.config = config.DefaultConfig()
-		m.registry = provider.NewRegistry()
-		m.activeProvider = ""
-		m.activeModel = nil
-		m.firstRunModel = nil
-		m.replModel = nil
-		m.configModel = nil
-		m.screenStack = m.screenStack[:0]
-		cmds = append(cmds, m.navigateToScreen(ScreenFirstRun))
-		cmds = append(cmds, m.addToastCmd("M31A reset to factory state", "success", 3*time.Second))
-
-	// ── Config editor saved (stays on ScreenConfig) ────────────────────────
+		cmds = append(cmds, m.handleResetComplete()...)
 	case ConfigSavedMsg:
-		// Re-register providers so new API keys take effect immediately
-		m.reRegisterProvidersFromConfig()
-		if m.configModel != nil {
-			m.configModel.buildContent()
-		}
-		if m.dispatcher != nil && m.config != nil {
-			m.dispatcher.UpdatePermissions(&m.config.Permissions)
-		}
-		cmds = append(cmds, m.addToastCmd("Config saved to disk", "success", 3*time.Second))
-
-	// ── Config hot-reload (file changed on disk) ────────────────────────────
+		cmds = append(cmds, m.handleConfigSaved()...)
 	case config.ConfigReloadMsg:
-		if msg.Error != nil {
-			slog.Warn("config reload failed", "error", msg.Error)
-			cmds = append(cmds, m.addToastCmd("Config reload failed: "+m31errors.UserMessage(msg.Error), "error", 5*time.Second))
-			break
-		}
-		if msg.Config != nil {
-			// Resolve API keys from env/keychain since Load() does not call
-			// ResolveAPIKeys — without this, keychain-stored keys are lost
-			// after SaveWithKeychain clears them from the TOML file.
-			if err := msg.Config.ResolveAPIKeys(m.keychain); err != nil {
-				slog.Warn("failed to resolve API keys on reload", "error", err)
-			}
-			m.config = msg.Config
-			m.reRegisterProvidersFromConfig()
-			if m.dispatcher != nil {
-				m.dispatcher.UpdatePermissions(&m.config.Permissions)
-			}
-			if m.configModel != nil {
-				m.configModel.cfg = m.config
-				m.configModel.buildContent()
-			}
-			if m.settingsModel != nil {
-				m.settingsModel.config = m.config
-			}
-			cmds = append(cmds, m.addToastCmd("Config reloaded from disk", "info", 3*time.Second))
-		}
+		cmds = append(cmds, m.handleConfigReload(msg)...)
 
 	// ── Theme changed ─────────────────────────────────────────────────────────
 	case ThemeChangedMsg:
@@ -1038,68 +311,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Fallback event ────────────────────────────────────────────────────────
 	case FallbackEventMsg:
-		m.activeProvider = msg.To
-		slog.Info("provider fallback", "from", msg.From, "to", msg.To, "reason", msg.Reason)
-		m.addToast(fmt.Sprintf("Switched from %s to %s (provider unavailable)", msg.From, msg.To), "warning")
-		// Persist provider switch to config so it survives restarts.
-		if m.config != nil {
-			m.config.Provider.Default = msg.To
-			if m.configPath != "" {
-				if err := m.config.SaveWithKeychain(m.configPath, m.keychain); err != nil {
-					slog.Warn("failed to save provider to config", "error", err)
-				}
-			}
-		}
-		// Re-validate the active model against the new provider
-		if m.registry != nil && m.activeModel != nil {
-			if p, err := m.registry.Get(msg.To); err == nil && p != nil {
-				if info, err := p.GetModel(m.activeModel.ID); err == nil && info != nil {
-					m.activeModel = info
-				}
-			}
-		}
+		cmds = append(cmds, m.handleFallbackEvent(msg)...)
 
 	// ── Bisect start with commit range ─────────────────────────────────────
 	case BisectStartMsg:
-		if m.bisectModel != nil && m.git != nil {
-			commits, err := m.git.Log(0) // all commits
-			if err == nil && len(commits) > 0 {
-				var bisectCommits []bisectCommit
-				goodIdx := -1
-				badIdx := -1
-				for i, c := range commits {
-					hash := c.Hash
-					if len(hash) > 7 {
-						hash = hash[:7]
-					}
-					status := "pending"
-					if msg.GoodCommit != "" && (c.Hash == msg.GoodCommit || c.ShortHash == msg.GoodCommit || hash == msg.GoodCommit) {
-						status = "good"
-						goodIdx = i
-					}
-					if msg.BadCommit != "" && (c.Hash == msg.BadCommit || c.ShortHash == msg.BadCommit || hash == msg.BadCommit) {
-						status = "bad"
-						badIdx = i
-					}
-					bisectCommits = append(bisectCommits, bisectCommit{
-						Hash:    c.Hash,
-						Message: c.Message,
-						Status:  status,
-					})
-				}
-				// If we found good and bad, keep only the range between them
-				if goodIdx >= 0 && badIdx >= 0 && goodIdx != badIdx {
-					start, end := goodIdx, badIdx
-					if start > end {
-						start, end = end, start
-					}
-					bisectCommits = bisectCommits[start : end+1]
-				}
-				if len(bisectCommits) > 0 {
-					m.bisectModel.SetCommits(bisectCommits)
-				}
-			}
-		}
+		cmds = append(cmds, m.handleBisectStart(msg)...)
 
 	// ── Session detail request ─────────────────────────────────────────────
 	case SessionDetailRequestMsg:
@@ -1109,26 +325,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Chat history: continue from message ────────────────────────────────
 	case ChatHistoryContinueMsg:
-		if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.Messages()) {
-			// Truncate messages: keep everything up to and including the selected message
-			truncated := make([]types.Message, msg.MessageIndex+1)
-			copy(truncated, m.replModel.Messages()[:msg.MessageIndex+1])
-			m.replModel.SetMessages(truncated)
-			// Persist the truncated session
-			if m.sessionManager != nil && m.sessionID != "" {
-				sess, err := m.sessionManager.LoadSession(m.sessionID)
-				if err == nil {
-					sess.Messages = truncated
-					sess.MessageCount = len(truncated)
-					_ = m.sessionManager.SaveSession(sess)
-				}
-			}
-			cmds = append(cmds, m.addToastCmd(
-				fmt.Sprintf("Continued from message %d — %d messages remaining", msg.MessageIndex+1, len(truncated)),
-				"success", 3*time.Second))
-			// Navigate back to REPL
-			cmds = append(cmds, m.navigateToScreen(ScreenREPL))
-		}
+		cmds = append(cmds, m.handleChatHistoryContinue(msg)...)
 
 	// ── Ghost write request ───────────────────────────────────────────────
 	case GhostWriteRequestMsg:
@@ -1158,51 +355,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Model selected ────────────────────────────────────────────────────────
 	case ModelSelectedMsg:
-		m.activeModel = &msg.Model
-		m.activeProvider = msg.Provider
-		if m.registry != nil {
-			if err := m.registry.SetActive(msg.Provider); err != nil {
-				slog.Warn("failed to set active provider", "provider", msg.Provider, "error", err)
-				cmds = append(cmds, m.addToastCmd("Could not switch to "+msg.Provider+": "+m31errors.UserMessage(err), "warning", 5*time.Second))
-			}
-		}
-		if m.replModel != nil {
-			// Immediately sync the model to replModel to avoid split-brain
-			// between AppState.activeModel and replModel.activeModel.
-			m.replModel.activeModel = &msg.Model
-			m.replModel.activeProvider = msg.Provider
-			providerCmd := m.replModel.SetProvider(m.shutdownCtx, m.registry, msg.Provider, &msg.Model, m.sessionID, m.config)
-			cmds = append(cmds, providerCmd)
-		}
-		cmds = append(cmds, m.popScreen())
+		cmds = append(cmds, m.handleModelSelected(msg)...)
 
 	// ── Sidebar tick (periodic or file-watcher triggered) ──────────────────────
 	case SidebarRefreshTickMsg:
-		if m.sidebarModel != nil {
-			newSidebar, cmd := m.sidebarModel.Update(msg)
-			m.sidebarModel = newSidebar
-			cmds = append(cmds, cmd)
-		}
-		// Re-register file watcher listener for next event
-		if m.fileWatcher != nil {
-			cmds = append(cmds, m.drainFileWatcherCmd())
-		}
-
-	// ── Sidebar refresh ───────────────────────────────────────────────────────
+		cmds = append(cmds, m.handleSidebarRefreshTick(msg)...)
 	case SidebarRefreshMsg:
-		if m.sidebarModel != nil {
-			newSidebar, cmd := m.sidebarModel.Update(msg)
-			m.sidebarModel = newSidebar
-			cmds = append(cmds, cmd)
-		}
-		// Propagate git branch to REPL for status bar display
-		if m.replModel != nil && msg.Branch != "" {
-			m.replModel.sidebarBranch = msg.Branch
-		}
-		// Propagate changed-file count so the welcome screen project card is accurate
-		if m.replModel != nil {
-			m.replModel.SetChangedFiles(len(msg.Files))
-		}
+		cmds = append(cmds, m.handleSidebarRefresh(msg)...)
 
 	case SidebarRevertMsg:
 		if m.sidebarModel != nil {
@@ -1210,93 +369,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case SidebarTodoUpdateMsg:
-		if m.sidebarModel != nil {
-			// Ensure sidebar is in todo mode
-			if m.sidebarModel.GetMode() == SidebarModeFiles {
-				m.sidebarModel.SetMode(SidebarModeTodo)
-			}
-			// Add LLM-generated items
-			for _, item := range msg.Items {
-				m.sidebarModel.AddTodoItem(SidebarTodoItem{
-					Content:  item.Content,
-					Status:   item.Status,
-					Priority: item.Priority,
-					Source:   "llm",
-				})
-			}
-		}
+		cmds = append(cmds, m.handleSidebarTodoUpdate(msg)...)
 
 	// ── Subagent events ───────────────────────────────────────────────────────
 	case SubagentEventMsg:
-		if m.subagentsModel != nil {
-			m.subagentsModel.ApplyEvent(msg.Event)
-			// Auto-show the panel on first activity so the user sees progress.
-			if msg.Event.Type == subagent.EventSpawned {
-				m.subagentsVisible = true
-			}
-			// Update sidebar sub-agent status
-			if m.sidebarModel != nil {
-				total, active := m.subagentsModel.GetStatus()
-				m.sidebarModel.UpdateSubAgentStatus(total, active)
-			}
-		}
-		// Surface terminal events in the REPL so the parent conversation
-		// has access to subagent summaries without opening the panel.
-		if m.replModel != nil {
-			switch msg.Event.Type {
-			case subagent.EventSpawned:
-				label := msg.Event.Name
-				if label == "" {
-					label = msg.Event.AgentID
-				}
-				m.replModel.AddMessage(makeAssistantMsg(
-					fmt.Sprintf("**Subagent %s** spawned", label),
-				))
-			case subagent.EventDone:
-				label := msg.Event.Name
-				if label == "" {
-					label = msg.Event.AgentID
-				}
-				body := fmt.Sprintf("**Subagent %s done** (%d tools, %d+%d tokens)",
-					label, msg.Event.ToolCalls, msg.Event.InputToks, msg.Event.OutputToks)
-				if msg.Event.Summary != "" {
-					body += "\n\n" + msg.Event.Summary
-				}
-				m.replModel.AddMessage(makeAssistantMsg(body))
-				// Clean up the subagent's worktree now that it's done.
-				if m.subagentManager != nil {
-					agentID := msg.Event.AgentID
-					cmds = append(cmds, func() tea.Msg {
-						if err := m.subagentManager.Cleanup(m.shutdownCtx, agentID); err != nil {
-							slog.Warn("subagent worktree cleanup failed", "id", agentID, "error", err)
-						}
-						return nil
-					})
-				}
-			case subagent.EventError:
-				label := msg.Event.Name
-				if label == "" {
-					label = msg.Event.AgentID
-				}
-				m.replModel.AddMessage(makeAssistantMsg(
-					fmt.Sprintf("**Subagent %s errored:** %s", label, msg.Event.Error),
-				))
-				// Clean up the subagent's worktree on error too.
-				if m.subagentManager != nil {
-					agentID := msg.Event.AgentID
-					cmds = append(cmds, func() tea.Msg {
-						if err := m.subagentManager.Cleanup(m.shutdownCtx, agentID); err != nil {
-							slog.Warn("subagent worktree cleanup failed", "id", agentID, "error", err)
-						}
-						return nil
-					})
-				}
-			}
-		}
-		// Re-register the listener so the next event is delivered.
-		if m.subagentManager != nil {
-			cmds = append(cmds, subagentListenerCmd(m.shutdownCtx, m.subagentManager.Events()))
-		}
+		cmds = append(cmds, m.handleSubagentEvent(msg)...)
 
 	// ── Diff screen ───────────────────────────────────────────────────────────
 	case DiffScreenMsg:
@@ -1373,16 +450,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
 	case ProviderModelsFetchedMsg:
-		if msg.Err != nil {
-			slog.Warn("failed to fetch provider models", "error", msg.Err)
-			cmds = append(cmds, m.addToastCmd("Could not load model catalog: "+m31errors.UserMessage(msg.Err), "warning", 5*time.Second))
-		}
-		if m.replModel != nil {
-			m.replModel.handleProviderModelsFetched(msg)
-			if m.replModel.activeModel != nil {
-				m.activeModel = m.replModel.activeModel
-			}
-		}
+		cmds = append(cmds, m.handleProviderModelsFetched(msg)...)
 
 	// ── ThinkingBlockToggle ───────────────────────────────────────────────────
 	case ThinkingBlockToggleMsg:
@@ -1409,252 +477,14 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// forwardMsgToScreen forwards a message to the active screen's sub-model and
-// returns the resulting tea.Cmd. This eliminates the need to duplicate the
-// screen switch block across mouse, tick, and default message handlers.
-func (m *AppState) forwardMsgToScreen(msg tea.Msg) tea.Cmd {
-	switch m.screen {
-	case ScreenREPL:
-		if m.replModel != nil {
-			newRepl, cmd := m.replModel.Update(msg)
-			if r, ok := newRepl.(*ReplModel); ok {
-				m.replModel = r
-			}
-			return cmd
-		}
-	case ScreenPlan:
-		if m.planModel != nil {
-			newPlan, cmd := m.planModel.Update(msg)
-			m.planModel = newPlan
-			return cmd
-		}
-	case ScreenExecute:
-		if m.executeModel != nil {
-			newExec, cmd := m.executeModel.Update(msg)
-			m.executeModel = newExec
-			return cmd
-		}
-	case ScreenVerify:
-		if m.verifyModel != nil {
-			newVerify, cmd := m.verifyModel.Update(msg)
-			m.verifyModel = newVerify
-			return cmd
-		}
-	case ScreenShip:
-		if m.shipModel != nil {
-			newShip, cmd := m.shipModel.Update(msg)
-			m.shipModel = newShip
-			return cmd
-		}
-	case ScreenLedger:
-		if m.ledgerModel != nil {
-			newLedger, cmd := m.ledgerModel.Update(msg)
-			if nl, ok := newLedger.(*LedgerModel); ok {
-				m.ledgerModel = nl
-			}
-			return cmd
-		}
-	case ScreenRollback:
-		if m.rollbackModel != nil {
-			newRB, cmd := m.rollbackModel.Update(msg)
-			if nr, ok := newRB.(*RollbackModel); ok {
-				m.rollbackModel = nr
-			}
-			return cmd
-		}
-	case ScreenConfig:
-		if m.configModel != nil {
-			newCfg, cmd := m.configModel.Update(msg)
-			m.configModel = newCfg
-			return cmd
-		}
-	case ScreenDiff:
-		if m.diffModel != nil {
-			newDiff, cmd := m.diffModel.Update(msg)
-			if nd, ok := newDiff.(*DiffModel); ok {
-				m.diffModel = nd
-			}
-			return cmd
-		}
-	case ScreenHelp:
-		if m.helpModel != nil {
-			newHelp, cmd := m.helpModel.Update(msg)
-			if nh, ok := newHelp.(*HelpModel); ok {
-				m.helpModel = nh
-			}
-			return cmd
-		}
-	case ScreenToolDetail:
-		if m.toolDetailModel != nil {
-			newTD, cmd := m.toolDetailModel.Update(msg)
-			if nt, ok := newTD.(*ToolDetailModel); ok {
-				m.toolDetailModel = nt
-			}
-			return cmd
-		}
-	case ScreenCommandPalette:
-		if m.commandPaletteScreenModel != nil {
-			newCP, cmd := m.commandPaletteScreenModel.Update(msg)
-			if ncp, ok := newCP.(*CommandPaletteScreenModel); ok {
-				m.commandPaletteScreenModel = ncp
-			}
-			return cmd
-		}
-	case ScreenFileExplorer:
-		if m.fileExplorerModel != nil {
-			newFE, cmd := m.fileExplorerModel.Update(msg)
-			if nf, ok := newFE.(*FileExplorerModel); ok {
-				m.fileExplorerModel = nf
-			}
-			return cmd
-		}
-	case ScreenBisect:
-		if m.bisectModel != nil {
-			newBisect, cmd := m.bisectModel.Update(msg)
-			if nb, ok := newBisect.(*BisectModel); ok {
-				m.bisectModel = nb
-			}
-			return cmd
-		}
-	case ScreenDashboard:
-		if m.dashboardModel != nil {
-			newDash, cmd := m.dashboardModel.Update(msg)
-			if nd, ok := newDash.(*DashboardModel); ok {
-				m.dashboardModel = nd
-			}
-			return cmd
-		}
-	case ScreenNotifications:
-		if m.notifModel != nil {
-			newNotif, cmd := m.notifModel.Update(msg)
-			if nn, ok := newNotif.(*NotificationModel); ok {
-				m.notifModel = nn
-			}
-			return cmd
-		}
-	case ScreenMetrics:
-		if m.metricsModel != nil {
-			newMetrics, cmd := m.metricsModel.Update(msg)
-			if nm, ok := newMetrics.(*MetricsModel); ok {
-				m.metricsModel = nm
-			}
-			return cmd
-		}
-	case ScreenThemePicker:
-		if m.themePickerModel != nil {
-			newTP, cmd := m.themePickerModel.Update(msg)
-			if nt, ok := newTP.(*ThemePickerModel); ok {
-				m.themePickerModel = nt
-			}
-			return cmd
-		}
-	case ScreenResume:
-		if m.resumeModel != nil {
-			newResume, cmd := m.resumeModel.Update(msg)
-			if nr, ok := newResume.(*ResumeModel); ok {
-				m.resumeModel = nr
-			}
-			return cmd
-		}
-	case ScreenSettings:
-		if m.settingsModel != nil {
-			newSettings, cmd := m.settingsModel.Update(msg)
-			m.settingsModel = newSettings
-			return cmd
-		}
-	case ScreenModelSelector:
-		if m.msModel != nil {
-			newMs, cmd := m.msModel.Update(msg)
-			if nm, ok := newMs.(*ModelSelector); ok {
-				m.msModel = nm
-			}
-			return cmd
-		}
-	case ScreenDiscuss:
-		if m.discussModel != nil {
-			newDiscuss, cmd := m.discussModel.Update(msg)
-			if nd, ok := newDiscuss.(*DiscussModel); ok {
-				m.discussModel = nd
-			}
-			return cmd
-		}
-	case ScreenGoalInput:
-		if m.goalInput != nil {
-			newGoal, cmd := m.goalInput.Update(msg)
-			if ng, ok := newGoal.(*GoalInputModel); ok {
-				m.goalInput = ng
-			}
-			return cmd
-		}
-	case ScreenFirstRun:
-		if m.firstRunModel != nil {
-			newFR, cmd := m.firstRunModel.Update(msg)
-			if nfr, ok := newFR.(*FirstRunModel); ok {
-				m.firstRunModel = nfr
-			}
-			return cmd
-		}
-	case ScreenGhostPicker:
-		if m.ghostPickerModel != nil {
-			newGP, cmd := m.ghostPickerModel.Update(msg)
-			if ngp, ok := newGP.(*GhostPickerModel); ok {
-				m.ghostPickerModel = ngp
-			}
-			return cmd
-		}
-	case ScreenGhostOutput:
-		if m.ghostOutputModel != nil {
-			newGO, cmd := m.ghostOutputModel.Update(msg)
-			if ngo, ok := newGO.(*GhostOutputModel); ok {
-				m.ghostOutputModel = ngo
-			}
-			return cmd
-		}
-	case ScreenConfirmQuit:
-		if m.confirmQuitModel != nil {
-			newCQ, cmd := m.confirmQuitModel.Update(msg)
-			if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
-				m.confirmQuitModel = ncq
-			}
-			return cmd
-		}
-	case ScreenPhaseModelPicker:
-		if m.phaseModelPicker != nil {
-			newPMP, cmd := m.phaseModelPicker.Update(msg)
-			m.phaseModelPicker = newPMP
-			return cmd
-		}
-	case ScreenSessionDetail:
-		if m.sessionDetailModel != nil {
-			newSD, cmd := m.sessionDetailModel.Update(msg)
-			if ns, ok := newSD.(*SessionDetailModel); ok {
-				m.sessionDetailModel = ns
-			}
-			return cmd
-		}
-	case ScreenChatHistory:
-		if m.chatHistoryModel != nil {
-			newCH, cmd := m.chatHistoryModel.Update(msg)
-			if nch, ok := newCH.(*ChatHistoryModel); ok {
-				m.chatHistoryModel = nch
-			}
-			return cmd
-		}
-	case ScreenHome:
-		if m.homeModel != nil {
-			newHome, cmd := m.homeModel.Update(msg)
-			if nh, ok := newHome.(*HomeModel); ok {
-				m.homeModel = nh
-			}
-			return cmd
-		}
-	}
-	return nil
-}
-
 // ─── Routing helpers ──────────────────────────────────────────────────────────
 
 // routeToScreen returns the initialization cmd for the current screen.
+// This switch is intentionally kept separate from ensureSubModel():
+// routeToScreen() is called on FIRST navigation to a screen (from navigateToScreen)
+// and creates the sub-model + calls Init(). ensureSubModel() is called on
+// TRANSITIONS and popScreen() and handles resize + conditional re-init.
+// They share structure but differ in lifecycle semantics.
 func (m *AppState) routeToScreen() tea.Cmd {
 	switch m.screen {
 	case ScreenFirstRun:
@@ -2124,245 +954,7 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		return m.sidebarModel.HandleKey(msg)
 	}
 
-	switch m.screen {
-	case ScreenREPL:
-		if m.replModel != nil {
-			newRepl, cmd := m.replModel.Update(msg)
-			if r, ok := newRepl.(*ReplModel); ok {
-				m.replModel = r
-			}
-			return cmd
-		}
-	case ScreenPermission:
-		return m.handlePermissionKey(msg)
-	case ScreenModelSelector:
-		if m.msModel != nil {
-			newMs, cmd := m.msModel.Update(msg)
-			if nm, ok := newMs.(*ModelSelector); ok {
-				m.msModel = nm
-			}
-			return cmd
-		}
-	case ScreenSettings:
-		if m.settingsModel != nil {
-			newSettings, cmd := m.settingsModel.Update(msg)
-			m.settingsModel = newSettings
-			return cmd
-		}
-	case ScreenResume:
-		if m.resumeModel != nil {
-			newResume, cmd := m.resumeModel.Update(msg)
-			if nr, ok := newResume.(*ResumeModel); ok {
-				m.resumeModel = nr
-			}
-			return cmd
-		}
-	case ScreenPlan:
-		if m.planModel != nil {
-			newPlan, cmd := m.planModel.Update(msg)
-			m.planModel = newPlan
-			return cmd
-		}
-	case ScreenExecute:
-		if m.executeModel != nil {
-			newExec, cmd := m.executeModel.Update(msg)
-			m.executeModel = newExec
-			return cmd
-		}
-	case ScreenVerify:
-		if m.verifyModel != nil {
-			newVerify, cmd := m.verifyModel.Update(msg)
-			m.verifyModel = newVerify
-			return cmd
-		}
-	case ScreenShip:
-		if m.shipModel != nil {
-			newShip, cmd := m.shipModel.Update(msg)
-			m.shipModel = newShip
-			return cmd
-		}
-	case ScreenDiscuss:
-		if m.discussModel != nil {
-			newDiscuss, cmd := m.discussModel.Update(msg)
-			if nd, ok := newDiscuss.(*DiscussModel); ok {
-				m.discussModel = nd
-			}
-			return cmd
-		}
-	case ScreenDiff:
-		if m.diffModel != nil {
-			newDiff, cmd := m.diffModel.Update(msg)
-			if nd, ok := newDiff.(*DiffModel); ok {
-				m.diffModel = nd
-			}
-			return cmd
-		}
-	case ScreenGoalInput:
-		if m.goalInput != nil {
-			newGoal, cmd := m.goalInput.Update(msg)
-			if ng, ok := newGoal.(*GoalInputModel); ok {
-				m.goalInput = ng
-			}
-			return cmd
-		}
-	case ScreenFirstRun:
-		if m.firstRunModel != nil {
-			newFR, cmd := m.firstRunModel.Update(msg)
-			if nfr, ok := newFR.(*FirstRunModel); ok {
-				m.firstRunModel = nfr
-			}
-			return cmd
-		}
-	case ScreenLedger:
-		if m.ledgerModel != nil {
-			newLedger, cmd := m.ledgerModel.Update(msg)
-			if nl, ok := newLedger.(*LedgerModel); ok {
-				m.ledgerModel = nl
-			}
-			return cmd
-		}
-	case ScreenRollback:
-		if m.rollbackModel != nil {
-			newRB, cmd := m.rollbackModel.Update(msg)
-			if nr, ok := newRB.(*RollbackModel); ok {
-				m.rollbackModel = nr
-			}
-			return cmd
-		}
-	case ScreenConfig:
-		if m.configModel != nil {
-			newCfg, cmd := m.configModel.Update(msg)
-			m.configModel = newCfg
-			return cmd
-		}
-	case ScreenMetrics:
-		if m.metricsModel != nil {
-			newMetrics, cmd := m.metricsModel.Update(msg)
-			if nm, ok := newMetrics.(*MetricsModel); ok {
-				m.metricsModel = nm
-			}
-			return cmd
-		}
-	case ScreenHelp:
-		if m.helpModel != nil {
-			newHelp, cmd := m.helpModel.Update(msg)
-			if nh, ok := newHelp.(*HelpModel); ok {
-				m.helpModel = nh
-			}
-			return cmd
-		}
-	case ScreenBisect:
-		if m.bisectModel != nil {
-			newBisect, cmd := m.bisectModel.Update(msg)
-			if nb, ok := newBisect.(*BisectModel); ok {
-				m.bisectModel = nb
-			}
-			return cmd
-		}
-	case ScreenThemePicker:
-		if m.themePickerModel != nil {
-			newTP, cmd := m.themePickerModel.Update(msg)
-			if nt, ok := newTP.(*ThemePickerModel); ok {
-				m.themePickerModel = nt
-			}
-			return cmd
-		}
-	case ScreenNotifications:
-		if m.notifModel != nil {
-			newNotif, cmd := m.notifModel.Update(msg)
-			if nn, ok := newNotif.(*NotificationModel); ok {
-				m.notifModel = nn
-			}
-			return cmd
-		}
-	case ScreenDashboard:
-		if m.dashboardModel != nil {
-			newDash, cmd := m.dashboardModel.Update(msg)
-			if nd, ok := newDash.(*DashboardModel); ok {
-				m.dashboardModel = nd
-			}
-			return cmd
-		}
-	case ScreenSessionDetail:
-		if m.sessionDetailModel != nil {
-			newSD, cmd := m.sessionDetailModel.Update(msg)
-			if ns, ok := newSD.(*SessionDetailModel); ok {
-				m.sessionDetailModel = ns
-			}
-			return cmd
-		}
-	case ScreenFileExplorer:
-		if m.fileExplorerModel != nil {
-			newFE, cmd := m.fileExplorerModel.Update(msg)
-			if nf, ok := newFE.(*FileExplorerModel); ok {
-				m.fileExplorerModel = nf
-			}
-			return cmd
-		}
-	case ScreenToolDetail:
-		if m.toolDetailModel != nil {
-			newTD, cmd := m.toolDetailModel.Update(msg)
-			if nt, ok := newTD.(*ToolDetailModel); ok {
-				m.toolDetailModel = nt
-			}
-			return cmd
-		}
-	case ScreenGhostPicker:
-		if m.ghostPickerModel != nil {
-			newGP, cmd := m.ghostPickerModel.Update(msg)
-			if ngp, ok := newGP.(*GhostPickerModel); ok {
-				m.ghostPickerModel = ngp
-			}
-			return cmd
-		}
-	case ScreenGhostOutput:
-		if m.ghostOutputModel != nil {
-			newGO, cmd := m.ghostOutputModel.Update(msg)
-			if ngo, ok := newGO.(*GhostOutputModel); ok {
-				m.ghostOutputModel = ngo
-			}
-			return cmd
-		}
-	case ScreenConfirmQuit:
-		if m.confirmQuitModel != nil {
-			newCQ, cmd := m.confirmQuitModel.Update(msg)
-			if ncq, ok := newCQ.(*ConfirmQuitModel); ok {
-				m.confirmQuitModel = ncq
-			}
-			return cmd
-		}
-	case ScreenPhaseModelPicker:
-		if m.phaseModelPicker != nil {
-			newPM, cmd := m.phaseModelPicker.Update(msg)
-			m.phaseModelPicker = newPM
-			return cmd
-		}
-	case ScreenChatHistory:
-		if m.chatHistoryModel != nil {
-			newCH, cmd := m.chatHistoryModel.Update(msg)
-			if nch, ok := newCH.(*ChatHistoryModel); ok {
-				m.chatHistoryModel = nch
-			}
-			return cmd
-		}
-	case ScreenCommandPalette:
-		if m.commandPaletteScreenModel != nil {
-			newCP, cmd := m.commandPaletteScreenModel.Update(msg)
-			if ncp, ok := newCP.(*CommandPaletteScreenModel); ok {
-				m.commandPaletteScreenModel = ncp
-			}
-			return cmd
-		}
-	case ScreenHome:
-		if m.homeModel != nil {
-			newHome, cmd := m.homeModel.Update(msg)
-			if nh, ok := newHome.(*HomeModel); ok {
-				m.homeModel = nh
-			}
-			return cmd
-		}
-	}
-	return nil
+	return m.routeKeyToScreen(msg)
 }
 
 // handleAppMsg handles AppMsg screen transitions.

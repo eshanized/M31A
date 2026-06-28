@@ -74,8 +74,8 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 		"files":         "ctrl+x f",
 		"ledger":        "ctrl+x l",
 		"rollback":      "ctrl+x k",
-		"config":        "ctrl+x s",
-		"metrics":       "ctrl+x m",
+		"config":        "ctrl+x c",
+		"metrics":       "ctrl+x e",
 	}
 
 	// Category map
