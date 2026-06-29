@@ -82,7 +82,7 @@ func runHeadless(prompt string, registry *provider.Registry, defaultModel string
 		fmt.Fprintf(os.Stderr, "error: chat completion failed: %v\n", err)
 		return 1
 	}
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	var response strings.Builder
 	for {

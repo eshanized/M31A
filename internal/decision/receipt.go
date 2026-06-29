@@ -9,12 +9,12 @@ import (
 // DecisionReceipt records a single decision made by the system.
 // Immutable after creation — exported getters only, unexported fields.
 type DecisionReceipt struct {
-	Timestamp  time.Time `json:"timestamp"`
-	Decision   string    `json:"decision"`
-	Rationale  string    `json:"rationale"`
-	Alternatives []string `json:"alternatives,omitempty"`
-	Cost       Cost      `json:"cost"`
-	Category   Category  `json:"category"`
+	Timestamp    time.Time `json:"timestamp"`
+	Decision     string    `json:"decision"`
+	Rationale    string    `json:"rationale"`
+	Alternatives []string  `json:"alternatives,omitempty"`
+	Cost         Cost      `json:"cost"`
+	Category     Category  `json:"category"`
 }
 
 // Category classifies the type of decision.

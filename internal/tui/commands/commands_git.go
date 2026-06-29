@@ -142,9 +142,9 @@ func handleRollbackFile(args []string, ctx CommandContext) CommandResult {
 			}
 		}
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Files changed in %s:\n\n", hash[:min(7, len(hash))]))
+		fmt.Fprintf(&b, "Files changed in %s:\n\n", hash[:min(7, len(hash))])
 		for _, f := range files {
-			b.WriteString(fmt.Sprintf("  %s\n", f))
+			fmt.Fprintf(&b, "  %s\n", f)
 		}
 		b.WriteString("\nUsage: /rollback file <hash> <file-path> [file-path...]")
 		return CommandResult{Success: true, Message: b.String()}

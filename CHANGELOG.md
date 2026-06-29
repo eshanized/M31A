@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.5.0] - 2026-06-29
+
+### Added
+- **Decision transparency**: In-memory decision logger with channel-backed buffered writes, ring buffer overflow, and redaction of sensitive patterns (API keys, emails, IPs)
+- **Project knowledge**: In-memory knowledge store tracking conventions, patterns, facts, and per-file intelligence with growth caps and LLM context injection via DynamicContextRegistry
+- **Checkpoint resume**: Basic checkpoint data persistence (phase, goal, plan version, decisions) with disk-backed session checkpoints
+- **Self-heal explanation**: HealReport struct recording error type, strategy, files used, and duration for each self-healing attempt
+- **File-level selective rollback**: ChangedFiles, FileDiff, and RevertFiles for reverting individual files to a previous commit state
+- **Decision log browser**: /decisions screen for browsing the in-memory decision log
+
+### Fixed
+- **provider**: Context-exceeded detection for "input...exceeds" provider error patterns (was using literal substring match on regex-like pattern)
+- **workflow**: Data race in concurrent task tool call counting (totalToolCalls/groupToolCalls modified without synchronization)
+- **workflow**: Phase Transition() now protected by mutex to prevent interleaved checkpoint saves
+- **session**: UpdateWorkflowState and RenameSession now acquire file lock to prevent concurrent write corruption
+- **ledger**: Cross-process file locking via flock to prevent LEDGER.md corruption from multiple M31A instances
+- **ledger**: New() now returns nil on directory creation failure instead of silently producing a broken ledger
+- **workflow**: findFreePort TOCTOU race mitigated with retry-and-verify loop
+
+### Changed
+- PhaseRuntime uses Verify model config slot (was shared without explicit mapping)
+- WorkflowState struct extracted from Engine to group mutable session state
+
 ## [1.4.0] - 2026-06-26
 
 ### Added

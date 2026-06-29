@@ -148,33 +148,6 @@ func (m *PermissionModal) Render(width, height int) string {
 	)
 }
 
-// renderCountdownBar renders a progress bar using half-block characters (▀▄).
-// Fills from left to right based on remaining time ratio.
-func (m *PermissionModal) renderCountdownBar(maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-
-	total := m.timeout.Seconds()
-	remaining := m.Remaining().Seconds()
-	if total <= 0 {
-		return ""
-	}
-
-	ratio := remaining / total
-	filledWidth := int(ratio * float64(maxWidth))
-	if filledWidth > maxWidth {
-		filledWidth = maxWidth
-	}
-	emptyWidth := maxWidth - filledWidth
-
-	s := m.styles
-	filled := s.PermBarFill.Render(strings.Repeat("█", filledWidth))
-	empty := s.PermBarEmpty.Render(strings.Repeat("░", emptyWidth))
-
-	return filled + empty
-}
-
 func (m *PermissionModal) Allow() tools.PermissionResponse {
 	return tools.PermissionResponse{Allowed: true, Remember: false}
 }

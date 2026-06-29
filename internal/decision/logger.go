@@ -22,9 +22,9 @@ type Logger struct {
 	capacity  int
 	flushed   []DecisionReceipt
 	flushMu   sync.Mutex
-	flushOpMu sync.Mutex          // serializes Flush() callers to prevent deadlock
-	closeCh   chan struct{}        // closed by Close() to signal shutdown
-	done      chan struct{}        // closed by drain() when it has fully exited
+	flushOpMu sync.Mutex    // serializes Flush() callers to prevent deadlock
+	closeCh   chan struct{} // closed by Close() to signal shutdown
+	done      chan struct{} // closed by drain() when it has fully exited
 	flushCh   chan chan []DecisionReceipt
 }
 

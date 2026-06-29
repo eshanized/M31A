@@ -129,7 +129,7 @@ func TestForwardMouseToScreen_NilModels(t *testing.T) {
 	a := NewApp(nil, "", nil, nil, nil, nil, nil, nil, nil, "test", 0)
 	a.screen = ScreenREPL
 
-	cmd := a.forwardMouseToScreen(tea.MouseMsg{Type: tea.MouseLeft, X: 10, Y: 5})
+	cmd := a.forwardMouseToScreen(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 10, Y: 5})
 	if cmd != nil {
 		t.Error("forwardMouseToScreen should return nil when models are nil")
 	}

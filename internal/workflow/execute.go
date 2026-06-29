@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/decision"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
@@ -91,16 +92,16 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 	// 4. Execute each group sequentially
 	var execErrors []string
-	totalToolCalls := 0
+	var totalToolCalls atomic.Int64
 	for _, group := range groups {
-		groupToolCalls := 0
+		var groupToolCalls atomic.Int64
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
 			// H16 fix: removed pre-task checkpoint — too expensive (10+ read+parse+write
 			// cycles per plan). Checkpoints now only at phase boundaries and on heal.
 
 			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
-			totalToolCalls += result.ToolCalls
-			groupToolCalls += result.ToolCalls
+			totalToolCalls.Add(int64(result.ToolCalls))
+			groupToolCalls.Add(int64(result.ToolCalls))
 			// Propagate HealsAttempted mutations back to the tasks slice
 			for i := range tasks {
 				if tasks[i].ID == task.ID {
@@ -117,7 +118,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 		}
 
 		// Invalidate code intel only when tool calls were made (files may have changed)
-		if groupToolCalls > 0 {
+		if groupToolCalls.Load() > 0 {
 			e.codeIntelMu.Lock()
 			e.codeIntel = nil
 			e.codeIntelBuilt = false
@@ -171,7 +172,7 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 		Phase:     m31types.PhaseExecute,
 		Success:   allDone,
 		Tasks:     updatedTasks,
-		ToolCalls: totalToolCalls,
+		ToolCalls: int(totalToolCalls.Load()),
 	}
 	if len(execErrors) > 0 {
 		result.Error = strings.Join(execErrors, "; ")

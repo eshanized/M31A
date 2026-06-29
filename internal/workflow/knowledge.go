@@ -31,9 +31,9 @@ type Knowledge struct {
 
 // Convention represents a detected coding convention.
 type Convention struct {
-	Category string `json:"category"` // naming, imports, errors, etc.
-	Pattern  string `json:"pattern"`  // e.g., "error handling uses sentinel errors"
-	Example  string `json:"example"`  // e.g., "m31errors.ErrNotFound"
+	Category   string  `json:"category"` // naming, imports, errors, etc.
+	Pattern    string  `json:"pattern"`  // e.g., "error handling uses sentinel errors"
+	Example    string  `json:"example"`  // e.g., "m31errors.ErrNotFound"
 	Confidence float64 `json:"confidence"`
 }
 

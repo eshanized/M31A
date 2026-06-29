@@ -294,6 +294,11 @@ func (m *Manager) loadSessionMetadata() (*Session, error) {
 
 // UpdateWorkflowState persists the workflow state to session.json.
 func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase, questions []string) error {
+	if err := m.lock.Lock(); err != nil {
+		return fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	session, err := m.loadSessionMetadata()
 	if err != nil {
 		return fmt.Errorf("UpdateWorkflowState: load session: %w", err)
@@ -458,6 +463,11 @@ func (m *Manager) FilterSessions(query string) ([]SessionInfo, error) {
 
 // RenameSession updates the session's label.
 func (m *Manager) RenameSession(id, label string) error {
+	if err := m.lock.Lock(); err != nil {
+		return fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	sess, err := m.loadSessionMetadata()
 	if err != nil {
 		return fmt.Errorf("load session: %w", err)

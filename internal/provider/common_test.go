@@ -377,6 +377,11 @@ func TestIsContextExceeded_OperatorPrecedence(t *testing.T) {
 		{"400 without context keywords", 400, `{"error":"invalid parameter"}`, false},
 		{"case insensitive", 400, `{"error":"CONTEXT_LENGTH_EXCEEDED"}`, true},
 		{"mixed case exceed keyword", 400, `{"error":"context_length must not Exceed limit"}`, true},
+		{"input exceeds (compound)", 400, `{"error":"Input token count exceeds maximum"}`, true},
+		{"input length exceeds limit", 400, `{"error":"input length exceeds limit"}`, true},
+		{"INPUT EXCEEDS case insensitive", 400, `{"error":"INPUT TOKEN EXCEEDS MAX"}`, true},
+		{"input without exceeds", 400, `{"error":"input is required"}`, false},
+		{"exceeds without input", 400, `{"error":"token count exceeds maximum"}`, false},
 	}
 
 	for _, tt := range tests {

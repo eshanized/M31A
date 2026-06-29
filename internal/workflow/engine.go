@@ -101,12 +101,15 @@ func LoadPrompts() (*PromptRegistry, error) {
 // and v1.5 subsystems (decision log, knowledge, budget tracker).
 // The Engine retains phase dispatch, LLM streaming, and subsystem orchestration.
 type WorkflowState struct {
+	// transitionMu serializes phase transitions to prevent interleaved checkpoint saves.
+	transitionMu sync.Mutex
+
 	// Plan state
-	planMarkdown    string // current plan content for refinement context
-	planVersion     int    // current plan version (increments on refine)
-	refineFeedback  string // pending refinement feedback from user
-	researchOutput  string // pre-plan research results for injection into plan context
-	discussPlanCycles int  // Plan→Discuss→Plan round-trips (capped at maxDiscussPlanCycles)
+	planMarkdown      string // current plan content for refinement context
+	planVersion       int    // current plan version (increments on refine)
+	refineFeedback    string // pending refinement feedback from user
+	researchOutput    string // pre-plan research results for injection into plan context
+	discussPlanCycles int    // Plan→Discuss→Plan round-trips (capped at maxDiscussPlanCycles)
 
 	// Cached tool definitions (built once, reused for all LLM calls)
 	cachedToolDefs     []provider.ToolDefinition
@@ -137,7 +140,7 @@ type WorkflowState struct {
 	intentResult *m31types.IntentResult
 
 	// Dynamic context change detection
-	contextSnapshot     map[string]string
+	contextSnapshot      map[string]string
 	cachedDynamicContext string
 
 	// v1.5: Decision logging
@@ -152,11 +155,11 @@ type WorkflowState struct {
 
 // CheckpointData holds data that can be saved/restored across checkpoints.
 type CheckpointData struct {
-	Phase        m31types.WorkflowPhase `json:"phase"`
-	Goal         string                 `json:"goal"`
-	PlanVersion  int                    `json:"plan_version"`
-	Decisions    []decision.DecisionReceipt `json:"decisions,omitempty"`
-	Timestamp    time.Time              `json:"timestamp"`
+	Phase       m31types.WorkflowPhase     `json:"phase"`
+	Goal        string                     `json:"goal"`
+	PlanVersion int                        `json:"plan_version"`
+	Decisions   []decision.DecisionReceipt `json:"decisions,omitempty"`
+	Timestamp   time.Time                  `json:"timestamp"`
 }
 
 // Engine orchestrates the seven active workflow phases (Initialize, Discuss, Plan, Execute, Verify, Runtime, Ship).
@@ -283,14 +286,14 @@ func (e *Engine) WorkflowMode() m31types.WorkflowMode {
 // SetIntentResult stores the LLM-classified intent result for downstream enrichment.
 func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
 	e.state.intentResult = ir
-		// Log intent classification decision
-		if ir != nil {
-			e.LogDecision(decision.DecisionReceipt{
-				Decision:  fmt.Sprintf("intent:%s (complexity:%s, confidence:%.0f%%)", ir.Intent, ir.Complexity, ir.Confidence*100),
-				Rationale: ir.Summary,
-				Category:  decision.CategoryIntent,
-			})
-		}
+	// Log intent classification decision
+	if ir != nil {
+		e.LogDecision(decision.DecisionReceipt{
+			Decision:  fmt.Sprintf("intent:%s (complexity:%s, confidence:%.0f%%)", ir.Intent, ir.Complexity, ir.Confidence*100),
+			Rationale: ir.Summary,
+			Category:  decision.CategoryIntent,
+		})
+	}
 }
 
 // IntentResult returns the stored intent classification result, or nil if unset.
@@ -670,6 +673,9 @@ var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
 // Transition saves a checkpoint and writes STATE.md for the new phase.
 // Validates the transition is allowed by the phase ordering guard.
 func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase) error {
+	e.state.transitionMu.Lock()
+	defer e.state.transitionMu.Unlock()
+
 	// Phase transition guard — reject out-of-order transitions.
 	allowed, ok := validPhaseTransitions[from]
 	if !ok {

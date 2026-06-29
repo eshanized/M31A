@@ -576,18 +576,18 @@ func (e *Engine) generateSessionSummary(tasks []m31types.Task, commits []git.Com
 	var b strings.Builder
 
 	b.WriteString("# Session Summary\n\n")
-	b.WriteString(fmt.Sprintf("**Goal:** %s\n\n", goal))
-	b.WriteString(fmt.Sprintf("**Duration:** %s\n\n", summary.Duration.Round(time.Second)))
+	fmt.Fprintf(&b, "**Goal:** %s\n\n", goal)
+	fmt.Fprintf(&b, "**Duration:** %s\n\n", summary.Duration.Round(time.Second))
 
 	// Task summary
 	b.WriteString("## Tasks\n\n")
-	b.WriteString(fmt.Sprintf("- Total: %d\n", summary.TaskTotal))
-	b.WriteString(fmt.Sprintf("- Completed: %d\n", summary.TaskDone))
+	fmt.Fprintf(&b, "- Total: %d\n", summary.TaskTotal)
+	fmt.Fprintf(&b, "- Completed: %d\n", summary.TaskDone)
 	if summary.TaskFailed > 0 {
-		b.WriteString(fmt.Sprintf("- Failed: %d\n", summary.TaskFailed))
+		fmt.Fprintf(&b, "- Failed: %d\n", summary.TaskFailed)
 	}
 	if summary.TaskSkipped > 0 {
-		b.WriteString(fmt.Sprintf("- Skipped: %d\n", summary.TaskSkipped))
+		fmt.Fprintf(&b, "- Skipped: %d\n", summary.TaskSkipped)
 	}
 	b.WriteString("\n")
 
@@ -600,16 +600,16 @@ func (e *Engine) generateSessionSummary(tasks []m31types.Task, commits []git.Com
 			categories[string(d.Category)]++
 		}
 		for cat, count := range categories {
-			b.WriteString(fmt.Sprintf("- %s: %d\n", cat, count))
+			fmt.Fprintf(&b, "- %s: %d\n", cat, count)
 		}
-		b.WriteString(fmt.Sprintf("- Total: %d\n\n", len(decisions)))
+		fmt.Fprintf(&b, "- Total: %d\n\n", len(decisions))
 	}
 
 	// Git commits
 	if len(commits) > 0 {
 		b.WriteString("## Commits\n\n")
 		for _, c := range commits {
-			b.WriteString(fmt.Sprintf("- %s: %s\n", c.Hash[:min(7, len(c.Hash))], c.Message))
+			fmt.Fprintf(&b, "- %s: %s\n", c.Hash[:min(7, len(c.Hash))], c.Message)
 		}
 		b.WriteString("\n")
 	}
@@ -619,9 +619,9 @@ func (e *Engine) generateSessionSummary(tasks []m31types.Task, commits []git.Com
 		healReport := e.LastHealReport()
 		if healReport != nil {
 			b.WriteString("## Self-Heal Summary\n\n")
-			b.WriteString(fmt.Sprintf("- Task %d healed successfully\n", healReport.TaskID))
-			b.WriteString(fmt.Sprintf("- Error type: %s\n", healReport.ErrorType))
-			b.WriteString(fmt.Sprintf("- Strategy: %s\n", healReport.Strategy))
+			fmt.Fprintf(&b, "- Task %d healed successfully\n", healReport.TaskID)
+			fmt.Fprintf(&b, "- Error type: %s\n", healReport.ErrorType)
+			fmt.Fprintf(&b, "- Strategy: %s\n", healReport.Strategy)
 			b.WriteString("\n")
 		}
 	}

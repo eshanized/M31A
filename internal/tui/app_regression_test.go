@@ -174,7 +174,7 @@ func TestForwardMouseToScreen_NilSidebar(t *testing.T) {
 	a.sidebarModel = nil
 
 	// Should not panic with nil sidebar
-	cmd := a.forwardMouseToScreen(tea.MouseMsg{Type: tea.MouseLeft, X: 10, Y: 5})
+	cmd := a.forwardMouseToScreen(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 10, Y: 5})
 	_ = cmd
 }
 
@@ -188,7 +188,7 @@ func TestForwardMouseToScreen_SidebarClick(t *testing.T) {
 	}
 
 	// Click in sidebar area (x < sidebar width)
-	cmd := a.forwardMouseToScreen(tea.MouseMsg{Type: tea.MouseLeft, X: 5, Y: 10})
+	cmd := a.forwardMouseToScreen(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 5, Y: 10})
 	_ = cmd
 	// Should route to sidebar, not screen
 }

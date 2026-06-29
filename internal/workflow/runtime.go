@@ -488,14 +488,25 @@ func (e *Engine) discoverRoutesFromFileSystem() []string {
 }
 
 // findFreePort asks the OS for a free TCP port.
+// Retries up to 3 times to mitigate TOCTOU race between releasing
+// the probe listener and the server binding to the port.
 func findFreePort() int {
-	l, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return 0
+	for range 3 {
+		l, err := net.Listen("tcp", "localhost:0")
+		if err != nil {
+			return 0
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+
+		// Verify the port is still free before returning.
+		l2, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+		if err == nil {
+			_ = l2.Close()
+			return port
+		}
 	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
+	return 0
 }
 
 // hasIndexHTML checks if a directory contains an index.html file.

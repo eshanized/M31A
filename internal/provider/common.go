@@ -61,7 +61,7 @@ func IsContextExceeded(statusCode int, body string) bool {
 		containsFold(body, "context window exceeded") ||
 		containsFold(body, "context length") ||
 		containsFold(body, "too many tokens") ||
-		containsFold(body, "input.*exceeds") ||
+		(containsFold(body, "input") && containsFold(body, "exceeds")) ||
 		containsFold(body, "token limit") ||
 		containsFold(body, "max tokens") ||
 		containsFold(body, "token_count") ||

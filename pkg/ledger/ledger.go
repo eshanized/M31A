@@ -37,6 +37,7 @@ type Ledger struct {
 	mu      sync.RWMutex
 	path    string
 	entries []LedgerEntry
+	lock    *fileutil.FileLock
 
 	// Stats cache with mtime-based invalidation.
 	statsCache      LedgerStats
@@ -59,12 +60,13 @@ type LedgerStats struct {
 // it parses existing entries into memory. The directory is created if needed.
 func New(filePath string) *Ledger {
 	if err := os.MkdirAll(filepath.Dir(filePath), types.DirPermission); err != nil {
-		return &Ledger{path: filePath}
+		return nil
 	}
 
 	l := &Ledger{
 		path:    filePath,
 		entries: make([]LedgerEntry, 0),
+		lock:    fileutil.NewFileLock(filePath + ".lock"),
 	}
 
 	if _, err := os.Stat(filePath); err == nil {
@@ -124,6 +126,11 @@ func NewEntry(session types.Session, taskCount, failedTasks, skippedTasks, commi
 // already exists (H-18 idempotency guard). Uses true append-only writes (H9 fix)
 // instead of rewriting the entire file on every append.
 func (l *Ledger) Append(entry LedgerEntry) error {
+	if err := l.lock.Lock(); err != nil {
+		return fmt.Errorf("ledger lock: %w", err)
+	}
+	defer l.lock.Unlock() //nolint:errcheck
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
