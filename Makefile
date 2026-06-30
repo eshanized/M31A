@@ -54,6 +54,21 @@ dev: build
 	@printf "\033[0;32m[run]\033[0m Starting $(BINARY)...\n"
 	@./$(BINARY)
 
+## run-latest        — Build and run the latest released version
+run-latest:
+	@printf "\033[0;32m[run-latest]\033[0m Fetching latest release tag...\n"
+	@LATEST_TAG=$$(git tag --sort=-v:refname | head -1); \
+	if [ -z "$$LATEST_TAG" ]; then \
+		printf "\033[0;31m[run-latest]\033[0m No tags found. Run 'git fetch --tags' first.\n"; \
+		exit 1; \
+	fi; \
+	printf "\033[0;32m[run-latest]\033[0m Building from tag $$LATEST_TAG...\n"; \
+	CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-s -w -X main.Version=$$LATEST_TAG" \
+		-o $(BINARY) $(CMD_DIR) && \
+	printf "\033[0;32m[run-latest]\033[0m Starting $(BINARY) $$LATEST_TAG...\n"; \
+	./$(BINARY)
+
 # ==============================================================================
 # Testing
 # ==============================================================================
@@ -293,7 +308,7 @@ version:
 # Phony targets
 # ==============================================================================
 
-.PHONY: build debug dev help \
+.PHONY: build debug dev run-latest help \
         test test-fast test-verbose test-specific \
         bench bench-verbose cover \
         lint lint-fix vet fmt tidy check validate-release \
