@@ -55,11 +55,11 @@ func (p PageChrome) ContentWidth() int {
 
 // RenderPage composes the unified page layout: 1-line header + content + 1-line footer.
 // The total output is exactly Height rows.
-func RenderPage(chrome PageChrome, content string, header HeaderInfo, footer FooterInfo, t theme.Theme) string {
+func RenderPage(chrome PageChrome, content string, header HeaderInfo, footer FooterInfo, t theme.Theme, cache *theme.StyleCache) string {
 	bp := Detect(chrome.Width)
 
-	headerLine := BuildHeader(header, chrome.Width, bp, t)
-	footerLine := BuildFooter(footer, chrome.Width, bp, t)
+	headerLine := BuildHeader(header, chrome.Width, bp, t, cache)
+	footerLine := BuildFooter(footer, chrome.Width, bp, t, cache)
 
 	// Ensure content fits in exactly ContentHeight rows
 	contentHeight := chrome.ContentHeight()
@@ -86,12 +86,12 @@ func RenderPage(chrome PageChrome, content string, header HeaderInfo, footer Foo
 //
 // Layout (premium): M31A │ breadcrumb ········ model [provider] [ctx]
 // Uses │ separators and leader dots to create visual depth.
-func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) string {
+func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme, cache *theme.StyleCache) string {
 	if width < 20 {
 		return strings.Repeat(" ", width)
 	}
 
-	s := theme.BuildSemanticStyles(t)
+	s := cache.S
 
 	sep := s.SeparatorV.Render(" │ ")
 	sepW := 3 // visible width of " │ "
@@ -114,7 +114,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 	if bp >= Full {
 		var parts []string
 		if info.CtxTotal > 0 && info.CtxUsed > 0 {
-			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, info.CtxHistory, t)
+			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, info.CtxHistory, cache)
 			if ctxMeter != "" {
 				parts = append(parts, ctxMeter)
 			}
@@ -123,7 +123,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 			parts = append(parts, s.Muted.Render(info.ModelName))
 		}
 		if info.Provider != "" {
-			parts = append(parts, renderProvBadge(t, info.Provider))
+			parts = append(parts, renderProvBadge(s, info.Provider))
 		}
 		if len(parts) > 0 {
 			right = strings.Join(parts, " ")
@@ -164,11 +164,11 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme) strin
 }
 
 // renderContextMeter renders a compact inline context usage bar for the header.
-func renderContextMeter(used, total int, history []int, t theme.Theme) string {
+func renderContextMeter(used, total int, history []int, cache *theme.StyleCache) string {
 	if total <= 0 || used <= 0 {
 		return ""
 	}
-	s := theme.BuildSemanticStyles(t)
+	s := cache.S
 
 	pct := float64(used) / float64(total)
 	if pct < 0.15 {
@@ -203,7 +203,7 @@ func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 		if len(history) < sparkW {
 			sparkW = len(history)
 		}
-		spark := components.Sparkline{Values: history, Width: sparkW, Theme: t}
+		spark := components.Sparkline{Values: history, Width: sparkW, Theme: cache.Theme}
 		result += " " + spark.Render()
 	}
 
@@ -214,12 +214,12 @@ func renderContextMeter(used, total int, history []int, t theme.Theme) string {
 //
 // Layout (premium): ⌂ cwd ⎇ branch │ ⠹ responding... │ ctrl+p · ctrl+b  $0.02
 // Uses │ separators to create distinct zones with visual weight.
-func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme) string {
+func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache *theme.StyleCache) string {
 	if width < 10 {
 		return strings.Repeat(" ", width)
 	}
 
-	s := theme.BuildSemanticStyles(t)
+	s := cache.S
 
 	sep := s.SeparatorV.Render(" │ ")
 	dotSep := s.SeparatorLine.Render(" · ")
@@ -384,8 +384,7 @@ func assembleThreeZone(left, center, right string, width int) string {
 	return result
 }
 
-func renderProvBadge(t theme.Theme, provider string) string {
-	s := theme.BuildSemanticStyles(t)
+func renderProvBadge(s theme.SemanticStyles, provider string) string {
 	short := shortProviderName(provider)
 	bracket := s.SeparatorV.Render
 	text := s.Muted.Render(short)

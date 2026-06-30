@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/config"
@@ -302,4 +303,164 @@ func TestExtractCommandString(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Batch approval tests
+// ---------------------------------------------------------------------------
+
+func TestBatchApproval_Active(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	if !d.checkBatchApproval("Bash", types.RiskDangerous) {
+		t.Error("expected batch approval to be active")
+	}
+}
+
+func TestBatchApproval_NotActive(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	if d.checkBatchApproval("Bash", types.RiskDangerous) {
+		t.Error("expected batch approval to not be active")
+	}
+}
+
+func TestBatchApproval_WrongTool(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	if d.checkBatchApproval("Edit", types.RiskDangerous) {
+		t.Error("expected batch approval to not match different tool")
+	}
+}
+
+func TestBatchApproval_WrongRisk(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	if d.checkBatchApproval("Bash", types.RiskDestructive) {
+		t.Error("expected batch approval to not match different risk level")
+	}
+}
+
+func TestBatchApproval_Revoke(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	d.RevokeBatchApprovals()
+	if d.checkBatchApproval("Bash", types.RiskDangerous) {
+		t.Error("expected batch approval to be revoked")
+	}
+}
+
+func TestBatchApproval_Count(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	if d.BatchApprovalCount() != 0 {
+		t.Errorf("expected 0 batch approvals, got %d", d.BatchApprovalCount())
+	}
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	if d.BatchApprovalCount() != 1 {
+		t.Errorf("expected 1 batch approval, got %d", d.BatchApprovalCount())
+	}
+
+	d.ApproveBatch("Edit", types.RiskMedium)
+	if d.BatchApprovalCount() != 2 {
+		t.Errorf("expected 2 batch approvals, got %d", d.BatchApprovalCount())
+	}
+
+	d.RevokeBatchApprovals()
+	if d.BatchApprovalCount() != 0 {
+		t.Errorf("expected 0 batch approvals after revoke, got %d", d.BatchApprovalCount())
+	}
+}
+
+func TestBatchApproval_ToolNames(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	if names := d.ActiveBatchToolNames(); names != "" {
+		t.Errorf("expected empty tool names, got %q", names)
+	}
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	d.ApproveBatch("Edit", types.RiskMedium)
+	names := d.ActiveBatchToolNames()
+	if names == "" {
+		t.Error("expected non-empty tool names")
+	}
+	// Order may vary, check both are present
+	if !strings.Contains(names, "Bash") || !strings.Contains(names, "Edit") {
+		t.Errorf("expected tool names to contain 'Bash' and 'Edit', got %q", names)
+	}
+}
+
+func TestBatchApproval_DuplicateKey(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	d.ApproveBatch("Bash", types.RiskDangerous)
+	if d.BatchApprovalCount() != 1 {
+		t.Errorf("expected 1 batch approval (duplicate), got %d", d.BatchApprovalCount())
+	}
+}
+
+func TestBatchApproval_PermissionRequest_QueueDepth(t *testing.T) {
+	t.Parallel()
+	req := PermissionRequest{
+		ID:         1,
+		ToolName:   "Bash",
+		Command:    "echo test",
+		RiskLevel:  types.RiskDangerous,
+		QueueDepth: 3,
+	}
+	if req.QueueDepth != 3 {
+		t.Errorf("expected queue depth 3, got %d", req.QueueDepth)
+	}
+}
+
+func TestPermissionResponse_ApproveAll(t *testing.T) {
+	t.Parallel()
+	resp := PermissionResponse{
+		RequestID:  1,
+		Allowed:    true,
+		ApproveAll: true,
+	}
+	if !resp.ApproveAll {
+		t.Error("expected ApproveAll to be true")
+	}
+}
+
+func TestBatchApproval_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(&config.PermissionsConfig{})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			d.ApproveBatch("Bash", types.RiskDangerous)
+			d.checkBatchApproval("Bash", types.RiskDangerous)
+			d.BatchApprovalCount()
+			d.ActiveBatchToolNames()
+		}
+	}()
+
+	for i := 0; i < 100; i++ {
+		d.ApproveBatch("Edit", types.RiskMedium)
+		d.checkBatchApproval("Edit", types.RiskMedium)
+		d.RevokeBatchApprovals()
+	}
+
+	<-done
 }

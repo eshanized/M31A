@@ -19,7 +19,7 @@ import (
 //
 // The scrollbar is only rendered when the content exceeds the viewport height.
 // When content fits entirely, the original content is returned unchanged.
-func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width int) string {
+func overlayScrollbar(rendered string, vp viewport.Model, s theme.SemanticStyles, width int) string {
 	if width < 20 || vp.Height < 2 {
 		return rendered
 	}
@@ -28,8 +28,6 @@ func overlayScrollbar(rendered string, vp viewport.Model, t theme.Theme, width i
 	if totalLines <= vp.Height {
 		return rendered
 	}
-
-	s := theme.BuildSemanticStyles(t)
 
 	lines := strings.Split(rendered, "\n")
 

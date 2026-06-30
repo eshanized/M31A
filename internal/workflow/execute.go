@@ -131,6 +131,12 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 			e.logger.Warn("save state failed", "error", err)
 		}
 
+		// Revoke batch approvals after each task group completes
+		// to prevent stale approvals from carrying across groups
+		if e.dispatcher != nil {
+			e.dispatcher.RevokeBatchApprovals()
+		}
+
 		// Auto-sync TODO.md from task runner state after each group
 		if syncErr := e.dispatcher.SyncTodoFromTasks(runner.Tasks()); syncErr != nil {
 			e.logger.Warn("todo sync after group failed", "error", syncErr)
@@ -511,6 +517,13 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 		toolErr := len(toolErrMessages) > 0
 		toolCallCount := len(toolExecResults)
+
+		// Wave 2B: proactive compaction during Execute phase
+		e.toolCallsSinceLastCompact += toolCallCount
+		if e.cfg != nil && e.cfg.Compaction.Proactive && e.toolCallsSinceLastCompact >= e.cfg.Compaction.ToolCallsThreshold {
+			e.toolCallsSinceLastCompact = 0
+			messages = e.proactiveCompactCheck(messages)
+		}
 
 		if toolErr {
 			if task.HealsAttempted >= m31types.MaxHealAttempts {

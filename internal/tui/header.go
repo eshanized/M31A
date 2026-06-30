@@ -10,8 +10,7 @@ import (
 
 // RenderPhaseBadge renders a compact phase indicator for the header.
 // Shows e.g. "[init]" in brand color with brand border when workflow is active.
-func RenderPhaseBadge(t theme.Theme, phase string) string {
-	s := theme.BuildSemanticStyles(t)
+func RenderPhaseBadge(s theme.SemanticStyles, t theme.Theme, phase string) string {
 	return s.BrandBold.
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Brand).
@@ -20,12 +19,10 @@ func RenderPhaseBadge(t theme.Theme, phase string) string {
 }
 
 // RenderPhaseBreadcrumb renders the workflow phase breadcrumb using theme.PhaseActive/PhasePast/PhaseFuture.
-func RenderPhaseBreadcrumb(t theme.Theme, phase types.WorkflowPhase) string {
+func RenderPhaseBreadcrumb(s theme.SemanticStyles, phase types.WorkflowPhase) string {
 	if phase == types.PhaseIdle || phase == "" {
 		return ""
 	}
-
-	s := theme.BuildSemanticStyles(t)
 
 	phases := []types.WorkflowPhase{
 		types.PhaseInitialize,

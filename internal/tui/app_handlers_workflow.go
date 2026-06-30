@@ -49,7 +49,7 @@ func (m *AppState) handleWorkflowTaskStart(msg workflow.TaskStartMsg) []tea.Cmd 
 		})
 	}
 
-	cmds = append(cmds, m.drainEmitterCmd())
+	cmds = append(cmds, m.drainAdaptiveCmd())
 	return cmds
 }
 
@@ -91,7 +91,7 @@ func (m *AppState) handleWorkflowTaskUpdate(msg workflow.TaskUpdateMsg) []tea.Cm
 		}
 	}
 
-	cmds = append(cmds, m.drainEmitterCmd())
+	cmds = append(cmds, m.drainAdaptiveCmd())
 	return cmds
 }
 
@@ -110,7 +110,7 @@ func (m *AppState) handleWorkflowToolStart(msg workflow.ToolStartMsg) []tea.Cmd 
 	if m.sidebarModel != nil {
 		m.sidebarModel.AddToolCallStart(msg.ToolName, msg.Description)
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handleWorkflowToolComplete processes workflow.ToolCompleteMsg: appends to the
@@ -131,7 +131,7 @@ func (m *AppState) handleWorkflowToolComplete(msg workflow.ToolCompleteMsg) []te
 			m.sidebarModel.MarkFileChanged(msg.FilePath)
 		}
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handleWorkflowSelfHealStart processes workflow.SelfHealStartMsg.
@@ -144,7 +144,7 @@ func (m *AppState) handleWorkflowSelfHealStart(msg workflow.SelfHealStartMsg) []
 	if m.verifyModel != nil {
 		m.verifyModel.StartHealing(msg.TaskID, msg.Attempt)
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handleWorkflowSelfHealComplete processes workflow.SelfHealCompleteMsg.
@@ -161,7 +161,7 @@ func (m *AppState) handleWorkflowSelfHealComplete(msg workflow.SelfHealCompleteM
 	if m.verifyModel != nil {
 		m.verifyModel.StopHealing()
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handlePhaseTransitionStart processes workflow.PhaseTransitionStartMsg.
@@ -169,7 +169,7 @@ func (m *AppState) handlePhaseTransitionStart(msg workflow.PhaseTransitionStartM
 	if m.sidebarModel != nil {
 		m.sidebarModel.SetCurrentPhase(msg.To)
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handlePhaseTransitionComplete processes workflow.PhaseTransitionCompleteMsg.
@@ -177,7 +177,7 @@ func (m *AppState) handlePhaseTransitionComplete(msg workflow.PhaseTransitionCom
 	if m.sidebarModel != nil && msg.To != "" {
 		m.sidebarModel.MarkPhaseCompleted(msg.To)
 	}
-	return []tea.Cmd{m.drainEmitterCmd()}
+	return []tea.Cmd{m.drainAdaptiveCmd()}
 }
 
 // handleBisectStart processes BisectStartMsg: loads git log and sets up

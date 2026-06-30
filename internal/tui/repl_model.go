@@ -37,6 +37,7 @@ type ProviderModelsFetchedMsg struct {
 type ReplModel struct {
 	// Layout
 	theme        theme.Theme
+	styleCache   *theme.StyleCache
 	version      string
 	width        int
 	height       int
@@ -177,6 +178,7 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 
 	m := ReplModel{
 		theme:          t,
+		styleCache:     theme.NewStyleCache(t),
 		version:        version,
 		textarea:       ta,
 		spinner:        components.NewSpinner(),

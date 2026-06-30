@@ -6,6 +6,8 @@ import "github.com/charmbracelet/lipgloss"
 // Build once per theme change; reuse on every render to avoid per-frame
 // lipgloss.NewStyle() allocations.
 type StyleCache struct {
+	// Theme stores the source theme for components that need raw token access.
+	Theme Theme
 	// Text styles
 	Brand         lipgloss.Style
 	BrandBold     lipgloss.Style
@@ -110,7 +112,7 @@ type StyleCache struct {
 // NewStyleCache builds a StyleCache from a Theme. Call this once per theme
 // change and pass the cache to components.
 func NewStyleCache(t Theme) *StyleCache {
-	c := &StyleCache{}
+	c := &StyleCache{Theme: t}
 
 	// Text
 	c.Brand = lipgloss.NewStyle().Foreground(t.Brand)

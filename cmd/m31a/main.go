@@ -115,6 +115,7 @@ func run() int {
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	helpFlag := flag.Bool("help", false, "Show usage information")
 	promptFlag := flag.String("prompt", "", "Run in headless mode: send prompt to LLM and print response")
+	goalFlag := flag.String("goal", "", "Run in headless mode: execute full workflow with goal")
 	modelFlag := flag.String("model", "", "Model ID for headless mode (default: config model or first available)")
 	flag.Usage = func() {
 		printUsage(cmdRegistry)
@@ -238,6 +239,24 @@ func run() int {
 			model = cfg.Model.Default
 		}
 		return runHeadless(*promptFlag, registry, model, logger)
+	}
+
+	// Headless mode: --goal runs full workflow without TUI
+	if *goalFlag != "" {
+		if !hasProvider {
+			fmt.Fprintln(os.Stderr, "error: no provider configured — set an API key environment variable")
+			return 1
+		}
+		model := *modelFlag
+		if model == "" {
+			model = cfg.Model.Default
+		}
+		// Validate goal flag
+		if goalFlag == nil || *goalFlag == "" {
+			fmt.Fprintln(os.Stderr, "error: --goal is required in headless mode")
+			return 1
+		}
+		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, *modelFlag, logger)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)

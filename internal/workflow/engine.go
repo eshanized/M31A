@@ -131,6 +131,10 @@ type WorkflowState struct {
 	cachedProjectShared   *m31types.ProjectState
 	cachedProjectSharedID string
 
+	// Conversation messages for the workflow (updated by /compress proactively)
+	Messages []m31types.Message
+
+
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
@@ -207,6 +211,8 @@ type Engine struct {
 	contextRegistry *ctxsrc.Registry
 	// collector captures session metrics (tool calls, LLM usage, phase durations, heals).
 	collector *metrics.Collector
+	// toolCallsSinceLastCompact counts tool calls since last proactive compaction check.
+	toolCallsSinceLastCompact int
 	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
 	state *WorkflowState
 }
@@ -596,6 +602,20 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	start := time.Now()
 	e.activePhase = phase
 
+	// Revoke batch approvals on phase transition to prevent stale approvals
+	// from carrying across phases
+	if e.dispatcher != nil {
+		e.dispatcher.RevokeBatchApprovals()
+	}
+
+	// Reset tool call counter for proactive compaction tracking
+	e.toolCallsSinceLastCompact = 0
+
+	// Proactive compaction: check if context is already heavy before entering a new phase
+	if e.state != nil && len(e.state.Messages) > 0 {
+		e.state.Messages = e.proactiveCompactCheck(e.state.Messages)
+	}
+
 	// Record phase transition
 	if e.collector != nil {
 		e.collector.RecordPhaseTransition(phase)
@@ -967,6 +987,69 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 		slog.Warn("context usage approaching limit after truncation", "estimated", estimated, "limit", contextLength)
 	}
 	return msgs, nil
+}
+
+// proactiveCompactCheck performs compaction if context usage exceeds the
+// configured threshold. Called before phase transitions and periodically
+// during Execute phase. This is a no-op if compactor is nil, proactive
+// compaction is disabled, or no messages are available.
+func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.Message {
+	if e.compactor == nil || e.provider == nil || e.tokens == nil {
+		return messages
+	}
+	if e.cfg == nil || !e.cfg.Compaction.Proactive {
+		return messages
+	}
+
+	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.activePhase))
+	if err != nil || modelInfo == nil {
+		return messages
+	}
+	contextLength := modelInfo.ContextLength
+	if contextLength <= 0 {
+		contextLength = m31types.DefaultContextLength
+	}
+
+	estimated := e.tokens.EstimateMessages(messages)
+	threshold := int(float64(contextLength) * float64(e.cfg.Compaction.PhaseTransitionPct) / 100.0)
+	if threshold <= 0 {
+		threshold = int(float64(contextLength) * 0.60)
+	}
+
+	if estimated <= threshold {
+		return messages
+	}
+
+	slog.Info("proactive compaction triggered",
+		"phase", e.activePhase,
+		"estimated_tokens", estimated,
+		"context_length", contextLength,
+		"threshold_pct", e.cfg.Compaction.PhaseTransitionPct)
+
+	compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.activePhase))
+	compactCancel()
+
+	if compactErr != nil {
+		slog.Warn("proactive compaction failed", "error", compactErr)
+		return messages
+	}
+	if !result.Compacted {
+		return messages
+	}
+
+	e.emit(CompactionCompleteMsg{
+		TokensBefore:    result.TokensBefore,
+		TokensAfter:     result.TokensAfter,
+		MessagesRemoved: result.MessagesRemoved,
+	})
+
+	compacted := e.compactedMessages(messages, result.Summary)
+	slog.Info("proactive compaction complete",
+		"tokens_before", result.TokensBefore,
+		"tokens_after", result.TokensAfter,
+		"messages_removed", result.MessagesRemoved)
+	return compacted
 }
 
 // SubmitDiscussAnswer records an answer for a discuss question.

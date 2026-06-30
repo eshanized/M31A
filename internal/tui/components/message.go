@@ -34,6 +34,10 @@ type MessageRenderer struct {
 	// toolCallCache maps segment content string → pre-parsed ToolCall (TU-3 fix).
 	// Avoids json.Unmarshal on every render for unchanged tool_use segments.
 	toolCallCache map[string]*types.ToolCall
+
+	// renderCache caches glamour-rendered output per (content, width).
+	// Avoids re-rendering identical markdown on every frame.
+	renderCache *GlamourCache
 }
 
 func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
@@ -42,6 +46,7 @@ func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 		styles:        theme.BuildSemanticStyles(t),
 		width:         width,
 		toolCallCache: make(map[string]*types.ToolCall),
+		renderCache:   NewGlamourCache(),
 	}
 	if err := mr.createGlamourRenderer(); err != nil {
 		return nil, err
@@ -211,6 +216,7 @@ func (r *MessageRenderer) SetWidth(width int) error {
 		return nil
 	}
 	r.width = width
+	r.renderCache.Clear()
 	_ = r.renderer.Close()
 	return r.createGlamourRenderer()
 }
@@ -439,15 +445,23 @@ func (r *MessageRenderer) renderContentSegment(content string, width int) string
 		}
 	}
 
+	// Check render cache before calling glamour
+	if cached, ok := r.renderCache.Get(content, width); ok {
+		return cached
+	}
+
 	rendered, err := r.renderer.Render(content)
 	if err != nil {
 		return r.styles.Body.Width(width).PaddingLeft(2).Render(content)
 	}
 
-	return lipgloss.NewStyle().
+	result := lipgloss.NewStyle().
 		Width(width).
 		PaddingLeft(2).
 		Render(rendered)
+
+	r.renderCache.Set(content, width, result)
+	return result
 }
 
 // renderAgentIteration renders an agent-loop iteration as a compact inline line.

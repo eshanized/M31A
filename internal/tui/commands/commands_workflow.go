@@ -254,3 +254,33 @@ func handleAgentMode(args []string, ctx CommandContext) CommandResult {
 		return CommandResult{Success: false, Message: "Usage: `/agent [on|off]`"}
 	}
 }
+
+// handlePending shows pending permission requests and batch approval status.
+func handlePending(_ []string, ctx CommandContext) CommandResult {
+	var sb strings.Builder
+	sb.WriteString("**Pending approvals:**\n\n")
+
+	if ctx.Dispatcher == nil {
+		sb.WriteString("  No dispatcher available.\n")
+		return CommandResult{Success: true, Message: sb.String()}
+	}
+
+	// Batch approval status
+	batchCount := ctx.Dispatcher.BatchApprovalCount()
+	batchTools := ctx.Dispatcher.ActiveBatchToolNames()
+	if batchCount > 0 {
+		fmt.Fprintf(&sb, "  Batch approvals active: **%s** (%d)\n", batchTools, batchCount)
+	} else {
+		sb.WriteString("  No active batch approvals.\n")
+	}
+
+	// Pending permission count
+	pending := ctx.Dispatcher.PendingPermCount()
+	if pending > 0 {
+		fmt.Fprintf(&sb, "  %d permission request(s) queued.\n", pending)
+	} else {
+		sb.WriteString("  No pending permission requests.\n")
+	}
+
+	return CommandResult{Success: true, Message: sb.String()}
+}

@@ -281,6 +281,7 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("phase", handlePhase, "Show or transition phase")
 	_ = r.Register("pause", handlePause, "Pause workflow")
 	_ = r.Register("resume-task", handleResumeTask, "Resume workflow")
+	_ = r.Register("pending", handlePending, "Show pending permission queue and batch approvals")
 	_ = r.Register("agent-mode", handleAgentMode, "Toggle autonomous agent mode")
 	_ = r.Register("metrics", handleMetrics, "Open session analytics")
 	_ = r.Register("dashboard", handleDashboard, "Open workflow dashboard")

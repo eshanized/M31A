@@ -37,6 +37,7 @@ Guidelines:
 - Preserve specific file paths, function names, error messages, and code snippets.
 - Do NOT include tool call details or raw tool outputs.
 - Focus on WHAT and WHY, not HOW (the recent messages already have the HOW).
+- Preserve tool usage patterns: include a tool_summary section that lists how many times each tool was called (e.g. "Used bash 5 times, edit 3 times, grep 8 times").
 `
 
 // Template returns the compaction summary prompt template.

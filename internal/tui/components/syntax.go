@@ -58,18 +58,18 @@ func DetectLanguage(code string) string {
 
 // RenderCodeBlock renders a syntax-highlighted code block with language label and line numbers.
 // Uses semantic styles for consistent appearance across themes.
-func RenderCodeBlock(code, language string, t theme.Theme, width int) string {
+func RenderCodeBlock(code, language string, cache *theme.StyleCache, width int) string {
 	if width < 20 {
 		width = 80
 	}
-	s := theme.BuildSemanticStyles(t)
+	s := cache.S
 
 	// Language label — refined pill badge
 	var headerLeft string
 	if language != "" {
 		headerLeft = s.CodeKeyword.
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.Brand).
+			BorderForeground(cache.Theme.Brand).
 			Padding(0, 1).
 			Render(language)
 	}
@@ -90,12 +90,12 @@ func RenderCodeBlock(code, language string, t theme.Theme, width int) string {
 		header = copyHint
 	}
 
-	codeLines := renderCodeLines(code, language, t, width)
+	codeLines := renderCodeLines(code, language, cache, width)
 	return header + "\n" + codeLines
 }
 
-func renderCodeLines(code, language string, t theme.Theme, width int) string {
-	highlighted := HighlightCode(code, language, t)
+func renderCodeLines(code, language string, cache *theme.StyleCache, width int) string {
+	highlighted := HighlightCode(code, language, cache.Theme)
 	codeLines := strings.Split(highlighted, "\n")
 
 	lineNumWidth := len(fmt.Sprintf("%d", len(codeLines)))
@@ -103,7 +103,7 @@ func renderCodeLines(code, language string, t theme.Theme, width int) string {
 		lineNumWidth = 2
 	}
 
-	s := theme.BuildSemanticStyles(t)
+	s := cache.S
 	codeWidth := width - lineNumWidth - 3
 
 	var lines []string

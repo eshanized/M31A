@@ -7,6 +7,10 @@ import (
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
+func testCache() *theme.StyleCache {
+	return theme.NewStyleCache(theme.Default())
+}
+
 func TestShortProviderName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -195,7 +199,7 @@ func TestBuildHeader_FullWidth(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := HeaderInfo{Brand: "M31A", Breadcrumb: "Chat", ModelName: "claude-3", Provider: "openrouter"}
-	header := BuildHeader(info, 100, Full, tm)
+	header := BuildHeader(info, 100, Full, tm, testCache())
 	if !strings.Contains(header, "M31A") {
 		t.Error("Full header should contain brand")
 	}
@@ -208,7 +212,7 @@ func TestBuildHeader_VeryNarrow(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := HeaderInfo{Brand: "M31A"}
-	header := BuildHeader(info, 5, Full, tm)
+	header := BuildHeader(info, 5, Full, tm, testCache())
 	if header == "" {
 		t.Error("Very narrow header should return non-empty string")
 	}
@@ -227,7 +231,7 @@ func TestBuildFooter_FullWidth_Cost(t *testing.T) {
 		ShowCost:      true,
 		SpinnerFrame:  "~",
 	}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, testCache())
 	if !strings.Contains(footer, "project") {
 		t.Error("Full footer should contain cwd")
 	}
@@ -242,7 +246,7 @@ func TestBuildFooter_VerySmallCost(t *testing.T) {
 		Cost:       0.001,
 		ShowCost:   true,
 	}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, testCache())
 	if !strings.Contains(footer, "<$0.01") {
 		t.Error("Small cost should show '<$0.01'")
 	}
@@ -255,7 +259,7 @@ func TestBuildFooter_LeaderActive(t *testing.T) {
 		Cwd:          "project",
 		LeaderActive: true,
 	}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, testCache())
 	// Footer now shows "LEADER" (not "ctrl+x") when leader key is active
 	if !strings.Contains(footer, "LEADER") {
 		t.Error("Leader active should show 'LEADER'")
@@ -266,7 +270,7 @@ func TestBuildFooter_VeryNarrow(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{Cwd: "project"}
-	footer := BuildFooter(info, 5, Full, tm)
+	footer := BuildFooter(info, 5, Full, tm, testCache())
 	if footer == "" {
 		t.Error("Very narrow footer should return non-empty string")
 	}
@@ -280,7 +284,7 @@ func TestBuildFooter_StandardWidth_NoCost(t *testing.T) {
 		Cost:     5.0,
 		ShowCost: true,
 	}
-	footer := BuildFooter(info, 70, Standard, tm)
+	footer := BuildFooter(info, 70, Standard, tm, testCache())
 	if !strings.Contains(footer, "project") {
 		t.Error("Standard footer should contain cwd")
 	}
@@ -290,7 +294,7 @@ func TestBuildFooter_Compact_BasenameOnly(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{Cwd: "/home/user/project"}
-	footer := BuildFooter(info, 50, Compact, tm)
+	footer := BuildFooter(info, 50, Compact, tm, testCache())
 	if !strings.Contains(footer, "project") {
 		t.Error("Compact footer should contain basename")
 	}
@@ -344,7 +348,7 @@ func TestAssembleThreeZone_NoCenterNoRight(t *testing.T) {
 
 func TestRenderProvBadge(t *testing.T) {
 	t.Parallel()
-	got := renderProvBadge(theme.Dark(), "openrouter")
+	got := renderProvBadge(theme.NewStyleCache(theme.Dark()).S, "openrouter")
 	if got == "" {
 		t.Error("renderProvBadge should return non-empty string")
 	}
@@ -354,7 +358,7 @@ func TestBuildHeader_StandardWidth_WithModel(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := HeaderInfo{Brand: "M31A", ModelName: "claude-3", Provider: "zen"}
-	header := BuildHeader(info, 80, Standard, tm)
+	header := BuildHeader(info, 80, Standard, tm, testCache())
 	if !strings.Contains(header, "M31A") {
 		t.Error("Standard header with model should contain brand")
 	}
@@ -364,7 +368,7 @@ func TestBuildFooter_StandardWidth_WithOperation(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{Cwd: "project", Operation: "responding..."}
-	footer := BuildFooter(info, 65, Standard, tm)
+	footer := BuildFooter(info, 65, Standard, tm, testCache())
 	if !strings.Contains(footer, "responding") {
 		t.Error("Standard footer should contain operation")
 	}
@@ -374,7 +378,7 @@ func TestBuildFooter_FullWidth_NoCostShow(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{Cwd: "project", TokenCount: 5000, ShowCost: false}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, testCache())
 	if strings.Contains(footer, "$") {
 		t.Error("Full footer with ShowCost=false should not contain cost")
 	}
@@ -384,7 +388,7 @@ func TestBuildFooter_FullWidth_ZeroTokenCount(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
 	info := FooterInfo{Cwd: "project", TokenCount: 0, ShowCost: true}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, testCache())
 	if strings.Contains(footer, "ctx") {
 		t.Error("Full footer with 0 token count should not contain 'ctx'")
 	}

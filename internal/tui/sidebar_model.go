@@ -110,6 +110,14 @@ type SidebarModel struct {
 	// Context pressure
 	contextPressure float64 // 0.0 to 1.0
 
+	// Compaction event tracking (Wave 2C)
+	lastCompactionBefore int // tokens before last compaction
+	lastCompactionAfter  int // tokens after last compaction
+	lastCompactionTime   time.Time
+
+	// Pending permission requests (updated from dispatcher)
+	pendingPermCount int
+
 	// Cost accumulator
 	totalCost    float64
 	costTrend    float64 // positive = spending faster, negative = slower
@@ -328,6 +336,18 @@ func (s *SidebarModel) SetCurrentPhase(phase string) {
 	}
 	s.currentPhase = phase
 	s.phaseStartedAt = time.Now()
+}
+
+// SetPendingPermCount updates the number of pending permission requests.
+func (s *SidebarModel) SetPendingPermCount(n int) {
+	s.pendingPermCount = n
+}
+
+// SetCompactionEvent records a compaction event for display in the sidebar.
+func (s *SidebarModel) SetCompactionEvent(tokensBefore, tokensAfter int) {
+	s.lastCompactionBefore = tokensBefore
+	s.lastCompactionAfter = tokensAfter
+	s.lastCompactionTime = time.Now()
 }
 
 // GetPhasePipeline returns the list of all phases for display.
@@ -731,6 +751,7 @@ func (s *SidebarModel) View() string {
 	lines = append(lines, s.renderToolTimeline(contentW)...)
 	lines = append(lines, s.renderSpeedMetrics(contentW)...)
 	lines = append(lines, s.renderSubAgentBadge(contentW)...)
+	lines = append(lines, s.renderPendingPermBadge(contentW)...)
 	lines = append(lines, s.renderFileTreeOrTodo(contentW)...)
 	lines = append(lines, s.renderSession(contentW)...)
 	lines = append(lines, s.renderHints(contentW)...)
@@ -1044,6 +1065,15 @@ func (s *SidebarModel) renderSubAgentBadge(_ int) []string {
 		agentText = fmt.Sprintf("⬡ %d agents", s.subAgentCount)
 	}
 	return []string{lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(1).Render(agentText)}
+}
+
+// renderPendingPermBadge shows pending permission request count.
+func (s *SidebarModel) renderPendingPermBadge(_ int) []string {
+	if s.pendingPermCount <= 0 {
+		return nil
+	}
+	text := fmt.Sprintf("⏱ %d pending approval(s)", s.pendingPermCount)
+	return []string{lipgloss.NewStyle().Foreground(s.theme.Warning).PaddingLeft(1).Render(text)}
 }
 
 // renderFileTreeOrTodo renders either the file tree or the todo list depending on mode.

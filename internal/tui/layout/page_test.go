@@ -93,8 +93,9 @@ func TestRenderPageRowCount(t *testing.T) {
 	header := HeaderInfo{Brand: "M31A"}
 	footer := FooterInfo{Cwd: "project"}
 	tm := theme.Default()
+	cache := theme.NewStyleCache(tm)
 
-	result := RenderPage(chrome, content, header, footer, tm)
+	result := RenderPage(chrome, content, header, footer, tm, cache)
 	lines := strings.Split(result, "\n")
 
 	if len(lines) != 24 {
@@ -112,8 +113,9 @@ func TestRenderTooNarrow(t *testing.T) {
 
 func TestBuildHeaderContainsBrand(t *testing.T) {
 	tm := theme.Default()
+	cache := theme.NewStyleCache(tm)
 	info := HeaderInfo{Brand: "M31A", Breadcrumb: "Chat"}
-	header := BuildHeader(info, 80, Full, tm)
+	header := BuildHeader(info, 80, Full, tm, cache)
 	if !strings.Contains(header, "M31A") {
 		t.Error("Header does not contain brand name")
 	}
@@ -121,8 +123,9 @@ func TestBuildHeaderContainsBrand(t *testing.T) {
 
 func TestBuildFooterContainsCwd(t *testing.T) {
 	tm := theme.Default()
+	cache := theme.NewStyleCache(tm)
 	info := FooterInfo{Cwd: "myproject"}
-	footer := BuildFooter(info, 80, Full, tm)
+	footer := BuildFooter(info, 80, Full, tm, cache)
 	if !strings.Contains(footer, "myproject") {
 		t.Error("Footer does not contain cwd")
 	}
@@ -130,8 +133,9 @@ func TestBuildFooterContainsCwd(t *testing.T) {
 
 func TestBuildHeaderCompactNoBreadcrumb(t *testing.T) {
 	tm := theme.Default()
+	cache := theme.NewStyleCache(tm)
 	info := HeaderInfo{Brand: "M31A", Breadcrumb: "Chat"}
-	header := BuildHeader(info, 50, Compact, tm)
+	header := BuildHeader(info, 50, Compact, tm, cache)
 	if strings.Contains(header, "Chat") {
 		t.Error("Compact header should not contain breadcrumb")
 	}
@@ -139,11 +143,12 @@ func TestBuildHeaderCompactNoBreadcrumb(t *testing.T) {
 
 func TestBuildFooterCompactNoHints(t *testing.T) {
 	tm := theme.Default()
+	cache := theme.NewStyleCache(tm)
 	info := FooterInfo{
 		Cwd:           "project",
 		KeyboardHints: []string{"ctrl+p cmds"},
 	}
-	footer := BuildFooter(info, 50, Compact, tm)
+	footer := BuildFooter(info, 50, Compact, tm, cache)
 	if strings.Contains(footer, "ctrl+p") {
 		t.Error("Compact footer should not contain keyboard hints")
 	}

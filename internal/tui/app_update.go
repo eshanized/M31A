@@ -113,6 +113,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.checkAutoDream()
 			// Update sidebar with token usage
 			m.updateSidebarUsage()
+			// Wave 2A: proactive context warnings
+			cmds = append(cmds, m.checkContextWarnings()...)
 			if collapsed > 0 {
 				cmds = append(cmds, m.addToastCmd(
 					fmt.Sprintf("↓ %d tool output(s) collapsed — press Enter to expand", collapsed),
@@ -177,6 +179,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.permModal = components.NewPermissionModal(msg.Request, m.themeManager.Current(), timeout)
 		m.screen = ScreenPermission
+		if m.sidebarModel != nil {
+			m.sidebarModel.SetPendingPermCount(msg.Request.QueueDepth)
+		}
 
 	case PermissionResponseMsg:
 		cmds = append(cmds, m.handlePermissionResponse(msg))
@@ -255,14 +260,54 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.runtimeModel != nil {
 			m.runtimeModel.SetSummary(msg.Summary)
 		}
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.drainAdaptiveCmd())
 	case workflow.PhaseTransitionStartMsg:
 		cmds = append(cmds, m.handlePhaseTransitionStart(msg)...)
 	case workflow.PhaseTransitionCompleteMsg:
 		cmds = append(cmds, m.handlePhaseTransitionComplete(msg)...)
 	case workflow.IntermediateProgressMsg,
 		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
-		cmds = append(cmds, m.drainEmitterCmd())
+		cmds = append(cmds, m.drainAdaptiveCmd())
+
+	// ── Batched emitter drain ────────────────────────────────────────────────
+	case DrainBatchMsg:
+		// Process each message in the batch through the same handlers.
+		// This preserves ordering and re-uses existing logic.
+		for _, sub := range msg.Messages {
+			switch subMsg := sub.(type) {
+			case workflow.TaskStartMsg:
+				cmds = append(cmds, m.handleWorkflowTaskStart(subMsg)...)
+			case workflow.TaskUpdateMsg:
+				cmds = append(cmds, m.handleWorkflowTaskUpdate(subMsg)...)
+			case workflow.ToolStartMsg:
+				cmds = append(cmds, m.handleWorkflowToolStart(subMsg)...)
+			case workflow.ToolCompleteMsg:
+				cmds = append(cmds, m.handleWorkflowToolComplete(subMsg)...)
+			case workflow.SelfHealStartMsg:
+				cmds = append(cmds, m.handleWorkflowSelfHealStart(subMsg)...)
+			case workflow.SelfHealCompleteMsg:
+				cmds = append(cmds, m.handleWorkflowSelfHealComplete(subMsg)...)
+			case workflow.PhaseTransitionStartMsg:
+				cmds = append(cmds, m.handlePhaseTransitionStart(subMsg)...)
+			case workflow.PhaseTransitionCompleteMsg:
+				cmds = append(cmds, m.handlePhaseTransitionComplete(subMsg)...)
+			case workflow.RuntimeCheckCompleteMsg:
+				if m.runtimeModel != nil {
+					m.runtimeModel.SetSummary(subMsg.Summary)
+				}
+			case workflow.IntermediateProgressMsg,
+				workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
+				// No specific handler needed; drain continues below.
+			default:
+				slog.Debug("unhandled message in DrainBatchMsg", "type", fmt.Sprintf("%T", sub))
+			}
+		}
+		// Continue draining if there are more messages queued.
+		if m.emitterLoad() > 0 {
+			cmds = append(cmds, m.drainMultipleCmd())
+		} else {
+			cmds = append(cmds, m.drainEmitterCmd())
+		}
 
 	// ── Goal submitted ────────────────────────────────────────────────────────
 	case GoalSubmittedMsg:
@@ -1774,6 +1819,10 @@ func (m *AppState) handlePermissionResponse(msg PermissionResponseMsg) tea.Cmd {
 		m.screen = ScreenREPL
 	}
 	m.dispatcher.ApprovePermission(reqID, allowed, remember)
+	// Update sidebar pending count after approval/denial
+	if m.sidebarModel != nil {
+		m.sidebarModel.SetPendingPermCount(m.dispatcher.PendingPermCount())
+	}
 	return permListenerCmd(m.shutdownCtx, m.dispatcher)
 }
 
@@ -1835,6 +1884,14 @@ func (m *AppState) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
 				RequestID: m.permRequest.ID,
 				Allowed:   true,
 				Remember:  true,
+			},
+		})
+	case "b", "B":
+		return m.handlePermissionResponse(PermissionResponseMsg{
+			Response: tools.PermissionResponse{
+				RequestID:  m.permRequest.ID,
+				Allowed:    true,
+				ApproveAll: true,
 			},
 		})
 	case "n", "enter", "esc":

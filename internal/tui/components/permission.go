@@ -72,7 +72,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	if cmdContentW < 8 {
 		cmdContentW = 8
 	}
-	highlighted := highlightCommand(m.request.Command, m.theme)
+	highlighted := highlightCommand(m.request.Command, m.styles)
 	highlighted = TruncateWithEllipsis(highlighted, cmdContentW)
 	cmdBox := s.InputCode.
 		Width(modalWidth - 6).
@@ -82,17 +82,27 @@ func (m *PermissionModal) Render(width, height int) string {
 	keys := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top,
 			s.PermKey.Render("[Y]"),
-			s.PermHint.Render(" Allow once    "),
+			s.PermHint.Render(" Allow once      "),
 			s.PermKey.Render("[A]"),
 			s.PermHint.Render(" Always allow"),
 		),
 		lipgloss.JoinHorizontal(lipgloss.Top,
+			s.PermKey.Render("[B]"),
+			s.PermHint.Render(" Approve all     "),
 			s.PermKey.Render("[N]"),
-			s.PermHint.Render(" Deny          "),
+			s.PermHint.Render(" Deny"),
+		),
+		lipgloss.JoinHorizontal(lipgloss.Top,
 			s.PermKey.Render("[Esc]"),
 			s.PermHint.Render(" Exit"),
 		),
 	)
+
+	// ── Queue depth ────────────────────────────────────────────────────────
+	var queueInfo string
+	if m.request.QueueDepth > 0 {
+		queueInfo = s.Caption.Render(fmt.Sprintf("  %d tool(s) queued behind this one", m.request.QueueDepth))
+	}
 
 	// ── Countdown ─────────────────────────────────────────────────────────
 	remaining := m.Remaining()
@@ -137,6 +147,12 @@ func (m *PermissionModal) Render(width, height int) string {
 		"",
 		countdown,
 	)
+	if queueInfo != "" {
+		modalContent = lipgloss.JoinVertical(lipgloss.Top,
+			modalContent,
+			queueInfo,
+		)
+	}
 
 	modal := s.Dialog.
 		Width(modalWidth).
@@ -154,6 +170,10 @@ func (m *PermissionModal) Allow() tools.PermissionResponse {
 
 func (m *PermissionModal) AllowAlways() tools.PermissionResponse {
 	return tools.PermissionResponse{Allowed: true, Remember: true}
+}
+
+func (m *PermissionModal) AllowApproveAll() tools.PermissionResponse {
+	return tools.PermissionResponse{Allowed: true, ApproveAll: true}
 }
 
 func (m *PermissionModal) Deny() tools.PermissionResponse {
@@ -210,11 +230,10 @@ func formatDurationClock(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", mins, secs)
 }
 
-func highlightCommand(cmd string, t theme.Theme) string {
+func highlightCommand(cmd string, s theme.SemanticStyles) string {
 	if cmd == "" {
 		return cmd
 	}
-	s := theme.BuildSemanticStyles(t)
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
 		return cmd

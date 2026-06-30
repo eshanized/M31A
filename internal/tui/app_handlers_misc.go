@@ -194,3 +194,46 @@ func (m *AppState) handleSidebarTodoUpdate(msg SidebarTodoUpdateMsg) []tea.Cmd {
 	}
 	return nil
 }
+
+// checkContextWarnings checks context usage and emits toast warnings at 70% and 85%.
+// Called after updateSidebarUsage() when token data is fresh. Returns cmds for toasts.
+func (m *AppState) checkContextWarnings() []tea.Cmd {
+	if m.sidebarModel == nil {
+		return nil
+	}
+	total := m.sidebarModel.totalTokens
+	ctxLen := m.sidebarModel.contextLen
+	if ctxLen <= 0 || total <= 0 {
+		return nil
+	}
+	pct := float64(total) / float64(ctxLen)
+
+	var cmds []tea.Cmd
+
+	// Auto-insert system message to suggest /compress when context reaches 70%
+	if pct >= 0.70 && !m.ctxWarned70 {
+		// Mark warning as shown but don't block further compaction suggestions at 85%
+		m.ctxWarned70 = true
+		// Format the warning message similar to what the toast would show
+		warningMsg := fmt.Sprintf("Context at %d%%. Consider /compress to prevent overflow.", int(pct*100))
+		// Parse and insert as a system message in the REPL state
+		if m.replModel != nil {
+			// Clean existing content but preserve tool calls for workflow state
+			// This is a minimal intervention that just nudges the user
+			m.replModel.InsertSystemPromptHint("⚠️ " + warningMsg)
+		}
+	}
+
+	if pct >= 0.85 && !m.ctxWarned85 {
+		m.ctxWarned85 = true
+		cmds = append(cmds, m.addToastCmd(
+			fmt.Sprintf("Context at %d%%. Compaction recommended — /compress to free space.", int(pct*100)),
+			"warning", 8*time.Second))
+	} else if pct >= 0.70 && !m.ctxWarned70 {
+		m.ctxWarned70 = true
+		cmds = append(cmds, m.addToastCmd(
+			fmt.Sprintf("Context at %d%%. Consider /compress to prevent overflow.", int(pct*100)),
+			"info", 6*time.Second))
+	}
+	return cmds
+}

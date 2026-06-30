@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -99,7 +98,7 @@ func (m *ReplModel) View() string {
 	rw := m.replWidth()
 
 	// ── Viewport (messages or welcome) with scrollbar overlay ───────────────
-	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
+	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, m.styleCache.S, rw)
 
 	// ── Floating overlays (anchored to viewport's bottom rows) ─────────────
 	var overlays []string
@@ -127,7 +126,7 @@ func (m *ReplModel) View() string {
 
 	// Floating new-messages pill anchored to the TOP of the viewport.
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		s := theme.BuildSemanticStyles(m.theme)
+		s := m.styleCache.S
 		pill := s.BrandBold.
 			Align(lipgloss.Center).
 			Width(rw).
@@ -176,7 +175,10 @@ func (m *ReplModel) View() string {
 	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
 		info.LeaderActive = true
 	}
-	statusBar := RenderStatusBar(t, rw, info)
+	if m.dispatcher != nil {
+		info.BatchApprovalTools = m.dispatcher.ActiveBatchToolNames()
+	}
+	statusBar := RenderStatusBar(m.styleCache.S, rw, info)
 
 	// ── Assemble all parts ─────────────────────────────────────────────────
 	parts := []string{viewportContent, inputBorder, textareaView}
@@ -223,7 +225,7 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 	}
 
 	// Base viewport (messages or welcome content) with scrollbar overlay.
-	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, t, rw)
+	viewportContent := overlayScrollbar(m.viewport.View(), m.viewport, m.styleCache.S, rw)
 
 	// Input separator: animated wave during streaming, clean line when idle
 	inputBorder := m.renderWaveSeparator(rw)
@@ -254,7 +256,7 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 
 	// ── Floating new-messages indicator — anchored to the TOP of viewport ─
 	if m.newMessagesWhileScrolled > 0 && m.userScrolled {
-		s := theme.BuildSemanticStyles(m.theme)
+		s := m.styleCache.S
 		pill := s.BrandBold.
 			Align(lipgloss.Center).
 			Width(rw).
@@ -322,7 +324,7 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	s := theme.BuildSemanticStyles(m.theme)
+	s := m.styleCache.S
 
 	if !m.streaming && !m.thinking {
 		// Idle: clean, subtle line
@@ -346,7 +348,7 @@ func (m *ReplModel) renderWaveSeparator(width int) string {
 }
 
 func (m *ReplModel) renderSlashSuggestions(width int) string {
-	s := theme.BuildSemanticStyles(m.theme)
+	s := m.styleCache.S
 	var lines []string
 
 	for i, cmd := range m.slashSuggestions {

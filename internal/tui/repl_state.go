@@ -34,6 +34,7 @@ func (m *ReplModel) updatePlaceholder() {
 // SetTheme updates the theme and reinitializes the message renderer.
 func (m *ReplModel) SetTheme(t theme.Theme) {
 	m.theme = t
+	m.styleCache = theme.NewStyleCache(t)
 	if m.msgRenderer != nil {
 		newRenderer, err := components.NewMessageRenderer(t, m.width-4)
 		if err == nil {
@@ -404,7 +405,7 @@ func (m *ReplModel) renderMessages() {
 				msg.CreatedAt.Sub(prevTime) > 90*time.Second
 			if timeGap {
 				// Long gap: minimal centered timestamp, no decoration
-				s := theme.BuildSemanticStyles(m.theme)
+				s := m.styleCache.S
 				timeLabel := msg.CreatedAt.Format("15:04")
 				timeLine := s.Faint.Render(timeLabel)
 				sb.WriteString("\n")
@@ -478,7 +479,7 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 			}
 			return m.cachedThinkingBlock.Render(rw)
 		}
-		s := theme.BuildSemanticStyles(m.theme)
+		s := m.styleCache.S
 		contentWidth := rw - 6
 		if contentWidth < 20 {
 			contentWidth = 20
@@ -490,7 +491,7 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 			Render(streamContent + cursor)
 		return rendered
 	}
-	s := theme.BuildSemanticStyles(m.theme)
+	s := m.styleCache.S
 	spinnerFrame := m.spinner.Peek()
 	return s.Muted.Render("  " + spinnerFrame + " responding…")
 }

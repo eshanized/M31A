@@ -70,7 +70,7 @@ func (m *AppState) renderFrameForScreen(targetScreen Screen) string {
 		}
 	}
 
-	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
+	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
 	return m.applySidebar(main, sidebarStr, targetScreen)
 }
 
@@ -285,7 +285,7 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 	}
 
 	// Compose the full page
-	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t)
+	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
 
 	return m.applySidebar(main, sidebarStr, m.screen)
 }

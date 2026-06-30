@@ -14,6 +14,15 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// BatchApproval records a user's "approve all" decision for a tool+risk
+// combination. Approvals are task-scoped: they expire when the current task
+// completes or the workflow phase transitions.
+type BatchApproval struct {
+	ToolName  string
+	RiskLevel types.RiskLevel
+	ExpiresAt time.Time // zero = never expires (manual SetPermission)
+}
+
 func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember bool) {
 	resp := PermissionResponse{RequestID: requestID, Allowed: allowed, Remember: remember}
 	if ch, ok := d.pendingResponses.Load(requestID); ok {
@@ -38,6 +47,83 @@ func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.permissions[toolName] = allowed
+}
+
+// ApproveBatch records a batch approval for the given tool+risk combination.
+// When active, all future permission requests matching this tool+risk are
+// auto-approved without prompting the user. Approvals are task-scoped:
+// they expire when RevokeBatchApprovals() is called (typically on task
+// completion or phase transition).
+func (d *Dispatcher) ApproveBatch(toolName string, risk types.RiskLevel) {
+	key := batchKey(toolName, risk)
+	d.batchMu.Lock()
+	d.batchApprovals[key] = BatchApproval{
+		ToolName:  toolName,
+		RiskLevel: risk,
+	}
+	d.batchMu.Unlock()
+	slog.Info("batch approval activated",
+		"tool", toolName, "risk", risk)
+}
+
+// RevokeBatchApprovals clears all active batch approvals. Called on task
+// completion or phase transition to reset session-scoped approvals.
+func (d *Dispatcher) RevokeBatchApprovals() {
+	d.batchMu.Lock()
+	n := len(d.batchApprovals)
+	d.batchApprovals = make(map[string]BatchApproval)
+	d.batchMu.Unlock()
+	if n > 0 {
+		slog.Info("batch approvals revoked", "count", n)
+	}
+}
+
+// checkBatchApproval returns true if a batch approval is active for the
+// given tool+risk combination and has not expired.
+func (d *Dispatcher) checkBatchApproval(toolName string, risk types.RiskLevel) bool {
+	key := batchKey(toolName, risk)
+	d.batchMu.RLock()
+	ap, ok := d.batchApprovals[key]
+	d.batchMu.RUnlock()
+	if !ok {
+		return false
+	}
+	if !ap.ExpiresAt.IsZero() && time.Now().After(ap.ExpiresAt) {
+		d.batchMu.Lock()
+		delete(d.batchApprovals, key)
+		d.batchMu.Unlock()
+		return false
+	}
+	return true
+}
+
+// BatchApprovalCount returns the number of active batch approvals.
+func (d *Dispatcher) BatchApprovalCount() int {
+	d.batchMu.RLock()
+	defer d.batchMu.RUnlock()
+	return len(d.batchApprovals)
+}
+
+// ActiveBatchToolNames returns a comma-separated list of tool names with
+// active batch approvals (e.g. "bash,edit"). Empty string if none.
+func (d *Dispatcher) ActiveBatchToolNames() string {
+	d.batchMu.RLock()
+	defer d.batchMu.RUnlock()
+	var names []string
+	for _, ap := range d.batchApprovals {
+		names = append(names, ap.ToolName)
+	}
+	return strings.Join(names, ",")
+}
+
+// PendingPermCount returns the number of permission requests currently
+// waiting in the queue (between send and TUI response).
+func (d *Dispatcher) PendingPermCount() int {
+	return int(d.pendingPermCount.Load())
+}
+
+func batchKey(toolName string, risk types.RiskLevel) string {
+	return toolName + ":" + string(risk)
 }
 
 func (d *Dispatcher) SelectAgent(agent string) error {
@@ -279,16 +365,23 @@ func extractBashTimeout(input json.RawMessage) int {
 // until a matching response arrives, the timeout expires, or the context is
 // cancelled. Uses per-request channels to avoid deadlock when multiple tools
 // request permission concurrently. If the user selects "remember", the
-// decision is cached for the tool name.
+// decision is cached for the tool name. If the user selects "approve all",
+// all current and future requests for this tool+risk are batch-approved.
 func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req PermissionRequest, toolName string) error {
 	// Create per-request response channel
 	respCh := make(chan PermissionResponse, 1)
 	d.pendingResponses.Store(req.ID, respCh)
 	defer d.pendingResponses.Delete(req.ID)
 
+	// Set queue depth before sending (how many are already waiting)
+	req.QueueDepth = int(d.pendingPermCount.Load())
+	d.pendingPermCount.Add(1)
+	defer d.pendingPermCount.Add(-1)
+
 	select {
 	case d.requestCh <- req:
 	default:
+		d.pendingPermCount.Add(-1)
 		return m31errors.ErrPermissionDenied
 	}
 
@@ -306,6 +399,11 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 
 	if !resp.Allowed {
 		return m31errors.ErrPermissionDenied
+	}
+
+	// Handle "approve all" — batch approve for this tool+risk
+	if resp.ApproveAll {
+		d.ApproveBatch(toolName, req.RiskLevel)
 	}
 
 	if resp.Remember {

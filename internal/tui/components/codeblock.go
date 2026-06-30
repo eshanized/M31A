@@ -8,11 +8,11 @@ import (
 type CodeBlock struct {
 	Language string
 	Code     string
-	Theme    theme.Theme
+	Cache    *theme.StyleCache
 	Width    int
 }
 
 // View renders the code block with syntax highlighting and line numbers.
 func (cb CodeBlock) View() string {
-	return RenderCodeBlock(cb.Code, cb.Language, cb.Theme, cb.Width)
+	return RenderCodeBlock(cb.Code, cb.Language, cb.Cache, cb.Width)
 }

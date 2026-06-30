@@ -186,6 +186,10 @@ type AppState struct {
 	// Sidebar auto-hide notification tracking (UX-38)
 	sidebarAutoHideNotified bool
 
+	// Context warning tracking (Wave 2A: proactive context warnings)
+	ctxWarned70 bool // whether 70% warning has been shown
+	ctxWarned85 bool // whether 85% warning has been shown
+
 	// Confirmation dialog state (non-nil when awaiting y/n)
 	pendingConfirm *CommandResult
 	confirmPrompt  string

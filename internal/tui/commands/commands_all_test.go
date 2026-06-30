@@ -65,7 +65,7 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 		"compress", "memory", "optimize", "model", "fallback", "provider",
 		"diff", "rollback", "bisect",
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
-		"new", "workflow", "plan", "refine", "execute", "verify", "runtime", "ship", "phase", "pause", "resume-task", "agent-mode",
+		"new", "workflow", "plan", "refine", "execute", "verify", "runtime", "ship", "phase", "pause", "pending", "resume-task", "agent-mode",
 		"metrics", "dashboard", "notifications", "files", "ghost",
 		"agent", "agent-cancel", "complexity", "decisions",
 	}

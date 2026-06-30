@@ -417,7 +417,7 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	}
 
 	// Connect the MsgEmitter so workflow events reach the TUI
-	emitter := &channelEmitter{ch: make(chan tea.Msg, 128)}
+	emitter := newChannelEmitter()
 	engine.SetMsgEmitter(emitter)
 	m.emitterCh = emitter.ch
 
@@ -447,13 +447,22 @@ func (m *AppState) wireTodoWriteCallback() {
 			}
 		}
 		msg := SidebarTodoUpdateMsg{Items: sidebarItems}
-		// Try non-blocking send first; if channel is full, use a goroutine
-		// to avoid dropping updates under load.
-		select {
-		case m.emitterCh <- msg:
-		default:
-			go func() { m.emitterCh <- msg }()
+		// Bounded retry: try up to maxRetries times with fixed backoff.
+		// Never spawn unbounded goroutines.
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			select {
+			case m.emitterCh <- msg:
+				return
+			default:
+				if attempt < maxRetries {
+					time.Sleep(retryBackoff)
+				}
+			}
 		}
+		// All retries exhausted — drop the update.
+		dropped := globalDropCounter.Add(1)
+		slog.Warn("TodoWrite update dropped: channel full",
+			"total_dropped", dropped)
 	})
 }
 
@@ -471,6 +480,66 @@ func (m *AppState) drainEmitterCmd() tea.Cmd {
 			return nil
 		}
 	}
+}
+
+// drainMultipleCmd returns a tea.Cmd that reads up to maxDrainPerTick
+// messages from the emitter channel and wraps them in a batched message.
+// Used during high-load periods to prevent channel saturation.
+// If only one message is available, it returns it directly (no wrapping).
+func (m *AppState) drainMultipleCmd() tea.Cmd {
+	if m.emitterCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		// Read first message (blocking).
+		select {
+		case first := <-m.emitterCh:
+			// Try to read additional messages non-blockingly.
+			var batch []tea.Msg
+			batch = append(batch, first)
+			for i := 1; i < maxDrainPerTick; i++ {
+				select {
+				case msg := <-m.emitterCh:
+					batch = append(batch, msg)
+				default:
+					break
+				}
+			}
+			if len(batch) == 1 {
+				return first
+			}
+			return DrainBatchMsg{Messages: batch}
+		case <-m.shutdownCtx.Done():
+			return nil
+		}
+	}
+}
+
+// DrainBatchMsg wraps multiple emitter messages for batch processing.
+type DrainBatchMsg struct {
+	Messages []tea.Msg
+}
+
+// emitterLoad returns the number of messages currently queued in the
+// emitter channel. Used to decide between single and batch draining.
+func (m *AppState) emitterLoad() int {
+	if m.emitterCh == nil {
+		return 0
+	}
+	return len(m.emitterCh)
+}
+
+// drainAdaptiveCmd returns a drain command appropriate for the current load.
+// Under low load, reads one message. Under high load (>25% capacity),
+// reads up to maxDrainPerTick messages in a batch.
+func (m *AppState) drainAdaptiveCmd() tea.Cmd {
+	if m.emitterCh == nil {
+		return nil
+	}
+	if m.emitterLoad() > ChannelCap/4 {
+		return m.drainMultipleCmd()
+	}
+	return m.drainEmitterCmd()
 }
 
 // drainFileWatcherCmd returns a tea.Cmd that reads one message from the file

@@ -11,26 +11,27 @@ import (
 
 // StatusBarInfo carries optional info to render in the status bar.
 type StatusBarInfo struct {
-	PromptTokens     int
-	TotalTokens      int
-	Cost             float64
-	ShowCost         bool
-	WhichKey         string
-	LeaderActive     bool
-	AgentName        string
-	ModelName        string
-	ProviderName     string
-	IsStreaming      bool
-	IsThinking       bool
-	ThinkingDuration int64 // milliseconds of current thinking session
-	KeyboardHints    []string
-	WorkflowPhase    string
-	QuestionProgress string
-	CwdName          string // basename of working directory
-	GitBranch        string // current git branch
-	SpinnerFrame     string // animated spinner frame (empty = use static char)
-	ContextUsed      int    // tokens used in context window
-	ContextMax       int    // model's max context length (0 = unknown)
+	PromptTokens       int
+	TotalTokens        int
+	Cost               float64
+	ShowCost           bool
+	WhichKey           string
+	LeaderActive       bool
+	AgentName          string
+	ModelName          string
+	ProviderName       string
+	IsStreaming        bool
+	IsThinking         bool
+	ThinkingDuration   int64 // milliseconds of current thinking session
+	KeyboardHints      []string
+	WorkflowPhase      string
+	QuestionProgress   string
+	CwdName            string // basename of working directory
+	GitBranch          string // current git branch
+	SpinnerFrame       string // animated spinner frame (empty = use static char)
+	ContextUsed        int    // tokens used in context window
+	ContextMax         int    // model's max context length (0 = unknown)
+	BatchApprovalTools string // comma-separated tool names with active batch approvals
 }
 
 // RenderStatusBar renders the status bar line at the bottom of the terminal.
@@ -39,7 +40,7 @@ type StatusBarInfo struct {
 //	left (cwd + branch) · center (operation) · right (hints + cost)
 //
 // No background fill — inherits terminal background.
-func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
+func RenderStatusBar(s theme.SemanticStyles, width int, info *StatusBarInfo) string {
 	if width < 10 {
 		return ""
 	}
@@ -47,8 +48,6 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 	if info == nil {
 		info = &StatusBarInfo{}
 	}
-
-	s := theme.BuildSemanticStyles(t)
 
 	// Clone info to avoid mutating the original (narrow terminal adaptations)
 	cloned := *info
@@ -110,6 +109,16 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		centerText = s.FooterOp.Render(info.WhichKey)
 	}
 
+	// ── Batch approval badge ────────────────────────────────────────────────
+	if info.BatchApprovalTools != "" {
+		batchBadge := s.WarningText.Render(fmt.Sprintf("Batch: %s", info.BatchApprovalTools))
+		if centerText != "" {
+			centerText += "  " + batchBadge
+		} else {
+			centerText = batchBadge
+		}
+	}
+
 	// ── Right zone: hints + cost/tokens ──────────────────────────────────────
 	var rightParts []string
 	for _, hint := range info.KeyboardHints {
@@ -129,7 +138,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 		}
 	}
 	if info.ContextMax > 0 && info.ContextUsed > 0 {
-		rightParts = append(rightParts, renderContextRing(info.ContextUsed, info.ContextMax, t))
+		rightParts = append(rightParts, renderContextRing(info.ContextUsed, info.ContextMax, s))
 	}
 	rightText := strings.Join(rightParts, "  ")
 
@@ -189,8 +198,7 @@ func RenderStatusBar(t theme.Theme, width int, info *StatusBarInfo) string {
 }
 
 // RenderPromptMetadata renders the agent · model · provider row above the textarea.
-func RenderPromptMetadata(agentName, modelName, providerName string, t theme.Theme, width int) string {
-	s := theme.BuildSemanticStyles(t)
+func RenderPromptMetadata(agentName, modelName, providerName string, s theme.SemanticStyles, width int) string {
 
 	var parts []string
 	if agentName != "" {
@@ -246,11 +254,10 @@ func formatTokenCount(n int) string {
 //	ctx [████░░░░] 42%
 //
 // Color shifts from brand → warning → error as usage increases.
-func renderContextRing(used, total int, t theme.Theme) string {
+func renderContextRing(used, total int, s theme.SemanticStyles) string {
 	if total <= 0 {
 		return ""
 	}
-	s := theme.BuildSemanticStyles(t)
 
 	pct := float64(used) / float64(total)
 	if pct > 1.0 {

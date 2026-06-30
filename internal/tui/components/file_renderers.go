@@ -103,7 +103,7 @@ func (r *FileReadRenderer) RenderOutput(result *types.ToolResult, state ToolStat
 	}
 	parts := []string{}
 	if !collapsed && output != "" {
-		highlighted := RenderCodeBlock(output, "", r.theme, width)
+		highlighted := RenderCodeBlock(output, "", r.getStyleCache(), width)
 		if truncated {
 			highlighted += "\n" + r.styles.WarningText.Italic(true).
 				Render("[... output truncated]")
