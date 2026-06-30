@@ -32,9 +32,9 @@ import (
 )
 
 var (
-	Version  = "dev"
-	Commit   = "unknown"
-	Date     = "unknown"
+	Version   = "dev"
+	Commit    = "unknown"
+	Date      = "unknown"
 	GoVersion = "unknown"
 )
 
