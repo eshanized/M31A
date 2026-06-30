@@ -43,7 +43,6 @@ const (
 	ScreenConfig           Screen = 16   // full config viewer
 	ScreenHelp             Screen = 17   // keybinding help overlay
 	ScreenBisect           Screen = 18   // git bisect interactive
-	ScreenThemePicker      Screen = 19   // deprecated — M31A has a single theme
 	ScreenNotifications    Screen = 20   // notification history
 	ScreenDashboard        Screen = 21   // workflow pipeline overview
 	ScreenSessionDetail    Screen = 22   // session detail preview
@@ -101,8 +100,6 @@ func (s Screen) Label() string {
 		return "Help"
 	case ScreenBisect:
 		return "Bisect"
-	case ScreenThemePicker:
-		return "Themes"
 	case ScreenNotifications:
 		return "Notifications"
 	case ScreenDashboard:
@@ -186,8 +183,6 @@ func (s Screen) Name() string {
 		return "metrics"
 	case ScreenLedger:
 		return "ledger"
-	case ScreenThemePicker:
-		return "themepicker"
 	case ScreenHome:
 		return "home"
 	case ScreenFirstRun:
@@ -572,6 +567,9 @@ type WorkflowEngine interface {
 	SetWorkflowMode(mode types.WorkflowMode)
 	WorkflowMode() types.WorkflowMode
 	SnapshotDecisions() []decision.DecisionReceipt
+	Close()
+	LoadCheckpointData(data *workflow.CheckpointData)
+	GetCheckpointData() *workflow.CheckpointData
 }
 
 // ─── Intent classification ─────────────────────────────────────────────────────

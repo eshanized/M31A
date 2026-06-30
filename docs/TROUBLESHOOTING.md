@@ -25,7 +25,7 @@ Common issues and their solutions.
 
 **Solutions:**
 1. Check provider health by running M31 Autonomous and checking the header status indicator
-2. Verify network connectivity to OpenRouter/Zen
+2. Verify network connectivity to OpenRouter, Zen, or Nvidia
 3. Increase model cache TTL if rate-limited:
    ```toml
    [features]

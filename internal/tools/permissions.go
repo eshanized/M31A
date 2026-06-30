@@ -484,6 +484,57 @@ func extractFromParams(toolName string, params map[string]any) string {
 		if q, ok := params["question"].(string); ok {
 			return q
 		}
+	case "TodoRead":
+		if status, ok := params["status"].(string); ok && status != "" {
+			return fmt.Sprintf("read todos (%s)", status)
+		}
+		return "read todos"
+	case "WebSearch":
+		if query, ok := params["query"].(string); ok {
+			return fmt.Sprintf("search %s", query)
+		}
+	case "FileList":
+		if path, ok := params["path"].(string); ok && path != "" {
+			return fmt.Sprintf("list %s", path)
+		}
+		return "list files"
+	case "FileDelete":
+		if path, ok := params["path"].(string); ok {
+			return fmt.Sprintf("delete %s", path)
+		}
+	case "FileMove":
+		src, _ := params["source"].(string)
+		dst, _ := params["destination"].(string)
+		if src != "" && dst != "" {
+			return fmt.Sprintf("move %s → %s", src, dst)
+		}
+		if src != "" {
+			return fmt.Sprintf("move %s", src)
+		}
+	case "CodeMap":
+		if query, ok := params["query"].(string); ok {
+			return fmt.Sprintf("codemap %s", query)
+		}
+	case "CodeComplexity":
+		return "analyze complexity"
+	case "DevServer":
+		if action, ok := params["action"].(string); ok {
+			return fmt.Sprintf("devserver %s", action)
+		}
+	case "HTTPCheck":
+		if u, ok := params["url"].(string); ok {
+			return fmt.Sprintf("http check %s", u)
+		}
+	case "Agent":
+		if desc, ok := params["description"].(string); ok && desc != "" {
+			return fmt.Sprintf("agent: %s", desc)
+		}
+		return "spawn agent"
+	case "MetricsTool":
+		if mode, ok := params["mode"].(string); ok && mode != "" {
+			return fmt.Sprintf("metrics (%s)", mode)
+		}
+		return "show metrics"
 	}
 	return ""
 }

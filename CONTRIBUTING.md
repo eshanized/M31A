@@ -44,19 +44,50 @@ go vet ./...
 
 For the full package layout and architectural constraints, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Key highlights:
 
-- Only OpenRouter and Zen providers are supported — no direct Anthropic or OpenAI.
-- V1 tools are limited to: Bash, FileRead, FileWrite, Glob, Grep.
-- No CSS-style animations (Bubble Tea uses Unicode spinners and frame redraws).
-- API keys resolved in order: environment variable -> OS keychain -> config file. Never stored in plaintext.
-- No V1.1 features (ghost mode, PiP, subagents, deferred tools).
+- **Three providers** — OpenRouter, Zen, and Nvidia. No direct Anthropic or OpenAI.
+- **18 built-in tools** — Bash, FileRead, FileWrite, Edit, Glob, Grep, WebFetch, WebSearch, CodeMap, CodeComplexity, FileDelete, FileMove, FileList, TodoWrite, TodoRead, DevServer, HTTPCheck, AskUserQuestion.
+- API keys resolved in order: environment variable → OS keychain → config file. Never stored in plaintext.
 - No telemetry, analytics, or phone-home behavior.
-
-M31 Autonomous enforces strict package dependency rules. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph. Additional rules:
-
 - **Bubble Tea is single-threaded.** All state mutations go through `Update()` only. Never mutate `AppState` from a goroutine. Use `tea.Cmd` and `tea.Msg`.
 - **No CGO.** Binary must be static (`CGO_ENABLED=0`).
 - **No hardcoded model lists.** Models discovered dynamically from provider APIs.
-- **V1 task execution is SEQUENTIAL.** No concurrency.
+- **Bounded parallelism.** Task runner uses Kahn's algorithm with 4 concurrent tasks.
+
+## Package Layout
+
+```
+cmd/m31a/          Entry point (flag parsing, config, provider registration, TUI launch)
+internal/          Private packages (not importable)
+  codeintel/       4-language parser, import graph, relevance scoring
+  config/          TOML loader, hot-reload, project context detection
+  context/         Dynamic context system, registry, estimation
+  decision/        Decision logging and receipts
+  errors/          Sentinel errors with user-friendly messages
+  fileutil/        Atomic file operations
+  git/             Git operations (commit, rollback, diff, stash, branch)
+  log/             Structured logging with daily rotation
+  provider/        LLM provider abstraction (OpenRouter, Zen, Nvidia)
+  tokens/          Token estimation (tiktoken + EMA calibration)
+  tools/           18 tools + dispatcher + permissions + subagents
+  tui/             Bubble Tea TUI (33 screens)
+  types/           Shared types, constants, workflow phases
+  workflow/        Seven-phase orchestration engine
+pkg/               Public packages (importable)
+  autodream/       Context consolidation with reentrancy guard
+  arbitrage/       Model-cost optimizer with task classification
+  bisect/          Git-bisect wrapper for model comparison
+  compaction/      Context compaction utilities
+  coordinator/     Drain management for workflow→TUI communication
+  history/         Frecent prompt history with scoring
+  keychain/        OS keychain abstraction (Linux/macOS/Windows)
+  ledger/          Cross-session learning store (markdown-backed)
+  metrics/         Metrics collection and reporting
+  retry/           Retry logic with exponential backoff
+  rollback/        Commit-chain manager (soft/hard/safe reset)
+  session/         Session lifecycle, persistence, checkpointing
+  skills/          Skill discovery and management
+  taskrunner/      Kahn's algorithm, bounded parallelism
+```
 
 ## Adding a New Tool
 
@@ -65,13 +96,13 @@ M31 Autonomous enforces strict package dependency rules. See [docs/ARCHITECTURE.
    - `Description() string`
    - `RiskLevel() types.RiskLevel`
    - `Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error)`
-2. Register it in `DefaultDispatcher()` in `internal/tools/dispatcher.go`
+2. Register it in `DefaultDispatcher()` in `internal/tools/defaults.go`
 3. Write tests in `internal/tools/mytool_test.go`
-4. Update this doc and `docs/SLASH_COMMANDS.md` if relevant
+4. Update `docs/TOOLS.md` if relevant
 
 ## Adding a New TUI Screen
 
-1. Add a `Screen*` constant in `internal/tui/types.go`
+1. Add a `Screen*` constant in `internal/tui/tuitypes/tuitypes.go`
 2. Create a model struct with `View()`, `Update()`, and optionally `Init()` methods
 3. Add the model field to `AppState` in `internal/tui/app.go`
 4. Initialize the model in `NewApp()`
@@ -80,15 +111,17 @@ M31 Autonomous enforces strict package dependency rules. See [docs/ARCHITECTURE.
 
 ## Adding a New Workflow Phase
 
-1. Create `internal/workflow/myphase.go` with `runMyPhase()` method on `Engine`
-2. Add the phase to the switch in `Engine.RunPhase()`
-3. Add the phase constant to `internal/types/enums.go`
-4. Update `handlePhase` in `internal/tui/commands.go` if needed
-5. Write tests in `internal/workflow/engine_test.go`
+1. Add the phase constant to `internal/types/types.go`
+2. Add to `validPhaseTransitions` map in `internal/workflow/engine.go`
+3. Create `internal/workflow/myphase.go` with `runMyPhase()` method on `Engine`
+4. Add to `RunPhase()` dispatch in `internal/workflow/engine.go`
+5. Add phase model slot to `modelForPhase()`
+6. Add TUI screen in `internal/tui/tuitypes/tuitypes.go`
+7. Write tests in `internal/workflow/engine_test.go`
 
 ## Pull Request Conventions
 
-- **Commit messages:** Follow conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`)
+- **Commit messages:** Follow conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`)
 - **Tests:** All PRs must pass `go test -race ./...` with no regressions
 - **Coverage:** New code should meet the 75% threshold (90% for critical packages)
 - **No breaking changes** without discussion in an issue first
@@ -100,8 +133,8 @@ M31 Autonomous enforces strict package dependency rules. See [docs/ARCHITECTURE.
 |------|---------|
 | `cmd/m31a/main.go` | Binary entry point, flag parsing, TUI launch |
 | `internal/tui/app.go` | Bubble Tea app, state management, message routing |
-| `internal/tui/commands.go` | Slash command handlers |
-| `internal/workflow/engine.go` | Six-phase workflow orchestration |
-| `internal/provider/` | LLM provider interface + OpenRouter/Zen clients |
-| `internal/tools/` | Core tool implementations |
+| `internal/tui/commands/` | Slash command registry and handlers |
+| `internal/workflow/engine.go` | Seven-phase workflow orchestration |
+| `internal/provider/` | LLM provider interface + OpenRouter/Zen/Nvidia clients |
+| `internal/tools/` | Core tool implementations and dispatcher |
 | `pkg/session/` | Session lifecycle and file persistence |

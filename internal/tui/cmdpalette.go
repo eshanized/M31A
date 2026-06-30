@@ -83,7 +83,7 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 	for _, cmd := range cmds {
 		switch cmd.Name {
 		// Core
-		case "help", "clear", "status", "reset", "quit", "undo", "history", "health", "tools":
+		case "help", "clear", "status", "reset", "quit", "undo", "history", "health", "tools", "about", "search", "copy-error", "prompt-history", "dream", "keychain":
 			catMap[cmd.Name] = CatCore
 		// AI / model
 		case "compress", "optimize", "model", "fallback", "provider":
@@ -92,14 +92,17 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 		case "settings", "config", "cost", "log", "key", "tokens":
 			catMap[cmd.Name] = CatConfig
 		// Session
-		case "sessions", "fork", "prev", "next", "save", "goal", "resume", "ledger":
+		case "sessions", "fork", "prev", "next", "save", "goal", "resume", "ledger", "export":
 			catMap[cmd.Name] = CatSession
 		// Git
-		case "diff", "rollback":
+		case "diff", "rollback", "bisect":
 			catMap[cmd.Name] = CatGit
 		// Workflow
-		case "workflow", "plan", "execute", "verify", "runtime", "ship", "phase", "pause", "metrics", "resume-task":
+		case "workflow", "plan", "execute", "verify", "runtime", "ship", "phase", "pause", "metrics", "resume-task", "pending", "refine", "agent-mode", "ghost", "notifications", "dashboard", "files", "decisions", "complexity":
 			catMap[cmd.Name] = CatWorkflow
+		// Analysis
+		case "agent", "agent-cancel":
+			catMap[cmd.Name] = CatCore
 		default:
 			catMap[cmd.Name] = CatCore
 		}

@@ -4,9 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.3.x   | :white_check_mark: |
-| 1.2.x   | :white_check_mark: |
-| < 1.2   | :x:                |
+| 1.6.x   | :white_check_mark: |
+| 1.5.x   | :white_check_mark: |
+| < 1.5   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -33,13 +33,18 @@ Include:
 
 M31 Autonomous is an AI coding agent that executes code and shell commands. By design, it requires trust in the LLM it uses. Key security features:
 
-- **Permission gating** — Dangerous operations require explicit user approval
-- **SSRF protection** — DNS pinning and private IP blocking for web requests
-- **Path traversal guards** — Symlink resolution and workspace containment
-- **Rate limiting** — Token bucket rate limiting on tool execution
-- **Zero telemetry** — No data is sent anywhere except your configured LLM provider
-
-For the full security audit, see [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
+| Layer | Mechanism |
+|-------|-----------|
+| **Permission gating** | Every `Bash` command gated: allow / allow always / deny, with configurable timeout and default `ask` mode |
+| **Rate limiting** | Token bucket: 20 burst / 10 sustained for normal tools; 5 burst / 2 sustained for dangerous tools |
+| **Concurrency control** | Max 8 concurrent tool executions via semaphore |
+| **Command blocklist** | Dangerous command patterns blocked at the tool boundary (defense-in-depth) |
+| **Path traversal** | Blocked at tool boundary; size limits (50MB per file read), stream-size caps |
+| **SSRF protection** | WebFetch blocks private, loopback, and link-local IP addresses |
+| **DNS rebinding** | WebSearch uses a DNS cache (5 min TTL) to prevent TOCTOU rebinding attacks |
+| **Edit safety** | 7-strategy cascade with collision-safe backups |
+| **Subagent depth** | Max nesting depth of 2 to prevent runaway agent spawning |
+| **Zero telemetry** | No data is sent anywhere except your configured LLM provider |
 
 ## Best Practices
 

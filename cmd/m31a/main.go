@@ -290,7 +290,7 @@ func run() int {
 
 	// Tools dispatcher — fail fast on permission config errors (WP-C04)
 	backupDir := filepath.Join(workDir, ".m31a", "backups")
-	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions)
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools)
 	if err != nil {
 		logger.Error("failed to create tools dispatcher — permission configuration is invalid", "error", err)
 		return 1
@@ -360,7 +360,7 @@ func run() int {
 		Worktrees:   &subagent.GitWorktrees{},
 		Profiles:    cfg.Agents.Profiles,
 		NewDispatcher: tools.NewDispatcherFactory(
-			backupDir, backupDir, &cfg.Permissions, nil, cfg.Agents.Profiles,
+			backupDir, backupDir, &cfg.Permissions, &cfg.Tools, nil, cfg.Agents.Profiles,
 		),
 	})
 	// Register the Agent tool on the parent dispatcher (non-child so it can

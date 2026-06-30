@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // handleHelp navigates to the Help screen with scrollable keybinding reference.
@@ -114,7 +115,7 @@ func handleQuit(_ []string, _ CommandContext) CommandResult {
 	}
 }
 
-// handleUndo shows the latest checkpoint info for the current session.
+// handleUndo restores the workflow to the latest checkpoint state.
 func handleUndo(_ []string, ctx CommandContext) CommandResult {
 	if ctx.SessionManager == nil || ctx.SessionID == "" {
 		return CommandResult{Success: false, Message: "No active session."}
@@ -123,12 +124,44 @@ func handleUndo(_ []string, ctx CommandContext) CommandResult {
 	if err != nil {
 		return CommandResult{Success: false, Message: "No checkpoint found."}
 	}
+
+	// Load checkpoint data from disk (includes decisions if available).
+	checkpoints, err := ctx.SessionManager.LoadCheckpoints(ctx.SessionID)
+	if err != nil || len(checkpoints) == 0 {
+		return CommandResult{Success: false, Message: "No checkpoint found."}
+	}
+	latest := checkpoints[0]
+
+	// Restore into the workflow engine if available.
+	if ctx.WorkflowEngine != nil {
+		cpData := &workflow.CheckpointData{
+			Phase:       latest.Phase,
+			Goal:        latest.Goal,
+			PlanVersion: latest.PlanVersion,
+			Timestamp:   latest.Timestamp,
+		}
+		ctx.WorkflowEngine.LoadCheckpointData(cpData)
+	}
+
+	phase := checkpoint.Phase
+	goal := checkpoint.Goal
+	if goal == "" {
+		goal = ctx.WorkflowEngine.PlanContent() // fallback: use current goal from engine
+	}
+
 	msg := fmt.Sprintf(
-		"**Latest checkpoint:**\n  Phase: %s\n  Time: %s",
-		checkpoint.Phase,
+		"**Restored checkpoint:**\n  Phase: %s\n  Time: %s\n\nResuming from checkpoint…",
+		phase,
 		checkpoint.Timestamp.Format("2006-01-02 15:04:05"),
 	)
-	return CommandResult{Success: true, Message: msg}
+
+	return CommandResult{
+		Success:        true,
+		Message:        msg,
+		WorkflowResume: true,
+		ResumePhase:    phase,
+		ResumeGoal:     goal,
+	}
 }
 
 // handleHistory opens the chat history table browser.

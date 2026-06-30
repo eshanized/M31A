@@ -2,7 +2,7 @@
 
 ## Overview
 
-M31 Autonomous is a modular AI agent framework built in Go with a Bubble Tea TUI. It routes user prompts through a **six-phase workflow** (`session → auto → dream → bisect → arbitrage → rollback`), selecting models by cost/quality, streaming responses, and maintaining full session history.
+M31 Autonomous is a terminal-native AI coding agent written in Go. It orchestrates a seven-phase workflow through a Bubble Tea TUI, streaming LLM responses from three providers with automatic fallback. The system executes 18 built-in tools gated by a permission system, produces verified git commits, and records cross-session learning.
 
 ---
 
@@ -10,244 +10,294 @@ M31 Autonomous is a modular AI agent framework built in Go with a Bubble Tea TUI
 
 ```
 .
-├── cmd/m31a/              # Main entry point (flag parsing, config init)
-├── docs/                  # User-facing documentation
-├── internal/
-│   ├── codeintel/         # Code intelligence utilities
-│   ├── config/            # YAML config loading, validation, defaults
-│   ├── errors/            # Sentinel errors for the entire app
-│   ├── fileutil/          # File system utilities
-│   ├── git/               # Git operations abstraction
-│   ├── log/               # Logging infrastructure
-│   ├── provider/          # LLM provider abstraction (OpenRouter, Zen)
-│   ├── tokens/            # Token counting and estimation
-│   ├── tools/             # Tool registry, MCP client, Toolhouse, Brave Search
-│   ├── tui/               # Bubble Tea TUI — models, views, commands, components
-│   │   ├── commands/      # Slash command registry + built-in commands
-│   │   ├── components/    # Reusable TUI components (spinners, lists, etc.)
-│   │   ├── layout/        # Layout helpers (chrome, sidebar sizing)
-│   │   ├── streaming/     # Streaming response rendering
-│   │   ├── theme/         # Lipgloss TUI theming (dark/light/auto)
-│   │   └── tuitypes/      # TUI-specific type definitions and interfaces
-│   ├── types/             # Core type definitions (workflow phases, tasks, etc.)
-│   └── workflow/          # Workflow engine (phase transitions, state management)
-├── pkg/
-│   ├── arbitrage/         # Model scoring, cost estimation, recommendation
-│   ├── autodream/         # Prompt enhancement (DREAM → enhanced prompt)
-│   ├── bisect/            # Response comparison / diffing
-│   ├── keychain/          # Encrypted API key storage via OS keychain
-│   ├── ledger/            # Auditable prompt/response log
-│   ├── rollback/          # Session state snapshot & restore
-│   └── session/           # Session lifecycle, persistence, checkpointing
-└── m31a.yaml              # Default user config
+├── cmd/m31a/                  # Entry point (flag parsing, config, provider registration, TUI launch)
+│   ├── main.go                # Startup sequence, signal handling, headless mode
+│   └── usage.go               # CLI help text, slash command listing
+├── docs/                      # User-facing documentation
+├── internal/                  # Private packages (not importable)
+│   ├── codeintel/             # 4-language parser (Go, TypeScript, Python, Rust), import graph, relevance
+│   ├── config/                # TOML loader (6-layer cascade), hot-reload, project context detection
+│   ├── context/               # Dynamic context system, registry, estimation
+│   ├── decision/              # Decision logging and receipts
+│   ├── errors/                # Sentinel errors with user-friendly messages
+│   ├── fileutil/              # Atomic file write operations
+│   ├── git/                   # Git operations (commit, rollback, diff, stash, branch)
+│   ├── log/                   # Structured logging with daily rotation
+│   ├── provider/              # LLM provider abstraction
+│   │   ├── interface.go       # LLMProvider interface (8 methods)
+│   │   ├── base_client.go     # Shared HTTP transport, model cache, cost estimation
+│   │   ├── cache.go           # Thread-safe model cache with TTL + stale + singleflight
+│   │   ├── capabilities.go    # Heuristic capability detection from model ID
+│   │   ├── fallback.go        # Parallel health checks, priority-based provider switching
+│   │   ├── registry.go        # Thread-safe provider registry
+│   │   ├── sse.go             # SSE stream parser with watchdog timer
+│   │   ├── openrouter/        # OpenRouter client (300+ models)
+│   │   ├── zen/               # Zen/OpenCode client
+│   │   └── nvidia/            # Nvidia NIM client
+│   ├── tokens/                # Token estimation (tiktoken + EMA calibration)
+│   ├── tools/                 # 18 tools + dispatcher + permissions + subagents
+│   │   ├── dispatcher.go      # Execution pipeline: concurrency, rate limiting, permissions
+│   │   ├── defaults.go        # DefaultDispatcher: registers all 18 tools
+│   │   ├── permissions.go     # Rule-based permission evaluation
+│   │   ├── subagent/          # Parallel subagent manager (git worktree isolation, depth=2)
+│   │   └── *.go               # Individual tool implementations
+│   ├── tui/                   # Bubble Tea TUI (33 screens)
+│   │   ├── app.go             # AppState definition, NewApp constructor
+│   │   ├── app_update.go      # Single dispatch point for all messages
+│   │   ├── app_view.go        # View rendering with theme support
+│   │   ├── commands/          # Slash command registry and handlers
+│   │   ├── components/        # Reusable TUI components (spinners, lists, modals)
+│   │   ├── layout/            # Layout helpers (chrome, sidebar sizing)
+│   │   ├── streaming/         # Streaming response rendering
+│   │   ├── theme/             # Lipgloss theming (M31A dark theme)
+│   │   └── tuitypes/          # TUI type definitions and interfaces
+│   ├── types/                 # Shared types, constants, workflow phases, risk levels
+│   └── workflow/              # Seven-phase orchestration engine
+│       ├── engine.go          # Core engine (phase dispatch, LLM streaming, prompt assembly)
+│       ├── initialize.go      # Project detection, git init, code index
+│       ├── discuss.go         # LLM-generated questions, quality scoring
+│       ├── plan.go            # Task breakdown, plan checker, coverage gates
+│       ├── execute.go         # Tool dispatch, self-healing, loop detection
+│       ├── verify.go          # Build/test verification, bisect fallback
+│       ├── runtime.go         # Dev server, HTTP smoke tests
+│       ├── ship.go            # Final commit, changelog, ledger entry
+│       └── prompts/           # Embedded prompt templates
+├── pkg/                       # Public packages (importable)
+│   ├── autodream/             # Context consolidation with reentrancy guard
+│   ├── arbitrage/             # Model-cost optimizer with task classification
+│   ├── bisect/                # Git-bisect wrapper for model comparison
+│   ├── compaction/            # Context compaction utilities
+│   ├── coordinator/           # Drain management for workflow→TUI communication
+│   ├── history/               # Frecent prompt history with scoring
+│   ├── keychain/              # OS keychain abstraction (Linux/macOS/Windows)
+│   ├── ledger/                # Cross-session learning store (markdown-backed)
+│   ├── metrics/               # Metrics collection and reporting
+│   ├── retry/                 # Retry logic with exponential backoff
+│   ├── rollback/              # Commit-chain manager (soft/hard/safe reset)
+│   ├── session/               # Session lifecycle, persistence, checkpointing
+│   ├── skills/                # Skill discovery and management
+│   └── taskrunner/            # Kahn's algorithm for topological sort, bounded parallelism
+├── scripts/                   # verify_v1.sh acceptance suite
+├── install.sh                 # One-liner installer
+├── Makefile                   # Build/test/lint/release targets
+└── .goreleaser.yaml           # Cross-compile + release config
 ```
 
 ---
 
-## Six-Phase Workflow
+## Dependency Rules
 
-| Phase | Package | Purpose |
-|-------|---------|---------|
-| **Session** | `pkg/session` | Create, persist, checkpoint, archive sessions under `~/.m31a/sessions/` |
-| **Auto** | `pkg/autodream` | Prompt enhancement — DEEP/FAST/SKIP; enhances user prompts for better results |
-| **Dream** | `internal/ghost` | Ghost writes append-only files with prompt-driven content generation |
-| **Bisect** | `pkg/bisect` | Compare multiple model responses, compute diff scores |
-| **Arbitrage** | `pkg/arbitrage` | Score task complexity, estimate costs, recommend optimal model |
-| **Rollback** | `pkg/rollback` | Snapshot session state, restore from checkpoint |
+- `cmd/m31a/` imports only `internal/` and `pkg/`
+- `internal/` may import `pkg/`
+- `pkg/` must NOT import `internal/` (enforced by Go module system)
+- `internal/types` is the shared type vocabulary across all layers
+
+---
+
+## Entry Point
+
+`cmd/m31a/main.go` handles:
+
+1. Flag parsing (`--version`, `--prompt`, `--goal`, `--model`)
+2. Config loading (6-layer TOML cascade)
+3. Provider registration (OpenRouter, Zen, Nvidia)
+4. Session manager, tool dispatcher, git client creation
+5. TUI construction with all dependencies injected
+6. Signal handling (SIGTERM/SIGINT with graceful shutdown)
+7. Headless mode (`--prompt` for single-shot LLM interaction)
 
 ---
 
 ## Provider Layer
 
-### Interface (`internal/provider/provider.go`)
+### Interface (`internal/provider/interface.go`)
+
 ```go
 type LLMProvider interface {
     Name() string
-    ListModels(ctx context.Context) ([]types.ModelInfo, error)
-    ChatCompletion(ctx context.Context, req types.ChatRequest) (*types.ChatResponse, error)
-    ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error)
-    HealthCheck(ctx context.Context) (*types.HealthReport, error)
-    EstimateCost(modelID string, usage types.Usage) float64
-    GetModel(id string) (*types.ModelInfo, error)
-    CachedModels() []types.ModelInfo
     APIKey() string
     FetchModels(ctx context.Context) ([]types.ModelInfo, error)
+    CachedModels() []types.ModelInfo
+    ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error)
+    EstimateCost(modelID string, usage types.Usage) float64
+    HealthCheck(ctx context.Context) types.HealthStatus
+    GetModel(id string) (*types.ModelInfo, error)
 }
 ```
 
 ### Implementations
 
-- **OpenRouter** (`internal/provider/openrouter/`) — Aggregates 300+ models; configurable referer/title
-- **Zen** (`internal/provider/zen/`) — Barret AI / Zen API provider with default context length support
+- **OpenRouter** (`internal/provider/openrouter/`) — Aggregates 300+ models, configurable referer/title headers
+- **Zen** (`internal/provider/zen/`) — Zen/OpenCode API provider with model enrichment
+- **Nvidia** (`internal/provider/nvidia/`) — Nvidia NIM gateway with multimodal handling
 
-### BaseClient (`internal/provider/base_client.go`)
-Shared HTTP transport with connection pooling (100 max idle conns, 10/host, 90s idle timeout). Provides `NewBaseClient()`, `APIKey()` (masked), `EstimateCost()`, `GetModel()`, `CachedModels()`, `MakeIterator()`, and caching.
+### Shared Infrastructure
 
-### Model Cache (`internal/provider/cache.go`)
-TTL-based in-memory cache with stale-while-revalidate support. Default TTL: 5 min, stale TTL: 1 hour.
+- **BaseClient** (`base_client.go`) — Shared HTTP transport (100 max idle conns, 10/host, 90s idle timeout), model lookup, cost estimation, stream iterator creation
+- **Model Cache** (`cache.go`) — TTL-based in-memory cache (5 min fresh, 24h stale) with singleflight deduplication
+- **Fallback** (`fallback.go`) — Parallel health checks (10s timeout), priority-based provider switching, rate-limit extraction
+- **SSE Parser** (`sse.go`) — Server-Sent Events parser with watchdog timer for streaming responses
+- **Capability Detection** (`capabilities.go`) — Heuristic inference from model ID (tool use, reasoning, vision)
 
-### Capability Detection (`internal/provider/capabilities.go`)
-Heuristic inference of model capabilities from model ID:
-- **Tool use**: claude, gpt, gemini, deepseek, qwen, llama, mistral, command-r, command-a
-- **Reasoning**: /o1, /o3, /o4 patterns + "reason" / "thinking" in ID
-- **Vision**: "vision" or "multimodal" in ID
+---
+
+## Workflow Engine
+
+Seven-phase orchestration in `internal/workflow/`:
+
+| Phase | File | Purpose |
+|-------|------|---------|
+| Initialize | `initialize.go` | Project detection, git init, code intelligence index, deep analysis |
+| Discuss | `discuss.go` | LLM-generated clarifying questions, quality scoring, completeness checks |
+| Plan | `plan.go` | Task breakdown, plan checker with revision loops, coverage gates, chunked generation |
+| Execute | `execute.go` | Tool dispatch with self-healing, loop detection, per-task quality gates |
+| Verify | `verify.go` | Build/test execution, self-healing, git bisect fallback, security scanning |
+| Runtime | `runtime.go` | Dev server lifecycle, HTTP smoke tests, route discovery |
+| Ship | `ship.go` | Pre-ship checklist, final commit, changelog generation, ledger entry |
+
+**Engine** (`engine.go`) — Core orchestration: phase dispatch, LLM streaming, system prompt building, context management, checkpoint persistence.
+
+**Workflow Modes** (`internal/types/types.go`):
+- `auto` — Adaptive (default), classifies intent and chooses phases
+- `full` — All 7 phases
+- `fast` — Skip Plan phase
+- `direct` — Skip Discuss, Plan, Verify
+
+---
+
+## Tools Layer
+
+18 built-in tools registered in `internal/tools/defaults.go`:
+
+| Tool | Risk | Purpose |
+|------|------|---------|
+| Bash | dangerous | Shell execution with dangerous command blocking |
+| FileRead | safe | File reading with byte/line offsets, binary detection |
+| FileWrite | medium | Atomic write with backup, append mode |
+| Edit | medium | 7-strategy cascading replacement with fuzzy matching |
+| Glob | safe | File pattern matching with ripgrep fallback |
+| Grep | safe | Content search with regex, gitignore caching |
+| WebFetch | safe | URL fetching with SSRF protection, HTML-to-markdown |
+| WebSearch | safe | SearXNG search with DNS cache |
+| CodeMap | safe | Code intelligence (upstream/downstream/define/references) |
+| CodeComplexity | safe | Codebase complexity classification |
+| FileDelete | destructive | File deletion with backup |
+| FileMove | medium | File move with containment checks |
+| FileList | safe | Tree-style directory listing |
+| TodoWrite | safe | TODO.md management with sidebar notification |
+| TodoRead | safe | TODO.md parsing |
+| DevServer | dangerous | Dev server lifecycle (start/stop/restart/logs) |
+| HTTPCheck | safe | HTTP request with status/body validation |
+| AskUserQuestion | safe | Interactive user question with timeout |
+
+**Dispatcher** (`dispatcher.go`) — Execution pipeline:
+1. Concurrency semaphore (max 8 concurrent tools)
+2. Rate limiter (token bucket: 20 burst / 10 sustained)
+3. Risk-level rate limiter (dangerous tools: 5 burst / 2 sustained)
+4. Permission check (rule evaluation → agent default → risk-level fallback)
+5. Tool execution
+6. Output bounding (2000 lines / 51200 bytes)
+
+**Subagent System** (`tools/subagent/`):
+- Max 8 concurrent subagents
+- Git worktree isolation per subagent
+- Max nesting depth: 2
+- Per-subagent budgets: 50 tools, 50K tokens, 25 turns
+
+---
+
+## Context System
+
+`internal/context/` — Dynamic context management:
+- Registry for context providers
+- Token estimation and budget management
+- Context change detection and caching
+
+---
+
+## Decision System
+
+`internal/decision/` — Decision logging and receipts:
+- Records architectural decisions during workflow execution
+- Snapshots available at ship phase
+- Browseable via `/decisions` command
+
+---
+
+## Checkpoint System
+
+Workflow state persistence:
+- Plan state (content, version, refinement feedback)
+- Conversation messages
+- Intent classification results
+- Dynamic context snapshots
+- Decision log state
+
+Checkpoints saved at phase transitions and available for resume after interruption.
+
+---
+
+## Knowledge System
+
+Code intelligence in `internal/codeintel/`:
+- 4-language parser (Go, TypeScript, Python, Rust) via regex fallbacks
+- Import dependency graphs with BFS traversal
+- Symbol index with hash map + trie for O(1)/O(K) lookups
+- Relevance scoring (direct mention, neighbors, symbols, transitive deps)
+- Incremental index cache with mtime-based invalidation
+
+---
+
+## Rollback System
+
+`pkg/rollback/` — Git commit chain management:
+- Commit listing with diff preview
+- Soft/hard/safe reset with backup branch creation
+- Stash-if-dirty pattern
 
 ---
 
 ## TUI Layer
 
-Built with **Bubble Tea** (`tea.Program`). Architecture:
+Built with **Bubble Tea** (`tea.Program`) following the Elm architecture.
 
-```
-cmd/m31a/main.go → NewApp() → tea.NewProgram(model)
-```
+**AppState** (`internal/tui/app.go`) — Single top-level model with ~50+ fields:
+- Screen routing with back-stack (33 screens)
+- Theme manager (M31A dark theme)
+- Key registry with leader key (`Ctrl+X`)
+- Command registry (60+ slash commands)
+- Provider/model state
+- Workflow engine integration via channel-based emitter
 
-### App Model (`internal/app/`)
-- **states.go** — AppState enum (Init, Ready, Processing, Streaming, Paused, Error, ConfirmQuit, SessionPicker, GhostPicker, GhostOutput, BisectOutput)
-- **init.go** — Tea init command (loads config, checks version)
-- **update.go** — Tea update loop (handles messages, keybinds, state transitions)
-- **view.go** — Tea render function (routes to active view)
-- **views.go** — Individual view renderers (init, ready, processing, streaming, error, confirmquit, session picker, ghost picker, ghost output, bisect output)
-- **keybinds.go** — Key mapping table
-- **messages.go** — Custom tea.Msg types
-- **startup.go** — Startup routine (checks keychain, provider health, version)
-- **session.go** — Session management (create, save checkpoint, restore, list)
-- **commands.go** — Slash command execution dispatch
-- **ghost.go** — Ghost write command execution
-- **bisect.go** — Bisect command execution
-- **autodream.go** — Auto dream prompt enhancement execution
+**Message flow:**
+1. Sub-models emit `KeyActionMsg`, `SlashCommandMsg`, or `AppMsg`
+2. `AppState.Update()` is the single dispatch point
+3. Workflow engine communicates via buffered channel (128 messages)
+4. `drainEmitterCmd()` reads one message per tick (backpressure control)
 
-### Keyboard Shortcuts
-| Key | Action |
-|-----|--------|
-| `Ctrl+C` / `q` | Quit (with confirmation in Processing/Streaming states) |
-| `Enter` | Submit prompt |
-| `Tab` / `Shift+Tab` | Cycle through autocomplete suggestions |
-| `Up` / `Down` | Navigate suggestions |
-| `Ctrl+S` | Save session checkpoint (when in Ready state, session active) |
-| `Esc` | Abort / go back |
-
-### Slash Commands
-Registered in `internal/commands/registry.go`. Executed via `internal/app/commands.go`.
-
-| Command | Description |
-|---------|-------------|
-| `/session` | Session management (list, create, delete, switch, save, checkpoint) |
-| `/model` | List and select models |
-| `/tools` | List and toggle available tools |
-| `/config` | View/alter config at runtime |
-| `/history` | View/prompt session history |
-| `/export` | Export session data |
-| `/agent` | Agent configuration |
-| `/ghost` | Ghost write files |
-| `/bisect` | Compare model responses |
-| `/tui` | TUI mode toggle |
-| `/help` | General help |
-| `/keychain` | API key management |
-| `/dream` | Toggle dream/prompt enhancement |
-| `/flush` | Clear screen and reset |
-| `/quit` | Quit application |
-| `/exit` | Alias for quit |
-| `//` | Literal slash passthrough |
-| `!` | Bash command passthrough |
-
-### Autocomplete
-`internal/commands/autocomplete.go` — Tab-based suggestions; cycle through with Tab/Shift+Tab; matches by prefix.
+**Themes:** Midnight, Daylight, Catppuccin Mocha, Nord Frost, Tokyo Night, Gruvbox Dark, Rose Pine, Dracula, Solarized Dark, Pure Mono, High Contrast
 
 ---
 
-## Configuration (`internal/config/`)
+## Headless Mode
 
-Config loaded from `~/.m31a.yaml` or `$XDG_CONFIG_HOME/m31a/m31a.yaml`. Uses `gopkg.in/yaml.v3`. Schema defined in `config.go` with validation.
+```bash
+# Single prompt (no TUI)
+m31a --prompt "What files are in the project?"
 
-### Sections
-| Section | Description |
-|---------|-------------|
-| `api_key` | OpenRouter API key |
-| `providers` | Provider-specific settings (Zen API URL, key, default context) |
-| `model` | Default model ID, fallback model, token limits |
-| `ui` | TUI theme, viewport history, edit mode, suggestions |
-| `keys` | Custom keybindings |
-| `agents` | Agent definitions (name, model, system prompt, tools, parameters) |
-| `tools` | Tool configurations (MCP server commands, Toolhouse, Brave Search API key) |
-| `git` | Git integration settings (auto-commit, author, GPG signing) |
-| `verify` | Verification settings (provider, attestation, logging) |
-| `ghost` | Ghost write settings (default directory, max retries, file patterns) |
-| `dev` | Dev mode settings |
-| `advanced` | Advanced options (cache TTL, health check thresholds, SSE parsers) |
-
----
-
-## Tools Layer (`internal/tools/`)
-
-| Package | Purpose |
-|---------|---------|
-| `registry.go` | ToolRegistry — register, list, lookup tools by name |
-| `execute.go` | ToolExecutor — execute tools with timeout, collect output |
-| `mcp_client.go` | MCP (Model Context Protocol) client — connects to MCP servers |
-| `mcp_transport.go` | MCP transport — stdio-based communication with MCP servers |
-| `toolhouse.go` | Toolhouse integration — cloud-based tool execution platform |
-| `brave.go` | Braze Search API integration — web search via Brave |
-
-### Tool Registry
-Tools are registered with name, description, input/output schemas, and a handler function. The registry allows listing available tools and dispatching execution by name.
-
-### MCP Client
-Connects to MCP servers over stdio transport. Handles JSON-RPC message exchange for tool discovery and execution.
-
----
-
-## Verification Layer (`internal/verify/`)
-
-| Package | Purpose |
-|---------|---------|
-| `attestation.go` | Attestation — verifies binary integrity and provenance |
-| `validate.go` | Validation — validates prompts, configs, tool outputs |
-| `mock_mcp.go` | Mock MCP server for testing tool execution |
-
----
-
-## Error Handling (`internal/errors/`)
-
-Defines sentinel errors used across the app:
-- `ErrInvalidKey` — Missing or empty API key
-- `ErrNoModels` — No models available from provider
-- `ErrHTTPRequest` — HTTP request failure
-- `ErrStream` — Stream read failure
-- `ErrConfigParse` — Config file parse failure
-- `ErrSessionNotFound`, `ErrSessionLoad`, `ErrSessionSave` — Session errors
-- `ErrProviderNotFound` — Unknown provider
-- `ErrToolNotFound`, `ErrToolExecution` — Tool errors
-- `ErrKeychainLocked`, `ErrKeychainSet`, `ErrKeychainGet` — Keychain errors
-- `ErrGhostWrite`, `ErrGhostRead` — Ghost write errors
-- `ErrBisectNoResponses`, `ErrBisectNoDiff` — Bisect errors
-
----
-
-## State Machine
-
-```
-Init → Ready (healthy) or Error (startup failure)
-Ready → Processing (Enter / submit)
-Processing → Streaming (response received)
-Streaming → Ready (stream complete)
-Streaming → Paused (user interrupt) → Ready
-Any state → Error → Ready
-Any state → ConfirmQuit → Quit / resume
-Ready → SessionPicker (list sessions)
-Ready → GhostPicker / GhostOutput
-Ready → BisectOutput
+# Full workflow execution
+m31a --goal "Create a REST API with authentication"
 ```
 
+Bypasses the TUI entirely. Sends prompts directly to the active provider and prints responses to stdout.
+
 ---
 
-## Version
+## Release Flow
 
-`internal/version/version.go` — exported via ldflags at build time:
-```go
-var (
-    Version   = "dev"
-    Commit    = "none"
-    Date      = "unknown"
-)
-```
+`/ship` phase:
+1. Pre-ship checklist (TODO/FIXME detection, debug statement scanning)
+2. Git commit with configured prefix
+3. Changelog generation
+4. Ledger entry (cross-session learning)
+5. Session metrics recording

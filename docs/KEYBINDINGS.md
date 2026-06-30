@@ -8,16 +8,15 @@ Default keybindings for M31 Autonomous's TUI.
 
 | Key | Action | Context |
 |-----|--------|---------|
-| `Enter` | Submit prompt | Ready state |
-| `Esc` | Cancel/abort/go back | Processing, Streaming, Paused, pickers |
-| `Ctrl+C` | Quit | Any state (requires confirmation if active) |
-| `q` | Quit when idle | Ready state |
+| `Enter` | Submit prompt | REPL |
+| `Esc` | Cancel / go back | Any |
+| `Ctrl+C` | Quit (requires confirmation if active) | Any |
+| `q` | Quit when idle | REPL |
 | `Tab` | Next autocomplete suggestion | Input with suggestions |
 | `Shift+Tab` | Previous autocomplete suggestion | Input with suggestions |
-| `Up` | Previous suggestion / scroll up | Suggestions list, history |
-| `Down` | Next suggestion / scroll down | Suggestions list, history |
-| `Ctrl+S` | Save session checkpoint | Ready state (session active) |
-| `Ctrl+Z` | Toggle zen mode | Ready state |
+| `Up` | Previous suggestion / scroll up | Suggestions, history |
+| `Down` | Next suggestion / scroll down | Suggestions, history |
+| `Ctrl+S` | Save session checkpoint | REPL (session active) |
 
 ---
 
@@ -25,26 +24,44 @@ Default keybindings for M31 Autonomous's TUI.
 
 Default leader key: `Ctrl+X`
 
-Press and release the leader key, then press the chord key within the timeout (default 1 second).
+Press and release the leader key, then press the chord key within 2 seconds.
+
+### Global (any screen)
 
 | Sequence | Action |
 |----------|--------|
-| `Ctrl+X` `c` | Compact mode toggle |
-| `Ctrl+X` `t` | Theme toggle (dark/light) |
-| `Ctrl+X` `s` | Save session |
-| `Ctrl+X` `h` | Show help |
-| `Ctrl+X` `q` | Quit |
+| `Ctrl+X` `s` | Open settings |
+| `Ctrl+X` `h` | Open help |
+| `Ctrl+X` `l` | Open ledger |
+| `Ctrl+X` `k` | Open rollback |
+| `Ctrl+X` `d` | Open dashboard |
+| `Ctrl+X` `!` | Open notifications |
+| `Ctrl+X` `f` | Open file explorer |
+| `Ctrl+X` `a` | Toggle subagents panel |
+| `Ctrl+X` `c` | Open config viewer |
+| `Ctrl+X` `i` | Open session detail |
+| `Ctrl+X` `o` | Open tool output |
+| `Ctrl+X` `g` | Open home screen |
+
+### REPL Only
+
+| Sequence | Action |
+|----------|--------|
+| `Ctrl+X` `b` | Toggle sidebar |
+| `Ctrl+X` `n` | New session |
+| `Ctrl+X` `r` | Session list |
+| `Ctrl+X` `m` | Select model |
+| `Ctrl+X` `[` | Widen sidebar |
+| `Ctrl+X` `]` | Narrow sidebar |
 
 ---
 
-## Navigation
+## Command Palette
 
 | Key | Action |
 |-----|--------|
-| `PgUp` | Scroll up one page |
-| `PgDown` | Scroll down one page |
-| `Home` | Scroll to top |
-| `End` | Scroll to bottom |
+| `Ctrl+P` | Open/close command palette |
+| `Ctrl+Q` | Open quick actions |
 
 ---
 
@@ -62,7 +79,7 @@ Press and release the leader key, then press the chord key within the timeout (d
 
 ---
 
-## View Mode (Scrolling through responses)
+## View Mode (scrolling through responses)
 
 | Key | Action |
 |-----|--------|
@@ -72,6 +89,21 @@ Press and release the leader key, then press the chord key within the timeout (d
 | `G` | Scroll to bottom |
 | `d` | Scroll down half page |
 | `u` | Scroll up half page |
+| `PgUp` | Scroll up one page |
+| `PgDown` | Scroll down one page |
+| `Home` | Scroll to top |
+| `End` | Scroll to bottom |
+
+---
+
+## Permission Modal
+
+| Key | Action |
+|-----|--------|
+| `y` | Allow (this time) |
+| `a` | Allow always |
+| `n` | Deny |
+| `e` | Exit |
 
 ---
 
@@ -82,8 +114,5 @@ Keybindings can be customized in `~/.m31a/config.toml`:
 ```toml
 [ui]
 leader_key = "ctrl+x"
-leader_timeout_ms = 1000
-zen_mode_key = "ctrl+z"
+leader_timeout_ms = 2000
 ```
-
-Notable: The leader key timeout is configurable for users who prefer slower or faster chord sequences.

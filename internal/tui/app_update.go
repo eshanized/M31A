@@ -45,7 +45,11 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
-				return m, tea.Quit
+				m.lastCtrlCTime = time.Time{}
+				cw, ch := m.contentDimensions()
+				m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+				m.screen = ScreenConfirmQuit
+				return m, nil
 			}
 			m.lastCtrlCTime = time.Now()
 			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
@@ -268,6 +272,41 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflow.IntermediateProgressMsg,
 		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
 		cmds = append(cmds, m.drainAdaptiveCmd())
+	// ── W7: Newly wired workflow events ──────────────────────────────────────
+	case workflow.InitAnalysisMsg:
+		cmds = append(cmds, m.handleInitAnalysis(msg)...)
+	case workflow.InitPreflightMsg:
+		cmds = append(cmds, m.handleInitPreflight(msg)...)
+	case workflow.ResearchProgressMsg:
+		cmds = append(cmds, m.handleResearchProgress(msg)...)
+	case workflow.PlanCheckMsg:
+		cmds = append(cmds, m.handlePlanCheck(msg)...)
+	case workflow.PlanRevisionMsg:
+		cmds = append(cmds, m.handlePlanRevision(msg)...)
+	case workflow.PlanChunkProgressMsg:
+		cmds = append(cmds, m.handlePlanChunkProgress(msg)...)
+	case workflow.DiscussQualityMsg:
+		cmds = append(cmds, m.handleDiscussQuality(msg)...)
+	case workflow.DiscussCompletenessMsg:
+		cmds = append(cmds, m.handleDiscussCompleteness(msg)...)
+	case workflow.ExecutePreflightMsg:
+		cmds = append(cmds, m.handleExecutePreflight(msg)...)
+	case workflow.ExecuteQualityGateMsg:
+		cmds = append(cmds, m.handleExecuteQualityGate(msg)...)
+	case workflow.ExecuteLoopDetectMsg:
+		cmds = append(cmds, m.handleExecuteLoopDetect(msg)...)
+	case workflow.VerifyReportMsg:
+		cmds = append(cmds, m.handleVerifyReport(msg)...)
+	case workflow.ShipPreflightMsg:
+		cmds = append(cmds, m.handleShipPreflight(msg)...)
+	case workflow.ShipChangelogMsg:
+		cmds = append(cmds, m.handleShipChangelog(msg)...)
+	case workflow.CompactionCompleteMsg:
+		cmds = append(cmds, m.handleCompactionComplete(msg)...)
+	case workflow.TaskDiffSummaryMsg:
+		cmds = append(cmds, m.handleTaskDiffSummary(msg)...)
+	case workflow.AgentSwitchMsg:
+		cmds = append(cmds, m.handleAgentSwitch(msg)...)
 
 	// ── Batched emitter drain ────────────────────────────────────────────────
 	case DrainBatchMsg:
@@ -298,6 +337,41 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case workflow.IntermediateProgressMsg,
 				workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
 				// No specific handler needed; drain continues below.
+			// ── W7: Newly wired workflow events in batch drain ──────────────────
+			case workflow.InitAnalysisMsg:
+				cmds = append(cmds, m.handleInitAnalysis(subMsg)...)
+			case workflow.InitPreflightMsg:
+				cmds = append(cmds, m.handleInitPreflight(subMsg)...)
+			case workflow.ResearchProgressMsg:
+				cmds = append(cmds, m.handleResearchProgress(subMsg)...)
+			case workflow.PlanCheckMsg:
+				cmds = append(cmds, m.handlePlanCheck(subMsg)...)
+			case workflow.PlanRevisionMsg:
+				cmds = append(cmds, m.handlePlanRevision(subMsg)...)
+			case workflow.PlanChunkProgressMsg:
+				cmds = append(cmds, m.handlePlanChunkProgress(subMsg)...)
+			case workflow.DiscussQualityMsg:
+				cmds = append(cmds, m.handleDiscussQuality(subMsg)...)
+			case workflow.DiscussCompletenessMsg:
+				cmds = append(cmds, m.handleDiscussCompleteness(subMsg)...)
+			case workflow.ExecutePreflightMsg:
+				cmds = append(cmds, m.handleExecutePreflight(subMsg)...)
+			case workflow.ExecuteQualityGateMsg:
+				cmds = append(cmds, m.handleExecuteQualityGate(subMsg)...)
+			case workflow.ExecuteLoopDetectMsg:
+				cmds = append(cmds, m.handleExecuteLoopDetect(subMsg)...)
+			case workflow.VerifyReportMsg:
+				cmds = append(cmds, m.handleVerifyReport(subMsg)...)
+			case workflow.ShipPreflightMsg:
+				cmds = append(cmds, m.handleShipPreflight(subMsg)...)
+			case workflow.ShipChangelogMsg:
+				cmds = append(cmds, m.handleShipChangelog(subMsg)...)
+			case workflow.CompactionCompleteMsg:
+				cmds = append(cmds, m.handleCompactionComplete(subMsg)...)
+			case workflow.TaskDiffSummaryMsg:
+				cmds = append(cmds, m.handleTaskDiffSummary(subMsg)...)
+			case workflow.AgentSwitchMsg:
+				cmds = append(cmds, m.handleAgentSwitch(subMsg)...)
 			default:
 				slog.Debug("unhandled message in DrainBatchMsg", "type", fmt.Sprintf("%T", sub))
 			}
@@ -1328,6 +1402,9 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		} else {
 			m.confirmQuitModel.SetDimensions(cw, ch)
 		}
+		return nil
+	case ScreenDecisions:
+		// ScreenDecisions renders directly from the workflow engine — no sub-model needed.
 		return nil
 	case ScreenPhaseModelPicker:
 		if m.phaseModelPicker == nil {

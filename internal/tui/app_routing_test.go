@@ -61,7 +61,20 @@ func TestScreenName(t *testing.T) {
 // TestScreenNameUniqueness verifies all screen names are unique.
 func TestScreenNameUniqueness(t *testing.T) {
 	seen := make(map[string]tuitypes.Screen)
-	for i := tuitypes.Screen(0); i <= 32; i++ {
+	validScreens := []tuitypes.Screen{
+		tuitypes.ScreenFirstRun, tuitypes.ScreenREPL, tuitypes.ScreenModelSelector,
+		tuitypes.ScreenSettings, tuitypes.ScreenResume, tuitypes.ScreenPermission,
+		tuitypes.ScreenPlan, tuitypes.ScreenExecute, tuitypes.ScreenVerify,
+		tuitypes.ScreenShip, tuitypes.ScreenDiff, tuitypes.ScreenLedger,
+		tuitypes.ScreenRollback, tuitypes.ScreenGoalInput, tuitypes.ScreenDiscuss,
+		tuitypes.ScreenMetrics, tuitypes.ScreenConfig, tuitypes.ScreenHelp,
+		tuitypes.ScreenBisect, tuitypes.ScreenNotifications, tuitypes.ScreenDashboard,
+		tuitypes.ScreenSessionDetail, tuitypes.ScreenFileExplorer, tuitypes.ScreenToolDetail,
+		tuitypes.ScreenPhaseModelPicker, tuitypes.ScreenGhostPicker, tuitypes.ScreenGhostOutput,
+		tuitypes.ScreenConfirmQuit, tuitypes.ScreenChatHistory, tuitypes.ScreenCommandPalette,
+		tuitypes.ScreenRuntimeCheck, tuitypes.ScreenHome, tuitypes.ScreenDecisions,
+	}
+	for _, i := range validScreens {
 		name := i.Name()
 		if name == "" {
 			continue
@@ -75,10 +88,23 @@ func TestScreenNameUniqueness(t *testing.T) {
 
 // TestScreenLabel verifies Label() returns non-empty strings for all screens.
 func TestScreenLabel(t *testing.T) {
-	for i := tuitypes.Screen(0); i <= 32; i++ {
-		label := i.Label()
+	validScreens := []tuitypes.Screen{
+		tuitypes.ScreenFirstRun, tuitypes.ScreenREPL, tuitypes.ScreenModelSelector,
+		tuitypes.ScreenSettings, tuitypes.ScreenResume, tuitypes.ScreenPermission,
+		tuitypes.ScreenPlan, tuitypes.ScreenExecute, tuitypes.ScreenVerify,
+		tuitypes.ScreenShip, tuitypes.ScreenDiff, tuitypes.ScreenLedger,
+		tuitypes.ScreenRollback, tuitypes.ScreenGoalInput, tuitypes.ScreenDiscuss,
+		tuitypes.ScreenMetrics, tuitypes.ScreenConfig, tuitypes.ScreenHelp,
+		tuitypes.ScreenBisect, tuitypes.ScreenNotifications, tuitypes.ScreenDashboard,
+		tuitypes.ScreenSessionDetail, tuitypes.ScreenFileExplorer, tuitypes.ScreenToolDetail,
+		tuitypes.ScreenPhaseModelPicker, tuitypes.ScreenGhostPicker, tuitypes.ScreenGhostOutput,
+		tuitypes.ScreenConfirmQuit, tuitypes.ScreenChatHistory, tuitypes.ScreenCommandPalette,
+		tuitypes.ScreenRuntimeCheck, tuitypes.ScreenHome, tuitypes.ScreenDecisions,
+	}
+	for _, s := range validScreens {
+		label := s.Label()
 		if label == "" || label == "Unknown" {
-			t.Errorf("Screen(%d).Label() = %q, want a meaningful label", i, label)
+			t.Errorf("Screen(%d).Label() = %q, want a meaningful label", s, label)
 		}
 	}
 }

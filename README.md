@@ -198,7 +198,7 @@ flowchart LR
 
 ### Terminal UI
 
-- **33-screen Bubble Tea TUI** — 11 themes (Midnight, Daylight, Catppuccin Mocha, Nord Frost, Tokyo Night, Gruvbox Dark, Rose Pine, Dracula, Solarized Dark, Pure Mono, High Contrast), Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
+- **33-screen Bubble Tea TUI** — M31A dark theme, Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
 - **Fuzzy model selector** — search with per-token cost comparison and live context-warning.
 - **Diff viewer** — browse git diffs inline with syntax highlighting.
 - **Rollback browser** — view commit chain, soft/hard reset with preview.
@@ -280,14 +280,15 @@ reduced_motion = false
 welcome_screen = true
 
 [permissions]
-default_mode = "ask"
+default_mode = "prompt"
 timeout_seconds = 300
 
 [features]
 auto_backup = true
-resume_on_startup = true
+resume_on_startup = false
 workflow_mode = "auto"
 budget_limit_usd = 0
+metrics_enabled = true
 plan_research = true
 plan_check = true
 plan_security_gate = true
@@ -303,15 +304,15 @@ ship_changelog = true
 init_deep_analysis = true
 
 [tools]
-max_glob_results = 50
-max_grep_results = 50
+max_glob_results = 1000
+max_grep_results = 100
 bash_kill_grace_secs = 5
 websearch_enabled = true
 
 [git]
 commit_prefix = "feat"
 fix_prefix = "fix"
-ship_prefix = "ship"
+ship_prefix = "chore"
 
 [verify]
 build_command = ""
@@ -339,7 +340,7 @@ graph TB
 
     subgraph internal["internal/ (private)"]
         direction TB
-        tui["tui/<br/>33 screens · 11 themes<br/>Bubble Tea app"]
+        tui["tui/<br/>33 screens<br/>Bubble Tea app"]
         workflow["workflow/<br/>seven-phase engine<br/>quality gates · chunked plans"]
         provider["provider/<br/>openrouter · zen · nvidia<br/>fallback · cache · SSE"]
         tools["tools/<br/>18 tools · permissions<br/>rate limiting · concurrency"]
@@ -382,7 +383,7 @@ graph TB
 | Package | Description |
 |---------|-------------|
 | `cmd/m31a/` | Binary entry point with CLI flags |
-| `internal/tui/` | Bubble Tea TUI app — 33 screens, 11 themes, responsive layout, command palette |
+| `internal/tui/` | Bubble Tea TUI app — 33 screens, responsive layout, command palette |
 | `internal/workflow/` | Seven-phase orchestration engine with quality gates, chunked plans, and pre-flight checks |
 | `internal/provider/` | OpenRouter, Zen, and Nvidia clients with auto-fallback, model cache, and SSE streaming |
 | `internal/tools/` | 18 tools with permission system, token-bucket rate limiting, and concurrency control |
@@ -435,7 +436,7 @@ Deep dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [Wiki](https://gith
 │   ├── provider/      openrouter, zen, nvidia clients
 │   ├── tokens/        tiktoken estimation, EMA calibration
 │   ├── tools/         18 tools + subagent manager
-│   ├── tui/           Bubble Tea app (33 screens, 11 themes)
+│   ├── tui/           Bubble Tea app (33 screens)
 │   ├── types/         shared types, constants, workflow modes
 │   └── workflow/      seven-phase engine, quality gates
 ├── pkg/               public packages (importable)
@@ -529,7 +530,7 @@ If you use M31 Autonomous in your research, please cite it:
 }
 ```
 
-Or use the `CITATION.cff` file in this repository for automatic citation generation on GitHub.
+Or use the bibtex entry above for citation.
 
 ## Thanks
 

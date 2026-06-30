@@ -8,13 +8,23 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 )
 
-func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig) (*Dispatcher, error) {
+func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (*Dispatcher, error) {
 	d := NewDispatcher(cfg)
 	d.workDir_ = workDir
 
 	// Initialize output store for tool output bounding
 	outputDir := filepath.Join(homeDir(), ".m31a", "tool-output")
-	store := NewOutputStore(outputDir, DefaultOutputMaxLines, DefaultOutputMaxBytes)
+	maxLines := DefaultOutputMaxLines
+	maxBytes := DefaultOutputMaxBytes
+	if toolsCfg != nil {
+		if toolsCfg.OutputMaxLines > 0 {
+			maxLines = toolsCfg.OutputMaxLines
+		}
+		if toolsCfg.OutputMaxBytes > 0 {
+			maxBytes = toolsCfg.OutputMaxBytes
+		}
+	}
+	store := NewOutputStore(outputDir, maxLines, maxBytes)
 	d.SetOutputStore(store)
 	// Best-effort cleanup of old output files on startup
 	_, _ = store.Cleanup(OutputRetentionDays * 24 * time.Hour)
@@ -52,7 +62,11 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewWebFetch(sessionsDir, false)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewWebSearch("")); err != nil {
+	webSearchBaseURL := ""
+	if toolsCfg != nil && toolsCfg.WebSearchBaseURL != "" {
+		webSearchBaseURL = toolsCfg.WebSearchBaseURL
+	}
+	if err := d.Register(NewWebSearch(webSearchBaseURL)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh, &d.pendingQuestions)); err != nil {

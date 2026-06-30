@@ -405,6 +405,13 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 	}
 }
 
+// Close flushes and shuts down the decision logger. Safe to call multiple times.
+func (e *Engine) Close() {
+	if e.state != nil && e.state.decisionLog != nil {
+		e.state.decisionLog.Close()
+	}
+}
+
 // GetCheckpointData returns the current checkpoint data, or nil if none.
 func (e *Engine) GetCheckpointData() *CheckpointData {
 	return e.state.checkpointData

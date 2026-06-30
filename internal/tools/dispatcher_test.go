@@ -207,7 +207,7 @@ func TestDispatcher_GetTool(t *testing.T) {
 func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d, err := DefaultDispatcher(dir, dir, dir, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}

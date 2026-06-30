@@ -129,6 +129,12 @@ tidy:
 check: fmt tidy vet test
 	@printf "\033[0;32m[check]\033[0m All checks passed!\n"
 
+## validate-release  — Run full release validation suite
+validate-release:
+	@printf "\033[0;32m[validate]\033[0m Running release validation harness...\n"
+	@scripts/validate-release.sh
+	@printf "\033[0;32m[validate]\033[0m Done — see VALIDATION_REPORT.md\n"
+
 # ==============================================================================
 # Cross-compilation
 # ==============================================================================
@@ -290,7 +296,7 @@ version:
 .PHONY: build debug dev help \
         test test-fast test-verbose test-specific \
         bench bench-verbose cover \
-        lint lint-fix vet fmt tidy check \
+        lint lint-fix vet fmt tidy check validate-release \
         cross $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(arch))) \
         release release-dry \
         deps deps-verify size clean nuke install version \

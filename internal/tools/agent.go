@@ -246,9 +246,9 @@ func (a *dispatcherAdapter) UnregisterTool(name string) { a.d.Unregister(name) }
 //
 // backupDir and sessionsDir are shared across all dispatchers; permCfg is
 // reused verbatim so permission rules apply uniformly.
-func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.PermissionsConfig, manager *subagent.Manager, profiles map[string]config.SubagentProfileConfig) subagent.DispatcherFactory {
+func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig, manager *subagent.Manager, profiles map[string]config.SubagentProfileConfig) subagent.DispatcherFactory {
 	return func(workDir string) (subagent.ToolDispatcher, error) {
-		d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg)
+		d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg, toolsCfg)
 		if err != nil {
 			return nil, err
 		}

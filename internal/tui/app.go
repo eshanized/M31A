@@ -152,6 +152,19 @@ func (m *AppState) startFileWatcher() tea.Cmd {
 
 // Shutdown cleanly tears down all background goroutines.
 func (m *AppState) Shutdown() {
+	// W2: Persist session state before cancelling contexts so messages,
+	// workflow state, and checkpoints survive process exit.
+	m.saveSessionOnShutdown()
+
+	// W3: Stop all managed dev servers so child processes do not orphan.
+	if m.dispatcher != nil {
+		if tool, ok := m.dispatcher.GetTool("DevServer"); ok {
+			if ds, castOK := tool.(*tools.DevServer); castOK {
+				ds.StopAll()
+			}
+		}
+	}
+
 	if m.fileWatcher != nil {
 		m.fileWatcher.Close()
 	}
@@ -179,8 +192,55 @@ func (m *AppState) Shutdown() {
 	if m.dispatcher != nil {
 		m.dispatcher.Stop()
 	}
+	// W1: Close the decision logger to flush pending decisions and stop its goroutine.
+	if eng, ok := m.workflowEngine.(*workflow.Engine); ok {
+		eng.Close()
+	}
 	if m.subagentManager != nil {
 		m.subagentManager.Shutdown(context.Background())
+	}
+}
+
+// saveSessionOnShutdown persists messages, workflow state, and session metadata
+// during graceful shutdown. Errors are logged but do not prevent shutdown.
+func (m *AppState) saveSessionOnShutdown() {
+	if m.sessionManager == nil || m.sessionID == "" {
+		return
+	}
+
+	// Persist workflow phase/goal if a workflow was active.
+	if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
+		if err := m.sessionManager.UpdateWorkflowState(
+			m.sessionID,
+			m.workflowGoal,
+			m.workflowPhase,
+			m.discussQuestions,
+		); err != nil {
+			slog.Warn("shutdown: failed to persist workflow state", "error", err)
+		}
+	}
+
+	// Save the full session (messages + metadata) if the REPL model is available.
+	if m.replModel != nil {
+		sess, err := m.sessionManager.LoadSession(m.sessionID)
+		if err != nil {
+			slog.Warn("shutdown: failed to load session for save", "error", err)
+			return
+		}
+		if sess != nil {
+			msgs := m.replModel.Messages()
+			sess.Messages = msgs
+			sess.MessageCount = len(msgs)
+			if m.activeProvider != "" {
+				sess.Provider = m.activeProvider
+			}
+			if m.activeModel != nil {
+				sess.Model = m.activeModel.ID
+			}
+			if err := m.sessionManager.SaveSession(sess); err != nil {
+				slog.Warn("shutdown: failed to save session", "error", err)
+			}
+		}
 	}
 }
 

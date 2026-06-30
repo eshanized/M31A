@@ -1,21 +1,59 @@
 # TUI Screen Reference
 
-M31 Autonomous uses a Bubble Tea TUI with 29 screens. The active screen depends on the current `AppState`.
+M31 Autonomous uses a Bubble Tea TUI with 33 screens. The active screen is determined by the current `Screen` constant.
 
 ---
 
-## Init Screen (ScreenFirstRun)
-Shown during startup while M31 Autonomous:
-- Loads configuration (`~/.m31a/config.toml`)
-- Resolves API keys (env → keychain → config)
-- Checks provider health (OpenRouter/Zen)
-- Checks for updates (version comparison)
-- Appears as a logo animation and loading indicator
+## Screen Index
+
+| # | Screen | Label | Purpose |
+|---|--------|-------|---------|
+| 0 | ScreenFirstRun | Setup | API key setup wizard |
+| 1 | ScreenREPL | Chat | Main chat interface |
+| 2 | ScreenModelSelector | Models | Model/provider picker |
+| 3 | ScreenSettings | Settings | Settings editor (6 tabs) |
+| 4 | ScreenResume | Sessions | Session browser |
+| 5 | ScreenPermission | Permission | Tool permission modal |
+| 6 | ScreenPlan | Plan | Plan review |
+| 7 | ScreenExecute | Execute | Task execution progress |
+| 8 | ScreenVerify | Verify | Verification results |
+| 9 | ScreenShip | Ship | Ship summary |
+| 10 | ScreenDiff | Diff | Git diff viewer |
+| 11 | ScreenLedger | Ledger | Learning ledger browser |
+| 12 | ScreenRollback | Rollback | Commit time machine |
+| 13 | ScreenGoalInput | Goal | Full-screen goal entry |
+| 14 | ScreenDiscuss | Discuss | Discuss Q&A |
+| 15 | ScreenMetrics | Metrics | Session analytics |
+| 16 | ScreenConfig | Config | Full config viewer |
+| 17 | ScreenHelp | Help | Keybinding help overlay |
+| 18 | ScreenBisect | Bisect | Git bisect interactive |
+| 20 | ScreenNotifications | Notifications | Notification history |
+| 21 | ScreenDashboard | Dashboard | Workflow pipeline overview |
+| 22 | ScreenSessionDetail | Session | Session detail preview |
+| 23 | ScreenFileExplorer | Files | File tree browser |
+| 24 | ScreenToolDetail | Tool Output | Expandable tool output |
+| 25 | ScreenPhaseModelPicker | Model Setup | Dual-model picker |
+| 26 | ScreenGhostPicker | Ghost Picker | Ghost write file selector |
+| 27 | ScreenGhostOutput | Ghost Output | Ghost write results |
+| 28 | ScreenConfirmQuit | Confirm Quit | Confirm quit dialog |
+| 29 | ScreenChatHistory | Chat History | Chat history table browser |
+| 30 | ScreenCommandPalette | Commands | Command palette with detail panel |
+| 31 | ScreenRuntimeCheck | Runtime Check | Runtime verification |
+| 32 | ScreenHome | Home | Landing screen with logo and tips |
+| 33 | ScreenDecisions | Decisions | Decision log browser |
 
 ---
 
-## Ready Screen (ScreenREPL)
-The main interaction screen. Layout:
+## Core Screens
+
+### Home (ScreenHome)
+
+Landing screen shown on startup. Displays logo, recent sessions, and quick-start tips. Submit a prompt to begin a workflow.
+
+### REPL (ScreenREPL)
+
+The main interaction screen:
+
 ```
 ┌─────────────────────────────────────────────────┐
 │ Header: Model | Tokens | Cost | Health Status   │
@@ -33,51 +71,89 @@ The main interaction screen. Layout:
 └─────────────────────────────────────────────────┘
 ```
 
----
+### First Run (ScreenFirstRun)
 
-## Processing Screen (ScreenExecute)
-Shown while waiting for the LLM to respond:
-- Spinner animation (configurable style)
-- "Processing..." status text
-- Input area locked
-- Cancel with `Esc`
+API key setup wizard shown on first launch. Guides through:
+- Provider selection (OpenRouter, Zen, Nvidia)
+- API key entry
+- Model selection
 
----
+### Settings (ScreenSettings)
 
-## Streaming Screen
-Live response streaming:
-- Tokens appear in real-time
-- Tool calls render as expandable cards
-- Thinking blocks dimmed/italic (configurable)
-- Backpressure-aware rendering (doesn't block the stream)
+Settings editor with 6 tabs:
+- Provider configuration
+- Model defaults
+- UI preferences
+- Permission modes
+- Feature toggles
+- Keychain management
 
----
+### Config Viewer (ScreenConfig)
 
-## Error Screen
-Shown on critical errors:
-- Error message with details
-- Recovery options
-- Press any key to return to Ready state
+Full config viewer showing all TOML configuration in read-only mode.
 
----
+### Help (ScreenHelp)
 
-## Confirm Quit Screen (ScreenConfirmQuit)
-Shown when quitting during active processing:
-```
-┌──────────────────────────────────┐
-│  Confirm Quit                    │
-│                                  │
-│  An operation is in progress.    │
-│  Are you sure you want to quit?  │
-│                                  │
-│  [y] Yes, quit    [n] No, stay  │
-└──────────────────────────────────┘
-```
+Keybinding help overlay listing all keyboard shortcuts by context.
 
 ---
 
-## Session Picker (ScreenResume)
-Activated via `/sessions` command:
+## Workflow Screens
+
+### Goal Input (ScreenGoalInput)
+
+Full-screen goal entry for workflow initiation. Text input with confirmation.
+
+### Discuss (ScreenDiscuss)
+
+Q&A screen for the Discuss phase. One question at a time with:
+- Timeout support
+- Skip all option
+- Answer completeness scoring
+
+### Plan (ScreenPlan)
+
+Plan review screen:
+- Task graph with dependencies
+- File list and acceptance criteria
+- Approve, refine, or reject
+
+### Execute (ScreenExecute)
+
+Task execution progress screen:
+- Live tool call output
+- Task status indicators
+- Self-heal attempt tracking
+
+### Verify (ScreenVerify)
+
+Verification results screen:
+- Test results
+- Validation output
+- Self-heal options
+
+### Ship (ScreenShip)
+
+Ship summary screen:
+- Commit details
+- Changes summary
+- Ledger entry
+- Changelog
+
+### Runtime Check (ScreenRuntimeCheck)
+
+Runtime verification screen:
+- Dev server status
+- HTTP smoke test results
+- Route discovery
+
+---
+
+## Data Viewers
+
+### Session Browser (ScreenResume)
+
+Session list with preview:
 ```
 ┌──────────────────────────────────┐
 │  Sessions                        │
@@ -90,230 +166,132 @@ Activated via `/sessions` command:
 └──────────────────────────────────┘
 ```
 
----
+### Session Detail (ScreenSessionDetail)
 
-## Session Detail (ScreenSessionDetail)
-Shows detailed info about a session before loading it:
+Detailed info about a session:
 - Session ID, Model, Provider, Phase
 - Message count and preview
 - Resume with Enter, Back with Esc
 
----
+### Chat History (ScreenChatHistory)
 
-## Ghost Picker (ScreenGhostPicker)
-Activated via `/ghost` command:
-```
-┌──────────────────────────────────┐
-│  Ghost Write Files               │
-│                                  │
-│  Select files to generate:       │
-│                                  │
-│  >  [x] src/api/handler.go      │
-│     [ ] src/api/router.go       │
-│     [ ] tests/api_test.go       │
-│                                  │
-│  [Space] toggle  [Enter] write  │
-└──────────────────────────────────┘
-```
+Table browser for past conversations within a session.
 
----
+### Ledger (ScreenLedger)
 
-## Ghost Output (ScreenGhostOutput)
-Shows results of ghost write operation:
-- Files created/appended
-- Warnings (if any)
-- Content preview for selected file
+Learning ledger browser:
+- Pattern tracking across sessions
+- Statistics and insights
 
----
+### Metrics (ScreenMetrics)
 
-## Bisect Output (ScreenBisect)
-Shows model comparison results:
-```
-┌──────────────────────────────────┐
-│  Model A  vs  Model B           │
-│  ───────────────────────────    │
-│  Similarity: 87%                │
-│                                  │
-│  + Added lines (green)          │
-│  - Removed lines (red)          │
-│    Common lines (white)         │
-└──────────────────────────────────┘
-```
+Session analytics:
+- Token usage over time
+- Cost breakdown
+- Performance stats
 
----
+### Diff Viewer (ScreenDiff)
 
-## Model Selector (ScreenModelSelector)
-Model/provider picker with fuzzy search:
-- Lists all available models
-- Cost comparison
-- Capability filtering
-
----
-
-## Settings (ScreenSettings)
-Settings editor with 6 tabs:
-- Provider configuration
-- Model defaults
-- UI preferences
-- Permission modes
-- Feature toggles
-- Keychain management
-
----
-
-## Plan Review (ScreenPlan)
-Plan review screen:
-- Task graph with dependencies
-- File list and acceptance criteria
-- Approve, refine, or reject
-
----
-
-## Verify (ScreenVerify)
-Verification results screen:
-- Test results
-- Validation output
-- Self-heal options
-
----
-
-## Ship (ScreenShip)
-Ship summary screen:
-- Commit details
-- Changes summary
-- Ledger entry
-
----
-
-## Diff Viewer (ScreenDiff)
 Full diff viewer:
 - Syntax-highlighted diff
 - Line-by-line navigation
 
 ---
 
-## Ledger (ScreenLedger)
-Learning ledger browser:
-- Pattern tracking across sessions
-- Statistics and insights
+## Git Screens
 
----
+### Rollback (ScreenRollback)
 
-## Rollback (ScreenRollback)
 Commit time machine:
 - Browse commit history
-- Soft reset to any commit
+- Soft/hard/safe reset with preview
+- Backup branch creation
+
+### Bisect (ScreenBisect)
+
+Git bisect interactive:
+- Mark commits as good/bad
+- Binary search for offending commit
 
 ---
 
-## Goal Input (ScreenGoalInput)
-Full-screen goal entry:
-- Text input for workflow goal
-- Confirmation
+## UI Screens
 
----
+### Model Selector (ScreenModelSelector)
 
-## Discuss (ScreenDiscuss)
-Discuss Q&A screen:
-- One-by-one question presentation
-- Timeout support
-- Skip all option
+Model/provider picker with fuzzy search:
+- Lists all available models
+- Cost comparison per token
+- Capability filtering
 
----
+### Notifications (ScreenNotifications)
 
-## Metrics (ScreenMetrics)
-Session analytics:
-- Token usage over time
-- Cost breakdown
-- Performance stats
-
----
-
-## Config Viewer (ScreenConfig)
-Full config viewer:
-- Read-only config display
-- JSON/TOML formatted
-
----
-
-## Help (ScreenHelp)
-Keybinding help overlay:
-- All keybindings listed
-- Screen-specific shortcuts
-
----
-
-## Theme Picker (ScreenThemePicker)
-Theme browser/preview:
-- Dark/Light/Auto themes
-- Preview before apply
-
----
-
-## Notifications (ScreenNotifications)
 Notification history:
 - All past notifications
 - Type-colored entries
 - Scrollable list
 
----
+### Dashboard (ScreenDashboard)
 
-## Dashboard (ScreenDashboard)
 Workflow pipeline overview:
 - Phase progress bar
 - Current goal and model
 - Activity timeline
 
----
+### File Explorer (ScreenFileExplorer)
 
-## File Explorer (ScreenFileExplorer)
 File tree browser:
 - Project file tree
 - Expandable directories
 - Navigate with j/k
 
----
+### Tool Detail (ScreenToolDetail)
 
-## Tool Detail (ScreenToolDetail)
 Expandable tool output:
 - Full tool call results
 - Copy content
 
+### Decisions (ScreenDecisions)
+
+Decision log browser:
+- Architectural decisions recorded during workflow
+- Timestamped entries
+
 ---
 
-## Phase Model Picker (ScreenPhaseModelPicker)
+## Modals
+
+### Permission Modal (ScreenPermission)
+
+Tool permission prompt:
+- Allow / Allow Always / Deny / Exit
+- Countdown timer
+- Tool details and risk level
+
+### Confirm Quit (ScreenConfirmQuit)
+
+Quit confirmation during active processing:
+```
+┌──────────────────────────────────┐
+│  Confirm Quit                    │
+│                                  │
+│  An operation is in progress.    │
+│  Are you sure you want to quit?  │
+│                                  │
+│  [y] Yes, quit    [n] No, stay  │
+└──────────────────────────────────┘
+```
+
+### Phase Model Picker (ScreenPhaseModelPicker)
+
 Dual-model picker:
 - Planning model (Discuss/Plan/Verify)
 - Coding model (Execute/Ship)
 - Tab to cycle, Enter to confirm
 
----
+### Command Palette (ScreenCommandPalette)
 
-## Permission Modal (ScreenPermission)
-Tool permission modal:
-- Allow/Deny/Always allow
-- Countdown timer
-- Tool details
-
----
-
-## Command Palette
-Overlay command palette:
-- Fuzzy search commands
-- Category grouping
-- Keyboard shortcuts
-
----
-
-## Screen Count Summary
-
-| Category | Count |
-|----------|-------|
-| Core screens | 6 (REPL, FirstRun, Settings, ModelSelector, Help, Config) |
-| Workflow screens | 6 (GoalInput, Discuss, Plan, Execute, Verify, Ship) |
-| Data viewers | 5 (Resume, SessionDetail, Ledger, Metrics, Diff) |
-| Git screens | 2 (Rollback, Bisect) |
-| UI screens | 5 (ThemePicker, Notifications, Dashboard, FileExplorer, ToolDetail) |
-| Ghost screens | 2 (GhostPicker, GhostOutput) |
-| Modals | 3 (Permission, ConfirmQuit, PhaseModelPicker) |
-| **Total** | **29** |
+Fuzzy search command palette:
+- All registered slash commands
+- Category grouping (Core, AI, Config, Session, Git, Workflow)
+- Keyboard shortcut display

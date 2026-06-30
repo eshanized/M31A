@@ -1,6 +1,6 @@
 # Slash Commands
 
-M31A provides slash commands for runtime actions. Commands are parsed from input and executed before the LLM prompt.
+M31 Autonomous provides slash commands for runtime actions. Commands are parsed from input and executed before the LLM prompt.
 
 ---
 
@@ -8,141 +8,161 @@ M31A provides slash commands for runtime actions. Commands are parsed from input
 
 ### Core
 
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/help` | Show keybinding help | `/help` |
-| `/chat` | Start a new chat session (clear messages) | `/chat` |
-| `/clear` | Clear conversation messages | `/clear` (with confirmation) |
-| `/flush` | Clear screen and reset view | `/flush` |
-| `/search` | Search conversation messages | `/search <query>` |
-| `/status` | Show session info | `/status` |
-| `/about` | Show version and system info | `/about` |
-| `/history` | Open chat history browser | `/history` |
-| `/prompt-history` | Show recent prompt history | `/prompt-history` |
-| `/health` | Show system health status | `/health` |
-| `/tools` | List available tools | `/tools` |
-| `/copy-error` | Copy last error to clipboard | `/copy-error` |
-| `/undo` | Show latest checkpoint info | `/undo` |
-| `/reset` | Reset to first-run screen | `/reset` (with confirmation) |
-| `/quit` | Exit the application | `/quit` |
-| `/exit` | Exit the application (alias) | `/exit` |
-
-### Session
-
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/sessions` | List recent sessions | `/sessions` |
-| `/resume` | Open session browser | `/resume` |
-| `/save` | Save current session | `/save` |
-| `/export` | Export session to file | `/export [markdown\|json] [path]` |
-| `/goal` | Set or show session goal | `/goal [text]` |
-| `/ledger` | Show learning ledger | `/ledger` |
-
-### Workflow
-
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/new` | Start a new workflow | `/new` |
-| `/workflow` | Show workflow status | `/workflow` |
-| `/plan` | Start plan phase | `/plan` |
-| `/refine` | Refine the current plan | `/refine` |
-| `/execute` | Start execute phase | `/execute` |
-| `/verify` | Start verify phase | `/verify` |
-| `/ship` | Start ship phase | `/ship` |
-| `/phase` | Show or transition phase | `/phase [discuss\|plan\|execute\|verify\|ship]` |
-| `/pause` | Pause workflow | `/pause` |
-| `/resume-task` | Resume paused workflow | `/resume-task` |
-| `/agent-mode` | Toggle autonomous agent mode | `/agent-mode [on\|off]` |
-| `/metrics` | Open session analytics | `/metrics` |
-| `/dashboard` | Open workflow dashboard | `/dashboard` |
+| Command | Description |
+|---------|-------------|
+| `/help` | List available commands |
+| `/clear` | Clear conversation messages (with confirmation) |
+| `/status` | Show session info |
+| `/reset` | Reset to factory state (deletes config, keys, sessions) |
+| `/quit` | Exit the application |
+| `/exit` | Exit the application (alias for /quit) |
+| `/chat` | Start a new chat session (clear messages) |
+| `/flush` | Clear screen and reset view |
+| `/search` | Search conversation messages |
+| `/about` | Show version and system info |
+| `/undo` | Show latest checkpoint info |
+| `/history` | Open chat history browser |
+| `/prompt-history` | Show recent prompt history |
+| `/health` | Show system health status |
+| `/tools` | List available tools |
+| `/copy-error` | Copy last error to clipboard |
 
 ### AI & Model
 
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/model` | Show or switch model | `/model` |
-| `/models` | List all cached models | `/models` |
-| `/provider` | Show or switch provider | `/provider [name]` |
-| `/fallback` | Show fallback status | `/fallback [provider]` |
-| `/optimize` | Suggest cheaper model alternatives | `/optimize` |
-| `/compress` | Trigger context consolidation | `/compress` |
-| `/memory` | Manage context memory | `/memory [view\|pause\|resume\|revert]` |
-| `/dream` | Alias for `/memory` | `/dream [view\|pause\|resume\|revert]` |
-| `/tokens` | Estimate token count | `/tokens` |
-| `/cost` | Toggle cost display | `/cost` |
+| Command | Description |
+|---------|-------------|
+| `/compress` | Trigger context consolidation |
+| `/memory` | Manage context memory (view/pause/resume/revert) |
+| `/dream` | Alias for `/memory` |
+| `/optimize` | Suggest cheaper model alternatives |
+| `/model` | Show or switch model |
+| `/fallback` | Switch provider / show fallback status |
+| `/provider` | Show or switch provider |
+
+### Config & Settings
+
+| Command | Description |
+|---------|-------------|
+| `/settings` | Open settings editor |
+| `/config` | Open full config editor (all sections, editable) |
+| `/cost` | Toggle cost display |
+| `/log` | Show recent log entries |
+| `/key` | Show API key status |
+| `/keychain` | Alias for `/key` |
+| `/tokens` | Estimate token count |
+
+### Session
+
+| Command | Description |
+|---------|-------------|
+| `/sessions` | List recent sessions |
+| `/export` | Export session to file |
+| `/fork` | Fork current session |
+| `/prev` | Switch to previous session |
+| `/next` | Switch to next session |
+| `/save` | Save current session |
+| `/goal` | Set or show session goal |
+| `/resume` | Open session browser |
+| `/ledger` | Show learning ledger |
+
+### Workflow
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new workflow |
+| `/workflow` | Workflow control |
+| `/plan` | Alias for `/phase plan` |
+| `/refine` | Refine the current plan with feedback |
+| `/execute` | Alias for `/phase execute` |
+| `/verify` | Alias for `/phase verify` |
+| `/runtime` | Alias for `/phase runtime` |
+| `/ship` | Alias for `/phase ship` |
+| `/phase` | Show or transition phase |
+| `/pause` | Pause workflow |
+| `/resume-task` | Resume workflow |
+| `/pending` | Show pending permission queue and batch approvals |
+| `/agent-mode` | Toggle autonomous agent mode |
+| `/metrics` | Open session analytics |
+| `/dashboard` | Open workflow dashboard |
+| `/notifications` | Open notification center |
+| `/files` | Open file explorer |
+| `/ghost` | Ghost write files |
 
 ### Git
 
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/diff` | Show git diff | `/diff [ref] [ref]` |
-| `/rollback` | Browse or reset to commit | `/rollback [hash]` |
-| `/bisect` | Git bisect info | `/bisect [good] [bad]` |
-
-### Settings & System
-
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/settings` | Open settings editor | `/settings` |
-| `/config` | Open full config editor | `/config` |
-| `/theme` | Switch theme | `/theme [dark\|light\|auto\|palette]` |
-| `/themes` | Open theme picker | `/themes` |
-| `/key` | Show API key status | `/key` |
-| `/keychain` | Alias for `/key` | `/keychain` |
-| `/log` | Show recent log entries | `/log [n]` |
-| `/files` | Open file explorer | `/files` |
-| `/ghost` | Ghost write files | `/ghost` |
+| Command | Description |
+|---------|-------------|
+| `/diff` | Show git diff |
+| `/rollback` | Browse or reset to commit |
+| `/bisect` | Git bisect info |
 
 ### Subagents
 
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/agent` | Spawn or list subagents | `/agent [desc]: [prompt]` |
-| `/agent-cancel` | Cancel a running subagent | `/agent-cancel <id\|all>` |
+| Command | Description |
+|---------|-------------|
+| `/agent` | Spawn a parallel subagent (or list active) |
+| `/agent-cancel` | Cancel a running subagent |
+
+### Analysis
+
+| Command | Description |
+|---------|-------------|
+| `/complexity` | Show codebase complexity report |
+| `/decisions` | Show decision log for current session |
 
 ---
 
 ## Special Syntax
 
 ### Literal Slash (`//`)
+
 Prefix a prompt with `//` to send it literally without slash command parsing:
 ```
 //model should be optimized
 ```
 
 ### Bang Passthrough (`!`)
+
 Prefix a prompt with `!` to execute it as a bash command:
 ```
 !ls -la src/
 ```
+
 Output is captured and displayed inline.
 
 ---
 
 ## Command Palette
 
-Press `ctrl+p` to open the command palette. All registered slash commands appear in the palette with fuzzy search.
-
-## Quick Actions
-
-Press `ctrl+q` to open the quick actions overlay for fast access to common commands.
+Press `Ctrl+P` to open the command palette. All registered slash commands appear with fuzzy search and category grouping.
 
 ## Leader Keys
 
-Press `ctrl+x` followed by a key for quick navigation:
+Press `Ctrl+X` followed by a key for quick navigation:
 
 | Shortcut | Action |
 |----------|--------|
-| `ctrl+x h` | Help screen |
-| `ctrl+x s` | Settings |
-| `ctrl+x b` | Toggle sidebar |
-| `ctrl+x p` | Theme picker |
-| `ctrl+x m` | Model selector |
-| `ctrl+x r` | Resume session |
-| `ctrl+x n` | New workflow |
-| `ctrl+x l` | Learning ledger |
-| `ctrl+x k` | Rollback browser |
-| `ctrl+x t` | Toggle theme |
-| `ctrl+x d` | Dashboard |
-| `ctrl+x f` | File explorer |
-| `ctrl+x !` | Notifications |
+| `Ctrl+X s` | Settings |
+| `Ctrl+X h` | Help |
+| `Ctrl+X l` | Ledger |
+| `Ctrl+X k` | Rollback |
+| `Ctrl+X d` | Dashboard |
+| `Ctrl+X !` | Notifications |
+| `Ctrl+X f` | File explorer |
+| `Ctrl+X a` | Subagents panel |
+| `Ctrl+X c` | Config viewer |
+| `Ctrl+X i` | Session detail |
+| `Ctrl+X o` | Tool output |
+| `Ctrl+X g` | Home screen |
+| `Ctrl+X b` | Toggle sidebar (REPL only) |
+| `Ctrl+X n` | New session (REPL only) |
+| `Ctrl+X r` | Session list (REPL only) |
+| `Ctrl+X m` | Select model (REPL only) |
+| `Ctrl+X [` | Widen sidebar (REPL only) |
+| `Ctrl+X ]` | Narrow sidebar (REPL only) |
+
+---
+
+## Dynamic Commands
+
+Skills discovered from `~/.m31a/` and project directories are registered as slash commands at startup.

@@ -1049,7 +1049,7 @@ func (m *AppState) renderDecisionsContent(chrome layout.PageChrome) string {
 		return renderEmptyState("Decisions", "No workflow engine available", width, height, theme)
 	}
 
-	decisions := m.workflowEngine.SnapshotDecisions()
+	decisions := decision.RedactSlice(m.workflowEngine.SnapshotDecisions())
 	if len(decisions) == 0 {
 		return renderEmptyState("Decisions", "No decisions recorded yet — start a workflow with /new", width, height, theme)
 	}

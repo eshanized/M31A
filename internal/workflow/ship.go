@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	m31types "github.com/eshanized/M31A/internal/types"
@@ -592,7 +593,7 @@ func (e *Engine) generateSessionSummary(tasks []m31types.Task, commits []git.Com
 	b.WriteString("\n")
 
 	// Decision summary
-	decisions := e.SnapshotDecisions()
+	decisions := decision.RedactSlice(e.SnapshotDecisions())
 	if len(decisions) > 0 {
 		b.WriteString("## Decisions\n\n")
 		categories := make(map[string]int)

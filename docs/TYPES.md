@@ -56,7 +56,7 @@ type StreamChunk struct {
 type ModelInfo struct {
     ID            string       // Model identifier (e.g., "openai/gpt-4o")
     Name          string       // Human-readable name
-    Provider      ProviderName // "openrouter" or "zen"
+    Provider      ProviderName // "openrouter", "zen", or "nvidia"
     Description   string
     Pricing       Pricing      // Cost per token
     ContextLength int          // Max context window
@@ -183,9 +183,10 @@ type Session struct {
 ```go
 type ComplexityLevel string
 const (
-    ComplexitySimple   ComplexityLevel = "simple"
-    ComplexityModerate ComplexityLevel = "moderate"
-    ComplexityComplex  ComplexityLevel = "complex"
+	ComplexityTrivial  ComplexityLevel = "trivial"
+	ComplexitySimple   ComplexityLevel = "simple"
+	ComplexityModerate ComplexityLevel = "moderate"
+	ComplexityComplex  ComplexityLevel = "complex"
 )
 
 type CostEstimate struct {

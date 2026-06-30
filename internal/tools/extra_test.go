@@ -2137,7 +2137,7 @@ func TestMatchAnyParamValue_PatternParam(t *testing.T) {
 func TestDefaultDispatcher_RegistersAllTools(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d, err := DefaultDispatcher(dir, dir, dir, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
@@ -2169,7 +2169,7 @@ func TestDefaultDispatcher_WithPermissionsConfig(t *testing.T) {
 			{Tool: "Bash", Action: "allow"},
 		},
 	}
-	d, err := DefaultDispatcher(dir, dir, dir, cfg)
+	d, err := DefaultDispatcher(dir, dir, dir, cfg, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher with config failed: %v", err)
 	}
@@ -2253,7 +2253,7 @@ func TestNextPermissionRequestID_Incrementing(t *testing.T) {
 func TestBuildToolDefs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d, err := DefaultDispatcher(dir, dir, dir, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
@@ -3434,7 +3434,7 @@ func TestDispatcherAdapter_Stop(t *testing.T) {
 func TestNewDispatcherFactory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	factory := NewDispatcherFactory(dir, dir, nil, nil, nil)
+	factory := NewDispatcherFactory(dir, dir, nil, nil, nil, nil)
 	d, err := factory(dir)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
@@ -3449,7 +3449,7 @@ func TestNewDispatcherFactory_WithManager(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	// Manager requires Dependencies, but factory just passes nil manager check
-	factory := NewDispatcherFactory(dir, dir, nil, nil, nil)
+	factory := NewDispatcherFactory(dir, dir, nil, nil, nil, nil)
 	d, err := factory(dir)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
@@ -4159,7 +4159,7 @@ func TestDefaultDispatcher_ErrorPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	// DefaultDispatcher with valid config should succeed
-	d, err := DefaultDispatcher(dir, dir, dir, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
