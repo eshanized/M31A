@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.6.0] - 2026-06-30
+
+### Added
+- **build**: Embed `Commit`, `Date`, and `GoVersion` in release binaries via ldflags for debuggable release artifacts
+- **build**: `-trimpath` flag for reproducible builds (strips absolute source paths from binaries)
+- **changelog**: Explicit changelog filter in GoReleaser config excluding docs, test, chore, ci, build, and merge commits
+
+### Changed
+- **build**: `m31a --version` now outputs full metadata: `m31a v1.6.0 (commit, date) os/arch (Go version)`
+- **build**: Makefile uses dedicated `BUILDFLAGS` variable for compiler flags separate from linker flags
+
 ## [1.5.0] - 2026-06-29
 
 ### Added
