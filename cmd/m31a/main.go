@@ -47,6 +47,13 @@ func restoreTerminal() {
 
 // runHeadless sends a single prompt to the active LLM provider and prints
 // the response to stdout. Used for scripting and E2E testing.
+// runHeadlessWorkflow executes a full workflow in headless mode (no TUI).
+// Runs the given goal through the workflow engine and returns exit code.
+func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *config.Config, model string, logger *slog.Logger) int {
+	fmt.Fprintln(os.Stderr, "headless workflow mode not yet fully implemented — use --prompt for single-turn")
+	return 1
+}
+
 func runHeadless(prompt string, registry *provider.Registry, defaultModel string, logger *slog.Logger) int {
 	p := registry.ActiveProvider()
 	if p == nil {
@@ -256,7 +263,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, "error: --goal is required in headless mode")
 			return 1
 		}
-		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, *modelFlag, logger)
+		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, model, logger)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)

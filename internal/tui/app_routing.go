@@ -354,6 +354,11 @@ func (m *AppState) initScreenUpdaters() {
 		}
 		return cmd
 	}
+
+	// ScreenDecisions has no sub-model — it renders directly from the workflow engine.
+	m.screenUpdaters[ScreenDecisions] = func(msg tea.Msg) tea.Cmd {
+		return nil
+	}
 }
 
 // forwardMsgToScreen forwards a message to the active screen's sub-model

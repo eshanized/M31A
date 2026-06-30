@@ -226,7 +226,7 @@ func (m *Manager) LoadSession(id string) (*Session, error) {
 
 	switch session.WorkflowPhase {
 	case types.PhaseIdle, types.PhaseInitialize, types.PhaseDiscuss,
-		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseShip:
+		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseRuntime, types.PhaseShip:
 	case "":
 		session.WorkflowPhase = types.PhaseIdle
 	default:
@@ -282,7 +282,7 @@ func (m *Manager) loadSessionMetadata() (*Session, error) {
 
 	switch session.WorkflowPhase {
 	case types.PhaseIdle, types.PhaseInitialize, types.PhaseDiscuss,
-		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseShip:
+		types.PhasePlan, types.PhaseExecute, types.PhaseVerify, types.PhaseRuntime, types.PhaseShip:
 	case "":
 		session.WorkflowPhase = types.PhaseIdle
 	default:
@@ -367,6 +367,10 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 // DeleteSession removes the project-local session files without deleting
 // the entire .m31a/ directory (which may contain backups, planning data, etc.).
 func (m *Manager) DeleteSession(id string) error {
+	if err := m.lock.Lock(); err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
 	dir := m.projectDir()
 	for _, name := range []string{"session.json", "session.json.bak", "messages.json"} {
 		path := filepath.Join(dir, name)

@@ -100,9 +100,12 @@ func DefaultConfig() *Config {
 			UserEmail:    "m31a@local",
 		},
 		Compaction: CompactionConfig{
-			Auto:       true,
-			Buffer:     20000,
-			KeepTokens: 8000,
+			Auto:               true,
+			Buffer:             20000,
+			KeepTokens:         8000,
+			Proactive:          true,
+			ToolCallsThreshold: 15,
+			PhaseTransitionPct: 60,
 		},
 		Instructions: InstructionsConfig{
 			Enabled: true,

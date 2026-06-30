@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/config"
@@ -34,6 +35,14 @@ type Dispatcher struct {
 	activeAgent       string
 	permissionTimeout int
 	workDir_          string // working directory for cwd-aware permission caching
+	// Batch approval: user can approve all pending + future calls for a
+	// tool+risk combination. Approvals are task-scoped (expire on task
+	// completion or phase transition).
+	batchMu        sync.RWMutex
+	batchApprovals map[string]BatchApproval // key: "toolName:riskLevel"
+	// pendingPermCount tracks how many permission requests are waiting in the
+	// queue for display in the permission modal ("3 tools behind this one").
+	pendingPermCount atomic.Int64
 	// Rate limiter: token bucket for tool execution (WP-S04).
 	rateTokens chan struct{}
 	rateTicker *time.Ticker
@@ -68,6 +77,7 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		agents:              make(map[string]config.PermissionsAgentConfig),
 		activeAgent:         DefaultAgentName,
 		permissionTimeout:   types.DefaultPermissionTimeout,
+		batchApprovals:      make(map[string]BatchApproval),
 		rateTokens:          make(chan struct{}, ToolRateLimitBurst),
 		rateDone:            make(chan struct{}),
 		dangerousRateTokens: make(chan struct{}, DangerousRateLimitBurst),
@@ -426,17 +436,8 @@ func (d *Dispatcher) ensurePermission(ctx context.Context, call types.ToolCall, 
 
 	risk := tool.RiskLevel()
 
-	interactive := true
-	if val, ok := input.Params["interactive"]; ok {
-		if iv, isBool := val.(bool); isBool {
-			interactive = iv
-		}
-	}
-
-	if !interactive {
-		if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
-			return fmt.Errorf("tool %s (risk: %s) blocked in shell mode: %w", call.Name, risk, m31errors.ErrPermissionDenied)
-		}
+	// Check batch approval before prompting (between rule and agent_default)
+	if d.checkBatchApproval(call.Name, risk) {
 		return nil
 	}
 

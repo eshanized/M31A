@@ -21,16 +21,51 @@ type PermissionRequest struct {
 	Command     string          `json:"command"`
 	RiskLevel   types.RiskLevel `json:"risk_level"`
 	TimeoutSecs int             `json:"timeout_secs"`
+	// QueueDepth is the number of pending permission requests behind this one.
+	QueueDepth int `json:"queue_depth"`
 	// Rule context (populated when a permission rule matched)
 	RuleTool    string `json:"rule_tool,omitempty"`
 	RulePattern string `json:"rule_pattern,omitempty"`
 	RuleAction  string `json:"rule_action,omitempty"`
+	// Policy indicates how permissions should be handled (AllowSafe/DenyAll/Prompt)
+	Policy PermissionPolicy `json:"policy,omitempty"`
+}
+
+// PermissionPolicy defines how permissions are handled in headless mode
+type PermissionPolicy string
+
+const (
+	PolicyAllowSafe PermissionPolicy = "allow-safe"
+	PolicyDenyAll   PermissionPolicy = "deny-all"
+	PolicyPrompt    PermissionPolicy = "prompt"
+)
+
+func (p PermissionPolicy) IsValid() bool {
+	switch p {
+	case PolicyAllowSafe, PolicyDenyAll, PolicyPrompt:
+		return true
+	default:
+		return false
+	}
+}
+
+// ShouldAutoAllow determines if a tool is automatically allowed based on policy
+func (p PermissionPolicy) ShouldAutoAllow(toolName string, risk types.RiskLevel) bool {
+	switch p {
+	case PolicyAllowSafe:
+		return risk != types.RiskDangerous && risk != types.RiskDestructive
+	case PolicyDenyAll:
+		return false
+	default:
+		return false
+	}
 }
 
 type PermissionResponse struct {
-	RequestID int64 `json:"request_id"`
-	Allowed   bool  `json:"allowed"`
-	Remember  bool  `json:"remember"`
+	RequestID  int64 `json:"request_id"`
+	Allowed    bool  `json:"allowed"`
+	Remember   bool  `json:"remember"`
+	ApproveAll bool  `json:"approve_all"` // approve all pending + future for this tool+risk
 }
 
 // PermissionContext carries additional info about a matched rule

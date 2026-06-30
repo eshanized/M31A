@@ -134,7 +134,6 @@ type WorkflowState struct {
 	// Conversation messages for the workflow (updated by /compress proactively)
 	Messages []m31types.Message
 
-
 	// Cached parsed plan for execute phase (H15 fix)
 	cachedPlan    *m31types.Plan
 	cachedPlanMD5 string // MD5 of planMarkdown for invalidation

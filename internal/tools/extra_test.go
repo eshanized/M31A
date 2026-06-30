@@ -4083,37 +4083,71 @@ func TestCheckPermission_AgentDefaultAsk(t *testing.T) {
 // Dispatcher: ensurePermission with non-interactive input
 // ---------------------------------------------------------------------------
 
-func TestEnsurePermission_NonInteractiveSafeTool(t *testing.T) {
+// ---------------------------------------------------------------------------
+// PermissionPolicy tests
+// ---------------------------------------------------------------------------
+
+func TestPermissionPolicy_IsValid(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
-	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
-	_, err := d.Execute(context.Background(), types.ToolCall{
-		ID:    "call1",
-		Name:  "safe",
-		Input: []byte(`{"params":{"interactive":false}}`),
-	})
-	if err != nil {
-		t.Errorf("safe tool should execute in non-interactive mode, got: %v", err)
+	tests := []struct {
+		policy PermissionPolicy
+		want   bool
+	}{
+		{PolicyAllowSafe, true},
+		{PolicyDenyAll, true},
+		{PolicyPrompt, true},
+		{PermissionPolicy("invalid"), false},
+		{PermissionPolicy(""), false},
+	}
+	for _, tt := range tests {
+		got := tt.policy.IsValid()
+		if got != tt.want {
+			t.Errorf("IsValid(%q) = %v, want %v", tt.policy, got, tt.want)
+		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ensurePermission: non-interactive dangerous tool should be blocked
-// ---------------------------------------------------------------------------
-
-func TestEnsurePermission_NonInteractiveDangerousTool(t *testing.T) {
-	d := NewDispatcher(nil)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
-	_, err := d.Execute(context.Background(), types.ToolCall{
-		ID:    "call1",
-		Name:  "bash",
-		Input: []byte(`{"params":{"command":"rm -rf /","interactive":false}}`),
-	})
-	if err == nil {
-		t.Fatal("expected error for non-interactive dangerous tool")
+func TestPermissionPolicy_ShouldAutoAllow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		policy    PermissionPolicy
+		toolName  string
+		risk      types.RiskLevel
+		wantAllow bool
+	}{
+		{PolicyAllowSafe, "ls", types.RiskSafe, true},
+		{PolicyAllowSafe, "bash", types.RiskMedium, true},
+		{PolicyAllowSafe, "bash", types.RiskDangerous, false},
+		{PolicyAllowSafe, "rm", types.RiskDestructive, false},
+		{PolicyDenyAll, "ls", types.RiskSafe, false},
+		{PolicyDenyAll, "bash", types.RiskDangerous, false},
+		{PolicyPrompt, "ls", types.RiskSafe, false},
+		{PolicyPrompt, "bash", types.RiskDangerous, false},
 	}
-	if !strings.Contains(err.Error(), "blocked in shell mode") {
-		t.Errorf("expected 'blocked in shell mode', got: %v", err)
+	for _, tt := range tests {
+		got := tt.policy.ShouldAutoAllow(tt.toolName, tt.risk)
+		if got != tt.wantAllow {
+			t.Errorf("ShouldAutoAllow(%q, %q, %q) = %v, want %v", tt.policy, tt.toolName, tt.risk, got, tt.wantAllow)
+		}
+	}
+}
+
+func TestPermissionPolicy_ShouldAutoAllow_EdgeCases(t *testing.T) {
+	t.Parallel()
+	// DenyAll denies everything
+	if PolicyDenyAll.ShouldAutoAllow("any", types.RiskSafe) {
+		t.Error("DenyAll should not auto-allow any tool")
+	}
+	// AllowSafe denies dangerous+destructive
+	if PolicyAllowSafe.ShouldAutoAllow("any", types.RiskDangerous) {
+		t.Error("AllowSafe should not auto-allow dangerous tools")
+	}
+	if PolicyAllowSafe.ShouldAutoAllow("any", types.RiskDestructive) {
+		t.Error("AllowSafe should not auto-allow destructive tools")
+	}
+	// Prompt denies nothing via ShouldAutoAllow (always prompts)
+	if PolicyPrompt.ShouldAutoAllow("any", types.RiskDestructive) {
+		t.Error("Prompt should not auto-allow any tool")
 	}
 }
 

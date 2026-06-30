@@ -210,20 +210,6 @@ func (m *AppState) checkContextWarnings() []tea.Cmd {
 
 	var cmds []tea.Cmd
 
-	// Auto-insert system message to suggest /compress when context reaches 70%
-	if pct >= 0.70 && !m.ctxWarned70 {
-		// Mark warning as shown but don't block further compaction suggestions at 85%
-		m.ctxWarned70 = true
-		// Format the warning message similar to what the toast would show
-		warningMsg := fmt.Sprintf("Context at %d%%. Consider /compress to prevent overflow.", int(pct*100))
-		// Parse and insert as a system message in the REPL state
-		if m.replModel != nil {
-			// Clean existing content but preserve tool calls for workflow state
-			// This is a minimal intervention that just nudges the user
-			m.replModel.InsertSystemPromptHint("⚠️ " + warningMsg)
-		}
-	}
-
 	if pct >= 0.85 && !m.ctxWarned85 {
 		m.ctxWarned85 = true
 		cmds = append(cmds, m.addToastCmd(

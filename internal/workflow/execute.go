@@ -301,8 +301,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				if e.collector != nil {
 					e.collector.RecordHealTrigger(m31types.PhaseExecute)
 				}
-				// Inject the code-as-text as context and demand FileWrite usage
-				forcedMsg := append(messages, m31types.Message{
+				// Inject the code-as-text as context and demand FileWrite usage.
+				// Clone messages first to avoid aliasing the original slice's backing array.
+				forcedMsg := make([]m31types.Message, len(messages), len(messages)+1)
+				copy(forcedMsg, messages)
+				forcedMsg = append(forcedMsg, m31types.Message{
 					Role:    "user",
 					Content: "CRITICAL: You output code as plain text. This is WRONG. You MUST use the FileWrite tool to create files. Here is the code you wrote — now create each file using FileWrite tool calls. Do NOT output code as text again. Create the files using FileWrite.",
 				})
@@ -522,7 +525,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		e.toolCallsSinceLastCompact += toolCallCount
 		if e.cfg != nil && e.cfg.Compaction.Proactive && e.toolCallsSinceLastCompact >= e.cfg.Compaction.ToolCallsThreshold {
 			e.toolCallsSinceLastCompact = 0
-			messages = e.proactiveCompactCheck(messages)
+			e.proactiveCompactCheck(messages) //nolint:errcheck // compaction has side effects (emit, log); return value unused here
 		}
 
 		if toolErr {

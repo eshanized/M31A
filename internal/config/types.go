@@ -23,6 +23,11 @@ type CompactionConfig struct {
 	Auto       bool `toml:"auto"`
 	Buffer     int  `toml:"buffer"`
 	KeepTokens int  `toml:"keep_tokens"`
+
+	// Proactive compaction settings (Wave 2B)
+	Proactive          bool `toml:"proactive"`            // trigger compaction before phase transitions
+	ToolCallsThreshold int  `toml:"tool_calls_threshold"` // check compaction every N tool calls during Execute
+	PhaseTransitionPct int  `toml:"phase_transition_pct"` // trigger compaction at this % before phase transition
 }
 
 // InstructionsConfig controls AGENTS.md file discovery for project-aware context.

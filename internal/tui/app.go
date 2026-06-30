@@ -497,12 +497,13 @@ func (m *AppState) drainMultipleCmd() tea.Cmd {
 			// Try to read additional messages non-blockingly.
 			var batch []tea.Msg
 			batch = append(batch, first)
+		drainLoop:
 			for i := 1; i < maxDrainPerTick; i++ {
 				select {
 				case msg := <-m.emitterCh:
 					batch = append(batch, msg)
 				default:
-					break
+					break drainLoop
 				}
 			}
 			if len(batch) == 1 {
