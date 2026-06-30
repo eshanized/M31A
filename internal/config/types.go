@@ -257,7 +257,8 @@ type FeaturesConfig struct {
 	InitPreflight    bool `toml:"init_preflight"`     // Environment pre-flight checks
 
 	// Intent classification (LLM-based prompt routing)
-	IntentClassification bool `toml:"intent_classification"` // Pre-classify REPL input for routing
+	IntentClassification      bool `toml:"intent_classification"`        // Pre-classify REPL input for routing
+	IntentClassifyTimeoutSecs int  `toml:"intent_classify_timeout_secs"` // Timeout for LLM classification (seconds). Default 25.
 }
 
 type LedgerConfig struct {

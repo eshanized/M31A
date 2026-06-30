@@ -383,9 +383,13 @@ func (m *AppState) classifyAndRoute(p provider.LLMProvider, input string) tea.Cm
 	modelID := m.activeModel.ID
 	prompts := m.promptRegistry
 	ctx := m.shutdownCtx
+	timeoutSecs := 0
+	if m.config != nil && m.config.Features.IntentClassifyTimeoutSecs > 0 {
+		timeoutSecs = m.config.Features.IntentClassifyTimeoutSecs
+	}
 
 	return func() tea.Msg {
-		result, err := workflow.ClassifyIntent(ctx, p, modelID, input, prompts)
+		result, err := workflow.ClassifyIntent(ctx, p, modelID, input, prompts, timeoutSecs)
 		if err != nil || result == nil {
 			return IntentClassifiedMsg{
 				Input: input,

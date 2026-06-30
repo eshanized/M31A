@@ -11,17 +11,24 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
-const intentClassifyTimeout = 10 * time.Second
+const (
+	defaultIntentClassifyTimeout = 25 * time.Second
+	maxClassifyRetries           = 2
+	classifyRetryBaseDelay       = 2 * time.Second
+)
 
 // ClassifyIntent uses an LLM to classify the user's input intent.
 // Falls back to the keyword-based ClassifyPrompt on failure or timeout.
-func ClassifyIntent(ctx context.Context, p provider.LLMProvider, modelID string, input string, prompts *PromptRegistry) (*m31types.IntentResult, error) {
+// timeoutSecs controls the per-attempt deadline; 0 uses the default (25s).
+func ClassifyIntent(ctx context.Context, p provider.LLMProvider, modelID string, input string, prompts *PromptRegistry, timeoutSecs int) (*m31types.IntentResult, error) {
 	if p == nil || modelID == "" {
 		return nil, fmt.Errorf("provider or model not available")
 	}
 
-	classifyCtx, cancel := context.WithTimeout(ctx, intentClassifyTimeout)
-	defer cancel()
+	timeout := defaultIntentClassifyTimeout
+	if timeoutSecs > 0 {
+		timeout = time.Duration(timeoutSecs) * time.Second
+	}
 
 	systemPrompt := prompts.IntentClassify
 	if systemPrompt == "" {
@@ -40,22 +47,42 @@ func ClassifyIntent(ctx context.Context, p provider.LLMProvider, modelID string,
 		ReasoningEnabled: false,
 	}
 
-	iterator, err := p.ChatCompletionStream(classifyCtx, req)
-	if err != nil {
-		return nil, fmt.Errorf("classify LLM call failed: %w", err)
+	var lastErr error
+	for attempt := 0; attempt <= maxClassifyRetries; attempt++ {
+		if attempt > 0 {
+			delay := classifyRetryBaseDelay * time.Duration(1<<(attempt-1))
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("classify aborted during retry backoff: %w", ctx.Err())
+			case <-time.After(delay):
+			}
+		}
+
+		classifyCtx, cancel := context.WithTimeout(ctx, timeout)
+		iterator, err := p.ChatCompletionStream(classifyCtx, req)
+		if err != nil {
+			cancel()
+			lastErr = fmt.Errorf("classify LLM call failed: %w", err)
+			continue
+		}
+
+		content, streamErr := consumeClassifyStream(iterator)
+		cancel()
+		if streamErr != nil {
+			lastErr = fmt.Errorf("classify stream read failed: %w", streamErr)
+			continue
+		}
+
+		result, parseErr := parseIntentJSON(content)
+		if parseErr != nil {
+			lastErr = fmt.Errorf("classify JSON parse failed: %w", parseErr)
+			continue
+		}
+
+		return result, nil
 	}
 
-	content, err := consumeClassifyStream(iterator)
-	if err != nil {
-		return nil, fmt.Errorf("classify stream read failed: %w", err)
-	}
-
-	result, err := parseIntentJSON(content)
-	if err != nil {
-		return nil, fmt.Errorf("classify JSON parse failed: %w", err)
-	}
-
-	return result, nil
+	return nil, lastErr
 }
 
 // consumeClassifyStream reads all chunks from the classification iterator.

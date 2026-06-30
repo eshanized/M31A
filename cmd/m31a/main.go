@@ -207,6 +207,9 @@ func run() int {
 	if kcErr != nil {
 		logger.Warn("keychain initialization failed", "error", kcErr)
 	}
+	// Wrap with availability caching so repeated SaveWithKeychain calls
+	// don't trigger repeated D-Bus/pass attempts and duplicate warnings.
+	kc = keychain.NewCached(kc)
 	if kc != nil {
 		if resolveErr := cfg.ResolveAPIKeys(kc); resolveErr != nil {
 			logger.Warn("failed to resolve API keys", "error", resolveErr)

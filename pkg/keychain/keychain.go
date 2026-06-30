@@ -1,5 +1,7 @@
 package keychain
 
+import "sync/atomic"
+
 const (
 	servicePrefix = "m31a/"
 	// AccountName is the keychain account identifier used across all platforms.
@@ -31,3 +33,55 @@ type Keychain interface {
 // On windows: returns a windowsKeychain backed by Windows Credential Manager.
 // Each platform file (keychain_linux.go, keychain_darwin.go, keychain_windows.go)
 // provides its own New() implementation via build tags.
+
+// cachedKeychain wraps a Keychain and caches availability.
+// Once any operation returns ErrKeychainUnavailable, all subsequent operations
+// return ErrKeychainUnavailable immediately without attempting the backend.
+// This prevents repeated D-Bus/pass connection attempts and suppresses
+// duplicate warning logs.
+type cachedKeychain struct {
+	inner       Keychain
+	unavailable atomic.Bool
+}
+
+// NewCached wraps an existing Keychain with availability caching.
+// If the inner keychain is nil, returns nil.
+func NewCached(inner Keychain) Keychain {
+	if inner == nil {
+		return nil
+	}
+	return &cachedKeychain{inner: inner}
+}
+
+func (c *cachedKeychain) Get(service string) (string, error) {
+	if c.unavailable.Load() {
+		return "", ErrKeychainUnavailable
+	}
+	val, err := c.inner.Get(service)
+	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
+		c.unavailable.Store(true)
+	}
+	return val, err
+}
+
+func (c *cachedKeychain) Set(service, value string) error {
+	if c.unavailable.Load() {
+		return ErrKeychainUnavailable
+	}
+	err := c.inner.Set(service, value)
+	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
+		c.unavailable.Store(true)
+	}
+	return err
+}
+
+func (c *cachedKeychain) Delete(service string) error {
+	if c.unavailable.Load() {
+		return ErrKeychainUnavailable
+	}
+	err := c.inner.Delete(service)
+	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
+		c.unavailable.Store(true)
+	}
+	return err
+}

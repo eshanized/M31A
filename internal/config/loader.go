@@ -60,7 +60,8 @@ func DefaultConfig() *Config {
 			RateLimitBackoffSecs:   120,
 			PlanCheckMaxIter:       3,
 			PlanChunkThreshold:     10,
-			IntentClassification:   true,
+			IntentClassification:      true,
+			IntentClassifyTimeoutSecs: 25,
 			// Enable all quality gates and checks by default
 			PlanResearch:        true,
 			PlanCheck:           true,
