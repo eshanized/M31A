@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.6.1] - 2026-06-30
+
+### Added
+- **config**: `intent_classify_timeout_secs` option to configure intent classification timeout per provider (default 25s)
+
+### Fixed
+- **workflow**: Intent classification timeout with NVIDIA NIM increased from 10s to 25s and made configurable
+- **workflow**: Added retry with exponential backoff (3 attempts, 2s/4s delays) for intent classification LLM calls
+- **keychain**: Cached keychain availability to suppress repeated fallback warnings on every provider initialization
+
 ## [1.6.0] - 2026-06-30
 
 ### Added
