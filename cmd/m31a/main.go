@@ -31,7 +31,12 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
-var Version = "dev"
+var (
+	Version  = "dev"
+	Commit   = "unknown"
+	Date     = "unknown"
+	GoVersion = "unknown"
+)
 
 // restoreTerminal writes ANSI escape sequences to undo alt-screen mode,
 // mouse capture, and hidden cursor. Called before os.Exit in the hard
@@ -138,7 +143,11 @@ func run() int {
 		if idx := strings.Index(goVer, ":"); idx != -1 {
 			goVer = goVer[:idx]
 		}
-		fmt.Printf("m31a %s %s/%s (Go %s)\n", Version, runtime.GOOS, runtime.GOARCH, goVer)
+		// Prefer the build-time GoVersion if set; fall back to runtime.
+		if GoVersion != "unknown" {
+			goVer = GoVersion
+		}
+		fmt.Printf("m31a %s (%s, %s) %s/%s (Go %s)\n", Version, Commit, Date, runtime.GOOS, runtime.GOARCH, goVer)
 		return 0
 	}
 
@@ -156,6 +165,8 @@ func run() int {
 
 	logger.Info("M31A starting",
 		"version", Version,
+		"commit", Commit,
+		"date", Date,
 		"go_version", runtime.Version(),
 		"os", runtime.GOOS,
 		"arch", runtime.GOARCH,

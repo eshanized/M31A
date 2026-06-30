@@ -9,9 +9,10 @@ COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE        := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 # Build flags
-LDFLAGS     := -ldflags "-s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE)"
+LDFLAGS     := -ldflags "-s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE) -X main.GoVersion=$(shell go version | cut -d' ' -f3)"
 GOFLAGS     := CGO_ENABLED=0
 GO          := go
+BUILDFLAGS  := -trimpath
 
 # Directories
 CMD_DIR     := ./cmd/m31a
@@ -39,7 +40,7 @@ help:
 ## build             — Build binary for current platform (optimized)
 build:
 	@printf "\033[0;32m[build]\033[0m Building $(BINARY) for $(shell go env GOOS)/$(shell go env GOARCH)...\n"
-	@$(GOFLAGS) $(GO) build $(LDFLAGS) -o $(BINARY) $(CMD_DIR)
+	@$(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(BINARY) $(CMD_DIR)
 	@printf "\033[0;32m[build]\033[0m Done: $(BINARY) ($$(du -h $(BINARY) | cut -f1))\n"
 
 ## debug             — Build with debug symbols (no strip, static)
@@ -137,27 +138,27 @@ cross: $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(a
 
 build-linux-amd64:
 	@printf "\033[0;32m[cross]\033[0m Building linux/amd64...\n"
-	@GOOS=linux GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-amd64 $(CMD_DIR)
+	@GOOS=linux GOARCH=amd64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-amd64 $(CMD_DIR)
 
 build-linux-arm64:
 	@printf "\033[0;32m[cross]\033[0m Building linux/arm64...\n"
-	@GOOS=linux GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-arm64 $(CMD_DIR)
+	@GOOS=linux GOARCH=arm64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-linux-arm64 $(CMD_DIR)
 
 build-darwin-amd64:
 	@printf "\033[0;32m[cross]\033[0m Building darwin/amd64...\n"
-	@GOOS=darwin GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-amd64 $(CMD_DIR)
+	@GOOS=darwin GOARCH=amd64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-amd64 $(CMD_DIR)
 
 build-darwin-arm64:
 	@printf "\033[0;32m[cross]\033[0m Building darwin/arm64...\n"
-	@GOOS=darwin GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-arm64 $(CMD_DIR)
+	@GOOS=darwin GOARCH=arm64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-darwin-arm64 $(CMD_DIR)
 
 build-windows-amd64:
 	@printf "\033[0;32m[cross]\033[0m Building windows/amd64...\n"
-	@GOOS=windows GOARCH=amd64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-amd64.exe $(CMD_DIR)
+	@GOOS=windows GOARCH=amd64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-amd64.exe $(CMD_DIR)
 
 build-windows-arm64:
 	@printf "\033[0;32m[cross]\033[0m Building windows/arm64...\n"
-	@GOOS=windows GOARCH=arm64 $(GOFLAGS) $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-arm64.exe $(CMD_DIR)
+	@GOOS=windows GOARCH=arm64 $(GOFLAGS) $(GO) build $(BUILDFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY)-windows-arm64.exe $(CMD_DIR)
 
 # ==============================================================================
 # Release
@@ -214,7 +215,7 @@ nuke: clean
 ## install           — Install binary to GOBIN
 install:
 	@printf "\033[0;32m[install]\033[0m Installing via go install...\n"
-	@CGO_ENABLED=0 $(GO) install $(LDFLAGS) $(CMD_DIR)
+	@CGO_ENABLED=0 $(GO) install $(BUILDFLAGS) $(LDFLAGS) $(CMD_DIR)
 	@printf "\033[0;32m[install]\033[0m Done\n"
 
 # ==============================================================================

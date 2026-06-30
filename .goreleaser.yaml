@@ -14,9 +14,13 @@ builds:
       - arm64
     binary: m31a
     main: ./cmd/m31a
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.Date={{.Date}}
     ignore:
       - goos: windows
         goarch: arm64
@@ -54,6 +58,18 @@ scoops:
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^build:"
+      - Merge pull request
+      - Merge branch
 
 release:
   draft: true
