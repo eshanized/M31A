@@ -32,9 +32,9 @@ archives:
 nfpms:
   - id: m31a-pkg
     package_name: m31a
-    vendor: Eshanized
+    vendor: Eshan Roy
     homepage: https://github.com/eshanized/M31A
-    maintainer: Eshanized <noreply@eshanized.com>
+    maintainer: Eshan Roy <eshanized@proton.me>
     description: Terminal-native AI coding agent that ships, not just suggests
     license: MIT
     formats:
