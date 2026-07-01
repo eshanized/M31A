@@ -38,15 +38,20 @@ type MessageRenderer struct {
 	// renderCache caches glamour-rendered output per (content, width).
 	// Avoids re-rendering identical markdown on every frame.
 	renderCache *GlamourCache
+
+	// toolCardCollapsed tracks collapsed state per tool call ID (M8 progressive disclosure).
+	// Persisted across renders so toggle/collapse state survives re-render.
+	toolCardCollapsed map[string]bool
 }
 
 func NewMessageRenderer(t theme.Theme, width int) (*MessageRenderer, error) {
 	mr := &MessageRenderer{
-		theme:         t,
-		styles:        theme.BuildSemanticStyles(t),
-		width:         width,
-		toolCallCache: make(map[string]*types.ToolCall),
-		renderCache:   NewGlamourCache(),
+		theme:             t,
+		styles:            theme.BuildSemanticStyles(t),
+		width:             width,
+		toolCallCache:     make(map[string]*types.ToolCall),
+		renderCache:       NewGlamourCache(),
+		toolCardCollapsed: make(map[string]bool),
 	}
 	if err := mr.createGlamourRenderer(); err != nil {
 		return nil, err
@@ -356,6 +361,10 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 					toolSegments = append(toolSegments, tc.Name)
 					if hasContent {
 						card := NewToolCard(*tc, nil, ToolRunning, t)
+						// M8: Apply persisted collapsed state by tool call ID
+						if tc.ID != "" && r.toolCardCollapsed[tc.ID] {
+							card.SetCollapsed(true)
+						}
 						contentSegments = append(contentSegments, card.Render(contentWidth))
 					}
 				}
@@ -371,6 +380,10 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 			toolSegments = append(toolSegments, tc.Name)
 			if hasContent {
 				card := NewToolCard(tc, nil, ToolRunning, t)
+				// M8: Apply persisted collapsed state by tool call ID
+				if tc.ID != "" && r.toolCardCollapsed[tc.ID] {
+					card.SetCollapsed(true)
+				}
 				contentSegments = append(contentSegments, card.Render(contentWidth))
 			}
 		}
@@ -392,6 +405,10 @@ func (r *MessageRenderer) renderAssistantMessage(msg types.Message, width int) s
 				}
 				if tc != nil {
 					card := NewToolCard(*tc, nil, ToolRunning, t)
+					// M8: Apply persisted collapsed state
+					if tc.ID != "" && r.toolCardCollapsed[tc.ID] {
+						card.SetCollapsed(true)
+					}
 					toolCards = append(toolCards, card.Render(contentWidth))
 				}
 			}
@@ -651,4 +668,28 @@ func WrapWithGutter(content string, gutterChar lipgloss.Style, width int) string
 		)
 	}
 	return strings.Join(result, "\n")
+}
+
+// ─── M8: Tool card collapsed state management ────────────────────────────────
+
+// SetToolCardCollapsed sets the collapsed state for a tool call by ID (M8).
+func (r *MessageRenderer) SetToolCardCollapsed(toolID string, collapsed bool) {
+	r.toolCardCollapsed[toolID] = collapsed
+}
+
+// IsToolCardCollapsed returns the collapsed state for a tool call by ID (M8).
+func (r *MessageRenderer) IsToolCardCollapsed(toolID string) bool {
+	return r.toolCardCollapsed[toolID]
+}
+
+// SetAllToolCardsCollapsed sets collapsed state for all tool cards (M8).
+func (r *MessageRenderer) SetAllToolCardsCollapsed(collapsed bool) {
+	for id := range r.toolCardCollapsed {
+		r.toolCardCollapsed[id] = collapsed
+	}
+}
+
+// ResetToolCardCollapsed clears all collapsed state (M8).
+func (r *MessageRenderer) ResetToolCardCollapsed() {
+	r.toolCardCollapsed = make(map[string]bool)
 }

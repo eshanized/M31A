@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -119,7 +118,8 @@ func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
 	return sm, nil
 }
 
-// View renders the ship summary screen inside a branded ThinBorder card.
+// View renders the ship summary screen content.
+// Header, footer, and chrome are handled by the unified PageLayout.
 func (sm *ShipModel) View() string {
 	if sm.showDemo && sm.demonstration != "" {
 		header := lipgloss.NewStyle().Foreground(sm.theme.Brand).Bold(true).Render("Walkthrough") +
@@ -132,8 +132,7 @@ func (sm *ShipModel) View() string {
 		w = 80
 	}
 
-	// ── Stats Grid (2-column layout) ────────────────────────────────────────
-
+	// ── Stats consolidated to 2 lines ─────────────────────────────────────
 	taskIcon := "✓"
 	taskColor := t.Success
 	if sm.summary.TaskFailed > 0 {
@@ -141,51 +140,39 @@ func (sm *ShipModel) View() string {
 		taskColor = t.Error
 	}
 
-	taskStr := lipgloss.NewStyle().Foreground(t.Text).Render(
-		"Tasks:") + " " +
-		lipgloss.NewStyle().Foreground(taskColor).Render(
-			fmt.Sprintf("%d/%d %s", sm.summary.TaskDone, sm.summary.TaskTotal, taskIcon))
+	// Line 1: Tasks + Files
+	line1 := lipgloss.JoinHorizontal(lipgloss.Left,
+		lipgloss.NewStyle().Foreground(t.Text).Render("Tasks: ")+
+			lipgloss.NewStyle().Foreground(taskColor).Render(
+				fmt.Sprintf("%d/%d %s", sm.summary.TaskDone, sm.summary.TaskTotal, taskIcon)),
+		"  ",
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("│"),
+		"  ",
+		lipgloss.NewStyle().Foreground(t.Text).Render("Files: ")+
+			lipgloss.NewStyle().Foreground(t.Text).Render(
+				fmt.Sprintf("+%d ~%d -%d", sm.summary.FilesAdded, sm.summary.FilesModified, sm.summary.FilesDeleted)),
+	)
 
-	filesStr := lipgloss.NewStyle().Foreground(t.Text).Render("Files:") + " " +
-		lipgloss.NewStyle().Foreground(t.Text).Render(
-			fmt.Sprintf("+%d ~%d -%d", sm.summary.FilesAdded, sm.summary.FilesModified, sm.summary.FilesDeleted))
-
-	tokensStr := ""
-	if sm.summary.TotalTokens > 0 {
-		tokensStr = lipgloss.NewStyle().Foreground(t.Text).Render("Tokens:") + " " +
-			lipgloss.NewStyle().Foreground(t.Text).Render(formatSI(sm.summary.TotalTokens))
-	}
-	costStr := ""
-	if sm.summary.TotalCost > 0 {
-		costStr = lipgloss.NewStyle().Foreground(t.Text).Render("Cost:") + " " +
-			lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("$%.4f", sm.summary.TotalCost))
-	}
-	durationStr := ""
+	// Line 2: Duration + Cost
+	var line2Parts []string
 	if sm.summary.Duration != "" {
-		durationStr = lipgloss.NewStyle().Foreground(t.Text).Render("Duration:") + " " +
-			lipgloss.NewStyle().Foreground(t.Text).Render(sm.summary.Duration)
+		line2Parts = append(line2Parts,
+			lipgloss.NewStyle().Foreground(t.Text).Render("Duration: ")+
+				lipgloss.NewStyle().Foreground(t.Text).Render(sm.summary.Duration))
 	}
-	commitsStr := lipgloss.NewStyle().Foreground(t.Text).Render("Commits:") + " " +
-		lipgloss.NewStyle().Foreground(t.Text).Render(fmt.Sprintf("%d", len(sm.summary.Commits)))
-
-	colWidth := (w - 8) / 2 // account for border padding
-	var rows [][2]string
-	if tokensStr != "" {
-		rows = [][2]string{
-			{taskStr, tokensStr},
-			{filesStr, costStr},
-			{"", durationStr},
-			{"", commitsStr},
-		}
-	} else {
-		rows = [][2]string{
-			{taskStr, durationStr},
-			{filesStr, commitsStr},
-		}
+	if sm.summary.TotalCost > 0 {
+		line2Parts = append(line2Parts,
+			lipgloss.NewStyle().Foreground(t.Text).Render("Cost: ")+
+				lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("$%.4f", sm.summary.TotalCost)))
 	}
-	grid := renderShipStatsGrid(t, rows, colWidth)
+	if sm.summary.TotalTokens > 0 {
+		line2Parts = append(line2Parts,
+			lipgloss.NewStyle().Foreground(t.Text).Render("Tokens: ")+
+				lipgloss.NewStyle().Foreground(t.Text).Render(formatSI(sm.summary.TotalTokens)))
+	}
+	line2 := strings.Join(line2Parts, "  "+lipgloss.NewStyle().Foreground(t.TextMuted).Render("│")+"  ")
 
-	// ── Commit Log ──────────────────────────────────────────────────────────
+	// ── Commit log as secondary content ────────────────────────────────────
 	var commitLines []string
 	for i, c := range sm.summary.Commits {
 		if i >= 5 {
@@ -197,36 +184,26 @@ func (sm *ShipModel) View() string {
 		}
 		commitLines = append(commitLines, fmt.Sprintf("  %s  %s",
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(hash),
-			lipgloss.NewStyle().Foreground(t.Text).Render(c.Message),
+			lipgloss.NewStyle().Foreground(t.TextSecondary).Render(c.Message),
 		))
 	}
 
 	var commitBlock string
 	if len(commitLines) > 0 {
-		commitBlock = strings.Join(commitLines, "\n")
+		commitHeader := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Commits:")
+		commitBlock = commitHeader + "\n" + strings.Join(commitLines, "\n")
 	}
 
-	// ── Card Content ────────────────────────────────────────────────────────
-	var cardContent []string
-	cardContent = append(cardContent, "")
-	cardContent = append(cardContent, grid)
-	cardContent = append(cardContent, "")
+	// ── Assemble (no card wrapper) ────────────────────────────────────────
+	var parts []string
+	parts = append(parts, "")
+	parts = append(parts, line1)
+	parts = append(parts, line2)
 	if commitBlock != "" {
-		cardContent = append(cardContent, commitBlock)
-		cardContent = append(cardContent, "")
+		parts = append(parts, "")
+		parts = append(parts, commitBlock)
 	}
-	cardContent = append(cardContent, "")
+	parts = append(parts, "")
 
-	// ── Wrapping Card ───────────────────────────────────────────────────────
-	content := strings.Join(cardContent, "\n")
-	card := components.Card{
-		Title:   "Session Summary",
-		Content: content,
-		Width:   w - 4,
-		Border:  theme.ThinBorder,
-		Style:   components.CardBrand,
-		Theme:   t,
-	}.Render()
-
-	return card
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

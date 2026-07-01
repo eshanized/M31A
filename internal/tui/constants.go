@@ -36,6 +36,10 @@ const (
 	MaxScreenStack = 20
 )
 
+// UX_V2_CHROME enables the simplified chrome layout (M1).
+// When false, the legacy header/footer rendering is used.
+const UX_V2_CHROME = true
+
 // Layout dimension constants
 const (
 	// MinReplWidth is the minimum width for the REPL content area.

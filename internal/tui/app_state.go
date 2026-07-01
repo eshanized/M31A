@@ -24,6 +24,7 @@ import (
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/metrics"
+	"github.com/eshanized/M31A/pkg/narrative"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
 )
@@ -179,6 +180,11 @@ type AppState struct {
 
 	// Stream cancellation
 	streamCancelFn context.CancelFunc
+
+	// Narrative engine
+	narrativeEngine *narrative.Engine
+	narrativeBridge *narrative.Bridge
+	narrativeState  *NarrativeState
 
 	// Double ctrl+c exit tracking
 	lastCtrlCTime time.Time

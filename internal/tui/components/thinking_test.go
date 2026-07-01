@@ -1,198 +1,226 @@
 package components
 
 import (
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
 
-func TestNewThinkingBlock_DefaultState(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "thinking content",
+func TestThinkingLabel_PlanPhase(t *testing.T) {
+	tests := []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{500 * time.Millisecond, "Analyzing code"},
+		{1 * time.Second, "Analyzing code"},
+		{2 * time.Second, "Planning implementation"},
+		{5 * time.Second, "Planning implementation"},
+		{30 * time.Second, "Planning implementation"},
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	if tb == nil {
-		t.Fatal("expected non-nil ThinkingBlock")
-	}
-	if tb.IsExpanded() {
-		t.Error("expected collapsed by default")
+
+	for _, tt := range tests {
+		t.Run(tt.elapsed.String(), func(t *testing.T) {
+			got := thinkingLabel("plan", "", tt.elapsed)
+			if got != tt.want {
+				t.Errorf("thinkingLabel(\"plan\", \"\", %v) = %q, want %q", tt.elapsed, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestThinkingBlock_RenderCollapsed(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "deep reasoning content",
+func TestThinkingLabel_ExecutePhase(t *testing.T) {
+	tests := []struct {
+		taskAction string
+		elapsed    time.Duration
+		want       string
+	}{
+		{"Write auth handler", 100 * time.Millisecond, "Implementing changes"},
+		{"Write auth handler", 5 * time.Second, "Implementing changes"},
+		{"", 1 * time.Second, "Analyzing code"},
+		{"", 3 * time.Second, "Implementing changes"},
+		{"", 10 * time.Second, "Implementing changes"},
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	result := tb.Render(80)
-	if result == "" {
-		t.Error("expected non-empty collapsed render")
+
+	for _, tt := range tests {
+		t.Run(tt.taskAction, func(t *testing.T) {
+			got := thinkingLabel("execute", tt.taskAction, tt.elapsed)
+			if got != tt.want {
+				t.Errorf("thinkingLabel(\"execute\", %q, %v) = %q, want %q", tt.taskAction, tt.elapsed, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestThinkingBlock_RenderExpanded(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "expanded thinking content here",
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
-	result := tb.Render(80)
-	if result == "" {
-		t.Error("expected non-empty expanded render")
+func TestThinkingLabel_VerifyPhase(t *testing.T) {
+	got := thinkingLabel("verify", "", 2*time.Second)
+	want := "Verifying results"
+	if got != want {
+		t.Errorf("thinkingLabel(\"verify\", \"\", 2s) = %q, want %q", got, want)
 	}
 }
 
-func TestThinkingBlock_Toggle(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "content",
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-
-	tb.Toggle()
-	if !tb.IsExpanded() {
-		t.Error("expected expanded after toggle")
-	}
-
-	tb.Toggle()
-	if tb.IsExpanded() {
-		t.Error("expected collapsed after second toggle")
+func TestThinkingLabel_DiscussPhase(t *testing.T) {
+	got := thinkingLabel("discuss", "", 3*time.Second)
+	want := "Planning implementation"
+	if got != want {
+		t.Errorf("thinkingLabel(\"discuss\", \"\", 3s) = %q, want %q", got, want)
 	}
 }
 
-func TestThinkingBlock_Duration_Under10s(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:       "thinking",
-		Content:    "test",
-		DurationMs: 1200,
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	dur := tb.Duration()
-	if dur != "1.2s" {
-		t.Errorf("expected 1.2s, got %q", dur)
+func TestThinkingLabel_ShipPhase(t *testing.T) {
+	got := thinkingLabel("ship", "", 2*time.Second)
+	want := "Synthesizing"
+	if got != want {
+		t.Errorf("thinkingLabel(\"ship\", \"\", 2s) = %q, want %q", got, want)
 	}
 }
 
-func TestThinkingBlock_Duration_Over10s(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:       "thinking",
-		Content:    "test",
-		DurationMs: 12300,
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	dur := tb.Duration()
-	if dur != "12.3s" {
-		t.Errorf("expected 12.3s, got %q", dur)
+func TestThinkingLabel_RuntimePhase(t *testing.T) {
+	got := thinkingLabel("runtime", "", 1*time.Second)
+	want := "Analyzing code"
+	if got != want {
+		t.Errorf("thinkingLabel(\"runtime\", \"\", 1s) = %q, want %q", got, want)
 	}
 }
 
-func TestThinkingBlock_Duration_Over60s(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:       "thinking",
-		Content:    "test",
-		DurationMs: 83000,
+func TestThinkingLabel_UnknownPhase(t *testing.T) {
+	tests := []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{100 * time.Millisecond, "Analyzing"},
+		{1 * time.Second, "Refining approach"},
+		{5 * time.Second, "Synthesizing"},
+		{10 * time.Second, "Synthesizing"},
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	dur := tb.Duration()
-	if dur != "1m 23s" {
-		t.Errorf("expected 1m 23s, got %q", dur)
+
+	for _, tt := range tests {
+		t.Run(tt.elapsed.String(), func(t *testing.T) {
+			got := thinkingLabel("", "", tt.elapsed)
+			if got != tt.want {
+				t.Errorf("thinkingLabel(\"\", \"\", %v) = %q, want %q", tt.elapsed, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestThinkingBlock_Header_TruncatesWide(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "very long content that should be truncated in header",
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
-	header := tb.Header(20)
-	if header == "" {
-		t.Error("expected non-empty header")
+func TestThinkingLabel_CaseInsensitive(t *testing.T) {
+	got := thinkingLabel("PLAN", "", 5*time.Second)
+	want := "Planning implementation"
+	if got != want {
+		t.Errorf("thinkingLabel(\"PLAN\", \"\", 5s) = %q, want %q", got, want)
 	}
 }
 
-func TestThinkingBlock_FinalizedDuration(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:       "thinking",
-		Content:    "done thinking",
-		DurationMs: 5500,
-	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	dur := tb.Duration()
-	if dur != "5.5s" {
-		t.Errorf("expected 5.5s, got %q", dur)
+func TestThinkingLabel_Duration(t *testing.T) {
+	// Test that the label is consistent regardless of exact duration
+	label1 := thinkingLabel("plan", "", 2*time.Second)
+	label2 := thinkingLabel("plan", "", 2*time.Second)
+	if label1 != label2 {
+		t.Errorf("thinkingLabel should be deterministic, got %q and %q", label1, label2)
 	}
 }
 
-func TestThinkingBlock_LiveDuration(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "live thinking",
+func TestThinkingBlock_SetContext(t *testing.T) {
+	block := &ThinkingBlock{}
+	block.SetContext("execute", "Write auth handler")
+	if block.phase != "execute" {
+		t.Errorf("phase = %q, want %q", block.phase, "execute")
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	time.Sleep(60 * time.Millisecond)
-	dur := tb.Duration()
-	if dur == "0.0s" {
-		t.Errorf("expected non-zero live duration, got %q", dur)
+	if block.taskAction != "Write auth handler" {
+		t.Errorf("taskAction = %q, want %q", block.taskAction, "Write auth handler")
 	}
 }
 
-func TestThinkingBlock_Header_Collapsed(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "content",
+func TestThinkingBlock_Elapsed(t *testing.T) {
+	block := &ThinkingBlock{
+		startedAt: time.Now().Add(-5 * time.Second),
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
-	header := tb.Header(80)
-	// New opencode-style: ▸ for collapsed
-	if !strings.Contains(header, "Thinking") {
-		t.Error("expected 'Thinking' in collapsed header")
+	elapsed := block.Elapsed()
+	if elapsed < 4*time.Second || elapsed > 6*time.Second {
+		t.Errorf("Elapsed() = %v, want ~5s", elapsed)
 	}
 }
 
-func TestThinkingBlock_Header_Expanded(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "content",
+func TestThinkingBlock_Elapsed_WithDurationMs(t *testing.T) {
+	block := &ThinkingBlock{
+		segment: types.MessageSegment{
+			DurationMs: 3000,
+		},
+		startedAt: time.Now().Add(-10 * time.Second),
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), true, 0)
-	header := tb.Header(80)
-	// New opencode-style: ▾ for expanded, with collapse hint
-	if !strings.Contains(header, "Thinking") {
-		t.Error("expected 'Thinking' in expanded header")
+	elapsed := block.Elapsed()
+	if elapsed != 3*time.Second {
+		t.Errorf("Elapsed() = %v, want 3s", elapsed)
 	}
 }
 
-func TestThinkingBlock_AfterToggle(t *testing.T) {
-	seg := types.MessageSegment{
-		Type:    "thinking",
-		Content: "content",
+func TestClassifyThinkingIntent(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      string
+		taskAction string
+		elapsed    time.Duration
+		want       ThinkingIntent
+	}{
+		{"plan short", "plan", "", 500 * time.Millisecond, IntentAnalyzing},
+		{"plan long", "plan", "", 3 * time.Second, IntentPlanning},
+		{"execute with action", "execute", "Write code", 100 * time.Millisecond, IntentImplementing},
+		{"execute no action short", "execute", "", 1 * time.Second, IntentAnalyzing},
+		{"execute no action long", "execute", "", 5 * time.Second, IntentImplementing},
+		{"verify", "verify", "", 2 * time.Second, IntentVerifying},
+		{"discuss", "discuss", "", 3 * time.Second, IntentPlanning},
+		{"ship", "ship", "", 2 * time.Second, IntentSynthesizing},
+		{"runtime", "runtime", "", 1 * time.Second, IntentAnalyzing},
+		{"unknown short", "", "", 500 * time.Millisecond, IntentAnalyzing},
+		{"unknown medium", "", "", 2 * time.Second, IntentRefining},
+		{"unknown long", "", "", 10 * time.Second, IntentSynthesizing},
 	}
-	tb := NewThinkingBlock(seg, theme.Dark(), false, 0)
 
-	// Initially collapsed
-	if tb.IsExpanded() {
-		t.Error("expected initially collapsed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyThinkingIntent(tt.phase, tt.taskAction, tt.elapsed)
+			if got != tt.want {
+				t.Errorf("classifyThinkingIntent(%q, %q, %v) = %d, want %d", tt.phase, tt.taskAction, tt.elapsed, got, tt.want)
+			}
+		})
 	}
-	headerBefore := tb.Header(80)
-	// New format: contains Thinking + expand hint
-	if !strings.Contains(headerBefore, "Thinking") {
-		t.Error("expected 'Thinking' in collapsed header")
+}
+
+func TestIntentLabel(t *testing.T) {
+	tests := []struct {
+		intent  ThinkingIntent
+		elapsed time.Duration
+		want    string
+	}{
+		{IntentPlanning, 2 * time.Second, "Planning implementation"},
+		{IntentImplementing, 2 * time.Second, "Implementing changes"},
+		{IntentVerifying, 2 * time.Second, "Verifying results"},
+		{IntentAnalyzing, 100 * time.Millisecond, "Analyzing"},
+		{IntentAnalyzing, 1 * time.Second, "Analyzing code"},
+		{IntentRefining, 2 * time.Second, "Refining approach"},
+		{IntentResearching, 2 * time.Second, "Researching"},
+		{IntentSynthesizing, 2 * time.Second, "Synthesizing"},
+		{IntentUnknown, 500 * time.Millisecond, "Thinking"},
+		{IntentUnknown, 2 * time.Second, "Thinking…"},
 	}
 
-	// Toggle to expanded
-	tb.Toggle()
-	if !tb.IsExpanded() {
-		t.Error("expected expanded after toggle")
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := intentLabel(tt.intent, tt.elapsed)
+			if got != tt.want {
+				t.Errorf("intentLabel(%d, %v) = %q, want %q", tt.intent, tt.elapsed, got, tt.want)
+			}
+		})
 	}
-	headerAfter := tb.Header(80)
-	// New format: contains Thinking + collapse hint
-	if !strings.Contains(headerAfter, "Thinking") {
-		t.Error("expected 'Thinking' in expanded header")
+}
+
+func TestThinkingLabelExported(t *testing.T) {
+	// Test that the exported function works the same as the internal one
+	got := ThinkingLabel("plan", "", 5*time.Second)
+	want := thinkingLabel("plan", "", 5*time.Second)
+	if got != want {
+		t.Errorf("ThinkingLabel() = %q, want %q", got, want)
 	}
 }

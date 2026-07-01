@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
@@ -242,6 +243,7 @@ func renderLoading(label string, w, h int, t theme.Theme) string {
 
 // renderEmptyState renders a centered empty state with a title and hint,
 // telling the user why the screen is empty and what to do about it.
+// Uses the EmptyState component for consistent styling.
 func renderEmptyState(title, hint string, w, h int, t theme.Theme) string {
 	if w < 1 {
 		w = 40
@@ -250,16 +252,16 @@ func renderEmptyState(title, hint string, w, h int, t theme.Theme) string {
 		h = 3
 	}
 
-	titleStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true)
-
-	content := lipgloss.JoinVertical(lipgloss.Center,
-		titleStyle.Render(title),
-		"",
-		hintStyle.Render(hint),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
+	// Use the EmptyState component for consistent styling
+	es := components.EmptyState{
+		Icon:     "◇",
+		Title:    title,
+		Subtitle: hint,
+		Theme:    t,
+		Width:    w,
+		Height:   h,
+	}
+	return es.Render()
 }
 
 // ─── Formatting utilities ──────────────────────────────────────────────────────
@@ -355,13 +357,6 @@ func SidebarRefreshTicker(ctx context.Context, d time.Duration) tea.Cmd {
 // NextSidebarRefreshTick returns a tea.Cmd for the next sidebar refresh tick.
 func NextSidebarRefreshTick(ctx context.Context, d time.Duration) tea.Cmd {
 	return SidebarRefreshTicker(ctx, d)
-}
-
-// CacheRefreshTicker returns a tea.Cmd that emits a RefreshCacheMsg after d.
-func CacheRefreshTicker(providerName string, d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg {
-		return RefreshCacheMsg{ProviderName: providerName}
-	})
 }
 
 // NextCacheRefreshTick returns a tea.Cmd for the next cache refresh tick.

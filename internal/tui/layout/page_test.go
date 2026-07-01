@@ -22,8 +22,9 @@ func TestDetect(t *testing.T) {
 		{70, Standard},
 		{79, Standard},
 		{80, Full},
-		{120, Full},
-		{200, Full},
+		{119, Full},
+		{120, UltraWide},
+		{200, UltraWide},
 	}
 
 	for _, tt := range tests {

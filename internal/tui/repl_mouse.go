@@ -275,13 +275,13 @@ func (m *ReplModel) handleViewportClick(y int) tea.Cmd {
 	for _, seg := range msg.Segments {
 		if seg.Type == "tool_use" {
 			return func() tea.Msg {
-				return ToolClickMsg{MessageIndex: idx, ToolName: extractToolName(seg.Content)}
+				return ToolClickMsg{MessageIndex: idx, ToolName: extractToolName(seg.Content), ToolID: extractToolID(seg.Content)}
 			}
 		}
 	}
 	for _, tc := range msg.ToolCalls {
 		return func() tea.Msg {
-			return ToolClickMsg{MessageIndex: idx, ToolName: tc.Name}
+			return ToolClickMsg{MessageIndex: idx, ToolName: tc.Name, ToolID: tc.ID}
 		}
 	}
 	return nil
@@ -298,4 +298,18 @@ func extractToolName(segContent string) string {
 		return ""
 	}
 	return n.Name
+}
+
+// extractToolID pulls the "id" field out of a JSON-encoded tool_use
+// segment without fully unmarshaling it. Falls back to "" on any error.
+// M8: used for collapsed state persistence.
+func extractToolID(segContent string) string {
+	type idOnly struct {
+		ID string `json:"id"`
+	}
+	var id idOnly
+	if err := json.Unmarshal([]byte(segContent), &id); err != nil {
+		return ""
+	}
+	return id.ID
 }

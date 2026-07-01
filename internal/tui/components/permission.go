@@ -20,6 +20,10 @@ type PermissionModal struct {
 	styles  theme.SemanticStyles
 	elapsed time.Duration
 	timeout time.Duration
+	// phase is the current workflow phase (e.g. "execute", "plan")
+	phase string
+	// goal is the current workflow goal
+	goal string
 }
 
 func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout time.Duration) *PermissionModal {
@@ -32,6 +36,12 @@ func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout 
 		styles:  theme.BuildSemanticStyles(t),
 		timeout: timeout,
 	}
+}
+
+// SetContext sets the workflow phase and goal for richer descriptions.
+func (m *PermissionModal) SetContext(phase, goal string) {
+	m.phase = phase
+	m.goal = goal
 }
 
 // Clear resets the modal to its inactive state.
@@ -49,25 +59,32 @@ func (m *PermissionModal) Render(width, height int) string {
 		modalWidth = 20
 	}
 
-	// ── Title ─────────────────────────────────────────────────────────────
-	titleLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		s.PermLock.Render("key"),
-		" ",
-		s.PermTitle.Render("Permission Required"),
-	)
+	// Generate plain English description
+	desc := GenerateDescription(m.request, m.phase, m.goal)
 
-	// ── Tool & risk info ──────────────────────────────────────────────────
-	riskBadge := m.riskStyle().Render(fmt.Sprintf(" %s ", riskLabel(m.request.RiskLevel)))
+	// ── Title: "M31A wants to [action]" ──────────────────────────────────
+	actionText := desc.Action
+	if actionText == "" {
+		actionText = "use a tool"
+	}
+	titleLine := s.PermTitle.Render(fmt.Sprintf("M31A wants to %s", actionText))
 
-	toolLine := lipgloss.JoinHorizontal(lipgloss.Top,
-		s.Caption.Render("Tool  "),
-		s.Heading.Render(m.request.ToolName),
-		"  ",
-		s.Caption.Render("Risk  "),
-		riskBadge,
-	)
+	// ── Consequence explanation ───────────────────────────────────────────
+	var consequenceLine string
+	if desc.Consequence != "" {
+		consequenceLine = s.Body.Render(desc.Consequence)
+	}
 
-	// ── Command box ───────────────────────────────────────────────────────
+	// ── Target (if different from action) ─────────────────────────────────
+	var targetLine string
+	if desc.Target != "" {
+		targetLine = s.Caption.Render("Target: ") + s.Body.Render(desc.Target)
+	}
+
+	// ── Risk via border color accent (not text label) ────────────────────
+	// Risk is communicated via the border style, not via a text badge
+
+	// ── Command box (secondary, below divider) ───────────────────────────
 	cmdContentW := modalWidth - 10
 	if cmdContentW < 8 {
 		cmdContentW = 8
@@ -94,7 +111,7 @@ func (m *PermissionModal) Render(width, height int) string {
 		),
 		lipgloss.JoinHorizontal(lipgloss.Top,
 			s.PermKey.Render("[Esc]"),
-			s.PermHint.Render(" Exit"),
+			s.PermHint.Render(" Deny (safe default)"),
 		),
 	)
 
@@ -104,16 +121,15 @@ func (m *PermissionModal) Render(width, height int) string {
 		queueInfo = s.Caption.Render(fmt.Sprintf("  %d tool(s) queued behind this one", m.request.QueueDepth))
 	}
 
-	// ── Countdown ─────────────────────────────────────────────────────────
+	// ── Countdown (only when <5 seconds remaining) ────────────────────────
 	remaining := m.Remaining()
 	var countdown string
 	if remaining <= 0 {
-		countdown = s.PermCountdownErr.Render("Tool will be rejected")
-	} else if remaining <= 30*time.Second {
+		countdown = s.PermCountdownErr.Render("Auto-deny: tool will be rejected")
+	} else if remaining <= 5*time.Second {
 		countdown = s.PermCountdownWarn.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
-	} else {
-		countdown = s.PermCountdown.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
 	}
+	// No countdown shown when >5 seconds (cleaner UI)
 
 	// ── Rule context ──────────────────────────────────────────────────────
 	var ruleInfo string
@@ -127,8 +143,21 @@ func (m *PermissionModal) Render(width, height int) string {
 	// ── Assemble ──────────────────────────────────────────────────────────
 	modalContent := lipgloss.JoinVertical(lipgloss.Top,
 		titleLine,
-		"",
-		toolLine,
+	)
+	if consequenceLine != "" {
+		modalContent = lipgloss.JoinVertical(lipgloss.Top,
+			modalContent,
+			consequenceLine,
+		)
+	}
+	if targetLine != "" {
+		modalContent = lipgloss.JoinVertical(lipgloss.Top,
+			modalContent,
+			targetLine,
+		)
+	}
+	modalContent = lipgloss.JoinVertical(lipgloss.Top,
+		modalContent,
 		"",
 		s.Caption.Render("Command"),
 		cmdBox,
@@ -144,9 +173,14 @@ func (m *PermissionModal) Render(width, height int) string {
 		modalContent,
 		"",
 		keys,
-		"",
-		countdown,
 	)
+	if countdown != "" {
+		modalContent = lipgloss.JoinVertical(lipgloss.Top,
+			modalContent,
+			"",
+			countdown,
+		)
+	}
 	if queueInfo != "" {
 		modalContent = lipgloss.JoinVertical(lipgloss.Top,
 			modalContent,
@@ -250,4 +284,10 @@ func highlightCommand(cmd string, s theme.SemanticStyles) string {
 		}
 	}
 	return result.String()
+}
+
+// HighlightCommand is the exported version of highlightCommand that takes a theme.
+func HighlightCommand(cmd string, t theme.Theme) string {
+	s := theme.BuildSemanticStyles(t)
+	return highlightCommand(cmd, s)
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -151,51 +150,19 @@ func (dm *DiscussModel) View() string {
 			Render("No questions to answer.")
 	}
 
-	// ── Dot progress indicators ─────────────────────────────────────────────
-	// ● = done/current, ○ = pending
-	var dots []string
-	for i := range dm.questions {
-		var dotStyle lipgloss.Style
-		var dot string
-		if i < dm.current {
-			// Done → checkmark in brand
-			dotStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-			dot = "✓"
-		} else if i == dm.current {
-			// Current → filled dot in brand
-			dotStyle = lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
-			dot = "●"
-		} else {
-			// Pending → empty dot in muted
-			dotStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
-			dot = "○"
-		}
-		dots = append(dots, dotStyle.Render(dot))
-	}
-	dotLine := lipgloss.NewStyle().Render(
-		strings.Join(dots, " "))
-
+	// ── Progress: simplified "2 of 3" (no dot indicators for ≤5) ────────
 	progressText := lipgloss.NewStyle().Foreground(t.TextSecondary).
-		Render(fmt.Sprintf("Question %d of %d", dm.current+1, len(dm.questions)))
+		Render(fmt.Sprintf("%d of %d", dm.current+1, len(dm.questions)))
 
-	progress := lipgloss.JoinHorizontal(lipgloss.Left,
-		dotLine, "  ", progressText)
-
-	// ── Question in ThinBorder card with brand left border ───────────────────
+	// ── Question (no card border) ─────────────────────────────────────────
 	question := ""
 	if dm.current < len(dm.questions) {
 		question = dm.questions[dm.current]
 	}
 
-	qCard := components.Card{
-		Content: lipgloss.NewStyle().Foreground(t.Text).Render(question),
-		Width:   w - 6,
-		Border:  theme.ThinBorder,
-		Style:   components.CardBrand,
-		Theme:   t,
-	}.Render()
+	questionText := lipgloss.NewStyle().Foreground(t.Text).Render(question)
 
-	// ── Input area ───────────────────────────────────────────────────────────
+	// ── Input area ───────────────────────────────────────────────────────
 	inputView := dm.input.View()
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -205,7 +172,7 @@ func (dm *DiscussModel) View() string {
 		Width(w - 8).
 		Render(inputView)
 
-	// ── Timer (always visible, changes style when urgent) ─────────────────
+	// ── Timer (only when <30 seconds) ────────────────────────────────────
 	timeoutLine := ""
 	if dm.hasDeadline && dm.timeout > 0 {
 		remaining := int(time.Until(dm.deadline).Seconds())
@@ -215,31 +182,21 @@ func (dm *DiscussModel) View() string {
 		if remaining < 30 {
 			timeoutLine = lipgloss.NewStyle().Foreground(t.Warning).
 				Render(fmt.Sprintf("%ds remaining", remaining))
-		} else {
-			timeoutLine = lipgloss.NewStyle().Foreground(t.TextMuted).
-				Render(fmt.Sprintf("%ds remaining", remaining))
 		}
 	}
 
-	// ── Question separator ─────────────────────────────────────────────────
-	qSep := components.SectionDivider{
-		Width: w - 4,
-		Theme: t,
-	}.Render()
-
-	// ── Assemble ────────────────────────────────────────────────────────────
+	// ── Assemble ──────────────────────────────────────────────────────────
 	parts := []string{
-		"", progress, "",
-		qSep,
-		qCard, "",
+		"",
+		progressText,
+		"",
+		questionText,
+		"",
 		inputBox,
 	}
 	if timeoutLine != "" {
 		parts = append(parts, timeoutLine)
 	}
-	// Key hints
-	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("Enter: submit  Esc: skip  Ctrl+Shift+S: skip all")
-	parts = append(parts, "", hints)
+	// No key hints here — footer handles
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

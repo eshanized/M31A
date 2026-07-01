@@ -244,3 +244,147 @@ func TestToolCard_SanitizesOutput(t *testing.T) {
 		t.Error("stored output still contains original ANSI escape codes after sanitization")
 	}
 }
+
+// ─── M8: Progressive Disclosure Tests ────────────────────────────────────────
+
+func TestM8_ToolCardID(t *testing.T) {
+	input := json.RawMessage(`"cmd"`)
+	call := types.ToolCall{ID: "unique-id-123", Name: "Bash", Input: input}
+	tc := NewToolCard(call, nil, ToolRunning, theme.Dark())
+	if tc.ToolID() != "unique-id-123" {
+		t.Errorf("expected ToolID 'unique-id-123', got %q", tc.ToolID())
+	}
+}
+
+func TestM8_SuccessfulToolCollapsedByDefault(t *testing.T) {
+	input := json.RawMessage(`"echo hello"`)
+	call := types.ToolCall{ID: "m8-1", Name: "Bash", Input: input}
+	result := &types.ToolResult{
+		ToolCallID: "m8-1",
+		Output:     "hello",
+		DurationMs: 50,
+	}
+	tc := NewToolCard(call, result, ToolSuccess, theme.Dark())
+	if !tc.IsCollapsed() {
+		t.Error("M8: successful tools should be collapsed by default")
+	}
+}
+
+func TestM8_FailedToolAutoExpands(t *testing.T) {
+	input := json.RawMessage(`"badcmd"`)
+	call := types.ToolCall{ID: "m8-2", Name: "Bash", Input: input}
+	result := &types.ToolResult{
+		ToolCallID: "m8-2",
+		Output:     "",
+		Error:      "command not found",
+		DurationMs: 50,
+	}
+	tc := NewToolCard(call, result, ToolError, theme.Dark())
+	if tc.IsCollapsed() {
+		t.Error("M8: failed tools should be auto-expanded")
+	}
+}
+
+func TestM8_RunningToolNotAutoCollapsed(t *testing.T) {
+	input := json.RawMessage(`"cmd"`)
+	call := types.ToolCall{ID: "m8-3", Name: "Bash", Input: input}
+	tc := NewToolCard(call, nil, ToolRunning, theme.Dark())
+	if tc.IsCollapsed() {
+		t.Error("M8: running tools should not be auto-collapsed")
+	}
+}
+
+func TestM8_ToggleCollapsedState(t *testing.T) {
+	input := json.RawMessage(`"cmd"`)
+	call := types.ToolCall{ID: "m8-4", Name: "Bash", Input: input}
+	tc := NewToolCard(call, nil, ToolRunning, theme.Dark())
+	initial := tc.IsCollapsed()
+	tc.Toggle()
+	if tc.IsCollapsed() == initial {
+		t.Error("M8: Toggle should change collapsed state")
+	}
+	tc.Toggle()
+	if tc.IsCollapsed() != initial {
+		t.Error("M8: second Toggle should restore original state")
+	}
+}
+
+func TestM8_SetCollapsed(t *testing.T) {
+	input := json.RawMessage(`"cmd"`)
+	call := types.ToolCall{ID: "m8-5", Name: "Bash", Input: input}
+	tc := NewToolCard(call, nil, ToolRunning, theme.Dark())
+	tc.SetCollapsed(true)
+	if !tc.IsCollapsed() {
+		t.Error("M8: SetCollapsed(true) should set collapsed")
+	}
+	tc.SetCollapsed(false)
+	if tc.IsCollapsed() {
+		t.Error("M8: SetCollapsed(false) should unset collapsed")
+	}
+}
+
+func TestM8_CollapsedStatePersistence(t *testing.T) {
+	// Simulate: create card, collapse it, create renderer, check state persists
+	input := json.RawMessage(`"cmd"`)
+	call := types.ToolCall{ID: "m8-persist", Name: "Bash", Input: input}
+	tc := NewToolCard(call, nil, ToolRunning, theme.Dark())
+	tc.SetCollapsed(true)
+
+	// Create a renderer and check that collapsed state is applied
+	mr, err := NewMessageRenderer(theme.Dark(), 80)
+	if err != nil {
+		t.Fatalf("failed to create MessageRenderer: %v", err)
+	}
+	mr.SetToolCardCollapsed("m8-persist", true)
+	if !mr.IsToolCardCollapsed("m8-persist") {
+		t.Error("M8: collapsed state should persist in renderer")
+	}
+}
+
+func TestM8_SetAllToolCardsCollapsed(t *testing.T) {
+	mr, err := NewMessageRenderer(theme.Dark(), 80)
+	if err != nil {
+		t.Fatalf("failed to create MessageRenderer: %v", err)
+	}
+	mr.SetToolCardCollapsed("id-1", false)
+	mr.SetToolCardCollapsed("id-2", false)
+	mr.SetToolCardCollapsed("id-3", false)
+
+	mr.SetAllToolCardsCollapsed(true)
+
+	if !mr.IsToolCardCollapsed("id-1") || !mr.IsToolCardCollapsed("id-2") || !mr.IsToolCardCollapsed("id-3") {
+		t.Error("M8: SetAllToolCardsCollapsed should collapse all")
+	}
+}
+
+func TestM8_ResetToolCardCollapsed(t *testing.T) {
+	mr, err := NewMessageRenderer(theme.Dark(), 80)
+	if err != nil {
+		t.Fatalf("failed to create MessageRenderer: %v", err)
+	}
+	mr.SetToolCardCollapsed("id-1", true)
+	mr.ResetToolCardCollapsed()
+	if mr.IsToolCardCollapsed("id-1") {
+		t.Error("M8: ResetToolCardCollapsed should clear all state")
+	}
+}
+
+func TestM8_RenderingShowsExpandHint(t *testing.T) {
+	input := json.RawMessage(`"echo test"`)
+	call := types.ToolCall{ID: "m8-hint", Name: "Bash", Input: input}
+	result := &types.ToolResult{
+		ToolCallID: "m8-hint",
+		Output:     "test output\nline2\nline3",
+		DurationMs: 50,
+	}
+	tc := NewToolCard(call, result, ToolSuccess, theme.Dark())
+	// Successful tool should be collapsed by default
+	if !tc.IsCollapsed() {
+		t.Error("M8: successful tool should be collapsed")
+	}
+	// Render should include expand hint
+	rendered := tc.Render(80)
+	if !strings.Contains(rendered, "Enter to expand") {
+		t.Error("M8: collapsed successful tool should show expand hint")
+	}
+}

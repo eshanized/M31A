@@ -12,13 +12,16 @@ const (
 	Standard
 	// Full: ≥ 80 cols — sidebar visible, all chrome, full key hints.
 	Full
+	// UltraWide: ≥ 120 cols — wider sidebar, more breathing room.
+	UltraWide
 )
 
 // Width thresholds.
 const (
-	MinWidth    = 40
-	CompactMax  = 59
-	StandardMax = 79
+	MinWidth     = 40
+	CompactMax   = 59
+	StandardMax  = 79
+	UltraWideMax = 119
 )
 
 // Detect returns the breakpoint for a given terminal width.
@@ -30,8 +33,10 @@ func Detect(width int) Breakpoint {
 		return Compact
 	case width <= StandardMax:
 		return Standard
-	default:
+	case width <= UltraWideMax:
 		return Full
+	default:
+		return UltraWide
 	}
 }
 

@@ -19,6 +19,10 @@ type ThinkingBlock struct {
 	focused      bool
 	startedAt    time.Time
 	scrollOffset int
+	// phase is the current workflow phase (e.g. "execute", "plan")
+	phase string
+	// taskAction is the current task action (if any)
+	taskAction string
 	// Cached duration to avoid recalculating every render
 	lastDurationStr string
 	lastDurationAt  time.Time
@@ -40,6 +44,12 @@ func NewThinkingBlock(segment types.MessageSegment, t theme.Theme, expanded bool
 	}
 }
 
+// SetContext sets the workflow phase and task action for intent labels.
+func (b *ThinkingBlock) SetContext(phase, taskAction string) {
+	b.phase = phase
+	b.taskAction = taskAction
+}
+
 // Render renders the thinking block as a compact inline element:
 //
 // Collapsed:  ╭─ ⠹ Thinking · 1.2s ──────────────────╮
@@ -48,12 +58,15 @@ func (b *ThinkingBlock) Render(width int) string {
 	s := b.styles
 	contentWidth := width - 4 // account for padding
 
+	// Get intent label instead of timer
+	elapsed := b.Elapsed()
+	intentLabel := thinkingLabel(b.phase, b.taskAction, elapsed)
+
 	if !b.expanded {
 		// Collapsed: styled capsule with content preview
-		durStr := b.Duration()
 		spinner := "⠹" // static thinking indicator; parent spinner provides animation
 		spinnerStyled := s.ThinkingToggle.Bold(true).Render(spinner)
-		labelStyled := s.ThinkingLabel.Render(" Thinking · " + durStr)
+		labelStyled := s.ThinkingLabel.Render(" " + intentLabel)
 
 		// Content preview: first line truncated to fit
 		preview := ""
@@ -98,7 +111,7 @@ func (b *ThinkingBlock) Render(width int) string {
 
 	// Expanded: panel with ┃ left-gutter border + italic thinking content + footer
 
-	// Header line: toggle + "Thinking" + duration
+	// Header line: toggle + intent label + duration
 	headerText := b.Header(contentWidth)
 	header := lipgloss.NewStyle().
 		Border(theme.ThinBorder).
@@ -160,7 +173,7 @@ func (b *ThinkingBlock) Render(width int) string {
 	}
 	body := strings.Join(bodyPadded, "\n")
 
-	// Footer: duration
+	// Footer: duration (shown only when expanded for tooltip/expandable)
 	durStr := b.Duration()
 	footer := lipgloss.NewStyle().
 		Border(theme.ThinBorder).
@@ -168,7 +181,7 @@ func (b *ThinkingBlock) Render(width int) string {
 		BorderTop(false).BorderBottom(true).BorderLeft(true).BorderRight(true).
 		Padding(0, 1).
 		Width(contentWidth + 2).
-		Render(s.ThinkingLabel.Render(durStr))
+		Render(s.ThinkingMuted.Render(durStr))
 
 	return header + "\n" + body + "\n" + footer
 }
@@ -263,7 +276,9 @@ func (b *ThinkingBlock) Header(width int) string {
 		}
 	}
 
-	durStr := b.Duration()
+	// Use intent label instead of "Thinking · duration"
+	elapsed := b.Elapsed()
+	intent := thinkingLabel(b.phase, b.taskAction, elapsed)
 
 	toggleStyle := s.ThinkingToggle
 	if b.focused {
@@ -271,6 +286,102 @@ func (b *ThinkingBlock) Header(width int) string {
 	}
 
 	return toggleStyle.Render(toggle) +
-		s.ThinkingLabel.Render(fmt.Sprintf(" Thinking · %s", durStr)) +
+		s.ThinkingLabel.Render(" "+intent) +
 		s.ThinkingMuted.Render(hint)
+}
+
+// Elapsed returns the elapsed time since thinking started.
+func (b *ThinkingBlock) Elapsed() time.Duration {
+	if b.segment.DurationMs > 0 {
+		return time.Duration(b.segment.DurationMs) * time.Millisecond
+	}
+	return time.Since(b.startedAt)
+}
+
+// thinkingLabel returns an intent-based label for the thinking state.
+func thinkingLabel(phase, taskAction string, elapsed time.Duration) string {
+	intent := classifyThinkingIntent(phase, taskAction, elapsed)
+	return intentLabel(intent, elapsed)
+}
+
+// ThinkingLabel is the exported version of thinkingLabel for use in other packages.
+func ThinkingLabel(phase, taskAction string, elapsed time.Duration) string {
+	return thinkingLabel(phase, taskAction, elapsed)
+}
+
+// ThinkingIntent represents the type of work the AI is doing.
+type ThinkingIntent int
+
+const (
+	IntentUnknown ThinkingIntent = iota
+	IntentPlanning
+	IntentImplementing
+	IntentVerifying
+	IntentAnalyzing
+	IntentRefining
+	IntentResearching
+	IntentSynthesizing
+)
+
+func classifyThinkingIntent(phase, taskAction string, elapsed time.Duration) ThinkingIntent {
+	phase = strings.ToLower(phase)
+
+	switch phase {
+	case "plan":
+		if elapsed < 2*time.Second {
+			return IntentAnalyzing
+		}
+		return IntentPlanning
+	case "execute":
+		if taskAction != "" {
+			return IntentImplementing
+		}
+		if elapsed < 3*time.Second {
+			return IntentAnalyzing
+		}
+		return IntentImplementing
+	case "verify":
+		return IntentVerifying
+	case "discuss":
+		return IntentPlanning
+	case "ship":
+		return IntentSynthesizing
+	case "runtime":
+		return IntentAnalyzing
+	default:
+		if elapsed < 1*time.Second {
+			return IntentAnalyzing
+		}
+		if elapsed < 5*time.Second {
+			return IntentRefining
+		}
+		return IntentSynthesizing
+	}
+}
+
+func intentLabel(intent ThinkingIntent, elapsed time.Duration) string {
+	switch intent {
+	case IntentPlanning:
+		return "Planning implementation"
+	case IntentImplementing:
+		return "Implementing changes"
+	case IntentVerifying:
+		return "Verifying results"
+	case IntentAnalyzing:
+		if elapsed < 500*time.Millisecond {
+			return "Analyzing"
+		}
+		return "Analyzing code"
+	case IntentRefining:
+		return "Refining approach"
+	case IntentResearching:
+		return "Researching"
+	case IntentSynthesizing:
+		return "Synthesizing"
+	default:
+		if elapsed < 1*time.Second {
+			return "Thinking"
+		}
+		return "Thinking…"
+	}
 }

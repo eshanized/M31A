@@ -20,19 +20,10 @@ func (hm *HomeModel) renderHome() string {
 		h = 24
 	}
 
-	// Logo with glow effect
-	logoBlock := components.RenderBigLogo(t.Brand, true, w)
+	// Logo without glow effect (simplified chrome)
+	logoBlock := components.RenderBigLogo(t.Brand, false, w)
 
-	// Add gradient glow line below logo
-	glowWidth := w / 2
-	if glowWidth > 40 {
-		glowWidth = 40
-	}
-	glowStyle := lipgloss.NewStyle().
-		Foreground(t.Brand).
-		Faint(true)
-	glowLine := glowStyle.Render(strings.Repeat("·", glowWidth))
-	glowBlock := lipgloss.JoinVertical(lipgloss.Center, logoBlock, glowLine)
+	glowBlock := logoBlock
 
 	promptMaxW := w * 7 / 10
 	if promptMaxW > 75 {
@@ -52,23 +43,20 @@ func (hm *HomeModel) renderHome() string {
 
 	tipsBlock := hm.renderTips(w)
 
-	versionLine := ""
-	if hm.version != "" {
-		versionLine = lipgloss.NewStyle().
-			Foreground(t.TextMuted).
-			Render("v" + hm.version)
-	}
+	// Tagline below logo (replaces version display)
+	tagline := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Faint(true).
+		Render("Autonomous coding agent")
 
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		"",
 		glowBlock,
-		"",
+		tagline,
 		"",
 		inputBox,
 		"",
 		tipsBlock,
-		"",
-		versionLine,
 	)
 
 	// Overlay slash suggestions if visible
@@ -77,14 +65,12 @@ func (hm *HomeModel) renderHome() string {
 		content = lipgloss.JoinVertical(lipgloss.Center,
 			"",
 			glowBlock,
-			"",
+			tagline,
 			"",
 			inputBox,
 			suggestionsBox,
 			"",
 			tipsBlock,
-			"",
-			versionLine,
 		)
 	}
 

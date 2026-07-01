@@ -99,28 +99,23 @@ func (b *BaseRenderer) RenderGenericOutput(output string, truncated bool, collap
 	return s.SecondaryText.Width(width).Padding(0, 1).Render(output)
 }
 
+func (b *BaseRenderer) RenderInput(call types.ToolCall, width int) string {
+	s := b.styles
+	input := string(call.Input)
+	if len(input) > 200 {
+		input = input[:200] + "..."
+	}
+	return s.Muted.Render(input)
+}
+
+func (b *BaseRenderer) RenderOutput(result *types.ToolResult, state ToolState, durationMs int64, truncated bool, collapsed bool, width int) string {
+	if result == nil {
+		return ""
+	}
+	return b.RenderGenericOutput(result.Output, truncated, collapsed, width)
+}
+
 func RendererForTool(toolName string, t theme.Theme) ToolRenderer {
 	s := theme.BuildSemanticStyles(t)
-	switch toolName {
-	case "Bash":
-		return &BashRenderer{BaseRenderer: BaseRenderer{toolName: "Bash", theme: t, styles: s}}
-	case "Edit":
-		return &EditRenderer{BaseRenderer: BaseRenderer{toolName: "Edit", theme: t, styles: s}}
-	case "FileRead":
-		return &FileReadRenderer{BaseRenderer: BaseRenderer{toolName: "FileRead", theme: t, styles: s}}
-	case "FileWrite":
-		return &FileWriteRenderer{BaseRenderer: BaseRenderer{toolName: "FileWrite", theme: t, styles: s}}
-	case "TodoWrite":
-		return &TodoWriteRenderer{BaseRenderer: BaseRenderer{toolName: "TodoWrite", theme: t, styles: s}}
-	case "Grep":
-		return &GrepRenderer{BaseRenderer: BaseRenderer{toolName: "Grep", theme: t, styles: s}}
-	case "Glob":
-		return &GlobRenderer{BaseRenderer: BaseRenderer{toolName: "Glob", theme: t, styles: s}}
-	case "WebFetch":
-		return &WebFetchRenderer{BaseRenderer: BaseRenderer{toolName: "WebFetch", theme: t, styles: s}}
-	case "AskUserQuestion":
-		return &AskUserQuestionRenderer{BaseRenderer: BaseRenderer{toolName: "AskUserQuestion", theme: t, styles: s}}
-	default:
-		return &GenericRenderer{BaseRenderer: BaseRenderer{toolName: toolName, theme: t, styles: s}}
-	}
+	return &BaseRenderer{toolName: toolName, theme: t, styles: s}
 }

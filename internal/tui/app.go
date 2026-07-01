@@ -477,9 +477,15 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 	}
 
 	// Connect the MsgEmitter so workflow events reach the TUI
-	emitter := newChannelEmitter()
-	engine.SetMsgEmitter(emitter)
-	m.emitterCh = emitter.ch
+	// Use narrative-aware emitter to intercept and process workflow messages
+	narrativeEmitter := newNarrativeEmitter(nil, &globalDropCounter)
+	narrativeEmitter.inner.ch = make(chan tea.Msg, ChannelCap)
+	engine.SetMsgEmitter(narrativeEmitter)
+	m.emitterCh = narrativeEmitter.inner.ch
+	m.narrativeEngine = narrativeEmitter.engine
+	m.narrativeBridge = narrativeEmitter.bridge
+	m.narrativeState = NewNarrativeState()
+	m.sidebarModel.SetNarrativeState(m.narrativeState)
 
 	// Wire TodoWrite callback to update sidebar
 	m.wireTodoWriteCallback()

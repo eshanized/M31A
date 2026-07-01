@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -84,17 +83,14 @@ func RenderPage(chrome PageChrome, content string, header HeaderInfo, footer Foo
 
 // BuildHeader renders the unified 1-line header bar.
 //
-// Layout (premium): M31A │ breadcrumb ········ model [provider] [ctx]
-// Uses │ separators and leader dots to create visual depth.
+// Layout: M31A  breadcrumb ···························· model
+// Simplified chrome: no leader dots, no provider badge, no context meter.
 func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme, cache *theme.StyleCache) string {
 	if width < 20 {
 		return strings.Repeat(" ", width)
 	}
 
 	s := cache.S
-
-	sep := s.SeparatorV.Render(" │ ")
-	sepW := 3 // visible width of " │ "
 
 	// Left zone: brand name
 	brand := s.HeaderBrand.Render(info.Brand)
@@ -108,49 +104,34 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme, cache
 		crumbW = lipgloss.Width(crumb)
 	}
 
-	// Right zone: context meter + model + provider (Full only)
+	// Right zone: model name only (Full+), no provider badge, no context meter
 	var right string
 	rightW := 0
-	if bp >= Full {
-		var parts []string
-		if info.CtxTotal > 0 && info.CtxUsed > 0 {
-			ctxMeter := renderContextMeter(info.CtxUsed, info.CtxTotal, info.CtxHistory, cache)
-			if ctxMeter != "" {
-				parts = append(parts, ctxMeter)
-			}
-		}
-		if info.ModelName != "" {
-			parts = append(parts, s.Muted.Render(info.ModelName))
-		}
-		if info.Provider != "" {
-			parts = append(parts, renderProvBadge(s, info.Provider))
-		}
-		if len(parts) > 0 {
-			right = strings.Join(parts, " ")
-			rightW = lipgloss.Width(right)
-		}
+	if bp >= Full && info.ModelName != "" {
+		right = s.Muted.Render(info.ModelName)
+		rightW = lipgloss.Width(right)
 	}
 
-	// Compute leader-dot fill between crumb and right zone.
-	leftFixed := brandW + sepW + crumbW
-	rightFixed := 0
-	if right != "" {
-		rightFixed = sepW + rightW
+	// Compute space between crumb and right zone using spaces (no leader dots)
+	leftFixed := brandW + crumbW
+	if crumb != "" {
+		leftFixed += 2 // spacer between brand and crumb
 	}
+	rightFixed := rightW
 	fillW := width - leftFixed - rightFixed
 	if fillW < 1 {
 		fillW = 1
 	}
-	dots := s.HeaderDots.Render(strings.Repeat("·", fillW))
+	fill := strings.Repeat(" ", fillW)
 
 	var result string
 	if crumb != "" {
-		result = brand + sep + crumb + dots
+		result = brand + "  " + crumb + fill
 	} else {
-		result = brand + dots
+		result = brand + fill
 	}
 	if right != "" {
-		result += sep + right
+		result += right
 	}
 
 	// Final width guard
@@ -163,57 +144,10 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme, cache
 	return result
 }
 
-// renderContextMeter renders a compact inline context usage bar for the header.
-func renderContextMeter(used, total int, history []int, cache *theme.StyleCache) string {
-	if total <= 0 || used <= 0 {
-		return ""
-	}
-	s := cache.S
-
-	pct := float64(used) / float64(total)
-	if pct < 0.15 {
-		return ""
-	}
-
-	const barW = 6
-	filled := int(pct * barW)
-	if filled > barW {
-		filled = barW
-	}
-	if filled < 0 {
-		filled = 0
-	}
-
-	var ctxColor lipgloss.Style
-	switch {
-	case pct >= 0.90:
-		ctxColor = s.ErrorText
-	case pct >= 0.70:
-		ctxColor = s.WarningText
-	default:
-		ctxColor = s.Muted
-	}
-
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
-	pctLabel := intToStr(int(pct*100)) + "%"
-	result := ctxColor.Render(bar + " " + pctLabel)
-
-	if len(history) > 1 {
-		sparkW := 5
-		if len(history) < sparkW {
-			sparkW = len(history)
-		}
-		spark := components.Sparkline{Values: history, Width: sparkW, Theme: cache.Theme}
-		result += " " + spark.Render()
-	}
-
-	return result
-}
-
 // BuildFooter renders the unified 1-line footer bar.
 //
-// Layout (premium): ⌂ cwd ⎇ branch │ ⠹ responding... │ ctrl+p · ctrl+b  $0.02
-// Uses │ separators to create distinct zones with visual weight.
+// Layout: ⌂ cwd ⎇ branch  ·  ⠹ responding...  ·  ctrl+p · ctrl+b
+// Simplified chrome: no cost, no context ring, no │ separators.
 func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache *theme.StyleCache) string {
 	if width < 10 {
 		return strings.Repeat(" ", width)
@@ -221,7 +155,6 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 
 	s := cache.S
 
-	sep := s.SeparatorV.Render(" │ ")
 	dotSep := s.SeparatorLine.Render(" · ")
 
 	// Left zone: ⌂ cwd  ⎇ branch
@@ -261,7 +194,7 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 		}
 	}
 
-	// Right zone: keyboard hints (dot-separated) + cost
+	// Right zone: keyboard hints only (no cost, no token count)
 	var rightParts []string
 	if ShowFooterHints(width) {
 		hintStrs := make([]string, 0, len(info.KeyboardHints))
@@ -272,21 +205,9 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 			rightParts = append(rightParts, strings.Join(hintStrs, dotSep))
 		}
 	}
-	if ShowFooterCost(width) && info.ShowCost && info.TokenCount > 0 {
-		rightParts = append(rightParts, s.FooterHint.Render(formatTokenCount(info.TokenCount)))
-		if info.Cost > 0 {
-			var costStr string
-			if info.Cost < 0.01 {
-				costStr = "<$0.01"
-			} else {
-				costStr = "$" + formatCost(info.Cost)
-			}
-			rightParts = append(rightParts, s.WarningText.Render(costStr))
-		}
-	}
 	right := strings.Join(rightParts, "  ")
 
-	// Compose with │ separators between non-empty zones
+	// Compose with · separators between non-empty zones
 	var zones []string
 	if left != "" {
 		zones = append(zones, left)
@@ -298,7 +219,7 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 		zones = append(zones, right)
 	}
 
-	result := strings.Join(zones, sep)
+	result := strings.Join(zones, dotSep)
 	resultW := lipgloss.Width(result)
 
 	// Overflow: progressively drop zones then truncate.
@@ -310,7 +231,7 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 		if center != "" {
 			zones2 = append(zones2, center)
 		}
-		result = strings.Join(zones2, sep)
+		result = strings.Join(zones2, dotSep)
 		resultW = lipgloss.Width(result)
 	}
 	if resultW > width && left != "" {
@@ -456,17 +377,4 @@ func intToStr(n int) string {
 		return "-" + string(digits)
 	}
 	return string(digits)
-}
-
-// CenterText centers a styled text within a given width.
-func CenterText(text string, style lipgloss.Style, width int) string {
-	rendered := style.Render(text)
-	textWidth := lipgloss.Width(rendered)
-	padding := width - textWidth
-	if padding <= 0 {
-		return rendered
-	}
-	leftPad := padding / 2
-	rightPad := padding - leftPad
-	return strings.Repeat(" ", leftPad) + rendered + strings.Repeat(" ", rightPad)
 }

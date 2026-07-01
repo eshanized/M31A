@@ -376,6 +376,15 @@ func (m *ReplModel) renderMessages() {
 
 	rw := m.replWidth()
 
+	// M8: Sync tool card collapsed state to the renderer before rendering
+	if m.msgRenderer != nil {
+		for _, card := range m.toolCards {
+			if card.ToolID() != "" {
+				m.msgRenderer.SetToolCardCollapsed(card.ToolID(), card.IsCollapsed())
+			}
+		}
+	}
+
 	// During streaming, use incremental rendering if we have cached content
 	if m.streaming && m.cachedMessageContent != "" && len(m.messages) > 0 {
 		m.renderMessagesIncremental(rw)

@@ -217,6 +217,12 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			m.slashSuggestions = nil
 			return nil
 		}
+		// M8: Collapse all expanded tool cards
+		if m.hasExpandedToolCards() {
+			return func() tea.Msg {
+				return ToolCollapseAllMsg{}
+			}
+		}
 		// PERF-41: Save input before clearing for undo
 		current := m.textarea.Value()
 		if current != "" && m.savedInput == "" {
@@ -517,7 +523,25 @@ type ThinkingBlockToggleMsg struct {
 // ToolClickMsg is emitted when a mouse click lands on a tool card inside
 // the REPL viewport. MessageIndex identifies the message; ToolName is the
 // name of the first tool_use segment in that message.
+// M8: ToolID is the unique tool call ID for collapsed state persistence.
 type ToolClickMsg struct {
 	MessageIndex int
 	ToolName     string
+	ToolID       string // M8: unique tool call ID
+}
+
+// ToolCollapseAllMsg is emitted when the user presses Escape to collapse
+// all expanded tool cards (M8).
+type ToolCollapseAllMsg struct{}
+
+// hasExpandedToolCards returns true if any tool card in the current message set
+// is expanded (not collapsed). Used by Escape handler to decide whether to
+// collapse tool cards or clear input (M8).
+func (m *ReplModel) hasExpandedToolCards() bool {
+	for _, card := range m.toolCards {
+		if !card.IsCollapsed() {
+			return true
+		}
+	}
+	return false
 }

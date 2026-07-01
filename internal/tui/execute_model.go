@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -171,72 +170,61 @@ func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 // Header, footer, and chrome are handled by the unified PageLayout.
 func (em *ExecuteModel) View() string {
 	t := em.theme
-	w := em.width
 
-	// Progress info row (inline with task content)
 	done, total, failed := em.countTasks()
-	pct := 0
-	if total > 0 {
-		pct = int(math.Round(float64(done) / float64(total) * 100))
-	}
 
-	progressLine := lipgloss.NewStyle().Foreground(t.TextSecondary).
-		Render(fmt.Sprintf("%d/%d tasks", done, total))
+	// ── Current activity label (replaces stats line) ─────────────────────
+	activityLabel := em.currentActivityLabel()
 
+	// ── Single subtle progress line ───────────────────────────────────────
+	var progressParts []string
 	if failed > 0 {
-		progressLine += " " + lipgloss.NewStyle().Foreground(t.Error).
-			Render(fmt.Sprintf("(%d failed)", failed))
+		progressParts = append(progressParts, lipgloss.NewStyle().Foreground(t.Error).
+			Render(fmt.Sprintf("%d failed", failed)))
 	}
-
-	progressLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf("%d%%", pct))
-
-	elapsed := time.Since(em.startedAt)
-	progressLine += " " + lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render(fmt.Sprintf("· %ds", int(elapsed.Seconds())))
-
-	// ETA based on elapsed time and completion rate
-	if done > 0 && done < total {
-		perTask := elapsed.Seconds() / float64(done)
-		etaSec := int(math.Round(perTask * float64(total-done)))
-		progressLine += lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render(fmt.Sprintf(" · ETA %ds", etaSec))
+	if done > 0 {
+		progressParts = append(progressParts, lipgloss.NewStyle().Foreground(t.TextMuted).
+			Render(fmt.Sprintf("%d/%d", done, total)))
 	}
+	progressLine := strings.Join(progressParts, " ")
 
 	if em.paused {
 		progressLine += "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("PAUSED")
 	}
 
-	// Animated progress bar
-	em.animatedProg.Width = w
-	if em.animatedProg.Width > 60 {
-		em.animatedProg.Width = 60
-	}
-	progressBar := em.animatedProg.Render()
-
-	// Thin separator
-	sep := lipgloss.NewStyle().Foreground(t.BorderSubtle).
-		Render(strings.Repeat("─", w))
-
-	// Key hints
-	hints := lipgloss.NewStyle().Foreground(t.TextMuted).
-		Render("j/k: scroll  p: pause  Esc: back")
-
+	// ── Assemble ──────────────────────────────────────────────────────────
 	return lipgloss.JoinVertical(lipgloss.Left,
+		activityLabel,
 		progressLine,
-		progressBar,
-		sep,
 		em.viewport.View(),
-		hints,
 	)
+}
+
+// currentActivityLabel returns a human-readable label of what's happening now.
+func (em *ExecuteModel) currentActivityLabel() string {
+	t := em.theme
+
+	if em.currentTask >= 0 && em.currentTask < len(em.tasks) {
+		task := em.tasks[em.currentTask]
+		frame := em.spinner.Peek()
+		return lipgloss.NewStyle().Foreground(t.Brand).Render(frame) + " " +
+			lipgloss.NewStyle().Foreground(t.Text).Render(task.Action)
+	}
+
+	// Check if all done
+	done, total, _ := em.countTasks()
+	if done == total && total > 0 {
+		return lipgloss.NewStyle().Foreground(t.Success).Render("✓ All tasks complete")
+	}
+
+	return lipgloss.NewStyle().Foreground(t.TextMuted).Render("Preparing tasks…")
 }
 
 func (em *ExecuteModel) renderTasks() string {
 	t := em.theme
 	var lines []string
-	for i, task := range em.tasks {
-		statusBadge := taskStatusBadge(task.Status, t)
 
+	for i, task := range em.tasks {
 		// Dim everything when paused
 		var lineStyle lipgloss.Style
 		if em.paused {
@@ -245,6 +233,26 @@ func (em *ExecuteModel) renderTasks() string {
 			lineStyle = lipgloss.NewStyle()
 		}
 
+		// ── Completed tasks: collapse to single line with ✓ ───────────────
+		if task.Status == types.StatusDone {
+			num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
+			checkmark := lipgloss.NewStyle().Foreground(t.Success).Render("✓")
+			action := lineStyle.Foreground(t.TextSecondary).Render(task.Action)
+			lines = append(lines, fmt.Sprintf("  %s %s %s", num, checkmark, action))
+			continue
+		}
+
+		// ── Failed tasks: show error inline (red, expanded) ───────────────
+		if task.Status == types.StatusFailed {
+			num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
+			crossmark := lipgloss.NewStyle().Foreground(t.Error).Render("✗")
+			action := lipgloss.NewStyle().Foreground(t.Error).Render(task.Action)
+			lines = append(lines, fmt.Sprintf("  %s %s %s", num, crossmark, action))
+			continue
+		}
+
+		// ── Running task: show with spinner ───────────────────────────────
+		statusBadge := taskStatusBadge(task.Status, t)
 		spinner := ""
 		if !em.paused && task.Status == types.StatusRunning {
 			spinner = " " + renderTaskSpinner(em)
@@ -273,6 +281,16 @@ func (em *ExecuteModel) renderTasks() string {
 			}
 		}
 	}
+
+	// ── Pending tasks: dimmed ────────────────────────────────────────────
+	for i, task := range em.tasks {
+		if task.Status == types.StatusPending || task.Status == "" {
+			num := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(fmt.Sprintf("%3d.", i+1))
+			action := lipgloss.NewStyle().Faint(true).Render(task.Action)
+			lines = append(lines, fmt.Sprintf("  %s ○ %s", num, action))
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 

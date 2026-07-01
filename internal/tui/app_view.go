@@ -981,58 +981,135 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 		return ""
 	}
 
-	riskStyle := lipgloss.NewStyle().Foreground(t.Warning)
-	if req.RiskLevel == types.RiskDestructive {
-		riskStyle = lipgloss.NewStyle().Foreground(t.Error)
+	// Generate plain English description
+	desc := components.GenerateDescription(*req, phase, goal)
+
+	// ── Title: "M31A wants to [action]" ──────────────────────────────────
+	actionText := desc.Action
+	if actionText == "" {
+		actionText = "use a tool"
+	}
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Primary)
+	titleLine := titleStyle.Render(fmt.Sprintf("M31A wants to %s", actionText))
+
+	// ── Consequence explanation ───────────────────────────────────────────
+	var consequenceLine string
+	if desc.Consequence != "" {
+		consequenceLine = lipgloss.NewStyle().Foreground(t.TextSecondary).Render(desc.Consequence)
 	}
 
+	// ── Target (if different from action) ─────────────────────────────────
+	var targetLine string
+	if desc.Target != "" {
+		targetLine = lipgloss.NewStyle().Foreground(t.TextMuted).Render("Target: " + desc.Target)
+	}
+
+	// ── Command box (secondary, below divider) ───────────────────────────
+	cmdContentW := width - 10
+	if cmdContentW < 8 {
+		cmdContentW = 8
+	}
+	highlighted := components.HighlightCommand(req.Command, t)
+	highlighted = components.TruncateWithEllipsis(highlighted, cmdContentW)
+	cmdBox := lipgloss.NewStyle().
+		Background(t.SurfaceElevated).
+		Foreground(t.TextPrimary).
+		Padding(1).
+		Width(width - 6).
+		Render(highlighted)
+
+	// ── Keybindings ───────────────────────────────────────────────────────
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	keys := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("[Y]"),
+			hintStyle.Render(" Allow once      "),
+			keyStyle.Render("[A]"),
+			hintStyle.Render(" Always allow"),
+		),
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("[B]"),
+			hintStyle.Render(" Approve all     "),
+			keyStyle.Render("[N]"),
+			hintStyle.Render(" Deny"),
+		),
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("[Esc]"),
+			hintStyle.Render(" Deny (safe default)"),
+		),
+	)
+
+	// ── Countdown (only when <5 seconds remaining) ────────────────────────
+	var countdownLine string
+	if countdown <= 0 {
+		countdownLine = lipgloss.NewStyle().Foreground(t.Error).Render("Auto-deny: tool will be rejected")
+	} else if countdown <= 5 {
+		countdownLine = lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("Auto-deny in %ds", countdown))
+	}
+	// No countdown shown when >5 seconds (cleaner UI)
+
+	// ── Rule context ──────────────────────────────────────────────────────
+	var ruleLine string
+	if req.RuleTool != "" || req.RulePattern != "" {
+		ruleLine = lipgloss.NewStyle().Foreground(t.TextMuted).Render(
+			fmt.Sprintf("Matched rule: tool=%q pattern=%q action=%q",
+				req.RuleTool, req.RulePattern, req.RuleAction),
+		)
+	}
+
+	// ── Assemble ──────────────────────────────────────────────────────────
 	bodyLines := []string{
-		"  Tool:  " + req.ToolName,
-		"  Command:",
-		lipgloss.NewStyle().PaddingLeft(4).MaxWidth(width - 8).Render(req.Command),
-		"  Risk:  " + riskStyle.Render(string(req.RiskLevel)),
+		titleLine,
 	}
-
-	if phase != "" && phase != "idle" {
-		phaseLine := lipgloss.NewStyle().Foreground(t.TextSecondary).
-			Render("  Phase: " + phase)
-		bodyLines = append(bodyLines, phaseLine)
+	if consequenceLine != "" {
+		bodyLines = append(bodyLines, consequenceLine)
 	}
-	if goal != "" {
-		goalSnippet := goal
-		if len(goalSnippet) > width-12 {
-			goalSnippet = goalSnippet[:width-15] + "…"
-		}
-		goalLine := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render("  Goal:  " + goalSnippet)
-		bodyLines = append(bodyLines, goalLine)
+	if targetLine != "" {
+		bodyLines = append(bodyLines, targetLine)
 	}
-
 	bodyLines = append(bodyLines,
 		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  y/↵ allow   n/esc deny   a allow always"),
-		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("  Timeout: "+formatSI(countdown)+"s"),
+		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Command"),
+		cmdBox,
 	)
+	if ruleLine != "" {
+		bodyLines = append(bodyLines, "", ruleLine)
+	}
+	bodyLines = append(bodyLines,
+		"",
+		keys,
+	)
+	if countdownLine != "" {
+		bodyLines = append(bodyLines, "", countdownLine)
+	}
 
 	bodyContent := lipgloss.JoinVertical(lipgloss.Left, bodyLines...)
 
+	// Risk communicated via border color accent
 	borderStyle := lipgloss.RoundedBorder()
+	borderColor := t.BorderSubtle
+	if req.RiskLevel == types.RiskDangerous {
+		borderColor = t.Warning
+	} else if req.RiskLevel == types.RiskDestructive {
+		borderColor = t.Error
+	}
 
-	card := components.Card{
-		Title:   "Permission Required",
-		Content: bodyContent,
-		Width:   width,
-		Border:  borderStyle,
-		Style:   components.CardBrand,
-		Theme:   t,
-	}.Render()
+	card := lipgloss.NewStyle().
+		Border(borderStyle).
+		BorderForeground(borderColor).
+		Width(width).
+		Padding(1).
+		Render(bodyContent)
 
 	if urgent {
 		card = lipgloss.NewStyle().
 			Border(borderStyle).
 			BorderForeground(t.Error).
 			Width(width).
+			Padding(1).
 			Render(bodyContent)
 		return lipgloss.Place(termW, termH, lipgloss.Center, lipgloss.Center, card)
 	}

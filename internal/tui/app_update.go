@@ -182,6 +182,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			timeout = time.Duration(msg.Request.TimeoutSecs) * time.Second
 		}
 		m.permModal = components.NewPermissionModal(msg.Request, m.themeManager.Current(), timeout)
+		m.permModal.SetContext(string(m.workflowPhase), m.workflowGoal)
 		m.screen = ScreenPermission
 		if m.sidebarModel != nil {
 			m.sidebarModel.SetPendingPermCount(msg.Request.QueueDepth)
@@ -308,6 +309,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflow.AgentSwitchMsg:
 		cmds = append(cmds, m.handleAgentSwitch(msg)...)
 
+	// ── Narrative engine ─────────────────────────────────────────────────
+	case NarrativeBubbleMsg:
+		cmds = append(cmds, m.handleNarrativeBubble(msg)...)
+
 	// ── Batched emitter drain ────────────────────────────────────────────────
 	case DrainBatchMsg:
 		// Process each message in the batch through the same handlers.
@@ -372,6 +377,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.handleTaskDiffSummary(subMsg)...)
 			case workflow.AgentSwitchMsg:
 				cmds = append(cmds, m.handleAgentSwitch(subMsg)...)
+			case NarrativeBubbleMsg:
+				cmds = append(cmds, m.handleNarrativeBubble(subMsg)...)
 			default:
 				slog.Debug("unhandled message in DrainBatchMsg", "type", fmt.Sprintf("%T", sub))
 			}
@@ -572,13 +579,23 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Tool card click (mouse) ───────────────────────────────────────────────
 	case ToolClickMsg:
 		if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.messages) {
-			m.ensureToolDetailModel()
-			title, body := m.extractToolDetail(msg.MessageIndex, msg.ToolName)
-			if title != "" {
-				m.toolDetailModel.SetContent(title, body)
-				cmds = append(cmds, m.navigateToScreen(ScreenToolDetail))
+			// M8: Toggle collapsed state on click (Shift+click opens ToolDetail)
+			if msg.ToolID != "" {
+				m.toggleToolCardCollapsed(msg.ToolID)
+			} else {
+				// Fallback: open ToolDetail if no tool ID available
+				m.ensureToolDetailModel()
+				title, body := m.extractToolDetail(msg.MessageIndex, msg.ToolName)
+				if title != "" {
+					m.toolDetailModel.SetContent(title, body)
+					cmds = append(cmds, m.navigateToScreen(ScreenToolDetail))
+				}
 			}
 		}
+
+	// ── M8: Collapse all tool cards (Escape key) ─────────────────────────────
+	case ToolCollapseAllMsg:
+		m.collapseAllToolCards()
 
 	// ── Model/command palette sub-model forwarding ────────────────────────────
 	default:
@@ -586,6 +603,39 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// ─── M8: Tool card toggle helpers ────────────────────────────────────────────
+
+// toggleToolCardCollapsed toggles the collapsed state of a tool card by ID (M8).
+func (m *AppState) toggleToolCardCollapsed(toolID string) {
+	if m.replModel == nil || m.replModel.msgRenderer == nil {
+		return
+	}
+	// Toggle in the renderer's collapsed state map
+	current := m.replModel.msgRenderer.IsToolCardCollapsed(toolID)
+	m.replModel.msgRenderer.SetToolCardCollapsed(toolID, !current)
+	// Also update the tool card in the REPL's map if it exists
+	for _, card := range m.replModel.toolCards {
+		if card.ToolID() == toolID {
+			card.SetCollapsed(!current)
+			break
+		}
+	}
+	// Re-render to reflect the change
+	m.replModel.renderMessages()
+}
+
+// collapseAllToolCards collapses all expanded tool cards (M8).
+func (m *AppState) collapseAllToolCards() {
+	if m.replModel == nil || m.replModel.msgRenderer == nil {
+		return
+	}
+	m.replModel.msgRenderer.SetAllToolCardsCollapsed(true)
+	for _, card := range m.replModel.toolCards {
+		card.SetCollapsed(true)
+	}
+	m.replModel.renderMessages()
 }
 
 // ─── Routing helpers ──────────────────────────────────────────────────────────

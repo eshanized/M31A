@@ -49,14 +49,6 @@ func TestDetectLanguageFromCode(t *testing.T) {
 	}
 }
 
-func TestBashPrefix(t *testing.T) {
-	t.Parallel()
-	p := bashPrefix()
-	if p != "$ " && p != "> " {
-		t.Errorf("bashPrefix() = %q, unexpected value", p)
-	}
-}
-
 func TestCalcContentWidth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -784,8 +776,9 @@ func TestThinkingBlock_Header(t *testing.T) {
 	if h == "" {
 		t.Error("Header should return non-empty string")
 	}
-	if !strings.Contains(h, "Thinking") {
-		t.Error("Header should contain 'Thinking'")
+	// Header should contain an intent label (e.g. "Analyzing", "Thinking", etc.)
+	if !strings.Contains(h, "Analyzing") && !strings.Contains(h, "Thinking") && !strings.Contains(h, "Refining") {
+		t.Error("Header should contain an intent label")
 	}
 }
 
@@ -1335,9 +1328,9 @@ func TestToolCard_Render_SmallWidth(t *testing.T) {
 	}
 }
 
-func TestBashRenderer_RenderInput(t *testing.T) {
+func TestBaseRenderer_RenderInput(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
+	r := RendererForTool("Bash", theme.Dark())
 	input := json.RawMessage(`{"command": "ls -la"}`)
 	call := types.ToolCall{ID: "1", Name: "Bash", Input: input}
 	got := r.RenderInput(call, 40)
@@ -1346,9 +1339,9 @@ func TestBashRenderer_RenderInput(t *testing.T) {
 	}
 }
 
-func TestBashRenderer_RenderInput_InvalidJSON(t *testing.T) {
+func TestBaseRenderer_RenderInput_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
+	r := RendererForTool("Bash", theme.Dark())
 	input := json.RawMessage(`not json`)
 	call := types.ToolCall{ID: "1", Name: "Bash", Input: input}
 	got := r.RenderInput(call, 40)
@@ -1357,9 +1350,9 @@ func TestBashRenderer_RenderInput_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBashRenderer_RenderOutput(t *testing.T) {
+func TestBaseRenderer_RenderOutput(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
+	r := RendererForTool("Bash", theme.Dark())
 	result := &types.ToolResult{Output: "hello world", DurationMs: 100}
 	got := r.RenderOutput(result, ToolSuccess, 100, false, false, 40)
 	if got == "" {
@@ -1367,9 +1360,9 @@ func TestBashRenderer_RenderOutput(t *testing.T) {
 	}
 }
 
-func TestBashRenderer_RenderOutput_Error(t *testing.T) {
+func TestBaseRenderer_RenderOutput_Error(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
+	r := RendererForTool("Bash", theme.Dark())
 	result := &types.ToolResult{Output: "error output", Error: "command failed", DurationMs: 50}
 	got := r.RenderOutput(result, ToolError, 50, false, false, 40)
 	if got == "" {
@@ -1377,12 +1370,12 @@ func TestBashRenderer_RenderOutput_Error(t *testing.T) {
 	}
 }
 
-func TestBashRenderer_RenderOutput_NilResult(t *testing.T) {
+func TestBaseRenderer_RenderOutput_NilResult(t *testing.T) {
 	t.Parallel()
-	r := NewBashRenderer(theme.Dark())
+	r := RendererForTool("Bash", theme.Dark())
 	got := r.RenderOutput(nil, ToolRunning, 0, false, false, 40)
-	if got == "" {
-		t.Error("RenderOutput nil result should return non-empty string")
+	if got != "" {
+		t.Error("RenderOutput nil result should return empty string")
 	}
 }
 

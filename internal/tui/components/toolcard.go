@@ -62,6 +62,7 @@ const (
 )
 
 type ToolCard struct {
+	toolID    string // M8: unique tool call ID for collapsed state persistence
 	toolName   string
 	input      string
 	output     string
@@ -78,6 +79,9 @@ type ToolCard struct {
 	flashColor  lipgloss.Color // border flash color
 	completedAt time.Time      // when the tool completed (for age-based fading)
 }
+
+// ToolID returns the unique tool call identifier (M8).
+func (c *ToolCard) ToolID() string { return c.toolID }
 
 // ToolName returns the tool's identifier (e.g. "FileRead", "Bash").
 func (c *ToolCard) ToolName() string { return c.toolName }
@@ -106,6 +110,7 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 	}
 
 	tc := &ToolCard{
+		toolID:    call.ID,
 		toolName:  call.Name,
 		input:     input,
 		output:    output,
@@ -129,8 +134,23 @@ func NewToolCard(call types.ToolCall, result *types.ToolResult, state ToolState,
 		lineCount = 0
 	}
 	tc.lineCount = lineCount
-	if lineCount > 50 {
-		tc.collapsed = true
+
+	// M8: Progressive Disclosure - collapsed by default for successful tools
+	// Failed tools auto-expand with error context
+	switch state {
+	case ToolError:
+		// Failed tools auto-expand with error context
+		tc.collapsed = false
+	case ToolSuccess:
+		// Successful tools collapsed by default (unless already collapsed for binary/long output)
+		if !tc.collapsed {
+			tc.collapsed = true
+		}
+	default:
+		// Running tools: collapse if >50 lines
+		if lineCount > 50 {
+			tc.collapsed = true
+		}
 	}
 
 	runeCount := utf8.RuneCountInString(output)
@@ -205,12 +225,13 @@ func (c *ToolCard) renderInline(width int) string {
 		if c.truncated {
 			statusStr = s.WarningText.Render("✓ truncated")
 		} else if c.collapsed && c.output != "" {
-			lineCount := strings.Count(c.output, "\n") + 1
-			statusStr = s.Muted.Render(fmt.Sprintf("✓ +%d lines", lineCount))
+			// M8: Show expand hint for collapsed successful tools
+			statusStr = s.Muted.Render("✓ " + TruncateEnd(fmt.Sprintf("%d lines", c.lineCount), 20) + "  [Enter to expand]")
 		} else {
 			statusStr = s.SuccessText.Render("✓")
 		}
 	case ToolError:
+		// Failed tools should not be collapsed (auto-expanded)
 		statusStr = s.ErrorText.Render("✗ failed")
 	}
 

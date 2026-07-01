@@ -25,10 +25,16 @@ const (
 type SidebarMode int
 
 const (
-	// SidebarModeFiles shows the git file tree (default).
+	// SidebarModeFiles shows the git file tree (default full sidebar).
 	SidebarModeFiles SidebarMode = iota
 	// SidebarModeTodo shows the task progress and TODO list.
 	SidebarModeTodo
+	// SidebarModeIdle shows minimal orientation: branch, cost, task (2-3 lines).
+	SidebarModeIdle
+	// SidebarModeActive shows staged files + in-progress items (5-7 lines).
+	SidebarModeActive
+	// SidebarModeNarrative shows the narrative engine output.
+	SidebarModeNarrative
 )
 
 // SidebarTaskProgress tracks overall task execution progress.
@@ -132,6 +138,9 @@ type SidebarModel struct {
 	// Active sub-agents
 	subAgentCount  int
 	subAgentActive int
+
+	// Narrative state
+	narrativeState *NarrativeState
 }
 
 // NewSidebarModel creates a new SidebarModel.
@@ -140,7 +149,7 @@ func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
 	return &SidebarModel{
 		git:     g,
 		theme:   t,
-		visible: true,
+		visible: false, // hidden by default per M1 spec
 		width:   sidebarDefaultWidth,
 		tree:    components.NewFileTree(root, t, sidebarDefaultWidth-4, 10),
 	}
@@ -170,6 +179,11 @@ func (s *SidebarModel) SetShutdownContext(ctx context.Context) {
 	s.shutdownCtx = ctx
 }
 
+// SetNarrativeState sets the narrative state for the narrative sidebar mode.
+func (s *SidebarModel) SetNarrativeState(ns *NarrativeState) {
+	s.narrativeState = ns
+}
+
 // SetMode switches the sidebar between file tree and todo list display.
 func (s *SidebarModel) SetMode(mode SidebarMode) {
 	s.mode = mode
@@ -178,6 +192,25 @@ func (s *SidebarModel) SetMode(mode SidebarMode) {
 // GetMode returns the current sidebar display mode.
 func (s *SidebarModel) GetMode() SidebarMode {
 	return s.mode
+}
+
+// CycleMode cycles through sidebar modes: Idle → Active → Narrative → Files → Todo → Idle.
+// Used by ctrl+g key binding.
+func (s *SidebarModel) CycleMode() {
+	switch s.mode {
+	case SidebarModeIdle:
+		s.mode = SidebarModeActive
+	case SidebarModeActive:
+		s.mode = SidebarModeNarrative
+	case SidebarModeNarrative:
+		s.mode = SidebarModeFiles
+	case SidebarModeFiles:
+		s.mode = SidebarModeTodo
+	case SidebarModeTodo:
+		s.mode = SidebarModeIdle
+	default:
+		s.mode = SidebarModeIdle
+	}
 }
 
 // SetTodoItems sets the LLM-generated TODO items for display.
@@ -742,19 +775,32 @@ func (s *SidebarModel) View() string {
 	w := s.width
 	contentW := w - 1
 
+	// Route to mode-specific renderer
 	var lines []string
-
-	lines = append(lines, s.renderHeader(contentW)...)
-	lines = append(lines, s.renderGitStatus(contentW)...)
-	lines = append(lines, s.renderTokenUsage(contentW)...)
-	lines = append(lines, s.renderPhasePipeline(contentW)...)
-	lines = append(lines, s.renderToolTimeline(contentW)...)
-	lines = append(lines, s.renderSpeedMetrics(contentW)...)
-	lines = append(lines, s.renderSubAgentBadge(contentW)...)
-	lines = append(lines, s.renderPendingPermBadge(contentW)...)
-	lines = append(lines, s.renderFileTreeOrTodo(contentW)...)
-	lines = append(lines, s.renderSession(contentW)...)
-	lines = append(lines, s.renderHints(contentW)...)
+	switch s.mode {
+	case SidebarModeIdle:
+		lines = s.renderIdle(contentW)
+	case SidebarModeActive:
+		lines = s.renderActive(contentW)
+	case SidebarModeNarrative:
+		lines = renderNarrativeSidebar(s.narrativeState, t, contentW)
+		if len(lines) == 0 {
+			lines = s.renderIdle(contentW)
+		}
+	default:
+		// SidebarModeFiles and SidebarModeTodo use full rendering
+		lines = append(lines, s.renderHeader(contentW)...)
+		lines = append(lines, s.renderGitStatus(contentW)...)
+		lines = append(lines, s.renderTokenUsage(contentW)...)
+		lines = append(lines, s.renderPhasePipeline(contentW)...)
+		lines = append(lines, s.renderToolTimeline(contentW)...)
+		lines = append(lines, s.renderSpeedMetrics(contentW)...)
+		lines = append(lines, s.renderSubAgentBadge(contentW)...)
+		lines = append(lines, s.renderPendingPermBadge(contentW)...)
+		lines = append(lines, s.renderFileTreeOrTodo(contentW)...)
+		lines = append(lines, s.renderSession(contentW)...)
+		lines = append(lines, s.renderHints(contentW)...)
+	}
 
 	// Pad each line to exactly contentW characters for consistent border alignment.
 	var paddedLines []string
@@ -827,6 +873,152 @@ func (s *SidebarModel) renderHeader(contentW int) []string {
 		Foreground(t.TextMuted).
 		Render(" " + version)
 	return []string{title + versionBadge, components.SectionDivider{Width: contentW, Theme: t}.Render()}
+}
+
+// renderIdle renders the minimal sidebar mode (2-3 lines): branch, cost, task.
+func (s *SidebarModel) renderIdle(contentW int) []string {
+	t := s.theme
+	var lines []string
+
+	// Line 1: branch
+	if s.branch != "" {
+		branchLine := lipgloss.NewStyle().
+			Foreground(t.TextSecondary).
+			PaddingLeft(1).
+			Width(contentW).
+			Render("⎇ " + s.branch)
+		lines = append(lines, branchLine)
+	}
+
+	// Line 2: cost (if available)
+	if s.showCost && s.cost > 0 {
+		var costStr string
+		if s.cost < 0.01 {
+			costStr = "<$0.01"
+		} else {
+			costStr = fmt.Sprintf("$%.2f", s.cost)
+		}
+		costLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Width(contentW).
+			Render(costStr)
+		lines = append(lines, costLine)
+	}
+
+	// Line 3: current task/phase
+	if s.currentPhase != "" {
+		phaseLine := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			PaddingLeft(1).
+			Width(contentW).
+			Render("▸ " + s.currentPhase)
+		lines = append(lines, phaseLine)
+	}
+
+	return lines
+}
+
+// renderActive renders the active sidebar mode (5-7 lines): branch, staged files, in-progress items.
+func (s *SidebarModel) renderActive(contentW int) []string {
+	t := s.theme
+	var lines []string
+
+	// Line 1: branch
+	if s.branch != "" {
+		branchLine := lipgloss.NewStyle().
+			Foreground(t.TextSecondary).
+			PaddingLeft(1).
+			Width(contentW).
+			Render("⎇ " + s.branch)
+		lines = append(lines, branchLine)
+	}
+
+	// Line 2: file status summary
+	modCount, addCount, delCount, untracked := countFileStatuses(s.files)
+	if modCount+addCount+delCount+untracked > 0 {
+		var pills []string
+		if modCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("●%d", modCount)))
+		}
+		if addCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Success).Render(fmt.Sprintf("+%d", addCount)))
+		}
+		if delCount > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf("-%d", delCount)))
+		}
+		if untracked > 0 {
+			pills = append(pills, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("?%d", untracked)))
+		}
+		lines = append(lines, lipgloss.NewStyle().PaddingLeft(1).Render(strings.Join(pills, " ")))
+	}
+
+	// Line 3: current phase
+	if s.currentPhase != "" {
+		phaseLine := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			PaddingLeft(1).
+			Width(contentW).
+			Render("▸ " + s.currentPhase)
+		lines = append(lines, phaseLine)
+	}
+
+	// Lines 4-5: in-progress tasks (top 2)
+	inProgressCount := 0
+	for _, item := range s.todoItems {
+		if item.Status == "in_progress" && inProgressCount < 2 {
+			taskLine := lipgloss.NewStyle().
+				Foreground(t.TextMuted).
+				PaddingLeft(1).
+				Width(contentW).
+				Render("  " + truncateStr(item.Content, contentW-4))
+			lines = append(lines, taskLine)
+			inProgressCount++
+		}
+	}
+
+	// Line 6: cost (if available)
+	if s.showCost && s.cost > 0 {
+		var costStr string
+		if s.cost < 0.01 {
+			costStr = "<$0.01"
+		} else {
+			costStr = fmt.Sprintf("$%.2f", s.cost)
+		}
+		costLine := lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			PaddingLeft(1).
+			Width(contentW).
+			Render(costStr)
+		lines = append(lines, costLine)
+	}
+
+	// Line 7: pending permissions (if any)
+	if s.pendingPermCount > 0 {
+		permLine := lipgloss.NewStyle().
+			Foreground(t.Warning).
+			PaddingLeft(1).
+			Width(contentW).
+			Render(fmt.Sprintf("! %d pending", s.pendingPermCount))
+		lines = append(lines, permLine)
+	}
+
+	return lines
+}
+
+// truncateStr truncates a string to maxLen, adding "…" if truncated.
+func truncateStr(s string, maxLen int) string {
+	if maxLen < 1 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen == 1 {
+		return "…"
+	}
+	return string(runes[:maxLen-1]) + "…"
 }
 
 // renderGitStatus renders the git branch and file status pills.

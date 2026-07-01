@@ -247,8 +247,9 @@ func TestBuildFooter_VerySmallCost(t *testing.T) {
 		ShowCost:   true,
 	}
 	footer := BuildFooter(info, 80, Full, tm, testCache())
-	if !strings.Contains(footer, "<$0.01") {
-		t.Error("Small cost should show '<$0.01'")
+	// Cost is no longer displayed in simplified chrome footer
+	if strings.Contains(footer, "<$0.01") || strings.Contains(footer, "$") {
+		t.Error("Simplified chrome footer should not contain cost")
 	}
 }
 

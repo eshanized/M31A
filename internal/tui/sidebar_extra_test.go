@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/git"
@@ -31,16 +32,17 @@ func TestSidebarSettersGetters(t *testing.T) {
 
 func TestSidebarToggleExtra(t *testing.T) {
 	s := NewSidebarModel(nil, testTheme())
+	// M1: sidebar starts hidden by default
+	if s.visible {
+		t.Error("should start hidden (M1 default)")
+	}
+	s.Toggle()
 	if !s.visible {
-		t.Error("should start visible")
+		t.Error("should be visible after toggle")
 	}
 	s.Toggle()
 	if s.visible {
-		t.Error("should be hidden after toggle")
-	}
-	s.Toggle()
-	if !s.visible {
-		t.Error("should be visible after second toggle")
+		t.Error("should be hidden after second toggle")
 	}
 }
 
@@ -223,5 +225,197 @@ func TestBuildSidebarTreeEmptyExtra(t *testing.T) {
 	}
 	if len(root.Children) != 0 {
 		t.Error("should have no children")
+	}
+}
+
+// ─── M1 Sidebar Framework Tests ───────────────────────────────────────────────
+
+func TestSidebarM1_DefaultHidden(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	// M1: sidebar starts hidden by default
+	if s.visible {
+		t.Error("sidebar should start hidden (M1 default)")
+	}
+	if s.IsVisible() {
+		t.Error("IsVisible should return false (M1 default)")
+	}
+}
+
+func TestSidebarM1_DefaultMode(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	// M1: default mode should be SidebarModeFiles
+	if s.GetMode() != SidebarModeFiles {
+		t.Errorf("default mode = %v, want SidebarModeFiles", s.GetMode())
+	}
+}
+
+func TestSidebarM1_CycleMode(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+
+	// Start at Files (default) → cycle to Todo
+	s.CycleMode()
+	if s.GetMode() != SidebarModeTodo {
+		t.Errorf("after 1st cycle: mode = %v, want SidebarModeTodo", s.GetMode())
+	}
+
+	// Todo → Idle
+	s.CycleMode()
+	if s.GetMode() != SidebarModeIdle {
+		t.Errorf("after 2nd cycle: mode = %v, want SidebarModeIdle", s.GetMode())
+	}
+
+	// Idle → Active
+	s.CycleMode()
+	if s.GetMode() != SidebarModeActive {
+		t.Errorf("after 3rd cycle: mode = %v, want SidebarModeActive", s.GetMode())
+	}
+
+	// Active → Narrative
+	s.CycleMode()
+	if s.GetMode() != SidebarModeNarrative {
+		t.Errorf("after 4th cycle: mode = %v, want SidebarModeNarrative", s.GetMode())
+	}
+
+	// Narrative → Files (back to start)
+	s.CycleMode()
+	if s.GetMode() != SidebarModeFiles {
+		t.Errorf("after 5th cycle: mode = %v, want SidebarModeFiles", s.GetMode())
+	}
+}
+
+func TestSidebarM1_IdleModeRender(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	s.visible = true
+	s.SetMode(SidebarModeIdle)
+	s.branch = "main"
+	s.cost = 0.05
+	s.showCost = true
+	s.currentPhase = "execute"
+
+	view := s.View()
+	if view == "" {
+		t.Error("idle mode should produce non-empty output")
+	}
+	// Should contain branch
+	if !strings.Contains(view, "main") {
+		t.Error("idle mode should show branch")
+	}
+	// Should contain cost
+	if !strings.Contains(view, "$0.05") {
+		t.Error("idle mode should show cost")
+	}
+	// Should contain phase
+	if !strings.Contains(view, "execute") {
+		t.Error("idle mode should show phase")
+	}
+}
+
+func TestSidebarM1_ActiveModeRender(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	s.visible = true
+	s.SetMode(SidebarModeActive)
+	s.branch = "feature"
+	s.currentPhase = "plan"
+	s.todoItems = []SidebarTodoItem{
+		{Content: "Task 1", Status: "in_progress"},
+		{Content: "Task 2", Status: "completed"},
+	}
+
+	view := s.View()
+	if view == "" {
+		t.Error("active mode should produce non-empty output")
+	}
+	// Should contain branch
+	if !strings.Contains(view, "feature") {
+		t.Error("active mode should show branch")
+	}
+	// Should contain phase
+	if !strings.Contains(view, "plan") {
+		t.Error("active mode should show phase")
+	}
+}
+
+func TestSidebarM1_IdleModeMinimalLines(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	s.visible = true
+	s.SetMode(SidebarModeIdle)
+
+	// With minimal data, idle mode should produce 0-3 lines
+	s.branch = "main"
+	lines := s.renderIdle(28)
+	if len(lines) > 3 {
+		t.Errorf("idle mode produced %d lines, want <= 3", len(lines))
+	}
+}
+
+func TestSidebarM1_ActiveModeModerateLines(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	s.visible = true
+	s.SetMode(SidebarModeActive)
+	s.branch = "main"
+	s.currentPhase = "execute"
+	s.todoItems = []SidebarTodoItem{
+		{Content: "Task 1", Status: "in_progress"},
+		{Content: "Task 2", Status: "in_progress"},
+		{Content: "Task 3", Status: "completed"},
+	}
+
+	lines := s.renderActive(28)
+	// Active mode: branch + phase + 2 in-progress = 4 lines min
+	// With more data: up to 7 lines
+	if len(lines) > 7 {
+		t.Errorf("active mode produced %d lines, want <= 7", len(lines))
+	}
+	if len(lines) < 2 {
+		t.Errorf("active mode produced %d lines, want >= 2", len(lines))
+	}
+}
+
+func TestSidebarM1_ToggleVisibility(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+
+	// Start hidden
+	if s.IsVisible() {
+		t.Error("should start hidden")
+	}
+
+	// Toggle to visible
+	s.Toggle()
+	if !s.IsVisible() {
+		t.Error("should be visible after toggle")
+	}
+
+	// Toggle back to hidden
+	s.Toggle()
+	if s.IsVisible() {
+		t.Error("should be hidden after second toggle")
+	}
+}
+
+func TestSidebarM1_WidthDefault(t *testing.T) {
+	s := NewSidebarModel(nil, testTheme())
+	// Default width should be 30 (sidebarDefaultWidth)
+	if s.GetWidth() != 0 {
+		t.Errorf("hidden sidebar width = %d, want 0", s.GetWidth())
+	}
+	s.visible = true
+	if s.GetWidth() != sidebarDefaultWidth {
+		t.Errorf("visible sidebar width = %d, want %d", s.GetWidth(), sidebarDefaultWidth)
+	}
+}
+
+func TestSidebarM1_ModeConstants(t *testing.T) {
+	// Verify mode constants exist and have expected values
+	if SidebarModeFiles != 0 {
+		t.Errorf("SidebarModeFiles = %d, want 0", SidebarModeFiles)
+	}
+	if SidebarModeTodo != 1 {
+		t.Errorf("SidebarModeTodo = %d, want 1", SidebarModeTodo)
+	}
+	if SidebarModeIdle != 2 {
+		t.Errorf("SidebarModeIdle = %d, want 2", SidebarModeIdle)
+	}
+	if SidebarModeActive != 3 {
+		t.Errorf("SidebarModeActive = %d, want 3", SidebarModeActive)
 	}
 }
