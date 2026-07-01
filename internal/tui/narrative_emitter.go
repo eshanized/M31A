@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"log/slog"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/pkg/narrative"
 )
@@ -73,9 +70,4 @@ func (ne *narrativeEmitter) EmitNarrative(n narrative.NarrativeObject) {
 // LogDropped returns the current drop count for observability.
 func (ne *narrativeEmitter) LogDropped() int64 {
 	return ne.inner.drops.Load()
-}
-
-// narrativeEmitterLog logs narrative emission for debugging.
-func narrativeEmitterLog(msg string, args ...interface{}) {
-	slog.Debug(fmt.Sprintf("narrative: %s", msg), args...)
 }

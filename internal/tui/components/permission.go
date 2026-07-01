@@ -241,22 +241,6 @@ func (m *PermissionModal) riskStyle() lipgloss.Style {
 	}
 }
 
-// riskLabel returns a human-readable risk label with icon for accessibility.
-func riskLabel(level types.RiskLevel) string {
-	switch level {
-	case types.RiskDangerous:
-		return "⚠ DANGEROUS"
-	case types.RiskDestructive:
-		return "✖ DESTRUCTIVE"
-	case types.RiskMedium:
-		return "● MEDIUM"
-	case types.RiskSafe:
-		return "✓ SAFE"
-	default:
-		return "UNKNOWN"
-	}
-}
-
 func formatDurationClock(d time.Duration) string {
 	totalSecs := int(d.Seconds())
 	mins := totalSecs / 60

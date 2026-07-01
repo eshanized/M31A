@@ -127,11 +127,6 @@ func (sm *ShipModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, sm.demoViewport.View())
 	}
 	t := sm.theme
-	w := sm.width
-	if w < 50 {
-		w = 80
-	}
-
 	// ── Stats consolidated to 2 lines ─────────────────────────────────────
 	taskIcon := "✓"
 	taskColor := t.Success

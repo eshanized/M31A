@@ -18,18 +18,9 @@ type ToolRenderer interface {
 }
 
 type BaseRenderer struct {
-	toolName   string
-	theme      theme.Theme
-	styles     theme.SemanticStyles
-	styleCache *theme.StyleCache
-}
-
-// getStyleCache returns the cached style cache, building it lazily on first use.
-func (b *BaseRenderer) getStyleCache() *theme.StyleCache {
-	if b.styleCache == nil {
-		b.styleCache = theme.NewStyleCache(b.theme)
-	}
-	return b.styleCache
+	toolName string
+	theme    theme.Theme
+	styles   theme.SemanticStyles
 }
 
 func (b *BaseRenderer) Name() string {

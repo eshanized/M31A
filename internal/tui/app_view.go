@@ -1091,9 +1091,10 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 	// Risk communicated via border color accent
 	borderStyle := lipgloss.RoundedBorder()
 	borderColor := t.BorderSubtle
-	if req.RiskLevel == types.RiskDangerous {
+	switch req.RiskLevel {
+	case types.RiskDangerous:
 		borderColor = t.Warning
-	} else if req.RiskLevel == types.RiskDestructive {
+	case types.RiskDestructive:
 		borderColor = t.Error
 	}
 
