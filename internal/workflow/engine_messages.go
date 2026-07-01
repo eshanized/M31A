@@ -118,12 +118,6 @@ type DemonstrationReadyMsg struct {
 	Content string
 }
 
-// PlanProgressMsg reports plan generation progress with version info.
-type PlanProgressMsg struct {
-	Version int
-	Message string
-}
-
 // DiffStats holds file change statistics from git diff.
 type DiffStats struct {
 	FilesAdded    int

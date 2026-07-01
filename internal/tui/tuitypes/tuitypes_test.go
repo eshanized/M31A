@@ -313,14 +313,6 @@ func TestHomeSubmitMsg(t *testing.T) {
 	}
 }
 
-func TestThemeChangedMsg(t *testing.T) {
-	msg := ThemeChangedMsg{Theme: "dark"}
-
-	if msg.Theme != "dark" {
-		t.Errorf("Theme = %q, want %q", msg.Theme, "dark")
-	}
-}
-
 func TestToastMsg(t *testing.T) {
 	msg := ToastMsg{
 		Text:     "Operation successful",

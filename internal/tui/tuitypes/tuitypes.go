@@ -395,12 +395,6 @@ type HomeSubmitMsg struct {
 	Text string
 }
 
-// ThemeChangedMsg is deprecated. M31A has a single theme.
-// Kept for backward compatibility.
-type ThemeChangedMsg struct {
-	Theme string // ignored
-}
-
 // ToastMsg displays a transient notification.
 type ToastMsg struct {
 	Text     string

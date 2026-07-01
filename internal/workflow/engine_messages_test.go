@@ -189,11 +189,3 @@ func TestDemonstrationReadyMsg_Fields(t *testing.T) {
 		t.Errorf("expected 'demo content', got %q", msg.Content)
 	}
 }
-
-func TestPlanProgressMsg_Fields(t *testing.T) {
-	t.Parallel()
-	msg := PlanProgressMsg{Version: 2, Message: "v2 plan"}
-	if msg.Version != 2 {
-		t.Errorf("expected 2, got %d", msg.Version)
-	}
-}

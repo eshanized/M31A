@@ -19,9 +19,3 @@ func TruncateMiddle(s string, maxLen int) string {
 func TruncateEnd(s string, maxLen int) string {
 	return components.TruncateEnd(s, maxLen)
 }
-
-// TruncateError truncates an error message to show the first 200 runes plus "[...]".
-// Delegates to components.TruncateError.
-func TruncateError(s string) string {
-	return components.TruncateError(s)
-}

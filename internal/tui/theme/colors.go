@@ -113,18 +113,6 @@ func Light() Theme {
 	return M31A()
 }
 
-// Auto is deprecated. M31A ships with a single dark theme.
-// Returns M31A() for backward compatibility.
-func Auto() Theme {
-	return M31A()
-}
-
-// HighContrast is deprecated. M31A ships with a single theme.
-// Returns M31A() for backward compatibility.
-func HighContrast() Theme {
-	return M31A()
-}
-
 // buildBadgeStyles sets all badge/label styles using the theme's BadgeForeground color.
 func buildBadgeStyles(t *Theme) {
 	fg := lipgloss.Color(t.BadgeForeground)

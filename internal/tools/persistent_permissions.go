@@ -2,12 +2,10 @@ package tools
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/types"
 )
 
 // PersistentPermissions manages saved permission rules that survive across
@@ -51,57 +49,4 @@ func (p *PersistentPermissions) Load(projectDir string) []config.PermissionRule 
 	}
 
 	return pd.Projects[projectDir]
-}
-
-// Save adds a permission rule for the given project directory and persists it.
-func (p *PersistentPermissions) Save(projectDir string, rule config.PermissionRule) error {
-	if p.path == "" {
-		return fmt.Errorf("no path configured for persistent permissions")
-	}
-
-	var pd persistentData
-
-	if data, err := os.ReadFile(p.path); err == nil {
-		_ = json.Unmarshal(data, &pd)
-	}
-	if pd.Projects == nil {
-		pd.Projects = make(map[string][]config.PermissionRule)
-	}
-
-	pd.Projects[projectDir] = append(pd.Projects[projectDir], rule)
-
-	out, err := json.MarshalIndent(pd, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal persistent permissions: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(p.path), types.DirPermission); err != nil {
-		return fmt.Errorf("create persistent permissions dir: %w", err)
-	}
-
-	return os.WriteFile(p.path, out, types.FilePermission)
-}
-
-// Remove clears all persistent rules for the given project directory.
-func (p *PersistentPermissions) Remove(projectDir string) error {
-	if p.path == "" {
-		return nil
-	}
-
-	var pd persistentData
-	data, err := os.ReadFile(p.path)
-	if err != nil {
-		return nil
-	}
-	if unmarshalErr := json.Unmarshal(data, &pd); unmarshalErr != nil {
-		return nil
-	}
-
-	delete(pd.Projects, projectDir)
-
-	out, err := json.MarshalIndent(pd, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(p.path, out, types.FilePermission)
 }

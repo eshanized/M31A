@@ -468,11 +468,6 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 	})
 }
 
-// NewEngineWithCollector creates a workflow engine with metrics collection.
-func NewEngineWithCollector(opts EngineOptions) (*Engine, error) {
-	return NewEngineFromOptions(opts)
-}
-
 // NewEngineFromOptions creates a workflow engine from an EngineOptions struct.
 func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 

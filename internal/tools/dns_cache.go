@@ -39,18 +39,6 @@ func NewDNSCache(ttl time.Duration, evictThreshold int32) *DNSCache {
 	}
 }
 
-// NewDNSCacheWithMaxSize creates a DNS cache with explicit max size control.
-func NewDNSCacheWithMaxSize(ttl time.Duration, evictThreshold int32, maxSize int32) *DNSCache {
-	if maxSize <= 0 {
-		maxSize = 1024
-	}
-	return &DNSCache{
-		ttl:       ttl,
-		threshold: evictThreshold,
-		maxSize:   maxSize,
-	}
-}
-
 // Size returns the approximate number of entries in the cache.
 func (dc *DNSCache) Size() int32 {
 	var count int32

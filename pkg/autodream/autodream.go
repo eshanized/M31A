@@ -56,14 +56,6 @@ func New(messages []types.Message) *Consolidator {
 	}
 }
 
-// NewWithEstimator creates a Consolidator with an accurate token estimator.
-// When provided, token counts use the real tokenizer instead of word-count heuristics.
-func NewWithEstimator(messages []types.Message, est *tokens.Estimator) *Consolidator {
-	c := New(messages)
-	c.tokenEst = est
-	return c
-}
-
 // SetMessages replaces the Consolidator's internal message list with a
 // defensive copy of the provided slice. This is the integration point for
 // callers (e.g. ReplModel) that own the authoritative message history.

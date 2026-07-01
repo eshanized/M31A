@@ -145,10 +145,6 @@ func (r *Runner) Schedule() ([][]int, error) {
 	return groups, nil
 }
 
-// MaxParallelTasks is the default maximum number of tasks to execute concurrently
-// within a group. Deprecated: use types.DefaultMaxParallelTasks or Runner.MaxParallel instead.
-const MaxParallelTasks = types.DefaultMaxParallelTasks
-
 // ExecuteGroup runs all tasks in the group concurrently with bounded parallelism.
 // Dependencies must have been completed in prior groups.
 // The provided ctx is used as the parent context for all tasks, ensuring

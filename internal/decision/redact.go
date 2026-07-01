@@ -1,9 +1,6 @@
 package decision
 
-import (
-	"regexp"
-	"strings"
-)
+import "regexp"
 
 var (
 	apiKeyPattern = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|credential|bearer)\s*[:=]\s*\S+`)
@@ -42,13 +39,4 @@ func RedactSlice(decisions []DecisionReceipt) []DecisionReceipt {
 		result[i] = RedactReceipt(d)
 	}
 	return result
-}
-
-// RedactJSON redacts sensitive data from a JSON string (best-effort).
-func RedactJSON(jsonStr string) string {
-	jsonStr = apiKeyPattern.ReplaceAllString(jsonStr, "${1}=***REDACTED***")
-	jsonStr = bearerPattern.ReplaceAllString(jsonStr, "Bearer ***REDACTED***")
-	jsonStr = emailPattern.ReplaceAllString(jsonStr, "***@***.***")
-	jsonStr = ipPattern.ReplaceAllString(jsonStr, "***.***.***.***")
-	return strings.TrimSpace(jsonStr)
 }
