@@ -246,7 +246,7 @@ func TestTemplateResolverAskingQuestion(t *testing.T) {
 	r := NewTemplateResolver()
 	event := RawEvent{
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{},
+		Data:      map[string]interface{}{},
 	}
 
 	narrative := r.Resolve(NarrativeAskingQuestion, event)
@@ -262,7 +262,7 @@ func TestTemplateResolverPlanningWork(t *testing.T) {
 	r := NewTemplateResolver()
 	event := RawEvent{
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{},
+		Data:      map[string]interface{}{},
 	}
 
 	narrative := r.Resolve(NarrativePlanningWork, event)
@@ -326,7 +326,7 @@ func TestTemplateResolverLoopDetected(t *testing.T) {
 	r := NewTemplateResolver()
 	event := RawEvent{
 		Timestamp: time.Now(),
-		Data:     map[string]interface{}{},
+		Data:      map[string]interface{}{},
 	}
 
 	narrative := r.Resolve(NarrativeLoopDetected, event)
@@ -379,38 +379,38 @@ func TestTemplateResolverAllTemplatesProduceOutput(t *testing.T) {
 	event := RawEvent{
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
-			"description": "test",
-			"tool_name":   "Bash",
-			"file":        "test.go",
-			"pattern":     "TODO",
-			"query":       "test query",
-			"url":         "https://example.com",
-			"agent_type":  "test-agent",
-			"message":     "test message",
-			"error":       "test error",
-			"attempt":     1,
-			"max_attempts": 3,
-			"percentage":  50,
-			"topic":       "test topic",
-			"task_count":  5,
-			"entry_count": 3,
-			"tokens_saved": 100,
-			"count":       5,
-			"current":     1,
-			"total":       3,
-			"iteration":   1,
+			"description":    "test",
+			"tool_name":      "Bash",
+			"file":           "test.go",
+			"pattern":        "TODO",
+			"query":          "test query",
+			"url":            "https://example.com",
+			"agent_type":     "test-agent",
+			"message":        "test message",
+			"error":          "test error",
+			"attempt":        1,
+			"max_attempts":   3,
+			"percentage":     50,
+			"topic":          "test topic",
+			"task_count":     5,
+			"entry_count":    3,
+			"tokens_saved":   100,
+			"count":          5,
+			"current":        1,
+			"total":          3,
+			"iteration":      1,
 			"max_iterations": 3,
-			"from":        "provider-a",
-			"to":          "provider-b",
-			"model":       "gpt-4",
-			"lang":        "go",
-			"file_count":  10,
-			"test_count":  5,
-			"passed":      4,
-			"message_count": 10,
-			"scope":       "test scope",
-			"command":     "go build",
-			"issue_count": 2,
+			"from":           "provider-a",
+			"to":             "provider-b",
+			"model":          "gpt-4",
+			"lang":           "go",
+			"file_count":     10,
+			"test_count":     5,
+			"passed":         4,
+			"message_count":  10,
+			"scope":          "test scope",
+			"command":        "go build",
+			"issue_count":    2,
 		},
 	}
 

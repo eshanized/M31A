@@ -9,13 +9,13 @@ import (
 
 func TestGenerateDescription_Bash(t *testing.T) {
 	tests := []struct {
-		name           string
-		cmd            string
-		phase          string
-		goal           string
-		expectAction   string
-		expectConseq   string
-		expectRisk     string
+		name         string
+		cmd          string
+		phase        string
+		goal         string
+		expectAction string
+		expectConseq string
+		expectRisk   string
 	}{
 		{
 			name:         "rm command",

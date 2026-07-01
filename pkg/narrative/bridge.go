@@ -189,7 +189,7 @@ func (b *Bridge) MsgToRawEvent(msg interface{}) (RawEvent, bool) {
 			Type:      EventVerifyReport,
 			Timestamp: now,
 			Data: map[string]interface{}{
-				"report":   m.Report,
+				"report":    m.Report,
 				"pass_rate": m.PassRate,
 			},
 		}, true
@@ -210,8 +210,8 @@ func (b *Bridge) MsgToRawEvent(msg interface{}) (RawEvent, bool) {
 			Type:      EventShipChangelog,
 			Timestamp: now,
 			Data: map[string]interface{}{
-				"content":      m.Content,
-				"entry_count":  m.Entries,
+				"content":     m.Content,
+				"entry_count": m.Entries,
 			},
 		}, true
 
@@ -230,11 +230,11 @@ func (b *Bridge) MsgToRawEvent(msg interface{}) (RawEvent, bool) {
 			Type:      EventInitAnalysis,
 			Timestamp: now,
 			Data: map[string]interface{}{
-				"project_type":   m.ProjectType,
-				"framework":      m.Framework,
-				"language":       m.Language,
-				"file_count":     m.FileCount,
-				"health_score":   m.HealthScore,
+				"project_type": m.ProjectType,
+				"framework":    m.Framework,
+				"language":     m.Language,
+				"file_count":   m.FileCount,
+				"health_score": m.HealthScore,
 			},
 		}, true
 
@@ -292,9 +292,9 @@ func (b *Bridge) MsgToRawEvent(msg interface{}) (RawEvent, bool) {
 			Type:      EventTaskDiff,
 			Timestamp: now,
 			Data: map[string]interface{}{
-				"task_id":    m.TaskID,
-				"additions":  additions,
-				"deletions":  deletions,
+				"task_id":   m.TaskID,
+				"additions": additions,
+				"deletions": deletions,
 			},
 		}, true
 

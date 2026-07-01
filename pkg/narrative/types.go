@@ -9,17 +9,17 @@ import "time"
 type Category int
 
 const (
-	CategoryOrienting   Category = iota // Where am I?
-	CategoryUnderstanding              // Reading and analyzing
-	CategoryDiscussing                  // Questions and answers
-	CategoryPlanning                    // Breaking down work
-	CategoryResearching                 // External information
-	CategoryExecuting                   // Making changes
-	CategoryVerifying                   // Tests and validation
-	CategoryRecovering                  // Self-healing
-	CategoryShipping                    // Committing and finalizing
-	CategoryLearning                    // Context management
-	CategoryAlerting                    // Errors and warnings
+	CategoryOrienting     Category = iota // Where am I?
+	CategoryUnderstanding                 // Reading and analyzing
+	CategoryDiscussing                    // Questions and answers
+	CategoryPlanning                      // Breaking down work
+	CategoryResearching                   // External information
+	CategoryExecuting                     // Making changes
+	CategoryVerifying                     // Tests and validation
+	CategoryRecovering                    // Self-healing
+	CategoryShipping                      // Committing and finalizing
+	CategoryLearning                      // Context management
+	CategoryAlerting                      // Errors and warnings
 )
 
 // String returns the human-readable name of the category.
@@ -70,10 +70,10 @@ type Display int
 
 const (
 	DisplaySidebar      Display = iota // Sidebar only
-	DisplayConversation               // Conversation only
-	DisplayBoth                       // Sidebar and conversation
-	DisplayToast                      // Transient toast notification
-	DisplayHidden                     // Not displayed (internal)
+	DisplayConversation                // Conversation only
+	DisplayBoth                        // Sidebar and conversation
+	DisplayToast                       // Transient toast notification
+	DisplayHidden                      // Not displayed (internal)
 )
 
 // Classification is the output of the classifier for a single event.
@@ -110,27 +110,27 @@ const (
 	EventSelfHealComplete EventType = "selfheal_complete"
 
 	// Initialize events
-	EventInitAnalysis EventType = "init_analysis"
+	EventInitAnalysis  EventType = "init_analysis"
 	EventInitPreflight EventType = "init_preflight"
 
 	// Plan events
-	EventPlanRevision     EventType = "plan_revision"
-	EventPlanChunk        EventType = "plan_chunk"
-	EventPlanReady        EventType = "plan_ready"
-	EventPlanRefine       EventType = "plan_refine"
+	EventPlanRevision EventType = "plan_revision"
+	EventPlanChunk    EventType = "plan_chunk"
+	EventPlanReady    EventType = "plan_ready"
+	EventPlanRefine   EventType = "plan_refine"
 
 	// Execute events
-	EventExecutePreflight   EventType = "execute_preflight"
-	EventExecuteLoopDetect  EventType = "execute_loop_detect"
+	EventExecutePreflight  EventType = "execute_preflight"
+	EventExecuteLoopDetect EventType = "execute_loop_detect"
 
 	// Verify events
 	EventVerifyReport EventType = "verify_report"
 	EventVerifyTests  EventType = "verify_tests"
 
 	// Ship events
-	EventShipPreflight  EventType = "ship_preflight"
-	EventShipChangelog  EventType = "ship_changelog"
-	EventShipCommit     EventType = "ship_commit"
+	EventShipPreflight      EventType = "ship_preflight"
+	EventShipChangelog      EventType = "ship_changelog"
+	EventShipCommit         EventType = "ship_commit"
 	EventDemonstrationReady EventType = "demonstration_ready"
 
 	// Runtime events
@@ -150,11 +150,11 @@ const (
 	EventCompactionComplete EventType = "compaction_complete"
 
 	// Agent events
-	EventAgentStart   EventType = "agent_start"
-	EventAgentDone    EventType = "agent_done"
-	EventAgentError   EventType = "agent_error"
-	EventAgentCancel  EventType = "agent_cancel"
-	EventAgentSpawn   EventType = "agent_spawn"
+	EventAgentStart  EventType = "agent_start"
+	EventAgentDone   EventType = "agent_done"
+	EventAgentError  EventType = "agent_error"
+	EventAgentCancel EventType = "agent_cancel"
+	EventAgentSpawn  EventType = "agent_spawn"
 
 	// Model events
 	EventModelSwitch EventType = "model_switch"
@@ -163,10 +163,10 @@ const (
 	EventConfigReload EventType = "config_reload"
 
 	// Discussion events
-	EventDiscussStart     EventType = "discuss_start"
-	EventDiscussWaiting   EventType = "discuss_waiting"
-	EventDiscussTimeout   EventType = "discuss_timeout"
-	EventDiscussComplete  EventType = "discuss_complete"
+	EventDiscussStart    EventType = "discuss_start"
+	EventDiscussWaiting  EventType = "discuss_waiting"
+	EventDiscussTimeout  EventType = "discuss_timeout"
+	EventDiscussComplete EventType = "discuss_complete"
 
 	// Session events
 	EventSessionRestored EventType = "session_restored"
@@ -241,15 +241,15 @@ const (
 	NarrativeSessionRestored NarrativeType = "session_restored"
 
 	// Understanding
-	NarrativeReadingCode      NarrativeType = "reading_code"
-	NarrativeReadingProject   NarrativeType = "reading_project"
-	NarrativeAnalyzingCode    NarrativeType = "analyzing_code"
-	NarrativeMappingCodebase  NarrativeType = "mapping_codebase"
+	NarrativeReadingCode     NarrativeType = "reading_code"
+	NarrativeReadingProject  NarrativeType = "reading_project"
+	NarrativeAnalyzingCode   NarrativeType = "analyzing_code"
+	NarrativeMappingCodebase NarrativeType = "mapping_codebase"
 
 	// Discussing
-	NarrativeAskingQuestion    NarrativeType = "asking_question"
-	NarrativeWaitingForAnswer  NarrativeType = "waiting_for_answer"
-	NarrativeQuestionTimedOut  NarrativeType = "question_timed_out"
+	NarrativeAskingQuestion   NarrativeType = "asking_question"
+	NarrativeWaitingForAnswer NarrativeType = "waiting_for_answer"
+	NarrativeQuestionTimedOut NarrativeType = "question_timed_out"
 
 	// Planning
 	NarrativePlanningWork NarrativeType = "planning_work"
@@ -280,10 +280,10 @@ const (
 	NarrativeBuildFailed  NarrativeType = "build_failed"
 
 	// Recovering
-	NarrativeSelfHealing     NarrativeType = "self_healing"
-	NarrativeHealingAttempt  NarrativeType = "healing_attempt"
-	NarrativeHealingSuccess  NarrativeType = "healing_success"
-	NarrativeHealingFailed   NarrativeType = "healing_failed"
+	NarrativeSelfHealing    NarrativeType = "self_healing"
+	NarrativeHealingAttempt NarrativeType = "healing_attempt"
+	NarrativeHealingSuccess NarrativeType = "healing_success"
+	NarrativeHealingFailed  NarrativeType = "healing_failed"
 
 	// Shipping
 	NarrativePreparingCommit NarrativeType = "preparing_commit"
@@ -293,7 +293,7 @@ const (
 
 	// Learning
 	NarrativeContextCompressed NarrativeType = "context_compressed"
-	NarrativeMessagesRemoved  NarrativeType = "messages_removed"
+	NarrativeMessagesRemoved   NarrativeType = "messages_removed"
 
 	// Alerting
 	NarrativeProviderError  NarrativeType = "provider_error"

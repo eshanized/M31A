@@ -15,9 +15,9 @@ type NarrativeBubbleMsg struct {
 
 // NarrativeState holds the current narrative display state in the TUI.
 type NarrativeState struct {
-	Active   narrative.NarrativeObject // currently displayed narrative
-	History  []narrative.NarrativeObject // recent narratives (ring buffer, max 5)
-	MaxHist  int
+	Active  narrative.NarrativeObject   // currently displayed narrative
+	History []narrative.NarrativeObject // recent narratives (ring buffer, max 5)
+	MaxHist int
 }
 
 // NewNarrativeState creates a new narrative state.

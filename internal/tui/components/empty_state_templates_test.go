@@ -28,9 +28,9 @@ func TestEmptyState_Render(t *testing.T) {
 
 func TestEmptyState_RenderMinimal(t *testing.T) {
 	es := EmptyState{
-		Title: "Minimal",
-		Theme: theme.Dark(),
-		Width: 40,
+		Title:  "Minimal",
+		Theme:  theme.Dark(),
+		Width:  40,
 		Height: 10,
 	}
 
@@ -42,9 +42,9 @@ func TestEmptyState_RenderMinimal(t *testing.T) {
 
 func TestEmptyState_RenderSmall(t *testing.T) {
 	es := EmptyState{
-		Title: "Small",
-		Theme: theme.Dark(),
-		Width: 10,
+		Title:  "Small",
+		Theme:  theme.Dark(),
+		Width:  10,
 		Height: 2,
 	}
 

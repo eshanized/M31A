@@ -183,7 +183,7 @@ func TestClassifierCustomRules(t *testing.T) {
 	c := NewClassifier()
 	c.Register(EventType("custom_event"), ClassifyResult{
 		Classification: ClassifyNarrative,
-		NarrativeType:   NarrativeReadingProject,
+		NarrativeType:  NarrativeReadingProject,
 	})
 
 	event := RawEvent{Type: "custom_event"}

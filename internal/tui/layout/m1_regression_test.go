@@ -138,9 +138,9 @@ func TestM1_FooterNoContextRing(t *testing.T) {
 	tm := theme.Default()
 	cache := theme.NewStyleCache(tm)
 	info := FooterInfo{
-		Cwd:       "project",
+		Cwd:        "project",
 		TokenCount: 5000,
-		ShowCost:  true,
+		ShowCost:   true,
 	}
 	footer := BuildFooter(info, 80, Full, tm, cache)
 
@@ -457,12 +457,12 @@ func TestM1_Responsive_SidebarVisibility(t *testing.T) {
 		width    int
 		expected bool
 	}{
-		{40, false},  // Narrow: no sidebar
-		{60, false},  // Compact: no sidebar
-		{79, false},  // Just below threshold
-		{80, true},   // Full: sidebar visible
-		{120, true},  // UltraWide: sidebar visible
-		{160, true},  // VeryWide: sidebar visible
+		{40, false}, // Narrow: no sidebar
+		{60, false}, // Compact: no sidebar
+		{79, false}, // Just below threshold
+		{80, true},  // Full: sidebar visible
+		{120, true}, // UltraWide: sidebar visible
+		{160, true}, // VeryWide: sidebar visible
 	}
 	for _, tt := range tests {
 		got := ShowSidebar(tt.width)
@@ -478,11 +478,11 @@ func TestM1_Responsive_FooterHintsVisibility(t *testing.T) {
 		width    int
 		expected bool
 	}{
-		{40, false},  // Narrow: no hints
-		{59, false},  // Just below threshold
-		{60, true},   // Compact+: hints visible
-		{80, true},   // Full: hints visible
-		{120, true},  // UltraWide: hints visible
+		{40, false}, // Narrow: no hints
+		{59, false}, // Just below threshold
+		{60, true},  // Compact+: hints visible
+		{80, true},  // Full: hints visible
+		{120, true}, // UltraWide: hints visible
 	}
 	for _, tt := range tests {
 		got := ShowFooterHints(tt.width)

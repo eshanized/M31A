@@ -12,15 +12,15 @@ import (
 // to feed them through the narrative engine. Original messages pass through
 // unchanged; narrative results are emitted as additional messages.
 type narrativeEmitter struct {
-	inner    *channelEmitter
-	bridge   *narrative.Bridge
-	engine   *narrative.Engine
+	inner  *channelEmitter
+	bridge *narrative.Bridge
+	engine *narrative.Engine
 }
 
 // newNarrativeEmitter creates a narrative-aware emitter wrapping the given channel.
 func newNarrativeEmitter(ch chan tea.Msg, drops *DropCounter) *narrativeEmitter {
 	return &narrativeEmitter{
-		inner: &channelEmitter{ch: ch, drops: drops},
+		inner:  &channelEmitter{ch: ch, drops: drops},
 		bridge: narrative.NewBridge(),
 		engine: narrative.NewEngine(narrative.DefaultEngineConfig()),
 	}

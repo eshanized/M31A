@@ -62,7 +62,7 @@ const (
 )
 
 type ToolCard struct {
-	toolID    string // M8: unique tool call ID for collapsed state persistence
+	toolID     string // M8: unique tool call ID for collapsed state persistence
 	toolName   string
 	input      string
 	output     string
