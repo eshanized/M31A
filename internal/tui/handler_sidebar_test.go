@@ -1,0 +1,118 @@
+package tui
+
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/pkg/arbitrage"
+)
+
+func TestHandleGoalSubmittedMsg_Signature(t *testing.T) {
+	// Verify function signature matches expected pattern.
+	// Full test skipped: NewPhaseModelPickerModel requires registry setup.
+	var f func(*AppState, GoalSubmittedMsg) (tea.Model, tea.Cmd) = handleGoalSubmittedMsg
+	_ = f
+}
+
+func TestHandleSidebarRevertMsg_NilSidebar(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := SidebarRevertMsg{}
+	result, cmd := handleSidebarRevertMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd when sidebarModel is nil")
+	}
+}
+
+func TestHandleGhostWriteRequestMsg_EmptyFiles(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := GhostWriteRequestMsg{Files: []string{}}
+	result, cmd := handleGhostWriteRequestMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd when no files")
+	}
+}
+
+func TestHandleGhostWriteResultMsg_NilResult(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := GhostWriteResultMsg{}
+	result, cmd := handleGhostWriteResultMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd")
+	}
+}
+
+func TestHandleOptimizedMsg_EmptyRecommendations(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := OptimizedMsg{Recommendations: []arbitrage.ArbitrageRecommendation{}}
+	result, cmd := handleOptimizedMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd when no recommendations")
+	}
+}
+
+func TestHandleSidebarRefreshTickMsg_NilSidebar(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := SidebarRefreshTickMsg{}
+	result, cmd := handleSidebarRefreshTickMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd")
+	}
+}
+
+func TestHandleSidebarRefreshMsg_NilSidebar(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := SidebarRefreshMsg{}
+	result, cmd := handleSidebarRefreshMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd")
+	}
+}
+
+func TestHandleSidebarTodoUpdateMsg_NilSidebar(t *testing.T) {
+	m := newTestAppStateForWorkflow()
+	msg := SidebarTodoUpdateMsg{}
+	result, cmd := handleSidebarTodoUpdateMsg(m, msg)
+	if result == nil {
+		t.Fatal("expected non-nil model")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil cmd")
+	}
+}
+
+func TestHandlerSidebarSignatures(t *testing.T) {
+	var f1 func(*AppState, GoalSubmittedMsg) (tea.Model, tea.Cmd) = handleGoalSubmittedMsg
+	var f2 func(*AppState, SidebarRevertMsg) (tea.Model, tea.Cmd) = handleSidebarRevertMsg
+	var f3 func(*AppState, GhostWriteRequestMsg) (tea.Model, tea.Cmd) = handleGhostWriteRequestMsg
+	var f4 func(*AppState, GhostWriteResultMsg) (tea.Model, tea.Cmd) = handleGhostWriteResultMsg
+	var f5 func(*AppState, OptimizedMsg) (tea.Model, tea.Cmd) = handleOptimizedMsg
+	var f6 func(*AppState, SidebarRefreshTickMsg) (tea.Model, tea.Cmd) = handleSidebarRefreshTickMsg
+	var f7 func(*AppState, SidebarRefreshMsg) (tea.Model, tea.Cmd) = handleSidebarRefreshMsg
+	var f8 func(*AppState, SidebarTodoUpdateMsg) (tea.Model, tea.Cmd) = handleSidebarTodoUpdateMsg
+	_ = f1
+	_ = f2
+	_ = f3
+	_ = f4
+	_ = f5
+	_ = f6
+	_ = f7
+	_ = f8
+}
