@@ -173,7 +173,9 @@ type Engine struct {
 	planningDir      string
 	provider         provider.LLMProvider
 	modelID          string
+	modelIDMu        sync.RWMutex
 	activePhase      m31types.WorkflowPhase
+	activePhaseMu    sync.RWMutex
 	cfg              *config.Config
 	git              *git.Git
 	dispatcher       *tools.Dispatcher
@@ -189,11 +191,13 @@ type Engine struct {
 	callCounter      int64
 	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
 	// workflowMode controls phase-skipping behaviour based on prompt complexity.
-	workflowMode m31types.WorkflowMode
+	workflowMode     m31types.WorkflowMode
+	workflowModeMu   sync.RWMutex
 	// perPhaseModels holds per-phase model overrides set by the TUI via SetPhaseModel.
 	// Keys are WorkflowPhase values; values are model ID strings.
 	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
-	perPhaseModels map[m31types.WorkflowPhase]string
+	perPhaseModels   map[m31types.WorkflowPhase]string
+	perPhaseModelsMu sync.RWMutex
 	// Codebase intelligence layer (lazy-built, invalidated between execute groups)
 	codeIntel      *codeintel.Indexer
 	codeIntelMu    sync.Mutex
@@ -231,9 +235,12 @@ func (e *Engine) gitConfig() config.GitConfig {
 //  4. the engine's active modelID
 func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 	// 1. Interactive per-phase override (highest priority)
+	e.perPhaseModelsMu.RLock()
 	if id, ok := e.perPhaseModels[phase]; ok && id != "" {
+		e.perPhaseModelsMu.RUnlock()
 		return id
 	}
+	e.perPhaseModelsMu.RUnlock()
 	if e.cfg == nil {
 		return e.modelID
 	}
@@ -270,6 +277,8 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 // This takes the highest priority over AgentsConfig and cfg.Model.Default.
 // Called by the TUI after the user selects Planning/Coding models in the picker.
 func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
+	e.perPhaseModelsMu.Lock()
+	defer e.perPhaseModelsMu.Unlock()
 	if e.perPhaseModels == nil {
 		e.perPhaseModels = make(map[m31types.WorkflowPhase]string)
 	}
@@ -280,11 +289,15 @@ func (e *Engine) SetPhaseModel(phase m31types.WorkflowPhase, modelID string) {
 
 // SetWorkflowMode sets the mode that controls phase-skipping behaviour.
 func (e *Engine) SetWorkflowMode(mode m31types.WorkflowMode) {
+	e.workflowModeMu.Lock()
 	e.workflowMode = mode
+	e.workflowModeMu.Unlock()
 }
 
 // WorkflowMode returns the current workflow mode.
 func (e *Engine) WorkflowMode() m31types.WorkflowMode {
+	e.workflowModeMu.RLock()
+	defer e.workflowModeMu.RUnlock()
 	return e.workflowMode
 }
 
@@ -574,7 +587,9 @@ func (e *Engine) loadProjectCached() *m31types.ProjectState {
 
 // SetModel updates the active model ID and provider for the engine.
 func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
+	e.modelIDMu.Lock()
 	e.modelID = modelID
+	e.modelIDMu.Unlock()
 	if p != nil {
 		e.provider = p
 	}
@@ -601,7 +616,9 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	start := time.Now()
+	e.activePhaseMu.Lock()
 	e.activePhase = phase
+	e.activePhaseMu.Unlock()
 
 	// Revoke batch approvals on phase transition to prevent stale approvals
 	// from carrying across phases
