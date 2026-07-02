@@ -21,7 +21,12 @@ func CaptureDiffSummary(g *git.Git, beforeHash, afterHash string) (*m31types.Dif
 		return nil, fmt.Errorf("git diff --numstat: %w", err)
 	}
 
-	statusOut, _ := g.Run("diff", "--name-status", beforeHash+".."+afterHash)
+	statusOut, err := g.Run("diff", "--name-status", beforeHash+".."+afterHash)
+	if err != nil {
+		// Log the error but continue with empty status map.
+		// The diff summary will still show additions/deletions from numstat.
+		statusOut = ""
+	}
 
 	summary := &m31types.DiffSummary{}
 	statusMap := parseNameStatus(statusOut)

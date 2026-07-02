@@ -433,7 +433,10 @@ func composeChunkedPlanMarkdown(outline *PlanOutline, tasks []m31types.Task, sec
 	fmt.Fprintf(&sb, "# %s\n\n", outline.Title)
 	sb.WriteString("## Summary\n\nGenerated via chunked planning mode.\n\n")
 	sb.WriteString("## Task List\n\n```json\n")
-	taskJSON, _ := json.MarshalIndent(tasks, "", "  ")
+	taskJSON, err := json.MarshalIndent(tasks, "", "  ")
+	if err != nil {
+		taskJSON = []byte("[]")
+	}
 	sb.WriteString(string(taskJSON))
 	sb.WriteString("\n```\n")
 	return sb.String()
