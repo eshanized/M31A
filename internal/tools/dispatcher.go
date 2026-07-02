@@ -458,11 +458,13 @@ func (d *Dispatcher) ensurePermission(ctx context.Context, call types.ToolCall, 
 // channel exists. This prevents cross-caller response routing (H-2).
 func (d *Dispatcher) RespondQuestion(requestID int64, answer string) {
 	resp := QuestionResponse{Answer: answer}
-	if ch, ok := d.pendingQuestions.Load(requestID); ok {
-		select {
-		case ch.(chan QuestionResponse) <- resp:
-		default:
-			slog.Warn("question response dropped: per-request channel full", "request_id", requestID)
+	if rawCh, ok := d.pendingQuestions.Load(requestID); ok {
+		if qCh, ok := rawCh.(chan QuestionResponse); ok {
+			select {
+			case qCh <- resp:
+			default:
+				slog.Warn("question response dropped: per-request channel full", "request_id", requestID)
+			}
 		}
 		d.pendingQuestions.Delete(requestID)
 		return

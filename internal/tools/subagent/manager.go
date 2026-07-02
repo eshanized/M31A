@@ -234,7 +234,9 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 // Get returns a subagent by ID, or nil if unknown.
 func (m *Manager) Get(id string) *Subagent {
 	if v, ok := m.agents.Load(id); ok {
-		return v.(*Subagent)
+		if sa, ok := v.(*Subagent); ok {
+			return sa
+		}
 	}
 	return nil
 }
@@ -243,10 +245,11 @@ func (m *Manager) Get(id string) *Subagent {
 func (m *Manager) List() []SubagentInfo {
 	var out []SubagentInfo
 	m.agents.Range(func(_, value any) bool {
-		sa := value.(*Subagent)
-		sa.mu.Lock()
-		out = append(out, sa.Info)
-		sa.mu.Unlock()
+		if sa, ok := value.(*Subagent); ok {
+			sa.mu.Lock()
+			out = append(out, sa.Info)
+			sa.mu.Unlock()
+		}
 		return true
 	})
 	return out
@@ -262,7 +265,9 @@ func (m *Manager) Cancel(id string) {
 // CancelAll requests cancellation of every running subagent.
 func (m *Manager) CancelAll() {
 	m.agents.Range(func(_, value any) bool {
-		value.(*Subagent).cancel()
+		if sa, ok := value.(*Subagent); ok {
+			sa.cancel()
+		}
 		return true
 	})
 }
@@ -289,7 +294,11 @@ func (m *Manager) Cleanup(ctx context.Context, id string) error {
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.CancelAll()
 	m.agents.Range(func(key, value any) bool {
-		sa := value.(*Subagent)
+		sa, ok := value.(*Subagent)
+		if !ok {
+			m.agents.Delete(key)
+			return true
+		}
 		<-sa.done
 		// Clean up worktree so orphaned directories don't accumulate.
 		if sa.Info.Isolation == IsolationWorktree &&
