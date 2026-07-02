@@ -376,10 +376,10 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 	// Set queue depth before sending (how many are already waiting)
 	req.QueueDepth = int(d.pendingPermCount.Load())
 	d.pendingPermCount.Add(1)
-	defer d.pendingPermCount.Add(-1)
 
 	select {
 	case d.requestCh <- req:
+		defer d.pendingPermCount.Add(-1)
 	default:
 		d.pendingPermCount.Add(-1)
 		return m31errors.ErrPermissionDenied

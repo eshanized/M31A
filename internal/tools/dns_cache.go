@@ -23,6 +23,7 @@ type dnsCacheEntry struct {
 type DNSCache struct {
 	cache     sync.Map
 	ttl       time.Duration
+	mu        sync.Mutex
 	inserts   atomic.Int32
 	threshold int32
 	maxSize   int32 // maximum number of entries in the cache
@@ -81,6 +82,7 @@ func (dc *DNSCache) Resolve(ctx context.Context, host string) ([]net.IPAddr, err
 	}
 	dc.cache.Store(host, entry)
 
+	dc.mu.Lock()
 	if dc.inserts.Add(1) >= dc.threshold {
 		dc.inserts.Store(0)
 		dc.evictExpired(now)
@@ -90,6 +92,7 @@ func (dc *DNSCache) Resolve(ctx context.Context, host string) ([]net.IPAddr, err
 	if dc.Size() > dc.maxSize {
 		dc.evictOldest(dc.maxSize / 2) // evict down to half capacity
 	}
+	dc.mu.Unlock()
 
 	return addrs, nil
 }
