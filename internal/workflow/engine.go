@@ -8,14 +8,12 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/codeintel"
@@ -131,7 +129,7 @@ type Engine struct {
 	execCommand      func(name string, args ...string) *exec.Cmd
 	msgEmitter       MsgEmitter
 	callCounter      int64
-	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
+	costTracker      *CostTracker
 	// workflowMode controls phase-skipping behaviour based on prompt complexity.
 	workflowMode   m31types.WorkflowMode
 	workflowModeMu sync.RWMutex
@@ -446,6 +444,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		logger:        slog.Default(),
 		startTime:     time.Now(),
 		execCommand:   exec.Command,
+		costTracker:   NewCostTracker(budgetFromConfig(opts.Config)),
 		compactor:     compaction.New(compactionConfig(opts.Config), opts.TokenEst),
 		contextRegistry: ctxsrc.NewRegistry(
 			ctxsrc.DateTimeSource{},
@@ -457,6 +456,14 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 			decisionLog: decision.NewLogger(256),
 		},
 	}, nil
+}
+
+// budgetFromConfig extracts the budget limit from config, returning 0 if nil.
+func budgetFromConfig(cfg *config.Config) float64 {
+	if cfg == nil {
+		return 0
+	}
+	return cfg.Features.BudgetLimitUSD
 }
 
 // compactionConfig converts a config.CompactionConfig to a compaction.Config.
@@ -547,7 +554,7 @@ func (e *Engine) SetCollector(c *metrics.Collector) {
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	// Budget guardrail: check cumulative cost before each phase
 	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
-		cost := math.Float64frombits(atomic.LoadUint64(&e.totalCostBits))
+		cost := e.costTracker.TotalCost()
 		if cost >= e.cfg.Features.BudgetLimitUSD {
 			return &PhaseResult{
 				Phase:   phase,
@@ -609,13 +616,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		result.WorkflowMode = e.workflowMode
 		// Accumulate cost for budget tracking
 		if result.Cost > 0 {
-			for {
-				old := atomic.LoadUint64(&e.totalCostBits)
-				new := math.Float64bits(math.Float64frombits(old) + result.Cost)
-				if atomic.CompareAndSwapUint64(&e.totalCostBits, old, new) {
-					break
-				}
-			}
+			e.costTracker.RecordCost(result.Cost)
 		}
 		// Record metrics
 		if e.collector != nil {

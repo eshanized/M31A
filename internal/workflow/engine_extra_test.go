@@ -3,11 +3,9 @@ package workflow
 import (
 	"context"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1410,7 +1408,8 @@ func TestRunPhase_BudgetLimit(t *testing.T) {
 		},
 	}
 	// Set cumulative cost above budget
-	engine.totalCostBits = 1 // non-zero bits = non-zero cost
+	engine.costTracker = NewCostTracker(0.001)
+	engine.costTracker.RecordCost(0.01) // above budget
 
 	_, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
@@ -3144,7 +3143,8 @@ func TestRunPhase_BudgetExceeded(t *testing.T) {
 	}
 
 	// Simulate high cost
-	atomic.StoreUint64(&engine.totalCostBits, math.Float64bits(0.01))
+	engine.costTracker = NewCostTracker(0.001)
+	engine.costTracker.RecordCost(0.01)
 
 	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
 	if err == nil {
