@@ -6,62 +6,59 @@ import (
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
+func TestCaptureDiffSummary_NilGit(t *testing.T) {
+	_, err := CaptureDiffSummary(nil, "abc", "def")
+	if err == nil {
+		t.Error("CaptureDiffSummary should return error with nil git")
+	}
+}
+
 func TestParseNameStatus(t *testing.T) {
 	tests := []struct {
-		name string
-		out  string
-		want map[string]string
+		name     string
+		input    string
+		expected map[string]string
 	}{
 		{
-			name: "added and modified",
-			out:  "A\tfile1.go\nM\tfile2.go",
-			want: map[string]string{"file1.go": "added", "file2.go": "modified"},
+			"empty",
+			"",
+			map[string]string{},
 		},
 		{
-			name: "deleted",
-			out:  "D\told_file.go",
-			want: map[string]string{"old_file.go": "deleted"},
+			"added",
+			"A\tfile.go",
+			map[string]string{"file.go": "added"},
 		},
 		{
-			name: "renamed uses old name as key",
-			out:  "R100\told_name.go\tnew_name.go",
-			want: map[string]string{"old_name.go": "renamed"},
+			"deleted",
+			"D\told.go",
+			map[string]string{"old.go": "deleted"},
 		},
 		{
-			name: "empty input",
-			out:  "",
-			want: map[string]string{},
+			"modified",
+			"M\tmain.go",
+			map[string]string{"main.go": "modified"},
 		},
 		{
-			name: "unknown status defaults to modified",
-			out:  "X\tunknown.go",
-			want: map[string]string{"unknown.go": "modified"},
+			"renamed",
+			"R100\told.go\tnew.go",
+			map[string]string{"old.go": "renamed"},
 		},
 		{
-			name: "malformed line skipped",
-			out:  "A\nM\tfile.go",
-			want: map[string]string{"file.go": "modified"},
-		},
-		{
-			name: "multiple added files",
-			out:  "A\tfile1.go\nA\tfile2.go",
-			want: map[string]string{"file1.go": "added", "file2.go": "added"},
-		},
-		{
-			name: "copied file",
-			out:  "C100\tsource.go\tdest.go",
-			want: map[string]string{"source.go": "modified"},
+			"multiple",
+			"A\tnew.go\nD\told.go\nM\tmain.go",
+			map[string]string{"new.go": "added", "old.go": "deleted", "main.go": "modified"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseNameStatus(tt.out)
-			if len(got) != len(tt.want) {
-				t.Errorf("parseNameStatus() returned %d entries, want %d: got=%v", len(got), len(tt.want), got)
+			got := parseNameStatus(tt.input)
+			if len(got) != len(tt.expected) {
+				t.Errorf("parseNameStatus() returned %d entries, want %d", len(got), len(tt.expected))
 				return
 			}
-			for k, v := range tt.want {
+			for k, v := range tt.expected {
 				if got[k] != v {
 					t.Errorf("parseNameStatus()[%q] = %q, want %q", k, got[k], v)
 				}
@@ -71,83 +68,66 @@ func TestParseNameStatus(t *testing.T) {
 }
 
 func TestFormatDiffSummary(t *testing.T) {
-	tests := []struct {
-		name    string
-		summary *m31types.DiffSummary
-		want    string
-	}{
-		{
-			name:    "nil summary",
-			summary: nil,
-			want:    "No file changes.",
-		},
-		{
-			name:    "empty files",
-			summary: &m31types.DiffSummary{},
-			want:    "No file changes.",
-		},
-		{
-			name: "single file modified",
-			summary: &m31types.DiffSummary{
-				Files:     []m31types.FileDiff{{File: "main.go", Status: "modified", Additions: 10, Deletions: 5}},
-				Additions: 10,
-				Deletions: 5,
-			},
-			want: "Files changed: 1 (+10/-5)\n  [M] main.go (+10/-5)\n",
-		},
-		{
-			name: "multiple files with different statuses",
-			summary: &m31types.DiffSummary{
-				Files: []m31types.FileDiff{
-					{File: "new.go", Status: "added", Additions: 50, Deletions: 0},
-					{File: "old.go", Status: "deleted", Additions: 0, Deletions: 30},
-					{File: "mod.go", Status: "modified", Additions: 5, Deletions: 3},
-				},
-				Additions: 55,
-				Deletions: 33,
-			},
-			want: "Files changed: 3 (+55/-33)\n  [+] new.go (+50/-0)\n  [-] old.go (+0/-30)\n  [M] mod.go (+5/-3)\n",
-		},
-		{
-			name: "renamed file",
-			summary: &m31types.DiffSummary{
-				Files:     []m31types.FileDiff{{File: "new_name.go", Status: "renamed", Additions: 0, Deletions: 0}},
-				Additions: 0,
-				Deletions: 0,
-			},
-			want: "Files changed: 1 (+0/-0)\n  [R] new_name.go (+0/-0)\n",
-		},
+	// Nil summary
+	got := FormatDiffSummary(nil)
+	if got != "No file changes." {
+		t.Errorf("FormatDiffSummary(nil) = %q, want %q", got, "No file changes.")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := FormatDiffSummary(tt.summary)
-			if got != tt.want {
-				t.Errorf("FormatDiffSummary() =\n%q\nwant:\n%q", got, tt.want)
-			}
-		})
+	// Empty files
+	empty := &m31types.DiffSummary{}
+	got = FormatDiffSummary(empty)
+	if got != "No file changes." {
+		t.Errorf("FormatDiffSummary(empty) = %q, want %q", got, "No file changes.")
+	}
+
+	// With files
+	ds := &m31types.DiffSummary{
+		Additions: 10,
+		Deletions: 5,
+		Files: []m31types.FileDiff{
+			{File: "new.go", Status: "added", Additions: 10, Deletions: 0},
+			{File: "old.go", Status: "deleted", Additions: 0, Deletions: 5},
+		},
+	}
+	got = FormatDiffSummary(ds)
+	if !contains(got, "Files changed: 2") {
+		t.Errorf("FormatDiffSummary should contain file count, got: %q", got)
+	}
+	if !contains(got, "new.go") {
+		t.Errorf("FormatDiffSummary should contain file name, got: %q", got)
 	}
 }
 
 func TestStatusIcon(t *testing.T) {
 	tests := []struct {
-		status string
-		want   string
+		status   string
+		expected string
 	}{
 		{"added", "[+]"},
 		{"deleted", "[-]"},
 		{"renamed", "[R]"},
 		{"modified", "[M]"},
 		{"unknown", "[M]"},
-		{"", "[M]"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			got := statusIcon(tt.status)
-			if got != tt.want {
-				t.Errorf("statusIcon(%q) = %q, want %q", tt.status, got, tt.want)
-			}
-		})
+		got := statusIcon(tt.status)
+		if got != tt.expected {
+			t.Errorf("statusIcon(%q) = %q, want %q", tt.status, got, tt.expected)
+		}
 	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

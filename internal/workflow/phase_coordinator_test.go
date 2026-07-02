@@ -161,3 +161,43 @@ type testConfig struct {
 func (c *testConfig) GetBudgetLimit() float64 {
 	return c.budgetLimit
 }
+
+func TestPhaseCoordinator_ModelForPhase(t *testing.T) {
+	pc, _ := setupTestPhaseCoordinator(t)
+
+	// Should return empty string (placeholder implementation)
+	model := pc.ModelForPhase(m31types.PhaseExecute)
+	if model != "" {
+		t.Errorf("ModelForPhase should return empty string, got %q", model)
+	}
+}
+
+func TestPhaseCoordinator_ProviderForPhase(t *testing.T) {
+	pc, _ := setupTestPhaseCoordinator(t)
+
+	// Should return nil (placeholder implementation)
+	provider := pc.ProviderForPhase(m31types.PhaseExecute)
+	if provider != nil {
+		t.Error("ProviderForPhase should return nil")
+	}
+}
+
+func TestPhaseCoordinator_Emit(t *testing.T) {
+	pc, emitter := setupTestPhaseCoordinator(t)
+
+	// Emit a message
+	pc.Emit("test message")
+
+	if len(emitter.messages) != 1 {
+		t.Errorf("expected 1 emitted message, got %d", len(emitter.messages))
+	}
+}
+
+func TestPhaseCoordinator_Logger(t *testing.T) {
+	pc, _ := setupTestPhaseCoordinator(t)
+
+	logger := pc.Logger()
+	if logger == nil {
+		t.Error("Logger should return non-nil logger")
+	}
+}

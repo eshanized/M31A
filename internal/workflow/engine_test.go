@@ -968,3 +968,95 @@ func (c *capturingProvider) GetModel(id string) (*m31types.ModelInfo, error) {
 func (c *capturingProvider) CachedModels() []m31types.ModelInfo {
 	return c.inner.CachedModels()
 }
+
+func TestEngine_SetWorkflowMode(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Default mode should be zero value
+	if engine.WorkflowMode() != "" {
+		t.Errorf("expected default workflow mode to be empty, got %v", engine.WorkflowMode())
+	}
+
+	// Set mode
+	engine.SetWorkflowMode(m31types.ModeAuto)
+	if engine.WorkflowMode() != m31types.ModeAuto {
+		t.Errorf("expected workflow mode %v, got %v", m31types.ModeAuto, engine.WorkflowMode())
+	}
+}
+
+func TestEngine_IntentResult(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Default should be nil
+	if engine.IntentResult() != nil {
+		t.Error("expected nil intent result by default")
+	}
+
+	// Set intent result
+	ir := &m31types.IntentResult{
+		Intent:     "feature",
+		Complexity: "medium",
+		Confidence: 0.85,
+		Scope:      []string{"auth", "api"},
+	}
+	engine.SetIntentResult(ir)
+
+	got := engine.IntentResult()
+	if got == nil {
+		t.Fatal("expected non-nil intent result")
+	}
+	if got.Intent != "feature" {
+		t.Errorf("expected intent 'feature', got %q", got.Intent)
+	}
+}
+
+func TestEngine_ScopeIncludes(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// No intent result — should return false
+	if engine.ScopeIncludes("auth") {
+		t.Error("ScopeIncludes should return false with nil intent result")
+	}
+
+	// Set intent with scope
+	ir := &m31types.IntentResult{
+		Scope: []string{"auth", "api", "database"},
+	}
+	engine.SetIntentResult(ir)
+
+	if !engine.ScopeIncludes("auth") {
+		t.Error("ScopeIncludes should return true for 'auth'")
+	}
+	if !engine.ScopeIncludes("api") {
+		t.Error("ScopeIncludes should return true for 'api'")
+	}
+	if engine.ScopeIncludes("frontend") {
+		t.Error("ScopeIncludes should return false for 'frontend'")
+	}
+}
+
+func TestEngine_SetCollector(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Setting nil should be safe
+	engine.SetCollector(nil)
+
+	// Setting a collector should not panic
+	// (We can't easily test the collector without mocking metrics)
+}
+
+func TestEngine_CompactedMessages(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	// Empty messages should return empty
+	msgs := []m31types.Message{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there!"},
+	}
+
+	result := engine.compactedMessages(msgs, "Previous conversation summarized.")
+	if len(result) == 0 {
+		t.Error("compactedMessages should return non-empty result")
+	}
+}
