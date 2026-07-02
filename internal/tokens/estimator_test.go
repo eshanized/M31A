@@ -16,6 +16,9 @@ func TestEstimator_NewWithKnownModel(t *testing.T) {
 	if e.ModelID() != "gpt-4o" {
 		t.Errorf("expected modelID 'gpt-4o', got %q", e.ModelID())
 	}
+	if e.Provider() != ProviderOpenAI {
+		t.Errorf("expected provider OpenAI, got %v", e.Provider())
+	}
 }
 
 func TestEstimator_NewWithUnknownModel(t *testing.T) {
@@ -25,6 +28,9 @@ func TestEstimator_NewWithUnknownModel(t *testing.T) {
 	}
 	if e.tokenizer != nil {
 		t.Error("expected nil tokenizer for unsupported model")
+	}
+	if e.Provider() != ProviderAnthropic {
+		t.Errorf("expected provider Anthropic, got %v", e.Provider())
 	}
 }
 
@@ -274,5 +280,71 @@ func TestEstimator_ModelID(t *testing.T) {
 	e2 := NewEstimator("custom-model-v3")
 	if e2.ModelID() != "custom-model-v3" {
 		t.Errorf("expected 'custom-model-v3', got %q", e2.ModelID())
+	}
+}
+
+func TestDetectProviderFamily(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		expected ProviderFamily
+	}{
+		{"gpt-4o", ProviderOpenAI},
+		{"gpt-4-turbo", ProviderOpenAI},
+		{"o1-preview", ProviderOpenAI},
+		{"o3-mini", ProviderOpenAI},
+		{"claude-3-opus", ProviderAnthropic},
+		{"claude-3-5-sonnet", ProviderAnthropic},
+		{"gemini-pro", ProviderGoogle},
+		{"gemini-1.5-flash", ProviderGoogle},
+		{"llama-3-70b", ProviderMeta},
+		{"mistral-large", ProviderMistral},
+		{"qwen-2.5", ProviderQwen},
+		{"deepseek-chat", ProviderDeepSeek},
+		{"command-r-plus", ProviderCohere},
+		{"custom-model", ProviderUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			result := DetectProviderFamily(tt.modelID)
+			if result != tt.expected {
+				t.Errorf("DetectProviderFamily(%q) = %v, want %v", tt.modelID, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEstimator_ProviderSpecificEstimation(t *testing.T) {
+	text := "This is a test message with enough words to trigger provider-specific heuristics for accurate token estimation."
+
+	tests := []struct {
+		modelID  string
+		expected ProviderFamily
+	}{
+		{"gpt-4o", ProviderOpenAI},
+		{"claude-3-opus", ProviderAnthropic},
+		{"gemini-pro", ProviderGoogle},
+		{"llama-3-70b", ProviderMeta},
+		{"mistral-large", ProviderMistral},
+		{"qwen-2.5", ProviderQwen},
+		{"deepseek-chat", ProviderDeepSeek},
+		{"command-r-plus", ProviderCohere},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			e := NewEstimator(tt.modelID)
+			if e.Provider() != tt.expected {
+				t.Errorf("expected provider %v, got %v", tt.expected, e.Provider())
+			}
+
+			count, provider := e.EstimateTokensForProvider(text)
+			if count <= 0 {
+				t.Errorf("expected positive token count, got %d", count)
+			}
+			if provider != tt.expected.String() {
+				t.Errorf("expected provider %q, got %q", tt.expected.String(), provider)
+			}
+		})
 	}
 }

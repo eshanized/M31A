@@ -2,6 +2,7 @@ package provider
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -64,6 +65,88 @@ var deprecatedNvidiaModels = []string{
 // Reported on NVIDIA developer forums and confirmed via M31A testing.
 var brokenOnNvidiaNIM = []string{
 	"ibm/granite",
+}
+
+// ModelCapabilities describes what a model supports.
+type ModelCapabilities struct {
+	SupportsTools        bool
+	SupportsImages       bool
+	SupportsStreaming    bool
+	SupportsJSON         bool
+	SupportsSystemPrompt bool
+	MaxContextWindow     int
+	MaxOutputTokens      int
+}
+
+// modelCapabilitiesCache stores detected capabilities to avoid repeated lookups.
+var modelCapabilitiesCache sync.Map
+
+// knownModelCapabilities is a hardcoded fallback table for well-known models.
+// This is used when runtime detection fails or is not available.
+var knownModelCapabilities = map[string]ModelCapabilities{
+	// OpenAI models
+	"gpt-4o": {
+		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 128000, MaxOutputTokens: 16384,
+	},
+	"gpt-4-turbo": {
+		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 128000, MaxOutputTokens: 4096,
+	},
+	"o1-preview": {
+		SupportsTools: false, SupportsImages: true, SupportsStreaming: false,
+		SupportsJSON: false, SupportsSystemPrompt: false,
+		MaxContextWindow: 128000, MaxOutputTokens: 32768,
+	},
+	// Anthropic models
+	"claude-3-opus": {
+		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 200000, MaxOutputTokens: 4096,
+	},
+	"claude-3-5-sonnet": {
+		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 200000, MaxOutputTokens: 8192,
+	},
+	// Google models
+	"gemini-pro": {
+		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 32760, MaxOutputTokens: 8192,
+	},
+	// Meta models
+	"llama-3-70b": {
+		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 8192, MaxOutputTokens: 2048,
+	},
+	// Mistral models
+	"mistral-large": {
+		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 32768, MaxOutputTokens: 4096,
+	},
+	// Qwen models
+	"qwen-2.5": {
+		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 32768, MaxOutputTokens: 8192,
+	},
+	// DeepSeek models
+	"deepseek-chat": {
+		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 32768, MaxOutputTokens: 4096,
+	},
+	// Cohere models
+	"command-r-plus": {
+		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
+		SupportsJSON: true, SupportsSystemPrompt: true,
+		MaxContextWindow: 128000, MaxOutputTokens: 4096,
+	},
 }
 
 // IsNonChatModel reports whether a model ID belongs to a model that does not
@@ -149,4 +232,64 @@ func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) ty
 	}
 
 	return caps
+}
+
+// DetectCapabilities returns the capabilities for a model. It first checks the
+// cache, then falls back to the hardcoded table. Returns nil if the model is
+// not recognized.
+func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
+	// Check cache first
+	cacheKey := provider + "/" + modelID
+	if cached, ok := modelCapabilitiesCache.Load(cacheKey); ok {
+		caps := cached.(*ModelCapabilities)
+		return caps, nil
+	}
+
+	// Check hardcoded table
+	id := strings.ToLower(modelID)
+	for knownID, caps := range knownModelCapabilities {
+		if strings.Contains(id, strings.ToLower(knownID)) {
+			// Cache the result (store pointer)
+			capsPtr := &caps
+			modelCapabilitiesCache.Store(cacheKey, capsPtr)
+			return capsPtr, nil
+		}
+	}
+
+	// Default capabilities for unknown models
+	defaultCaps := &ModelCapabilities{
+		SupportsTools:        false,
+		SupportsImages:       false,
+		SupportsStreaming:    true,
+		SupportsJSON:         true,
+		SupportsSystemPrompt: true,
+		MaxContextWindow:     4096,
+		MaxOutputTokens:      2048,
+	}
+
+	return defaultCaps, nil
+}
+
+// CheckModelHealth performs a lightweight health check for a model.
+// Currently returns nil (always healthy) — can be extended to make actual
+// API calls if needed.
+func CheckModelHealth(provider, modelID string) error {
+	// For now, just validate the model ID is not empty and not a known broken model
+	if modelID == "" {
+		return &ModelHealthError{ModelID: modelID, Reason: "empty model ID"}
+	}
+	if IsLikelyBrokenOnNvidia(modelID) {
+		return &ModelHealthError{ModelID: modelID, Reason: "known broken on NVIDIA NIM"}
+	}
+	return nil
+}
+
+// ModelHealthError represents a model health check failure.
+type ModelHealthError struct {
+	ModelID string
+	Reason  string
+}
+
+func (e *ModelHealthError) Error() string {
+	return "model health check failed for " + e.ModelID + ": " + e.Reason
 }

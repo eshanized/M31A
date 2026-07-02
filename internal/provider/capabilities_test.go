@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseModelCapabilities_ToolCapable(t *testing.T) {
 	t.Parallel()
@@ -168,5 +171,131 @@ func TestParseModelCapabilities_ChatCompletionOnly(t *testing.T) {
 				t.Errorf("expected Chat=false for %q", id)
 			}
 		})
+	}
+}
+
+func TestDetectCapabilities_KnownModels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		provider string
+		modelID  string
+		wantCaps bool
+	}{
+		{"openai", "gpt-4o", true},
+		{"anthropic", "claude-3-opus", true},
+		{"google", "gemini-pro", true},
+		{"meta", "llama-3-70b", true},
+		{"mistral", "mistral-large", true},
+		{"qwen", "qwen-2.5", true},
+		{"deepseek", "deepseek-chat", true},
+		{"cohere", "command-r-plus", true},
+		{"custom", "unknown-model", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			caps, err := DetectCapabilities(tt.provider, tt.modelID)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if caps == nil {
+				t.Fatal("expected non-nil capabilities")
+			}
+
+			// Verify known models have reasonable defaults
+			if tt.wantCaps {
+				if caps.MaxContextWindow <= 0 {
+					t.Errorf("expected positive MaxContextWindow for %q", tt.modelID)
+				}
+				if caps.MaxOutputTokens <= 0 {
+					t.Errorf("expected positive MaxOutputTokens for %q", tt.modelID)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectCapabilities_Caching(t *testing.T) {
+	t.Parallel()
+
+	// First call
+	caps1, err := DetectCapabilities("openai", "gpt-4o")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Second call should return cached result
+	caps2, err := DetectCapabilities("openai", "gpt-4o")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should be the same pointer (cached)
+	if caps1 != caps2 {
+		t.Error("expected same pointer from cache")
+	}
+}
+
+func TestCheckModelHealth_EmptyModelID(t *testing.T) {
+	t.Parallel()
+
+	err := CheckModelHealth("openai", "")
+	if err == nil {
+		t.Error("expected error for empty model ID")
+	}
+
+	var healthErr *ModelHealthError
+	if !strings.Contains(err.Error(), "empty model ID") {
+		t.Errorf("expected 'empty model ID' in error, got: %v", err)
+	}
+	_ = healthErr
+}
+
+func TestCheckModelHealth_BrokenModel(t *testing.T) {
+	t.Parallel()
+
+	err := CheckModelHealth("nvidia", "ibm/granite")
+	if err == nil {
+		t.Error("expected error for broken model")
+	}
+
+	if !strings.Contains(err.Error(), "known broken on NVIDIA NIM") {
+		t.Errorf("expected 'known broken on NVIDIA NIM' in error, got: %v", err)
+	}
+}
+
+func TestCheckModelHealth_HealthyModel(t *testing.T) {
+	t.Parallel()
+
+	err := CheckModelHealth("openai", "gpt-4o")
+	if err != nil {
+		t.Errorf("expected no error for healthy model, got: %v", err)
+	}
+}
+
+func TestModelCapabilities_Fields(t *testing.T) {
+	t.Parallel()
+
+	caps, err := DetectCapabilities("openai", "gpt-4o")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all fields are set
+	if !caps.SupportsTools {
+		t.Error("expected SupportsTools=true for gpt-4o")
+	}
+	if !caps.SupportsImages {
+		t.Error("expected SupportsImages=true for gpt-4o")
+	}
+	if !caps.SupportsStreaming {
+		t.Error("expected SupportsStreaming=true for gpt-4o")
+	}
+	if !caps.SupportsJSON {
+		t.Error("expected SupportsJSON=true for gpt-4o")
+	}
+	if !caps.SupportsSystemPrompt {
+		t.Error("expected SupportsSystemPrompt=true for gpt-4o")
 	}
 }

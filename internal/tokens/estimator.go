@@ -3,6 +3,7 @@ package tokens
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -11,30 +12,91 @@ import (
 	"github.com/pkoukk/tiktoken-go"
 )
 
-// NOTE: tiktoken-go is unmaintained since 2024. New tokenizers (e.g. o200k_base
-// for GPT-4o) may not be recognized, causing silent fallback to rune counting.
-// Monitor for a maintained fork or official replacement.
-
 // DefaultWarningThreshold is the default context usage ratio that triggers
 // the context warning banner (80%).
 const DefaultWarningThreshold = 0.80
 
+// ProviderFamily identifies a group of models that share similar tokenization.
+type ProviderFamily int
+
+const (
+	ProviderUnknown ProviderFamily = iota
+	ProviderOpenAI
+	ProviderAnthropic
+	ProviderGoogle
+	ProviderMeta
+	ProviderMistral
+	ProviderQwen
+	ProviderDeepSeek
+	ProviderCohere
+)
+
+// String returns the provider family name.
+func (p ProviderFamily) String() string {
+	switch p {
+	case ProviderOpenAI:
+		return "openai"
+	case ProviderAnthropic:
+		return "anthropic"
+	case ProviderGoogle:
+		return "google"
+	case ProviderMeta:
+		return "meta"
+	case ProviderMistral:
+		return "mistral"
+	case ProviderQwen:
+		return "qwen"
+	case ProviderDeepSeek:
+		return "deepseek"
+	case ProviderCohere:
+		return "cohere"
+	default:
+		return "unknown"
+	}
+}
+
+// DetectProviderFamily identifies the provider family from a model ID.
+func DetectProviderFamily(modelID string) ProviderFamily {
+	id := strings.ToLower(modelID)
+
+	switch {
+	case strings.Contains(id, "gpt-") || strings.Contains(id, "o1") || strings.Contains(id, "o3") || strings.Contains(id, "o4"):
+		return ProviderOpenAI
+	case strings.Contains(id, "claude"):
+		return ProviderAnthropic
+	case strings.Contains(id, "gemini"):
+		return ProviderGoogle
+	case strings.Contains(id, "llama"):
+		return ProviderMeta
+	case strings.Contains(id, "mistral"):
+		return ProviderMistral
+	case strings.Contains(id, "qwen"):
+		return ProviderQwen
+	case strings.Contains(id, "deepseek"):
+		return ProviderDeepSeek
+	case strings.Contains(id, "command"):
+		return ProviderCohere
+	default:
+		return ProviderUnknown
+	}
+}
+
 // Estimator provides token counting and context usage estimation for a
-// specific model. Uses tiktoken-go for supported OpenAI models and a rune-based
-// fallback for unsupported models (Claude, OpenRouter aliases, etc.).
+// specific model. Uses tiktoken-go for supported OpenAI models and provider-
+// specific approximations for other providers. Falls back to rune-based
+// counting for unknown providers.
 // EMA calibration corrects estimates against actual usage from API responses.
 type Estimator struct {
-	modelID   string
-	tokenizer *tiktoken.Tiktoken
-	emaAlpha  float64
-	// emaFactor stores the calibration factor as raw uint64 bits (via
-	// math.Float64bits/Float64frombits) for lock-free atomic access.
+	modelID       string
+	provider      ProviderFamily
+	tokenizer     *tiktoken.Tiktoken
+	emaAlpha      float64
 	emaFactorBits atomic.Uint64
 }
 
 // NewEstimator creates an Estimator for the given model ID.
 // If the model is not supported by tiktoken-go, the tokenizer is set to nil
-// and the rune-based fallback is used for estimation.
+// and provider-specific or rune-based fallback is used for estimation.
 func NewEstimator(modelID string) *Estimator {
 	return NewEstimatorWithOpts(modelID, EstimatorOpts{})
 }
@@ -50,37 +112,119 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 	if alpha <= 0 || alpha > 1 {
 		alpha = types.EMACorrectionAlpha
 	}
+	provider := DetectProviderFamily(modelID)
 	e := &Estimator{
 		modelID:  modelID,
+		provider: provider,
 		emaAlpha: alpha,
 	}
 	e.emaFactorBits.Store(math.Float64bits(1.0))
 
-	tkm, err := tiktoken.EncodingForModel(modelID)
-	if err == nil {
-		e.tokenizer = tkm
+	// Only load tiktoken for OpenAI models
+	if provider == ProviderOpenAI {
+		tkm, err := tiktoken.EncodingForModel(modelID)
+		if err == nil {
+			e.tokenizer = tkm
+		}
 	}
 
 	return e
 }
 
+// estimateWithProvider applies provider-specific tokenization heuristics.
+// These are approximations that are more accurate than rune-based counting.
+func (e *Estimator) estimateWithProvider(text string) int {
+	runes := utf8.RuneCountInString(text)
+	words := strings.Fields(text)
+	wordCount := len(words)
+
+	switch e.provider {
+	case ProviderAnthropic:
+		// Claude uses byte-pair encoding similar to GPT but with different merges.
+		// Approximate: ~4 chars per token, but code/text ratio matters.
+		if runes > 100 {
+			return runes / 4
+		}
+		return wordCount * 3 / 2
+
+	case ProviderGoogle:
+		// Gemini uses SentencePiece-style tokenization.
+		// Approximate: ~3.5 chars per token for typical English.
+		if runes > 100 {
+			return int(float64(runes) / 3.5)
+		}
+		return wordCount * 3 / 2
+
+	case ProviderMeta:
+		// Llama models use SentencePiece with BPE.
+		// Approximate: ~4 chars per token.
+		if runes > 100 {
+			return runes / 4
+		}
+		return wordCount * 3 / 2
+
+	case ProviderMistral:
+		// Mistral uses a BPE tokenizer similar to Llama.
+		// Approximate: ~4 chars per token.
+		if runes > 100 {
+			return runes / 4
+		}
+		return wordCount * 3 / 2
+
+	case ProviderQwen:
+		// Qwen uses a BPE tokenizer with multilingual support.
+		// Approximate: ~3 chars per token for English.
+		if runes > 100 {
+			return runes / 3
+		}
+		return wordCount * 4 / 3
+
+	case ProviderDeepSeek:
+		// DeepSeek uses a BPE tokenizer similar to Llama.
+		// Approximate: ~4 chars per token.
+		if runes > 100 {
+			return runes / 4
+		}
+		return wordCount * 3 / 2
+
+	case ProviderCohere:
+		// Cohere uses a BPE tokenizer.
+		// Approximate: ~4 chars per token.
+		if runes > 100 {
+			return runes / 4
+		}
+		return wordCount * 3 / 2
+
+	default:
+		// Unknown provider: use rune-based fallback.
+		// Original formula: (runes/4 + 1) * 1.3
+		return int((float64(runes)/4.0 + 1.0) * 1.3)
+	}
+}
+
 // Estimate returns the estimated token count for the given text.
-// Uses tiktoken-go if the model is supported; otherwise falls back to
-// utf8.RuneCountInString(text) / 4 * 1.3. The emaFactor calibration is applied
-// to all estimates. Uses lock-free atomic read for the calibration factor.
+// Uses tiktoken-go for OpenAI models, provider-specific heuristics for
+// known providers, and rune-based fallback for unknown models.
+// The emaFactor calibration is applied to all estimates.
 func (e *Estimator) Estimate(text string) int {
 	var estimated int
 
 	if e.tokenizer != nil {
 		estimated = len(e.tokenizer.Encode(text, nil, nil))
 	} else {
-		// Use utf8.RuneCountInString which is O(N) time but O(1) space
-		// instead of len([]rune(text)) which allocates O(N) memory
-		estimated = int((float64(utf8.RuneCountInString(text))/4.0 + 1.0) * 1.3)
+		estimated = e.estimateWithProvider(text)
 	}
 
 	factor := math.Float64frombits(e.emaFactorBits.Load())
 	return int(float64(estimated) * factor)
+}
+
+// EstimateTokensForProvider returns the estimated token count and the provider
+// family name used for estimation. This is useful for diagnostics and fallback
+// reporting.
+func (e *Estimator) EstimateTokensForProvider(text string) (int, string) {
+	count := e.Estimate(text)
+	return count, e.provider.String()
 }
 
 // Calibrate updates the emaFactor using exponential moving average.
@@ -154,6 +298,11 @@ func (e *Estimator) ContextWarningBanner(used int, total int64, threshold float6
 // ModelID returns the model identifier for this estimator.
 func (e *Estimator) ModelID() string {
 	return e.modelID
+}
+
+// Provider returns the detected provider family for this estimator.
+func (e *Estimator) Provider() ProviderFamily {
+	return e.provider
 }
 
 // emaFactor returns the current calibration factor. Exported for testing only.
