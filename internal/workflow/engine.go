@@ -130,6 +130,7 @@ type Engine struct {
 	msgEmitter       MsgEmitter
 	callCounter      int64
 	costTracker      *CostTracker
+	contextBuilder   *ContextBuilder
 	// workflowMode controls phase-skipping behaviour based on prompt complexity.
 	workflowMode   m31types.WorkflowMode
 	workflowModeMu sync.RWMutex
@@ -429,7 +430,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
-	return &Engine{
+	e := &Engine{
 		sessionID:     opts.SessionID,
 		workDir:       opts.WorkDir,
 		backupDir:     opts.BackupDir,
@@ -455,7 +456,22 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},
-	}, nil
+	}
+
+	// Create contextBuilder with a callback to Engine's modelForPhase.
+	// The callback captures the engine pointer, which is safe because
+	// contextBuilder is only used after the engine is fully initialized.
+	e.contextBuilder = NewContextBuilder(
+		promptBuilder,
+		opts.TokenEst,
+		opts.Config,
+		e.state,
+		opts.WorkDir,
+		e.contextRegistry,
+		func(phase string) string { return e.modelForPhase(m31types.WorkflowPhase(phase)) },
+	)
+
+	return e, nil
 }
 
 // budgetFromConfig extracts the budget limit from config, returning 0 if nil.
@@ -1137,90 +1153,15 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 }
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
-// The base prompt is cached since it doesn't change during a session (PERF-24).
-// Full assembled prompts are cached per extras signature to avoid repeated string building.
+// Delegates to ContextBuilder for prompt composition logic.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
-	e.state.cachedBasePromptOnce.Do(func() {
-		e.state.cachedBasePrompt = e.promptBuilder.Prompt("base")
-	})
-
-	// Build cache key from extras
-	key := strings.Join(extra, "|")
-
-	e.state.cachedFullPromptsMu.Lock()
-	if e.state.cachedFullPrompts == nil {
-		e.state.cachedFullPrompts = make(map[string]string)
-	}
-	if cached, ok := e.state.cachedFullPrompts[key]; ok {
-		e.state.cachedFullPromptsMu.Unlock()
-		return cached
-	}
-	e.state.cachedFullPromptsMu.Unlock()
-
-	parts := []string{e.state.cachedBasePrompt}
-
-	// Inject model-specific template
-	if modelTemplate := SelectTemplate(e.modelForPhase(e.activePhase)); modelTemplate != "" {
-		parts = append(parts, modelTemplate)
-	}
-
-	// Inject AGENTS.md instructions if enabled
-	if e.cfg != nil && e.cfg.Instructions.Enabled {
-		files := config.DiscoverInstructions(e.workDir, e.workDir)
-		if rendered := config.RenderInstructions(files); rendered != "" {
-			parts = append(parts, rendered)
-		}
-	}
-
-	// Reconcile dynamic context sources and include current state
-	if e.contextRegistry != nil {
-		ctx := context.Background()
-		changes := e.contextRegistry.Reconcile(ctx, e.state.contextSnapshot)
-		snapshot := e.contextRegistry.LoadAll(ctx)
-
-		if e.state.contextSnapshot == nil || len(changes) > 0 {
-			e.state.contextSnapshot = snapshot
-			e.state.cachedDynamicContext = e.renderDynamicContext(snapshot)
-		}
-
-		if e.state.cachedDynamicContext != "" {
-			parts = append(parts, e.state.cachedDynamicContext)
-		}
-	}
-
-	for _, p := range extra {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	result := strings.Join(parts, "\n\n---\n\n")
-
-	e.state.cachedFullPromptsMu.Lock()
-	e.state.cachedFullPrompts[key] = result
-	e.state.cachedFullPromptsMu.Unlock()
-
-	return result
+	return e.contextBuilder.BuildSystemPrompt(string(e.activePhase), extra...)
 }
 
 // renderDynamicContext formats a context snapshot map into a prompt section.
-// Values are joined in key-sorted order for deterministic output.
+// Delegates to ContextBuilder.
 func (e *Engine) renderDynamicContext(snapshot map[string]string) string {
-	if len(snapshot) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(snapshot))
-	for k := range snapshot {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var sb strings.Builder
-	for _, k := range keys {
-		if v := snapshot[k]; v != "" {
-			sb.WriteString(v)
-			sb.WriteString("\n\n")
-		}
-	}
-	return strings.TrimSpace(sb.String())
+	return e.contextBuilder.renderDynamicContext(snapshot)
 }
 
 // getCodeIntel lazily builds the codebase intelligence indexer.
