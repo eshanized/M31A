@@ -61,7 +61,10 @@ func (dc *DNSCache) Resolve(ctx context.Context, host string) ([]net.IPAddr, err
 	now := time.Now()
 
 	if cached, ok := dc.cache.Load(host); ok {
-		entry := cached.(*dnsCacheEntry)
+		entry, ok := cached.(*dnsCacheEntry)
+		if !ok {
+			return nil, fmt.Errorf("invalid cache entry type for host %s", host)
+		}
 		if now.Before(entry.expires) {
 			return entry.addrs, nil
 		}
@@ -100,7 +103,10 @@ func (dc *DNSCache) Resolve(ctx context.Context, host string) ([]net.IPAddr, err
 // evictExpired removes all expired entries from the cache.
 func (dc *DNSCache) evictExpired(now time.Time) {
 	dc.cache.Range(func(key, value any) bool {
-		e := value.(*dnsCacheEntry)
+		e, ok := value.(*dnsCacheEntry)
+		if !ok {
+			return true // skip invalid entry
+		}
 		if now.After(e.expires) {
 			dc.cache.Delete(key)
 		}
@@ -113,7 +119,9 @@ func (dc *DNSCache) evictExpired(now time.Time) {
 func (dc *DNSCache) evictOldest(targetSize int32) {
 	var keys []string
 	dc.cache.Range(func(key, value any) bool {
-		keys = append(keys, key.(string))
+		if k, ok := key.(string); ok {
+			keys = append(keys, k)
+		}
 		return true
 	})
 
@@ -130,7 +138,10 @@ func (dc *DNSCache) evictOldest(targetSize int32) {
 	entries := make([]entryWithKey, 0, len(keys))
 	for _, k := range keys {
 		if v, ok := dc.cache.Load(k); ok {
-			e := v.(*dnsCacheEntry)
+			e, ok := v.(*dnsCacheEntry)
+			if !ok {
+				continue // skip invalid entry
+			}
 			entries = append(entries, entryWithKey{k, e.expires})
 		}
 	}
