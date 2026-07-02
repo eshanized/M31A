@@ -510,9 +510,9 @@ func TestBuildSystemPrompt_WebsiteScopeIncludesWebsiteBuild(t *testing.T) {
 	})
 
 	// Simulate what buildPlanContext does
-	extras := []string{engine.promptBuilder.Prompt("tool-use"), engine.promptBuilder.Prompt("plan-format"), engine.promptBuilder.Prompt("context-awareness"), engine.promptBuilder.Prompt("code-quality"), engine.promptBuilder.Prompt("code-intelligence")}
-	if engine.ScopeIncludes("website") && engine.promptBuilder.Prompt("website-build") != "" {
-		extras = append(extras, engine.promptBuilder.Prompt("website-build"))
+	extras := []string{engine.promptOrGet("tool-use"), engine.promptOrGet("plan-format"), engine.promptOrGet("context-awareness"), engine.promptOrGet("code-quality"), engine.promptOrGet("code-intelligence")}
+	if engine.ScopeIncludes("website") && engine.promptOrGet("website-build") != "" {
+		extras = append(extras, engine.promptOrGet("website-build"))
 	}
 
 	prompt := engine.buildSystemPrompt(extras...)
@@ -530,9 +530,9 @@ func TestBuildSystemPrompt_NonWebsiteScopeExcludesWebsiteBuild(t *testing.T) {
 		Scope: []string{"auth", "api"},
 	})
 
-	extras := []string{engine.promptBuilder.Prompt("tool-use"), engine.promptBuilder.Prompt("plan-format"), engine.promptBuilder.Prompt("context-awareness"), engine.promptBuilder.Prompt("code-quality"), engine.promptBuilder.Prompt("code-intelligence")}
-	if engine.ScopeIncludes("website") && engine.promptBuilder.Prompt("website-build") != "" {
-		extras = append(extras, engine.promptBuilder.Prompt("website-build"))
+	extras := []string{engine.promptOrGet("tool-use"), engine.promptOrGet("plan-format"), engine.promptOrGet("context-awareness"), engine.promptOrGet("code-quality"), engine.promptOrGet("code-intelligence")}
+	if engine.ScopeIncludes("website") && engine.promptOrGet("website-build") != "" {
+		extras = append(extras, engine.promptOrGet("website-build"))
 	}
 
 	prompt := engine.buildSystemPrompt(extras...)
@@ -545,9 +545,9 @@ func TestBuildSystemPrompt_NilScopeExcludesWebsiteBuild(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	// intentResult is nil
 
-	extras := []string{engine.promptBuilder.Prompt("tool-use"), engine.promptBuilder.Prompt("plan-format"), engine.promptBuilder.Prompt("context-awareness"), engine.promptBuilder.Prompt("code-quality"), engine.promptBuilder.Prompt("code-intelligence")}
-	if engine.ScopeIncludes("website") && engine.promptBuilder.Prompt("website-build") != "" {
-		extras = append(extras, engine.promptBuilder.Prompt("website-build"))
+	extras := []string{engine.promptOrGet("tool-use"), engine.promptOrGet("plan-format"), engine.promptOrGet("context-awareness"), engine.promptOrGet("code-quality"), engine.promptOrGet("code-intelligence")}
+	if engine.ScopeIncludes("website") && engine.promptOrGet("website-build") != "" {
+		extras = append(extras, engine.promptOrGet("website-build"))
 	}
 
 	prompt := engine.buildSystemPrompt(extras...)

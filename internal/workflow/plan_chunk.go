@@ -105,7 +105,7 @@ func (e *Engine) chunkThreshold() int {
 func (e *Engine) buildOutlineContext(ctx context.Context, goal string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("plan-outline"), e.promptBuilder.Prompt("context-awareness"))
+	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-outline"), e.promptOrGet("context-awareness"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
@@ -146,7 +146,7 @@ func (e *Engine) buildOutlineContext(ctx context.Context, goal string) []m31type
 func (e *Engine) buildWaveExpandContext(outline *PlanOutline, wave *WaveOutline, goal string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("plan-format"), e.promptBuilder.Prompt("tool-use"), e.promptBuilder.Prompt("context-awareness"))
+	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-format"), e.promptOrGet("tool-use"), e.promptOrGet("context-awareness"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder

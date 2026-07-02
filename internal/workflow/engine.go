@@ -153,6 +153,19 @@ func (e *Engine) gitConfig() config.GitConfig {
 	return config.DefaultGitConfig()
 }
 
+// promptOrGet returns the named prompt or empty string if not found.
+// Errors are logged at warn level. Used by callers where prompt names are
+// compile-time constants and a missing prompt is a programming error, not
+// a user-facing failure.
+func (e *Engine) promptOrGet(name string) string {
+	s, err := e.promptBuilder.Prompt(name)
+	if err != nil {
+		e.logger.Warn("missing prompt template", "name", name, "error", err)
+		return ""
+	}
+	return s
+}
+
 // modelForPhase returns the per-phase model ID, checked in priority order:
 //  1. perPhaseModels (set interactively by the TUI at workflow start)
 //  2. AgentsConfig from config.toml

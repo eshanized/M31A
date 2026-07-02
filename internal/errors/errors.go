@@ -7,9 +7,11 @@ import (
 )
 
 var (
-	reHTTP401              = regexp.MustCompile(`\b401\b`)
-	reHTTP429              = regexp.MustCompile(`\b429\b`)
-	reHTTP503              = regexp.MustCompile(`\b503\b`)
+	reHTTP401 = regexp.MustCompile(`\b401\b`)
+	reHTTP429 = regexp.MustCompile(`\b429\b`)
+	reHTTP503 = regexp.MustCompile(`\b503\b`)
+
+	// Provider errors.
 	ErrProviderUnreachable = errors.New("provider unreachable")
 	ErrProviderNotFound    = errors.New("provider not found")
 	ErrInvalidProvider     = errors.New("invalid provider name")
@@ -18,32 +20,127 @@ var (
 	ErrNoCredits           = errors.New("no credits available")
 	ErrContextExceeded     = errors.New("context window exceeded")
 	ErrModelNotFound       = errors.New("model not found")
-	ErrSessionCorrupted    = errors.New("session data corrupted")
-	ErrNoBinaryContent     = errors.New("binary content not displayable")
-	ErrFileTooLarge        = errors.New("file exceeds 5MB limit")
-	ErrCircularDependency  = errors.New("circular dependency in task graph")
-	ErrPermissionDenied    = errors.New("permission denied")
-	ErrToolExecution       = errors.New("tool execution failed")
-	ErrTaskFailed          = errors.New("task failed")
-	ErrPhaseTransition     = errors.New("invalid phase transition")
-	ErrCheckpointNotFound  = errors.New("checkpoint not found")
-	// Reject oversized LLM response payloads to prevent OOM.
-	ErrToolInputTooLarge = errors.New("tool input exceeds size limit")
-	// Bash timeout must be positive and <= 30 minutes.
-	ErrInvalidTimeout = errors.New("invalid timeout: must be > 0 and <= 30m")
-	// WebFetch SSRF — block private/loopback/link-local IPs.
-	ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
 	// SSE stream truncated before [DONE] sentinel.
 	ErrStreamTruncated = errors.New("stream truncated before completion")
-	// git bisect reset failed (e.g. no commits in range).
+
+	// Session and workflow errors.
+	ErrSessionCorrupted   = errors.New("session data corrupted")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrSessionPermission  = errors.New("session access denied")
+	ErrCheckpointNotFound = errors.New("checkpoint not found")
+	ErrPhaseTransition    = errors.New("invalid phase transition")
+	ErrTaskFailed         = errors.New("task failed")
+
+	// Tool and input errors.
+	ErrToolExecution      = errors.New("tool execution failed")
+	ErrToolInputTooLarge  = errors.New("tool input exceeds size limit")
+	ErrCircularDependency = errors.New("circular dependency in task graph")
+
+	// File and permission errors.
+	ErrPermissionDenied = errors.New("permission denied")
+	ErrNoBinaryContent  = errors.New("binary content not displayable")
+	ErrFileTooLarge     = errors.New("file exceeds 5MB limit")
+
+	// Validation errors.
+	ErrInvalidInput   = errors.New("invalid input")
+	ErrInvalidTimeout = errors.New("invalid timeout: must be > 0 and <= 30m")
+
+	// Lookup errors.
+	ErrNotFound = errors.New("not found")
+
+	// State errors.
+	ErrAlreadyExists  = errors.New("already exists")
+	ErrCancelled      = errors.New("operation cancelled")
+	ErrInternal       = errors.New("internal error")
+	ErrNotImplemented = errors.New("not implemented")
+
+	// Network and security errors.
+	ErrPrivateIPBlocked = errors.New("access to private IP is blocked (SSRF protection)")
+
+	// Git errors.
 	ErrBisectResetFailed = errors.New("bisect reset failed")
 	ErrBisectFailed      = errors.New("bisect failed")
-
-	// Session-specific errors for distinct failure modes.
-	ErrSessionNotFound   = errors.New("session not found")
-	ErrSessionPermission = errors.New("session access denied")
 	ErrGitNotInitialized = errors.New("git not initialized")
 )
+
+// ToolError wraps errors originating from tool execution with tool-specific context.
+type ToolError struct {
+	// Tool is the name of the tool that failed.
+	Tool string
+	// Op is the operation attempted (e.g., "execute", "parse input").
+	Op string
+	// Err is the underlying error.
+	Err error
+}
+
+func (e *ToolError) Error() string {
+	if e.Op != "" {
+		return "tool " + e.Tool + ": " + e.Op + ": " + e.Err.Error()
+	}
+	return "tool " + e.Tool + ": " + e.Err.Error()
+}
+
+// Unwrap returns the underlying error.
+func (e *ToolError) Unwrap() error { return e.Err }
+
+// ProviderError wraps errors from API providers with HTTP context.
+type ProviderError struct {
+	// Provider is the provider name (e.g., "openrouter", "zen").
+	Provider string
+	// Model is the requested model identifier, if applicable.
+	Model string
+	// StatusCode is the HTTP status code from the provider, 0 if not HTTP.
+	StatusCode int
+	// Err is the underlying error.
+	Err error
+}
+
+func (e *ProviderError) Error() string {
+	msg := "provider " + e.Provider
+	if e.Model != "" {
+		msg += " model " + e.Model
+	}
+	if e.StatusCode > 0 {
+		msg += " (HTTP " + itoa(e.StatusCode) + ")"
+	}
+	return msg + ": " + e.Err.Error()
+}
+
+// Unwrap returns the underlying error.
+func (e *ProviderError) Unwrap() error { return e.Err }
+
+// ConfigError wraps configuration loading or validation errors.
+type ConfigError struct {
+	// Key is the configuration key that caused the error, if applicable.
+	Key string
+	// Err is the underlying error.
+	Err error
+}
+
+func (e *ConfigError) Error() string {
+	if e.Key != "" {
+		return "config " + e.Key + ": " + e.Err.Error()
+	}
+	return "config: " + e.Err.Error()
+}
+
+// Unwrap returns the underlying error.
+func (e *ConfigError) Unwrap() error { return e.Err }
+
+// itoa converts an int to its decimal string representation without importing strconv.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
 
 // UserMessage returns a user-friendly, actionable message for common errors.
 // Falls back to a generic message for unrecognized errors.
@@ -106,6 +203,32 @@ func UserMessage(e error) string {
 		return "Cannot access session — check file permissions"
 	case errors.Is(e, ErrGitNotInitialized):
 		return "Git not initialized — ensure you're in a git repository"
+	case errors.Is(e, ErrInvalidInput):
+		return "Invalid input — check your parameters"
+	case errors.Is(e, ErrNotFound):
+		return "Not found — check the resource or path"
+	case errors.Is(e, ErrAlreadyExists):
+		return "Already exists — the resource is already present"
+	case errors.Is(e, ErrCancelled):
+		return "Operation cancelled"
+	case errors.Is(e, ErrInternal):
+		return "Internal error — try again or check the logs"
+	case errors.Is(e, ErrNotImplemented):
+		return "Not implemented — this feature is not yet available"
+	}
+
+	// Handle error types with structured context.
+	var toolErr *ToolError
+	if errors.As(e, &toolErr) {
+		return "Tool " + toolErr.Tool + " failed — check the error details"
+	}
+	var provErr *ProviderError
+	if errors.As(e, &provErr) {
+		return "Provider error from " + provErr.Provider + " — try again"
+	}
+	var cfgErr *ConfigError
+	if errors.As(e, &cfgErr) {
+		return "Configuration error — check your settings"
 	}
 
 	// Pattern matching for unwrapped errors

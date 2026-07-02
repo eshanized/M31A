@@ -212,7 +212,7 @@ func countDiscussIssues(issues []DiscussIssue) (blockers, warnings int) {
 // Injects code intelligence and file listing for richer context.
 func (e *Engine) buildDiscussContext(goal string) []m31types.Message {
 	var messages []m31types.Message
-	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.promptBuilder.Prompt("discuss"))})
+	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(e.promptOrGet("discuss"))})
 
 	// Load MEMORY.md if exists
 	sessionDir := filepath.Dir(e.planningDir)

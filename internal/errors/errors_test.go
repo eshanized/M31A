@@ -42,6 +42,14 @@ func TestUserMessage(t *testing.T) {
 		{"ErrSessionNotFound", ErrSessionNotFound, "Session not found — check the session ID or start a new session"},
 		{"ErrSessionPermission", ErrSessionPermission, "Cannot access session — check file permissions"},
 
+		// New sentinel errors
+		{"ErrInvalidInput", ErrInvalidInput, "Invalid input — check your parameters"},
+		{"ErrNotFound", ErrNotFound, "Not found — check the resource or path"},
+		{"ErrAlreadyExists", ErrAlreadyExists, "Already exists — the resource is already present"},
+		{"ErrCancelled", ErrCancelled, "Operation cancelled"},
+		{"ErrInternal", ErrInternal, "Internal error — try again or check the logs"},
+		{"ErrNotImplemented", ErrNotImplemented, "Not implemented — this feature is not yet available"},
+
 		// Wrapped sentinel errors
 		{"wrapped ErrInvalidKey", fmt.Errorf("auth failed: %w", ErrInvalidKey), "Invalid API key — run /settings to update"},
 
@@ -71,5 +79,190 @@ func TestUserMessage(t *testing.T) {
 				t.Errorf("UserMessage(%v) = %q, want %q", tt.err, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestToolError(t *testing.T) {
+	inner := errors.New("file not found")
+	toolErr := &ToolError{Tool: "bash", Op: "execute", Err: inner}
+
+	// Test Error()
+	want := "tool bash: execute: file not found"
+	if got := toolErr.Error(); got != want {
+		t.Errorf("ToolError.Error() = %q, want %q", got, want)
+	}
+
+	// Test Unwrap()
+	if !errors.Is(toolErr, inner) {
+		t.Error("ToolError should unwrap to inner error")
+	}
+
+	// Test errors.As
+	var target *ToolError
+	if !errors.As(toolErr, &target) {
+		t.Error("errors.As should find *ToolError")
+	}
+	if target.Tool != "bash" {
+		t.Errorf("ToolError.Tool = %q, want %q", target.Tool, "bash")
+	}
+}
+
+func TestToolError_NoOp(t *testing.T) {
+	inner := errors.New("something went wrong")
+	toolErr := &ToolError{Tool: "grep", Err: inner}
+
+	want := "tool grep: something went wrong"
+	if got := toolErr.Error(); got != want {
+		t.Errorf("ToolError.Error() without Op = %q, want %q", got, want)
+	}
+}
+
+func TestProviderError(t *testing.T) {
+	inner := errors.New("rate limited")
+	provErr := &ProviderError{Provider: "openrouter", Model: "gpt-4", StatusCode: 429, Err: inner}
+
+	// Test Error()
+	want := "provider openrouter model gpt-4 (HTTP 429): rate limited"
+	if got := provErr.Error(); got != want {
+		t.Errorf("ProviderError.Error() = %q, want %q", got, want)
+	}
+
+	// Test Unwrap()
+	if !errors.Is(provErr, inner) {
+		t.Error("ProviderError should unwrap to inner error")
+	}
+
+	// Test errors.As
+	var target *ProviderError
+	if !errors.As(provErr, &target) {
+		t.Error("errors.As should find *ProviderError")
+	}
+	if target.Provider != "openrouter" {
+		t.Errorf("ProviderError.Provider = %q, want %q", target.Provider, "openrouter")
+	}
+}
+
+func TestProviderError_NoModel(t *testing.T) {
+	inner := errors.New("timeout")
+	provErr := &ProviderError{Provider: "zen", StatusCode: 504, Err: inner}
+
+	want := "provider zen (HTTP 504): timeout"
+	if got := provErr.Error(); got != want {
+		t.Errorf("ProviderError.Error() without Model = %q, want %q", got, want)
+	}
+}
+
+func TestProviderError_NoStatus(t *testing.T) {
+	inner := errors.New("connection refused")
+	provErr := &ProviderError{Provider: "nvidia", Err: inner}
+
+	want := "provider nvidia: connection refused"
+	if got := provErr.Error(); got != want {
+		t.Errorf("ProviderError.Error() without StatusCode = %q, want %q", got, want)
+	}
+}
+
+func TestConfigError(t *testing.T) {
+	inner := errors.New("invalid value")
+	cfgErr := &ConfigError{Key: "model.default", Err: inner}
+
+	// Test Error()
+	want := "config model.default: invalid value"
+	if got := cfgErr.Error(); got != want {
+		t.Errorf("ConfigError.Error() = %q, want %q", got, want)
+	}
+
+	// Test Unwrap()
+	if !errors.Is(cfgErr, inner) {
+		t.Error("ConfigError should unwrap to inner error")
+	}
+
+	// Test errors.As
+	var target *ConfigError
+	if !errors.As(cfgErr, &target) {
+		t.Error("errors.As should find *ConfigError")
+	}
+	if target.Key != "model.default" {
+		t.Errorf("ConfigError.Key = %q, want %q", target.Key, "model.default")
+	}
+}
+
+func TestConfigError_NoKey(t *testing.T) {
+	inner := errors.New("file not found")
+	cfgErr := &ConfigError{Err: inner}
+
+	want := "config: file not found"
+	if got := cfgErr.Error(); got != want {
+		t.Errorf("ConfigError.Error() without Key = %q, want %q", got, want)
+	}
+}
+
+func TestErrorTypesInUserMessage(t *testing.T) {
+	// ToolError
+	toolErr := &ToolError{Tool: "bash", Op: "execute", Err: errors.New("exit code 1")}
+	got := UserMessage(toolErr)
+	want := "Tool bash failed — check the error details"
+	if got != want {
+		t.Errorf("UserMessage(ToolError) = %q, want %q", got, want)
+	}
+
+	// ProviderError
+	provErr := &ProviderError{Provider: "openrouter", Err: errors.New("rate limited")}
+	got = UserMessage(provErr)
+	want = "Provider error from openrouter — try again"
+	if got != want {
+		t.Errorf("UserMessage(ProviderError) = %q, want %q", got, want)
+	}
+
+	// ConfigError
+	cfgErr := &ConfigError{Key: "api.key", Err: errors.New("missing")}
+	got = UserMessage(cfgErr)
+	want = "Configuration error — check your settings"
+	if got != want {
+		t.Errorf("UserMessage(ConfigError) = %q, want %q", got, want)
+	}
+}
+
+func TestSentinelsAreUnique(t *testing.T) {
+	sentinels := []error{
+		ErrProviderUnreachable, ErrProviderNotFound, ErrInvalidProvider,
+		ErrRateLimited, ErrInvalidKey, ErrNoCredits, ErrContextExceeded,
+		ErrModelNotFound, ErrSessionCorrupted, ErrNoBinaryContent,
+		ErrFileTooLarge, ErrCircularDependency, ErrPermissionDenied,
+		ErrToolExecution, ErrTaskFailed, ErrPhaseTransition,
+		ErrCheckpointNotFound, ErrToolInputTooLarge, ErrInvalidTimeout,
+		ErrPrivateIPBlocked, ErrStreamTruncated, ErrBisectResetFailed,
+		ErrBisectFailed, ErrSessionNotFound, ErrSessionPermission,
+		ErrGitNotInitialized, ErrInvalidInput, ErrNotFound,
+		ErrAlreadyExists, ErrCancelled, ErrInternal, ErrNotImplemented,
+	}
+
+	seen := make(map[error]bool)
+	for i, s := range sentinels {
+		if s == nil {
+			t.Errorf("sentinel %d is nil", i)
+			continue
+		}
+		if seen[s] {
+			t.Errorf("duplicate sentinel: %v", s)
+		}
+		seen[s] = true
+	}
+}
+
+func TestWrapWithPercentW(t *testing.T) {
+	// Verify that wrapping with %w preserves errors.Is behavior
+	inner := ErrInvalidKey
+	wrapped := fmt.Errorf("auth failed: %w", inner)
+	if !errors.Is(wrapped, inner) {
+		t.Error("fmt.Errorf with %w should preserve errors.Is")
+	}
+
+	// Verify error type wrapping
+	toolErr := &ToolError{Tool: "bash", Err: inner}
+	wrapped2 := fmt.Errorf("exec failed: %w", toolErr)
+	var target *ToolError
+	if !errors.As(wrapped2, &target) {
+		t.Error("errors.As should find ToolError through wrapping")
 	}
 }

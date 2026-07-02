@@ -52,7 +52,11 @@ func NewContextBuilder(
 // Full assembled prompts are cached per extras signature to avoid repeated string building.
 func (cb *ContextBuilder) BuildSystemPrompt(activePhase string, extras ...string) string {
 	cb.state.cachedBasePromptOnce.Do(func() {
-		cb.state.cachedBasePrompt = cb.prompts.Prompt("base")
+		s, err := cb.prompts.Prompt("base")
+		if err != nil {
+			s = ""
+		}
+		cb.state.cachedBasePrompt = s
 	})
 
 	// Build cache key from extras

@@ -149,14 +149,11 @@ func (pb *PromptBuilder) GetPrompt(name string) (string, error) {
 	}
 }
 
-// Prompt returns the prompt template for the given name, panicking if not found.
-// Used in internal code where prompt names are compile-time constants.
-func (pb *PromptBuilder) Prompt(name string) string {
-	s, err := pb.GetPrompt(name)
-	if err != nil {
-		panic(fmt.Sprintf("prompt %q: %v", name, err))
-	}
-	return s
+// Prompt returns the prompt template for the given name.
+// Returns an error if the name is not recognized.
+// Callers should prefer GetPrompt for explicit error handling.
+func (pb *PromptBuilder) Prompt(name string) (string, error) {
+	return pb.GetPrompt(name)
 }
 
 // BuildSystemPrompt concatenates the base prompt with optional extras.

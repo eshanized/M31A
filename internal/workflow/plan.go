@@ -446,9 +446,9 @@ func composeChunkedPlanMarkdown(outline *PlanOutline, tasks []m31types.Task, sec
 // On refinement, the previous plan and user feedback are injected.
 func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTasks []m31types.Task, validationErrors []string, rawResponse string) []m31types.Message {
 	var messages []m31types.Message
-	extras := []string{e.promptBuilder.Prompt("tool-use"), e.promptBuilder.Prompt("plan-format"), e.promptBuilder.Prompt("context-awareness"), e.promptBuilder.Prompt("code-quality"), e.promptBuilder.Prompt("code-intelligence")}
-	if e.ScopeIncludes("website") && e.promptBuilder.Prompt("website-build") != "" {
-		extras = append(extras, e.promptBuilder.Prompt("website-build"))
+	extras := []string{e.promptOrGet("tool-use"), e.promptOrGet("plan-format"), e.promptOrGet("context-awareness"), e.promptOrGet("code-quality"), e.promptOrGet("code-intelligence")}
+	if e.ScopeIncludes("website") && e.promptOrGet("website-build") != "" {
+		extras = append(extras, e.promptOrGet("website-build"))
 	}
 	messages = append(messages, m31types.Message{Role: "system", Content: e.buildSystemPrompt(extras...)})
 

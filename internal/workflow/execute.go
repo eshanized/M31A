@@ -675,9 +675,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 // buildExecuteContext creates messages for task execution.
 func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, tasks []m31types.Task, goal string) []m31types.Message {
 	var messages []m31types.Message
-	extras := []string{e.promptBuilder.Prompt("tool-use"), e.promptBuilder.Prompt("execute-task"), e.promptBuilder.Prompt("context-awareness"), e.promptBuilder.Prompt("code-quality"), e.promptBuilder.Prompt("code-intelligence")}
-	if e.ScopeIncludes("website") && e.promptBuilder.Prompt("website-build") != "" {
-		extras = append(extras, e.promptBuilder.Prompt("website-build"))
+	extras := []string{e.promptOrGet("tool-use"), e.promptOrGet("execute-task"), e.promptOrGet("context-awareness"), e.promptOrGet("code-quality"), e.promptOrGet("code-intelligence")}
+	if e.ScopeIncludes("website") && e.promptOrGet("website-build") != "" {
+		extras = append(extras, e.promptOrGet("website-build"))
 	}
 	systemPrompt := e.buildSystemPrompt(extras...)
 	if goal != "" {
@@ -795,7 +795,7 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string, goal string) taskrunner.TaskResult {
 	start := time.Now()
 
-	healPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("tool-use"), e.promptBuilder.Prompt("self-heal"), e.promptBuilder.Prompt("code-quality"))
+	healPrompt := e.buildSystemPrompt(e.promptOrGet("tool-use"), e.promptOrGet("self-heal"), e.promptOrGet("code-quality"))
 	if goal != "" {
 		healPrompt += "\n\n## Original Goal\n" + goal
 	}

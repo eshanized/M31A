@@ -86,7 +86,7 @@ func (e *Engine) revisePlan(ctx context.Context, plan *m31types.Plan, issues []P
 func (e *Engine) buildCheckContext(plan *m31types.Plan, goal string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("plan-check"))
+	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-check"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
@@ -104,7 +104,7 @@ func (e *Engine) buildCheckContext(plan *m31types.Plan, goal string) []m31types.
 func (e *Engine) buildRevisionContext(plan *m31types.Plan, issues []PlanIssue, goal string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("plan-check"), e.promptBuilder.Prompt("plan-revise"))
+	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-check"), e.promptOrGet("plan-revise"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder

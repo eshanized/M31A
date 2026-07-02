@@ -82,23 +82,24 @@ func TestPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
-	s := pb.Prompt("base")
+	s, err := pb.Prompt("base")
+	if err != nil {
+		t.Fatalf("Prompt(base) error: %v", err)
+	}
 	if s == "" {
 		t.Error("Prompt(base) returned empty string")
 	}
 }
 
-func TestPrompt_PanicsOnInvalidName(t *testing.T) {
+func TestPrompt_ReturnsErrorOnInvalidName(t *testing.T) {
 	pb, err := NewPromptBuilder()
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Prompt(invalid) should panic")
-		}
-	}()
-	_ = pb.Prompt("nonexistent")
+	_, err = pb.Prompt("nonexistent")
+	if err == nil {
+		t.Error("Prompt(nonexistent) should return error")
+	}
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
