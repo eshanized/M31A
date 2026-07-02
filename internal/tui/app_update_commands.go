@@ -264,7 +264,11 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 	// Smart truncation to prevent context overflow
 	if m.activeModel != nil {
 		estimator := tokens.NewEstimator(m.activeModel.ID)
-		msgs, _ = streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
+		truncatedMsgs, truncated := streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
+		if truncated {
+			slog.Debug("truncated messages for LLM context window", "original", len(msgs), "kept", len(truncatedMsgs))
+		}
+		msgs = truncatedMsgs
 	}
 
 	ctx, cancel := context.WithCancel(m.shutdownCtx)
@@ -351,7 +355,11 @@ func (m *AppState) sendPlainTextChat(p provider.LLMProvider, input string) tea.C
 	// Smart truncation to prevent context overflow
 	if m.activeModel != nil {
 		estimator := tokens.NewEstimator(m.activeModel.ID)
-		msgs, _ = streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
+		truncatedMsgs, truncated := streaming.TruncateMessagesForLLM(msgs, m.activeModel.ContextLength, estimator)
+		if truncated {
+			slog.Debug("truncated messages for LLM context window", "original", len(msgs), "kept", len(truncatedMsgs))
+		}
+		msgs = truncatedMsgs
 	}
 
 	model := m.activeModel
