@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -97,147 +96,122 @@ func TestSaveProject_PreservesSliceAndMapFields(t *testing.T) {
 	}
 }
 
-// ── mergeField ───────────────────────────────────────────────────────────────
+// ── MergeConfig (type-safe) ─────────────────────────────────────────────────
 
-func TestMergeField_String(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf("")).Elem()
-	overlay = reflect.New(reflect.TypeOf("")).Elem()
-	base.SetString("old")
-	overlay.SetString("new")
-
-	mergeField(base, overlay, reflect.TypeOf(""), nil, "test")
-	if base.String() != "new" {
-		t.Errorf("expected 'new', got %q", base.String())
+func TestMergeConfig_TypeSafe_String(t *testing.T) {
+	t.Parallel()
+	base := &Config{UI: UIConfig{Theme: "dark"}}
+	overlay := &Config{UI: UIConfig{Theme: "light"}}
+	MergeConfig(base, overlay, nil)
+	if base.UI.Theme != "light" {
+		t.Errorf("expected 'light', got %q", base.UI.Theme)
 	}
 }
 
-func TestMergeField_StringEmptyOverlay(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf("")).Elem()
-	overlay = reflect.New(reflect.TypeOf("")).Elem()
-	base.SetString("keep")
-
-	mergeField(base, overlay, reflect.TypeOf(""), nil, "test")
-	if base.String() != "keep" {
-		t.Errorf("expected 'keep', got %q", base.String())
+func TestMergeConfig_TypeSafe_StringEmptyOverlay(t *testing.T) {
+	t.Parallel()
+	base := &Config{UI: UIConfig{Theme: "dark"}}
+	overlay := &Config{}
+	MergeConfig(base, overlay, nil)
+	if base.UI.Theme != "dark" {
+		t.Errorf("expected 'dark', got %q", base.UI.Theme)
 	}
 }
 
-func TestMergeField_Bool(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(false)).Elem()
-	overlay = reflect.New(reflect.TypeOf(false)).Elem()
-	base.SetBool(false)
-	overlay.SetBool(true)
-
-	mergeField(base, overlay, reflect.TypeOf(false), nil, "test")
-	if !base.Bool() {
+func TestMergeConfig_TypeSafe_Bool(t *testing.T) {
+	t.Parallel()
+	base := &Config{Features: FeaturesConfig{MetricsEnabled: false}}
+	overlay := &Config{Features: FeaturesConfig{MetricsEnabled: true}}
+	MergeConfig(base, overlay, nil)
+	if !base.Features.MetricsEnabled {
 		t.Error("expected true")
 	}
 }
 
-func TestMergeField_BoolDefinedFalse(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(false)).Elem()
-	overlay = reflect.New(reflect.TypeOf(false)).Elem()
-	base.SetBool(true)
-	overlay.SetBool(false)
-
-	defined := map[string]bool{"test": true}
-	mergeField(base, overlay, reflect.TypeOf(false), defined, "test")
-	if base.Bool() {
+func TestMergeConfig_TypeSafe_BoolDefinedFalse(t *testing.T) {
+	t.Parallel()
+	base := &Config{Features: FeaturesConfig{MetricsEnabled: true}}
+	overlay := &Config{Features: FeaturesConfig{MetricsEnabled: false}}
+	defined := map[string]bool{"features.metrics_enabled": true}
+	MergeConfig(base, overlay, defined)
+	if base.Features.MetricsEnabled {
 		t.Error("expected false when explicitly defined")
 	}
 }
 
-func TestMergeField_BoolUndefinedFalse(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(false)).Elem()
-	overlay = reflect.New(reflect.TypeOf(false)).Elem()
-	base.SetBool(true)
-	overlay.SetBool(false)
-
-	mergeField(base, overlay, reflect.TypeOf(false), nil, "test")
-	if !base.Bool() {
+func TestMergeConfig_TypeSafe_BoolUndefinedFalse(t *testing.T) {
+	t.Parallel()
+	base := &Config{Features: FeaturesConfig{MetricsEnabled: true}}
+	overlay := &Config{Features: FeaturesConfig{MetricsEnabled: false}}
+	MergeConfig(base, overlay, nil)
+	if !base.Features.MetricsEnabled {
 		t.Error("expected true when overlay false and not defined")
 	}
 }
 
-func TestMergeField_Int(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(0)).Elem()
-	overlay = reflect.New(reflect.TypeOf(0)).Elem()
-	base.SetInt(10)
-	overlay.SetInt(42)
-
-	mergeField(base, overlay, reflect.TypeOf(0), nil, "test")
-	if base.Int() != 42 {
-		t.Errorf("expected 42, got %d", base.Int())
+func TestMergeConfig_TypeSafe_Int(t *testing.T) {
+	t.Parallel()
+	base := &Config{UI: UIConfig{MaxIterations: 50}}
+	overlay := &Config{UI: UIConfig{MaxIterations: 100}}
+	MergeConfig(base, overlay, nil)
+	if base.UI.MaxIterations != 100 {
+		t.Errorf("expected 100, got %d", base.UI.MaxIterations)
 	}
 }
 
-func TestMergeField_IntZeroOverlay(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(0)).Elem()
-	overlay = reflect.New(reflect.TypeOf(0)).Elem()
-	base.SetInt(10)
-
-	mergeField(base, overlay, reflect.TypeOf(0), nil, "test")
-	if base.Int() != 10 {
-		t.Errorf("expected 10, got %d", base.Int())
+func TestMergeConfig_TypeSafe_IntZero(t *testing.T) {
+	t.Parallel()
+	base := &Config{UI: UIConfig{MaxIterations: 50}}
+	overlay := &Config{UI: UIConfig{MaxIterations: 0}}
+	MergeConfig(base, overlay, nil)
+	if base.UI.MaxIterations != 50 {
+		t.Errorf("expected 50 preserved, got %d", base.UI.MaxIterations)
 	}
 }
 
-func TestMergeField_Float(t *testing.T) {
-	var base, overlay reflect.Value
-	base = reflect.New(reflect.TypeOf(0.0)).Elem()
-	overlay = reflect.New(reflect.TypeOf(0.0)).Elem()
-	base.SetFloat(1.5)
-	overlay.SetFloat(2.5)
-
-	mergeField(base, overlay, reflect.TypeOf(0.0), nil, "test")
-	if base.Float() != 2.5 {
-		t.Errorf("expected 2.5, got %f", base.Float())
+func TestMergeConfig_TypeSafe_Float(t *testing.T) {
+	t.Parallel()
+	base := &Config{Model: ModelConfig{ContextWarningThreshold: 0.8}}
+	overlay := &Config{Model: ModelConfig{ContextWarningThreshold: 2.5}}
+	MergeConfig(base, overlay, nil)
+	if base.Model.ContextWarningThreshold != 2.5 {
+		t.Errorf("expected 2.5, got %f", base.Model.ContextWarningThreshold)
 	}
 }
 
-func TestMergeField_Slice(t *testing.T) {
-	baseVal := []string{"a", "b"}
-	overlayVal := []string{"c", "d", "e"}
-
-	base := reflect.ValueOf(&baseVal).Elem()
-	overlay := reflect.ValueOf(&overlayVal).Elem()
-
-	mergeField(base, overlay, reflect.TypeOf([]string{}), nil, "test")
-	if base.Len() != 3 {
-		t.Errorf("expected length 3, got %d", base.Len())
+func TestMergeConfig_TypeSafe_Slice(t *testing.T) {
+	t.Parallel()
+	base := &Config{Tools: ToolsConfig{SkipDirs: []string{"a", "b"}}}
+	overlay := &Config{Tools: ToolsConfig{SkipDirs: []string{"c", "d", "e"}}}
+	MergeConfig(base, overlay, nil)
+	if len(base.Tools.SkipDirs) != 3 {
+		t.Errorf("expected length 3, got %d", len(base.Tools.SkipDirs))
 	}
 }
 
-func TestMergeField_Map(t *testing.T) {
-	baseVal := map[string]string{"a": "1"}
-	overlayVal := map[string]string{"b": "2", "c": "3"}
-
-	base := reflect.ValueOf(&baseVal).Elem()
-	overlay := reflect.ValueOf(&overlayVal).Elem()
-
-	mergeField(base, overlay, reflect.TypeOf(map[string]string{}), nil, "test")
-	result := base.Interface().(map[string]string)
-	if result["a"] != "1" {
+func TestMergeConfig_TypeSafe_Map(t *testing.T) {
+	t.Parallel()
+	base := &Config{
+		Permissions: PermissionsConfig{
+			Agents: map[string]PermissionsAgentConfig{
+				"build": {DefaultAction: "allow"},
+			},
+		},
+	}
+	overlay := &Config{
+		Permissions: PermissionsConfig{
+			Agents: map[string]PermissionsAgentConfig{
+				"plan": {DefaultAction: "deny"},
+			},
+		},
+	}
+	MergeConfig(base, overlay, nil)
+	if base.Permissions.Agents["build"].DefaultAction != "allow" {
 		t.Error("expected base value preserved")
 	}
-	if result["b"] != "2" {
+	if base.Permissions.Agents["plan"].DefaultAction != "deny" {
 		t.Error("expected overlay value merged")
 	}
-}
-
-func TestMergeField_MapNilBase(t *testing.T) {
-	overlayVal := map[string]string{"a": "1"}
-	base := reflect.ValueOf(&struct{ M map[string]string }{}).Elem().Field(0)
-	overlay := reflect.ValueOf(&overlayVal).Elem()
-
-	mergeField(base, overlay, reflect.TypeOf(map[string]string{}), nil, "test")
 }
 
 // ── substituteVars ───────────────────────────────────────────────────────────

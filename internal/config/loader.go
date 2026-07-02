@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -295,35 +294,13 @@ func (c *Config) SaveProject(path string) error {
 	return nil
 }
 
-// mergeConfig performs a reflection-based merge of overlay into base.
+// mergeConfig performs a type-safe merge of overlay into base.
 // Overlay non-zero values override base values. Zero-valued fields in overlay
 // leave base values unchanged. Handles nested structs recursively.
 // The defined set tracks which TOML keys were explicitly set, enabling
 // bool fields to be overridden with false.
 func mergeConfig(base, overlay *Config, defined map[string]bool) {
-	mergeStructs(reflect.ValueOf(base).Elem(), reflect.ValueOf(overlay).Elem(), defined, "")
-}
-
-// mergeStructs recursively merges overlay fields into base using reflection.
-func mergeStructs(base, overlay reflect.Value, defined map[string]bool, prefix string) {
-	overlayType := overlay.Type()
-	for i := 0; i < overlay.NumField(); i++ {
-		field := overlayType.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		baseField := base.FieldByName(field.Name)
-		overlayField := overlay.FieldByName(field.Name)
-		if !baseField.IsValid() || !overlayField.IsValid() {
-			continue
-		}
-		fieldPrefix := prefix
-		if fieldPrefix != "" {
-			fieldPrefix += "."
-		}
-		fieldPrefix += toTOMLKey(field.Name)
-		mergeField(baseField, overlayField, field.Type, defined, fieldPrefix)
-	}
+	MergeConfig(base, overlay, defined)
 }
 
 // toTOMLKey converts a Go field name to a TOML key (snake_case).
@@ -351,50 +328,6 @@ func toTOMLKey(name string) string {
 		}
 	}
 	return string(result)
-}
-
-// mergeField copies a single field from overlay to base if non-zero.
-func mergeField(base, overlay reflect.Value, typ reflect.Type, defined map[string]bool, key string) {
-	switch typ.Kind() {
-	case reflect.String:
-		if overlay.String() != "" {
-			base.SetString(overlay.String())
-		}
-	case reflect.Bool:
-		// G-4 fix: Check if the bool was explicitly defined in the TOML.
-		// If explicitly set, always overwrite (even with false).
-		// If not in the defined set, only overwrite if overlay is true
-		// (to preserve base value for unset fields).
-		if defined[key] || overlay.Bool() {
-			base.SetBool(overlay.Bool())
-		}
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if overlay.Int() != 0 {
-			base.SetInt(overlay.Int())
-		}
-	case reflect.Float32, reflect.Float64:
-		if overlay.Float() != 0 {
-			base.SetFloat(overlay.Float())
-		}
-	case reflect.Slice:
-		if !overlay.IsNil() && overlay.Len() > 0 {
-			newSlice := reflect.MakeSlice(typ, overlay.Len(), overlay.Len())
-			reflect.Copy(newSlice, overlay)
-			base.Set(newSlice)
-		}
-	case reflect.Map:
-		if !overlay.IsNil() {
-			if base.IsNil() {
-				base.Set(reflect.MakeMap(typ))
-			}
-			iter := overlay.MapRange()
-			for iter.Next() {
-				base.SetMapIndex(iter.Key(), iter.Value())
-			}
-		}
-	case reflect.Struct:
-		mergeStructs(base, overlay, defined, key)
-	}
 }
 
 // ValidationError describes a single field-level config validation failure.
