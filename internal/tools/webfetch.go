@@ -87,6 +87,10 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 					}
 				}
 
+				if len(addrs) == 0 {
+					return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+				}
+
 				// Pin the first IP for connection
 				pinnedAddr := net.JoinHostPort(addrs[0].IP.String(), port)
 

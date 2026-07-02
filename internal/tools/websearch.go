@@ -52,14 +52,17 @@ func NewWebSearch(baseURL string) *WebSearch {
 				if err != nil {
 					return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
 				}
-				if !ws.allowPrivateIPs {
-					for _, ip := range ips {
-						if isPrivateIP(ip.IP) {
-							return nil, fmt.Errorf("access to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
-						}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+			}
+			if !ws.allowPrivateIPs {
+				for _, ip := range ips {
+					if isPrivateIP(ip.IP) {
+						return nil, fmt.Errorf("access to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
 					}
 				}
-				pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
+			}
+			pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
 				dialer := &net.Dialer{Timeout: 10 * time.Second}
 				return dialer.DialContext(ctx, network, pinnedAddr)
 			},
@@ -75,6 +78,9 @@ func NewWebSearch(baseURL string) *WebSearch {
 			ips, err := ws.resolveAndCache(req.Context(), host)
 			if err != nil {
 				return fmt.Errorf("redirect DNS resolution failed: %w", err)
+			}
+			if len(ips) == 0 {
+				return fmt.Errorf("no IP addresses resolved for redirect to %s", req.URL.Host)
 			}
 			for _, ip := range ips {
 				if isPrivateIP(ip.IP) {
