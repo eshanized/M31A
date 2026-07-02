@@ -695,12 +695,11 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 
 	// Load PROJECT.md for project context — use shared cache
 	var project *m31types.ProjectState
-	if e.state.cachedProjectID == e.sessionID {
-		project = e.state.cachedProject
+	if cached := e.cache.GetProject(e.sessionID); cached != nil {
+		project = cached
 	} else {
 		project = e.loadProjectCached()
-		e.state.cachedProject = project
-		e.state.cachedProjectID = e.sessionID
+		e.cache.SetProject(e.sessionID, project)
 	}
 	projectCtx := ""
 	if project != nil {
@@ -716,22 +715,16 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	}
 	if planMarkdown != "" {
 		var plan *m31types.Plan
-		// Use the pre-computed MD5 cache to avoid re-hashing the same plan
-		if e.state.cachedPlan != nil && e.state.cachedPlanMD5 != "" && e.state.planMarkdown == planMarkdown {
-			plan = e.state.cachedPlan
+		planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
+		if cached := e.cache.GetPlan(planHash); cached != nil {
+			plan = cached
 		} else {
-			planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
-			if e.state.cachedPlan != nil && e.state.cachedPlanMD5 == planHash {
-				plan = e.state.cachedPlan
-			} else {
-				var parseErr error
-				plan, parseErr = ParsePlan(planMarkdown)
-				if parseErr != nil {
-					e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
-				}
-				e.state.cachedPlan = plan
-				e.state.cachedPlanMD5 = planHash
+			var parseErr error
+			plan, parseErr = ParsePlan(planMarkdown)
+			if parseErr != nil {
+				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
 			}
+			e.cache.SetPlan(planHash, plan)
 		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"

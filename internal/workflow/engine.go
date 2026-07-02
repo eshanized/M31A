@@ -51,38 +51,22 @@ type WorkflowState struct {
 	researchOutput    string // pre-plan research results for injection into plan context
 	discussPlanCycles int    // Plan→Discuss→Plan round-trips (capped at maxDiscussPlanCycles)
 
-	// Cached tool definitions (built once, reused for all LLM calls)
-	cachedToolDefs     []provider.ToolDefinition
-	cachedToolDefsOnce sync.Once
-
-	// Cached system prompt static portions
+	// Cached base prompt (built once, used by ContextBuilder)
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once
 
-	// Cached full system prompts per extras signature (PERF-24 extension)
+	// Cached full system prompts per extras signature (used by ContextBuilder)
 	cachedFullPrompts   map[string]string
 	cachedFullPromptsMu sync.Mutex
 
-	// Cached project state for execute phase (H15 fix)
-	cachedProject   *m31types.ProjectState
-	cachedProjectID string // session ID for invalidation
-
-	// Cached project state shared across all context builders (PERF-29)
-	cachedProjectShared   *m31types.ProjectState
-	cachedProjectSharedID string
-
 	// Conversation messages for the workflow (updated by /compress proactively)
 	Messages []m31types.Message
-
-	// Cached parsed plan for execute phase (H15 fix)
-	cachedPlan    *m31types.Plan
-	cachedPlanMD5 string // MD5 of planMarkdown for invalidation
 
 	// Intent classification result from the LLM-based classifier.
 	// Set before the workflow starts; used to enrich discuss/research/plan context.
 	intentResult *m31types.IntentResult
 
-	// Dynamic context change detection
+	// Dynamic context change detection (used by ContextBuilder)
 	contextSnapshot      map[string]string
 	cachedDynamicContext string
 
@@ -115,6 +99,7 @@ type Engine struct {
 	modelID          string
 	modelIDMu        sync.RWMutex
 	stateMachine     *StateMachine
+	cache            *WorkflowCache
 	cfg              *config.Config
 	git              *git.Git
 	dispatcher       *tools.Dispatcher
@@ -453,6 +438,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		),
 		collector:    opts.Collector,
 		stateMachine: NewStateMachine(),
+		cache:        NewWorkflowCache(),
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},
@@ -537,16 +523,15 @@ func (e *Engine) compactedMessages(original []m31types.Message, summary string) 
 // on first access per session. Avoids redundant disk I/O + JSON parse across
 // buildDiscussContext, buildPlanContext, buildResearchContext, and buildExecuteContext.
 func (e *Engine) loadProjectCached() *m31types.ProjectState {
-	if e.state.cachedProjectSharedID == e.sessionID && e.state.cachedProjectShared != nil {
-		return e.state.cachedProjectShared
+	if cached := e.cache.GetProjectShared(e.sessionID); cached != nil {
+		return cached
 	}
 	project, err := e.sessionMgr.LoadProject(e.sessionID)
 	if err != nil {
 		e.logger.Warn("failed to load project", "error", err)
 		return nil
 	}
-	e.state.cachedProjectShared = project
-	e.state.cachedProjectSharedID = e.sessionID
+	e.cache.SetProjectShared(e.sessionID, project)
 	return project
 }
 
@@ -1081,7 +1066,7 @@ func (e *Engine) PlanVersion() int {
 // ParametersParsed field is populated once to avoid repeated
 // json.Unmarshal in BuildChatBody (PERF-25).
 func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
-	e.state.cachedToolDefsOnce.Do(func() {
+	return e.cache.GetToolDefs(func() []provider.ToolDefinition {
 		var defs []provider.ToolDefinition
 		for _, name := range e.dispatcher.List() {
 			tool, ok := e.dispatcher.GetTool(name)
@@ -1105,9 +1090,8 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 			}
 			defs = append(defs, def)
 		}
-		e.state.cachedToolDefs = defs
+		return defs
 	})
-	return e.state.cachedToolDefs
 }
 
 // buildSystemPrompt composes the system prompt from base + optional extras.
