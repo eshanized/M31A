@@ -18,55 +18,55 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Edit: cascadingReplace edge cases (line-trimmed and fuzzy fallback paths)
+// Edit: cascadingReplace edge cases (trimmed and fuzzy fallback paths)
 // ---------------------------------------------------------------------------
 
-func TestCascadingReplace_LineTrimmedFallback(t *testing.T) {
+func TestCascadingReplace_TrimmedFallback(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo"
-	// Exact match fails because of leading spaces; line-trimmed should match
-	result, strategy, err := cascadingReplace(content, "hello\nworld", "REPLACED", false)
+	// Exact match fails because of leading spaces; trimmed should match
+	result, strategy, _, err := cascadingReplace(content, "hello\nworld", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strategy != "line-trimmed" {
-		t.Errorf("strategy = %q, want 'line-trimmed'", strategy)
+	if strategy != "trimmed" {
+		t.Errorf("strategy = %q, want 'trimmed'", strategy)
 	}
 	if !strings.Contains(result, "REPLACED") {
 		t.Errorf("expected REPLACED in result, got %q", result)
 	}
 }
 
-func TestCascadingReplace_WhitespaceNormalizedFallback(t *testing.T) {
+func TestCascadingReplace_NormalizedFallback(t *testing.T) {
 	t.Parallel()
 	content := "hello    world\nfoo   bar"
-	// Line-trimmed fails because trimmed lines differ by whitespace;
-	// whitespace-normalized normalizes fields so it should match
-	result, strategy, err := cascadingReplace(content, "hello world\nfoo bar", "REPLACED", false)
+	// Trimmed fails because trimmed lines differ by whitespace;
+	// normalized normalizes fields so it should match
+	result, strategy, _, err := cascadingReplace(content, "hello world\nfoo bar", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strategy != "whitespace-normalized" {
-		t.Errorf("strategy = %q, want 'whitespace-normalized'", strategy)
+	if strategy != "normalized" {
+		t.Errorf("strategy = %q, want 'normalized'", strategy)
 	}
 	if result != "REPLACED" {
 		t.Errorf("got %q, want 'REPLACED'", result)
 	}
 }
 
-func TestCascadingReplace_FuzzyAnchorFallback(t *testing.T) {
+func TestCascadingReplace_AnchorFallback(t *testing.T) {
 	t.Parallel()
 	content := "first line\nsecond line\nthird line\nfourth line\nfifth line"
 	oldStr := "first line\nsecnd line\nthird line"
 	newStr := "REPLACED"
-	// Exact, line-trimmed, whitespace-normalized all fail;
-	// fuzzy anchor should match via Levenshtein on middle lines
-	result, strategy, err := cascadingReplace(content, oldStr, newStr, false)
+	// Exact, trimmed, normalized all fail;
+	// anchor should match via Levenshtein on middle lines
+	result, strategy, _, err := cascadingReplace(content, oldStr, newStr, false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strategy != "fuzzy-anchor" {
-		t.Errorf("strategy = %q, want 'fuzzy-anchor'", strategy)
+	if strategy != "anchor" {
+		t.Errorf("strategy = %q, want 'anchor'", strategy)
 	}
 	if !strings.Contains(result, "REPLACED") {
 		t.Errorf("expected REPLACED in result, got %q", result)
@@ -76,7 +76,7 @@ func TestCascadingReplace_FuzzyAnchorFallback(t *testing.T) {
 func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 	t.Parallel()
 	content := "hello world"
-	result, strategy, err := cascadingReplace(content, "hello world", "REPLACED", false)
+	result, strategy, _, err := cascadingReplace(content, "hello world", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 
 func TestCascadingReplace_EmptyContent(t *testing.T) {
 	t.Parallel()
-	_, _, err := cascadingReplace("", "hello", "world", false)
+	_, _, _, err := cascadingReplace("", "hello", "world", false, 0.8)
 	if err == nil {
 		t.Error("expected error for empty content")
 	}
@@ -100,7 +100,7 @@ func TestCascadingReplace_EmptyOldString(t *testing.T) {
 	t.Parallel()
 	// empty oldString matches at index 0 in strings.Index, so it returns exact-match
 	// Actually strings.Index returns 0 for empty substring
-	result, strategy, err := cascadingReplace("hello world", "", "REPLACED", false)
+	result, strategy, _, err := cascadingReplace("hello world", "", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,17 +109,17 @@ func TestCascadingReplace_EmptyOldString(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: fuzzyAnchorReplace edge cases
+// Edit: anchorReplace edge cases
 // ---------------------------------------------------------------------------
 
-func TestFuzzyAnchorReplace_NoMiddleLines(t *testing.T) {
+func TestAnchorReplace_NoMiddleLines(t *testing.T) {
 	t.Parallel()
 	// First+last match but there are no middle lines — needs MinLinesForFuzzy lines in oldStr
 	content := "alpha\nbeta\ngamma\ntheta"
 	oldStr := "alpha\nbeta\ngamma"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	result, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
+	result, err := anchorReplace(content, contentLines, oldStr, newStr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,74 +128,74 @@ func TestFuzzyAnchorReplace_NoMiddleLines(t *testing.T) {
 	}
 }
 
-func TestFuzzyAnchorReplace_MiddleLinesBelowThreshold(t *testing.T) {
+func TestAnchorReplace_MiddleLinesBelowThreshold(t *testing.T) {
 	t.Parallel()
 	// Middle lines differ too much — should not match
 	content := "first\ncompletely different\nalso different\nlast"
 	oldStr := "first\nslightly similar\nalso somewhat\nlast"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
+	_, err := anchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when middle lines differ significantly")
 	}
 }
 
-func TestFuzzyAnchorReplace_FirstLineNoMatch(t *testing.T) {
+func TestAnchorReplace_FirstLineNoMatch(t *testing.T) {
 	t.Parallel()
 	content := "alpha\nbeta\ngamma"
 	oldStr := "zzzz\nbeta\ngamma"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
+	_, err := anchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when first line doesn't match")
 	}
 }
 
-func TestFuzzyAnchorReplace_LastLineNoMatch(t *testing.T) {
+func TestAnchorReplace_LastLineNoMatch(t *testing.T) {
 	t.Parallel()
 	content := "alpha\nbeta\ngamma"
 	oldStr := "alpha\nbeta\nzzzz"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
+	_, err := anchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when last line doesn't match")
 	}
 }
 
-func TestFuzzyAnchorReplace_TooFewLines_AllOldLinesMatch(t *testing.T) {
+func TestAnchorReplace_TooFewLines_AllOldLinesMatch(t *testing.T) {
 	t.Parallel()
 	content := "one\ntwo"
 	contentLines := strings.Split(content, "\n")
-	_, err := fuzzyAnchorReplace(content, contentLines, "one\ntwo", "new")
+	_, err := anchorReplace(content, contentLines, "one\ntwo", "new")
 	if err == nil {
 		t.Error("expected error for fewer than MinLinesForFuzzy lines")
 	}
 }
 
-func TestFuzzyAnchorReplace_ContentTooShort(t *testing.T) {
+func TestAnchorReplace_ContentTooShort(t *testing.T) {
 	t.Parallel()
 	content := "short"
 	oldStr := "short\nsecond\nthird"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := fuzzyAnchorReplace(content, contentLines, oldStr, newStr)
+	_, err := anchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when content is shorter than old string")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: lineTrimmedReplace edge cases
+// Edit: trimmedReplace edge cases
 // ---------------------------------------------------------------------------
 
-func TestLineTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
+func TestTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  baz"
 	contentLines := strings.Split(content, "\n")
-	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
+	result, err := trimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -204,11 +204,11 @@ func TestLineTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
 	}
 }
 
-func TestLineTrimmedReplace_MultipleOccurrences(t *testing.T) {
+func TestTrimmedReplace_MultipleOccurrences(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo\n  hello\n  world"
 	contentLines := strings.Split(content, "\n")
-	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
+	result, err := trimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,21 +218,21 @@ func TestLineTrimmedReplace_MultipleOccurrences(t *testing.T) {
 	}
 }
 
-func TestLineTrimmedReplace_NoMatch(t *testing.T) {
+func TestTrimmedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb\nccc"
 	contentLines := strings.Split(content, "\n")
-	_, err := lineTrimmedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
+	_, err := trimmedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
 }
 
-func TestLineTrimmedReplace_SingleLine(t *testing.T) {
+func TestTrimmedReplace_SingleLine(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world"
 	contentLines := strings.Split(content, "\n")
-	result, err := lineTrimmedReplace(content, contentLines, "hello", "REPLACED")
+	result, err := trimmedReplace(content, contentLines, "hello", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -241,11 +241,11 @@ func TestLineTrimmedReplace_SingleLine(t *testing.T) {
 	}
 }
 
-func TestLineTrimmedReplace_IndentationPreserved(t *testing.T) {
+func TestTrimmedReplace_IndentationPreserved(t *testing.T) {
 	t.Parallel()
 	content := "\t\thello\n\t\tworld"
 	contentLines := strings.Split(content, "\n")
-	result, err := lineTrimmedReplace(content, contentLines, "hello\nworld", "replaced\nhere")
+	result, err := trimmedReplace(content, contentLines, "hello\nworld", "replaced\nhere")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -255,24 +255,24 @@ func TestLineTrimmedReplace_IndentationPreserved(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: whitespaceNormalizedReplace edge cases
+// Edit: normalizedReplace edge cases
 // ---------------------------------------------------------------------------
 
-func TestWhitespaceNormalizedReplace_NoMatch(t *testing.T) {
+func TestNormalizedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb"
 	contentLines := strings.Split(content, "\n")
-	_, err := whitespaceNormalizedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
+	_, err := normalizedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
 }
 
-func TestWhitespaceNormalizedReplace_MultipleSpaces(t *testing.T) {
+func TestNormalizedReplace_MultipleSpaces(t *testing.T) {
 	t.Parallel()
 	content := "hello     world"
 	contentLines := strings.Split(content, "\n")
-	result, err := whitespaceNormalizedReplace(content, contentLines, "hello world", "REPLACED")
+	result, err := normalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -281,11 +281,11 @@ func TestWhitespaceNormalizedReplace_MultipleSpaces(t *testing.T) {
 	}
 }
 
-func TestWhitespaceNormalizedReplace_Tabs(t *testing.T) {
+func TestNormalizedReplace_Tabs(t *testing.T) {
 	t.Parallel()
 	content := "hello\t\tworld"
 	contentLines := strings.Split(content, "\n")
-	result, err := whitespaceNormalizedReplace(content, contentLines, "hello world", "REPLACED")
+	result, err := normalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -294,11 +294,11 @@ func TestWhitespaceNormalizedReplace_Tabs(t *testing.T) {
 	}
 }
 
-func TestWhitespaceNormalizedReplace_MultiLine(t *testing.T) {
+func TestNormalizedReplace_MultiLine(t *testing.T) {
 	t.Parallel()
 	content := "line1   with   spaces\nline2  with  tabs"
 	contentLines := strings.Split(content, "\n")
-	result, err := whitespaceNormalizedReplace(content, contentLines, "line1 with spaces\nline2 with tabs", "REPLACED")
+	result, err := normalizedReplace(content, contentLines, "line1 with spaces\nline2 with tabs", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4194,10 +4194,10 @@ func TestHumanSize_AllUnits(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: Execute with whitespace-normalized match
+// Edit: Execute with normalized match
 // ---------------------------------------------------------------------------
 
-func TestEdit_Execute_WhitespaceNormalizedMatch(t *testing.T) {
+func TestEdit_Execute_NormalizedMatch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
@@ -4215,16 +4215,16 @@ func TestEdit_Execute_WhitespaceNormalizedMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result.Output, "whitespace-normalized") {
-		t.Errorf("expected 'whitespace-normalized' strategy, got: %s", result.Output)
+	if !strings.Contains(result.Output, "normalized") {
+		t.Errorf("expected 'normalized' strategy, got: %s", result.Output)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: Execute with line-trimmed match
+// Edit: Execute with trimmed match
 // ---------------------------------------------------------------------------
 
-func TestEdit_Execute_LineTrimmedMatch(t *testing.T) {
+func TestEdit_Execute_TrimmedMatch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
@@ -4242,16 +4242,16 @@ func TestEdit_Execute_LineTrimmedMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result.Output, "line-trimmed") {
-		t.Errorf("expected 'line-trimmed' strategy, got: %s", result.Output)
+	if !strings.Contains(result.Output, "trimmed") {
+		t.Errorf("expected 'trimmed' strategy, got: %s", result.Output)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: Execute with fuzzy-anchor match
+// Edit: Execute with anchor match
 // ---------------------------------------------------------------------------
 
-func TestEdit_Execute_FuzzyAnchorMatch(t *testing.T) {
+func TestEdit_Execute_AnchorMatch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
@@ -4269,8 +4269,8 @@ func TestEdit_Execute_FuzzyAnchorMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result.Output, "fuzzy-anchor") {
-		t.Errorf("expected 'fuzzy-anchor' strategy, got: %s", result.Output)
+	if !strings.Contains(result.Output, "anchor") {
+		t.Errorf("expected 'anchor' strategy, got: %s", result.Output)
 	}
 }
 

@@ -18,14 +18,39 @@ import (
 // Compile-time interface check
 var _ types.Tool = (*Edit)(nil)
 
+// DefaultConfidenceThreshold is the minimum confidence score required for
+// a non-exact match to be accepted. Matches below this threshold return an
+// error instead of silently performing a potentially incorrect replacement.
+const DefaultConfidenceThreshold = 0.8
+
+// EditStrategy defines a matching strategy with its confidence score.
+type EditStrategy struct {
+	Name       string
+	Confidence float64
+}
+
+// Known edit strategies with their confidence scores.
+var (
+	StrategyExact      = EditStrategy{Name: "exact-match", Confidence: 1.0}
+	StrategyTrimmed    = EditStrategy{Name: "trimmed", Confidence: 0.95}
+	StrategyNormalized = EditStrategy{Name: "normalized", Confidence: 0.9}
+	StrategyAnchor     = EditStrategy{Name: "anchor", Confidence: 0.85}
+	StrategyFuzzy      = EditStrategy{Name: "fuzzy", Confidence: 0.7}
+)
+
 type Edit struct {
-	workDir   string
-	backupDir string
-	collector *metrics.Collector
+	workDir             string
+	backupDir           string
+	collector           *metrics.Collector
+	ConfidenceThreshold float64
 }
 
 func NewEdit(workDir, backupDir string) *Edit {
-	return &Edit{workDir: workDir, backupDir: backupDir}
+	return &Edit{
+		workDir:             workDir,
+		backupDir:           backupDir,
+		ConfidenceThreshold: DefaultConfidenceThreshold,
+	}
 }
 
 // SetCollector attaches a metrics collector for recording edit strategy usage.
@@ -125,6 +150,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	// Apply replacement strategy
 	var newContent string
 	var strategy string
+	var confidence float64
 	var matchErr error
 
 	// Parse replace_all flag
@@ -150,8 +176,9 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 		newContent, matchErr = replaceByLineRange(normalizedContent, startLine, endLine, normalizedNewString)
 		strategy = "line-range"
+		confidence = 1.0
 	} else {
-		// Strategy 2-7: Cascading string matching
+		// Strategy 2-5: Cascading string matching with confidence scoring
 		oldStringRaw, ok := input.Params["old_string"]
 		if !ok {
 			return types.ToolResult{}, fmt.Errorf("must provide either start_line+end_line or old_string")
@@ -162,7 +189,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 		normalizedOldString := strings.ReplaceAll(oldString, "\r\n", "\n")
 
-		newContent, strategy, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll)
+		newContent, strategy, confidence, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll, t.ConfidenceThreshold)
 	}
 
 	// Record edit strategy usage
@@ -190,7 +217,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	elapsed := time.Since(start).Milliseconds()
 	return types.ToolResult{
-		Output:     fmt.Sprintf("Edited %s using %s strategy\n\n%s", path, strategy, diffSummary),
+		Output:     fmt.Sprintf("Edited %s using %s strategy (confidence: %.2f)\n\n%s", path, strategy, confidence, diffSummary),
 		DurationMs: elapsed,
 	}, nil
 }
@@ -290,57 +317,57 @@ func replaceByLineRange(content string, startLine, endLine int, newContent strin
 	return strings.Join(newLines, "\n"), nil
 }
 
-func cascadingReplace(content, oldString, newString string, replaceAll bool) (string, string, error) {
-	// Split content once for all strategies (H1 fix)
+func cascadingReplace(content, oldString, newString string, replaceAll bool, threshold float64) (string, string, float64, error) {
+	// Split content once for all strategies
 	contentLines := strings.Split(content, "\n")
 
-	// Strategy 2: Exact match
+	// Strategy 1: Exact match (confidence: 1.0)
 	if idx := strings.Index(content, oldString); idx >= 0 {
 		if replaceAll {
-			return strings.ReplaceAll(content, oldString, newString), "exact-match-all", nil
+			return strings.ReplaceAll(content, oldString, newString), StrategyExact.Name, StrategyExact.Confidence, nil
 		}
-		return strings.Replace(content, oldString, newString, 1), "exact-match", nil
+		return strings.Replace(content, oldString, newString, 1), StrategyExact.Name, StrategyExact.Confidence, nil
 	}
 
-	// Strategy 3: Line-trimmed match
-	result, err := lineTrimmedReplace(content, contentLines, oldString, newString)
-	if err == nil {
-		return result, "line-trimmed", nil
+	// Strategy 2: Trimmed match — trim each line before comparing (confidence: 0.95)
+	if result, err := trimmedReplace(content, contentLines, oldString, newString); err == nil {
+		return result, StrategyTrimmed.Name, StrategyTrimmed.Confidence, nil
 	}
 
-	// Strategy 4: Whitespace-normalized match
-	result, err = whitespaceNormalizedReplace(content, contentLines, oldString, newString)
-	if err == nil {
-		return result, "whitespace-normalized", nil
+	// Strategy 3: Normalized match — full whitespace + indent normalization (confidence: 0.9)
+	if result, err := normalizedReplace(content, contentLines, oldString, newString); err == nil {
+		return result, StrategyNormalized.Name, StrategyNormalized.Confidence, nil
 	}
 
-	// Strategy 5: Indentation-normalized match (handles tab/space mixing)
-	result, err = indentNormalizedReplace(content, contentLines, oldString, newString)
-	if err == nil {
-		return result, "indent-normalized", nil
+	// Strategy 4: Anchor match — first+last line anchoring with Levenshtein (confidence: 0.85)
+	if result, err := anchorReplace(content, contentLines, oldString, newString); err == nil {
+		return result, StrategyAnchor.Name, StrategyAnchor.Confidence, nil
 	}
 
-	// Strategy 6: Line-skip fuzzy match (allows missing/extra blank lines)
-	result, err = lineSkipReplace(content, contentLines, oldString, newString)
-	if err == nil {
-		return result, "line-skip", nil
-	}
-
-	// Strategy 7: Fuzzy anchor match (first+last line anchoring with Levenshtein)
-	result, err = fuzzyAnchorReplace(content, contentLines, oldString, newString)
-	if err == nil {
-		return result, "fuzzy-anchor", nil
+	// Strategy 5: Fuzzy match — Levenshtein-based approximate matching (confidence: 0.5-0.8)
+	if result, conf, err := fuzzyReplace(content, contentLines, oldString, newString); err == nil {
+		if conf >= threshold {
+			return result, StrategyFuzzy.Name, conf, nil
+		}
+		// Fuzzy match found but below threshold — return error with details
+		return "", "", conf, types.NewToolError(
+			fmt.Errorf("fuzzy match found but confidence %.2f is below threshold %.2f", conf, threshold),
+			"The file contains a similar string but the match is not confident enough. "+
+				"Use start_line and end_line for precise line-range edits, or read the file first to get the current content.",
+		)
 	}
 
 	// All strategies failed
-	return "", "", types.NewToolError(
+	return "", "", 0, types.NewToolError(
 		fmt.Errorf("could not find old_string in file (file has %d lines, %d characters)", len(contentLines), len(content)),
 		"Use start_line and end_line for precise line-range edits, or read the file first to get the current content. "+
 			"Ensure old_string matches exactly (check indentation and whitespace).",
 	)
 }
 
-func lineTrimmedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+// trimmedReplace matches by trimming whitespace from each line.
+// Merges the old line-trimmed and whitespace-normalized strategies.
+func trimmedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
 
 	oldTrimmed := make([]string, len(oldLines))
@@ -348,7 +375,7 @@ func lineTrimmedReplace(content string, contentLines []string, oldString, newStr
 		oldTrimmed[i] = strings.TrimSpace(line)
 	}
 
-	// Pre-trim content lines to avoid repeated TrimSpace in inner loop (PERF-16)
+	// Pre-trim content lines to avoid repeated TrimSpace in inner loop
 	contentTrimmed := make([]string, len(contentLines))
 	for i, line := range contentLines {
 		contentTrimmed[i] = strings.TrimSpace(line)
@@ -363,12 +390,10 @@ func lineTrimmedReplace(content string, contentLines []string, oldString, newStr
 			}
 		}
 		if match {
-			// Found match at line i, replace preserving original indentation
 			newLines := make([]string, 0, len(contentLines))
 			newLines = append(newLines, contentLines[:i]...)
 
 			newContentLines := strings.Split(newString, "\n")
-			// Compute base indent from first matched line and first new line
 			baseIndent := ""
 			if i < len(contentLines) {
 				baseIndent = leadingWhitespace(contentLines[i])
@@ -381,7 +406,6 @@ func lineTrimmedReplace(content string, contentLines []string, oldString, newStr
 				trimmed := strings.TrimSpace(ncLine)
 				if trimmed != "" {
 					ncIndent := leadingWhitespace(ncLine)
-					// Compute relative indent: remove new content's base indent, add matched line's indent
 					relativeIndent := ""
 					if len(ncIndent) >= len(newBaseIndent) {
 						relativeIndent = ncIndent[len(newBaseIndent):]
@@ -390,7 +414,6 @@ func lineTrimmedReplace(content string, contentLines []string, oldString, newStr
 				}
 				newLines = append(newLines, ncLine)
 			}
-			// Bounds check: only append remaining lines if match is not at end of file
 			if i+len(oldLines) < len(contentLines) {
 				newLines = append(newLines, contentLines[i+len(oldLines):]...)
 			}
@@ -399,11 +422,15 @@ func lineTrimmedReplace(content string, contentLines []string, oldString, newStr
 		}
 	}
 
-	return "", fmt.Errorf("no line-trimmed match found")
+	return "", fmt.Errorf("no trimmed match found")
 }
 
-func whitespaceNormalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+// normalizedReplace matches after normalizing whitespace and indentation.
+// Merges the old whitespace-normalized and indent-normalized strategies.
+func normalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+	// Full normalization: collapse whitespace, normalize tabs to spaces
 	normalize := func(s string) string {
+		s = strings.ReplaceAll(s, "\t", "    ")
 		fields := strings.Fields(s)
 		return strings.Join(fields, " ")
 	}
@@ -415,7 +442,6 @@ func whitespaceNormalizedReplace(content string, contentLines []string, oldStrin
 		normalizedOldLines[i] = normalize(line)
 	}
 
-	// Pre-compute normalized content lines to avoid repeated normalize() calls (PERF-17)
 	normalizedContentLines := make([]string, len(contentLines))
 	for i, line := range contentLines {
 		normalizedContentLines[i] = normalize(line)
@@ -440,125 +466,15 @@ func whitespaceNormalizedReplace(content string, contentLines []string, oldStrin
 		}
 	}
 
-	return "", fmt.Errorf("no whitespace-normalized match found")
+	return "", fmt.Errorf("no normalized match found")
 }
 
-// indentNormalizedReplace handles cases where tabs and spaces are mixed differently
-// between the old_string and the file content. It normalizes all indentation to
-// spaces for comparison purposes.
-func indentNormalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
-	normalizeIndent := func(s string) string {
-		// Replace tabs with 4 spaces, then collapse leading whitespace to spaces
-		s = strings.ReplaceAll(s, "\t", "    ")
-		fields := strings.Fields(s)
-		if len(fields) == 0 {
-			return ""
-		}
-		// Count leading spaces from original
-		leading := len(s) - len(strings.TrimLeft(s, " \t"))
-		return strings.Repeat(" ", leading) + strings.Join(fields, " ")
-	}
-
-	oldLines := strings.Split(oldString, "\n")
-
-	normalizedOldLines := make([]string, len(oldLines))
-	for i, line := range oldLines {
-		normalizedOldLines[i] = normalizeIndent(line)
-	}
-
-	normalizedContentLines := make([]string, len(contentLines))
-	for i, line := range contentLines {
-		normalizedContentLines[i] = normalizeIndent(line)
-	}
-
-	for i := 0; i <= len(contentLines)-len(oldLines); i++ {
-		match := true
-		for j := range normalizedOldLines {
-			if normalizedContentLines[i+j] != normalizedOldLines[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			newLines := make([]string, 0, len(contentLines)-len(oldLines)+strings.Count(newString, "\n")+1)
-			newLines = append(newLines, contentLines[:i]...)
-			newLines = append(newLines, strings.Split(newString, "\n")...)
-			if i+len(oldLines) < len(contentLines) {
-				newLines = append(newLines, contentLines[i+len(oldLines):]...)
-			}
-			return strings.Join(newLines, "\n"), nil
-		}
-	}
-
-	return "", fmt.Errorf("no indent-normalized match found")
-}
-
-// lineSkipReplace handles cases where the old_string has blank lines that don't
-// exist in the file content, or vice versa. It skips blank lines during matching.
-func lineSkipReplace(content string, contentLines []string, oldString, newString string) (string, error) {
-	oldLines := strings.Split(oldString, "\n")
-
-	// Filter to non-blank lines from old_string
-	var oldNonBlank []string
-	var oldNonBlankIndices []int
-	for i, line := range oldLines {
-		if strings.TrimSpace(line) != "" {
-			oldNonBlank = append(oldNonBlank, strings.TrimSpace(line))
-			oldNonBlankIndices = append(oldNonBlankIndices, i)
-		}
-	}
-
-	if len(oldNonBlank) == 0 {
-		return "", fmt.Errorf("old_string has no non-blank lines")
-	}
-
-	// Find consecutive non-blank lines in content that match
-	for i := 0; i <= len(contentLines)-len(oldNonBlank); i++ {
-		match := true
-		for j, nl := range oldNonBlank {
-			if strings.TrimSpace(contentLines[i+j]) != nl {
-				match = false
-				break
-			}
-		}
-		if match {
-			// Map the match range back to include any blank lines in the old_string
-			matchStart := i
-			matchEnd := i + len(oldNonBlank) - 1
-
-			// Adjust for leading/trailing blank lines in old_string
-			if len(oldNonBlankIndices) > 0 {
-				leadingBlanks := oldNonBlankIndices[0]
-				trailingBlanks := len(oldLines) - 1 - oldNonBlankIndices[len(oldNonBlankIndices)-1]
-				matchStart = i - leadingBlanks
-				matchEnd = i + len(oldNonBlank) - 1 + trailingBlanks
-			}
-
-			// Bounds check
-			if matchStart < 0 {
-				matchStart = 0
-			}
-			if matchEnd >= len(contentLines) {
-				matchEnd = len(contentLines) - 1
-			}
-
-			newLines := make([]string, 0, len(contentLines))
-			newLines = append(newLines, contentLines[:matchStart]...)
-			newLines = append(newLines, strings.Split(newString, "\n")...)
-			if matchEnd+1 < len(contentLines) {
-				newLines = append(newLines, contentLines[matchEnd+1:]...)
-			}
-			return strings.Join(newLines, "\n"), nil
-		}
-	}
-
-	return "", fmt.Errorf("no line-skip match found")
-}
-
-func fuzzyAnchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+// anchorReplace matches using first+last line anchoring with Levenshtein
+// similarity for middle lines. Requires at least MinLinesForFuzzy lines.
+func anchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
 	if len(oldLines) < MinLinesForFuzzy {
-		return "", fmt.Errorf("fuzzy anchor requires at least %d lines", MinLinesForFuzzy)
+		return "", fmt.Errorf("anchor replace requires at least %d lines", MinLinesForFuzzy)
 	}
 
 	firstLine := strings.TrimSpace(oldLines[0])
@@ -576,7 +492,6 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 			continue
 		}
 
-		// First and last line match — check middle lines with Levenshtein
 		middleOld := oldLines[1 : len(oldLines)-1]
 		middleContent := contentLines[i+1 : endIdx]
 
@@ -584,8 +499,6 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 			continue
 		}
 
-		// When there are no middle lines (first+last match is sufficient),
-		// accept the match directly to avoid 0/0 NaN from the similarity check.
 		if len(middleOld) == 0 {
 			newLines := make([]string, 0, len(contentLines))
 			newLines = append(newLines, contentLines[:i]...)
@@ -594,7 +507,6 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 			return strings.Join(newLines, "\n"), nil
 		}
 
-		// Pre-allocate buffers for levenshtein to avoid per-line allocations
 		maxLineLen := 0
 		for _, l := range middleOld {
 			if n := len(strings.TrimSpace(l)); n > maxLineLen {
@@ -631,7 +543,6 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 		avgSimilarity := totalSimilarity / float64(len(middleOld))
 
 		if avgSimilarity >= LevenshteinThreshold {
-			// Good enough match
 			newLines := make([]string, 0, len(contentLines))
 			newLines = append(newLines, contentLines[:i]...)
 			newLines = append(newLines, strings.Split(newString, "\n")...)
@@ -640,7 +551,58 @@ func fuzzyAnchorReplace(content string, contentLines []string, oldString, newStr
 		}
 	}
 
-	return "", fmt.Errorf("no fuzzy anchor match found")
+	return "", fmt.Errorf("no anchor match found")
+}
+
+// fuzzyReplace performs approximate matching using Levenshtein distance.
+// Returns the result, confidence score (0.5-0.8 based on similarity), and error.
+func fuzzyReplace(content string, contentLines []string, oldString, newString string) (string, float64, error) {
+	oldLines := strings.Split(oldString, "\n")
+	if len(oldLines) < 2 {
+		return "", 0, fmt.Errorf("fuzzy replace requires at least 2 lines")
+	}
+
+	bestConfidence := 0.0
+	bestIdx := -1
+
+	// Sliding window: try to find a contiguous block of lines that
+	// is similar to oldString using average line similarity
+	for i := 0; i <= len(contentLines)-len(oldLines); i++ {
+		totalSim := 0.0
+		for j, oldLine := range oldLines {
+			a := strings.TrimSpace(oldLine)
+			b := strings.TrimSpace(contentLines[i+j])
+			if a == b {
+				totalSim += 1.0
+			} else if len(a) == 0 || len(b) == 0 {
+				totalSim += 0.0
+			} else {
+				totalSim += levenshteinSimilarity(a, b)
+			}
+		}
+		avgSim := totalSim / float64(len(oldLines))
+
+		// Only consider matches that are reasonably similar
+		if avgSim >= LevenshteinThreshold && avgSim > bestConfidence {
+			bestConfidence = avgSim
+			bestIdx = i
+		}
+	}
+
+	if bestIdx < 0 {
+		return "", 0, fmt.Errorf("no fuzzy match found")
+	}
+
+	// Map similarity score to confidence range [0.5, 0.8]
+	confidence := 0.5 + 0.3*(bestConfidence-LevenshteinThreshold)/(1.0-LevenshteinThreshold)
+
+	newLines := make([]string, 0, len(contentLines))
+	newLines = append(newLines, contentLines[:bestIdx]...)
+	newLines = append(newLines, strings.Split(newString, "\n")...)
+	if bestIdx+len(oldLines) < len(contentLines) {
+		newLines = append(newLines, contentLines[bestIdx+len(oldLines):]...)
+	}
+	return strings.Join(newLines, "\n"), confidence, nil
 }
 
 func levenshteinSimilarity(a, b string) float64 {

@@ -427,23 +427,23 @@ func TestEdit_Execute_IndentNormalized(t *testing.T) {
 	}
 }
 
-func TestEdit_Execute_LineSkip(t *testing.T) {
+func TestEdit_Execute_BlankLineHandling(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backups")
 	os.MkdirAll(backupDir, 0755)
 
-	// Content WITHOUT blank lines
+	// Content WITH blank lines matching old_string
 	content := "line1\nline2\nline3\n"
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
 	edit := NewEdit(dir, backupDir)
-	// old_string WITH blank lines (that don't exist in content) — line-skip handles this
+	// old_string matches content exactly (no blank lines in either)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
-			"old_string": "line1\n\nline2\n\nline3",
+			"old_string": "line1\nline2\nline3",
 			"new_string": "A\nB\nC",
 		},
 	})

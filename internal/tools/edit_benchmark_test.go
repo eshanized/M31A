@@ -7,7 +7,7 @@ import (
 )
 
 // BenchmarkCascadingReplace benchmarks the cascading replace algorithm
-// across all 7 strategies with varying content sizes.
+// across all 5 strategies with varying content sizes.
 func BenchmarkCascadingReplace(b *testing.B) {
 	sizes := []struct {
 		name    string
@@ -29,7 +29,7 @@ func BenchmarkCascadingReplace(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				cascadingReplace(content, oldString, newString, false)
+				cascadingReplace(content, oldString, newString, false, 0.8)
 			}
 		})
 	}
@@ -49,37 +49,27 @@ func BenchmarkCascadingReplace_Strategies(b *testing.B) {
 		}
 	})
 
-	b.Run("line_trimmed", func(b *testing.B) {
+	b.Run("trimmed", func(b *testing.B) {
 		// Add leading/trailing spaces to old string to force trimmed match
 		oldString := "  " + lines[500] + "  "
 		newString := "replaced_line"
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			lineTrimmedReplace(content, lines, oldString, newString)
+			trimmedReplace(content, lines, oldString, newString)
 		}
 	})
 
-	b.Run("whitespace_normalized", func(b *testing.B) {
-		// Use double spaces to force whitespace normalization
+	b.Run("normalized", func(b *testing.B) {
+		// Use double spaces to force normalization
 		oldString := strings.ReplaceAll(lines[500], " ", "  ")
 		newString := "replaced_line"
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			whitespaceNormalizedReplace(content, lines, oldString, newString)
+			normalizedReplace(content, lines, oldString, newString)
 		}
 	})
 
-	b.Run("indent_normalized", func(b *testing.B) {
-		// Mix tabs and spaces to force indent normalization
-		oldString := "\t" + strings.TrimLeft(lines[500], " \t")
-		newString := "replaced_line"
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			indentNormalizedReplace(content, lines, oldString, newString)
-		}
-	})
-
-	b.Run("fuzzy_anchor", func(b *testing.B) {
+	b.Run("anchor", func(b *testing.B) {
 		// Use first and last lines of a 10-line block
 		startIdx := 495
 		endIdx := 504
@@ -91,7 +81,7 @@ func BenchmarkCascadingReplace_Strategies(b *testing.B) {
 		newString := "replaced_block"
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			fuzzyAnchorReplace(content, lines, oldString, newString)
+			anchorReplace(content, lines, oldString, newString)
 		}
 	})
 }
