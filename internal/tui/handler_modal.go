@@ -53,3 +53,42 @@ func handleDismissToastMsg(m *AppState, msg DismissToastMsg) (tea.Model, tea.Cmd
 	m.removeToastByID(msg.ToastID)
 	return m, nil
 }
+
+// handleErrorMsg processes error messages: adds an error banner to the REPL.
+func handleErrorMsg(m *AppState, msg ErrorMsg) (tea.Model, tea.Cmd) {
+	if m.replModel != nil {
+		m.replModel.AddMessage(makeErrorBannerMsg(plainErrorBanner(msg.Err, m.activeProvider), m.activeProvider))
+	}
+	return m, nil
+}
+
+// handleThinkingBlockToggleMsg processes thinking block toggle events.
+func handleThinkingBlockToggleMsg(m *AppState, msg ThinkingBlockToggleMsg) (tea.Model, tea.Cmd) {
+	if m.replModel != nil {
+		m.replModel.handleThinkingToggle(msg)
+	}
+	return m, nil
+}
+
+// handleToolClickMsg processes tool card click events (mouse interaction).
+func handleToolClickMsg(m *AppState, msg ToolClickMsg) (tea.Model, tea.Cmd) {
+	if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.messages) {
+		if msg.ToolID != "" {
+			m.toggleToolCardCollapsed(msg.ToolID)
+		} else {
+			m.ensureToolDetailModel()
+			title, body := m.extractToolDetail(msg.MessageIndex, msg.ToolName)
+			if title != "" {
+				m.toolDetailModel.SetContent(title, body)
+				return m, m.navigateToScreen(ScreenToolDetail)
+			}
+		}
+	}
+	return m, nil
+}
+
+// handleToolCollapseAllMsg processes collapse-all tool cards events (Escape key).
+func handleToolCollapseAllMsg(m *AppState, msg ToolCollapseAllMsg) (tea.Model, tea.Cmd) {
+	m.collapseAllToolCards()
+	return m, nil
+}

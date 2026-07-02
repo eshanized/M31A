@@ -2,7 +2,6 @@ package tui
 
 import (
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -23,6 +21,9 @@ import (
 
 // Update implements tea.Model. It is the single dispatch point for all messages.
 // CRITICAL: Never mutate AppState from a goroutine. All mutations go here.
+//
+// Each case delegates to a handler function in the corresponding handler_*.go
+// file. This keeps Update() as a thin dispatcher while preserving all behavior.
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -78,65 +79,34 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Leader timeout ────────────────────────────────────────────────────────
 	case LeaderTimeoutMsg:
-		if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
-			m.keyRegistry.DeactivateLeader()
-			cmds = append(cmds, m.addToastCmd("Leader key timed out", "info", 2*time.Second))
-		}
+		_, cmd := handleLeaderTimeoutMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Slash command ─────────────────────────────────────────────────────────
 	case SlashCommandMsg:
-		cmds = append(cmds, m.handleSlashCommand(msg.Command, msg.AttachedFiles))
+		_, cmd := handleSlashCommandMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Home screen submit ───────────────────────────────────────────────────
 	case HomeSubmitMsg:
-		m.ensureReplModel()
-		if m.replModel != nil {
-			m.replModel.textarea.SetValue(msg.Text)
-			m.replModel.textarea.Focus()
-			m.replModel.updateAutoExpandHeight()
-		}
-		cmds = append(cmds, m.navigateToScreen(ScreenREPL))
+		_, cmd := handleHomeSubmitMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Intent classification result ──────────────────────────────────────────
 	case IntentClassifiedMsg:
-		cmds = append(cmds, m.handleIntentClassified(msg))
+		_, cmd := handleIntentClassifiedMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Streaming ─────────────────────────────────────────────────────────────
 	case StreamMsg:
-		if m.replModel != nil {
-			// Start token burn tracking on the first chunk of a new response.
-			if !m.replModel.streaming && m.sidebarModel != nil {
-				m.sidebarModel.StartTokenBurn()
-			}
-			cs := m.replModel.handleStreamMsg(msg)
-			cmds = append(cmds, cs...)
-		}
+		_, cmd := handleStreamMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case StreamDoneMsg:
-		if m.replModel != nil {
-			collapsed := m.replModel.handleStreamDoneMsg(msg)
-			m.checkAutoDream()
-			// Update sidebar with token usage
-			m.updateSidebarUsage()
-			// Wave 2A: proactive context warnings
-			cmds = append(cmds, m.checkContextWarnings()...)
-			if collapsed > 0 {
-				cmds = append(cmds, m.addToastCmd(
-					fmt.Sprintf("↓ %d tool output(s) collapsed — press Enter to expand", collapsed),
-					"info", 3*time.Second))
-			}
-		}
-		m.streamCancelFn = nil
+		_, cmd := handleStreamDoneMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case StreamErrorMsg:
-		if m.replModel != nil {
-			m.replModel.handleStreamErrorMsg(msg)
-		}
-		m.streamCancelFn = nil
-		// Auto-fallback on rate limit or provider unreachable
-		if m.config != nil && m.config.Provider.AutoFallback && m.registry != nil {
-			if stderrors.Is(msg.Err, m31errors.ErrRateLimited) || stderrors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
-				cmds = append(cmds, m.attemptAutoFallback(msg.Err))
-			}
-		}
+		_, cmd := handleStreamErrorMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Agent loop ────────────────────────────────────────────────────────
 	case AgentStreamMsg, AgentThinkingMsg, AgentToolStartMsg, AgentToolProgressMsg,
@@ -149,118 +119,91 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Health ────────────────────────────────────────────────────────────────
 	case HealthCheckTickMsg:
-		if m.activeProvider != "" && m.registry != nil {
-			if p, err := m.registry.Get(m.activeProvider); err == nil {
-				cmds = append(cmds, HealthCheckCmd(m.shutdownCtx, p, 10*time.Second))
-			}
-		}
-		cmds = append(cmds, NextHealthTick(m.shutdownCtx, types.HealthCheckInterval))
-
+		_, cmd := handleHealthCheckTickMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case HealthCheckResultMsg:
-		cmds = append(cmds, m.handleHealthCheckResult(msg)...)
+		_, cmd := handleHealthCheckResultMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Cache refresh ─────────────────────────────────────────────────────────
 	case RefreshCacheMsg:
-		if m.registry != nil {
-			provider := msg.ProviderName
-			if provider == "" {
-				provider = m.activeProvider
-			}
-			cmds = append(cmds, CacheRefreshCmd(m.shutdownCtx, m.registry, provider))
-		}
+		_, cmd := handleRefreshCacheMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case CacheRefreshResultMsg:
-		if msg.NextCmd != nil {
-			cmds = append(cmds, msg.NextCmd)
-		}
+		_, cmd := handleCacheRefreshResultMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Permission modal ──────────────────────────────────────────────────────
 	case PermissionRequestMsg:
-		m.permRequest = &msg.Request
-		m.permCountdown = msg.Request.TimeoutSecs
-		timeout := components.DefaultPermissionTimeout
-		if msg.Request.TimeoutSecs > 0 {
-			timeout = time.Duration(msg.Request.TimeoutSecs) * time.Second
-		}
-		m.permModal = components.NewPermissionModal(msg.Request, m.themeManager.Current(), timeout)
-		m.permModal.SetContext(string(m.workflowPhase), m.workflowGoal)
-		m.screen = ScreenPermission
-		if m.sidebarModel != nil {
-			m.sidebarModel.SetPendingPermCount(msg.Request.QueueDepth)
-		}
-
+		_, cmd := handlePermissionRequestMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case PermissionResponseMsg:
-		cmds = append(cmds, m.handlePermissionResponse(msg))
-
+		_, cmd := handlePermissionResponseMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case PermissionTickMsg:
-		cmds = append(cmds, m.handlePermissionTick())
+		_, cmd := handlePermissionTickMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Question modal ────────────────────────────────────────────────────────
 	case QuestionRequestMsg:
-		m.questionRequest = &msg
-		qModel := components.NewQuestionModel(tools.QuestionRequest{
-			Question:    msg.Question,
-			Header:      msg.Header,
-			Options:     msg.Options,
-			AllowCustom: true,
-		}, m.themeManager.Current(), m.permModalWidth)
-		m.questionModel = &qModel
-		m.screen = ScreenPermission // reuse permission overlay
-
+		_, cmd := handleQuestionRequestMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case QuestionResponseMsg:
-		cmds = append(cmds, m.handleQuestionResponse(msg))
-
+		_, cmd := handleQuestionResponseMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case tools.QuestionResponse:
-		cmds = append(cmds, m.handleQuestionResponse(QuestionResponseMsg{Answer: msg.Answer}))
+		_, cmd := handleToolsQuestionResponse(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Discuss Q&A ────────────────────────────────────────────────────────
 	case DiscussAnswerMsg:
-		cmds = append(cmds, m.handleDiscussAnswer(msg))
-
+		_, cmd := handleDiscussAnswerMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case DiscussCompleteMsg:
-		cmds = append(cmds, m.handleDiscussComplete())
+		_, cmd := handleDiscussCompleteMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Workflow phase result ─────────────────────────────────────────────────
 	case PhaseResultMsg:
-		cmds = append(cmds, m.handlePhaseResult(msg))
-
+		_, cmd := handlePhaseResultMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case PlanReadyMsg:
-		cmds = append(cmds, m.handlePlanReady(msg))
-
+		_, cmd := handlePlanReadyMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case PlanApproveMsg:
-		cmds = append(cmds, m.handlePlanApprove())
-
+		_, cmd := handlePlanApproveMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case PlanRefineMsg:
-		cmds = append(cmds, m.handlePlanRefine(msg))
-
+		_, cmd := handlePlanRefineMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.DemonstrationReadyMsg:
-		if m.shipModel != nil {
-			m.shipModel.SetDemonstration(msg.Content)
-		}
-
+		_, cmd := handleDemonstrationReadyMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case ExecutePauseMsg:
-		if m.executeModel != nil {
-			m.executeModel.paused = msg.Paused
-		}
-
+		_, cmd := handleExecutePauseMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case HealResultMsg:
-		if m.verifyModel != nil {
-			newVerify, cmd := m.verifyModel.Update(msg)
-			m.verifyModel = newVerify
-			cmds = append(cmds, cmd)
-		}
+		_, cmd := handleHealResultMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	case workflow.TaskStartMsg:
-		cmds = append(cmds, m.handleWorkflowTaskStart(msg)...)
+		_, cmd := handleTaskStartWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.TaskUpdateMsg:
-		cmds = append(cmds, m.handleWorkflowTaskUpdate(msg)...)
+		_, cmd := handleTaskUpdateWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.ToolStartMsg:
-		cmds = append(cmds, m.handleWorkflowToolStart(msg)...)
+		_, cmd := handleToolStartWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.ToolCompleteMsg:
-		cmds = append(cmds, m.handleWorkflowToolComplete(msg)...)
+		_, cmd := handleToolCompleteWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.SelfHealStartMsg:
-		cmds = append(cmds, m.handleWorkflowSelfHealStart(msg)...)
+		_, cmd := handleSelfHealStartWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.SelfHealCompleteMsg:
-		cmds = append(cmds, m.handleWorkflowSelfHealComplete(msg)...)
+		_, cmd := handleSelfHealCompleteWorkflowMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case workflow.RuntimeCheckCompleteMsg:
 		if m.runtimeModel != nil {
 			m.runtimeModel.SetSummary(msg.Summary)
@@ -392,12 +335,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Goal submitted ────────────────────────────────────────────────────────
 	case GoalSubmittedMsg:
-		m.workflowGoal = msg.Goal
-		cw, ch := m.contentDimensions()
-		picker := NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
-		m.phaseModelPicker = picker
-		m.screen = ScreenPhaseModelPicker
-		cmds = append(cmds, picker.Init())
+		_, cmd := handleGoalSubmittedMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Phase model picked (from dual-model picker) ────────────────────────────
 	case PhaseModelPickedMsg:
@@ -406,26 +345,31 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Toast ─────────────────────────────────────────────────────────────────
 	case ToastMsg:
 		cmds = append(cmds, m.handleToast(msg)...)
-
 	case ToastExpiryMsg:
-		m.removeToastByID(msg.ToastID)
-
+		_, cmd := handleToastExpiryMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case DismissToastMsg:
-		m.removeToastByID(msg.ToastID)
+		_, cmd := handleDismissToastMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── First-run wizard complete ─────────────────────────────────────────────
 	case FirstRunCompleteMsg:
-		cmds = append(cmds, m.handleFirstRunComplete(msg))
+		_, cmd := handleFirstRunCompleteMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Settings saved ────────────────────────────────────────────────────────
 	case SettingsSavedMsg:
-		cmds = append(cmds, m.handleSettingsSaved()...)
+		_, cmd := handleSettingsSavedMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case ResetCompleteMsg:
-		cmds = append(cmds, m.handleResetComplete()...)
+		_, cmd := handleResetCompleteMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case ConfigSavedMsg:
-		cmds = append(cmds, m.handleConfigSaved()...)
+		_, cmd := handleConfigSavedMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case config.ConfigReloadMsg:
-		cmds = append(cmds, m.handleConfigReload(msg)...)
+		_, cmd := handleConfigReloadMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Fallback event ────────────────────────────────────────────────────────
 	case FallbackEventMsg:
@@ -437,9 +381,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Session detail request ─────────────────────────────────────────────
 	case SessionDetailRequestMsg:
-		if m.sessionDetailModel != nil && msg.Session != nil {
-			m.sessionDetailModel.SetSession(msg.Session)
-		}
+		_, cmd := handleSessionDetailRequestMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Chat history: continue from message ────────────────────────────────
 	case ChatHistoryContinueMsg:
@@ -447,29 +390,16 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Ghost write request ───────────────────────────────────────────────
 	case GhostWriteRequestMsg:
-		if len(msg.Files) > 0 {
-			cmds = append(cmds, m.addToastCmd(
-				fmt.Sprintf("Ghost write started for %d file(s)...", len(msg.Files)),
-				"info", 3*time.Second))
-			// Navigate to ghost output screen
-			cmds = append(cmds, m.navigateToScreen(ScreenGhostOutput))
-		}
-
-	// ── Ghost write result ────────────────────────────────────────────────
+		_, cmd := handleGhostWriteRequestMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case GhostWriteResultMsg:
-		if m.ghostOutputModel != nil && msg.Result != nil {
-			m.ghostOutputModel.SetResult(msg.Result)
-		}
+		_, cmd := handleGhostWriteResultMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Arbitrage optimization results ───────────────────────────────────────
 	case OptimizedMsg:
-		if len(msg.Recommendations) > 0 {
-			rec := msg.Recommendations[0]
-			cmds = append(cmds, m.addToastCmd(
-				fmt.Sprintf("Optimization: recommended %s (saving $%.4f)",
-					rec.RecommendedModel.ModelID, rec.Savings),
-				"info", 5*time.Second))
-		}
+		_, cmd := handleOptimizedMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Model selected ────────────────────────────────────────────────────────
 	case ModelSelectedMsg:
@@ -477,17 +407,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Sidebar tick (periodic or file-watcher triggered) ──────────────────────
 	case SidebarRefreshTickMsg:
-		cmds = append(cmds, m.handleSidebarRefreshTick(msg)...)
+		_, cmd := handleSidebarRefreshTickMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case SidebarRefreshMsg:
-		cmds = append(cmds, m.handleSidebarRefresh(msg)...)
-
+		_, cmd := handleSidebarRefreshMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case SidebarRevertMsg:
-		if m.sidebarModel != nil {
-			m.sidebarModel.RevertToFiles()
-		}
-
+		_, cmd := handleSidebarRevertMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case SidebarTodoUpdateMsg:
-		cmds = append(cmds, m.handleSidebarTodoUpdate(msg)...)
+		_, cmd := handleSidebarTodoUpdateMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Subagent events ───────────────────────────────────────────────────────
 	case SubagentEventMsg:
@@ -495,29 +425,15 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Diff screen ───────────────────────────────────────────────────────────
 	case DiffScreenMsg:
-		if m.diffModel == nil {
-			m.diffModel = NewDiffModel(m.themeManager.Current())
-		}
-		cw, ch := m.contentDimensions()
-		m.diffModel.SetDimensions(cw, ch)
-		m.diffModel.SetDiff(msg.Diff)
-		m.diffModel.SetTitle(msg.Title)
-		if m.sidebarModel != nil {
-			m.sidebarModel.Blur()
-		}
-		m.screen = ScreenDiff
-
+		_, cmd := handleDiffScreenMsg(m, msg)
+		cmds = append(cmds, cmd)
 	case DiffCloseMsg:
-		cmds = append(cmds, m.popScreen())
-		// Refresh sidebar git status after closing diff
-		if m.sidebarModel != nil {
-			cmds = append(cmds, m.sidebarModel.refreshCmd())
-		}
+		_, cmd := handleDiffCloseMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Session restore ──────────────────────────────────────────────────────
 	case sessionRestoredMsg:
 		cmds = append(cmds, m.applySessionRestored(msg))
-
 	case resumeScreenReadyMsg:
 		m.sessionList = nil
 		if m.resumeModel == nil {
@@ -538,33 +454,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Session rename ───────────────────────────────────────────────────────
 	case SessionRenameMsg:
-		if m.sessionManager != nil && msg.SessionID != "" {
-			label := time.Now().Format("2006-01-02_150405")
-			if err := m.sessionManager.RenameSession(msg.SessionID, label); err != nil {
-				cmds = append(cmds, m.addToastCmd("Rename failed: "+m31errors.UserMessage(err), "error", 5*time.Second))
-			} else {
-				cmds = append(cmds, m.addToastCmd("Session renamed", "success", 3*time.Second))
-				// Refresh the resume screen session list
-				cmds = append(cmds, m.openResumeScreen())
-			}
-		}
+		_, cmd := handleSessionRenameMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Session export ───────────────────────────────────────────────────────
 	case SessionExportMsg:
-		if m.sessionManager != nil && msg.SessionID != "" {
-			exportPath := fmt.Sprintf("session_%s.md", msg.SessionID)
-			if err := m.sessionManager.ExportSessionMarkdown(msg.SessionID, exportPath); err != nil {
-				cmds = append(cmds, m.addToastCmd("Export failed: "+m31errors.UserMessage(err), "error", 5*time.Second))
-			} else {
-				cmds = append(cmds, m.addToastCmd(fmt.Sprintf("Exported to %s", exportPath), "success", 5*time.Second))
-			}
-		}
+		_, cmd := handleSessionExportMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Error ─────────────────────────────────────────────────────────────────
 	case ErrorMsg:
-		if m.replModel != nil {
-			m.replModel.AddMessage(makeErrorBannerMsg(plainErrorBanner(msg.Err, m.activeProvider), m.activeProvider))
-		}
+		_, cmd := handleErrorMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── ProviderModelsFetched ─────────────────────────────────────────────────
 	case ProviderModelsFetchedMsg:
@@ -572,30 +473,18 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── ThinkingBlockToggle ───────────────────────────────────────────────────
 	case ThinkingBlockToggleMsg:
-		if m.replModel != nil {
-			m.replModel.handleThinkingToggle(msg)
-		}
+		_, cmd := handleThinkingBlockToggleMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Tool card click (mouse) ───────────────────────────────────────────────
 	case ToolClickMsg:
-		if m.replModel != nil && msg.MessageIndex >= 0 && msg.MessageIndex < len(m.replModel.messages) {
-			// M8: Toggle collapsed state on click (Shift+click opens ToolDetail)
-			if msg.ToolID != "" {
-				m.toggleToolCardCollapsed(msg.ToolID)
-			} else {
-				// Fallback: open ToolDetail if no tool ID available
-				m.ensureToolDetailModel()
-				title, body := m.extractToolDetail(msg.MessageIndex, msg.ToolName)
-				if title != "" {
-					m.toolDetailModel.SetContent(title, body)
-					cmds = append(cmds, m.navigateToScreen(ScreenToolDetail))
-				}
-			}
-		}
+		_, cmd := handleToolClickMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── M8: Collapse all tool cards (Escape key) ─────────────────────────────
 	case ToolCollapseAllMsg:
-		m.collapseAllToolCards()
+		_, cmd := handleToolCollapseAllMsg(m, msg)
+		cmds = append(cmds, cmd)
 
 	// ── Model/command palette sub-model forwarding ────────────────────────────
 	default:
