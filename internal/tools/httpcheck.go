@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -19,16 +20,49 @@ type HTTPCheck struct {
 	client *http.Client
 }
 
+// newSSRFProtectedTransport creates an HTTP transport with SSRF protection.
+// It resolves DNS, checks for private/reserved IPs, and pins the first IP
+// for the connection to prevent DNS rebinding attacks.
+func newSSRFProtectedTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse address %s: %w", addr, err)
+			}
+
+			// Resolve DNS
+			resolver := &net.Resolver{PreferGo: true}
+			ips, err := resolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+			}
+
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+			}
+
+			// Check for private/reserved IPs
+			for _, ip := range ips {
+				if isPrivateIP(ip.IP) || isReservedIP(ip.IP) {
+					return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+				}
+			}
+
+			// Pin the first IP for connection
+			pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			return dialer.DialContext(ctx, network, pinnedAddr)
+		},
+		TLSHandshakeTimeout: 5 * time.Second,
+	}
+}
+
 func NewHTTPCheck() *HTTPCheck {
 	return &HTTPCheck{
 		client: &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout: 5 * time.Second,
-				}).DialContext,
-				TLSHandshakeTimeout: 5 * time.Second,
-			},
+			Timeout:   15 * time.Second,
+			Transport: newSSRFProtectedTransport(),
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return fmt.Errorf("too many redirects")
