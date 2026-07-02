@@ -114,8 +114,7 @@ type Engine struct {
 	provider         provider.LLMProvider
 	modelID          string
 	modelIDMu        sync.RWMutex
-	activePhase      m31types.WorkflowPhase
-	activePhaseMu    sync.RWMutex
+	stateMachine     *StateMachine
 	cfg              *config.Config
 	git              *git.Git
 	dispatcher       *tools.Dispatcher
@@ -306,7 +305,7 @@ func (e *Engine) LastHealReport() *m31types.HealReport {
 func (e *Engine) SaveCheckpointData(goal string) {
 	decisions := e.SnapshotDecisions()
 	cp := &CheckpointData{
-		Phase:       e.activePhase,
+		Phase:       e.stateMachine.CurrentPhase(),
 		Goal:        goal,
 		PlanVersion: e.state.planVersion,
 		Decisions:   decisions,
@@ -349,7 +348,7 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 		}
 	}
 	e.state.checkpointData = data
-	e.activePhase = data.Phase
+	e.stateMachine.SetPhase(data.Phase)
 	e.state.planVersion = data.PlanVersion
 	// Restore decisions to the log
 	if data.Decisions != nil && e.state.decisionLog != nil {
@@ -452,7 +451,8 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
 			ctxsrc.GitSource{WorkDir: opts.WorkDir},
 		),
-		collector: opts.Collector,
+		collector:    opts.Collector,
+		stateMachine: NewStateMachine(),
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},
@@ -581,9 +581,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	start := time.Now()
-	e.activePhaseMu.Lock()
-	e.activePhase = phase
-	e.activePhaseMu.Unlock()
+	e.stateMachine.SetPhase(phase)
 
 	// Revoke batch approvals on phase transition to prevent stale approvals
 	// from carrying across phases
@@ -652,55 +650,15 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 // a TUI state bug or automated retry loop.
 const maxDiscussPlanCycles = 3
 
-// validPhaseTransitions defines which phase transitions are allowed.
-// Any transition not in this map is rejected with ErrPhaseTransition.
-// Fast/Direct mode transitions (Initialize→Execute, Execute→Ship) are
-// included because they are needed for adaptive workflow routing.
-var validPhaseTransitions = map[m31types.WorkflowPhase][]m31types.WorkflowPhase{
-	m31types.PhaseIdle:       {m31types.PhaseInitialize},
-	m31types.PhaseInitialize: {m31types.PhaseDiscuss, m31types.PhaseExecute, m31types.PhaseIdle},
-	m31types.PhaseDiscuss:    {m31types.PhasePlan, m31types.PhaseExecute, m31types.PhaseIdle},
-	m31types.PhasePlan:       {m31types.PhaseExecute, m31types.PhasePlan, m31types.PhaseDiscuss, m31types.PhaseIdle},
-	m31types.PhaseExecute:    {m31types.PhaseVerify, m31types.PhaseShip, m31types.PhaseIdle},
-	m31types.PhaseVerify:     {m31types.PhaseRuntime, m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
-	m31types.PhaseRuntime:    {m31types.PhaseShip, m31types.PhaseExecute, m31types.PhaseIdle},
-	m31types.PhaseShip:       {m31types.PhaseIdle},
-}
-
 // Transition saves a checkpoint and writes STATE.md for the new phase.
 // Validates the transition is allowed by the phase ordering guard.
 func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase) error {
 	e.state.transitionMu.Lock()
 	defer e.state.transitionMu.Unlock()
 
-	// Phase transition guard — reject out-of-order transitions.
-	allowed, ok := validPhaseTransitions[from]
-	if !ok {
-		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
-	}
-	valid := false
-	for _, a := range allowed {
-		if a == to {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid phase transition from %s to %s: %w", from, to, m31errors.ErrPhaseTransition)
-	}
-
-	// Plan↔Discuss oscillation guard: count Plan→Discuss transitions and
-	// reject beyond maxDiscussPlanCycles. The counter resets whenever the
-	// workflow leaves the Plan/Discuss subgraph for Execute/Ship/Idle.
-	if from == m31types.PhasePlan && to == m31types.PhaseDiscuss {
-		e.state.discussPlanCycles++
-		if e.state.discussPlanCycles > maxDiscussPlanCycles {
-			return fmt.Errorf("plan↔discuss cycle limit exceeded (%d): %w",
-				maxDiscussPlanCycles, m31errors.ErrPhaseTransition)
-		}
-	}
-	if to == m31types.PhaseExecute || to == m31types.PhaseShip || to == m31types.PhaseIdle {
-		e.state.discussPlanCycles = 0
+	// Delegate transition validation to StateMachine
+	if err := e.stateMachine.Transition(from, to); err != nil {
+		return err
 	}
 
 	// Emit phase transition start message
@@ -850,7 +808,7 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	if e.tokens == nil || e.provider == nil {
 		return messages, nil
 	}
-	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.activePhase))
+	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
 	if err != nil || modelInfo == nil {
 		return messages, nil
 	}
@@ -873,7 +831,7 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	if e.compactor != nil && e.compactor.ShouldCompact(messages, contextLength) {
 		slog.Info("auto-compaction triggered", "estimated_tokens", estimated, "context_length", contextLength)
 		compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
-		result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.activePhase))
+		result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.stateMachine.CurrentPhase()))
 		compactCancel()
 		if compactErr == nil && result.Compacted {
 			e.emit(CompactionCompleteMsg{
@@ -978,7 +936,7 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 		return messages
 	}
 
-	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.activePhase))
+	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
 	if err != nil || modelInfo == nil {
 		return messages
 	}
@@ -998,13 +956,13 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 	}
 
 	slog.Info("proactive compaction triggered",
-		"phase", e.activePhase,
+		"phase", e.stateMachine.CurrentPhase(),
 		"estimated_tokens", estimated,
 		"context_length", contextLength,
 		"threshold_pct", e.cfg.Compaction.PhaseTransitionPct)
 
 	compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.activePhase))
+	result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.stateMachine.CurrentPhase()))
 	compactCancel()
 
 	if compactErr != nil {
@@ -1155,7 +1113,7 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 // buildSystemPrompt composes the system prompt from base + optional extras.
 // Delegates to ContextBuilder for prompt composition logic.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
-	return e.contextBuilder.BuildSystemPrompt(string(e.activePhase), extra...)
+	return e.contextBuilder.BuildSystemPrompt(string(e.stateMachine.CurrentPhase()), extra...)
 }
 
 // renderDynamicContext formats a context snapshot map into a prompt section.
@@ -1348,7 +1306,7 @@ func (e *Engine) prepareStreamRequest(ctx context.Context, messages []m31types.M
 	})
 
 	req := provider.ChatRequest{
-		Model:            e.modelForPhase(e.activePhase),
+		Model:            e.modelForPhase(e.stateMachine.CurrentPhase()),
 		Messages:         msgs,
 		ReasoningEnabled: true,
 	}

@@ -1441,6 +1441,7 @@ func TestRunPhase_NoConfig(t *testing.T) {
 
 func TestTransition_InvalidFromPhase(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseShip)
 	err := engine.Transition(context.Background(), m31types.PhaseShip, m31types.PhasePlan)
 	if err == nil {
 		t.Error("expected error for invalid transition from Ship")
@@ -1457,6 +1458,7 @@ func TestTransition_InvalidToPhase(t *testing.T) {
 
 func TestTransition_DiscussToPlan(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseDiscuss)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseDiscuss,
 		Timestamp: time.Now(),
@@ -1471,6 +1473,7 @@ func TestTransition_DiscussToPlan(t *testing.T) {
 
 func TestTransition_DiscussToExecute(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseDiscuss)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseDiscuss,
 		Timestamp: time.Now(),
@@ -1485,6 +1488,7 @@ func TestTransition_DiscussToExecute(t *testing.T) {
 
 func TestTransition_PlanToExecute(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhasePlan)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhasePlan,
 		Timestamp: time.Now(),
@@ -1499,6 +1503,7 @@ func TestTransition_PlanToExecute(t *testing.T) {
 
 func TestTransition_PlanToPlan(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhasePlan)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhasePlan,
 		Timestamp: time.Now(),
@@ -1513,6 +1518,7 @@ func TestTransition_PlanToPlan(t *testing.T) {
 
 func TestTransition_ExecuteToVerify(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseExecute)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseExecute,
 		Timestamp: time.Now(),
@@ -1527,6 +1533,7 @@ func TestTransition_ExecuteToVerify(t *testing.T) {
 
 func TestTransition_VerifyToShip(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseVerify)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseVerify,
 		Timestamp: time.Now(),
@@ -1541,6 +1548,7 @@ func TestTransition_VerifyToShip(t *testing.T) {
 
 func TestTransition_VerifyToExecute(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseVerify)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseVerify,
 		Timestamp: time.Now(),
@@ -1555,6 +1563,7 @@ func TestTransition_VerifyToExecute(t *testing.T) {
 
 func TestTransition_ShipToIdle(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseShip)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseShip,
 		Timestamp: time.Now(),
@@ -1569,6 +1578,7 @@ func TestTransition_ShipToIdle(t *testing.T) {
 
 func TestTransition_IdleToInitialize(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	// Engine starts at PhaseIdle by default
 	err := engine.Transition(context.Background(), m31types.PhaseIdle, m31types.PhaseInitialize)
 	if err != nil {
 		t.Errorf("expected valid transition Idle->Initialize: %v", err)
@@ -1577,6 +1587,7 @@ func TestTransition_IdleToInitialize(t *testing.T) {
 
 func TestTransition_PlanToDiscuss(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhasePlan)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhasePlan,
 		Timestamp: time.Now(),
@@ -1591,6 +1602,7 @@ func TestTransition_PlanToDiscuss(t *testing.T) {
 
 func TestTransition_PlanToIdle(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhasePlan)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhasePlan,
 		Timestamp: time.Now(),
@@ -1605,6 +1617,7 @@ func TestTransition_PlanToIdle(t *testing.T) {
 
 func TestTransition_ExecuteToIdle(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseExecute)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseExecute,
 		Timestamp: time.Now(),
@@ -1619,6 +1632,7 @@ func TestTransition_ExecuteToIdle(t *testing.T) {
 
 func TestTransition_VerifyToIdle(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseVerify)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseVerify,
 		Timestamp: time.Now(),
@@ -1633,6 +1647,7 @@ func TestTransition_VerifyToIdle(t *testing.T) {
 
 func TestTransition_InitializeToIdle(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseInitialize)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseInitialize,
 		Timestamp: time.Now(),
@@ -1798,6 +1813,7 @@ func TestStreamLLMStreaming_LLMError(t *testing.T) {
 
 func TestTransition_InitializeToDiscuss(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseInitialize)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseInitialize,
 		Timestamp: time.Now(),
@@ -1812,6 +1828,7 @@ func TestTransition_InitializeToDiscuss(t *testing.T) {
 
 func TestTransition_InvalidInitializeToPlan(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseInitialize)
 	err := engine.Transition(context.Background(), m31types.PhaseInitialize, m31types.PhasePlan)
 	if err == nil {
 		t.Error("expected error for Initialize->Plan (must go through Discuss)")
@@ -2380,6 +2397,7 @@ func TestRunVerify_WithTestFiles(t *testing.T) {
 
 func TestTransition_AllPhases(t *testing.T) {
 	engine, _ := setupTestEngine(t)
+	engine.stateMachine.SetPhase(m31types.PhaseInitialize)
 	engine.sessionMgr.SaveCheckpoint(engine.sessionID, session.Checkpoint{
 		Phase:     m31types.PhaseInitialize,
 		Timestamp: time.Now(),
@@ -3118,7 +3136,7 @@ func TestTransition_AllAllowedTransitions(t *testing.T) {
 
 	for _, tr := range transitions {
 		// Reset phase to match the from
-		engine.activePhase = tr.from
+		engine.stateMachine.SetPhase(tr.from)
 		err := engine.Transition(context.Background(), tr.from, tr.to)
 		if err != nil {
 			t.Errorf("Transition %s -> %s failed: %v", tr.from, tr.to, err)
