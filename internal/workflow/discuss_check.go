@@ -251,7 +251,7 @@ func (e *Engine) generateFollowUps(ctx context.Context, goal string, questions [
 func (e *Engine) buildFollowUpContext(goal string, questions []string, answers map[int]string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.prompts.Discuss, e.prompts.DiscussFollowup)
+	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("discuss"), e.promptBuilder.Prompt("discuss-followup"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder

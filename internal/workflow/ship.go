@@ -519,7 +519,7 @@ func (e *Engine) generateDemonstration(ctx context.Context, goal string, tasks [
 	}
 
 	messages := []m31types.Message{
-		{Role: "system", Content: e.buildSystemPrompt(e.prompts.Demonstration)},
+		{Role: "system", Content: e.buildSystemPrompt(e.promptBuilder.Prompt("demonstration"))},
 		{Role: "user", Content: sb.String()},
 	}
 

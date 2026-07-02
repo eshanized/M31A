@@ -35,66 +35,8 @@ import (
 	"github.com/eshanized/M31A/pkg/session"
 )
 
-//go:embed prompts/*.md
-var promptFS embed.FS
-
 //go:embed templates/website-nextjs/*
 var websiteTemplateFS embed.FS
-
-// PromptRegistry holds all loaded prompt templates.
-type PromptRegistry struct {
-	Base             string
-	ToolUse          string
-	PlanFormat       string
-	ExecuteTask      string
-	Discuss          string
-	SelfHeal         string
-	Demonstration    string
-	Autonomous       string
-	ContextAwareness string
-	CodeQuality      string
-	CodeIntelligence string
-	Research         string
-	PlanCheck        string
-	PlanRevise       string
-	PlanOutline      string
-	DiscussFollowup  string
-	IntentClassify   string
-	WebsiteBuild     string
-}
-
-// LoadPrompts reads all embedded prompt files and returns a registry.
-func LoadPrompts() (*PromptRegistry, error) {
-	r := &PromptRegistry{}
-	files := map[string]*string{
-		"prompts/base.md":                 &r.Base,
-		"prompts/tool-use.md":             &r.ToolUse,
-		"prompts/plan-format.md":          &r.PlanFormat,
-		"prompts/execute-task.md":         &r.ExecuteTask,
-		"prompts/discuss-questions.md":    &r.Discuss,
-		"prompts/self-heal.md":            &r.SelfHeal,
-		"prompts/demonstration-format.md": &r.Demonstration,
-		"prompts/autonomous.md":           &r.Autonomous,
-		"prompts/context-awareness.md":    &r.ContextAwareness,
-		"prompts/code-quality.md":         &r.CodeQuality,
-		"prompts/code-intelligence.md":    &r.CodeIntelligence,
-		"prompts/research.md":             &r.Research,
-		"prompts/plan-check.md":           &r.PlanCheck,
-		"prompts/plan-revise.md":          &r.PlanRevise,
-		"prompts/plan-outline.md":         &r.PlanOutline,
-		"prompts/discuss-followup.md":     &r.DiscussFollowup,
-		"prompts/intent-classify.md":      &r.IntentClassify,
-		"prompts/website-build.md":        &r.WebsiteBuild,
-	}
-	for path, ptr := range files {
-		data, err := promptFS.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("load prompt %s: %w", path, err)
-		}
-		*ptr = strings.TrimSpace(string(data))
-	}
-	return r, nil
-}
 
 // WorkflowState groups mutable session state extracted from Engine.
 // This struct owns plan state, cached data, intent classification,
@@ -181,7 +123,7 @@ type Engine struct {
 	dispatcher       *tools.Dispatcher
 	tokens           *tokens.Estimator
 	sessionMgr       *session.Manager
-	prompts          *PromptRegistry
+	promptBuilder    *PromptBuilder
 	logger           *slog.Logger
 	startTime        time.Time
 	sessionStartHash string
@@ -191,8 +133,8 @@ type Engine struct {
 	callCounter      int64
 	totalCostBits    uint64 // atomic; cumulative cost for budget tracking (stored as bits)
 	// workflowMode controls phase-skipping behaviour based on prompt complexity.
-	workflowMode     m31types.WorkflowMode
-	workflowModeMu   sync.RWMutex
+	workflowMode   m31types.WorkflowMode
+	workflowModeMu sync.RWMutex
 	// perPhaseModels holds per-phase model overrides set by the TUI via SetPhaseModel.
 	// Keys are WorkflowPhase values; values are model ID strings.
 	// When set, takes precedence over AgentsConfig and cfg.Model.Default.
@@ -484,27 +426,27 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 // NewEngineFromOptions creates a workflow engine from an EngineOptions struct.
 func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 
-	prompts, err := LoadPrompts()
+	promptBuilder, err := NewPromptBuilder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
 	return &Engine{
-		sessionID:   opts.SessionID,
-		workDir:     opts.WorkDir,
-		backupDir:   opts.BackupDir,
-		planningDir: opts.PlanningDir,
-		provider:    opts.Provider,
-		modelID:     opts.ModelID,
-		cfg:         opts.Config,
-		dispatcher:  opts.Dispatcher,
-		tokens:      opts.TokenEst,
-		sessionMgr:  opts.SessionMgr,
-		prompts:     prompts,
-		logger:      slog.Default(),
-		startTime:   time.Now(),
-		execCommand: exec.Command,
-		compactor:   compaction.New(compactionConfig(opts.Config), opts.TokenEst),
+		sessionID:     opts.SessionID,
+		workDir:       opts.WorkDir,
+		backupDir:     opts.BackupDir,
+		planningDir:   opts.PlanningDir,
+		provider:      opts.Provider,
+		modelID:       opts.ModelID,
+		cfg:           opts.Config,
+		dispatcher:    opts.Dispatcher,
+		tokens:        opts.TokenEst,
+		sessionMgr:    opts.SessionMgr,
+		promptBuilder: promptBuilder,
+		logger:        slog.Default(),
+		startTime:     time.Now(),
+		execCommand:   exec.Command,
+		compactor:     compaction.New(compactionConfig(opts.Config), opts.TokenEst),
 		contextRegistry: ctxsrc.NewRegistry(
 			ctxsrc.DateTimeSource{},
 			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
@@ -1198,7 +1140,7 @@ func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
 // Full assembled prompts are cached per extras signature to avoid repeated string building.
 func (e *Engine) buildSystemPrompt(extra ...string) string {
 	e.state.cachedBasePromptOnce.Do(func() {
-		e.state.cachedBasePrompt = e.prompts.Base
+		e.state.cachedBasePrompt = e.promptBuilder.Prompt("base")
 	})
 
 	// Build cache key from extras

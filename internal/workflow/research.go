@@ -46,7 +46,7 @@ func (e *Engine) runResearch(ctx context.Context, goal string) (string, error) {
 func (e *Engine) buildResearchContext(goal string) []m31types.Message {
 	var messages []m31types.Message
 
-	systemPrompt := e.buildSystemPrompt(e.prompts.Research)
+	systemPrompt := e.buildSystemPrompt(e.promptBuilder.Prompt("research"))
 	messages = append(messages, m31types.Message{Role: "system", Content: systemPrompt})
 
 	var userCtx strings.Builder
