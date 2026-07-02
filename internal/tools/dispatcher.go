@@ -188,7 +188,9 @@ func (d *Dispatcher) Register(tool types.Tool) error {
 // SetCollector attaches a metrics collector for recording tool execution metrics.
 // Also propagates the collector to tools that support it (e.g., Edit for strategy tracking).
 func (d *Dispatcher) SetCollector(c *metrics.Collector) {
+	d.mu.Lock()
 	d.collector = c
+	d.mu.Unlock()
 	// Propagate collector to tools that support metric recording
 	d.mu.RLock()
 	defer d.mu.RUnlock()

@@ -286,9 +286,7 @@ func (d *DevServer) restartServer(ctx context.Context, input types.ToolInput, st
 			// entry was deleted, use stored env
 			_ = e
 		}
-		d.mu.Unlock()
 		// Use the env from the original entry
-		d.mu.Lock()
 		for _, e := range d.processes {
 			if e.command == command {
 				env = e.env
