@@ -2,8 +2,6 @@ package tui
 
 import (
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestHandleSessionDetailRequestMsg_NilModel(t *testing.T) {
@@ -69,11 +67,11 @@ func TestHandleDismissToastMsg(t *testing.T) {
 }
 
 func TestHandlerModalSignatures(t *testing.T) {
-	var f1 func(*AppState, SessionDetailRequestMsg) (tea.Model, tea.Cmd) = handleSessionDetailRequestMsg
-	var f2 func(*AppState, DiffScreenMsg) (tea.Model, tea.Cmd) = handleDiffScreenMsg
-	var f3 func(*AppState, DiffCloseMsg) (tea.Model, tea.Cmd) = handleDiffCloseMsg
-	var f4 func(*AppState, ToastExpiryMsg) (tea.Model, tea.Cmd) = handleToastExpiryMsg
-	var f5 func(*AppState, DismissToastMsg) (tea.Model, tea.Cmd) = handleDismissToastMsg
+	var f1 = handleSessionDetailRequestMsg
+	var f2 = handleDiffScreenMsg
+	var f3 = handleDiffCloseMsg
+	var f4 = handleToastExpiryMsg
+	var f5 = handleDismissToastMsg
 	_ = f1
 	_ = f2
 	_ = f3

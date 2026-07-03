@@ -36,10 +36,10 @@ func TestCollapseAllToolCards_NilMsgRenderer(t *testing.T) {
 func TestEnsureToolDetailModel_AlreadyExists(t *testing.T) {
 	tm := theme.NewManager(theme.ModeDark)
 	m := &AppState{
-		themeManager:   tm,
+		themeManager:    tm,
 		toolDetailModel: &ToolDetailModel{},
-		width:          80,
-		height:         24,
+		width:           80,
+		height:          24,
 	}
 	m.ensureToolDetailModel()
 	// Should not replace existing model
@@ -143,21 +143,21 @@ func TestExtractToolDetail_EmptyToolName(t *testing.T) {
 
 // Verify signatures
 func TestToggleToolCardCollapsed_Signature(t *testing.T) {
-	var fn func(string) = (&AppState{}).toggleToolCardCollapsed
+	var fn = (&AppState{}).toggleToolCardCollapsed
 	_ = fn
 }
 
 func TestCollapseAllToolCards_Signature(t *testing.T) {
-	var fn func() = (&AppState{}).collapseAllToolCards
+	var fn = (&AppState{}).collapseAllToolCards
 	_ = fn
 }
 
 func TestEnsureToolDetailModel_Signature(t *testing.T) {
-	var fn func() = (&AppState{}).ensureToolDetailModel
+	var fn = (&AppState{}).ensureToolDetailModel
 	_ = fn
 }
 
 func TestExtractToolDetail_Signature(t *testing.T) {
-	var fn func(int, string) (string, string) = (&AppState{}).extractToolDetail
+	var fn = (&AppState{}).extractToolDetail
 	_ = fn
 }

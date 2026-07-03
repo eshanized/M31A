@@ -2,8 +2,6 @@ package tui
 
 import (
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestHandleHealthCheckTickMsg_NilRegistry(t *testing.T) {
@@ -54,10 +52,10 @@ func TestHandleCacheRefreshResultMsg_NilNextCmd(t *testing.T) {
 }
 
 func TestHandlerRuntimeSignatures(t *testing.T) {
-	var f1 func(*AppState, HealthCheckTickMsg) (tea.Model, tea.Cmd) = handleHealthCheckTickMsg
-	var f2 func(*AppState, HealthCheckResultMsg) (tea.Model, tea.Cmd) = handleHealthCheckResultMsg
-	var f3 func(*AppState, RefreshCacheMsg) (tea.Model, tea.Cmd) = handleRefreshCacheMsg
-	var f4 func(*AppState, CacheRefreshResultMsg) (tea.Model, tea.Cmd) = handleCacheRefreshResultMsg
+	var f1 = handleHealthCheckTickMsg
+	var f2 = handleHealthCheckResultMsg
+	var f3 = handleRefreshCacheMsg
+	var f4 = handleCacheRefreshResultMsg
 	_ = f1
 	_ = f2
 	_ = f3

@@ -49,8 +49,6 @@ type WorkflowState struct {
 	planVersion       int    // current plan version (increments on refine)
 	refineFeedback    string // pending refinement feedback from user
 	researchOutput    string // pre-plan research results for injection into plan context
-	discussPlanCycles int    // Plan→Discuss→Plan round-trips (capped at maxDiscussPlanCycles)
-
 	// Cached base prompt (built once, used by ContextBuilder)
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once

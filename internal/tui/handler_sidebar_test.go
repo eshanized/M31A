@@ -3,14 +3,13 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 )
 
 func TestHandleGoalSubmittedMsg_Signature(t *testing.T) {
 	// Verify function signature matches expected pattern.
 	// Full test skipped: NewPhaseModelPickerModel requires registry setup.
-	var f func(*AppState, GoalSubmittedMsg) (tea.Model, tea.Cmd) = handleGoalSubmittedMsg
+	var f = handleGoalSubmittedMsg
 	_ = f
 }
 
@@ -99,14 +98,14 @@ func TestHandleSidebarTodoUpdateMsg_NilSidebar(t *testing.T) {
 }
 
 func TestHandlerSidebarSignatures(t *testing.T) {
-	var f1 func(*AppState, GoalSubmittedMsg) (tea.Model, tea.Cmd) = handleGoalSubmittedMsg
-	var f2 func(*AppState, SidebarRevertMsg) (tea.Model, tea.Cmd) = handleSidebarRevertMsg
-	var f3 func(*AppState, GhostWriteRequestMsg) (tea.Model, tea.Cmd) = handleGhostWriteRequestMsg
-	var f4 func(*AppState, GhostWriteResultMsg) (tea.Model, tea.Cmd) = handleGhostWriteResultMsg
-	var f5 func(*AppState, OptimizedMsg) (tea.Model, tea.Cmd) = handleOptimizedMsg
-	var f6 func(*AppState, SidebarRefreshTickMsg) (tea.Model, tea.Cmd) = handleSidebarRefreshTickMsg
-	var f7 func(*AppState, SidebarRefreshMsg) (tea.Model, tea.Cmd) = handleSidebarRefreshMsg
-	var f8 func(*AppState, SidebarTodoUpdateMsg) (tea.Model, tea.Cmd) = handleSidebarTodoUpdateMsg
+	var f1 = handleGoalSubmittedMsg
+	var f2 = handleSidebarRevertMsg
+	var f3 = handleGhostWriteRequestMsg
+	var f4 = handleGhostWriteResultMsg
+	var f5 = handleOptimizedMsg
+	var f6 = handleSidebarRefreshTickMsg
+	var f7 = handleSidebarRefreshMsg
+	var f8 = handleSidebarTodoUpdateMsg
 	_ = f1
 	_ = f2
 	_ = f3

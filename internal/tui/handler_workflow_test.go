@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/workflow"
 )
@@ -98,19 +97,19 @@ func TestHandleHealResultMsg_NilVerifyModel(t *testing.T) {
 }
 
 func TestHandlerWorkflowSignatures(t *testing.T) {
-	var f1 func(*AppState, PhaseResultMsg) (tea.Model, tea.Cmd) = handlePhaseResultMsg
-	var f2 func(*AppState, PlanReadyMsg) (tea.Model, tea.Cmd) = handlePlanReadyMsg
-	var f3 func(*AppState, PlanApproveMsg) (tea.Model, tea.Cmd) = handlePlanApproveMsg
-	var f4 func(*AppState, PlanRefineMsg) (tea.Model, tea.Cmd) = handlePlanRefineMsg
-	var f5 func(*AppState, workflow.DemonstrationReadyMsg) (tea.Model, tea.Cmd) = handleDemonstrationReadyMsg
-	var f6 func(*AppState, ExecutePauseMsg) (tea.Model, tea.Cmd) = handleExecutePauseMsg
-	var f7 func(*AppState, HealResultMsg) (tea.Model, tea.Cmd) = handleHealResultMsg
-	var f8 func(*AppState, workflow.TaskStartMsg) (tea.Model, tea.Cmd) = handleTaskStartWorkflowMsg
-	var f9 func(*AppState, workflow.TaskUpdateMsg) (tea.Model, tea.Cmd) = handleTaskUpdateWorkflowMsg
-	var f10 func(*AppState, workflow.ToolStartMsg) (tea.Model, tea.Cmd) = handleToolStartWorkflowMsg
-	var f11 func(*AppState, workflow.ToolCompleteMsg) (tea.Model, tea.Cmd) = handleToolCompleteWorkflowMsg
-	var f12 func(*AppState, workflow.SelfHealStartMsg) (tea.Model, tea.Cmd) = handleSelfHealStartWorkflowMsg
-	var f13 func(*AppState, workflow.SelfHealCompleteMsg) (tea.Model, tea.Cmd) = handleSelfHealCompleteWorkflowMsg
+	var f1 = handlePhaseResultMsg
+	var f2 = handlePlanReadyMsg
+	var f3 = handlePlanApproveMsg
+	var f4 = handlePlanRefineMsg
+	var f5 = handleDemonstrationReadyMsg
+	var f6 = handleExecutePauseMsg
+	var f7 = handleHealResultMsg
+	var f8 = handleTaskStartWorkflowMsg
+	var f9 = handleTaskUpdateWorkflowMsg
+	var f10 = handleToolStartWorkflowMsg
+	var f11 = handleToolCompleteWorkflowMsg
+	var f12 = handleSelfHealStartWorkflowMsg
+	var f13 = handleSelfHealCompleteWorkflowMsg
 	_ = f1
 	_ = f2
 	_ = f3

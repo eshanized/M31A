@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
@@ -136,12 +135,12 @@ func TestHandlePermissionKey_WithQuestionRequest(t *testing.T) {
 	rm := NewReplModel(testTheme(), "v1")
 	tm := theme.NewManager(theme.ModeDark)
 	m := &AppState{
-		replModel:      &rm,
-		themeManager:   tm,
+		replModel:       &rm,
+		themeManager:    tm,
 		questionRequest: &QuestionRequestMsg{ID: 1, Question: "test?"},
-		screen:         ScreenPermission,
-		width:          80,
-		height:         24,
+		screen:          ScreenPermission,
+		width:           80,
+		height:          24,
 	}
 	msg := testKeyMsg("y")
 	cmd := m.handlePermissionKey(msg)
@@ -270,51 +269,51 @@ func TestRunWorkflowFromGoal_WithSidebar(t *testing.T) {
 
 // Verify signatures
 func TestStartNewSession_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).startNewSession
+	var fn = (&AppState{}).startNewSession
 	_ = fn
 }
 
 func TestRunWorkflowFromGoal_Signature(t *testing.T) {
-	var fn func(string) tea.Cmd = (&AppState{}).runWorkflowFromGoal
+	var fn = (&AppState{}).runWorkflowFromGoal
 	_ = fn
 }
 
 func TestResolveWorkflowMode_Signature(t *testing.T) {
-	var fn func(string) types.WorkflowMode = (&AppState{}).resolveWorkflowMode
+	var fn = (&AppState{}).resolveWorkflowMode
 	_ = fn
 }
 
 func TestHandlePermissionResponse_Signature(t *testing.T) {
-	var fn func(PermissionResponseMsg) tea.Cmd = (&AppState{}).handlePermissionResponse
+	var fn = (&AppState{}).handlePermissionResponse
 	_ = fn
 }
 
 func TestHandlePermissionTick_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).handlePermissionTick
+	var fn = (&AppState{}).handlePermissionTick
 	_ = fn
 }
 
 func TestHandlePermissionKey_Signature(t *testing.T) {
-	var fn func(tea.KeyMsg) tea.Cmd = (&AppState{}).handlePermissionKey
+	var fn = (&AppState{}).handlePermissionKey
 	_ = fn
 }
 
 func TestHandleQuestionKey_Signature(t *testing.T) {
-	var fn func(tea.KeyMsg) tea.Cmd = (&AppState{}).handleQuestionKey
+	var fn = (&AppState{}).handleQuestionKey
 	_ = fn
 }
 
 func TestHandleQuestionResponse_Signature(t *testing.T) {
-	var fn func(QuestionResponseMsg) tea.Cmd = (&AppState{}).handleQuestionResponse
+	var fn = (&AppState{}).handleQuestionResponse
 	_ = fn
 }
 
 func TestHandleDiscussAnswer_Signature(t *testing.T) {
-	var fn func(DiscussAnswerMsg) tea.Cmd = (&AppState{}).handleDiscussAnswer
+	var fn = (&AppState{}).handleDiscussAnswer
 	_ = fn
 }
 
 func TestHandleDiscussComplete_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).handleDiscussComplete
+	var fn = (&AppState{}).handleDiscussComplete
 	_ = fn
 }

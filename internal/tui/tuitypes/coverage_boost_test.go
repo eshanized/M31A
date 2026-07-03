@@ -460,11 +460,11 @@ func TestPhaseResultMsg_Empty(t *testing.T) {
 func TestPhaseResultMsg_Fields(t *testing.T) {
 	t.Parallel()
 	msg := PhaseResultMsg{
-		Phase:    types.PhaseExecute,
-		Success:  true,
+		Phase:      types.PhaseExecute,
+		Success:    true,
 		DurationMs: 5000,
-		Cost:     0.25,
-		ToolCalls: 10,
+		Cost:       0.25,
+		ToolCalls:  10,
 	}
 	if msg.Phase != types.PhaseExecute {
 		t.Errorf("Phase = %v, want PhaseExecute", msg.Phase)

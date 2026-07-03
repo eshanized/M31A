@@ -52,7 +52,7 @@ func (m mergeHelper) float64Field(base, overlay *float64, key string) {
 
 // sliceField copies overlay to base if non-nil and non-empty.
 func (m mergeHelper) sliceField(base, overlay *[]string, key string) {
-	if *overlay != nil && len(*overlay) > 0 {
+	if len(*overlay) > 0 {
 		dst := make([]string, len(*overlay))
 		copy(dst, *overlay)
 		*base = dst
@@ -62,34 +62,10 @@ func (m mergeHelper) sliceField(base, overlay *[]string, key string) {
 // mergeSlice copies overlay to base if non-nil and non-empty.
 // Used for PermissionRule slices and similar typed slices.
 func mergeSlice[T any](base, overlay *[]T, key string) {
-	if *overlay != nil && len(*overlay) > 0 {
+	if len(*overlay) > 0 {
 		dst := make([]T, len(*overlay))
 		copy(dst, *overlay)
 		*base = dst
-	}
-}
-
-// mapField copies overlay entries into base. If overlay is nil, base is unchanged.
-func (m mergeHelper) mapField(base, overlay *map[string]string, key string) {
-	if *overlay != nil {
-		if *base == nil {
-			*base = make(map[string]string)
-		}
-		for k, v := range *overlay {
-			(*base)[k] = v
-		}
-	}
-}
-
-// mergeMap merges overlay entries into base map (generic).
-func mergeMap[V any](base, overlay *map[string]V, key string) {
-	if *overlay != nil {
-		if *base == nil {
-			*base = make(map[string]V)
-		}
-		for k, v := range *overlay {
-			(*base)[k] = v
-		}
 	}
 }
 

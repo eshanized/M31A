@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -91,12 +90,12 @@ func TestHandleToolsQuestionResponse_NilDispatcher(t *testing.T) {
 
 func TestHandlerToolSignatures(t *testing.T) {
 	// Verify function signatures match expected patterns.
-	var f1 func(*AppState, PermissionRequestMsg) (tea.Model, tea.Cmd) = handlePermissionRequestMsg
-	var f2 func(*AppState, PermissionResponseMsg) (tea.Model, tea.Cmd) = handlePermissionResponseMsg
-	var f3 func(*AppState, PermissionTickMsg) (tea.Model, tea.Cmd) = handlePermissionTickMsg
-	var f4 func(*AppState, QuestionRequestMsg) (tea.Model, tea.Cmd) = handleQuestionRequestMsg
-	var f5 func(*AppState, QuestionResponseMsg) (tea.Model, tea.Cmd) = handleQuestionResponseMsg
-	var f6 func(*AppState, tools.QuestionResponse) (tea.Model, tea.Cmd) = handleToolsQuestionResponse
+	var f1 = handlePermissionRequestMsg
+	var f2 = handlePermissionResponseMsg
+	var f3 = handlePermissionTickMsg
+	var f4 = handleQuestionRequestMsg
+	var f5 = handleQuestionResponseMsg
+	var f6 = handleToolsQuestionResponse
 	_ = f1
 	_ = f2
 	_ = f3

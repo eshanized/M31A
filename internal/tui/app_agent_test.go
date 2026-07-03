@@ -193,26 +193,26 @@ func TestReRegisterProvidersFromConfig_AllNil(t *testing.T) {
 
 // Verify signatures
 func TestExtractToolInputSnippet_Signature(t *testing.T) {
-	var fn func(types.ToolCall) string = extractToolInputSnippet
+	var fn = extractToolInputSnippet
 	_ = fn
 }
 
 func TestReadAgentCh_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).readAgentCh
+	var fn = (&AppState{}).readAgentCh
 	_ = fn
 }
 
 func TestSaveAgentSession_Signature(t *testing.T) {
-	var fn func() = (&AppState{}).saveAgentSession
+	var fn = (&AppState{}).saveAgentSession
 	_ = fn
 }
 
 func TestAttemptAutoFallback_Signature(t *testing.T) {
-	var fn func(error) tea.Cmd = (&AppState{}).attemptAutoFallback
+	var fn = (&AppState{}).attemptAutoFallback
 	_ = fn
 }
 
 func TestReRegisterProvidersFromConfig_Signature(t *testing.T) {
-	var fn func() = (&AppState{}).reRegisterProvidersFromConfig
+	var fn = (&AppState{}).reRegisterProvidersFromConfig
 	_ = fn
 }

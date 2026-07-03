@@ -561,9 +561,9 @@ func TestEngine_CheckAcceptanceCriteria_AllPass(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	engine.workDir = dir
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{"test.txt contains package main", "test.txt exists"},
-		Files:             []string{"test.txt"},
+		Files:              []string{"test.txt"},
 	}
 	result := engine.checkAcceptanceCriteria(task)
 	if !result.Passed {
@@ -580,9 +580,9 @@ func TestEngine_CheckAcceptanceCriteria_SomeFail(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	engine.workDir = dir
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{"test.txt contains package main", "test.txt contains xyz"},
-		Files:             []string{"test.txt"},
+		Files:              []string{"test.txt"},
 	}
 	result := engine.checkAcceptanceCriteria(task)
 	if result.Passed {
@@ -1599,7 +1599,7 @@ func TestEngine_SetRefinementFeedback_EmptyClears(t *testing.T) {
 
 func TestEngine_ExecCommandContext_NilContext(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	out, err := engine.execCommandContext(nil, "echo", "hello")
+	out, err := engine.execCommandContext(context.TODO(), "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2394,7 +2394,7 @@ func TestCheckAcceptanceCriteria_AllMet(t *testing.T) {
 	// Create a file that the criterion can match
 	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644)
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{"main.go contains func main"},
 	}
 	result := engine.checkAcceptanceCriteria(task)
@@ -2406,7 +2406,7 @@ func TestCheckAcceptanceCriteria_AllMet(t *testing.T) {
 func TestCheckAcceptanceCriteria_NoneMet(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{"nonexistent.go exists"},
 	}
 	result := engine.checkAcceptanceCriteria(task)
@@ -2418,7 +2418,7 @@ func TestCheckAcceptanceCriteria_NoneMet(t *testing.T) {
 func TestCheckAcceptanceCriteria_Empty(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{},
 	}
 	result := engine.checkAcceptanceCriteria(task)
@@ -2713,11 +2713,11 @@ func TestPlanIssue_Fields(t *testing.T) {
 
 func TestCalculateHealthScore_HighScore(t *testing.T) {
 	a := ProjectAnalysis{
-		TestFileRatio:  0.5,
+		TestFileRatio:   0.5,
 		DependencyCount: 10,
-		Framework:      "Next.js",
-		Language:       "TypeScript",
-		FileCount:      50,
+		Framework:       "Next.js",
+		Language:        "TypeScript",
+		FileCount:       50,
 	}
 	score := calculateHealthScore(a)
 	// 50 + 25 (test ratio 0.5*50) + 10 (framework != language) = 85
@@ -2801,7 +2801,7 @@ func TestDetectLanguage_V2(t *testing.T) {
 func TestBehavioralVerification_NoTests(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	task := m31types.Task{
-		ID:                1,
+		ID:                 1,
 		AcceptanceCriteria: []string{"main.go contains func main"},
 	}
 	results, err := engine.BehavioralVerification(task)
@@ -3349,7 +3349,7 @@ func TestIsVagueQuestion_Long_WithTerms(t *testing.T) {
 
 func TestIsVagueQuestion_Long_NoTerms(t *testing.T) {
 	if isVagueQuestion("How should we implement something for the general system?") {
-		// This has >= 8 words and no technical terms → not vague
+		t.Error("expected long question with general terms to not be vague")
 	}
 }
 

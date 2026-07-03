@@ -157,11 +157,11 @@ func TestRouteKeyMsg_WithPendingConfirm(t *testing.T) {
 	rm := NewReplModel(testTheme(), "v1")
 	tm := theme.NewManager(theme.ModeDark)
 	m := &AppState{
-		replModel:    &rm,
-		themeManager: tm,
+		replModel:      &rm,
+		themeManager:   tm,
 		pendingConfirm: &CommandResult{ConfirmPrompt: "Are you sure?"},
-		width:        80,
-		height:       24,
+		width:          80,
+		height:         24,
 	}
 	// Press 'n' to cancel
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
@@ -177,12 +177,12 @@ func TestRouteKeyMsg_WithPendingIntent_Y(t *testing.T) {
 	tm := theme.NewManager(theme.ModeDark)
 	intent := types.IntentResult{Intent: types.IntentFeature}
 	m := &AppState{
-		replModel:    &rm,
-		themeManager: tm,
-		pendingIntent: &intent,
+		replModel:          &rm,
+		themeManager:       tm,
+		pendingIntent:      &intent,
 		pendingIntentInput: "test goal",
-		width:        80,
-		height:       24,
+		width:              80,
+		height:             24,
 	}
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}
 	cmd := m.routeKeyMsg(msg)
@@ -199,13 +199,13 @@ func TestRouteKeyMsg_WithPendingIntent_N(t *testing.T) {
 	// Need a minimal registry to avoid nil dereference when intent is dismissed
 	registry := newTestRegistry()
 	m := &AppState{
-		replModel:    &rm,
-		themeManager: tm,
-		registry:     registry,
-		pendingIntent: &intent,
+		replModel:          &rm,
+		themeManager:       tm,
+		registry:           registry,
+		pendingIntent:      &intent,
 		pendingIntentInput: "test goal",
-		width:        80,
-		height:       24,
+		width:              80,
+		height:             24,
 	}
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
 	cmd := m.routeKeyMsg(msg)
@@ -287,21 +287,21 @@ func TestHandleKeyAction_Unknown(t *testing.T) {
 
 // Verify signatures
 func TestHandleWindowResize_Signature(t *testing.T) {
-	var fn func(tea.WindowSizeMsg) tea.Cmd = (&AppState{}).handleWindowResize
+	var fn = (&AppState{}).handleWindowResize
 	_ = fn
 }
 
 func TestRouteKeyMsg_Signature(t *testing.T) {
-	var fn func(tea.KeyMsg) tea.Cmd = (&AppState{}).routeKeyMsg
+	var fn = (&AppState{}).routeKeyMsg
 	_ = fn
 }
 
 func TestHandleKeyAction_Signature(t *testing.T) {
-	var fn func(string) tea.Cmd = (&AppState{}).handleKeyAction
+	var fn = (&AppState{}).handleKeyAction
 	_ = fn
 }
 
 func TestApplyTheme_Signature(t *testing.T) {
-	var fn func(string) = (&AppState{}).applyTheme
+	var fn = (&AppState{}).applyTheme
 	_ = fn
 }

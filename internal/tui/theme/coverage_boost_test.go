@@ -349,22 +349,22 @@ func TestM31A_AllRequiredFields(t *testing.T) {
 	t.Parallel()
 	th := M31A()
 	fields := map[string]string{
-		"Background":     string(th.Background),
-		"Surface":        string(th.Surface),
-		"Border":         string(th.Border),
-		"Brand":          string(th.Brand),
-		"TextPrimary":    string(th.TextPrimary),
-		"TextSecondary":  string(th.TextSecondary),
-		"Success":        string(th.Success),
-		"Error":          string(th.Error),
-		"Warning":        string(th.Warning),
-		"Thinking":       string(th.Thinking),
-		"CodeBG":         string(th.CodeBG),
-		"DividerChar":    th.DividerChar,
-		"BlockFull":      th.BlockFull,
-		"BlockHigh":      th.BlockHigh,
-		"BlockMed":       th.BlockMed,
-		"BlockLow":       th.BlockLow,
+		"Background":    string(th.Background),
+		"Surface":       string(th.Surface),
+		"Border":        string(th.Border),
+		"Brand":         string(th.Brand),
+		"TextPrimary":   string(th.TextPrimary),
+		"TextSecondary": string(th.TextSecondary),
+		"Success":       string(th.Success),
+		"Error":         string(th.Error),
+		"Warning":       string(th.Warning),
+		"Thinking":      string(th.Thinking),
+		"CodeBG":        string(th.CodeBG),
+		"DividerChar":   th.DividerChar,
+		"BlockFull":     th.BlockFull,
+		"BlockHigh":     th.BlockHigh,
+		"BlockMed":      th.BlockMed,
+		"BlockLow":      th.BlockLow,
 	}
 	for name, val := range fields {
 		if val == "" {

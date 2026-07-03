@@ -64,28 +64,7 @@ func LoadPrompts() (*PromptRegistry, error) {
 	return r, nil
 }
 
-// promptNameToField maps string names to PromptRegistry field accessors.
-// Used by PromptBuilder.GetPrompt to resolve prompt names at runtime.
-var promptNameToField = map[string]string{
-	"base":              "Base",
-	"tool-use":          "ToolUse",
-	"plan-format":       "PlanFormat",
-	"execute-task":      "ExecuteTask",
-	"discuss":           "Discuss",
-	"self-heal":         "SelfHeal",
-	"demonstration":     "Demonstration",
-	"autonomous":        "Autonomous",
-	"context-awareness": "ContextAwareness",
-	"code-quality":      "CodeQuality",
-	"code-intelligence": "CodeIntelligence",
-	"research":          "Research",
-	"plan-check":        "PlanCheck",
-	"plan-revise":       "PlanRevise",
-	"plan-outline":      "PlanOutline",
-	"discuss-followup":  "DiscussFollowup",
-	"intent-classify":   "IntentClassify",
-	"website-build":     "WebsiteBuild",
-}
+
 
 // PromptBuilder wraps a PromptRegistry and provides named prompt access.
 type PromptBuilder struct {

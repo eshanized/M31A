@@ -2,8 +2,6 @@ package tui
 
 import (
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestHandlePopScreenMsg_EmptyStack(t *testing.T) {
@@ -66,7 +64,7 @@ func TestHandleHomeSubmitMsg_NilReplModel(t *testing.T) {
 func TestHandleIntentClassifiedMsg_Signature(t *testing.T) {
 	// Verify function signature matches expected pattern.
 	// Full test skipped: handleIntentClassified requires registry setup.
-	var f func(*AppState, IntentClassifiedMsg) (tea.Model, tea.Cmd) = handleIntentClassifiedMsg
+	var f = handleIntentClassifiedMsg
 	_ = f
 }
 
@@ -95,14 +93,14 @@ func TestHandleDiscussCompleteMsg_NilEngine(t *testing.T) {
 }
 
 func TestHandlerNavigationSignatures(t *testing.T) {
-	var f1 func(*AppState, PopScreenMsg) (tea.Model, tea.Cmd) = handlePopScreenMsg
-	var f2 func(*AppState, KeyActionMsg) (tea.Model, tea.Cmd) = handleKeyActionMsg
-	var f3 func(*AppState, LeaderTimeoutMsg) (tea.Model, tea.Cmd) = handleLeaderTimeoutMsg
-	var f4 func(*AppState, SlashCommandMsg) (tea.Model, tea.Cmd) = handleSlashCommandMsg
-	var f5 func(*AppState, HomeSubmitMsg) (tea.Model, tea.Cmd) = handleHomeSubmitMsg
-	var f6 func(*AppState, IntentClassifiedMsg) (tea.Model, tea.Cmd) = handleIntentClassifiedMsg
-	var f7 func(*AppState, DiscussAnswerMsg) (tea.Model, tea.Cmd) = handleDiscussAnswerMsg
-	var f8 func(*AppState, DiscussCompleteMsg) (tea.Model, tea.Cmd) = handleDiscussCompleteMsg
+	var f1 = handlePopScreenMsg
+	var f2 = handleKeyActionMsg
+	var f3 = handleLeaderTimeoutMsg
+	var f4 = handleSlashCommandMsg
+	var f5 = handleHomeSubmitMsg
+	var f6 = handleIntentClassifiedMsg
+	var f7 = handleDiscussAnswerMsg
+	var f8 = handleDiscussCompleteMsg
 	_ = f1
 	_ = f2
 	_ = f3

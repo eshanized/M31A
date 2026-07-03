@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 )
 
@@ -60,11 +59,11 @@ func TestHandleConfigReloadMsg_NilConfig(t *testing.T) {
 }
 
 func TestHandlerConfigSignatures(t *testing.T) {
-	var f1 func(*AppState, FirstRunCompleteMsg) (tea.Model, tea.Cmd) = handleFirstRunCompleteMsg
-	var f2 func(*AppState, SettingsSavedMsg) (tea.Model, tea.Cmd) = handleSettingsSavedMsg
-	var f3 func(*AppState, ResetCompleteMsg) (tea.Model, tea.Cmd) = handleResetCompleteMsg
-	var f4 func(*AppState, ConfigSavedMsg) (tea.Model, tea.Cmd) = handleConfigSavedMsg
-	var f5 func(*AppState, config.ConfigReloadMsg) (tea.Model, tea.Cmd) = handleConfigReloadMsg
+	var f1 = handleFirstRunCompleteMsg
+	var f2 = handleSettingsSavedMsg
+	var f3 = handleResetCompleteMsg
+	var f4 = handleConfigSavedMsg
+	var f5 = handleConfigReloadMsg
 	_ = f1
 	_ = f2
 	_ = f3

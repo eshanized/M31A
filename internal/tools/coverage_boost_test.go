@@ -932,11 +932,11 @@ func TestHTTPCheck_Execute_WithBody(t *testing.T) {
 	// Use invalid URL to hit error path with body param
 	res, err := tool.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
-			"url":         "http://invalid-host-that-does-not-exist.example.com",
-			"method":      "POST",
-			"body":        `{"data":"test"}`,
-			"json_path":   "$.status",
-			"json_value":  "ok",
+			"url":        "http://invalid-host-that-does-not-exist.example.com",
+			"method":     "POST",
+			"body":       `{"data":"test"}`,
+			"json_path":  "$.status",
+			"json_value": "ok",
 		},
 	})
 	if err != nil {
@@ -1017,9 +1017,9 @@ func TestHTTPCheck_Execute_JSONPathInvalidJSON(t *testing.T) {
 	_ = srv
 	res, err := tool.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
-			"url":            "http://invalid-host.example.com",
-			"json_path":      "$.missing[",
-			"json_value":     "x",
+			"url":        "http://invalid-host.example.com",
+			"json_path":  "$.missing[",
+			"json_value": "x",
 		},
 	})
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -466,36 +465,36 @@ func TestRouteToScreen_UnknownScreen(t *testing.T) {
 // ─── Signature verification ───────────────────────────────────────────────
 
 func TestRouteToScreen_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).routeToScreen
+	var fn = (&AppState{}).routeToScreen
 	_ = fn
 }
 
 func TestNavigateToScreen_Signature(t *testing.T) {
-	var fn func(Screen) tea.Cmd = (&AppState{}).navigateToScreen
+	var fn = (&AppState{}).navigateToScreen
 	_ = fn
 }
 
 func TestPopScreen_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).popScreen
+	var fn = (&AppState{}).popScreen
 	_ = fn
 }
 
 func TestContentDimensions_Signature(t *testing.T) {
-	var fn func() (int, int) = (&AppState{}).contentDimensions
+	var fn = (&AppState{}).contentDimensions
 	_ = fn
 }
 
 func TestEnsureSubModel_Signature(t *testing.T) {
-	var fn func(Screen) tea.Cmd = (&AppState{}).ensureSubModel
+	var fn = (&AppState{}).ensureSubModel
 	_ = fn
 }
 
 func TestOpenResumeScreen_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).openResumeScreen
+	var fn = (&AppState{}).openResumeScreen
 	_ = fn
 }
 
 func TestOpenSettingsScreen_Signature(t *testing.T) {
-	var fn func() tea.Cmd = (&AppState{}).openSettingsScreen
+	var fn = (&AppState{}).openSettingsScreen
 	_ = fn
 }

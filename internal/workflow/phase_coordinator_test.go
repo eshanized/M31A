@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BudgetCheck(t *testing.T) {
 	// Test with budget under limit
 	cfg := &testConfig{budgetLimit: 1.0}
 	messages := []m31types.Message{{Role: "user", Content: "test"}}
-	result, err := pc.PrePhaseSetup(nil, m31types.PhaseInitialize, cfg, messages, nil)
+	result, err := pc.PrePhaseSetup(context.TODO(), m31types.PhaseInitialize, cfg, messages, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BudgetCheck(t *testing.T) {
 
 	// Test with budget exceeded
 	costTracker.RecordCost(0.6) // Now total is 1.1, exceeding limit
-	_, err = pc.PrePhaseSetup(nil, m31types.PhaseInitialize, cfg, messages, nil)
+	_, err = pc.PrePhaseSetup(context.TODO(), m31types.PhaseInitialize, cfg, messages, nil)
 	if err == nil {
 		t.Error("expected error for budget exceeded")
 	}
@@ -99,7 +100,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BatchApprovalRevocation(t *testing.T) {
 	pc.dispatcher = &mockDispatcher{}
 
 	messages := []m31types.Message{{Role: "user", Content: "test"}}
-	_, err := pc.PrePhaseSetup(nil, m31types.PhaseInitialize, nil, messages, nil)
+	_, err := pc.PrePhaseSetup(context.TODO(), m31types.PhaseInitialize, nil, messages, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestPhaseCoordinator_PostPhaseExecution(t *testing.T) {
 func TestPhaseCoordinator_CoordinateTransition(t *testing.T) {
 	pc, emitter := setupTestPhaseCoordinator(t)
 
-	err := pc.CoordinateTransition(nil, m31types.PhaseIdle, m31types.PhaseInitialize)
+	err := pc.CoordinateTransition(context.TODO(), m31types.PhaseIdle, m31types.PhaseInitialize)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
