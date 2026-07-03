@@ -45,10 +45,10 @@ type WorkflowState struct {
 	transitionMu sync.Mutex
 
 	// Plan state
-	planMarkdown      string // current plan content for refinement context
-	planVersion       int    // current plan version (increments on refine)
-	refineFeedback    string // pending refinement feedback from user
-	researchOutput    string // pre-plan research results for injection into plan context
+	planMarkdown   string // current plan content for refinement context
+	planVersion    int    // current plan version (increments on refine)
+	refineFeedback string // pending refinement feedback from user
+	researchOutput string // pre-plan research results for injection into plan context
 	// Cached base prompt (built once, used by ContextBuilder)
 	cachedBasePrompt     string
 	cachedBasePromptOnce sync.Once

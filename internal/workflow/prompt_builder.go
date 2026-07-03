@@ -64,8 +64,6 @@ func LoadPrompts() (*PromptRegistry, error) {
 	return r, nil
 }
 
-
-
 // PromptBuilder wraps a PromptRegistry and provides named prompt access.
 type PromptBuilder struct {
 	registry *PromptRegistry
