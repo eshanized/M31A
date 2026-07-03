@@ -13,8 +13,6 @@ import (
 
 const (
 	defaultIntentClassifyTimeout = 25 * time.Second
-	maxClassifyRetries           = 2
-	classifyRetryBaseDelay       = 2 * time.Second
 )
 
 // ClassifyIntent uses an LLM to classify the user's input intent.
@@ -47,42 +45,34 @@ func ClassifyIntent(ctx context.Context, p provider.LLMProvider, modelID string,
 		ReasoningEnabled: false,
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= maxClassifyRetries; attempt++ {
-		if attempt > 0 {
-			delay := classifyRetryBaseDelay * time.Duration(1<<(attempt-1))
-			select {
-			case <-ctx.Done():
-				return nil, fmt.Errorf("classify aborted during retry backoff: %w", ctx.Err())
-			case <-time.After(delay):
-			}
-		}
+	retryCfg := RetryConfig{
+		MaxAttempts:       3,
+		BaseDelay:         2 * time.Second,
+		MaxDelay:          10 * time.Second,
+		BackoffMultiplier: 2.0,
+	}
 
+	return RetryWithResult(ctx, retryCfg, func() (*m31types.IntentResult, error) {
 		classifyCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
 		iterator, err := p.ChatCompletionStream(classifyCtx, req)
 		if err != nil {
-			cancel()
-			lastErr = fmt.Errorf("classify LLM call failed: %w", err)
-			continue
+			return nil, fmt.Errorf("classify LLM call failed: %w", err)
 		}
 
 		content, streamErr := consumeClassifyStream(iterator)
-		cancel()
 		if streamErr != nil {
-			lastErr = fmt.Errorf("classify stream read failed: %w", streamErr)
-			continue
+			return nil, fmt.Errorf("classify stream read failed: %w", streamErr)
 		}
 
 		result, parseErr := parseIntentJSON(content)
 		if parseErr != nil {
-			lastErr = fmt.Errorf("classify JSON parse failed: %w", parseErr)
-			continue
+			return nil, fmt.Errorf("classify JSON parse failed: %w", parseErr)
 		}
 
 		return result, nil
-	}
-
-	return nil, lastErr
+	})
 }
 
 // consumeClassifyStream reads all chunks from the classification iterator.

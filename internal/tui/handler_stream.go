@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"fmt"
 	stderrors "errors"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
