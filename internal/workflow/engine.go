@@ -141,6 +141,8 @@ type Engine struct {
 	collector *metrics.Collector
 	// toolCallsSinceLastCompact counts tool calls since last proactive compaction check.
 	toolCallsSinceLastCompact int
+	// phaseCoordinator delegates pre-phase setup, post-phase metrics, and transition side effects.
+	phaseCoordinator *PhaseCoordinator
 	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
 	state *WorkflowState
 }
@@ -457,6 +459,19 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		},
 	}
 
+	// Wire PhaseCoordinator for delegated phase lifecycle management.
+	e.phaseCoordinator = NewPhaseCoordinator(
+		e.stateMachine,
+		e.cache,
+		opts.SessionMgr,
+		opts.SessionID,
+		e.costTracker,
+		opts.Collector,
+		opts.Dispatcher,
+		e.logger,
+		e.emit,
+	)
+
 	// Create contextBuilder with a callback to Engine's modelForPhase.
 	// The callback captures the engine pointer, which is safe because
 	// contextBuilder is only used after the engine is fully initialized.
@@ -498,6 +513,19 @@ func compactionConfig(cfg *config.Config) compaction.Config {
 		Buffer:     c.Buffer,
 		KeepTokens: c.KeepTokens,
 	}
+}
+
+// budgetConfigAdapter adapts *config.Config to the budget limit interface
+// expected by PhaseCoordinator.PrePhaseSetup.
+type budgetConfigAdapter struct {
+	cfg *config.Config
+}
+
+func (a *budgetConfigAdapter) GetBudgetLimit() float64 {
+	if a.cfg == nil {
+		return 0
+	}
+	return a.cfg.Features.BudgetLimitUSD
 }
 
 // compactedMessages builds a new message list with the compaction summary
@@ -566,7 +594,9 @@ func (e *Engine) SetCollector(c *metrics.Collector) {
 
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
-	// Budget guardrail: check cumulative cost before each phase
+	// Budget guardrail: check cumulative cost before each phase.
+	// Kept inline because e.costTracker may be reassigned after construction
+	// (e.g., in tests), while PhaseCoordinator holds the original reference.
 	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
 		cost := e.costTracker.TotalCost()
 		if cost >= e.cfg.Features.BudgetLimitUSD {
@@ -579,29 +609,30 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	start := time.Now()
-	e.stateMachine.SetPhase(phase)
 
-	// Revoke batch approvals on phase transition to prevent stale approvals
-	// from carrying across phases
-	if e.dispatcher != nil {
-		e.dispatcher.RevokeBatchApprovals()
+	// Delegate pre-phase setup to PhaseCoordinator
+	var err error
+	e.state.Messages, err = e.phaseCoordinator.PrePhaseSetup(
+		ctx,
+		phase,
+		&budgetConfigAdapter{cfg: e.cfg},
+		e.state.Messages,
+		e.proactiveCompactCheck,
+	)
+	if err != nil {
+		return &PhaseResult{
+			Phase:   phase,
+			Success: false,
+			Error:   err.Error(),
+		}, err
 	}
 
 	// Reset tool call counter for proactive compaction tracking
 	e.toolCallsSinceLastCompact = 0
 
-	// Proactive compaction: check if context is already heavy before entering a new phase
-	if e.state != nil && len(e.state.Messages) > 0 {
-		e.state.Messages = e.proactiveCompactCheck(e.state.Messages)
-	}
-
-	// Record phase transition
-	if e.collector != nil {
-		e.collector.RecordPhaseTransition(phase)
-	}
+	e.stateMachine.SetPhase(phase)
 
 	var result *PhaseResult
-	var err error
 
 	switch phase {
 	case m31types.PhaseInitialize:
@@ -623,21 +654,11 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	if result != nil {
-		result.DurationMs = time.Since(start).Milliseconds()
-		result.Phase = phase
 		result.WorkflowMode = e.workflowMode
-		// Accumulate cost for budget tracking
-		if result.Cost > 0 {
-			e.costTracker.RecordCost(result.Cost)
-		}
-		// Record metrics
-		if e.collector != nil {
-			e.collector.RecordPhaseDuration(phase, result.DurationMs, result.Success)
-			if result.Usage != nil {
-				e.collector.RecordLLMInteraction(phase, result.Usage, result.Cost)
-			}
-		}
 	}
+
+	// Delegate post-phase metrics to PhaseCoordinator
+	e.phaseCoordinator.PostPhaseExecution(phase, result, start)
 
 	return result, err
 }
@@ -659,47 +680,8 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 		return err
 	}
 
-	// Emit phase transition start message
-	e.emit(PhaseTransitionStartMsg{
-		From:    string(from),
-		To:      string(to),
-		Context: fmt.Sprintf("Moving to %s phase...", to),
-	})
-
-	// Save checkpoint
-	cp := session.Checkpoint{
-		Phase:     to,
-		Timestamp: time.Now(),
-	}
-	if err := e.sessionMgr.SaveCheckpoint(e.sessionID, cp); err != nil {
-		e.emit(PhaseTransitionCompleteMsg{
-			From:    string(from),
-			To:      string(to),
-			Success: false,
-			Error:   err.Error(),
-		})
-		return fmt.Errorf("save checkpoint: %w", err)
-	}
-
-	// Write STATE.md
-	if err := e.sessionMgr.SaveState(e.sessionID, to, "transitioning", string(to)); err != nil {
-		e.emit(PhaseTransitionCompleteMsg{
-			From:    string(from),
-			To:      string(to),
-			Success: false,
-			Error:   err.Error(),
-		})
-		return fmt.Errorf("save state: %w", err)
-	}
-
-	// Emit phase transition complete message
-	e.emit(PhaseTransitionCompleteMsg{
-		From:    string(from),
-		To:      string(to),
-		Success: true,
-	})
-
-	return nil
+	// Delegate transition side effects to PhaseCoordinator
+	return e.phaseCoordinator.CoordinateTransition(ctx, from, to)
 }
 
 // SetGit sets the git instance on the engine.
