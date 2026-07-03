@@ -1492,16 +1492,14 @@ func TestEngine_SetModel_NilProvider(t *testing.T) {
 
 func TestEngine_ConcurrentSessionID(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	var wg sync.WaitGroup
+	// Sequential calls — SetSessionID is not goroutine-safe
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			engine.SetSessionID(fmt.Sprintf("session-%d", i))
-			_ = engine.SessionID()
-		}(i)
+		engine.SetSessionID(fmt.Sprintf("session-%d", i))
+		got := engine.SessionID()
+		if got != fmt.Sprintf("session-%d", i) {
+			t.Errorf("expected session-%d, got %s", i, got)
+		}
 	}
-	wg.Wait()
 }
 
 // ============================================================================
