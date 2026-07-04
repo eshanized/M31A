@@ -143,6 +143,10 @@ type Engine struct {
 	phaseCoordinator *PhaseCoordinator
 	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
 	state *WorkflowState
+	// done is closed when the workflow completes or is shut down.
+	done chan struct{}
+	// cancel cancels the running workflow context on shutdown.
+	cancel context.CancelFunc
 }
 
 // gitConfig returns the git config with safe defaults when cfg is nil.
@@ -363,6 +367,54 @@ func (e *Engine) Close() {
 	}
 }
 
+// Shutdown gracefully stops the workflow engine. It cancels the running
+// workflow context, waits for the current phase to complete (with timeout),
+// and cleans up resources. Returns an error if the shutdown timeout is
+// exceeded while a workflow is still running.
+func (e *Engine) Shutdown(ctx context.Context) error {
+	// Cancel current workflow if running.
+	if e.cancel != nil {
+		e.cancel()
+	}
+
+	// Wait for current phase to complete with timeout.
+	if e.running() {
+		select {
+		case <-e.done:
+			// Workflow completed within the timeout.
+		case <-ctx.Done():
+			return fmt.Errorf("shutdown timeout: workflow still running")
+		}
+	}
+
+	// Cleanup resources.
+	e.cache = nil
+
+	return nil
+}
+
+// running returns true if the engine has an active workflow that has not
+// completed or been shut down.
+func (e *Engine) running() bool {
+	select {
+	case <-e.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// Complete signals that the workflow has finished. It closes the done channel
+// to unblock any waiting Shutdown calls.
+func (e *Engine) Complete() {
+	select {
+	case <-e.done:
+		// Already closed — safe to call multiple times.
+	default:
+		close(e.done)
+	}
+}
+
 // GetCheckpointData returns the current checkpoint data, or nil if none.
 func (e *Engine) GetCheckpointData() *CheckpointData {
 	return e.state.checkpointData
@@ -452,6 +504,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		collector:    opts.Collector,
 		stateMachine: NewStateMachine(),
 		cache:        NewWorkflowCache(),
+		done:         make(chan struct{}),
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},
