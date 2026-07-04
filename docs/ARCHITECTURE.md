@@ -293,6 +293,24 @@ Bypasses the TUI entirely. Sends prompts directly to the active provider and pri
 
 ---
 
+## Concurrency Patterns
+
+### Mutex Usage
+- `sync.RWMutex` for read-heavy shared state (e.g., `WorkflowCache.projectMu`)
+- `sync.Map` for concurrent map access with dynamic keys (e.g., `DNSCache.cache`, `Dispatcher.pendingResponses`)
+- Always use `defer` for unlock after lock to prevent deadlock on panic
+
+### Type Assertions
+- Always use comma-ok pattern for type assertions on interface values
+- Return error instead of panicking on type mismatch (e.g., `Dispatcher.ApprovePermission`)
+
+### Goroutine Lifecycle
+- Every goroutine must have a cancellation mechanism
+- Use `context.Context` for cancellation propagation
+- Always close channels and signal completion (e.g., `cmdDone` in Bash tool)
+
+---
+
 ## Release Flow
 
 `/ship` phase:
