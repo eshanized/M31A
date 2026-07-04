@@ -384,3 +384,30 @@ func TestBash_InvalidTimeout(t *testing.T) {
 		t.Errorf("expected 'done' in output, got: %s", result.Output)
 	}
 }
+
+func TestBash_ObfuscationDetection(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		{"double spaces", "rm  -rf  /", true},
+		{"variable expansion", "CMD=\"rm -rf /\"; $CMD", true},
+		{"newline injection", "rm\n-rf\n/", true},
+		{"backtick substitution", "`rm -rf /`", true},
+		{"dollar substitution", "$(rm -rf /)", true},
+		{"mixed case", "Rm -Rf /", true},
+		{"tabs", "rm\t-rf\t/", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, blocked := checkDangerousCommand(tt.command)
+			if blocked != tt.blocked {
+				t.Errorf("checkDangerousCommand(%q) blocked=%v, want %v", tt.command, blocked, tt.blocked)
+			}
+		})
+	}
+}
