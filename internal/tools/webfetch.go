@@ -103,8 +103,8 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
 
 				// Re-check after connect (paranoid check)
 				if tcpConn, ok := conn.(*net.TCPConn); ok {
-					remoteAddr := tcpConn.RemoteAddr().(*net.TCPAddr)
-					if !wf.allowPrivateIPs && (isPrivateIP(remoteAddr.IP) || isReservedIP(remoteAddr.IP)) {
+					remoteAddr, addrOk := tcpConn.RemoteAddr().(*net.TCPAddr)
+					if addrOk && !wf.allowPrivateIPs && (isPrivateIP(remoteAddr.IP) || isReservedIP(remoteAddr.IP)) {
 						_ = conn.Close()
 						return nil, fmt.Errorf("connected to private/reserved IP %s is blocked: %w", remoteAddr.IP, errors.ErrPrivateIPBlocked)
 					}
