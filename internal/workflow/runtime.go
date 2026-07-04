@@ -496,7 +496,12 @@ func findFreePort() int {
 		if err != nil {
 			return 0
 		}
-		port := l.Addr().(*net.TCPAddr).Port
+		addr, ok := l.Addr().(*net.TCPAddr)
+		if !ok {
+			_ = l.Close()
+			return 0
+		}
+		port := addr.Port
 		_ = l.Close()
 
 		// Verify the port is still free before returning.
