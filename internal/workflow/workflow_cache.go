@@ -37,7 +37,8 @@ type WorkflowCache struct {
 	plan    *m31types.Plan
 	planMD5 string // MD5 of planMarkdown for invalidation
 
-	// Dynamic context change detection
+	// Dynamic context change detection (protected by dynamicMu)
+	dynamicMu      sync.RWMutex
 	contextSnapshot map[string]string
 	dynamicContext  string
 }
@@ -138,17 +139,23 @@ func (wc *WorkflowCache) GetPlan(md5 string) *m31types.Plan {
 
 // SetDynamicContext caches the dynamic context string and snapshot.
 func (wc *WorkflowCache) SetDynamicContext(snapshot map[string]string, contextStr string) {
+	wc.dynamicMu.Lock()
+	defer wc.dynamicMu.Unlock()
 	wc.contextSnapshot = snapshot
 	wc.dynamicContext = contextStr
 }
 
 // GetDynamicContext returns the cached dynamic context string.
 func (wc *WorkflowCache) GetDynamicContext() string {
+	wc.dynamicMu.RLock()
+	defer wc.dynamicMu.RUnlock()
 	return wc.dynamicContext
 }
 
 // GetContextSnapshot returns the cached context snapshot.
 func (wc *WorkflowCache) GetContextSnapshot() map[string]string {
+	wc.dynamicMu.RLock()
+	defer wc.dynamicMu.RUnlock()
 	return wc.contextSnapshot
 }
 
@@ -166,4 +173,9 @@ func (wc *WorkflowCache) InvalidateAll() {
 	wc.plan = nil
 	wc.planMD5 = ""
 	wc.projectMu.Unlock()
+
+	wc.dynamicMu.Lock()
+	wc.contextSnapshot = nil
+	wc.dynamicContext = ""
+	wc.dynamicMu.Unlock()
 }
