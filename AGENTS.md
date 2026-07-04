@@ -6,7 +6,7 @@
 make build          # optimized binary (CGO_ENABLED=0, static)
 make test           # race-enabled tests with coverage
 make lint           # golangci-lint (govet, staticcheck, errcheck, ineffassign, unused)
-make check          # fmt → tidy → vet → test in sequence
+make check          # fmt → tidy → vet → lint → test in sequence
 make test-fast      # tests without race detector
 make test-specific TEST=TestFoo   # run one test
 make cover          # generate HTML coverage report

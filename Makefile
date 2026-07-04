@@ -140,8 +140,8 @@ tidy:
 	@printf "\033[0;32m[tidy]\033[0m Running go mod tidy...\n"
 	@$(GO) mod tidy
 
-## check             — Run fmt, vet, lint, test in sequence
-check: fmt tidy vet test
+## check             — Run fmt, tidy, vet, lint, test in sequence
+check: fmt tidy vet lint test
 	@printf "\033[0;32m[check]\033[0m All checks passed!\n"
 
 ## validate-release  — Run full release validation suite

@@ -292,6 +292,7 @@ type AgentsConfig struct {
 	Plan       string `toml:"plan"`
 	Execute    string `toml:"execute"`
 	Verify     string `toml:"verify"`
+	Runtime    string `toml:"runtime"`
 	Ship       string `toml:"ship"`
 	Discuss    string `toml:"discuss"`
 

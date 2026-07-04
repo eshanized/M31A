@@ -95,20 +95,20 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	pathRaw, ok := input.Params["path"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: path")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: path", m31errors.ErrToolExecution)
 	}
 	path, ok := pathRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter path must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter path must be a string", m31errors.ErrToolExecution)
 	}
 
 	newStringRaw, ok := input.Params["new_string"]
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("missing parameter: new_string")
+		return types.ToolResult{}, fmt.Errorf("%w: missing parameter: new_string", m31errors.ErrToolExecution)
 	}
 	newString, ok := newStringRaw.(string)
 	if !ok {
-		return types.ToolResult{}, fmt.Errorf("parameter new_string must be a string")
+		return types.ToolResult{}, fmt.Errorf("%w: parameter new_string must be a string", m31errors.ErrToolExecution)
 	}
 
 	// Check for binary content

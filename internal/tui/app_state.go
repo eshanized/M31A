@@ -181,7 +181,7 @@ type AppState struct {
 	// Stream cancellation
 	streamCancelFn context.CancelFunc
 
-	// Narrative engine
+	// Narrative engine (initialized in NewApp to prevent nil dereference)
 	narrativeEngine *narrative.Engine
 	narrativeBridge *narrative.Bridge
 	narrativeState  *NarrativeState
@@ -316,6 +316,7 @@ func NewApp(
 		toastTimers:    make(map[int]*time.Timer),
 		agentMode:      true,
 		screenCap:      16,
+		narrativeState: NewNarrativeState(),
 	}
 
 	if cfg != nil {

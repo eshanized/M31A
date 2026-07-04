@@ -95,6 +95,13 @@ func (idx *Indexer) buildFromCache(ctx context.Context, cached *IndexCache) erro
 		allFiles = append(allFiles, info)
 	}
 
+	// Remove deleted files from graph and index
+	if len(inc.Deleted) > 0 {
+		for _, path := range inc.Deleted {
+			graph.RemoveNode(path)
+		}
+	}
+
 	// Parse changed/new files
 	if len(inc.Changed) > 0 {
 		changedFiles, err := idx.parseFiles(ctx, inc.Changed)

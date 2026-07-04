@@ -115,5 +115,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run race tests
-        run: go test -race -count=1 ./...
+      # Tests already passed in the test job — no redundant re-run here

@@ -194,7 +194,7 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 	case m31types.PhaseVerify:
 		override = e.cfg.Agents.Verify
 	case m31types.PhaseRuntime:
-		override = e.cfg.Agents.Verify
+		override = e.cfg.Agents.Runtime
 	case m31types.PhaseShip:
 		override = e.cfg.Agents.Ship
 	case m31types.PhaseDiscuss:

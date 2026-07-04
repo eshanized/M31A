@@ -382,7 +382,7 @@ func (e *Engine) smokeTestRoute(ctx context.Context, url string) SmokeTestResult
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body := make([]byte, 1024*1024)
+	body := make([]byte, 65536) // 64KB buffer instead of 1MB
 	n, _ := resp.Body.Read(body)
 	_ = body[:n]
 

@@ -75,6 +75,7 @@ default_log_lines = 20               # Default log lines shown
 session_list_limit = 20              # Max sessions in resume list
 thinking_opacity = 0.6               # Thinking block opacity
 frecent_history_size = 100           # Frecent history entries
+reduced_motion = false               # Reduce animations for accessibility
 ```
 
 #### Theme & Colors (Reserved)
@@ -206,6 +207,7 @@ ship_changelog = true                # Auto-generated changelog
 init_deep_analysis = true            # Deep project analysis
 init_preflight = true                # Environment preflight checks
 intent_classification = true         # LLM-based intent classification
+intent_classify_timeout_secs = 25    # Timeout for LLM classification (seconds)
 ```
 
 ### Tools
@@ -289,6 +291,7 @@ research = ""                        # Research phase agent model
 plan = ""                            # Plan phase agent model
 execute = ""                         # Execute phase agent model
 verify = ""                          # Verify phase agent model
+runtime = ""                         # Runtime phase agent model
 ship = ""                            # Ship phase agent model
 discuss = ""                         # Discuss phase agent model
 

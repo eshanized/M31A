@@ -55,13 +55,13 @@ func NewWebSearch(baseURL string) *WebSearch {
 				if len(ips) == 0 {
 					return nil, fmt.Errorf("no IP addresses resolved for %s", host)
 				}
-				if !ws.allowPrivateIPs {
-					for _, ip := range ips {
-						if isPrivateIP(ip.IP) {
-							return nil, fmt.Errorf("access to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
-						}
+			if !ws.allowPrivateIPs {
+				for _, ip := range ips {
+					if isPrivateIP(ip.IP) || isReservedIP(ip.IP) {
+						return nil, fmt.Errorf("blocked: %s is a private or reserved IP", ip.IP)
 					}
 				}
+			}
 				pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
 				dialer := &net.Dialer{Timeout: 10 * time.Second}
 				return dialer.DialContext(ctx, network, pinnedAddr)
@@ -83,8 +83,8 @@ func NewWebSearch(baseURL string) *WebSearch {
 				return fmt.Errorf("no IP addresses resolved for redirect to %s", req.URL.Host)
 			}
 			for _, ip := range ips {
-				if isPrivateIP(ip.IP) {
-					return fmt.Errorf("redirect to private IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+				if isPrivateIP(ip.IP) || isReservedIP(ip.IP) {
+					return fmt.Errorf("redirect to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
 				}
 			}
 			return nil
