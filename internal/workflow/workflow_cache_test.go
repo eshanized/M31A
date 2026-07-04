@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -250,4 +251,41 @@ func TestWorkflowCache_SetDynamicContext(t *testing.T) {
 	if wc.GetContextSnapshot()["key"] != "value" {
 		t.Error("unexpected context snapshot")
 	}
+}
+
+func TestWorkflowCache_ConcurrentDynamicContext(t *testing.T) {
+	wc := NewWorkflowCache()
+
+	var wg sync.WaitGroup
+	numGoroutines := 100
+	numIterations := 1000
+
+	// Concurrent writers
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numIterations; j++ {
+				snapshot := map[string]string{
+					"id":   fmt.Sprintf("%d", id),
+					"iter": fmt.Sprintf("%d", j),
+				}
+				wc.SetDynamicContext(snapshot, fmt.Sprintf("context-%d-%d", id, j))
+			}
+		}(i)
+	}
+
+	// Concurrent readers
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numIterations; j++ {
+				_ = wc.GetDynamicContext()
+				_ = wc.GetContextSnapshot()
+			}
+		}()
+	}
+
+	wg.Wait()
 }
