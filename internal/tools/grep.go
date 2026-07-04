@@ -479,13 +479,64 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 }
 
 // gitignoreCache caches parsed gitignore patterns with mtime-based invalidation.
-// Uses sync.Map for thread-safe per-directory caching.
-var gitignoreCacheStore sync.Map // map[string]*gitignoreCacheEntry
+// Uses a bounded LRU cache with maximum 1024 directories to prevent unbounded memory growth.
+var gitignoreCacheInstance = newGitignoreCache()
+
+const maxGitignoreCacheSize = 1024
+
+type gitignoreCache struct {
+	mu    sync.RWMutex
+	cache map[string]*gitignoreCacheEntry
+	order []string // LRU order: oldest first
+}
 
 type gitignoreCacheEntry struct {
 	mu       sync.Mutex
 	mtime    time.Time
 	patterns []string
+}
+
+func newGitignoreCache() *gitignoreCache {
+	return &gitignoreCache{
+		cache: make(map[string]*gitignoreCacheEntry),
+		order: make([]string, 0),
+	}
+}
+
+func (c *gitignoreCache) get(dir string) (*gitignoreCacheEntry, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entry, ok := c.cache[dir]
+	return entry, ok
+}
+
+func (c *gitignoreCache) getOrCreate(dir string) *gitignoreCacheEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if entry, ok := c.cache[dir]; ok {
+		// Move to end of LRU order (most recently used)
+		for i, key := range c.order {
+			if key == dir {
+				c.order = append(c.order[:i], c.order[i+1:]...)
+				break
+			}
+		}
+		c.order = append(c.order, dir)
+		return entry
+	}
+
+	// Evict oldest if at capacity
+	if len(c.cache) >= maxGitignoreCacheSize {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.cache, oldest)
+	}
+
+	entry := &gitignoreCacheEntry{}
+	c.cache[dir] = entry
+	c.order = append(c.order, dir)
+	return entry
 }
 
 // loadGitignoreCached returns cached gitignore patterns, re-reading from disk
@@ -497,9 +548,8 @@ func loadGitignoreCached(dir string) []string {
 		return nil
 	}
 
-	// Get or create per-directory cache entry
-	val, _ := gitignoreCacheStore.LoadOrStore(dir, &gitignoreCacheEntry{})
-	entry := val.(*gitignoreCacheEntry)
+	// Get or create per-directory cache entry via bounded LRU cache
+	entry := gitignoreCacheInstance.getOrCreate(dir)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 
