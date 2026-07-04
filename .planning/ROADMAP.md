@@ -38,12 +38,15 @@ Plans:
 
 **Goal:** Fix all LOW severity bugs identified in the codebase audit to improve code quality and maintainability.
 
-**Requirements:** [BUG-42, BUG-43, BUG-44, BUG-45, BUG-46, BUG-47, BUG-48, BUG-49, BUG-50, BUG-51, BUG-52, BUG-53, BUG-54, BUG-55, BUG-56, BUG-57, BUG-58, BUG-59]
+**Requirements:** [BUG-42, BUG-43, BUG-44, BUG-45, BUG-46, BUG-47, BUG-48, BUG-49, BUG-50, BUG-51, BUG-52, BUG-53, BUG-54, BUG-55, BUG-56, BUG-57]
 
-**Plans:** TBD
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD
+- [ ] 03-01-PLAN.md — Provider consistency & SSRF security fixes (GAP-P02, GAP-SEC02, GAP-CON02, GAP-CON03)
+- [ ] 03-02-PLAN.md — Documentation & config fixes (GAP-U05, GAP-DOC02, GAP-DOC03, GAP-DOC04)
+- [ ] 03-03-PLAN.md — Edit tool & code quality fixes (GAP-E03, GAP-PERF01, GAP-CQ02, GAP-CQ03)
+- [ ] 03-04-PLAN.md — Performance, build & session fixes (GAP-PERF02, GAP-PERF03, GAP-BR02, GAP-S03)
 
 ---
 
