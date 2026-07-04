@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // DemandType distinguishes explicit runs requests from advisory wake signals.
@@ -157,7 +158,12 @@ func (c *Coordinator[Key]) awaitDone(e *entry) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	if e.done != nil {
 		go func() {
-			<-e.done
+			select {
+			case <-e.done:
+			case <-ctx.Done():
+			case <-time.After(5 * time.Minute):
+				// Safety net: if Complete() is never called, prevent goroutine leak
+			}
 			cancel()
 		}()
 	} else {
