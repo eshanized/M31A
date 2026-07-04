@@ -123,7 +123,7 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 		sortEntries(entries, sortBy)
 		for i, entry := range entries {
 			if count >= maxEntries {
-				sb.WriteString(prefix + "... (truncated at " + fmt.Sprintf("%d", maxEntries) + " entries)\n")
+				fmt.Fprintf(&sb, "%s... (truncated at %d entries)\n", prefix, maxEntries)
 				return
 			}
 			name := entry.Name()
