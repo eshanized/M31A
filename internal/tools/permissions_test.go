@@ -464,3 +464,22 @@ func TestBatchApproval_ConcurrentAccess(t *testing.T) {
 
 	<-done
 }
+
+func TestPermissions_InvalidType(t *testing.T) {
+	t.Parallel()
+	d := NewDispatcher(nil)
+
+	// Store invalid type in pending responses
+	d.pendingResponses.Store(int64(42), "not-a-channel")
+
+	// ApprovePermission should return without panic when type assertion fails
+	d.ApprovePermission(42, true, false)
+
+	// Verify the invalid entry is still present (not deleted on failed assertion)
+	if _, ok := d.pendingResponses.Load(int64(42)); !ok {
+		t.Error("expected invalid entry to still be present after failed type assertion")
+	}
+
+	// Clean up
+	d.pendingResponses.Delete(int64(42))
+}
