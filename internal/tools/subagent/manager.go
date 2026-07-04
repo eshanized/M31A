@@ -30,6 +30,10 @@ const (
 	// MaxSpawnRate is the maximum number of subagents that can be spawned
 	// per minute to prevent rapid resource exhaustion.
 	MaxSpawnRate = 10
+	// shutdownTimeout is the maximum time Shutdown waits for a subagent to
+	// exit before force-cleaning it. Prevents indefinite blocking if a
+	// subagent goroutine is stuck.
+	shutdownTimeout = 5 * time.Second
 )
 
 // ErrMaxConcurrent is returned when Spawn cannot acquire a slot.
@@ -289,17 +293,31 @@ func (m *Manager) Cleanup(ctx context.Context, id string) error {
 	return nil
 }
 
-// Shutdown cancels all subagents, waits for completion, cleans up their
-// worktrees, and closes the event channel. Safe to call once at application exit.
+// Shutdown cancels all subagents, waits for completion with a bounded
+// timeout, cleans up their worktrees, and closes the event channel.
+// Safe to call once at application exit.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.CancelAll()
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+	defer cancel()
+
 	m.agents.Range(func(key, value any) bool {
 		sa, ok := value.(*Subagent)
 		if !ok {
 			m.agents.Delete(key)
 			return true
 		}
-		<-sa.done
+		select {
+		case <-sa.done:
+			// Subagent exited within the timeout window.
+		case <-shutdownCtx.Done():
+			// Timeout exceeded — force cleanup to prevent indefinite blocking.
+			m.deps.Logger.Warn("subagent: shutdown timeout exceeded, force-cleaning",
+				"id", sa.Info.ID, "timeout", shutdownTimeout)
+			m.forceCleanup(sa)
+			return true
+		}
 		// Clean up worktree so orphaned directories don't accumulate.
 		if sa.Info.Isolation == IsolationWorktree &&
 			sa.Info.Worktree != "" && sa.Info.Worktree != m.deps.WorkDir &&
@@ -312,6 +330,14 @@ func (m *Manager) Shutdown(ctx context.Context) {
 		return true
 	})
 	close(m.eventCh)
+}
+
+// forceCleanup forcibly removes a subagent from the manager when it fails to
+// exit within the shutdown timeout. The subagent's done channel is left open
+// (the goroutine may still be running) but the manager forgets it so the
+// application can exit.
+func (m *Manager) forceCleanup(sa *Subagent) {
+	m.agents.Delete(sa.Info.ID)
 }
 
 // emit delivers an event to the outbound channel. Lifecycle events that
