@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -146,14 +147,10 @@ func (dc *DNSCache) evictOldest(targetSize int32) {
 		}
 	}
 
-	// Sort by expiry time (oldest first)
-	for i := 0; i < len(entries)-1; i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[i].expires.After(entries[j].expires) {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
+	// Sort by expiry time (oldest first) using efficient O(n log n) sort
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].expires.Before(entries[j].expires)
+	})
 
 	// Evict oldest entries until we're at target size
 	toEvict := int32(len(entries)) - targetSize
