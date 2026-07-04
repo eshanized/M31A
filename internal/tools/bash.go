@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -472,10 +473,51 @@ var dangerousObfuscationPatterns = []struct {
 	{"`", "backtick command substitution (potential injection)"},
 }
 
+// ansiEscapePattern matches ANSI escape sequences (color codes, cursor movement, etc.)
+// that could be used to obfuscate command content from pattern matching.
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// normalizeCommand normalizes a shell command for security pattern matching.
+// It removes ANSI escape codes, collapses whitespace, trims, and lowercases
+// to ensure obfuscation techniques cannot bypass dangerous command detection.
+func normalizeCommand(cmd string) string {
+	// Remove ANSI escape codes
+	cmd = ansiEscapePattern.ReplaceAllString(cmd, "")
+	// Collapse multiple spaces/tabs/newlines into a single space
+	cmd = regexp.MustCompile(`\s+`).ReplaceAllString(cmd, " ")
+	// Remove leading/trailing whitespace
+	cmd = strings.TrimSpace(cmd)
+	// Convert to lowercase for case-insensitive matching
+	cmd = strings.ToLower(cmd)
+	return cmd
+}
+
+// containsVariableExpansion detects shell variable expansion patterns that could
+// be used for command injection: $VARIABLE, ${VARIABLE}, and $((expression)).
+func containsVariableExpansion(cmd string) bool {
+	patterns := []string{
+		"$[A-Za-z_]",
+		"${",
+		"$((",
+	}
+	for _, p := range patterns {
+		if strings.Contains(cmd, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkDangerousCommand checks if a command matches any dangerous patterns.
 // Returns the reason and true if blocked, or empty string and false if allowed.
 func checkDangerousCommand(command string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(command))
+	normalized := normalizeCommand(command)
+
+	// Block if variable expansion detected (prevents injection via env vars)
+	if containsVariableExpansion(normalized) {
+		return "command contains variable expansion (potential injection)", true
+	}
+
 	for _, dp := range dangerousCommandPatterns {
 		if strings.Contains(normalized, dp.pattern) {
 			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
