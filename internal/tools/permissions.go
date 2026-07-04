@@ -26,8 +26,14 @@ type BatchApproval struct {
 func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember bool) {
 	resp := PermissionResponse{RequestID: requestID, Allowed: allowed, Remember: remember}
 	if ch, ok := d.pendingResponses.Load(requestID); ok {
+		respCh, ok := ch.(chan PermissionResponse)
+		if !ok {
+			slog.Warn("permission response dropped: invalid channel type",
+				"request_id", requestID, "allowed", allowed)
+			return
+		}
 		select {
-		case ch.(chan PermissionResponse) <- resp:
+		case respCh <- resp:
 		default:
 			slog.Warn("permission response dropped: per-request channel full",
 				"request_id", requestID, "allowed", allowed)
