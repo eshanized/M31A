@@ -149,7 +149,7 @@ func NewSidebarModel(g *git.Git, t theme.Theme) *SidebarModel {
 	return &SidebarModel{
 		git:     g,
 		theme:   t,
-		visible: false, // hidden by default per M1 spec
+		visible: true, // visible by default on terminals >= 80 columns (D-32)
 		width:   sidebarDefaultWidth,
 		tree:    components.NewFileTree(root, t, sidebarDefaultWidth-4, 10),
 	}

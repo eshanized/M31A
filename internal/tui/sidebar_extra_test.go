@@ -32,17 +32,17 @@ func TestSidebarSettersGetters(t *testing.T) {
 
 func TestSidebarToggleExtra(t *testing.T) {
 	s := NewSidebarModel(nil, testTheme())
-	// M1: sidebar starts hidden by default
+	// D-32: sidebar starts visible by default on terminals >= 80 columns
+	if !s.visible {
+		t.Error("should start visible (D-32 default)")
+	}
+	s.Toggle()
 	if s.visible {
-		t.Error("should start hidden (M1 default)")
+		t.Error("should be hidden after toggle")
 	}
 	s.Toggle()
 	if !s.visible {
-		t.Error("should be visible after toggle")
-	}
-	s.Toggle()
-	if s.visible {
-		t.Error("should be hidden after second toggle")
+		t.Error("should be visible after second toggle")
 	}
 }
 
@@ -232,12 +232,12 @@ func TestBuildSidebarTreeEmptyExtra(t *testing.T) {
 
 func TestSidebarM1_DefaultHidden(t *testing.T) {
 	s := NewSidebarModel(nil, testTheme())
-	// M1: sidebar starts hidden by default
-	if s.visible {
-		t.Error("sidebar should start hidden (M1 default)")
+	// D-32: sidebar starts visible by default on terminals >= 80 columns
+	if !s.visible {
+		t.Error("sidebar should start visible (D-32 default)")
 	}
-	if s.IsVisible() {
-		t.Error("IsVisible should return false (M1 default)")
+	if !s.IsVisible() {
+		t.Error("IsVisible should return true (D-32 default)")
 	}
 }
 
@@ -374,33 +374,33 @@ func TestSidebarM1_ActiveModeModerateLines(t *testing.T) {
 func TestSidebarM1_ToggleVisibility(t *testing.T) {
 	s := NewSidebarModel(nil, testTheme())
 
-	// Start hidden
-	if s.IsVisible() {
-		t.Error("should start hidden")
+	// D-32: Start visible by default
+	if !s.IsVisible() {
+		t.Error("should start visible (D-32 default)")
 	}
 
-	// Toggle to visible
+	// Toggle to hidden
+	s.Toggle()
+	if s.IsVisible() {
+		t.Error("should be hidden after toggle")
+	}
+
+	// Toggle back to visible
 	s.Toggle()
 	if !s.IsVisible() {
-		t.Error("should be visible after toggle")
-	}
-
-	// Toggle back to hidden
-	s.Toggle()
-	if s.IsVisible() {
-		t.Error("should be hidden after second toggle")
+		t.Error("should be visible after second toggle")
 	}
 }
 
 func TestSidebarM1_WidthDefault(t *testing.T) {
 	s := NewSidebarModel(nil, testTheme())
-	// Default width should be 30 (sidebarDefaultWidth)
-	if s.GetWidth() != 0 {
-		t.Errorf("hidden sidebar width = %d, want 0", s.GetWidth())
-	}
-	s.visible = true
+	// D-32: Default width should be 30 (sidebarDefaultWidth), visible by default
 	if s.GetWidth() != sidebarDefaultWidth {
 		t.Errorf("visible sidebar width = %d, want %d", s.GetWidth(), sidebarDefaultWidth)
+	}
+	s.visible = false
+	if s.GetWidth() != 0 {
+		t.Errorf("hidden sidebar width = %d, want 0", s.GetWidth())
 	}
 }
 
