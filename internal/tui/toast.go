@@ -58,16 +58,16 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 		offset = (2 - toast.Frame) * 10
 	}
 
-	// Card width: front toast widest, each subsequent 2 cols narrower
-	contentWidth := 40 - (index * 2)
+	// Card width: all toasts use the same width (no shrinking for stacked toasts)
+	contentWidth := 50
 	if toastWidth > 0 {
-		contentWidth = toastWidth/3 - (index * 2)
+		contentWidth = toastWidth / 3
 	}
-	if contentWidth > 45 {
-		contentWidth = 45
+	if contentWidth > 50 {
+		contentWidth = 50
 	}
-	if contentWidth < 20 {
-		contentWidth = 20
+	if contentWidth < 25 {
+		contentWidth = 25
 	}
 
 	// Build content with icon, title, and message
@@ -84,6 +84,14 @@ func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) st
 			msgText = TruncateWithEllipsis(msgText, contentWidth-6)
 		}
 		content += "\n" + msgStyle.Render("  "+msgText)
+	}
+
+	// Add action button if present
+	if toast.Action != nil && toast.ActionLabel != "" {
+		actionStyle := lipgloss.NewStyle().
+			Foreground(t.Brand).
+			Bold(true)
+		content += "\n" + actionStyle.Render("  ["+toast.ActionLabel+"]")
 	}
 
 	// Rounded card with surface background and shadow hint

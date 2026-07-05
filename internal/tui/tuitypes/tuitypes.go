@@ -409,12 +409,14 @@ type ToastExpiryMsg struct {
 
 // Toast represents a transient notification overlay.
 type Toast struct {
-	ID        int
-	Text      string
-	Type      string // "success", "error", "warning", "info"
-	CreatedAt time.Time
-	Frame     int           // animation frame (0, 1, 2)
-	Duration  time.Duration // auto-dismiss duration (0 = default 5s)
+	ID          int
+	Text        string
+	Type        string // "success", "error", "warning", "info"
+	CreatedAt   time.Time
+	Frame       int           // animation frame (0, 1, 2)
+	Duration    time.Duration // auto-dismiss duration (0 = default 5s)
+	Action      func() tea.Msg // optional action triggered by Enter key
+	ActionLabel string         // label for action button (e.g., "Undo", "Retry")
 }
 
 // DismissToastMsg is emitted when a toast should be dismissed manually.

@@ -33,4 +33,14 @@ const (
 	PadRelaxed = 3
 	// PadLoose is maximum padding for emphasis.
 	PadLoose = 4
+
+	// ── Semantic Padding Aliases ─────────────────────────────────────────────
+	// Semantic names for consistent usage across all screens.
+
+	// PaddingCompact is alias for PadTight — dense UI elements.
+	PaddingCompact = PadTight
+	// PaddingStandard is alias for PadNormal — most components.
+	PaddingStandard = PadNormal
+	// PaddingRelaxed is alias for PadRelaxed — spacious layouts.
+	PaddingRelaxed = PadRelaxed
 )
