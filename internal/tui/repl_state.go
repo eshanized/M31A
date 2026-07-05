@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -328,8 +329,8 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 
 // minRenderInterval is the minimum time between full viewport re-renders
 // during streaming. Prevents rebuilding the entire viewport at 10fps when
-// only the streaming tail changes.
-const minRenderInterval = time.Second / 5 // 5fps during streaming
+// only the streaming tail changes. Matches the spinner tick rate.
+const minRenderInterval = time.Second / 10 // 10fps during streaming
 
 // autoScrollConditionally scrolls to the bottom only if the user hasn't manually scrolled.
 // Uses smooth ease-out scrolling: sets a target offset and lets the tick handler animate toward it.
@@ -468,7 +469,7 @@ func (m *ReplModel) renderMessagesIncremental(rw int) {
 }
 
 // renderStreamingContent renders the current streaming content (thinking or response).
-// Uses plain lipgloss styling during streaming instead of Glamour's full markdown
+// Uses a lightweight markdown parser during streaming instead of Glamour's full markdown
 // pipeline. Glamour is O(n) with accumulated text and re-parses markdown on every
 // chunk, making it the primary bottleneck for streaming throughput. Full markdown
 // rendering is deferred to stream completion when the message is finalized.
@@ -495,10 +496,17 @@ func (m *ReplModel) renderStreamingContent(rw int) string {
 		}
 		cursorChar := "█"
 		cursor := s.StreamingCursor.Render(cursorChar)
-		rendered := s.StreamingText.
-			Width(contentWidth).
-			Render(streamContent + cursor)
-		return rendered
+
+		// Use lightweight markdown parser for streaming content (D-27)
+		var rendered string
+		if m.lightweightMarkdown != nil {
+			rendered = m.lightweightMarkdown.Render(streamContent, contentWidth)
+		} else {
+			rendered = s.StreamingText.Render(streamContent)
+		}
+
+		// Append cursor after the styled content
+		return lipgloss.NewStyle().Width(contentWidth).Render(rendered + cursor)
 	}
 	s := m.styleCache.S
 	spinnerFrame := m.spinner.Peek()

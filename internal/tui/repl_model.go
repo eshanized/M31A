@@ -139,6 +139,9 @@ type ReplModel struct {
 	cachedThinkingBlock   *components.ThinkingBlock // cached ThinkingBlock during streaming
 	cachedThinkingContent string                    // content used to create cachedThinkingBlock
 
+	// Lightweight markdown parser for streaming content (D-27)
+	lightweightMarkdown *components.LightweightMarkdown
+
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
 
@@ -177,16 +180,17 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
 
 	m := ReplModel{
-		theme:          t,
-		styleCache:     theme.NewStyleCache(t),
-		version:        version,
-		textarea:       ta,
-		spinner:        components.NewSpinner(),
-		thinkingBlocks: make(map[int]*components.ThinkingBlock),
-		toolCards:      make(map[int]*components.ToolCard),
-		liveToolIndex:  make(map[string]int),
-		modelValid:     true,
-		historyIndex:   -1,
+		theme:              t,
+		styleCache:         theme.NewStyleCache(t),
+		version:            version,
+		textarea:           ta,
+		spinner:            components.NewSpinner(),
+		thinkingBlocks:     make(map[int]*components.ThinkingBlock),
+		toolCards:          make(map[int]*components.ToolCard),
+		liveToolIndex:      make(map[string]int),
+		modelValid:         true,
+		historyIndex:       -1,
+		lightweightMarkdown: components.NewLightweightMarkdown(t),
 	}
 	return m
 }
