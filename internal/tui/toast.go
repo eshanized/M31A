@@ -29,8 +29,21 @@ func SetToastOverrides(overrides map[string]config.ToastTypeConfig) {
 }
 
 // getToastConfig returns the icon and title for a toast type,
-// checking config overrides first, then falling back to defaults.
+// applying defaults first, then overlaying any config overrides.
 func getToastConfig(toastType string) (icon, title string) {
+	// Start with defaults
+	switch toastType {
+	case "success":
+		icon, title = "✓", "Success"
+	case "error":
+		icon, title = "✗", "Error"
+	case "warning":
+		icon, title = "⚠", "Warning"
+	default:
+		icon, title = "ℹ", "Info"
+	}
+
+	// Apply overrides (partial overrides work correctly)
 	if override, ok := toastOverrides[toastType]; ok {
 		if override.Icon != "" {
 			icon = override.Icon
@@ -38,22 +51,8 @@ func getToastConfig(toastType string) (icon, title string) {
 		if override.Title != "" {
 			title = override.Title
 		}
-		if icon != "" && title != "" {
-			return icon, title
-		}
 	}
-
-	// Default values
-	switch toastType {
-	case "success":
-		return "✓", "Success"
-	case "error":
-		return "✗", "Error"
-	case "warning":
-		return "⚠", "Warning"
-	default:
-		return "ℹ", "Info"
-	}
+	return icon, title
 }
 
 // renderToastStack renders up to 3 most recent toasts stacked.
