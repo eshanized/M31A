@@ -52,6 +52,10 @@ type HomeModel struct {
 	slashVisible     bool
 	slashSuggestions []CommandInfo
 	slashSelected    int
+
+	// First-visit tour state
+	firstVisit bool   // true when no prior sessions exist
+	showTour   bool   // true when tour is actively displayed
 }
 
 // NewHomeModel creates a HomeModel.
@@ -85,6 +89,27 @@ func (hm *HomeModel) SetTheme(t theme.Theme) {
 // SetCommandRegistry sets the command registry for slash command suggestions.
 func (hm *HomeModel) SetCommandRegistry(registry *CommandRegistry) {
 	hm.cmdRegistry = registry
+}
+
+// SetFirstVisit marks this home screen as a first-time visit, enabling the
+// auto-show tour on first session.
+func (hm *HomeModel) SetFirstVisit(v bool) {
+	hm.firstVisit = v
+}
+
+// ShowTour triggers the getting-started tour overlay.
+func (hm *HomeModel) ShowTour() {
+	hm.showTour = true
+}
+
+// DismissTour hides the tour overlay.
+func (hm *HomeModel) DismissTour() {
+	hm.showTour = false
+}
+
+// IsTourVisible returns whether the tour is currently displayed.
+func (hm *HomeModel) IsTourVisible() bool {
+	return hm.showTour
 }
 
 // View implements tea.Model. Delegates to renderHome in home_view.go.

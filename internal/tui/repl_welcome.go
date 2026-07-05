@@ -53,8 +53,15 @@ func (m *ReplModel) renderWelcome() string {
 	// 5. Bottom bar (cwd + version)
 	bottomBar := m.renderBottomBar()
 
+	// Workflow explanation (per D-33)
+	workflowExplanation := lipgloss.NewStyle().
+		Foreground(m.theme.TextSecondary).
+		Render("Describe a task below. M31A will:\n  1. Discuss your requirements\n  2. Create a plan\n  3. Execute it\n  4. Verify the results\n\n  Type ? for help, Esc to go back.")
+
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		logo,
+		"",
+		workflowExplanation,
 		"",
 		topRow,
 		"",

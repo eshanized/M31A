@@ -25,6 +25,11 @@ func (hm *HomeModel) renderHome() string {
 
 	glowBlock := logoBlock
 
+	// Workflow explanation (per D-33, D-34)
+	explanation := lipgloss.NewStyle().
+		Foreground(t.TextSecondary).
+		Render("Describe a task. M31A will plan and execute it.")
+
 	promptMaxW := w * 7 / 10
 	if promptMaxW > 75 {
 		promptMaxW = 75
@@ -46,6 +51,18 @@ func (hm *HomeModel) renderHome() string {
 	inputFocused := !hm.slashVisible
 	inputBox = components.RenderFocusRing(inputBox, inputFocused, t, promptMaxW)
 
+	// Suggested prompts with categories (per D-31)
+	suggestionsBlock := hm.renderSuggestions(w)
+
+	// Getting-started hint for first-time users
+	var hintBlock string
+	if hm.firstVisit {
+		hintBlock = lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Faint(true).
+			Render("First time? Type /help getting-started")
+	}
+
 	tipsBlock := hm.renderTips(w)
 
 	// Tagline below logo (replaces version display)
@@ -58,11 +75,31 @@ func (hm *HomeModel) renderHome() string {
 		"",
 		glowBlock,
 		tagline,
+		explanation,
 		"",
 		inputBox,
 		"",
+		suggestionsBlock,
+		"",
 		tipsBlock,
 	)
+
+	if hintBlock != "" {
+		content = lipgloss.JoinVertical(lipgloss.Center,
+			"",
+			glowBlock,
+			tagline,
+			explanation,
+			"",
+			inputBox,
+			"",
+			suggestionsBlock,
+			"",
+			tipsBlock,
+			"",
+			hintBlock,
+		)
+	}
 
 	// Overlay slash suggestions if visible
 	if hm.slashVisible && len(hm.slashSuggestions) > 0 {
@@ -114,6 +151,36 @@ func (hm *HomeModel) renderSlashSuggestions(width int) string {
 		Render(strings.Join(lines, "\n"))
 
 	return box
+}
+
+// renderSuggestions renders categorized suggested prompts.
+func (hm *HomeModel) renderSuggestions(w int) string {
+	t := hm.theme
+
+	type suggestion struct {
+		category string
+		text     string
+	}
+
+	suggestions := []suggestion{
+		{"Code", "Fix failing tests"},
+		{"Code", "Add error handling"},
+		{"Explore", "Explain this codebase"},
+		{"Debug", "Find the bug in..."},
+		{"Explore", "Show the architecture"},
+	}
+
+	catStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+
+	var lines []string
+	for _, s := range suggestions {
+		cat := catStyle.Render(s.category)
+		txt := textStyle.Render(s.text)
+		lines = append(lines, "  "+cat+": "+txt)
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // renderTips renders the keyboard shortcut tips as a horizontal row.

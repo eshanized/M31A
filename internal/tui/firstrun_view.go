@@ -1106,11 +1106,31 @@ func (fr *FirstRunModel) renderModelRow(m types.ModelInfo, selected bool, maxW i
 
 func (fr *FirstRunModel) renderDone() string {
 	t := fr.theme
-	return lipgloss.JoinVertical(lipgloss.Center,
-		lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("✓ Setup complete!"),
-		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Starting M31A..."),
+
+	title := lipgloss.NewStyle().
+		Foreground(t.Success).Bold(true).
+		Render("✓ Setup complete!")
+
+	subtitle := lipgloss.NewStyle().
+		Foreground(t.TextPrimary).Bold(true).
+		Render("Here's how to use M31A:")
+
+	instructions := []string{
+		"1. Type a task description (e.g., \"fix the failing tests\")",
+		"2. M31A will discuss, plan, and execute it",
+		"3. Press Esc to go back, ? for help",
+	}
+
+	var lines []string
+	lines = append(lines, title, "", subtitle, "")
+	for _, line := range instructions {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextSecondary).Render("  "+line))
+	}
+	lines = append(lines, "",
+		lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render("Press Enter to continue to M31A"),
 	)
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // titleCase uppercases the first rune of s.
