@@ -505,7 +505,7 @@ func TestSettingsUpdateActivate(t *testing.T) {
 	s := testSettingsModel(t)
 	s.config.Provider.AutoFallback = false
 	s.fieldCursor = 1 // auto_fallback is a bool field
-	result, _ := s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	result, _ := s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = result
 	if !s.config.Provider.AutoFallback {
 		t.Error("should toggle to true")
@@ -516,7 +516,7 @@ func TestSettingsUpdateActivateSpace(t *testing.T) {
 	s := testSettingsModel(t)
 	s.config.Provider.AutoFallback = true
 	s.fieldCursor = 1
-	result, _ := s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	result, _ := s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = result
 	if s.config.Provider.AutoFallback {
 		t.Error("should toggle to false")

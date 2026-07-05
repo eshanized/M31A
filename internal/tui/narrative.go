@@ -108,29 +108,29 @@ func renderHistoricalNarrative(n narrative.NarrativeObject, t theme.Theme, width
 func narrativeIcon(n narrative.NarrativeObject) string {
 	switch n.Category {
 	case narrative.CategoryOrienting:
-		return "├"
+		return "\u25c6" // diamond
 	case narrative.CategoryUnderstanding:
-		return "├"
+		return "\u25cf" // filled circle
 	case narrative.CategoryDiscussing:
-		return "├"
+		return "\u25c7" // open diamond
 	case narrative.CategoryPlanning:
-		return "├"
+		return "\u25a1" // open square
 	case narrative.CategoryResearching:
-		return "├"
+		return "\u25c8" // diamond with dot
 	case narrative.CategoryExecuting:
-		return "├"
+		return "\u25b6" // play triangle
 	case narrative.CategoryVerifying:
-		return "├"
+		return "\u2713" // checkmark
 	case narrative.CategoryRecovering:
-		return "├"
+		return "\u21ba" // circular arrow
 	case narrative.CategoryShipping:
-		return "├"
+		return "\u2192" // right arrow
 	case narrative.CategoryLearning:
-		return "├"
+		return "\u2605" // star
 	case narrative.CategoryAlerting:
-		return "├"
+		return "\u26a0" // warning triangle
 	default:
-		return "├"
+		return "\u25cf" // filled circle
 	}
 }
 

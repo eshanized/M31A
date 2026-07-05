@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // Breadcrumb renders a navigation breadcrumb trail.
@@ -12,6 +13,37 @@ type Breadcrumb struct {
 	Parts []string
 	Theme theme.Theme
 	Width int
+}
+
+// BuildFromStack creates breadcrumb items from a screen stack and current screen.
+// The stack provides the path history; the current screen is the final breadcrumb.
+func BuildFromStack(screens []tuitypes.Screen, current tuitypes.Screen) []BreadcrumbItem {
+	var items []BreadcrumbItem
+	for _, s := range screens {
+		items = append(items, BreadcrumbItem{
+			Label: screenLabel(s),
+			Screen: s,
+		})
+	}
+	// Add the current screen if not already the last item
+	if len(items) == 0 || items[len(items)-1].Screen != current {
+		items = append(items, BreadcrumbItem{
+			Label: screenLabel(current),
+			Screen: current,
+		})
+	}
+	return items
+}
+
+// BreadcrumbItem represents a single breadcrumb with a label and screen reference.
+type BreadcrumbItem struct {
+	Label  string
+	Screen tuitypes.Screen
+}
+
+// screenLabel returns a human-readable label for a screen constant.
+func screenLabel(s tuitypes.Screen) string {
+	return s.Label()
 }
 
 // View renders the breadcrumb.

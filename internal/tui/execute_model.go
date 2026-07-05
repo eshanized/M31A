@@ -152,7 +152,7 @@ func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
 			}
 		case "esc", "q":
 			return em, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
 			}
 		}
 	case TickMsg:

@@ -219,7 +219,7 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc", "q":
-			return s, func() tea.Msg { return AppMsg{Screen: ScreenREPL} }
+			return s, func() tea.Msg { return PopScreenMsg{} }
 		case "tab":
 			if len(s.fields) > 0 && s.isCurrentFieldChoice() {
 				return s.cycleChoice(1)
@@ -284,7 +284,7 @@ func (s *SettingsModel) Update(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 			s.editing = false
 			s.editField = ""
 			s.buildFields()
-		case "e", "enter", " ":
+		case "enter":
 			return s.activateField()
 		case "s":
 			return s.saveConfig()

@@ -201,3 +201,77 @@
 - **Scope:** All exported code and architecture
 - **Requirement:** Update comments where architecture changes, keep exported documentation accurate, remove obsolete comments
 - **Acceptance:** Accurate documentation, no obsolete comments
+
+---
+
+## Phase 6: TUI Refactoring & UX Improvement
+
+### TUI-01: Navigation & Screen Consolidation
+- **Category:** UX / Information Architecture
+- **Scope:** `internal/tui/app_routing.go`, all screen models
+- **Requirement:** Reduce 33 screens to ~15 core screens by merging overlapping screens (GhostPicker/GhostOutput, ChatHistory into REPL, FileExplorer into sidebar, ToolDetail into REPL expandable cards, SessionDetail into Resume, Decisions into Dashboard). Add breadcrumb navigation wired to screenStack. Standardize Esc key to always mean "go back / close overlay".
+- **Acceptance:** Screen count reduced to ~15, breadcrumb shows navigation path, Esc behavior consistent across all screens
+- **Audit Issues:** #1, #4, #5
+
+### TUI-02: Accessibility Improvements
+- **Category:** Accessibility
+- **Scope:** `internal/tui/a11y/`, all screen models
+- **Requirement:** Add ANSI SGR-based fallbacks for non-iTerm2 terminals. Add visible focus indicators. Add text-based status indicators alongside color for health status, error/success states. Add screen reader announcements for all major state changes. Support tmux, kitty, alacritty, Windows Terminal.
+- **Acceptance:** Screen reader works on non-iTerm2 terminals, focus visible, color-blind accessible
+- **Audit Issues:** #3
+
+### TUI-03: Streaming & Performance Optimization
+- **Category:** Performance
+- **Scope:** `internal/tui/repl_state.go`, `internal/tui/components/message.go`
+- **Requirement:** Use lightweight markdown parser for streaming (bold/italic/links without full Glamour). Increase streaming render rate to 10fps. Add incremental markdown parser. Add viewport virtualization. Debounce resize events. Pre-compile regexes in hot paths.
+- **Acceptance:** Streaming renders formatted markdown, no 5fps stutter, no resize flicker
+- **Audit Issues:** #8, #13, #14, Performance Debt
+
+### TUI-04: First-Time Experience & Onboarding
+- **Category:** UX / Discoverability
+- **Scope:** `internal/tui/home_model.go`, `internal/tui/firstrun_model.go`
+- **Requirement:** Add "Getting Started" tour (3-5 screens explaining workflow). Make Home screen explain what M31A does. Add `/help getting-started` command. Show sidebar by default when terminal width >= 80 columns. Make first message explain workflow model.
+- **Acceptance:** New users understand workflow within 5 minutes, sidebar visible by default
+- **Audit Issues:** #6, #10, Discoverability Problems
+
+### TUI-05: Interaction Quality & Consistency
+- **Category:** UX / Interaction
+- **Scope:** Various screen models, keybindings
+- **Requirement:** Standardize keyboard shortcuts (j/k scroll, Esc back, Enter confirm). Add keybinding guide component. Add confirmation for /clear. Add undo for destructive actions. Fix permission modal UX (remove auto-deny timer, explain "Allow Always" scope, show full command). Add progress indicators for long operations.
+- **Acceptance:** Consistent keybindings, permission modal non-anxious, destructive actions confirmable
+- **Audit Issues:** #5, #7, #11, #19, #29
+
+### TUI-06: Toast & Notification System
+- **Category:** UX / Feedback
+- **Scope:** `internal/tui/toast.go`
+- **Requirement:** Add toast action buttons (e.g., "Undo" for errors). Don't shrink width for stacked toasts. Show full text on hover/focus. Add entrance/exit animation.
+- **Acceptance:** Toasts readable, actionable, animated
+- **Audit Issues:** #9, #30
+
+### TUI-07: Visual Consistency & Polish
+- **Category:** UX / Visual
+- **Scope:** Various components
+- **Requirement:** Standardize padding, border styles, text colors, badge styles, error formatting. Fix narrative icons (distinct per category). Fix diff viewer (add line numbers, side-by-side view). Show current values in settings list. Fix command palette keyboard shortcuts. Show all keybindings in help model. Make empty state actions keyboard-accessible.
+- **Acceptance:** Consistent visual language, all issues fixed
+- **Audit Issues:** #15, #16, #17, #18, #20, #23, #24, #25, #26, #27, #28
+
+### TUI-08: Code Quality & Maintenance
+- **Category:** Code Quality
+- **Scope:** `internal/tui/config_model.go`, various files
+- **Requirement:** Split config_model.go (1134 lines) into per-section files. Remove deprecated theme modes from UI. Pre-compile regexes. Remove dead code (unused breadcrumb, unused card variants, unused theme fields). Fix CJK character width handling.
+- **Acceptance:** Config model split, dead code removed, CJK handled
+- **Audit Issues:** #12, #16, #33, #34, #35, #36, #39
+
+### TUI-09: Workflow UX Improvement
+- **Category:** UX / Workflow
+- **Scope:** `internal/tui/app_state.go`, `internal/tui/handler_workflow.go`
+- **Requirement:** Add "quick mode" that auto-skips Discuss and Plan for simple tasks. Allow phase skipping via `/skip`. Make workflow model opt-in for plain text input. Add progress indicator showing current phase in status bar.
+- **Acceptance:** Simple tasks complete faster, workflow less frictional
+- **Audit Issues:** #2, #19
+
+### TUI-10: Documentation & Keybinding Sync
+- **Category:** Documentation
+- **Scope:** All TUI documentation
+- **Requirement:** Update keybindings documentation to match actual bindings. Update help screens to match actual bindings. Update onboarding to match actual behavior. Keep all docs synchronized with code changes.
+- **Acceptance:** Docs match code, no drift
+- **Audit Issues:** #28, Documentation section

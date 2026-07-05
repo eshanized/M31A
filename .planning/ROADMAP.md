@@ -69,3 +69,33 @@ Plans:
 - [x] 04-08-PLAN.md — Gap: Extract app_update.go helper methods to reduce file size (TECH-02)
 - [x] 04-09-PLAN.md — Gap: Increase workflow and tools test coverage to 75% (TECH-14)
 - [x] 04-10-PLAN.md — Gap: Increase TUI sub-package test coverage (TECH-14)
+
+---
+
+## Phase 5: Gap Remediation & Production Hardening
+
+**Goal:** Systematically eliminate all identified implementation gaps, architectural inconsistencies, bugs, race conditions, security issues, testing gaps, performance problems, and incomplete functionality to prepare M31A for a stable v1.0 release.
+
+**Requirements:** [GAP-01, GAP-02, GAP-03, GAP-04, GAP-05, GAP-06, GAP-07, GAP-08, GAP-09, GAP-10]
+
+**Plans:** 5/5 plans complete
+
+Plans:
+- [x] 05-01-PLAN.md — Concurrency & correctness fixes: data races, nil dereferences, unsafe type assertions, shutdown races
+- [x] 05-02-PLAN.md — Reliability & recovery: graceful shutdown, crash recovery, workflow recovery, provider recovery
+- [x] 05-03-PLAN.md — Security hardening: command injection, SSRF, shell parsing, permission paths, environment leakage
+- [x] 05-04-PLAN.md — Performance optimization: quadratic algorithms, unnecessary allocations, blocking hot paths, cache inefficiencies
+- [x] 05-05-PLAN.md — Testing & documentation: unit tests, race tests, regression tests, edge-case tests, doc updates
+
+---
+
+## Phase 6: TUI Refactoring & UX Improvement
+
+**Goal:** Transform the existing TUI into a best-in-class terminal application by resolving all valid issues from the TUI Audit Report while preserving the Bubble Tea architecture, Elm architecture, workflow engine, provider layer, and all existing functionality. The result should feel comparable in polish to Lazygit, k9s, Claude Code, and Warp while remaining faithful to M31A's own identity.
+
+**Requirements:** [TUI-01, TUI-02, TUI-03, TUI-04, TUI-05, TUI-06, TUI-07, TUI-08, TUI-09, TUI-10]
+
+**Plans:** [to be planned]
+
+Plans:
+- [ ] [to be planned]

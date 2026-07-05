@@ -151,7 +151,7 @@ func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
 			}
 		case "esc", "q":
 			return vm, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return PopScreenMsg{}
 			}
 		}
 	case HealResultMsg:

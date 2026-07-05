@@ -296,11 +296,26 @@ func (m *AppState) buildHeaderInfo() layout.HeaderInfo {
 		Brand: "M31A",
 	}
 
-	// Breadcrumb: screen label, or phase breadcrumb, or git branch
-	if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
-		info.Breadcrumb = string(m.workflowPhase)
+	// Build breadcrumb from screenStack for navigation path display.
+	t := m.themeManager.Current()
+	bc := components.Breadcrumb{Theme: t, Width: m.width}
+	breadcrumbItems := components.BuildFromStack(m.screenStack, m.screen)
+	var breadcrumbParts []string
+	for _, item := range breadcrumbItems {
+		breadcrumbParts = append(breadcrumbParts, item.Label)
+	}
+	bc.Parts = breadcrumbParts
+	breadcrumbStr := bc.View()
+
+	// Fallback to workflow phase or screen label if breadcrumb is empty
+	if breadcrumbStr == "" {
+		if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
+			info.Breadcrumb = string(m.workflowPhase)
+		} else {
+			info.Breadcrumb = m.screen.Label()
+		}
 	} else {
-		info.Breadcrumb = m.screen.Label()
+		info.Breadcrumb = breadcrumbStr
 	}
 
 	if m.activeModel != nil {
