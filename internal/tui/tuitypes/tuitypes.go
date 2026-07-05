@@ -413,8 +413,8 @@ type Toast struct {
 	Text        string
 	Type        string // "success", "error", "warning", "info"
 	CreatedAt   time.Time
-	Frame       int           // animation frame (0, 1, 2)
-	Duration    time.Duration // auto-dismiss duration (0 = default 5s)
+	Frame       int            // animation frame (0, 1, 2)
+	Duration    time.Duration  // auto-dismiss duration (0 = default 5s)
 	Action      func() tea.Msg // optional action triggered by Enter key
 	ActionLabel string         // label for action button (e.g., "Undo", "Retry")
 }

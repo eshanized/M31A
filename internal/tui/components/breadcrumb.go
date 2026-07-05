@@ -21,14 +21,14 @@ func BuildFromStack(screens []tuitypes.Screen, current tuitypes.Screen) []Breadc
 	var items []BreadcrumbItem
 	for _, s := range screens {
 		items = append(items, BreadcrumbItem{
-			Label: screenLabel(s),
+			Label:  screenLabel(s),
 			Screen: s,
 		})
 	}
 	// Add the current screen if not already the last item
 	if len(items) == 0 || items[len(items)-1].Screen != current {
 		items = append(items, BreadcrumbItem{
-			Label: screenLabel(current),
+			Label:  screenLabel(current),
 			Screen: current,
 		})
 	}

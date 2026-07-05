@@ -401,20 +401,20 @@ func handleSkipPhase(args []string, ctx CommandContext) CommandResult {
 	switch phase {
 	case "discuss":
 		return CommandResult{
-			Success:    true,
-			Message:    "Skipping Discuss phase → moving to Plan.",
+			Success:     true,
+			Message:     "Skipping Discuss phase → moving to Plan.",
 			SkipToPhase: "plan",
 		}
 	case "plan":
 		return CommandResult{
-			Success:    true,
-			Message:    "Skipping Plan phase → moving to Execute.",
+			Success:     true,
+			Message:     "Skipping Plan phase → moving to Execute.",
 			SkipToPhase: "execute",
 		}
 	case "verify":
 		return CommandResult{
-			Success:    true,
-			Message:    "Skipping Verify phase → moving to Ship.",
+			Success:     true,
+			Message:     "Skipping Verify phase → moving to Ship.",
 			SkipToPhase: "ship",
 		}
 	default:

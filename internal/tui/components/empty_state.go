@@ -24,7 +24,7 @@ type EmptyState struct {
 	Title        string
 	Subtitle     string
 	Actions      []Action
-	FocusedIndex int  // which action is focused (-1 = none)
+	FocusedIndex int // which action is focused (-1 = none)
 	Theme        theme.Theme
 	Width        int
 	Height       int

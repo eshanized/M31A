@@ -9,8 +9,8 @@ import (
 
 // TourStep represents a single step in the getting-started tour.
 type TourStep struct {
-	Title       string
-	Description string
+	Title        string
+	Description  string
 	Illustration string // optional decorative text
 }
 
@@ -28,28 +28,28 @@ type TourModel struct {
 func NewTourModel(t theme.Theme, w, h int) *TourModel {
 	steps := []TourStep{
 		{
-			Title:       "Welcome to M31A",
-			Description: "M31A is an AI-powered terminal assistant.\nIt plans and executes tasks autonomously so you can focus on building.",
+			Title:        "Welcome to M31A",
+			Description:  "M31A is an AI-powered terminal assistant.\nIt plans and executes tasks autonomously so you can focus on building.",
 			Illustration: "◆  M 3 1 A",
 		},
 		{
-			Title:       "How it works",
-			Description: "M31A follows a structured workflow:\n\n  Discuss  →  Plan  →  Execute  →  Verify  →  Ship\n\nEach step is automated. You review and approve key decisions.",
+			Title:        "How it works",
+			Description:  "M31A follows a structured workflow:\n\n  Discuss  →  Plan  →  Execute  →  Verify  →  Ship\n\nEach step is automated. You review and approve key decisions.",
 			Illustration: "",
 		},
 		{
-			Title:       "Quick start",
-			Description: "Type a task description to begin:\n\n  \"Fix the failing tests\"\n  \"Add error handling to the API\"\n  \"Explain this codebase architecture\"\n\nM31A will discuss, plan, and execute it.",
+			Title:        "Quick start",
+			Description:  "Type a task description to begin:\n\n  \"Fix the failing tests\"\n  \"Add error handling to the API\"\n  \"Explain this codebase architecture\"\n\nM31A will discuss, plan, and execute it.",
 			Illustration: "",
 		},
 		{
-			Title:       "Navigation",
-			Description: "  Esc        Go back / close overlay\n  j / k      Scroll up / down\n  Enter      Confirm / submit\n  ?          Show help\n  ctrl+p     Command palette\n  ctrl+b     Toggle sidebar",
+			Title:        "Navigation",
+			Description:  "  Esc        Go back / close overlay\n  j / k      Scroll up / down\n  Enter      Confirm / submit\n  ?          Show help\n  ctrl+p     Command palette\n  ctrl+b     Toggle sidebar",
 			Illustration: "",
 		},
 		{
-			Title:       "Ready!",
-			Description: "Type your first task to get started.\n\nYou can always restart this tour with:\n  /help getting-started",
+			Title:        "Ready!",
+			Description:  "Type your first task to get started.\n\nYou can always restart this tour with:\n  /help getting-started",
 			Illustration: "",
 		},
 	}

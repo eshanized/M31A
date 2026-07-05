@@ -26,8 +26,8 @@ type StatusBarInfo struct {
 	ThinkingDuration   int64 // milliseconds of current thinking session
 	KeyboardHints      []string
 	WorkflowPhase      string
-	WorkflowPhaseIndex int    // numeric phase index (0-based)
-	TotalPhases        int    // total number of workflow phases
+	WorkflowPhaseIndex int // numeric phase index (0-based)
+	TotalPhases        int // total number of workflow phases
 	QuestionProgress   string
 	CwdName            string // basename of working directory
 	GitBranch          string // current git branch

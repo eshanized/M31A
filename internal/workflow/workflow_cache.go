@@ -38,7 +38,7 @@ type WorkflowCache struct {
 	planMD5 string // MD5 of planMarkdown for invalidation
 
 	// Dynamic context change detection (protected by dynamicMu)
-	dynamicMu      sync.RWMutex
+	dynamicMu       sync.RWMutex
 	contextSnapshot map[string]string
 	dynamicContext  string
 }

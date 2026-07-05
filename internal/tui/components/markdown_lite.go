@@ -13,10 +13,10 @@ import (
 // inline formatting primitives. This keeps streaming at 10fps without
 // the O(n) cost of a full markdown pipeline.
 type LightweightMarkdown struct {
-	boldStyle    lipgloss.Style
-	italicStyle  lipgloss.Style
-	codeStyle    lipgloss.Style
-	linkStyle    lipgloss.Style
+	boldStyle     lipgloss.Style
+	italicStyle   lipgloss.Style
+	codeStyle     lipgloss.Style
+	linkStyle     lipgloss.Style
 	linkTextStyle lipgloss.Style
 }
 

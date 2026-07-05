@@ -54,8 +54,8 @@ type HomeModel struct {
 	slashSelected    int
 
 	// First-visit tour state
-	firstVisit bool   // true when no prior sessions exist
-	showTour   bool   // true when tour is actively displayed
+	firstVisit bool // true when no prior sessions exist
+	showTour   bool // true when tour is actively displayed
 }
 
 // NewHomeModel creates a HomeModel.

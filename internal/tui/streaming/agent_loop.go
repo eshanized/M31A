@@ -319,24 +319,24 @@ func AgentLoop(
 				// progressDone is closed after tool execution completes,
 				// stopping the ticker goroutine immediately rather than
 				// deferring until the agent loop exits.
-			progressDone := make(chan struct{})
-			go func(toolCall types.ToolCall) {
-				ticker := time.NewTicker(500 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ticker.C:
-						ch <- AgentToolProgressMsg{
-							ToolCall:  toolCall,
-							ElapsedMs: time.Since(start).Milliseconds(),
+				progressDone := make(chan struct{})
+				go func(toolCall types.ToolCall) {
+					ticker := time.NewTicker(500 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							ch <- AgentToolProgressMsg{
+								ToolCall:  toolCall,
+								ElapsedMs: time.Since(start).Milliseconds(),
+							}
+						case <-progressDone:
+							return
+						case <-ctx.Done():
+							return
 						}
-					case <-progressDone:
-						return
-					case <-ctx.Done():
-						return
 					}
-				}
-			}(tc)
+				}(tc)
 
 				result, execErr := dispatcher.Execute(ctx, tc)
 				duration := time.Since(start).Milliseconds()

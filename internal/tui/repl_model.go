@@ -153,9 +153,9 @@ type ReplModel struct {
 	virtualBuffer     int // messages to render above/below visible range
 
 	// Resize debounce: prevent flicker during rapid resize events (D-13)
-	resizeTimer    *time.Timer
-	lastWidth      int // track last rendered width to skip height-only changes
-	resizePending  bool
+	resizeTimer   *time.Timer
+	lastWidth     int // track last rendered width to skip height-only changes
+	resizePending bool
 
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
@@ -195,18 +195,18 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 	ta.Cursor.Style = lipgloss.NewStyle().Foreground(t.Brand)
 
 	m := ReplModel{
-		theme:              t,
-		styleCache:         theme.NewStyleCache(t),
-		version:            version,
-		textarea:           ta,
-		spinner:            components.NewSpinner(),
-		thinkingBlocks:     make(map[int]*components.ThinkingBlock),
-		toolCards:          make(map[int]*components.ToolCard),
-		liveToolIndex:      make(map[string]int),
-		modelValid:         true,
-		historyIndex:       -1,
+		theme:               t,
+		styleCache:          theme.NewStyleCache(t),
+		version:             version,
+		textarea:            ta,
+		spinner:             components.NewSpinner(),
+		thinkingBlocks:      make(map[int]*components.ThinkingBlock),
+		toolCards:           make(map[int]*components.ToolCard),
+		liveToolIndex:       make(map[string]int),
+		modelValid:          true,
+		historyIndex:        -1,
 		lightweightMarkdown: components.NewLightweightMarkdown(t),
-		virtualBuffer:      5, // render 5 messages above/below visible range
+		virtualBuffer:       5, // render 5 messages above/below visible range
 	}
 	return m
 }

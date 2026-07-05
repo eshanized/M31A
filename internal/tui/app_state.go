@@ -109,11 +109,11 @@ type AppState struct {
 	workflowPhase      types.WorkflowPhase
 	workflowPhaseIndex int // numeric phase index (0-6 for 7 phases)
 	workflowMode       types.WorkflowMode
-	workflowGoal   string
-	workflowCancel context.CancelFunc
-	shutdownCtx    context.Context
-	shutdownCancel context.CancelFunc
-	emitterCh      chan tea.Msg
+	workflowGoal       string
+	workflowCancel     context.CancelFunc
+	shutdownCtx        context.Context
+	shutdownCancel     context.CancelFunc
+	emitterCh          chan tea.Msg
 
 	// Optional packages
 	ledger         *ledger.Ledger
