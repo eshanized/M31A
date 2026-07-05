@@ -41,10 +41,10 @@ type TemplateConfig struct {
 // PromptConfig holds configurable prompt override settings.
 // Prompt loading follows a 4-level priority chain:
 //
-//	1. Config override (prompts.overrides[name])
-//	2. Project-level override (.m31a/prompts/<name>.md)
-//	3. Global override (~/.m31a/prompts/<name>.md)
-//	4. Embedded default (prompts/<name>.md from go:embed)
+//  1. Config override (prompts.overrides[name])
+//  2. Project-level override (.m31a/prompts/<name>.md)
+//  3. Global override (~/.m31a/prompts/<name>.md)
+//  4. Embedded default (prompts/<name>.md from go:embed)
 type PromptConfig struct {
 	// SystemPromptFile is the path to a file that replaces the base system prompt.
 	// If empty, uses embedded prompts/base.md.
@@ -446,11 +446,11 @@ type ToolsConfig struct {
 	OutputMaxBytes       int      `toml:"output_max_bytes"`
 
 	// Rate limiting (F-018)
-	RateLimitBurst          int `toml:"rate_limit_burst"`
-	RateLimitPerSec         int `toml:"rate_limit_per_sec"`
-	DangerousRateLimitBurst int `toml:"dangerous_rate_limit_burst"`
+	RateLimitBurst           int `toml:"rate_limit_burst"`
+	RateLimitPerSec          int `toml:"rate_limit_per_sec"`
+	DangerousRateLimitBurst  int `toml:"dangerous_rate_limit_burst"`
 	DangerousRateLimitPerSec int `toml:"dangerous_rate_limit_per_sec"`
-	MaxConcurrent           int `toml:"max_concurrent"`
+	MaxConcurrent            int `toml:"max_concurrent"`
 
 	// Output bounds (F-019)
 	OutputRetentionDays int `toml:"output_retention_days"`
@@ -541,8 +541,8 @@ type ModelCapabilitiesConfig struct {
 // ModelCapabilityOverride defines a single model capability entry that overrides
 // or extends the built-in knownModelCapabilities table.
 type ModelCapabilityOverride struct {
-	ContextLength    int  `toml:"context_length"`
-	MaxOutput        int  `toml:"max_output"`
-	SupportsTools    bool `toml:"supports_tools"`
+	ContextLength     int  `toml:"context_length"`
+	MaxOutput         int  `toml:"max_output"`
+	SupportsTools     bool `toml:"supports_tools"`
 	SupportsReasoning bool `toml:"supports_reasoning"`
 }

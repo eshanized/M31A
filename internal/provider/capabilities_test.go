@@ -356,8 +356,8 @@ func TestDetectCapabilities_ConfigOverrides(t *testing.T) {
 	// Set config with a known capability override
 	configCaps := map[string]ModelCapabilities{
 		"custom-model": {
-			SupportsTools:    true,
-			SupportsImages:   true,
+			SupportsTools:     true,
+			SupportsImages:    true,
 			SupportsStreaming: true,
 			MaxContextWindow:  100000,
 			MaxOutputTokens:   16000,
@@ -387,8 +387,8 @@ func TestDetectCapabilities_ConfigOverridesCheckedBeforeBuiltIn(t *testing.T) {
 	// Override a known model with different capabilities
 	configCaps := map[string]ModelCapabilities{
 		"gpt-4o": {
-			SupportsTools:    false,
-			SupportsImages:   false,
+			SupportsTools:     false,
+			SupportsImages:    false,
 			SupportsStreaming: true,
 			MaxContextWindow:  999,
 			MaxOutputTokens:   999,

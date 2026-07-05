@@ -56,25 +56,25 @@ func DefaultConfig() *Config {
 			MaxTodoItems: 50,
 			// Sidebar (F-050)
 			SidebarRefreshSecs: 5,
-		// Welcome screen (F-081, F-082)
-		WelcomeTwoColThreshold: 88,
-		WelcomeCardMinWidth:    20,
-		WelcomeCardMaxWidth:    60,
-		// Logo (F-042)
-		LogoFile: "",
-		LogoText: "",
-		// Welcome suggestions (F-043)
-		WelcomeSuggestions: []string{},
-		// Keyboard hints (F-044)
-		KeyboardHints: []string{},
-		// Unicode symbols (F-053)
-		SymbolOverrides: map[string]string{},
-		ASCIIFallback:   false,
-		// Theme file (F-052)
-		ThemeFile: "",
-		// Toast type overrides (F-045)
-		ToastTypeOverrides: map[string]ToastTypeConfig{},
-	},
+			// Welcome screen (F-081, F-082)
+			WelcomeTwoColThreshold: 88,
+			WelcomeCardMinWidth:    20,
+			WelcomeCardMaxWidth:    60,
+			// Logo (F-042)
+			LogoFile: "",
+			LogoText: "",
+			// Welcome suggestions (F-043)
+			WelcomeSuggestions: []string{},
+			// Keyboard hints (F-044)
+			KeyboardHints: []string{},
+			// Unicode symbols (F-053)
+			SymbolOverrides: map[string]string{},
+			ASCIIFallback:   false,
+			// Theme file (F-052)
+			ThemeFile: "",
+			// Toast type overrides (F-045)
+			ToastTypeOverrides: map[string]ToastTypeConfig{},
+		},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
 			TokenEMAAlpha:           types.EMACorrectionAlpha,
@@ -163,8 +163,8 @@ func DefaultConfig() *Config {
 			MaxToolConcurrency: 4,
 			LoopDetectWindow:   3,
 			// Dangerous command extensions (F-017)
-			AdditionalBlockedCommands:      []string{},
-			AdditionalObfuscationPatterns:  []string{},
+			AdditionalBlockedCommands:     []string{},
+			AdditionalObfuscationPatterns: []string{},
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",
@@ -174,24 +174,24 @@ func DefaultConfig() *Config {
 			UserEmail:    "m31a@local",
 		},
 		Compaction: CompactionConfig{
-			Auto:               true,
-			Buffer:             20000,
-			KeepTokens:         8000,
-			Proactive:          true,
-			ToolCallsThreshold: 15,
-			PhaseTransitionPct: 60,
-			SummaryTemplate:    "",
+			Auto:                true,
+			Buffer:              20000,
+			KeepTokens:          8000,
+			Proactive:           true,
+			ToolCallsThreshold:  15,
+			PhaseTransitionPct:  60,
+			SummaryTemplate:     "",
 			SummaryTemplateFile: "",
 		},
 		Instructions: InstructionsConfig{
 			Enabled: true,
 		},
 		ModelCapabilities: ModelCapabilitiesConfig{
-			ExtraReasoningPatterns:     []string{},
-			ExtraToolCapablePatterns:   []string{},
+			ExtraReasoningPatterns:      []string{},
+			ExtraToolCapablePatterns:    []string{},
 			ExtraCompletionOnlyPatterns: []string{},
-			ExtraNonChatPatterns:       []string{},
-			KnownCapabilities:          map[string]ModelCapabilityOverride{},
+			ExtraNonChatPatterns:        []string{},
+			KnownCapabilities:           map[string]ModelCapabilityOverride{},
 		},
 		Prompts: PromptConfig{
 			SystemPromptFile:       "",

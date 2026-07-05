@@ -16,11 +16,11 @@ var (
 )
 
 type capabilityConfigData struct {
-	extraReasoningPatterns     []string
-	extraToolCapablePatterns   []string
+	extraReasoningPatterns      []string
+	extraToolCapablePatterns    []string
 	extraCompletionOnlyPatterns []string
-	extraNonChatPatterns       []string
-	knownCapabilities          map[string]ModelCapabilities
+	extraNonChatPatterns        []string
+	knownCapabilities           map[string]ModelCapabilities
 }
 
 // SetCapabilityConfig initializes the package-level capability configuration.
@@ -30,11 +30,11 @@ func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, 
 	capabilityConfigMu.Lock()
 	defer capabilityConfigMu.Unlock()
 	capabilityConfig = capabilityConfigData{
-		extraReasoningPatterns:     extraReasoning,
-		extraToolCapablePatterns:   extraToolCapable,
+		extraReasoningPatterns:      extraReasoning,
+		extraToolCapablePatterns:    extraToolCapable,
 		extraCompletionOnlyPatterns: extraCompletionOnly,
-		extraNonChatPatterns:       extraNonChat,
-		knownCapabilities:          knownCaps,
+		extraNonChatPatterns:        extraNonChat,
+		knownCapabilities:           knownCaps,
 	}
 	// Clear the capabilities cache so new config takes effect immediately
 	modelCapabilitiesCache = sync.Map{}

@@ -223,13 +223,13 @@ func run() int {
 	knownCaps := make(map[string]provider.ModelCapabilities, len(cfg.ModelCapabilities.KnownCapabilities))
 	for pattern, override := range cfg.ModelCapabilities.KnownCapabilities {
 		knownCaps[pattern] = provider.ModelCapabilities{
-			SupportsTools:     override.SupportsTools,
-			SupportsImages:    false,
-			SupportsStreaming: true,
-			SupportsJSON:      true,
+			SupportsTools:        override.SupportsTools,
+			SupportsImages:       false,
+			SupportsStreaming:    true,
+			SupportsJSON:         true,
 			SupportsSystemPrompt: true,
-			MaxContextWindow:  override.ContextLength,
-			MaxOutputTokens:   override.MaxOutput,
+			MaxContextWindow:     override.ContextLength,
+			MaxOutputTokens:      override.MaxOutput,
 		}
 	}
 	provider.SetCapabilityConfig(

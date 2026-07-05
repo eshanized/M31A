@@ -19,9 +19,9 @@ import (
 var _ types.Tool = (*Bash)(nil)
 
 type Bash struct {
-	workDir                    string
-	maxTimeout                 time.Duration
-	additionalBlockedCommands  []string
+	workDir                       string
+	maxTimeout                    time.Duration
+	additionalBlockedCommands     []string
 	additionalObfuscationPatterns []string
 }
 
@@ -31,9 +31,9 @@ func NewBash(workDir string, maxTimeoutSecs int, additionalBlockedCommands []str
 		maxTimeout = time.Duration(maxTimeoutSecs) * time.Second
 	}
 	return &Bash{
-		workDir:                    workDir,
-		maxTimeout:                 maxTimeout,
-		additionalBlockedCommands:  additionalBlockedCommands,
+		workDir:                       workDir,
+		maxTimeout:                    maxTimeout,
+		additionalBlockedCommands:     additionalBlockedCommands,
 		additionalObfuscationPatterns: additionalObfuscationPatterns,
 	}
 }

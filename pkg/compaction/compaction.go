@@ -15,10 +15,10 @@ import (
 
 // Config holds compaction settings.
 type Config struct {
-	Auto               bool
-	Buffer             int    // tokens reserved before compaction triggers
-	KeepTokens         int    // tokens of recent history to preserve verbatim
-	SummaryTemplate    string // inline template override (takes precedence over file)
+	Auto                bool
+	Buffer              int    // tokens reserved before compaction triggers
+	KeepTokens          int    // tokens of recent history to preserve verbatim
+	SummaryTemplate     string // inline template override (takes precedence over file)
 	SummaryTemplateFile string // path to template file (used when SummaryTemplate is empty)
 }
 

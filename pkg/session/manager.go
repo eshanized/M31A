@@ -34,10 +34,10 @@ type Manager struct {
 
 // ManagerOpts holds optional settings for the Manager.
 type ManagerOpts struct {
-	SessionIDBytes       int           // Number of random bytes (4 = 8 hex chars). 0 = default.
-	MaxRecentModels      int           // Max recent models. 0 = default (10).
-	SessionCacheTTL      time.Duration // TTL for session list cache. 0 = default (2s).
-	CoordinatorTimeoutSecs int         // Safety timeout for coordinator. 0 = default (300s).
+	SessionIDBytes         int           // Number of random bytes (4 = 8 hex chars). 0 = default.
+	MaxRecentModels        int           // Max recent models. 0 = default (10).
+	SessionCacheTTL        time.Duration // TTL for session list cache. 0 = default (2s).
+	CoordinatorTimeoutSecs int           // Safety timeout for coordinator. 0 = default (300s).
 }
 
 // NewManager creates a Manager with a global config directory and a project
