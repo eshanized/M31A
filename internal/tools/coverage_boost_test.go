@@ -568,7 +568,7 @@ func TestHtmlTableToMarkdown_SingleCell(t *testing.T) {
 }
 
 func TestWebFetch_Close(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	// Close should not panic
 	wf.Close()
 }
@@ -579,7 +579,7 @@ func TestWebFetch_Close(t *testing.T) {
 
 func TestDispatcher_Unregister(t *testing.T) {
 	d := NewDispatcher(nil)
-	d.Register(NewBash(t.TempDir()))
+	d.Register(NewBash(t.TempDir(), 1800))
 	d.Unregister("Bash")
 	// After unregister, executing should fail
 	_, err := d.Execute(context.Background(), types.ToolCall{
@@ -616,7 +616,7 @@ func TestAgent_UnregisterTool(t *testing.T) {
 	// UnregisterTool is in agent.go; test it can be called
 	dir := t.TempDir()
 	d := NewDispatcher(nil)
-	d.Register(NewBash(dir))
+	d.Register(NewBash(dir, 1800))
 	// Just verify that the dispatcher can unregister
 	d.Unregister("Bash")
 }

@@ -37,7 +37,23 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 		d.mu.Unlock()
 	}
 
-	if err := d.Register(NewBash(workDir)); err != nil {
+	// Extract config values with safe defaults
+	bashMaxTimeoutSecs := 1800
+	webfetchMaxRetries := 3
+	webfetchRetryDelayMs := 100
+	if toolsCfg != nil {
+		if toolsCfg.BashMaxTimeoutSecs > 0 {
+			bashMaxTimeoutSecs = toolsCfg.BashMaxTimeoutSecs
+		}
+		if toolsCfg.WebfetchMaxRetries > 0 {
+			webfetchMaxRetries = toolsCfg.WebfetchMaxRetries
+		}
+		if toolsCfg.WebfetchRetryDelayMs > 0 {
+			webfetchRetryDelayMs = toolsCfg.WebfetchRetryDelayMs
+		}
+	}
+
+	if err := d.Register(NewBash(workDir, bashMaxTimeoutSecs)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewFileRead(workDir)); err != nil {
@@ -59,7 +75,7 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(todoRead); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewWebFetch(sessionsDir, false)); err != nil {
+	if err := d.Register(NewWebFetch(sessionsDir, false, webfetchMaxRetries, webfetchRetryDelayMs)); err != nil {
 		return nil, err
 	}
 	webSearchBaseURL := ""

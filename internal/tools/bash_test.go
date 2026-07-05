@@ -11,7 +11,7 @@ import (
 
 func TestBash_SimpleCommand(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -28,7 +28,7 @@ func TestBash_SimpleCommand(t *testing.T) {
 
 func TestBash_Name(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	if b.Name() != "Bash" {
 		t.Errorf("expected name 'Bash', got %s", b.Name())
 	}
@@ -36,7 +36,7 @@ func TestBash_Name(t *testing.T) {
 
 func TestBash_Description(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	if b.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -44,7 +44,7 @@ func TestBash_Description(t *testing.T) {
 
 func TestBash_RiskLevel(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	if b.RiskLevel() != types.RiskDangerous {
 		t.Errorf("expected RiskDangerous, got %s", b.RiskLevel())
 	}
@@ -52,7 +52,7 @@ func TestBash_RiskLevel(t *testing.T) {
 
 func TestBash_WithWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
-	b := NewBash(dir)
+	b := NewBash(dir, 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -69,7 +69,7 @@ func TestBash_WithWorkingDirectory(t *testing.T) {
 
 func TestBash_Stderr(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -86,7 +86,7 @@ func TestBash_Stderr(t *testing.T) {
 
 func TestBash_Timeout(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	start := time.Now()
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
@@ -109,7 +109,7 @@ func TestBash_Timeout(t *testing.T) {
 
 func TestBash_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -137,7 +137,7 @@ func TestBash_ContextCancellation(t *testing.T) {
 
 func TestBash_NonZeroExit(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -153,7 +153,7 @@ func TestBash_NonZeroExit(t *testing.T) {
 }
 
 func TestBash_OutputTruncated(t *testing.T) {
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	// Generate 100k chars of output (more than 50k limit)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
@@ -171,7 +171,7 @@ func TestBash_OutputTruncated(t *testing.T) {
 
 func TestBash_BinaryOutput(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -188,7 +188,7 @@ func TestBash_BinaryOutput(t *testing.T) {
 
 func TestBash_CommandNotFound(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -205,7 +205,7 @@ func TestBash_CommandNotFound(t *testing.T) {
 
 func TestBash_MissingCommandParam(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	_, err := b.Execute(context.Background(), types.ToolInput{
 		Name:   "Bash",
 		Params: map[string]any{},
@@ -333,7 +333,7 @@ func TestIsBinary_LongBinary(t *testing.T) {
 
 func TestBash_CommandNotString(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	_, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -350,7 +350,7 @@ func TestBash_CommandNotString(t *testing.T) {
 
 func TestBash_CustomTimeout(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -368,7 +368,7 @@ func TestBash_CustomTimeout(t *testing.T) {
 
 func TestBash_InvalidTimeout(t *testing.T) {
 	t.Parallel()
-	b := NewBash(t.TempDir())
+	b := NewBash(t.TempDir(), 1800)
 	// Invalid timeout type should use default
 	result, err := b.Execute(context.Background(), types.ToolInput{
 		Name: "Bash",

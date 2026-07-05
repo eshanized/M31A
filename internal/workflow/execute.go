@@ -75,6 +75,9 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 	// 2. Create runner
 	runner := taskrunner.New(tasks)
+	if e.cfg != nil && e.cfg.Features.MaxParallelTasks > 0 {
+		runner.MaxParallel = e.cfg.Features.MaxParallelTasks
+	}
 
 	// Wire task lifecycle callbacks to emit messages to the TUI.
 	runner.OnTaskStart = func(task m31types.Task) {
@@ -195,13 +198,21 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 	loopEnabled := e.cfg != nil && e.cfg.Features.ExecuteLoopDetect
 	var tracker *ToolCallTracker
 	if loopEnabled {
-		tracker = NewToolCallTracker(3)
+		loopWindow := 3
+		if e.cfg != nil && e.cfg.Tools.LoopDetectWindow > 0 {
+			loopWindow = e.cfg.Tools.LoopDetectWindow
+		}
+		tracker = NewToolCallTracker(loopWindow)
 	}
 
 	// Track whether we need to re-check quality gate after a heal
 	qualityGatePending := false
 
-	for task.HealsAttempted < m31types.MaxHealAttempts {
+	maxHeals := m31types.MaxHealAttempts
+	if e.cfg != nil && e.cfg.Features.MaxHealAttempts > 0 {
+		maxHeals = e.cfg.Features.MaxHealAttempts
+	}
+	for task.HealsAttempted < maxHeals {
 		// Re-check quality gate after a successful heal before calling LLM again
 		if qualityGatePending {
 			qualityGatePending = false
@@ -387,7 +398,10 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		// Execute tool calls in parallel with bounded concurrency.
 		// The dispatcher has its own rate limiter, and goroutines are bounded
 		// by the semaphore to prevent resource exhaustion.
-		const maxToolConcurrency = 4
+		maxToolConcurrency := 4
+		if e.cfg != nil && e.cfg.Tools.MaxToolConcurrency > 0 {
+			maxToolConcurrency = e.cfg.Tools.MaxToolConcurrency
+		}
 		toolExecResults = make([]struct {
 			call     m31types.ToolCall
 			result   m31types.ToolResult

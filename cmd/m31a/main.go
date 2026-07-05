@@ -289,7 +289,9 @@ func run() int {
 
 	// Session manager — project-local sessions in <workDir>/.m31a/
 	globalConfigDir := filepath.Dir(configPath)
-	sessionMgr := session.NewManager(globalConfigDir, workDir, session.ManagerOpts{})
+	sessionMgr := session.NewManager(globalConfigDir, workDir, session.ManagerOpts{
+		CoordinatorTimeoutSecs: cfg.Features.CoordinatorTimeoutSecs,
+	})
 
 	// Tools dispatcher — fail fast on permission config errors (WP-C04)
 	backupDir := filepath.Join(workDir, ".m31a", "backups")

@@ -850,6 +850,9 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	}
 
 	threshold80 := int(float64(contextLength) * 0.80)
+	if e.cfg != nil && e.cfg.Features.ContextTruncationThreshold > 0 {
+		threshold80 = int(float64(contextLength) * e.cfg.Features.ContextTruncationThreshold)
+	}
 	threshold95 := int(float64(contextLength) * 0.95)
 
 	if estimated <= threshold80 {
@@ -1407,6 +1410,14 @@ func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, 
 	}
 
 	policy := retry.DefaultPolicy()
+	if e.cfg != nil {
+		policy = retry.ConfiguredPolicy(
+			e.cfg.Features.RetryMaxAttempts,
+			e.cfg.Features.RetryBaseDelayMs,
+			e.cfg.Features.RetryMaxDelayMs,
+			e.cfg.Features.RetryBackoffMultiplier,
+		)
+	}
 	var lastErr = firstErr
 
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {

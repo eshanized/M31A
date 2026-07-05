@@ -6,7 +6,16 @@ import (
 )
 
 // maxVisibleToasts caps the number of toasts rendered simultaneously.
-const maxVisibleToasts = 3
+// Set via SetMaxVisibleToasts during TUI initialization from config.
+var maxVisibleToasts = 3
+
+// SetMaxVisibleToasts updates the maximum number of visible toasts.
+// Called during TUI initialization with cfg.UI.ToastMaxVisible.
+func SetMaxVisibleToasts(n int) {
+	if n > 0 {
+		maxVisibleToasts = n
+	}
+}
 
 // renderToastStack renders up to 3 most recent toasts stacked.
 func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {

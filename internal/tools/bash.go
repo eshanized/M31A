@@ -19,12 +19,18 @@ import (
 var _ types.Tool = (*Bash)(nil)
 
 type Bash struct {
-	workDir string
+	workDir    string
+	maxTimeout time.Duration
 }
 
-func NewBash(workDir string) *Bash {
+func NewBash(workDir string, maxTimeoutSecs int) *Bash {
+	maxTimeout := types.BashTimeout
+	if maxTimeoutSecs > 0 {
+		maxTimeout = time.Duration(maxTimeoutSecs) * time.Second
+	}
 	return &Bash{
-		workDir: workDir,
+		workDir:    workDir,
+		maxTimeout: maxTimeout,
 	}
 }
 
@@ -88,7 +94,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		)
 	}
 
-	timeoutSec := int(types.BashTimeout.Seconds())
+	timeoutSec := int(t.maxTimeout.Seconds())
 	if customRaw, ok := input.Params["timeout"]; ok {
 		if customFloat, ok := customRaw.(float64); ok {
 			timeoutSec = int(customFloat)
@@ -97,8 +103,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	if timeoutSec <= 0 {
 		return types.ToolResult{}, fmt.Errorf("timeout must be positive: %w", m31errors.ErrInvalidTimeout)
 	}
-	if timeoutSec > int(types.BashTimeout.Seconds()) {
-		return types.ToolResult{}, fmt.Errorf("timeout exceeds max %s: %w", types.BashTimeout, m31errors.ErrInvalidTimeout)
+	if timeoutSec > int(t.maxTimeout.Seconds()) {
+		return types.ToolResult{}, fmt.Errorf("timeout exceeds max %s: %w", t.maxTimeout, m31errors.ErrInvalidTimeout)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)

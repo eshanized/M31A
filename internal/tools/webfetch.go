@@ -49,13 +49,25 @@ type WebFetch struct {
 	allowPrivateIPs bool
 	client          *http.Client
 	dnsCache        *DNSCache
+	maxRetries      int
+	baseRetryDelay  time.Duration
 }
 
-func NewWebFetch(sessionsDir string, allowPrivateIPs bool) *WebFetch {
+func NewWebFetch(sessionsDir string, allowPrivateIPs bool, maxRetries int, retryDelayMs int) *WebFetch {
+	retries := 3
+	if maxRetries > 0 {
+		retries = maxRetries
+	}
+	delay := 500 * time.Millisecond
+	if retryDelayMs > 0 {
+		delay = time.Duration(retryDelayMs) * time.Millisecond
+	}
 	wf := &WebFetch{
 		sessionsDir:     sessionsDir,
 		allowPrivateIPs: allowPrivateIPs,
 		dnsCache:        NewDNSCache(DNSCacheTTL, 64),
+		maxRetries:      retries,
+		baseRetryDelay:  delay,
 	}
 	wf.client = &http.Client{
 		Transport: &http.Transport{
@@ -305,7 +317,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		return types.ToolResult{}, fmt.Errorf("timeout must be between 1 and %d seconds", MaxTimeoutSecs)
 	}
 
-	retries := maxRetries
+	retries := t.maxRetries
 	if rRaw, ok := input.Params["retries"].(float64); ok {
 		retries = int(rRaw)
 		if retries < 0 {
@@ -324,7 +336,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	for attempt := 0; attempt <= retries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff with jitter
-			delay := baseRetryDelay * time.Duration(1<<(attempt-1))
+			delay := t.baseRetryDelay * time.Duration(1<<(attempt-1))
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():

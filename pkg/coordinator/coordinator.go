@@ -20,6 +20,9 @@ const (
 type Coordinator[Key comparable] struct {
 	mu      sync.Mutex
 	entries map[Key]*entry
+	// SafetyTimeout is the maximum time to wait for Complete() before
+	// releasing the goroutine. Zero means use the default (5 minutes).
+	SafetyTimeout time.Duration
 }
 
 type entry struct {
@@ -158,10 +161,14 @@ func (c *Coordinator[Key]) awaitDone(e *entry) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	if e.done != nil {
 		go func() {
+			timeout := c.SafetyTimeout
+			if timeout <= 0 {
+				timeout = 5 * time.Minute // default safety net
+			}
 			select {
 			case <-e.done:
 			case <-ctx.Done():
-			case <-time.After(5 * time.Minute):
+			case <-time.After(timeout):
 				// Safety net: if Complete() is never called, prevent goroutine leak
 			}
 			cancel()

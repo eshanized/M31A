@@ -34,9 +34,10 @@ type Manager struct {
 
 // ManagerOpts holds optional settings for the Manager.
 type ManagerOpts struct {
-	SessionIDBytes  int           // Number of random bytes (4 = 8 hex chars). 0 = default.
-	MaxRecentModels int           // Max recent models. 0 = default (10).
-	SessionCacheTTL time.Duration // TTL for session list cache. 0 = default (2s).
+	SessionIDBytes       int           // Number of random bytes (4 = 8 hex chars). 0 = default.
+	MaxRecentModels      int           // Max recent models. 0 = default (10).
+	SessionCacheTTL      time.Duration // TTL for session list cache. 0 = default (2s).
+	CoordinatorTimeoutSecs int         // Safety timeout for coordinator. 0 = default (300s).
 }
 
 // NewManager creates a Manager with a global config directory and a project
@@ -52,6 +53,10 @@ func NewManager(baseDir, workDir string, opts ManagerOpts) *Manager {
 		opts.SessionCacheTTL = types.DefaultSessionCacheTTL
 	}
 	projectDir := filepath.Join(workDir, ".m31a")
+	coord := coordinator.New[string]()
+	if opts.CoordinatorTimeoutSecs > 0 {
+		coord.SafetyTimeout = time.Duration(opts.CoordinatorTimeoutSecs) * time.Second
+	}
 	return &Manager{
 		baseDir:         baseDir,
 		workDir:         workDir,
@@ -59,7 +64,7 @@ func NewManager(baseDir, workDir string, opts ManagerOpts) *Manager {
 		maxRecentModels: opts.MaxRecentModels,
 		sessionCacheTTL: opts.SessionCacheTTL,
 		lock:            fileutil.NewFileLock(filepath.Join(projectDir, "session.lock")),
-		coordinator:     coordinator.New[string](),
+		coordinator:     coord,
 	}
 }
 

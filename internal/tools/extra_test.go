@@ -2509,7 +2509,7 @@ func TestTodoWrite_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	schema := wf.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2526,7 +2526,7 @@ func TestWebFetch_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_MissingURLParam(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name:   "WebFetch",
 		Params: map[string]any{},
@@ -2538,7 +2538,7 @@ func TestWebFetch_MissingURLParam(t *testing.T) {
 
 func TestWebFetch_URLNotString(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2552,7 +2552,7 @@ func TestWebFetch_URLNotString(t *testing.T) {
 
 func TestWebFetch_InvalidFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2567,7 +2567,7 @@ func TestWebFetch_InvalidFormat(t *testing.T) {
 
 func TestWebFetch_NonHTTPScheme(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2584,7 +2584,7 @@ func TestWebFetch_NonHTTPScheme(t *testing.T) {
 
 func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2599,7 +2599,7 @@ func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 
 func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2614,7 +2614,7 @@ func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 
 func TestWebFetch_NonFloatTimeout(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	// timeout not a float64 → default to 30, then the request itself fails
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -2982,7 +2982,7 @@ func TestFileRead_ContextCancelled(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	err := wf.resolveAndCheck(context.Background(), "://invalid")
 	if err == nil {
 		t.Error("expected error for invalid URL")
@@ -2991,7 +2991,7 @@ func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	err := wf.resolveAndCheck(context.Background(), "http://")
 	if err == nil {
 		t.Error("expected error for URL with no host")
@@ -3000,7 +3000,7 @@ func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	err := wf.resolveAndCheck(context.Background(), "http://127.0.0.1:80")
 	if err == nil {
 		t.Error("expected error for literal private IP")
@@ -3009,7 +3009,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	err := wf.resolveAndCheck(context.Background(), "http://8.8.8.8:80")
 	if err != nil {
 		t.Errorf("expected no error for public IP, got: %v", err)
@@ -3022,7 +3022,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	addrs, err := wf.resolveAndCache(context.Background(), "127.0.0.1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3087,7 +3087,7 @@ func TestEdit_Execute_LineRange_OutOfRange(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_ExpiredCache(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	// Store an expired entry directly in the shared cache
 	wf.dnsCache.cache.Store("expired.example.com", &dnsCacheEntry{
 		addrs:   []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
@@ -3753,7 +3753,7 @@ func TestAskUserQuestion_NonFloatTimeout(t *testing.T) {
 
 func TestWebFetch_RiskLevel(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	if wf.RiskLevel() != types.RiskMedium {
 		t.Errorf("expected RiskMedium, got %s", wf.RiskLevel())
 	}
@@ -3761,7 +3761,7 @@ func TestWebFetch_RiskLevel(t *testing.T) {
 
 func TestWebFetch_NewWithPrivateIPsAllowed(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), true)
+	wf := NewWebFetch(t.TempDir(), true, 3, 100)
 	if !wf.allowPrivateIPs {
 		t.Error("expected allowPrivateIPs to be true")
 	}
@@ -4332,7 +4332,7 @@ func TestGlob_RGEmptyResult(t *testing.T) {
 
 func TestWebFetch_Execute_TextFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	// This will fail with SSRF since it's a literal IP
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -4352,7 +4352,7 @@ func TestWebFetch_Execute_TextFormat(t *testing.T) {
 
 func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4371,7 +4371,7 @@ func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 
 func TestWebFetch_Execute_MarkdownFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4409,7 +4409,7 @@ func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_NonExistentHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.resolveAndCache(context.Background(), "this-host-does-not-exist-xyz123.invalid")
 	if err == nil {
 		t.Error("expected DNS resolution error for non-existent host")

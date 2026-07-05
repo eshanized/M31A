@@ -359,6 +359,10 @@ func NewApp(
 		if cfg.UI.PermissionModalWidth > 0 {
 			a.permModalWidth = cfg.UI.PermissionModalWidth
 		}
+		// Wire UI config constants from TOML config
+		if cfg.UI.ToastMaxVisible > 0 {
+			SetMaxVisibleToasts(cfg.UI.ToastMaxVisible)
+		}
 	}
 
 	// Initialize sidebar

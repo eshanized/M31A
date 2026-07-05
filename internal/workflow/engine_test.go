@@ -41,7 +41,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 
 	// Create dispatcher with tools
 	dispatcher := tools.NewDispatcher(nil)
-	dispatcher.Register(tools.NewBash(dir))
+	dispatcher.Register(tools.NewBash(dir, 1800))
 	dispatcher.Register(tools.NewFileRead(dir))
 	dispatcher.Register(tools.NewFileWrite(dir, filepath.Join(dir, "backups")))
 	dispatcher.Register(tools.NewEdit(dir, filepath.Join(dir, "backups")))

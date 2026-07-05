@@ -22,6 +22,25 @@ func DefaultPolicy() *Policy {
 	}
 }
 
+// ConfiguredPolicy returns a retry policy with values from config.
+// Zero values fall back to DefaultPolicy defaults.
+func ConfiguredPolicy(maxAttempts int, baseDelayMs int, maxDelayMs int, backoffMultiplier float64) *Policy {
+	p := DefaultPolicy()
+	if maxAttempts > 0 {
+		p.MaxAttempts = maxAttempts
+	}
+	if baseDelayMs > 0 {
+		p.InitialDelay = time.Duration(baseDelayMs) * time.Millisecond
+	}
+	if maxDelayMs > 0 {
+		p.MaxDelay = time.Duration(maxDelayMs) * time.Millisecond
+	}
+	if backoffMultiplier > 0 {
+		p.BackoffFactor = backoffMultiplier
+	}
+	return p
+}
+
 // Policy configures retry behavior with exponential backoff and
 // retry-after header support.
 type Policy struct {

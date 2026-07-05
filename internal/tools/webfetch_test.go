@@ -12,7 +12,7 @@ import (
 
 func TestWebFetch_SSRFBlocksPrivateIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -29,7 +29,7 @@ func TestWebFetch_SSRFBlocksPrivateIP(t *testing.T) {
 
 func TestWebFetch_SSRFBlocksLinkLocal(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false)
+	wf := NewWebFetch(t.TempDir(), false, 3, 100)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -54,7 +54,7 @@ func TestWebFetch_TLSConnection(t *testing.T) {
 	defer ts.Close()
 
 	// Create WebFetch with allowPrivateIPs to skip SSRF check on localhost
-	wf := NewWebFetch(t.TempDir(), true)
+	wf := NewWebFetch(t.TempDir(), true, 3, 100)
 	wf.client = ts.Client() // Use the test server's TLS-configured client
 
 	result, err := wf.Execute(context.Background(), types.ToolInput{

@@ -13,13 +13,13 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		name   string
 		schema string
 	}{
-		{"Bash", NewBash(".").ParameterSchema()},
+		{"Bash", NewBash(".", 1800).ParameterSchema()},
 		{"FileRead", NewFileRead(".").ParameterSchema()},
 		{"FileWrite", NewFileWrite(".", ".").ParameterSchema()},
 		{"Glob", NewGlob(".").ParameterSchema()},
 		{"Grep", NewGrep(".").ParameterSchema()},
 		{"Edit", NewEdit(".", ".").ParameterSchema()},
-		{"WebFetch", NewWebFetch(".", false).ParameterSchema()},
+		{"WebFetch", NewWebFetch(".", false, 3, 100).ParameterSchema()},
 		{"TodoWrite", NewTodoWrite(".", "test").ParameterSchema()},
 	}
 
