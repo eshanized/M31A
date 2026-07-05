@@ -36,7 +36,7 @@ $ m31a
    RS256, keep backward compat for 30 days
 ```
 
-> **Status:** v1.6.0 — production-ready with reproducible builds and embedded build metadata.
+> **Status:** v1.7.0 — production-ready with engine decomposition, externalized config, and hardened security.
 
 ## Install
 
@@ -172,11 +172,14 @@ flowchart LR
 
 - **Seven-phase workflow** — `Initialize → Discuss → Plan → Execute → Verify → Runtime → Ship` with four modes (`auto`, `full`, `fast`, `direct`) to match task complexity. Every run ends with a verified git commit and a ledger entry.
 - **Workflow quality gates** — Plan checker with revision loops, coverage gates, security heuristics, and gap analysis. Discuss-phase quality scoring and completeness checks. Execute-phase pre-flight validation and tool-call loop detection.
+- **Engine decomposition** — PhaseCoordinator, StateMachine, WorkflowCache, ContextBuilder, CostTracker, and PromptBuilder extracted from monolithic Engine for cleaner separation of concerns.
 - **Code intelligence** — Parses Go (via tree-sitter), TypeScript, Python, and Rust. Builds import dependency graphs, indexes symbols, scores file relevance. The LLM gets context about which files matter for the current task.
+- **Decision logger** — In-memory structured decision receipts with rationale, alternatives, cost tracking, non-blocking ring-buffer logging, and automatic secret redaction.
 - **Code complexity analysis** — `CodeComplexity` tool classifies your codebase as simple (<10K lines), moderate (10K–50K), or complex (50K+) across all 4 languages, informing model selection.
 - **18 built-in tools** — `Bash`, `FileRead`, `FileWrite`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `CodeMap`, `CodeComplexity`, `FileDelete`, `FileMove`, `FileList`, `TodoWrite`, `TodoRead`, `DevServer`, `HTTPCheck`, `AskUserQuestion`. All gated by a permission system with rate limiting and concurrency control.
 - **Parallel subagents** — The LLM can spawn child agents (up to depth 2) that run in isolated git worktrees, each with their own dispatcher and permissions.
 - **Task runner** — Kahn's algorithm for topological sort, bounded parallelism (4 concurrent), per-task timeouts, retry support.
+- **Narrative engine** — Transforms low-level execution events into human-readable progress descriptions with classification, templating, and timing-based deduplication.
 
 ### Model & Provider
 
@@ -185,6 +188,7 @@ flowchart LR
 - **Per-phase model assignment** — Use a cheap model for Discuss/Plan, powerful model for Execute/Verify/Ship. Eight configurable phase slots.
 - **AutoDream context compression** — Long conversations get automatically consolidated. Protected messages (initial goal, tool calls, plans, last 5 messages) are never compressed. Auto-compression triggers on context window overflow.
 - **Token estimation** — tiktoken-based with EMA self-calibration. Context warning banner at 80%, hard reject at 95%. Configurable warning threshold and EMA alpha.
+- **Multi-provider token estimation** — Runtime capability detection across providers with fallback estimation strategies.
 
 ### Safety & Privacy
 
@@ -194,6 +198,8 @@ flowchart LR
 - **OS keychain** — Linux (dbus/secret-service), macOS (Keychain), Windows (Credential Manager). One code path, three backends. API keys **never written to disk in plaintext**.
 - **Zero telemetry** — No phone-home, no analytics, no data collection. Works offline once model catalog is cached.
 - **SSRF + DNS rebinding protection** — WebFetch blocks private, loopback, and link-local IP addresses. WebSearch uses a DNS cache to prevent TOCTOU rebinding attacks.
+- **Path traversal prevention** — Keychain service paths sanitized to block traversal attacks.
+- **Command injection hardening** — Bash command detection normalized to catch obfuscation attempts.
 - **Edit safety** — 7-strategy cascade replacement with collision-safe backups and replace-all support.
 
 ### Terminal UI
@@ -207,6 +213,9 @@ flowchart LR
 - **Chat history** — browse and search past conversations within a session.
 - **Session persistence** — resume mid-workflow after `Ctrl+C`, network drops, or laptop sleep.
 - **Accessibility** — reduced motion mode, configurable animation speed, opacity controls, and breathing effects.
+- **Streaming performance** — Lightweight streaming markdown parser, viewport virtualization, resize debounce, and 10fps render rate.
+- **First-time experience** — Quick mode, `/help getting-started`, `/skip` commands, and getting-started tour.
+- **Keyboard-first navigation** — Breadcrumb navigation, visible focus indicators, and help screen synced with actual keybindings.
 
 ## Quick Tour
 
@@ -262,6 +271,9 @@ Full keymap: [`docs/KEYBINDINGS.md`](docs/KEYBINDINGS.md)
 [provider]
 default = "openrouter"
 auto_fallback = true
+fallback_priority = ["openrouter", "zen", "nvidia"]
+health_check_timeout_secs = 10
+registration_order = "config"
 
 [model]
 default = ""
@@ -269,6 +281,7 @@ auto_arbitrage = false
 arbitrage_threshold = 0.1
 show_thinking_by_default = false
 token_ema_alpha = 0.3
+capability_overrides = {}
 
 [ui]
 theme = "dark"
@@ -308,6 +321,19 @@ max_glob_results = 1000
 max_grep_results = 100
 bash_kill_grace_secs = 5
 websearch_enabled = true
+dangerous_command_overrides = []
+
+[prompts]
+override_dir = ""
+dynamic_limits = true
+
+[narrative]
+template_overrides = {}
+
+[ui.theme_config]
+logo = ""
+welcome = ""
+symbols = {}
 
 [git]
 commit_prefix = "feat"
@@ -347,12 +373,16 @@ graph TB
         subagent["tools/subagent/<br/>parallel subagents<br/>worktree isolation · depth=2"]
         codeintel["codeintel/<br/>4-language parser<br/>import graph · relevance"]
         config["config/<br/>TOML loader · hot-reload<br/>project context detection"]
+        context["context/<br/>dynamic context<br/>registry · diff notifications"]
+        decision["decision/<br/>decision receipts<br/>ring buffer · redaction"]
         git["git/<br/>commit · rollback<br/>diff · stash · branch"]
+        logging["logging/<br/>audit logging<br/>secret redaction"]
+        shell["shell/<br/>platform-aware<br/>command execution"]
         tokens["tokens/<br/>tiktoken estimation<br/>EMA calibration"]
         types["types/<br/>shared types · constants<br/>workflow modes · risk levels"]
+        wiring["wiring/<br/>integration<br/>regression tests"]
         fileutil["fileutil/<br/>atomic file operations"]
         errors["errors/<br/>sentinel errors"]
-        log["log/<br/>structured logging<br/>daily rotation"]
 
         tools --> subagent
     end
@@ -367,7 +397,12 @@ graph TB
         keychain["keychain/<br/>OS keychain<br/>Linux · macOS · Windows"]
         autodream["autodream/<br/>context consolidation<br/>reentrancy guard"]
         arbitrage["arbitrage/<br/>model-cost optimizer"]
+        compaction["compaction/<br/>session compaction<br/>LLM summarization"]
+        coordinator["coordinator/<br/>drain sessions<br/>coalescing · interrupt"]
         history["history/<br/>frecent prompt history<br/>scoring"]
+        metrics["metrics/<br/>session metrics<br/>JSON persistence"]
+        narrative["narrative/<br/>event → progress<br/>description transformer"]
+        retry["retry/<br/>exponential backoff<br/>error classification"]
     end
 
     main --> internal
@@ -390,12 +425,16 @@ graph TB
 | `internal/tools/subagent/` | Parallel subagent manager with git worktree isolation (max depth 2) |
 | `internal/codeintel/` | 4-language parser (Go, TypeScript, Python, Rust) with import graph and relevance scoring |
 | `internal/config/` | TOML loader with project context detection, hot-reload, and workflow enhancement flags |
+| `internal/context/` | Dynamic context registry tracking, reconciling, and rendering changes between LLM calls |
+| `internal/decision/` | Structured decision receipts with rationale, cost tracking, and ring-buffer logging |
 | `internal/git/` | Commit, rollback, diff, stash, and branch operations |
+| `internal/logging/` | Audit and security utilities with secret redaction and source scanning |
+| `internal/shell/` | Platform-aware shell command execution (Unix/Windows abstraction) |
 | `internal/tokens/` | tiktoken-based estimation with EMA self-calibration |
 | `internal/types/` | Shared types, constants, workflow modes, risk levels, and plan structures |
+| `internal/wiring/` | End-to-end integration regression tests |
 | `internal/fileutil/` | Atomic file write operations |
 | `internal/errors/` | Sentinel errors with user-friendly messages |
-| `internal/log/` | Structured logging with daily rotation |
 | `pkg/session/` | Session lifecycle and persistence (JSON in `~/.m31a/sessions/`) |
 | `pkg/ledger/` | Cross-session learning store (markdown-backed) |
 | `pkg/rollback/` | Commit-chain manager (soft/hard/safe reset) |
@@ -404,7 +443,13 @@ graph TB
 | `pkg/keychain/` | OS keychain abstraction (Linux dbus, macOS Keychain, Windows Credential Manager) |
 | `pkg/autodream/` | Context consolidation with reentrancy guard |
 | `pkg/arbitrage/` | Model-cost optimizer with task classification |
+| `pkg/compaction/` | Automatic session compaction with LLM-summarized context replacement |
+| `pkg/coordinator/` | Concurrent drain session management with coalescing and interrupt support |
 | `pkg/history/` | Frecent prompt history with scoring |
+| `pkg/metrics/` | Thread-safe session metrics collector with JSON persistence |
+| `pkg/narrative/` | Execution event to human-readable progress description transformer |
+| `pkg/retry/` | Configurable retry policy with exponential backoff and error classification |
+| `pkg/skills/` | Skill management and slash command registration |
 
 Deep dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [Wiki](https://github.com/eshanized/M31A/wiki)
 
@@ -429,27 +474,32 @@ Deep dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [Wiki](https://gith
 ├── internal/          private packages (not importable)
 │   ├── codeintel/     4-language parser, import graph, relevance scoring
 │   ├── config/        TOML loader, project context, hot-reload
+│   ├── context/       dynamic context registry, diff notifications
+│   ├── decision/      decision receipts, ring buffer, redaction
 │   ├── errors/        sentinel errors
 │   ├── fileutil/      atomic file operations
 │   ├── git/           commit, rollback, diff, stash, branch
-│   ├── log/           structured logging, daily rotation
+│   ├── logging/       audit logging, secret redaction
 │   ├── provider/      openrouter, zen, nvidia clients
+│   ├── shell/         platform-aware command execution
 │   ├── tokens/        tiktoken estimation, EMA calibration
 │   ├── tools/         18 tools + subagent manager
 │   ├── tui/           Bubble Tea app (33 screens)
 │   ├── types/         shared types, constants, workflow modes
+│   ├── wiring/        integration regression tests
 │   └── workflow/      seven-phase engine, quality gates
 ├── pkg/               public packages (importable)
-│   ├── autodream/     context consolidation, reentrancy guard
 │   ├── arbitrage/     model-cost optimizer
+│   ├── autodream/     context consolidation, reentrancy guard
 │   ├── bisect/        git-bisect wrapper
-│   ├── compaction/    compaction utilities
-│   ├── coordinator/   coordination logic
+│   ├── compaction/    session compaction, LLM summarization
+│   ├── coordinator/   drain session management, coalescing
 │   ├── history/       frecent prompt history, scoring
 │   ├── keychain/      OS keychain abstraction
 │   ├── ledger/        cross-session learning store
-│   ├── metrics/       metrics collection
-│   ├── retry/         retry logic
+│   ├── metrics/       session metrics, JSON persistence
+│   ├── narrative/     event to progress description transformer
+│   ├── retry/         exponential backoff, error classification
 │   ├── rollback/      commit-chain manager
 │   ├── session/       session lifecycle, persistence
 │   ├── skills/        skill management
@@ -490,9 +540,11 @@ M31 Autonomous executes shell commands on your behalf. Security is layered:
 | **Concurrency control** | Max 8 concurrent tool executions via semaphore |
 | **Command blocklist** | Dangerous command patterns blocked at the tool boundary (defense-in-depth) |
 | **Path traversal** | Blocked at tool boundary; size limits (50MB per file read), stream-size caps |
+| **Keychain path traversal** | `sanitizeService` blocks traversal in keychain service names |
 | **SSRF protection** | WebFetch blocks private, loopback, and link-local IP addresses |
 | **DNS rebinding** | WebSearch uses a DNS cache (5 min TTL) to prevent TOCTOU rebinding attacks |
 | **Edit safety** | 7-strategy cascade with collision-safe backups |
+| **Command injection** | Normalized detection catches obfuscation attempts |
 | **Subagent depth** | Max nesting depth of 2 to prevent runaway agent spawning |
 
 See [`SECURITY.md`](SECURITY.md) to report vulnerabilities. See [`docs/TOOLS.md`](docs/TOOLS.md) for the full tool security model.
@@ -506,6 +558,9 @@ See [`SECURITY.md`](SECURITY.md) to report vulnerabilities. See [`docs/TOOLS.md`
 - [x] **Nvidia NIM provider** — third provider with auto-fallback (v1.0)
 - [x] **Code complexity analysis** — polyglot codebase classifier informing model selection (v1.0)
 - [x] **Chunked plan generation** — large plans auto-chunk with outline + wave expansion (v1.0)
+- [x] **Engine decomposition** — PhaseCoordinator, StateMachine, WorkflowCache extraction (v1.7)
+- [x] **Config externalization** — prompt overrides, provider capabilities, UI config (v1.7)
+- [x] **Streaming performance** — viewport virtualization, markdown parser, 10fps render (v1.7)
 - [ ] **Ghost mode** — fully headless runs that produce a structured diff without touching the TUI
 - [ ] **Picture-in-picture** — run a second agent in a side pane for cross-review
 - [ ] **Deferred tools** — queue tool calls that require human approval for batch review
@@ -526,7 +581,7 @@ If you use M31 Autonomous in your research, please cite it:
   title        = {M31 Autonomous: A Terminal-Native AI Coding Agent with Seven-Phase Workflow Orchestration},
   year         = {2026},
   url          = {https://github.com/eshanized/M31A},
-  version      = {v1.6.0}
+  version      = {v1.7.0}
 }
 ```
 
