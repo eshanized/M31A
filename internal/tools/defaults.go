@@ -41,6 +41,8 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	bashMaxTimeoutSecs := 1800
 	webfetchMaxRetries := 3
 	webfetchRetryDelayMs := 100
+	var additionalBlockedCommands []string
+	var additionalObfuscationPatterns []string
 	if toolsCfg != nil {
 		if toolsCfg.BashMaxTimeoutSecs > 0 {
 			bashMaxTimeoutSecs = toolsCfg.BashMaxTimeoutSecs
@@ -51,9 +53,11 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 		if toolsCfg.WebfetchRetryDelayMs > 0 {
 			webfetchRetryDelayMs = toolsCfg.WebfetchRetryDelayMs
 		}
+		additionalBlockedCommands = toolsCfg.AdditionalBlockedCommands
+		additionalObfuscationPatterns = toolsCfg.AdditionalObfuscationPatterns
 	}
 
-	if err := d.Register(NewBash(workDir, bashMaxTimeoutSecs)); err != nil {
+	if err := d.Register(NewBash(workDir, bashMaxTimeoutSecs, additionalBlockedCommands, additionalObfuscationPatterns)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewFileRead(workDir)); err != nil {

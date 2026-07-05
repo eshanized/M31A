@@ -396,6 +396,16 @@ type ToolsConfig struct {
 	// Execute phase (F-086, F-087)
 	MaxToolConcurrency int `toml:"max_tool_concurrency"`
 	LoopDetectWindow   int `toml:"loop_detect_window"`
+
+	// Dangerous command extensions (F-017): user-defined patterns appended to the
+	// compiled security baseline. These are regex patterns matched against bash input.
+	// The compiled baseline is never bypassable via config.
+	// Example: ["docker rm", "kubectl delete", "terraform destroy"]
+	AdditionalBlockedCommands []string `toml:"additional_blocked_commands"`
+
+	// Additional obfuscation patterns: user-defined patterns appended to the
+	// compiled obfuscation detection list.
+	AdditionalObfuscationPatterns []string `toml:"additional_obfuscation_patterns"`
 }
 
 type AgentsConfig struct {

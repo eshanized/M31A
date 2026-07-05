@@ -13,7 +13,7 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		name   string
 		schema string
 	}{
-		{"Bash", NewBash(".", 1800).ParameterSchema()},
+		{"Bash", NewBash(".", 1800, nil, nil).ParameterSchema()},
 		{"FileRead", NewFileRead(".").ParameterSchema()},
 		{"FileWrite", NewFileWrite(".", ".").ParameterSchema()},
 		{"Glob", NewGlob(".").ParameterSchema()},

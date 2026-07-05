@@ -19,18 +19,22 @@ import (
 var _ types.Tool = (*Bash)(nil)
 
 type Bash struct {
-	workDir    string
-	maxTimeout time.Duration
+	workDir                    string
+	maxTimeout                 time.Duration
+	additionalBlockedCommands  []string
+	additionalObfuscationPatterns []string
 }
 
-func NewBash(workDir string, maxTimeoutSecs int) *Bash {
+func NewBash(workDir string, maxTimeoutSecs int, additionalBlockedCommands []string, additionalObfuscationPatterns []string) *Bash {
 	maxTimeout := types.BashTimeout
 	if maxTimeoutSecs > 0 {
 		maxTimeout = time.Duration(maxTimeoutSecs) * time.Second
 	}
 	return &Bash{
-		workDir:    workDir,
-		maxTimeout: maxTimeout,
+		workDir:                    workDir,
+		maxTimeout:                 maxTimeout,
+		additionalBlockedCommands:  additionalBlockedCommands,
+		additionalObfuscationPatterns: additionalObfuscationPatterns,
 	}
 }
 
@@ -79,7 +83,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	// Check for dangerous commands before execution
-	if reason, blocked := checkDangerousCommand(command); blocked {
+	if reason, blocked := checkDangerousCommand(command, t.additionalBlockedCommands, t.additionalObfuscationPatterns); blocked {
 		return types.ToolResult{}, types.NewToolError(
 			fmt.Errorf("command blocked: %s", reason),
 			"Modify the command to avoid destructive patterns. If this is intentional, use a more specific command.",
@@ -516,7 +520,9 @@ func containsVariableExpansion(cmd string) bool {
 
 // checkDangerousCommand checks if a command matches any dangerous patterns.
 // Returns the reason and true if blocked, or empty string and false if allowed.
-func checkDangerousCommand(command string) (string, bool) {
+// The compiled baseline is always checked first (security baseline — never bypassable).
+// Additional patterns from config are checked after the baseline.
+func checkDangerousCommand(command string, additionalBlocked []string, additionalObfuscation []string) (string, bool) {
 	normalized := normalizeCommand(command)
 
 	// Block if variable expansion detected (prevents injection via env vars)
@@ -524,6 +530,7 @@ func checkDangerousCommand(command string) (string, bool) {
 		return "command contains variable expansion (potential injection)", true
 	}
 
+	// Check compiled baseline (security baseline — never bypassable)
 	for _, dp := range dangerousCommandPatterns {
 		if strings.Contains(normalized, dp.pattern) {
 			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
@@ -534,6 +541,20 @@ func checkDangerousCommand(command string) (string, bool) {
 			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
 		}
 	}
+
+	// Check user-added blocked commands (can be bypassed by removing from config)
+	for _, pattern := range additionalBlocked {
+		if strings.Contains(normalized, pattern) {
+			return fmt.Sprintf("blocked by user-configured command: %q", pattern), true
+		}
+	}
+	// Check user-added obfuscation patterns
+	for _, pattern := range additionalObfuscation {
+		if strings.Contains(normalized, pattern) {
+			return fmt.Sprintf("blocked by user-configured obfuscation pattern: %q", pattern), true
+		}
+	}
+
 	return "", false
 }
 

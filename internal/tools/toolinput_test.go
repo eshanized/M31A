@@ -13,7 +13,7 @@ import (
 
 func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
 	d := NewDispatcher(nil)
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
 	// Send a dangerous tool call
@@ -66,7 +66,7 @@ func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
 
 func TestDispatcher_PermissionTimeout_Typed(t *testing.T) {
 	d := NewDispatcher(nil)
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
 	call := types.ToolCall{
@@ -94,7 +94,7 @@ func TestDispatcher_PermissionTimeout_Typed(t *testing.T) {
 
 func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
 	d := NewDispatcher(nil)
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
 	call := types.ToolCall{

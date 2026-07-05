@@ -148,6 +148,9 @@ func DefaultConfig() *Config {
 			// Execute phase (F-086, F-087)
 			MaxToolConcurrency: 4,
 			LoopDetectWindow:   3,
+			// Dangerous command extensions (F-017)
+			AdditionalBlockedCommands:      []string{},
+			AdditionalObfuscationPatterns:  []string{},
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",

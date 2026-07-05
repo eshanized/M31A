@@ -35,7 +35,7 @@ func TestBuildToolDefs_IncludesAllRegistered(t *testing.T) {
 func TestBuildToolDefs_WithSchemaProvider(t *testing.T) {
 	t.Parallel()
 	d := NewDispatcher(nil)
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
 	defs := BuildToolDefs(d)

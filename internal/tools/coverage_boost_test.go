@@ -579,7 +579,7 @@ func TestWebFetch_Close(t *testing.T) {
 
 func TestDispatcher_Unregister(t *testing.T) {
 	d := NewDispatcher(nil)
-	d.Register(NewBash(t.TempDir(), 1800))
+	d.Register(NewBash(t.TempDir(), 1800, nil, nil))
 	d.Unregister("Bash")
 	// After unregister, executing should fail
 	_, err := d.Execute(context.Background(), types.ToolCall{
@@ -616,7 +616,7 @@ func TestAgent_UnregisterTool(t *testing.T) {
 	// UnregisterTool is in agent.go; test it can be called
 	dir := t.TempDir()
 	d := NewDispatcher(nil)
-	d.Register(NewBash(dir, 1800))
+	d.Register(NewBash(dir, 1800, nil, nil))
 	// Just verify that the dispatcher can unregister
 	d.Unregister("Bash")
 }

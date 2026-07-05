@@ -11,7 +11,7 @@ import (
 )
 
 func TestBashTool_Timeout_RejectsZero(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -29,7 +29,7 @@ func TestBashTool_Timeout_RejectsZero(t *testing.T) {
 }
 
 func TestBashTool_Timeout_RejectsNegative(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -47,7 +47,7 @@ func TestBashTool_Timeout_RejectsNegative(t *testing.T) {
 }
 
 func TestBashTool_Timeout_RejectsExcessive(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -65,7 +65,7 @@ func TestBashTool_Timeout_RejectsExcessive(t *testing.T) {
 }
 
 func TestBashTool_Timeout_AcceptsBoundary(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -83,7 +83,7 @@ func TestBashTool_Timeout_AcceptsBoundary(t *testing.T) {
 }
 
 func TestBashTool_Command_MustBeString(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
@@ -100,7 +100,7 @@ func TestBashTool_Command_MustBeString(t *testing.T) {
 }
 
 func TestBashTool_OutputCap(t *testing.T) {
-	bash := NewBash(t.TempDir(), 1800)
+	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	input := types.ToolInput{
 		Name: "Bash",
 		Params: map[string]any{
