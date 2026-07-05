@@ -707,19 +707,22 @@ func (s *SettingsModel) renderProviderTab() string {
 		}
 	} else {
 		for _, hs := range s.healthResults {
-			icon, color := "⟳", t.Warning
+			icon, color, label := "⟳", t.Warning, "Checking"
 			switch hs.Status {
 			case "ok":
-				icon, color = "✓", t.Success
+				icon, color, label = "●", t.Success, "Live"
 			case "error":
-				icon, color = "✗", t.Error
+				icon, color, label = "○", t.Error, "Offline"
+			case "slow":
+				icon, color, label = "◐", t.Warning, "Slow"
 			}
 			detail := ""
 			if hs.Detail != "" {
 				detail = lipgloss.NewStyle().Foreground(t.TextMuted).Render(" — " + hs.Detail)
 			}
+			statusText := fmt.Sprintf("%s %s %s", icon, hs.Name, label)
 			lines = append(lines, lipgloss.NewStyle().Foreground(color).PaddingLeft(4).
-				Render(icon+" "+hs.Name)+detail)
+				Render(statusText)+detail)
 		}
 	}
 

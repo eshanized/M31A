@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/components"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -139,6 +140,10 @@ func (m *ReplModel) View() string {
 
 	// ── Textarea ───────────────────────────────────────────────────────────
 	textareaView := m.textarea.View()
+	// Apply visible focus ring when the REPL input has keyboard focus.
+	// The input loses focus when modals/overlays are open (slash, mention, etc.).
+	hasFocus := !m.slashVisible && !m.mentionVisible && !m.quickActionsVisible
+	textareaView = components.RenderFocusRing(textareaView, hasFocus, t, rw)
 
 	// ── Status bar ─────────────────────────────────────────────────────────
 	var thinkingDur int64
@@ -266,6 +271,9 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 
 	// Textarea
 	textareaView := m.textarea.View()
+	// Apply visible focus ring when the REPL input has keyboard focus.
+	hasFocus := !m.slashVisible && !m.mentionVisible && !m.quickActionsVisible
+	textareaView = components.RenderFocusRing(textareaView, hasFocus, t, rw)
 
 	// Assemble exactly contentHeight rows: viewport + input border + textarea.
 	parts := []string{viewportContent, inputBorder, textareaView}

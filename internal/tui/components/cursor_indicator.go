@@ -44,3 +44,21 @@ func CursorWidth(char string) int {
 	}
 	return lipgloss.Width(char)
 }
+
+// RenderFocusRing wraps content in a visible focus ring border when focused.
+// When focused is false, returns content unchanged. The focus ring uses the
+// theme's brand color with a rounded border to visually indicate which
+// interactive element currently has keyboard focus.
+func RenderFocusRing(content string, focused bool, t theme.Theme, width int) string {
+	if !focused {
+		return content
+	}
+	if t.Brand == "" {
+		t = theme.Default()
+	}
+	ringStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(t.Brand)).
+		Width(width)
+	return ringStyle.Render(content)
+}

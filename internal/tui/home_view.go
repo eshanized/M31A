@@ -41,6 +41,11 @@ func (hm *HomeModel) renderHome() string {
 		Width(promptMaxW).
 		Render(hm.input.View())
 
+	// Apply visible focus ring when the input has keyboard focus.
+	// The home screen input always has focus unless slash suggestions are open.
+	inputFocused := !hm.slashVisible
+	inputBox = components.RenderFocusRing(inputBox, inputFocused, t, promptMaxW)
+
 	tipsBlock := hm.renderTips(w)
 
 	// Tagline below logo (replaces version display)
