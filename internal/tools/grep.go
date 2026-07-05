@@ -503,13 +503,6 @@ func newGitignoreCache() *gitignoreCache {
 	}
 }
 
-func (c *gitignoreCache) get(dir string) (*gitignoreCacheEntry, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	entry, ok := c.cache[dir]
-	return entry, ok
-}
-
 func (c *gitignoreCache) getOrCreate(dir string) *gitignoreCacheEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()

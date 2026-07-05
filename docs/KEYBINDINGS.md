@@ -1,6 +1,7 @@
 # Keyboard Shortcuts
 
-Default keybindings for M31 Autonomous's TUI.
+Default keybindings for M31A's TUI. All keybindings are shown dynamically
+in the help screen (? key) and are sourced from the keybinding registry.
 
 ---
 
@@ -11,12 +12,33 @@ Default keybindings for M31 Autonomous's TUI.
 | `Enter` | Submit prompt | REPL |
 | `Esc` | Cancel / go back | Any |
 | `Ctrl+C` | Quit (requires confirmation if active) | Any |
-| `q` | Quit when idle | REPL |
+| `?` | Toggle help screen | Any |
+| `Ctrl+P` | Open command palette | Any |
 | `Tab` | Next autocomplete suggestion | Input with suggestions |
 | `Shift+Tab` | Previous autocomplete suggestion | Input with suggestions |
 | `Up` | Previous suggestion / scroll up | Suggestions, history |
 | `Down` | Next suggestion / scroll down | Suggestions, history |
-| `Ctrl+S` | Save session checkpoint | REPL (session active) |
+
+---
+
+## REPL Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Ctrl+J` | Insert newline (multi-line) |
+| `Shift+Enter` | Insert newline (multi-line) |
+| `Up` / `Down` | Navigate command history |
+| `Tab` | Complete slash/mention suggestion |
+| `/` | Slash command autocomplete |
+| `@` | File mention autocomplete |
+| `Ctrl+L` / `End` | Scroll to bottom |
+| `Ctrl+U` / `PgUp` | Scroll page up |
+| `Ctrl+D` / `PgDn` | Scroll page down |
+| `j` / `k` | Scroll line down/up (when input empty) |
+| `Ctrl+Y` | Copy last assistant message |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+X` | Leader key prefix |
 
 ---
 
@@ -24,7 +46,7 @@ Default keybindings for M31 Autonomous's TUI.
 
 Default leader key: `Ctrl+X`
 
-Press and release the leader key, then press the chord key within 2 seconds.
+Press and release the leader key, then press the chord key within 1 second.
 
 ### Global (any screen)
 
@@ -61,7 +83,10 @@ Press and release the leader key, then press the chord key within 2 seconds.
 | Key | Action |
 |-----|--------|
 | `Ctrl+P` | Open/close command palette |
-| `Ctrl+Q` | Open quick actions |
+| `Up` / `Down` | Navigate commands |
+| `Enter` | Execute selected command |
+| `Esc` | Close palette |
+| Type to filter | Fuzzy search commands |
 
 ---
 
@@ -101,9 +126,72 @@ Press and release the leader key, then press the chord key within 2 seconds.
 | Key | Action |
 |-----|--------|
 | `y` | Allow (this time) |
-| `a` | Allow always |
+| `a` | Allow for session |
 | `n` | Deny |
 | `e` | Exit |
+
+---
+
+## Empty State Navigation
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Focus next action |
+| `k` / `Up` | Focus previous action |
+| `Enter` | Activate focused action |
+| `Esc` | Close empty state |
+
+---
+
+## Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start new workflow |
+| `/goal` | Set session goal |
+| `/plan` | Start plan phase |
+| `/execute` | Start execute phase |
+| `/verify` | Start verify phase |
+| `/ship` | Start ship phase |
+| `/pause` | Pause workflow |
+| `/resume-task` | Resume workflow |
+| `/metrics` | Session analytics |
+| `/chat` | Start new chat session |
+| `/sessions` | List recent sessions |
+| `/resume` | Open session browser |
+| `/save` | Save session |
+| `/clear` | Clear conversation |
+| `/search` | Search messages |
+| `/flush` | Clear screen, reset view |
+| `/history` | Chat history browser |
+| `/status` | Show session info |
+| `/model` | Show or switch model |
+| `/provider` | Show or switch provider |
+| `/fallback` | Provider fallback status |
+| `/optimize` | Suggest cheaper model |
+| `/compress` | Compress context |
+| `/memory` | Manage context memory |
+| `/tokens` | Estimate token count |
+| `/cost` | Toggle cost display |
+| `/diff` | Show git diff |
+| `/rollback` | Browse commits |
+| `/bisect` | Git bisect |
+| `/settings` | Open settings editor |
+| `/config` | Show or set config |
+| `/health` | System health |
+| `/tools` | List available tools |
+| `/log` | Recent log entries |
+| `/key` | API key status |
+| `/keychain` | API key status (alias) |
+| `/dream` | Context memory (alias) |
+| `/ledger` | Learning ledger |
+| `/about` | Version & system info |
+| `/reset` | Reset to first-run |
+| `/quit` | Exit application |
+| `/exit` | Exit (alias) |
+| `/getting-started` | Show getting-started guide |
+| `/quick` | Toggle quick mode for simple tasks |
+| `/skip` | Skip to a workflow phase |
 
 ---
 
@@ -114,5 +202,8 @@ Keybindings can be customized in `~/.m31a/config.toml`:
 ```toml
 [ui]
 leader_key = "ctrl+x"
-leader_timeout_ms = 2000
+leader_timeout_ms = 1000
 ```
+
+The leader timeout controls how long (in milliseconds) you have to press
+the chord key after pressing the leader key. Default is 1000ms (1 second).

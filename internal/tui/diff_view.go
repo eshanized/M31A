@@ -150,7 +150,7 @@ func parseHunkHeader(header string) (oldStart, newStart int) {
 	if commaIdx < 0 {
 		return 0, 0
 	}
-	fmt.Sscanf(header[dashIdx+1:dashIdx+commaIdx], "%d", &oldStart)
+	_, _ = fmt.Sscanf(header[dashIdx+1:dashIdx+commaIdx], "%d", &oldStart)
 
 	// Find "+newStart" part
 	plusIdx := strings.Index(header, "+")
@@ -164,7 +164,7 @@ func parseHunkHeader(header string) (oldStart, newStart int) {
 	if commaIdx < 0 {
 		return oldStart, 0
 	}
-	fmt.Sscanf(header[plusIdx+1:plusIdx+commaIdx], "%d", &newStart)
+	_, _ = fmt.Sscanf(header[plusIdx+1:plusIdx+commaIdx], "%d", &newStart)
 
 	return oldStart, newStart
 }

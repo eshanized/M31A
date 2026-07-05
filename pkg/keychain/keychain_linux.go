@@ -38,21 +38,6 @@ func validateService(service string) error {
 	return nil
 }
 
-// sanitizeService normalizes a service name to prevent path traversal and
-// injection attacks. Removes path separators (replacing with underscore),
-// strips null bytes, and trims whitespace. This is a defense-in-depth
-// measure; validateService should be called first for strict validation.
-func sanitizeService(service string) string {
-	// Replace path separators with underscore to prevent traversal
-	service = strings.ReplaceAll(service, "/", "_")
-	service = strings.ReplaceAll(service, "\\", "_")
-	// Remove null bytes
-	service = strings.ReplaceAll(service, "\x00", "")
-	// Trim whitespace
-	service = strings.TrimSpace(service)
-	return service
-}
-
 // Get retrieves the secret for the given service.
 // Attempts D-Bus Secret Service first, then falls back to pass CLI.
 func (k *linuxKeychain) Get(service string) (string, error) {

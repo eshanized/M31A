@@ -1,6 +1,9 @@
 # TUI Screen Reference
 
-M31 Autonomous uses a Bubble Tea TUI with 33 screens. The active screen is determined by the current `Screen` constant.
+M31A uses a Bubble Tea TUI with consolidated screens. The active screen is
+determined by the current `Screen` constant. Screen navigation uses Esc to
+go back, breadcrumbs show the navigation path, and the sidebar is visible
+by default on terminals with 80+ columns.
 
 ---
 
@@ -48,28 +51,37 @@ M31 Autonomous uses a Bubble Tea TUI with 33 screens. The active screen is deter
 
 ### Home (ScreenHome)
 
-Landing screen shown on startup. Displays logo, recent sessions, and quick-start tips. Submit a prompt to begin a workflow.
+Landing screen shown on startup. Displays logo, recent sessions, quick-start
+tips, and a getting-started tour for first-time users. Submit a prompt to
+begin a workflow.
 
 ### REPL (ScreenREPL)
 
 The main interaction screen:
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Header: Model | Tokens | Cost | Health Status   │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  Conversation area (scrollable)                 │
-│  - User messages (styled)                       │
-│  - Assistant responses (streamed in real-time)  │
-│  - Tool call cards (collapsible)                │
-│  - Thinking blocks (collapsible, dimmed)        │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│ Input bar: > _                                  │
-│ Suggestions dropdown (on / command partial)     │
-└─────────────────────────────────────────────────┘
++---------------------------------------------------+
+| Header: Model | Tokens | Cost | Health Status     |
++---------------------------------------------------+
+|                                                     |
+|  Conversation area (scrollable)                     |
+|  - User messages (styled)                           |
+|  - Assistant responses (streamed in real-time)      |
+|  - Tool call cards (collapsible)                    |
+|  - Thinking blocks (collapsible, dimmed)            |
+|                                                     |
++---------------------------------------------------+
+| Input bar: > _                                      |
+| Suggestions dropdown (on / command partial)         |
++---------------------------------------------------+
 ```
+
+The REPL includes:
+- Breadcrumb navigation in the header (from screen stack)
+- Sidebar panel (visible by default on 80+ column terminals)
+- Workflow phase progress indicator in the status bar
+- Lightweight markdown rendering during streaming (10fps)
+- Viewport virtualization for large conversations
 
 ### First Run (ScreenFirstRun)
 
@@ -77,6 +89,8 @@ API key setup wizard shown on first launch. Guides through:
 - Provider selection (OpenRouter, Zen, Nvidia)
 - API key entry
 - Model selection
+
+After completion, shows a "What's next" page with usage instructions.
 
 ### Settings (ScreenSettings)
 
@@ -88,6 +102,8 @@ Settings editor with 6 tabs:
 - Feature toggles
 - Keychain management
 
+Settings use Enter-only activation (no e/space).
+
 ### Config Viewer (ScreenConfig)
 
 Full config viewer showing all TOML configuration in read-only mode.
@@ -95,6 +111,8 @@ Full config viewer showing all TOML configuration in read-only mode.
 ### Help (ScreenHelp)
 
 Keybinding help overlay listing all keyboard shortcuts by context.
+Sections are generated dynamically from the keybinding registry to
+ensure accuracy. Scrollable with j/k, close with Esc.
 
 ---
 
@@ -155,15 +173,15 @@ Runtime verification screen:
 
 Session list with preview:
 ```
-┌──────────────────────────────────┐
-│  Sessions                        │
-│                                  │
-│  >  abc12345  My session       │
-│     def67890  Code review      │
-│     ...                         │
-│                                  │
-│  [↑/↓] navigate  [Enter] select │
-└──────────────────────────────────┘
++----------------------------------+
+|  Sessions                        |
+|                                  |
+|  >  abc12345  My session         |
+|     def67890  Code review        |
+|     ...                          |
+|                                  |
+|  [up/down] navigate  [Enter] select |
++----------------------------------+
 ```
 
 ### Session Detail (ScreenSessionDetail)
@@ -194,6 +212,7 @@ Session analytics:
 
 Full diff viewer:
 - Syntax-highlighted diff
+- Old/new line numbers from hunk headers
 - Line-by-line navigation
 
 ---
@@ -234,7 +253,7 @@ Notification history:
 ### Dashboard (ScreenDashboard)
 
 Workflow pipeline overview:
-- Phase progress bar
+- Phase progress bar (Phase X/Y with block characters)
 - Current goal and model
 - Activity timeline
 
@@ -264,22 +283,23 @@ Decision log browser:
 ### Permission Modal (ScreenPermission)
 
 Tool permission prompt:
-- Allow / Allow Always / Deny / Exit
-- Countdown timer
+- Allow / Allow for session / Deny / Exit
+- 10-minute timeout (no auto-deny)
 - Tool details and risk level
+- Responsive width (60-80 columns)
 
 ### Confirm Quit (ScreenConfirmQuit)
 
 Quit confirmation during active processing:
 ```
-┌──────────────────────────────────┐
-│  Confirm Quit                    │
-│                                  │
-│  An operation is in progress.    │
-│  Are you sure you want to quit?  │
-│                                  │
-│  [y] Yes, quit    [n] No, stay  │
-└──────────────────────────────────┘
++----------------------------------+
+|  Confirm Quit                    |
+|                                  |
+|  An operation is in progress.    |
+|  Are you sure you want to quit?  |
+|                                  |
+|  [y] Yes, quit    [n] No, stay  |
++----------------------------------+
 ```
 
 ### Phase Model Picker (ScreenPhaseModelPicker)
@@ -294,4 +314,15 @@ Dual-model picker:
 Fuzzy search command palette:
 - All registered slash commands
 - Category grouping (Core, AI, Config, Session, Git, Workflow)
-- Keyboard shortcut display
+- Keyboard shortcut display (synced with actual keybindings)
+
+---
+
+## Navigation
+
+- **Esc** always means "go back / close overlay" across all screens
+- **Breadcrumbs** in the header show the navigation path (from screen stack)
+- **j/k** scroll in viewport contexts
+- **Enter** confirms/submits
+- **Sidebar** visible by default on terminals with 80+ columns
+- **Help** screen (?) shows all keybindings dynamically

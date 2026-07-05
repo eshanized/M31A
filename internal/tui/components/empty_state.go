@@ -11,18 +11,59 @@ import (
 type Action struct {
 	Label string
 	Hint  string
+	// OnActivate is an optional callback invoked when the user presses Enter
+	// on this action. If nil, the action is display-only.
+	OnActivate func()
 }
 
 // EmptyState renders a branded, illustrated empty state with icon, title,
-// description, and actionable suggestions.
+// description, and actionable suggestions. Actions are keyboard-navigable
+// using j/k or up/down to move and Enter to activate (D-18, D-44).
 type EmptyState struct {
-	Icon     string // Unicode icon (e.g., "◈")
-	Title    string
-	Subtitle string
-	Actions  []Action
-	Theme    theme.Theme
-	Width    int
-	Height   int
+	Icon         string // Unicode icon (e.g., "◈")
+	Title        string
+	Subtitle     string
+	Actions      []Action
+	FocusedIndex int  // which action is focused (-1 = none)
+	Theme        theme.Theme
+	Width        int
+	Height       int
+}
+
+// MoveFocusDown moves the focus to the next action.
+func (e *EmptyState) MoveFocusDown() {
+	if len(e.Actions) == 0 {
+		return
+	}
+	if e.FocusedIndex < 0 {
+		e.FocusedIndex = 0
+	} else if e.FocusedIndex < len(e.Actions)-1 {
+		e.FocusedIndex++
+	}
+}
+
+// MoveFocusUp moves the focus to the previous action.
+func (e *EmptyState) MoveFocusUp() {
+	if len(e.Actions) == 0 {
+		return
+	}
+	if e.FocusedIndex > 0 {
+		e.FocusedIndex--
+	}
+}
+
+// ActivateFocused invokes the OnActivate callback of the currently focused
+// action. Returns true if an action was activated.
+func (e *EmptyState) ActivateFocused() bool {
+	if e.FocusedIndex < 0 || e.FocusedIndex >= len(e.Actions) {
+		return false
+	}
+	a := e.Actions[e.FocusedIndex]
+	if a.OnActivate != nil {
+		a.OnActivate()
+		return true
+	}
+	return false
 }
 
 // Render returns the empty state as a centered string.
@@ -62,13 +103,25 @@ func (e EmptyState) Render() string {
 		subtitleLine = s.EmptyStateHint.Render(e.Subtitle)
 	}
 
-	// Actions
+	// Actions with keyboard focus indicator
 	var actionLines []string
 	if len(e.Actions) > 0 {
-		// Build action card
 		var items []string
-		for _, a := range e.Actions {
-			label := s.EmptyStateAction.Render("▸ " + a.Label)
+		for i, a := range e.Actions {
+			// Show focus indicator: arrow prefix for focused, space for others
+			prefix := "  "
+			if i == e.FocusedIndex {
+				prefix = "→ "
+			}
+
+			var label string
+			if i == e.FocusedIndex {
+				label = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).
+					Render(prefix + a.Label)
+			} else {
+				label = s.EmptyStateAction.Render(prefix + a.Label)
+			}
+
 			hint := ""
 			if a.Hint != "" {
 				hint = s.EmptyStateHint.Italic(true).Render("  · " + a.Hint)
@@ -93,8 +146,12 @@ func (e EmptyState) Render() string {
 		actionLines = append(actionLines, actionsBlock)
 	}
 
-	// Keyboard hint
-	hintLine := s.EmptyStateHint.Render("Type a message or press ctrl+p for commands")
+	// Keyboard hint — shows navigation instructions when actions exist
+	hintText := "Type a message or press ctrl+p for commands"
+	if len(e.Actions) > 0 {
+		hintText = "j/k navigate  Enter select  Esc close"
+	}
+	hintLine := s.EmptyStateHint.Render(hintText)
 
 	// Compose vertically
 	var parts []string

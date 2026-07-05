@@ -109,8 +109,9 @@ func AgentLoop(
 			}
 		}()
 
-		ctx, cancel := context.WithCancel(ctx)
+		childCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
+		ctx = childCtx
 
 		if contextLength <= 0 {
 			contextLength = 128_000

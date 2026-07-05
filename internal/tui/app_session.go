@@ -122,7 +122,10 @@ func (m *AppState) resolveWorkflowMode(goal string) types.WorkflowMode {
 		workDir = m.git.WorkDir()
 	}
 	complexity := workflow.ClassifyPrompt(goal, workDir)
-	return workflow.WorkflowModeForComplexity(complexity)
+	mode := workflow.WorkflowModeForComplexity(complexity)
+
+	// Apply quick mode adjustment for simple tasks when enabled
+	return adjustModeForQuickMode(mode, goal, m.quickMode)
 }
 
 // handlePermissionResponse processes the user's permission decision.
