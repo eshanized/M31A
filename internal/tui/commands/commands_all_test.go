@@ -67,6 +67,7 @@ func TestDefaultCommands_AllRegistered(t *testing.T) {
 		"sessions", "export", "fork", "prev", "next", "save", "goal", "resume", "ledger",
 		"new", "workflow", "plan", "refine", "execute", "verify", "runtime", "ship", "phase", "pause", "pending", "resume-task", "agent-mode",
 		"metrics", "dashboard", "notifications", "files", "ghost",
+		"getting-started", "quick", "skip",
 		"agent", "agent-cancel", "complexity", "decisions",
 	}
 	registered := r.List()

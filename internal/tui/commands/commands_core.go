@@ -330,6 +330,98 @@ func handleSearch(args []string, ctx CommandContext) CommandResult {
 	}
 }
 
+// handleGettingStarted triggers the getting-started tour.
+func handleGettingStarted(_ []string, _ CommandContext) CommandResult {
+	return CommandResult{
+		Success: true,
+		Message: "**Getting Started Tour**\n\n" +
+			"Welcome to M31A! Here's what you need to know:\n\n" +
+			"**What is M31A?**\n" +
+			"An AI-powered terminal assistant that plans and executes tasks autonomously.\n\n" +
+			"**How it works:**\n" +
+			"  Discuss → Plan → Execute → Verify → Ship\n\n" +
+			"**Quick start:**\n" +
+			"Type a task description to begin. Examples:\n" +
+			"  • \"Fix the failing tests\"\n" +
+			"  • \"Add error handling to the API\"\n" +
+			"  • \"Explain this codebase architecture\"\n\n" +
+			"**Navigation:**\n" +
+			"  Esc — Go back / close overlay\n" +
+			"  j/k — Scroll up / down\n" +
+			"  Enter — Confirm / submit\n" +
+			"  ? — Show help\n" +
+			"  ctrl+p — Command palette\n" +
+			"  ctrl+b — Toggle sidebar",
+	}
+}
+
+// handleQuickMode toggles quick mode on or off.
+func handleQuickMode(args []string, ctx CommandContext) CommandResult {
+	if len(args) == 0 {
+		status := "off"
+		if ctx.QuickMode != nil && *ctx.QuickMode {
+			status = "on"
+		}
+		return CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("**Quick mode:** %s\n\nWhen on, simple tasks auto-skip Discuss phase and go straight to Plan/Execute.\n\nUsage: `/quick on` or `/quick off`", status),
+		}
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "on":
+		if ctx.SetQuickMode != nil {
+			ctx.SetQuickMode(true)
+		}
+		return CommandResult{Success: true, Message: "Quick mode **enabled**. Simple tasks will skip Discuss phase."}
+	case "off":
+		if ctx.SetQuickMode != nil {
+			ctx.SetQuickMode(false)
+		}
+		return CommandResult{Success: true, Message: "Quick mode **disabled**. All tasks go through the full workflow."}
+	default:
+		return CommandResult{Success: false, Message: "Usage: `/quick [on|off]`"}
+	}
+}
+
+// handleSkipPhase skips to a specific workflow phase.
+func handleSkipPhase(args []string, ctx CommandContext) CommandResult {
+	if len(args) == 0 {
+		return CommandResult{
+			Success: true,
+			Message: "**Skip phase**\n\nSkip to a specific workflow phase:\n\n" +
+				"  `/skip discuss` — Skip to Plan\n" +
+				"  `/skip plan` — Skip to Execute\n" +
+				"  `/skip verify` — Skip to Ship\n\n" +
+				"Usage: `/skip <phase>`",
+		}
+	}
+
+	phase := strings.ToLower(args[0])
+	switch phase {
+	case "discuss":
+		return CommandResult{
+			Success:    true,
+			Message:    "Skipping Discuss phase → moving to Plan.",
+			SkipToPhase: "plan",
+		}
+	case "plan":
+		return CommandResult{
+			Success:    true,
+			Message:    "Skipping Plan phase → moving to Execute.",
+			SkipToPhase: "execute",
+		}
+	case "verify":
+		return CommandResult{
+			Success:    true,
+			Message:    "Skipping Verify phase → moving to Ship.",
+			SkipToPhase: "ship",
+		}
+	default:
+		return CommandResult{Success: false, Message: fmt.Sprintf("Unknown phase: %s. Valid phases: discuss, plan, verify", phase)}
+	}
+}
+
 // handleAbout shows version and system information.
 func handleAbout(_ []string, ctx CommandContext) CommandResult {
 	version := ctx.Version

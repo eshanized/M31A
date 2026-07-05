@@ -47,6 +47,7 @@ type CommandResult struct {
 	ResumeQuestions []string
 	ConfirmRequired bool
 	ConfirmPrompt   string
+	SkipToPhase     string // when set, skip workflow to this phase
 }
 
 // CommandHandler processes a slash command invocation.
@@ -74,6 +75,8 @@ type CommandContext struct {
 	CopyError       func() tea.Cmd
 	AgentMode       *bool
 	SetAgentMode    func(bool)
+	QuickMode       *bool
+	SetQuickMode    func(bool)
 	CancelAgent     func()
 	Version         string
 	Keychain        keychain.Keychain
@@ -288,6 +291,9 @@ func DefaultCommands() *CommandRegistry {
 	_ = r.Register("notifications", handleNotifications, "Open notification center")
 	_ = r.Register("files", handleFiles, "Open file explorer")
 	_ = r.Register("ghost", handleGhost, "Ghost write files")
+	_ = r.Register("getting-started", handleGettingStarted, "Show the getting-started tour")
+	_ = r.Register("quick", handleQuickMode, "Toggle quick mode (auto-skip Discuss for simple tasks)")
+	_ = r.Register("skip", handleSkipPhase, "Skip to a specific workflow phase")
 
 	// Subagents
 	_ = r.Register("agent", handleAgent, "Spawn a parallel subagent (or list active)")

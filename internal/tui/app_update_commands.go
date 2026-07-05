@@ -56,6 +56,8 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 				SubagentManager: m.subagentManager,
 				AgentMode:       &m.agentMode,
 				SetAgentMode:    func(v bool) { m.agentMode = v },
+				QuickMode:       &m.quickMode,
+				SetQuickMode:    func(v bool) { m.quickMode = v },
 				CancelAgent: func() {
 					if m.streamCancelFn != nil {
 						m.streamCancelFn()
@@ -134,6 +136,12 @@ func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
 		m.workflowGoal = result.ResumeGoal
 		m.workflowPhase = result.ResumePhase
 		return m.runWorkflowFromGoal(result.ResumeGoal)
+	}
+
+	// Skip to phase
+	if result.SkipToPhase != "" {
+		m.workflowPhase = types.WorkflowPhase(result.SkipToPhase)
+		return nil
 	}
 
 	// Cmd callback

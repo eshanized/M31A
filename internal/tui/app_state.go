@@ -216,6 +216,7 @@ type AppState struct {
 
 	// Autonomous agent mode
 	agentMode      bool // when true, plain text triggers agent loop (default)
+	quickMode      bool // when true, simple tasks auto-skip Discuss phase
 	promptRegistry *workflow.PromptRegistry
 	agentCh        <-chan tea.Msg // agent loop channel for cmd chain
 
@@ -248,6 +249,16 @@ func (a *AppState) SetSubagentManager(m *subagent.Manager) {
 	if m != nil {
 		a.subagentsModel = NewSubagentsModel(a.themeManager.Current())
 	}
+}
+
+// SetQuickMode enables or disables quick mode for simple tasks.
+func (a *AppState) SetQuickMode(enabled bool) {
+	a.quickMode = enabled
+}
+
+// IsQuickMode returns whether quick mode is enabled.
+func (a *AppState) IsQuickMode() bool {
+	return a.quickMode
 }
 
 // SetCwd stores the working directory so it can be propagated to the REPL
