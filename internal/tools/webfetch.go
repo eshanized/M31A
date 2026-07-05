@@ -39,11 +39,6 @@ func getVersion() string {
 	return "dev"
 }
 
-const (
-	maxRetries     = 3
-	baseRetryDelay = 500 * time.Millisecond
-)
-
 type WebFetch struct {
 	sessionsDir     string
 	allowPrivateIPs bool
