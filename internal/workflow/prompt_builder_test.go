@@ -3,10 +3,12 @@ package workflow
 import (
 	"strings"
 	"testing"
+
+	"github.com/eshanized/M31A/internal/config"
 )
 
 func TestNewPromptBuilder(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -16,7 +18,7 @@ func TestNewPromptBuilder(t *testing.T) {
 }
 
 func TestGetPrompt_Base(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestGetPrompt_Base(t *testing.T) {
 }
 
 func TestGetPrompt_ToolUse(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -44,7 +46,7 @@ func TestGetPrompt_ToolUse(t *testing.T) {
 }
 
 func TestGetPrompt_AllPrompts(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestGetPrompt_AllPrompts(t *testing.T) {
 }
 
 func TestGetPrompt_Nonexistent(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -78,7 +80,7 @@ func TestGetPrompt_Nonexistent(t *testing.T) {
 }
 
 func TestPrompt(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestPrompt(t *testing.T) {
 }
 
 func TestPrompt_ReturnsErrorOnInvalidName(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -103,7 +105,7 @@ func TestPrompt_ReturnsErrorOnInvalidName(t *testing.T) {
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -120,7 +122,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_EmptyExtras(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}
@@ -131,7 +133,7 @@ func TestBuildSystemPrompt_EmptyExtras(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_EmptyStringsIgnored(t *testing.T) {
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}

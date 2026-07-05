@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
@@ -515,7 +516,7 @@ func TestEngine_HasTestFiles(t *testing.T) {
 }
 
 func TestPromptRegistry_LoadPrompts(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}
@@ -548,7 +549,7 @@ func TestPromptRegistry_LoadPrompts(t *testing.T) {
 // Regression here re-triggers the DESTRUCTIVE permission dialog on "explain
 // the codebase" style requests.
 func TestAutonomousPrompt_ReadOnlyGuidance(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}

@@ -474,7 +474,12 @@ func NewEngine(sessionID, workDir, backupDir, planningDir string, p provider.LLM
 // NewEngineFromOptions creates a workflow engine from an EngineOptions struct.
 func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 
-	promptBuilder, err := NewPromptBuilder()
+	promptCfg := config.PromptConfig{}
+	projectRoot := opts.WorkDir
+	if opts.Config != nil {
+		promptCfg = opts.Config.Prompts
+	}
+	promptBuilder, err := NewPromptBuilder(promptCfg, projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}

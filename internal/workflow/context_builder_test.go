@@ -10,7 +10,7 @@ import (
 
 func newTestContextBuilder(t *testing.T) *ContextBuilder {
 	t.Helper()
-	pb, err := NewPromptBuilder()
+	pb, err := NewPromptBuilder(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("NewPromptBuilder failed: %v", err)
 	}

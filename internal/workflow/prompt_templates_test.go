@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"testing"
+
+	"github.com/eshanized/M31A/internal/config"
 )
 
 func TestSelectTemplate(t *testing.T) {
@@ -65,7 +67,7 @@ func TestSelectTemplate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := SelectTemplate(tt.modelID)
+			got := SelectTemplate(tt.modelID, config.PromptConfig{})
 			if tt.wantEmpty {
 				if got != "" {
 					t.Errorf("SelectTemplate(%q) = non-empty string, want empty", tt.modelID)

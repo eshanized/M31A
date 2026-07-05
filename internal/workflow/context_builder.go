@@ -76,7 +76,11 @@ func (cb *ContextBuilder) BuildSystemPrompt(activePhase string, extras ...string
 
 	// Inject model-specific template
 	if cb.modelForPhase != nil {
-		if modelTemplate := SelectTemplate(cb.modelForPhase(activePhase)); modelTemplate != "" {
+		var promptCfg config.PromptConfig
+		if cb.cfg != nil {
+			promptCfg = cb.cfg.Prompts
+		}
+		if modelTemplate := SelectTemplate(cb.modelForPhase(activePhase), promptCfg); modelTemplate != "" {
 			parts = append(parts, modelTemplate)
 		}
 	}

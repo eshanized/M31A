@@ -4,6 +4,11 @@ import (
 	"embed"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow/prompts"
 )
 
 //go:embed prompts/*.md
@@ -31,37 +36,84 @@ type PromptRegistry struct {
 	WebsiteBuild     string
 }
 
-// LoadPrompts reads all embedded prompt files and returns a registry.
-func LoadPrompts() (*PromptRegistry, error) {
+// promptNames maps registry field names to their prompt file names.
+var promptNames = map[string]string{
+	"base":                 "base",
+	"tool-use":             "tool-use",
+	"plan-format":          "plan-format",
+	"execute-task":         "execute-task",
+	"discuss-questions":    "discuss",
+	"self-heal":            "self-heal",
+	"demonstration-format": "demonstration",
+	"autonomous":           "autonomous",
+	"context-awareness":    "context-awareness",
+	"code-quality":         "code-quality",
+	"code-intelligence":    "code-intelligence",
+	"research":             "research",
+	"plan-check":           "plan-check",
+	"plan-revise":          "plan-revise",
+	"plan-outline":         "plan-outline",
+	"discuss-followup":     "discuss-followup",
+	"intent-classify":      "intent-classify",
+	"website-build":        "website-build",
+}
+
+// LoadPrompts reads all prompt files with override support and returns a registry.
+// Uses the 4-level priority chain: config override > project > global > embedded.
+func LoadPrompts(cfg config.PromptConfig, projectRoot string) (*PromptRegistry, error) {
 	r := &PromptRegistry{}
-	files := map[string]*string{
-		"prompts/base.md":                 &r.Base,
-		"prompts/tool-use.md":             &r.ToolUse,
-		"prompts/plan-format.md":          &r.PlanFormat,
-		"prompts/execute-task.md":         &r.ExecuteTask,
-		"prompts/discuss-questions.md":    &r.Discuss,
-		"prompts/self-heal.md":            &r.SelfHeal,
-		"prompts/demonstration-format.md": &r.Demonstration,
-		"prompts/autonomous.md":           &r.Autonomous,
-		"prompts/context-awareness.md":    &r.ContextAwareness,
-		"prompts/code-quality.md":         &r.CodeQuality,
-		"prompts/code-intelligence.md":    &r.CodeIntelligence,
-		"prompts/research.md":             &r.Research,
-		"prompts/plan-check.md":           &r.PlanCheck,
-		"prompts/plan-revise.md":          &r.PlanRevise,
-		"prompts/plan-outline.md":         &r.PlanOutline,
-		"prompts/discuss-followup.md":     &r.DiscussFollowup,
-		"prompts/intent-classify.md":      &r.IntentClassify,
-		"prompts/website-build.md":        &r.WebsiteBuild,
+	registryFields := map[string]*string{
+		"base":                 &r.Base,
+		"tool-use":             &r.ToolUse,
+		"plan-format":          &r.PlanFormat,
+		"execute-task":         &r.ExecuteTask,
+		"discuss-questions":    &r.Discuss,
+		"self-heal":            &r.SelfHeal,
+		"demonstration-format": &r.Demonstration,
+		"autonomous":           &r.Autonomous,
+		"context-awareness":    &r.ContextAwareness,
+		"code-quality":         &r.CodeQuality,
+		"code-intelligence":    &r.CodeIntelligence,
+		"research":             &r.Research,
+		"plan-check":           &r.PlanCheck,
+		"plan-revise":          &r.PlanRevise,
+		"plan-outline":         &r.PlanOutline,
+		"discuss-followup":     &r.DiscussFollowup,
+		"intent-classify":      &r.IntentClassify,
+		"website-build":        &r.WebsiteBuild,
 	}
-	for path, ptr := range files {
-		data, err := promptFS.ReadFile(path)
+
+	for fileKey, ptr := range registryFields {
+		data, _, err := prompts.LoadPrompt(fileKey, cfg, projectRoot, promptFS)
 		if err != nil {
-			return nil, fmt.Errorf("load prompt %s: %w", path, err)
+			return nil, fmt.Errorf("load prompt %s: %w", fileKey, err)
 		}
-		*ptr = strings.TrimSpace(string(data))
+		*ptr = strings.TrimSpace(data)
 	}
+
+	// Inject dynamic limits into the tool-use prompt (F-010).
+	// The prompt must reflect actual runtime limits, not hardcoded values.
+	r.ToolUse = injectToolUseLimits(r.ToolUse)
+
 	return r, nil
+}
+
+// injectToolUseLimits replaces hardcoded limit values in the tool-use prompt
+// with actual runtime constants. This ensures the prompt accurately describes
+// the real constraints the AI will encounter.
+func injectToolUseLimits(prompt string) string {
+	timeoutMins := int(types.BashTimeout / time.Minute)
+	outputLimit := types.BashOutputLimit
+	maxFileSizeMB := types.MaxFileSize / (1024 * 1024)
+
+	prompt = strings.ReplaceAll(prompt, "30 minutes maximum",
+		fmt.Sprintf("%d minutes maximum", timeoutMins))
+	prompt = strings.ReplaceAll(prompt, "50,000 characters",
+		fmt.Sprintf("%d characters", outputLimit))
+	prompt = strings.ReplaceAll(prompt, "5MB",
+		fmt.Sprintf("%dMB", maxFileSizeMB))
+
+	return prompt
 }
 
 // PromptBuilder wraps a PromptRegistry and provides named prompt access.
@@ -69,9 +121,10 @@ type PromptBuilder struct {
 	registry *PromptRegistry
 }
 
-// NewPromptBuilder creates a PromptBuilder by loading all prompt templates.
-func NewPromptBuilder() (*PromptBuilder, error) {
-	r, err := LoadPrompts()
+// NewPromptBuilder creates a PromptBuilder by loading all prompt templates
+// with override support from the provided config.
+func NewPromptBuilder(cfg config.PromptConfig, projectRoot string) (*PromptBuilder, error) {
+	r, err := LoadPrompts(cfg, projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("create prompt builder: %w", err)
 	}

@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/config"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // --- PromptRegistry Tests ---
 
 func TestPromptRegistry_WebsiteBuildPromptLoaded(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}
@@ -22,7 +23,7 @@ func TestPromptRegistry_WebsiteBuildPromptLoaded(t *testing.T) {
 }
 
 func TestPromptRegistry_WebsiteBuildContainsDesignSystem(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestPromptRegistry_WebsiteBuildContainsDesignSystem(t *testing.T) {
 }
 
 func TestPromptRegistry_WebsiteBuildContainsShadcnComponents(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestPromptRegistry_WebsiteBuildContainsShadcnComponents(t *testing.T) {
 }
 
 func TestPromptRegistry_WebsiteBuildContainsPageList(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestPromptRegistry_WebsiteBuildContainsPageList(t *testing.T) {
 }
 
 func TestPromptRegistry_WebsiteBuildContainsColorPalettes(t *testing.T) {
-	registry, err := LoadPrompts()
+	registry, err := LoadPrompts(config.PromptConfig{}, "")
 	if err != nil {
 		t.Fatalf("LoadPrompts failed: %v", err)
 	}

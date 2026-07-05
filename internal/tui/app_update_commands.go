@@ -205,7 +205,7 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	if m.config != nil && m.config.Features.IntentClassification {
 		// Ensure prompt registry is loaded for the classifier
 		if m.promptRegistry == nil {
-			registry, err := workflow.LoadPrompts()
+			registry, err := workflow.LoadPrompts(m.config.Prompts, "")
 			if err == nil {
 				m.promptRegistry = registry
 			}
@@ -228,7 +228,7 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd {
 	// Load and cache prompts
 	if m.promptRegistry == nil {
-		registry, err := workflow.LoadPrompts()
+		registry, err := workflow.LoadPrompts(m.config.Prompts, "")
 		if err != nil {
 			if m.replModel != nil {
 				m.replModel.AddMessage(makeAssistantMsg(
