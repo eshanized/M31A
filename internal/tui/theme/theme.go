@@ -7,9 +7,7 @@ import "github.com/charmbracelet/lipgloss"
 type Mode int
 
 const (
-	ModeDark  Mode = iota // the only supported mode
-	ModeLight             // deprecated — returns ModeDark
-	ModeAuto              // deprecated — returns ModeDark
+	ModeDark Mode = iota // the only supported mode
 )
 
 // Standard borders used across the TUI
@@ -205,14 +203,6 @@ func (m *Manager) resolve() {
 
 	m.current = base
 	m.invalidateCache()
-}
-
-// Cycle is deprecated. M31A has a single theme.
-// Kept for backward compatibility — always returns ModeDark.
-func (m *Manager) Cycle() Mode {
-	m.mode = ModeDark
-	m.resolve()
-	return m.mode
 }
 
 // Current returns the active theme.

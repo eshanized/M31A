@@ -28,13 +28,3 @@ func TestDark_BackgroundNonZero(t *testing.T) {
 		t.Errorf("expected ModeDark, got %v", th.Mode)
 	}
 }
-
-func TestNewManager_Cycle(t *testing.T) {
-	t.Parallel()
-	m := NewManager(ModeDark)
-	mode := m.Cycle()
-	// M31A has a single theme — cycle always returns ModeDark
-	if mode != ModeDark {
-		t.Errorf("expected ModeDark after cycle, got %v", mode)
-	}
-}

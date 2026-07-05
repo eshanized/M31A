@@ -157,25 +157,6 @@ func TestManager_CurrentBorder_AfterSet(t *testing.T) {
 	}
 }
 
-func TestManager_Cycle_AlwaysDark(t *testing.T) {
-	t.Parallel()
-	m := NewManager(ModeDark)
-	mode := m.Cycle()
-	if mode != ModeDark {
-		t.Errorf("Cycle should always return ModeDark, got %v", mode)
-	}
-}
-
-func TestManager_Current_AfterCycle(t *testing.T) {
-	t.Parallel()
-	m := NewManager(ModeDark)
-	m.Cycle()
-	th := m.Current()
-	if th.Background == "" {
-		t.Error("Current after Cycle should have non-empty Background")
-	}
-}
-
 // --- BuildSemanticStyles ---
 
 func TestBuildSemanticStyles_Typography(t *testing.T) {
@@ -304,12 +285,6 @@ func TestMode_Constants(t *testing.T) {
 	t.Parallel()
 	if ModeDark != 0 {
 		t.Errorf("ModeDark = %d, want 0", ModeDark)
-	}
-	if ModeLight != 1 {
-		t.Errorf("ModeLight = %d, want 1", ModeLight)
-	}
-	if ModeAuto != 2 {
-		t.Errorf("ModeAuto = %d, want 2", ModeAuto)
 	}
 }
 

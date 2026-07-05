@@ -362,15 +362,13 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 }
 
 // applyTheme switches the theme and propagates it to all sub-models.
+// M31A ships with a single dark theme. Light/auto themes are not supported.
 func (m *AppState) applyTheme(themeName string) {
-	switch themeName {
-	case "dark":
-		m.themeManager = theme.NewManager(theme.ModeDark)
-	case "light":
-		m.themeManager = theme.NewManager(theme.ModeLight)
-	case "auto":
-		m.themeManager = theme.NewManager(theme.ModeAuto)
+	if themeName != "dark" {
+		// Light/auto themes are not supported; always use dark.
+		themeName = "dark"
 	}
+	m.themeManager = theme.NewManager(theme.ModeDark)
 
 	// Persist theme selection to config so it survives restarts.
 	if m.config != nil {

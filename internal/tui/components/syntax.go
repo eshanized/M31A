@@ -122,8 +122,5 @@ func renderCodeLines(code, language string, cache *theme.StyleCache, width int) 
 }
 
 func chromaStyleFromTheme(t theme.Theme) *chroma.Style {
-	if t.Mode == theme.ModeLight {
-		return styles.Get("github")
-	}
 	return styles.Get("monokai")
 }

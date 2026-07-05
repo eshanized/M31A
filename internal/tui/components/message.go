@@ -86,9 +86,6 @@ func buildGlamourStyle(t theme.Theme) ansi.StyleConfig {
 	secondary := string(t.Secondary)
 
 	chromaTheme := "monokai"
-	if t.Mode == theme.ModeLight {
-		chromaTheme = "github"
-	}
 
 	return ansi.StyleConfig{
 		Document: ansi.StyleBlock{

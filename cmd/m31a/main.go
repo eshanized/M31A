@@ -312,14 +312,9 @@ func run() int {
 	// AutoDream (starts with empty messages; REPL injects messages later)
 	autoDreamClient := autodream.New(nil)
 
-	// Theme
+	// Theme — M31A ships with a single dark theme.
+	// Light/auto themes are not supported; always use dark.
 	themeMode := theme.ModeDark
-	switch cfg.UI.Theme {
-	case "light":
-		themeMode = theme.ModeLight
-	case "auto":
-		themeMode = theme.ModeAuto
-	}
 
 	// Build and launch TUI app
 	app := tui.NewApp(

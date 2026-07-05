@@ -312,10 +312,8 @@ func NewApp(
 	tm := theme.NewManager(themeMode)
 	if cfg != nil && cfg.UI.Theme != "" {
 		switch cfg.UI.Theme {
-		case "light":
-			tm = theme.NewManager(theme.ModeLight)
-		case "auto":
-			tm = theme.NewManager(theme.ModeAuto)
+		case "light", "auto":
+			// Light/auto themes are not supported; always use dark.
 		}
 	}
 

@@ -330,7 +330,7 @@ func TestPaletteForProfile_AllProfiles(t *testing.T) {
 
 func TestManager_AllModes(t *testing.T) {
 	t.Parallel()
-	modes := []Mode{ModeDark, ModeLight, ModeAuto}
+	modes := []Mode{ModeDark}
 	for _, mode := range modes {
 		m := NewManager(mode)
 		if m.Current().Background == "" {
