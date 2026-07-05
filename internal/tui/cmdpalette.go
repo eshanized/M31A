@@ -59,23 +59,26 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 	cmds := registry.AllCommandsWithExecute()
 	entries := make([]paletteEntry, 0, len(cmds))
 
-	// Shortcut map for common key bindings
+	// Shortcut map for common key bindings — synced with actual registered
+	// keybindings in keybindings_screens.go (D-23 fix).
 	shortcuts := map[string]string{
 		"help":          "?",
-		"model":         "ctrl+m",
-		"settings":      "ctrl+s",
-		"new":           "ctrl+n",
-		"clear":         "ctrl+l",
-		"sessions":      "ctrl+r",
-		"diff":          "ctrl+d",
-		"themes":        "ctrl+x p",
+		"model":         "ctrl+x m",
+		"settings":      "ctrl+x s",
+		"new":           "ctrl+x n",
+		"clear":         "ctrl+x b",
+		"sessions":      "ctrl+x r",
+		"diff":          "ctrl+x d",
 		"dashboard":     "ctrl+x d",
 		"notifications": "ctrl+x !",
 		"files":         "ctrl+x f",
 		"ledger":        "ctrl+x l",
 		"rollback":      "ctrl+x k",
 		"config":        "ctrl+x c",
-		"metrics":       "ctrl+x e",
+		"home":          "ctrl+x g",
+		"session-detail": "ctrl+x i",
+		"tool-output":   "ctrl+x o",
+		"subagents":     "ctrl+x a",
 	}
 
 	// Category map

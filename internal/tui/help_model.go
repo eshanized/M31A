@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -18,11 +19,12 @@ type helpSection struct {
 
 // HelpModel shows keybinding help overlay with scrollable viewport.
 type HelpModel struct {
-	theme    theme.Theme
-	sections []helpSection
-	viewport viewport.Model
-	width    int
-	height   int
+	theme       theme.Theme
+	sections    []helpSection
+	keyRegistry *KeyRegistry
+	viewport    viewport.Model
+	width       int
+	height      int
 }
 
 // NewHelpModel creates a HelpModel with the default M31A keybindings.
@@ -33,7 +35,162 @@ func NewHelpModel(t theme.Theme) *HelpModel {
 	}
 }
 
-// defaultHelpSections returns all keybinding sections.
+// SetKeyRegistry sets the key registry for dynamic help generation.
+func (hm *HelpModel) SetKeyRegistry(kr *KeyRegistry) {
+	hm.keyRegistry = kr
+	hm.rebuildSections()
+}
+
+// rebuildSections regenerates help sections from the keybinding registry
+// and hardcoded slash-command sections. This ensures the help screen always
+// matches the actual keybindings registered in the application.
+func (hm *HelpModel) rebuildSections() {
+	if hm.keyRegistry == nil {
+		return
+	}
+
+	kr := hm.keyRegistry
+	leaderPrefix := kr.LeaderKey() + " "
+
+	// ── Global section (non-leader bindings from CtxGlobal) ──────────
+	var globalItems [][2]string
+	globalItems = append(globalItems, [2]string{"?", "Toggle this help"})
+	globalItems = append(globalItems, [2]string{"ctrl+c", "Cancel / quit (double to exit)"})
+	globalItems = append(globalItems, [2]string{"ctrl+p", "Command palette"})
+	for _, b := range kr.GetContextSpecificBindings(CtxGlobal) {
+		if strings.HasPrefix(b.Key, leaderPrefix) {
+			continue // leader chords go in their own section
+		}
+		globalItems = append(globalItems, [2]string{b.Key, b.Description})
+	}
+
+	// ── REPL section (non-leader bindings from CtxREPL) ─────────────
+	var replItems [][2]string
+	replItems = append(replItems, [2]string{"enter", "Send message"})
+	replItems = append(replItems, [2]string{"ctrl+j", "Insert newline (multi-line)"})
+	replItems = append(replItems, [2]string{"shift+enter", "Insert newline (multi-line)"})
+	replItems = append(replItems, [2]string{"up/down", "Navigate command history"})
+	replItems = append(replItems, [2]string{"tab", "Complete slash/mention suggestion"})
+	replItems = append(replItems, [2]string{"/", "Slash command autocomplete"})
+	replItems = append(replItems, [2]string{"@", "File mention autocomplete"})
+	replItems = append(replItems, [2]string{"ctrl+l / end", "Scroll to bottom"})
+	replItems = append(replItems, [2]string{"ctrl+u / pgup", "Scroll page up"})
+	replItems = append(replItems, [2]string{"ctrl+d / pgdn", "Scroll page down"})
+	replItems = append(replItems, [2]string{"j / k", "Scroll line down/up (empty input)"})
+	for _, b := range kr.GetContextSpecificBindings(CtxREPL) {
+		if strings.HasPrefix(b.Key, leaderPrefix) {
+			continue
+		}
+		// Skip keys already listed above
+		duplicate := false
+		for _, existing := range replItems {
+			if existing[0] == b.Key {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			replItems = append(replItems, [2]string{b.Key, b.Description})
+		}
+	}
+
+	// ── Leader Key section (all chord bindings) ─────────────────────
+	seen := make(map[string]bool)
+	var leaderItems [][2]string
+	for _, b := range kr.GetContextSpecificBindings(CtxGlobal) {
+		if strings.HasPrefix(b.Key, leaderPrefix) {
+			shortKey := strings.TrimPrefix(b.Key, leaderPrefix)
+			if !seen[shortKey] {
+				seen[shortKey] = true
+				leaderItems = append(leaderItems, [2]string{"x " + shortKey, b.Description})
+			}
+		}
+	}
+	for _, b := range kr.GetContextSpecificBindings(CtxREPL) {
+		if strings.HasPrefix(b.Key, leaderPrefix) {
+			shortKey := strings.TrimPrefix(b.Key, leaderPrefix)
+			if !seen[shortKey] {
+				seen[shortKey] = true
+				leaderItems = append(leaderItems, [2]string{"x " + shortKey, b.Description})
+			}
+		}
+	}
+
+	// ── Workflow section (slash commands) ────────────────────────────
+	workflowItems := [][2]string{
+		{"/new", "Start new workflow"},
+		{"/goal", "Set session goal"},
+		{"/plan", "Start plan phase"},
+		{"/execute", "Start execute phase"},
+		{"/verify", "Start verify phase"},
+		{"/ship", "Start ship phase"},
+		{"/pause", "Pause workflow"},
+		{"/resume-task", "Resume workflow"},
+		{"/metrics", "Session analytics"},
+	}
+
+	// ── Session section ──────────────────────────────────────────────
+	sessionItems := [][2]string{
+		{"/chat", "Start new chat session"},
+		{"/sessions", "List recent sessions"},
+		{"/resume", "Open session browser"},
+		{"/save", "Save session"},
+		{"/clear", "Clear conversation"},
+		{"/search", "Search messages"},
+		{"/flush", "Clear screen, reset view"},
+		{"/history", "Chat history browser"},
+		{"/status", "Show session info"},
+	}
+
+	// ── AI & Model section ───────────────────────────────────────────
+	aiItems := [][2]string{
+		{"/model", "Show or switch model"},
+		{"/provider", "Show or switch provider"},
+		{"/fallback", "Provider fallback status"},
+		{"/optimize", "Suggest cheaper model"},
+		{"/compress", "Compress context"},
+		{"/memory", "Manage context memory"},
+		{"/tokens", "Estimate token count"},
+		{"/cost", "Toggle cost display"},
+	}
+
+	// ── Git & Diff section ───────────────────────────────────────────
+	gitItems := [][2]string{
+		{"/diff", "Show git diff"},
+		{"/rollback", "Browse commits"},
+		{"/bisect", "Git bisect"},
+	}
+
+	// ── Settings & System section ────────────────────────────────────
+	systemItems := [][2]string{
+		{"/settings", "Open settings editor"},
+		{"/config", "Show or set config"},
+		{"/health", "System health"},
+		{"/tools", "List available tools"},
+		{"/log", "Recent log entries"},
+		{"/key", "API key status"},
+		{"/keychain", "API key status (alias)"},
+		{"/dream", "Context memory (alias)"},
+		{"/ledger", "Learning ledger"},
+		{"/about", "Version & system info"},
+		{"/reset", "Reset to first-run"},
+		{"/quit", "Exit application"},
+		{"/exit", "Exit (alias)"},
+	}
+
+	hm.sections = []helpSection{
+		{title: "Global", items: globalItems},
+		{title: "REPL", items: replItems},
+		{title: fmt.Sprintf("Leader Key (%s ...)", kr.LeaderKey()), items: leaderItems},
+		{title: "Workflow", items: workflowItems},
+		{title: "Session", items: sessionItems},
+		{title: "AI & Model", items: aiItems},
+		{title: "Git & Diff", items: gitItems},
+		{title: "Settings & System", items: systemItems},
+	}
+}
+
+// defaultHelpSections returns all keybinding sections (fallback when no registry).
 func defaultHelpSections() []helpSection {
 	return []helpSection{
 		{
@@ -66,7 +223,7 @@ func defaultHelpSections() []helpSection {
 			},
 		},
 		{
-			title: "Leader Key (ctrl+x …)",
+			title: "Leader Key (ctrl+x ...)",
 			items: [][2]string{
 				{"x h", "Help screen"},
 				{"x s", "Settings"},

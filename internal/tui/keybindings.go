@@ -181,6 +181,29 @@ func (r *KeyRegistry) GetContextBindings(ctx KeyContext) []KeyBinding {
 	return result
 }
 
+// GetContextSpecificBindings returns only the bindings registered for a specific
+// context (no global bindings). Used by the help screen to show context-specific
+// shortcuts separately from global ones.
+func (r *KeyRegistry) GetContextSpecificBindings(ctx KeyContext) []KeyBinding {
+	return r.bindings[ctx]
+}
+
+// ShortcutForCommand returns the keyboard shortcut registered for a given
+// slash command name, or empty string if none. It searches all contexts for
+// bindings whose description matches the command name.
+func (r *KeyRegistry) ShortcutForCommand(cmdName string) string {
+	// Build a lookup of all bindings keyed by description (case-insensitive)
+	lower := strings.ToLower(cmdName)
+	for _, bindings := range r.bindings {
+		for _, b := range bindings {
+			if strings.Contains(strings.ToLower(b.Description), lower) {
+				return b.Key
+			}
+		}
+	}
+	return ""
+}
+
 // RenderWhichKey returns a formatted which-key overlay showing available leader
 // key bindings for the current context. Returns empty string if no bindings.
 func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, maxWidth int, brand, textSecondary, textMuted lipgloss.Color) string {

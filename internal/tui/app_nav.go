@@ -137,6 +137,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	case ScreenHelp:
 		if m.helpModel == nil {
 			m.helpModel = NewHelpModel(m.themeManager.Current())
+			m.helpModel.SetKeyRegistry(m.keyRegistry)
 		}
 		cw, ch := m.contentDimensions()
 		m.helpModel.SetDimensions(cw, ch)
@@ -392,6 +393,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenHelp:
 		if m.helpModel == nil {
 			m.helpModel = NewHelpModel(m.themeManager.Current())
+			m.helpModel.SetKeyRegistry(m.keyRegistry)
 		}
 		m.helpModel.SetDimensions(cw, ch)
 		return m.helpModel.Init()
