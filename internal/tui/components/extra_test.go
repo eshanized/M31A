@@ -458,22 +458,8 @@ func TestHashPosition(t *testing.T) {
 
 func TestSparkline_Resample(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		values []int
-		target int
-		want   int
-	}{
-		{[]int{1, 2, 3, 4, 5}, 3, 3},
-		{[]int{1, 2, 3, 4, 5}, 0, 5}, // target <= 0 returns original
-		{[]int{1, 2, 3, 4, 5}, -1, 5},
-		{[]int{1, 2, 3, 4, 5}, 5, 5},
-	}
-	for _, tt := range tests {
-		got := resample(tt.values, tt.target)
-		if len(got) != tt.want {
-			t.Errorf("resample(%v, %d) returned len %d, want %d", tt.values, tt.target, len(got), tt.want)
-		}
-	}
+	// Note: resample function was removed as unused (Sparkline struct removed)
+	// resampleFloat64 is still available for RenderSparkline
 }
 
 func TestResampleFloat64(t *testing.T) {
@@ -497,17 +483,8 @@ func TestResampleFloat64(t *testing.T) {
 
 func TestResample_Averaging(t *testing.T) {
 	t.Parallel()
-	// [10, 20, 30, 40] → target 2: first half avg=15, second half avg=35
-	got := resample([]int{10, 20, 30, 40}, 2)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 elements, got %d", len(got))
-	}
-	if got[0] != 15 {
-		t.Errorf("got[0] = %d, want 15", got[0])
-	}
-	if got[1] != 35 {
-		t.Errorf("got[1] = %d, want 35", got[1])
-	}
+	// Note: resample function was removed as unused (Sparkline struct removed)
+	// resampleFloat64 is still available for RenderSparkline
 }
 
 func TestResampleFloat64_Averaging(t *testing.T) {
@@ -1393,82 +1370,6 @@ func TestHighlightCode_GoCode(t *testing.T) {
 	got := HighlightCode(code, "go", theme.Dark())
 	if got == "" {
 		t.Error("HighlightCode for Go code should return non-empty string")
-	}
-}
-
-func TestBarChart_Render(t *testing.T) {
-	t.Parallel()
-	bc := BarChart{
-		Values:   []int{10, 20, 30},
-		Labels:   []string{"A", "B", "C"},
-		MaxWidth: 40,
-	}
-	got := bc.Render()
-	if got == "" {
-		t.Error("Render should return non-empty string")
-	}
-}
-
-func TestBarChart_RenderEmpty(t *testing.T) {
-	t.Parallel()
-	bc := BarChart{Values: []int{}, Labels: []string{}}
-	got := bc.Render()
-	if got != "" {
-		t.Error("Render empty should return empty string")
-	}
-}
-
-func TestBarChart_RenderMismatchedLengths(t *testing.T) {
-	t.Parallel()
-	bc := BarChart{Values: []int{1, 2}, Labels: []string{"A"}}
-	got := bc.Render()
-	if got != "" {
-		t.Error("Render mismatched lengths should return empty string")
-	}
-}
-
-func TestSparkline_Render(t *testing.T) {
-	t.Parallel()
-	sl := Sparkline{Values: []int{1, 5, 3, 8, 2}, Width: 10, Theme: theme.Dark()}
-	got := sl.Render()
-	if got == "" {
-		t.Error("Render should return non-empty string")
-	}
-}
-
-func TestSparkline_RenderEmpty(t *testing.T) {
-	t.Parallel()
-	sl := Sparkline{Values: []int{}, Theme: theme.Dark()}
-	got := sl.Render()
-	if got != "" {
-		t.Error("Render empty should return empty string")
-	}
-}
-
-func TestSparkline_RenderWithLabel(t *testing.T) {
-	t.Parallel()
-	sl := Sparkline{Values: []int{1, 2, 3}, Label: "tokens", Theme: theme.Dark()}
-	got := sl.Render()
-	if got == "" {
-		t.Error("Render with label should return non-empty string")
-	}
-}
-
-func TestSparkline_RenderResample(t *testing.T) {
-	t.Parallel()
-	sl := Sparkline{Values: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, Width: 3, Theme: theme.Dark()}
-	got := sl.Render()
-	if got == "" {
-		t.Error("Render resampled should return non-empty string")
-	}
-}
-
-func TestSparkline_RenderPadLeft(t *testing.T) {
-	t.Parallel()
-	sl := Sparkline{Values: []int{1, 2}, Width: 5, Theme: theme.Dark()}
-	got := sl.Render()
-	if got == "" {
-		t.Error("Render padded should return non-empty string")
 	}
 }
 

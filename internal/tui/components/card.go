@@ -1,8 +1,6 @@
 package components
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -18,17 +16,6 @@ const (
 	CardWarning
 )
 
-// CardVariant represents the visual variant of a card
-type CardVariant int
-
-const (
-	CardPlain    CardVariant = iota // current: border only
-	CardElevated                    // border + background + shadow
-	CardHeader                      // filled header bar + border body
-	CardMinimal                     // top gradient line only, no side borders
-	CardInline                      // no borders, just background tint
-)
-
 // Card renders a reusable bordered panel with optional title.
 // Width is required; if 0, the card may render at 0 width.
 type Card struct {
@@ -37,7 +24,6 @@ type Card struct {
 	Width   int
 	Border  lipgloss.Border // theme.ThinBorder, theme.NormalBorder, theme.DoubleBorder
 	Style   CardStyle
-	Variant CardVariant
 	Icon    string // optional prefix icon
 	Footer  string // optional footer
 	Focused bool   // hover/focus state
@@ -89,44 +75,6 @@ func (c Card) Render() string {
 	// Add footer if provided
 	if c.Footer != "" {
 		content = content + "\n" + s.Muted.Italic(true).Render(c.Footer)
-	}
-
-	switch c.Variant {
-	case CardElevated:
-		// Border + background + shadow
-		style := s.CardElevated.
-			Border(c.Border).
-			BorderForeground(borderColor).
-			Width(c.Width)
-		return theme.RenderWithShadow(style.Render(content), c.Theme.ShadowColor, 1, 1)
-	case CardHeader:
-		// Filled header bar + border body
-		if c.Title != "" {
-			headerStyle := s.CardHeader
-			header := headerStyle.Render(c.Title)
-			bodyStyle := lipgloss.NewStyle().
-				Border(c.Border).
-				BorderForeground(borderColor).
-				Width(c.Width).
-				Padding(0, 1)
-			return header + "\n" + bodyStyle.Render(c.Content)
-		}
-	case CardMinimal:
-		// Top gradient line only, no side borders
-		gradientStyle := s.BrandBold
-		gradientW := c.Width - 2
-		if gradientW < 1 {
-			gradientW = 1
-		}
-		gradientLine := gradientStyle.Render(strings.Repeat("─", gradientW))
-		return gradientLine + "\n" + content
-	case CardInline:
-		// No borders, just background tint
-		style := lipgloss.NewStyle().
-			Width(c.Width).
-			Padding(0, 1).
-			Background(lipgloss.Color(c.Theme.Surface))
-		return style.Render(content)
 	}
 
 	// Default: Plain card with border

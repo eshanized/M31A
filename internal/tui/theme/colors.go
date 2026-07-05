@@ -80,7 +80,6 @@ func M31A() Theme {
 		Secondary:         lipgloss.Color(Thinking),
 		Accent:            lipgloss.Color(Thinking),
 		Info:              lipgloss.Color(Thinking),
-		ThinkingOpacity:   0.7,
 		DiffAdded:         lipgloss.Color(DiffAdded),
 		DiffRemoved:       lipgloss.Color(DiffRemoved),
 		DiffAddedBg:       lipgloss.Color(DiffAddedBg),
@@ -93,10 +92,7 @@ func M31A() Theme {
 		DividerChar:  "─",
 		HeaderHeight: 1,
 		ShadowColor:  lipgloss.Color(Shadow),
-		CompactMode:  false,
 		SelectionBg:  lipgloss.Color(Selection),
-		CardPadding:  1,
-		TabWidth:     4,
 	}
 	applyThemeStyles(&t)
 	return t

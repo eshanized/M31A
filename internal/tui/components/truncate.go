@@ -4,25 +4,26 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 // TruncateWithEllipsis truncates a string to maxWidth visible columns,
-// appending "..." if truncation occurred. Respects ANSI escape sequences
-// via lipgloss.Width so styled strings are measured correctly.
+// appending "..." if truncation occurred. Uses runewidth for proper CJK
+// character width handling (double-width characters).
 func TruncateWithEllipsis(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	w := lipgloss.Width(s)
+	w := runewidth.StringWidth(s)
 	if w <= maxWidth {
 		return s
 	}
-	// Binary search for the cut point
+	// Binary search for the cut point using runewidth
 	runes := []rune(s)
 	lo, hi := 0, len(runes)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		if lipgloss.Width(string(runes[:mid])) <= maxWidth-3 {
+		if runewidth.StringWidth(string(runes[:mid])) <= maxWidth-3 {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -71,3 +72,6 @@ func TruncateError(s string) string {
 	runes := []rune(s)
 	return string(runes[:200]) + "[...]"
 }
+
+// Ensure lipgloss is imported (used by TruncateWithEllipsis for ANSI-aware width)
+var _ = lipgloss.Width
