@@ -29,6 +29,36 @@ func NewTemplateResolver() *TemplateResolver {
 	return tr
 }
 
+// NewTemplateResolverWithOverrides creates a TemplateResolver with default
+// templates and user-defined template overrides. Overrides replace the template
+// text for matching NarrativeType keys. All other fields (category, priority,
+// display, duration) from the default entry are preserved.
+func NewTemplateResolverWithOverrides(overrides map[string]string) *TemplateResolver {
+	tr := NewTemplateResolver()
+	if len(overrides) == 0 {
+		return tr
+	}
+	for typeStr, overrideText := range overrides {
+		if overrideText == "" {
+			continue
+		}
+		typ := NarrativeType(typeStr)
+		if entry, ok := tr.templates[typ]; ok {
+			entry.template = overrideText
+			tr.templates[typ] = entry
+		} else {
+			// Allow defining templates for new custom types
+			tr.templates[typ] = templateEntry{
+				template: overrideText,
+				category: CategoryAlerting,
+				priority: PriorityPhase,
+				display:  DisplayBoth,
+			}
+		}
+	}
+	return tr
+}
+
 // Resolve renders the narrative text for a given type and event.
 func (tr *TemplateResolver) Resolve(typ NarrativeType, event RawEvent) NarrativeObject {
 	entry, ok := tr.templates[typ]

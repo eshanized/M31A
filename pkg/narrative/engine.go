@@ -34,6 +34,17 @@ func DefaultEngineConfig() EngineConfig {
 	}
 }
 
+// EngineConfigWithOverrides returns a fully configured engine with user-defined
+// template and classification overrides from config.
+func EngineConfigWithOverrides(templateOverrides map[string]string, classificationOverrides map[string]string) EngineConfig {
+	return EngineConfig{
+		Classifier: NewClassifierWithOverrides(classificationOverrides),
+		Resolver:   NewTemplateResolverWithOverrides(templateOverrides),
+		Grouper:    NewGrouper(DefaultGroupConfig()),
+		Timing:     NewTimingGuard(DefaultTimingConfig()),
+	}
+}
+
 // NewEngine creates an Engine with the given configuration.
 func NewEngine(config EngineConfig) *Engine {
 	if config.Classifier == nil {

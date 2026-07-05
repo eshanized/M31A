@@ -1,6 +1,8 @@
 package compaction
 
-const summaryTemplate = `You are a conversation compactor. Summarize the conversation history below into a structured summary that preserves all critical context for continuing the session.
+import "os"
+
+const defaultSummaryTemplate = `You are a conversation compactor. Summarize the conversation history below into a structured summary that preserves all critical context for continuing the session.
 
 Produce a summary with EXACTLY these sections:
 
@@ -41,6 +43,25 @@ Guidelines:
 `
 
 // Template returns the compaction summary prompt template.
+// This is a convenience wrapper around TemplateWithConfig with empty config.
 func Template() string {
-	return summaryTemplate
+	return TemplateWithConfig("", "")
+}
+
+// TemplateWithConfig returns the compaction summary prompt template,
+// respecting config overrides. Priority: inline > file > embedded default.
+func TemplateWithConfig(cfgTemplate string, cfgTemplateFile string) string {
+	// Priority 1: inline template override
+	if cfgTemplate != "" {
+		return cfgTemplate
+	}
+	// Priority 2: template file
+	if cfgTemplateFile != "" {
+		data, err := os.ReadFile(cfgTemplateFile)
+		if err == nil {
+			return string(data)
+		}
+	}
+	// Priority 3: embedded default
+	return defaultSummaryTemplate
 }

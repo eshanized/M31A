@@ -565,9 +565,11 @@ func compactionConfig(cfg *config.Config) compaction.Config {
 		c.KeepTokens = 8000
 	}
 	return compaction.Config{
-		Auto:       c.Auto,
-		Buffer:     c.Buffer,
-		KeepTokens: c.KeepTokens,
+		Auto:               c.Auto,
+		Buffer:             c.Buffer,
+		KeepTokens:         c.KeepTokens,
+		SummaryTemplate:    c.SummaryTemplate,
+		SummaryTemplateFile: c.SummaryTemplateFile,
 	}
 }
 

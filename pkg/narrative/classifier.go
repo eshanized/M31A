@@ -22,6 +22,46 @@ func NewClassifier() *Classifier {
 	return c
 }
 
+// NewClassifierWithOverrides creates a Classifier with default rules and
+// user-defined classification overrides. Overrides replace the classification
+// for matching EventType keys. Valid override values: "narrative", "grouped",
+// "hidden", "expanded".
+func NewClassifierWithOverrides(overrides map[string]string) *Classifier {
+	c := NewClassifier()
+	if len(overrides) == 0 {
+		return c
+	}
+	for eventStr, overrideStr := range overrides {
+		if overrideStr == "" {
+			continue
+		}
+		event := EventType(eventStr)
+		var classification Classification
+		switch overrideStr {
+		case "narrative":
+			classification = ClassifyNarrative
+		case "grouped":
+			classification = ClassifyGrouped
+		case "hidden":
+			classification = ClassifyHidden
+		case "expanded":
+			classification = ClassifyExpanded
+		default:
+			continue // skip invalid classification values
+		}
+		existing, ok := c.rules[event]
+		if ok {
+			existing.Classification = classification
+			c.rules[event] = existing
+		} else {
+			c.rules[event] = ClassifyResult{
+				Classification: classification,
+			}
+		}
+	}
+	return c
+}
+
 // Classify returns the classification for an event type.
 func (c *Classifier) Classify(event RawEvent) ClassifyResult {
 	if r, ok := c.rules[event.Type]; ok {

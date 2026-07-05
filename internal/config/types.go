@@ -18,6 +18,7 @@ type Config struct {
 	Skills            SkillsConfig            `toml:"skills"`
 	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
 	Prompts           PromptConfig            `toml:"prompts"`
+	Narrative         NarrativeConfig         `toml:"narrative"`
 }
 
 // PromptConfig holds configurable prompt override settings.
@@ -61,6 +62,28 @@ type CompactionConfig struct {
 	Proactive          bool `toml:"proactive"`            // trigger compaction before phase transitions
 	ToolCallsThreshold int  `toml:"tool_calls_threshold"` // check compaction every N tool calls during Execute
 	PhaseTransitionPct int  `toml:"phase_transition_pct"` // trigger compaction at this % before phase transition
+
+	// Custom summary template (F-063): inline template text that overrides
+	// the embedded compaction summary template. Takes precedence over file.
+	SummaryTemplate string `toml:"summary_template"`
+
+	// Custom summary template file path: if set and SummaryTemplate is empty,
+	// reads the template from this file. Falls back to embedded default on error.
+	SummaryTemplateFile string `toml:"summary_template_file"`
+}
+
+// NarrativeConfig holds narrative system configuration (F-059, F-060).
+type NarrativeConfig struct {
+	// Template overrides: map of NarrativeType string to template text.
+	// Overrides the embedded template for that type.
+	// Example: {"task_complete": "Done! {description} completed successfully."}
+	TemplateOverrides map[string]string `toml:"template_overrides"`
+
+	// Classification overrides: map of EventType string to classification string.
+	// Overrides the embedded classification for that event type.
+	// Valid values: "narrative", "grouped", "hidden", "expanded"
+	// Example: {"tool_call": "expanded"}
+	ClassificationOverrides map[string]string `toml:"classification_overrides"`
 }
 
 // InstructionsConfig controls AGENTS.md file discovery for project-aware context.

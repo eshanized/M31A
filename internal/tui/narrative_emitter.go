@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/pkg/narrative"
 )
 
@@ -15,11 +16,21 @@ type narrativeEmitter struct {
 }
 
 // newNarrativeEmitter creates a narrative-aware emitter wrapping the given channel.
-func newNarrativeEmitter(ch chan tea.Msg, drops *DropCounter) *narrativeEmitter {
+// If cfg is non-nil, template and classification overrides from config are applied.
+func newNarrativeEmitter(ch chan tea.Msg, drops *DropCounter, cfg *config.Config) *narrativeEmitter {
+	var engineConfig narrative.EngineConfig
+	if cfg != nil {
+		engineConfig = narrative.EngineConfigWithOverrides(
+			cfg.Narrative.TemplateOverrides,
+			cfg.Narrative.ClassificationOverrides,
+		)
+	} else {
+		engineConfig = narrative.DefaultEngineConfig()
+	}
 	return &narrativeEmitter{
 		inner:  &channelEmitter{ch: ch, drops: drops},
 		bridge: narrative.NewBridge(),
-		engine: narrative.NewEngine(narrative.DefaultEngineConfig()),
+		engine: narrative.NewEngine(engineConfig),
 	}
 }
 

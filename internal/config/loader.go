@@ -166,6 +166,8 @@ func DefaultConfig() *Config {
 			Proactive:          true,
 			ToolCallsThreshold: 15,
 			PhaseTransitionPct: 60,
+			SummaryTemplate:    "",
+			SummaryTemplateFile: "",
 		},
 		Instructions: InstructionsConfig{
 			Enabled: true,
@@ -183,6 +185,10 @@ func DefaultConfig() *Config {
 			GlobalPromptDir:        "",
 			Overrides:              map[string]string{},
 			ModelTemplateOverrides: map[string]string{},
+		},
+		Narrative: NarrativeConfig{
+			TemplateOverrides:       map[string]string{},
+			ClassificationOverrides: map[string]string{},
 		},
 	}
 }
@@ -690,7 +696,7 @@ func knownConfigKeys() map[string]bool {
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
-			"model_capabilities": true, "prompts": true,
+			"model_capabilities": true, "prompts": true, "narrative": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true, "nvidia": true,
 		}

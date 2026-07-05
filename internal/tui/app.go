@@ -482,7 +482,7 @@ func (m *AppState) initWorkflowEngine() tea.Cmd {
 
 	// Connect the MsgEmitter so workflow events reach the TUI
 	// Use narrative-aware emitter to intercept and process workflow messages
-	narrativeEmitter := newNarrativeEmitter(nil, &globalDropCounter)
+	narrativeEmitter := newNarrativeEmitter(nil, &globalDropCounter, m.config)
 	narrativeEmitter.inner.ch = make(chan tea.Msg, ChannelCap)
 	engine.SetMsgEmitter(narrativeEmitter)
 	m.emitterCh = narrativeEmitter.inner.ch

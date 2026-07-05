@@ -15,9 +15,11 @@ import (
 
 // Config holds compaction settings.
 type Config struct {
-	Auto       bool
-	Buffer     int // tokens reserved before compaction triggers
-	KeepTokens int // tokens of recent history to preserve verbatim
+	Auto               bool
+	Buffer             int    // tokens reserved before compaction triggers
+	KeepTokens         int    // tokens of recent history to preserve verbatim
+	SummaryTemplate    string // inline template override (takes precedence over file)
+	SummaryTemplateFile string // path to template file (used when SummaryTemplate is empty)
 }
 
 // DefaultConfig returns compaction defaults.
@@ -151,7 +153,7 @@ func (c *Compactor) generateSummary(ctx context.Context, headText string, p prov
 	messages := []types.Message{
 		{
 			Role:    "system",
-			Content: Template(),
+			Content: TemplateWithConfig(c.cfg.SummaryTemplate, c.cfg.SummaryTemplateFile),
 		},
 		{
 			Role:    "user",
