@@ -3,20 +3,52 @@ package config
 import "github.com/eshanized/M31A/internal/types"
 
 type Config struct {
-	Provider         ProviderConfig         `toml:"provider"`
-	Model            ModelConfig            `toml:"model"`
-	UI               UIConfig               `toml:"ui"`
-	Permissions      PermissionsConfig      `toml:"permissions"`
-	Features         FeaturesConfig         `toml:"features"`
-	Ledger           LedgerConfig           `toml:"ledger"`
-	Tools            ToolsConfig            `toml:"tools"`
-	Agents           AgentsConfig           `toml:"agents"`
-	Git              GitConfig              `toml:"git"`
-	Verify           VerifyConfig           `toml:"verify"`
-	Compaction       CompactionConfig       `toml:"compaction"`
-	Instructions     InstructionsConfig     `toml:"instructions"`
-	Skills           SkillsConfig           `toml:"skills"`
+	Provider          ProviderConfig          `toml:"provider"`
+	Model             ModelConfig             `toml:"model"`
+	UI                UIConfig                `toml:"ui"`
+	Permissions       PermissionsConfig       `toml:"permissions"`
+	Features          FeaturesConfig          `toml:"features"`
+	Ledger            LedgerConfig            `toml:"ledger"`
+	Tools             ToolsConfig             `toml:"tools"`
+	Agents            AgentsConfig            `toml:"agents"`
+	Git               GitConfig               `toml:"git"`
+	Verify            VerifyConfig            `toml:"verify"`
+	Compaction        CompactionConfig        `toml:"compaction"`
+	Instructions      InstructionsConfig      `toml:"instructions"`
+	Skills            SkillsConfig            `toml:"skills"`
 	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
+	Prompts           PromptConfig            `toml:"prompts"`
+}
+
+// PromptConfig holds configurable prompt override settings.
+// Prompt loading follows a 4-level priority chain:
+//
+//	1. Config override (prompts.overrides[name])
+//	2. Project-level override (.m31a/prompts/<name>.md)
+//	3. Global override (~/.m31a/prompts/<name>.md)
+//	4. Embedded default (prompts/<name>.md from go:embed)
+type PromptConfig struct {
+	// SystemPromptFile is the path to a file that replaces the base system prompt.
+	// If empty, uses embedded prompts/base.md.
+	SystemPromptFile string `toml:"system_prompt_file"`
+
+	// ProjectPromptDir is the path to a directory containing project-level prompt overrides.
+	// Default: ".m31a/prompts/" relative to the project root.
+	// If a file like "execute-task.md" exists in this directory, it overrides
+	// the embedded version of that prompt.
+	ProjectPromptDir string `toml:"project_prompt_dir"`
+
+	// GlobalPromptDir is the path to a directory for user-wide prompt overrides.
+	// Default: "" (resolved at runtime to ~/.m31a/prompts/).
+	GlobalPromptDir string `toml:"global_prompt_dir"`
+
+	// Overrides is a map of prompt name to file path for per-prompt overrides.
+	// Example: {"execute-task": "/path/to/custom-execute.md"}
+	Overrides map[string]string `toml:"overrides"`
+
+	// ModelTemplateOverrides is a map of model ID prefix to template file path.
+	// Example: {"mistral": "/path/to/mistral.txt", "deepseek": "/path/to/deepseek.txt"}
+	ModelTemplateOverrides map[string]string `toml:"model_template_overrides"`
 }
 
 // CompactionConfig holds automatic session compaction settings.

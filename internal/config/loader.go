@@ -174,6 +174,13 @@ func DefaultConfig() *Config {
 			ExtraNonChatPatterns:       []string{},
 			KnownCapabilities:          map[string]ModelCapabilityOverride{},
 		},
+		Prompts: PromptConfig{
+			SystemPromptFile:       "",
+			ProjectPromptDir:       ".m31a/prompts",
+			GlobalPromptDir:        "",
+			Overrides:              map[string]string{},
+			ModelTemplateOverrides: map[string]string{},
+		},
 	}
 }
 
@@ -680,7 +687,7 @@ func knownConfigKeys() map[string]bool {
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
-			"model_capabilities": true,
+			"model_capabilities": true, "prompts": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true, "nvidia": true,
 		}
