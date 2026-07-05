@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/glamour v0.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/mattn/go-runewidth v0.0.19 // indirect
+	github.com/mattn/go-runewidth v0.0.19
 	github.com/pkoukk/tiktoken-go v0.1.8
 	// DEP-1: golang.org/x/sync/singleflight — stable x/ package, appropriate usage
 	golang.org/x/sync v0.21.0
@@ -20,6 +20,7 @@ require (
 	github.com/alecthomas/chroma v0.10.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/fsnotify/fsnotify v1.10.1
+	// github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/odvcencio/gotreesitter v0.20.5
 )
 
