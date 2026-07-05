@@ -18,6 +18,10 @@ type DiffModel struct {
 	width    int
 	height   int
 
+	// Display options
+	showLineNumbers bool
+	showSideBySide  bool // for future use
+
 	// Stats
 	additions int
 	deletions int
@@ -25,7 +29,11 @@ type DiffModel struct {
 
 // NewDiffModel creates a DiffModel.
 func NewDiffModel(t theme.Theme) *DiffModel {
-	return &DiffModel{theme: t}
+	return &DiffModel{
+		theme:           t,
+		showLineNumbers: true,
+		showSideBySide:  false,
+	}
 }
 
 // SetTheme updates the theme.

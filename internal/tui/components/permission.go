@@ -11,8 +11,9 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
-// DefaultPermissionTimeout is the default permission modal timeout, derived from the shared constant.
-var DefaultPermissionTimeout = time.Duration(types.DefaultPermissionTimeout) * time.Second
+// DefaultPermissionTimeout is the default permission modal timeout (10 minutes).
+// The permission modal waits for user decision without auto-deny.
+var DefaultPermissionTimeout = 10 * time.Minute
 
 type PermissionModal struct {
 	request tools.PermissionRequest
@@ -52,6 +53,16 @@ func (m *PermissionModal) Clear() {
 func (m *PermissionModal) Render(width, height int) string {
 	s := m.styles
 	modalWidth := 60
+	// Use full command text width if wider than minimum
+	cmdWidth := len(m.request.Command) + 10
+	if cmdWidth > modalWidth {
+		modalWidth = cmdWidth
+	}
+	// Cap at maximum 80 columns
+	if modalWidth > 80 {
+		modalWidth = 80
+	}
+	// Ensure it fits in terminal
 	if width < modalWidth+4 {
 		modalWidth = width - 4
 	}
@@ -85,12 +96,15 @@ func (m *PermissionModal) Render(width, height int) string {
 	// Risk is communicated via the border style, not via a text badge
 
 	// ── Command box (secondary, below divider) ───────────────────────────
-	cmdContentW := modalWidth - 10
+	cmdContentW := modalWidth - 6
 	if cmdContentW < 8 {
 		cmdContentW = 8
 	}
 	highlighted := highlightCommand(m.request.Command, m.styles)
-	highlighted = TruncateWithEllipsis(highlighted, cmdContentW)
+	// Show full command when possible, only truncate if extremely long
+	if len(m.request.Command) > cmdContentW {
+		highlighted = TruncateWithEllipsis(highlighted, cmdContentW)
+	}
 	cmdBox := s.InputCode.
 		Width(modalWidth - 6).
 		Render(highlighted)
@@ -99,13 +113,13 @@ func (m *PermissionModal) Render(width, height int) string {
 	keys := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top,
 			s.PermKey.Render("[Y]"),
-			s.PermHint.Render(" Allow once      "),
+			s.PermHint.Render(" Allow once        "),
 			s.PermKey.Render("[A]"),
-			s.PermHint.Render(" Always allow"),
+			s.PermHint.Render(" Allow for session"),
 		),
 		lipgloss.JoinHorizontal(lipgloss.Top,
 			s.PermKey.Render("[B]"),
-			s.PermHint.Render(" Approve all     "),
+			s.PermHint.Render(" Approve all       "),
 			s.PermKey.Render("[N]"),
 			s.PermHint.Render(" Deny"),
 		),
@@ -121,15 +135,12 @@ func (m *PermissionModal) Render(width, height int) string {
 		queueInfo = s.Caption.Render(fmt.Sprintf("  %d tool(s) queued behind this one", m.request.QueueDepth))
 	}
 
-	// ── Countdown (only when <5 seconds remaining) ────────────────────────
+	// ── Timeout info (non-urgent, just informational) ─────────────────────
 	remaining := m.Remaining()
-	var countdown string
-	if remaining <= 0 {
-		countdown = s.PermCountdownErr.Render("Auto-deny: tool will be rejected")
-	} else if remaining <= 5*time.Second {
-		countdown = s.PermCountdownWarn.Render(fmt.Sprintf("Auto-deny in %s", formatDurationClock(remaining)))
+	var timeoutInfo string
+	if remaining > 0 && remaining < 5*time.Minute {
+		timeoutInfo = s.Caption.Render(fmt.Sprintf("  Timeout in %s", formatDurationClock(remaining)))
 	}
-	// No countdown shown when >5 seconds (cleaner UI)
 
 	// ── Rule context ──────────────────────────────────────────────────────
 	var ruleInfo string
@@ -174,11 +185,11 @@ func (m *PermissionModal) Render(width, height int) string {
 		"",
 		keys,
 	)
-	if countdown != "" {
+	if timeoutInfo != "" {
 		modalContent = lipgloss.JoinVertical(lipgloss.Top,
 			modalContent,
 			"",
-			countdown,
+			timeoutInfo,
 		)
 	}
 	if queueInfo != "" {

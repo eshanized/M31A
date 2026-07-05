@@ -90,7 +90,8 @@ func colorizeDiff(diff string, t theme.Theme) string {
 	const lineNumWidth = 4
 	var (
 		out           []string
-		lineNum       int
+		oldLineNum    int
+		newLineNum    int
 		lineNumStyle  = lipgloss.NewStyle().Foreground(t.TextMuted).Width(lineNumWidth).Align(lipgloss.Right)
 		fileHeaderSty = lipgloss.NewStyle().Foreground(t.TextMuted)
 		hunkSty       = lipgloss.NewStyle().Foreground(t.Thinking).Bold(true)
@@ -102,29 +103,68 @@ func colorizeDiff(diff string, t theme.Theme) string {
 	for _, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "@@"):
+			// Parse hunk header to extract starting line numbers
+			// Format: @@ -oldStart,oldCount +newStart,newCount @@
+			oldLineNum, newLineNum = parseHunkHeader(line)
 			out = append(out, "    "+hunkSty.Render(line))
-			lineNum = 0
 
 		case strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ "):
 			out = append(out, "    "+fileHeaderSty.Render(line))
 
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-			lineNum++
-			ln := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
+			ln := lineNumStyle.Render(fmt.Sprintf("%d", newLineNum))
 			out = append(out, ln+"│"+addSty.Render(line))
+			newLineNum++
 
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			ln := lineNumStyle.Render("")
+			ln := lineNumStyle.Render(fmt.Sprintf("%d", oldLineNum))
 			out = append(out, ln+"│"+delSty.Render(line))
+			oldLineNum++
 
 		case strings.HasPrefix(line, "\\ "):
 			out = append(out, "    "+contextSty.Render(line))
 
 		default:
-			lineNum++
-			ln := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
+			// Context line: show both old and new line numbers
+			ln := lineNumStyle.Render(fmt.Sprintf("%d", oldLineNum))
 			out = append(out, ln+"│"+contextSty.Render(line))
+			oldLineNum++
+			newLineNum++
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// parseHunkHeader extracts old and new starting line numbers from a hunk header.
+// Format: @@ -oldStart,oldCount +newStart,newCount @@
+func parseHunkHeader(header string) (oldStart, newStart int) {
+	// Find "-oldStart" part
+	dashIdx := strings.Index(header, "-")
+	if dashIdx < 0 {
+		return 0, 0
+	}
+	commaIdx := strings.Index(header[dashIdx:], ",")
+	if commaIdx < 0 {
+		commaIdx = strings.Index(header[dashIdx:], " ")
+	}
+	if commaIdx < 0 {
+		return 0, 0
+	}
+	fmt.Sscanf(header[dashIdx+1:dashIdx+commaIdx], "%d", &oldStart)
+
+	// Find "+newStart" part
+	plusIdx := strings.Index(header, "+")
+	if plusIdx < 0 {
+		return oldStart, 0
+	}
+	commaIdx = strings.Index(header[plusIdx:], ",")
+	if commaIdx < 0 {
+		commaIdx = strings.Index(header[plusIdx:], " ")
+	}
+	if commaIdx < 0 {
+		return oldStart, 0
+	}
+	fmt.Sscanf(header[plusIdx+1:plusIdx+commaIdx], "%d", &newStart)
+
+	return oldStart, newStart
 }

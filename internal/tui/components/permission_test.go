@@ -148,8 +148,8 @@ func TestPermissionModal_RiskColor_Destructive(t *testing.T) {
 	}
 }
 
-// L-14: zero timeout defaults to 300s
-func TestPermissionModal_ZeroTimeoutDefaults300s(t *testing.T) {
+// L-14: zero timeout defaults to 10 minutes (no auto-deny)
+func TestPermissionModal_ZeroTimeoutDefaults10m(t *testing.T) {
 	req := tools.PermissionRequest{
 		ToolName:  "Bash",
 		Command:   "ls",
@@ -157,8 +157,8 @@ func TestPermissionModal_ZeroTimeoutDefaults300s(t *testing.T) {
 	}
 	m := NewPermissionModal(req, theme.Dark(), 0)
 	remaining := m.Remaining()
-	if remaining < 299*time.Second || remaining > 300*time.Second {
-		t.Errorf("expected ~300s remaining for zero timeout, got %v", remaining)
+	if remaining < 599*time.Second || remaining > 600*time.Second {
+		t.Errorf("expected ~600s (10m) remaining for zero timeout, got %v", remaining)
 	}
 }
 
