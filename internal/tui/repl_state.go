@@ -392,7 +392,10 @@ func (m *ReplModel) renderMessages() {
 		return
 	}
 
-	// Full render
+	// Viewport virtualization (D-30): calculate visible range and only render visible messages
+	m.calculateVisibleRange()
+
+	// Full render with virtualization
 	var sb strings.Builder
 
 	// Build a line-offset table so mouse clicks can map Y → message index.
@@ -402,6 +405,15 @@ func (m *ReplModel) renderMessages() {
 	var prevTime time.Time
 	for i, msg := range m.messages {
 		offsets[i] = lineCount
+
+		// Viewport virtualization: skip messages outside visible range + buffer
+		if i < m.visibleRangeStart || i >= m.visibleRangeEnd {
+			// Estimate line count for skipped messages (approximate for offset tracking)
+			estimatedLines := 5 // rough estimate per message
+			lineCount += estimatedLines
+			continue
+		}
+
 		rendered := m.msgRenderer.RenderMessage(msg, rw)
 		if rendered == "" {
 			offsets[i] = -1
@@ -410,7 +422,7 @@ func (m *ReplModel) renderMessages() {
 		// Breathing rhythm: whitespace separates messages naturally.
 		// The gutter system (┃ you / ┃ ◆) already distinguishes roles,
 		// so we don't need decorative dot separators.
-		if i > 0 {
+		if i > 0 && i >= m.visibleRangeStart {
 			timeGap := !msg.CreatedAt.IsZero() && !prevTime.IsZero() &&
 				msg.CreatedAt.Sub(prevTime) > 90*time.Second
 			if timeGap {
@@ -466,6 +478,49 @@ func (m *ReplModel) renderMessagesIncremental(rw int) {
 	m.viewportContent = content
 	m.viewport.SetContent(content)
 	m.lastRenderTime = time.Now()
+}
+
+// calculateVisibleRange determines which messages are within the viewport's
+// visible range plus a buffer. For conversations with many messages, this
+// avoids rendering messages that are scrolled off-screen (D-30).
+func (m *ReplModel) calculateVisibleRange() {
+	if len(m.messages) == 0 {
+		m.visibleRangeStart = 0
+		m.visibleRangeEnd = 0
+		return
+	}
+
+	// For small conversations, render everything
+	if len(m.messages) <= 20 {
+		m.visibleRangeStart = 0
+		m.visibleRangeEnd = len(m.messages)
+		return
+	}
+
+	// Estimate which messages are visible based on viewport scroll position
+	// Each message is approximately 5-15 lines depending on content
+	vpHeight := m.viewport.Height
+	scrollY := m.viewport.YOffset
+
+	// Estimate lines per message (conservative: 8 lines average)
+	linesPerMsg := 8
+	startMsg := scrollY / linesPerMsg
+	endMsg := (scrollY + vpHeight) / linesPerMsg
+
+	// Add buffer
+	startMsg -= m.virtualBuffer
+	endMsg += m.virtualBuffer
+
+	// Clamp
+	if startMsg < 0 {
+		startMsg = 0
+	}
+	if endMsg > len(m.messages) {
+		endMsg = len(m.messages)
+	}
+
+	m.visibleRangeStart = startMsg
+	m.visibleRangeEnd = endMsg
 }
 
 // renderStreamingContent renders the current streaming content (thinking or response).

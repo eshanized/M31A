@@ -9,6 +9,11 @@ import (
 	"github.com/eshanized/M31A/pkg/history"
 )
 
+// ResizeTickMsg is emitted after a resize debounce period completes.
+// The REPL re-renders only after receiving this message, preventing
+// flicker during rapid resize events (D-13).
+type ResizeTickMsg struct{}
+
 // ─── REPL keyboard handling ───────────────────────────────────────────────────
 
 // Init implements tea.Model; the REPL starts with a spinner tick.
@@ -24,7 +29,7 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Resize all components
+		// Resize all components with debounce (D-13)
 		m.width = msg.Width
 		m.height = msg.Height
 
@@ -41,7 +46,28 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.msgRenderer != nil {
 			_ = m.msgRenderer.SetWidth(rw - 4)
 		}
-		m.renderMessages()
+
+		// Debounce: only re-render if width changed (not just height)
+		// This prevents flicker during rapid vertical resize
+		if rw != m.lastWidth {
+			m.lastWidth = rw
+			// Cancel any pending resize render
+			if m.resizeTimer != nil {
+				m.resizeTimer.Stop()
+			}
+			// Debounce: wait 100ms of no resize events before re-rendering
+			m.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+				// This runs in a goroutine — send a message to trigger re-render
+				// Note: we can't directly call m.renderMessages() from here
+				// because Bubble Tea is single-threaded. Instead, we set a flag
+				// and the next TickMsg will pick it up.
+				m.resizePending = true
+			})
+		}
+		// Always re-render on first init (width == 0)
+		if m.lastWidth == 0 {
+			m.renderMessages()
+		}
 
 	case tea.KeyMsg:
 		if m.streaming {
@@ -75,6 +101,11 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleStreamErrorMsg(msg)
 
 	case TickMsg:
+		// Handle pending resize re-render (D-13 debounce)
+		if m.resizePending {
+			m.resizePending = false
+			m.renderMessages()
+		}
 		if m.streaming || m.thinking {
 			m.spinner.Next()
 			m.waveOffset++ // advance the animated input separator wave

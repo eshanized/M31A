@@ -142,6 +142,16 @@ type ReplModel struct {
 	// Lightweight markdown parser for streaming content (D-27)
 	lightweightMarkdown *components.LightweightMarkdown
 
+	// Viewport virtualization: only render visible messages (D-30)
+	visibleRangeStart int // first visible message index
+	visibleRangeEnd   int // last visible message index (exclusive)
+	virtualBuffer     int // messages to render above/below visible range
+
+	// Resize debounce: prevent flicker during rapid resize events (D-13)
+	resizeTimer    *time.Timer
+	lastWidth      int // track last rendered width to skip height-only changes
+	resizePending  bool
+
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
 
@@ -191,6 +201,7 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 		modelValid:         true,
 		historyIndex:       -1,
 		lightweightMarkdown: components.NewLightweightMarkdown(t),
+		virtualBuffer:      5, // render 5 messages above/below visible range
 	}
 	return m
 }
