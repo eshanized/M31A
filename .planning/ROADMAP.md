@@ -95,7 +95,14 @@ Plans:
 
 **Requirements:** [TUI-01, TUI-02, TUI-03, TUI-04, TUI-05, TUI-06, TUI-07, TUI-08, TUI-09, TUI-10]
 
-**Plans:** [to be planned]
+**Plans:** 8 plans
 
 Plans:
-- [ ] [to be planned]
+- [x] 06-01-PLAN.md — Navigation foundation: screen consolidation, breadcrumb wiring, Esc standardization, sidebar defaults, keyboard consistency, narrative icons
+- [x] 06-02-PLAN.md — Accessibility: ANSI SGR fallbacks, focus indicators, text status indicators, screen reader announcements
+- [x] 06-03-PLAN.md — Streaming performance: lightweight markdown parser, 10fps render rate, viewport virtualization, resize debounce
+- [x] 06-04-PLAN.md — First-time experience: onboarding tour, home screen improvements, quick mode, /help getting-started
+- [x] 06-05-PLAN.md — Interaction quality: permission modal UX, diff viewer line numbers, toast improvements, visual consistency
+- [x] 06-06-PLAN.md — Workflow UX: progress indicators, /clear confirmation, /undo command
+- [x] 06-07-PLAN.md — Code quality: config model split, deprecated theme removal, dead code cleanup, CJK handling
+- [x] 06-08-PLAN.md — Documentation: help screen sync, command palette fix, empty state accessibility, docs update
