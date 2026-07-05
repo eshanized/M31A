@@ -40,6 +40,21 @@ func DefaultConfig() *Config {
 			SessionListLimit:      20,
 			ThinkingOpacity:       0.6,
 			FrecentHistorySize:    100,
+			// Layout thresholds (F-046)
+			WidthUltraCompact: 40,
+			WidthCompact:      60,
+			WidthFull:         80,
+			// Toast (F-047)
+			ToastMaxVisible: 3,
+			// History (F-048, F-049)
+			MaxMessages:  500,
+			MaxTodoItems: 50,
+			// Sidebar (F-050)
+			SidebarRefreshSecs: 5,
+			// Welcome screen (F-081, F-082)
+			WelcomeTwoColThreshold: 88,
+			WelcomeCardMinWidth:    20,
+			WelcomeCardMaxWidth:    60,
 		},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
@@ -78,6 +93,22 @@ func DefaultConfig() *Config {
 			ShipChangelog:       true,
 			InitDeepAnalysis:    true,
 			InitPreflight:       true,
+			// Workflow thresholds (F-030, F-031)
+			MaxHealAttempts: types.MaxHealAttempts,
+			MaxPlanRetries:  types.MaxPlanRetries,
+			// Context (F-033)
+			ContextTruncationThreshold: types.ContextWarningThreshold,
+			// Retry policy (F-061)
+			RetryMaxAttempts:       3,
+			RetryBaseDelayMs:       1000,
+			RetryMaxDelayMs:        30000,
+			RetryBackoffMultiplier: 2.0,
+			// Retry-after (F-062)
+			MaxRetryAfterSecs: int(types.MaxRetryAfterWait / time.Second),
+			// Task runner (F-076)
+			MaxParallelTasks: types.DefaultMaxParallelTasks,
+			// Coordinator (F-078)
+			CoordinatorTimeoutSecs: 300,
 		},
 		Tools: ToolsConfig{
 			MaxGlobResults:       types.DefaultMaxGlobResults,
@@ -91,6 +122,27 @@ func DefaultConfig() *Config {
 			WebSearchEnabled:     true,
 			OutputMaxLines:       types.DefaultOutputMaxLines,
 			OutputMaxBytes:       types.DefaultOutputMaxBytes,
+			// Rate limiting (F-018)
+			RateLimitBurst:           20,
+			RateLimitPerSec:          10,
+			DangerousRateLimitBurst:  5,
+			DangerousRateLimitPerSec: 2,
+			MaxConcurrent:            8,
+			// Output bounds (F-019)
+			OutputRetentionDays: 7,
+			// DNS (F-023)
+			DnsCacheTTLSecs: 300,
+			// Edit tool (F-024)
+			FuzzyThreshold:   0.7,
+			MinLinesForFuzzy: 3,
+			// Bash (F-020)
+			BashMaxTimeoutSecs: 1800,
+			// WebFetch (F-021)
+			WebfetchMaxRetries:   3,
+			WebfetchRetryDelayMs: 500,
+			// Execute phase (F-086, F-087)
+			MaxToolConcurrency: 4,
+			LoopDetectWindow:   3,
 		},
 		Git: GitConfig{
 			CommitPrefix: "feat",
@@ -538,6 +590,54 @@ func validateConfig(cfg *Config) error {
 			Field:        "tools.webfetch_max_redirects",
 			ExpectedType: "non-negative integer",
 			ActualValue:  fmt.Sprintf("%d", cfg.Tools.WebfetchMaxRedirects),
+		})
+	}
+
+	// T-07-01: Rate limit bounds — prevent unlimited rate limits via config.
+	if cfg.Tools.RateLimitBurst < 0 || cfg.Tools.RateLimitBurst > 100 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.rate_limit_burst",
+			ExpectedType: "integer between 0 and 100",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.RateLimitBurst),
+		})
+	}
+	if cfg.Tools.RateLimitPerSec < 0 || cfg.Tools.RateLimitPerSec > 50 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.rate_limit_per_sec",
+			ExpectedType: "integer between 0 and 50",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.RateLimitPerSec),
+		})
+	}
+
+	// T-07-02: Concurrency bounds — prevent resource exhaustion via config.
+	if cfg.Tools.MaxConcurrent < 0 || cfg.Tools.MaxConcurrent > 32 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.max_concurrent",
+			ExpectedType: "integer between 0 and 32",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.MaxConcurrent),
+		})
+	}
+	if cfg.Tools.MaxToolConcurrency < 0 || cfg.Tools.MaxToolConcurrency > 16 {
+		errs = append(errs, ValidationError{
+			Field:        "tools.max_tool_concurrency",
+			ExpectedType: "integer between 0 and 16",
+			ActualValue:  fmt.Sprintf("%d", cfg.Tools.MaxToolConcurrency),
+		})
+	}
+
+	// T-07-04: Retry bounds — prevent infinite retry loops via config.
+	if cfg.Features.RetryMaxAttempts < 0 || cfg.Features.RetryMaxAttempts > 10 {
+		errs = append(errs, ValidationError{
+			Field:        "features.retry_max_attempts",
+			ExpectedType: "integer between 0 and 10",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.RetryMaxAttempts),
+		})
+	}
+	if cfg.Features.RetryMaxDelayMs < 0 || (cfg.Features.RetryMaxDelayMs > 0 && cfg.Features.RetryMaxDelayMs < 1000) || cfg.Features.RetryMaxDelayMs > 300000 {
+		errs = append(errs, ValidationError{
+			Field:        "features.retry_max_delay_ms",
+			ExpectedType: "integer between 0, or 1000 and 300000",
+			ActualValue:  fmt.Sprintf("%d", cfg.Features.RetryMaxDelayMs),
 		})
 	}
 

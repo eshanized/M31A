@@ -165,6 +165,23 @@ type UIConfig struct {
 	ToastPosition     string `toml:"toast_position"`
 	ToastDurationSecs int    `toml:"toast_duration_secs"`
 	ToastMaxVisible   int    `toml:"toast_max_visible"`
+
+	// Layout thresholds (F-046)
+	WidthUltraCompact int `toml:"width_ultra_compact"`
+	WidthCompact      int `toml:"width_compact"`
+	WidthFull         int `toml:"width_full"`
+
+	// History (F-048, F-049)
+	MaxMessages  int `toml:"max_messages"`
+	MaxTodoItems int `toml:"max_todo_items"`
+
+	// Sidebar (F-050)
+	SidebarRefreshSecs int `toml:"sidebar_refresh_secs"`
+
+	// Welcome screen (F-081, F-082)
+	WelcomeTwoColThreshold int `toml:"welcome_two_col_threshold"`
+	WelcomeCardMinWidth    int `toml:"welcome_card_min_width"`
+	WelcomeCardMaxWidth    int `toml:"welcome_card_max_width"`
 }
 
 type PermissionsConfig struct {
@@ -259,6 +276,28 @@ type FeaturesConfig struct {
 	// Intent classification (LLM-based prompt routing)
 	IntentClassification      bool `toml:"intent_classification"`        // Pre-classify REPL input for routing
 	IntentClassifyTimeoutSecs int  `toml:"intent_classify_timeout_secs"` // Timeout for LLM classification (seconds). Default 25.
+
+	// Workflow thresholds (F-030, F-031)
+	MaxHealAttempts int `toml:"max_heal_attempts"`
+	MaxPlanRetries  int `toml:"max_plan_retries"`
+
+	// Context (F-033)
+	ContextTruncationThreshold float64 `toml:"context_truncation_threshold"`
+
+	// Retry policy (F-061)
+	RetryMaxAttempts       int     `toml:"retry_max_attempts"`
+	RetryBaseDelayMs       int     `toml:"retry_base_delay_ms"`
+	RetryMaxDelayMs        int     `toml:"retry_max_delay_ms"`
+	RetryBackoffMultiplier float64 `toml:"retry_backoff_multiplier"`
+
+	// Retry-after (F-062)
+	MaxRetryAfterSecs int `toml:"max_retry_after_secs"`
+
+	// Task runner (F-076)
+	MaxParallelTasks int `toml:"max_parallel_tasks"`
+
+	// Coordinator (F-078)
+	CoordinatorTimeoutSecs int `toml:"coordinator_timeout_secs"`
 }
 
 type LedgerConfig struct {
@@ -283,6 +322,34 @@ type ToolsConfig struct {
 	WebSearchEnabled     bool     `toml:"websearch_enabled"`
 	OutputMaxLines       int      `toml:"output_max_lines"`
 	OutputMaxBytes       int      `toml:"output_max_bytes"`
+
+	// Rate limiting (F-018)
+	RateLimitBurst          int `toml:"rate_limit_burst"`
+	RateLimitPerSec         int `toml:"rate_limit_per_sec"`
+	DangerousRateLimitBurst int `toml:"dangerous_rate_limit_burst"`
+	DangerousRateLimitPerSec int `toml:"dangerous_rate_limit_per_sec"`
+	MaxConcurrent           int `toml:"max_concurrent"`
+
+	// Output bounds (F-019)
+	OutputRetentionDays int `toml:"output_retention_days"`
+
+	// DNS (F-023)
+	DnsCacheTTLSecs int `toml:"dns_cache_ttl_secs"`
+
+	// Edit tool (F-024)
+	FuzzyThreshold   float64 `toml:"fuzzy_threshold"`
+	MinLinesForFuzzy int     `toml:"min_lines_for_fuzzy"`
+
+	// Bash (F-020)
+	BashMaxTimeoutSecs int `toml:"bash_max_timeout_secs"`
+
+	// WebFetch (F-021)
+	WebfetchMaxRetries   int `toml:"webfetch_max_retries"`
+	WebfetchRetryDelayMs int `toml:"webfetch_retry_delay_ms"`
+
+	// Execute phase (F-086, F-087)
+	MaxToolConcurrency int `toml:"max_tool_concurrency"`
+	LoopDetectWindow   int `toml:"loop_detect_window"`
 }
 
 type AgentsConfig struct {
