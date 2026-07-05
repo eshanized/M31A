@@ -25,16 +25,20 @@ const bigLogo = `___  ___ _____  __    ___
 const bigLogoTagline = "autonomous coding agent"
 
 // RenderLogo renders the M31A logo with optional version and bold styling.
-func RenderLogo(version string, bold bool, brandColor lipgloss.Color) string {
-	logoText := logo
+// If customLogoText is non-empty, it is used instead of the embedded default.
+func RenderLogo(version string, bold bool, brandColor lipgloss.Color, customLogoText ...string) string {
+	logoStr := logo
+	if len(customLogoText) > 0 && customLogoText[0] != "" {
+		logoStr = customLogoText[0]
+	}
 	if version != "" {
-		logoText = logo + version
+		logoStr = logoStr + version
 	}
 	style := lipgloss.NewStyle().Foreground(brandColor)
 	if bold {
 		style = style.Bold(true)
 	}
-	lines := strings.Split(logoText, "\n")
+	lines := strings.Split(logoStr, "\n")
 	styled := make([]string, len(lines))
 	for i, line := range lines {
 		styled[i] = style.Render(line)
@@ -48,8 +52,13 @@ func RenderLogo(version string, bold bool, brandColor lipgloss.Color) string {
 // using fade characters (█ ▓ ▒ ░ ·). The tagline "autonomous coding agent"
 // is always rendered below in muted secondary color.
 // maxW limits the total output width; pass 0 for no limit.
-func RenderBigLogo(brandColor lipgloss.Color, glow bool, maxW int) string {
-	lines := strings.Split(bigLogo, "\n")
+// Optional customLogoText overrides the embedded bigLogo.
+func RenderBigLogo(brandColor lipgloss.Color, glow bool, maxW int, customLogoText ...string) string {
+	logoStr := bigLogo
+	if len(customLogoText) > 0 && customLogoText[0] != "" {
+		logoStr = customLogoText[0]
+	}
+	lines := strings.Split(logoStr, "\n")
 	styled := make([]string, len(lines))
 	for i, line := range lines {
 		styled[i] = lipgloss.NewStyle().Foreground(brandColor).Bold(true).Render(line)

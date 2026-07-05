@@ -229,6 +229,7 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
 			m.homeModel.SetCommandRegistry(m.cmdRegistry)
+			m.homeModel.SetConfig(m.config)
 		}
 		return m.homeModel.Init()
 	default:
@@ -531,6 +532,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		if m.homeModel == nil {
 			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
 			m.homeModel.SetCommandRegistry(m.cmdRegistry)
+			m.homeModel.SetConfig(m.config)
 		} else {
 			m.homeModel.SetDimensions(cw, ch)
 		}

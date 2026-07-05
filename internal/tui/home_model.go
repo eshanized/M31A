@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -39,6 +40,7 @@ type HomeTickMsg struct{}
 type HomeModel struct {
 	theme   theme.Theme
 	version string
+	cfg     *config.Config
 
 	input         textinput.Model
 	placeholderIx int
@@ -84,6 +86,11 @@ func (hm *HomeModel) SetDimensions(w, h int) {
 // SetTheme updates the theme.
 func (hm *HomeModel) SetTheme(t theme.Theme) {
 	hm.theme = t
+}
+
+// SetConfig updates the config for logo/welcome customization.
+func (hm *HomeModel) SetConfig(cfg *config.Config) {
+	hm.cfg = cfg
 }
 
 // SetCommandRegistry sets the command registry for slash command suggestions.

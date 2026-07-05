@@ -255,7 +255,7 @@ func (fr *FirstRunModel) renderWelcome() string {
 func (fr *FirstRunModel) renderWelcomePanel(innerW, panelW int) string {
 	t := fr.theme
 
-	logoBlock := components.RenderBigLogo(t.Brand, true, fr.effectiveWidth())
+	logoBlock := components.RenderBigLogo(t.Brand, true, fr.effectiveWidth(), resolveLogoText(fr.config.UI))
 
 	tagline := lipgloss.NewStyle().
 		Foreground(t.TextSecondary).

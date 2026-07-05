@@ -796,6 +796,7 @@ func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {
 	if m.homeModel == nil {
 		m.homeModel = NewHomeModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight(), m.version)
 		m.homeModel.SetCommandRegistry(m.cmdRegistry)
+		m.homeModel.SetConfig(m.config)
 	}
 	m.homeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
 	return m.homeModel.renderHome()

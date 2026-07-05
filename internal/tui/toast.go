@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -9,11 +10,49 @@ import (
 // Set via SetMaxVisibleToasts during TUI initialization from config.
 var maxVisibleToasts = 3
 
+// toastOverrides holds config-based toast type overrides.
+// Set via SetToastOverrides during TUI initialization from config.
+var toastOverrides map[string]config.ToastTypeConfig
+
 // SetMaxVisibleToasts updates the maximum number of visible toasts.
 // Called during TUI initialization with cfg.UI.ToastMaxVisible.
 func SetMaxVisibleToasts(n int) {
 	if n > 0 {
 		maxVisibleToasts = n
+	}
+}
+
+// SetToastOverrides sets custom toast type icon/title overrides from config.
+// Called during TUI initialization with cfg.UI.ToastTypeOverrides.
+func SetToastOverrides(overrides map[string]config.ToastTypeConfig) {
+	toastOverrides = overrides
+}
+
+// getToastConfig returns the icon and title for a toast type,
+// checking config overrides first, then falling back to defaults.
+func getToastConfig(toastType string) (icon, title string) {
+	if override, ok := toastOverrides[toastType]; ok {
+		if override.Icon != "" {
+			icon = override.Icon
+		}
+		if override.Title != "" {
+			title = override.Title
+		}
+		if icon != "" && title != "" {
+			return icon, title
+		}
+	}
+
+	// Default values
+	switch toastType {
+	case "success":
+		return "✓", "Success"
+	case "error":
+		return "✗", "Error"
+	case "warning":
+		return "⚠", "Warning"
+	default:
+		return "ℹ", "Info"
 	}
 }
 
@@ -41,25 +80,20 @@ func renderToastStack(toasts []Toast, t theme.Theme, termWidth int) string {
 // renderSingleToast renders one toast as a card with rounded border and colored accent.
 func renderSingleToast(toast Toast, t theme.Theme, index int, toastWidth int) string {
 	var borderColor lipgloss.Color
-	var icon string
-	var title string
+	icon, title := getToastConfig(toast.Type)
 	switch toast.Type {
 	case "success":
 		borderColor = t.Success
-		icon = lipgloss.NewStyle().Foreground(t.Success).Render("✓")
-		title = "Success"
+		icon = lipgloss.NewStyle().Foreground(t.Success).Render(icon)
 	case "error":
 		borderColor = t.Error
-		icon = lipgloss.NewStyle().Foreground(t.Error).Render("✗")
-		title = "Error"
+		icon = lipgloss.NewStyle().Foreground(t.Error).Render(icon)
 	case "warning":
 		borderColor = t.Warning
-		icon = lipgloss.NewStyle().Foreground(t.Warning).Render("⚠")
-		title = "Warning"
+		icon = lipgloss.NewStyle().Foreground(t.Warning).Render(icon)
 	default:
 		borderColor = t.Brand
-		icon = lipgloss.NewStyle().Foreground(t.Brand).Render("ℹ")
-		title = "Info"
+		icon = lipgloss.NewStyle().Foreground(t.Brand).Render(icon)
 	}
 
 	offset := 0

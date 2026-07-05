@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -48,7 +50,7 @@ func (m *ReplModel) renderWelcome() string {
 	gettingStarted := m.renderGettingStarted(cardW)
 
 	// 4. Keyboard hints
-	hints := renderKeyboardHints(m.theme)
+	hints := renderKeyboardHints(m.theme, m.cfg)
 
 	// 5. Bottom bar (cwd + version)
 	bottomBar := m.renderBottomBar()
@@ -102,10 +104,29 @@ func welcomeCardWidth(availWidth int) int {
 
 // renderLogoWithGlow renders the M31A logo with a gradient glow row beneath.
 func (m *ReplModel) renderLogoWithGlow() string {
-	logoBlock := components.RenderBigLogo(m.theme.Brand, true, m.replWidth())
+	var customLogo string
+	if m.cfg != nil {
+		customLogo = resolveLogoText(m.cfg.UI)
+	}
+	logoBlock := components.RenderBigLogo(m.theme.Brand, true, m.replWidth(), customLogo)
 	gradientSep := renderGradientSeparator(m.replWidth(), m.theme)
 
 	return lipgloss.JoinVertical(lipgloss.Center, logoBlock, gradientSep)
+}
+
+// resolveLogoText returns the custom logo text from config.
+// Priority: LogoText (inline) > LogoFile (file contents) > "" (use embedded default).
+func resolveLogoText(ui config.UIConfig) string {
+	if ui.LogoText != "" {
+		return ui.LogoText
+	}
+	if ui.LogoFile != "" {
+		data, err := os.ReadFile(ui.LogoFile)
+		if err == nil {
+			return string(data)
+		}
+	}
+	return ""
 }
 
 // renderGradientSeparator renders a clean gradient separator line
@@ -258,6 +279,20 @@ func (m *ReplModel) renderProjectCard(cardWidth int) string {
 // renderGettingStarted renders suggested prompts, context-aware when possible.
 func (m *ReplModel) welcomePrompts() []struct{ prompt, hint string } {
 	type suggestion = struct{ prompt, hint string }
+
+	// Check for config-overridden welcome suggestions
+	if m.cfg != nil && len(m.cfg.UI.WelcomeSuggestions) > 0 {
+		prompts := make([]suggestion, len(m.cfg.UI.WelcomeSuggestions))
+		for i, s := range m.cfg.UI.WelcomeSuggestions {
+			prompts[i] = suggestion{prompt: s, hint: "custom"}
+		}
+		// Cap at 3
+		if len(prompts) > 3 {
+			prompts = prompts[:3]
+		}
+		return prompts
+	}
+
 	prompts := []suggestion{
 		{"Fix the failing tests in this repo", "auto-fix"},
 		{"Add error handling to the API layer", "refactor"},
@@ -329,9 +364,13 @@ func (m *ReplModel) renderGettingStarted(cardWidth int) string {
 }
 
 // renderKeyboardHints renders keyboard shortcut hints with branded separator dots.
-func renderKeyboardHints(t theme.Theme) string {
+// Accepts config for keyboard hint overrides.
+func renderKeyboardHints(t theme.Theme, cfg *config.Config) string {
 	s := theme.BuildSemanticStyles(t)
 	hints := []string{"ctrl+p commands", "ctrl+b sidebar", "/help"}
+	if cfg != nil && len(cfg.UI.KeyboardHints) > 0 {
+		hints = cfg.UI.KeyboardHints
+	}
 	parts := make([]string, len(hints))
 	for i, h := range hints {
 		parts[i] = s.KeyboardHint.Render(h)

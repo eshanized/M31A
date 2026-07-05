@@ -56,11 +56,25 @@ func DefaultConfig() *Config {
 			MaxTodoItems: 50,
 			// Sidebar (F-050)
 			SidebarRefreshSecs: 5,
-			// Welcome screen (F-081, F-082)
-			WelcomeTwoColThreshold: 88,
-			WelcomeCardMinWidth:    20,
-			WelcomeCardMaxWidth:    60,
-		},
+		// Welcome screen (F-081, F-082)
+		WelcomeTwoColThreshold: 88,
+		WelcomeCardMinWidth:    20,
+		WelcomeCardMaxWidth:    60,
+		// Logo (F-042)
+		LogoFile: "",
+		LogoText: "",
+		// Welcome suggestions (F-043)
+		WelcomeSuggestions: []string{},
+		// Keyboard hints (F-044)
+		KeyboardHints: []string{},
+		// Unicode symbols (F-053)
+		SymbolOverrides: map[string]string{},
+		ASCIIFallback:   false,
+		// Theme file (F-052)
+		ThemeFile: "",
+		// Toast type overrides (F-045)
+		ToastTypeOverrides: map[string]ToastTypeConfig{},
+	},
 		Model: ModelConfig{
 			ContextWarningThreshold: types.ContextWarningThreshold,
 			TokenEMAAlpha:           types.EMACorrectionAlpha,
@@ -189,6 +203,11 @@ func DefaultConfig() *Config {
 		Narrative: NarrativeConfig{
 			TemplateOverrides:       map[string]string{},
 			ClassificationOverrides: map[string]string{},
+		},
+		Templates: TemplateConfig{
+			ExternalDir:      "",
+			WebsiteFramework: "nextjs",
+			CustomPalettes:   map[string]map[string]string{},
 		},
 	}
 }
@@ -696,7 +715,7 @@ func knownConfigKeys() map[string]bool {
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
-			"model_capabilities": true, "prompts": true, "narrative": true,
+			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true, "nvidia": true,
 		}

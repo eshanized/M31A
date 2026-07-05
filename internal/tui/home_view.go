@@ -21,7 +21,11 @@ func (hm *HomeModel) renderHome() string {
 	}
 
 	// Logo without glow effect (simplified chrome)
-	logoBlock := components.RenderBigLogo(t.Brand, false, w)
+	var customLogo string
+	if hm.cfg != nil {
+		customLogo = resolveLogoText(hm.cfg.UI)
+	}
+	logoBlock := components.RenderBigLogo(t.Brand, false, w, customLogo)
 
 	glowBlock := logoBlock
 

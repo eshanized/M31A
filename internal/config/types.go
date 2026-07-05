@@ -19,6 +19,23 @@ type Config struct {
 	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
 	Prompts           PromptConfig            `toml:"prompts"`
 	Narrative         NarrativeConfig         `toml:"narrative"`
+	Templates         TemplateConfig          `toml:"templates"`
+}
+
+// TemplateConfig holds template directory and website framework configuration.
+type TemplateConfig struct {
+	// External template directory (F-056): path to a directory containing
+	// user-defined templates. Templates in this directory are merged with
+	// embedded templates. If a template has the same name, the external one wins.
+	ExternalDir string `toml:"external_dir"`
+
+	// Website framework (F-005, F-057): which framework to use for website builds.
+	// Options: "nextjs" (default), "vue", "svelte", "astro", "html"
+	WebsiteFramework string `toml:"website_framework"`
+
+	// Custom design palettes (F-058): map of palette name to color definitions.
+	// Example: {"custom": {"primary": "#FF5733", "secondary": "#33FF57"}}
+	CustomPalettes map[string]map[string]string `toml:"custom_palettes"`
 }
 
 // PromptConfig holds configurable prompt override settings.
@@ -251,6 +268,42 @@ type UIConfig struct {
 	WelcomeTwoColThreshold int `toml:"welcome_two_col_threshold"`
 	WelcomeCardMinWidth    int `toml:"welcome_card_min_width"`
 	WelcomeCardMaxWidth    int `toml:"welcome_card_max_width"`
+
+	// Logo (F-042): path to a custom logo file. If empty, uses embedded ASCII art.
+	LogoFile string `toml:"logo_file"`
+
+	// Logo text override: inline logo text. Takes precedence over LogoFile.
+	LogoText string `toml:"logo_text"`
+
+	// Welcome suggestions (F-043): custom welcome prompt suggestions.
+	// If empty, uses the built-in defaults.
+	WelcomeSuggestions []string `toml:"welcome_suggestions"`
+
+	// Keyboard hints (F-044): custom keyboard hint strings.
+	// If empty, uses the built-in defaults.
+	KeyboardHints []string `toml:"keyboard_hints"`
+
+	// Unicode symbol overrides (F-053): map of symbol name to replacement character.
+	// Example: {"check": "✓", "cross": "✗", "warning": "⚠"}
+	SymbolOverrides map[string]string `toml:"symbol_overrides"`
+
+	// ASCII fallback mode: when true, uses ASCII characters instead of Unicode.
+	// Useful for terminals with poor Unicode support.
+	ASCIIFallback bool `toml:"ascii_fallback"`
+
+	// Theme file (F-052): path to a custom theme file.
+	// If empty, uses built-in dark/light/auto themes.
+	ThemeFile string `toml:"theme_file"`
+
+	// Toast type overrides (F-045): map of toast type to icon/title.
+	// Example: {"success": {"icon": "OK", "title": "Done"}}
+	ToastTypeOverrides map[string]ToastTypeConfig `toml:"toast_type_overrides"`
+}
+
+// ToastTypeConfig holds custom icon and title for a toast type.
+type ToastTypeConfig struct {
+	Icon  string `toml:"icon"`
+	Title string `toml:"title"`
 }
 
 type PermissionsConfig struct {

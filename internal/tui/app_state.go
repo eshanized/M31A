@@ -363,6 +363,9 @@ func NewApp(
 		if cfg.UI.ToastMaxVisible > 0 {
 			SetMaxVisibleToasts(cfg.UI.ToastMaxVisible)
 		}
+		if len(cfg.UI.ToastTypeOverrides) > 0 {
+			SetToastOverrides(cfg.UI.ToastTypeOverrides)
+		}
 	}
 
 	// Initialize sidebar
