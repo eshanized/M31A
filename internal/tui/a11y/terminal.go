@@ -80,6 +80,13 @@ func SupportsOSC1337() bool {
 	}
 }
 
+// SupportsSGR returns true if the terminal can interpret ANSI SGR sequences
+// for semantic emphasis (bold, italic, underline). All terminals support SGR,
+// so this always returns true. It exists for explicit call-site clarity.
+func SupportsSGR() bool {
+	return true
+}
+
 // SupportsSemanticLabels returns true if the terminal can display semantic labels.
 // Currently only iTerm2 supports SetSemanticLabel via OSC 1337.
 func SupportsSemanticLabels() bool {
