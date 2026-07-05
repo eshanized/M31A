@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.7.0] - 2026-07-06
+
+### Added
+- **engine**: Extract PhaseCoordinator, StateMachine, WorkflowCache, ContextBuilder, CostTracker, and PromptBuilder from monolithic Engine for cleaner separation of concerns
+- **retry**: Centralized retry logic with `RetryWithBackoff` and `RetryWithResult` utilities
+- **helpers**: Performance optimization, concurrency review, and memory optimization helpers
+- **logging**: Audit logging and standardized error handling across the codebase
+- **tui**: Show sidebar by default on wide terminals, wire breadcrumb navigation, and standardize keyboard behavior
+- **a11y**: Visible focus indicators, text-based health status, ANSI SGR fallbacks, and expanded screen reader announcements
+- **streaming**: Lightweight streaming markdown parser, viewport virtualization, resize debounce, and increased render rate to 10fps
+- **ux**: Quick mode, `/help getting-started`, `/skip` commands, and getting-started tour for first-time users
+- **toast**: Improved toast system with visual consistency, permission modal UX, and diff viewer improvements
+- **status**: Workflow phase progress indicator in status bar
+- **keyboard**: Keyboard-accessible empty states, help screen and command palette sync with actual keybindings
+- **config**: Extend config structs with hardcoded refactoring fields, threat model validations, and wire config values into consumer code with constant fallbacks
+- **provider**: Configurable fallback priority, health check timeout, registration order, and model capability config overrides
+- **prompts**: Prompt loader with 4-level override mechanism and dynamic limit injection
+- **tools**: Config-based dangerous command extensions, subagent profile support, narrative template overrides, and compaction template config
+- **ui**: UI externalization — logo, welcome, symbols, theme config, and website template config
+- **tokens**: Multi-provider token estimation and runtime capability detection
+- **components**: Empty state templates, permission descriptions, and narrative engine for TUI storytelling
+
+### Fixed
+- **safety**: Use safe comma-ok type assertions on sync.Map values and add length checks before indexing DNS resolution results
+- **race**: Fix DNS cache TOCTOU, permissions double decrement, SetCollector data race, and restartServer TOCTOU race
+- **errors**: Capture `TruncateMessagesForLLM` truncation indicator and check errors from `git diff` and `json.MarshalIndent`
+- **ssrf**: Add SSRF protection to HTTPCheck and safe comma-ok type assertions in DNS cache
+- **concurrency**: Prevent goroutine leak in `Coordinator.awaitDone`, add mutex protection to WorkflowCache dynamic context operations, and use safe type assertions in `findFreePort`, `WebFetch`, and `ApprovePermission`
+- **shutdown**: Add graceful shutdown to workflow engine, ensure AgentLoop goroutines terminate cleanly on cancellation, and add bounded timeout to SubagentManager shutdown
+- **security**: Add `sanitizeService` for keychain path traversal prevention and harden bash command injection detection with normalization
+- **perf**: Bound gitignore cache size with LRU eviction and replace O(n²) bubble sort with `sort.Slice` in DNS cache eviction
+- **websearch**: Correct IP filtering logic for private and reserved IPs
+- **config**: Apply defaults before overlaying toast config overrides and remove unused constants
+
+### Changed
+- **refactor**: Rewrite `Update()` as thin dispatcher with extracted helper methods
+- **refactor**: Wire PhaseCoordinator into Engine lifecycle and extract 30 helper methods from `app_update.go` into 5 files
+- **refactor**: Remove dead code, fix CJK character width, split config model, and remove deprecated theme modes
+- **refactor**: Remove reflection-based config merge, simplify slice merge logic, and clean up unused map merge functions
+- **refactor**: Simplify cascading strategies in edit with confidence scoring
+- **refactor**: Unify intent classification with retry utility
+- **tui**: Simplify and clean internal TUI code, enhance components and screens
+- **core**: Remove dead code and unused components
+
+### Security
+- **ssrf**: Add SSRF protection to HTTPCheck (H10)
+- **path**: Add `sanitizeService` for keychain path traversal prevention
+- **injection**: Harden bash command injection detection with normalization
+
+### Testing
+- Add tests for WebFetch TLS connection, permissions invalid type assertion, DNS cache high-contention, bash obfuscation detection, and WorkflowCache concurrent dynamic context
+- Add TUI test coverage (commands, a11y, components, layout, streaming, theme, tuitypes)
+- Add tools and workflow coverage boost tests to reach 75%
+- Add tests for extracted helper methods and integration tests for PhaseCoordinator wiring
+
 ## [1.6.1] - 2026-06-30
 
 ### Added
