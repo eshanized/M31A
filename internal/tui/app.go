@@ -299,8 +299,12 @@ func (m *AppState) removeToastByID(id int) {
 // setWorkflowPhase transitions to a new workflow phase, updating state.
 func (m *AppState) setWorkflowPhase(phase types.WorkflowPhase) {
 	m.workflowPhase = phase
+	m.workflowPhaseIndex = phaseToIndex(phase)
 	if m.replModel != nil {
 		m.replModel.lastStatus = "Phase: " + string(phase)
+		m.replModel.workflowPhase = string(phase)
+		m.replModel.workflowPhaseIndex = m.workflowPhaseIndex
+		m.replModel.totalPhases = totalPhases
 	}
 	if m.sidebarModel != nil {
 		m.sidebarModel.SetCurrentPhase(string(phase))

@@ -26,6 +26,8 @@ type StatusBarInfo struct {
 	ThinkingDuration   int64 // milliseconds of current thinking session
 	KeyboardHints      []string
 	WorkflowPhase      string
+	WorkflowPhaseIndex int    // numeric phase index (0-based)
+	TotalPhases        int    // total number of workflow phases
 	QuestionProgress   string
 	CwdName            string // basename of working directory
 	GitBranch          string // current git branch
@@ -107,7 +109,13 @@ func RenderStatusBar(s theme.SemanticStyles, width int, info *StatusBarInfo) str
 		if info.QuestionProgress != "" {
 			phaseText += " · " + info.QuestionProgress
 		}
-		centerText = s.BrandText.Render(phaseText)
+		// Add phase progress indicator when phase index is available
+		if info.TotalPhases > 0 {
+			progressBar := components.RenderWorkflowProgressBar(info.WorkflowPhaseIndex+1, info.TotalPhases, 8)
+			centerText = s.BrandText.Render(phaseText) + " " + s.ProgressLabel.Render(progressBar)
+		} else {
+			centerText = s.BrandText.Render(phaseText)
+		}
 	case info.WhichKey != "":
 		centerText = s.FooterOp.Render(info.WhichKey)
 	}

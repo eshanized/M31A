@@ -100,6 +100,11 @@ type ReplModel struct {
 	lastCost         float64
 	sessionSparkline string
 
+	// Workflow phase tracking for status bar progress indicator
+	workflowPhase      string // current workflow phase name (e.g., "plan", "execute")
+	workflowPhaseIndex int    // numeric phase index (0-based)
+	totalPhases        int    // total number of workflow phases
+
 	// Working directory for @filepath resolution
 	cwd string
 

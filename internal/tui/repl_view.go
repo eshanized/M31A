@@ -151,11 +151,14 @@ func (m *ReplModel) View() string {
 		thinkingDur = time.Since(m.thinkingStartAt).Milliseconds()
 	}
 	info := &StatusBarInfo{
-		IsStreaming:      m.streaming,
-		IsThinking:       m.thinking,
-		ThinkingDuration: thinkingDur,
-		SpinnerFrame:     m.spinner.Peek(),
-		KeyboardHints:    []string{"ctrl+p cmds", "ctrl+b sidebar"},
+		IsStreaming:        m.streaming,
+		IsThinking:         m.thinking,
+		ThinkingDuration:   thinkingDur,
+		SpinnerFrame:       m.spinner.Peek(),
+		KeyboardHints:      []string{"ctrl+p cmds", "ctrl+b sidebar"},
+		WorkflowPhase:      m.workflowPhase,
+		WorkflowPhaseIndex: m.workflowPhaseIndex,
+		TotalPhases:        m.totalPhases,
 	}
 	if m.streaming || m.thinking {
 		info.KeyboardHints = append([]string{"ctrl+c cancel"}, info.KeyboardHints...)

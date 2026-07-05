@@ -33,6 +33,31 @@ import (
 // It is defined separately from the concrete workflow.Engine to allow testing.
 type workflowEngineInterface = WorkflowEngine
 
+// totalPhases is the number of active workflow phases (Initialize through Ship).
+const totalPhases = 7
+
+// phaseToIndex maps a WorkflowPhase to its numeric index (0-6).
+func phaseToIndex(phase types.WorkflowPhase) int {
+	switch phase {
+	case types.PhaseInitialize:
+		return 0
+	case types.PhaseDiscuss:
+		return 1
+	case types.PhasePlan:
+		return 2
+	case types.PhaseExecute:
+		return 3
+	case types.PhaseVerify:
+		return 4
+	case types.PhaseRuntime:
+		return 5
+	case types.PhaseShip:
+		return 6
+	default:
+		return 0
+	}
+}
+
 // Compile-time interface check
 var _ workflowEngineInterface = (*workflow.Engine)(nil)
 
@@ -80,9 +105,10 @@ type AppState struct {
 	cwd string
 
 	// Workflow
-	workflowEngine workflowEngineInterface
-	workflowPhase  types.WorkflowPhase
-	workflowMode   types.WorkflowMode
+	workflowEngine     workflowEngineInterface
+	workflowPhase      types.WorkflowPhase
+	workflowPhaseIndex int // numeric phase index (0-6 for 7 phases)
+	workflowMode       types.WorkflowMode
 	workflowGoal   string
 	workflowCancel context.CancelFunc
 	shutdownCtx    context.Context

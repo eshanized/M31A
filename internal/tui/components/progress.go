@@ -384,3 +384,32 @@ func (c CompactProgress) Render() string {
 
 	return fmt.Sprintf("[%d%%]", int(math.Round(pct*100)))
 }
+
+// RenderWorkflowProgressBar renders a compact workflow phase progress bar
+// showing "Phase X/Y" with a visual bar indicator.
+// The bar uses Unicode block characters: "████░░░░".
+func RenderWorkflowProgressBar(current, total, barWidth int) string {
+	if total <= 0 {
+		return ""
+	}
+	if barWidth <= 0 {
+		barWidth = 8
+	}
+
+	pct := float64(current) / float64(total)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+
+	filled := int(math.Round(pct * float64(barWidth)))
+	if filled > barWidth {
+		filled = barWidth
+	}
+	empty := barWidth - filled
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	return fmt.Sprintf("Phase %d/%d %s", current, total, bar)
+}
