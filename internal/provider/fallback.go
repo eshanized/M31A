@@ -19,24 +19,44 @@ type FallbackEvent struct {
 // maxRetryAfter is the maximum duration to wait for Retry-After header (120s cap).
 const maxRetryAfter = types.MaxRetryAfterWait
 
-func FindFallbackProvider(registry *Registry, currentProvider string) (string, *FallbackEvent, error) {
-	names := registry.ListAll()
-
-	// Collect candidate providers (excluding the current one)
+// FindFallbackProvider searches for an alternative provider when the current
+// one fails. fallbackPriority is an ordered list of provider names to try;
+// when non-empty, candidates are checked in this order. When empty, falls
+// back to alphabetical sort (existing behavior). healthCheckTimeoutSecs
+// controls the per-provider health check deadline; 0 uses the default (10s).
+func FindFallbackProvider(registry *Registry, currentProvider string, fallbackPriority []string, healthCheckTimeoutSecs int) (string, *FallbackEvent, error) {
+	// Build candidate list in the requested order
 	type candidate struct {
 		name     string
 		provider LLMProvider
 	}
 	var candidates []candidate
-	for _, name := range names {
-		if name == currentProvider {
-			continue
+
+	if len(fallbackPriority) > 0 {
+		// Use config-specified order
+		for _, name := range fallbackPriority {
+			if name == currentProvider {
+				continue
+			}
+			p, err := registry.Get(name)
+			if err != nil {
+				continue
+			}
+			candidates = append(candidates, candidate{name: name, provider: p})
 		}
-		p, err := registry.Get(name)
-		if err != nil {
-			continue
+	} else {
+		// Fallback to alphabetical sort (existing behavior)
+		names := registry.ListAll()
+		for _, name := range names {
+			if name == currentProvider {
+				continue
+			}
+			p, err := registry.Get(name)
+			if err != nil {
+				continue
+			}
+			candidates = append(candidates, candidate{name: name, provider: p})
 		}
-		candidates = append(candidates, candidate{name: name, provider: p})
 	}
 
 	if len(candidates) == 0 {
@@ -51,7 +71,11 @@ func FindFallbackProvider(registry *Registry, currentProvider string) (string, *
 	}
 	ch := make(chan result, len(candidates))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	timeout := 10 * time.Second // default
+	if healthCheckTimeoutSecs > 0 {
+		timeout = time.Duration(healthCheckTimeoutSecs) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	for _, c := range candidates {
@@ -157,7 +181,7 @@ type FallbackAfterWait struct {
 //
 // When the current provider returned a 429 with a Retry-After header,
 // Wait is capped at maxRetryAfter (120s).
-func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string) FallbackAfterWait {
+func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string, fallbackPriority []string, healthCheckTimeoutSecs int) FallbackAfterWait {
 	wait := time.Duration(0)
 	if retryAfterHeader != "" {
 		if seconds, err := strconv.Atoi(retryAfterHeader); err == nil && seconds > 0 {
@@ -168,7 +192,7 @@ func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retr
 		}
 	}
 
-	_, event, err := FindFallbackProvider(registry, currentProvider)
+	_, event, err := FindFallbackProvider(registry, currentProvider, fallbackPriority, healthCheckTimeoutSecs)
 	if err != nil {
 		return FallbackAfterWait{Err: err}
 	}

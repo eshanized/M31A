@@ -26,6 +26,11 @@ var ErrValidation = errors.New("config validation")
 // causes Load to return DefaultConfig without error.
 func DefaultConfig() *Config {
 	return &Config{
+		Provider: ProviderConfig{
+			FallbackPriority:       []string{"nvidia", "zen", "openrouter"},
+			HealthCheckTimeoutSecs: 10,
+			RegistrationOrder:      []string{"openrouter", "zen", "nvidia"},
+		},
 		UI: UIConfig{
 			SidebarWidthThreshold: 120,
 			MaxIterations:         100,
@@ -668,6 +673,7 @@ func knownConfigKeys() map[string]bool {
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
+			"model_capabilities": true,
 			// Common typos / sub-tables that appear in user configs
 			"openrouter": true, "zen": true, "nvidia": true,
 		}

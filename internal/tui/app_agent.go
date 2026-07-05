@@ -34,7 +34,7 @@ func (m *AppState) attemptAutoFallback(origErr error) tea.Cmd {
 		}
 	}
 
-	result := provider.FindFallbackWithRetryAfter(m.registry, m.activeProvider, retryAfter)
+	result := provider.FindFallbackWithRetryAfter(m.registry, m.activeProvider, retryAfter, m.config.Provider.FallbackPriority, m.config.Provider.HealthCheckTimeoutSecs)
 	if result.Err != nil {
 		slog.Warn("auto-fallback failed: no healthy fallback provider", "error", result.Err)
 		return m.addToastCmd("Auto-fallback failed: no healthy provider available", "error", 5*time.Second)

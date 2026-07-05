@@ -518,7 +518,7 @@ func TestFindFallbackWithRetryAfter_WithHeader(t *testing.T) {
 	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
 	r.SetActive("a")
 
-	result := FindFallbackWithRetryAfter(r, "a", "30")
+	result := FindFallbackWithRetryAfter(r, "a", "30", nil, 0)
 	if result.Err != nil {
 		t.Fatalf("unexpected error: %v", result.Err)
 	}
@@ -542,7 +542,7 @@ func TestFindFallbackWithRetryAfter_NoHeader(t *testing.T) {
 	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
 	r.SetActive("a")
 
-	result := FindFallbackWithRetryAfter(r, "a", "")
+	result := FindFallbackWithRetryAfter(r, "a", "", nil, 0)
 	if result.Err != nil {
 		t.Fatalf("unexpected error: %v", result.Err)
 	}
@@ -557,7 +557,7 @@ func TestFindFallbackWithRetryAfter_NoAlternative(t *testing.T) {
 	r.Register("a", &mockProvider{name: "a", healthStatus: "offline"})
 	r.SetActive("a")
 
-	result := FindFallbackWithRetryAfter(r, "a", "30")
+	result := FindFallbackWithRetryAfter(r, "a", "30", nil, 0)
 	if result.Err == nil {
 		t.Fatal("expected error when no fallback available")
 	}
@@ -570,7 +570,7 @@ func TestFindFallbackWithRetryAfter_CapWait(t *testing.T) {
 	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
 	r.SetActive("a")
 
-	result := FindFallbackWithRetryAfter(r, "a", "9999")
+	result := FindFallbackWithRetryAfter(r, "a", "9999", nil, 0)
 	if result.Err != nil {
 		t.Fatalf("unexpected error: %v", result.Err)
 	}
@@ -588,7 +588,7 @@ func TestFindFallbackProvider_SlowStatus(t *testing.T) {
 	r.Register("b", &mockProvider{name: "b", healthStatus: "slow"})
 	r.SetActive("a")
 
-	_, event, err := FindFallbackProvider(r, "a")
+	_, event, err := FindFallbackProvider(r, "a", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

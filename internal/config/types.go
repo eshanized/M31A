@@ -72,6 +72,19 @@ type ProviderConfig struct {
 	// Empty means use defaults ("https://github.com/eshanized/M31A", "M31A").
 	OpenRouterReferer string `toml:"openrouter_referer"`
 	OpenRouterTitle   string `toml:"openrouter_title"`
+
+	// Fallback priority (F-015): ordered list of provider names to try on failure.
+	// Default: ["nvidia", "zen", "openrouter"] (matches alphabetical sort).
+	FallbackPriority []string `toml:"fallback_priority"`
+
+	// Health check timeout in seconds (F-016).
+	// Default: 10 (current hardcoded value).
+	HealthCheckTimeoutSecs int `toml:"health_check_timeout_secs"`
+
+	// Provider registration order (F-013).
+	// If set, providers are registered in this order.
+	// Default: ["openrouter", "zen", "nvidia"] (current behavior).
+	RegistrationOrder []string `toml:"registration_order"`
 }
 
 type ProviderCredentialConfig struct {

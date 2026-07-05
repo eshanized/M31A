@@ -100,7 +100,7 @@ func TestFindFallbackProvider_Switches(t *testing.T) {
 	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
 	r.SetActive("a")
 
-	newName, event, err := FindFallbackProvider(r, "a")
+	newName, event, err := FindFallbackProvider(r, "a", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,8 +123,58 @@ func TestFindFallbackProvider_NoAlternative(t *testing.T) {
 	r.Register("a", &mockProvider{name: "a", healthStatus: "offline"})
 	r.SetActive("a")
 
-	_, _, err := FindFallbackProvider(r, "a")
+	_, _, err := FindFallbackProvider(r, "a", nil, 0)
 	if err != m31errors.ErrProviderUnreachable {
 		t.Fatalf("expected ErrProviderUnreachable, got %v", err)
+	}
+}
+
+func TestFindFallbackProvider_CustomPriority(t *testing.T) {
+	r := NewRegistry()
+	r.Register("a", &mockProvider{name: "a", healthStatus: "offline"})
+	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
+	r.Register("c", &mockProvider{name: "c", healthStatus: "live"})
+	r.SetActive("a")
+
+	// Custom priority: c first, then b
+	newName, _, err := FindFallbackProvider(r, "a", []string{"c", "b"}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if newName != "c" {
+		t.Fatalf("expected fallback to %q (first in priority), got %q", "c", newName)
+	}
+}
+
+func TestFindFallbackProvider_CustomPrioritySkipsCurrent(t *testing.T) {
+	r := NewRegistry()
+	r.Register("a", &mockProvider{name: "a", healthStatus: "offline"})
+	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
+	r.SetActive("a")
+
+	// Priority lists "a" first but it's the current provider — should skip to "b"
+	newName, _, err := FindFallbackProvider(r, "a", []string{"a", "b"}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if newName != "b" {
+		t.Fatalf("expected fallback to %q, got %q", "b", newName)
+	}
+}
+
+func TestFindFallbackProvider_EmptyPriorityFallsBackToAlphabetical(t *testing.T) {
+	r := NewRegistry()
+	r.Register("a", &mockProvider{name: "a", healthStatus: "offline"})
+	r.Register("b", &mockProvider{name: "b", healthStatus: "live"})
+	r.Register("c", &mockProvider{name: "c", healthStatus: "live"})
+	r.SetActive("a")
+
+	// Empty priority should use alphabetical order (b before c)
+	newName, _, err := FindFallbackProvider(r, "a", []string{}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if newName != "b" {
+		t.Fatalf("expected fallback to %q (alphabetical first), got %q", "b", newName)
 	}
 }
