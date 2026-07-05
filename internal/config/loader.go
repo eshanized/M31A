@@ -167,6 +167,13 @@ func DefaultConfig() *Config {
 		Instructions: InstructionsConfig{
 			Enabled: true,
 		},
+		ModelCapabilities: ModelCapabilitiesConfig{
+			ExtraReasoningPatterns:     []string{},
+			ExtraToolCapablePatterns:   []string{},
+			ExtraCompletionOnlyPatterns: []string{},
+			ExtraNonChatPatterns:       []string{},
+			KnownCapabilities:          map[string]ModelCapabilityOverride{},
+		},
 	}
 }
 

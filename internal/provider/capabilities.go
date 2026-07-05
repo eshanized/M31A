@@ -7,6 +7,39 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// capabilityConfig holds the user-configured model capability overrides.
+// Set once at startup via SetCapabilityConfig; all capability detection
+// functions read from this package-level variable.
+var (
+	capabilityConfigMu sync.RWMutex
+	capabilityConfig   capabilityConfigData
+)
+
+type capabilityConfigData struct {
+	extraReasoningPatterns     []string
+	extraToolCapablePatterns   []string
+	extraCompletionOnlyPatterns []string
+	extraNonChatPatterns       []string
+	knownCapabilities          map[string]ModelCapabilities
+}
+
+// SetCapabilityConfig initializes the package-level capability configuration.
+// Must be called once at startup before any capability detection functions
+// are invoked. Pass nil or empty config to keep built-in defaults.
+func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, extraNonChat []string, knownCaps map[string]ModelCapabilities) {
+	capabilityConfigMu.Lock()
+	defer capabilityConfigMu.Unlock()
+	capabilityConfig = capabilityConfigData{
+		extraReasoningPatterns:     extraReasoning,
+		extraToolCapablePatterns:   extraToolCapable,
+		extraCompletionOnlyPatterns: extraCompletionOnly,
+		extraNonChatPatterns:       extraNonChat,
+		knownCapabilities:          knownCaps,
+	}
+	// Clear the capabilities cache so new config takes effect immediately
+	modelCapabilitiesCache = sync.Map{}
+}
+
 // defaultReasoningPatterns are the default ID patterns that indicate reasoning/thinking models.
 var defaultReasoningPatterns = []string{"/o1", "/o3", "/o4"}
 
@@ -164,6 +197,14 @@ func IsNonChatModel(modelID string) bool {
 			return true
 		}
 	}
+	capabilityConfigMu.RLock()
+	extra := capabilityConfig.extraNonChatPatterns
+	capabilityConfigMu.RUnlock()
+	for _, p := range extra {
+		if strings.Contains(id, p) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -183,6 +224,7 @@ func IsLikelyBrokenOnNvidia(modelID string) bool {
 // ParseModelCapabilities infers capability flags from the model ID using heuristics.
 // extraReasoningPatterns are additional patterns to check for reasoning detection
 // (e.g., Zen uses "-r1" which OpenRouter does not).
+// Config-based extra patterns are also checked automatically.
 // Tools capability defaults to false and is only set true for known tool-capable model families.
 func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) types.CapFlags {
 	id := strings.ToLower(modelID)
@@ -195,13 +237,29 @@ func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) ty
 			break
 		}
 	}
+	if !caps.Tools {
+		capabilityConfigMu.RLock()
+		extra := capabilityConfig.extraToolCapablePatterns
+		capabilityConfigMu.RUnlock()
+		for _, p := range extra {
+			if strings.Contains(id, p) {
+				caps.Tools = true
+				break
+			}
+		}
+	}
 
-	// Build combined reasoning patterns
+	// Build combined reasoning patterns (built-in + caller-provided + config)
 	patterns := defaultReasoningPatterns
-	if len(extraReasoningPatterns) > 0 {
-		patterns = make([]string, 0, len(defaultReasoningPatterns)+len(extraReasoningPatterns))
+	capabilityConfigMu.RLock()
+	configExtra := capabilityConfig.extraReasoningPatterns
+	capabilityConfigMu.RUnlock()
+	totalExtra := len(extraReasoningPatterns) + len(configExtra)
+	if totalExtra > 0 {
+		patterns = make([]string, 0, len(defaultReasoningPatterns)+totalExtra)
 		patterns = append(patterns, defaultReasoningPatterns...)
 		patterns = append(patterns, extraReasoningPatterns...)
+		patterns = append(patterns, configExtra...)
 	}
 
 	// Detect reasoning/thinking models by ID patterns
@@ -230,13 +288,24 @@ func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) ty
 			break
 		}
 	}
+	if caps.Chat {
+		capabilityConfigMu.RLock()
+		extra := capabilityConfig.extraCompletionOnlyPatterns
+		capabilityConfigMu.RUnlock()
+		for _, p := range extra {
+			if strings.Contains(id, p) {
+				caps.Chat = false
+				break
+			}
+		}
+	}
 
 	return caps
 }
 
 // DetectCapabilities returns the capabilities for a model. It first checks the
-// cache, then falls back to the hardcoded table. Returns nil if the model is
-// not recognized.
+// cache, then config overrides, then the hardcoded table. Returns nil if the
+// model is not recognized.
 func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
 	// Check cache first
 	cacheKey := provider + "/" + modelID
@@ -245,8 +314,21 @@ func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
 		return caps, nil
 	}
 
-	// Check hardcoded table
 	id := strings.ToLower(modelID)
+
+	// Check config overrides (user-defined known capabilities)
+	capabilityConfigMu.RLock()
+	configCaps := capabilityConfig.knownCapabilities
+	capabilityConfigMu.RUnlock()
+	for knownID, caps := range configCaps {
+		if strings.Contains(id, strings.ToLower(knownID)) {
+			capsPtr := &caps
+			modelCapabilitiesCache.Store(cacheKey, capsPtr)
+			return capsPtr, nil
+		}
+	}
+
+	// Check hardcoded table
 	for knownID, caps := range knownModelCapabilities {
 		if strings.Contains(id, strings.ToLower(knownID)) {
 			// Cache the result (store pointer)

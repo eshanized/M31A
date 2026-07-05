@@ -3,19 +3,20 @@ package config
 import "github.com/eshanized/M31A/internal/types"
 
 type Config struct {
-	Provider     ProviderConfig     `toml:"provider"`
-	Model        ModelConfig        `toml:"model"`
-	UI           UIConfig           `toml:"ui"`
-	Permissions  PermissionsConfig  `toml:"permissions"`
-	Features     FeaturesConfig     `toml:"features"`
-	Ledger       LedgerConfig       `toml:"ledger"`
-	Tools        ToolsConfig        `toml:"tools"`
-	Agents       AgentsConfig       `toml:"agents"`
-	Git          GitConfig          `toml:"git"`
-	Verify       VerifyConfig       `toml:"verify"`
-	Compaction   CompactionConfig   `toml:"compaction"`
-	Instructions InstructionsConfig `toml:"instructions"`
-	Skills       SkillsConfig       `toml:"skills"`
+	Provider         ProviderConfig         `toml:"provider"`
+	Model            ModelConfig            `toml:"model"`
+	UI               UIConfig               `toml:"ui"`
+	Permissions      PermissionsConfig      `toml:"permissions"`
+	Features         FeaturesConfig         `toml:"features"`
+	Ledger           LedgerConfig           `toml:"ledger"`
+	Tools            ToolsConfig            `toml:"tools"`
+	Agents           AgentsConfig           `toml:"agents"`
+	Git              GitConfig              `toml:"git"`
+	Verify           VerifyConfig           `toml:"verify"`
+	Compaction       CompactionConfig       `toml:"compaction"`
+	Instructions     InstructionsConfig     `toml:"instructions"`
+	Skills           SkillsConfig           `toml:"skills"`
+	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
 }
 
 // CompactionConfig holds automatic session compaction settings.
@@ -396,4 +397,34 @@ type SubagentProfileConfig struct {
 	MaxTokens    int      `toml:"max_tokens,omitempty"`
 	MaxTurns     int      `toml:"max_turns,omitempty"`
 	Disabled     bool     `toml:"disabled,omitempty"`
+}
+
+// ModelCapabilitiesConfig holds user-configurable overrides for model capability
+// detection. All fields are additive — they extend the built-in patterns, never
+// replace them. When empty, the built-in behavior is preserved.
+type ModelCapabilitiesConfig struct {
+	// Extra reasoning patterns appended to the built-in list (F-011).
+	ExtraReasoningPatterns []string `toml:"extra_reasoning_patterns"`
+
+	// Extra tool-capable patterns appended to the built-in list (F-011).
+	ExtraToolCapablePatterns []string `toml:"extra_tool_capable_patterns"`
+
+	// Extra completion-only patterns appended to the built-in list (F-011).
+	ExtraCompletionOnlyPatterns []string `toml:"extra_completion_only_patterns"`
+
+	// Extra non-chat patterns appended to the built-in list (F-011).
+	ExtraNonChatPatterns []string `toml:"extra_non_chat_patterns"`
+
+	// Known model capability overrides merged with the built-in map (F-012).
+	// Key: model ID pattern, Value: capability settings.
+	KnownCapabilities map[string]ModelCapabilityOverride `toml:"known_capabilities"`
+}
+
+// ModelCapabilityOverride defines a single model capability entry that overrides
+// or extends the built-in knownModelCapabilities table.
+type ModelCapabilityOverride struct {
+	ContextLength    int  `toml:"context_length"`
+	MaxOutput        int  `toml:"max_output"`
+	SupportsTools    bool `toml:"supports_tools"`
+	SupportsReasoning bool `toml:"supports_reasoning"`
 }

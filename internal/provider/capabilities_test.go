@@ -299,3 +299,115 @@ func TestModelCapabilities_Fields(t *testing.T) {
 		t.Error("expected SupportsSystemPrompt=true for gpt-4o")
 	}
 }
+
+// ── Config-based capability detection ────────────────────────────────────────
+
+func TestParseModelCapabilities_ConfigExtraToolPatterns(t *testing.T) {
+	// NOT parallel — modifies global capability config
+	// Set config with extra tool-capable pattern
+	SetCapabilityConfig(nil, []string{"custom-tool-model"}, nil, nil, nil)
+
+	caps := ParseModelCapabilities("vendor/custom-tool-model-large")
+	if !caps.Tools {
+		t.Error("expected Tools=true with config extra tool pattern")
+	}
+
+	// Reset immediately
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+func TestParseModelCapabilities_ConfigExtraReasoningPatterns(t *testing.T) {
+	// NOT parallel — modifies global capability config
+	SetCapabilityConfig([]string{"my-reason"}, nil, nil, nil, nil)
+
+	caps := ParseModelCapabilities("custom/my-reason-model")
+	if !caps.Reasoning {
+		t.Error("expected Reasoning=true with config extra reasoning pattern")
+	}
+
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+func TestParseModelCapabilities_ConfigExtraCompletionOnlyPatterns(t *testing.T) {
+	// NOT parallel — modifies global capability config
+	SetCapabilityConfig(nil, nil, []string{"my-completion-only"}, nil, nil)
+
+	caps := ParseModelCapabilities("vendor/my-completion-only-model")
+	if caps.Chat {
+		t.Error("expected Chat=false with config extra completion-only pattern")
+	}
+
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+func TestParseModelCapabilities_ConfigExtraNonChatPatterns(t *testing.T) {
+	// NOT parallel — modifies global capability config
+	SetCapabilityConfig(nil, nil, nil, []string{"my-embed"}, nil)
+
+	if !IsNonChatModel("vendor/my-embed-model") {
+		t.Error("expected IsNonChatModel=true with config extra non-chat pattern")
+	}
+
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+func TestDetectCapabilities_ConfigOverrides(t *testing.T) {
+	// NOT parallel — modifies global capability config
+	// Set config with a known capability override
+	configCaps := map[string]ModelCapabilities{
+		"custom-model": {
+			SupportsTools:    true,
+			SupportsImages:   true,
+			SupportsStreaming: true,
+			MaxContextWindow:  100000,
+			MaxOutputTokens:   16000,
+		},
+	}
+	SetCapabilityConfig(nil, nil, nil, nil, configCaps)
+
+	caps, err := DetectCapabilities("vendor", "custom-model-v2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !caps.SupportsTools {
+		t.Error("expected SupportsTools=true from config override")
+	}
+	if !caps.SupportsImages {
+		t.Error("expected SupportsImages=true from config override")
+	}
+	if caps.MaxContextWindow != 100000 {
+		t.Errorf("MaxContextWindow = %d, want 100000", caps.MaxContextWindow)
+	}
+
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+func TestDetectCapabilities_ConfigOverridesCheckedBeforeBuiltIn(t *testing.T) {
+	// NOT parallel — modifies global capability config that affects other tests.
+	// Override a known model with different capabilities
+	configCaps := map[string]ModelCapabilities{
+		"gpt-4o": {
+			SupportsTools:    false,
+			SupportsImages:   false,
+			SupportsStreaming: true,
+			MaxContextWindow:  999,
+			MaxOutputTokens:   999,
+		},
+	}
+	SetCapabilityConfig(nil, nil, nil, nil, configCaps)
+
+	caps, err := DetectCapabilities("openai", "gpt-4o")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Config override should take precedence over built-in
+	if caps.SupportsTools {
+		t.Error("expected SupportsTools=false from config override (not built-in)")
+	}
+	if caps.MaxContextWindow != 999 {
+		t.Errorf("MaxContextWindow = %d, want 999 (config override)", caps.MaxContextWindow)
+	}
+
+	// Reset config immediately so other tests see clean state
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
