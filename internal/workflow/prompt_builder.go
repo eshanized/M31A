@@ -36,28 +36,6 @@ type PromptRegistry struct {
 	WebsiteBuild     string
 }
 
-// promptNames maps registry field names to their prompt file names.
-var promptNames = map[string]string{
-	"base":                 "base",
-	"tool-use":             "tool-use",
-	"plan-format":          "plan-format",
-	"execute-task":         "execute-task",
-	"discuss-questions":    "discuss",
-	"self-heal":            "self-heal",
-	"demonstration-format": "demonstration",
-	"autonomous":           "autonomous",
-	"context-awareness":    "context-awareness",
-	"code-quality":         "code-quality",
-	"code-intelligence":    "code-intelligence",
-	"research":             "research",
-	"plan-check":           "plan-check",
-	"plan-revise":          "plan-revise",
-	"plan-outline":         "plan-outline",
-	"discuss-followup":     "discuss-followup",
-	"intent-classify":      "intent-classify",
-	"website-build":        "website-build",
-}
-
 // LoadPrompts reads all prompt files with override support and returns a registry.
 // Uses the 4-level priority chain: config override > project > global > embedded.
 func LoadPrompts(cfg config.PromptConfig, projectRoot string) (*PromptRegistry, error) {
