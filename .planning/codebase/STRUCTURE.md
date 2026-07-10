@@ -1,167 +1,252 @@
-# Directory Structure — M31A
+---
+title: STRUCTURE.md
+project: M31A
+last_mapped: 2026-07-11
+---
 
-> Mapped: 2026-07-09
+# Codebase Structure
 
 ## Top-Level Layout
 
 ```
 M31A/
-  cmd/m31a/           Entry point (2 files)
-  docs/               Documentation (13 files)
-  internal/           Private packages (18 sub-packages)
-  pkg/                Public packages (15 sub-packages)
-  scripts/            Shell scripts (2 files)
-  .github/            CI/CD, issue templates, funding
-  .planning/          GSD workflow artifacts
+├── cmd/m31a/              # Binary entry point (main.go, usage.go)
+├── internal/              # Private application packages
+│   ├── codeintel/         # Code intelligence / indexer
+│   ├── config/            # Config loading, merging, types
+│   ├── context/           # Dynamic context registry
+│   ├── decision/          # Decision logging subsystem
+│   ├── errors/            # Typed error vocabulary
+│   ├── fileutil/          # File utility helpers
+│   ├── git/               # Git wrapper
+│   ├── log/               # Logging bootstrapper
+│   ├── logging/           # Structured logging helpers
+│   ├── provider/          # LLM provider layer (OpenRouter, Zen, Nvidia)
+│   ├── shell/             # Shell helpers
+│   ├── testutil/          # Internal test utilities
+│   ├── tokens/            # Token estimation
+│   ├── tools/             # 18 built-in agent tools + dispatcher
+│   ├── tui/               # Bubble Tea UI (app, screens, models, views)
+│   ├── types/             # Shared type vocabulary
+│   ├── wiring/            # Integration/wiring-level tests
+│   └── workflow/          # 7-phase workflow engine
+├── pkg/                   # Reusable packages (no internal/ imports)
+│   ├── arbitrage/         # Model arbitrage / cost scoring
+│   ├── autodream/         # Autonomous planning consolidator
+│   ├── bisect/            # Binary bisect subsystem
+│   ├── compaction/        # Session compaction
+│   ├── coordinator/       # Phase coordination helpers
+│   ├── history/           # Frecent history tracking
+│   ├── keychain/          # OS keychain (Darwin/Linux/Windows)
+│   ├── ledger/            # Session record persistence (LEDGER.md)
+│   ├── metrics/           # Session observability metrics
+│   ├── narrative/         # Narrative engine / story bridge
+│   ├── retry/             # Retry policy
+│   ├── rollback/          # Git-based rollback
+│   ├── session/           # Session manager
+│   ├── skills/            # Skills subsystem
+│   └── taskrunner/        # Task runner (coverage-critical)
+├── docs/                  # 13 developer/user documentation files
+├── scripts/               # Shell scripts: validate-release.sh, verify_v1.sh
+├── M31A.wiki/             # GitHub wiki mirror
+├── .m31a/                 # Runtime config/state directory (gitignored)
+├── .planning/             # GSD planning artifacts
+├── .github/               # CI/CD workflows
+├── Makefile               # Primary build system
+├── go.mod / go.sum        # Go module manifest
+├── .goreleaser.yaml       # Multi-platform release config
+├── .golangci.yml          # Linter config
+├── e2e_test.go            # Binary-level E2E test (root package)
+├── AGENTS.md              # AI coding agent rules
+├── CHANGELOG.md           # Version history
+└── layout.test            # Large test layout fixture (~40 MB)
 ```
 
 ## Entry Point
 
-### `cmd/m31a/`
+**`cmd/m31a/main.go`** (14.7 KB) — Flag parsing, config loading, provider registration, TUI construction.
+**`cmd/m31a/usage.go`** (2.5 KB) — CLI usage/help text.
 
-- `main.go` (~300 lines) — Entry point: flag parsing, config load, provider init, TUI launch
-- `usage.go` (~100 lines) — CLI flag definitions and help text
+## Key Internal Packages
 
-## Core Internal Packages (`internal/`)
+### `internal/workflow/` (89 files, ~300 KB)
 
-### `internal/workflow/` (91 files)
+The heart of the agent. Implements the 7-phase engine.
 
-Seven-phase engine. Key files:
-- `engine.go` — Core workflow engine
-- `phase_coordinator.go` — Phase lifecycle management
-- `state_machine.go` — Phase state transitions
-- `workflow_cache.go` — Workflow data caching
-- `context_builder.go` — Dynamic context assembly
-- `cost_tracker.go` — Per-phase cost tracking
-- `prompt_builder.go` — Prompt template assembly
-- `intent.go` — Intent classification
+| File | Role |
+|------|------|
+| `engine.go` | `Engine` struct, phase dispatch, model-per-phase routing (~1521 lines) |
+| `execute.go` | Execute phase: tool orchestration (~36 KB) |
+| `plan.go` | Plan phase: generation and refinement (~18 KB) |
+| `ship.go` | Ship phase: git commit/PR logic (~20 KB) |
+| `discuss.go` | Discuss phase: goal clarification |
+| `verify.go` | Verify phase: coverage gates |
+| `runtime.go` | Runtime phase: dev server orchestration |
+| `initialize.go` | Initialize phase: context setup |
+| `state_machine.go` | Phase transition FSM |
+| `engine_parse.go` | Tool call parsing from LLM stream (~19 KB) |
+| `context_builder.go` | Builds per-phase LLM context |
+| `workflow_cache.go` | Caches base prompts and full system prompts |
+| `prompts/` | Embedded `.md` prompt templates |
+| `templates/` | Embedded website templates (Next.js etc.) |
 
-Per-phase files:
-- Phase 1: `initialize.go`, `init_deep.go`
-- Phase 2: `discuss.go`, `discuss_check.go`
-- Phase 3: `plan.go`, `plan_chunk.go`, `plan_check.go`, `plan_parser.go`
-- Phase 4: `execute.go`, `execute_preflight.go`, `execute_quality.go`
-- Phase 5: `verify.go`, `verify_report.go`
-- Phase 6: `runtime.go`
-- Phase 7: `ship.go`, `ship_preflight.go`
+### `internal/tui/` (152 files, ~500 KB)
 
-Supporting: `agent_switch.go`, `classify.go`, `diff_summary.go`, `retry.go`, `coverage_gates.go`, `thinking_indicator.go` + templates in `prompts/` and `templates/`
+Pure Bubble Tea (Elm-style) UI. Every mutation goes through `Update()`.
 
-### `internal/tui/` (158 files)
+| File | Role |
+|------|------|
+| `app.go` | Root model factory, wiring (~23 KB) |
+| `app_state.go` | `AppState` struct — single mutable model (~13 KB) |
+| `app_update.go` | Master `Update()` dispatch (~25 KB) |
+| `app_view.go` | Master `View()` render (~43 KB) |
+| `app_update_commands.go` | Command handler routing (~15 KB) |
+| `sidebar_model.go` | Sidebar state and rendering (~47 KB) |
+| `repl.go` | REPL input loop (~15 KB) |
+| `settings_model.go` | Settings screen (~24 KB) |
+| `firstrun_model.go` | First-run wizard (~22 KB) |
+| `firstrun_view.go` | First-run wizard view (~38 KB) |
+| `cmdpalette.go` | Command palette popup (~14 KB) |
+| `theme/` | Theme/color manager |
+| `components/` | Shared UI components |
+| `layout/` | Layout primitives |
+| `streaming/` | Streaming text renderer |
+| `tuitypes/` | TUI-internal type aliases |
 
-Bubble Tea TUI application. Key structure:
-- `app.go`, `app_state.go` — Root application
-- `app_routing.go` — Screen navigation
-- `app_update.go` — Central update handler
-- `app_view.go` — Central view handler
-- `repl.go`, `repl_view.go`, `repl_model.go` — Main REPL interface
-- `sidebar_model.go` — File/session sidebar
-- `streaming.go`, `streaming/` — LLM response streaming
-- `layout/` (14 files) — Responsive layout engine
-- `commands/` (16 files) — Slash command implementations
-- `components/` — Reusable UI components
-- `theme/` — M31A dark theme
-- `a11y/` — Accessibility (reduced motion)
-- `tuitypes/` — TUI-specific type definitions
+### `internal/tools/` (83 files + `subagent/`)
 
-Screen models: `home_model.go`, `dashboard_model.go`, `diff_model.go`, `plan_model.go`, `execute_model.go`, `verify_model.go`, `ship_model.go`, `config_model.go`, `settings_model.go`, `chathistory_model.go`, `ledger_model.go`, `rollback_model.go`, `modelselector_model.go`, `fileexplorer_model.go`, `discuss_model.go`, `runtime_model.go`, `bisect_model.go`, `subagents_model.go`, `ghostpicker_model.go`
+18 built-in tools registered via `defaults.go`:
 
-Event handlers: `handler_config.go`, `handler_modal.go`, `handler_navigation.go`, `handler_runtime.go`, `handler_sidebar.go`, `handler_stream.go`, `handler_tool.go`, `handler_workflow.go`
+| Tool File | Tool Name |
+|-----------|-----------|
+| `bash.go` | Bash execution (with sandbox) |
+| `fileread.go` | FileRead |
+| `filewrite.go` | FileWrite |
+| `edit.go` | Edit (patch-style) |
+| `todo.go` / `todoread.go` | TodoWrite / TodoRead |
+| `webfetch.go` | WebFetch |
+| `websearch.go` | WebSearch |
+| `question.go` | AskUserQuestion |
+| `glob.go` | Glob |
+| `grep.go` | Grep |
+| `filelist.go` | FileList |
+| `filedelete.go` | FileDelete |
+| `filemove.go` | FileMove |
+| `codemap.go` | CodeMap |
+| `codecomplexity.go` | CodeComplexity |
+| `devserver.go` | DevServer |
+| `httpcheck.go` | HTTPCheck |
+| `memory.go` | Memory |
 
-### `internal/tools/` (79 files)
-
-18 tools + infrastructure:
-- `dispatcher.go` — Tool dispatch with permissions
-- `permissions.go` — Permission system (modal, persistent, timeout)
-- `concurrency.go` — Rate limiting, semaphore
-- `defaults.go` — Tool registration
-- `bash.go` (6 files, unix + windows variants)
-- `edit.go` (4 files) — 7-strategy cascade edit
-- `fileread.go`, `filewrite.go`, `filedelete.go`, `filemove.go`, `filelist.go`
-- `glob.go`, `grep.go` (with skip-comments and truncation variants)
-- `webfetch.go` (with SSRF protection), `websearch.go`, `httpcheck.go`
-- `codemap.go`, `codecomplexity.go`
-- `question.go`, `todo.go`, `todoread.go`
-- `devserver.go`, `agent.go`, `memory.go`
-
-Subagent infrastructure: `subagent/manager.go`, `worktree.go`, `profile.go`, `loop.go`, `events.go`
+`dispatcher.go` (14.5 KB) — Routes calls, enforces permissions, handles rate-limiting and concurrency.
+`permissions.go` (14.8 KB) — Permission model with risk levels: safe / medium / dangerous / destructive.
+`bash_sandbox_linux.go` (7.2 KB) — Linux seccomp/namespace sandbox for bash.
 
 ### `internal/provider/` (26 files)
 
-- `interface.go` — Provider interface
-- `base_client.go` — Shared client infrastructure
-- `cache.go` — Model metadata cache
-- `fallback.go` — Auto-fallback
-- `capabilities.go` — Model capability registry
-- `registry.go` — Provider registration
-- `sse.go` — SSE streaming
-- `reasoning.go` — Extended thinking
-- `openrouter/` — OpenRouter provider
-- `zen/` — OpenCode Zen provider
-- `nvidia/` — Nvidia NIM provider
+Three provider implementations in sub-packages:
 
-### `internal/codeintel/` (13 files)
+- `openrouter/` — OpenRouter REST client
+- `zen/` — Zen API client
+- `nvidia/` — Nvidia API client
 
-- `codeintel.go` — Main code intelligence
-- `parser.go` — Multi-language parser
-- `graph.go` — Import dependency graph
-- `index.go` — Symbol indexing
-- `relevance.go` — File relevance scoring
-- `trie.go` — Prefix matching trie
-- `cache.go` — Parse result caching
+Shared:
+- `registry.go` — Provider registry
+- `capabilities.go` — Model capability detection
+- `model_metadata.go` — Dynamic model metadata
+- `fallback.go` — Fallback routing on error
+- `reasoning.go` — Extended thinking support
+- `sse.go` — Server-sent events streaming
 
-### Other internal packages
+### `internal/types/` (11 files)
 
-| Package | Files | Purpose |
-|---------|-------|---------|
-| `config/` | 12 | TOML loading, merging, project context |
-| `context/` | ~5 | Dynamic context registry, diff notifications |
-| `decision/` | ~5 | Decision receipts, ring buffer |
-| `errors/` | ~3 | Sentinel errors |
-| `fileutil/` | ~3 | Atomic file operations |
-| `git/` | ~5 | Git operations |
-| `log/` | ~3 | Structured logging |
-| `logging/` | ~3 | Audit logging, secret redaction |
-| `shell/` | ~3 | Platform shell execution |
-| `tokens/` | ~3 | Token estimation, EMA calibration |
-| `types/` | 11 | Shared types, constants, plan types |
-| `wiring/` | ~3 | Integration/regression tests |
-| `testutil/` | ~3 | Test helpers |
+Shared type vocabulary. `pkg/` must NOT import `internal/`.
 
-## Public Packages (`pkg/`)
+Key types in `types.go`:
+- `WorkflowPhase` — string enum: idle / initialize / discuss / plan / execute / verify / runtime / ship
+- `WorkflowMode` — auto / full / fast / direct
+- `RiskLevel` — safe / medium / dangerous / destructive
+- `IntentType` — feature / bugfix / refactor / question / explanation / exploration / chore
+- `IntentResult` — LLM classifier output struct
+- `ComplexityLevel` — trivial / simple / moderate / complex
 
-| Package | Purpose |
-|---------|---------|
-| `arbitrage/` | Model-cost optimizer |
-| `autodream/` | Context consolidation, reentrancy guard |
-| `bisect/` | Git-bisect wrapper |
-| `compaction/` | Session compaction, LLM summarization |
-| `coordinator/` | Drain session management, coalescing |
-| `history/` | Frecent prompt history, scoring |
-| `keychain/` (7 files) | OS keychain (Linux/macOS/Windows) |
-| `ledger/` | Cross-session learning store |
-| `metrics/` | Session metrics, JSON persistence |
-| `narrative/` | Event to progress description transformer |
-| `retry/` | Exponential backoff, error classification |
-| `rollback/` | Commit-chain manager |
-| `session/` (15 files) | Session lifecycle, persistence |
-| `skills/` | Skill management |
-| `taskrunner/` | Kahn's algorithm, bounded parallelism |
+### `internal/config/` (12 files)
 
-## Documentation (`docs/`)
+- `types.go` (24 KB) — Top-level `Config` struct with 23 sub-configs (Provider, Model, UI, Permissions, Features, Ledger, Tools, Agents, Git, Verify, Compaction, Instructions, Skills, ModelCapabilities, Prompts, Narrative, Templates)
+- `loader.go` (39 KB) — Multi-source config loading, merging, validation
+- `merge.go` (19 KB) — Deep config merge logic
 
-`ARCHITECTURE.md`, `CONFIG.md`, `INTERFACES.md`, `KEYBINDINGS.md`, `ONBOARDING.md`, `PROVIDERS.md`, `QUICKSTART.md`, `SCREENS.md`, `SLASH_COMMANDS.md`, `TOOLS.md`, `TROUBLESHOOTING.md`, `TYPES.md`, `WORKFLOW.md` — 13 files total.
+## `pkg/` Reusable Packages
 
-## Infrastructure Files
+| Package | Role |
+|---------|------|
+| `taskrunner/` | Task scheduling with coverage target ≥90% |
+| `bisect/` | Git-based bisect for regression isolation; coverage ≥90% |
+| `rollback/` | Git commit rollback; coverage ≥90% |
+| `session/` | Session lifecycle management |
+| `keychain/` | Platform keychain: Darwin (Keychain), Linux (D-Bus/Secret Service), Windows (DPAPI) |
+| `ledger/` | Append-only ledger file (LEDGER.md) |
+| `metrics/` | Tool call, LLM usage, phase duration, heal event collection |
+| `compaction/` | Proactive + reactive session compaction |
+| `arbitrage/` | Model selection cost/quality scoring |
+| `autodream/` | Autonomous planning dream/consolidation loop |
+| `narrative/` | Narrative engine for session storytelling |
+| `history/` | Frecent (frequent+recent) history for prompt recall |
+| `coordinator/` | Phase pre/post coordination (side effects, metrics) |
+| `retry/` | Configurable retry policy |
+| `skills/` | Skills loading and dispatch |
 
-- `go.mod` / `go.sum` — Go module definition (go 1.25.0)
-- `Makefile` — Build orchestration (321 lines)
-- `.golangci.yml` — Linter config (5 linters enabled)
-- `.goreleaser.yaml` — Release pipeline config
-- `.gitignore` — Ignore rules
-- `.env.example` — API key template
-- `m31a.json` — Scoop manifest
-- `e2e_test.go` — End-to-end binary tests
-- `install.sh` — One-liner installer
-- `CHANGELOG.md` — Release history
-- `AGENTS.md` — M31A-specific agent guidance
+## Naming Conventions
+
+### Files
+
+- **`*_model.go`** — Bubble Tea model struct for a screen or sub-component
+- **`*_view.go`** — View rendering for a model
+- **`*_handler*.go`** — Message handlers split from main `Update()`
+- **`*_test.go`** — Unit tests (co-located with source)
+- **`*_extra_test.go`** — Additional/supplemental test cases
+- **`coverage_boost_test.go`** — Coverage gap-fill tests (in `internal/tools/`, `internal/workflow/`)
+- **`*_benchmark_test.go`** — Go benchmark tests
+- **`*_integration_test.go`** — Integration-level tests
+- **`*_unix.go` / `*_windows.go`** — OS-specific build tag files
+- **`*_darwin.go` / `*_linux.go`** — Platform-specific implementations
+- **`engine_*.go`** — Engine sub-files (parse, verify, messages, wiring)
+- **`app_*.go`** — AppState sub-files (handlers, nav, routing, session, input, update)
+
+### Packages
+
+- `internal/` — Application-private; never imported by `pkg/`
+- `pkg/` — Reusable, dependency-free from `internal/`; can be extracted
+- All packages use lowercase snake_case module path segments
+
+### Go Identifiers
+
+- Exported types: `PascalCase` with doc comments required
+- Unexported fields: `camelCase`
+- Constants: `PascalCase` for exported, `camelCase` for unexported
+- Error wrapping: `fmt.Errorf("context: %w", err)` pattern throughout
+- No `panic()` in production code (only in test helpers)
+
+## Special Files / Directories
+
+| Path | Purpose |
+|------|---------|
+| `.m31a/` | Runtime: sessions, tool output, API keys (gitignored) |
+| `.planning/` | GSD planning artifacts |
+| `layout.test` | Large binary fixture for layout tests (~40 MB) |
+| `e2e_test.go` | Root-package binary integration test; skips without real API keys |
+| `internal/workflow/templates/` | Embedded Next.js website template (go:embed) |
+| `internal/workflow/prompts/` | Embedded LLM prompt templates (go:embed) |
+| `scripts/validate-release.sh` | Pre-release validation script |
+| `scripts/verify_v1.sh` | V1 feature verification script |
+| `.goreleaser.yaml` | Multi-platform release: linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/amd64 |
+
+## Dependency Rule
+
+```
+cmd/          → internal/ → pkg/
+                           ↑
+                    (pkg/ cannot import internal/)
+```
+
+Enforced by Go module system. Violation causes compile failure.
