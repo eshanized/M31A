@@ -20,17 +20,19 @@ This roadmap covers a complete wiring audit of the M31A codebase (Go TUI with Bu
 **Requirements**: [WIRING-01, WIRING-02, WIRING-03, WIRING-04]
 
 **Success Criteria** (what must be TRUE):
+
 1. Complete dependency graph exists mapping every module, package, interface, service, workflow phase, configuration, event, command, state transition, provider, tool, UI component, and runtime system
 2. Every input has a traced path to its consumer; every output has a traced path from its producer
 3. Every abstraction has a verified implementation; every implementation is verified as actually used
 4. Report with all 20 sections delivered: Executive Summary, Dependency Graph Overview, Startup Wiring Issues, Workflow Wiring Issues, UI Wiring Issues, Tool Wiring Issues, Provider Wiring Issues, Configuration Wiring Issues, Persistence Wiring Issues, Package Dependency Issues, Missing Registrations, Dead Code, Unreachable Code, Documentation Drift, Missing Tests, Severity Matrix, Exact File Locations, Root Cause Analysis, Recommended Fix, Priority Order
 
-**Plans**: 3 plans
+**Plans**: 2/3 plans executed
 
 Plans:
-- [ ] 01-01: Build complete dependency graph and trace startup wiring (cmd/m31a/main.go → config, logger, keychain, providers, dispatcher, workflow engine, session, TUI, shutdown, signals, background workers, hot reload)
-- [ ] 01-02: Trace workflow engine (7 phases), provider layer, tools dispatcher, Bubble Tea state machine, configuration, persistence, pkg/ public APIs, subagents
-- [ ] 01-03: Generate 20-section wiring audit report with severity matrix and remediation priority
+
+- [x] 01-01-PLAN.md: Build complete dependency graph and trace startup wiring (cmd/m31a/main.go → config, logger, keychain, providers, dispatcher, workflow engine, session, TUI, shutdown, signals, background workers, hot reload)
+- [x] 01-02-PLAN.md: Trace workflow engine (7 phases), provider layer, tools dispatcher, Bubble Tea state machine, configuration, persistence, pkg/ public APIs, subagents
+- [ ] 01-03-PLAN.md: Generate 20-section wiring audit report with severity matrix and remediation priority
 
 ### Phase 2: Wiring Remediation
 
@@ -41,6 +43,7 @@ Plans:
 **Requirements**: [REMED-01, REMED-02, REMED-03, REMED-04, REMED-05]
 
 **Success Criteria** (what must be TRUE):
+
 1. All Critical severity wiring issues fixed and verified
 2. All High severity wiring issues fixed and verified
 3. All Medium severity wiring issues fixed and verified
@@ -50,6 +53,7 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+
 - [ ] 02-01: Fix Critical severity wiring issues (missing registrations, orphan interfaces, nil paths, impossible execution paths, broken DI, lifecycle leaks, goroutine leaks, context leaks, channel leaks)
 - [ ] 02-02: Fix High severity wiring issues (dead code, unreachable code, duplicate systems/providers/config/tools, incorrect dependency direction, startup/shutdown ordering bugs, race conditions, resource leaks)
 - [ ] 02-03: Fix Medium severity wiring issues (unused registrations, implementations never instantiated, events never consumed, messages never handled, handlers never called, commands never triggered, partially implemented features, abandoned features)
@@ -63,5 +67,5 @@ Phases execute in numeric order: 1 → 2
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Wiring Audit | 0/3 | Not started | - |
+| 1. Wiring Audit | 2/3 | In Progress|  |
 | 2. Wiring Remediation | 0/5 | Not started | - |
