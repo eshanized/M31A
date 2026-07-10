@@ -20,8 +20,8 @@ require (
 	github.com/alecthomas/chroma v0.10.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/fsnotify/fsnotify v1.10.1
-	// github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/odvcencio/gotreesitter v0.20.5
+	golang.org/x/sys v0.46.0
 )
 
 require (
@@ -51,6 +51,5 @@ require (
 	github.com/yuin/goldmark v1.5.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.1 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )

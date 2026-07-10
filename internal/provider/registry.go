@@ -22,7 +22,7 @@ func NewRegistry() *Registry {
 
 func (r *Registry) Register(name string, p LLMProvider) error {
 	if name == "" {
-		return fmt.Errorf("provider name cannot be empty")
+		return fmt.Errorf("provider name cannot be empty: %w", m31errors.ErrInvalidProvider)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -87,7 +87,7 @@ func (r *Registry) Get(name string) (LLMProvider, error) {
 	defer r.mu.RUnlock()
 	p, ok := r.providers[name]
 	if !ok {
-		return nil, m31errors.ErrProviderUnreachable
+		return nil, m31errors.ErrProviderNotFound
 	}
 	return p, nil
 }

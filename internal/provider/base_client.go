@@ -241,16 +241,3 @@ func (b *BaseClient) HandleChatHTTPErrorWithCredits(resp *http.Response, provide
 		return &HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 	}
 }
-
-// ClassifyHealthStatus returns the health status for a given latency value
-// based on the configured thresholds.
-func (b *BaseClient) ClassifyHealthStatus(latencyMs int64) string {
-	switch {
-	case latencyMs < b.HealthLiveMs:
-		return types.HealthStatusLive
-	case latencyMs < b.HealthSlowMs:
-		return types.HealthStatusSlow
-	default:
-		return types.HealthStatusDegraded
-	}
-}
