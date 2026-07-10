@@ -18,6 +18,12 @@ Executes shell commands with timeout and output capture.
 
 **Dangerous command blocking:** Commands matching blocklist patterns (e.g., `rm -rf /`, `dd if=/dev/zero`) are denied at the tool boundary.
 
+**Process sandboxing:** The Bash tool applies OS-level sandboxing:
+- **All platforms:** Sensitive environment variables (API keys, tokens, secrets) are scrubbed before subprocess execution.
+- **Linux 5.13+:** Landlock restricts filesystem access to the work directory, `/tmp`, `/dev`, `/usr`, `/bin`, and `/lib`.
+- **macOS:** sandbox-exec profile limits filesystem access and process execution.
+- **Other platforms:** Environment scrubbing only (graceful degradation).
+
 ---
 
 ### FileRead

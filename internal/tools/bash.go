@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -119,15 +118,13 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	setupProcessGroup(cmd)
 
-	// Inject non-interactive environment variables to prevent CLI tools from
-	// hanging on stdin prompts (e.g., npx init, npm create, apt-get).
-	cmd.Env = append(os.Environ(),
-		"CI=true",
-		"DEBIAN_FRONTEND=noninteractive",
-		"npm_config_yes=true",
-		"PIP_NO_INPUT=1",
-		"YARN_ENABLE_IMMUTABLE_INSTALLS=false",
-	)
+	// Apply platform-specific sandboxing: scrubs sensitive env vars,
+	// applies OS-level restrictions where available (Landlock on Linux,
+	// sandbox-exec on macOS). Falls back to env-scrub-only on other platforms.
+	if err := applyBashSandbox(cmd, t.workDir); err != nil {
+		slog.Warn("bash sandbox setup failed, proceeding without sandbox",
+			"error", err)
+	}
 
 	// Explicitly close stdin so child processes reading from it get EOF
 	// immediately instead of blocking. This prevents hangs from CLIs that
