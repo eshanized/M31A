@@ -20,7 +20,7 @@ require (
 	github.com/alecthomas/chroma v0.10.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/odvcencio/gotreesitter v0.20.5
+	github.com/odvcencio/gotreesitter v0.22.5
 	golang.org/x/sys v0.46.0
 )
 
