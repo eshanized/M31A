@@ -1,316 +1,446 @@
-<!-- refreshed: 2026-07-10 -->
-# Architecture
+# ARCHITECTURE.md — System Architecture
 
 **Analysis Date:** 2026-07-10
 
-## System Overview
+## High-Level Architecture
 
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                          CLI Entry Point                              │
-│                   `cmd/m31a/main.go`                                  │
-│   flag parsing, config load, provider registration, TUI launch        │
-├───────────┬───────────────────────────────────┬───────────────────────┤
-│  Provider │          TUI (Bubble Tea)          │   Session Manager     │
-│ Registry  │         `internal/tui/`            │   `pkg/session/`      │
-│`internal/ │  AppState (single-threaded model)  │   checkpoint, resume  │
-│ provider/ │  screens, components, commands     │   persistence         │
-│ registry  │  Update() is the ONLY mutator      │                       │
-└─────┬─────┴──────────────┬────────────────────┴──────────┬────────────┘
-      │                    │                              │
-      ▼                    ▼                              ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│                     Workflow Engine                                    │
-│               `internal/workflow/engine.go`                           │
-│                                                                       │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────────┐   │
-│   │Initialize│→ │ Discuss  │→ │   Plan   │→ │     Execute       │   │
-│   └──────────┘  └──────────┘  └──────────┘  └───────┬───────────┘   │
-│                                                       │              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐           │              │
-│   │  Ship    │← │ Runtime  │← │  Verify  │←──────────┘              │
-│   └──────────┘  └──────────┘  └──────────┘                          │
-│                                                                       │
-│   StateMachine ─ ContextBuilder ─ CostTracker ─ PhaseCoordinator     │
-│   PromptBuilder ─ DecisionLogger ─ Compactor ─ CodeIntel Indexer     │
-├───────────────────────────────────────────────────────────────────────┤
-│                     Tools Dispatcher                                   │
-│                `internal/tools/dispatcher.go`                         │
-│                                                                       │
-│   18 built-in tools: Bash, FileRead, FileWrite, Edit, Grep, Glob,   │
-│   FileList, FileDelete, FileMove, CodeMap, CodeComplexity,           │
-│   WebFetch, WebSearch, DevServer, HTTPCheck, AskUserQuestion,        │
-│   TodoWrite, TodoRead, Agent                                         │
-│                                                                       │
-│   ┌──────────┐  ┌──────────┐  ┌────────────────────────────────┐    │
-│   │Permissions│ │Rate Limits│  │  Subagent Manager (parallel)   │    │
-│   └──────────┘  └──────────┘  │  `internal/tools/subagent/`    │    │
-│                                └────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌────────────────┐  ┌────────────────┐  ┌────────────────────────────┐
-│   LLM Provider │  │   Git Client   │  │   Support Packages (pkg/)  │
-│   Layer         │  │   `internal/   │  │                            │
-│   `internal/    │  │    git/`       │  │  session    taskrunner     │
-│    provider/`   │  │                │  │  rollback   ledger         │
-│                 │  │   Shell        │  │  keychain   narrative      │
-│  ┌───────────┐  │  │   `internal/   │  │  compaction metrics       │
-│  │OpenRouter │  │  │    shell/`     │  │  arbitrage  coordinator   │
-│  │Zen        │  │  │                │  │  history    retry         │
-│  │NVIDIA NIM │  │  │   CodeIntel    │  │  bisect     autodream     │
-│  └───────────┘  │  │   `internal/   │  │  skills                  │
-│                 │  │    codeintel/` │  │                            │
-└────────────────┘  └────────────────┘  └────────────────────────────┘
-         │                                       │
-         ▼                                       ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Config & Types                                     │
-│  `internal/config/`        `internal/types/`                        │
-│  TOML-based config         Shared type vocabulary (Phase, Message,  │
-│  Hot-reload via watcher    Task, ToolCall, ModelInfo, etc.)         │
-│                                                                       │
-│  `internal/errors/`        `internal/tokens/`                       │
-│  Sentinel errors           Token estimation with EMA calibration    │
-│                                                                       │
-│  `internal/context/`       `internal/decision/`                     │
-│  Dynamic system context    Decision logging for audit trail         │
-└─────────────────────────────────────────────────────────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           M31A TUI Application                               │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  Bubble Tea (Elm Architecture) — Single-threaded event loop            │  │
+│  │  `internal/tui/app.go` — AppState implements tea.Model                 │  │
+│  │  Init() → Update(msg) → View()                                         │  │
+│  └──────────────────────────────┬────────────────────────────────────────┘  │
+│                                 │ tea.Cmd / tea.Msg                          │
+│                                 ▼                                            │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                    Workflow Engine — 7 Phases                          │  │
+│  │  `internal/workflow/engine.go` — Engine orchestrates phases           │  │
+│  │  Initialize → Discuss → Plan → Execute → Verify → Runtime → Ship      │  │
+│  │  StateMachine (`state_machine.go`) validates phase transitions        │  │
+│  │  PhaseCoordinator handles pre/post-phase hooks & metrics              │  │
+│  └───────────────┬───────────────────────────┬───────────────────────────┘  │
+│                  │                           │                              │
+│                  ▼                           ▼                              │
+│  ┌─────────────────────────┐   ┌─────────────────────────────────────┐    │
+│  │    Provider Layer       │   │           Tool Dispatcher           │    │
+│  │  `internal/provider/`   │   │     `internal/tools/dispatcher.go`  │    │
+│  │  Registry → 3 Providers │   │  18 built-in tools (defaults.go)    │    │
+│  │  - OpenRouter           │   │  Permissions, rate limiting,        │    │
+│  │  - Zen                  │   │  concurrency, output bounding       │    │
+│  │  - NVIDIA               │   │  Subagent spawning (Agent tool)     │    │
+│  └─────────────────────────┘   └─────────────────────────────────────┘    │
+│                  │                           │                              │
+│                  └───────────────┬────────────┘                              │
+│                                  ▼                                          │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                    Shared Types — `internal/types/`                    │  │
+│  │  WorkflowPhase, ModelInfo, Message, Tool, Task, IntentResult, etc.  │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                  │                                          │
+│                                  ▼                                          │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │              Public Packages — `pkg/` (no internal deps)               │  │
+│  │  keychain, ledger, metrics, retry, rollback, session, taskrunner,     │  │
+│  │  bisect, compaction, autodream, arbitrage, coordinator, narrative,    │  │
+│  │  history, skills, rollback                                             │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Component Responsibilities
+## Entry Point
 
-| Component | Responsibility | File |
-|-----------|----------------|------|
-| CLI Entry | Flag parsing, provider registration, TUI launch, headless mode | `cmd/m31a/main.go` |
-| AppState | Single Bubble Tea model, owns ALL state mutations via `Update()` | `internal/tui/app_state.go` |
-| Engine | Orchestrates 7-phase workflow, LLM streaming, tool dispatch | `internal/workflow/engine.go` |
-| StateMachine | Validates and tracks phase transitions with history | `internal/workflow/state_machine.go` |
-| ContextBuilder | Composes system prompts from base + dynamic context | `internal/workflow/context_builder.go` |
-| PromptBuilder | Loads prompt templates with 4-level override chain | `internal/workflow/prompt_builder.go` |
-| PhaseCoordinator | Delegates pre/post-phase setup and transition side effects | `internal/workflow/phase_coordinator.go` |
-| CostTracker | Tracks LLM cost against configurable budget | `internal/workflow/cost_tracker.go` |
-| DecisionLogger | Records decisions for audit trail | `internal/decision/logger.go` |
-| Compactor | Auto-compaction of conversation history when context fills | `pkg/compaction/compaction.go` |
-| Dispatcher | Tool registration, permission gates, rate limiting, concurrency | `internal/tools/dispatcher.go` |
-| SubagentManager | Parallel child agents with independent worktrees | `internal/tools/subagent/manager.go` |
-| Registry | Provider management, active provider selection, atomic swap | `internal/provider/registry.go` |
-| SessionManager | Session persistence, checkpoint/resume, task persistence | `pkg/session/manager.go` |
-| TaskRunner | Task scheduling with dependency resolution and parallel execution | `pkg/taskrunner/runner.go` |
-| Git | Git operations for commit, branch, diff, worktree management | `internal/git/git.go` |
-| CodeIntel | Codebase indexing, import graph, symbol lookup, relevance scoring | `internal/codeintel/codeintel.go` |
-| Tokens | Token estimation with EMA calibration for context management | `internal/tokens/estimator.go` |
-| Config | TOML-based configuration with hot-reload support | `internal/config/loader.go` |
+**`cmd/m31a/main.go`** — Application bootstrap:
+- Flag parsing (`--prompt`, `--goal`, `--model`, `--version`, `--help`)
+- Config loading (`~/.m31a/config.toml` via `internal/config`)
+- Logger initialization (`internal/log`)
+- Keychain initialization (`pkg/keychain`) — OS keyring for API keys
+- Provider registry registration (OpenRouter, Zen, NVIDIA) via `internal/tui/provider_registration.go`
+- TUI construction (`internal/tui.NewApp`) with all dependencies:
+  - Session manager (`pkg/session`)
+  - Tools dispatcher (`internal/tools.DefaultDispatcher`)
+  - Git client (`internal/git`)
+  - Ledger (`pkg/ledger`)
+  - Rollback (`pkg/rollback`)
+  - AutoDream (`pkg/autodream`)
+  - Subagent manager (`internal/tools/subagent`)
+- Signal handling: SIGTERM/SIGINT → `tea.QuitMsg` via channel (preserves Bubble Tea single-threaded contract)
+- Hard fallback: force exit after 5s, writes `.force-exit` sentinel
 
-## Pattern Overview
+## Layer Architecture
 
-**Overall:** Elm Architecture (Bubble Tea) + Seven-Phase Workflow Engine
+### Layer 1: TUI (Bubble Tea / Elm Architecture)
+**Location:** `internal/tui/`
 
-**Key Characteristics:**
-- Strict single-threaded TUI state mutations via Bubble Tea's `Update()` method
-- Workflow engine runs in goroutines, communicates back to TUI via `tea.Msg` channels
-- Provider layer abstracts LLM APIs behind `LLMProvider` interface (OpenRouter, Zen, NVIDIA NIM)
-- Tools are registered in a Dispatcher with permission gates, rate limiting, and concurrency control
-- Subagents run in parallel with independent git worktrees
-- `pkg/` packages are reusable (no imports from `internal/`), `internal/` contains app-specific logic
-- Prompt templates are embedded via `go:embed` with 4-level override chain
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| AppState (Model) | `app.go`, `app_state.go` | Root model implementing `tea.Model`; holds all sub-models, workflow engine, dispatcher, session |
+| Update | `app_update.go`, `app_update_phase.go`, `app_update_commands.go` | Single state mutation point; handles `tea.Msg` from workflow, tools, subagents, user input |
+| View | `app_view.go` | Renders current screen; 45+ screen types in `tuitypes.Screen` |
+| REPL | `repl.go`, `repl_model.go`, `repl_view.go` | Chat interface with streaming, markdown rendering, slash commands |
+| Navigation | `app_nav.go` | Screen stack management (push/pop/replace) |
+| Components | `components/` | Reusable UI: sidebar, model selector, discuss/plan/execute/verify/ship screens |
+| Commands | `commands/` | Slash command implementations (`/model`, `/provider`, `/session`, etc.) |
+| Types | `tuitypes/` | All `tea.Msg` types, Screen enum, shared TUI types |
 
-## Layers
+**Key invariant:** All state mutations occur in `Update()`. Goroutines communicate via `tea.Cmd` → `tea.Msg` channels. Never mutate `AppState` from a goroutine.
 
-**CLI Entry (`cmd/m31a/`):**
-- Purpose: Application bootstrap, flag parsing, provider registration, TUI creation
-- Location: `cmd/m31a/main.go`
-- Contains: `main()`, `run()`, `runHeadless()`, provider registration
-- Depends on: `internal/config`, `internal/provider`, `internal/tui`, `pkg/keychain`, `pkg/session`
-- Used by: User launches the binary
+### Layer 2: Workflow Engine
+**Location:** `internal/workflow/engine.go` (1,494 lines)
 
-**TUI Layer (`internal/tui/`):**
-- Purpose: Terminal UI with Bubble Tea Elm architecture
-- Location: `internal/tui/`
-- Contains: `AppState` (single model), screen models, handlers, components, layout
-- Depends on: `internal/workflow`, `internal/tools`, `internal/provider`, `pkg/session`
-- Used by: All user interaction
+**Core types:**
+- `Engine` — Orchestrates 7 phases, holds provider, dispatcher, token estimator, session manager, config
+- `WorkflowState` — Mutable session state (plan, messages, intent, decisions, checkpoints)
+- `StateMachine` — `internal/workflow/state_machine.go` — Validates phase transitions
+- `PhaseCoordinator` — `phase_coordinator.go` — Pre/post-phase hooks, metrics, checkpoints
 
-**Workflow Engine (`internal/workflow/`):**
-- Purpose: Seven-phase workflow orchestration (Initialize -> Discuss -> Plan -> Execute -> Verify -> Runtime -> Ship)
-- Location: `internal/workflow/`
-- Contains: `Engine`, `StateMachine`, `ContextBuilder`, `PromptBuilder`, `CostTracker`, phase implementations
-- Depends on: `internal/tools`, `internal/provider`, `internal/types`, `pkg/session`, `pkg/taskrunner`
-- Used by: TUI via `WorkflowEngine` interface, runs phases in goroutines
+**Seven Phases (WorkflowPhase enum in `internal/types/types.go`):**
+```
+PhaseIdle → PhaseInitialize → PhaseDiscuss → PhasePlan → PhaseExecute → PhaseVerify → PhaseRuntime → PhaseShip → PhaseIdle
+```
 
-**Tools Layer (`internal/tools/`):**
-- Purpose: 18 built-in tool implementations with permission gating and rate limiting
-- Location: `internal/tools/`
-- Contains: Tool implementations (`Bash`, `FileRead`, `Edit`, etc.), `Dispatcher`, `Agent`
-- Depends on: `internal/types`, `internal/config`
-- Used by: Workflow engine dispatches tools via LLM tool calls
+**Phase transitions** validated by `StateMachine.validTransitions` map. Plan↔Discuss oscillation guarded (max 3 cycles).
 
-**Provider Layer (`internal/provider/`):**
-- Purpose: LLM API abstraction with provider registry and capability detection
-- Location: `internal/provider/`
-- Contains: `LLMProvider` interface, `Registry`, provider implementations (`openrouter/`, `zen/`, `nvidia/`)
-- Depends on: `internal/types`
-- Used by: Workflow engine streams LLM responses
+**Phase execution flow** (`RunPhase`):
+1. Budget guardrail check (`costTracker.TotalCost()` vs `BudgetLimitUSD`)
+2. `PhaseCoordinator.PrePhaseSetup` — compaction check, checkpoint save
+3. Phase-specific `run<Phase>` method (e.g., `runExecute`, `runPlan`)
+4. `PhaseCoordinator.PostPhaseExecution` — metrics, duration recording
+5. Return `PhaseResult` (tasks, messages, error, cost, usage, tool calls)
 
-**Shared Types (`internal/types/`):**
-- Purpose: Canonical type vocabulary shared across all layers
-- Location: `internal/types/`
-- Contains: `WorkflowPhase`, `Message`, `Task`, `ToolCall`, `ModelInfo`, `Tool` interface, constants
-- Depends on: Nothing (leaf package)
-- Used by: Every layer in the system
+**Streaming LLM calls:**
+- `streamLLMWithTools` / `streamLLM` / `streamLLMStreaming` — unified request prep, preflight context check, retry with exponential backoff
+- `consumeStreamWithTools` — parses native tool_call chunks + text deltas
+- `preflightContextCheck` — estimates tokens, triggers auto-compaction or truncation at 80%/95% context window
 
-**Support Packages (`pkg/`):**
-- Purpose: Reusable library code with no `internal/` imports
-- Location: `pkg/`
-- Contains: `session`, `taskrunner`, `rollback`, `ledger`, `keychain`, `narrative`, `compaction`, `metrics`, `arbitrage`, `coordinator`, `history`, `retry`, `bisect`, `autodream`, `skills`
-- Depends on: Only `internal/types` (allowed boundary)
-- Used by: Both `internal/` packages and potentially external consumers
+**Key subsystems (v1.5+):**
+- Decision logging: `internal/decision/logger.go` → `Engine.LogDecision()`
+- Self-heal: `Engine.HealTask()` — re-runs failed task with failure context
+- Checkpoint resume: `SaveCheckpointData` / `LoadCheckpointData` → `pkg/session.Checkpoint`
+- Auto-compaction: `pkg/compaction.Compactor` — LLM-based session summarization
+- Cost tracking: `CostTracker` with per-phase budget enforcement
+
+### Layer 3a: Provider Layer
+**Location:** `internal/provider/`
+
+| File | Purpose |
+|------|---------|
+| `interface.go` | `LLMProvider` interface: `Name()`, `APIKey()`, `FetchModels()`, `CachedModels()`, `ChatCompletionStream()`, `EstimateCost()`, `HealthCheck()`, `GetModel()` |
+| `registry.go` | `Registry` — thread-safe provider registry with active provider tracking, `TrySetActive`/`RollbackActive` for atomic health-check-driven failover |
+| `common.go` | Shared HTTP client, SSE parsing, retry logic, request building |
+| `capabilities.go` | Dynamic model capability detection (tools, reasoning, vision, context length) from API metadata + config overrides |
+| `reasoning.go` | Reasoning token handling, thinking budget management |
+| `openrouter/`, `zen/`, `nvidia/` | Provider implementations — each wraps `BaseClient`, implements `LLMProvider` |
+
+**Model discovery:** Dynamic via `FetchModels()` — never hardcoded. Capabilities merged from API + `config.toml` `ModelCapabilities.KnownCapabilities`.
+
+### Layer 3b: Tool Dispatcher
+**Location:** `internal/tools/dispatcher.go` (480 lines)
+
+**Dispatcher responsibilities:**
+- Tool registry (`map[string]types.Tool`) — 18 built-in tools registered in `defaults.go`
+- Permission system: rules from `config.PermissionsConfig`, persistent per-project approvals
+- Rate limiting: token bucket (general + dangerous-tool specific)
+- Concurrency: semaphore (`MaxConcurrentTools`)
+- Output bounding: `OutputStore` — truncates tool output to `maxLines`/`maxBytes`
+- Question/Permission channels: goroutine-safe request/response via `sync.Map` per-request routing
+- Batch approvals: user can approve all future calls for tool+risk combo (task-scoped)
+- Metrics collection: `pkg/metrics.Collector` integration
+- Subagent support: `Agent` tool spawns child agents with isolated worktrees + dispatchers
+
+**Built-in tools (from `defaults.go`):**
+`Bash`, `FileRead`, `FileWrite`, `Edit`, `TodoWrite`, `TodoRead`, `WebFetch`, `WebSearch`, `Glob`, `Grep`, `FileList`, `FileDelete`, `FileMove`, `CodeMap`, `CodeComplexity`, `DevServer`, `HTTPCheck`, `Agent`
+
+### Layer 4: Shared Types
+**Location:** `internal/types/types.go` (350 lines)
+
+**Core type vocabulary (used across all layers):**
+- `WorkflowPhase`, `WorkflowMode`, `ComplexityLevel`, `IntentType`, `IntentResult`
+- `RiskLevel` (safe/medium/dangerous/destructive), `TaskStatus`
+- `ModelInfo`, `Pricing`, `Capabilities`, `ArchInfo`
+- `Message`, `MessageSegment`, `ToolCall`, `ToolInput`, `ToolResult`, `ToolError`
+- `Task`, `ProjectState`, `Session`, `StreamChunk`, `StreamIterator`
+- `HealthStatus`, `DiffSummary`, `FileDiff`
+- Constants: `MaxLLMResponseBytes`, `DefaultContextLength`, `MaxHealAttempts`, `MaxToolsPerCall`
+
+### Layer 5: Public Packages (`pkg/`)
+**Constraint:** `pkg/` MUST NOT import `internal/` (enforced by Go module structure).
+
+| Package | Purpose |
+|---------|---------|
+| `pkg/keychain` | OS keyring integration (macOS Keychain, Windows Credential Manager, Linux Secret Service/D-Bus) |
+| `pkg/ledger` | Session record persistence (LEDGER.md) |
+| `pkg/metrics` | Tool/LLM call metrics collection |
+| `pkg/retry` | Exponential backoff with error classification |
+| `pkg/rollback` | Git-based rollback to session start hash |
+| `pkg/session` | Session persistence, checkpoints, project state |
+| `pkg/taskrunner` | Parallel task execution with dependencies |
+| `pkg/bisect` | Git bisect automation for regression finding |
+| `pkg/compaction` | LLM-based session summarization |
+| `pkg/autodream` | Proactive session compression |
+| `pkg/arbitrage` | Model cost optimization recommendations |
+| `pkg/coordinator` | Multi-agent coordination |
+| `pkg/narrative` | Structured narrative event stream for TUI |
+| `pkg/history` | Command history with frecency |
+| `pkg/skills` | Skill discovery and loading |
+| `pkg/rollback` | Rollback operations |
 
 ## Data Flow
 
-### Primary Request Path (User sends message)
+### Primary Request Path (User Goal → Workflow → LLM/Tools → TUI)
 
-1. User types in REPL, `AppState.Update()` receives `tea.KeyMsg` (`internal/tui/app_input.go`)
-2. Input is routed to screen handler via `screenUpdaters` map (`internal/tui/app_routing.go`)
-3. For workflow goals, intent is classified via LLM (`internal/workflow/classify.go`)
-4. Workflow phases are launched as `tea.Cmd` goroutines (`internal/tui/app.go:RunPhaseCmd()`)
-5. `Engine.RunPhase()` dispatches to phase-specific methods (`internal/workflow/engine.go:694-712`)
-6. Phase methods call `Engine.streamLLM()` which streams via `provider.ChatCompletionStream()` (`internal/workflow/engine.go:1392-1401`)
-7. LLM tool calls are dispatched via `Dispatcher.Dispatch()` (`internal/tools/dispatcher.go`)
-8. Tool results are fed back as `types.Message` entries in the conversation
-9. Phase completion emits `PhaseResultMsg` back to TUI via `MsgEmitter`
-10. `AppState.Update()` processes the result and routes to next phase or idle
+```
+1. User submits goal in TUI (REPL or /workflow)
+       │
+       ▼
+2. AppState.RunPhaseCmd(PhaseInitialize) → tea.Cmd
+       │
+       ▼
+3. Goroutine: Engine.RunPhase(ctx, PhaseInitialize, goal)
+       │  ├─ Budget check
+       │  ├─ PhaseCoordinator.PrePhaseSetup (compaction, checkpoint)
+       │  └─ runInitialize(): intent classification via LLM
+       │
+       ▼
+4. Engine emits PhaseResultMsg via MsgEmitter channel
+       │
+       ▼
+5. AppState.Update(PhaseResultMsg) — single-threaded state mutation
+       │  ├─ Updates workflowPhase, tasks, messages
+       │  ├─ Triggers next phase via RunPhaseCmd(PhaseDiscuss)
+       │  └─ Returns tea.Batch(drainEmitterCmd, nextPhaseCmd)
+       │
+       ▼
+6. Repeat for Discuss → Plan → Execute → Verify → Runtime → Ship
+       │
+       ├─ Discuss: LLM generates clarifying questions → TUI renders → User answers
+       ├─ Plan: LLM generates plan.md → TUI renders for approval/refinement
+       ├─ Execute: LLM + tools (streamLLMWithTools) → Tool calls via Dispatcher
+       │            └─ Dispatcher: permission check → rate limit → concurrency → execute
+       ├─ Verify: Run verification commands, self-heal on failure
+       ├─ Runtime: Dev server health checks, smoke tests
+       └─ Ship: Git commit, PR creation, ledger entry
+```
 
-### Tool Dispatch Path
+### Tool Execution Flow
 
-1. LLM response contains `ToolCall` entries (`internal/types/types.go:164-168`)
-2. `Engine.consumeStreamWithTools()` collects both text and tool calls (`internal/workflow/engine.go:1231-1286`)
-3. `Dispatcher.Dispatch()` checks permissions via `PermissionRequest` channel (`internal/tools/dispatcher.go`)
-4. TUI shows permission modal if needed (`internal/tui/handler_tool.go`)
-5. Tool's `Execute()` is called with rate limiting and concurrency control (`internal/tools/dispatcher.go:400+`)
-6. `ToolResult` is returned and added to conversation as tool message
+```
+LLM emits tool_call chunk
+       │
+       ▼
+Engine.consumeStreamWithTools() → []ToolCall
+       │
+       ▼
+Engine calls Dispatcher.Execute(toolName, input) for each
+       │
+       ▼
+Dispatcher.Execute():
+  1. Acquire concurrency semaphore
+  2. Acquire rate limit token (general or dangerous)
+  3. Check permissions (config rules + persistent approvals)
+     ├─ If allowed: execute tool
+     ├─ If needs approval: send PermissionRequestMsg → TUI → user responds
+     └─ If denied: return error to LLM
+  4. Execute tool (tool.Execute(ctx, input))
+  5. Bound output via OutputStore
+  6. Release semaphore, record metrics
+  7. Return ToolResult
+       │
+       ▼
+Engine streams ToolResult back to LLM as tool message
+       │
+       ▼
+Next LLM iteration continues...
+```
 
-### Session Persistence Path
+### Concurrency Model
 
-1. `SessionManager` saves to `<workDir>/.m31a/session.json` (`pkg/session/manager.go`)
-2. Messages saved to `<workDir>/.m31a/messages.json`
-3. Tasks saved to `<workDir>/.m31a/tasks.json`
-4. Checkpoints saved for resume support (`pkg/session/checkpoint.go`)
-5. On shutdown, `AppState.saveSessionOnShutdown()` persists all state (`internal/tui/app.go:206-244`)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Bubble Tea Main Goroutine                     │
+│  tea.Program.Run() → AppState.Update(msg) → AppState.View()     │
+│  ─────────────────────────────────────────────────────────────  │
+│  ALL state mutations happen HERE. Never mutate AppState from    │
+│  other goroutines. Use tea.Cmd to schedule work, tea.Msg to     │
+│  deliver results back to Update().                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+       ┌────────────┐  ┌────────────┐  ┌────────────┐
+       │ Workflow   │  │ Tool       │  │ Subagent   │
+       │ Engine     │  │ Dispatcher │  │ Manager    │
+       │ Goroutine  │  │ Goroutines │  │ Goroutines │
+       └────────────┘  └────────────┘  └────────────┘
+              │               │               │
+              └───────────────┼───────────────┘
+                              ▼
+                    ┌─────────────────┐
+                    │ tea.Msg Channel │
+                    │ (emitterCh)     │
+                    └────────┬────────┘
+                             │
+                    drainEmitterCmd() reads
+                    and forwards to
+                    tea.Program.Send()
+                             │
+                             ▼
+                    Back to Update() loop
+```
 
-**State Management:**
-- TUI state: Single `AppState` struct, mutated only in `Update()` (Bubble Tea contract)
-- Workflow state: `WorkflowState` inside `Engine`, protected by `transitionMu` for phase transitions
-- Session state: Persisted to JSON files in `.m31a/` directory
-- Provider state: `Registry` with `sync.RWMutex` for thread-safe provider switching
-- Tool state: `Dispatcher` with `sync.RWMutex` for concurrent tool access
+**Channels used:**
+- `Dispatcher.requestCh` / `responseCh` — permission requests (buffered)
+- `Dispatcher.questionReqCh` / `questionRespCh` — AskUser questions
+- `Engine.msgEmitter.ch` (chan `tea.Msg`) — workflow → TUI events
+- `FileWatcher.Events` — filesystem changes → sidebar refresh
+- `ConfigWatcher` channel — config.toml changes → hot reload
+
+**Rate limiters / semaphores (Dispatcher):**
+- `rateTokens` (chan struct{}) — general tool rate limit (token bucket)
+- `dangerousRateTokens` — stricter limit for dangerous/destructive tools
+- `concurrencySem` — `MaxConcurrentTools` simultaneous executions
 
 ## Key Abstractions
 
-**WorkflowEngine Interface:**
-- Purpose: Decouples TUI from concrete workflow engine for testing
-- Examples: `internal/tui/tuitypes/tuitypes.go:107`
-- Pattern: Interface alias (`type WorkflowEngine = tuitypes.WorkflowEngine`)
+### WorkflowEngine Interface (`internal/tui/tuitypes/types.go`)
+```go
+type WorkflowEngine interface {
+    RunPhase(ctx context.Context, phase types.WorkflowPhase, goal string) (*PhaseResult, error)
+    SetModel(modelID string, p provider.LLMProvider)
+    SetPhaseModel(phase types.WorkflowPhase, modelID string)
+    SetWorkflowMode(mode types.WorkflowMode)
+    SetIntentResult(*types.IntentResult)
+    SubmitDiscussAnswer(index int, answer string) error
+    SetRefinementFeedback(string)
+    PlanContent() string
+    PlanVersion() int
+    HealTask(ctx context.Context, taskID int) (bool, error)
+    SaveCheckpointData(goal string)
+    LoadCheckpointData(*CheckpointData)
+    // ... more
+}
+```
+Implemented by `*workflow.Engine`. Allows TUI to depend on interface, not concrete type.
 
-**LLMProvider Interface:**
-- Purpose: Abstracts LLM API differences across providers
-- Examples: `internal/provider/interface.go:9-18`
-- Pattern: Interface with `Name()`, `FetchModels()`, `ChatCompletionStream()`, `GetModel()`
+### LLMProvider Interface (`internal/provider/interface.go`)
+```go
+type LLMProvider interface {
+    Name() string
+    APIKey() string
+    FetchModels(ctx context.Context) ([]types.ModelInfo, error)
+    CachedModels() []types.ModelInfo
+    ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error)
+    EstimateCost(modelID string, usage types.Usage) float64
+    HealthCheck(ctx context.Context) types.HealthStatus
+    GetModel(id string) (*types.ModelInfo, error)
+}
+```
+Three implementations: `openrouter.Provider`, `zen.Provider`, `nvidia.Provider`.
 
-**Tool Interface:**
-- Purpose: Uniform interface for all 18 built-in tools
-- Examples: `internal/types/types.go:241-246`
-- Pattern: Interface with `Name()`, `Description()`, `RiskLevel()`, `Execute()`
+### Tool Interface (`internal/types/types.go`)
+```go
+type Tool interface {
+    Name() string
+    Description() string
+    RiskLevel() RiskLevel
+    Execute(ctx context.Context, input ToolInput) (ToolResult, error)
+}
+```
+Optional: `SchemaProvider` for JSON Schema parameters.
 
-**MsgEmitter:**
-- Purpose: Decouples workflow engine from Bubble Tea program for message passing
-- Examples: `internal/workflow/engine.go:834-838`
-- Pattern: Callback function `func(msg any)` that sends to TUI's channel
-
-**Screen Routing Map:**
-- Purpose: Eliminates duplicated per-screen switch statements in Update()
-- Examples: `internal/tui/app_state.go:257` (`screenUpdaters map[Screen]screenUpdateFunc`)
-- Pattern: Map of `Screen` enum to `screenUpdateFunc` closures
+### StateMachine (`internal/workflow/state_machine.go`)
+Encapsulates phase transition logic. Validates against `validTransitions` map. Thread-safe with `sync.RWMutex`. Tracks history and Plan↔Discuss cycle count.
 
 ## Entry Points
 
-**CLI Main:**
-- Location: `cmd/m31a/main.go`
-- Triggers: User runs `m31a` binary
-- Responsibilities: Flag parsing, config load, provider registration, TUI or headless mode
-
-**TUI Init:**
-- Location: `internal/tui/app.go:24`
-- Triggers: Bubble Tea runtime calls `Init()` after `tea.NewProgram().Run()`
-- Responsibilities: Start health ticker, permission listener, file watcher, session resume
-
-**TUI Update:**
-- Location: `internal/tui/app_update.go`
-- Triggers: Every user input, timer tick, or message from goroutines
-- Responsibilities: Route messages to screen handlers, mutate AppState
-
-**Engine RunPhase:**
-- Location: `internal/workflow/engine.go:654`
-- Triggers: TUI's `RunPhaseCmd` goroutine
-- Responsibilities: Execute a workflow phase (Initialize through Ship)
+| Entry Point | File | Trigger |
+|-------------|------|---------|
+| TUI (interactive) | `cmd/m31a/main.go` → `tea.NewProgram(app).Run()` | Default (no flags) |
+| Headless prompt | `runHeadless()` | `--prompt "text"` |
+| Headless workflow | `runHeadlessWorkflow()` | `--goal "text"` (not fully implemented) |
+| Version | `main.go` | `--version` |
 
 ## Architectural Constraints
 
-- **Threading:** Bubble Tea is strictly single-threaded. All state mutations happen in `Update()`. Workflow phases run in goroutines but communicate back via `tea.Msg` channels. Never mutate `AppState` from a goroutine.
-- **Global state:** `slog.SetDefault(logger)` is set once at startup (`cmd/m31a/main.go:164`). No other module-level singletons.
-- **Circular imports:** Enforced by Go module system. `pkg/` must NOT import `internal/`. `internal/types` is the leaf package.
-- **Build constraint:** `CGO_ENABLED=0` is a hard constraint. Binary must be statically linked.
-- **Provider models are dynamic:** Never hardcode model IDs. Models are discovered from provider APIs.
-- **API keys via keychain:** `pkg/keychain/` stores keys in OS keychain, never plaintext in config files (except fallback).
+### Threading
+- **Bubble Tea is single-threaded.** All `AppState` mutations in `Update()`.
+- Goroutines (workflow, tools, subagents, watchers) communicate via channels → `tea.Msg` → `Update()`.
+- `sync.Mutex`/`RWMutex` protects Engine internal state (`WorkflowState`, `StateMachine`, model maps).
+
+### Global State
+- `slog.Default()` — structured logging (initialized in `main.go`)
+- `internal/types` package-level constants (no mutable globals)
+- `Dispatcher` rate limiters & semaphores — per-dispatcher instance state
+- `Registry` active provider — mutex-protected map
+
+### Circular Imports
+- **None.** Go module system enforces: `pkg/` ↛ `internal/`, `internal/tui` → `internal/workflow` → `internal/provider/tools/types`, `cmd/m31a` → all.
+
+### Build Constraints
+- `CGO_ENABLED=0` mandatory (static binary) — enforced in Makefile `GOFLAGS`
+- Go 1.25.0 (per `go.mod`)
+- Cross-compile targets: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 (via `.goreleaser.yaml`)
 
 ## Anti-Patterns
 
-### Mutating AppState from goroutines
+### ❌ Mutating AppState from Goroutine
+```go
+// WRONG — breaks Bubble Tea contract
+go func() {
+    m.workflowPhase = PhaseExecute  // Data race!
+}()
+```
+**Do instead:**
+```go
+// CORRECT — emit message, let Update() mutate
+m.emitterCh <- PhaseResultMsg{Phase: PhaseExecute, Success: true}
+```
 
-**What happens:** Direct field assignment on `AppState` from a workflow goroutine.
-**Why it's wrong:** Breaks Bubble Tea's single-threaded contract, causes data races and session corruption.
-**Do this instead:** Emit a `tea.Msg` via `MsgEmitter` and handle it in `Update()`. See `internal/workflow/engine.go:834-838`.
+### ❌ Direct Provider Calls from TUI
+```go
+// WRONG — bypasses workflow engine, no checkpointing
+p.ChatCompletionStream(ctx, req)
+```
+**Do instead:** Use `Engine.RunPhase()` or `Engine.streamLLMWithTools()`.
 
-### Hardcoding model names
+### ❌ Hardcoding Model Names
+```go
+// WRONG — models discovered dynamically
+model := "anthropic/claude-3.5-sonnet"
+```
+**Do instead:** Use `provider.FetchModels()` or `registry.ActiveProvider().CachedModels()`.
 
-**What happens:** Writing `"claude-3-5-sonnet"` or similar in code.
-**Why it's wrong:** Provider model lists are dynamic. Models appear/disappear based on API availability.
-**Do this instead:** Use `provider.FetchModels()` and `provider.GetModel()` to discover models at runtime.
-
-### Importing internal from pkg
-
-**What happens:** A `pkg/` package imports from `internal/`.
-**Why it's wrong:** Violates Go module boundaries. Makes `pkg/` packages unusable outside this module.
-**Do this instead:** Pass `internal/` dependencies as interfaces or parameters. `pkg/` may only import `internal/types`.
-
-### Skipping permissions for destructive tools
-
-**What happens:** Registering a tool with `RiskDestructive` but bypassing permission checks.
-**Why it's wrong:** Destructive operations (file delete, bash with dangerous commands) need explicit user approval.
-**Do this instead:** Let the `Dispatcher` handle permissions via the `PermissionRequest` channel.
+### ❌ pkg/ Importing internal/
+```go
+// WRONG — violates module boundary
+import "github.com/eshanized/M31A/internal/types"
+```
+**Do instead:** Keep `pkg/` pure. Shared types live in `internal/types/`.
 
 ## Error Handling
 
 **Strategy:** Return errors, never panic. Wrap with `fmt.Errorf("%w", err)`.
 
-**Patterns:**
-- Sentinel errors defined in `internal/errors/errors.go` (e.g., `ErrPhaseTransition`, `ErrContextExceeded`, `ErrProviderNotFound`)
-- Errors wrapped with `%w` for Go 1.13+ error chains
-- `ToolError` type with `Err` + `Hint` for LLM self-recovery guidance (`internal/types/types.go:207-226`)
-- Non-recoverable errors returned as `fmt.Errorf` with sentinel wrapping
-- Recoverable errors (LLM failures, permission timeouts) retried via `pkg/retry/`
+**Error types:** `internal/errors/errors.go` defines sentinel errors:
+- `ErrPhaseTransition`, `ErrProviderNotFound`, `ErrProviderUnreachable`
+- `ErrInvalidProvider`, `ErrContextExceeded`, `ErrToolNotFound`
+- `ErrPermissionDenied`, `ErrRateLimited`
+
+**Retry:** `pkg/retry` — exponential backoff with error classification (retryable vs non-retryable). Used in `Engine.retryChatStream()`.
+
+**LLM Errors:** Classified by `retry.ClassifyError()` → `retry.IsRetryable()`.
 
 ## Cross-Cutting Concerns
 
-**Logging:** `log/slog` structured logging. Logger initialized in `cmd/m31a/main.go:157-164`. Set as default via `slog.SetDefault()`. Used throughout via `slog.Info/Warn/Error`.
-
-**Validation:** Config validation in `internal/config/loader.go`. Permission rules validated at dispatcher creation time. Tool input validated per-tool via JSON schema.
-
-**Authentication:** API keys resolved via OS keychain (`pkg/keychain/`) with platform-specific implementations (`keychain_darwin.go`, `keychain_linux.go`, `keychain_windows.go`). Fallback to config file. Keys never written to disk in plaintext.
-
-**Metrics:** `pkg/metrics/` collector records tool calls, LLM usage, phase durations, heals. Persists to `METRICS.json` in session directory.
-
-**Narrative:** `pkg/narrative/` engine classifies and groups tool call events for human-readable output. Configurable via `internal/config/types.go:NarrativeConfig`.
+| Concern | Implementation |
+|---------|----------------|
+| **Logging** | `slog` via `internal/log.NewLogger()` — JSON output to `~/.m31a/logs/`, level from config |
+| **Validation** | Tool input validated via JSON Schema (`SchemaProvider`); config validated on load |
+| **Authentication** | API keys via OS keychain (`pkg/keychain`); never written to disk in plaintext |
+| **Config** | TOML (`config.toml`) — `internal/config/config.go` with `Load()`/`WatchConfig()` |
+| **Persistence** | Session JSON in `~/.m31a/sessions/`; checkpoints; project state; LEDGER.md |
+| **Health Checks** | Periodic `HealthCheckTickMsg` → provider `HealthCheck()` → TUI status indicator |
 
 ---
 

@@ -1,388 +1,642 @@
-# Testing Patterns
+# TESTING.md — Testing Strategy & Practices
 
-**Analysis Date:** 2026-07-10
+> Last mapped: 2026-07-10
 
-## Test Framework
+## Test Framework & Commands
 
-**Runner:**
-- Go's built-in `testing` package
-- Config: No external test config file; all configuration via Makefile targets and `go test` flags
+### Framework
 
-**Assertion Library:**
-- Standard library only (`testing.T` methods: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Skipf`)
-- No external assertion libraries (no testify, no gomega)
+- **Standard library `testing`** — No external test framework (testify not used despite being in `go.sum` as transitive dependency)
+- **Table-driven tests** — Primary pattern using `t.Run()` with subtests
+- **Parallel execution** — `t.Parallel()` used extensively for isolated tests
+- **Test helpers** — `t.Helper()` for assertion wrappers, `t.TempDir()` for isolated temp directories
 
-**Run Commands:**
-```bash
-make test              # Run all tests with race detector + coverage
-make test-fast         # Run tests without race detector (faster)
-make test-verbose      # Run tests with verbose output
-make test-specific TEST=TestFoo   # Run specific test by name
-make bench             # Run all benchmarks
-make bench-verbose     # Run benchmarks with verbose output
-make cover             # Generate HTML coverage report (after test)
-go test -race ./...    # Direct race-enabled test run
-go test -bench=. -benchmem -run=^$ ./...  # Direct benchmark run
-```
+### Make Targets
 
-## Test File Organization
+| Target | Command | Purpose |
+|--------|---------|---------|
+| `make test` | `go test -race -cover -coverprofile=coverage.out ./...` | Full test suite with race detector + coverage |
+| `make test-fast` | `go test -cover ./...` | Tests without race detector (faster) |
+| `make test-verbose` | `go test -v -race -cover ./...` | Verbose output with race detector |
+| `make test-specific TEST=TestFoo` | `go test -v -race -run TestFoo ./...` | Run single test by name |
+| `make cover` | `go tool cover -html=coverage.out -o coverage.html` | Generate HTML coverage report |
+| `make bench` | `go test -bench=. -benchmem -run=^$ ./...` | Run benchmarks |
+| `make check` | `fmt → tidy → vet → lint → test` | Full CI pipeline |
 
-**Location:** Test files are co-located with source files in the same package (standard Go convention).
+### Coverage Targets
 
-**Naming:**
-- `<name>_test.go` — primary test file (e.g., `rollback_test.go`, `runner_test.go`)
-- `<name>_extra_test.go` — edge-case and coverage-boost tests (e.g., `manager_extra_test.go`, `compaction_extra_test.go`)
-- `<name>_bench_test.go` — benchmark tests (e.g., `edit_benchmark_test.go`, `codecomplexity_benchmark_test.go`)
-- `doc_test.go` — empty test to cover `doc.go` file presence (e.g., `pkg/bisect/doc_test.go`)
-- `e2e_test.go` — root-level end-to-end tests that compile and run the binary
+| Package | Target | Enforcement |
+|---------|--------|-------------|
+| Overall | 75% | CI gate via `make check` |
+| `pkg/taskrunner` | 90% | High-coverage requirement |
+| `pkg/bisect` | 90% | High-coverage requirement |
+| `pkg/rollback` | 90% | High-coverage requirement |
 
-**Structure:**
-```
-internal/
-  errors/
-    errors.go           # source
-    errors_test.go      # tests (same package: `package errors`)
-  config/
-    loader.go
-    loader_test.go
-    config_extra_test.go  # additional edge cases
-pkg/
-  rollback/
-    rollback.go
-    rollback_test.go
-    doc.go
-    doc_test.go          # covers doc.go
-```
+Coverage is not enforced per-package via tooling — the 90% targets for critical packages are documented expectations validated during code review and release validation.
 
-## Test Structure
+## Test Organization
 
-**Package declaration:** Tests use the same package name as the source (whitebox testing):
-```go
-package rollback  // NOT package rollback_test
+### Unit Tests
 
-import (
-    "testing"
-    "github.com/eshanized/M31A/internal/git"
-)
-```
+- **Location**: `*_test.go` alongside source files
+- **Package naming**: Same package as source (white-box) or `*_test` package (black-box, e.g., `m31a_test` for `e2e_test.go`)
+- **Naming**: `Test<Function>_<Scenario>` or `Test<Feature>_<Behavior>`
+- **Pattern**: Table-driven with `t.Run()` subtests
 
-**Exception:** E2E tests use `_test` suffix package:
-```go
-package m31a_test  // blackbox test at root level
-```
+**Example** — `pkg/taskrunner/runner_test.go:130-144` (table-driven circular dependency test):
 
-**Suite organization (table-driven tests):**
-```go
-func TestUserMessage(t *testing.T) {
-    tests := []struct {
-        name     string
-        err      error
-        expected string
-    }{
-        {"nil", nil, ""},
-        {"ErrProviderUnreachable", ErrProviderUnreachable, "Provider unreachable..."},
-        {"wrapped ErrInvalidKey", fmt.Errorf("auth failed: %w", ErrInvalidKey), "Invalid API key..."},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            got := UserMessage(tt.err)
-            if got != tt.expected {
-                t.Errorf("UserMessage(%v) = %q, want %q", tt.err, got, tt.expected)
-            }
-        })
-    }
-}
-```
-
-**Subtests with `t.Run`:**
-```go
-func TestHasUncommittedChanges(t *testing.T) {
-    t.Run("clean", func(t *testing.T) {
-        _, g := setupRollback(t)
-        createCommits(g, 1)
-        r := New(g)
-        dirty, err := r.HasUncommittedChanges()
-        // ...
-    })
-    t.Run("dirty", func(t *testing.T) {
-        // ...
-    })
-    t.Run("modified", func(t *testing.T) {
-        // ...
-    })
-}
-```
-
-**Setup pattern:**
-```go
-func setupRollback(t *testing.T) (*Rollback, *git.Git) {
-    t.Helper()
-    dir := t.TempDir()
-    g := git.New(dir)
-    if err := g.Init(); err != nil {
-        t.Fatalf("Init failed: %v", err)
-    }
-    if err := g.ConfigUser("Test", "test@test.com"); err != nil {
-        t.Fatalf("ConfigUser failed: %v", err)
-    }
-    return New(g), g
-}
-```
-
-**Helper pattern:**
-```go
-func newTask(id int, desc string, deps []int) types.Task {
-    return types.Task{
-        ID:           id,
-        Description:  desc,
-        Action:       "Create",
-        Dependencies: deps,
-    }
-}
-```
-
-## Mocking
-
-**Framework:** No external mocking library. Mocks are hand-written structs implementing interfaces.
-
-**Mock pattern (keychain):**
-```go
-type mockKeychain struct {
-    store map[string]string
-}
-
-func newMockKeychain() *mockKeychain {
-    return &mockKeychain{store: make(map[string]string)}
-}
-
-func (m *mockKeychain) Get(service string) (string, error) {
-    if v, ok := m.store[service]; ok {
-        return v, nil
-    }
-    return "", errors.New("not found")
-}
-
-func (m *mockKeychain) Set(service, value string) error {
-    m.store[service] = value
-    return nil
-}
-
-func (m *mockKeychain) Delete(service string) error {
-    delete(m.store, service)
-    return nil
-}
-```
-
-**Mock pattern (GitRunner interface for bisect):**
-```go
-// In pkg/bisect/bisect.go:
-type GitRunner interface {
-    Run(args ...string) (string, error)
-}
-
-// In tests, any struct implementing Run(args ...string) (string, error) works as a mock.
-```
-
-**Mock tools for dispatcher tests:** `mockTool` struct defined in `internal/tools/dispatcher_test.go`.
-
-**What to mock:**
-- External services (API providers, keychain, git operations)
-- File system operations (via temp directories — prefer `t.TempDir()` over mocking)
-- Time-dependent code (rare; usually tested with real time)
-
-**What NOT to mock:**
-- Internal data structures (test directly)
-- Standard library functions
-- Go built-in types
-
-## Fixtures and Factories
-
-**Test data creation:**
-```go
-func createCommits(g *git.Git, n int) {
-    for i := 0; i < n; i++ {
-        f := filepath.Join(g.WorkDir(), fmt.Sprintf("f%d.txt", i))
-        if err := os.WriteFile(f, []byte(fmt.Sprintf("content %d", i)), 0644); err != nil {
-            panic(fmt.Sprintf("WriteFile failed: %v", err))
-        }
-        if err := g.Commit(fmt.Sprintf("commit %d", i)); err != nil {
-            panic(fmt.Sprintf("Commit %d failed: %v", i, err))
-        }
-    }
-}
-```
-
-**Location:** Fixtures and factories are defined as helper functions in the test files themselves, not in separate fixture directories.
-
-**Temp directories:** Always use `t.TempDir()` for test isolation. Never use shared directories.
-
-**Test environment:**
-```go
-// internal/testutil/envtest.go provides:
-testutil.RequireAPIKey(t, "OPENROUTER_API_KEY")  // Skip if env var not set
-testutil.RequireAnyAPIKey(t, "KEY1", "KEY2")     // Skip if none set
-testutil.LoadTestDotEnv(t)                        // Load .env.test file
-```
-
-## Coverage
-
-**Targets:**
-- **75%** overall
-- **90%** for `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`
-
-**Run coverage:**
-```bash
-make test              # Generates coverage.out
-make cover             # Generates coverage.html from coverage.out
-go tool cover -html=coverage.out -o coverage.html  # Direct
-```
-
-**Coverage strategy:**
-- Core packages (`taskrunner`, `bisect`, `rollback`) require 90% coverage
-- Use `_extra_test.go` files to add edge-case tests for coverage gaps
-- Test files excluded from `errcheck` and `unused` lint checks (`.golangci.yml`)
-
-## Test Types
-
-**Unit Tests:**
-- Package-level tests in the same package (whitebox)
-- Test individual functions and methods
-- Use `t.TempDir()` for filesystem isolation
-- Use hand-written mocks for external dependencies
-
-**Integration Tests:**
-- Config loading with real TOML files (`internal/config/loader_test.go`)
-- Session persistence with real filesystem (`pkg/session/session_test.go`)
-- Git operations with real temp repositories (`internal/git/git_test.go`)
-
-**E2E Tests:**
-- `e2e_test.go` at root level compiles and runs the `m31a` binary
-- Uses `exec.Command` to invoke the binary
-- Tests `--version`, `--help`, `--prompt` flags
-- Real API tests (`TestBinary_Prompt_*RealAPI`) skip when env vars not set:
-```go
-func TestBinary_Prompt_NvidiaRealAPI(t *testing.T) {
-    apiKey := os.Getenv("NVIDIA_API_KEY")
-    if apiKey == "" {
-        t.Skip("NVIDIA_API_KEY not set — skipping real API test")
-    }
-    // ...
-}
-```
-
-**Benchmark Tests:**
-- `Benchmark*` functions in `_test.go` or `_bench_test.go` files
-- Use `b.ResetTimer()`, `b.StopTimer()`, `b.StartTimer()` for accurate measurement
-- Use `b.RunParallel()` for concurrent benchmarks
-- Use `b.ReportAllocs()` for memory allocation tracking
-- Example locations: `pkg/narrative/benchmarks_test.go`, `internal/codeintel/bench_test.go`
-
-## Common Patterns
-
-**Parallel execution:**
-```go
-func TestExtractReviewNotes_EmptySection(t *testing.T) {
-    t.Parallel()
-    notes := extractReviewNotes("")
-    if notes != nil {
-        t.Errorf("expected nil for empty section, got %v", notes)
-    }
-}
-```
-Use `t.Parallel()` when the test has no shared mutable state. Avoid for tests that modify package-level variables or share resources.
-
-**Error testing:**
 ```go
 func TestRunner_CircularDependency(t *testing.T) {
-    tasks := []types.Task{
-        newTask(1, "a", []int{2}),
-        newTask(2, "b", []int{1}),
-    }
-    r := New(tasks)
+	tasks := []types.Task{
+		newTask(1, "a", []int{2}),
+		newTask(2, "b", []int{1}),
+	}
+	r := New(tasks)
 
-    _, err := r.Schedule()
-    if err == nil {
-        t.Fatal("Expected error for circular dependency")
-    }
-    if err != m31errors.ErrCircularDependency {
-        t.Errorf("Expected ErrCircularDependency, got %v", err)
-    }
+	_, err := r.Schedule()
+	if err == nil {
+		t.Fatal("Expected error for circular dependency")
+	}
+	if err != m31errors.ErrCircularDependency {
+		t.Errorf("Expected ErrCircularDependency, got %v", err)
+	}
 }
 ```
 
-**Callback testing:**
+**Example** — `pkg/rollback/rollback_test.go:490-501` (table-driven with subtests):
+
 ```go
-func TestSoftReset_Callback_Invoked(t *testing.T) {
-    callbackHash := ""
-    callbackCalled := false
-    onReset := func(newHead string) error {
-        callbackCalled = true
-        callbackHash = newHead
-        return nil
-    }
-
-    result, err := r.SoftReset(firstHash, onReset)
-    // ...
-    if !callbackCalled {
-        t.Error("Expected onReset callback to be called")
-    }
+func TestMatchToolName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		pattern string
+		tool    string
+		want    bool
+	}{
+		{"exact match", "Bash", "Bash", true},
+		{"wildcard", "*", "Bash", true},
+		{"glob prefix", "B*", "Bash", true},
+		{"no match", "Bash", "FileRead", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchToolName(tt.pattern, tt.tool)
+			if got != tt.want {
+				t.Errorf("matchToolName(%q, %q) = %v, want %v", tt.pattern, tt.tool, got, tt.want)
+			}
+		})
+	}
 }
 ```
 
-**Sentinel error uniqueness:**
+### Integration Tests
+
+- **Provider integration tests**: `internal/provider/*/integration_test.go` — Test real APIs with `httptest` servers and optional live API keys
+- **Real API tests**: Skip gracefully when env vars not set (see `internal/testutil/envtest.go`)
+
+### E2E Tests (`e2e_test.go`)
+
+- **Package**: `m31a_test` (external test package)
+- **Approach**: Compile binary via `go build`, execute as subprocess
+- **Real API tests**: `TestBinary_Prompt_*RealAPI` — require `OPENROUTER_API_KEY`, `ZEN_API_KEY`, `NVIDIA_API_KEY`
+- **Skip behavior**: `t.Skip()` when env vars absent
+
+**Example** — `e2e_test.go:52-73` (NVIDIA real API test):
+
 ```go
-func TestSentinelsAreUnique(t *testing.T) {
-    sentinels := []error{
-        ErrProviderUnreachable, ErrRateLimited, ErrInvalidKey, // ...
-    }
-    seen := make(map[error]bool)
-    for i, s := range sentinels {
-        if seen[s] {
-            t.Errorf("duplicate sentinel: %v", s)
-        }
-        seen[s] = true
-    }
+func TestBinary_Prompt_NvidiaRealAPI(t *testing.T) {
+	apiKey := os.Getenv("NVIDIA_API_KEY")
+	if apiKey == "" {
+		t.Skip("NVIDIA_API_KEY not set — skipping real API test")
+	}
+
+	bin := buildBinary(t)
+	cmd := exec.Command(bin, "--prompt", "What is 2+2? Reply with just the number.", "--model", "meta/llama-3.1-8b-instruct")
+	cmd.Env = append(cleanEnv(), "NVIDIA_API_KEY="+apiKey)
+	cmd.Dir = t.TempDir()
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("headless mode failed: %v\noutput: %s", err, string(out))
+	}
+	resp := strings.TrimSpace(string(out))
+	if resp == "" {
+		t.Fatal("expected non-empty response from NVIDIA API")
+	}
 }
 ```
 
-**Doc coverage tests:**
-```go
-// pkg/bisect/doc_test.go
-func TestDoc(t *testing.T) {
-    t.Parallel()
-    // Verify the package compiles and doc.go is present
-}
-```
+**Helper functions** (`e2e_test.go:150-191`):
 
-**E2E helper functions:**
 ```go
 func buildBinary(t *testing.T) string {
-    t.Helper()
-    bin := filepath.Join(t.TempDir(), "m31a")
-    cmd := exec.Command("go", "build", "-o", bin, "./cmd/m31a")
-    cmd.Dir = filepath.Join(mustGetwd(t), ".")
-    out, err := cmd.CombinedOutput()
-    if err != nil {
-        t.Fatalf("build failed: %v\n%s", err, string(out))
-    }
-    return bin
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "m31a")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/m31a")
+	cmd.Dir = filepath.Join(mustGetwd(t), ".")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build failed: %v\n%s", err, string(out))
+	}
+	return bin
 }
 
 func cleanEnv() []string {
-    return []string{
-        "PATH=" + os.Getenv("PATH"),
-        "HOME=" + os.TempDir(),
-        "M31A_CONFIG=" + filepath.Join(os.TempDir(), "m31a-test-config.toml"),
-    }
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.TempDir(),
+		"M31A_CONFIG=" + filepath.Join(os.TempDir(), "m31a-test-config.toml"),
+	}
 }
 ```
 
-## Test Count
+## Test Patterns
 
-- **262** test files across the codebase
-- **~100+** uses of `t.Parallel()` for concurrent test execution
-- Tests run with race detector by default (`make test`)
+### Table-Driven Tests (Standard Pattern)
+
+Used throughout the codebase. Structure:
+
+```go
+tests := []struct {
+	name     string
+	input    InputType
+	want     ExpectedType
+	wantErr  error // or wantErrCount int
+}{
+	{name: "case 1", input: ..., want: ..., wantErr: nil},
+	{name: "case 2", input: ..., want: ..., wantErr: ErrSomething},
+}
+for _, tt := range tests {
+	t.Run(tt.name, func(t *testing.T) {
+		got, err := FunctionUnderTest(tt.input)
+		if tt.wantErr != nil {
+			if err == nil || !errors.Is(err, tt.wantErr) {
+				t.Errorf("expected error %v, got %v", tt.wantErr, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != tt.want {
+			t.Errorf("expected %v, got %v", tt.want, got)
+		}
+	})
+}
+```
+
+### Subtest Naming Convention
+
+- `t.Run("description", func(t *testing.T) { ... })`
+- Descriptive names: `"empty list"`, `"circular dependency"`, `"secret key denied by first rule"`
+
+### Test Helpers
+
+**Common patterns:**
+
+```go
+// Constructor helper with temp dir
+func newTestManager(t *testing.T) (*Manager, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "m31a-session-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	return NewManager(dir, dir, ManagerOpts{}), dir
+}
+
+// Setup function returning cleanup
+func setupTestEngine(t *testing.T) (*Engine, func()) {
+	t.Helper()
+	// ... setup ...
+	return engine, func() { /* cleanup */ }
+}
+
+// Reusable test data builders
+func newTask(id int, desc string, deps []int) types.Task {
+	return types.Task{
+		ID:           id,
+		Description:  desc,
+		Action:       "Create",
+		Dependencies: deps,
+	}
+}
+```
+
+### Mocking Strategies
+
+#### 1. Interface-Based Mocks (Primary)
+
+Define interface in `internal/provider/interface.go`, implement mock in test file:
+
+```go
+// internal/workflow/engine_test.go:70-110
+type mockProvider struct {
+	response       string
+	err            error
+	callCount      int
+	multiResponses []string
+}
+
+func (m *mockProvider) Name() string   { return "mock" }
+func (m *mockProvider) APIKey() string { return "test-key" }
+func (m *mockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
+	return nil, nil
+}
+func (m *mockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
+	m.callCount++
+	content := m.response
+	if len(m.multiResponses) > 0 {
+		idx := m.callCount - 1
+		if idx < len(m.multiResponses) {
+			content = m.multiResponses[idx]
+		}
+	}
+	done := false
+	next := func() (*m31types.StreamChunk, error) {
+		if done {
+			return nil, io.EOF
+		}
+		done = true
+		return &m31types.StreamChunk{Delta: content}, nil
+	}
+	close := func() error { return nil }
+	return &m31types.StreamIterator{Next: next, Close: close}, m.err
+}
+// ... other interface methods
+```
+
+#### 2. Embedded Mock Extension
+
+Extend base mock for specific behavior:
+
+```go
+// internal/workflow/engine_test.go:714-728
+type mockProviderWithModel struct {
+	mockProvider
+	model *m31types.ModelInfo
+}
+
+func (m *mockProviderWithModel) GetModel(id string) (*m31types.ModelInfo, error) {
+	return m.model, nil
+}
+func (m *mockProviderWithModel) CachedModels() []m31types.ModelInfo {
+	if m.model != nil {
+		return []m31types.ModelInfo{*m.model}
+	}
+	return nil
+}
+```
+
+#### 3. `httptest.Server` for HTTP Clients
+
+Used extensively in provider client tests (`internal/provider/zen/client_test.go`):
+
+```go
+ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/models" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"object":"list","data":[{"id":"test/model"}]}`))
+	}
+}))
+defer ts.Close()
+
+c, _ := New("test-key", Options{})
+c.BaseURLField = ts.URL // Override base URL for test
+models, err := c.FetchModels(context.Background())
+```
+
+#### 4. Permission/Callback Mocks via Channels
+
+`internal/tools/dispatcher_test.go:89-112` — Test permission flow with goroutines and channels:
+
+```go
+errCh := make(chan error, 1)
+go func() {
+	_, err := d.Execute(context.Background(), types.ToolCall{
+		ID: "call1", Name: "bash", Input: []byte(`{}`),
+	})
+	errCh <- err
+}()
+
+req := <-d.RequestCh() // Receive permission request
+d.ApprovePermission(req.ID, true, false) // Approve
+if err := <-errCh; err != nil {
+	t.Errorf("expected nil error after approval, got: %v", err)
+}
+```
+
+### Test Fixtures & Testdata
+
+- **No dedicated `testdata/` directories** — Test data created inline via `t.TempDir()` and `os.WriteFile()`
+- **Git repos for git-dependent tests**: Created on-the-fly in `pkg/bisect/bisect_test.go:14-45` and `pkg/rollback/rollback_test.go:16-40`
+- **Golden files**: Not used; expected outputs encoded in test cases
+
+**Example** — `pkg/bisect/bisect_test.go:14-45`:
+
+```go
+func setupBisectRepo(t *testing.T) (string, *Bisect) {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+
+	writeFile(t, dir, "main.go", "package main\nfunc main() {}\n")
+	runGit(t, dir, "add", "-A")
+	runGit(t, dir, "commit", "-m", "initial")
+	// ... more commits ...
+	b := New(dir, slog.Default())
+	return dir, b
+}
+```
+
+### Parallel Tests
+
+- `t.Parallel()` used by default for isolated unit tests
+- Tests that share state (e.g., modifying global config) omit `t.Parallel()`
+- E2E tests don't run in parallel (binary build + execution)
+
+## Race Detector
+
+- **Enabled by default** in `make test` via `-race` flag
+- **Required for CI** — `make check` runs full test suite with race detector
+- **Bubble Tea constraint**: TUI is single-threaded; race detector catches cross-goroutine state mutations
+- **Test patterns for race safety**: Channel-based communication, `t.Parallel()` isolation, no shared mutable state
+
+## Linting & Static Analysis
+
+### golangci-lint Config (`.golangci.yml`)
+
+```yaml
+version: "2"
+run:
+  timeout: 5m
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+settings:
+  govet:
+    enable:
+      - shadow
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+exclusions:
+  rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - unused
+```
+
+### Enabled Linters
+
+| Linter | Purpose |
+|--------|---------|
+| `govet` (+ `shadow`) | Standard Go vet checks + shadowed variable detection |
+| `staticcheck` | Static analysis for bugs, performance, style |
+| `errcheck` | Unchecked errors (disabled for test files) |
+| `ineffassign` | Ineffective assignments |
+| `unused` | Unused code (disabled for test files) |
+
+### Test File Exclusions
+
+- `_test.go` files excluded from `errcheck` and `unused`
+- Allows `t.Fatal()` without checking return, test helpers without use
+
+## Key Test Files by Category
+
+### Core Package Tests (High Coverage Targets)
+
+| File | Package | Focus |
+|------|---------|-------|
+| `pkg/taskrunner/runner_test.go` | `pkg/taskrunner` | Task scheduling, dependency resolution, execution (90% target) |
+| `pkg/bisect/bisect_test.go` | `pkg/bisect` | Git bisect logic, log parsing, diff extraction (90% target) |
+| `pkg/bisect/extra_test.go` | `pkg/bisect` | Edge cases, error paths |
+| `pkg/rollback/rollback_test.go` | `pkg/rollback` | Git rollback operations, soft/hard/safe reset (90% target) |
+| `pkg/rollback/doc_test.go` | `pkg/rollback` | Package documentation coverage |
+
+### Provider Tests
+
+| File | Focus |
+|------|-------|
+| `internal/provider/zen/client_test.go` | Zen provider HTTP client, streaming, error mapping |
+| `internal/provider/zen/integration_test.go` | Live API integration (requires `ZEN_API_KEY`) |
+| `internal/provider/openrouter/client_test.go` | OpenRouter client logic |
+| `internal/provider/openrouter/integration_test.go` | Live OpenRouter API (requires `OPENROUTER_API_KEY`) |
+| `internal/provider/nvidia/integration_test.go` | Live NVIDIA API (requires `NVIDIA_API_KEY`) |
+| `internal/provider/interface_test.go` | Interface compliance verification |
+| `internal/provider/fallback_test.go` | Fallback provider logic |
+| `internal/provider/registry_test.go` | Provider registry, model discovery |
+
+### Workflow Engine Tests
+
+| File | Focus |
+|------|-------|
+| `internal/workflow/engine_test.go` | Engine initialization, phase transitions, prompt building, tool parsing |
+| `internal/workflow/state_machine_test.go` | Phase state machine |
+| `internal/workflow/phase_coordinator_test.go` | Phase coordination |
+| `internal/workflow/intent_accuracy_test.go` | Intent classification accuracy |
+| `internal/workflow/execute_quality_test.go` | Execution quality checks |
+| `internal/workflow/verify_test.go` | Task verification |
+| `internal/workflow/integration_test.go` | End-to-end workflow tests |
+
+### Session & Persistence Tests
+
+| File | Focus |
+|------|-------|
+| `pkg/session/manager_test.go` | Session CRUD, loading, timestamps |
+| `pkg/session/checkpoint_test.go` | Checkpoint save/restore |
+| `pkg/session/planning_test.go` | Planning artifacts |
+| `pkg/session/session_resumedat_test.go` | Resume data serialization |
+
+### Tooling Tests
+
+| File | Focus |
+|------|-------|
+| `internal/tools/dispatcher_test.go` | Tool dispatch, permissions, rate limiting, agents |
+| `internal/tools/bash_test.go` | Bash tool execution |
+| `internal/tools/edit_test.go` | Edit tool |
+| `internal/tools/glob_test.go` | Glob tool |
+| `internal/tools/grep_test.go` | Grep tool |
+
+### E2E & Binary Tests
+
+| File | Focus |
+|------|-------|
+| `e2e_test.go` | Binary build, version/help, headless prompt, real API integration |
+
+### Test Utilities
+
+| File | Purpose |
+|------|---------|
+| `internal/testutil/envtest.go` | `RequireAPIKey()`, `RequireAnyAPIKey()`, `LoadTestDotEnv()` for live API tests |
+
+## Running Tests Locally
+
+### Full Suite (CI-equivalent)
+
+```bash
+make check
+# Runs: fmt → tidy → vet → lint → test (with -race)
+```
+
+### Quick Iteration
+
+```bash
+make test-fast          # No race detector, faster feedback
+make test-specific TEST=TestRunner_CircularDependency  # Single test
+make test-verbose       # Verbose output with race detector
+```
+
+### Coverage Analysis
+
+```bash
+make cover              # Generates coverage.html
+# Open coverage.html in browser
+```
+
+### Live API Integration Tests
+
+```bash
+# Set API keys in environment or .env file
+export OPENROUTER_API_KEY=sk-or-...
+export ZEN_API_KEY=sk-zen-...
+export NVIDIA_API_KEY=nvapi-...
+
+# Run integration tests (will skip if keys not set)
+go test -v -run TestIntegration ./internal/provider/...
+
+# Run E2E real API tests
+go test -v -run TestBinary_Prompt_.*RealAPI .
+```
+
+### Benchmarks
+
+```bash
+make bench              # All benchmarks
+make bench-verbose      # Verbose benchmark output
+```
+
+## Writing New Tests
+
+### Conventions
+
+1. **File location**: `*_test.go` next to source file
+2. **Package**: Same as source for white-box; `*_test` for black-box (e.g., `e2e_test.go` uses `m31a_test`)
+3. **Naming**: `Test<Function>_<Scenario>` or `Test<Feature>_<Behavior>`
+4. **Structure**: Table-driven with `t.Run()` subtests
+5. **Parallel**: Add `t.Parallel()` for isolated tests
+6. **Helpers**: Use `t.Helper()` in test helper functions
+7. **Temp dirs**: Use `t.TempDir()` for isolation
+8. **Assertions**: Standard library only — `if err != nil { t.Fatalf(...) }`, `if got != want { t.Errorf(...) }`
+9. **Error wrapping**: Use `errors.Is(err, ExpectedErr)` for sentinel errors
+10. **Mocking**: Define interface in source, implement mock in test file
+
+### Adding Coverage-Critical Tests
+
+For `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback` (90% target):
+
+1. Run `make cover` and open `coverage.html`
+2. Identify uncovered branches/functions
+3. Add table-driven test cases covering those paths
+4. Focus on error paths, edge cases, boundary conditions
+
+### Integration Test Template
+
+```go
+func TestIntegration_Feature(t *testing.T) {
+	testutil.LoadTestDotEnv(t) // Loads .env if present
+	apiKey := testutil.RequireAnyAPIKey(t, "M31A_XXX_API_KEY", "XXX_API_KEY")
+	
+	// Test with real API
+	// Use t.Skip() for permission errors, t.Fatal() for unexpected failures
+}
+```
+
+## CI Integration
+
+### GitHub Actions (Inferred from Makefile)
+
+```yaml
+# Equivalent to make check
+- name: Run checks
+  run: make check
+
+# Coverage upload (if configured)
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+  with:
+    files: ./coverage.out
+```
+
+### Release Validation
+
+```bash
+make validate-release     # Runs scripts/validate-release.sh
+# Produces VALIDATION_REPORT.md
+```
+
+## Common Patterns Reference
+
+### Error Assertion
+
+```go
+// Sentinel error
+if !errors.Is(err, m31errors.ErrCircularDependency) {
+    t.Errorf("expected ErrCircularDependency, got %v", err)
+}
+
+// Error contains string
+if !strings.Contains(err.Error(), "circular") {
+    t.Errorf("expected error to mention 'circular', got %v", err)
+}
+
+// No error expected
+if err != nil {
+    t.Fatalf("unexpected error: %v", err)
+}
+```
+
+### Stream Iterator Testing
+
+```go
+iterator := &m31types.StreamIterator{
+    Next: func() (*m31types.StreamChunk, error) {
+        // Return chunks, then io.EOF
+    },
+    Close: func() error { return nil },
+}
+
+chunk, err := iterator.Next()
+if err != nil && err != io.EOF {
+    t.Fatalf("unexpected error: %v", err)
+}
+```
+
+### Goroutine Coordination in Tests
+
+```go
+errCh := make(chan error, 1)
+go func() {
+    _, err := functionUnderTest()
+    errCh <- err
+}()
+
+// Wait for event or timeout
+select {
+case req := <-requestCh:
+    // Handle request
+case <-time.After(2 * time.Second):
+    t.Fatal("timeout waiting for request")
+}
+```
 
 ---
 

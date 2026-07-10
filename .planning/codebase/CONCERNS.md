@@ -1,188 +1,241 @@
-# Codebase Concerns
+# CONCERNS.md — Technical Debt & Risks
 
-**Analysis Date:** 2026-07-10
+> Last mapped: 2026-07-10
 
-## Tech Debt
+---
 
-**Oversized Source Files (>1000 lines):**
-- Issue: Multiple source files exceed 1000 lines, indicating accumulated complexity that increases cognitive load and makes modifications riskier
-- Files:
-  - `internal/tui/sidebar_model.go` (1621 lines)
-  - `internal/workflow/engine.go` (1494 lines)
-  - `internal/tui/app_view.go` (1213 lines)
-  - `internal/config/loader.go` (1154 lines)
-  - `internal/tools/webfetch.go` (1147 lines)
-  - `internal/tui/firstrun_view.go` (1144 lines)
-  - `internal/workflow/execute.go` (1121 lines)
-- Impact: Harder to navigate, review, and test individual concerns; increased merge conflict risk
-- Fix approach: Extract focused sub-components; for example, split `engine.go` (1494 lines) into separate files for streaming, tool dispatch, and phase orchestration
+## Critical Concerns
 
-**Hardcoded Model Capabilities Table:**
-- Issue: `internal/provider/capabilities.go` contains a hardcoded fallback table of model capabilities (context windows, output tokens, tool support). New models from providers require code changes and a new release to work correctly.
-- Files: `internal/provider/capabilities.go` (lines 117-170)
-- Impact: New or updated models won't be recognized until the code is updated; the table will drift from reality over time
-- Fix approach: The runtime detection path (API query + cache) is already implemented and should be the primary mechanism. The hardcoded table should be reduced to a minimal fallback and documented as "best-effort only." Consider auto-populating from provider API metadata when available.
+### CGO_ENABLED=0 Hard Constraint
+- **Location**: `Makefile:13`, `.goreleaser.yaml:7`
+- **Risk**: Any transitive dependency requiring CGO breaks the build (static binary requirement). The `github.com/godbus/dbus/v5` dependency (used for Linux keychain D-Bus Secret Service) is pure Go but could introduce CGO transitively if dependencies change.
+- **Impact**: Blocks cross-compilation and releases if a dependency adds CGO.
+- **Monitoring**: `make check` and CI build matrix (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64) catch this. Windows ARM64 explicitly excluded (`.goreleaser.yaml:26`).
+- **Mitigation**: Audit new dependencies for CGO requirements before adding. Use `go mod graph` to check transitive deps.
 
-**BUG-annotated Regression Tests:**
-- Issue: Tests reference specific bug numbers (BUG-04, BUG-05, BUG-06, BUG-10, BUG-12, BUG-15) without linking to tracking issues or documenting the root cause. This makes it harder to understand if the underlying bugs were fully resolved.
-- Files:
-  - `internal/workflow/classify_test.go` (BUG-04, BUG-05, BUG-06)
-  - `internal/workflow/ship.go` (BUG-10, BUG-15)
-  - `internal/workflow/engine.go` (BUG-12)
-- Impact: Future developers cannot determine if these are resolved fixes or active workarounds
-- Fix approach: Add a comment block at the top of each test or referenced site summarizing the original bug and its resolution status, or link to the tracking issue.
+### Provider Model Discovery is Dynamic — No Fallback Catalog
+- **Location**: `internal/provider/openrouter/client.go:86-133`, `internal/provider/nvidia/client.go`, `internal/provider/zen/client.go:165`
+- **Risk**: Provider APIs can change model lists, remove models, or return errors at runtime. No embedded fallback model list exists.
+- **Impact**: If all providers fail to fetch models, the TUI model picker shows empty list; workflows cannot start without a model.
+- **Current mitigation**: `ModelCache.StaleFallback()` (`internal/provider/cache.go:130`) returns stale cached models on fetch failure. Cache TTL: 5 min (`config/loader.go:85`), stale TTL: 24 hours.
+- **Gap**: First run with no cache and no network = unusable. No hardcoded fallback models.
 
-**md5.Sum Used for Cache Keys:**
-- Issue: `internal/workflow/execute.go:732` uses `md5.Sum([]byte(planMarkdown))` to create cache keys for parsed plans. While this is not a security concern (it's only used for in-memory caching, not cryptographic purposes), md5 is cryptographically broken and using it for any purpose sends the wrong signal.
-- Files: `internal/workflow/execute.go` (line 732)
-- Impact: Minor — no security risk, but could confuse security audits or code reviews
-- Fix approach: Replace with `sha256.Sum256` or a faster non-cryptographic hash like `fnv` for cache keys, which is more idiomatic in Go.
+### API Keys Fall Back to Environment Variables in CI
+- **Location**: `internal/config/loader.go:960-976`, `e2e_test.go:60, 84, 113`
+- **Risk**: CI/CD uses plain env vars (`NVIDIA_API_KEY`, `ZEN_API_KEY`, `OPENROUTER_API_KEY`). Keychain (OS secure storage) is bypassed when unavailable.
+- **Status**: Keychain used locally (`pkg/keychain/`); env vars used in CI and when keychain fails. Documented in `docs/CONFIG.md` and `docs/PROVIDERS.md`.
+- **Impact**: Secrets in CI logs if not masked; no audit trail for CI key usage.
+- **Mitigation**: GitHub Actions masks secrets; ensure `actions/upload-artifact` doesn't leak them.
 
-## Known Bugs
+---
 
-**os.Setenv Race Condition in Config Loader:**
-- Issue: `internal/config/loader.go:1150` calls `os.Setenv(key, value)` to load .env variables. The comment at line 1104 acknowledges this is "not goroutine-safe." The code attempts to mitigate this by calling early (before logger initialization), but the comment at `cmd/m31a/main.go:154` says "Load .env before logger to avoid goroutine race on os.Setenv." If any goroutine reads env vars after this point, there is a race.
-- Files: `internal/config/loader.go` (line 1150), `cmd/m31a/main.go` (line 154)
-- Trigger: Concurrent env var reads during or after .env loading
-- Workaround: The current mitigation (loading early) works in practice, but this is fragile. A robust fix would pass env vars through a config struct rather than polluting the global process environment.
+## High Concerns
 
-**Single TODO Marker in Production Code:**
-- Issue: `internal/workflow/ship_preflight_test.go:20` contains `// TODO: fix this later` — the only genuine TODO comment found in the codebase. While this is in a test file, it indicates an unfinished item.
-- Files: `internal/workflow/ship_preflight_test.go` (line 20)
-- Impact: Low — test-only, but represents known incomplete work
+### Bubble Tea Single-Threaded Model — Goroutine Mutation Risk
+- **Location**: `internal/tui/app.go`, `internal/workflow/engine.go`
+- **Risk**: Bubble Tea (Elm architecture) requires all state mutations through `Update(msg tea.Msg)`. Goroutines **must** send messages via channels (`tea.Cmd`), never mutate `AppState` directly.
+- **Violations to audit**:
+  - `internal/tui/app.go:143-150` — `startFileWatcher()` spawns goroutine reading from channel, returns `tea.Cmd` ✅ correct
+  - `internal/tui/app.go:640-660` — `startConfigWatcher()` spawns goroutine, forwards via channel ✅ correct
+  - `internal/workflow/engine.go:341-372` — `RunPhaseCmd` runs engine in goroutine, returns result via `tea.Cmd` ✅ correct
+  - `internal/tui/app.go:522-537` — `wireTodoWriteCallback` uses bounded retry on channel send, drops on full channel ⚠️ data loss possible under load
+- **Pattern**: All goroutines use `must use `chan tea.Msg` or `tea.Cmd`. `sync.Mutex` on `AppState` fields is a red flag.
 
-## Security Considerations
+### BUG-17: Provider Model Cache Race Condition (Documented)
+- **Location**: `internal/provider/cache.go:47-51`
+- **Issue**: `singleflight.Group` deduplicates refresh calls. The `refreshing` atomic flag is set/cleared **only by the goroutine that executes `fetchFn`**. Waiters never touch it — correct by design but fragile if `singleflight` behavior changes.
+- **Impact**: If `refreshing` flag logic diverges, cache could report stale data as fresh.
+- **Status**: Documented as BUG-17; current implementation is sound but requires careful review on any `singleflight` changes.
 
-**Config .env File Parsing — Variable Overwrite Guard:**
-- Issue: `internal/config/loader.go:1149` checks `os.LookupEnv(key)` before setting environment variables from .env files, but if an env var is set with an empty value, the check passes and the .env value overwrites it. This is intentional per the design but could be surprising.
-- Files: `internal/config/loader.go` (lines 1140-1152)
-- Current mitigation: Only sets env vars that are not already present in the process environment
-- Recommendations: Document this behavior explicitly in the .env.example file. Consider adding a `M31A_DOTENV_NO_OVERRIDE=true` option for strict no-overwrite mode.
+### BUG-29: Token Estimation Underestimates Tool-Heavy Conversations
+- **Location**: `internal/tokens/estimator.go:319-334`
+- **Issue**: `EstimateMessages` now accounts for per-message overhead (4 tokens) and tool call input JSON, but tool call **output** tokens and system prompt tokens are not included.
+- **Impact**: Preflight context checks (`internal/workflow/execute_preflight.go`) may allow requests that exceed model context window.
+- **Mitigation**: EMA calibration factor (`emaFactor`) adapts over time, but cold-start estimates can be low.
 
-**SSRF Protection in WebFetch:**
-- Status: Well-implemented. The `internal/tools/webfetch.go` file implements DNS pinning, private/reserved IP blocking, redirect SSRF protection, and a post-connect paranoid re-check. This is a strong defense-in-depth pattern.
-- Files: `internal/tools/webfetch.go` (lines 76-151)
+### Test Coverage Gaps — Multiple Packages Below 90% Target
+- **Target**: 90% for `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback` (per AGENTS.md)
+- **Current coverage** (`go test -cover ./...`):
 
-**Keychain Integration for API Keys:**
-- Status: Properly implemented. API keys are stored in OS keychain (`pkg/keychain/`) and never written to disk in plaintext. Platform-specific implementations exist for Linux (pass), macOS (security command), and Windows.
-- Files: `pkg/keychain/keychain_linux.go`, `pkg/keychain/keychain_darwin.go`, `pkg/keychain/keychain_windows.go`
+| Package | Coverage | Status |
+|---------|----------|--------|
+| `pkg/rollback` | 72.5% | 🔴 **Below 90% target** |
+| `pkg/taskrunner` | 89.0% | 🟡 Near target |
+| `pkg/bisect` | 89.0% | 🟡 Near target |
+| `pkg/keychain` | 17.9% | 🔴 Very low (OS-specific, hard to test) |
+| `pkg/ledger` | 88.9% | 🟡 Near target |
+| `pkg/narrative` | 82.5% | 🟡 Below target |
+| `pkg/retry` | 85.3% | 🟡 Below target |
+| `pkg/session` | 75.3% | 🟡 Below target |
+| `internal/workflow` | 74.8% | 🔴 **Core engine, below target** |
+| `internal/tools` | 75.4% | 🔴 **18 tools, below target** |
+| `internal/tui` | 27.7% | 🔴 Very low (TUI hard to test) |
+| `internal/tui/commands` | 44.8% | 🔴 |
+| `internal/tui/components` | 56.9% | 🔴 |
+| `internal/tui/streaming` | 33.2% | 🔴 |
+| `internal/codeintel` | 58.1% | 🔴 |
+| `internal/provider` | 85.0% | 🟡 |
+| `internal/provider/nvidia` | 0.0% | 🔴 No tests |
+| `internal/provider/openrouter` | 84.1% | 🟡 |
+| `internal/config` | 87.7% | 🟡 |
+| `internal/git` | 73.8% | 🔴 |
 
-**Ship Preflight Secret Detection:**
-- Status: Implemented with heuristic patterns. `internal/workflow/ship_preflight.go` detects hardcoded secrets (sk-, ghp_, glpat-, xoxb-, AKIA prefixes) and blocks the ship phase.
-- Files: `internal/workflow/ship_preflight.go` (lines 66-83)
-- Recommendations: The heuristic is prefix-based only. Consider adding regex patterns for base64-encoded secrets, JWT tokens, and hex-encoded keys for broader coverage.
+- **E2E tests**: Require real API keys (`NVIDIA_API_KEY`, `ZEN_API_KEY`, `OPENROUTER_API_KEY`) — skipped in CI (`e2e_test.go:54, 78, 107`).
 
-## Performance Bottlenecks
+### Known Bugs (Documented as BUG-XX)
+| ID | Location | Description |
+|----|----------|-------------|
+| BUG-01 | `internal/git/git.go:451` | Channel ordering in concurrent `git status` + `git diff --numstat` — fixed by separate result vars |
+| BUG-04 | `internal/workflow/classify_test.go:12` | Multiple framework indicators (e.g., Go + Node) — classifier test exists |
+| BUG-05 | `internal/workflow/classify_test.go:42` | Multiple lock files (go.mod + package.json) — package manager detection |
+| BUG-06 | `internal/tools/concurrency.go:48` | `sync.Map` comma-ok assertions (fixed, documented) |
+| BUG-07 | `internal/tools/concurrency.go:48` | `sync.Map` comma-ok assertions (fixed, documented) |
+| BUG-10 | `internal/workflow/ship.go:118` | Commit skipped when working tree clean after `AddAll` — fixed by `DiffStaged()` check |
+| BUG-12 | `internal/workflow/engine.go:725` | Infinite Plan↔Discuss oscillation — capped at 3 cycles (`maxDiscussPlanCycles`) |
+| BUG-15 | `internal/workflow/ship.go:347` | Diff stats heuristic — fixed by `git status --porcelain` on range |
+| BUG-17 | `internal/provider/cache.go:47` | `refreshing` flag only set by fetch executor (see High concern above) |
+| BUG-18 | `internal/config/loader.go:989` | Config reload message drop — fixed by blocking send with retry |
+| BUG-19 | `internal/tools/concurrency.go:48` | `sync.Map` comma-ok assertions (fixed, documented) |
+| BUG-29 | `internal/tokens/estimator.go:320` | Token underestimation for tool-heavy conversations |
 
-**Polling-Based Server Readiness Checks:**
-- Problem: Both `internal/workflow/runtime.go:303-326` and `internal/tools/devserver.go:576-584` use fixed 500ms sleep polling loops to check server readiness. For fast-starting servers, this adds unnecessary latency; for slow servers, the interval may be too aggressive.
-- Files: `internal/workflow/runtime.go` (lines 303-326), `internal/tools/devserver.go` (lines 576-584)
-- Cause: Simple polling with fixed interval; no exponential backoff or event-driven notification
-- Improvement path: Implement exponential backoff starting at 100ms, or use filesystem watching for server output signals
+---
 
-**Gitignore Cache LRU Eviction:**
-- Problem: `internal/tools/grep.go:480-533` implements a custom LRU cache with O(n) eviction due to slice-based ordering. For workspaces with many directories, the `getOrCreate` method performs a linear scan of the order slice on every cache hit.
-- Files: `internal/tools/grep.go` (lines 480-533)
-- Cause: The LRU order is maintained as a `[]string` with linear search for element removal
-- Improvement path: Replace with a doubly-linked list + map pattern (like `container/list`) for O(1) LRU operations, or accept the current cost since 1024 max entries makes the linear scan bounded
+## Medium Concerns
 
-**Codeintel Index Full Rebuild:**
-- Problem: `internal/codeintel/codeintel.go:60-84` performs a full re-parse of all project files when the cache is invalidated. For large projects, this could introduce noticeable latency on first tool invocation.
-- Files: `internal/codeintel/codeintel.go` (lines 60-84), `internal/codeintel/parser.go` (861 lines)
-- Cause: The indexer falls back to full build when cache is missing or corrupted
-- Improvement path: The incremental path (`buildIncremental`) is already implemented and used when cache exists. Consider persisting the cache across sessions (it appears to be session-scoped currently based on `workDir`)
+### Secret Handling — Keychain Unavailable on Headless Linux
+- **Location**: `pkg/keychain/keychain_linux.go:41-56`, `pkg/keychain/keychain.go:56-65`
+- **Issue**: D-Bus Secret Service requires running `dbus-daemon` and a Secret Service provider (gnome-keyring, kwallet). On headless servers/CI, `NewCached()` wraps keychain and marks unavailable after first failure (`cachedKeychain.unavailable.Store(true)`).
+- **Fallback**: `pass` CLI (GPG-based) if installed and initialized.
+- **Gap**: No fallback if both D-Bus and `pass` unavailable — keychain returns `ErrKeychainUnavailable`, config loader falls back to env vars silently (`internal/config/loader.go:960-976`).
+- **Impact**: API keys stored in plaintext env vars on headless systems.
 
-## Fragile Areas
+### Windows Keychain Uses Unsafe Pointer Arithmetic
+- **Location**: `pkg/keychain/keychain_windows.go:55-71`, `pkg/keychain/keychain_windows.go:101-107`
+- **Risk**: `unsafe.Pointer` conversions for Win32 `CredReadW`/`CredWriteW`. Memory layout must exactly match Win32 `CREDENTIAL` struct. Any Go version change affecting struct layout could corrupt memory.
+- **Mitigation**: Compile-time checks limited; runtime testing on Windows required.
 
-**TUI Emitter Channel Backpressure:**
-- Files: `internal/tui/app_channel.go` (lines 62-82), `internal/tui/app.go` (lines 520-536)
-- Why fragile: The `channelEmitter` drops messages after `maxRetries` attempts when the Bubble Tea channel is full. During high-load tool execution, the emitter can be saturated, causing dropped workflow messages. The `globalDropCounter` tracks this but does not trigger any recovery.
-- Safe modification: Always check `DroppedMessages()` after a workflow phase completes. Consider adding a warning toast when drops exceed a threshold.
-- Test coverage: `internal/tui/app_channel_test.go` covers basic send/receive patterns
+### Error Handling — Sentinel Errors vs Wrapped Errors
+- **Location**: `internal/errors/errors.go`, throughout codebase
+- **Pattern**: Sentinel errors (`ErrProviderUnreachable`, `ErrInvalidKey`, etc.) wrapped with `fmt.Errorf("%w", err)`. `UserMessage()` uses `errors.Is`/`errors.As` for user-friendly messages.
+- **Gap**: Not all call sites use `errors.Is`/`As` — some compare error strings (brittle). Example: `internal/tools/webfetch.go` checks `strings.Contains(err.Error(), "404")`.
+- **Recommendation**: Enforce `errors.Is`/`As` via linter (`errorlint` not in golangci-lint config).
 
-**Parallel Tool Execution in Execute Phase:**
-- Files: `internal/workflow/execute.go` (lines 400-510)
-- Why fragile: Tools are dispatched in parallel goroutines with a semaphore, but each goroutine's panic recovery writes to `toolExecResults[idx]` without synchronization (relying on index-based access). The `recover()` handlers emit error messages to the channel, which could interleave with normal tool completion messages.
-- Safe modification: Never modify the concurrency model without running `make test` (race detector enabled)
-- Test coverage: `internal/tools/concurrency_test.go`, `internal/tools/dispatcher_test.go`
+### Provider Fallback Chain — No Health-Based Reordering
+- **Location**: `internal/provider/registry.go`, `internal/config/loader.go:29-32`
+- **Config**: `ProviderConfig.FallbackPriority: ["nvidia", "zen", "openrouter"]`
+- **Issue**: Fallback order is static. If primary provider is unhealthy (rate limited, no credits), the app tries next in list but doesn't reorder based on health.
+- **Impact**: Repeated failures on unhealthy primary before falling back.
+- **Mitigation**: Health check runs on startup (`internal/tui/app.go:86`), but not continuously during workflow.
 
-**Self-Heal Loop Interaction:**
-- Files: `internal/workflow/execute.go` (lines 193-400)
-- Why fragile: The heal loop can re-enter the LLM stream, generate new tool calls, and loop back through quality gates. The interaction between `qualityGatePending`, `healTask`, and `streamLLMWithTools` creates a complex state machine with multiple exit conditions.
-- Safe modification: Never increase `MaxHealAttempts` beyond 3 without comprehensive integration testing
-- Test coverage: `internal/workflow/engine_test.go`, `internal/workflow/coverage_boost_test.go`
+### Workflow Engine — Phase Transition Mutex Contention
+- **Location**: `internal/workflow/engine.go:44-45`, `internal/workflow/engine.go:733`
+- **Issue**: `WorkflowState.transitionMu` serializes all phase transitions. Long-running phases (Execute) block other transitions.
+- **Impact**: If `Execute` phase takes 10 minutes, `Ship` cannot start even if ready. No timeout on transition lock.
 
-**Runtime Server Lifecycle:**
-- Files: `internal/workflow/runtime.go` (lines 180-300)
-- Why fragile: Go/Rust/Python/Node server processes are started via `exec.CommandContext` with port discovery via TOCTOU-vulnerable `findFreePort`. Process cleanup relies on `killProcessGroup` with graceful/force kill escalation, but orphan processes can remain if the cleanup path is not reached (e.g., panic in the calling goroutine).
-- Safe modification: Always test server start/stop cycles manually after changes; check for orphaned processes with `lsof -i :PORT`
-- Test coverage: `internal/workflow/runtime.go` (integration tests), `internal/workflow/engine_test.go`
+### Subagent Manager — Spawn Rate Limiting but No Global Cap
+- **Location**: `internal/tools/subagent/manager.go`, `internal/tools/subagent/loop.go`
+- **Config**: `Features.MaxParallelTasks` (default 8, `config/loader.go:128`)
+- **Gap**: Subagent spawn rate limited (`spawnMu` + token bucket), but no hard cap on total concurrent subagents across session. Could exhaust file descriptors or memory on large tasks.
 
-## Scaling Limits
+---
 
-**REPL Message History:**
-- Current capacity: 500 messages (`internal/tui/constants.go:27`)
-- Limit: Beyond 500 messages, older messages are pruned. This is bounded but may be insufficient for long-running sessions.
-- Scaling path: The `MaxMessages` constant can be increased, but each message carries token estimates and tool call caches that consume memory. The compaction system (`pkg/compaction/`) handles proactive compression.
+## Low Concerns
 
-**Subagent Concurrency:**
-- Current capacity: 3 concurrent subagents (`internal/tools/subagent/manager.go`), 50 total per session
-- Limit: Hard caps prevent resource exhaustion but may be restrictive for complex multi-agent workflows
-- Scaling path: Increase `MaxConcurrent` and `MaxTotalSubagents` constants if needed, but verify memory impact
+### Go Version Pinning — 1.25.0 Required
+- **Location**: `go.mod:3`, `.github/workflows/ci.yml:22, 50, 87`, `Makefile` (implied)
+- **Risk**: Go 1.25.0 is very new (released ~Aug 2025). If CI runner lacks it, builds fail. `go.mod` enforces minimum but not maximum.
+- **Mitigation**: CI uses `actions/setup-go@v5` with `go-version: "1.25"`.
 
-**Tool Output Store:**
-- Current capacity: Bounded by `internal/tools/output_store.go` with mutex-protected writes
-- Limit: Tool outputs are stored in memory per session; large grep or file read outputs could consume significant memory
-- Scaling path: Implement output truncation at the store level (currently done at the display layer)
+### Dependency Freshness — Some Indirect Deps Old
+- **Location**: `go.mod:28-56`
+- **Examples**: `github.com/erikgeiser/coninput v0.0.0-20211004...` (4+ years), `github.com/muesli/termenv v0.16.0` (2023).
+- **Risk**: Unmaintained transitive deps may have vulnerabilities or incompatibilities.
+- **Mitigation**: `govulncheck` runs in CI (`.github/workflows/ci.yml:68-70`).
 
-## Dependencies at Risk
+### Bubble Tea v1 — Breaking Changes from v0
+- **Location**: `go.mod:9` (`github.com/charmbracelet/bubbletea v1.3.0`)
+- **Risk**: Major version upgrade; TUI code may use deprecated APIs. Codebase appears updated but full audit needed.
 
-**go 1.25.0 in go.mod:**
-- Risk: The `go.mod` specifies `go 1.25.0` which is a future Go version. This could cause issues with standard Go tooling if the actual Go version installed differs.
-- Impact: Build failures or unexpected behavior with different Go versions
-- Migration plan: Ensure all developers use the exact Go version specified. The Makefile should validate the Go version.
+### TUI Layout Package — Complex, Low Coverage
+- **Location**: `internal/tui/layout/` (coverage 91.3% but `layout_test.go` only)
+- **Risk**: Custom constraint solver (`solver.go`) with responsive breakpoints. Edge cases on terminal resize not fully tested.
 
-**tree-sitter Dependency:**
-- Risk: `github.com/odvcencio/gotreesitter v0.20.5` is used for code intelligence parsing. Tree-sitter bindings require CGO for the underlying C library, which conflicts with the `CGO_ENABLED=0` build constraint specified in AGENTS.md.
-- Files: `internal/codeintel/parser.go` (uses tree-sitter for parsing), `go.mod` (line 24)
-- Impact: If tree-sitter requires CGO, the static binary build would break. This needs verification — the codebase may have a fallback path or build tag that excludes tree-sitter when CGO is disabled.
-- Migration plan: Verify that the codeintel parser works without CGO. If tree-sitter requires CGO, implement a build tag to use a pure-Go fallback parser.
+### Configuration Watcher — fsnotify Fallback to Polling
+- **Location**: `internal/config/loader.go:1013-1061`
+- **Issue**: If `fsnotify` fails (e.g., no inotify on container), falls back to 500ms polling (`ConfigWatchInterval`). Polling wakes CPU unnecessarily.
+- **Impact**: Minor battery drain on laptops; negligible on servers.
 
-**tiktoken-go Dependency:**
-- Risk: `github.com/pkoukk/tiktoken-go v0.1.8` is used for token estimation. This library may have its own dependency tree that could introduce CGO requirements or compatibility issues.
-- Files: `internal/tokens/` (token estimation), `go.mod` (line 14)
-- Impact: Token estimation is critical for context window management; if this dependency fails, the system cannot correctly estimate context usage
-- Migration plan: Monitor for updates; consider maintaining a fallback token estimator based on character count heuristics
+### Magic Numbers / Hardcoded Timeouts
+- **Location**: Scattered
+- **Examples**:
+  - `internal/tui/app.go:65` — `HealthCheckInterval = 30 * time.Second`
+  - `internal/tui/app.go:66` — `SidebarRefreshInterval = 5 * time.Second`
+  - `internal/workflow/engine.go:108` — `startTime` for cost tracking
+  - `internal/provider/cache.go:15` — `DefaultCacheRefreshInterval = 5 * time.Minute`
+- **Risk**: Tuning requires code change; not configurable via `config.toml`.
 
-## Test Coverage Gaps
+### Internal/Pkg Boundary — Enforced by Module System
+- **Location**: `go.mod`, directory structure
+- **Rule**: `internal/` packages cannot be imported outside module. `pkg/` packages are public API.
+- **Current**: `pkg/keychain`, `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback` are public but have low test coverage.
+- **Risk**: External consumers (if any) depend on unstable internals.
 
-**Ship Preflight Test Coverage:**
-- What's not tested: The ship preflight checks for TODO markers, debug statements, and hardcoded secrets, but only tests the Go language patterns. JavaScript/TypeScript debug patterns (console.log) are checked but the test coverage for the secret detection patterns is minimal.
-- Files: `internal/workflow/ship_preflight_test.go` (117 lines)
-- Risk: Secret detection heuristics could miss new secret formats or produce false positives
-- Priority: Medium — the current patterns cover the most common cases
+---
 
-**Codeintel Parser Coverage:**
-- What's not tested: The `internal/codeintel/parser.go` (861 lines) implements parsers for Go, JavaScript, TypeScript, Python, Rust, and other languages, but the test file `internal/codeintel/parser_test.go` has limited coverage of edge cases for each language.
-- Files: `internal/codeintel/parser.go`, `internal/codeintel/parser_test.go`
-- Risk: Parser bugs could cause incorrect import resolution or symbol indexing, affecting code intelligence quality
-- Priority: Medium — parsers are used for code context, not correctness-critical operations
+## Informational
 
-**TUI View Rendering:**
-- What's not tested: Several TUI view files (`app_view.go`, `firstrun_view.go`, `sidebar_model.go`) contain complex rendering logic but have limited test coverage. The `coverage_boost_test.go` files suggest an effort to improve coverage.
-- Files: `internal/tui/app_view.go` (1213 lines), `internal/tui/firstrun_view.go` (1144 lines)
-- Risk: Visual regressions could be introduced without detection; responsive layout edge cases may not be covered
-- Priority: Low — TUI rendering is primarily cosmetic, though layout bugs can affect usability
+### Architectural Debt
+| Area | Concern | Location |
+|------|---------|----------|
+| Provider Interface | `LLMProvider` interface in `internal/provider/interface.go` is large (10+ methods). Could split into `ModelFetcher`, `ChatCompleter`, `HealthChecker`. | `internal/provider/interface.go` |
+| Tool Permissions | Permission rules in `internal/tools/permissions.go` are string-based (glob patterns). No structured policy engine. | `internal/tools/permissions.go` |
+| Workflow State | `WorkflowState` struct (`internal/workflow/engine.go:43-79`) has 30+ fields — consider splitting into phase-specific state objects. | `internal/workflow/engine.go` |
+| Cost Tracking | `CostTracker` (`internal/workflow/cost_tracker.go`) uses `float64` for USD — floating point precision issues over long sessions. | `internal/workflow/cost_tracker.go` |
 
-## Missing Critical Features
+### Cross-Cutting Concerns Not Fully Addressed
+- **Structured logging**: Uses `slog` with `slog.Attr` but no correlation IDs across workflow phases.
+- **Metrics**: `pkg/metrics/collector.go` collects but no Prometheus/OpenTelemetry exporter.
+- **Distributed tracing**: None — workflow phases, tool calls, LLM requests not traced.
 
-**Structured Error Recovery for Provider Failures:**
-- Problem: When an LLM provider fails mid-stream (network error, rate limit), the system falls back to another provider, but there is no mechanism to resume the partially-completed stream from the new provider. This means the full conversation context must be re-sent.
-- Blocks: Optimal cost and latency during provider failover; users may experience duplicate token charges.
+### File References
+- `Makefile` (lines 13, 48, 162-182, 239)
+- `.goreleaser.yaml` (lines 7, 26)
+- `go.mod` (lines 3, 9, 12, 15-16, 28-56)
+- `internal/config/loader.go` (lines 29-32, 85, 960-976, 989-1007)
+- `internal/provider/registry.go` (lines 11-116)
+- `internal/provider/cache.go` (lines 13-139)
+- `internal/provider/openrouter/client.go` (lines 86-133)
+- `internal/provider/nvidia/client.go`
+- `internal/provider/zen/client.go` (line 165)
+- `internal/tokens/estimator.go` (lines 319-334)
+- `internal/errors/errors.go` (lines 9-274)
+- `internal/workflow/engine.go` (lines 44-45, 341-372, 725-728)
+- `internal/workflow/ship.go` (lines 118, 347)
+- `internal/git/git.go` (line 451)
+- `internal/tui/app.go` (lines 65-66, 143-150, 522-537, 640-660)
+- `internal/tools/subagent/manager.go`
+- `internal/tools/subagent/loop.go`
+- `internal/tools/concurrency.go` (lines 28-81)
+- `internal/tools/permissions.go`
+- `internal/tools/dispatcher.go` (lines 522-537)
+- `pkg/keychain/keychain.go` (lines 38-87)
+- `pkg/keychain/keychain_linux.go` (lines 41-56, 120-136)
+- `pkg/keychain/keychain_windows.go` (lines 55-71, 101-107)
+- `pkg/keychain/keychain_darwin.go` (lines 36-55)
+- `e2e_test.go` (lines 53-126)
+- `.github/workflows/ci.yml` (lines 22, 50, 68-70, 87)
 
-**Test Coverage Reporting in CI:**
-- Problem: The `Makefile` has `cover` target for local coverage reports, but there is no CI integration for tracking coverage trends over time. The 75% target (90% for critical packages) is specified in AGENTS.md but not enforced automatically.
-- Blocks: Regression detection when coverage drops; no historical trend data for coverage quality.
+---
+
+## Severity Summary
+
+| Severity | Count | Items |
+|----------|-------|-------|
+| CRITICAL | 3 | CGO constraint, dynamic provider models, CI secret fallback |
+| HIGH | 4 | Bubble Tea threading, BUG-17 cache race, BUG-29 token estimation, test coverage gaps |
+| MEDIUM | 7 | Keychain headless Linux, Windows unsafe pointers, error handling patterns, static fallback chain, phase transition mutex, subagent cap, config watcher polling |
+| LOW | 6 | Go version pin, old transitive deps, Bubble Tea v1, TUI layout complexity, magic numbers, internal/pkg boundary |
+| INFO | 5 | Architectural debt (provider interface, tool permissions, workflow state, cost tracking, observability) |
 
 ---
 

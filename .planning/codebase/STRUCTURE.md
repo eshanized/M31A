@@ -1,320 +1,251 @@
-# Codebase Structure
+# STRUCTURE.md — Directory Layout & Key Locations
 
 **Analysis Date:** 2026-07-10
 
-## Directory Layout
+## Root Layout
 
 ```
 M31A/
-├── cmd/
-│   └── m31a/                  # CLI entry point
-│       ├── main.go            # Flag parsing, config, provider registration, TUI launch
-│       └── usage.go           # Help/usage text
-├── internal/                  # Private application code
-│   ├── codeintel/             # Codebase intelligence (import graph, symbols, relevance)
-│   ├── config/                # TOML config loading, merging, types
-│   ├── context/               # Dynamic system context sources (date, env, git)
-│   ├── decision/              # Decision logging for audit trail
-│   ├── errors/                # Sentinel errors (ErrPhaseTransition, ErrContextExceeded, etc.)
-│   ├── fileutil/              # Atomic writes, file locking (platform-specific)
-│   ├── git/                   # Git operations (commit, branch, diff, worktree)
-│   ├── log/                   # Logger initialization (slog)
-│   ├── logging/               # Audit logging
-│   ├── provider/              # LLM provider abstraction + registry
-│   │   ├── interface.go       # LLMProvider interface
-│   │   ├── registry.go        # Thread-safe provider registry
-│   │   ├── base_client.go     # Shared HTTP client logic
-│   │   ├── cache.go           # Model list caching
-│   │   ├── capabilities.go    # Model capability detection
-│   │   ├── fallback.go        # Provider fallback logic
-│   │   ├── reasoning.go       # Reasoning model detection
-│   │   ├── sse.go             # Server-sent events parsing
-│   │   ├── openrouter/        # OpenRouter provider implementation
-│   │   ├── zen/               # Zen provider implementation
-│   │   └── nvidia/            # NVIDIA NIM provider implementation
-│   ├── shell/                 # Shell command execution (platform-specific)
-│   ├── testutil/              # Test helpers
-│   ├── tokens/                # Token estimation with EMA calibration
-│   ├── tools/                 # 18 built-in tools + dispatcher
-│   │   ├── interface.go       # Tool interface definition
-│   │   ├── dispatcher.go      # Permission gating, rate limiting, concurrency
-│   │   ├── defaults.go        # Default tool registration
-│   │   ├── agent.go           # Agent tool (spawns subagents)
-│   │   ├── bash.go            # Bash/shell execution tool
-│   │   ├── edit.go            # File editing tool
-│   │   ├── fileread.go        # File reading tool
-│   │   ├── filewrite.go       # File writing tool
-│   │   ├── grep.go            # Content search tool
-│   │   ├── glob.go            # File pattern matching tool
-│   │   ├── webfetch.go        # URL fetching tool
-│   │   ├── websearch.go       # Web search tool
-│   │   ├── permissions.go     # Permission request/response types
-│   │   ├── output_store.go    # Tool output bounding
-│   │   └── subagent/          # Subagent manager, profiles, worktrees
-│   ├── tui/                   # Bubble Tea terminal UI
-│   │   ├── app.go             # AppState Init/Shutdown, Bubble Tea Model
-│   │   ├── app_state.go       # AppState struct (single-threaded model)
-│   │   ├── app_update.go      # Main Update() router
-│   │   ├── app_routing.go     # Screen routing map
-│   │   ├── app_handlers.go    # Message handlers
-│   │   ├── types.go           # Screen and message type re-exports
-│   │   ├── tuitypes/          # Screen enum and message types
-│   │   ├── commands/          # Slash command implementations
-│   │   ├── components/        # Reusable UI components (56 files)
-│   │   ├── layout/            # Layout system (box, stack, responsive, constraints)
-│   │   ├── theme/             # Theme management (dark only)
-│   │   ├── streaming/         # LLM streaming rendering
-│   │   ├── repl*.go           # REPL screen (main chat interface)
-│   │   ├── home_model.go      # Home/landing screen
-│   │   ├── sidebar_model.go   # Sidebar with file tree, git status
-│   │   ├── plan_model.go      # Plan display/approval screen
-│   │   ├── execute_model.go   # Task execution screen
-│   │   ├── verify_model.go    # Verification screen
-│   │   ├── settings_model.go  # Settings screen
-│   │   └── *_model.go         # Other screen implementations
-│   ├── types/                 # Shared type vocabulary
-│   │   ├── types.go           # Core types (Message, Task, ToolCall, ModelInfo, etc.)
-│   │   ├── constants.go       # System constants
-│   │   ├── plan.go            # Plan-related types
-│   │   ├── git.go             # Git-related types
-│   │   └── toolcall.go        # Tool call types
-│   ├── wiring/                # Dependency wiring (test-only)
-│   └── workflow/              # Seven-phase workflow engine
-│       ├── engine.go          # Engine struct, RunPhase, phase dispatch
-│       ├── state_machine.go   # Phase transition validation and history
-│       ├── context_builder.go # System prompt composition
-│       ├── prompt_builder.go  # Prompt template loading with overrides
-│       ├── phase_coordinator.go # Pre/post phase setup delegation
-│       ├── cost_tracker.go    # LLM cost tracking and budget enforcement
-│       ├── classify.go        # Intent classification (LLM-based)
-│       ├── initialize.go      # Initialize phase
-│       ├── discuss.go         # Discuss phase (Q&A with user)
-│       ├── plan.go            # Plan phase (task decomposition)
-│       ├── execute.go         # Execute phase (task runner + tool dispatch)
-│       ├── verify.go          # Verify phase (testing, build verification)
-│       ├── runtime.go         # Runtime phase (dev server management)
-│       ├── ship.go            # Ship phase (git commit, changelog)
-│       ├── retry.go           # LLM retry with exponential backoff
-│       ├── workflow_cache.go  # Session-scoped caching
-│       ├── prompts/           # Embedded prompt templates (20 .md files)
-│       │   ├── base.md        # Base system prompt
-│       │   ├── tool-use.md    # Tool usage instructions
-│       │   ├── plan-format.md # Plan output format
-│       │   ├── execute-task.md # Task execution instructions
-│       │   ├── self-heal.md   # Self-healing instructions
-│       │   └── ...
-│       └── templates/         # Embedded project templates
-│           └── website-nextjs/ # Next.js website template
-├── pkg/                       # Reusable packages (no internal/ imports)
-│   ├── arbitrage/             # Model quality scoring for auto-selection
-│   ├── autodream/             # Context consolidation (summarize old messages)
-│   ├── bisect/                # Git bisect automation for bug hunting
-│   ├── compaction/            # Automatic conversation compaction
-│   ├── coordinator/           # Concurrent session drain management
-│   ├── history/               # Frecent history (recent + frequent)
-│   ├── keychain/              # OS keychain API key storage
-│   │   ├── keychain.go        # Interface
-│   │   ├── keychain_darwin.go # macOS Keychain
-│   │   ├── keychain_linux.go  # Linux Secret Service/D-Bus
-│   │   └── keychain_windows.go # Windows Credential Manager
-│   ├── ledger/                # Session record persistence (Markdown)
-│   ├── metrics/               # Session metrics collection
-│   ├── narrative/             # Tool call event classification/grouping
-│   ├── retry/                 # Retry policy with exponential backoff
-│   ├── rollback/              # Safe git commit rollback
-│   ├── session/               # Session persistence and management
-│   │   ├── session.go         # Session struct
-│   │   ├── manager.go         # Load/save/list sessions
-│   │   ├── checkpoint.go      # Checkpoint save/load for resume
-│   │   └── planning.go        # Plan/task persistence
-│   ├── skills/                # Skill discovery and loading
-│   └── taskrunner/            # Task scheduling with dependency resolution
-├── e2e_test.go                # End-to-end tests (compiles and runs binary)
-├── go.mod                     # Go module: github.com/eshanized/M31A (go 1.25.0)
-├── go.sum                     # Dependency checksums
-├── Makefile                   # Build, test, lint, cross-compile targets
-├── .golangci.yml              # Linter configuration
-├── .goreleaser.yaml           # Release automation
-├── .env.example               # Environment variable template
-├── m31a.json                  # Project-level config (if present)
-├── .m31a/                     # Project-local session data
-│   ├── session.json           # Current session metadata
-│   ├── messages.json          # Session message history
-│   └── session.lock           # File lock for concurrent access
-├── docs/                      # Documentation
-│   ├── ARCHITECTURE.md
-│   ├── CONFIG.md
-│   ├── TOOLS.md
-│   ├── WORKFLOW.md
-│   └── ...
-├── scripts/                   # Build/release scripts
-│   ├── validate-release.sh
-│   └── verify_v1.sh
-└── .planning/                 # GSD planning documents
-    └── codebase/              # Codebase analysis documents
+├── cmd/m31a/                    # Entry point
+│   └── main.go                  # Flag parsing, config, provider registration, TUI bootstrap
+├── internal/                    # Private application code (can import pkg/)
+│   ├── config/                  # TOML config loading, validation, file watching
+│   ├── codeintel/               # Codebase intelligence indexer (symbols, imports, complexity)
+│   ├── context/                 # Dynamic context sources (datetime, env, git)
+│   ├── decision/                # Decision logging (v1.5)
+│   ├── errors/                  # Sentinel error definitions
+│   ├── fileutil/                # File utilities (atomic write, backup, diff)
+│   ├── git/                     # Git wrapper (commit, diff, status, worktree)
+│   ├── log/                     # Structured logging setup (slog + file rotation)
+│   ├── provider/                # LLM provider abstraction + 3 implementations
+│   │   ├── openrouter/          # OpenRouter provider
+│   │   ├── zen/                 # Z.ai provider
+│   │   └── nvidia/              # NVIDIA NIM provider
+│   ├── tools/                   # 18 built-in tools + dispatcher
+│   │   └── subagent/            # Parallel subagent manager (worktrees, isolated dispatchers)
+│   ├── tui/                     # Bubble Tea TUI (Elm architecture)
+│   │   ├── a11y/                # Accessibility helpers
+│   │   ├── commands/            # Slash command implementations
+│   │   ├── components/          # Reusable UI components (sidebar, model picker, etc.)
+│   │   ├── layout/              # Layout primitives
+│   │   ├── streaming/           # Streaming response rendering
+│   │   ├── theme/               # Dark theme (lipgloss)
+│   │   ├── tuitypes/            # All tea.Msg types, Screen enum, shared TUI types
+│   │   ├── app.go               # AppState (root Model), Init/Update/View/Shutdown
+│   │   ├── app_state.go         # AppState fields, getters/setters
+│   │   ├── app_update*.go       # Update() handlers by category
+│   │   ├── app_view.go          # View() rendering
+│   │   ├── app_nav.go           # Screen stack navigation
+│   │   ├── repl*.go             # REPL chat interface
+│   │   ├── *_model.go / *_view.go  # Per-screen model/view pairs
+│   │   └── provider_registration.go  # Provider factory for main.go
+│   ├── types/                   # Shared type vocabulary (WorkflowPhase, ModelInfo, Message, Tool, Task, etc.)
+│   ├── workflow/                # 7-phase workflow engine
+│   │   ├── engine.go            # Engine orchestration, phase runners, streaming
+│   │   ├── state_machine.go     # Phase transition validation
+│   │   ├── phase_coordinator.go # Pre/post-phase hooks, checkpoints, metrics
+│   │   ├── prompt_builder.go    # System prompt composition
+│   │   ├── context_builder.go   # Dynamic context injection
+│   │   ├── prompts/             # Embedded prompt templates
+│   │   └── templates/           # Website template (Next.js)
+│   ├── wiring/                  # Integration tests wiring
+│   └── logging/                 # Audit logging
+├── pkg/                         # Public packages (CANNOT import internal/)
+│   ├── arbitrage/               # Model cost optimization recommendations
+│   ├── autodream/               # Proactive session compaction
+│   ├── bisect/                  # Git bisect automation
+│   ├── compaction/              # LLM-based session summarization
+│   ├── coordinator/             # Multi-agent coordination
+│   ├── history/                 # Command history with frecency
+│   ├── keychain/                # OS keyring (macOS/Windows/Linux)
+│   ├── ledger/                  # Session record persistence (LEDGER.md)
+│   ├── metrics/                 # Tool/LLM call metrics collection
+│   ├── narrative/               # Structured narrative event stream
+│   ├── retry/                   # Exponential backoff with error classification
+│   ├── rollback/                # Git-based rollback to session start
+│   ├── session/                 # Session persistence, checkpoints, project state
+│   ├── skills/                  # Skill discovery and loading
+│   └── taskrunner/              # Parallel task execution with dependencies
+├── e2e_test.go                  # End-to-end tests (real API calls when keys present)
+├── Makefile                     # Build pipeline (fmt→tidy→vet→lint→test)
+├── go.mod                       # Go 1.25.0, CGO_ENABLED=0, Bubble Tea + deps
+├── go.sum
+├── .goreleaser.yaml             # Cross-compile + release config
+├── README.md
+├── AGENTS.md                    # Agent instructions
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── SECURITY.md
+├── TESTING.md
+├── .env.example                 # Example environment variables
+├── .gitignore
+├── .golangci.yml                # Linter config (govet, staticcheck, errcheck, ineffassign, unused)
+├── install.sh                   # Installer script
+├── m31a                         # Built binary (gitignored)
+├── m31a.json                    # Build metadata
+├── docs/                        # Documentation
+├── scripts/                     # Release validation, helpers
+└── .m31a/                       # Runtime data (gitignored)
+    ├── config.toml              # User config
+    ├── LEDGER.md                # Session ledger
+    ├── sessions/                # Session JSON files
+    ├── backups/                 # Tool backup files
+    └── tool-output/             # Bounded tool output store
 ```
 
 ## Directory Purposes
 
-**`cmd/m31a/`:**
-- Purpose: CLI binary entry point
-- Contains: `main.go` (flag parsing, config, provider registration, TUI/headless launch), `usage.go` (help text)
-- Key files: `main.go:116-477` (the `run()` function is the real entry point)
-
-**`internal/tui/`:**
-- Purpose: Terminal UI implementing Elm Architecture (Bubble Tea)
-- Contains: `AppState` (single model), 25+ screen models, 56 reusable components, layout system, theme
-- Key files: `app_state.go` (AppState struct), `app_update.go` (Update router), `app.go` (Init/Shutdown)
-
-**`internal/workflow/`:**
-- Purpose: Seven-phase workflow engine (Initialize -> Discuss -> Plan -> Execute -> Verify -> Runtime -> Ship)
-- Contains: Engine, StateMachine, phase implementations, prompt templates, context builder
-- Key files: `engine.go` (Engine struct and RunPhase), `state_machine.go` (transition validation)
-
-**`internal/tools/`:**
-- Purpose: 18 built-in tool implementations with permission gating and rate limiting
-- Contains: Tool implementations, Dispatcher, Agent tool, Subagent manager
-- Key files: `dispatcher.go` (permission/rate/concurrency), `defaults.go` (tool registration), `agent.go` (subagent spawning)
-
-**`internal/provider/`:**
-- Purpose: LLM API abstraction layer with provider registry
-- Contains: `LLMProvider` interface, Registry, three provider implementations
-- Key files: `interface.go` (LLMProvider interface), `registry.go` (thread-safe registry)
-
-**`internal/types/`:**
-- Purpose: Canonical type vocabulary shared across all layers
-- Contains: `WorkflowPhase`, `Message`, `Task`, `ToolCall`, `ModelInfo`, `Tool` interface, constants
-- Key files: `types.go` (core types), `constants.go` (system constants)
-
-**`internal/config/`:**
-- Purpose: TOML-based configuration with hot-reload support
-- Contains: Config types, loader, merge logic, project context
-- Key files: `types.go` (Config struct with all nested configs), `loader.go` (TOML parsing)
-
-**`pkg/session/`:**
-- Purpose: Session persistence, checkpoint/resume, task storage
-- Contains: Session struct, Manager (load/save/list), checkpoint logic
-- Key files: `manager.go` (session CRUD), `session.go` (Session struct)
-
-**`pkg/taskrunner/`:**
-- Purpose: Task scheduling with dependency resolution and parallel execution
-- Contains: Runner with topological sort, parallel execution groups
-- Key files: `runner.go` (Runner struct, Execute method)
-
-**`pkg/keychain/`:**
-- Purpose: OS keychain integration for secure API key storage
-- Contains: Platform-specific implementations (macOS/Linux/Windows)
-- Key files: `keychain.go` (interface), `keychain_linux.go` (D-Bus Secret Service)
-
-**`internal/codeintel/`:**
-- Purpose: Codebase intelligence for import graph, symbol lookup, relevance scoring
-- Contains: Indexer, parsers (tree-sitter based), import graph, symbol index
-- Key files: `codeintel.go` (Indexer), `trie.go` (prefix search), `relevance.go` (scoring)
+| Directory | Purpose | Key Files |
+|-----------|---------|-----------|
+| `cmd/m31a/` | Application entry point | `main.go` |
+| `internal/config/` | Config loading, validation, hot-reload | `config.go`, `watch.go` |
+| `internal/codeintel/` | Symbol indexer, import graph, complexity | `indexer.go` |
+| `internal/context/` | Dynamic context sources (datetime, env, git) | `registry.go`, `sources.go` |
+| `internal/decision/` | Decision receipts, logger | `logger.go`, `receipt.go`, `query.go` |
+| `internal/errors/` | Sentinel errors for typed handling | `errors.go` |
+| `internal/fileutil/` | Atomic write, backup, diff utilities | `atomic.go`, `backup.go`, `diff.go` |
+| `internal/git/` | Git operations wrapper | `git.go` |
+| `internal/log/` | Logger initialization, file rotation | `logger.go` |
+| `internal/provider/` | Provider interface + 3 implementations | `interface.go`, `registry.go`, `common.go`, `capabilities.go`, `reasoning.go` |
+| `internal/tools/` | Tool definitions, dispatcher, permissions | `dispatcher.go`, `defaults.go`, `bash.go`, `edit.go`, `agent.go`, `subagent/` |
+| `internal/tui/` | Full TUI implementation | See Key Locations below |
+| `internal/types/` | Shared type definitions | `types.go` |
+| `internal/workflow/` | 7-phase workflow engine | `engine.go`, `state_machine.go`, `phase_coordinator.go` |
+| `pkg/keychain/` | OS keyring abstraction | `keychain.go`, `keychain_darwin.go`, `keychain_linux.go`, `keychain_windows.go` |
+| `pkg/ledger/` | Session ledger persistence | `ledger.go` |
+| `pkg/metrics/` | Metrics collector | `collector.go`, `types.go` |
+| `pkg/retry/` | Retry policy with classification | `policy.go` |
+| `pkg/rollback/` | Git rollback operations | `rollback.go` |
+| `pkg/session/` | Session/project persistence | `manager.go`, `session.go`, `checkpoint.go` |
+| `pkg/taskrunner/` | Parallel task execution | `runner.go` |
+| `pkg/bisect/` | Git bisect automation | `exec.go`, `bisect.go` |
+| `pkg/compaction/` | Session compaction | `compaction.go`, `template.go` |
+| `pkg/autodream/` | Proactive compression | `autodream.go` |
+| `pkg/arbitrage/` | Model cost optimization | `arbitrage.go` |
+| `pkg/coordinator/` | Multi-agent coordination | `coordinator.go` |
+| `pkg/narrative/` | Narrative event stream | `engine.go`, `bridge.go` |
+| `pkg/history/` | Command history | `history.go` |
+| `pkg/skills/` | Skill system | `loader.go`, `discovery.go`, `skill.go` |
 
 ## Key File Locations
 
-**Entry Points:**
-- `cmd/m31a/main.go`: Binary entry point, `main()` -> `run()`
-- `internal/tui/app.go:24`: Bubble Tea `Init()` method
-- `internal/tui/app_update.go`: Bubble Tea `Update()` method (the only place AppState is mutated)
-
-**Configuration:**
-- `internal/config/types.go`: All config struct definitions
-- `internal/config/loader.go`: TOML loading and validation
-- `.env.example`: Environment variable template (API keys)
-- `~/.m31a/config.toml`: Global user config (resolved at runtime)
-
-**Core Logic:**
-- `internal/workflow/engine.go`: Workflow engine orchestration
-- `internal/tools/dispatcher.go`: Tool dispatch with permissions
-- `internal/provider/registry.go`: Provider management
-
-**Testing:**
-- `e2e_test.go`: End-to-end tests (compiles and runs binary)
-- `*_test.go` files: Co-located unit tests throughout
-- `internal/testutil/`: Shared test helpers
+| Concern | Location |
+|---------|----------|
+| **Entry point** | `cmd/m31a/main.go` |
+| **Config loading** | `internal/config/config.go` |
+| **TUI App (Model)** | `internal/tui/app.go`, `internal/tui/app_state.go` |
+| **TUI Update handlers** | `internal/tui/app_update.go`, `app_update_phase.go`, `app_update_commands.go` |
+| **TUI View** | `internal/tui/app_view.go` |
+| **REPL (chat interface)** | `internal/tui/repl.go`, `repl_model.go`, `repl_view.go` |
+| **Workflow Engine** | `internal/workflow/engine.go` |
+| **Phase State Machine** | `internal/workflow/state_machine.go` |
+| **Phase Coordinator** | `internal/workflow/phase_coordinator.go` |
+| **Provider Interface** | `internal/provider/interface.go` |
+| **Provider Registry** | `internal/provider/registry.go` |
+| **Provider Implementations** | `internal/provider/openrouter/`, `zen/`, `nvidia/` |
+| **Tool Registry** | `internal/tools/defaults.go` |
+| **Tool Dispatcher** | `internal/tools/dispatcher.go` |
+| **Built-in Tools** | `internal/tools/*.go` (bash, edit, file*, glob, grep, todo*, webfetch, websearch, codemap, codecomplexity, devserver, httpcheck, agent) |
+| **Subagent Manager** | `internal/tools/subagent/manager.go` |
+| **Shared Types** | `internal/types/types.go` |
+| **Session Management** | `pkg/session/manager.go`, `session.go`, `checkpoint.go` |
+| **Keychain (OS keyring)** | `pkg/keychain/keychain.go` |
+| **Ledger** | `pkg/ledger/ledger.go` |
+| **Rollback** | `pkg/rollback/rollback.go` |
+| **Metrics** | `pkg/metrics/collector.go` |
+| **Compaction** | `pkg/compaction/compaction.go` |
+| **AutoDream** | `pkg/autodream/autodream.go` |
 
 ## Naming Conventions
 
-**Files:**
-- Screen models: `<screen>_model.go` (e.g., `plan_model.go`, `execute_model.go`)
-- Screen views: `<screen>_view.go` (e.g., `plan_view.go`, `execute_view.go`)
-- Handlers: `handler_<category>.go` (e.g., `handler_tool.go`, `handler_workflow.go`)
-- Platform-specific: `<name>_<platform>.go` (e.g., `bash_unix.go`, `keychain_linux.go`)
-- Tests: `<name>_test.go` (co-located with source)
-- Extra tests: `<name>_extra_test.go` or `<name>_<category>_test.go`
-
-**Directories:**
-- Internal packages: lowercase, single word (e.g., `tools/`, `provider/`, `workflow/`)
-- Public packages: lowercase, single word (e.g., `session/`, `keychain/`, `metrics/`)
-- TUI subdirectories: `components/`, `layout/`, `commands/`, `tuitypes/`, `theme/`, `streaming/`
-
-**Types:**
-- Interfaces: PascalCase, noun (e.g., `LLMProvider`, `Tool`, `WorkflowEngine`)
-- Structs: PascalCase (e.g., `AppState`, `Engine`, `Dispatcher`)
-- Constants: PascalCase for exported, camelCase for unexported (e.g., `PhaseInitialize`, `maxDiscussPlanCycles`)
-- Message types: PascalCase with `Msg` suffix (e.g., `PhaseResultMsg`, `StreamChunkMsg`)
+| Element | Convention | Example |
+|---------|------------|---------|
+| Packages | lowercase, singular | `provider`, `tools`, `workflow`, `session` |
+| Files | snake_case.go | `engine.go`, `state_machine.go`, `prompt_builder.go` |
+| Types | PascalCase | `WorkflowPhase`, `ModelInfo`, `ToolResult` |
+| Interfaces | Noun + er | `LLMProvider`, `Dispatcher`, `SchemaProvider` |
+| Constants | PascalCase | `PhaseInitialize`, `RiskDangerous`, `MaxHealAttempts` |
+| Private fields | camelCase | `sessionID`, `workDir`, `activeModel` |
+| Exported functions | PascalCase | `NewEngine()`, `RunPhase()`, `SetModel()` |
+| Test files | `_test.go` suffix | `engine_test.go`, `dispatcher_test.go` |
+| Test helpers | `testutil` package | `internal/testutil/` |
 
 ## Where to Add New Code
 
-**New Workflow Phase:**
-1. Add phase constant to `internal/types/types.go` (`WorkflowPhase` type)
-2. Add transition rules to `internal/workflow/state_machine.go` (`validTransitions` map)
-3. Implement phase method in `internal/workflow/<phase>.go`
-4. Add case to `internal/workflow/engine.go:RunPhase()` switch
-5. Add phase model to `internal/tui/` (e.g., `<phase>_model.go`)
-6. Add screen constant to `internal/tui/tuitypes/tuitypes.go`
-7. Register in `internal/tui/types.go` re-exports
+### New Feature (Workflow Phase)
+1. Add phase constant to `internal/types/types.go` (`WorkflowPhase`)
+2. Add transition rules to `internal/workflow/state_machine.go` (`validTransitions`)
+3. Implement `run<Phase>()` in `internal/workflow/engine.go`
+4. Add TUI screen in `internal/tui/` (`<phase>_model.go`, `<phase>_view.go`)
+5. Register screen in `internal/tui/tuitypes/types.go` (`Screen` enum)
+6. Add navigation in `internal/tui/app_nav.go`
 
-**New Tool:**
+### New Tool
 1. Create `internal/tools/<toolname>.go` implementing `types.Tool` interface
-2. Register in `internal/tools/defaults.go:DefaultDispatcher()`
-3. Add tool-specific tests in `internal/tools/<toolname>_test.go`
+2. Optionally implement `types.SchemaProvider` for JSON Schema
+3. Register in `internal/tools/defaults.go` → `DefaultDispatcher()`
+4. Add permission rule defaults in `internal/config/config.go` if needed
 
-**New LLM Provider:**
-1. Create `internal/provider/<name>/client.go` implementing `provider.LLMProvider`
-2. Add provider registration case to `internal/tui/provider_registration.go`
-3. Add provider config fields to `internal/config/types.go:ProviderConfig`
+### New Provider
+1. Create `internal/provider/<name>/provider.go` implementing `LLMProvider`
+2. Add registration in `internal/tui/provider_registration.go` → `RegisterProvider()`
+3. Add config section in `internal/config/config.go` (`ProviderConfig`)
 
-**New TUI Screen:**
-1. Create `internal/tui/<screen>_model.go` with Bubble Tea model
-2. Create `internal/tui/<screen>_view.go` with `View()` method
-3. Add screen constant to `internal/tui/tuitypes/tuitypes.go`
-4. Register in `internal/tui/types.go` re-exports
-5. Add routing in `internal/tui/app_routing.go`
+### New Public Package (pkg/)
+1. Create `pkg/<name>/` with `doc.go` (package doc)
+2. **Must not import** `github.com/eshanized/M31A/internal/...`
+3. Can import other `pkg/` packages and stdlib
+4. Add tests in `_test.go` files
 
-**New pkg/ Package:**
-1. Create directory under `pkg/<name>/`
-2. Implement with NO imports from `internal/` (except `internal/types`)
-3. Add `doc.go` package documentation
-4. Add tests in `pkg/<name>/<name>_test.go`
+### New Config Option
+1. Add field to appropriate struct in `internal/config/config.go`
+2. Add TOML tag (`toml:"field_name"`)
+3. Handle default in `DefaultConfig()` or `Load()`
+4. Wire through to consumer (e.g., `Engine`, `Dispatcher`, `TUI`)
+
+## Module Boundaries
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        import graph                              │
+├─────────────────────────────────────────────────────────────────┤
+│  cmd/m31a                                                        │
+│       │                                                          │
+│       ▼                                                          │
+│  internal/tui ──────────────────────────────────┐               │
+│       │                                          │               │
+│       ▼                                          ▼               │
+│  internal/workflow ←───────────────────── internal/tools        │
+│       │                     │                     │              │
+│       ▼                     ▼                     ▼              │
+│  internal/provider ◄───── internal/types ──────► pkg/*          │
+│       │                                          ▲               │
+│       └──────────────────────────────────────────┘               │
+│                         (pkg CANNOT import internal)             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Enforcement:** Go module system — `pkg/` has no path to `internal/` packages.
 
 ## Special Directories
 
-**`.m31a/`:**
-- Purpose: Project-local session data (messages, session metadata, task lists, backups)
-- Generated: Yes (by running `m31a`)
-- Committed: No (gitignored)
+| Directory | Purpose | Generated | Committed |
+|-----------|---------|-----------|-----------|
+| `.m31a/` | Runtime data (config, sessions, ledger, backups) | Yes | No (gitignored) |
+| `dist/` | Cross-compiled release binaries | Yes (goreleaser) | No |
+| `vendor/` | Not used (Go modules) | N/A | No |
+| `.planning/` | GSD planning artifacts | Yes | Yes |
+| `M31A.wiki/` | Wiki content (separate repo) | No | Yes |
 
-**`~/.m31a/`:**
-- Purpose: Global user config, history, tool output cache
-- Generated: Yes (by running `m31a`)
-- Committed: No (user-specific)
+## Build Artifacts
 
-**`internal/workflow/prompts/`:**
-- Purpose: Embedded prompt templates (base system prompt, tool use, plan format, etc.)
-- Generated: No (hand-written)
-- Committed: Yes
-
-**`internal/workflow/templates/`:**
-- Purpose: Embedded project templates (e.g., Next.js website template)
-- Generated: No (hand-written)
-- Committed: Yes
-
-**`dist/`:**
-- Purpose: Cross-compiled binary output
-- Generated: Yes (by `make cross`)
-- Committed: No (gitignored)
+| Artifact | Location | Generated By |
+|----------|----------|--------------|
+| Binary (current platform) | `./m31a` | `make build` |
+| Debug binary | `./m31a-debug` | `make debug` |
+| Cross-compiled binaries | `dist/` | `make cross` / goreleaser |
+| Coverage report | `coverage.out`, `coverage.html` | `make test`, `make cover` |
 
 ---
 
