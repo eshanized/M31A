@@ -36,8 +36,10 @@ func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, 
 		extraNonChatPatterns:        extraNonChat,
 		knownCapabilities:           knownCaps,
 	}
-	// Clear the capabilities cache so new config takes effect immediately
-	modelCapabilitiesCache = sync.Map{}
+	// Clear the capabilities cache so new config takes effect immediately.
+	modelCapabilitiesCacheMu.Lock()
+	modelCapabilitiesCache = make(map[string]*ModelCapabilities)
+	modelCapabilitiesCacheMu.Unlock()
 }
 
 // defaultReasoningPatterns are the default ID patterns that indicate reasoning/thinking models.
@@ -112,7 +114,13 @@ type ModelCapabilities struct {
 }
 
 // modelCapabilitiesCache stores detected capabilities to avoid repeated lookups.
-var modelCapabilitiesCache sync.Map
+// Protected by modelCapabilitiesCacheMu — typed map replaces sync.Map for
+// compile-time type safety and to prevent the data race from value-type
+// replacement (BUG-06, BUG-07, BUG-19).
+var (
+	modelCapabilitiesCacheMu sync.RWMutex
+	modelCapabilitiesCache   = make(map[string]*ModelCapabilities)
+)
 
 // knownModelCapabilities is a hardcoded fallback table for well-known models.
 // This is used when runtime detection fails or is not available.
@@ -307,12 +315,14 @@ func ParseModelCapabilities(modelID string, extraReasoningPatterns ...string) ty
 // cache, then config overrides, then the hardcoded table. Returns nil if the
 // model is not recognized.
 func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
-	// Check cache first
+	// Check cache first (typed map, no type assertion needed)
 	cacheKey := provider + "/" + modelID
-	if cached, ok := modelCapabilitiesCache.Load(cacheKey); ok {
-		caps := cached.(*ModelCapabilities)
+	modelCapabilitiesCacheMu.RLock()
+	if caps, ok := modelCapabilitiesCache[cacheKey]; ok {
+		modelCapabilitiesCacheMu.RUnlock()
 		return caps, nil
 	}
+	modelCapabilitiesCacheMu.RUnlock()
 
 	id := strings.ToLower(modelID)
 
@@ -323,7 +333,9 @@ func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
 	for knownID, caps := range configCaps {
 		if strings.Contains(id, strings.ToLower(knownID)) {
 			capsPtr := &caps
-			modelCapabilitiesCache.Store(cacheKey, capsPtr)
+			modelCapabilitiesCacheMu.Lock()
+			modelCapabilitiesCache[cacheKey] = capsPtr
+			modelCapabilitiesCacheMu.Unlock()
 			return capsPtr, nil
 		}
 	}
@@ -333,7 +345,9 @@ func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
 		if strings.Contains(id, strings.ToLower(knownID)) {
 			// Cache the result (store pointer)
 			capsPtr := &caps
-			modelCapabilitiesCache.Store(cacheKey, capsPtr)
+			modelCapabilitiesCacheMu.Lock()
+			modelCapabilitiesCache[cacheKey] = capsPtr
+			modelCapabilitiesCacheMu.Unlock()
 			return capsPtr, nil
 		}
 	}

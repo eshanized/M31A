@@ -31,7 +31,9 @@ var (
 // Results are cached to avoid recompilation on every call.
 func sectionHeaderRe(name string) *regexp.Regexp {
 	if v, ok := sectionHeaderCache.Load(name); ok {
-		return v.(*regexp.Regexp)
+		if re, ok := v.(*regexp.Regexp); ok {
+			return re
+		}
 	}
 	re := regexp.MustCompile(`(?im)^##\s+` + regexp.QuoteMeta(name) + `\s*$`)
 	sectionHeaderCache.Store(name, re)
@@ -42,7 +44,9 @@ func sectionHeaderRe(name string) *regexp.Regexp {
 // Results are cached to avoid recompilation on every call.
 func subsectionHeaderRe(name string) *regexp.Regexp {
 	if v, ok := subsectionHeaderCache.Load(name); ok {
-		return v.(*regexp.Regexp)
+		if re, ok := v.(*regexp.Regexp); ok {
+			return re
+		}
 	}
 	re := regexp.MustCompile(`(?im)^###\s+` + regexp.QuoteMeta(name) + `\s*$`)
 	subsectionHeaderCache.Store(name, re)

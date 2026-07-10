@@ -31,8 +31,10 @@ func WithRWMutex(mu *sync.RWMutex, fn func(), write bool) {
 //
 //   - sync.Mutex/RWMutex: Used correctly in Dispatcher, Engine, WorkflowState,
 //     and Subagent for protecting mutable state. All locks have defer Unlock.
-//   - sync.Map: Used in DNSCache, Dispatcher (pendingResponses/pendingQuestions),
-//     and SubagentManager (agents). All use comma-ok type assertions.
+//   - sync.Map: Used in Dispatcher (pendingResponses/pendingQuestions) and
+//     SubagentManager (agents). All use comma-ok type assertions.
+//     Package-level caches (capabilities) replaced with typed mutex-guarded
+//     maps to prevent data races from value-type replacement (BUG-06, BUG-07, BUG-19).
 //   - atomic operations: Used for cost tracking (CostTracker), call counters,
 //     and rate limiter tokens. All use proper atomic types (Int32, Int64).
 //   - Goroutine spawning: All goroutines have context cancellation paths.
@@ -46,6 +48,8 @@ func WithRWMutex(mu *sync.RWMutex, fn func(), write bool) {
 //   - DNSCache eviction is mutex-protected (M14)
 //   - Subagent spawn rate limiting prevents runaway spawning (C-9)
 //   - All sync.Map usage includes comma-ok type assertions (BUG-06, BUG-07, BUG-19)
+//   - Package-level sync.Map caches replaced with typed mutex-guarded maps
+//     to eliminate type assertion panics and data races
 
 // ReviewResult holds the outcome of a concurrency review.
 type ReviewResult struct {
@@ -64,6 +68,7 @@ func ReviewConcurrency() ReviewResult {
 			"Dispatcher.stopOnce (sync.Once) prevents TOCTOU race in Stop()",
 			"Dispatcher.concurrencySem limits concurrent tool executions",
 			"DNSCache uses sync.Map with comma-ok type assertions",
+			"Capabilities cache uses typed mutex-guarded map (BUG-06, BUG-07, BUG-19)",
 			"Engine.modelIDMu protects model ID changes",
 			"Engine.workflowModeMu protects workflow mode",
 			"Engine.perPhaseModelsMu protects per-phase model map",

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -409,5 +410,63 @@ func TestDetectCapabilities_ConfigOverridesCheckedBeforeBuiltIn(t *testing.T) {
 	}
 
 	// Reset config immediately so other tests see clean state
+	SetCapabilityConfig(nil, nil, nil, nil, nil)
+}
+
+// TestDetectCapabilities_ConcurrentAccess exercises concurrent readers of
+// DetectCapabilities while SetCapabilityConfig replaces the cache. This test
+// must pass under -race to verify that the typed mutex-guarded cache
+// replacement (BUG-06, BUG-07, BUG-19) does not race with readers.
+func TestDetectCapabilities_ConcurrentAccess(t *testing.T) {
+	// Seed the cache with known models
+	configCaps := map[string]ModelCapabilities{
+		"test-concurrent-model": {
+			SupportsTools:    true,
+			MaxContextWindow: 16384,
+		},
+	}
+	SetCapabilityConfig(nil, nil, nil, nil, configCaps)
+
+	// Warm the cache
+	if _, err := DetectCapabilities("test", "test-concurrent-model"); err != nil {
+		t.Fatalf("cache warm-up failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+
+	// Concurrent readers — should never panic or return nil
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				caps, err := DetectCapabilities("test", "test-concurrent-model")
+				if err != nil {
+					t.Errorf("DetectCapabilities failed: %v", err)
+					return
+				}
+				if caps == nil {
+					t.Error("DetectCapabilities returned nil")
+					return
+				}
+				// After config replacement, the model won't be in cache or config,
+				// so it falls back to the default. We just verify no panic and no nil.
+			}
+		}()
+	}
+
+	// Concurrent config updates — replaces the cache map
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Use the same config so readers can still find the model
+			SetCapabilityConfig(nil, nil, nil, nil, configCaps)
+		}()
+	}
+
+	wg.Wait()
+
+	// Clean up
 	SetCapabilityConfig(nil, nil, nil, nil, nil)
 }
