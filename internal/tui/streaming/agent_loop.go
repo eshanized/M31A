@@ -281,23 +281,23 @@ func AgentLoop(
 				calls = parseTextToolCalls(fullContent.String())
 			}
 
-		if len(calls) == 0 {
-			msg := types.Message{
-				Role:    "assistant",
-				Content: fullContent.String(),
-				Usage:   lastUsage,
+			if len(calls) == 0 {
+				msg := types.Message{
+					Role:    "assistant",
+					Content: fullContent.String(),
+					Usage:   lastUsage,
+				}
+				// Calibrate estimator with actual input token counts from the API.
+				// PromptTokens is the model's actual count of the input context,
+				// which we compare against our estimate of the full message list
+				// to correct provider-specific heuristics over successive calls.
+				if lastUsage != nil && lastUsage.PromptTokens > 0 {
+					estimated := estimator.EstimateMessages(messages)
+					estimator.Calibrate(estimated, lastUsage.PromptTokens)
+				}
+				ch <- AgentDoneMsg{Message: msg, Usage: lastUsage}
+				return
 			}
-			// Calibrate estimator with actual input token counts from the API.
-			// PromptTokens is the model's actual count of the input context,
-			// which we compare against our estimate of the full message list
-			// to correct provider-specific heuristics over successive calls.
-			if lastUsage != nil && lastUsage.PromptTokens > 0 {
-				estimated := estimator.EstimateMessages(messages)
-				estimator.Calibrate(estimated, lastUsage.PromptTokens)
-			}
-			ch <- AgentDoneMsg{Message: msg, Usage: lastUsage}
-			return
-		}
 
 			// Finalize the current streaming message before tool execution
 			ch <- AgentIterationDoneMsg{
