@@ -1186,10 +1186,12 @@ func (e *Engine) getCodeIntel(ctx context.Context) *codeintel.Indexer {
 // consumeStream reads all chunks from the iterator and returns the concatenated content.
 // Enforces MaxLLMResponseBytes limit to prevent OOM from pathological responses.
 // Returns partial content before non-EOF errors so callers can inspect what was received.
-func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error) {
+// Also captures usage data from the final chunk for token calibration.
+func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, *m31types.Usage, error) {
 	var sb strings.Builder
 	defer iterator.Close() //nolint:errcheck
 
+	var lastUsage *m31types.Usage
 	for {
 		chunk, err := iterator.Next()
 		if err == io.EOF {
@@ -1200,18 +1202,23 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, error
 			if chunk != nil && chunk.Delta != "" {
 				sb.WriteString(chunk.Delta)
 			}
-			return sb.String(), err
+			return sb.String(), lastUsage, err
 		}
-		if chunk != nil && chunk.Delta != "" {
-			sb.WriteString(chunk.Delta)
-			// Enforce max response size incrementally as chunks arrive
-			if sb.Len() > m31types.MaxLLMResponseBytes {
-				return sb.String(), fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
-					m31types.MaxLLMResponseBytes, m31errors.ErrContextExceeded)
+		if chunk != nil {
+			if chunk.Delta != "" {
+				sb.WriteString(chunk.Delta)
+				// Enforce max response size incrementally as chunks arrive
+				if sb.Len() > m31types.MaxLLMResponseBytes {
+					return sb.String(), lastUsage, fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
+						m31types.MaxLLMResponseBytes, m31errors.ErrContextExceeded)
+				}
+			}
+			if chunk.Usage != nil {
+				lastUsage = chunk.Usage
 			}
 		}
 	}
-	return sb.String(), nil
+	return sb.String(), lastUsage, nil
 }
 
 // toolCallBuilder accumulates streamed tool_call chunks for a single tool invocation.
@@ -1223,16 +1230,17 @@ type toolCallBuilder struct {
 
 // consumeStreamWithTools reads all chunks from the iterator, collecting both
 // text content and native tool_call chunks. Returns the concatenated content,
-// any structured tool calls, and an error.
+// any structured tool calls, captured usage data, and an error.
 //
 // Native tool_call chunks arrive with Type="tool_call" and incremental argument
 // deltas in ToolInput. They are accumulated by Index and finalized into ToolCall
 // structs with parsed JSON arguments.
-func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (string, []m31types.ToolCall, error) {
+func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (string, []m31types.ToolCall, *m31types.Usage, error) {
 	var content strings.Builder
 	builders := map[int]*toolCallBuilder{}
 	defer iterator.Close() //nolint:errcheck
 
+	var lastUsage *m31types.Usage
 	for {
 		chunk, err := iterator.Next()
 		if err == io.EOF {
@@ -1244,10 +1252,14 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 			}
 			// Discard partial tool calls from truncated streams to prevent
 			// dispatching incomplete/malformed tool calls.
-			return content.String(), nil, err
+			return content.String(), nil, lastUsage, err
 		}
 		if chunk == nil {
 			continue
+		}
+
+		if chunk.Usage != nil {
+			lastUsage = chunk.Usage
 		}
 
 		switch chunk.Type {
@@ -1274,7 +1286,7 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 			if chunk.Delta != "" {
 				content.WriteString(chunk.Delta)
 				if content.Len() > m31types.MaxLLMResponseBytes {
-					return content.String(), nil, fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
+					return content.String(), nil, lastUsage, fmt.Errorf("LLM response exceeds maximum size of %d bytes: %w",
 						m31types.MaxLLMResponseBytes, m31errors.ErrContextExceeded)
 				}
 			}
@@ -1282,7 +1294,7 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 	}
 
 	toolCalls := finalizeToolCalls(builders, e)
-	return content.String(), toolCalls, nil
+	return content.String(), toolCalls, lastUsage, nil
 }
 
 // finalizeToolCalls converts accumulated toolCallBuilders into ToolCall structs.
@@ -1374,6 +1386,18 @@ func (e *Engine) emitThinkingDone() {
 	})
 }
 
+// calibrateFromUsage feeds actual API token counts back into the estimator
+// so provider-specific heuristics self-correct over the lifetime of a workflow.
+// Only PromptTokens is used because it represents the model's actual view of
+// the input context, which is what EstimateMessages tries to approximate.
+func (e *Engine) calibrateFromUsage(messages []m31types.Message, usage *m31types.Usage) {
+	if e.tokens == nil || usage == nil || usage.PromptTokens <= 0 {
+		return
+	}
+	estimated := e.tokens.EstimateMessages(messages)
+	e.tokens.Calibrate(estimated, usage.PromptTokens)
+}
+
 // streamLLMWithTools sends a chat request with tool definitions and returns
 // both the text content and any native tool calls from the response.
 // Used by execute and heal phases for structured tool dispatch.
@@ -1383,7 +1407,8 @@ func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Mes
 		return "", nil, err
 	}
 
-	content, toolCalls, err := e.consumeStreamWithTools(iterator)
+	content, toolCalls, usage, err := e.consumeStreamWithTools(iterator)
+	e.calibrateFromUsage(messages, usage)
 	e.emitThinkingDone()
 	return content, toolCalls, err
 }
@@ -1395,7 +1420,8 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 		return "", err
 	}
 
-	result, err := e.consumeStream(iterator)
+	result, usage, err := e.consumeStream(iterator)
+	e.calibrateFromUsage(messages, usage)
 	e.emitThinkingDone()
 	return result, err
 }

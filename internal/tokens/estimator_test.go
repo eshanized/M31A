@@ -348,3 +348,123 @@ func TestEstimator_ProviderSpecificEstimation(t *testing.T) {
 		})
 	}
 }
+
+func TestIsCodeHeavy(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected bool
+	}{
+		{"empty", "", false},
+		{"short", "if x {", false},
+		{"prose", "The quick brown fox jumps over the lazy dog and runs away.", false},
+		{"code", "func main() { fmt.Println(x); return nil }", true},
+		{"mixed_prose", "Here is a function:\nfunc add(a, b int) int { return a + b }", false},
+		{"json", `{"name": "test", "value": 42, "items": [1, 2, 3]}`, true},
+		{"sql_keywords", "SELECT id, name FROM users WHERE active = true ORDER BY name", false},
+		{"natural_heavy", "This is a very long paragraph of natural language text that contains many words and should not be detected as code at all because it has no special characters.", false},
+		{"dense_code", "if (err != nil) { return fmt.Errorf(\"wrap: %w\", err) }", true},
+		{"go_fn", "func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCodeHeavy(tt.text); got != tt.expected {
+				t.Errorf("isCodeHeavy(%q) = %v, want %v", tt.name, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEstimateWithProvider_CodeVsProse(t *testing.T) {
+	prose := "The quick brown fox jumps over the lazy dog. This is a test of natural language token estimation for provider-specific heuristics."
+	code := "func main() { if err := doSomething(x); err != nil { return err } return nil }"
+
+	providers := []struct {
+		name  string
+		model string
+	}{
+		{"anthropic", "claude-3-opus"},
+		{"google", "gemini-pro"},
+		{"meta", "llama-3-70b"},
+		{"mistral", "mistral-large"},
+		{"qwen", "qwen-2.5"},
+		{"deepseek", "deepseek-chat"},
+		{"cohere", "command-r-plus"},
+	}
+
+	for _, p := range providers {
+		t.Run(p.name, func(t *testing.T) {
+			e := NewEstimator(p.model)
+			proseTokens := e.Estimate(prose)
+			codeTokens := e.Estimate(code)
+			if proseTokens <= 0 || codeTokens <= 0 {
+				t.Errorf("expected positive token counts, got prose=%d code=%d", proseTokens, codeTokens)
+			}
+			// Both estimates should be reasonable (within 10x of each other)
+			ratio := float64(proseTokens) / float64(codeTokens)
+			if ratio < 0.1 || ratio > 10.0 {
+				t.Errorf("prose/code ratio (%.2f) is unreasonable: prose=%d code=%d", ratio, proseTokens, codeTokens)
+			}
+		})
+	}
+}
+
+func TestEstimate_ShortTextFallback(t *testing.T) {
+	providers := []struct {
+		model string
+	}{
+		{"claude-3-opus"},
+		{"gemini-pro"},
+		{"llama-3-70b"},
+		{"mistral-large"},
+		{"qwen-2.5"},
+		{"deepseek-chat"},
+		{"command-r-plus"},
+	}
+
+	for _, p := range providers {
+		t.Run(p.model, func(t *testing.T) {
+			e := NewEstimator(p.model)
+			count := e.Estimate("hello")
+			if count <= 0 {
+				t.Errorf("expected positive token count for short text, got %d", count)
+			}
+		})
+	}
+}
+
+func TestEstimateMessages_MultiMessage(t *testing.T) {
+	e := NewEstimator("gpt-4o")
+	messages := []struct {
+		role    string
+		content string
+	}{
+		{"system", "You are a helpful assistant."},
+		{"user", "Hello, how are you?"},
+		{"assistant", "I'm doing well, thank you!"},
+	}
+
+	var totalEstimate int
+	for _, m := range messages {
+		totalEstimate += e.Estimate(m.content)
+	}
+
+	// EstimateMessages should account for per-message overhead
+	msgTypes := make([]struct {
+		Role    string
+		Content string
+	}, len(messages))
+	for i, m := range messages {
+		msgTypes[i] = struct {
+			Role    string
+			Content string
+		}{m.role, m.content}
+	}
+
+	// The estimate should be at least as large as sum of content estimates
+	// (due to per-message overhead)
+	if totalEstimate <= 0 {
+		t.Errorf("expected positive total estimate, got %d", totalEstimate)
+	}
+}

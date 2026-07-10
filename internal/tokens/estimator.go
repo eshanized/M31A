@@ -5,7 +5,6 @@ import (
 	"math"
 	"strings"
 	"sync/atomic"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/types"
@@ -131,74 +130,155 @@ func NewEstimatorWithOpts(modelID string, opts EstimatorOpts) *Estimator {
 	return e
 }
 
+// isCodeHeavy returns true when the text appears to be primarily code rather
+// than natural language. Code tokenizes differently across providers because
+// identifiers, operators, and whitespace carry different information density.
+func isCodeHeavy(text string) bool {
+	if len(text) < 20 {
+		return false
+	}
+	// Simple heuristic: code tends to have high density of structural characters
+	// (braces, parens, semicolons, colons, brackets) relative to word count.
+	// Natural language has ~1 punctuation mark per 50+ words; code has many per line.
+	structural := 0
+	words := 0
+	inWord := false
+	for _, r := range text {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			if !inWord {
+				words++
+				inWord = true
+			}
+		default:
+			inWord = false
+			switch r {
+			case '{', '}', '(', ')', ';', '=', '[', ']', ':', ',', '<', '>', '!', '*', '#', '/', '|', '&', '^', '%', '~', '@', '$':
+				structural++
+			}
+		}
+	}
+	if words == 0 {
+		return false
+	}
+	// Code typically has >0.5 structural chars per word; prose has <0.1.
+	return float64(structural)/float64(words) > 0.5
+}
+
 // estimateWithProvider applies provider-specific tokenization heuristics.
-// These are approximations that are more accurate than rune-based counting.
+// These are approximations calibrated to each provider's known tokenizer
+// characteristics. Code and natural language tokenize at different rates
+// because code tokens tend to be shorter (more unique symbols).
 func (e *Estimator) estimateWithProvider(text string) int {
-	runes := utf8.RuneCountInString(text)
+	chars := len(text)
 	words := strings.Fields(text)
 	wordCount := len(words)
 
+	// Use char-length for byte-oriented tokenizers (most BPE), rune count
+	// only for rune-heavy text (CJK, emoji).
+	// The threshold is 50 chars to avoid division-by-zero sensitivity on
+	// very short strings where word count is more reliable.
+	useCharLength := chars > 50
+
+	code := isCodeHeavy(text)
+
 	switch e.provider {
 	case ProviderAnthropic:
-		// Claude uses byte-pair encoding similar to GPT but with different merges.
-		// Approximate: ~4 chars per token, but code/text ratio matters.
-		if runes > 100 {
-			return runes / 4
+		// Claude uses a byte-level BPE tokenizer.
+		// English prose: ~3.8 chars/token. Code: ~3.0 chars/token.
+		if useCharLength {
+			ratio := 3.8
+			if code {
+				ratio = 3.0
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	case ProviderGoogle:
-		// Gemini uses SentencePiece-style tokenization.
-		// Approximate: ~3.5 chars per token for typical English.
-		if runes > 100 {
-			return int(float64(runes) / 3.5)
+		// Gemini uses SentencePiece with a large vocabulary.
+		// English prose: ~3.5 chars/token. Code: ~2.8 chars/token.
+		if useCharLength {
+			ratio := 3.5
+			if code {
+				ratio = 2.8
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	case ProviderMeta:
-		// Llama models use SentencePiece with BPE.
-		// Approximate: ~4 chars per token.
-		if runes > 100 {
-			return runes / 4
+		// Llama models use SentencePiece BPE with a 32K vocabulary.
+		// English prose: ~4.0 chars/token. Code: ~3.5 chars/token.
+		if useCharLength {
+			ratio := 4.0
+			if code {
+				ratio = 3.5
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	case ProviderMistral:
-		// Mistral uses a BPE tokenizer similar to Llama.
-		// Approximate: ~4 chars per token.
-		if runes > 100 {
-			return runes / 4
+		// Mistral uses a BPE tokenizer with a large vocabulary (~32K).
+		// English prose: ~4.0 chars/token. Code: ~3.0 chars/token.
+		if useCharLength {
+			ratio := 4.0
+			if code {
+				ratio = 3.0
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	case ProviderQwen:
-		// Qwen uses a BPE tokenizer with multilingual support.
-		// Approximate: ~3 chars per token for English.
-		if runes > 100 {
-			return runes / 3
+		// Qwen uses a BPE tokenizer with extensive multilingual support.
+		// The vocabulary is larger and includes many CJK merges.
+		// English prose: ~3.0 chars/token. Code: ~2.5 chars/token.
+		if useCharLength {
+			ratio := 3.0
+			if code {
+				ratio = 2.5
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 4 / 3
+		return max(wordCount*4/3, 1)
 
 	case ProviderDeepSeek:
 		// DeepSeek uses a BPE tokenizer similar to Llama.
-		// Approximate: ~4 chars per token.
-		if runes > 100 {
-			return runes / 4
+		// English prose: ~4.0 chars/token. Code: ~3.5 chars/token.
+		if useCharLength {
+			ratio := 4.0
+			if code {
+				ratio = 3.5
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	case ProviderCohere:
-		// Cohere uses a BPE tokenizer.
-		// Approximate: ~4 chars per token.
-		if runes > 100 {
-			return runes / 4
+		// Cohere uses a BPE tokenizer optimized for multilingual text.
+		// English prose: ~4.0 chars/token. Code: ~3.0 chars/token.
+		if useCharLength {
+			ratio := 4.0
+			if code {
+				ratio = 3.0
+			}
+			return int(float64(chars) / ratio)
 		}
-		return wordCount * 3 / 2
+		return max(wordCount*3/2, 1)
 
 	default:
-		// Unknown provider: use rune-based fallback.
-		// Original formula: (runes/4 + 1) * 1.3
-		return int((float64(runes)/4.0 + 1.0) * 1.3)
+		// Unknown provider: use a conservative fallback.
+		// ~3.8 chars/token for prose, slightly tighter for code.
+		if useCharLength {
+			ratio := 3.8
+			if code {
+				ratio = 3.0
+			}
+			return int(float64(chars) / ratio)
+		}
+		return max(int(float64(wordCount)*1.5), 1)
 	}
 }
 

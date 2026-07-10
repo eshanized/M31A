@@ -1091,7 +1091,7 @@ func TestEngine_ConsumeStream_MaxSize(t *testing.T) {
 		Next:  func() (*m31types.StreamChunk, error) { return &m31types.StreamChunk{Delta: string(content)}, nil },
 		Close: func() error { return nil },
 	}
-	_, err := engine.consumeStream(iterator)
+	_, _, err := engine.consumeStream(iterator)
 	if err == nil {
 		t.Fatal("expected error for oversized response")
 	}
@@ -1110,7 +1110,7 @@ func TestEngine_ConsumeStream_PartialOnError(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	content, err := engine.consumeStream(iterator)
+	content, _, err := engine.consumeStream(iterator)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1132,7 +1132,7 @@ func TestEngine_ConsumeStream_NilChunk(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	content, err := engine.consumeStream(iterator)
+	content, _, err := engine.consumeStream(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1160,7 +1160,7 @@ func TestEngine_ConsumeStreamWithTools_TextOnly(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	content, calls, err := engine.consumeStreamWithTools(iterator)
+	content, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1187,7 +1187,7 @@ func TestEngine_ConsumeStreamWithTools_WithToolCalls(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	_, calls, err := engine.consumeStreamWithTools(iterator)
+	_, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1215,7 +1215,7 @@ func TestEngine_ConsumeStreamWithTools_NilChunk(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	content, _, err := engine.consumeStreamWithTools(iterator)
+	content, _, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1239,7 +1239,7 @@ func TestEngine_ConsumeStreamWithTools_EmptyToolInput(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	_, calls, err := engine.consumeStreamWithTools(iterator)
+	_, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1270,7 +1270,7 @@ func TestEngine_ConsumeStreamWithTools_ToolCountExceeded(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	_, calls, err := engine.consumeStreamWithTools(iterator)
+	_, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1289,7 +1289,7 @@ func TestEngine_ConsumeStreamWithTools_MaxSize(t *testing.T) {
 		Next:  func() (*m31types.StreamChunk, error) { return &m31types.StreamChunk{Delta: string(content)}, nil },
 		Close: func() error { return nil },
 	}
-	_, _, err := engine.consumeStreamWithTools(iterator)
+	_, _, _, err := engine.consumeStreamWithTools(iterator)
 	if err == nil {
 		t.Fatal("expected error for oversized response")
 	}
@@ -1861,7 +1861,7 @@ func TestEngine_ConsumeStreamWithTools_ToolNameNormalization(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	_, calls, err := engine.consumeStreamWithTools(iterator)
+	_, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1890,7 +1890,7 @@ func TestEngine_ConsumeStreamWithTools_MultipleTools(t *testing.T) {
 		},
 		Close: func() error { return nil },
 	}
-	_, calls, err := engine.consumeStreamWithTools(iterator)
+	_, calls, _, err := engine.consumeStreamWithTools(iterator)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -650,7 +650,7 @@ func TestConsumeStream_ErrorBeforeEOF(t *testing.T) {
 		Close: func() error { return nil },
 	}
 
-	result, err := engine.consumeStream(iterator)
+	result, _, err := engine.consumeStream(iterator)
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
 	}
@@ -680,7 +680,7 @@ func TestConsumeStream_NormalEOF(t *testing.T) {
 		Close: func() error { return nil },
 	}
 
-	result, err := engine.consumeStream(iterator)
+	result, _, err := engine.consumeStream(iterator)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -739,7 +739,9 @@ func TestEngine_PreflightContextCheck(t *testing.T) {
 	}
 
 	// Create messages that will exceed 95% of 100 tokens (95 tokens)
-	longContent := strings.Repeat("word ", 60) // ~60 tokens via rune fallback
+	// New heuristic: ~3.8 chars/token for unknown providers (prose)
+	// Need > 95 * 3.8 = 361 chars to exceed the threshold.
+	longContent := strings.Repeat("word ", 80) // 400 chars → ~105 tokens
 	messages := []m31types.Message{
 		{Role: "user", Content: longContent},
 	}
@@ -794,7 +796,7 @@ func TestConsumeStreamWithTools_NativeToolCalls(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	content, toolCalls, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -834,7 +836,7 @@ func TestConsumeStreamWithTools_MultipleTools(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	content, toolCalls, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -870,7 +872,7 @@ func TestConsumeStreamWithTools_NoToolCalls(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, toolCalls, err := engine.consumeStreamWithTools(iter)
+	content, toolCalls, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -900,7 +902,7 @@ func TestConsumeStreamWithTools_ToolNameNormalization(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	_, toolCalls, err := engine.consumeStreamWithTools(iter)
+	_, toolCalls, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

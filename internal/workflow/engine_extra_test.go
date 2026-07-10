@@ -961,7 +961,7 @@ func TestConsumeStreamWithTools_EmptyToolInput(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	_, toolCalls, err := engine.consumeStreamWithTools(iter)
+	_, toolCalls, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -990,7 +990,7 @@ func TestConsumeStreamWithTools_NilChunk(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, _, err := engine.consumeStreamWithTools(iter)
+	content, _, _, err := engine.consumeStreamWithTools(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestConsumeStream_NilChunk(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, err := engine.consumeStream(iter)
+	content, _, err := engine.consumeStream(iter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1990,7 +1990,7 @@ func TestConsumeStreamWithTools_Error(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, _, err := engine.consumeStreamWithTools(iter)
+	content, _, _, err := engine.consumeStreamWithTools(iter)
 	if err != io.ErrUnexpectedEOF {
 		t.Errorf("expected io.ErrUnexpectedEOF, got %v", err)
 	}
@@ -2017,7 +2017,7 @@ func TestConsumeStreamWithTools_TextThenError(t *testing.T) {
 	}
 	iter := &m31types.StreamIterator{Next: next, Close: func() error { return nil }}
 
-	content, _, err := engine.consumeStreamWithTools(iter)
+	content, _, _, err := engine.consumeStreamWithTools(iter)
 	if err != io.ErrUnexpectedEOF {
 		t.Errorf("expected io.ErrUnexpectedEOF, got %v", err)
 	}
