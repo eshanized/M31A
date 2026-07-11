@@ -37,13 +37,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.addToastCmd("Response cancelled", "warning", 3*time.Second))
 				return m, tea.Batch(cmds...)
 			}
-if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
-			m.lastCtrlCTime = time.Time{}
-			cw, ch := m.contentDimensions()
-			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
-			m.switchScreen(ScreenConfirmQuit)
-			return m, nil
-		}
+			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
+				m.lastCtrlCTime = time.Time{}
+				cw, ch := m.contentDimensions()
+				m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+				m.switchScreen(ScreenConfirmQuit)
+				return m, nil
+			}
 			m.lastCtrlCTime = time.Now()
 			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
 			return m, tea.Batch(cmds...)

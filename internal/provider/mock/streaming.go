@@ -31,7 +31,7 @@ type StreamingMockProvider struct {
 	// calls allowed. 0 means unlimited. Default: 0 (unlimited).
 	ConcurrencyLimit int
 
-	mu           sync.Mutex
+	mu            sync.Mutex
 	activeStreams int
 }
 

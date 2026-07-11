@@ -8,8 +8,8 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/workflow"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -73,9 +73,11 @@ func TestEmitterDropsUnderStreamingLoad(t *testing.T) {
 // simplePlanProvider returns a fixed plan with 1 task
 type simplePlanProvider struct{}
 
-func (p *simplePlanProvider) Name() string        { return "mock" }
-func (p *simplePlanProvider) APIKey() string      { return "test-key" }
-func (p *simplePlanProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) { return nil, nil }
+func (p *simplePlanProvider) Name() string   { return "mock" }
+func (p *simplePlanProvider) APIKey() string { return "test-key" }
+func (p *simplePlanProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
+	return nil, nil
+}
 func (p *simplePlanProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
 	done := false
 	next := func() (*m31types.StreamChunk, error) {
@@ -89,6 +91,8 @@ func (p *simplePlanProvider) ChatCompletionStream(ctx context.Context, req provi
 	return &m31types.StreamIterator{Next: next, Close: close}, nil
 }
 func (p *simplePlanProvider) EstimateCost(modelID string, usage m31types.Usage) float64 { return 0 }
-func (p *simplePlanProvider) HealthCheck(ctx context.Context) m31types.HealthStatus { return m31types.HealthStatus{Status: "live"} }
+func (p *simplePlanProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
+	return m31types.HealthStatus{Status: "live"}
+}
 func (p *simplePlanProvider) GetModel(id string) (*m31types.ModelInfo, error) { return nil, nil }
-func (p *simplePlanProvider) CachedModels() []m31types.ModelInfo { return nil }
+func (p *simplePlanProvider) CachedModels() []m31types.ModelInfo              { return nil }

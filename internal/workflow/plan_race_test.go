@@ -39,9 +39,11 @@ func (m *raceMockProvider) ChatCompletionStream(ctx context.Context, req provide
 	return &m31types.StreamIterator{Next: next, Close: close}, nil
 }
 func (m *raceMockProvider) EstimateCost(modelID string, usage m31types.Usage) float64 { return 0 }
-func (m *raceMockProvider) HealthCheck(ctx context.Context) m31types.HealthStatus { return m31types.HealthStatus{Status: "live"} }
+func (m *raceMockProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
+	return m31types.HealthStatus{Status: "live"}
+}
 func (m *raceMockProvider) GetModel(id string) (*m31types.ModelInfo, error) { return nil, nil }
-func (m *raceMockProvider) CachedModels() []m31types.ModelInfo { return nil }
+func (m *raceMockProvider) CachedModels() []m31types.ModelInfo              { return nil }
 
 func setupRaceTestEngine(t *testing.T) *Engine {
 	t.Helper()
