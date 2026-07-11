@@ -617,11 +617,13 @@ func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
+	// Ensure GoalInput is registered with router
 	if m.goalInput == nil {
-		return renderEmptyState("Goal input", "Type a goal below and press enter to start a workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
+		m.router.Register(ScreenGoalInput, m.goalInput)
 	}
 	m.goalInput.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.goalInput.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
@@ -728,11 +730,19 @@ func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
+	// Ensure FileExplorer is registered with router
 	if m.fileExplorerModel == nil {
-		return renderEmptyState("File explorer", "No files to display — ensure the working directory is set", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		if m.cwd != "" {
+			root := buildFileTree(m.cwd, 0, 3)
+			if root != nil {
+				m.fileExplorerModel.SetRoot(root)
+			}
+		}
+		m.router.Register(ScreenFileExplorer, m.fileExplorerModel)
 	}
 	m.fileExplorerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.fileExplorerModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
@@ -744,27 +754,37 @@ func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
+	// Ensure PhaseModelPicker is registered with router
 	if m.phaseModelPicker == nil {
-		return renderEmptyState("Model picker", "Loading models…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		if m.registry == nil || len(m.registry.ListAll()) == 0 {
+			return renderEmptyState("Model picker", "No providers configured", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		}
+		cw, ch := m.contentDimensions()
+		m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenPhaseModelPicker, m.phaseModelPicker)
 	}
 	m.phaseModelPicker.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.phaseModelPicker.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderGhostPickerContent(chrome layout.PageChrome) string {
+	// Ensure GhostPicker is registered with router
 	if m.ghostPickerModel == nil {
-		return renderEmptyState("Ghost mode", "No ghost files available — run a workflow to generate ghost outputs", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.ghostPickerModel = NewGhostPickerModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenGhostPicker, m.ghostPickerModel)
 	}
 	m.ghostPickerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.ghostPickerModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderGhostOutputContent(chrome layout.PageChrome) string {
+	// Ensure GhostOutput is registered with router
 	if m.ghostOutputModel == nil {
-		return renderEmptyState("Ghost output", "No ghost output yet — select a ghost file to see results", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.ghostOutputModel = NewGhostOutputModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenGhostOutput, m.ghostOutputModel)
 	}
 	m.ghostOutputModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.ghostOutputModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {

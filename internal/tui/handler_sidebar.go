@@ -17,7 +17,7 @@ func handleGoalSubmittedMsg(m *AppState, msg GoalSubmittedMsg) (tea.Model, tea.C
 	cw, ch := m.contentDimensions()
 	picker := NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
 	m.phaseModelPicker = picker
-	m.screen = ScreenPhaseModelPicker
+	m.switchScreen(ScreenPhaseModelPicker)
 	return m, picker.Init()
 }
 

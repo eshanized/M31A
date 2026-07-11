@@ -183,7 +183,16 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenFileExplorer] = func(msg tea.Msg) tea.Cmd {
 		if m.fileExplorerModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), cw, ch)
+			if m.cwd != "" {
+				root := buildFileTree(m.cwd, 0, 3)
+				if root != nil {
+					m.fileExplorerModel.SetRoot(root)
+				}
+			}
+			// Register with router
+			m.router.Register(ScreenFileExplorer, m.fileExplorerModel)
 		}
 		newModel, cmd := m.fileExplorerModel.Update(msg)
 		if r, ok := newModel.(*FileExplorerModel); ok {
@@ -271,7 +280,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenGoalInput] = func(msg tea.Msg) tea.Cmd {
 		if m.goalInput == nil {
-			return nil
+			m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
+			// Register with router
+			m.router.Register(ScreenGoalInput, m.goalInput)
 		}
 		newModel, cmd := m.goalInput.Update(msg)
 		if r, ok := newModel.(*GoalInputModel); ok {
@@ -291,7 +302,10 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenGhostPicker] = func(msg tea.Msg) tea.Cmd {
 		if m.ghostPickerModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.ghostPickerModel = NewGhostPickerModel(m.themeManager.Current(), cw, ch)
+			// Register with router
+			m.router.Register(ScreenGhostPicker, m.ghostPickerModel)
 		}
 		newModel, cmd := m.ghostPickerModel.Update(msg)
 		if r, ok := newModel.(*GhostPickerModel); ok {
@@ -301,7 +315,10 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenGhostOutput] = func(msg tea.Msg) tea.Cmd {
 		if m.ghostOutputModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.ghostOutputModel = NewGhostOutputModel(m.themeManager.Current(), cw, ch)
+			// Register with router
+			m.router.Register(ScreenGhostOutput, m.ghostOutputModel)
 		}
 		newModel, cmd := m.ghostOutputModel.Update(msg)
 		if r, ok := newModel.(*GhostOutputModel); ok {
@@ -323,10 +340,14 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenPhaseModelPicker] = func(msg tea.Msg) tea.Cmd {
 		if m.phaseModelPicker == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenPhaseModelPicker, m.phaseModelPicker)
 		}
 		newModel, cmd := m.phaseModelPicker.Update(msg)
-		m.phaseModelPicker = newModel
+		if r, ok := newModel.(*PhaseModelPickerModel); ok {
+			m.phaseModelPicker = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenSessionDetail] = func(msg tea.Msg) tea.Cmd {

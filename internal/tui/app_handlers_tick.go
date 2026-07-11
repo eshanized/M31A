@@ -52,7 +52,9 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 	}
 	if m.screen == ScreenPhaseModelPicker && m.phaseModelPicker != nil {
 		newPMP, cmd := m.phaseModelPicker.Update(msg)
-		m.phaseModelPicker = newPMP
+		if r, ok := newPMP.(*PhaseModelPickerModel); ok {
+			m.phaseModelPicker = r
+		}
 		cmds = append(cmds, cmd)
 	}
 	if m.screen == ScreenModelSelector && m.msModel != nil {

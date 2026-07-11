@@ -20,9 +20,9 @@ import (
 
 // Test constants matching production values
 const (
-	testChannelCap        = 512                       // production ChannelCap
-	testDrainTickInterval = 16 * time.Millisecond     // ~60Hz calibrated starting point per RESEARCH.md A1/A2
-	testMaxDrainPerTick   = 4                         // production maxDrainPerTick
+	testChannelCap        = 512                   // production ChannelCap
+	testDrainTickInterval = 16 * time.Millisecond // ~60Hz calibrated starting point per RESEARCH.md A1/A2
+	testMaxDrainPerTick   = 4                     // production maxDrainPerTick
 )
 
 // simplePlanProvider returns a fixed plan with 1 task - always returns valid JSON
@@ -64,8 +64,8 @@ func newStreamingPlanProvider(cfg mock.StreamingMockProvider) *streamingPlanProv
 	}
 }
 
-func (p *streamingPlanProvider) Name() string           { return p.streaming.Name() }
-func (p *streamingPlanProvider) APIKey() string         { return p.streaming.APIKey() }
+func (p *streamingPlanProvider) Name() string   { return p.streaming.Name() }
+func (p *streamingPlanProvider) APIKey() string { return p.streaming.APIKey() }
 func (p *streamingPlanProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
 	return p.streaming.FetchModels(ctx)
 }

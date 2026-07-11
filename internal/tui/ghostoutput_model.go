@@ -68,8 +68,8 @@ func (go_ *GhostOutputModel) clampScroll() {
 // Init implements tea.Model.
 func (go_ *GhostOutputModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model.
-func (go_ *GhostOutputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (go_ *GhostOutputModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		go_.SetDimensions(msg.Width, msg.Height)

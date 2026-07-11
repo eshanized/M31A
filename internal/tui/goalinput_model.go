@@ -58,8 +58,8 @@ func (gi *GoalInputModel) Init() tea.Cmd {
 	return textarea.Blink
 }
 
-// Update implements tea.Model.
-func (gi *GoalInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable interface.
+func (gi *GoalInputModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		gi.SetDimensions(msg.Width, msg.Height)

@@ -67,8 +67,8 @@ func (gp *GhostPickerModel) SelectedFiles() []string {
 // Init implements tea.Model.
 func (gp *GhostPickerModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model.
-func (gp *GhostPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (gp *GhostPickerModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		gp.SetDimensions(msg.Width, msg.Height)

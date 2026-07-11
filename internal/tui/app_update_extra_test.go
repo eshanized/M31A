@@ -18,6 +18,7 @@ func testAppState() *AppState {
 		replModel:    &rm,
 		themeManager: tm,
 		router:       NewRouter(),
+		registry:     newTestRegistry(),
 		toasts:       []Toast{},
 		toastTimers:  make(map[int]*time.Timer),
 		width:        80,
