@@ -1,6 +1,9 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/types"
+)
 
 // app_routing.go — consolidated screen routing infrastructure.
 //
@@ -72,10 +75,20 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenPlan] = func(msg tea.Msg) tea.Cmd {
 		if m.planModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.planModel = NewPlanModel(
+				[]types.Task{},
+				m.themeManager.Current(),
+				"", "", "",
+				0, "",
+				cw, ch,
+			)
+			m.router.Register(ScreenPlan, m.planModel)
 		}
 		newModel, cmd := m.planModel.Update(msg)
-		m.planModel = newModel
+		if r, ok := newModel.(*PlanModel); ok {
+			m.planModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenExecute] = func(msg tea.Msg) tea.Cmd {
@@ -202,7 +215,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenBisect] = func(msg tea.Msg) tea.Cmd {
 		if m.bisectModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenBisect, m.bisectModel)
 		}
 		newModel, cmd := m.bisectModel.Update(msg)
 		if r, ok := newModel.(*BisectModel); ok {
@@ -212,7 +227,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenDashboard] = func(msg tea.Msg) tea.Cmd {
 		if m.dashboardModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenDashboard, m.dashboardModel)
 		}
 		newModel, cmd := m.dashboardModel.Update(msg)
 		if r, ok := newModel.(*DashboardModel); ok {
@@ -270,7 +287,12 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenDiscuss] = func(msg tea.Msg) tea.Cmd {
 		if m.discussModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+			if m.config != nil && m.config.UI.DiscussTimeout > 0 {
+				m.discussModel.SetTimeout(m.config.UI.DiscussTimeout)
+			}
+			m.router.Register(ScreenDiscuss, m.discussModel)
 		}
 		newModel, cmd := m.discussModel.Update(msg)
 		if r, ok := newModel.(*DiscussModel); ok {

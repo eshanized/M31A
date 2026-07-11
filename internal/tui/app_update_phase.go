@@ -116,7 +116,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				ds := m.workflowEngine.DiscussState()
 				m.discussQuestions = ds.Questions
 			}
-			m.screen = ScreenDiscuss
+			m.switchScreen(ScreenDiscuss)
 			timeoutSecs := 0
 			if m.config != nil {
 				timeoutSecs = m.config.UI.DiscussTimeout
@@ -178,13 +178,13 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				m.width, m.height,
 			)
 		}
-		m.screen = ScreenPlan
+		m.switchScreen(ScreenPlan)
 		m.persistWorkflowState()
 		return m.RunPhaseCmd(next)
 
 	case types.PhasePlan:
 		// Show plan screen and wait for user approval (do NOT auto-advance to Execute)
-		m.screen = ScreenPlan
+		m.switchScreen(ScreenPlan)
 		if m.planModel == nil {
 			m.planModel = NewPlanModel(
 				msg.Tasks,

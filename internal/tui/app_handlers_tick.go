@@ -74,7 +74,9 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 	}
 	if m.screen == ScreenPlan && m.planModel != nil {
 		newPlan, cmd := m.planModel.Update(msg)
-		m.planModel = newPlan
+		if np, ok := newPlan.(*PlanModel); ok {
+			m.planModel = np
+		}
 		cmds = append(cmds, cmd)
 	}
 	if m.screen == ScreenShip && m.shipModel != nil {

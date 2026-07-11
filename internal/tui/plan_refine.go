@@ -28,8 +28,8 @@ func NewPlanRefineModel(t theme.Theme, width int) *PlanRefineModel {
 	}
 }
 
-// Update handles refine input key events.
-func (pm *PlanRefineModel) Update(msg tea.Msg) (*PlanRefineModel, tea.Cmd) {
+// Update implements Screenable.
+func (pm *PlanRefineModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -57,4 +57,19 @@ func (pm *PlanRefineModel) View() string {
 // Value returns the current textarea content.
 func (pm *PlanRefineModel) Value() string {
 	return pm.textarea.Value()
+}
+
+// Init implements Screenable.
+func (pm *PlanRefineModel) Init() tea.Cmd {
+	return nil
+}
+
+// SetDimensions updates the refine model dimensions.
+func (pm *PlanRefineModel) SetDimensions(w, h int) {
+	pm.textarea.SetWidth(w - 4)
+}
+
+// SetTheme updates the theme.
+func (pm *PlanRefineModel) SetTheme(t theme.Theme) {
+	pm.theme = t
 }

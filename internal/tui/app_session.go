@@ -311,7 +311,7 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 	m.persistWorkflowState()
 
 	if next == types.PhaseExecute {
-		m.screen = ScreenExecute
+		m.switchScreen(ScreenExecute)
 		var tasks []types.Task
 		if m.sessionManager != nil {
 			var loadErr error
@@ -329,6 +329,6 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 		return m.RunPhaseCmd(types.PhaseExecute)
 	}
 
-	m.screen = ScreenPlan
+	m.switchScreen(ScreenPlan)
 	return m.RunPhaseCmd(next)
 }

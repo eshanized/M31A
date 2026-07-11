@@ -69,8 +69,8 @@ func (dm *DiscussModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update implements tea.Model.
-func (dm *DiscussModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (dm *DiscussModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		dm.width = msg.Width

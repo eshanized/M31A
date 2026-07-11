@@ -174,6 +174,16 @@ func (pm *PlanModel) SetDimensions(w, h int) {
 	pm.initViewport()
 }
 
+// SetTheme updates the theme.
+func (pm *PlanModel) SetTheme(t theme.Theme) {
+	pm.theme = t
+}
+
+// Init implements Screenable.
+func (pm *PlanModel) Init() tea.Cmd {
+	return nil
+}
+
 func (pm *PlanModel) initViewport() {
 	h := pm.height - 7
 	if h < 5 {
@@ -188,7 +198,7 @@ func (pm *PlanModel) initViewport() {
 }
 
 // Update handles plan screen key events.
-func (pm *PlanModel) Update(msg tea.Msg) (*PlanModel, tea.Cmd) {
+func (pm *PlanModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	if pm.refineMode && pm.refineInput != nil {
 		return pm.handleRefineUpdate(msg)
 	}
@@ -232,7 +242,7 @@ func (pm *PlanModel) Update(msg tea.Msg) (*PlanModel, tea.Cmd) {
 	return pm, nil
 }
 
-func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (*PlanModel, tea.Cmd) {
+func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		pm.confirmMode = false
@@ -251,7 +261,7 @@ func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (*PlanModel, tea.Cmd) {
 	return pm, nil
 }
 
-func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (*PlanModel, tea.Cmd) {
+func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -273,7 +283,9 @@ func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (*PlanModel, tea.Cmd) {
 	}
 	if pm.refineInput != nil {
 		newRefine, cmd := pm.refineInput.Update(msg)
-		pm.refineInput = newRefine
+		if nr, ok := newRefine.(*PlanRefineModel); ok {
+			pm.refineInput = nr
+		}
 		return pm, cmd
 	}
 	return pm, nil

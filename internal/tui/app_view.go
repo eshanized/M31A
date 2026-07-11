@@ -571,14 +571,20 @@ func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
+	// Ensure Plan is registered with router
 	if m.planModel == nil {
-		if m.workflowPhase == types.PhasePlan {
-			return renderLoading("Generating plan…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
-		}
-		return renderEmptyState("No plan available", "Run /plan or start a workflow with /new", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.planModel = NewPlanModel(
+			[]types.Task{},
+			m.themeManager.Current(),
+			"", "", "",
+			0, "",
+			cw, ch,
+		)
+		m.router.Register(ScreenPlan, m.planModel)
 	}
 	m.planModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.planModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
@@ -659,11 +665,17 @@ func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
+	// Ensure Discuss is registered with router
 	if m.discussModel == nil {
-		return renderEmptyState("Discussion", "No discussion questions — start a workflow with /new", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+		if m.config != nil && m.config.UI.DiscussTimeout > 0 {
+			m.discussModel.SetTimeout(m.config.UI.DiscussTimeout)
+		}
+		m.router.Register(ScreenDiscuss, m.discussModel)
 	}
 	m.discussModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.discussModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
@@ -698,11 +710,14 @@ func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
+	// Ensure Bisect is registered with router
 	if m.bisectModel == nil {
-		return renderEmptyState("Git bisect", "No bisect session active — run /bisect to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenBisect, m.bisectModel)
 	}
 	m.bisectModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.bisectModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
@@ -714,11 +729,17 @@ func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
+	// Ensure Dashboard is registered with router
 	if m.dashboardModel == nil {
-		return renderEmptyState("Dashboard", "No workflow active — type a goal or run /new to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.dashboardModel = NewDashboardModel(m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenDashboard, m.dashboardModel)
 	}
 	m.dashboardModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.dashboardModel.View()
+	if m.workflowEngine != nil {
+		m.dashboardModel.SetWorkflowState(m.workflowPhase, m.workflowGoal, "", m.activeProvider)
+	}
+	return m.router.View()
 }
 
 func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
