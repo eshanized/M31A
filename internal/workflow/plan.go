@@ -157,10 +157,12 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		tasks[i].Status = m31types.StatusPending
 	}
 
+	e.state.planMu.Lock()
 	e.state.planMarkdown = planMarkdown
 	if !isRefinement {
 		e.state.planVersion = 1
 	}
+	e.state.planMu.Unlock()
 
 	if err := e.sessionMgr.SavePlan(e.sessionID, e.state.planVersion, planMarkdown); err != nil {
 		e.logger.Warn("save plan.md failed", "error", err)

@@ -274,10 +274,10 @@ func (m *AppState) popScreen() tea.Cmd {
 	if len(m.screenStack) > 0 {
 		prev := m.screenStack[len(m.screenStack)-1]
 		m.screenStack = m.screenStack[:len(m.screenStack)-1]
-		m.screen = prev
+		m.switchScreen(prev)
 		return m.ensureSubModel(prev)
 	}
-	m.screen = ScreenREPL
+	m.switchScreen(ScreenREPL)
 	return nil
 }
 

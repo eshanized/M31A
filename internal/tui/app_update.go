@@ -37,13 +37,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.addToastCmd("Response cancelled", "warning", 3*time.Second))
 				return m, tea.Batch(cmds...)
 			}
-			if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
-				m.lastCtrlCTime = time.Time{}
-				cw, ch := m.contentDimensions()
-				m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
-				m.screen = ScreenConfirmQuit
-				return m, nil
-			}
+if !m.lastCtrlCTime.IsZero() && time.Since(m.lastCtrlCTime) < 2*time.Second {
+			m.lastCtrlCTime = time.Time{}
+			cw, ch := m.contentDimensions()
+			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+			m.switchScreen(ScreenConfirmQuit)
+			return m, nil
+		}
 			m.lastCtrlCTime = time.Now()
 			cmds = append(cmds, m.addToastCmd("Press ctrl+c again to exit (2s window)", "info", 2*time.Second))
 			return m, tea.Batch(cmds...)
@@ -116,6 +116,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case HealthCheckResultMsg:
 		_, cmd := handleHealthCheckResultMsg(m, msg)
 		cmds = append(cmds, cmd)
+	case EmitterDropLogTickMsg:
+		cmds = append(cmds, m.handleEmitterDropLogTick(msg))
 
 	// ── Cache refresh ─────────────────────────────────────────────────────────
 	case RefreshCacheMsg:
@@ -208,6 +210,8 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflow.IntermediateProgressMsg,
 		workflow.ThinkingStartMsg, workflow.ThinkingCompleteMsg:
 		cmds = append(cmds, m.drainAdaptiveCmd())
+	case workflow.DecisionsSnapshotMsg:
+		cmds = append(cmds, m.handleDecisionsSnapshot(msg))
 	// ── W7: Newly wired workflow events ──────────────────────────────────────
 	case workflow.InitAnalysisMsg:
 		cmds = append(cmds, m.handleInitAnalysis(msg)...)

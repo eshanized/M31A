@@ -765,11 +765,13 @@ func (m *AppState) renderGhostOutputContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {
+	// Ensure ConfirmQuit is registered with router
 	if m.confirmQuitModel == nil {
 		m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenConfirmQuit, m.confirmQuitModel)
 	}
 	m.confirmQuitModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.confirmQuitModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
@@ -1139,11 +1141,7 @@ func (m *AppState) renderDecisionsContent(chrome layout.PageChrome) string {
 	height := chrome.ContentHeight()
 	theme := m.themeManager.Current()
 
-	if m.workflowEngine == nil {
-		return renderEmptyState("Decisions", "No workflow engine available", width, height, theme)
-	}
-
-	decisions := decision.RedactSlice(m.workflowEngine.SnapshotDecisions())
+	decisions := decision.RedactSlice(m.cachedDecisions)
 	if len(decisions) == 0 {
 		return renderEmptyState("Decisions", "No decisions recorded yet — start a workflow with /new", width, height, theme)
 	}

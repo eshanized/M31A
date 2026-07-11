@@ -101,6 +101,7 @@ type (
 	GhostWriteResultMsg     = tuitypes.GhostWriteResultMsg
 	ChatHistoryContinueMsg  = tuitypes.ChatHistoryContinueMsg
 	IntentClassifiedMsg     = tuitypes.IntentClassifiedMsg
+	EmitterDropLogTickMsg   = tuitypes.EmitterDropLogTickMsg
 )
 
 // WorkflowEngine re-exports the workflow engine interface from tuitypes.

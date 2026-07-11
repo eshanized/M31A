@@ -308,7 +308,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenConfirmQuit] = func(msg tea.Msg) tea.Cmd {
 		if m.confirmQuitModel == nil {
-			return nil
+			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), m.width, m.height)
+			// Register with router
+			m.router.Register(ScreenConfirmQuit, m.confirmQuitModel)
 		}
 		newModel, cmd := m.confirmQuitModel.Update(msg)
 		if r, ok := newModel.(*ConfirmQuitModel); ok {

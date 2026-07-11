@@ -75,6 +75,8 @@ func (m *AppState) Init() tea.Cmd {
 			baseCmds = append(baseCmds, m.sidebarModel.refreshCmd())
 			baseCmds = append(baseCmds, NextSidebarRefreshTick(m.shutdownCtx, SidebarRefreshInterval))
 		}
+		// Periodic emitter drop counter logging (if any drops occurred).
+		baseCmds = append(baseCmds, EmitterDropLogTick(m.shutdownCtx))
 		// Start file watcher for real-time sidebar refresh
 		baseCmds = append(baseCmds, m.startFileWatcher())
 
@@ -198,6 +200,10 @@ func (m *AppState) Shutdown() {
 	}
 	if m.subagentManager != nil {
 		m.subagentManager.Shutdown(context.Background())
+	}
+	// Emitter drop observability: log total drops on shutdown
+	if dropped := DroppedMessages(); dropped > 0 {
+		slog.Warn("workflow->TUI channel drops during session", "total_dropped", dropped)
 	}
 }
 

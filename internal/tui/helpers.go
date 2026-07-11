@@ -359,6 +359,17 @@ func NextSidebarRefreshTick(ctx context.Context, d time.Duration) tea.Cmd {
 	return SidebarRefreshTicker(ctx, d)
 }
 
+// EmitterDropLogInterval is how often to log the emitter drop counter (30s).
+const EmitterDropLogInterval = 30 * time.Second
+
+// EmitterDropLogTick returns a tea.Cmd that emits EmitterDropLogTickMsg
+// periodically to log the drop counter if any drops have occurred.
+func EmitterDropLogTick(ctx context.Context) tea.Cmd {
+	return tea.Tick(EmitterDropLogInterval, func(time.Time) tea.Msg {
+		return EmitterDropLogTickMsg{}
+	})
+}
+
 // NextCacheRefreshTick returns a tea.Cmd for the next cache refresh tick.
 func NextCacheRefreshTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {

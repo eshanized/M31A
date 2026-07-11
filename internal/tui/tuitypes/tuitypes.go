@@ -267,6 +267,12 @@ type ErrorMsg struct {
 	Err error
 }
 
+// EmitterDropLogTickMsg is emitted periodically to log the emitter drop counter
+// if any messages have been dropped.
+type EmitterDropLogTickMsg struct {
+	Time time.Time
+}
+
 // ─── Permission messages ──────────────────────────────────────────────────────
 
 // PermissionRequestMsg is sent when a tool needs user approval.

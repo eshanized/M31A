@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // app_handlers_misc.go — miscellaneous event handling extracted from Update().
@@ -222,4 +223,20 @@ func (m *AppState) checkContextWarnings() []tea.Cmd {
 			"info", 6*time.Second))
 	}
 	return cmds
+}
+
+// handleDecisionsSnapshot updates the cached decisions from the workflow engine.
+func (m *AppState) handleDecisionsSnapshot(msg workflow.DecisionsSnapshotMsg) tea.Cmd {
+	m.cachedDecisions = msg.Decisions
+	return nil
+}
+
+// handleEmitterDropLogTick logs the emitter drop counter if any drops have occurred.
+// Re-schedules itself for the next interval.
+func (m *AppState) handleEmitterDropLogTick(msg EmitterDropLogTickMsg) tea.Cmd {
+	if dropped := DroppedMessages(); dropped > 0 {
+		slog.Warn("workflow->TUI channel drops observed", "total_dropped", dropped)
+	}
+	// Re-schedule the next tick
+	return EmitterDropLogTick(m.shutdownCtx)
 }

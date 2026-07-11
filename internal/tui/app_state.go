@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
@@ -78,6 +79,9 @@ type AppState struct {
 	screenStack []Screen
 	screenCap   int // max screen stack size (prevents unbounded growth)
 
+	// Router for new screen interface (pilot: ConfirmQuit)
+	router *Router
+
 	// Theme
 	themeManager *theme.Manager
 
@@ -114,6 +118,9 @@ type AppState struct {
 	shutdownCtx        context.Context
 	shutdownCancel     context.CancelFunc
 	emitterCh          chan tea.Msg
+
+	// Cached decisions from workflow engine (updated via DecisionsSnapshotMsg)
+	cachedDecisions []decision.DecisionReceipt
 
 	// Optional packages
 	ledger         *ledger.Ledger
@@ -375,6 +382,9 @@ func NewApp(
 		a.sidebarModel.SetWidth(cfg.UI.SidebarWidth)
 	}
 
+	// Initialize router for new screen interface (pilot: ConfirmQuit)
+	a.router = NewRouter()
+
 	// Initialize screen routing map (closures capture m, so nil models are safe)
 	a.initScreenUpdaters()
 
@@ -457,4 +467,12 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 	}
 	cmds = append(cmds, m.startNewSession())
 	return tea.Batch(cmds...)
+}
+
+// switchScreen updates the current screen and notifies the router (if using new interface).
+func (m *AppState) switchScreen(s Screen) {
+	m.screen = s
+	if m.router != nil && m.router.ActiveID() != s {
+		m.router.SwitchTo(s)
+	}
 }

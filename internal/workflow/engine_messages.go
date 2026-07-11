@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/git"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
@@ -259,4 +260,9 @@ type CompactionCompleteMsg struct {
 type TaskDiffSummaryMsg struct {
 	TaskID  int
 	Summary *m31types.DiffSummary
+}
+
+// DecisionsSnapshotMsg carries a snapshot of the decision log to the TUI.
+type DecisionsSnapshotMsg struct {
+	Decisions []decision.DecisionReceipt
 }

@@ -44,6 +44,10 @@ type WorkflowState struct {
 	// transitionMu serializes phase transitions to prevent interleaved checkpoint saves.
 	transitionMu sync.Mutex
 
+	// planMu guards planMarkdown and planVersion to prevent races between
+	// workflow goroutine writes and TUI reads via PlanContent()/PlanVersion().
+	planMu sync.RWMutex
+
 	// Plan state
 	planMarkdown   string // current plan content for refinement context
 	planVersion    int    // current plan version (increments on refine)
@@ -278,6 +282,18 @@ func (e *Engine) ScopeIncludes(term string) bool {
 func (e *Engine) LogDecision(r decision.DecisionReceipt) {
 	if e.state.decisionLog != nil {
 		e.state.decisionLog.Log(r)
+		e.emitDecisionsSnapshot()
+	}
+}
+
+// emitDecisionsSnapshot emits a snapshot of current decisions to the TUI.
+func (e *Engine) emitDecisionsSnapshot() {
+	if e.msgEmitter == nil {
+		return
+	}
+	decisions := e.SnapshotDecisions()
+	if len(decisions) > 0 {
+		e.msgEmitter.Emit(DecisionsSnapshotMsg{Decisions: decisions})
 	}
 }
 
@@ -351,7 +367,9 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 	}
 	e.state.checkpointData = data
 	e.stateMachine.SetPhase(data.Phase)
+	e.state.planMu.Lock()
 	e.state.planVersion = data.PlanVersion
+	e.state.planMu.Unlock()
 	// Restore decisions to the log
 	if data.Decisions != nil && e.state.decisionLog != nil {
 		for _, d := range data.Decisions {
@@ -1090,7 +1108,9 @@ func (e *Engine) FinalizeDiscuss() error {
 func (e *Engine) SetRefinementFeedback(feedback string) {
 	if feedback != "" && feedback != e.state.refineFeedback {
 		e.state.refineFeedback = feedback
+		e.state.planMu.Lock()
 		e.state.planVersion++
+		e.state.planMu.Unlock()
 		// Log plan revision decision
 		e.LogDecision(decision.DecisionReceipt{
 			Decision:  fmt.Sprintf("plan revision requested (v%d)", e.state.planVersion),
@@ -1107,12 +1127,16 @@ func (e *Engine) SetRefinementFeedback(feedback string) {
 
 // PlanContent returns the current plan markdown content.
 func (e *Engine) PlanContent() string {
+	e.state.planMu.RLock()
+	defer e.state.planMu.RUnlock()
 	return e.state.planMarkdown
 }
 
 // PlanVersion returns the current plan version number.
 // Version 1 is the initial plan; each refinement increments it.
 func (e *Engine) PlanVersion() int {
+	e.state.planMu.RLock()
+	defer e.state.planMu.RUnlock()
 	return e.state.planVersion
 }
 
