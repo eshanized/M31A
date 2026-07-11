@@ -262,10 +262,11 @@ func (m *AppState) navigateToScreen(screen Screen) tea.Cmd {
 		// Eagerly ensure sub-model exists so it's ready when transition completes.
 		initCmd := m.ensureSubModel(screen)
 		m.StartTransition(screen, "")
+		m.switchScreen(screen)
 		return tea.Batch(StreamTickCmd(), initCmd)
 	}
 
-	m.screen = screen
+	m.switchScreen(screen)
 	return m.ensureSubModel(screen)
 }
 

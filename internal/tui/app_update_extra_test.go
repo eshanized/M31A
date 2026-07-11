@@ -17,6 +17,7 @@ func testAppState() *AppState {
 		screen:       ScreenREPL,
 		replModel:    &rm,
 		themeManager: tm,
+		router:       NewRouter(),
 		toasts:       []Toast{},
 		toastTimers:  make(map[int]*time.Timer),
 		width:        80,

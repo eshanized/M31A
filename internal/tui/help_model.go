@@ -326,8 +326,8 @@ func (hm *HelpModel) SetDimensions(w, h int) {
 // Init implements tea.Model.
 func (hm *HelpModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model with scrollable viewport.
-func (hm *HelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable interface.
+func (hm *HelpModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		hm.width = msg.Width

@@ -150,7 +150,10 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenHelp] = func(msg tea.Msg) tea.Cmd {
 		if m.helpModel == nil {
-			return nil
+			m.helpModel = NewHelpModel(m.themeManager.Current())
+			m.helpModel.SetKeyRegistry(m.keyRegistry)
+			// Register with router
+			m.router.Register(ScreenHelp, m.helpModel)
 		}
 		newModel, cmd := m.helpModel.Update(msg)
 		if r, ok := newModel.(*HelpModel); ok {
@@ -348,7 +351,12 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenHome] = func(msg tea.Msg) tea.Cmd {
 		if m.homeModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
+			m.homeModel.SetCommandRegistry(m.cmdRegistry)
+			m.homeModel.SetConfig(m.config)
+			// Register with router
+			m.router.Register(ScreenHome, m.homeModel)
 		}
 		newModel, cmd := m.homeModel.Update(msg)
 		if r, ok := newModel.(*HomeModel); ok {

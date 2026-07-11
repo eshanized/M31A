@@ -685,11 +685,14 @@ func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
+	// Ensure Help is registered with router
 	if m.helpModel == nil {
-		return renderEmptyState("Help", "Loading keyboard shortcuts…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.helpModel = NewHelpModel(m.themeManager.Current())
+		m.helpModel.SetKeyRegistry(m.keyRegistry)
+		m.router.Register(ScreenHelp, m.helpModel)
 	}
 	m.helpModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.helpModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderBisectContent(chrome layout.PageChrome) string {
@@ -795,13 +798,15 @@ func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string 
 }
 
 func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {
+	// Ensure Home is registered with router
 	if m.homeModel == nil {
 		m.homeModel = NewHomeModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight(), m.version)
 		m.homeModel.SetCommandRegistry(m.cmdRegistry)
 		m.homeModel.SetConfig(m.config)
+		m.router.Register(ScreenHome, m.homeModel)
 	}
 	m.homeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.homeModel.renderHome()
+	return m.router.View()
 }
 
 // clampPermissionModalWidth computes the clamped modal width from the
