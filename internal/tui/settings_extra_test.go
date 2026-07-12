@@ -158,7 +158,8 @@ func TestSettingsSetFieldValueInvalidNumber(t *testing.T) {
 
 func TestSettingsActivateFieldEmpty(t *testing.T) {
 	s := &SettingsModel{config: config.DefaultConfig()}
-	s, _ = s.activateField()
+	s2, _ := s.activateField()
+	s = s2.(*SettingsModel)
 	if s.editing {
 		t.Error("should not edit with empty fields")
 	}
@@ -168,7 +169,8 @@ func TestSettingsActivateFieldOOB(t *testing.T) {
 	s := &SettingsModel{config: config.DefaultConfig()}
 	s.fields = []settingsField{{key: "x"}}
 	s.fieldCursor = 5
-	s, _ = s.activateField()
+	s2, _ := s.activateField()
+	s = s2.(*SettingsModel)
 	if s.editing {
 		t.Error("should not edit with OOB cursor")
 	}
@@ -179,7 +181,8 @@ func TestSettingsUpdateEditingOtherKey(t *testing.T) {
 	s := &SettingsModel{editing: true, editField: "model", config: cfg}
 	s.editValue = textinput.New()
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
-	s, _ = s.updateEditing(msg)
+	s2, _ := s.updateEditing(msg)
+	s = s2.(*SettingsModel)
 	if !s.editing {
 		t.Error("should still be editing on regular key")
 	}

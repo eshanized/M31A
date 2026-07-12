@@ -175,7 +175,25 @@ func (m *ConfigModel) setFieldValue(f cfgField, val string) {
 
 func (m *ConfigModel) Init() tea.Cmd { return nil }
 
-func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
+// SetDimensions updates the config model dimensions.
+func (m *ConfigModel) SetDimensions(w, h int) {
+	m.width = w
+	m.height = h
+	m.viewport.Width = max(10, w-4)
+	vpH := h - 8
+	if vpH < 4 {
+		vpH = 4
+	}
+	m.viewport.Height = vpH
+	m.editInput.Width = max(20, min(50, w-12))
+}
+
+// SetTheme updates the theme.
+func (m *ConfigModel) SetTheme(t theme.Theme) {
+	m.theme = t
+}
+
+func (m *ConfigModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.confirmingExit {
@@ -203,7 +221,7 @@ func (m *ConfigModel) Update(msg tea.Msg) (*ConfigModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		return m, func() tea.Msg { return PopScreenMsg{} }
@@ -214,7 +232,7 @@ func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) 
 	return m, nil
 }
 
-func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		if m.dirty {
@@ -276,7 +294,7 @@ func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConfigModel) activateField() (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) activateField() (Screenable, tea.Cmd) {
 	if len(m.sections) == 0 {
 		return m, nil
 	}
@@ -335,7 +353,7 @@ func (m *ConfigModel) activateField() (*ConfigModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.editing = false
@@ -366,7 +384,7 @@ func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (*ConfigModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ConfigModel) saveConfig() (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) saveConfig() (Screenable, tea.Cmd) {
 	if m.cfg == nil || m.cfgPath == "" {
 		m.statusMsg = "✗ No config path set"
 		m.statusTime = time.Now()
@@ -386,7 +404,7 @@ func (m *ConfigModel) saveConfig() (*ConfigModel, tea.Cmd) {
 	return m, func() tea.Msg { return ConfigSavedMsg{} }
 }
 
-func (m *ConfigModel) saveLocalConfig() (*ConfigModel, tea.Cmd) {
+func (m *ConfigModel) saveLocalConfig() (Screenable, tea.Cmd) {
 	if m.cfg == nil {
 		m.statusMsg = "✗ No config loaded"
 		m.statusTime = time.Now()

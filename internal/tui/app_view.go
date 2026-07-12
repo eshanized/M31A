@@ -554,11 +554,15 @@ func maxInt(a, b int) int {
 }
 
 func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
+	// Ensure Settings is registered with router
 	if m.settingsModel == nil {
 		m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
 	}
-	m.settingsModel.width = chrome.ContentWidth()
-	m.settingsModel.height = chrome.ContentHeight()
+	m.settingsModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	if m.router != nil {
+		m.router.Register(ScreenSettings, m.settingsModel)
+		return m.router.View()
+	}
 	return m.settingsModel.View()
 }
 
@@ -679,13 +683,17 @@ func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
+	// Ensure Config is registered with router
 	if m.configModel == nil {
-		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, chrome.ContentWidth(), chrome.ContentHeight(), m.keychain)
-	} else {
-		m.configModel.cfg = m.config
-		m.configModel.width = chrome.ContentWidth()
-		m.configModel.height = chrome.ContentHeight()
-		m.configModel.theme = m.themeManager.Current()
+		cw, ch := m.contentDimensions()
+		m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
+	}
+	m.configModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	m.configModel.SetTheme(m.themeManager.Current())
+	m.configModel.cfg = m.config
+	if m.router != nil {
+		m.router.Register(ScreenConfig, m.configModel)
+		return m.router.View()
 	}
 	return m.configModel.View()
 }

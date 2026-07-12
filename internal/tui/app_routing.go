@@ -145,10 +145,14 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenConfig] = func(msg tea.Msg) tea.Cmd {
 		if m.configModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
+			m.router.Register(ScreenConfig, m.configModel)
 		}
 		newModel, cmd := m.configModel.Update(msg)
-		m.configModel = newModel
+		if r, ok := newModel.(*ConfigModel); ok {
+			m.configModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenDiff] = func(msg tea.Msg) tea.Cmd {
@@ -269,10 +273,13 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenSettings] = func(msg tea.Msg) tea.Cmd {
 		if m.settingsModel == nil {
-			return nil
+			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
+			m.router.Register(ScreenSettings, m.settingsModel)
 		}
 		newModel, cmd := m.settingsModel.Update(msg)
-		m.settingsModel = newModel
+		if r, ok := newModel.(*SettingsModel); ok {
+			m.settingsModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenModelSelector] = func(msg tea.Msg) tea.Cmd {
