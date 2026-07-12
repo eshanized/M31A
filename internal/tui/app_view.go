@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/layout"
@@ -225,7 +224,11 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 		return m.renderPermissionModal()
 	}
 
-	// Model Selector as centered dialog overlay on dimmed REPL background
+	// Model Selector as centered dialog overlay on dimmed REPL background.
+	// This overlay path returns before renderScreenContent, so the router never
+	// controls ModelSelector's View(). The model is rendered directly on the
+	// concrete pointer. This is intentional — ModelSelector is an overlay, not
+	// a full-screen routed view. Do not "fix" this by removing the early return.
 	if m.screen == ScreenModelSelector && m.msModel != nil {
 		modalW := m.width * 4 / 5
 		modalH := m.height * 3 / 4
@@ -567,13 +570,16 @@ func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
-	// Ensure ModelSelector is registered with router
+	// ModelSelector is rendered as a centered dialog overlay in renderFrameWithTheme()
+	// (lines 229-253), which returns before this function is called. This code path
+	// is unreachable in normal operation — the overlay intercepts rendering first.
+	// Kept as a fallback for completeness; does not register with the router because
+	// View() is never delegated through it for this screen.
 	if m.msModel == nil {
 		m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
-		m.router.Register(ScreenModelSelector, m.msModel)
 	}
 	m.msModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.router.View()
+	return m.msModel.View()
 }
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
@@ -645,6 +651,13 @@ func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 		return renderLoading("Loading first-run wizard…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.firstRunModel.SetContentWidth(chrome.ContentWidth())
+	if m.router != nil {
+		m.router.Register(ScreenFirstRun, m.firstRunModel)
+		if m.router.ActiveID() != ScreenFirstRun {
+			m.router.SwitchTo(ScreenFirstRun)
+		}
+		return m.router.View()
+	}
 	return m.firstRunModel.View()
 }
 
@@ -748,6 +761,10 @@ func (m *AppState) renderNotificationsContent(chrome layout.PageChrome) string {
 		return renderEmptyState("Notifications", "No notifications yet — they'll appear here as you use M31A", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
 	}
 	m.notifModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	if m.router != nil {
+		m.router.Register(ScreenNotifications, m.notifModel)
+		return m.router.View()
+	}
 	return m.notifModel.View()
 }
 
@@ -1213,75 +1230,16 @@ func RenderPermissionModal(req *tools.PermissionRequest, countdown, width, termW
 }
 
 func (m *AppState) renderDecisionsContent(chrome layout.PageChrome) string {
-	width := chrome.ContentWidth()
-	height := chrome.ContentHeight()
-	theme := m.themeManager.Current()
-
-	decisions := decision.RedactSlice(m.cachedDecisions)
-	if len(decisions) == 0 {
-		return renderEmptyState("Decisions", "No decisions recorded yet — start a workflow with /new", width, height, theme)
+	// Ensure DecisionScreen is registered with router
+	if m.decisionScreen == nil {
+		cw, ch := m.contentDimensions()
+		m.decisionScreen = NewDecisionScreen(m.themeManager.Current(), cw, ch)
 	}
-
-	// Build table
-	var b strings.Builder
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(theme.Primary).
-		MarginBottom(1)
-
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(theme.TextPrimary).
-		BorderBottom(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(theme.BorderSubtle)
-
-	rowStyle := lipgloss.NewStyle().
-		Foreground(theme.TextPrimary)
-
-	catStyle := map[decision.Category]lipgloss.Style{
-		decision.CategoryTool:     lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		decision.CategoryPlan:     lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
-		decision.CategoryIntent:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
-		decision.CategoryRetry:    lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-		decision.CategoryStrategy: lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
-		decision.CategoryModel:    lipgloss.NewStyle().Foreground(lipgloss.Color("133")),
+	m.decisionScreen.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	m.decisionScreen.SetDecisions(m.cachedDecisions)
+	if m.router != nil {
+		m.router.Register(ScreenDecisions, m.decisionScreen)
+		return m.router.View()
 	}
-
-	b.WriteString(titleStyle.Render("Decision Log"))
-	b.WriteString("\n\n")
-
-	// Header row
-	b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-8s %s", "Time", "Category", "Decision")))
-	b.WriteString("\n")
-
-	// Data rows
-	for _, d := range decisions {
-		ts := d.Timestamp.Format("15:04:05")
-		cat := string(d.Category)
-		if s, ok := catStyle[d.Category]; ok {
-			cat = s.Render(cat)
-		}
-		decision := d.Decision
-		if len(decision) > width-40 {
-			decision = decision[:width-43] + "..."
-		}
-		b.WriteString(rowStyle.Render(fmt.Sprintf("%-20s %-8s %s", ts, cat, decision)))
-		b.WriteString("\n")
-	}
-
-	// Summary
-	totalCost := decision.CostSummary(decisions)
-	summaryStyle := lipgloss.NewStyle().
-		Foreground(theme.TextMuted).
-		MarginTop(1)
-	b.WriteString(summaryStyle.Render(fmt.Sprintf(
-		"%d decisions | %d tokens | %.1fs total duration",
-		len(decisions), totalCost.Tokens, totalCost.Duration,
-	)))
-
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Render(b.String())
+	return m.decisionScreen.View()
 }

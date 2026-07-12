@@ -154,6 +154,14 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
 		}
 		return nil
+	case ScreenDecisions:
+		if m.decisionScreen == nil {
+			if m.themeManager != nil {
+				cw, ch := m.contentDimensions()
+				m.decisionScreen = NewDecisionScreen(m.themeManager.Current(), cw, ch)
+			}
+		}
+		return nil
 	case ScreenDashboard:
 		if m.dashboardModel == nil {
 			cw, ch := m.contentDimensions()
@@ -502,7 +510,13 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		}
 		return nil
 	case ScreenDecisions:
-		// ScreenDecisions renders directly from the workflow engine — no sub-model needed.
+		if m.decisionScreen == nil {
+			if m.themeManager != nil {
+				m.decisionScreen = NewDecisionScreen(m.themeManager.Current(), cw, ch)
+			}
+		} else {
+			m.decisionScreen.SetDimensions(cw, ch)
+		}
 		return nil
 	case ScreenPhaseModelPicker:
 		if m.phaseModelPicker == nil {

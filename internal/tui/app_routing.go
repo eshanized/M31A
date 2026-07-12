@@ -255,6 +255,10 @@ func (m *AppState) initScreenUpdaters() {
 		if m.notifModel == nil {
 			return nil
 		}
+		// Ensure Notifications is registered with router on first message.
+		if m.router != nil {
+			m.router.Register(ScreenNotifications, m.notifModel)
+		}
 		newModel, cmd := m.notifModel.Update(msg)
 		if r, ok := newModel.(*NotificationModel); ok {
 			m.notifModel = r
@@ -295,9 +299,10 @@ func (m *AppState) initScreenUpdaters() {
 		return cmd
 	}
 	m.screenUpdaters[ScreenModelSelector] = func(msg tea.Msg) tea.Cmd {
+		// ModelSelector is an overlay — View() is handled by renderFrameWithTheme()
+		// directly on the concrete pointer; router registration is unnecessary.
 		if m.msModel == nil {
 			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
-			m.router.Register(ScreenModelSelector, m.msModel)
 		}
 		newModel, cmd := m.msModel.Update(msg)
 		if r, ok := newModel.(*ModelSelector); ok {
@@ -335,6 +340,10 @@ func (m *AppState) initScreenUpdaters() {
 	m.screenUpdaters[ScreenFirstRun] = func(msg tea.Msg) tea.Cmd {
 		if m.firstRunModel == nil {
 			return nil
+		}
+		// Register with router on first message (model created by routeToScreen/ensureSubModel).
+		if m.router != nil {
+			m.router.Register(ScreenFirstRun, m.firstRunModel)
 		}
 		newModel, cmd := m.firstRunModel.Update(msg)
 		if r, ok := newModel.(*FirstRunModel); ok {
@@ -430,9 +439,18 @@ func (m *AppState) initScreenUpdaters() {
 		return cmd
 	}
 
-	// ScreenDecisions has no sub-model — it renders directly from the workflow engine.
+	// ScreenDecisions uses a lightweight DecisionScreen wrapper for router registration.
 	m.screenUpdaters[ScreenDecisions] = func(msg tea.Msg) tea.Cmd {
-		return nil
+		if m.decisionScreen == nil {
+			cw, ch := m.contentDimensions()
+			m.decisionScreen = NewDecisionScreen(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenDecisions, m.decisionScreen)
+		}
+		newModel, cmd := m.decisionScreen.Update(msg)
+		if r, ok := newModel.(*DecisionScreen); ok {
+			m.decisionScreen = r
+		}
+		return cmd
 	}
 }
 
