@@ -70,8 +70,8 @@ func (rm *RollbackModel) LoadCommits() {
 // Init implements tea.Model.
 func (rm *RollbackModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model.
-func (rm *RollbackModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (rm *RollbackModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		rm.SetDimensions(msg.Width, msg.Height)

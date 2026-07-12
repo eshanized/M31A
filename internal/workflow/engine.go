@@ -48,6 +48,10 @@ type WorkflowState struct {
 	// workflow goroutine writes and TUI reads via PlanContent()/PlanVersion().
 	planMu sync.RWMutex
 
+	// messagesMu guards Messages to prevent races between workflow goroutine
+	// writes (via PrePhaseSetup) and any concurrent reads.
+	messagesMu sync.RWMutex
+
 	// Plan state
 	planMarkdown   string // current plan content for refinement context
 	planVersion    int    // current plan version (increments on refine)
@@ -687,6 +691,8 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	start := time.Now()
 
 	// Delegate pre-phase setup to PhaseCoordinator
+	// messagesMu protects Messages from concurrent access during PrePhaseSetup
+	e.state.messagesMu.Lock()
 	var err error
 	e.state.Messages, err = e.phaseCoordinator.PrePhaseSetup(
 		ctx,
@@ -695,6 +701,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		e.state.Messages,
 		e.proactiveCompactCheck,
 	)
+	e.state.messagesMu.Unlock()
 	if err != nil {
 		return &PhaseResult{
 			Phase:   phase,

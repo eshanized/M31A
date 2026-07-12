@@ -117,11 +117,11 @@ func (mm *MetricsModel) ApplyStats(s metricsStats) {
 	mm.loaded = true
 }
 
-// Init implements tea.Model.
+// Init implements Screenable.
 func (mm *MetricsModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model.
-func (mm *MetricsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (mm *MetricsModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width

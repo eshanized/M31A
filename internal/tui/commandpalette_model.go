@@ -73,8 +73,8 @@ func (m *CommandPaletteScreenModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update implements tea.Model.
-func (m *CommandPaletteScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (m *CommandPaletteScreenModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetDimensions(msg.Width, msg.Height)

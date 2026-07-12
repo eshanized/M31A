@@ -567,11 +567,13 @@ func (m *AppState) renderSettingsContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderModelSelectorContent(chrome layout.PageChrome) string {
+	// Ensure ModelSelector is registered with router
 	if m.msModel == nil {
-		return renderLoading("Loading model selector…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
+		m.router.Register(ScreenModelSelector, m.msModel)
 	}
 	m.msModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.msModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
@@ -619,11 +621,13 @@ func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
+	// Ensure Resume is registered with router
 	if m.resumeModel == nil {
-		return renderLoading("Loading sessions…", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.resumeModel = NewResumeModel(nil, m.themeManager.Current())
+		m.router.Register(ScreenResume, m.resumeModel)
 	}
 	m.resumeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.resumeModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderGoalInputContent(chrome layout.PageChrome) string {
@@ -645,27 +649,36 @@ func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
+	// Ensure Ledger is registered with router
 	if m.ledgerModel == nil {
-		return renderEmptyState("Learning ledger", "No learning entries yet — complete a workflow to populate the ledger", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
+		m.ledgerModel.LoadEntries()
+		m.router.Register(ScreenLedger, m.ledgerModel)
 	}
 	m.ledgerModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.ledgerModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderRollbackContent(chrome layout.PageChrome) string {
+	// Ensure Rollback is registered with router
 	if m.rollbackModel == nil {
-		return renderEmptyState("Rollback browser", "No commit history loaded — ensure git is initialized", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
+		m.rollbackModel.LoadCommits()
+		m.router.Register(ScreenRollback, m.rollbackModel)
 	}
 	m.rollbackModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.rollbackModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderMetricsContent(chrome layout.PageChrome) string {
+	// Ensure Metrics is registered with router
 	if m.metricsModel == nil {
-		return renderEmptyState("Session metrics", "No metrics available — complete some tasks to see analytics", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.metricsModel = NewMetricsModel(m.themeManager.Current())
+		m.router.Register(ScreenMetrics, m.metricsModel)
 	}
 	m.metricsModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.metricsModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderDiscussContent(chrome layout.PageChrome) string {
@@ -699,11 +712,13 @@ func (m *AppState) renderConfigContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderDiffContent(chrome layout.PageChrome) string {
+	// Ensure Diff is registered with router
 	if m.diffModel == nil {
-		return renderEmptyState("Diff viewer", "No diff to display — run /diff or use the workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.diffModel = NewDiffModel(m.themeManager.Current())
+		m.router.Register(ScreenDiff, m.diffModel)
 	}
 	m.diffModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.diffModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderHelpContent(chrome layout.PageChrome) string {
@@ -751,11 +766,13 @@ func (m *AppState) renderDashboardContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderSessionDetailContent(chrome layout.PageChrome) string {
+	// Ensure SessionDetail is registered with router
 	if m.sessionDetailModel == nil {
-		return renderEmptyState("Session detail", "No session selected — use /resume to browse sessions", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenSessionDetail, m.sessionDetailModel)
 	}
 	m.sessionDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.sessionDetailModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
@@ -775,11 +792,14 @@ func (m *AppState) renderFileExplorerContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderToolDetailContent(chrome layout.PageChrome) string {
+	// Ensure ToolDetail is registered with router
 	if m.toolDetailModel == nil {
-		return renderEmptyState("Tool output", "No tool output selected — click a tool card in the REPL to inspect it", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenToolDetail, m.toolDetailModel)
 	}
 	m.toolDetailModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.toolDetailModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderPhaseModelPickerContent(chrome layout.PageChrome) string {
@@ -839,11 +859,13 @@ func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string {
+	// Ensure CommandPaletteScreen is registered with router
 	if m.commandPaletteScreenModel == nil {
 		m.commandPaletteScreenModel = NewCommandPaletteScreenModel(m.cmdRegistry, m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenCommandPalette, m.commandPaletteScreenModel)
 	}
 	m.commandPaletteScreenModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.commandPaletteScreenModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderHomeContent(chrome layout.PageChrome) string {

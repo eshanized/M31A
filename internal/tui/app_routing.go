@@ -125,7 +125,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenLedger] = func(msg tea.Msg) tea.Cmd {
 		if m.ledgerModel == nil {
-			return nil
+			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
+			m.ledgerModel.LoadEntries()
+			m.router.Register(ScreenLedger, m.ledgerModel)
 		}
 		newModel, cmd := m.ledgerModel.Update(msg)
 		if r, ok := newModel.(*LedgerModel); ok {
@@ -135,7 +137,10 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenRollback] = func(msg tea.Msg) tea.Cmd {
 		if m.rollbackModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
+			m.rollbackModel.LoadCommits()
+			m.router.Register(ScreenRollback, m.rollbackModel)
 		}
 		newModel, cmd := m.rollbackModel.Update(msg)
 		if r, ok := newModel.(*RollbackModel); ok {
@@ -157,7 +162,8 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenDiff] = func(msg tea.Msg) tea.Cmd {
 		if m.diffModel == nil {
-			return nil
+			m.diffModel = NewDiffModel(m.themeManager.Current())
+			m.router.Register(ScreenDiff, m.diffModel)
 		}
 		newModel, cmd := m.diffModel.Update(msg)
 		if r, ok := newModel.(*DiffModel); ok {
@@ -180,7 +186,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenToolDetail] = func(msg tea.Msg) tea.Cmd {
 		if m.toolDetailModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenToolDetail, m.toolDetailModel)
 		}
 		newModel, cmd := m.toolDetailModel.Update(msg)
 		if r, ok := newModel.(*ToolDetailModel); ok {
@@ -190,7 +198,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenCommandPalette] = func(msg tea.Msg) tea.Cmd {
 		if m.commandPaletteScreenModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.commandPaletteScreenModel = NewCommandPaletteScreenModel(m.cmdRegistry, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenCommandPalette, m.commandPaletteScreenModel)
 		}
 		newModel, cmd := m.commandPaletteScreenModel.Update(msg)
 		if r, ok := newModel.(*CommandPaletteScreenModel); ok {
@@ -253,7 +263,8 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenMetrics] = func(msg tea.Msg) tea.Cmd {
 		if m.metricsModel == nil {
-			return nil
+			m.metricsModel = NewMetricsModel(m.themeManager.Current())
+			m.router.Register(ScreenMetrics, m.metricsModel)
 		}
 		newModel, cmd := m.metricsModel.Update(msg)
 		if r, ok := newModel.(*MetricsModel); ok {
@@ -263,7 +274,8 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenResume] = func(msg tea.Msg) tea.Cmd {
 		if m.resumeModel == nil {
-			return nil
+			m.resumeModel = NewResumeModel(nil, m.themeManager.Current())
+			m.router.Register(ScreenResume, m.resumeModel)
 		}
 		newModel, cmd := m.resumeModel.Update(msg)
 		if r, ok := newModel.(*ResumeModel); ok {
@@ -284,7 +296,8 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenModelSelector] = func(msg tea.Msg) tea.Cmd {
 		if m.msModel == nil {
-			return nil
+			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
+			m.router.Register(ScreenModelSelector, m.msModel)
 		}
 		newModel, cmd := m.msModel.Update(msg)
 		if r, ok := newModel.(*ModelSelector); ok {
@@ -381,7 +394,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenSessionDetail] = func(msg tea.Msg) tea.Cmd {
 		if m.sessionDetailModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenSessionDetail, m.sessionDetailModel)
 		}
 		newModel, cmd := m.sessionDetailModel.Update(msg)
 		if r, ok := newModel.(*SessionDetailModel); ok {

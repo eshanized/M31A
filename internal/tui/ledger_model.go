@@ -65,8 +65,8 @@ func (lm *LedgerModel) LoadEntries() {
 // Init implements tea.Model.
 func (lm *LedgerModel) Init() tea.Cmd { return nil }
 
-// Update implements tea.Model.
-func (lm *LedgerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements Screenable.
+func (lm *LedgerModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		lm.SetDimensions(msg.Width, msg.Height)

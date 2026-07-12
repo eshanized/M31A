@@ -114,7 +114,7 @@ func (ms *ModelSelector) fetchModelsCmd(provName string) tea.Cmd {
 }
 
 // Update handles key events and async load messages.
-func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (ms *ModelSelector) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		ms.width = msg.Width
