@@ -475,9 +475,6 @@ var dangerousObfuscationPatterns = []struct {
 	{"$(eval", "command substitution with eval"},
 	{"xargs rm", "xargs with rm (batch deletion)"},
 	{"xargs -0 rm", "xargs with rm (batch deletion)"},
-	{"${", "shell variable expansion (potential injection)"},
-	{"$(", "command substitution (potential injection)"},
-	{"`", "backtick command substitution (potential injection)"},
 }
 
 // ansiEscapePattern matches ANSI escape sequences (color codes, cursor movement, etc.)
