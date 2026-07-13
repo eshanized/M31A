@@ -61,7 +61,7 @@ if [[ "$OS" == "windows" ]]; then
     BIN_NAME="m31a.exe"
 fi
 
-URL="https://github.com/$REPO/releases/download/$VERSION/${REPO##*/}_${VERSION#v}_${OS}_${ARCH}.${EXT}"
+URL="https://github.com/$REPO/releases/download/$VERSION/m31a_${VERSION}_${OS}_${ARCH}.${EXT}"
 
 # Create temp directory
 TMPDIR=$(mktemp -d)
@@ -81,7 +81,7 @@ fi
 # Verify checksum if available
 CHECKSUM_URL="https://github.com/$REPO/releases/download/$VERSION/checksums.txt"
 if curl -fsSL "$CHECKSUM_URL" -o "$TMPDIR/checksums.txt" 2>/dev/null; then
-    EXPECTED=$(grep "${REPO##*/}_${VERSION#v}_${OS}_${ARCH}.${EXT}" "$TMPDIR/checksums.txt" | awk '{print $1}')
+    EXPECTED=$(grep "m31a_${VERSION}_${OS}_${ARCH}.${EXT}" "$TMPDIR/checksums.txt" | awk '{print $1}')
     if [[ -n "$EXPECTED" ]]; then
         ACTUAL=$(shasum -a 256 "$TMPDIR/archive.${EXT}" 2>/dev/null | awk '{print $1}' || sha256sum "$TMPDIR/archive.${EXT}" | awk '{print $1}')
         if [[ "$EXPECTED" != "$ACTUAL" ]]; then
@@ -103,8 +103,8 @@ fi
 mkdir -p "$BIN_DIR"
 if [[ -f "$TMPDIR/$BIN_NAME" ]]; then
     mv "$TMPDIR/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
-elif [[ -f "$TMPDIR/${REPO##*/}_${VERSION#v}_${OS}_${ARCH}/$BIN_NAME" ]]; then
-    mv "$TMPDIR/${REPO##*/}_${VERSION#v}_${OS}_${ARCH}/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
+elif [[ -f "$TMPDIR/m31a_${VERSION}_${OS}_${ARCH}/$BIN_NAME" ]]; then
+    mv "$TMPDIR/m31a_${VERSION}_${OS}_${ARCH}/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
 else
     echo "Error: Binary not found in archive"
     find "$TMPDIR" -type f -name "$BIN_NAME"
