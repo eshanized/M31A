@@ -437,9 +437,13 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (Screenable, 
 	case "auto_arbitrage":
 		s.config.Model.AutoArbitrage = val == "yes"
 	case "context_length":
-		if n, err := strconv.Atoi(val); err == nil {
-			s.config.Model.DefaultContextLength = n
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			s.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+			s.statusTime = time.Now()
+			return s, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
 		}
+		s.config.Model.DefaultContextLength = n
 	case "show_cost":
 		s.config.UI.ShowCostEstimate = val == "yes"
 	case "show_tokens":
@@ -447,15 +451,23 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (Screenable, 
 	case "compact_mode":
 		s.config.UI.CompactMode = val == "yes"
 	case "sidebar_width":
-		if n, err := strconv.Atoi(val); err == nil {
-			s.config.UI.SidebarWidth = n
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			s.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+			s.statusTime = time.Now()
+			return s, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
 		}
+		s.config.UI.SidebarWidth = n
 	case "leader_key":
 		s.config.UI.LeaderKey = val
 	case "max_history":
-		if n, err := strconv.Atoi(val); err == nil {
-			s.config.UI.MaxMessageHistory = n
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			s.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+			s.statusTime = time.Now()
+			return s, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
 		}
+		s.config.UI.MaxMessageHistory = n
 	case "apikey_or":
 		s.config.Provider.OpenRouter.APIKey = val
 	case "apikey_zen":
@@ -465,13 +477,21 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (Screenable, 
 	case "perm_mode":
 		s.config.Permissions.DefaultMode = val
 	case "perm_timeout":
-		if n, err := strconv.Atoi(val); err == nil {
-			s.config.Permissions.TimeoutSeconds = n
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			s.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+			s.statusTime = time.Now()
+			return s, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
 		}
+		s.config.Permissions.TimeoutSeconds = n
 	case "max_iterations":
-		if n, err := strconv.Atoi(val); err == nil {
-			s.config.UI.MaxIterations = n
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			s.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+			s.statusTime = time.Now()
+			return s, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
 		}
+		s.config.UI.MaxIterations = n
 	case "auto_backup":
 		s.config.Features.AutoBackup = val == "yes"
 	}
@@ -866,4 +886,15 @@ func boolStr(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// newToastCmd returns a tea.Cmd that displays a toast notification.
+func newToastCmd(text, toastType string) tea.Cmd {
+	return func() tea.Msg {
+		return ToastMsg{
+			Text:     text,
+			Duration: 3 * time.Second,
+			Type:     toastType,
+		}
+	}
 }

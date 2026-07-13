@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -368,6 +369,22 @@ func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 		}
 		sec := m.sections[m.sectionIdx]
 		f := sec.fields[m.fieldIdx]
+		// Validate numeric fields before setting
+		if (f.fieldType == cfgNumber || f.fieldType == cfgFloat) && val != "" {
+			if f.fieldType == cfgNumber {
+				if _, err := strconv.Atoi(val); err != nil {
+					m.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid integer", val)
+					m.statusTime = time.Now()
+					return m, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid integer", val), "error")
+				}
+			} else {
+				if _, err := strconv.ParseFloat(val, 64); err != nil {
+					m.statusMsg = fmt.Sprintf("Invalid number: %q is not a valid float", val)
+					m.statusTime = time.Now()
+					return m, newToastCmd(fmt.Sprintf("Invalid number: %q is not a valid float", val), "error")
+				}
+			}
+		}
 		m.setFieldValue(f, val)
 		m.dirty = true
 		displayVal := val
