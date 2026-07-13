@@ -138,7 +138,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 			return nil
 		}
-		// No questions — skip to next phase based on mode
+		// No questions — show transition confirmation before proceeding
 		if m.workflowEngine != nil {
 			if err := m.workflowEngine.SkipDiscuss(); err != nil {
 				slog.Warn("failed to skip discuss phase", "error", err)
@@ -150,38 +150,13 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			m.screen = ScreenREPL
 			return nil
 		}
-		m.setWorkflowPhase(next)
-		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseDiscuss, next); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseDiscuss, "to", next, "error", err)
-			}
-		}
-		if next == types.PhaseExecute {
-			// In fast/direct mode, skip plan and go straight to execution
-			m.switchScreen(ScreenExecute)
-			tasks := msg.Tasks
-			if m.executeModel == nil {
-				cw, ch := m.contentDimensions()
-				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
-				m.router.Register(ScreenExecute, m.executeModel)
-			} else {
-				m.executeModel.tasks = tasks
-			}
-			m.persistWorkflowState()
-			return m.RunPhaseCmd(types.PhaseExecute)
-		}
-		if m.planModel == nil {
-			m.planModel = NewPlanModel(
-				msg.Tasks,
-				m.themeManager.Current(),
-				modelID, modelName, m.activeProvider,
-				0, "",
-				m.width, m.height,
-			)
-		}
-		m.switchScreen(ScreenPlan)
+		// Show transition confirmation for Discuss->Plan
+		summary := phaseTransitionSummary(types.PhaseDiscuss, msg.Tasks)
+		cw, ch := m.contentDimensions()
+		m.phaseTransitionModel = NewPhaseTransitionModel(m.themeManager.Current(), types.PhaseDiscuss, next, summary, cw, ch)
+		m.switchScreen(ScreenPhaseTransition)
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(next)
+		return nil
 
 	case types.PhasePlan:
 		// Show plan screen and wait for user approval (do NOT auto-advance to Execute)
@@ -242,59 +217,22 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			m.screen = ScreenREPL
 			return nil
 		}
-		m.setWorkflowPhase(next)
-		m.switchScreen(ScreenVerify)
-		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, next); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseExecute, "to", next, "error", err)
-			}
-		}
-		if next == types.PhaseShip {
-			// Direct mode: skip verify, go straight to ship
-			summary := ShipSummary{
-				SessionID: m.sessionID,
-				TaskDone:  countDone(msg.Tasks),
-				TaskTotal: len(msg.Tasks),
-				Model:     modelName,
-				Provider:  m.activeProvider,
-			}
-			if msg.Usage != nil {
-				summary.TotalTokens = msg.Usage.TotalTokens
-			}
-			summary.TotalCost = msg.Cost
-			cw, ch := m.contentDimensions()
-			m.shipModel = NewShipModel(summary, m.themeManager.Current(), cw, ch)
-			m.persistWorkflowState()
-			return m.RunPhaseCmd(types.PhaseShip)
-		}
+		// Show transition confirmation for Execute->Verify
+		summary := phaseTransitionSummary(types.PhaseExecute, msg.Tasks)
 		cw, ch := m.contentDimensions()
-		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
-		m.router.Register(ScreenVerify, m.verifyModel)
-		if len(msg.ManualVerificationSteps) > 0 {
-			m.verifyModel.SetManualSteps(msg.ManualVerificationSteps)
-		}
+		m.phaseTransitionModel = NewPhaseTransitionModel(m.themeManager.Current(), types.PhaseExecute, next, summary, cw, ch)
+		m.switchScreen(ScreenPhaseTransition)
 		m.persistWorkflowState()
-		// Refresh sidebar git status after task execution
-		if m.sidebarModel != nil {
-			return tea.Batch(m.RunPhaseCmd(types.PhaseVerify), m.sidebarModel.refreshCmd())
-		}
-		return m.RunPhaseCmd(types.PhaseVerify)
+		return nil
 
 	case types.PhaseVerify:
-		m.setWorkflowPhase(types.PhaseRuntime)
-		m.switchScreen(ScreenRuntimeCheck)
-		if m.workflowEngine != nil {
-			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseRuntime); err != nil {
-				slog.Error("phase transition failed", "from", types.PhaseVerify, "to", types.PhaseRuntime, "error", err)
-			}
-		}
-		if m.runtimeModel == nil {
-			cw, ch := m.contentDimensions()
-			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
-			m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
-		}
+		// Show transition confirmation for Verify->Runtime
+		summary := phaseTransitionSummary(types.PhaseVerify, msg.Tasks)
+		cw, ch := m.contentDimensions()
+		m.phaseTransitionModel = NewPhaseTransitionModel(m.themeManager.Current(), types.PhaseVerify, types.PhaseRuntime, summary, cw, ch)
+		m.switchScreen(ScreenPhaseTransition)
 		m.persistWorkflowState()
-		return m.RunPhaseCmd(types.PhaseRuntime)
+		return nil
 
 	case types.PhaseRuntime:
 		// Update runtime model with results
@@ -383,4 +321,91 @@ func countDone(tasks []types.Task) int {
 		}
 	}
 	return n
+}
+
+// handlePhaseTransitionDecision processes the user's decision on phase transition.
+func (m *AppState) handlePhaseTransitionDecision(msg PhaseTransitionMsg) (Screenable, tea.Cmd) {
+	if msg.Approved {
+		// Proceed to next phase
+		m.setWorkflowPhase(msg.To)
+		if m.workflowEngine != nil {
+			if err := m.workflowEngine.Transition(m.shutdownCtx, msg.From, msg.To); err != nil {
+				slog.Error("phase transition failed", "from", msg.From, "to", msg.To, "error", err)
+			}
+		}
+		// Handle specific transitions
+		switch msg.To {
+		case types.PhasePlan:
+			if m.planModel == nil {
+				cw, ch := m.contentDimensions()
+				m.planModel = NewPlanModel(
+					[]types.Task{},
+					m.themeManager.Current(),
+					"", "", m.activeProvider,
+					0, "",
+					cw, ch,
+				)
+			}
+			m.switchScreen(ScreenPlan)
+			m.persistWorkflowState()
+			return nil, m.RunPhaseCmd(types.PhasePlan)
+		case types.PhaseExecute:
+			tasks := []types.Task{}
+			if m.planModel != nil {
+				tasks = m.planModel.tasks
+			}
+			if m.executeModel == nil {
+				cw, ch := m.contentDimensions()
+				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+				m.router.Register(ScreenExecute, m.executeModel)
+			} else {
+				m.executeModel.tasks = tasks
+			}
+			m.switchScreen(ScreenExecute)
+			m.persistWorkflowState()
+			return nil, m.RunPhaseCmd(types.PhaseExecute)
+		case types.PhaseVerify:
+			cw, ch := m.contentDimensions()
+			m.verifyModel = NewVerifyModel([]types.Task{}, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenVerify, m.verifyModel)
+			m.switchScreen(ScreenVerify)
+			m.persistWorkflowState()
+			return nil, m.RunPhaseCmd(types.PhaseVerify)
+		case types.PhaseRuntime:
+			if m.runtimeModel == nil {
+				cw, ch := m.contentDimensions()
+				m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
+				m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
+			}
+			m.switchScreen(ScreenRuntimeCheck)
+			m.persistWorkflowState()
+			return nil, m.RunPhaseCmd(types.PhaseRuntime)
+		}
+		return nil, m.RunPhaseCmd(msg.To)
+	}
+
+	if msg.GoBack {
+		// Go back to previous phase
+		m.setWorkflowPhase(msg.From)
+		switch msg.From {
+		case types.PhaseDiscuss:
+			m.switchScreen(ScreenDiscuss)
+		case types.PhasePlan:
+			m.switchScreen(ScreenPlan)
+		case types.PhaseExecute:
+			m.switchScreen(ScreenExecute)
+		case types.PhaseVerify:
+			m.switchScreen(ScreenVerify)
+		default:
+			m.switchScreen(ScreenREPL)
+		}
+		m.persistWorkflowState()
+		return nil, nil
+	}
+
+	// Cancel — return to REPL
+	m.setWorkflowPhase(types.PhaseIdle)
+	m.switchScreen(ScreenREPL)
+	m.persistWorkflowState()
+	return nil, nil
 }

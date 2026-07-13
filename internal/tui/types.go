@@ -44,6 +44,7 @@ const (
 	ScreenRuntimeCheck     = tuitypes.ScreenRuntimeCheck
 	ScreenHome             = tuitypes.ScreenHome
 	ScreenDecisions        = tuitypes.ScreenDecisions
+	ScreenPhaseTransition  = tuitypes.ScreenPhaseTransition
 )
 
 // Message type re-exports

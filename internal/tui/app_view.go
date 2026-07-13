@@ -183,6 +183,8 @@ func (m *AppState) renderScreenContent(screen Screen, chrome layout.PageChrome) 
 		return m.renderHomeContent(chrome)
 	case ScreenDecisions:
 		return m.renderDecisionsContent(chrome)
+	case ScreenPhaseTransition:
+		return m.renderPhaseTransitionContent(chrome)
 	default:
 		return m.renderREPLContent(chrome)
 	}
@@ -1251,4 +1253,13 @@ func (m *AppState) renderDecisionsContent(chrome layout.PageChrome) string {
 		return m.router.View()
 	}
 	return m.decisionScreen.View()
+}
+
+// renderPhaseTransitionContent renders the phase transition confirmation screen.
+func (m *AppState) renderPhaseTransitionContent(chrome layout.PageChrome) string {
+	if m.phaseTransitionModel == nil {
+		return ""
+	}
+	m.phaseTransitionModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.phaseTransitionModel.View()
 }

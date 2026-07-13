@@ -161,6 +161,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PhaseResultMsg:
 		_, cmd := handlePhaseResultMsg(m, msg)
 		cmds = append(cmds, cmd)
+	case PhaseTransitionMsg:
+		_, cmd := m.handlePhaseTransitionDecision(msg)
+		cmds = append(cmds, cmd)
 	case PlanReadyMsg:
 		_, cmd := handlePlanReadyMsg(m, msg)
 		cmds = append(cmds, cmd)

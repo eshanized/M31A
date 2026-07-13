@@ -173,6 +173,9 @@ type AppState struct {
 	// Chat history browser
 	chatHistoryModel *ChatHistoryModel
 
+	// Phase transition confirmation screen
+	phaseTransitionModel *PhaseTransitionModel
+
 	// Dedicated command palette screen (ctrl+p)
 	commandPaletteScreenModel *CommandPaletteScreenModel
 

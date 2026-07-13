@@ -406,6 +406,18 @@ func (m *AppState) initScreenUpdaters() {
 		}
 		return cmd
 	}
+	m.screenUpdaters[ScreenPhaseTransition] = func(msg tea.Msg) tea.Cmd {
+		if m.phaseTransitionModel == nil {
+			cw, ch := m.contentDimensions()
+			m.phaseTransitionModel = NewPhaseTransitionModel(m.themeManager.Current(), types.PhaseIdle, types.PhaseIdle, "", cw, ch)
+			m.router.Register(ScreenPhaseTransition, m.phaseTransitionModel)
+		}
+		newModel, cmd := m.phaseTransitionModel.Update(msg)
+		if r, ok := newModel.(*PhaseTransitionModel); ok {
+			m.phaseTransitionModel = r
+		}
+		return cmd
+	}
 	m.screenUpdaters[ScreenPhaseModelPicker] = func(msg tea.Msg) tea.Cmd {
 		if m.phaseModelPicker == nil {
 			cw, ch := m.contentDimensions()

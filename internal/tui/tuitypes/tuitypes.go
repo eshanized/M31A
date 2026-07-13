@@ -57,6 +57,7 @@ const (
 	ScreenRuntimeCheck     Screen = 31   // runtime verification (dev server + smoke tests)
 	ScreenHome             Screen = 32   // landing screen with logo, prompt, and tips
 	ScreenDecisions        Screen = 33   // decision log browser
+	ScreenPhaseTransition  Screen = 34   // phase transition confirmation
 )
 
 // Label returns a human-readable name for the screen.
