@@ -42,7 +42,7 @@ func (t *Bash) Name() string {
 }
 
 func (t *Bash) Description() string {
-	return "Execute a shell command with output capping, timeout, and working directory support."
+	return "Execute a shell command with output capping, timeout, and working directory support. Use the workdir parameter to run commands in a different directory without chaining cd commands."
 }
 
 func (t *Bash) RiskLevel() types.RiskLevel {
@@ -63,6 +63,10 @@ func (t *Bash) ParameterSchema() string {
 				"description": "Timeout in seconds (default 1800, max 1800)",
 				"minimum": 1,
 				"maximum": 1800
+			},
+			"workdir": {
+				"type": "string",
+				"description": "Working directory for the command (overrides default). If relative, resolved from the default working directory."
 			}
 		},
 		"required": ["command"]
@@ -114,14 +118,18 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	defer cancel()
 
 	cmd := newShellCmd(ctx, command)
+	// Determine working directory: explicit workdir parameter overrides default
 	cmd.Dir = t.workDir
+	if workdirRaw, ok := input.Params["workdir"].(string); ok && workdirRaw != "" {
+		cmd.Dir = workdirRaw
+	}
 
 	setupProcessGroup(cmd)
 
 	// Apply platform-specific sandboxing: scrubs sensitive env vars,
 	// applies OS-level restrictions where available (Landlock on Linux,
 	// sandbox-exec on macOS). Falls back to env-scrub-only on other platforms.
-	if err := applyBashSandbox(cmd, t.workDir); err != nil {
+	if err := applyBashSandbox(cmd, cmd.Dir); err != nil {
 		slog.Warn("bash sandbox setup failed, proceeding without sandbox",
 			"error", err)
 	}
