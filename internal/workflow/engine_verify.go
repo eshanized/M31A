@@ -228,7 +228,7 @@ func (e *Engine) verifyTaskContext(parent context.Context) (context.Context, con
 
 // verifyTask checks if a task's outputs exist and are syntactically valid.
 func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) VerificationResult {
-	result := VerificationResult{TaskID: task.ID, FilesExist: true, SyntaxOK: true, TestsOK: true}
+	result := VerificationResult{TaskID: task.ID, FilesExist: true, SyntaxOK: true, TestsOK: true, LintOK: true}
 
 	// File existence
 	for _, f := range task.Files {
@@ -269,6 +269,18 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	// Configured build/test commands take precedence over auto-detection
 	// ── Content validation ──────────────────────────────────────────────────
 	placeholderSignals := []string{"TODO", "FIXME", "XXX", "PLACEHOLDER", "lorem ipsum", "Lorem ipsum"}
+	emptyFunctionPatterns := []string{
+		"{\n}",           // empty function body
+		"{ }",            // empty function body (single line)
+		"{\n\t\n}",       // empty function body with tab
+		"{\n  \n}",       // empty function body with spaces
+		"pass",           // Python stub
+		"pass\n",         // Python stub with newline
+		"raise NotImplementedError", // Python stub
+		"panic(\"not implemented\")", // Go stub
+		"todo!()",        // Rust stub
+		"unimplemented!()", // Rust stub
+	}
 	for _, f := range task.Files {
 		path := filepath.Join(e.workDir, f)
 		content, readErr := os.ReadFile(path)
@@ -278,7 +290,8 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		text := string(content)
 
 		// Check for suspiciously small files (likely stubs)
-		if len(content) < 20 && !isConfigFile(f) {
+		// Increased threshold from 20 to 50 bytes to catch more stub implementations
+		if len(content) < 50 && !isConfigFile(f) {
 			result.Errors = append(result.Errors, fmt.Sprintf("file %s appears incomplete (%d bytes)", f, len(content)))
 		}
 
@@ -289,10 +302,19 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 				break
 			}
 		}
+
+		// Check for empty function bodies (stub implementations)
+		for _, pattern := range emptyFunctionPatterns {
+			if strings.Contains(text, pattern) {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("file %s may contain empty function body or stub", f))
+				break
+			}
+		}
 	}
 
 	hasCustomBuild := e.cfg != nil && e.cfg.Verify.BuildCommand != ""
 	hasCustomTest := e.cfg != nil && e.cfg.Verify.TestCommand != ""
+	hasCustomLint := e.cfg != nil && e.cfg.Verify.LintCommand != ""
 
 	// C-7: Use the parent context directly — it already has a deadline
 	// from verifyTaskContext(). Creating nested WithTimeout calls causes
@@ -315,8 +337,17 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 		}
 	}
 
+	if hasCustomLint {
+		cmd := shell.CommandContext(ctx, e.cfg.Verify.LintCommand)
+		cmd.Dir = e.workDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("configured lint command failed: %s", string(out)))
+			result.LintOK = false
+		}
+	}
+
 	// Skip auto-detection if custom commands were configured
-	if hasCustomBuild && hasCustomTest {
+	if hasCustomBuild && hasCustomTest && hasCustomLint {
 		return result
 	}
 

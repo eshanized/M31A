@@ -246,7 +246,9 @@ type VerificationResult struct {
 	FilesExist bool
 	SyntaxOK   bool
 	TestsOK    bool
+	LintOK     bool
 	Errors     []string
+	Warnings   []string
 }
 
 // CompactionCompleteMsg is emitted when automatic session compaction completes.

@@ -128,6 +128,7 @@ type GitConfig struct {
 type VerifyConfig struct {
 	BuildCommand string `toml:"build_command"`
 	TestCommand  string `toml:"test_command"`
+	LintCommand  string `toml:"lint_command"`
 }
 
 type ProviderConfig struct {
