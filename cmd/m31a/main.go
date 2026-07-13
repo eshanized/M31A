@@ -19,11 +19,13 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/log"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/keychain"
 	"github.com/eshanized/M31A/pkg/ledger"
@@ -50,13 +52,132 @@ func restoreTerminal() {
 	)
 }
 
-// runHeadless sends a single prompt to the active LLM provider and prints
-// the response to stdout. Used for scripting and E2E testing.
 // runHeadlessWorkflow executes a full workflow in headless mode (no TUI).
 // Runs the given goal through the workflow engine and returns exit code.
-func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *config.Config, model string, logger *slog.Logger) int {
-	fmt.Fprintln(os.Stderr, "headless workflow mode not yet fully implemented — use --prompt for single-turn")
-	return 1
+func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *config.Config, model string, logger *slog.Logger, registry *provider.Registry) int {
+	// Working directory
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot determine working directory: %v\n", err)
+		return 1
+	}
+
+	// Session manager
+	globalConfigDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot determine home directory: %v\n", err)
+		return 1
+	}
+	globalConfigDir = filepath.Join(globalConfigDir, ".m31a")
+	sessionMgr := session.NewManager(globalConfigDir, workDir, session.ManagerOpts{
+		CoordinatorTimeoutSecs: cfg.Features.CoordinatorTimeoutSecs,
+	})
+
+	// Tools dispatcher
+	backupDir := filepath.Join(workDir, ".m31a", "backups")
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to create tools dispatcher: %v\n", err)
+		return 1
+	}
+
+	// Git client
+	gitClient := git.New(workDir)
+
+	// Ledger
+	ledgerPath := filepath.Join(globalConfigDir, "LEDGER.md")
+	ledgerClient := ledger.New(ledgerPath)
+
+	// Token estimator
+	tokenEst := tokens.NewEstimator(model)
+
+	// Create session
+	sess, err := sessionMgr.NewSession(model, registry.Active())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to create session: %v\n", err)
+		return 1
+	}
+
+	// Get active provider
+	p := registry.ActiveProvider()
+	if p == nil {
+		fmt.Fprintln(os.Stderr, "error: no active provider")
+		return 1
+	}
+
+	// Create workflow engine
+	engine, err := workflow.NewEngine(
+		sess.ID,
+		workDir,
+		backupDir,
+		filepath.Join(workDir, ".m31a", "planning"),
+		p,
+		model,
+		dispatcher,
+		tokenEst,
+		sessionMgr,
+		cfg,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to create workflow engine: %v\n", err)
+		return 1
+	}
+	defer engine.Close()
+
+	engine.SetGit(gitClient)
+	engine.SetLedger(ledgerClient)
+
+	// Run all phases sequentially
+	phases := []types.WorkflowPhase{
+		types.PhaseInitialize,
+		types.PhaseDiscuss,
+		types.PhasePlan,
+		types.PhaseExecute,
+		types.PhaseVerify,
+		types.PhaseRuntime,
+		types.PhaseShip,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	for _, phase := range phases {
+		logger.Info("running phase", "phase", phase, "goal", goal)
+		fmt.Fprintf(os.Stderr, "Phase: %s\n", phase)
+
+		result, err := engine.RunPhase(ctx, phase, goal)
+		if err != nil {
+			logger.Error("phase failed", "phase", phase, "error", err)
+			fmt.Fprintf(os.Stderr, "Error in phase %s: %v\n", phase, err)
+			return 1
+		}
+		if !result.Success {
+			logger.Error("phase did not succeed", "phase", phase, "error", result.Error)
+			fmt.Fprintf(os.Stderr, "Phase %s failed: %s\n", phase, result.Error)
+			return 1
+		}
+
+		// Transition to next phase (except after last phase)
+		if phase != types.PhaseShip {
+			if err := engine.Transition(ctx, phase, phases[indexOf(phase, phases)+1]); err != nil {
+				logger.Warn("transition failed", "from", phase, "error", err)
+			}
+		}
+	}
+
+	logger.Info("headless workflow completed", "goal", goal)
+	fmt.Fprintln(os.Stderr, "Workflow completed successfully.")
+	return 0
+}
+
+// indexOf returns the index of a phase in the slice.
+func indexOf(phase types.WorkflowPhase, phases []types.WorkflowPhase) int {
+	for i, p := range phases {
+		if p == phase {
+			return i
+		}
+	}
+	return -1
 }
 
 func runHeadless(prompt string, registry *provider.Registry, defaultModel string, logger *slog.Logger) int {
@@ -299,7 +420,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, "error: --goal is required in headless mode")
 			return 1
 		}
-		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, model, logger)
+		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, model, logger, registry)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)
