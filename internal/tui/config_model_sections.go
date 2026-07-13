@@ -6,14 +6,16 @@ func (m *ConfigModel) buildSections() {
 		{
 			title: "Provider",
 			fields: []cfgField{
-				{key: "provider.default", label: "Default provider", fieldType: cfgChoice, choices: []string{"zen", "openrouter"}, hint: "Which provider M31A uses by default"},
+				{key: "provider.default", label: "Default provider", fieldType: cfgChoice, choices: []string{"zen", "openrouter", "nvidia"}, hint: "Which provider M31A uses by default"},
 				{key: "provider.auto_fallback", label: "Auto fallback", fieldType: cfgBool, hint: "Automatically switch provider on failure"},
 				{key: "provider.openrouter_base_url", label: "OpenRouter base URL", fieldType: cfgText, hint: "Custom base URL (empty = default)"},
 				{key: "provider.zen_base_url", label: "Zen base URL", fieldType: cfgText, hint: "Custom base URL (empty = default)"},
+				{key: "provider.nvidia_base_url", label: "NVIDIA base URL", fieldType: cfgText, hint: "Custom base URL (empty = default)"},
 				{key: "provider.openrouter_referer", label: "OpenRouter referer header", fieldType: cfgText, hint: "HTTP-Referer sent to OpenRouter"},
 				{key: "provider.openrouter_title", label: "OpenRouter title header", fieldType: cfgText, hint: "X-Title sent to OpenRouter"},
 				{key: "provider.openrouter.api_key", label: "OpenRouter API key", fieldType: cfgPassword, hint: "Saved to keychain, not written to disk"},
 				{key: "provider.zen.api_key", label: "Zen API key", fieldType: cfgPassword, hint: "Saved to keychain, not written to disk"},
+				{key: "provider.nvidia.api_key", label: "NVIDIA API key", fieldType: cfgPassword, hint: "Saved to keychain, not written to disk"},
 			},
 		},
 		{

@@ -586,7 +586,10 @@ func (s *SettingsModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, mainArea, "", editBox, "", status)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, mainArea, status)
+	// Hint line: clarify this is a simplified view
+	hint := lipgloss.NewStyle().Foreground(t.TextSecondary).PaddingLeft(2).
+		Render("Showing common options -- see Config editor for advanced settings")
+	return lipgloss.JoinVertical(lipgloss.Left, mainArea, hint, status)
 }
 
 func (s *SettingsModel) renderTabContent() string {

@@ -13,6 +13,8 @@ func getProviderFieldValue(c *config.Config, key string) (string, bool) {
 		return c.Provider.OpenRouterBaseURL, true
 	case "provider.zen_base_url":
 		return c.Provider.ZenBaseURL, true
+	case "provider.nvidia_base_url":
+		return c.Provider.NvidiaBaseURL, true
 	case "provider.openrouter_referer":
 		return c.Provider.OpenRouterReferer, true
 	case "provider.openrouter_title":
@@ -21,6 +23,8 @@ func getProviderFieldValue(c *config.Config, key string) (string, bool) {
 		return c.Provider.OpenRouter.APIKey, true
 	case "provider.zen.api_key":
 		return c.Provider.Zen.APIKey, true
+	case "provider.nvidia.api_key":
+		return c.Provider.Nvidia.APIKey, true
 	}
 	return "", false
 }
@@ -36,6 +40,8 @@ func setProviderFieldValue(c *config.Config, key string, val string) bool {
 		c.Provider.OpenRouterBaseURL = val
 	case "provider.zen_base_url":
 		c.Provider.ZenBaseURL = val
+	case "provider.nvidia_base_url":
+		c.Provider.NvidiaBaseURL = val
 	case "provider.openrouter_referer":
 		c.Provider.OpenRouterReferer = val
 	case "provider.openrouter_title":
@@ -44,6 +50,8 @@ func setProviderFieldValue(c *config.Config, key string, val string) bool {
 		c.Provider.OpenRouter.APIKey = val
 	case "provider.zen.api_key":
 		c.Provider.Zen.APIKey = val
+	case "provider.nvidia.api_key":
+		c.Provider.Nvidia.APIKey = val
 	default:
 		return false
 	}
