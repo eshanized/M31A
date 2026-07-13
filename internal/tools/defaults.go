@@ -119,6 +119,9 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(NewHTTPCheck()); err != nil {
 		return nil, err
 	}
+	if err := d.Register(NewGit(workDir)); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
