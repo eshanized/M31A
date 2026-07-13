@@ -795,6 +795,19 @@ func (e *Engine) SetCollector(c *metrics.Collector) {
 	e.collector = c
 }
 
+// GetCostInfo returns the current cost and budget information.
+func (e *Engine) GetCostInfo() (totalCost float64, budgetLimit float64, budgetRemaining float64) {
+	totalCost = e.costTracker.TotalCost()
+	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
+		budgetLimit = e.cfg.Features.BudgetLimitUSD
+		budgetRemaining = budgetLimit - totalCost
+		if budgetRemaining < 0 {
+			budgetRemaining = 0
+		}
+	}
+	return
+}
+
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	// Budget guardrail: check cumulative cost before each phase.

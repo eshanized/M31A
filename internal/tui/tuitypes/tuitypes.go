@@ -581,6 +581,9 @@ type WorkflowEngine interface {
 	SkipCurrentTask(taskID int)
 	CancelCurrentTask(taskID int)
 	CancelGroup()
+
+	// Cost tracking
+	GetCostInfo() (totalCost float64, budgetLimit float64, budgetRemaining float64)
 }
 
 // ─── Intent classification ─────────────────────────────────────────────────────

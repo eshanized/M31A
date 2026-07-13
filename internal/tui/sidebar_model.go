@@ -890,13 +890,18 @@ func (s *SidebarModel) renderIdle(contentW int) []string {
 		lines = append(lines, branchLine)
 	}
 
-	// Line 2: cost (if available)
+	// Line 2: cost + elapsed time (if available)
 	if s.showCost && s.cost > 0 {
 		var costStr string
 		if s.cost < 0.01 {
 			costStr = "<$0.01"
 		} else {
 			costStr = fmt.Sprintf("$%.2f", s.cost)
+		}
+		// Add elapsed time if available
+		if !s.taskProgress.StartedAt.IsZero() {
+			elapsed := time.Since(s.taskProgress.StartedAt)
+			costStr += fmt.Sprintf(" in %s", formatDuration(elapsed))
 		}
 		costLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
@@ -977,13 +982,18 @@ func (s *SidebarModel) renderActive(contentW int) []string {
 		}
 	}
 
-	// Line 6: cost (if available)
+	// Line 6: cost + elapsed time (if available)
 	if s.showCost && s.cost > 0 {
 		var costStr string
 		if s.cost < 0.01 {
 			costStr = "<$0.01"
 		} else {
 			costStr = fmt.Sprintf("$%.2f", s.cost)
+		}
+		// Add elapsed time if available
+		if !s.taskProgress.StartedAt.IsZero() {
+			elapsed := time.Since(s.taskProgress.StartedAt)
+			costStr += fmt.Sprintf(" in %s", formatDuration(elapsed))
 		}
 		costLine := lipgloss.NewStyle().
 			Foreground(t.TextMuted).
@@ -1019,6 +1029,27 @@ func truncateStr(s string, maxLen int) string {
 		return "…"
 	}
 	return string(runes[:maxLen-1]) + "…"
+}
+
+// formatDuration formats a duration in a human-readable way.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		minutes := int(d.Minutes())
+		seconds := int(d.Seconds()) % 60
+		if seconds == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm%ds", minutes, seconds)
+	}
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh%dm", hours, minutes)
 }
 
 // renderGitStatus renders the git branch and file status pills.
