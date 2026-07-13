@@ -138,7 +138,7 @@ func (m *PermissionModal) Render(width, height int) string {
 	// ── Timeout info (non-urgent, just informational) ─────────────────────
 	remaining := m.Remaining()
 	var timeoutInfo string
-	if remaining > 0 && remaining < 5*time.Minute {
+	if remaining > 0 {
 		timeoutInfo = s.Caption.Render(fmt.Sprintf("  Timeout in %s", formatDurationClock(remaining)))
 	}
 
