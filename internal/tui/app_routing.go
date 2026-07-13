@@ -3,6 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // app_routing.go — consolidated screen routing infrastructure.
@@ -93,34 +94,50 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenExecute] = func(msg tea.Msg) tea.Cmd {
 		if m.executeModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.executeModel = NewExecuteModel([]types.Task{}, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenExecute, m.executeModel)
 		}
 		newModel, cmd := m.executeModel.Update(msg)
-		m.executeModel = newModel
+		if r, ok := newModel.(*ExecuteModel); ok {
+			m.executeModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenVerify] = func(msg tea.Msg) tea.Cmd {
 		if m.verifyModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.verifyModel = NewVerifyModel([]types.Task{}, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenVerify, m.verifyModel)
 		}
 		newModel, cmd := m.verifyModel.Update(msg)
-		m.verifyModel = newModel
+		if r, ok := newModel.(*VerifyModel); ok {
+			m.verifyModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenRuntimeCheck] = func(msg tea.Msg) tea.Cmd {
 		if m.runtimeModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
 		}
 		newModel, cmd := m.runtimeModel.Update(msg)
-		m.runtimeModel = newModel
+		if r, ok := newModel.(*RuntimeModel); ok {
+			m.runtimeModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenShip] = func(msg tea.Msg) tea.Cmd {
 		if m.shipModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.shipModel = NewShipModel(ShipSummary{}, m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenShip, m.shipModel)
 		}
 		newModel, cmd := m.shipModel.Update(msg)
-		m.shipModel = newModel
+		if r, ok := newModel.(*ShipModel); ok {
+			m.shipModel = r
+		}
 		return cmd
 	}
 	m.screenUpdaters[ScreenLedger] = func(msg tea.Msg) tea.Cmd {
@@ -415,7 +432,9 @@ func (m *AppState) initScreenUpdaters() {
 	}
 	m.screenUpdaters[ScreenChatHistory] = func(msg tea.Msg) tea.Cmd {
 		if m.chatHistoryModel == nil {
-			return nil
+			cw, ch := m.contentDimensions()
+			m.chatHistoryModel = NewChatHistoryModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenChatHistory, m.chatHistoryModel)
 		}
 		newModel, cmd := m.chatHistoryModel.Update(msg)
 		if r, ok := newModel.(*ChatHistoryModel); ok {

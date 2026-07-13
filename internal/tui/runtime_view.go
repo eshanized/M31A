@@ -6,12 +6,12 @@ import (
 
 // renderRuntimeContent renders the runtime verification screen content.
 func (m *AppState) renderRuntimeContent(chrome layout.PageChrome) string {
+	// Ensure RuntimeCheck is registered with router
 	if m.runtimeModel == nil {
-		return ""
+		cw, ch := m.contentDimensions()
+		m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
 	}
-
-	m.runtimeModel.width = chrome.ContentWidth()
-	m.runtimeModel.height = chrome.ContentHeight()
-
-	return m.runtimeModel.renderContent()
+	m.runtimeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.router.View()
 }

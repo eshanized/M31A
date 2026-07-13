@@ -38,6 +38,27 @@ func NewRuntimeModel(t theme.Theme, w, h int) *RuntimeModel {
 	return rm
 }
 
+// Init implements Screenable.
+func (rm *RuntimeModel) Init() tea.Cmd { return nil }
+
+// SetDimensions implements Screenable.
+func (rm *RuntimeModel) SetDimensions(w, h int) {
+	rm.width = w
+	rm.height = h
+	rm.initViewport()
+}
+
+// SetTheme implements Screenable.
+func (rm *RuntimeModel) SetTheme(t theme.Theme) {
+	rm.theme = t
+	rm.viewport.SetContent(rm.renderContent())
+}
+
+// View implements Screenable.
+func (rm *RuntimeModel) View() string {
+	return rm.renderContent()
+}
+
 func (rm *RuntimeModel) initViewport() {
 	const chrome = 8
 	h := rm.height - chrome
@@ -60,7 +81,7 @@ func (rm *RuntimeModel) SetSummary(summary workflow.RuntimeSummary) {
 type RuntimeTickMsg struct{}
 
 // Update handles runtime screen key events.
-func (rm *RuntimeModel) Update(msg tea.Msg) (*RuntimeModel, tea.Cmd) {
+func (rm *RuntimeModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		rm.width = msg.Width

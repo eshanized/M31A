@@ -158,11 +158,12 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		}
 		if next == types.PhaseExecute {
 			// In fast/direct mode, skip plan and go straight to execution
-			m.screen = ScreenExecute
+			m.switchScreen(ScreenExecute)
 			tasks := msg.Tasks
 			if m.executeModel == nil {
 				cw, ch := m.contentDimensions()
 				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+				m.router.Register(ScreenExecute, m.executeModel)
 			} else {
 				m.executeModel.tasks = tasks
 			}
@@ -242,7 +243,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			return nil
 		}
 		m.setWorkflowPhase(next)
-		m.screen = ScreenVerify
+		m.switchScreen(ScreenVerify)
 		if m.workflowEngine != nil {
 			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseExecute, next); err != nil {
 				slog.Error("phase transition failed", "from", types.PhaseExecute, "to", next, "error", err)
@@ -268,6 +269,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		}
 		cw, ch := m.contentDimensions()
 		m.verifyModel = NewVerifyModel(msg.Tasks, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenVerify, m.verifyModel)
 		if len(msg.ManualVerificationSteps) > 0 {
 			m.verifyModel.SetManualSteps(msg.ManualVerificationSteps)
 		}
@@ -280,7 +282,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 
 	case types.PhaseVerify:
 		m.setWorkflowPhase(types.PhaseRuntime)
-		m.screen = ScreenRuntimeCheck
+		m.switchScreen(ScreenRuntimeCheck)
 		if m.workflowEngine != nil {
 			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseVerify, types.PhaseRuntime); err != nil {
 				slog.Error("phase transition failed", "from", types.PhaseVerify, "to", types.PhaseRuntime, "error", err)
@@ -289,6 +291,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 		if m.runtimeModel == nil {
 			cw, ch := m.contentDimensions()
 			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
+			m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
 		}
 		m.persistWorkflowState()
 		return m.RunPhaseCmd(types.PhaseRuntime)
@@ -306,14 +309,14 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			})
 		}
 		// Show runtime screen and wait for user to continue
-		m.screen = ScreenRuntimeCheck
+		m.switchScreen(ScreenRuntimeCheck)
 		m.persistWorkflowState()
 		return nil
 
 	case types.PhaseShip:
 		m.setWorkflowPhase(types.PhaseIdle)
 		m.persistWorkflowState()
-		m.screen = ScreenShip
+		m.switchScreen(ScreenShip)
 		if m.shipModel != nil && msg.Demonstration != "" {
 			m.shipModel.SetDemonstration(msg.Demonstration)
 		}
@@ -342,7 +345,7 @@ func (m *AppState) handlePlanReady(msg PlanReadyMsg) tea.Cmd {
 // handlePlanApprove handles plan acceptance — transitions from Plan to Execute.
 func (m *AppState) handlePlanApprove() tea.Cmd {
 	m.setWorkflowPhase(types.PhaseExecute)
-	m.screen = ScreenExecute
+	m.switchScreen(ScreenExecute)
 	if m.workflowEngine != nil {
 		if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhasePlan, types.PhaseExecute); err != nil {
 			slog.Error("phase transition failed", "from", types.PhasePlan, "to", types.PhaseExecute, "error", err)
@@ -355,6 +358,7 @@ func (m *AppState) handlePlanApprove() tea.Cmd {
 	if m.executeModel == nil {
 		cw, ch := m.contentDimensions()
 		m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenExecute, m.executeModel)
 	} else {
 		m.executeModel.tasks = tasks
 	}

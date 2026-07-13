@@ -47,6 +47,22 @@ func NewVerifyModel(tasks []types.Task, results map[int]workflow.VerificationRes
 	return vm
 }
 
+// Init implements Screenable.
+func (vm *VerifyModel) Init() tea.Cmd { return nil }
+
+// SetDimensions implements Screenable.
+func (vm *VerifyModel) SetDimensions(w, h int) {
+	vm.width = w
+	vm.height = h
+	vm.initViewport()
+}
+
+// SetTheme implements Screenable.
+func (vm *VerifyModel) SetTheme(t theme.Theme) {
+	vm.theme = t
+	vm.viewport.SetContent(vm.renderResults())
+}
+
 func (vm *VerifyModel) initViewport() {
 	// verifyViewChrome: progressLine(1) + separator(1) + hints(1) + margins(3)
 	const verifyViewChrome = 6
@@ -97,7 +113,7 @@ func (vm *VerifyModel) TickSpinner() {
 }
 
 // Update handles verify screen key events.
-func (vm *VerifyModel) Update(msg tea.Msg) (*VerifyModel, tea.Cmd) {
+func (vm *VerifyModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {

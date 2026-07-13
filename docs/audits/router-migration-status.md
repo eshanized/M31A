@@ -1,6 +1,6 @@
 # Router Migration Status
 
-**Date:** 2026-07-12 (regenerated)
+**Date:** 2026-07-13 (rev 4)
 **Purpose:** Mechanically-generated, single-source-of-truth for which screens are registered with the Router vs. legacy switch path.
 
 ---
@@ -19,42 +19,42 @@ The earlier investigation report (`screen-migration-investigation.md`) claimed 3
 
 | Value | Constant | Registered? | Legacy? |
 |-------|----------|:-----------:|:-------:|
-| 0 | ScreenFirstRun | | X |
+| 0 | ScreenFirstRun | X | |
 | 1 | ScreenREPL | | X |
-| 2 | ScreenModelSelector | X | X |
-| 3 | ScreenSettings | X | X |
-| 4 | ScreenResume | X | X |
+| 2 | ScreenModelSelector | | X |
+| 3 | ScreenSettings | X | |
+| 4 | ScreenResume | X | |
 | 5 | ScreenPermission | | X |
-| 6 | ScreenPlan | X | X |
+| 6 | ScreenPlan | X | |
 | 7 | ScreenExecute | | X |
 | 8 | ScreenVerify | | X |
-| 9 | ScreenShip | | X |
-| 10 | ScreenDiff | X | X |
-| 11 | ScreenLedger | X | X |
-| 12 | ScreenRollback | X | X |
-| 13 | ScreenGoalInput | X | X |
-| 14 | ScreenDiscuss | X | X |
-| 15 | ScreenMetrics | X | X |
-| 16 | ScreenConfig | X | X |
-| 17 | ScreenHelp | X | X |
-| 18 | ScreenBisect | X | X |
+| 9 | ScreenShip | X | |
+| 10 | ScreenDiff | X | |
+| 11 | ScreenLedger | X | |
+| 12 | ScreenRollback | X | |
+| 13 | ScreenGoalInput | X | |
+| 14 | ScreenDiscuss | X | |
+| 15 | ScreenMetrics | X | |
+| 16 | ScreenConfig | X | |
+| 17 | ScreenHelp | X | |
+| 18 | ScreenBisect | X | |
 | 19 | *(undefined)* | — | — |
-| 20 | ScreenNotifications | | X |
-| 21 | ScreenDashboard | X | X |
-| 22 | ScreenSessionDetail | X | X |
-| 23 | ScreenFileExplorer | X | X |
-| 24 | ScreenToolDetail | X | X |
-| 25 | ScreenPhaseModelPicker | X | X |
-| 26 | ScreenGhostPicker | X | X |
-| 27 | ScreenGhostOutput | X | X |
-| 28 | ScreenConfirmQuit | X | X |
+| 20 | ScreenNotifications | X | |
+| 21 | ScreenDashboard | X | |
+| 22 | ScreenSessionDetail | X | |
+| 23 | ScreenFileExplorer | X | |
+| 24 | ScreenToolDetail | X | |
+| 25 | ScreenPhaseModelPicker | X | |
+| 26 | ScreenGhostPicker | X | |
+| 27 | ScreenGhostOutput | X | |
+| 28 | ScreenConfirmQuit | X | |
 | 29 | ScreenChatHistory | | X |
-| 30 | ScreenCommandPalette | X | X |
+| 30 | ScreenCommandPalette | X | |
 | 31 | ScreenRuntimeCheck | | X |
-| 32 | ScreenHome | X | X |
-| 33 | ScreenDecisions | | X |
+| 32 | ScreenHome | X | |
+| 33 | ScreenDecisions | X | |
 
-**Legend:** "X" in Registered = has `router.Register()` in both `app_routing.go` and `app_view.go`. "X" in Legacy = has `case Screen*` in the View switch (some also have Update switch cases).
+**Legend:** "X" in Registered = has `router.Register()` in both `app_routing.go` and `app_view.go`. "X" in Legacy = has `case Screen*` in the View switch (some also have Update switch cases) but no router registration.
 
 ---
 
@@ -64,21 +64,22 @@ The earlier investigation report (`screen-migration-investigation.md`) claimed 3
 |--------|-------|
 | Total enum values defined | 33 |
 | Undefined enum value | 1 (value 19) |
-| Registered with Router | 23 (70%) |
-| Legacy switch path only | 10 (30%) |
+| Registered with Router | 26 (79%) |
+| Legacy switch path only | 7 (21%) |
 
 ---
 
-## Registered with Router (23 screens)
+## Registered with Router (26 screens)
 
 These screens have `router.Register()` in both `app_routing.go` (Update) and `app_view.go` (View). They bypass the legacy switch statements.
 
 | Screen | Enum Value |
 |--------|-----------|
+| ScreenFirstRun | 0 |
 | ScreenSettings | 3 |
-| ScreenModelSelector | 2 |
 | ScreenResume | 4 |
 | ScreenPlan | 6 |
+| ScreenShip | 9 |
 | ScreenDiff | 10 |
 | ScreenLedger | 11 |
 | ScreenRollback | 12 |
@@ -88,6 +89,7 @@ These screens have `router.Register()` in both `app_routing.go` (Update) and `ap
 | ScreenConfig | 16 |
 | ScreenHelp | 17 |
 | ScreenBisect | 18 |
+| ScreenNotifications | 20 |
 | ScreenDashboard | 21 |
 | ScreenSessionDetail | 22 |
 | ScreenFileExplorer | 23 |
@@ -98,25 +100,23 @@ These screens have `router.Register()` in both `app_routing.go` (Update) and `ap
 | ScreenConfirmQuit | 28 |
 | ScreenCommandPalette | 30 |
 | ScreenHome | 32 |
+| ScreenDecisions | 33 |
 
 ---
 
-## Legacy Switch Path Only (10 screens)
+## Legacy Switch Path Only (7 screens)
 
 These screens have NO `router.Register()` call. They route through the legacy `case Screen*` switch statements in `app_view.go` (and one in `app_routing.go`).
 
 | Screen | Enum Value | Why Not Yet Migrated |
 |--------|-----------|---------------------|
-| ScreenFirstRun | 0 | Wizard flow; writes config/keychain |
 | ScreenREPL | 1 | Core chat; ~1300+ lines; highest coupling (sidebar, streaming, tools, autoDream, chatHistory) |
-| ScreenPermission | 5 | Modal overlay; not a full screen (only legacy case in `app_routing.go` Update switch) |
+| ScreenModelSelector | 2 | Overlay-only — View() handled by renderFrameWithTheme() before renderScreenContent; router registration removed. See modelselector-overlay-resolution.md |
+| ScreenPermission | 5 | Overlay-only — same shape as ModelSelector. Render intercept at app_view.go:221 returns before renderScreenContent. Never had router.Register(). See permission-overlay-confirmation.md |
 | ScreenExecute | 7 | Tight Plan coupling; 10+ workflow handler mutations; live output |
 | ScreenVerify | 8 | Healing integration; spinner state; manual steps |
-| ScreenShip | 9 | Demonstration content from phase result |
-| ScreenNotifications | 20 | AddNotification() from toast system |
 | ScreenChatHistory | 29 | View-time coupling to REPL messages (architectural smell) |
 | ScreenRuntimeCheck | 31 | dev server + smoke tests |
-| ScreenDecisions | 33 | Decision log browser |
 
 ---
 
@@ -131,9 +131,11 @@ ScreenCommandPalette
 ScreenConfig
 ScreenConfirmQuit
 ScreenDashboard
+ScreenDecisions
 ScreenDiff
 ScreenDiscuss
 ScreenFileExplorer
+ScreenFirstRun
 ScreenGhostOutput
 ScreenGhostPicker
 ScreenGoalInput
@@ -141,13 +143,14 @@ ScreenHelp
 ScreenHome
 ScreenLedger
 ScreenMetrics
-ScreenModelSelector
+ScreenNotifications
 ScreenPhaseModelPicker
 ScreenPlan
 ScreenResume
 ScreenRollback
 ScreenSessionDetail
 ScreenSettings
+ScreenShip
 ScreenToolDetail
 ```
 
@@ -160,9 +163,11 @@ ScreenCommandPalette
 ScreenConfig
 ScreenConfirmQuit
 ScreenDashboard
+ScreenDecisions
 ScreenDiff
 ScreenDiscuss
 ScreenFileExplorer
+ScreenFirstRun
 ScreenGhostOutput
 ScreenGhostPicker
 ScreenGoalInput
@@ -170,23 +175,24 @@ ScreenHelp
 ScreenHome
 ScreenLedger
 ScreenMetrics
-ScreenModelSelector
+ScreenNotifications
 ScreenPhaseModelPicker
 ScreenPlan
 ScreenResume
 ScreenRollback
 ScreenSessionDetail
 ScreenSettings
+ScreenShip
 ScreenToolDetail
 ```
 
-Both files register the same 23 screens. The two sets are identical.
+Both files register the same 26 screens. The two sets are identical.
 
 ### Which screens still have cases in the Update switch?
 
 ```
 $ grep -n 'case Screen' internal/tui/app_routing.go | grep -v 'router.Register'
-469:	case ScreenPermission:
+491:	case ScreenPermission:
 ```
 
 Only `ScreenPermission` (5) remains in the Update switch.
@@ -195,66 +201,93 @@ Only `ScreenPermission` (5) remains in the Update switch.
 
 ```
 $ grep -n 'case Screen' internal/tui/app_view.go | grep -v 'router.Register'
-122:	case ScreenREPL:
-124:	case ScreenSettings:
-126:	case ScreenModelSelector:
-128:	case ScreenPlan:
-130:	case ScreenExecute:
-132:	case ScreenVerify:
-134:	case ScreenRuntimeCheck:
-136:	case ScreenShip:
-138:	case ScreenResume:
-140:	case ScreenGoalInput:
-142:	case ScreenFirstRun:
-144:	case ScreenLedger:
-146:	case ScreenRollback:
-148:	case ScreenMetrics:
-150:	case ScreenDiscuss:
-152:	case ScreenConfig:
-154:	case ScreenDiff:
-156:	case ScreenHelp:
-158:	case ScreenBisect:
-160:	case ScreenNotifications:
-162:	case ScreenDashboard:
-164:	case ScreenSessionDetail:
-166:	case ScreenFileExplorer:
-168:	case ScreenToolDetail:
-170:	case ScreenPhaseModelPicker:
-172:	case ScreenGhostPicker:
-174:	case ScreenGhostOutput:
-176:	case ScreenConfirmQuit:
-178:	case ScreenChatHistory:
-180:	case ScreenCommandPalette:
-182:	case ScreenHome:
-184:	case ScreenDecisions:
-405:	case ScreenSettings:
-407:	case ScreenPlan:
-409:	case ScreenExecute:
-411:	case ScreenVerify:
-413:	case ScreenRuntimeCheck:
-415:	case ScreenShip:
-417:	case ScreenModelSelector:
-419:	case ScreenResume:
-421:	case ScreenDiscuss:
-423:	case ScreenHelp:
-425:	case ScreenLedger:
-427:	case ScreenRollback:
-429:	case ScreenMetrics:
-431:	case ScreenConfig:
-433:	case ScreenBisect:
-435:	case ScreenNotifications:
-437:	case ScreenDashboard:
-439:	case ScreenPermission:
-441:	case ScreenPhaseModelPicker:
-443:	case ScreenGhostPicker:
-445:	case ScreenGhostOutput:
-447:	case ScreenConfirmQuit:
-449:	case ScreenChatHistory:
-451:	case ScreenCommandPalette:
-453:	case ScreenHome:
+121:	case ScreenREPL:
+123:	case ScreenSettings:
+125:	case ScreenModelSelector:
+127:	case ScreenPlan:
+129:	case ScreenExecute:
+131:	case ScreenVerify:
+133:	case ScreenRuntimeCheck:
+135:	case ScreenShip:
+137:	case ScreenResume:
+139:	case ScreenGoalInput:
+141:	case ScreenFirstRun:
+143:	case ScreenLedger:
+145:	case ScreenRollback:
+147:	case ScreenMetrics:
+149:	case ScreenDiscuss:
+151:	case ScreenConfig:
+153:	case ScreenDiff:
+155:	case ScreenHelp:
+157:	case ScreenBisect:
+159:	case ScreenNotifications:
+161:	case ScreenDashboard:
+163:	case ScreenSessionDetail:
+165:	case ScreenFileExplorer:
+167:	case ScreenToolDetail:
+169:	case ScreenPhaseModelPicker:
+171:	case ScreenGhostPicker:
+173:	case ScreenGhostOutput:
+175:	case ScreenConfirmQuit:
+177:	case ScreenChatHistory:
+179:	case ScreenCommandPalette:
+181:	case ScreenHome:
+183:	case ScreenDecisions:
+413:	case ScreenSettings:
+415:	case ScreenPlan:
+417:	case ScreenExecute:
+419:	case ScreenVerify:
+421:	case ScreenRuntimeCheck:
+423:	case ScreenShip:
+425:	case ScreenModelSelector:
+427:	case ScreenResume:
+429:	case ScreenDiscuss:
+431:	case ScreenHelp:
+433:	case ScreenLedger:
+435:	case ScreenRollback:
+437:	case ScreenMetrics:
+439:	case ScreenConfig:
+441:	case ScreenBisect:
+443:	case ScreenNotifications:
+445:	case ScreenDashboard:
+447:	case ScreenPermission:
+449:	case ScreenPhaseModelPicker:
+451:	case ScreenGhostPicker:
+453:	case ScreenGhostOutput:
+455:	case ScreenConfirmQuit:
+457:	case ScreenChatHistory:
+459:	case ScreenCommandPalette:
+461:	case ScreenHome:
 ```
 
-Note: The View switch in `app_view.go` has two blocks (lines 122-184 and lines 405-453). Both are legacy fallback paths. Screens that ARE registered with the router still appear in these switch statements as fallbacks — the router is checked first, so the switch cases are dead code for registered screens. The 10 screens listed in "Legacy Switch Path Only" above are the ones that actually rely on these switch cases because they have no router registration.
+Note: The View switch in `app_view.go` has two blocks (lines 121-183 and lines 413-461). Both are legacy fallback paths. Screens that ARE registered with the router still appear in these switch statements as fallbacks — the router is checked first, so the switch cases are dead code for registered screens. The 7 screens listed in "Legacy Switch Path Only" above are the ones that actually rely on these switch cases because they have no router registration.
+
+---
+
+## Change Log
+
+### Rev 4 (2026-07-13)
+
+- **ScreenShip (9)** moved from Legacy to Registered (screen-migration-ship.md — Phase 3 screen 1 of 6 migrated)
+- Registered count: 25 → 26. Legacy count: 8 → 7.
+
+### Rev 3 (2026-07-13)
+
+- **ScreenPermission (5)** "Why Not Updated" clarified as overlay-only, never had router.Register(). See permission-overlay-confirmation.md. No screen moved between categories; Registered=25, Legacy=8 unchanged.
+
+### Rev 2 (2026-07-12)
+
+Supersedes rev 1. Changes since rev 1:
+
+- **ScreenFirstRun (0)** moved from Legacy to Registered (screen-migration-firstrun.md)
+- **ScreenModelSelector (2)** moved from Registered to Legacy (modelselector-overlay-resolution.md — router registration removed; overlay-only screen)
+- **ScreenNotifications (20)** moved from Legacy to Registered (screen-migration-notifications-decisions.md)
+- **ScreenDecisions (33)** moved from Legacy to Registered (screen-migration-notifications-decisions.md)
+- Registered count: 23 → 25. Legacy count: 10 → 8.
+
+### Rev 1 (2026-07-12)
+
+Initial generation.
 
 ---
 
@@ -266,4 +299,6 @@ Note: The View switch in `app_view.go` has two blocks (lines 122-184 and lines 4
 
 3. **`screen-migration-resume-sessiondetail.md`**: Lists `ScreenMetrics` twice in its remaining screens list.
 
-All three errors are examples of hand-composed lists drifting from the mechanical truth. This file is the canonical reference.
+4. **`screen-migration-notifications-decisions.md`**: Hand-composed "remaining screens" list at bottom is incomplete and inconsistent with this canonical file. It lists only 3 remaining screens (ScreenREPL, ScreenChatHistory, ScreenFirstRun) — missing ScreenModelSelector, ScreenPermission, ScreenExecute, ScreenVerify, ScreenShip, and ScreenRuntimeCheck. This is exactly the drift this file exists to prevent.
+
+All four errors are examples of hand-composed lists drifting from the mechanical truth. This file is the canonical reference.

@@ -63,6 +63,23 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 	return em
 }
 
+// Init implements Screenable.
+func (em *ExecuteModel) Init() tea.Cmd { return nil }
+
+// SetDimensions implements Screenable.
+func (em *ExecuteModel) SetDimensions(w, h int) {
+	em.width = w
+	em.height = h
+	em.initViewport()
+}
+
+// SetTheme implements Screenable.
+func (em *ExecuteModel) SetTheme(t theme.Theme) {
+	em.theme = t
+	em.animatedProg.Theme = t
+	em.refreshContent()
+}
+
 func (em *ExecuteModel) initViewport() {
 	// executeViewChrome: progressLine(1) + separator(1) + hints(1) + margins(3)
 	const executeViewChrome = 6
@@ -128,7 +145,7 @@ func (em *ExecuteModel) AppendLiveOutput(lines []string) {
 }
 
 // Update handles execute screen key events.
-func (em *ExecuteModel) Update(msg tea.Msg) (*ExecuteModel, tea.Cmd) {
+func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {

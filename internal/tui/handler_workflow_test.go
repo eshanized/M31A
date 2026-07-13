@@ -10,6 +10,7 @@ import (
 func newTestAppStateForWorkflow() *AppState {
 	return &AppState{
 		themeManager: theme.NewManager(theme.ModeDark),
+		router:       NewRouter(),
 		width:        80,
 		height:       24,
 	}

@@ -1,8 +1,6 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -10,7 +8,8 @@ import (
 // Using the existing Screen type from tuitypes for consistency.
 type ScreenID = Screen
 
-// Router manages screen transitions and delegates messages to the active screen.
+// Router manages screen registration, active-screen tracking, and View() delegation.
+// Update() dispatch is handled by screenUpdaters in app_routing.go, not by the Router.
 type Router struct {
 	screens  map[ScreenID]Screenable
 	activeID ScreenID
@@ -37,35 +36,20 @@ func (r *Router) Register(id ScreenID, s Screenable) {
 	s.SetTheme(r.theme)
 }
 
-// SwitchTo changes the active screen.
-func (r *Router) SwitchTo(id ScreenID) tea.Cmd {
+// SwitchTo changes the active screen and syncs its dimensions/theme.
+// Init() is NOT called here — ensureSubModel already calls Init() during model creation.
+func (r *Router) SwitchTo(id ScreenID) {
 	if id == 0 {
-		return nil
+		return
 	}
 	if s, ok := r.screens[id]; ok {
 		r.activeID = id
 		r.active = s
-		// Initialize new screen with current dimensions and theme
 		if r.active != nil {
 			r.active.SetDimensions(r.width, r.height)
 			r.active.SetTheme(r.theme)
 		}
-		return r.active.Init()
 	}
-	return nil
-}
-
-// Update delegates the message to the active screen.
-func (r *Router) Update(msg tea.Msg) tea.Cmd {
-	if r.active == nil {
-		return nil
-	}
-	newActive, cmd := r.active.Update(msg)
-	if newActive != nil {
-		r.screens[r.activeID] = newActive
-		r.active = newActive
-	}
-	return cmd
 }
 
 // View returns the view of the active screen.
@@ -95,11 +79,6 @@ func (r *Router) SetDimensions(w, h int) {
 			s.SetDimensions(w, h)
 		}
 	}
-}
-
-// ActiveScreen returns the currently active screen.
-func (r *Router) ActiveScreen() Screenable {
-	return r.active
 }
 
 // ActiveID returns the currently active screen ID.

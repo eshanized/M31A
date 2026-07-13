@@ -55,14 +55,32 @@ func NewShipModel(summary ShipSummary, t theme.Theme, w, h int) *ShipModel {
 	return sm
 }
 
+// Init implements Screenable.
+func (sm *ShipModel) Init() tea.Cmd { return nil }
+
+// SetDimensions implements Screenable.
+func (sm *ShipModel) SetDimensions(w, h int) {
+	sm.width = w
+	sm.height = h
+	sm.demoViewport = viewport.New(w-4, h-8)
+	if sm.demonstration != "" {
+		sm.demoViewport.SetContent(sm.demonstration)
+	}
+}
+
+// SetTheme implements Screenable.
+func (sm *ShipModel) SetTheme(t theme.Theme) {
+	sm.theme = t
+}
+
 // SetDemonstration sets the demonstration walkthrough content.
 func (sm *ShipModel) SetDemonstration(content string) {
 	sm.demonstration = content
 	sm.demoViewport.SetContent(content)
 }
 
-// Update handles ship screen key events.
-func (sm *ShipModel) Update(msg tea.Msg) (*ShipModel, tea.Cmd) {
+// Update implements Screenable.
+func (sm *ShipModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		sm.width = msg.Width

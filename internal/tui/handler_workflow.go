@@ -82,7 +82,9 @@ func handleExecutePauseMsg(m *AppState, msg ExecutePauseMsg) (tea.Model, tea.Cmd
 func handleHealResultMsg(m *AppState, msg HealResultMsg) (tea.Model, tea.Cmd) {
 	if m.verifyModel != nil {
 		newVerify, cmd := m.verifyModel.Update(msg)
-		m.verifyModel = newVerify
+		if r, ok := newVerify.(*VerifyModel); ok {
+			m.verifyModel = r
+		}
 		return m, cmd
 	}
 	return m, nil

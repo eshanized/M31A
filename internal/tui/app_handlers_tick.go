@@ -47,7 +47,9 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 
 	if m.screen == ScreenExecute && m.executeModel != nil {
 		execM, cmd := m.executeModel.Update(msg)
-		m.executeModel = execM
+		if r, ok := execM.(*ExecuteModel); ok {
+			m.executeModel = r
+		}
 		cmds = append(cmds, cmd)
 	}
 	if m.screen == ScreenPhaseModelPicker && m.phaseModelPicker != nil {
@@ -69,7 +71,9 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 	}
 	if m.screen == ScreenRuntimeCheck && m.runtimeModel != nil {
 		newRuntime, cmd := m.runtimeModel.Update(msg)
-		m.runtimeModel = newRuntime
+		if r, ok := newRuntime.(*RuntimeModel); ok {
+			m.runtimeModel = r
+		}
 		cmds = append(cmds, cmd)
 	}
 	if m.screen == ScreenPlan && m.planModel != nil {
@@ -81,7 +85,9 @@ func (m *AppState) forwardTickToScreen(msg TickMsg) []tea.Cmd {
 	}
 	if m.screen == ScreenShip && m.shipModel != nil {
 		newShip, cmd := m.shipModel.Update(msg)
-		m.shipModel = newShip
+		if r, ok := newShip.(*ShipModel); ok {
+			m.shipModel = r
+		}
 		cmds = append(cmds, cmd)
 	}
 	if m.screen == ScreenDashboard && m.dashboardModel != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui/layout"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // ─── AppState view rendering ──────────────────────────────────────────────────
@@ -215,7 +216,12 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 		return m.cmdPalette.View()
 	}
 
-	// Permission/question modal (top priority overlay)
+	// Permission/question modal (top priority overlay).
+	// This overlay path returns before renderScreenContent, so the router never
+	// controls Permission's View(). The modal is rendered directly on the
+	// concrete pointer. This is intentional — Permission is a modal overlay,
+	// not a full-screen routed view. It has no router.Register() and never has.
+	// Do not "fix" this by removing the early return or adding router registration.
 	if m.screen == ScreenPermission {
 		modalContent := m.renderPermissionModalContent()
 		if result := m.renderDimmedModal(modalContent, t); result != "" {
@@ -600,30 +606,35 @@ func (m *AppState) renderPlanContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderExecuteContent(chrome layout.PageChrome) string {
+	// Ensure Execute is registered with router
 	if m.executeModel == nil {
-		return renderEmptyState("No tasks to execute", "Run /new to start a workflow", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.executeModel = NewExecuteModel([]types.Task{}, m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenExecute, m.executeModel)
 	}
-	m.executeModel.width = chrome.ContentWidth()
-	m.executeModel.height = chrome.ContentHeight()
-	return m.executeModel.View()
+	m.executeModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.router.View()
 }
 
 func (m *AppState) renderVerifyContent(chrome layout.PageChrome) string {
+	// Ensure Verify is registered with router
 	if m.verifyModel == nil {
-		return renderEmptyState("No verification results", "Run /verify after executing tasks", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		cw, ch := m.contentDimensions()
+		m.verifyModel = NewVerifyModel([]types.Task{}, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
+		m.router.Register(ScreenVerify, m.verifyModel)
 	}
-	m.verifyModel.width = chrome.ContentWidth()
-	m.verifyModel.height = chrome.ContentHeight()
-	return m.verifyModel.View()
+	m.verifyModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.router.View()
 }
 
 func (m *AppState) renderShipContent(chrome layout.PageChrome) string {
+	// Ensure Ship is registered with router
 	if m.shipModel == nil {
-		return renderEmptyState("Nothing to ship", "Complete the workflow phases first — run /new to start", chrome.ContentWidth(), chrome.ContentHeight(), m.themeManager.Current())
+		m.shipModel = NewShipModel(ShipSummary{}, m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+		m.router.Register(ScreenShip, m.shipModel)
 	}
-	m.shipModel.width = chrome.ContentWidth()
-	m.shipModel.height = chrome.ContentHeight()
-	return m.shipModel.View()
+	m.shipModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.router.View()
 }
 
 func (m *AppState) renderResumeContent(chrome layout.PageChrome) string {
@@ -864,15 +875,13 @@ func (m *AppState) renderConfirmQuitContent(chrome layout.PageChrome) string {
 }
 
 func (m *AppState) renderChatHistoryContent(chrome layout.PageChrome) string {
+	// Ensure ChatHistory is registered with router
 	if m.chatHistoryModel == nil {
 		m.chatHistoryModel = NewChatHistoryModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
-		// Load messages from current REPL session on first creation
-		if m.replModel != nil {
-			m.chatHistoryModel.SetMessages(m.replModel.Messages())
-		}
+		m.router.Register(ScreenChatHistory, m.chatHistoryModel)
 	}
 	m.chatHistoryModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
-	return m.chatHistoryModel.View()
+	return m.router.View()
 }
 
 func (m *AppState) renderCommandPaletteContent(chrome layout.PageChrome) string {

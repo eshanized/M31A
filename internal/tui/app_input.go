@@ -335,7 +335,7 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 		return nil
 	case "runtime_continue":
 		m.setWorkflowPhase(types.PhaseShip)
-		m.screen = ScreenShip
+		m.switchScreen(ScreenShip)
 		if m.workflowEngine != nil {
 			if err := m.workflowEngine.Transition(m.shutdownCtx, types.PhaseRuntime, types.PhaseShip); err != nil {
 				slog.Error("phase transition failed", "from", types.PhaseRuntime, "to", types.PhaseShip, "error", err)
