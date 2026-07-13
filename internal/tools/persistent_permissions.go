@@ -50,3 +50,39 @@ func (p *PersistentPermissions) Load(projectDir string) []config.PermissionRule 
 
 	return pd.Projects[projectDir]
 }
+
+// Save persists permission rules for the given project directory.
+func (p *PersistentPermissions) Save(projectDir string, rules []config.PermissionRule) error {
+	if p.path == "" {
+		return nil
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(p.path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Read existing data to preserve other projects
+	var pd persistentData
+	data, err := os.ReadFile(p.path)
+	if err == nil {
+		_ = json.Unmarshal(data, &pd)
+	}
+
+	// Initialize map if needed
+	if pd.Projects == nil {
+		pd.Projects = make(map[string][]config.PermissionRule)
+	}
+
+	// Update rules for this project
+	pd.Projects[projectDir] = rules
+
+	// Write back to file
+	data, err = json.MarshalIndent(pd, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(p.path, data, 0644)
+}

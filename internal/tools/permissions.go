@@ -418,6 +418,22 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 		d.mu.Lock()
 		d.permissions[cacheKey] = resp.Allowed
 		d.mu.Unlock()
+
+		// Persist to disk
+		if d.persistentPerms != nil {
+			// Create a permission rule for this command
+			rule := config.PermissionRule{
+				Tool:    toolName,
+				Pattern: req.Command,
+				Action:  "allow",
+			}
+			// Load existing rules, append new one, save
+			existingRules := d.persistentPerms.Load(workDir)
+			existingRules = append(existingRules, rule)
+			if err := d.persistentPerms.Save(workDir, existingRules); err != nil {
+				slog.Error("failed to persist permission rule", "error", err)
+			}
+		}
 	}
 
 	return nil

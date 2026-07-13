@@ -12,6 +12,14 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	d := NewDispatcher(cfg)
 	d.workDir_ = workDir
 
+	// Load persistent permissions for this project
+	if d.persistentPerms != nil {
+		persistentRules := d.persistentPerms.Load(workDir)
+		if len(persistentRules) > 0 {
+			d.rules = append(d.rules, persistentRules...)
+		}
+	}
+
 	// Initialize output store for tool output bounding
 	outputDir := filepath.Join(homeDir(), ".m31a", "tool-output")
 	maxLines := DefaultOutputMaxLines

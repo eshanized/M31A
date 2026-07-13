@@ -59,6 +59,8 @@ type Dispatcher struct {
 	outputStore *OutputStore
 	// collector captures tool execution metrics (call count, success/fail, duration).
 	collector *metrics.Collector
+	// persistentPerms handles saving permission rules to disk.
+	persistentPerms *PersistentPermissions
 }
 
 // NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
@@ -83,6 +85,7 @@ func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		dangerousRateTokens: make(chan struct{}, DangerousRateLimitBurst),
 		dangerousRateDone:   make(chan struct{}),
 		concurrencySem:      make(chan struct{}, MaxConcurrentTools),
+		persistentPerms:     NewPersistentPermissions(),
 	}
 	// Initialize token bucket for rate limiting.
 	for i := 0; i < ToolRateLimitBurst; i++ {
