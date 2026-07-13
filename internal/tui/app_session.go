@@ -323,6 +323,7 @@ func (m *AppState) handleDiscussComplete() tea.Cmd {
 		if m.executeModel == nil {
 			cw, ch := m.contentDimensions()
 			m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+			m.executeModel.SetWorkflowEngine(m.workflowEngine)
 		} else {
 			m.executeModel.tasks = tasks
 		}

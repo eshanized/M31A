@@ -97,10 +97,40 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 	var execErrors []string
 	var totalToolCalls atomic.Int64
 	for _, group := range groups {
+		// Check for pause before executing each group
+		e.waitForPause(ctx)
+
 		var groupToolCalls atomic.Int64
 		execFn := func(ctx context.Context, task m31types.Task) taskrunner.TaskResult {
 			// H16 fix: removed pre-task checkpoint — too expensive (10+ read+parse+write
 			// cycles per plan). Checkpoints now only at phase boundaries and on heal.
+
+			// Check for pause/skip/cancel while executing
+			e.pauseMu.Lock()
+			paused := e.pauseCh != nil
+			e.pauseMu.Unlock()
+			if paused {
+				// Wait for resume or skip/cancel commands
+				skipID, cancelID, cancelledGroup, ok := e.consumeSkipOrCancel(ctx)
+				if !ok {
+					// Context cancelled
+					return taskrunner.TaskResult{Error: "execution cancelled"}
+				}
+				if cancelledGroup {
+					// Mark remaining tasks in group as skipped
+					return taskrunner.TaskResult{Error: "group cancelled"}
+				}
+				if skipID == task.ID {
+					// Mark task as skipped
+					task.Status = m31types.StatusSkipped
+					return taskrunner.TaskResult{Success: true, Output: "skipped by user"}
+				}
+				if cancelID == task.ID {
+					// Mark task as failed
+					task.Status = m31types.StatusFailed
+					return taskrunner.TaskResult{Error: "cancelled by user"}
+				}
+			}
 
 			result := e.executeTaskWithTools(ctx, &task, tasks, goal)
 			totalToolCalls.Add(int64(result.ToolCalls))

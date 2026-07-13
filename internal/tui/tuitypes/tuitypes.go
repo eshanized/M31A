@@ -573,6 +573,14 @@ type WorkflowEngine interface {
 	Close()
 	LoadCheckpointData(data *workflow.CheckpointData)
 	GetCheckpointData() *workflow.CheckpointData
+
+	// Pause/Resume support for execute phase
+	PauseExecution() bool
+	ResumeExecution() bool
+	IsPaused() bool
+	SkipCurrentTask(taskID int)
+	CancelCurrentTask(taskID int)
+	CancelGroup()
 }
 
 // ─── Intent classification ─────────────────────────────────────────────────────

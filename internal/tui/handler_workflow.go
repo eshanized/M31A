@@ -75,6 +75,14 @@ func handleExecutePauseMsg(m *AppState, msg ExecutePauseMsg) (tea.Model, tea.Cmd
 	if m.executeModel != nil {
 		m.executeModel.paused = msg.Paused
 	}
+	// Also pause/resume the workflow engine
+	if m.workflowEngine != nil {
+		if msg.Paused {
+			m.workflowEngine.PauseExecution()
+		} else {
+			m.workflowEngine.ResumeExecution()
+		}
+	}
 	return m, nil
 }
 

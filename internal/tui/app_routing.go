@@ -96,6 +96,7 @@ func (m *AppState) initScreenUpdaters() {
 		if m.executeModel == nil {
 			cw, ch := m.contentDimensions()
 			m.executeModel = NewExecuteModel([]types.Task{}, m.themeManager.Current(), cw, ch)
+			m.executeModel.SetWorkflowEngine(m.workflowEngine)
 			m.router.Register(ScreenExecute, m.executeModel)
 		}
 		newModel, cmd := m.executeModel.Update(msg)

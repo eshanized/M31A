@@ -36,6 +36,9 @@ type ExecuteModel struct {
 
 	// Previous done count for detecting changes
 	prevDone int
+
+	// Workflow engine for pause/resume/skip/cancel
+	workflowEngine WorkflowEngine
 }
 
 // NewExecuteModel creates an ExecuteModel.
@@ -61,6 +64,11 @@ func NewExecuteModel(tasks []types.Task, t theme.Theme, w, h int) *ExecuteModel 
 	}
 	em.initViewport()
 	return em
+}
+
+// SetWorkflowEngine sets the workflow engine for pause/resume/skip/cancel support.
+func (em *ExecuteModel) SetWorkflowEngine(engine WorkflowEngine) {
+	em.workflowEngine = engine
 }
 
 // Init implements Screenable.
@@ -167,6 +175,27 @@ func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 			return em, func() tea.Msg {
 				return ExecutePauseMsg{Paused: em.paused}
 			}
+		case "s":
+			// Skip current task (only when paused)
+			if em.paused && em.currentTask >= 0 && em.currentTask < len(em.tasks) {
+				taskID := em.tasks[em.currentTask].ID
+				if em.workflowEngine != nil {
+					em.workflowEngine.SkipCurrentTask(taskID)
+				}
+			}
+		case "c":
+			// Cancel current task (only when paused)
+			if em.paused && em.currentTask >= 0 && em.currentTask < len(em.tasks) {
+				taskID := em.tasks[em.currentTask].ID
+				if em.workflowEngine != nil {
+					em.workflowEngine.CancelCurrentTask(taskID)
+				}
+			}
+		case "x":
+			// Cancel entire group (only when paused)
+			if em.paused && em.workflowEngine != nil {
+				em.workflowEngine.CancelGroup()
+			}
 		case "esc", "q":
 			return em, func() tea.Msg {
 				return PopScreenMsg{}
@@ -209,12 +238,28 @@ func (em *ExecuteModel) View() string {
 		progressLine += "  " + lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("PAUSED")
 	}
 
+	// ── Pause controls (shown when paused) ──────────────────────────────
+	var pauseControls string
+	if em.paused {
+		controls := []string{
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("[s] Skip task"),
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("[c] Cancel task"),
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("[x] Cancel group"),
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render("[p] Resume"),
+		}
+		pauseControls = strings.Join(controls, "  ")
+	}
+
 	// ── Assemble ──────────────────────────────────────────────────────────
-	return lipgloss.JoinVertical(lipgloss.Left,
+	parts := []string{
 		activityLabel,
 		progressLine,
 		em.viewport.View(),
-	)
+	}
+	if pauseControls != "" {
+		parts = append(parts, pauseControls)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // currentActivityLabel returns a human-readable label of what's happening now.

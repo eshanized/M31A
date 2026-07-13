@@ -296,6 +296,7 @@ func (m *AppState) handlePlanApprove() tea.Cmd {
 	if m.executeModel == nil {
 		cw, ch := m.contentDimensions()
 		m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+		m.executeModel.SetWorkflowEngine(m.workflowEngine)
 		m.router.Register(ScreenExecute, m.executeModel)
 	} else {
 		m.executeModel.tasks = tasks
@@ -357,6 +358,7 @@ func (m *AppState) handlePhaseTransitionDecision(msg PhaseTransitionMsg) (Screen
 			if m.executeModel == nil {
 				cw, ch := m.contentDimensions()
 				m.executeModel = NewExecuteModel(tasks, m.themeManager.Current(), cw, ch)
+				m.executeModel.SetWorkflowEngine(m.workflowEngine)
 				m.router.Register(ScreenExecute, m.executeModel)
 			} else {
 				m.executeModel.tasks = tasks
