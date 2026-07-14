@@ -562,7 +562,8 @@ func extractCommitMessage(args string) string {
 	fields := strings.Fields(args)
 	for i, f := range fields {
 		if f == "-m" && i+1 < len(fields) {
-			msg := fields[i+1]
+			// Collect all remaining tokens after -m as the full commit message
+			msg := strings.Join(fields[i+1:], " ")
 			// Strip surrounding quotes
 			if len(msg) >= 2 {
 				if (msg[0] == '"' && msg[len(msg)-1] == '"') ||
