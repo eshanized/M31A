@@ -41,7 +41,7 @@ type ExecuteModel struct {
 	workflowEngine WorkflowEngine
 
 	// Exit confirmation dialog state
-	confirmExit      bool
+	confirmExit       bool
 	confirmExitChoice int // 0=pause, 1=cancel, 2=stay
 }
 

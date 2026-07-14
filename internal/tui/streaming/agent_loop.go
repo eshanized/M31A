@@ -105,7 +105,7 @@ func AgentLoop(
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
-				ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %v", r)}
+				ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %w", r)}
 			}
 		}()
 

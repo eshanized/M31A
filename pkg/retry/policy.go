@@ -177,7 +177,7 @@ func (p *Policy) RetryWithHeaders(ctx context.Context, fn func() (http.Header, e
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+			return fmt.Errorf("%w: %w", ctx.Err(), lastErr)
 		case <-timer.C:
 		}
 	}

@@ -94,7 +94,7 @@ func (t *CodeMap) Execute(ctx context.Context, input types.ToolInput) (types.Too
 
 	idx, err := t.getIndexer(ctx)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: codeintel: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: codeintel: %w", m31errors.ErrToolExecution, err)
 	}
 
 	var output string

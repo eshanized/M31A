@@ -187,6 +187,7 @@ func (m *ConfigModel) SetDimensions(w, h int) {
 	}
 	m.viewport.Height = vpH
 	m.editInput.Width = max(20, min(50, w-12))
+	m.updateViewportContent()
 }
 
 // SetTheme updates the theme.
@@ -219,6 +220,8 @@ func (m *ConfigModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	// Update viewport content to maintain Elm architecture purity
+	m.updateViewportContent()
 	return m, cmd
 }
 
@@ -281,16 +284,19 @@ func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 			if cfg, err := config.Load(m.cfgPath); err == nil {
 				m.cfg = cfg
 				m.buildSections()
+				m.updateViewportContent()
 				m.statusMsg = "↺ Config reloaded from disk"
 				m.statusTime = time.Now()
 				return m, func() tea.Msg { return ConfigSavedMsg{} }
 			}
 		}
 		m.buildSections()
+		m.updateViewportContent()
 		m.statusMsg = "↺ Config reloaded from memory"
 		m.statusTime = time.Now()
 	}
 
+	m.updateViewportContent()
 	m.scrollToField()
 	return m, nil
 }
@@ -316,6 +322,7 @@ func (m *ConfigModel) activateField() (Screenable, tea.Cmd) {
 		m.dirty = true
 		m.statusMsg = fmt.Sprintf("✎ %s → %s  (press s to save)", f.label, newVal)
 		m.statusTime = time.Now()
+		m.updateViewportContent()
 
 	case cfgChoice:
 		if len(f.choices) == 0 {
@@ -334,6 +341,7 @@ func (m *ConfigModel) activateField() (Screenable, tea.Cmd) {
 		m.dirty = true
 		m.statusMsg = fmt.Sprintf("✎ %s → %s  (press s to save)", f.label, next)
 		m.statusTime = time.Now()
+		m.updateViewportContent()
 
 	case cfgReadOnly:
 		m.statusMsg = "(read-only field)"
@@ -393,6 +401,7 @@ func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 		}
 		m.statusMsg = fmt.Sprintf("✎ %s → %s  (press s to save)", f.label, displayVal)
 		m.statusTime = time.Now()
+		m.updateViewportContent()
 		return m, nil
 	}
 

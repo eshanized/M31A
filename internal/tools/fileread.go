@@ -70,7 +70,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	start := time.Now()
 
 	if err := ctx.Err(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: %w", m31errors.ErrToolExecution, err)
 	}
 
 	pathRaw, ok := input.Params["path"]
@@ -111,7 +111,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	// Resolve relative to workDir; absolute paths used as-is
 	resolved, err := ResolveAndContainPathExists(path, t.workDir)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: %w", m31errors.ErrToolExecution, err)
 	}
 
 	// Check if it's a directory
@@ -146,7 +146,7 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	header := make([]byte, 512)
 	n, readErr := f.Read(header)
 	if readErr != nil && readErr != io.EOF {
-		return types.ToolResult{}, fmt.Errorf("%w: read header: %v", m31errors.ErrToolExecution, readErr)
+		return types.ToolResult{}, fmt.Errorf("%w: read header: %w", m31errors.ErrToolExecution, readErr)
 	}
 	header = header[:n]
 
@@ -224,7 +224,7 @@ func (t *FileRead) readLineRange(f *os.File, path string, offset, maxLines int, 
 	}
 
 	if err := scanner.Err(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: read error: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: read error: %w", m31errors.ErrToolExecution, err)
 	}
 
 	elapsed := time.Since(start).Milliseconds()

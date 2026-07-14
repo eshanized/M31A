@@ -398,6 +398,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 			m.configModel.height = ch
 			m.configModel.theme = m.themeManager.Current()
 			m.configModel.buildSections()
+			m.configModel.updateViewportContent()
 		}
 		return nil
 	case ScreenHelp:

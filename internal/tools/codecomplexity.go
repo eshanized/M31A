@@ -127,7 +127,7 @@ func (t *CodeComplexity) Execute(ctx context.Context, input types.ToolInput) (ty
 
 	report, err := t.analyze(ctx, skip, extensions)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: %w", m31errors.ErrToolExecution, err)
 	}
 
 	output := formatComplexityReport(report)

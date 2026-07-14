@@ -257,7 +257,7 @@ func (t *TodoWrite) writeTodoFile(items []TodoItem) error {
 	}
 	sessionDir := filepath.Join(t.sessionsDir, sid)
 	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
-		return fmt.Errorf("%w: cannot create session directory: %v", m31errors.ErrToolExecution, err)
+		return fmt.Errorf("%w: cannot create session directory: %w", m31errors.ErrToolExecution, err)
 	}
 
 	todoPath := filepath.Join(sessionDir, "TODO.md")
@@ -265,15 +265,15 @@ func (t *TodoWrite) writeTodoFile(items []TodoItem) error {
 
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
-		return fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, err)
+		return fmt.Errorf("%w: cannot generate temp name: %w", m31errors.ErrToolExecution, err)
 	}
 	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
 	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
-		return fmt.Errorf("%w: cannot write temp file: %v", m31errors.ErrToolExecution, err)
+		return fmt.Errorf("%w: cannot write temp file: %w", m31errors.ErrToolExecution, err)
 	}
 	if err := os.Rename(tmpPath, todoPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("%w: cannot write TODO.md: %v", m31errors.ErrToolExecution, err)
+		return fmt.Errorf("%w: cannot write TODO.md: %w", m31errors.ErrToolExecution, err)
 	}
 	return nil
 }

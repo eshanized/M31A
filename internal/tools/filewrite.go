@@ -113,7 +113,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	// Resolve target path relative to workDir
 	targetPath, err := ResolveAndContainPath(path, t.workDir)
 	if err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: %w", m31errors.ErrToolExecution, err)
 	}
 
 	// Backup existing file (before append or overwrite)
@@ -122,18 +122,18 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		sanitized := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
 		randBytes := make([]byte, 4)
 		if _, backupRandErr := rand.Read(randBytes); backupRandErr != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot generate backup name: %v", m31errors.ErrToolExecution, backupRandErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot generate backup name: %w", m31errors.ErrToolExecution, backupRandErr)
 		}
 		backupName := fmt.Sprintf("%s.%s.%s", sanitized, time.Now().Format("20060102T150405.000"), hex.EncodeToString(randBytes))
 		backupPath := filepath.Join(t.backupDir, backupName)
 
 		if backupDirErr := os.MkdirAll(t.backupDir, DirPermission); backupDirErr != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot create backup directory: %v", m31errors.ErrToolExecution, backupDirErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot create backup directory: %w", m31errors.ErrToolExecution, backupDirErr)
 		}
 
 		existingContent, readErr := os.ReadFile(targetPath)
 		if readErr != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot read original for backup: %v", m31errors.ErrToolExecution, readErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot read original for backup: %w", m31errors.ErrToolExecution, readErr)
 		}
 
 		// Prune old backups for this file BEFORE writing the new one to prevent
@@ -141,14 +141,14 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 		t.pruneBackups(sanitized)
 
 		if writeErr := os.WriteFile(backupPath, existingContent, FilePermission); writeErr != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot write backup: %v", m31errors.ErrToolExecution, writeErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot write backup: %w", m31errors.ErrToolExecution, writeErr)
 		}
 	}
 
 	// Create parent directories
 	if createDirs {
 		if dirErr := os.MkdirAll(filepath.Dir(targetPath), DirPermission); dirErr != nil {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot create directories: %v", m31errors.ErrToolExecution, dirErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot create directories: %w", m31errors.ErrToolExecution, dirErr)
 		}
 	}
 
@@ -156,7 +156,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	if appendMode {
 		existingContent, readErr := os.ReadFile(targetPath)
 		if readErr != nil && !os.IsNotExist(readErr) {
-			return types.ToolResult{}, fmt.Errorf("%w: cannot read file for append: %v", m31errors.ErrToolExecution, readErr)
+			return types.ToolResult{}, fmt.Errorf("%w: cannot read file for append: %w", m31errors.ErrToolExecution, readErr)
 		}
 		if readErr == nil {
 			contentBytes = append(existingContent, contentBytes...)
@@ -166,7 +166,7 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	// Temp file creation
 	randBytes := make([]byte, 8)
 	if _, randErr := rand.Read(randBytes); randErr != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: cannot generate temp name: %v", m31errors.ErrToolExecution, randErr)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot generate temp name: %w", m31errors.ErrToolExecution, randErr)
 	}
 	tmpPath := filepath.Join(filepath.Dir(targetPath), ".m31a_tmp_"+hex.EncodeToString(randBytes))
 
@@ -183,18 +183,18 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}()
 
 	if _, err := tmpFile.Write(contentBytes); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: write failed: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: write failed: %w", m31errors.ErrToolExecution, err)
 	}
 	if err := tmpFile.Sync(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: fsync failed: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: fsync failed: %w", m31errors.ErrToolExecution, err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: close failed: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: close failed: %w", m31errors.ErrToolExecution, err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, targetPath); err != nil {
-		return types.ToolResult{}, fmt.Errorf("%w: rename failed: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: rename failed: %w", m31errors.ErrToolExecution, err)
 	}
 
 	cleanup = false

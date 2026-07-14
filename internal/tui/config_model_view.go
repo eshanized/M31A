@@ -106,26 +106,7 @@ func (m *ConfigModel) renderFields() string {
 	if len(m.sections) == 0 {
 		return ""
 	}
-	sec := m.sections[m.sectionIdx]
 	t := m.theme
-
-	// Available height for the field viewport
-	vpH := m.height - 10
-	if vpH < 4 {
-		vpH = 4
-	}
-
-	var rows []string
-	for i, f := range sec.fields {
-		rows = append(rows, m.renderFieldRow(f, i))
-	}
-	content := strings.Join(rows, "\n")
-
-	cContentW := max(10, m.width-4)
-	m.viewport.Width = cContentW
-	m.viewport.Height = vpH
-	m.viewport.SetContent(content)
-	m.scrollToField()
 
 	// Wrap viewport in a subtle border
 	return lipgloss.NewStyle().
@@ -280,6 +261,36 @@ func (m *ConfigModel) scrollToField() {
 	} else if offset >= m.viewport.YOffset+vpH {
 		m.viewport.SetYOffset(offset - vpH + 1)
 	}
+}
+
+// updateViewportContent updates viewport dimensions and content based on current state.
+// This method must be called from Update() (not View()) to maintain Elm architecture purity.
+func (m *ConfigModel) updateViewportContent() {
+	if len(m.sections) == 0 {
+		return
+	}
+	// Compute viewport dimensions (matching SetDimensions and Update formulas)
+	vpH := m.height - 8
+	if vpH < 4 {
+		vpH = 4
+	}
+	cContentW := max(10, m.width-4)
+
+	// Update viewport dimensions only if changed (avoid unnecessary re-renders)
+	if m.viewport.Width != cContentW || m.viewport.Height != vpH {
+		m.viewport.Width = cContentW
+		m.viewport.Height = vpH
+	}
+
+	// Build content from current section's fields
+	sec := m.sections[m.sectionIdx]
+	var rows []string
+	for i, f := range sec.fields {
+		rows = append(rows, m.renderFieldRow(f, i))
+	}
+	content := strings.Join(rows, "\n")
+	m.viewport.SetContent(content)
+	m.scrollToField()
 }
 
 // buildContent is kept for backward compatibility with AppState which calls it after SettingsSavedMsg.

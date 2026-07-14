@@ -83,7 +83,7 @@ func (t *TodoRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 				DurationMs: time.Since(start).Milliseconds(),
 			}, nil
 		}
-		return types.ToolResult{}, fmt.Errorf("%w: cannot read TODO.md: %v", m31errors.ErrToolExecution, err)
+		return types.ToolResult{}, fmt.Errorf("%w: cannot read TODO.md: %w", m31errors.ErrToolExecution, err)
 	}
 
 	// Parse the markdown table
