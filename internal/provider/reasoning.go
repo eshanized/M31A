@@ -156,7 +156,7 @@ func ParseSSEChunk(data string, modelID string) (*types.StreamChunk, error) {
 	// NVIDIA (and some OpenAI-compatible providers) return HTTP 200 with an
 	// error object in the SSE body instead of a proper HTTP error status code.
 	// Detect this before checking for 'choices' so the user sees the real error.
-if errObj, exists := raw["error"]; exists {
+	if errObj, exists := raw["error"]; exists {
 		switch e := errObj.(type) {
 		case map[string]any:
 			if msg, ok := e["message"].(string); ok && msg != "" {

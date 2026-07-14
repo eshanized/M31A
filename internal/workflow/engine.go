@@ -1551,8 +1551,8 @@ func (e *Engine) prepareStreamRequest(ctx context.Context, messages []m31types.M
 		req.Tools = e.buildToolDefinitions()
 	}
 
-		rp, _ := e.providerAndModel()
-		iterator, err := rp.ChatCompletionStream(ctx, req)
+	rp, _ := e.providerAndModel()
+	iterator, err := rp.ChatCompletionStream(ctx, req)
 	if err != nil {
 		iterator, err = e.retryChatStream(ctx, req, err)
 		if err != nil {
@@ -1649,8 +1649,8 @@ func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, 
 		case <-time.After(delay):
 		}
 
-	sp, _ := e.providerAndModel()
-	iterator, err := sp.ChatCompletionStream(ctx, req)
+		sp, _ := e.providerAndModel()
+		iterator, err := sp.ChatCompletionStream(ctx, req)
 		if err == nil {
 			return iterator, nil
 		}

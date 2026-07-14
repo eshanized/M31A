@@ -240,10 +240,10 @@ func TestSpawn_DegradedMode_EmitsSpawnFailedEvent(t *testing.T) {
 	}()
 
 	id, _, err := m.Spawn(ctx, SpawnRequest{
-		Description:  "test degraded mode",
-		Prompt:       "echo test",
-		Isolation:    IsolationWorktree,
-		Background:   true,
+		Description: "test degraded mode",
+		Prompt:      "echo test",
+		Isolation:   IsolationWorktree,
+		Background:  true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

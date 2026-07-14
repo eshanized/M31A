@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eshanized/M31A/pkg/coordinator"
 	m31errors "github.com/eshanized/M31A/pkg/errors"
 	"github.com/eshanized/M31A/pkg/types"
-	"github.com/eshanized/M31A/pkg/coordinator"
 )
 
 // Manager provides session operations. Sessions are stored project-locally

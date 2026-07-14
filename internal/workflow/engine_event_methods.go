@@ -154,10 +154,10 @@ func (m ExecutePreflightMsg) EventData() map[string]interface{} {
 func (m ExecuteQualityGateMsg) EventType() string { return "execute_quality_gate" }
 func (m ExecuteQualityGateMsg) EventData() map[string]interface{} {
 	return map[string]interface{}{
-		"task_id":  m.TaskID,
-		"passed":   m.Passed,
-		"checked":  m.Checked,
-		"failed":   m.Failed,
+		"task_id": m.TaskID,
+		"passed":  m.Passed,
+		"checked": m.Checked,
+		"failed":  m.Failed,
 	}
 }
 

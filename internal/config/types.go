@@ -1,6 +1,10 @@
 package config
 
-import "github.com/eshanized/M31A/internal/types"
+import (
+	"time"
+
+	"github.com/eshanized/M31A/internal/types"
+)
 
 type Config struct {
 	Provider          ProviderConfig          `toml:"provider"`
@@ -320,6 +324,24 @@ type PermissionRule struct {
 	Pattern   string          `toml:"pattern"`
 	RiskLevel types.RiskLevel `toml:"risk_level"`
 	Action    string          `toml:"action"`
+	TTL       string          `toml:"ttl,omitempty"`        // e.g., "24h", "7d" (empty = permanent)
+	CreatedAt string          `toml:"created_at,omitempty"` // RFC3339 timestamp
+}
+
+// IsExpired returns true if the permission rule has exceeded its TTL.
+func (r PermissionRule) IsExpired() bool {
+	if r.TTL == "" || r.CreatedAt == "" {
+		return false // No TTL or no creation time = permanent
+	}
+	duration, err := time.ParseDuration(r.TTL)
+	if err != nil {
+		return false // Invalid TTL = treat as permanent
+	}
+	created, err := time.Parse(time.RFC3339, r.CreatedAt)
+	if err != nil {
+		return false // Invalid timestamp = treat as permanent
+	}
+	return time.Now().After(created.Add(duration))
 }
 
 // PermissionsAgentConfig defines per-agent permission profiles.

@@ -16,7 +16,13 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if d.persistentPerms != nil {
 		persistentRules := d.persistentPerms.Load(workDir)
 		if len(persistentRules) > 0 {
-			d.rules = append(d.rules, persistentRules...)
+			// Filter out expired rules
+			now := time.Now()
+			for _, rule := range persistentRules {
+				if !isRuleExpired(rule, now) {
+					d.rules = append(d.rules, rule)
+				}
+			}
 		}
 	}
 

@@ -25,7 +25,7 @@ func RedactReceipt(r DecisionReceipt) DecisionReceipt {
 
 // RedactString masks sensitive patterns in a string.
 func RedactString(s string) string {
-	s = apiKeyPattern.ReplaceAllString(s, "${1}=***REDACTED***")
+	s = apiKeyPattern.ReplaceAllString(s, "$1=***REDACTED***")
 	s = bearerPattern.ReplaceAllString(s, "Bearer ***REDACTED***")
 	s = emailPattern.ReplaceAllString(s, "***@***.***")
 	s = ipPattern.ReplaceAllString(s, "***.***.***.***")

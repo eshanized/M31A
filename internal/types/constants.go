@@ -7,26 +7,26 @@ import (
 // Constants — re-exported from pkg/types for backward compatibility.
 
 const (
-	ModelCacheTTL           = pkgTypes.ModelCacheTTL
-	HealthCheckInterval     = pkgTypes.HealthCheckInterval
-	MaxFileSize             = pkgTypes.MaxFileSize
-	MaxToolOutputChars      = pkgTypes.MaxToolOutputChars
-	MaxHealAttempts         = pkgTypes.MaxHealAttempts
-	MaxPlanRetries          = pkgTypes.MaxPlanRetries
-	MaxPlanRefinements      = pkgTypes.MaxPlanRefinements
-	SessionIDLength         = pkgTypes.SessionIDLength
-	AutoDreamThreshold      = pkgTypes.AutoDreamThreshold
-	ContextWarningThreshold = pkgTypes.ContextWarningThreshold
-	HTTPDialTimeout         = pkgTypes.HTTPDialTimeout
-	BashTimeout             = pkgTypes.BashTimeout
-	BashOutputLimit         = pkgTypes.BashOutputLimit
-	DefaultContextLength    = pkgTypes.DefaultContextLength
-	MaxLLMResponseBytes     = pkgTypes.MaxLLMResponseBytes
-	MaxSessionFileSize      = pkgTypes.MaxSessionFileSize
+	ModelCacheTTL            = pkgTypes.ModelCacheTTL
+	HealthCheckInterval      = pkgTypes.HealthCheckInterval
+	MaxFileSize              = pkgTypes.MaxFileSize
+	MaxToolOutputChars       = pkgTypes.MaxToolOutputChars
+	MaxHealAttempts          = pkgTypes.MaxHealAttempts
+	MaxPlanRetries           = pkgTypes.MaxPlanRetries
+	MaxPlanRefinements       = pkgTypes.MaxPlanRefinements
+	SessionIDLength          = pkgTypes.SessionIDLength
+	AutoDreamThreshold       = pkgTypes.AutoDreamThreshold
+	ContextWarningThreshold  = pkgTypes.ContextWarningThreshold
+	HTTPDialTimeout          = pkgTypes.HTTPDialTimeout
+	BashTimeout              = pkgTypes.BashTimeout
+	BashOutputLimit          = pkgTypes.BashOutputLimit
+	DefaultContextLength     = pkgTypes.DefaultContextLength
+	MaxLLMResponseBytes      = pkgTypes.MaxLLMResponseBytes
+	MaxSessionFileSize       = pkgTypes.MaxSessionFileSize
 	DefaultPermissionTimeout = pkgTypes.DefaultPermissionTimeout
-	StaleCacheTTL           = pkgTypes.StaleCacheTTL
-	DefaultHealthLiveMs     = pkgTypes.DefaultHealthLiveMs
-	DefaultHealthSlowMs     = pkgTypes.DefaultHealthSlowMs
+	StaleCacheTTL            = pkgTypes.StaleCacheTTL
+	DefaultHealthLiveMs      = pkgTypes.DefaultHealthLiveMs
+	DefaultHealthSlowMs      = pkgTypes.DefaultHealthSlowMs
 
 	HealthStatusLive     = pkgTypes.HealthStatusLive
 	HealthStatusSlow     = pkgTypes.HealthStatusSlow
@@ -63,8 +63,8 @@ const (
 
 	EMACorrectionAlpha = pkgTypes.EMACorrectionAlpha
 
-	MaxToolsPerCall  = pkgTypes.MaxToolsPerCall
-	MaxCwdFileDepth  = pkgTypes.MaxCwdFileDepth
+	MaxToolsPerCall = pkgTypes.MaxToolsPerCall
+	MaxCwdFileDepth = pkgTypes.MaxCwdFileDepth
 
 	ConfigWatchInterval   = pkgTypes.ConfigWatchInterval
 	MaxProjectConfigDepth = pkgTypes.MaxProjectConfigDepth

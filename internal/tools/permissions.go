@@ -14,6 +14,28 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// isRuleExpired returns true if the permission rule has expired based on its TTL.
+func isRuleExpired(rule config.PermissionRule, now time.Time) bool {
+	if rule.TTL == "" {
+		return false // No TTL = permanent
+	}
+	if rule.CreatedAt == "" {
+		return false // No creation time = treat as permanent
+	}
+	created, err := time.Parse(time.RFC3339, rule.CreatedAt)
+	if err != nil {
+		return false // Invalid timestamp = treat as permanent
+	}
+
+	// Parse TTL duration
+	ttl, err := time.ParseDuration(rule.TTL)
+	if err != nil {
+		return false // Invalid TTL = treat as permanent
+	}
+
+	return now.After(created.Add(ttl))
+}
+
 // BatchApproval records a user's "approve all" decision for a tool+risk
 // combination. Approvals are task-scoped: they expire when the current task
 // completes or the workflow phase transitions.
@@ -21,6 +43,10 @@ type BatchApproval struct {
 	ToolName  string
 	RiskLevel types.RiskLevel
 	ExpiresAt time.Time // zero = never expires (manual SetPermission)
+}
+
+func batchKey(toolName string, risk types.RiskLevel) string {
+	return toolName + ":" + string(risk)
 }
 
 func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember bool) {
@@ -122,14 +148,117 @@ func (d *Dispatcher) ActiveBatchToolNames() string {
 	return strings.Join(names, ",")
 }
 
+// PermissionEntry represents a permission rule with metadata for display.
+type PermissionEntry struct {
+	Tool      string
+	Pattern   string
+	Action    string
+	CreatedAt string
+	TTL       string
+	Expired   bool
+	Source    string // "config", "persistent", "session"
+}
+
+// ListPermissions returns all active permission rules with metadata.
+func (d *Dispatcher) ListPermissions() []PermissionEntry {
+	d.mu.RLock()
+	rules := make([]config.PermissionRule, len(d.rules))
+	copy(rules, d.rules)
+	d.mu.RUnlock()
+
+	now := time.Now()
+	entries := make([]PermissionEntry, 0, len(rules))
+
+	// Track which rules came from original config vs persistent
+	originalSet := make(map[string]struct{})
+	d.mu.RLock()
+	for _, rule := range d.originalRules {
+		key := ruleKey(rule)
+		originalSet[key] = struct{}{}
+	}
+	d.mu.RUnlock()
+
+	for _, rule := range rules {
+		key := ruleKey(rule)
+		source := "session"
+		if _, ok := originalSet[key]; ok {
+			source = "config"
+		} else if rule.CreatedAt != "" {
+			source = "persistent"
+		}
+
+		expired := isRuleExpired(rule, now)
+		entries = append(entries, PermissionEntry{
+			Tool:      rule.Tool,
+			Pattern:   rule.Pattern,
+			Action:    rule.Action,
+			CreatedAt: rule.CreatedAt,
+			TTL:       rule.TTL,
+			Expired:   expired,
+			Source:    source,
+		})
+	}
+	return entries
+}
+
+// RevokePermission removes a permission rule matching the given tool and pattern.
+func (d *Dispatcher) RevokePermission(tool, pattern string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Remove from in-memory rules
+	newRules := make([]config.PermissionRule, 0, len(d.rules))
+	found := false
+	for _, rule := range d.rules {
+		if rule.Tool == tool && rule.Pattern == pattern {
+			found = true
+			continue
+		}
+		newRules = append(newRules, rule)
+	}
+	d.rules = newRules
+
+	// Also remove from originalRules if present
+	newOriginal := make([]config.PermissionRule, 0, len(d.originalRules))
+	for _, rule := range d.originalRules {
+		if rule.Tool == tool && rule.Pattern == pattern {
+			found = true
+			continue
+		}
+		newOriginal = append(newOriginal, rule)
+	}
+	d.originalRules = newOriginal
+
+	if !found {
+		return fmt.Errorf("permission rule not found: tool=%s pattern=%s", tool, pattern)
+	}
+
+	// If persistent perms enabled, update disk
+	if d.persistentPerms != nil && d.workDir_ != "" {
+		persistentRules := d.persistentPerms.Load(d.workDir_)
+		newPersistent := make([]config.PermissionRule, 0, len(persistentRules))
+		for _, rule := range persistentRules {
+			if rule.Tool == tool && rule.Pattern == pattern {
+				continue
+			}
+			newPersistent = append(newPersistent, rule)
+		}
+		if err := d.persistentPerms.Save(d.workDir_, newPersistent); err != nil {
+			slog.Error("failed to persist permission revocation", "error", err)
+		}
+	}
+
+	return nil
+}
+
+func ruleKey(rule config.PermissionRule) string {
+	return rule.Tool + "|" + rule.Resource + "|" + rule.Pattern + "|" + string(rule.RiskLevel) + "|" + rule.Action
+}
+
 // PendingPermCount returns the number of permission requests currently
 // waiting in the queue (between send and TUI response).
 func (d *Dispatcher) PendingPermCount() int {
 	return int(d.pendingPermCount.Load())
-}
-
-func batchKey(toolName string, risk types.RiskLevel) string {
-	return toolName + ":" + string(risk)
 }
 
 func (d *Dispatcher) SelectAgent(agent string) error {
@@ -419,15 +548,15 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 		d.permissions[cacheKey] = resp.Allowed
 		d.mu.Unlock()
 
-		// Persist to disk
+		// Persist to disk with TTL (default 24h)
 		if d.persistentPerms != nil {
-			// Create a permission rule for this command
 			rule := config.PermissionRule{
-				Tool:    toolName,
-				Pattern: req.Command,
-				Action:  "allow",
+				Tool:      toolName,
+				Pattern:   req.Command,
+				Action:    "allow",
+				TTL:       "24h", // default 24-hour TTL
+				CreatedAt: time.Now().Format(time.RFC3339),
 			}
-			// Load existing rules, append new one, save
 			existingRules := d.persistentPerms.Load(workDir)
 			existingRules = append(existingRules, rule)
 			if err := d.persistentPerms.Save(workDir, existingRules); err != nil {
