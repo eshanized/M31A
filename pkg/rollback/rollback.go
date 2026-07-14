@@ -6,8 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // ErrInvalidHash is returned when a commit hash is not found in the repository.
@@ -15,10 +14,10 @@ var ErrInvalidHash = errors.New("invalid commit hash")
 
 // RollbackEntry represents a single commit in the rollback chain.
 type RollbackEntry struct {
-	CommitInfo    git.CommitInfo `json:"commit_info"`
-	Diff          string         `json:"diff"`
-	IsCurrent     bool           `json:"is_current"`
-	HasCheckpoint bool           `json:"has_checkpoint"`
+	CommitInfo    types.CommitInfo `json:"commit_info"`
+	Diff          string           `json:"diff"`
+	IsCurrent     bool             `json:"is_current"`
+	HasCheckpoint bool             `json:"has_checkpoint"`
 }
 
 // RollbackResult represents the outcome of a reset operation.
@@ -30,13 +29,28 @@ type RollbackResult struct {
 	Message        string `json:"message"`
 }
 
+// GitRunner abstracts git operations used by Rollback. Consumers should
+// inject the concrete *git.Git implementation via New().
+type GitRunner interface {
+	Run(args ...string) (string, error)
+	LogAll() ([]types.CommitInfo, error)
+	HeadHash() (string, error)
+	DiffRefs(ref1, ref2 string) (string, error)
+	ResetSoft(commit string) error
+	ResetHard(commit string) error
+	StashPush(message string) error
+	StashPop() error
+	CountCommits(startHash, endHash string) (int, error)
+	HasUncommittedChanges() (bool, error)
+}
+
 // Rollback provides safe commit rollback operations.
 type Rollback struct {
-	git *git.Git
+	git GitRunner
 }
 
 // New creates a new Rollback instance backed by the given git wrapper.
-func New(g *git.Git) *Rollback {
+func New(g GitRunner) *Rollback {
 	return &Rollback{git: g}
 }
 

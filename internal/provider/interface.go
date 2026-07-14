@@ -6,6 +6,12 @@ import (
 	"github.com/eshanized/M31A/internal/types"
 )
 
+// ChatRequest is an alias for types.ChatRequest (canonical definition in pkg/types/).
+type ChatRequest = types.ChatRequest
+
+// ToolDefinition is an alias for types.ToolDefinition (canonical definition in pkg/types/).
+type ToolDefinition = types.ToolDefinition
+
 type LLMProvider interface {
 	Name() string
 	APIKey() string
@@ -15,19 +21,4 @@ type LLMProvider interface {
 	EstimateCost(modelID string, usage types.Usage) float64
 	HealthCheck(ctx context.Context) types.HealthStatus
 	GetModel(id string) (*types.ModelInfo, error)
-}
-
-type ChatRequest struct {
-	Model            string           `json:"model"`
-	Messages         []types.Message  `json:"messages"`
-	MaxTokens        int              `json:"max_tokens,omitempty"`
-	Tools            []ToolDefinition `json:"tools,omitempty"`
-	ReasoningEnabled bool             `json:"reasoning_enabled,omitempty"`
-}
-
-type ToolDefinition struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Parameters       string `json:"parameters"`
-	ParametersParsed any    `json:"-"` // cached json.Unmarshal result, populated by buildToolDefinitions
 }

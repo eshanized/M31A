@@ -3,7 +3,7 @@ package session
 import (
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // SessionInfo holds display metadata for session listings.

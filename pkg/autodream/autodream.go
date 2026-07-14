@@ -9,9 +9,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eshanized/M31A/internal/tokens"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
+
+// TokenEstimator provides token counting for text. The concrete
+// implementation lives in internal/tokens; this interface breaks the
+// import cycle while preserving type safety.
+type TokenEstimator interface {
+	Estimate(text string) int
+	EstimateMessages(messages []types.Message) int
+}
 
 // ConsolidationResult reports the outcome of a Consolidate() call.
 type ConsolidationResult struct {
@@ -37,7 +44,7 @@ type Consolidator struct {
 	// entering a double-summary state.
 	consolidating atomic.Bool
 	// tokenEst provides accurate token counting instead of word-count heuristics.
-	tokenEst *tokens.Estimator
+	tokenEst TokenEstimator
 }
 
 // ErrAlreadyConsolidating is returned when a consolidation is already in

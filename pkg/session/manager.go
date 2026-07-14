@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/fileutil"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/pkg/errors"
+	"github.com/eshanized/M31A/pkg/types"
 	"github.com/eshanized/M31A/pkg/coordinator"
 )
 
@@ -28,7 +27,7 @@ type Manager struct {
 	sessionIDBytes  int           // number of random bytes for session IDs (default 4 = 8 hex chars)
 	maxRecentModels int           // max recent models to track (default 10)
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
-	lock            *fileutil.FileLock
+	lock            *fileLock
 	coordinator     *coordinator.Coordinator[string] // per-session concurrency control
 }
 
@@ -63,7 +62,7 @@ func NewManager(baseDir, workDir string, opts ManagerOpts) *Manager {
 		sessionIDBytes:  opts.SessionIDBytes,
 		maxRecentModels: opts.MaxRecentModels,
 		sessionCacheTTL: opts.SessionCacheTTL,
-		lock:            fileutil.NewFileLock(filepath.Join(projectDir, "session.lock")),
+		lock:            newFileLock(filepath.Join(projectDir, "session.lock")),
 		coordinator:     coord,
 	}
 }
@@ -106,7 +105,7 @@ func (m *Manager) planningDirPath() string {
 
 // atomicWrite atomically writes data to path by writing to a temp file then renaming.
 func (m *Manager) atomicWrite(path string, data []byte) error {
-	return fileutil.AtomicWrite(path, data)
+	return atomicWrite(path, data)
 }
 
 // ensureDir creates the directory at path (including parents) with DirPermission perms.

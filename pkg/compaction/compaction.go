@@ -8,10 +8,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/tokens"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
+
+// TokenEstimator provides token counting for text. The concrete
+// implementation lives in internal/tokens; this interface breaks the
+// import cycle while preserving type safety.
+type TokenEstimator interface {
+	Estimate(text string) int
+	EstimateMessages(messages []types.Message) int
+}
+
+// Provider abstracts the LLM provider for compaction summary generation.
+// The concrete implementation lives in internal/provider; this interface
+// breaks the import cycle while preserving type safety.
+type Provider interface {
+	ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error)
+	GetModel(modelID string) (*types.ModelInfo, error)
+}
 
 // Config holds compaction settings.
 type Config struct {
@@ -36,7 +50,7 @@ func DefaultConfig() Config {
 // usage exceeds the threshold.
 type Compactor struct {
 	cfg        Config
-	tokenEst   *tokens.Estimator
+	tokenEst   TokenEstimator
 	mu         sync.RWMutex
 	lastResult *Result
 }
@@ -52,7 +66,7 @@ type Result struct {
 }
 
 // New creates a Compactor with the given config and token estimator.
-func New(cfg Config, tokenEst *tokens.Estimator) *Compactor {
+func New(cfg Config, tokenEst TokenEstimator) *Compactor {
 	return &Compactor{
 		cfg:      cfg,
 		tokenEst: tokenEst,
@@ -81,7 +95,7 @@ func (c *Compactor) ShouldCompact(messages []types.Message, contextLength int64)
 // Compact generates a structured summary of old messages and returns a new
 // message list with the old messages replaced by the summary. Uses the LLM
 // provider to generate the summary.
-func (c *Compactor) Compact(ctx context.Context, messages []types.Message, p provider.LLMProvider, modelID string) (*Result, error) {
+func (c *Compactor) Compact(ctx context.Context, messages []types.Message, p Provider, modelID string) (*Result, error) {
 	start := time.Now()
 
 	if c.tokenEst == nil {
@@ -145,7 +159,7 @@ func (c *Compactor) Compact(ctx context.Context, messages []types.Message, p pro
 }
 
 // generateSummary sends the serialized head to the LLM for summarization.
-func (c *Compactor) generateSummary(ctx context.Context, headText string, p provider.LLMProvider, modelID string) (string, error) {
+func (c *Compactor) generateSummary(ctx context.Context, headText string, p Provider, modelID string) (string, error) {
 	if p == nil {
 		return "", fmt.Errorf("provider required for compaction")
 	}
@@ -161,7 +175,7 @@ func (c *Compactor) generateSummary(ctx context.Context, headText string, p prov
 		},
 	}
 
-	req := provider.ChatRequest{
+	req := types.ChatRequest{
 		Model:            modelID,
 		Messages:         messages,
 		ReasoningEnabled: false,

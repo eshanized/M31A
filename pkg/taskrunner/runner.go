@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/pkg/errors"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // TaskResult holds the outcome of executing a single task.

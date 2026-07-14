@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"strings"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/git"
+	m31errors "github.com/eshanized/M31A/pkg/errors"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // BisectResult holds the offending commit and its diff.
 type BisectResult struct {
-	OffendingCommit git.CommitInfo
+	OffendingCommit types.CommitInfo
 	Diff            string
 }
 
@@ -136,7 +136,7 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	}
 
 	return &BisectResult{
-		OffendingCommit: git.CommitInfo{
+		OffendingCommit: types.CommitInfo{
 			Hash:      offending,
 			ShortHash: offending,
 		},

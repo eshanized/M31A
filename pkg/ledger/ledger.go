@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/fileutil"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/pkg/errors"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // LedgerEntry represents a single session record stored in the ledger.
@@ -37,7 +36,7 @@ type Ledger struct {
 	mu      sync.RWMutex
 	path    string
 	entries []LedgerEntry
-	lock    *fileutil.FileLock
+	lock    *types.FileLock
 
 	// Stats cache with mtime-based invalidation.
 	statsCache      LedgerStats
@@ -66,7 +65,7 @@ func New(filePath string) *Ledger {
 	l := &Ledger{
 		path:    filePath,
 		entries: make([]LedgerEntry, 0),
-		lock:    fileutil.NewFileLock(filePath + ".lock"),
+		lock:    types.NewFileLock(filePath + ".lock"),
 	}
 
 	if _, err := os.Stat(filePath); err == nil {
@@ -407,7 +406,7 @@ func (l *Ledger) rewriteFile() error {
 		}
 	}
 
-	if err := fileutil.AtomicWrite(l.path, []byte(sb.String())); err != nil {
+	if err := types.AtomicWrite(l.path, []byte(sb.String())); err != nil {
 		return fmt.Errorf("write ledger: %w", err)
 	}
 
