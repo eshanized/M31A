@@ -783,11 +783,18 @@ func (e *Engine) loadProjectCached() *m31types.ProjectState {
 // SetModel updates the active model ID and provider for the engine.
 func (e *Engine) SetModel(modelID string, p provider.LLMProvider) {
 	e.modelIDMu.Lock()
+	defer e.modelIDMu.Unlock()
 	e.modelID = modelID
-	e.modelIDMu.Unlock()
 	if p != nil {
 		e.provider = p
 	}
+}
+
+// providerAndModel returns the current provider and modelID atomically.
+func (e *Engine) providerAndModel() (provider.LLMProvider, string) {
+	e.modelIDMu.RLock()
+	defer e.modelIDMu.RUnlock()
+	return e.provider, e.modelID
 }
 
 // SetCollector attaches a metrics collector to the engine for recording
@@ -1005,10 +1012,14 @@ func (e *Engine) emit(msg any) {
 // cannot bring usage below 95%. Returns a (possibly truncated) copy of the
 // messages so the caller's original slice is never mutated.
 func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.Message, error) {
-	if e.tokens == nil || e.provider == nil {
+	if e.tokens == nil {
 		return messages, nil
 	}
-	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
+	p, _ := e.providerAndModel()
+	if p == nil {
+		return messages, nil
+	}
+	modelInfo, err := p.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
 	if err != nil || modelInfo == nil {
 		return messages, nil
 	}
@@ -1034,7 +1045,8 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	if e.compactor != nil && e.compactor.ShouldCompact(messages, contextLength) {
 		slog.Info("auto-compaction triggered", "estimated_tokens", estimated, "context_length", contextLength)
 		compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
-		result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.stateMachine.CurrentPhase()))
+		cp, _ := e.providerAndModel()
+		result, compactErr := e.compactor.Compact(compactCtx, messages, cp, e.modelForPhase(e.stateMachine.CurrentPhase()))
 		compactCancel()
 		if compactErr == nil && result.Compacted {
 			e.emit(CompactionCompleteMsg{
@@ -1132,14 +1144,18 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 // during Execute phase. This is a no-op if compactor is nil, proactive
 // compaction is disabled, or no messages are available.
 func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.Message {
-	if e.compactor == nil || e.provider == nil || e.tokens == nil {
+	if e.compactor == nil || e.tokens == nil {
+		return messages
+	}
+	p, _ := e.providerAndModel()
+	if p == nil {
 		return messages
 	}
 	if e.cfg == nil || !e.cfg.Compaction.Proactive {
 		return messages
 	}
 
-	modelInfo, err := e.provider.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
+	modelInfo, err := p.GetModel(e.modelForPhase(e.stateMachine.CurrentPhase()))
 	if err != nil || modelInfo == nil {
 		return messages
 	}
@@ -1165,7 +1181,8 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 		"threshold_pct", e.cfg.Compaction.PhaseTransitionPct)
 
 	compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	result, compactErr := e.compactor.Compact(compactCtx, messages, e.provider, e.modelForPhase(e.stateMachine.CurrentPhase()))
+	cp2, _ := e.providerAndModel()
+	result, compactErr := e.compactor.Compact(compactCtx, messages, cp2, e.modelForPhase(e.stateMachine.CurrentPhase()))
 	compactCancel()
 
 	if compactErr != nil {
@@ -1534,7 +1551,8 @@ func (e *Engine) prepareStreamRequest(ctx context.Context, messages []m31types.M
 		req.Tools = e.buildToolDefinitions()
 	}
 
-	iterator, err := e.provider.ChatCompletionStream(ctx, req)
+		rp, _ := e.providerAndModel()
+		iterator, err := rp.ChatCompletionStream(ctx, req)
 	if err != nil {
 		iterator, err = e.retryChatStream(ctx, req, err)
 		if err != nil {
@@ -1631,7 +1649,8 @@ func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, 
 		case <-time.After(delay):
 		}
 
-		iterator, err := e.provider.ChatCompletionStream(ctx, req)
+	sp, _ := e.providerAndModel()
+	iterator, err := sp.ChatCompletionStream(ctx, req)
 		if err == nil {
 			return iterator, nil
 		}
