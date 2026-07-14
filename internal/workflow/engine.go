@@ -874,7 +874,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	if result != nil {
-		result.WorkflowMode = e.workflowMode
+		result.WorkflowMode = e.WorkflowMode()
 	}
 
 	// Delegate post-phase metrics to PhaseCoordinator

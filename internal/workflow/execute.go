@@ -22,7 +22,7 @@ import (
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.
 func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, error) {
-	e.logger.Info("execute phase starting", "goal", goal, "mode", e.workflowMode)
+	e.logger.Info("execute phase starting", "goal", goal, "mode", e.WorkflowMode())
 
 	// 1. Load tasks
 	tasks, err := e.sessionMgr.LoadTasks(e.sessionID)
@@ -32,7 +32,8 @@ func (e *Engine) runExecute(ctx context.Context, goal string) (*PhaseResult, err
 
 	// In Fast/Direct mode, auto-generate a single task when none exist
 	// (Plan phase was skipped, so we create one on the fly).
-	if len(tasks) == 0 && e.workflowMode != "" && e.workflowMode != m31types.ModeFull {
+	mode := e.WorkflowMode()
+	if len(tasks) == 0 && mode != "" && mode != m31types.ModeFull {
 		tasks = []m31types.Task{
 			{
 				ID:           1,
