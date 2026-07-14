@@ -82,10 +82,15 @@ func (e *Engine) readTaskFiles(files []string) string {
 
 // descriptionKeywords extracts meaningful keywords from the current task context
 // for matching against function names in source files.
+// Returns common code terms that help find relevant functions during smart truncation.
 func (e *Engine) descriptionKeywords() []string {
-	// Heuristic: extract capitalized words and common code terms from the task
-	// This is intentionally simple — the real matching is in findRelevantFunction.
-	return nil // uses task context from the caller
+	// Return common code terms that help identify relevant functions
+	// during smart file truncation. The real matching uses these as
+	// fallback when task-specific keywords aren't available.
+	return []string{
+		"func", "method", "handler", "service", "controller",
+		"model", "view", "test", "config", "init",
+	}
 }
 
 // findRelevantFunction searches lines[startAt:] for a function/method declaration
@@ -270,16 +275,16 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	// ── Content validation ──────────────────────────────────────────────────
 	placeholderSignals := []string{"TODO", "FIXME", "XXX", "PLACEHOLDER", "lorem ipsum", "Lorem ipsum"}
 	emptyFunctionPatterns := []string{
-		"{\n}",           // empty function body
-		"{ }",            // empty function body (single line)
-		"{\n\t\n}",       // empty function body with tab
-		"{\n  \n}",       // empty function body with spaces
-		"pass",           // Python stub
-		"pass\n",         // Python stub with newline
-		"raise NotImplementedError", // Python stub
+		"{\n}",                       // empty function body
+		"{ }",                        // empty function body (single line)
+		"{\n\t\n}",                   // empty function body with tab
+		"{\n  \n}",                   // empty function body with spaces
+		"pass",                       // Python stub
+		"pass\n",                     // Python stub with newline
+		"raise NotImplementedError",  // Python stub
 		"panic(\"not implemented\")", // Go stub
-		"todo!()",        // Rust stub
-		"unimplemented!()", // Rust stub
+		"todo!()",                    // Rust stub
+		"unimplemented!()",           // Rust stub
 	}
 	for _, f := range task.Files {
 		path := filepath.Join(e.workDir, f)
@@ -505,12 +510,20 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 // isConfigFile returns true for small config files where <50 bytes is normal.
 func isConfigFile(path string) bool {
 	base := filepath.Base(path)
+	ext := filepath.Ext(path)
 	configFiles := []string{
-		".gitignore", ".env", ".editorconfig", ".nvmrc", ".node-version",
+		".gitignore", ".env", ".env.example", ".editorconfig", ".nvmrc", ".node-version",
 		".ruby-version", ".python-version", "Procfile", ".dockerignore",
 	}
 	for _, cf := range configFiles {
 		if base == cf {
+			return true
+		}
+	}
+	// Check common config extensions
+	configExts := []string{".toml", ".yaml", ".yml", ".json", ".xml", ".ini", ".cfg", ".conf"}
+	for _, ce := range configExts {
+		if ext == ce {
 			return true
 		}
 	}

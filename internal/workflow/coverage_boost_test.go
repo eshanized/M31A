@@ -1729,9 +1729,17 @@ func TestEngine_IsConfigFile(t *testing.T) {
 		{".nvmrc", true},
 		{"Procfile", true},
 		{".dockerignore", true},
+		{".env.example", true},
+		{".toml", true},
+		{"config.yaml", true},
+		{"config.yml", true},
+		{"config.json", true},
+		{"config.xml", true},
+		{"config.ini", true},
+		{"config.cfg", true},
+		{"config.conf", true},
 		{"main.go", false},
 		{"test.txt", false},
-		{"package.json", false}, // not in the known config list
 	}
 	for _, tt := range tests {
 		if got := isConfigFile(tt.path); got != tt.expect {
@@ -1743,9 +1751,12 @@ func TestEngine_IsConfigFile(t *testing.T) {
 func TestEngine_DescriptionKeywords(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	result := engine.descriptionKeywords()
-	// descriptionKeywords currently returns nil (uses task context from caller)
-	if result != nil {
-		t.Errorf("expected nil result, got %v", result)
+	// descriptionKeywords returns common code terms for smart truncation
+	if result == nil {
+		t.Error("expected non-nil result, got nil")
+	}
+	if len(result) == 0 {
+		t.Error("expected non-empty result, got empty slice")
 	}
 }
 
