@@ -272,10 +272,11 @@ func (e *Engine) consumeSkipOrCancel(ctx context.Context) (skipID int, cancelID 
 	skipCh := e.skipTaskCh
 	cancelCh := e.cancelTaskCh
 	groupCh := e.cancelGroupCh
+	resumeCh := e.resumeCh
 	e.pauseMu.Unlock()
 
 	select {
-	case <-e.resumeCh:
+	case <-resumeCh:
 		return 0, 0, false, true
 	case id := <-skipCh:
 		return id, 0, false, true
