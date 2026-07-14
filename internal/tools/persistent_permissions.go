@@ -2,8 +2,11 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/eshanized/M31A/internal/config"
 )
@@ -67,7 +70,18 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 	var pd persistentData
 	data, err := os.ReadFile(p.path)
 	if err == nil {
-		_ = json.Unmarshal(data, &pd)
+		if err := json.Unmarshal(data, &pd); err != nil {
+			// Corrupt JSON — back up the file before overwriting
+			backupPath := fmt.Sprintf("%s.corrupt.%d", p.path, time.Now().Unix())
+			if src, srcErr := os.Open(p.path); srcErr == nil {
+				if dst, dstErr := os.Create(backupPath); dstErr == nil {
+					_, _ = io.Copy(dst, src)
+					_ = dst.Close()
+				}
+				_ = src.Close()
+			}
+			return fmt.Errorf("corrupt permissions file backed up to %s: %w", backupPath, err)
+		}
 	}
 
 	// Initialize map if needed
