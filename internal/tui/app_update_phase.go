@@ -20,12 +20,14 @@ func nextPhaseForMode(from types.WorkflowPhase, mode types.WorkflowMode) (types.
 		if mode == types.ModeDirect {
 			return types.PhaseExecute, true
 		}
+		// ModeAuto follows full workflow path (no phase skipping)
 		return types.PhaseDiscuss, true
 
 	case types.PhaseDiscuss:
 		if mode == types.ModeFast || mode == types.ModeDirect {
 			return types.PhaseExecute, true
 		}
+		// ModeAuto follows full workflow path (no phase skipping)
 		return types.PhasePlan, true
 
 	case types.PhasePlan:
@@ -35,12 +37,14 @@ func nextPhaseForMode(from types.WorkflowPhase, mode types.WorkflowMode) (types.
 		if mode == types.ModeDirect {
 			return types.PhaseShip, true
 		}
+		// ModeAuto follows full workflow path (no phase skipping)
 		return types.PhaseVerify, true
 
 	case types.PhaseVerify:
 		if mode == types.ModeDirect {
 			return types.PhaseShip, true
 		}
+		// ModeAuto follows full workflow path (no phase skipping)
 		return types.PhaseRuntime, true
 
 	case types.PhaseRuntime:
