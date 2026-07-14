@@ -68,9 +68,9 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 
 	// Read existing data to preserve other projects
 	var pd persistentData
-	data, err := os.ReadFile(p.path)
-	if err == nil {
-		if err := json.Unmarshal(data, &pd); err != nil {
+	data, readErr := os.ReadFile(p.path)
+	if readErr == nil {
+		if jsonErr := json.Unmarshal(data, &pd); jsonErr != nil {
 			// Corrupt JSON — back up the file before overwriting
 			backupPath := fmt.Sprintf("%s.corrupt.%d", p.path, time.Now().Unix())
 			if src, srcErr := os.Open(p.path); srcErr == nil {
@@ -80,7 +80,7 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 				}
 				_ = src.Close()
 			}
-			return fmt.Errorf("corrupt permissions file backed up to %s: %w", backupPath, err)
+			return fmt.Errorf("corrupt permissions file backed up to %s: %w", backupPath, jsonErr)
 		}
 	}
 
@@ -93,9 +93,9 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 	pd.Projects[projectDir] = rules
 
 	// Write back to file
-	data, err = json.MarshalIndent(pd, "", "  ")
-	if err != nil {
-		return err
+	data, marshalErr := json.MarshalIndent(pd, "", "  ")
+	if marshalErr != nil {
+		return marshalErr
 	}
 
 	return os.WriteFile(p.path, data, 0644)
