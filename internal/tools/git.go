@@ -88,8 +88,25 @@ func validateGitArgs(operation string, args []string) error {
 		return fmt.Errorf("unknown git operation: %s", operation)
 	}
 
-	for _, arg := range args {
+	for i, arg := range args {
 		if !allowList[arg] {
+			// For commit with -m, treat everything after -m as message text
+			if operation == "commit" && arg == "-m" {
+				break // remaining args are the commit message
+			}
+			// For commit, skip tokens that follow -m (they are message words)
+			if operation == "commit" && i > 0 {
+				prevIsDashM := false
+				for j := i - 1; j >= 0; j-- {
+					if args[j] == "-m" {
+						prevIsDashM = true
+						break
+					}
+				}
+				if prevIsDashM {
+					continue
+				}
+			}
 			return fmt.Errorf("argument %q is not allowed for git %s operation: %w", arg, operation, m31errors.ErrToolExecution)
 		}
 	}
