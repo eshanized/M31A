@@ -64,10 +64,36 @@ func (g *Git) ParameterSchema() string {
 
 // gitResult is the structured output returned by git operations.
 type gitResult struct {
-	Success  bool   `json:"success"`
+	Success   bool   `json:"success"`
 	Operation string `json:"operation"`
-	Output   string `json:"output,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// validateGitArgs checks that all arguments are in the allowlist for the given operation.
+func validateGitArgs(operation string, args []string) error {
+	allowed := map[string]map[string]bool{
+		"add":      {"-f": true, "-p": true, "-v": true, "-n": true, "--dry-run": true, "--verbose": true},
+		"commit":   {"-m": true, "-a": true, "--amend": true, "--no-edit": true, "--allow-empty": true, "--allow-empty-message": true},
+		"diff":     {"--stat": true, "--name-only": true, "--name-status": true, "--cached": true, "--staged": true},
+		"log":      {"--oneline": true, "--graph": true, "--all": true, "--stat": true, "-n": true, "--pretty": true},
+		"branch":   {"-d": true, "-D": true, "-m": true, "-M": true, "-r": true, "-a": true, "--list": true},
+		"checkout": {"-b": true, "-B": true, "--orphan": true},
+		"stash":    {"push": true, "pop": true, "apply": true, "drop": true, "list": true, "show": true},
+		"status":   {"--short": true, "--branch": true, "--porcelain": true},
+	}
+
+	allowList, ok := allowed[operation]
+	if !ok {
+		return fmt.Errorf("unknown git operation: %s", operation)
+	}
+
+	for _, arg := range args {
+		if !allowList[arg] {
+			return fmt.Errorf("argument %q is not allowed for git %s operation: %w", arg, operation, m31errors.ErrToolExecution)
+		}
+	}
+	return nil
 }
 
 func (g *Git) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
@@ -90,6 +116,14 @@ func (g *Git) Execute(ctx context.Context, input types.ToolInput) (types.ToolRes
 
 	var result gitResult
 	var err error
+
+	// Validate args against per-operation allowlists
+	if args != "" {
+		parsedArgs := strings.Fields(args)
+		if err := validateGitArgs(operation, parsedArgs); err != nil {
+			return types.ToolResult{}, err
+		}
+	}
 
 	switch operation {
 	case "add":
