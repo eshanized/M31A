@@ -928,6 +928,9 @@ func TestHTTPCheck_Execute_NoURL(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_WithBody(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	tool := NewHTTPCheck()
 	// Use invalid URL to hit error path with body param
 	res, err := tool.Execute(context.Background(), types.ToolInput{
@@ -949,6 +952,9 @@ func TestHTTPCheck_Execute_WithBody(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_StatusMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	tool := NewHTTPCheck()
 	// Use invalid URL to hit error path
 	res, err := tool.Execute(context.Background(), types.ToolInput{
@@ -964,6 +970,9 @@ func TestHTTPCheck_Execute_StatusMismatch(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_NotExpectedContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	tool := NewHTTPCheck()
 	// Use invalid URL to exercise code path with not_expected_content
 	res, err := tool.Execute(context.Background(), types.ToolInput{
@@ -979,6 +988,9 @@ func TestHTTPCheck_Execute_NotExpectedContent(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_MaxBodyBytes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	tool := NewHTTPCheck()
 	res, err := tool.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -993,6 +1005,9 @@ func TestHTTPCheck_Execute_MaxBodyBytes(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_Headers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	tool := NewHTTPCheck()
 	res, err := tool.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -1007,6 +1022,9 @@ func TestHTTPCheck_Execute_Headers(t *testing.T) {
 }
 
 func TestHTTPCheck_Execute_JSONPathInvalidJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network-dependent test in short mode")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	}))

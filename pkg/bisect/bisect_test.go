@@ -71,6 +71,9 @@ func commitHash(t *testing.T, dir string) string {
 }
 
 func TestBisect_Successful(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	// Get hashes
@@ -115,6 +118,9 @@ func TestBisect_Successful(t *testing.T) {
 }
 
 func TestBisect_AlwaysPasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -131,6 +137,9 @@ func TestBisect_AlwaysPasses(t *testing.T) {
 }
 
 func TestBisect_AlwaysFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -204,6 +213,9 @@ Bisecting: 0 revisions left`,
 }
 
 func TestBisect_DiffExtraction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -325,6 +337,9 @@ Bisecting: 0 revisions left
 }
 
 func TestBisect_CheckFnPassesThenErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -353,6 +368,9 @@ func TestBisect_CheckFnPassesThenErrors(t *testing.T) {
 }
 
 func TestBisect_CheckFnFailsThenErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -396,6 +414,9 @@ func TestBisect_NilLogger(t *testing.T) {
 }
 
 func TestBisect_DiffExtractionErrorSilent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	dir, b := setupBisectRepo(t)
 
 	hashes := gitLogHashes(t, dir)
@@ -422,6 +443,9 @@ func TestBisect_DiffExtractionErrorSilent(t *testing.T) {
 }
 
 func TestBisect_GoodCommitError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow bisect test in short mode")
+	}
 	_, b := setupBisectRepo(t)
 
 	// Use valid head but invalid good hash to trigger error on "bisect good"
