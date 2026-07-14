@@ -37,14 +37,6 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	// Best-effort cleanup of old output files on startup
 	_, _ = store.Cleanup(OutputRetentionDays * 24 * time.Hour)
 
-	// Load persistent permissions for this project
-	pp := NewPersistentPermissions()
-	if saved := pp.Load(workDir); len(saved) > 0 {
-		d.mu.Lock()
-		d.rules = append(d.rules, saved...)
-		d.mu.Unlock()
-	}
-
 	// Extract config values with safe defaults
 	bashMaxTimeoutSecs := 1800
 	webfetchMaxRetries := 3
