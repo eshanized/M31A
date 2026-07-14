@@ -469,6 +469,8 @@ var dangerousCommandPatterns = []struct {
 	{"rm -fr /*", "recursive delete of root filesystem"},
 	{":(){ :|:& };:", "fork bomb"},
 	{"mkfs", "filesystem formatting"},
+	{"mkfs.ext4", "ext4 filesystem formatting"},
+	{"mkfs.xfs", "XFS filesystem formatting"},
 	{"dd if=", "raw disk write"},
 	{"dd of=/dev/", "raw disk write to device"},
 	{"> /dev/sda", "raw disk overwrite"},
@@ -490,6 +492,11 @@ var dangerousCommandPatterns = []struct {
 	{"> /etc/", "writing to system config directory"},
 	{"mv / ", "moving to root filesystem"},
 	{"mv /* ", "moving from root filesystem"},
+	{"fdisk", "disk partitioning"},
+	{"wipefs", "filesystem signature wiping"},
+	{"shred", "secure file deletion"},
+	{"nc -l", "netcat listener"},
+	{"ncat -l", "netcat listener"},
 }
 
 // dangerousObfuscationPatterns catches commands that use shell features
@@ -530,12 +537,14 @@ func normalizeCommand(cmd string) string {
 }
 
 // containsVariableExpansion detects shell variable expansion patterns that could
-// be used for command injection: $VARIABLE, ${VARIABLE}, and $((expression)).
+// be used for command injection: $VARIABLE, ${VARIABLE}, $((expression)),
+// $(command), and backtick command substitution.
 func containsVariableExpansion(cmd string) bool {
 	patterns := []string{
 		"$[A-Za-z_]",
 		"${",
-		"$((",
+		"$(",
+		"`",
 	}
 	for _, p := range patterns {
 		if strings.Contains(cmd, p) {
