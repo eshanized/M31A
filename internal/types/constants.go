@@ -1,152 +1,92 @@
 package types
 
 import (
-	"sync"
-	"time"
+	pkgTypes "github.com/eshanized/M31A/pkg/types"
 )
+
+// Constants — re-exported from pkg/types for backward compatibility.
 
 const (
-	ModelCacheTTL           = 5 * time.Minute
-	HealthCheckInterval     = 60 * time.Second
-	MaxFileSize             = 5 * 1024 * 1024
-	MaxToolOutputChars      = 10_000
-	MaxHealAttempts         = 2
-	MaxPlanRetries          = 3
-	MaxPlanRefinements      = 5
-	SessionIDLength         = 8
-	AutoDreamThreshold      = 0.60
-	ContextWarningThreshold = 0.80
-	HTTPDialTimeout         = 30 * time.Second
-	BashTimeout             = 30 * time.Minute
-	BashOutputLimit         = 50_000
-	DefaultContextLength    = 128_000
-	MaxLLMResponseBytes     = 1 << 20
-	// MaxSessionFileSize is the maximum allowed size for session files
-	// (session.json, messages.json, checkpoint.json) to prevent OOM from
-	// corrupted or maliciously crafted files (WP-H05).
-	MaxSessionFileSize = 50 * 1024 * 1024 // 50 MB
-	// DefaultPermissionTimeout is the default permission modal timeout in seconds.
-	// Used by both the TUI permission modal and the tool dispatcher.
-	DefaultPermissionTimeout = 300
-	// StaleCacheTTL is the fallback TTL for stale model cache entries.
-	StaleCacheTTL = 24 * time.Hour
-	// DefaultHealthLiveMs is the default health check latency threshold for "live" status.
-	DefaultHealthLiveMs = 500
-	// DefaultHealthSlowMs is the default health check latency threshold for "slow" status.
-	DefaultHealthSlowMs = 2000
+	ModelCacheTTL           = pkgTypes.ModelCacheTTL
+	HealthCheckInterval     = pkgTypes.HealthCheckInterval
+	MaxFileSize             = pkgTypes.MaxFileSize
+	MaxToolOutputChars      = pkgTypes.MaxToolOutputChars
+	MaxHealAttempts         = pkgTypes.MaxHealAttempts
+	MaxPlanRetries          = pkgTypes.MaxPlanRetries
+	MaxPlanRefinements      = pkgTypes.MaxPlanRefinements
+	SessionIDLength         = pkgTypes.SessionIDLength
+	AutoDreamThreshold      = pkgTypes.AutoDreamThreshold
+	ContextWarningThreshold = pkgTypes.ContextWarningThreshold
+	HTTPDialTimeout         = pkgTypes.HTTPDialTimeout
+	BashTimeout             = pkgTypes.BashTimeout
+	BashOutputLimit         = pkgTypes.BashOutputLimit
+	DefaultContextLength    = pkgTypes.DefaultContextLength
+	MaxLLMResponseBytes     = pkgTypes.MaxLLMResponseBytes
+	MaxSessionFileSize      = pkgTypes.MaxSessionFileSize
+	DefaultPermissionTimeout = pkgTypes.DefaultPermissionTimeout
+	StaleCacheTTL           = pkgTypes.StaleCacheTTL
+	DefaultHealthLiveMs     = pkgTypes.DefaultHealthLiveMs
+	DefaultHealthSlowMs     = pkgTypes.DefaultHealthSlowMs
 
-	// Health status string constants
-	HealthStatusLive     = "live"
-	HealthStatusSlow     = "slow"
-	HealthStatusOffline  = "offline"
-	HealthStatusDegraded = "degraded"
+	HealthStatusLive     = pkgTypes.HealthStatusLive
+	HealthStatusSlow     = pkgTypes.HealthStatusSlow
+	HealthStatusOffline  = pkgTypes.HealthStatusOffline
+	HealthStatusDegraded = pkgTypes.HealthStatusDegraded
 
-	// MaxProviderErrorChars is the max chars for sanitized provider errors
-	MaxProviderErrorChars = 200
+	MaxProviderErrorChars = pkgTypes.MaxProviderErrorChars
 
-	// DefaultOpenRouterBaseURL is the default OpenRouter API base URL
-	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	DefaultOpenRouterBaseURL = pkgTypes.DefaultOpenRouterBaseURL
+	DefaultZenBaseURL        = pkgTypes.DefaultZenBaseURL
+	DefaultNvidiaBaseURL     = pkgTypes.DefaultNvidiaBaseURL
+	DefaultReferer           = pkgTypes.DefaultReferer
+	DefaultMaxRecentModels   = pkgTypes.DefaultMaxRecentModels
 
-	// DefaultZenBaseURL is the default Zen API base URL
-	DefaultZenBaseURL = "https://opencode.ai/zen/v1"
+	DirPermission  = pkgTypes.DirPermission
+	FilePermission = pkgTypes.FilePermission
 
-	// DefaultNvidiaBaseURL is the default NVIDIA NIM API base URL
-	DefaultNvidiaBaseURL = "https://integrate.api.nvidia.com/v1"
+	DefaultMaxGlobResults       = pkgTypes.DefaultMaxGlobResults
+	DefaultMaxGrepResults       = pkgTypes.DefaultMaxGrepResults
+	DefaultBashKillGraceSecs    = pkgTypes.DefaultBashKillGraceSecs
+	DefaultMaxBackupsPerFile    = pkgTypes.DefaultMaxBackupsPerFile
+	DefaultWebfetchMaxRedirects = pkgTypes.DefaultWebfetchMaxRedirects
 
-	// DefaultReferer is the default HTTP-Referer header for OpenRouter
-	DefaultReferer = "https://github.com/eshanized/M31A"
+	DefaultOutputMaxLines = pkgTypes.DefaultOutputMaxLines
+	DefaultOutputMaxBytes = pkgTypes.DefaultOutputMaxBytes
 
-	// DefaultMaxRecentModels is the default number of recent models to remember
-	DefaultMaxRecentModels = 10
+	CompressCooldown   = pkgTypes.CompressCooldown
+	ChannelSendTimeout = pkgTypes.ChannelSendTimeout
+	ToastDuration      = pkgTypes.ToastDuration
 
-	// DirPermission is the default directory permission (0755)
-	DirPermission = 0755
-	// FilePermission is the default file permission (0644)
-	FilePermission = 0644
+	FetchModelsTimeout    = pkgTypes.FetchModelsTimeout
+	HealthCheckRetryDelay = pkgTypes.HealthCheckRetryDelay
+	MaxRetryAfterWait     = pkgTypes.MaxRetryAfterWait
 
-	// Tool default values (referenced by internal/tools/constants.go)
-	DefaultMaxGlobResults       = 1000
-	DefaultMaxGrepResults       = 100
-	DefaultBashKillGraceSecs    = 5
-	DefaultMaxBackupsPerFile    = 10
-	DefaultWebfetchMaxRedirects = 5
+	EMACorrectionAlpha = pkgTypes.EMACorrectionAlpha
 
-	// Tool output bounding defaults
-	DefaultOutputMaxLines = 2000
-	DefaultOutputMaxBytes = 51200
+	MaxToolsPerCall  = pkgTypes.MaxToolsPerCall
+	MaxCwdFileDepth  = pkgTypes.MaxCwdFileDepth
 
-	// CompressCooldown is the cooldown between /compress commands
-	CompressCooldown = 60 * time.Second
-	// ChannelSendTimeout is the timeout for sending on tea.Cmd channels
-	ChannelSendTimeout = 500 * time.Millisecond
-	// ToastDuration is how long toast messages display
-	ToastDuration = 10 * time.Second
+	ConfigWatchInterval   = pkgTypes.ConfigWatchInterval
+	MaxProjectConfigDepth = pkgTypes.MaxProjectConfigDepth
 
-	// FetchModelsTimeout is the timeout for fetching model catalogs
-	FetchModelsTimeout = 15 * time.Second
-	// HealthCheckRetryDelay is the delay before retrying a failed health check
-	HealthCheckRetryDelay = 5 * time.Second
-	// MaxRetryAfterWait is the maximum wait time for retry-after headers
-	MaxRetryAfterWait = 120 * time.Second
+	DefaultSessionCacheTTL = pkgTypes.DefaultSessionCacheTTL
 
-	// EMACorrectionAlpha is the default EMA correction rate for token estimation calibration.
-	EMACorrectionAlpha = 0.3
+	DefaultVerifyTimeout = pkgTypes.DefaultVerifyTimeout
 
-	// MaxToolsPerCall is the max tool calls allowed per LLM response
-	MaxToolsPerCall = 16
-	// MaxCwdFileDepth is the max directory depth for cwd file schema
-	MaxCwdFileDepth = 3
+	DefaultFetchModelsTimeout = pkgTypes.DefaultFetchModelsTimeout
 
-	// ConfigWatchInterval is the interval for watching config file changes
-	ConfigWatchInterval = 5 * time.Second
-	// MaxProjectConfigDepth is the max parent directory depth for project config discovery
-	MaxProjectConfigDepth = 3
+	DefaultUserAgent = pkgTypes.DefaultUserAgent
+	DefaultXTitle    = pkgTypes.DefaultXTitle
+	DateFormat       = pkgTypes.DateFormat
+	DateTimeFormat   = pkgTypes.DateTimeFormat
 
-	// DefaultSessionCacheTTL is the default TTL for the session list cache.
-	DefaultSessionCacheTTL = 2 * time.Second
-
-	// DefaultVerifyTimeout is the default timeout for a single verify phase task.
-	DefaultVerifyTimeout = 5 * time.Minute
-
-	// DefaultFetchModelsTimeout is an alias for FetchModelsTimeout (M-32: removed duplicate constant).
-	DefaultFetchModelsTimeout = FetchModelsTimeout
-
-	// DefaultUserAgent is the default User-Agent header for API requests
-	DefaultUserAgent = "M31A/dev"
-	// DefaultXTitle is the default X-Title header for OpenRouter
-	DefaultXTitle = "M31A"
-	// DateFormat is the standard date format used across the application
-	DateFormat = "2006-01-02"
-	// DateTimeFormat is the date+time format used for file listings
-	DateTimeFormat = "2006-01-02 15:04"
-
-	// DefaultMaxParallelTasks is the default maximum number of tasks to execute
-	// concurrently within a group. Configurable via Runner.MaxParallel.
-	DefaultMaxParallelTasks = 4
+	DefaultMaxParallelTasks = pkgTypes.DefaultMaxParallelTasks
 )
 
-// SkipDirs is the list of directories to skip during file traversal.
-var SkipDirs = []string{"node_modules", "vendor", ".next", "dist", "build", "target", ".venv", "venv", "__pycache__"}
-
-var (
-	skipDirsCache map[string]bool
-	skipDirsOnce  sync.Once
-)
+// SkipDirs — re-exported from pkg/types for backward compatibility.
+var SkipDirs = pkgTypes.SkipDirs
 
 // SkipDirsMap returns a cached map for O(1) lookup of skip directories.
-// Computed lazily on first access via sync.Once.
 func SkipDirsMap() map[string]bool {
-	skipDirsOnce.Do(func() {
-		m := make(map[string]bool, len(SkipDirs))
-		for _, d := range SkipDirs {
-			m[d] = true
-		}
-		skipDirsCache = m
-	})
-	// Return a copy to prevent callers from mutating the cached map.
-	out := make(map[string]bool, len(skipDirsCache))
-	for k, v := range skipDirsCache {
-		out[k] = v
-	}
-	return out
+	return pkgTypes.SkipDirsMap()
 }
