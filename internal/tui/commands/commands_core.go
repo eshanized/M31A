@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 )
 
@@ -79,7 +80,7 @@ func handleReset(_ []string, ctx CommandContext) CommandResult {
 		Cmd: func() tea.Msg {
 			// Delete API keys from keychain
 			if ctx.Keychain != nil {
-				for _, provider := range []string{"openrouter", "zen", "nvidia"} {
+				for _, provider := range []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia} {
 					_ = ctx.Keychain.Delete(provider)
 				}
 			}

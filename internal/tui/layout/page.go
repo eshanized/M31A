@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // HeaderInfo carries the data needed to render the unified header.
@@ -314,9 +315,9 @@ func renderProvBadge(s theme.SemanticStyles, provider string) string {
 
 func shortProviderName(name string) string {
 	switch {
-	case strings.Contains(strings.ToLower(name), "openrouter"):
+	case strings.Contains(strings.ToLower(name), types.ProviderOpenRouter):
 		return "OR"
-	case strings.Contains(strings.ToLower(name), "zen"):
+	case strings.Contains(strings.ToLower(name), types.ProviderZen):
 		return "ZEN"
 	default:
 		if len(name) > 3 {

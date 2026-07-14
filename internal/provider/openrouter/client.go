@@ -60,7 +60,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 }
 
 func (c *Client) Name() string {
-	return "openrouter"
+	return types.ProviderOpenRouter
 }
 
 type openRouterModel struct {
@@ -117,7 +117,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 					InputPerMToken:  m.Pricing.PromptToken * 1_000_000,
 					OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
 				},
-				Provider:     "openrouter",
+				Provider:     types.ProviderOpenRouter,
 				TopProvider:  m.TopProvider,
 				Capabilities: provider.ParseModelCapabilities(m.ID),
 			}
@@ -180,7 +180,7 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, c.HandleChatHTTPErrorWithCredits(resp, "openrouter", nil)
+		return nil, c.HandleChatHTTPErrorWithCredits(resp, types.ProviderOpenRouter, nil)
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)

@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/testutil"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func testConfigModel(t *testing.T) *ConfigModel {
@@ -261,10 +262,10 @@ func TestConfigActivateFieldChoice(t *testing.T) {
 	cm := testConfigModel(t)
 	cm.sectionIdx = 0
 	cm.fieldIdx = 0 // provider.default
-	cm.cfg.Provider.Default = "zen"
+	cm.cfg.Provider.Default = types.ProviderZen
 	_, _ = cm.activateField()
-	if cm.cfg.Provider.Default != "openrouter" {
-		t.Errorf("provider=%s, want openrouter", cm.cfg.Provider.Default)
+	if cm.cfg.Provider.Default != types.ProviderNvidia {
+		t.Errorf("provider=%s, want %s", cm.cfg.Provider.Default, types.ProviderNvidia)
 	}
 }
 

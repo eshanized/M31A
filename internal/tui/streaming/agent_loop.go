@@ -105,13 +105,13 @@ func AgentLoop(
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
-				ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %w", r)}
+				if err, ok := r.(error); ok {
+					ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %w", err)}
+				} else {
+					ch <- AgentErrorMsg{Err: fmt.Errorf("agent panic: %v", r)}
+				}
 			}
 		}()
-
-		childCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		ctx = childCtx
 
 		if contextLength <= 0 {
 			contextLength = 128_000

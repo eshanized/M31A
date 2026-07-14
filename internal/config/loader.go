@@ -27,9 +27,9 @@ var ErrValidation = errors.New("config validation")
 func DefaultConfig() *Config {
 	return &Config{
 		Provider: ProviderConfig{
-			FallbackPriority:       []string{"nvidia", "zen", "openrouter"},
+			FallbackPriority:       []string{types.ProviderNvidia, types.ProviderZen, types.ProviderOpenRouter},
 			HealthCheckTimeoutSecs: 10,
-			RegistrationOrder:      []string{"openrouter", "zen", "nvidia"},
+			RegistrationOrder:      []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia},
 		},
 		UI: UIConfig{
 			SidebarWidthThreshold: 120,
@@ -717,7 +717,7 @@ func knownConfigKeys() map[string]bool {
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
 			// Common typos / sub-tables that appear in user configs
-			"openrouter": true, "zen": true, "nvidia": true,
+			"types.ProviderOpenRouter": true, "types.ProviderZen": true, "types.ProviderNvidia": true,
 		}
 	})
 	return knownKeysMap
@@ -852,7 +852,7 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 		nvidiaSaved := nvidiaKey == ""
 
 		if openRouterKey != "" {
-			if err := kc.Set("openrouter", openRouterKey); err == nil {
+			if err := kc.Set(types.ProviderOpenRouter, openRouterKey); err == nil {
 				openRouterSaved = true
 			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
 				// Keychain unavailable - will persist to config file
@@ -861,7 +861,7 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 			}
 		}
 		if zenKey != "" {
-			if err := kc.Set("zen", zenKey); err == nil {
+			if err := kc.Set(types.ProviderZen, zenKey); err == nil {
 				zenSaved = true
 			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
 				// Keychain unavailable - will persist to config file
@@ -870,7 +870,7 @@ func (c *Config) SaveWithKeychain(path string, kc keychain.Keychain) error {
 			}
 		}
 		if nvidiaKey != "" {
-			if err := kc.Set("nvidia", nvidiaKey); err == nil {
+			if err := kc.Set(types.ProviderNvidia, nvidiaKey); err == nil {
 				nvidiaSaved = true
 			} else if errors.Is(err, keychain.ErrKeychainUnavailable) {
 				// Keychain unavailable - will persist to config file
@@ -939,11 +939,11 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 	} else if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		c.Provider.OpenRouter.APIKey = key
 	} else if kc != nil {
-		if k, err := kc.Get("openrouter"); err == nil {
+		if k, err := kc.Get(types.ProviderOpenRouter); err == nil {
 			c.Provider.OpenRouter.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
 			// Unexpected error — log and continue
-			slog.Warn("keychain error", "provider", "openrouter", "error", err)
+			slog.Warn("keychain error", "provider", types.ProviderOpenRouter, "error", err)
 		}
 		// If keychain returns ErrKeyNotFound or ErrKeychainUnavailable,
 		// keep the value from config file (already loaded in c.Provider.OpenRouter.APIKey)
@@ -955,10 +955,10 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 	} else if key := os.Getenv("ZEN_API_KEY"); key != "" {
 		c.Provider.Zen.APIKey = key
 	} else if kc != nil {
-		if k, err := kc.Get("zen"); err == nil {
+		if k, err := kc.Get(types.ProviderZen); err == nil {
 			c.Provider.Zen.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
-			slog.Warn("keychain error", "provider", "zen", "error", err)
+			slog.Warn("keychain error", "provider", types.ProviderZen, "error", err)
 		}
 	}
 
@@ -968,10 +968,10 @@ func (c *Config) ResolveAPIKeys(kc keychain.Keychain) error {
 	} else if key := os.Getenv("NVIDIA_API_KEY"); key != "" {
 		c.Provider.Nvidia.APIKey = key
 	} else if kc != nil {
-		if k, err := kc.Get("nvidia"); err == nil {
+		if k, err := kc.Get(types.ProviderNvidia); err == nil {
 			c.Provider.Nvidia.APIKey = k
 		} else if !errors.Is(err, keychain.ErrKeyNotFound) && !errors.Is(err, keychain.ErrKeychainUnavailable) {
-			slog.Warn("keychain error", "provider", "nvidia", "error", err)
+			slog.Warn("keychain error", "provider", types.ProviderNvidia, "error", err)
 		}
 	}
 

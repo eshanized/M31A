@@ -408,11 +408,11 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 	// Without this, m.config still has empty keys and the save is a no-op.
 	for _, entry := range msg.Providers {
 		switch entry.ID {
-		case "openrouter":
+		case types.ProviderOpenRouter:
 			m.config.Provider.OpenRouter.APIKey = entry.APIKey
-		case "zen":
+		case types.ProviderZen:
 			m.config.Provider.Zen.APIKey = entry.APIKey
-		case "nvidia":
+		case types.ProviderNvidia:
 			m.config.Provider.Nvidia.APIKey = entry.APIKey
 		}
 	}

@@ -30,7 +30,7 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 	}
 
 	switch providerID {
-	case "openrouter":
+	case types.ProviderOpenRouter:
 		baseURL := ""
 		referer := ""
 		title := ""
@@ -55,12 +55,12 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 		if err != nil {
 			return err
 		}
-		if err := registry.Register("openrouter", client); err != nil {
+		if err := registry.Register(types.ProviderOpenRouter, client); err != nil {
 			return err
 		}
 		slog.Info("OpenRouter provider registered")
 
-	case "zen":
+	case types.ProviderZen:
 		baseURL := ""
 		var defaultCtxLen int
 		var healthLiveMs, healthSlowMs int
@@ -82,12 +82,12 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 		if err != nil {
 			return err
 		}
-		if err := registry.Register("zen", client); err != nil {
+		if err := registry.Register(types.ProviderZen, client); err != nil {
 			return err
 		}
 		slog.Info("Zen provider registered")
 
-	case "nvidia":
+	case types.ProviderNvidia:
 		baseURL := ""
 		var defaultCtxLen int
 		var healthLiveMs, healthSlowMs int
@@ -109,7 +109,7 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 		if err != nil {
 			return err
 		}
-		if err := registry.Register("nvidia", client); err != nil {
+		if err := registry.Register(types.ProviderNvidia, client); err != nil {
 			return err
 		}
 		slog.Info("NVIDIA NIM provider registered")

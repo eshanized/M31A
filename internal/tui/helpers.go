@@ -299,15 +299,15 @@ func formatDurationMs(ms int64) string {
 // ProviderShortName returns a short display name for a provider.
 func ProviderShortName(name string) string {
 	switch strings.ToLower(name) {
-	case "openrouter":
+	case types.ProviderOpenRouter:
 		return "OR"
-	case "zen", "zen-gateway":
+	case types.ProviderZen, "zen-gateway":
 		return "Zen"
 	case "openai":
 		return "OAI"
 	case "anthropic":
 		return "AC"
-	case "nvidia", "nim":
+	case types.ProviderNvidia, "nim":
 		return "NV"
 	default:
 		if len(name) > 4 {

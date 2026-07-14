@@ -55,7 +55,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 }
 
 func (c *Client) Name() string {
-	return "zen"
+	return types.ProviderZen
 }
 
 type zenModel struct {
@@ -104,15 +104,15 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 					InputPerMToken:  0,
 					OutputPerMToken: 0,
 				},
-				Provider:     "zen",
-				TopProvider:  "zen",
+				Provider:     types.ProviderZen,
+				TopProvider:  types.ProviderZen,
 				Capabilities: provider.ParseModelCapabilities(m.ID, "-r1"),
 			}
 			models = append(models, info)
 		}
 		// Enrich models with context_length and pricing from OpenRouter or local database.
 		// Zen API does not return pricing or per-model context_length.
-		models = provider.EnrichModelInfo(models, "zen")
+		models = provider.EnrichModelInfo(models, types.ProviderZen)
 		return models, nil
 	})
 	if err != nil {
@@ -151,11 +151,11 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 			_ = resp.Body.Close()
 			bodyStr := string(bodyBytes)
 			if strings.Contains(bodyStr, "CreditsError") || strings.Contains(bodyStr, "payment") || strings.Contains(bodyStr, "billing") || strings.Contains(bodyStr, "credit") {
-				return nil, fmt.Errorf("no credits: %s: %w", provider.SanitizeProviderError(resp.StatusCode, bodyStr, "zen"), m31errors.ErrNoCredits)
+				return nil, fmt.Errorf("no credits: %s: %w", provider.SanitizeProviderError(resp.StatusCode, bodyStr, types.ProviderZen), m31errors.ErrNoCredits)
 			}
 			return nil, m31errors.ErrInvalidKey
 		}
-		return nil, c.HandleChatHTTPError(resp, "zen", nil)
+		return nil, c.HandleChatHTTPError(resp, types.ProviderZen, nil)
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)

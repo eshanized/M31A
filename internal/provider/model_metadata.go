@@ -22,7 +22,7 @@ var lastFetchAttempt time.Time
 type ModelMetadata struct {
 	ContextLength int64
 	Pricing       types.Pricing
-	Source        string // "openrouter", "local"
+	Source        string // types.ProviderOpenRouter, "local"
 }
 
 var (
@@ -120,7 +120,7 @@ func fetchOpenRouterMetadataUncached(ctx context.Context) (map[string]ModelMetad
 				InputPerMToken:  promptPrice * 1_000_000,
 				OutputPerMToken: compPrice * 1_000_000,
 			},
-			Source: "openrouter",
+			Source: types.ProviderOpenRouter,
 		}
 	}
 
@@ -272,7 +272,7 @@ func EnrichModelInfo(models []types.ModelInfo, providerName string) []types.Mode
 			}
 
 			// Enrich pricing for providers that don't report it (e.g., Zen)
-			if providerName == "zen" {
+			if providerName == types.ProviderZen {
 				if m.Pricing.InputPerMToken == 0 && m.Pricing.OutputPerMToken == 0 {
 					m.Pricing = meta.Pricing
 				}

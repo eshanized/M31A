@@ -53,7 +53,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 }
 
 func (c *Client) Name() string {
-	return "nvidia"
+	return types.ProviderNvidia
 }
 
 type nvidiaModel struct {
@@ -108,8 +108,8 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 					InputPerMToken:  0,
 					OutputPerMToken: 0,
 				},
-				Provider:     "nvidia",
-				TopProvider:  "nvidia",
+				Provider:     types.ProviderNvidia,
+				TopProvider:  types.ProviderNvidia,
 				Capabilities: provider.ParseModelCapabilities(m.ID),
 			}
 			if !info.Capabilities.Chat {
@@ -117,7 +117,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			}
 			models = append(models, info)
 		}
-		models = provider.EnrichModelInfo(models, "nvidia")
+		models = provider.EnrichModelInfo(models, types.ProviderNvidia)
 		return models, nil
 	})
 	if err != nil {
@@ -245,14 +245,14 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 				c.Cache.Remove(req.Model)
 				slog.Info("nvidia: evicted incompatible model", "model", req.Model, "body", bodyStr)
 			}
-			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, "nvidia")
+			msg := provider.SanitizeProviderError(resp.StatusCode, bodyStr, types.ProviderNvidia)
 			if isMultimodalModel(req.Model) {
 				msg += " — this model requires image, video, or audio input"
 			}
 			return nil, &provider.HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 		}
 		// Fall through to shared handler for 429, 401, 402, 503, and others
-		return nil, c.HandleChatHTTPErrorWithCredits(resp, "nvidia", nil)
+		return nil, c.HandleChatHTTPErrorWithCredits(resp, types.ProviderNvidia, nil)
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)

@@ -82,21 +82,21 @@ type providerInfo struct {
 
 var providerCatalog = []providerInfo{
 	{
-		ID:          "openrouter",
+		ID:          types.ProviderOpenRouter,
 		Name:        "OpenRouter",
 		Icon:        "⬡",
 		Description: "Unified access to 200+ models from all major labs.",
 		Recommended: true,
 	},
 	{
-		ID:          "zen",
+		ID:          types.ProviderZen,
 		Name:        "Zen",
 		Icon:        "◉",
 		Description: "Zen gateway with built-in cost controls.",
 		Recommended: false,
 	},
 	{
-		ID:          "nvidia",
+		ID:          types.ProviderNvidia,
 		Name:        "NVIDIA NIM",
 		Icon:        "◆",
 		Description: "NVIDIA NIM with coding-optimized models (Nemotron, Llama, DeepSeek).",
@@ -400,11 +400,11 @@ func categorizeModels(models []types.ModelInfo) []modelCategory {
 // keyPlaceholderForProvider returns the API key placeholder text for a given provider.
 func keyPlaceholderForProvider(providerID string) string {
 	switch providerID {
-	case "openrouter":
+	case types.ProviderOpenRouter:
 		return "sk-or-..."
-	case "nvidia":
+	case types.ProviderNvidia:
 		return "nvapi-..."
-	case "zen":
+	case types.ProviderZen:
 		return "API key"
 	default:
 		return "API key"
@@ -416,21 +416,21 @@ func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		// Basic format validation per provider
 		switch providerID {
-		case "openrouter":
+		case types.ProviderOpenRouter:
 			if !strings.HasPrefix(apiKey, "sk-or-") && !strings.HasPrefix(apiKey, "sk-") {
 				return firstRunKeyValidationMsg{
 					OK:     false,
 					ErrStr: "OpenRouter API keys typically start with 'sk-or-'",
 				}
 			}
-		case "zen":
+		case types.ProviderZen:
 			if len(apiKey) < 8 {
 				return firstRunKeyValidationMsg{
 					OK:     false,
 					ErrStr: "API key seems too short",
 				}
 			}
-		case "nvidia":
+		case types.ProviderNvidia:
 			if !strings.HasPrefix(apiKey, "nvapi-") {
 				return firstRunKeyValidationMsg{
 					OK:     false,

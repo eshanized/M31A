@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/pkg/keychain"
 )
@@ -113,7 +114,7 @@ func (s *SettingsModel) buildFields() {
 	switch s.activeTab {
 	case TabProvider:
 		s.fields = []settingsField{
-			{key: "provider", label: "Default provider", fieldType: "choice", choices: []string{"openrouter", "zen", "nvidia"}},
+			{key: "provider", label: "Default provider", fieldType: "choice", choices: []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia}},
 			{key: "auto_fallback", label: "Auto fallback", fieldType: "bool"},
 		}
 	case TabModel:
@@ -721,10 +722,10 @@ func (s *SettingsModel) renderProviderTab() string {
 
 	if len(s.healthResults) == 0 {
 		if s.config != nil {
-			for _, name := range []string{"openrouter", "zen", "nvidia"} {
-				hasKey := name == "openrouter" && s.config.Provider.OpenRouter.APIKey != "" ||
-					name == "zen" && s.config.Provider.Zen.APIKey != "" ||
-					name == "nvidia" && s.config.Provider.Nvidia.APIKey != ""
+			for _, name := range []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia} {
+				hasKey := name == types.ProviderOpenRouter && s.config.Provider.OpenRouter.APIKey != "" ||
+					name == types.ProviderZen && s.config.Provider.Zen.APIKey != "" ||
+					name == types.ProviderNvidia && s.config.Provider.Nvidia.APIKey != ""
 				if hasKey {
 					lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(4).
 						Render("● "+name+" (key set)"))

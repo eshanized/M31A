@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // attemptAutoFallback tries to switch to a fallback provider when the active one fails.
@@ -78,17 +79,17 @@ func (m *AppState) reRegisterProvidersFromConfig() {
 		return
 	}
 	if m.config.Provider.OpenRouter.APIKey != "" {
-		if err := RegisterProvider(m.registry, m.config, "openrouter", m.config.Provider.OpenRouter.APIKey, m.version); err != nil {
+		if err := RegisterProvider(m.registry, m.config, types.ProviderOpenRouter, m.config.Provider.OpenRouter.APIKey, m.version); err != nil {
 			slog.Warn("failed to re-register OpenRouter after config save", "error", err)
 		}
 	}
 	if m.config.Provider.Zen.APIKey != "" {
-		if err := RegisterProvider(m.registry, m.config, "zen", m.config.Provider.Zen.APIKey, m.version); err != nil {
+		if err := RegisterProvider(m.registry, m.config, types.ProviderZen, m.config.Provider.Zen.APIKey, m.version); err != nil {
 			slog.Warn("failed to re-register Zen after config save", "error", err)
 		}
 	}
 	if m.config.Provider.Nvidia.APIKey != "" {
-		if err := RegisterProvider(m.registry, m.config, "nvidia", m.config.Provider.Nvidia.APIKey, m.version); err != nil {
+		if err := RegisterProvider(m.registry, m.config, types.ProviderNvidia, m.config.Provider.Nvidia.APIKey, m.version); err != nil {
 			slog.Warn("failed to re-register NVIDIA after config save", "error", err)
 		}
 	}

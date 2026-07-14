@@ -1,12 +1,16 @@
 package tui
 
+import (
+	"github.com/eshanized/M31A/internal/types"
+)
+
 // buildSections defines all sections and their fields in the same order as config.toml.
 func (m *ConfigModel) buildSections() {
 	m.sections = []cfgSection{
 		{
 			title: "Provider",
 			fields: []cfgField{
-				{key: "provider.default", label: "Default provider", fieldType: cfgChoice, choices: []string{"zen", "openrouter", "nvidia"}, hint: "Which provider M31A uses by default"},
+				{key: "provider.default", label: "Default provider", fieldType: cfgChoice, choices: []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia}, hint: "Which provider M31A uses by default"},
 				{key: "provider.auto_fallback", label: "Auto fallback", fieldType: cfgBool, hint: "Automatically switch provider on failure"},
 				{key: "provider.openrouter_base_url", label: "OpenRouter base URL", fieldType: cfgText, hint: "Custom base URL (empty = default)"},
 				{key: "provider.zen_base_url", label: "Zen base URL", fieldType: cfgText, hint: "Custom base URL (empty = default)"},

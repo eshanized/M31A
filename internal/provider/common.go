@@ -325,7 +325,7 @@ func SanitizeProviderError(statusCode int, body string, providerName string) str
 		return msg
 	case http.StatusUnauthorized:
 		msg := "Invalid API key"
-		if providerName == "zen" && cleaned != "" {
+		if providerName == types.ProviderZen && cleaned != "" {
 			msg += ": " + cleaned
 		}
 		return msg
@@ -336,7 +336,7 @@ func SanitizeProviderError(statusCode int, body string, providerName string) str
 	case http.StatusInternalServerError:
 		return "Provider server error — try again later"
 	case http.StatusBadGateway:
-		if providerName == "zen" {
+		if providerName == types.ProviderZen {
 			msg := fmt.Sprintf("Provider gateway error (HTTP %d) — try again later", statusCode)
 			if cleaned != "" {
 				msg += ": " + cleaned
