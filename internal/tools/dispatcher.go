@@ -314,7 +314,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	res := types.ToolResult{
 		ToolCallID: call.ID,
-		Output:     output,
+		Output:     wrapToolOutput(output),
 		DurationMs: elapsed,
 		Truncated:  truncated,
 	}
@@ -480,4 +480,13 @@ func (d *Dispatcher) RespondQuestion(requestID int64, answer string) {
 	case <-time.After(30 * time.Second):
 		slog.Warn("question response dropped: shared channel full")
 	}
+}
+
+// wrapToolOutput wraps tool output in <tool_output> delimiters to help the LLM
+// distinguish between tool results and its own reasoning.
+func wrapToolOutput(output string) string {
+	if output == "" {
+		return output
+	}
+	return "<tool_output>\n" + output + "\n</tool_output>"
 }

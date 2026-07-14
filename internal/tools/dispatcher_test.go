@@ -41,8 +41,8 @@ func TestDispatcher_RegisterAndExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Output != "ok" {
-		t.Errorf("expected 'ok', got %q", result.Output)
+	if result.Output != "<tool_output>\nok\n</tool_output>" {
+		t.Errorf("expected '<tool_output>\\nok\\n</tool_output>', got %q", result.Output)
 	}
 	if result.ToolCallID != "call1" {
 		t.Errorf("expected ToolCallID 'call1', got %q", result.ToolCallID)
@@ -164,8 +164,8 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 	if err != nil {
 		t.Errorf("remembered call should not need permission, got: %v", err)
 	}
-	if result.Output != "ok" {
-		t.Errorf("expected 'ok', got %q", result.Output)
+	if result.Output != "<tool_output>\nok\n</tool_output>" {
+		t.Errorf("expected '<tool_output>\\nok\\n</tool_output>', got %q", result.Output)
 	}
 }
 
@@ -877,8 +877,8 @@ func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error for empty input on known tool, got: %v", err)
 	}
-	if result.Output != "ok" {
-		t.Errorf("expected 'ok', got %q", result.Output)
+	if result.Output != "<tool_output>\nok\n</tool_output>" {
+		t.Errorf("expected '<tool_output>\\nok\\n</tool_output>', got %q", result.Output)
 	}
 }
 
@@ -895,8 +895,8 @@ func TestDispatcher_EmptyBytesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error for empty bytes input, got: %v", err)
 	}
-	if result.Output != "ok" {
-		t.Errorf("expected 'ok', got %q", result.Output)
+	if result.Output != "<tool_output>\nok\n</tool_output>" {
+		t.Errorf("expected '<tool_output>\\nok\\n</tool_output>', got %q", result.Output)
 	}
 }
 

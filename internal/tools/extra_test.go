@@ -3404,8 +3404,8 @@ func TestDispatcherAdapter_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Output != "ok" {
-		t.Errorf("expected 'ok', got %q", result.Output)
+	if result.Output != "<tool_output>\nok\n</tool_output>" {
+		t.Errorf("expected '<tool_output>\\nok\\n</tool_output>', got %q", result.Output)
 	}
 }
 
