@@ -39,6 +39,10 @@ type ExecuteModel struct {
 
 	// Workflow engine for pause/resume/skip/cancel
 	workflowEngine WorkflowEngine
+
+	// Exit confirmation dialog state
+	confirmExit      bool
+	confirmExitChoice int // 0=pause, 1=cancel, 2=stay
 }
 
 // NewExecuteModel creates an ExecuteModel.
@@ -152,6 +156,16 @@ func (em *ExecuteModel) AppendLiveOutput(lines []string) {
 	em.refreshContent()
 }
 
+// hasActiveTasks returns true if any tasks are running or pending (not all done/failed).
+func (em *ExecuteModel) hasActiveTasks() bool {
+	for _, t := range em.tasks {
+		if t.Status == types.StatusRunning || t.Status == types.StatusPending || t.Status == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Update handles execute screen key events.
 func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -165,6 +179,46 @@ func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 			}
 		}
 	case tea.KeyMsg:
+		// Handle exit confirmation dialog
+		if em.confirmExit {
+			switch msg.String() {
+			case "up", "k":
+				if em.confirmExitChoice > 0 {
+					em.confirmExitChoice--
+				}
+				return em, nil
+			case "down", "j":
+				if em.confirmExitChoice < 2 {
+					em.confirmExitChoice++
+				}
+				return em, nil
+			case "enter", " ":
+				switch em.confirmExitChoice {
+				case 0: // Pause
+					em.paused = true
+					em.confirmExit = false
+					return em, func() tea.Msg {
+						return ExecutePauseMsg{Paused: true}
+					}
+				case 1: // Cancel
+					if em.workflowEngine != nil {
+						em.workflowEngine.CancelGroup()
+					}
+					em.confirmExit = false
+					return em, func() tea.Msg {
+						return PopScreenMsg{}
+					}
+				case 2: // Stay
+					em.confirmExit = false
+					return em, nil
+				}
+			case "esc", "q", "n":
+				em.confirmExit = false
+				return em, nil
+			}
+			return em, nil
+		}
+
 		switch msg.String() {
 		case "j", "down":
 			em.viewport.LineDown(1)
@@ -197,6 +251,12 @@ func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 				em.workflowEngine.CancelGroup()
 			}
 		case "esc", "q":
+			// Show confirmation if execution is active (not paused, tasks running)
+			if !em.paused && em.hasActiveTasks() {
+				em.confirmExit = true
+				em.confirmExitChoice = 0
+				return em, nil
+			}
 			return em, func() tea.Msg {
 				return PopScreenMsg{}
 			}
@@ -259,6 +319,28 @@ func (em *ExecuteModel) View() string {
 	if pauseControls != "" {
 		parts = append(parts, pauseControls)
 	}
+
+	// ── Exit confirmation dialog ──────────────────────────────────────
+	if em.confirmExit {
+		options := []string{"Pause execution", "Cancel execution", "Stay on screen"}
+		var dialogLines []string
+		dialogLines = append(dialogLines, "")
+		dialogLines = append(dialogLines, lipgloss.NewStyle().Foreground(t.Warning).Bold(true).Render("  Execution is running. What would you like to do?"))
+		dialogLines = append(dialogLines, "")
+		for i, opt := range options {
+			cursor := "  "
+			style := lipgloss.NewStyle().Foreground(t.TextSecondary)
+			if i == em.confirmExitChoice {
+				cursor = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
+				style = lipgloss.NewStyle().Foreground(t.TextPrimary)
+			}
+			dialogLines = append(dialogLines, "    "+cursor+style.Render(opt))
+		}
+		dialogLines = append(dialogLines, "")
+		dialogLines = append(dialogLines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("    [↑↓] Navigate  [Enter] Select  [Esc] Cancel"))
+		parts = append(parts, strings.Join(dialogLines, "\n"))
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
