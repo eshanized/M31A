@@ -120,8 +120,8 @@ func (g *Git) Execute(ctx context.Context, input types.ToolInput) (types.ToolRes
 	// Validate args against per-operation allowlists
 	if args != "" {
 		parsedArgs := strings.Fields(args)
-		if err := validateGitArgs(operation, parsedArgs); err != nil {
-			return types.ToolResult{}, err
+		if valErr := validateGitArgs(operation, parsedArgs); valErr != nil {
+			return types.ToolResult{}, valErr
 		}
 	}
 
@@ -516,27 +516,27 @@ func (g *Git) gitStatus(ctx context.Context) (gitResult, error) {
 	sb.WriteString("Git Status:\n")
 
 	if len(staged) > 0 {
-		sb.WriteString(fmt.Sprintf("\nStaged (%d):\n", len(staged)))
+		fmt.Fprintf(&sb, "\nStaged (%d):\n", len(staged))
 		for _, f := range staged {
-			sb.WriteString(fmt.Sprintf("  + %s\n", f))
+			fmt.Fprintf(&sb, "  + %s\n", f)
 		}
 	}
 	if len(modified) > 0 {
-		sb.WriteString(fmt.Sprintf("\nModified (%d):\n", len(modified)))
+		fmt.Fprintf(&sb, "\nModified (%d):\n", len(modified))
 		for _, f := range modified {
-			sb.WriteString(fmt.Sprintf("  ~ %s\n", f))
+			fmt.Fprintf(&sb, "  ~ %s\n", f)
 		}
 	}
 	if len(deleted) > 0 {
-		sb.WriteString(fmt.Sprintf("\nDeleted (%d):\n", len(deleted)))
+		fmt.Fprintf(&sb, "\nDeleted (%d):\n", len(deleted))
 		for _, f := range deleted {
-			sb.WriteString(fmt.Sprintf("  - %s\n", f))
+			fmt.Fprintf(&sb, "  - %s\n", f)
 		}
 	}
 	if len(untracked) > 0 {
-		sb.WriteString(fmt.Sprintf("\nUntracked (%d):\n", len(untracked)))
+		fmt.Fprintf(&sb, "\nUntracked (%d):\n", len(untracked))
 		for _, f := range untracked {
-			sb.WriteString(fmt.Sprintf("  ? %s\n", f))
+			fmt.Fprintf(&sb, "  ? %s\n", f)
 		}
 	}
 
@@ -547,7 +547,7 @@ func (g *Git) gitStatus(ctx context.Context) (gitResult, error) {
 	// Add branch info
 	branch, err := g.runGit(ctx, "branch", "--show-current")
 	if err == nil && branch != "" {
-		sb.WriteString(fmt.Sprintf("\nOn branch: %s", branch))
+		fmt.Fprintf(&sb, "\nOn branch: %s", branch)
 	}
 
 	return gitResult{

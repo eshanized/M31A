@@ -58,9 +58,9 @@ type streamingPlanProvider struct {
 	callCount int32
 }
 
-func newStreamingPlanProvider(cfg mock.StreamingMockProvider) *streamingPlanProvider {
+func newStreamingPlanProvider(cfg *mock.StreamingMockProvider) *streamingPlanProvider {
 	return &streamingPlanProvider{
-		streaming: &cfg,
+		streaming: cfg,
 	}
 }
 
@@ -256,7 +256,7 @@ func TestEmitterStreamingScenario(t *testing.T) {
 
 	// Create test engine with streaming mock provider (200 chunks, 1ms delay, 10 concurrent)
 	// Use streamingPlanProvider for streaming load during execute phase
-	provider := newStreamingPlanProvider(mock.StreamingMockProvider{
+	provider := newStreamingPlanProvider(&mock.StreamingMockProvider{
 		ChunksPerResponse: 200,
 		ChunkDelay:        1 * time.Millisecond,
 		ConcurrencyLimit:  10,
@@ -322,7 +322,7 @@ func TestEmitterToolBurstScenario(t *testing.T) {
 	}
 
 	// Create test engine with streaming plan provider
-	provider := newStreamingPlanProvider(mock.StreamingMockProvider{
+	provider := newStreamingPlanProvider(&mock.StreamingMockProvider{
 		ChunksPerResponse: 1,
 		ChunkDelay:        1 * time.Millisecond,
 		ConcurrencyLimit:  1,
@@ -393,7 +393,7 @@ func TestEmitterStressTest_NoGoroutineLeak(t *testing.T) {
 	dispatcher.SetPermission("FileRead", true)
 	dispatcher.SetPermission("FileWrite", true)
 
-	provider := newStreamingPlanProvider(mock.StreamingMockProvider{
+	provider := newStreamingPlanProvider(&mock.StreamingMockProvider{
 		ChunksPerResponse: 10,
 		ChunkDelay:        1 * time.Millisecond,
 		ConcurrencyLimit:  2,

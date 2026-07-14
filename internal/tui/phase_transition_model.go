@@ -13,13 +13,13 @@ import (
 // PhaseTransitionModel displays a confirmation screen between workflow phases.
 // Shows what was accomplished in the previous phase and asks whether to proceed.
 type PhaseTransitionModel struct {
-	theme      theme.Theme
-	fromPhase  types.WorkflowPhase
-	toPhase    types.WorkflowPhase
-	summary    string
-	width      int
-	height     int
-	cursor     int // 0=proceed, 1=go back, 2=cancel
+	theme     theme.Theme
+	fromPhase types.WorkflowPhase
+	toPhase   types.WorkflowPhase
+	summary   string
+	width     int
+	height    int
+	cursor    int // 0=proceed, 1=go back, 2=cancel
 }
 
 // NewPhaseTransitionModel creates a new phase transition confirmation screen.
@@ -122,10 +122,6 @@ func (m *PhaseTransitionModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 
 func (m *PhaseTransitionModel) View() string {
 	t := m.theme
-	w := m.width
-	if w <= 0 {
-		w = 80
-	}
 
 	var sb strings.Builder
 
