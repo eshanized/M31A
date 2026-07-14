@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -121,7 +123,30 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	// Determine working directory: explicit workdir parameter overrides default
 	cmd.Dir = t.workDir
 	if workdirRaw, ok := input.Params["workdir"].(string); ok && workdirRaw != "" {
-		cmd.Dir = workdirRaw
+		// Validate and clean the workdir path
+		cleaned := filepath.Clean(workdirRaw)
+
+		// If relative, resolve against t.workDir
+		var absWorkdir string
+		if filepath.IsAbs(cleaned) {
+			absWorkdir = cleaned
+		} else {
+			absWorkdir = filepath.Join(t.workDir, cleaned)
+		}
+
+		// Ensure the path is within the project directory
+		cleanTWorkDir := filepath.Clean(t.workDir)
+		rel, err := filepath.Rel(cleanTWorkDir, absWorkdir)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return types.ToolResult{}, fmt.Errorf("workdir must be within the project directory: %w", m31errors.ErrToolExecution)
+		}
+
+		// Verify path exists
+		if _, err := os.Stat(absWorkdir); err != nil {
+			return types.ToolResult{}, fmt.Errorf("workdir does not exist: %s: %w", absWorkdir, m31errors.ErrToolExecution)
+		}
+
+		cmd.Dir = absWorkdir
 	}
 
 	setupProcessGroup(cmd)
