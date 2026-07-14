@@ -1,29 +1,15 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: in_progress
-last_updated: "2026-07-13T04:29:53.000Z"
+milestone_name: Gate
+status: Phase 04 in progress
+last_updated: "2026-07-14T03:10:43.248Z"
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
-current_focus:
-  phase: 01-critical-issues
-  plan: 01
-  task: null
-session:
-  last_run: "2026-07-13T04:29:53.000Z"
-  stopped_at: "Completed 01-01-PLAN.md"
-  resume_file: null
-decisions:
-  - "Removed $(, ${, and backtick from obfuscation blocklist"
-  - "Installer URLs use lowercase m31a with v prefix"
-  - "Headless mode runs all 7 workflow phases"
-  - "Permission timeout shows countdown from start"
-blockers: []
+  total_plans: 5
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
@@ -32,15 +18,38 @@ blockers: []
 
 ### Roadmap Evolution
 
+- Phase 1: Critical issues (C1-C4) — implemented, verification found 1 gap (C1 partial)
+- Phase 2: High priority issues (H1-H10) — implemented, verification found regressions
+- Phase 3: Stabilization — all 14 must-haves verified, production stability achieved
+- Phase 4: Release Audit Blockers — addresses CRITICAL/HIGH blockers from RELEASE_AUDIT_V1.md
+
 ## Phase Status
 
-- Phase 1: In Progress (1/1 plans complete)
+- Phase 1: Complete (1/1 plans complete, verified)
+- Phase 2: Complete (1/1 plans complete, verified)
+- Phase 3: Complete (1/1 plans complete, verified)
+- Phase 4: In progress (2/5 plans complete)
+  - Plan 01: Fix pkg/ to internal/ architectural boundary — COMPLETE
+  - Plan 02: Fix data race on e.provider — pending
+  - Plan 03: Fix test suite timeouts — pending
+  - Plan 04: Fix security bypasses — pending
+  - Plan 05: Fix error chains and code quality — pending
 
 ## Current Focus
 
-- Ready for next phase or plan
+- Phase 4: Release Audit Blockers — resolve all blockers for v1.0 release
+- Plan 01 COMPLETE: Fixed pkg/ to internal/ architectural boundary (C1)
+
+## Decisions
+
+- Moved ChatRequest/ToolDefinition to pkg/types/ for interface compatibility (C1 fix)
+- Used consumer-side interface pattern for all pkg/ to internal/ dependencies
+- WorkflowEvent interface with EventType()/EventData() for narrative bridge
 
 ## Session History
 
-- Last run: 2026-07-13T04:29:53.000Z
-- Stopped at: Completed 01-01-PLAN.md
+- Last run: 2026-07-14T10:35:00Z
+- Completed Plan 04-01: Fixed C1 architectural boundary violation
+- Extracted shared types/errors to pkg/, updated all 10 pkg/ consumers
+- Zero pkg/ to internal/ imports verified
+- Created 2 atomic commits (f01a2dce, 8b633aa2)
