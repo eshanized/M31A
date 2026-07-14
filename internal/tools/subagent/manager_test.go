@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -168,3 +169,122 @@ func TestManager_MaxConcurrent(t *testing.T) {
 	// Release all blocked providers so Shutdown can drain cleanly.
 	close(release)
 }
+
+func TestSpawn_DefaultIsolation_IsWorktree(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	m := NewManager(Dependencies{
+		WorkDir:       t.TempDir(),
+		ActiveModel:   &types.ModelInfo{ID: "fake"},
+		Registry:      newBlockingTestRegistry(release),
+		NewDispatcher: func(workDir string) (ToolDispatcher, error) { return &fakeDispatcher{}, nil },
+	})
+	defer m.Shutdown(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Spawn with empty Isolation — should default to IsolationWorktree
+	id, _, err := m.Spawn(ctx, SpawnRequest{
+		Description: "test default isolation",
+		Prompt:      "echo test",
+		Background:  true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	close(release)
+
+	// Verify agent was created with worktree isolation
+	a, ok := m.agents.Load(id)
+	if !ok {
+		t.Fatalf("agent %s not found", id)
+	}
+	sa := a.(*Subagent)
+	if sa.Info.Isolation != IsolationWorktree {
+		t.Errorf("expected default isolation 'worktree', got %q", sa.Info.Isolation)
+	}
+}
+
+func TestSpawn_DegradedMode_EmitsSpawnFailedEvent(t *testing.T) {
+	t.Parallel()
+
+	// Create a worktree provider that always fails
+	failWorktrees := &failWorktreeProvider{}
+
+	release := make(chan struct{})
+	m := NewManager(Dependencies{
+		WorkDir:       t.TempDir(),
+		ActiveModel:   &types.ModelInfo{ID: "fake"},
+		Registry:      newBlockingTestRegistry(release),
+		Worktrees:     failWorktrees,
+		NewDispatcher: func(workDir string) (ToolDispatcher, error) { return &fakeDispatcher{}, nil },
+	})
+	defer m.Shutdown(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Collect events
+	var events []SubagentEvent
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range m.Events() {
+			events = append(events, ev)
+			if ev.Type == EventSpawnFailed {
+				return
+			}
+		}
+	}()
+
+	id, _, err := m.Spawn(ctx, SpawnRequest{
+		Description:  "test degraded mode",
+		Prompt:       "echo test",
+		Isolation:    IsolationWorktree,
+		Background:   true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	close(release)
+
+	// Wait for event
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
+
+	// Verify agent was created (degraded mode, not failure)
+	a, ok := m.agents.Load(id)
+	if !ok {
+		t.Fatalf("agent %s not found in degraded mode", id)
+	}
+	sa := a.(*Subagent)
+	// Worktree should be the parent dir (degraded)
+	if sa.Info.Worktree == "" {
+		t.Error("expected worktree to be set (parent dir in degraded mode)")
+	}
+
+	// Verify SpawnFailed event was emitted
+	foundEvent := false
+	for _, ev := range events {
+		if ev.Type == EventSpawnFailed {
+			foundEvent = true
+			break
+		}
+	}
+	if !foundEvent {
+		t.Error("expected EventSpawnFailed event to be emitted")
+	}
+}
+
+// failWorktreeProvider always returns an error on Create.
+type failWorktreeProvider struct{}
+
+func (f *failWorktreeProvider) IsRepo(_ string) bool { return true }
+func (f *failWorktreeProvider) Create(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("worktree creation failed: test injection")
+}
+func (f *failWorktreeProvider) Remove(_ context.Context, _ string) error { return nil }

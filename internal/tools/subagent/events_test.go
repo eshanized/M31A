@@ -11,17 +11,18 @@ func TestEventTypes_Constants(t *testing.T) {
 	t.Parallel()
 	// Verify event type constants are distinct
 	types := map[EventType]bool{
-		EventSpawned:   true,
-		EventToolStart: true,
-		EventToolDone:  true,
-		EventTextDelta: true,
-		EventThinking:  true,
-		EventDone:      true,
-		EventError:     true,
-		EventCancelled: true,
+		EventSpawned:     true,
+		EventSpawnFailed: true,
+		EventToolStart:   true,
+		EventToolDone:    true,
+		EventTextDelta:   true,
+		EventThinking:    true,
+		EventDone:        true,
+		EventError:       true,
+		EventCancelled:   true,
 	}
-	if len(types) != 8 {
-		t.Errorf("expected 8 event types, got %d", len(types))
+	if len(types) != 9 {
+		t.Errorf("expected 9 event types, got %d", len(types))
 	}
 }
 

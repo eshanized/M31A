@@ -105,7 +105,7 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 		return "", nil, errors.New("subagent: prompt is required")
 	}
 	if req.Isolation == "" {
-		req.Isolation = IsolationDefault
+		req.Isolation = IsolationWorktree
 	}
 	if req.SubagentType == "" {
 		req.SubagentType = "general"
@@ -192,10 +192,19 @@ func (m *Manager) Spawn(parentCtx context.Context, req SpawnRequest) (string, *S
 		path, werr := m.deps.Worktrees.Create(parentCtx, m.deps.WorkDir, id, req.Name)
 		m.spawnMu.Unlock()
 		if werr != nil {
-			<-m.sem
-			return "", nil, errors.New("subagent: worktree: " + werr.Error())
+			// Degraded mode: log warning and emit event, continue without isolation.
+			slog.Warn("subagent: worktree creation failed, running in degraded mode",
+				"agent_id", id, "error", werr)
+			m.emit(SubagentEvent{
+				Type:      EventSpawnFailed,
+				AgentID:   id,
+				Name:      req.Name,
+				Error:     fmt.Sprintf("worktree: %v", werr),
+				Timestamp: time.Now(),
+			})
+		} else {
+			worktree = path
 		}
-		worktree = path
 	}
 
 	ctx, cancel := context.WithCancel(parentCtx)

@@ -18,14 +18,15 @@ import (
 type EventType string
 
 const (
-	EventSpawned   EventType = "spawned"
-	EventToolStart EventType = "tool_start"
-	EventToolDone  EventType = "tool_done"
-	EventTextDelta EventType = "text_delta"
-	EventThinking  EventType = "thinking"
-	EventDone      EventType = "done"
-	EventError     EventType = "error"
-	EventCancelled EventType = "cancelled"
+	EventSpawned     EventType = "spawned"
+	EventSpawnFailed EventType = "spawn_failed"
+	EventToolStart   EventType = "tool_start"
+	EventToolDone    EventType = "tool_done"
+	EventTextDelta   EventType = "text_delta"
+	EventThinking    EventType = "thinking"
+	EventDone        EventType = "done"
+	EventError       EventType = "error"
+	EventCancelled   EventType = "cancelled"
 )
 
 // Status describes a subagent's lifecycle state.
