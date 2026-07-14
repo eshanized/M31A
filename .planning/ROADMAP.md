@@ -42,13 +42,13 @@
 
 **Depends on:** Phase 3
 
-**Plans:** 3/6 plans executed
+**Plans:** 5/6 plans complete
 
 - [ ] PLAN.md
 - [x] 04-01-PLAN.md — Wave 1: Extract shared types to `pkg/types/`, create `pkg/errors/`, fix architectural boundary (C1)
 - [x] 04-02-PLAN.md — Wave 2: Fix data race on `e.provider` (C3), mock DNS/git for test timeouts (C2), security hardening (H1-H4)
 - [x] 04-03-PLAN.md — Wave 3: Fix 142 `fmt.Errorf` without `%w` (H5), define provider name constants (H7)
-- [ ] 04-04-PLAN.md — Wave 4: Add test coverage for `cmd/m31a` and `internal/decision` (H8), permission expiry (M1), engine field protection (M2), file lock (M3)
-- [ ] 04-05-PLAN.md — Wave 5: Full verification suite, produce RELEASE_AUDIT_RESOLUTION.md
+- [x] 04-04-PLAN.md — Wave 4: Add test coverage for `cmd/m31a` and `internal/decision` (H8), permission expiry (M1), engine field protection (M2), file lock (M3)
+- [x] 04-05-PLAN.md — Wave 5: Full verification suite, produce RELEASE_AUDIT_RESOLUTION.md
 
 ---

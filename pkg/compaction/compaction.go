@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // TokenEstimator provides token counting for text. The concrete

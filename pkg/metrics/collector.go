@@ -10,16 +10,16 @@ import (
 	"sync"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 const (
 	// metricsFileName is the JSON file stored in the session directory.
 	metricsFileName = "METRICS.json"
 	// dirPermission for session directories.
-	dirPermission = m31types.DirPermission
+	dirPermission = types.DirPermission
 	// filePermission for metrics file.
-	filePermission = m31types.FilePermission
+	filePermission = types.FilePermission
 )
 
 // Collector provides thread-safe collection and persistence of session metrics.
@@ -98,7 +98,7 @@ func (c *Collector) RecordToolCall(name string, success bool, durationMs int64) 
 }
 
 // RecordLLMInteraction records an LLM call's token usage and cost.
-func (c *Collector) RecordLLMInteraction(phase m31types.WorkflowPhase, usage *m31types.Usage, cost float64) {
+func (c *Collector) RecordLLMInteraction(phase types.WorkflowPhase, usage *types.Usage, cost float64) {
 	if !c.enabled || usage == nil {
 		return
 	}
@@ -130,7 +130,7 @@ func (c *Collector) RecordLLMInteraction(phase m31types.WorkflowPhase, usage *m3
 }
 
 // RecordLLMInteractionWithPrompt records an LLM call with prompt hash and truncation info.
-func (c *Collector) RecordLLMInteractionWithPrompt(phase m31types.WorkflowPhase, usage *m31types.Usage, cost float64, promptHash string, truncated bool) {
+func (c *Collector) RecordLLMInteractionWithPrompt(phase types.WorkflowPhase, usage *types.Usage, cost float64, promptHash string, truncated bool) {
 	if !c.enabled || usage == nil {
 		return
 	}
@@ -170,7 +170,7 @@ func (c *Collector) RecordLLMInteractionWithPrompt(phase m31types.WorkflowPhase,
 }
 
 // RecordPhaseTransition records a phase transition event.
-func (c *Collector) RecordPhaseTransition(phase m31types.WorkflowPhase) {
+func (c *Collector) RecordPhaseTransition(phase types.WorkflowPhase) {
 	if !c.enabled {
 		return
 	}
@@ -192,7 +192,7 @@ func (c *Collector) RecordPhaseTransition(phase m31types.WorkflowPhase) {
 }
 
 // RecordPhaseDuration records the final duration of a completed phase.
-func (c *Collector) RecordPhaseDuration(phase m31types.WorkflowPhase, durationMs int64, success bool) {
+func (c *Collector) RecordPhaseDuration(phase types.WorkflowPhase, durationMs int64, success bool) {
 	if !c.enabled {
 		return
 	}
@@ -216,7 +216,7 @@ func (c *Collector) RecordPhaseDuration(phase m31types.WorkflowPhase, durationMs
 }
 
 // RecordHealTrigger records a self-heal trigger event.
-func (c *Collector) RecordHealTrigger(phase m31types.WorkflowPhase) {
+func (c *Collector) RecordHealTrigger(phase types.WorkflowPhase) {
 	if !c.enabled {
 		return
 	}
@@ -238,7 +238,7 @@ func (c *Collector) RecordHealTrigger(phase m31types.WorkflowPhase) {
 }
 
 // RecordBisectTrigger records a bisect trigger event.
-func (c *Collector) RecordBisectTrigger(phase m31types.WorkflowPhase) {
+func (c *Collector) RecordBisectTrigger(phase types.WorkflowPhase) {
 	if !c.enabled {
 		return
 	}
@@ -282,7 +282,7 @@ func (c *Collector) RecordEditStrategy(strategy string) {
 }
 
 // RecordHealOutcome records whether a self-heal attempt succeeded or failed.
-func (c *Collector) RecordHealOutcome(phase m31types.WorkflowPhase, success bool) {
+func (c *Collector) RecordHealOutcome(phase types.WorkflowPhase, success bool) {
 	if !c.enabled {
 		return
 	}
@@ -312,7 +312,7 @@ func (c *Collector) RecordHealOutcome(phase m31types.WorkflowPhase, success bool
 }
 
 // RecordHealDuration adds heal duration to the phase metric.
-func (c *Collector) RecordHealDuration(phase m31types.WorkflowPhase, durationMs int64) {
+func (c *Collector) RecordHealDuration(phase types.WorkflowPhase, durationMs int64) {
 	if !c.enabled {
 		return
 	}
@@ -334,7 +334,7 @@ func (c *Collector) RecordHealDuration(phase m31types.WorkflowPhase, durationMs 
 }
 
 // RecordHealLoop records a detected heal loop (same error repeating).
-func (c *Collector) RecordHealLoop(phase m31types.WorkflowPhase) {
+func (c *Collector) RecordHealLoop(phase types.WorkflowPhase) {
 	if !c.enabled {
 		return
 	}
@@ -356,7 +356,7 @@ func (c *Collector) RecordHealLoop(phase m31types.WorkflowPhase) {
 }
 
 // RecordBisectOutcome records whether a bisect heal attempt succeeded or failed.
-func (c *Collector) RecordBisectOutcome(phase m31types.WorkflowPhase, success bool) {
+func (c *Collector) RecordBisectOutcome(phase types.WorkflowPhase, success bool) {
 	if !c.enabled {
 		return
 	}
