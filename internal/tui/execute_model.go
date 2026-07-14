@@ -313,6 +313,14 @@ func (em *ExecuteModel) renderTasks() string {
 			continue
 		}
 
+		// ── Pending tasks: dimmed with ○ badge ──────────────────────────
+		if task.Status == types.StatusPending || task.Status == "" {
+			num := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(fmt.Sprintf("%3d.", i+1))
+			action := lipgloss.NewStyle().Faint(true).Render(task.Action)
+			lines = append(lines, fmt.Sprintf("  %s ○ %s", num, action))
+			continue
+		}
+
 		// ── Running task: show with spinner ───────────────────────────────
 		statusBadge := taskStatusBadge(task.Status, t)
 		spinner := ""
@@ -341,15 +349,6 @@ func (em *ExecuteModel) renderTasks() string {
 					PaddingLeft(6).
 					Render(l))
 			}
-		}
-	}
-
-	// ── Pending tasks: dimmed ────────────────────────────────────────────
-	for i, task := range em.tasks {
-		if task.Status == types.StatusPending || task.Status == "" {
-			num := lipgloss.NewStyle().Foreground(t.TextMuted).Faint(true).Render(fmt.Sprintf("%3d.", i+1))
-			action := lipgloss.NewStyle().Faint(true).Render(task.Action)
-			lines = append(lines, fmt.Sprintf("  %s ○ %s", num, action))
 		}
 	}
 
