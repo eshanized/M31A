@@ -1,0 +1,190 @@
+# ROADMAP.md — M31A
+
+## Phase Structure
+
+| Phase | Name | Goal | Dependencies |
+|-------|------|------|--------------|
+| 1 | Fix TUI Blank Screens | All screens render correctly; first-run → home → REPL works | — |
+| 2 | Stabilize Core Workflow | All 7 phases execute end-to-end without crashes | 1 |
+| 3 | Headless Modes & Session Resume | `--prompt`, `--goal`, resume on startup work reliably | 2 |
+| 4 | Provider Polish & Fallback | Multi-provider with auto-fallback, model caching | 2 |
+| 5 | Subagents & Parallel Execution | Child agents with isolated worktrees spawn from parent | 3, 4 |
+| 6 | Observability & UX Polish | Metrics, ledger, notifications, dashboard screens | 3 |
+| 7 | Release Hardening | Cross-compile, installers, docs, v1.0.0 | 1-6 |
+
+---
+
+## Phase 1: Fix TUI Blank Screens
+
+**Goal**: All TUI screens render content. User can run `m31a`, complete first-run wizard, reach Home screen, send prompts, see responses.
+
+**Requirements**: FR-1.1, FR-1.2, FR-1.3, FR-1.4, NFR-2, AC-1, AC-5
+
+**Success Criteria**:
+
+- `m31a` starts without "could not open TTY" error in real terminal
+- FirstRun wizard displays all 4 steps (welcome, provider select, API key, model pick)
+- After wizard, Home screen shows logo, prompt, suggestions, tips
+- Typing in prompt and pressing Enter shows streaming response in REPL
+- Window resize handled correctly (no blank screen on resize)
+- All 30+ screens in app_screens.go render without blank content
+
+**Technical Focus**:
+
+- Debug why View() returns empty in real terminal but tests pass
+- Verify WindowSizeMsg handling in Init → Update → View cycle
+- Check theme/color issues making text invisible
+- Ensure router.Screenable interface implemented for all screens
+- Validate contentDimensions() calculations for sidebar + chrome
+
+**Estimated Effort**: 2-3 days
+
+---
+
+## Phase 2: Stabilize Core Workflow
+
+**Goal**: All 7 workflow phases execute sequentially with proper state transitions, tool execution, and verification.
+
+**Requirements**: FR-2.1 through FR-2.10, NFR-2
+
+**Success Criteria**:
+
+- `--goal` runs all 7 phases to completion
+- Each phase produces expected artifacts (plan, tasks, verification results)
+- Self-healing on tool failures works
+- Phase transitions require user confirmation (configurable)
+- Checkpoint/restore at phase boundaries works
+
+**Technical Focus**:
+
+- Workflow engine phase execution logic
+- Tool dispatcher permission flow
+- Verification phase test execution
+- Runtime phase dev server management
+- Git commit / ship phase
+
+**Estimated Effort**: 5-7 days
+
+---
+
+## Phase 3: Headless Modes & Session Resume
+
+**Goal**: Reliable headless operation and session persistence.
+
+**Requirements**: FR-6.1, FR-6.2, FR-6.3, FR-5.1, FR-5.2, FR-5.3, FR-5.4, AC-3, AC-4
+
+**Success Criteria**:
+
+- `--prompt` works with all 3 providers
+- `--goal` completes full workflow headless
+- ResumeOnStartup restores last session correctly
+- Session browser lists, searches, exports sessions
+- Sessions survive crashes (autosave on shutdown)
+
+**Estimated Effort**: 3-4 days
+
+---
+
+## Phase 4: Provider Polish & Fallback
+
+**Requirements**: FR-3.1 through FR-3.5
+
+**Success Criteria**:
+
+- Automatic fallback when primary provider fails
+- Model cache refresh works (stale-while-revalidate)
+- Health checks run periodically
+- Cost tracking accurate per phase
+- Keychain integration works on Linux/macOS/Windows
+
+**Estimated Effort**: 2-3 days
+
+---
+
+## Phase 5: Subagents & Parallel Execution
+
+**Requirements**: FR-4.4
+
+**Success Criteria**:
+
+- Parent can spawn child agents via Agent tool
+- Children have isolated git worktrees
+- Children have own dispatcher + tool access
+- Results merged back to parent session
+- No deadlocks or resource leaks
+
+**Estimated Effort**: 4-5 days
+
+---
+
+## Phase 6: Observability & UX Polish
+
+**Requirements**: FR-1.5, FR-1.6, FR-1.8, FR-5.4, NFR-1
+
+**Success Criteria**:
+
+- Dashboard screen shows pipeline overview
+- Metrics screen shows token usage, costs, timing
+- Ledger browser shows decision history
+- Notifications screen captures all toasts
+- Smooth 60fps animations on transitions
+- Sidebar auto-hide on narrow terminals
+
+**Estimated Effort**: 3-4 days
+
+---
+
+## Phase 7: Release Hardening
+
+**Requirements**: NFR-1, NFR-2, NFR-3, NFR-4
+
+**Success Criteria**:
+
+- Cross-compiles to all 5 targets
+- Goreleaser produces .tar.gz, .deb, .rpm, Homebrew formula
+- Static binary verified (no CGO)
+- Man pages + markdown docs generated
+- README + CONTRIBUTING updated
+- v1.0.0 tagged
+
+**Estimated Effort**: 2-3 days
+
+### Phase 8: Investigate and fix TUI blank screens issue - all screens render empty when running the binary
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
+
+---
+
+## Cross-Phase Notes
+
+- **Phase 1 is blocking** — all subsequent phases need working TUI for verification
+- **Phases 2-3 can parallelize** after Phase 1 (workflow engine vs headless/resume)
+- **Phase 4-5 depend on Phase 2** (provider integration, subagents need workflow)
+- **Phase 6 depends on Phases 2-4** (observability needs real data)
+- **Phase 7 is final integration**
+
+## Risk Mitigation
+
+| Risk | Mitigation |
+|------|------------|
+| TUI blank screens are architectural | Spike minimal Bubble Tea app to isolate issue |
+| Workflow engine has hidden deadlocks | Add timeout/cancellation to all phase transitions |
+| Provider APIs change | Dynamic model discovery, capability detection |
+| Keychain fails on CI/headless | Graceful fallback to config file (encrypted) |
+| Subagent worktree conflicts | Unique branch names, cleanup on exit |
+
+## Canonical References
+
+- `AGENTS.md` — build/test/lint commands, architecture rules
+- `.planning/codebase/ARCHITECTURE.md` — system design
+- `.planning/codebase/STACK.md` — dependencies
+- `.planning/codebase/CONVENTIONS.md` — code style
+
+EOF
