@@ -16,9 +16,9 @@
 
 ## Phase 1: Fix TUI Blank Screens
 
-**Goal**: All TUI screens render content. User can run `m31a`, complete first-run wizard, reach Home screen, send prompts, see responses.
+**Goal**: All TUI screens render content correctly. User can run `m31a`, complete first-run wizard, reach Home screen, send prompts, see responses in REPL.
 
-**Requirements**: FR-1.1, FR-1.2, FR-1.3, FR-1.4, NFR-2, AC-1, AC-5
+**Requirements**: FR-1.1, FR-1.2, FR-1.3, FR-1.4, FR-1.5, FR-1.8, AC-1, AC-5, NFR-1, NFR-2
 
 **Success Criteria**:
 
@@ -37,7 +37,12 @@
 - Ensure router.Screenable interface implemented for all screens
 - Validate contentDimensions() calculations for sidebar + chrome
 
-**Estimated Effort**: 2-3 days
+**Estimated Effort**: 2-3 days (3 plans)
+
+**Plans**:
+- Plan 01: Screenable interface audit and ReplModel.SetDimensions implementation
+- Plan 02: Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
+- Plan 03: Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
 
 ---
 
@@ -151,14 +156,17 @@
 
 ### Phase 8: Investigate and fix TUI blank screens issue - all screens render empty when running the binary
 
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 7
-**Plans:** 0 plans
+**Goal:** All TUI screens render content correctly. User can run `m31a`, complete first-run wizard, reach Home screen, send prompts, see responses in REPL.
+
+**Requirements**: FR-1.1, FR-1.2, FR-1.3, FR-1.4, FR-1.5, FR-1.8, AC-1, AC-5, NFR-1, NFR-2
+**Depends on:** —
+**Plans:** 3 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
+- [ ] 08-01-PLAN.md — Screenable interface audit and ReplModel.SetDimensions implementation
+- [ ] 08-02-PLAN.md — Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
+- [ ] 08-03-PLAN.md — Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
 
 ---
 
