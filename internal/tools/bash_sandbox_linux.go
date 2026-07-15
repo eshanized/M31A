@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -108,7 +109,7 @@ func applyLandlock(cmd *exec.Cmd, workDir string) error {
 	// Create the ruleset
 	rulesetFd, err := landlockCreateRuleset(allowedAccess)
 	if err != nil {
-		return err
+		return fmt.Errorf("create landlock ruleset: %w", err)
 	}
 	defer func() { _ = syscall.Close(rulesetFd) }()
 
@@ -163,7 +164,7 @@ func applyLandlock(cmd *exec.Cmd, workDir string) error {
 
 	// Apply Landlock to the current process (inherited by children)
 	if err := landlockRestrictSelf(rulesetFd, 0); err != nil {
-		return err
+		return fmt.Errorf("apply landlock restrictions: %w", err)
 	}
 
 	return nil

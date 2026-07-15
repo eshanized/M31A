@@ -21,6 +21,7 @@ type FileRead struct {
 	workDir string
 }
 
+// NewFileRead creates a new FileRead tool instance.
 func NewFileRead(workDir string) *FileRead {
 	return &FileRead{workDir: workDir}
 }

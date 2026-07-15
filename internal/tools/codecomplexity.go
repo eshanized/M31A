@@ -56,7 +56,7 @@ type CodeComplexity struct {
 	skipDirs []string
 }
 
-// NewCodeComplexity creates a new CodeComplexity tool.
+// NewCodeComplexity creates a new CodeComplexity tool instance.
 // skipDirs is an optional override; if nil, types.SkipDirs is used.
 func NewCodeComplexity(workDir string, skipDirs []string) *CodeComplexity {
 	return &CodeComplexity{

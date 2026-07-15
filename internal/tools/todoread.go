@@ -22,6 +22,7 @@ type TodoRead struct {
 	sessionID   atomic.Value // stores string
 }
 
+// NewTodoRead creates a new TodoRead tool instance.
 func NewTodoRead(sessionsDir, sessionID string) *TodoRead {
 	t := &TodoRead{sessionsDir: sessionsDir}
 	t.sessionID.Store(sessionID)

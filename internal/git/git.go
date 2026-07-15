@@ -144,7 +144,7 @@ func (g *Git) hasSensitiveFiles() ([]string, error) {
 // Refuses to commit if sensitive files (credentials, keys, .env) are staged.
 func (g *Git) Commit(message string) error {
 	if err := g.AddAll(); err != nil {
-		return err
+		return fmt.Errorf("git add all: %w", err)
 	}
 	if suspicious, err := g.hasSensitiveFiles(); err == nil && len(suspicious) > 0 {
 		return fmt.Errorf("refusing to commit: sensitive files detected in staged changes: %s. Use CommitWithFiles to commit specific files, or remove these files first", strings.Join(suspicious, ", "))
@@ -683,10 +683,10 @@ func (g *Git) StashPop() error {
 // ConfigUser sets the git user name and email for the repository.
 func (g *Git) ConfigUser(name, email string) error {
 	if _, err := g.run("config", "user.name", name); err != nil {
-		return err
+		return fmt.Errorf("git config user.name: %w", err)
 	}
 	if _, err := g.run("config", "user.email", email); err != nil {
-		return err
+		return fmt.Errorf("git config user.email: %w", err)
 	}
 	return nil
 }

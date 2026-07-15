@@ -39,7 +39,7 @@ type Agent struct {
 // Going deeper is blocked to prevent runaway resource consumption.
 const MaxAgentDepth = 2
 
-// NewAgent creates an Agent tool backed by the given manager.
+// NewAgent creates a new Agent tool instance.
 func NewAgent(m *subagent.Manager, isChild bool, depth int, profiles map[string]config.SubagentProfileConfig) *Agent {
 	return &Agent{manager: m, isChild: isChild, depth: depth, profiles: profiles}
 }
@@ -246,6 +246,8 @@ func (a *dispatcherAdapter) UnregisterTool(name string) { a.d.Unregister(name) }
 //
 // backupDir and sessionsDir are shared across all dispatchers; permCfg is
 // reused verbatim so permission rules apply uniformly.
+//
+// NewDispatcherFactory creates a new DispatcherFactory for subagents.
 func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig, manager *subagent.Manager, profiles map[string]config.SubagentProfileConfig) subagent.DispatcherFactory {
 	return func(workDir string) (subagent.ToolDispatcher, error) {
 		d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg, toolsCfg)

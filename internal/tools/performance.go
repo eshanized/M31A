@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -88,7 +89,7 @@ func BatchOperation[T any](items []T, batchSize int, fn func([]T) error) error {
 			end = len(items)
 		}
 		if err := fn(items[i:end]); err != nil {
-			return err
+			return fmt.Errorf("batch process: %w", err)
 		}
 	}
 	return nil

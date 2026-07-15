@@ -26,6 +26,7 @@ type Bash struct {
 	additionalObfuscationPatterns []string
 }
 
+// NewBash creates a new Bash tool instance.
 func NewBash(workDir string, maxTimeoutSecs int, additionalBlockedCommands []string, additionalObfuscationPatterns []string) *Bash {
 	maxTimeout := types.BashTimeout
 	if maxTimeoutSecs > 0 {

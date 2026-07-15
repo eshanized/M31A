@@ -19,6 +19,8 @@ import (
 // ============================================================================
 // strings.go Tests
 // ============================================================================
+// strings.go Tests
+// ============================================================================
 
 func TestHumanSize_Zero(t *testing.T) {
 	result := HumanSize(0)
@@ -578,7 +580,7 @@ func TestWebFetch_Close(t *testing.T) {
 // ============================================================================
 
 func TestDispatcher_Unregister(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(NewBash(t.TempDir(), 1800, nil, nil))
 	d.Unregister("Bash")
 	// After unregister, executing should fail
@@ -592,19 +594,19 @@ func TestDispatcher_Unregister(t *testing.T) {
 }
 
 func TestDispatcher_Unregister_NotFound(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	// Should not panic
 	d.Unregister("nonexistent")
 }
 
 func TestDispatcher_SetCollector(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	// Should not panic with nil
 	d.SetCollector(nil)
 }
 
 func TestDispatcher_SetTodoWriteCallback(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.SetTodoWriteCallback(nil) // should not panic
 }
 
@@ -615,7 +617,7 @@ func TestDispatcher_SetTodoWriteCallback(t *testing.T) {
 func TestAgent_UnregisterTool(t *testing.T) {
 	// UnregisterTool is in agent.go; test it can be called
 	dir := t.TempDir()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(NewBash(dir, 1800, nil, nil))
 	// Just verify that the dispatcher can unregister
 	d.Unregister("Bash")
@@ -626,7 +628,7 @@ func TestAgent_UnregisterTool(t *testing.T) {
 // ============================================================================
 
 func TestDispatcher_PendingPermCount(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	count := d.PendingPermCount()
 	if count != 0 {
 		t.Errorf("expected 0, got %d", count)
@@ -1127,7 +1129,7 @@ func TestFileRead_OffsetTruncated(t *testing.T) {
 }
 
 func TestDispatcher_SyncTodoFromTasks_NilTodoWrite(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	err := d.SyncTodoFromTasks([]types.Task{})
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)

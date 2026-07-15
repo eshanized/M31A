@@ -46,6 +46,7 @@ type WebFetch struct {
 	baseRetryDelay  time.Duration
 }
 
+// NewWebFetch creates a new WebFetch tool instance.
 func NewWebFetch(sessionsDir string, allowPrivateIPs bool, maxRetries int, retryDelayMs int) *WebFetch {
 	retries := 3
 	if maxRetries > 0 {
@@ -133,7 +134,7 @@ func NewWebFetch(sessionsDir string, allowPrivateIPs bool, maxRetries int, retry
 			if err != nil {
 				slog.Warn("WebFetch redirect DNS resolution failed",
 					"url", req.URL.String(), "error", err)
-				return err
+				return fmt.Errorf("resolve redirect host: %w", err)
 			}
 			if !wf.allowPrivateIPs {
 				for _, addr := range addrs {

@@ -58,6 +58,7 @@ func newSSRFProtectedTransport() *http.Transport {
 	}
 }
 
+// NewHTTPCheck creates a new HTTPCheck tool instance with SSRF protection.
 func NewHTTPCheck() *HTTPCheck {
 	return &HTTPCheck{
 		client: &http.Client{

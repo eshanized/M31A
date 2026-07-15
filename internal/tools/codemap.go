@@ -26,6 +26,7 @@ type CodeMap struct {
 	builtAt time.Time
 }
 
+// NewCodeMap creates a new CodeMap tool instance.
 func NewCodeMap(workDir string) *CodeMap {
 	return &CodeMap{workDir: workDir}
 }

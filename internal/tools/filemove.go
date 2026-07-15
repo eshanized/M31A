@@ -21,6 +21,7 @@ type FileMove struct {
 	backupDir string
 }
 
+// NewFileMove creates a new FileMove tool instance.
 func NewFileMove(workDir, backupDir string) *FileMove {
 	return &FileMove{workDir: workDir, backupDir: backupDir}
 }

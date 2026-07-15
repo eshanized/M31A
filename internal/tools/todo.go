@@ -34,6 +34,7 @@ type TodoItem struct {
 	Priority string
 }
 
+// NewTodoWrite creates a new TodoWrite tool instance.
 func NewTodoWrite(sessionsDir, sessionID string) *TodoWrite {
 	t := &TodoWrite{sessionsDir: sessionsDir}
 	t.sessionID.Store(sessionID)
@@ -200,7 +201,7 @@ func (t *TodoWrite) SyncTodoFromTasks(tasks []types.Task) error {
 	}
 
 	if err := t.writeTodoFile(items); err != nil {
-		return err
+		return fmt.Errorf("write todo file: %w", err)
 	}
 
 	// Notify sidebar

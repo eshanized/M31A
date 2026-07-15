@@ -63,7 +63,7 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 	// Ensure directory exists
 	dir := filepath.Dir(p.path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+		return fmt.Errorf("create permissions dir: %w", err)
 	}
 
 	// Read existing data to preserve other projects
@@ -95,7 +95,7 @@ func (p *PersistentPermissions) Save(projectDir string, rules []config.Permissio
 	// Write back to file
 	data, marshalErr := json.MarshalIndent(pd, "", "  ")
 	if marshalErr != nil {
-		return marshalErr
+		return fmt.Errorf("marshal permissions: %w", marshalErr)
 	}
 
 	return os.WriteFile(p.path, data, 0644)

@@ -41,6 +41,7 @@ type AskUserQuestion struct {
 	pending    *sync.Map // map[int64]chan QuestionResponse — per-request routing
 }
 
+// NewAskUserQuestion creates a new AskUserQuestion tool instance.
 func NewAskUserQuestion(requestCh chan QuestionRequest, responseCh chan QuestionResponse, pending *sync.Map) *AskUserQuestion {
 	return &AskUserQuestion{
 		requestCh:  requestCh,

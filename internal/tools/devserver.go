@@ -86,6 +86,7 @@ type DevServer struct {
 	nextKey   int
 }
 
+// NewDevServer creates a new DevServer tool instance.
 func NewDevServer(workDir string) *DevServer {
 	return &DevServer{
 		workDir:   workDir,

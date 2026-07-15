@@ -110,7 +110,7 @@ func RetryWithResult[T any](ctx context.Context, cfg RetryConfig, fn func() (T, 
 		class, reason := retry.ClassifyError(err)
 		if !retry.IsRetryable(class) {
 			slog.Debug("retry: non-retryable error", "attempt", attempt, "reason", reason, "error", err)
-			return zero, err
+			return zero, fmt.Errorf("non-retryable error: %w", err)
 		}
 
 		if attempt >= policy.MaxAttempts {

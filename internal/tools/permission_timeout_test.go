@@ -23,7 +23,7 @@ func (m *mockToolTimeout) Execute(ctx context.Context, input types.ToolInput) (t
 
 func TestPermissionTimeout(t *testing.T) {
 	t.Run("Permission request times out", func(t *testing.T) {
-		d := NewDispatcher(&config.PermissionsConfig{
+		d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 			TimeoutSeconds: 1,
 			Rules: []config.PermissionRule{
 				{
@@ -65,7 +65,7 @@ func TestPermissionTimeout(t *testing.T) {
 	})
 
 	t.Run("Permission request succeeds before timeout", func(t *testing.T) {
-		d := NewDispatcher(&config.PermissionsConfig{
+		d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 			TimeoutSeconds: 2,
 			Rules: []config.PermissionRule{
 				{

@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 )
 
@@ -15,7 +16,10 @@ func getProcessGroup(pid int) (int, error) {
 func killProcessGroup(pid int) error {
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find process %d: %w", pid, err)
 	}
-	return p.Kill()
+	if err := p.Kill(); err != nil {
+		return fmt.Errorf("kill process %d: %w", pid, err)
+	}
+	return nil
 }

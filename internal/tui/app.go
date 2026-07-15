@@ -40,6 +40,7 @@ func (m *AppState) Init() tea.Cmd {
 	if hasProvider {
 		m.screen = ScreenHome
 		m.ensureReplModel()
+		m.switchScreen(m.screen)
 
 		// Populate activeModel from config.Model.Default so the REPL can
 		// send messages immediately without requiring /model first.
@@ -103,6 +104,7 @@ func (m *AppState) Init() tea.Cmd {
 		m.routeToScreen(),
 		NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),
 	}
+	m.switchScreen(m.screen)
 	if m.dispatcher != nil {
 		cmds = append(cmds, permListenerCmd(m.shutdownCtx, m.dispatcher))
 		cmds = append(cmds, questionListenerCmd(m.shutdownCtx, m.dispatcher))

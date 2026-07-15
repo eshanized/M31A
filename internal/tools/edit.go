@@ -45,6 +45,7 @@ type Edit struct {
 	ConfidenceThreshold float64
 }
 
+// NewEdit creates a new Edit tool instance.
 func NewEdit(workDir, backupDir string) *Edit {
 	return &Edit{
 		workDir:             workDir,

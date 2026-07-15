@@ -2281,7 +2281,7 @@ func TestBuildToolDefs(t *testing.T) {
 
 func TestBuildToolDefs_SingleTool(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(NewGlob(t.TempDir()))
 	defs := BuildToolDefs(d)
 	if len(defs) != 1 {
@@ -2840,7 +2840,7 @@ func TestEdit_Execute_FileNotFound(t *testing.T) {
 
 func TestDispatcher_SetPermission(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.SetPermission("Bash", true)
 	d.mu.RLock()
 	allowed := d.permissions["Bash"]
@@ -2855,7 +2855,7 @@ func TestDispatcher_SetPermission(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDispatcher_Stop(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Stop()
 	// Double stop should not panic
 	d.Stop()
@@ -3037,7 +3037,7 @@ func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDispatcher_RateLimitTokens(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
 
 	// Should be able to execute several safe tools quickly
@@ -3394,7 +3394,7 @@ func TestAgent_Execute_UnknownIsolation(t *testing.T) {
 
 func TestDispatcherAdapter_Execute(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 	adapter := &dispatcherAdapter{d: d}
 	result, err := adapter.Execute(context.Background(), subagent.ToolCallInput{
@@ -3411,7 +3411,7 @@ func TestDispatcherAdapter_Execute(t *testing.T) {
 
 func TestDispatcherAdapter_ListTools(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "alpha", riskLevel: types.RiskSafe})
 	d.Register(&mockTool{name: "beta", riskLevel: types.RiskSafe})
 	adapter := &dispatcherAdapter{d: d}
@@ -3422,7 +3422,7 @@ func TestDispatcherAdapter_ListTools(t *testing.T) {
 }
 
 func TestDispatcherAdapter_Stop(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	adapter := &dispatcherAdapter{d: d}
 	adapter.Stop() // should not panic
 }
@@ -3544,7 +3544,7 @@ func TestEdit_Execute_CascadingFuzzy(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDispatcher_SetSessionID(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	// Should not panic when todoWrite is nil
 	d.SetSessionID("test-session")
 
@@ -4020,7 +4020,7 @@ func TestToolResultError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestApprovePermission_FallbackChannelFull(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	// Fill both the per-request channel and shared channel
 	// First, approve on a nonexistent request ID (no per-request channel)
 	// then also fill the shared channel
@@ -4036,7 +4036,7 @@ func TestApprovePermission_FallbackChannelFull(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRespondQuestion_FallbackSharedChannel(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	// Fill the shared channel to trigger the warning path
 	for i := 0; i < QuestionChannelBuffer; i++ {
 		d.questionRespCh <- QuestionResponse{}
@@ -4051,7 +4051,7 @@ func TestRespondQuestion_FallbackSharedChannel(t *testing.T) {
 
 func TestCheckPermission_AgentDefaultAsk(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Agents: map[string]config.PermissionsAgentConfig{
 			"ask-agent": {DefaultAction: "ask"},
 		},

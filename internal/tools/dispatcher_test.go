@@ -30,7 +30,7 @@ func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 func TestDispatcher_RegisterAndExecute(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
@@ -51,7 +51,7 @@ func TestDispatcher_RegisterAndExecute(t *testing.T) {
 
 func TestDispatcher_UnknownTool(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	_, err := d.Execute(context.Background(), types.ToolCall{
 		ID:   "call1",
 		Name: "nonexistent",
@@ -69,7 +69,7 @@ func TestDispatcher_UnknownTool(t *testing.T) {
 
 func TestDispatcher_SafeToolNoPermission(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
@@ -83,7 +83,7 @@ func TestDispatcher_SafeToolNoPermission(t *testing.T) {
 }
 
 func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
 	errCh := make(chan error, 1)
@@ -112,7 +112,7 @@ func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 }
 
 func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
 	errCh := make(chan error, 1)
@@ -134,7 +134,7 @@ func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 }
 
 func TestDispatcher_RememberedPermission(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
 	// First call — approve with remember=true
@@ -171,7 +171,7 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 
 func TestDispatcher_List(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "zzz", riskLevel: types.RiskSafe})
 	d.Register(&mockTool{name: "aaa", riskLevel: types.RiskSafe})
 	d.Register(&mockTool{name: "mmm", riskLevel: types.RiskSafe})
@@ -187,7 +187,7 @@ func TestDispatcher_List(t *testing.T) {
 
 func TestDispatcher_GetTool(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	tool, ok := d.GetTool("test")
@@ -297,7 +297,7 @@ func TestExtractCommandString_Fallback(t *testing.T) {
 }
 
 func TestDispatcher_DestructiveToolPermission(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "filewrite", riskLevel: types.RiskDestructive})
 
 	errCh := make(chan error, 1)
@@ -326,7 +326,7 @@ func TestDispatcher_DestructiveToolPermission(t *testing.T) {
 }
 
 func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -356,7 +356,7 @@ func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
 
 func TestDispatcher_RegisterDuplicate(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	if err := d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe}); err != nil {
 		t.Fatalf("first register failed: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestMatchAnyParamValue_NonStringValues(t *testing.T) {
 }
 
 func TestCheckPermission_RuleAllow(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
 		},
@@ -518,7 +518,7 @@ func TestCheckPermission_RuleAllow(t *testing.T) {
 }
 
 func TestCheckPermission_RuleDeny(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**/*.go", Action: "deny"},
 		},
@@ -544,7 +544,7 @@ func TestCheckPermission_RuleDeny(t *testing.T) {
 }
 
 func TestCheckPermission_RuleAsk(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**/*.go", Action: "ask"},
 		},
@@ -573,7 +573,7 @@ func TestCheckPermission_RuleAsk(t *testing.T) {
 }
 
 func TestCheckPermission_NoMatchFallthrough(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "*.py", Action: "allow"},
 		},
@@ -600,7 +600,7 @@ func TestCheckPermission_NoMatchFallthrough(t *testing.T) {
 }
 
 func TestCheckPermission_ToolFilter(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Grep", Pattern: "**", Action: "allow"},
 		},
@@ -630,7 +630,7 @@ func TestCheckPermission_ToolFilter(t *testing.T) {
 }
 
 func TestCheckPermission_MultipleRulesFirstWins(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**/secret*", Action: "deny"},
 			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
@@ -672,7 +672,7 @@ func TestCheckPermission_MultipleRulesFirstWins(t *testing.T) {
 }
 
 func TestSelectAgent(t *testing.T) {
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**/*.py", Action: "allow"},
 		},
@@ -737,7 +737,7 @@ func TestPermissionContext_Fields(t *testing.T) {
 	t.Parallel()
 
 	t.Run("rule match populates all fields", func(t *testing.T) {
-		d := NewDispatcher(&config.PermissionsConfig{
+		d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 			Rules: []config.PermissionRule{
 				{Tool: "Bash", Pattern: "**/secret*", Action: "deny"},
 			},
@@ -766,7 +766,7 @@ func TestPermissionContext_Fields(t *testing.T) {
 	})
 
 	t.Run("no match returns risk_level source", func(t *testing.T) {
-		d := NewDispatcher(nil)
+		d := testDispatcher(t)
 		d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
 
 		_, pctx, err := d.checkPermission("Bash", types.ToolInput{
@@ -825,7 +825,7 @@ func TestDoublestarMatch(t *testing.T) {
 }
 
 func TestDispatcher_PermissionChannelFull(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
 
 	// Fill the request channel (buffer size is 8)
@@ -845,7 +845,7 @@ func TestDispatcher_PermissionChannelFull(t *testing.T) {
 
 func TestToolInputJSON(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
@@ -866,7 +866,7 @@ func TestToolInputJSON(t *testing.T) {
 
 func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
@@ -884,7 +884,7 @@ func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
 
 func TestDispatcher_EmptyBytesInput(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
@@ -902,7 +902,7 @@ func TestDispatcher_EmptyBytesInput(t *testing.T) {
 
 func TestDispatcher_NullInput(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
@@ -917,7 +917,7 @@ func TestDispatcher_NullInput(t *testing.T) {
 }
 
 func TestDispatcher_UpdatePermissions(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
 
 	cfg := &config.PermissionsConfig{
@@ -943,19 +943,19 @@ func TestDispatcher_UpdatePermissions(t *testing.T) {
 }
 
 func TestDispatcher_UpdatePermissions_Nil(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.UpdatePermissions(nil) // should not panic
 }
 
 func TestDispatcher_Stop_Idempotent(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	d.Stop()
 	d.Stop() // second call should not panic
 }
 
 func TestDispatcher_QuestionChannels(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 
 	if d.QuestionRequestCh() == nil {
 		t.Error("QuestionRequestCh should not be nil")
@@ -966,7 +966,7 @@ func TestDispatcher_QuestionChannels(t *testing.T) {
 }
 
 func TestDispatcher_RespondQuestion_Routing(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 
 	// Register a per-request channel
 	reqID := int64(42)
@@ -991,7 +991,7 @@ func TestDispatcher_RespondQuestion_Routing(t *testing.T) {
 }
 
 func TestDispatcher_RespondQuestion_FallbackToShared(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 
 	go d.RespondQuestion(999, "fallback")
 

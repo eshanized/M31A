@@ -25,6 +25,7 @@ type FileWrite struct {
 // MaxBackupsPerFile is the maximum number of backups to keep per file.
 // Defined in constants.go as MaxBackupsPerFile.
 
+// NewFileWrite creates a new FileWrite tool instance.
 func NewFileWrite(workDir, backupDir string) *FileWrite {
 	return &FileWrite{workDir: workDir, backupDir: backupDir}
 }

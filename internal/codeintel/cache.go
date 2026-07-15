@@ -3,6 +3,7 @@ package codeintel
 import (
 	"crypto/sha256"
 	"encoding/gob"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -63,12 +64,12 @@ func LoadCache(workDir string) *IndexCache {
 func SaveCache(workDir string, cache *IndexCache) error {
 	path := cachePath(workDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create cache dir: %w", err)
 	}
 
 	f, err := os.Create(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("create cache file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 

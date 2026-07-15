@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -53,10 +54,10 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			Version:           version,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("create OpenRouter client: %w", err)
 		}
 		if err := registry.Register(types.ProviderOpenRouter, client); err != nil {
-			return err
+			return fmt.Errorf("register OpenRouter provider: %w", err)
 		}
 		slog.Info("OpenRouter provider registered")
 
@@ -80,10 +81,10 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			Version:           version,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("create Zen client: %w", err)
 		}
 		if err := registry.Register(types.ProviderZen, client); err != nil {
-			return err
+			return fmt.Errorf("register Zen provider: %w", err)
 		}
 		slog.Info("Zen provider registered")
 
@@ -107,10 +108,10 @@ func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerI
 			Version:           version,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("create NVIDIA client: %w", err)
 		}
 		if err := registry.Register(types.ProviderNvidia, client); err != nil {
-			return err
+			return fmt.Errorf("register NVIDIA provider: %w", err)
 		}
 		slog.Info("NVIDIA NIM provider registered")
 	}

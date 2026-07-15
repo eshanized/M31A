@@ -904,7 +904,7 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 
 	// Delegate transition validation to StateMachine
 	if err := e.stateMachine.Transition(from, to); err != nil {
-		return err
+		return fmt.Errorf("phase transition %s -> %s: %w", from, to, err)
 	}
 
 	// Delegate transition side effects to PhaseCoordinator
@@ -1672,12 +1672,12 @@ func ExtractWebsiteTemplate(destDir string) error {
 	srcDir := "templates/website-nextjs"
 	return fs.WalkDir(websiteTemplateFS, srcDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("walk template dir: %w", err)
 		}
 		// Compute the relative path within the template
 		relPath, err := filepath.Rel(srcDir, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("compute relative path: %w", err)
 		}
 		if relPath == "." {
 			return nil
@@ -1688,11 +1688,11 @@ func ExtractWebsiteTemplate(destDir string) error {
 		}
 		data, err := websiteTemplateFS.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("read template file %q: %w", path, err)
 		}
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
+			return fmt.Errorf("create parent dir %q: %w", filepath.Dir(dest), err)
 		}
 		return os.WriteFile(dest, data, 0o644)
 	})

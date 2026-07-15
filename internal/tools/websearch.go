@@ -26,6 +26,7 @@ type WebSearch struct {
 	dnsCache        *DNSCache
 }
 
+// NewWebSearch creates a new WebSearch tool instance.
 func NewWebSearch(baseURL string) *WebSearch {
 	if baseURL == "" {
 		baseURL = DefaultSearchBaseURL

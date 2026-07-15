@@ -12,7 +12,7 @@ import (
 )
 
 func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
@@ -65,7 +65,7 @@ func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
 }
 
 func TestDispatcher_PermissionTimeout_Typed(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
@@ -93,7 +93,7 @@ func TestDispatcher_PermissionTimeout_Typed(t *testing.T) {
 }
 
 func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 

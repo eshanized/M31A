@@ -19,6 +19,7 @@ type FileList struct {
 	workDir string
 }
 
+// NewFileList creates a new FileList tool instance.
 func NewFileList(workDir string) *FileList {
 	return &FileList{workDir: workDir}
 }

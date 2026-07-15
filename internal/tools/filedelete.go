@@ -18,6 +18,7 @@ type FileDelete struct {
 	backupDir string
 }
 
+// NewFileDelete creates a new FileDelete tool instance.
 func NewFileDelete(workDir, backupDir string) *FileDelete {
 	return &FileDelete{workDir: workDir, backupDir: backupDir}
 }

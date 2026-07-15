@@ -67,7 +67,7 @@ func applySandboxExec(cmd *exec.Cmd, workDir string) error {
 	// Check if sandbox-exec is available
 	sandboxExecPath, err := exec.LookPath("sandbox-exec")
 	if err != nil {
-		return err
+		return fmt.Errorf("sandbox-exec not found: %w", err)
 	}
 
 	// Build the sandbox profile, adding work directory access if specified

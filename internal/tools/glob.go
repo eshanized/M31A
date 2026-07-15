@@ -21,6 +21,7 @@ type Glob struct {
 	workDir string
 }
 
+// NewGlob creates a new Glob tool instance.
 func NewGlob(workDir string) *Glob {
 	return &Glob{workDir: workDir}
 }

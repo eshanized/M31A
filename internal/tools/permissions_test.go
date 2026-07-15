@@ -15,7 +15,7 @@ import (
 
 func TestCheckPermission_AgentDefaultAllow(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Agents: map[string]config.PermissionsAgentConfig{
 			"autonomous": {DefaultAction: "allow"},
 		},
@@ -44,7 +44,7 @@ func TestCheckPermission_AgentDefaultAllow(t *testing.T) {
 
 func TestCheckPermission_AgentDefaultDeny(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Agents: map[string]config.PermissionsAgentConfig{
 			"restricted": {DefaultAction: "deny"},
 		},
@@ -70,7 +70,7 @@ func TestCheckPermission_AgentDefaultDeny(t *testing.T) {
 
 func TestCheckPermission_RuleOverridesAgentDefault(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Pattern: "**", Action: "deny"},
 		},
@@ -105,7 +105,7 @@ func TestCheckPermission_RuleOverridesAgentDefault(t *testing.T) {
 
 func TestSelectAgent_UnknownAgent(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcher(t)
 	err := d.SelectAgent("nonexistent")
 	if err == nil {
 		t.Error("expected error for unknown agent")
@@ -114,7 +114,7 @@ func TestSelectAgent_UnknownAgent(t *testing.T) {
 
 func TestSelectAgent_ResetToDefault(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Action: "allow"},
 		},
@@ -210,7 +210,7 @@ func TestMatchAnyParamValue_CommandGlob(t *testing.T) {
 
 func TestCheckPermission_AgentWithRules(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Action: "ask"},
 		},
@@ -250,7 +250,7 @@ func TestCheckPermission_AgentWithRules(t *testing.T) {
 
 func TestCheckPermission_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
 		Rules: []config.PermissionRule{
 			{Tool: "Bash", Action: "allow"},
 		},
@@ -311,7 +311,7 @@ func TestExtractCommandString(t *testing.T) {
 
 func TestBatchApproval_Active(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
 
 	d.ApproveBatch("Bash", types.RiskDangerous)
@@ -322,7 +322,7 @@ func TestBatchApproval_Active(t *testing.T) {
 
 func TestBatchApproval_NotActive(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	if d.checkBatchApproval("Bash", types.RiskDangerous) {
 		t.Error("expected batch approval to not be active")
@@ -331,7 +331,7 @@ func TestBatchApproval_NotActive(t *testing.T) {
 
 func TestBatchApproval_WrongTool(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	d.ApproveBatch("Bash", types.RiskDangerous)
 	if d.checkBatchApproval("Edit", types.RiskDangerous) {
@@ -341,7 +341,7 @@ func TestBatchApproval_WrongTool(t *testing.T) {
 
 func TestBatchApproval_WrongRisk(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	d.ApproveBatch("Bash", types.RiskDangerous)
 	if d.checkBatchApproval("Bash", types.RiskDestructive) {
@@ -351,7 +351,7 @@ func TestBatchApproval_WrongRisk(t *testing.T) {
 
 func TestBatchApproval_Revoke(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	d.ApproveBatch("Bash", types.RiskDangerous)
 	d.RevokeBatchApprovals()
@@ -362,7 +362,7 @@ func TestBatchApproval_Revoke(t *testing.T) {
 
 func TestBatchApproval_Count(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	if d.BatchApprovalCount() != 0 {
 		t.Errorf("expected 0 batch approvals, got %d", d.BatchApprovalCount())
@@ -386,7 +386,7 @@ func TestBatchApproval_Count(t *testing.T) {
 
 func TestBatchApproval_ToolNames(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	if names := d.ActiveBatchToolNames(); names != "" {
 		t.Errorf("expected empty tool names, got %q", names)
@@ -406,7 +406,7 @@ func TestBatchApproval_ToolNames(t *testing.T) {
 
 func TestBatchApproval_DuplicateKey(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	d.ApproveBatch("Bash", types.RiskDangerous)
 	d.ApproveBatch("Bash", types.RiskDangerous)
@@ -443,7 +443,7 @@ func TestPermissionResponse_ApproveAll(t *testing.T) {
 
 func TestBatchApproval_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(&config.PermissionsConfig{})
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{})
 
 	done := make(chan struct{})
 	go func() {
@@ -467,7 +467,7 @@ func TestBatchApproval_ConcurrentAccess(t *testing.T) {
 
 func TestPermissions_InvalidType(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher(nil)
+	d := testDispatcherWithConfig(t, nil)
 
 	// Store invalid type in pending responses
 	d.pendingResponses.Store(int64(42), "not-a-channel")

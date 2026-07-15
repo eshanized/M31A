@@ -106,7 +106,7 @@ func (idx *Indexer) buildFromCache(ctx context.Context, cached *IndexCache) erro
 	if len(inc.Changed) > 0 {
 		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse changed files: %w", err)
 		}
 		allFiles = append(allFiles, changedFiles...)
 	}
@@ -191,7 +191,7 @@ func (idx *Indexer) buildIncremental(ctx context.Context) error {
 	if len(inc.Changed) > 0 {
 		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse changed files: %w", err)
 		}
 
 		// Update graph and index with changed files

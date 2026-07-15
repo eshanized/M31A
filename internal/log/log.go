@@ -65,7 +65,7 @@ func rotateLogFiles(logDir, logFile string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("stat log file: %w", err)
 	}
 
 	now := time.Now()
@@ -80,7 +80,7 @@ func rotateLogFiles(logDir, logFile string) error {
 	}
 
 	if err := removeOldRotatedFiles(logDir); err != nil {
-		return err
+		return fmt.Errorf("remove old rotated files: %w", err)
 	}
 
 	return nil
@@ -89,7 +89,7 @@ func rotateLogFiles(logDir, logFile string) error {
 func removeOldRotatedFiles(logDir string) error {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("read log dir: %w", err)
 	}
 
 	now := time.Now()

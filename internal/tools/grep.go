@@ -27,6 +27,7 @@ type Grep struct {
 	hasRg   bool
 }
 
+// NewGrep creates a new Grep tool instance.
 func NewGrep(workDir string) *Grep {
 	_, err := exec.LookPath("rg")
 	return &Grep{
