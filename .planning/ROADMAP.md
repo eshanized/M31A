@@ -62,9 +62,14 @@
 
 **Depends on:** Phase 4
 
-**Plans:** 1 plan created
+**Plans:** 6 plans (phased approach)
 
-- [ ] 05-01-PLAN.md — Wave 1: Split low-risk leaf packages (helpers, transition, app_input), medium-risk tool package (dispatcher, permissions, edit), and medium-risk TUI package (settings_model, sidebar_model, app)
+- [x] 05-01-PLAN.md — Wave 1: Split low-risk leaf packages (helpers, transition, app_input) — 9 files
+- [ ] 05-02-PLAN.md — Wave 2: Split medium-risk tool package (dispatcher, permissions, edit) — 3 files
+- [ ] 05-03-PLAN.md — Wave 2: Split medium-risk TUI package (settings_model, sidebar_model, app) — 3 files
+- [ ] 05-04-PLAN.md — Wave 2: Split medium-risk config/provider/pkg (loader, types, capabilities, session) — 4 files
+- [ ] 05-05-PLAN.md — Wave 3: Split high-risk workflow package (engine, execute, engine_parse) — 3 files
+- [ ] 05-06-PLAN.md — Wave 3: Split high-risk entry point + remaining (main.go, git.go, misc) — 3+ files
 
 ---
 
