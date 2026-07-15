@@ -62,7 +62,9 @@
 
 **Depends on:** Phase 4
 
-**Plans:** 6 plans (phased approach)
+**Plans:** 1/1 plans complete
+
+- [ ] 05-PLAN.md
 
 - [x] 05-01-PLAN.md — Wave 1: Split low-risk leaf packages (helpers, transition, app_input) — 9 files
 - [ ] 05-02-PLAN.md — Wave 2: Split medium-risk tool package (dispatcher, permissions, edit) — 3 files
@@ -72,5 +74,3 @@
 - [ ] 05-06-PLAN.md — Wave 3: Split high-risk entry point + remaining (main.go, git.go, misc) — 3+ files
 
 ---
-
-
