@@ -55,3 +55,17 @@
 **Phase 4: COMPLETE** — All CRITICAL/HIGH blockers resolved. v1.0 release gate cleared.
 
 ---
+
+## Phase 5: Codebase Maintainability — Split Large Files
+
+**Goal:** Read all files in the codebase, split large files into smaller files for maintainability, test all files and ensure the project is not broken.
+
+**Depends on:** Phase 4
+
+**Plans:** 1 plan created
+
+- [ ] 05-01-PLAN.md — Wave 1: Split low-risk leaf packages (helpers, transition, app_input), medium-risk tool package (dispatcher, permissions, edit), and medium-risk TUI package (settings_model, sidebar_model, app)
+
+---
+
+
