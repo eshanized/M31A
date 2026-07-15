@@ -3,15 +3,15 @@
 ## Project Status
 
 - **Current Milestone**: v1.0.0 — Initial Release
-- **Current Phase**: 1 — Fix TUI Blank Screens
-- **Phase Status**: Not Started
+- **Current Phase**: 1 — Fix TUI Blank Screens (Phase 8 in roadmap)
+- **Phase Status**: Context Captured — Ready for Planning
 - **Last Updated**: 2026-07-16
 
 ## Phase Progress
 
 | Phase | Name | Status | Started | Completed |
 |-------|------|--------|---------|-----------|
-| 1 | Fix TUI Blank Screens | Not Started | — | — |
+| 1 | Fix TUI Blank Screens | Context Done | 2026-07-16 | — |
 | 2 | Stabilize Core Workflow | Pending | — | — |
 | 3 | Headless Modes & Session Resume | Pending | — | — |
 | 4 | Provider Polish & Fallback | Pending | — | — |
@@ -21,13 +21,19 @@
 
 ## Active Work
 
-No active work. Ready to begin Phase 1.
+Phase 1 context captured in `.planning/phases/08-investigate-and-fix-tui-blank-screens-issue-all-screens-rend/08-CONTEXT.md`. Key findings:
+- TTY requirement confirmed — prioritize real terminal
+- WindowSizeMsg timing is expected Bubble Tea behavior
+- Theme: lipgloss compatibility suspected
+- Screenable: ReplModel missing SetDimensions, full audit needed
+- Dimensions: contentDimensions() edge case guards needed
 
 ## Session History
 
 | Date | Phase | Action |
 |------|-------|--------|
 | 2026-07-16 | — | Project initialized, codebase mapped, planning docs created |
+| 2026-07-16 | 1 | Phase context captured, discussion log written |
 
 ## Deferred Ideas Log
 
@@ -37,10 +43,11 @@ No active work. Ready to begin Phase 1.
 - Multi-repo workspace support
 - Web UI / remote access
 - Team collaboration features
+- CI-compatible headless TUI testing (vhs, expect, gotty)
 
 ## Git State
 
 - **Branch**: master
-- **Last Commit**: docs: map existing codebase (68dda720)
-- **Uncommitted**: .planning/ (new)
+- **Last Commit**: docs(08): capture phase context for TUI blank screens investigation (fecd057e)
+- **Uncommitted**: none
 EOF
