@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"log/slog"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/layout"
 )
@@ -8,6 +10,9 @@ import (
 // handleWindowResize resizes all sub-models using content dimensions
 // (terminal minus unified chrome and sidebar).
 func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
+	// Debug: log WindowSizeMsg arrival (only at debug level)
+	slog.Debug("WindowSizeMsg received", "width", msg.Width, "height", msg.Height, "screen", m.screen.Label())
+
 	// Compute content dimensions: terminal minus unified chrome (header+footer)
 	contentW := msg.Width
 	contentH := msg.Height - layout.ChromeHeight
@@ -25,15 +30,15 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		contentW = 1
 	}
 
+	// Debug: log computed content dimensions
+	slog.Debug("contentDimensions computed", "contentW", contentW, "contentH", contentH, "sidebarW", sw)
+
 	// Build a content-sized WindowSizeMsg for sub-models
 	contentMsg := tea.WindowSizeMsg{Width: contentW, Height: contentH}
 
 	var cmd tea.Cmd
 	if m.replModel != nil {
-		m.replModel.width = contentW
-		m.replModel.height = contentH
-		// contentW already accounts for the sidebar; pass 0 to avoid double-subtracting.
-		m.replModel.SetSidebarWidth(0)
+		m.replModel.SetDimensions(contentW, contentH)
 		replM, replCmd := m.replModel.Update(contentMsg)
 		if r, ok := replM.(*ReplModel); ok {
 			m.replModel = r
@@ -45,20 +50,16 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.planModel.SetDimensions(contentW, contentH)
 	}
 	if m.executeModel != nil {
-		m.executeModel.width = contentW
-		m.executeModel.height = contentH
+		m.executeModel.SetDimensions(contentW, contentH)
 	}
 	if m.verifyModel != nil {
-		m.verifyModel.width = contentW
-		m.verifyModel.height = contentH
+		m.verifyModel.SetDimensions(contentW, contentH)
 	}
 	if m.metricsModel != nil {
-		m.metricsModel.width = contentW
-		m.metricsModel.height = contentH
+		m.metricsModel.SetDimensions(contentW, contentH)
 	}
 	if m.settingsModel != nil {
-		m.settingsModel.width = contentW
-		m.settingsModel.height = contentH
+		m.settingsModel.SetDimensions(contentW, contentH)
 	}
 	if m.cmdPalette != nil {
 		m.cmdPalette.SetDimensions(contentW, contentH)
@@ -82,15 +83,13 @@ func (m *AppState) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.rollbackModel.SetDimensions(contentW, contentH)
 	}
 	if m.shipModel != nil {
-		m.shipModel.width = contentW
-		m.shipModel.height = contentH
+		m.shipModel.SetDimensions(contentW, contentH)
 	}
 	if m.firstRunModel != nil {
 		m.firstRunModel.SetDimensions(contentW, contentH)
 	}
 	if m.configModel != nil {
-		m.configModel.width = contentW
-		m.configModel.height = contentH
+		m.configModel.SetDimensions(contentW, contentH)
 	}
 	if m.discussModel != nil {
 		m.discussModel.SetDimensions(contentW, contentH)

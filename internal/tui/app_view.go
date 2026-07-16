@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,9 +18,13 @@ import (
 // View implements tea.Model. It renders the full terminal frame using the
 // unified PageLayout system: 1-line header + content viewport + 1-line footer.
 func (m *AppState) View() string {
+	// Debug: log View() call
+	slog.Debug("AppState.View called", "width", m.width, "height", m.height, "screen", m.screen.Label(), "hasTransition", m.transition != nil && m.transition.Active)
+
 	if m.width == 0 || m.height == 0 {
 		// Dimensions not yet known — emit empty frame; bubbletea will repaint
 		// on first WindowSizeMsg.
+		slog.Debug("View: zero dimensions, returning empty")
 		return ""
 	}
 

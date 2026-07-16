@@ -3,8 +3,12 @@ package tui
 // Navigation and screen management methods for AppState.
 
 import (
+	"log/slog"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/layout"
+	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/session"
 )
 
@@ -15,6 +19,7 @@ import (
 // TRANSITIONS and popScreen() and handles resize + conditional re-init.
 // They share structure but differ in lifecycle semantics.
 func (m *AppState) routeToScreen() tea.Cmd {
+	slog.Debug("routeToScreen called", "screen", m.screen.Label(), "prevScreen", m.prevScreen.Label())
 	switch m.screen {
 	case ScreenFirstRun:
 		if m.firstRunModel == nil {
@@ -22,19 +27,24 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			fm.SetDimensions(cw, ch)
 			m.firstRunModel = fm
+			if m.router != nil {
+				m.router.Register(ScreenFirstRun, m.firstRunModel)
+			}
 		}
 		return m.firstRunModel.Init()
 	case ScreenREPL:
 		m.ensureReplModel()
 		if m.replModel.width == 0 {
 			cw, ch := m.contentDimensions()
-			m.replModel.width = cw
-			m.replModel.height = ch
+			m.replModel.SetDimensions(cw, ch)
 		}
 		return m.replModel.Init()
 	case ScreenModelSelector:
 		if m.msModel == nil {
 			m.msModel = NewModelSelector(m.shutdownCtx, m.registry, m.sessionManager, m.themeManager.Current())
+			if m.router != nil {
+				m.router.Register(ScreenModelSelector, m.msModel)
+			}
 		}
 		cw, ch := m.contentDimensions()
 		m.msModel.SetDimensions(cw, ch)
@@ -42,10 +52,12 @@ func (m *AppState) routeToScreen() tea.Cmd {
 	case ScreenSettings:
 		if m.settingsModel == nil {
 			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
+			if m.router != nil {
+				m.router.Register(ScreenSettings, m.settingsModel)
+			}
 		}
 		cw, ch := m.contentDimensions()
-		m.settingsModel.width = cw
-		m.settingsModel.height = ch
+		m.settingsModel.SetDimensions(cw, ch)
 		return m.settingsModel.Init()
 	case ScreenResume:
 		return m.openResumeScreen()
@@ -54,34 +66,45 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			m.planModel.SetDimensions(cw, ch)
 		}
+		if m.router != nil && m.planModel != nil {
+			m.router.Register(ScreenPlan, m.planModel)
+		}
 		return nil
 	case ScreenExecute:
 		if m.executeModel != nil {
 			cw, ch := m.contentDimensions()
-			m.executeModel.width = cw
-			m.executeModel.height = ch
+			m.executeModel.SetDimensions(cw, ch)
+		}
+		if m.router != nil && m.executeModel != nil {
+			m.router.Register(ScreenExecute, m.executeModel)
 		}
 		return nil
 	case ScreenVerify:
 		if m.verifyModel != nil {
 			cw, ch := m.contentDimensions()
-			m.verifyModel.width = cw
-			m.verifyModel.height = ch
+			m.verifyModel.SetDimensions(cw, ch)
+		}
+		if m.router != nil && m.verifyModel != nil {
+			m.router.Register(ScreenVerify, m.verifyModel)
 		}
 		return nil
 	case ScreenRuntimeCheck:
 		if m.runtimeModel != nil {
 			cw, ch := m.contentDimensions()
-			m.runtimeModel.width = cw
-			m.runtimeModel.height = ch
+			m.runtimeModel.SetDimensions(cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
+			}
 			return func() tea.Msg { return RuntimeTickMsg{} }
 		}
 		return nil
 	case ScreenShip:
 		if m.shipModel != nil {
 			cw, ch := m.contentDimensions()
-			m.shipModel.width = cw
-			m.shipModel.height = ch
+			m.shipModel.SetDimensions(cw, ch)
+		}
+		if m.router != nil && m.shipModel != nil {
+			m.router.Register(ScreenShip, m.shipModel)
 		}
 		return nil
 	case ScreenGoalInput:
@@ -103,6 +126,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.rollbackModel == nil {
 			cw, ch := m.contentDimensions()
 			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenRollback, m.rollbackModel)
+			}
 			m.rollbackModel.LoadCommits()
 		}
 		return nil
@@ -120,6 +146,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.discussModel == nil {
 			cw, ch := m.contentDimensions()
 			m.discussModel = NewDiscussModel(m.themeManager.Current(), m.discussQuestions, cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenDiscuss, m.discussModel)
+			}
 			if m.config != nil && m.config.UI.DiscussTimeout > 0 {
 				m.discussModel.SetTimeout(m.config.UI.DiscussTimeout)
 			}
@@ -132,11 +161,17 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.configModel == nil {
 			cw, ch := m.contentDimensions()
 			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
+			if m.router != nil {
+				m.router.Register(ScreenConfig, m.configModel)
+			}
 		}
 		return nil
 	case ScreenHelp:
 		if m.helpModel == nil {
 			m.helpModel = NewHelpModel(m.themeManager.Current())
+			if m.router != nil {
+				m.router.Register(ScreenHelp, m.helpModel)
+			}
 			m.helpModel.SetKeyRegistry(m.keyRegistry)
 		}
 		cw, ch := m.contentDimensions()
@@ -146,12 +181,18 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.bisectModel == nil {
 			cw, ch := m.contentDimensions()
 			m.bisectModel = NewBisectModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenBisect, m.bisectModel)
+			}
 		}
 		return nil
 	case ScreenNotifications:
 		if m.notifModel == nil {
 			cw, ch := m.contentDimensions()
 			m.notifModel = NewNotificationModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenNotifications, m.notifModel)
+			}
 		}
 		return nil
 	case ScreenDecisions:
@@ -159,6 +200,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			if m.themeManager != nil {
 				cw, ch := m.contentDimensions()
 				m.decisionScreen = NewDecisionScreen(m.themeManager.Current(), cw, ch)
+				if m.router != nil {
+					m.router.Register(ScreenDecisions, m.decisionScreen)
+				}
 			}
 		}
 		return nil
@@ -166,6 +210,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.dashboardModel == nil {
 			cw, ch := m.contentDimensions()
 			m.dashboardModel = NewDashboardModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenDashboard, m.dashboardModel)
+			}
 		}
 		if m.workflowEngine != nil {
 			m.dashboardModel.SetWorkflowState(m.workflowPhase, m.workflowGoal, "", m.activeProvider)
@@ -175,12 +222,18 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.sessionDetailModel == nil {
 			cw, ch := m.contentDimensions()
 			m.sessionDetailModel = NewSessionDetailModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenSessionDetail, m.sessionDetailModel)
+			}
 		}
 		return nil
 	case ScreenFileExplorer:
 		if m.fileExplorerModel == nil {
 			cw, ch := m.contentDimensions()
 			m.fileExplorerModel = NewFileExplorerModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenFileExplorer, m.fileExplorerModel)
+			}
 			if m.cwd != "" {
 				root := buildFileTree(m.cwd, 0, 3)
 				if root != nil {
@@ -193,35 +246,53 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.toolDetailModel == nil {
 			cw, ch := m.contentDimensions()
 			m.toolDetailModel = NewToolDetailModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenToolDetail, m.toolDetailModel)
+			}
 		}
 		return nil
 	case ScreenPhaseModelPicker:
 		if m.phaseModelPicker == nil {
 			cw, ch := m.contentDimensions()
 			m.phaseModelPicker = NewPhaseModelPickerModel(m.shutdownCtx, m.registry, m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenPhaseModelPicker, m.phaseModelPicker)
+			}
 		}
 		return nil
 	case ScreenGhostPicker:
 		if m.ghostPickerModel == nil {
 			cw, ch := m.contentDimensions()
 			m.ghostPickerModel = NewGhostPickerModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenGhostPicker, m.ghostPickerModel)
+			}
 		}
 		return nil
 	case ScreenGhostOutput:
 		if m.ghostOutputModel == nil {
 			cw, ch := m.contentDimensions()
 			m.ghostOutputModel = NewGhostOutputModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenGhostOutput, m.ghostOutputModel)
+			}
 		}
 		return nil
 	case ScreenConfirmQuit:
 		if m.confirmQuitModel == nil {
 			cw, ch := m.contentDimensions()
 			m.confirmQuitModel = NewConfirmQuitModel(m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenConfirmQuit, m.confirmQuitModel)
+			}
 		}
 		return nil
 	case ScreenDiff:
 		if m.diffModel == nil {
 			m.diffModel = NewDiffModel(m.themeManager.Current())
+			if m.router != nil {
+				m.router.Register(ScreenDiff, m.diffModel)
+			}
 		}
 		cw, ch := m.contentDimensions()
 		m.diffModel.SetDimensions(cw, ch)
@@ -230,6 +301,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 		if m.commandPaletteScreenModel == nil {
 			cw, ch := m.contentDimensions()
 			m.commandPaletteScreenModel = NewCommandPaletteScreenModel(m.cmdRegistry, m.themeManager.Current(), cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenCommandPalette, m.commandPaletteScreenModel)
+			}
 		}
 		return m.commandPaletteScreenModel.Init()
 	case ScreenHome:
@@ -238,6 +312,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			m.homeModel = NewHomeModel(m.themeManager.Current(), cw, ch, m.version)
 			m.homeModel.SetCommandRegistry(m.cmdRegistry)
 			m.homeModel.SetConfig(m.config)
+			if m.router != nil {
+				m.router.Register(ScreenHome, m.homeModel)
+			}
 		}
 		return m.homeModel.Init()
 	default:
@@ -304,6 +381,7 @@ func (m *AppState) contentDimensions() (w, h int) {
 	if w < 1 {
 		w = 1
 	}
+	slog.Debug("contentDimensions", "terminalW", m.width, "terminalH", m.height, "contentW", w, "contentH", h, "sidebarVisible", m.sidebarModel != nil && m.sidebarModel.IsVisible(), "showSidebar", layout.ShowSidebar(m.width))
 	return w, h
 }
 
@@ -313,6 +391,7 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	switch screen {
 	case ScreenREPL:
 		m.ensureReplModel()
+		m.replModel.SetDimensions(cw, ch)
 		return nil
 	case ScreenModelSelector:
 		if m.msModel == nil {
@@ -323,9 +402,11 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenSettings:
 		if m.settingsModel == nil {
 			m.settingsModel = NewSettingsModel(m.config, m.registry, m.themeManager.Current(), m.configPath, m.version, m.keychain, m.shutdownCtx)
+			if m.router != nil {
+				m.router.Register(ScreenSettings, m.settingsModel)
+			}
 		}
-		m.settingsModel.width = cw
-		m.settingsModel.height = ch
+		m.settingsModel.SetDimensions(cw, ch)
 		return m.settingsModel.Init()
 	case ScreenResume:
 		// Resume screen loads sessions async; use the existing command.
@@ -333,6 +414,9 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenGoalInput:
 		if m.goalInput == nil {
 			m.goalInput = NewGoalInputModel(m.themeManager.Current(), nil)
+			if m.router != nil {
+				m.router.Register(ScreenGoalInput, m.goalInput)
+			}
 		}
 		m.goalInput.SetDimensions(cw, ch)
 		return m.goalInput.Init()
@@ -342,32 +426,48 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 		}
 		return nil
 	case ScreenExecute:
-		if m.executeModel != nil {
-			m.executeModel.width = cw
-			m.executeModel.height = ch
+		if m.executeModel == nil {
+			m.executeModel = NewExecuteModel([]types.Task{}, m.themeManager.Current(), cw, ch)
+			m.executeModel.SetWorkflowEngine(m.workflowEngine)
+		}
+		m.executeModel.SetDimensions(cw, ch)
+		if m.router != nil {
+			m.router.Register(ScreenExecute, m.executeModel)
 		}
 		return nil
 	case ScreenVerify:
-		if m.verifyModel != nil {
-			m.verifyModel.width = cw
-			m.verifyModel.height = ch
+		if m.verifyModel == nil {
+			m.verifyModel = NewVerifyModel([]types.Task{}, map[int]workflow.VerificationResult{}, m.themeManager.Current(), cw, ch)
+		}
+		m.verifyModel.SetDimensions(cw, ch)
+		if m.router != nil {
+			m.router.Register(ScreenVerify, m.verifyModel)
 		}
 		return nil
 	case ScreenRuntimeCheck:
-		if m.runtimeModel != nil {
-			m.runtimeModel.width = cw
-			m.runtimeModel.height = ch
+		if m.runtimeModel == nil {
+			m.runtimeModel = NewRuntimeModel(m.themeManager.Current(), cw, ch)
+		}
+		m.runtimeModel.SetDimensions(cw, ch)
+		if m.router != nil {
+			m.router.Register(ScreenRuntimeCheck, m.runtimeModel)
 		}
 		return nil
 	case ScreenShip:
-		if m.shipModel != nil {
-			m.shipModel.width = cw
-			m.shipModel.height = ch
+		if m.shipModel == nil {
+			m.shipModel = NewShipModel(ShipSummary{}, m.themeManager.Current(), cw, ch)
+		}
+		m.shipModel.SetDimensions(cw, ch)
+		if m.router != nil {
+			m.router.Register(ScreenShip, m.shipModel)
 		}
 		return nil
 	case ScreenLedger:
 		if m.ledgerModel == nil {
 			m.ledgerModel = NewLedgerModel(m.themeManager.Current(), m.ledger)
+			if m.router != nil {
+				m.router.Register(ScreenLedger, m.ledgerModel)
+			}
 			m.ledgerModel.SetDimensions(cw, ch)
 			m.ledgerModel.LoadEntries()
 		}
@@ -375,12 +475,18 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenRollback:
 		if m.rollbackModel == nil {
 			m.rollbackModel = NewRollbackModel(m.themeManager.Current(), m.git, m.rollback, cw, ch)
+			if m.router != nil {
+				m.router.Register(ScreenRollback, m.rollbackModel)
+			}
 			m.rollbackModel.LoadCommits()
 		}
 		return nil
 	case ScreenMetrics:
 		if m.metricsModel == nil {
 			m.metricsModel = NewMetricsModel(m.themeManager.Current())
+			if m.router != nil {
+				m.router.Register(ScreenMetrics, m.metricsModel)
+			}
 		}
 		m.metricsModel.SetDimensions(cw, ch)
 		if m.sessionManager != nil {
@@ -390,12 +496,14 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenConfig:
 		if m.configModel == nil {
 			m.configModel = NewConfigModel(m.themeManager.Current(), m.config, m.configPath, cw, ch, m.keychain)
+			if m.router != nil {
+				m.router.Register(ScreenConfig, m.configModel)
+			}
 		} else {
 			// Sync live config pointer so edits made in settings are visible
 			m.configModel.cfg = m.config
 			m.configModel.cfgPath = m.configPath
-			m.configModel.width = cw
-			m.configModel.height = ch
+			m.configModel.SetDimensions(cw, ch)
 			m.configModel.theme = m.themeManager.Current()
 			m.configModel.buildSections()
 			m.configModel.updateViewportContent()

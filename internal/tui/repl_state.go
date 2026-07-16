@@ -64,6 +64,27 @@ func (m *ReplModel) SetSidebarWidth(sw int) {
 	m.textarea.SetWidth(replWidth)
 }
 
+// SetDimensions implements Screenable. Updates the REPL model dimensions
+// and propagates to internal components (viewport, textarea, message renderer).
+func (m *ReplModel) SetDimensions(w, h int) {
+	m.width = w
+	m.height = h
+	// Update viewport height (content area minus chrome: separator + textarea)
+	vpH := contentViewportHeight(h)
+	if m.viewport.Height != vpH || m.viewport.Width != w {
+		m.viewport.Width = w
+		m.viewport.Height = vpH
+		m.autoScrollConditionally()
+	}
+	// Update textarea width
+	replWidth := m.replWidth()
+	m.textarea.SetWidth(replWidth)
+	// Update message renderer width
+	if m.msgRenderer != nil {
+		_ = m.msgRenderer.SetWidth(replWidth - 4)
+	}
+}
+
 // ─── Provider / session setters ───────────────────────────────────────────────
 
 // SetProvider configures the active provider and returns a tea.Cmd that

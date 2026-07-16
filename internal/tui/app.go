@@ -22,6 +22,7 @@ import (
 
 // Init implements tea.Model. It starts the health ticker and permission listener.
 func (m *AppState) Init() tea.Cmd {
+	slog.Debug("AppState.Init called", "hasRegistry", m.registry != nil, "activeProvider", m.activeProvider, "hasConfig", m.config != nil)
 	// Session retention cleanup: remove sessions older than configured retention.
 	if m.sessionManager != nil && m.config != nil {
 		retentionDays := m.config.Features.SessionRetentionDays
@@ -38,6 +39,7 @@ func (m *AppState) Init() tea.Cmd {
 	// Startup routing decision: skip first-run if provider is already configured.
 	hasProvider := m.registry != nil && m.activeProvider != ""
 	if hasProvider {
+		slog.Debug("Init: hasProvider=true, setting screen=Home")
 		m.screen = ScreenHome
 		m.ensureReplModel()
 		m.switchScreen(m.screen)
