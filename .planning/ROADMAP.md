@@ -164,9 +164,9 @@
 
 Plans:
 
-- [ ] 08-01-PLAN.md — Screenable interface audit and ReplModel.SetDimensions implementation
-- [ ] 08-02-PLAN.md — Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
-- [ ] 08-03-PLAN.md — Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
+- [x] 08-01-PLAN.md — Screenable interface audit and ReplModel.SetDimensions implementation
+- [x] 08-02-PLAN.md — Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
+- [x] 08-03-PLAN.md — Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
 
 ---
 
