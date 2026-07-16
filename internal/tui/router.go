@@ -34,6 +34,11 @@ func (r *Router) Register(id ScreenID, s Screenable) {
 	r.screens[id] = s
 	s.SetDimensions(r.width, r.height)
 	s.SetTheme(r.theme)
+	// Auto-activate if this screen was SwitchTo'd before Register was called
+	// (e.g. during Init where switchScreen runs before routeToScreen).
+	if r.activeID == id && r.active == nil {
+		r.active = s
+	}
 }
 
 // SwitchTo changes the active screen and syncs its dimensions/theme.
