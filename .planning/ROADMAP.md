@@ -11,7 +11,7 @@
 | 5 | Subagents & Parallel Execution | Child agents with isolated worktrees spawn from parent | 3, 4 |
 | 6 | Observability & UX Polish | Metrics, ledger, notifications, dashboard screens | 3 |
 | 7 | Release Hardening | Cross-compile, installers, docs, v1.0.0 | 1-6 |
-| 9 | 2/10 | In Progress|  |
+| 9 | 5/10 | In Progress|  |
 
 ---
 

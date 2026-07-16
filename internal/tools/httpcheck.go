@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -43,11 +44,11 @@ func newSSRFProtectedTransport() *http.Transport {
 			}
 
 			// Check for private/reserved IPs
-			for _, ip := range ips {
-				if isPrivateIP(ip.IP) || isReservedIP(ip.IP) {
-					return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
-				}
+for _, ip := range ips {
+			if search.IsPrivateIP(ip.IP) || search.IsReservedIP(ip.IP) {
+				return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
 			}
+		}
 
 			// Pin the first IP for connection
 			pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)

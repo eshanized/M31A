@@ -14,6 +14,8 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/tools/fileops"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -26,9 +28,9 @@ type Dispatcher struct {
 	pendingResponses  sync.Map // map[int64]chan PermissionResponse — per-request routing
 	todoWrite         *TodoWrite
 	todoRead          *TodoRead
-	questionReqCh     chan QuestionRequest
-	questionRespCh    chan QuestionResponse
-	pendingQuestions  sync.Map // map[int64]chan QuestionResponse — per-request routing
+	questionReqCh     chan types.QuestionRequest
+	questionRespCh    chan types.QuestionResponse
+	pendingQuestions  sync.Map // map[int64]chan types.QuestionResponse — per-request routing
 	rules             []config.PermissionRule
 	originalRules     []config.PermissionRule
 	agents            map[string]config.PermissionsAgentConfig
@@ -66,14 +68,14 @@ type Dispatcher struct {
 // NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
 // The caller MUST call Stop() when the Dispatcher is no longer needed to prevent
 // goroutine leaks (e.g., during session restart or app shutdown).
-func NewDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
+func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
 		tools:               make(map[string]types.Tool),
 		permissions:         make(map[string]bool),
 		requestCh:           make(chan PermissionRequest, PermissionChannelBuffer),
 		responseCh:          make(chan PermissionResponse, PermissionChannelBuffer),
-		questionReqCh:       make(chan QuestionRequest, QuestionChannelBuffer),
-		questionRespCh:      make(chan QuestionResponse, QuestionChannelBuffer),
+		questionReqCh:       make(chan types.QuestionRequest, QuestionChannelBuffer),
+		questionRespCh:      make(chan types.QuestionResponse, QuestionChannelBuffer),
 		rules:               []config.PermissionRule{},
 		originalRules:       []config.PermissionRule{},
 		agents:              make(map[string]config.PermissionsAgentConfig),
@@ -198,7 +200,7 @@ func (d *Dispatcher) SetCollector(c *metrics.Collector) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	for _, tool := range d.tools {
-		if edit, ok := tool.(*Edit); ok {
+		if edit, ok := tool.(*fileops.Edit); ok {
 			edit.SetCollector(c)
 		}
 	}
@@ -210,6 +212,11 @@ func (d *Dispatcher) Unregister(name string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.tools, name)
+}
+
+// UnregisterTool is an alias for Unregister to satisfy ai.ToolDispatcher interface.
+func (d *Dispatcher) UnregisterTool(name string) {
+	d.Unregister(name)
 }
 
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
@@ -344,15 +351,32 @@ func (d *Dispatcher) GetTool(name string) (types.Tool, bool) {
 	return t, ok
 }
 
+func (d *Dispatcher) ListTools() []subagent.ToolDescriptor {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]subagent.ToolDescriptor, 0, len(d.tools))
+	for _, t := range d.tools {
+		desc := subagent.ToolDescriptor{
+			Name:        t.Name(),
+			Description: t.Description(),
+		}
+		if sp, ok := t.(types.SchemaProvider); ok {
+			desc.ParameterSchema = sp.ParameterSchema()
+		}
+		out = append(out, desc)
+	}
+	return out
+}
+
 func (d *Dispatcher) RequestCh() chan PermissionRequest {
 	return d.requestCh
 }
 
-func (d *Dispatcher) QuestionRequestCh() chan QuestionRequest {
+func (d *Dispatcher) QuestionRequestCh() chan types.QuestionRequest {
 	return d.questionReqCh
 }
 
-func (d *Dispatcher) QuestionResponseCh() chan QuestionResponse {
+func (d *Dispatcher) QuestionResponseCh() chan types.QuestionResponse {
 	return d.questionRespCh
 }
 
@@ -462,9 +486,9 @@ func (d *Dispatcher) ensurePermission(ctx context.Context, call types.ToolCall, 
 // for the given request ID. Falls back to the shared channel if no per-request
 // channel exists. This prevents cross-caller response routing (H-2).
 func (d *Dispatcher) RespondQuestion(requestID int64, answer string) {
-	resp := QuestionResponse{Answer: answer}
+	resp := types.QuestionResponse{Answer: answer}
 	if rawCh, ok := d.pendingQuestions.Load(requestID); ok {
-		if qCh, ok := rawCh.(chan QuestionResponse); ok {
+		if qCh, ok := rawCh.(chan types.QuestionResponse); ok {
 			select {
 			case qCh <- resp:
 			default:

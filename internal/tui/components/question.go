@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -22,7 +22,7 @@ type QuestionModel struct {
 	width       int
 }
 
-func NewQuestionModel(req tools.QuestionRequest, t theme.Theme, width int) QuestionModel {
+func NewQuestionModel(req types.QuestionRequest, t theme.Theme, width int) QuestionModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your answer..."
 	ta.Focus()
@@ -137,7 +137,7 @@ func (m *QuestionModel) View() string {
 
 func (m *QuestionModel) submitCmd(answer string) tea.Cmd {
 	return func() tea.Msg {
-		return tools.QuestionResponse{Answer: answer}
+		return types.QuestionResponse{Answer: answer}
 	}
 }
 

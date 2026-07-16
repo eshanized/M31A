@@ -366,3 +366,18 @@ type ToolDefinition struct {
 	Parameters       string `json:"parameters"`
 	ParametersParsed any    `json:"-"` // cached json.Unmarshal result, populated by buildToolDefinitions
 }
+
+// QuestionRequest represents a question sent from the tool to the TUI.
+type QuestionRequest struct {
+	ID          int64
+	Question    string
+	Header      string
+	Options     []string
+	AllowCustom bool
+	TimeoutSecs int
+}
+
+// QuestionResponse represents the user's answer from the TUI.
+type QuestionResponse struct {
+	Answer string
+}

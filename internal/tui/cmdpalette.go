@@ -22,18 +22,18 @@ const (
 	CatWorkflow CommandCategory = "Workflow"
 )
 
-// paletteEntry wraps a CommandInfo with its category and optional shortcut.
-type paletteEntry struct {
-	cmd      CommandInfo
-	category CommandCategory
-	shortcut string // e.g. "ctrl+b" or ""
+// PaletteEntry wraps a CommandInfo with its category and optional shortcut.
+type PaletteEntry struct {
+	Cmd      CommandInfo
+	Category CommandCategory
+	Shortcut string // e.g. "ctrl+b" or ""
 }
 
 // CommandPaletteModel is the command palette overlay.
 type CommandPaletteModel struct {
 	theme    theme.Theme
-	entries  []paletteEntry
-	filtered []paletteEntry
+	entries  []PaletteEntry
+	filtered []PaletteEntry
 	selected int
 	query    string
 	visible  bool
@@ -52,12 +52,12 @@ func NewCommandPalette(registry *CommandRegistry, t theme.Theme) *CommandPalette
 }
 
 // buildPaletteEntries categorizes all registered commands and assigns known shortcuts.
-func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
+func BuildPaletteEntries(registry *CommandRegistry) []PaletteEntry {
 	if registry == nil {
 		return nil
 	}
 	cmds := registry.AllCommandsWithExecute()
-	entries := make([]paletteEntry, 0, len(cmds))
+	entries := make([]PaletteEntry, 0, len(cmds))
 
 	// Shortcut map for common key bindings — synced with actual registered
 	// keybindings in keybindings_screens.go (D-23 fix).
@@ -116,7 +116,7 @@ func buildPaletteEntries(registry *CommandRegistry) []paletteEntry {
 		if cat == "" {
 			cat = CatCore
 		}
-		entries = append(entries, paletteEntry{
+		entries = append(entries, PaletteEntry{
 			cmd:      cmd,
 			category: cat,
 			shortcut: shortcuts[cmd.Name],
@@ -210,7 +210,7 @@ func (cp *CommandPaletteModel) filterCommands() {
 	}
 	q := strings.ToLower(cp.query)
 	type scoredEntry struct {
-		entry paletteEntry
+		entry PaletteEntry
 		score int
 	}
 	var scored []scoredEntry
@@ -244,7 +244,7 @@ func (cp *CommandPaletteModel) filterCommands() {
 // fuzzyScore returns a relevance score and whether the query matches the target.
 // Higher scores indicate better matches. Consecutive character matches and
 // word-boundary matches score higher.
-func fuzzyScore(target, query string) (int, bool) {
+func FuzzyScore(target, query string) (int, bool) {
 	if query == "" {
 		return 0, true
 	}
@@ -388,7 +388,7 @@ func (cp *CommandPaletteModel) renderCategoryHeader(cat CommandCategory) string 
 }
 
 // renderEntry renders a single palette entry with shortcut and search highlighting.
-func (cp *CommandPaletteModel) renderEntry(idx int, entry paletteEntry, paletteWidth int) string {
+func (cp *CommandPaletteModel) renderEntry(idx int, entry PaletteEntry, paletteWidth int) string {
 	t := cp.theme
 	isSelected := idx == cp.selected
 

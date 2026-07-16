@@ -7,18 +7,316 @@ package tuitypes
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/internal/arbitrage"
 	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/types"
 )
+
+// Screenable is the interface that all TUI screens must implement.
+// This enables a router-based architecture where screens are
+// registered and delegated to, rather than using giant switch statements.
+type Screenable interface {
+	Init() tea.Cmd
+	Update(msg tea.Msg) (tea.Model, tea.Cmd)
+	View() string
+	SetDimensions(w, h int)
+	SetTheme(theme.Theme)
+}
+
+// ─── Key binding types ──────────────────────────────────────────────────────────
+
+// KeyContext identifies which screen or layer is active for key binding lookups.
+type KeyContext string
+
+const (
+	CtxGlobal    KeyContext = "global"
+	CtxREPL      KeyContext = "repl"
+	CtxPalette   KeyContext = "palette"
+	CtxSidebar   KeyContext = "sidebar"
+	CtxSettings  KeyContext = "settings"
+	CtxModelSel  KeyContext = "modelselector"
+	CtxResume    KeyContext = "resume"
+	CtxPermModal KeyContext = "permission"
+	CtxFirstRun  KeyContext = "firstrun"
+	CtxPlan      KeyContext = "plan"
+	CtxExecute   KeyContext = "execute"
+	CtxVerify    KeyContext = "verify"
+	CtxShip      KeyContext = "ship"
+	CtxDiff      KeyContext = "diff"
+	CtxLedger    KeyContext = "ledger"
+	CtxRollback  KeyContext = "rollback"
+	CtxMetrics   KeyContext = "metrics"
+	CtxGoalInput KeyContext = "goalinput"
+	CtxDiscuss   KeyContext = "discuss"
+	CtxConfig    KeyContext = "config"
+	CtxHelp      KeyContext = "help"
+	CtxChatHist  KeyContext = "chathistory"
+)
+
+// KeyAction is a callback that produces a tea.Cmd when a key chord fires.
+type KeyAction func() tea.Cmd
+
+// KeyBinding associates a key (or chord) with an action and description.
+type KeyBinding struct {
+	Key         string
+	Description string
+	Action      KeyAction
+	Context     KeyContext
+}
+
+// LeaderTimeoutMsg is emitted after the leader key timeout expires.
+type LeaderTimeoutMsg struct{}
+
+// KeyRegistryOpts configures the key registry.
+type KeyRegistryOpts struct {
+	LeaderKey     string
+	LeaderTimeout time.Duration
+}
+
+// KeyRegistry holds all key bindings indexed by KeyContext.
+// It supports simple key bindings and two-key leader-chord sequences.
+type KeyRegistry struct {
+	bindings      map[KeyContext][]KeyBinding
+
+	leaderActive  bool
+	leaderKey     string
+	leaderTimeout time.Duration
+}
+
+// NewKeyRegistry creates a KeyRegistry with the given options.
+func NewKeyRegistry(opts KeyRegistryOpts) *KeyRegistry {
+	if opts.LeaderKey == "" {
+		opts.LeaderKey = "ctrl+x"
+	}
+	if opts.LeaderTimeout == 0 {
+		opts.LeaderTimeout = 2 * time.Second
+	}
+	return &KeyRegistry{
+		bindings:      make(map[KeyContext][]KeyBinding),
+		leaderKey:     opts.LeaderKey,
+		leaderTimeout: opts.LeaderTimeout,
+	}
+}
+
+// Register adds a key binding to the registry.
+func (r *KeyRegistry) Register(ctx KeyContext, key, description string, action KeyAction) {
+	r.bindings[ctx] = append(r.bindings[ctx], KeyBinding{
+		Key:         key,
+		Description: description,
+		Action:      action,
+		Context:     ctx,
+	})
+}
+
+// Handle processes a key event and returns (handled, cmd).
+// If the leader key is active it looks for chord bindings first.
+// If the leader key itself is pressed it activates leader mode and
+// returns a timeout tick.
+func (r *KeyRegistry) Handle(key string, ctx KeyContext) (bool, tea.Cmd) {
+	if r.leaderActive {
+		r.leaderActive = false
+		chordKey := r.leaderKey + " " + key
+		// Check context-specific chord bindings first
+		for _, b := range r.bindings[ctx] {
+			if b.Key == chordKey {
+				if b.Action != nil {
+					return true, b.Action()
+				}
+				return true, nil
+			}
+		}
+		// Fall through to global chord bindings
+		for _, b := range r.bindings[CtxGlobal] {
+			if b.Key == chordKey {
+				if b.Action != nil {
+					return true, b.Action()
+				}
+				return true, nil
+			}
+		}
+		// Chord not found — just consumed the key sequence
+		// Return a brief toast to let the user know the chord was invalid
+		return true, func() tea.Msg {
+			return ToastMsg{Text: "Unknown leader chord", Type: "warning", Duration: 1 * time.Second}
+		}
+	}
+
+	// Activate leader mode
+	if key == r.leaderKey {
+		r.leaderActive = true
+		return true, tea.Tick(r.leaderTimeout, func(time.Time) tea.Msg {
+			return LeaderTimeoutMsg{}
+		})
+	}
+
+	// Simple bindings — context then global
+	for _, b := range r.bindings[ctx] {
+		if b.Key == key {
+			if b.Action != nil {
+				return true, b.Action()
+			}
+			return true, nil
+		}
+	}
+	for _, b := range r.bindings[CtxGlobal] {
+		if b.Key == key {
+			if b.Action != nil {
+				return true, b.Action()
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// IsLeaderActive returns whether the leader key is currently active.
+func (r *KeyRegistry) IsLeaderActive() bool {
+	return r.leaderActive
+}
+
+// RenderWhichKey renders the which-key overlay for the given context.
+func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, width int, brand, textSecondary, textMuted lipgloss.Color) string {
+	// Implementation will be provided by the main tui package
+	// This is a placeholder to satisfy the interface
+	return ""
+}
+
+// ─── Layout constants ──────────────────────────────────────────────────────────
+
+// Width thresholds for responsive layout
+const (
+	// WidthUltraCompact is the minimum width for which only the REPL viewport
+	// and input area are shown — no header, no sidebar, no status bar chrome.
+	WidthUltraCompact = 40
+
+	// WidthCompact is the minimum width for a compact layout that includes
+	// a compact header but no sidebar and no keyboard hints.
+	WidthCompact = 60
+
+	// WidthFull is the minimum width for the full layout including sidebar,
+	// all keyboard hints, cost display, and all chrome elements.
+	WidthFull = 80
+)
+
+// SidebarRefreshInterval is the interval at which the sidebar polls for git status updates.
+const SidebarRefreshInterval = 5 * time.Second
+
+// Memory management limits to prevent unbounded growth
+const (
+	// MaxMessages is the maximum number of messages to keep in REPL history.
+	// Older messages are pruned when this limit is exceeded.
+	MaxMessages = 500
+
+	// MaxTodoItems is the maximum number of TODO items to display in the sidebar.
+	MaxTodoItems = 50
+
+	// MaxToolCallCache is the maximum number of tool calls to cache in the message renderer.
+	MaxToolCallCache = 200
+
+	// MaxScreenStack is the maximum size of the screen navigation stack.
+	MaxScreenStack = 20
+)
+
+// UX_V2_CHROME enables the simplified chrome layout (M1).
+// When false, the legacy header/footer rendering is used.
+const UX_V2_CHROME = true
+
+// Layout dimension constants
+const (
+	// MinReplWidth is the minimum width for the REPL content area.
+	MinReplWidth = 20
+
+	// MinModalWidth is the minimum width for modal dialogs.
+	MinModalWidth = 40
+
+	// MinModalHeight is the minimum height for modal dialogs.
+	MinModalHeight = 10
+
+	// DefaultSidebarWidth is the default width for the sidebar panel.
+	DefaultSidebarWidth = 30
+)
+
+// ─── String formatting helpers ──────────────────────────────────────────────────
+
+// TruncateWithEllipsis truncates a string to maxWidth, appending "…" if truncated.
+func TruncateWithEllipsis(s string, maxWidth int) string {
+	if len(s) <= maxWidth {
+		return s
+	}
+	if maxWidth <= 1 {
+		return "…"
+	}
+	return s[:maxWidth-1] + "…"
+}
+
+// TruncateEnd truncates a string to maxLen, appending "…" if truncated.
+func TruncateEnd(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 1 {
+		return "…"
+	}
+	return s[:maxLen-1] + "…"
+}
+
+// formatSI formats an integer with SI suffix (K, M).
+func formatSI(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// formatDurationMs formats a duration in milliseconds as a human-readable string.
+func formatDurationMs(ms int64) string {
+	if ms < 0 {
+		return "0s"
+	}
+	s := ms / 1000
+	m := s / 60
+	h := m / 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%dm", h, m%60)
+	case m > 0:
+		return fmt.Sprintf("%dm%ds", m, s%60)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// ProviderShortName returns a short display name for a provider.
+func ProviderShortName(name string) string {
+	switch strings.ToLower(name) {
+	case types.ProviderOpenRouter:
+		return "OR"
+	case types.ProviderZen, "zen-gateway":
+		return "Zen"
+	case "openai":
+		return "OAI"
+	case "anthropic":
+		return "ANT"
+	default:
+		return name
+	}
+}
 
 // Screen identifies which full-screen view is active.
 type Screen int
@@ -544,6 +842,14 @@ type GhostFile struct {
 	Path    string
 	Content string
 	Prompt  string
+}
+
+// ─── Key action messages ───────────────────────────────────────────────────────
+
+// KeyActionMsg is emitted by leader-key bindings to communicate an action name
+// to AppState.handleKeyAction.
+type KeyActionMsg struct {
+	Action string
 }
 
 // ─── Workflow engine interface ────────────────────────────────────────────────

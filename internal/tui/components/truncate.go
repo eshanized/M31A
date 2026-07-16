@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
@@ -75,3 +76,17 @@ func TruncateError(s string) string {
 
 // Ensure lipgloss is imported (used by TruncateWithEllipsis for ANSI-aware width)
 var _ = lipgloss.Width
+
+// FormatSI formats an integer with SI suffix (K, M).
+func FormatSI(n int) string {
+	const unit = 1000
+	if n < unit {
+		return fmt.Sprintf("%d", n)
+	}
+	div, exp := int64(unit), 0
+	for n >= unit*unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%c", float64(n)/float64(div), "KMGTPE"[exp])
+}

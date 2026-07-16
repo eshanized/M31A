@@ -5,11 +5,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/eshanized/M31A/internal/tools/ai"
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/tools/fileops"
+	"github.com/eshanized/M31A/internal/tools/exec"
+	"github.com/eshanized/M31A/internal/tools/search"
 )
 
 func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (*Dispatcher, error) {
-	d := NewDispatcher(cfg)
+	d := newDispatcher(cfg)
 	d.workDir_ = workDir
 
 	// Load persistent permissions for this project
@@ -46,7 +50,6 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	// Extract config values with safe defaults
 	bashMaxTimeoutSecs := 1800
 	webfetchMaxRetries := 3
-	webfetchRetryDelayMs := 100
 	var additionalBlockedCommands []string
 	var additionalObfuscationPatterns []string
 	if toolsCfg != nil {
@@ -56,25 +59,65 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 		if toolsCfg.WebfetchMaxRetries > 0 {
 			webfetchMaxRetries = toolsCfg.WebfetchMaxRetries
 		}
-		if toolsCfg.WebfetchRetryDelayMs > 0 {
-			webfetchRetryDelayMs = toolsCfg.WebfetchRetryDelayMs
-		}
 		additionalBlockedCommands = toolsCfg.AdditionalBlockedCommands
 		additionalObfuscationPatterns = toolsCfg.AdditionalObfuscationPatterns
 	}
 
-	if err := d.Register(NewBash(workDir, bashMaxTimeoutSecs, additionalBlockedCommands, additionalObfuscationPatterns)); err != nil {
+	// Create DNS cache for web fetch
+	dnsCache := search.NewDNSCache(search.DNSCacheTTL, 64)
+
+	// Register fileops tools
+	if err := d.Register(fileops.NewFileRead(workDir)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewFileRead(workDir)); err != nil {
+	if err := d.Register(fileops.NewFileWrite(workDir, backupDir)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewFileWrite(workDir, backupDir)); err != nil {
+	if err := d.Register(fileops.NewEdit(workDir, backupDir)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewEdit(workDir, backupDir)); err != nil {
+	if err := d.Register(fileops.NewFileList(workDir)); err != nil {
 		return nil, err
 	}
+	if err := d.Register(fileops.NewFileDelete(workDir, backupDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(fileops.NewFileMove(workDir, backupDir)); err != nil {
+		return nil, err
+	}
+
+	// Register exec tools
+	if err := d.Register(exec.NewBash(workDir, bashMaxTimeoutSecs, additionalBlockedCommands, additionalObfuscationPatterns)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(exec.NewDevServer(workDir)); err != nil {
+		return nil, err
+	}
+
+	// Register search tools
+	if err := d.Register(search.NewWebFetch(sessionsDir, webfetchMaxRetries, dnsCache)); err != nil {
+		return nil, err
+	}
+	webSearchBaseURL := ""
+	if toolsCfg != nil && toolsCfg.WebSearchBaseURL != "" {
+		webSearchBaseURL = toolsCfg.WebSearchBaseURL
+	}
+	if err := d.Register(search.NewWebSearch(webSearchBaseURL)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(search.NewGlob(workDir)); err != nil {
+		return nil, err
+	}
+	if err := d.Register(search.NewGrep(workDir)); err != nil {
+		return nil, err
+	}
+
+	// Register AI tools
+	if err := d.Register(ai.NewAskUserQuestion(d.questionReqCh, d.questionRespCh, &d.pendingQuestions)); err != nil {
+		return nil, err
+	}
+
+	// Register todo tools (still at root)
 	todo := NewTodoWrite(sessionsDir, "")
 	d.todoWrite = todo
 	if err := d.Register(todo); err != nil {
@@ -85,41 +128,12 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	if err := d.Register(todoRead); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewWebFetch(sessionsDir, false, webfetchMaxRetries, webfetchRetryDelayMs)); err != nil {
-		return nil, err
-	}
-	webSearchBaseURL := ""
-	if toolsCfg != nil && toolsCfg.WebSearchBaseURL != "" {
-		webSearchBaseURL = toolsCfg.WebSearchBaseURL
-	}
-	if err := d.Register(NewWebSearch(webSearchBaseURL)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewAskUserQuestion(d.questionReqCh, d.questionRespCh, &d.pendingQuestions)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewGlob(workDir)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewGrep(workDir)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewFileList(workDir)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewFileDelete(workDir, backupDir)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewFileMove(workDir, backupDir)); err != nil {
-		return nil, err
-	}
+
+	// Register remaining root tools
 	if err := d.Register(NewCodeMap(workDir)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewCodeComplexity(workDir, nil)); err != nil {
-		return nil, err
-	}
-	if err := d.Register(NewDevServer(workDir)); err != nil {
 		return nil, err
 	}
 	if err := d.Register(NewHTTPCheck()); err != nil {
@@ -129,6 +143,12 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 		return nil, err
 	}
 	return d, nil
+}
+
+// NewDispatcher implements ai.ToolDispatcher interface for use by subagents.
+// This is a factory function that creates a Dispatcher configured for subagent workspaces.
+func NewDispatcher(workDir, backupDir, sessionsDir string, permCfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (ai.ToolDispatcher, error) {
+	return DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg, toolsCfg)
 }
 
 func homeDir() string {
