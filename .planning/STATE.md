@@ -18,8 +18,8 @@ progress:
 
 - **Current Milestone**: v1.0.0 — Initial Release
 - **Current Phase**: 9 — Architecture Upgrade & Directory Restructuring
-- **Phase Status**: Wave 1/7 Complete — Executing
-- **Last Updated**: 2026-07-16T09:45:00Z
+- **Phase Status**: Wave 2/7 Complete — Executing
+- **Last Updated**: 2026-07-16T15:45:00Z
 
 ## Phase Progress
 
@@ -32,7 +32,7 @@ progress:
 | 5 | Subagents & Parallel Execution | Pending | — | — |
 | 6 | Observability & UX Polish | Pending | — | — |
 | 7 | Release Hardening | Pending | — | — |
-| 9 | Architecture Upgrade & Directory Restructuring | **Wave 1/7 Complete** | 2026-07-16 | — |
+| 9 | Architecture Upgrade & Directory Restructuring | **Wave 2/7 Complete** | 2026-07-16 | — |
 
 ## Active Work
 
@@ -52,6 +52,7 @@ Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT
 | 2026-07-16 | 1 | Phase context captured, discussion log written |
 | 2026-07-16 | 9 | Phase context captured — architecture upgrade decisions locked |
 | 2026-07-16 | 9 | **Wave 1 complete** — Plan 09-01 Type Layering Cleanup executed (internal/types/ deleted, 132+ imports rewritten to pkg/types) |
+| 2026-07-16 | 9 | **Wave 2 complete** — Plan 09-02 Package Reorganization executed (17 pkg/* packages moved to internal/*, all imports rewritten) |
 
 ## Deferred Ideas Log
 
@@ -66,7 +67,13 @@ Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT
 ## Git State
 
 - **Branch**: master
-- **Last Commit**: refactor(09-01): remove internal/types alias layer (d7aea4b2)
+- **Last Commit**: refactor(09-02): move pkg/* to internal/* and rewrite imports (7387fa54)
 - **Uncommitted**: .planning/STATE.md
+
+## Current Position
+
+- **Phase**: 09-architecture-upgrade (Wave 2 complete)
+- **Plan**: 09-02 Package Reorganization — **COMPLETE**
+- **Next**: 09-03 TUI Screen Sub-Package Extraction (Wave 3)
 
 EOF
