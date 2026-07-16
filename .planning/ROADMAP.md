@@ -178,21 +178,29 @@ Plans:
 **Requirements**: NFR-4 (Maintainability)
 
 **Success Criteria**:
-- All 180 TUI files split into screen sub-packages under `internal/tui/screens/`
-- Workflow engine decomposed with extracted shared concerns
-- Tools grouped by domain (fileops, exec, search, ai)
-- `internal/types/` aliases removed — all imports go to `pkg/types/` directly
-- `pkg/` contents moved into `internal/` (no external consumers)
-- Interface-driven boundaries between packages
-- All tests pass, no circular imports
+- `pkg/` → `internal/` migration complete (17 packages)
+- `internal/types/` alias layer removed
+- TUI screens in `internal/tui/screens/<name>/` (34 sub-packages)
+- Tools grouped into `fileops/`, `exec/`, `search/`, `ai/` (4 domains)
+- Workflow engine split into `engine/`, `phases/`, `streaming/`
+- TUI handlers grouped into `handlers/` sub-package
+- Interface-driven boundaries: WorkflowEngine, ToolExecutor, ProviderRegistry
+- Constructor injection at composition root (main.go)
+- All quality gates pass: `make check`, coverage ≥ 75%, import graph clean
 
 **Estimated Effort**: 3-4 days
 
-**Plans**:
-- Plan 01: Type layering cleanup — remove internal/types/ aliases, move internal-only types
-- Plan 02: Package reorganization — split TUI, workflow, tools; move pkg/ to internal/
-- Plan 03: Interface extraction and dependency injection wiring
-- Plan 04: Verification — all tests pass, import graph clean, no circular deps
+**Plans** (10 plans, each independently compilable/testable):
+- Plan 01: Type Layering Cleanup — Remove internal/types/ alias layer
+- Plan 02: Package Reorganization — Move pkg/ to internal/
+- Plan 03: TUI Screen Sub-Packages — Extract 34 screens to internal/tui/screens/
+- Plan 04: Tool Domain Grouping — Group tools into fileops/, exec/, search/, ai/
+- Plan 05: Workflow Engine Decomposition — Split into engine/, phases/, streaming/
+- Plan 06: TUI Handler Grouping — Consolidate handlers into handlers/ sub-package
+- Plan 07: Interface Extraction — WorkflowEngine + TUI-facing interfaces
+- Plan 08: Tool & Provider Interfaces — ToolExecutor, ProviderRegistry
+- Plan 09: Constructor Injection — Wire dependencies at composition root
+- Plan 10: Final Verification — Phase gate validation
 
 ---
 

@@ -596,22 +596,24 @@ go tool cover -func=coverage.out | tail -1
 
 **If this table is empty:** All claims in this research were verified or cited -- no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Workflow engine decomposition depth**
-   - What we know: `engine.go` is 1707 lines with phase runners, streaming, and orchestration
-   - What's unclear: Whether splitting into `workflow/engine/`, `workflow/phases/`, `workflow/streaming/` creates too many small packages vs. the benefit
-   - Recommendation: Start with extracting phase runners only (conservative per D-01). Keep streaming logic in engine unless it exceeds 500 lines after extraction
+All open questions resolved per planning decisions. Inline resolutions below:
 
-2. **Screen sub-package granularity**
-   - What we know: 34 screens exist, some very small (e.g., `confirm_quit`)
-   - What's unclear: Whether tiny screens warrant their own sub-package
-   - Recommendation: Only create sub-packages for screens with 3+ files or 200+ lines. Smaller screens stay in `tui/` root
+### 1. Workflow engine decomposition depth — RESOLVED
+- **Decision:** Split into three sub-packages as specified in D-03: `workflow/engine/`, `workflow/phases/`, `workflow/streaming/`
+- **Rationale:** The 1707-line `engine.go` clearly separates into (a) core orchestration state machine, (b) 18 phase runner files, (c) streaming logic. Each group has 3+ files and distinct responsibilities. D-01 conservative splitting means "don't split healthy code" — this code is not healthy (too large, mixed concerns).
+- **Plan mapping:** Plan 05 handles this decomposition.
 
-3. **Handler file grouping**
-   - What we know: D-12 says group `handlers/workflow.go`, `handlers/config.go`, `handlers/navigation.go`
-   - What's unclear: Whether creating a `handlers/` sub-package adds value vs. keeping files in `tui/` root with naming convention
-   - Recommendation: Use `app_handlers_workflow.go` naming in `tui/` root (current pattern). Sub-package adds import overhead without clear benefit for internal TUI files
+### 2. Screen sub-package granularity — RESOLVED
+- **Decision:** Create sub-packages for ALL 34 screens as specified in D-02. The RESEARCH.md file listing confirms 34 distinct screen model/view pairs.
+- **Rationale:** D-02 explicitly says "split screen-specific code into `internal/tui/screens/<name>/` (e.g., `screens/home/`, `screens/repl/`, `screens/settings/`)". The list includes small screens like `confirm_quit` — the decision is explicit, not a judgment call.
+- **Plan mapping:** Plan 03 handles all 34 screen moves.
+
+### 3. Handler file grouping — RESOLVED
+- **Decision:** Create `internal/tui/handlers/` sub-package with 3 files: `workflow.go`, `config.go`, `navigation.go` per D-12.
+- **Rationale:** D-12 explicitly says "Group TUI handler files by domain: `handlers/workflow.go` (phase transitions), `handlers/config.go` (settings), `handlers/navigation.go` (screen switching)." This is a locked decision, not a recommendation.
+- **Plan mapping:** Plan 06 handles handler grouping.
 
 ## Environment Availability
 
