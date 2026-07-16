@@ -25,7 +25,7 @@ func TestTreeSitterParser_ParseGo(t *testing.T) {
 import (
 	"fmt"
 	"strings"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func Exported() string {
@@ -63,7 +63,7 @@ var DefaultName = "test"
 	for _, imp := range info.Imports {
 		paths[imp.Path] = true
 	}
-	for _, want := range []string{"fmt", "strings", "github.com/eshanized/M31A/pkg/types"} {
+	for _, want := range []string{"fmt", "strings", "github.com/eshanized/M31A/internal/types"} {
 		if !paths[want] {
 			t.Errorf("missing import: %s", want)
 		}

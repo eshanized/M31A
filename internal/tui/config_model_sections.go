@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // buildSections defines all sections and their fields in the same order as config.toml.

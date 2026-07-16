@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // DashboardModel shows the workflow pipeline overview.

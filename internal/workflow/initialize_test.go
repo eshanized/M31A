@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 func TestEngine_RunInitialize(t *testing.T) {

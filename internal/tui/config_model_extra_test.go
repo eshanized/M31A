@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/testutil"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func testConfigModel(t *testing.T) *ConfigModel {

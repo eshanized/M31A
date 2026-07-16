@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestHandleSearch_MatchesSegmentContent(t *testing.T) {

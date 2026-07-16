@@ -3,7 +3,7 @@ package workflow
 import (
 	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/git"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // MsgEmitter is a callback interface for emitting events back to the TUI.

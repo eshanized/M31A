@@ -7,8 +7,8 @@ import (
 
 	"github.com/eshanized/M31A/internal/decision"
 	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/pkg/taskrunner"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/taskrunner"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // ─── W5: Task runner skips completed tasks on resume ─────────────────────────

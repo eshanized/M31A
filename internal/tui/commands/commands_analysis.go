@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // handleComplexity executes the CodeComplexity tool and returns the report.

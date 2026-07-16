@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // ChatRequest is an alias for types.ChatRequest (canonical definition in pkg/types/).

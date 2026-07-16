@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestAgent_NewAgent(t *testing.T) {

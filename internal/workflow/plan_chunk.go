@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // PlanOutline represents the high-level structure of a chunked plan.

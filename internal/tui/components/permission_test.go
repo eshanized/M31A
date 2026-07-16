@@ -6,7 +6,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestNewPermissionModal_DangerousTool(t *testing.T) {

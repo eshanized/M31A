@@ -7,7 +7,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 type FallbackEvent struct {

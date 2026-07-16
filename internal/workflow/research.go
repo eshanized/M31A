@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // runResearch performs a pre-plan research step that investigates the codebase,

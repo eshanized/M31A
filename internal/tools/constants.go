@@ -3,7 +3,7 @@ package tools
 import (
 	"time"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 const (

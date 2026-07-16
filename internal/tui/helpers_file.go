@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/internal/session"
 )
 
 // ─── AppState session helpers ─────────────────────────────────────────────────

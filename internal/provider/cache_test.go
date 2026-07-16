@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestModelCache_Get_StaleFallback(t *testing.T) {

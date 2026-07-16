@@ -25,12 +25,12 @@ import (
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/pkg/autodream"
-	"github.com/eshanized/M31A/pkg/keychain"
-	"github.com/eshanized/M31A/pkg/ledger"
-	"github.com/eshanized/M31A/pkg/rollback"
-	"github.com/eshanized/M31A/pkg/session"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/autodream"
+	"github.com/eshanized/M31A/internal/keychain"
+	"github.com/eshanized/M31A/internal/ledger"
+	"github.com/eshanized/M31A/internal/rollback"
+	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 var (

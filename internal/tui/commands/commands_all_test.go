@@ -6,9 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
-	"github.com/eshanized/M31A/pkg/autodream"
-	"github.com/eshanized/M31A/pkg/ledger"
-	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/internal/autodream"
+	"github.com/eshanized/M31A/internal/ledger"
+	"github.com/eshanized/M31A/internal/session"
 )
 
 // ─── ParseCommand tests ──────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // HTTPStatusError carries the HTTP status code from a provider response,

@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/internal/session"
 )
 
 func TestResumeSetters(t *testing.T) {

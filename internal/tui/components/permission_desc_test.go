@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestGenerateDescription_Bash(t *testing.T) {

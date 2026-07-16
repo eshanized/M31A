@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // capabilityConfig holds the user-configured model capability overrides.

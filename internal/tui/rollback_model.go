@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/rollback"
+	"github.com/eshanized/M31A/internal/rollback"
 )
 
 // RollbackModel shows the git commit timeline and allows resetting to any commit.

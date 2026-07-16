@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/pkg/metrics"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // ============================================================================

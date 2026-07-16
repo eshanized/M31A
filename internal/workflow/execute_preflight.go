@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // ExecutePreflightResult holds the outcome of pre-execution validation.

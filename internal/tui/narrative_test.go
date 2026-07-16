@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/pkg/narrative"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/narrative"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 func TestNarrativeStateUpdate(t *testing.T) {

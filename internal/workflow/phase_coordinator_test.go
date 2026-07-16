@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/pkg/session"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/session"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // mockDispatcher implements the Dispatcher interface for testing.

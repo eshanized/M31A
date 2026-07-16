@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/internal/session"
 )
 
 // ResumeModel shows the session browser so the user can resume a past session.

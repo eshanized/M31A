@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/pkg/narrative"
+	"github.com/eshanized/M31A/internal/narrative"
 )
 
 // narrativeEmitter wraps a channelEmitter and intercepts workflow messages

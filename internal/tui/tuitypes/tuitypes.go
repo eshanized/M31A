@@ -15,9 +15,9 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/pkg/arbitrage"
-	"github.com/eshanized/M31A/pkg/session"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/arbitrage"
+	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // Screen identifies which full-screen view is active.

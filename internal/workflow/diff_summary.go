@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/git"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // CaptureDiffSummary computes a diff summary between two git commit hashes.

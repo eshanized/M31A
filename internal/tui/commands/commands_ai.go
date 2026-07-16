@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
-	"github.com/eshanized/M31A/pkg/arbitrage"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/arbitrage"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // handleMemory manages context memory (AutoDream consolidation).

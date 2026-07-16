@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/ledger"
+	"github.com/eshanized/M31A/internal/ledger"
 )
 
 // LedgerModel displays the cross-session learning ledger.

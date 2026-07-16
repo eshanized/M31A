@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // AgentSwitchMsg is emitted when the engine suggests switching from planner

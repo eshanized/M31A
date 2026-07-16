@@ -14,8 +14,8 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/keychain"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/keychain"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // SettingsTab identifies which settings tab is active.

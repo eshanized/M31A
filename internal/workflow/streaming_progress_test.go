@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestStreamingProgress(t *testing.T) {

@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestBuildToolDefs_IncludesAllRegistered(t *testing.T) {

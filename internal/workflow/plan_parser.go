@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	m31types "github.com/eshanized/M31A/pkg/types"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // Pre-compiled regex patterns — avoids recompilation on every ParsePlan call.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/internal/session"
 )
 
 // renderResume renders the session browser screen content.

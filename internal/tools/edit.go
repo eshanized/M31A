@@ -11,8 +11,8 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/pkg/metrics"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // Compile-time interface check

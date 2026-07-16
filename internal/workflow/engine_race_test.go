@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // TestConcurrentSetModelAndProviderAndModel verifies that SetModel and

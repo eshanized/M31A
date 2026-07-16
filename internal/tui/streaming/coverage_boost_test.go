@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/tokens"
-	"github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // --- TruncateMessagesForLLM edge cases ---

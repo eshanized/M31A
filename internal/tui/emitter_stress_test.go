@@ -14,8 +14,8 @@ import (
 	"github.com/eshanized/M31A/internal/provider/mock"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/pkg/session"
-	m31types "github.com/eshanized/M31A/pkg/types"
+	"github.com/eshanized/M31A/internal/session"
+	m31types "github.com/eshanized/M31A/internal/types"
 )
 
 // Test constants matching production values
