@@ -379,7 +379,10 @@ func (m *AppState) contentDimensions() (w, h int) {
 		h = 1
 	}
 	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(m.width) {
-		w -= m.sidebarModel.GetWidth()
+		sidebarW := m.sidebarModel.GetWidth()
+		if sidebarW > 0 && sidebarW < w {
+			w -= sidebarW
+		}
 	}
 	if w < 1 {
 		w = 1

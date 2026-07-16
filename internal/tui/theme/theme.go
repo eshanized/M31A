@@ -178,11 +178,7 @@ func (m *Manager) resolve() {
 
 	// Apply 16-color ANSI fallback if terminal doesn't support 256/truecolor
 	if m.profile == Profile16 {
-		base.Brand = lipgloss.Color("208")
-		base.Success = lipgloss.Color("2")
-		base.Error = lipgloss.Color("1")
-		base.Warning = lipgloss.Color("3")
-		base.Thinking = lipgloss.Color("4")
+		base = ansiPalette()
 		applyThemeStyles(&base)
 	}
 
