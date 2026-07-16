@@ -50,31 +50,31 @@ func ansiPalette() Theme {
 	t.BackgroundPanel = lipgloss.Color("0")
 	t.BackgroundElement = lipgloss.Color("8")
 	// Text: map to ANSI white/bright white hierarchy
-	t.TextPrimary = lipgloss.Color("15")   // bright white
-	t.TextSecondary = lipgloss.Color("7")  // white (gray)
-	t.TextMuted = lipgloss.Color("8")      // bright black (dark gray)
+	t.TextPrimary = lipgloss.Color("15")  // bright white
+	t.TextSecondary = lipgloss.Color("7") // white (gray)
+	t.TextMuted = lipgloss.Color("8")     // bright black (dark gray)
 	t.Text = lipgloss.Color("15")
 	// Borders
-	t.Border = lipgloss.Color("8")         // bright black
-	t.BorderActive = lipgloss.Color("12")  // bright blue
-	t.BorderSubtle = lipgloss.Color("0")   // black (invisible)
+	t.Border = lipgloss.Color("8")        // bright black
+	t.BorderActive = lipgloss.Color("12") // bright blue
+	t.BorderSubtle = lipgloss.Color("0")  // black (invisible)
 	// Accent colors
-	t.Brand = lipgloss.Color("12")         // bright blue (professional)
+	t.Brand = lipgloss.Color("12") // bright blue (professional)
 	t.Primary = lipgloss.Color("12")
-	t.Accent = lipgloss.Color("13")        // bright magenta
+	t.Accent = lipgloss.Color("13") // bright magenta
 	t.Info = lipgloss.Color("12")
 	// Semantic colors
-	t.Success = lipgloss.Color("10")       // bright green
-	t.Error = lipgloss.Color("9")          // bright red
-	t.Warning = lipgloss.Color("11")       // bright yellow
-	t.Thinking = lipgloss.Color("12")      // bright blue
+	t.Success = lipgloss.Color("10")  // bright green
+	t.Error = lipgloss.Color("9")     // bright red
+	t.Warning = lipgloss.Color("11")  // bright yellow
+	t.Thinking = lipgloss.Color("12") // bright blue
 	t.Secondary = lipgloss.Color("13")
 	// Badge foreground
 	t.BadgeForeground = lipgloss.Color("15") // bright white
 	t.BadgeTextLight = lipgloss.Color("15")
 	t.BadgeTextDark = lipgloss.Color("0")
 	// Selection and shadow
-	t.SelectionBg = lipgloss.Color("12")   // bright blue
+	t.SelectionBg = lipgloss.Color("12") // bright blue
 	t.ShadowColor = lipgloss.Color("0")
 	// Code
 	t.CodeBG = lipgloss.Color("0")

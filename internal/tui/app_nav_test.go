@@ -36,6 +36,26 @@ func TestContentDimensions_SmallHeight(t *testing.T) {
 	}
 }
 
+func TestContentDimensions_UltraNarrow(t *testing.T) {
+	m := &AppState{width: 30, height: 8}
+	w, h := m.contentDimensions()
+	if w < 1 {
+		t.Errorf("w=%d, want >= 1", w)
+	}
+	if h < 1 {
+		t.Errorf("h=%d, want >= 1", h)
+	}
+}
+
+func TestContentDimensions_NegativeChrome(t *testing.T) {
+	m := &AppState{width: 80, height: 1}
+	_, h := m.contentDimensions()
+	// ChromeHeight is 2, so h = 1 - 2 = -1, guarded to 1
+	if h < 1 {
+		t.Errorf("h=%d, want >= 1", h)
+	}
+}
+
 // ─── popScreen ─────────────────────────────────────────────────────────────
 
 func TestPopScreen_EmptyStack(t *testing.T) {
@@ -388,7 +408,8 @@ func TestEnsureSubModel_Plan_NilModel(t *testing.T) {
 }
 
 func TestEnsureSubModel_Execute_NilModel(t *testing.T) {
-	m := &AppState{executeModel: nil}
+	tm := theme.NewManager(theme.ModeDark)
+	m := &AppState{executeModel: nil, themeManager: tm, width: 80, height: 24}
 	cmd := m.ensureSubModel(ScreenExecute)
 	if cmd != nil {
 		t.Error("nil executeModel should return nil cmd")
@@ -396,7 +417,8 @@ func TestEnsureSubModel_Execute_NilModel(t *testing.T) {
 }
 
 func TestEnsureSubModel_Verify_NilModel(t *testing.T) {
-	m := &AppState{verifyModel: nil}
+	tm := theme.NewManager(theme.ModeDark)
+	m := &AppState{verifyModel: nil, themeManager: tm, width: 80, height: 24}
 	cmd := m.ensureSubModel(ScreenVerify)
 	if cmd != nil {
 		t.Error("nil verifyModel should return nil cmd")
@@ -404,7 +426,8 @@ func TestEnsureSubModel_Verify_NilModel(t *testing.T) {
 }
 
 func TestEnsureSubModel_Ship_NilModel(t *testing.T) {
-	m := &AppState{shipModel: nil}
+	tm := theme.NewManager(theme.ModeDark)
+	m := &AppState{shipModel: nil, themeManager: tm, width: 80, height: 24}
 	cmd := m.ensureSubModel(ScreenShip)
 	if cmd != nil {
 		t.Error("nil shipModel should return nil cmd")
