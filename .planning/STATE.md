@@ -32,16 +32,17 @@ progress:
 | 5 | Subagents & Parallel Execution | Pending | — | — |
 | 6 | Observability & UX Polish | Pending | — | — |
 | 7 | Release Hardening | Pending | — | — |
+| 9 | Architecture Upgrade & Directory Restructuring | Context Done | 2026-07-16 | — |
 
 ## Active Work
 
-Phase 1 context captured in `.planning/phases/08-investigate-and-fix-tui-blank-screens-issue-all-screens-rend/08-CONTEXT.md`. Key findings:
+Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT.md`. Key decisions:
 
-- TTY requirement confirmed — prioritize real terminal
-- WindowSizeMsg timing is expected Bubble Tea behavior
-- Theme: lipgloss compatibility suspected
-- Screenable: ReplModel missing SetDimensions, full audit needed
-- Dimensions: contentDimensions() edge case guards needed
+- Conservative package splitting — only clear domain boundaries
+- Delete `internal/types/` aliases, import `pkg/types/` directly
+- Move `pkg/` contents into `internal/` (no external consumers)
+- Screen sub-packages for TUI, domain grouping for tools
+- Interface-driven boundaries + constructor injection
 
 ## Session History
 
@@ -49,6 +50,7 @@ Phase 1 context captured in `.planning/phases/08-investigate-and-fix-tui-blank-s
 |------|-------|--------|
 | 2026-07-16 | — | Project initialized, codebase mapped, planning docs created |
 | 2026-07-16 | 1 | Phase context captured, discussion log written |
+| 2026-07-16 | 9 | Phase context captured — architecture upgrade decisions locked |
 
 ## Deferred Ideas Log
 

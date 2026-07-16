@@ -11,6 +11,7 @@
 | 5 | Subagents & Parallel Execution | Child agents with isolated worktrees spawn from parent | 3, 4 |
 | 6 | Observability & UX Polish | Metrics, ledger, notifications, dashboard screens | 3 |
 | 7 | Release Hardening | Cross-compile, installers, docs, v1.0.0 | 1-6 |
+| 9 | Architecture Upgrade & Directory Restructuring | Reorganize code layout, refactor internal architecture, establish cleaner module boundaries | — |
 
 ---
 
@@ -167,6 +168,31 @@ Plans:
 - [x] 08-01-PLAN.md — Screenable interface audit and ReplModel.SetDimensions implementation
 - [x] 08-02-PLAN.md — Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
 - [x] 08-03-PLAN.md — Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
+
+---
+
+## Phase 9: Architecture Upgrade & Directory Restructuring
+
+**Goal**: Reorganize code layout, refactor internal architecture, and establish cleaner module boundaries to improve maintainability and reduce coupling.
+
+**Requirements**: NFR-4 (Maintainability)
+
+**Success Criteria**:
+- All 180 TUI files split into screen sub-packages under `internal/tui/screens/`
+- Workflow engine decomposed with extracted shared concerns
+- Tools grouped by domain (fileops, exec, search, ai)
+- `internal/types/` aliases removed — all imports go to `pkg/types/` directly
+- `pkg/` contents moved into `internal/` (no external consumers)
+- Interface-driven boundaries between packages
+- All tests pass, no circular imports
+
+**Estimated Effort**: 3-4 days
+
+**Plans**:
+- Plan 01: Type layering cleanup — remove internal/types/ aliases, move internal-only types
+- Plan 02: Package reorganization — split TUI, workflow, tools; move pkg/ to internal/
+- Plan 03: Interface extraction and dependency injection wiring
+- Plan 04: Verification — all tests pass, import graph clean, no circular deps
 
 ---
 
