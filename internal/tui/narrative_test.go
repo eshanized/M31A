@@ -3,9 +3,9 @@ package tui
 import (
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/narrative"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 func TestNarrativeStateUpdate(t *testing.T) {

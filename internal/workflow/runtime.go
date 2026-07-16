@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/shell"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // SmokeTestResult holds the result of a single HTTP smoke test.

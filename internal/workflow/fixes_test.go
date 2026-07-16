@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/ledger"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 func TestEngine_SetLedger(t *testing.T) {

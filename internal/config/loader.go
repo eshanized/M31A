@@ -13,8 +13,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/eshanized/M31A/internal/fileutil"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/keychain"
+	"github.com/eshanized/M31A/pkg/types"
 	"github.com/fsnotify/fsnotify"
 )
 

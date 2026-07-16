@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 	"github.com/pkoukk/tiktoken-go"
 )
 

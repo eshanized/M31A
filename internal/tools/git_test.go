@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 func TestGit_ArgValidation(t *testing.T) {

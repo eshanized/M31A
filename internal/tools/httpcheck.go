@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 var _ types.Tool = (*HTTPCheck)(nil)

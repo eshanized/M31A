@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-07-16T03:01:23.723Z"
+last_updated: "2026-07-16T04:21:17.634Z"
 progress:
   total_phases: 9
   completed_phases: 1
@@ -17,9 +17,9 @@ progress:
 ## Project Status
 
 - **Current Milestone**: v1.0.0 — Initial Release
-- **Current Phase**: 1 — Fix TUI Blank Screens (Phase 8 in roadmap)
-- **Phase Status**: Context Captured — Ready for Planning
-- **Last Updated**: 2026-07-16
+- **Current Phase**: 9 — Architecture Upgrade & Directory Restructuring
+- **Phase Status**: Wave 1/7 Complete — Executing
+- **Last Updated**: 2026-07-16T09:45:00Z
 
 ## Phase Progress
 
@@ -32,7 +32,7 @@ progress:
 | 5 | Subagents & Parallel Execution | Pending | — | — |
 | 6 | Observability & UX Polish | Pending | — | — |
 | 7 | Release Hardening | Pending | — | — |
-| 9 | Architecture Upgrade & Directory Restructuring | Context Done | 2026-07-16 | — |
+| 9 | Architecture Upgrade & Directory Restructuring | **Wave 1/7 Complete** | 2026-07-16 | — |
 
 ## Active Work
 
@@ -51,6 +51,7 @@ Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT
 | 2026-07-16 | — | Project initialized, codebase mapped, planning docs created |
 | 2026-07-16 | 1 | Phase context captured, discussion log written |
 | 2026-07-16 | 9 | Phase context captured — architecture upgrade decisions locked |
+| 2026-07-16 | 9 | **Wave 1 complete** — Plan 09-01 Type Layering Cleanup executed (internal/types/ deleted, 132+ imports rewritten to pkg/types) |
 
 ## Deferred Ideas Log
 

@@ -10,7 +10,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider/nvidia"
 	"github.com/eshanized/M31A/internal/provider/openrouter"
 	"github.com/eshanized/M31A/internal/provider/zen"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // RegisterProvider creates and registers a provider client in the registry

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/provider"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 func TestEngine_RunExecute_NoTasks(t *testing.T) {

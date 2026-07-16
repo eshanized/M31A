@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 func TestParseIntentJSON_ValidJSON(t *testing.T) {

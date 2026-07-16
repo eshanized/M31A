@@ -25,12 +25,12 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/compaction"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/metrics"
 	"github.com/eshanized/M31A/pkg/retry"
 	"github.com/eshanized/M31A/pkg/session"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 //go:embed templates/website-nextjs/*

@@ -13,8 +13,8 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/history"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // updatePlaceholder sets the textarea placeholder based on current state

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/provider"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/metrics"
 	"github.com/eshanized/M31A/pkg/session"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // PhaseCoordinator orchestrates phase execution lifecycle including

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/decision"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // runPlan generates a rich implementation plan and task list to accomplish the goal.

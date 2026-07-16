@@ -14,8 +14,8 @@ import (
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // handleSlashCommand routes slash commands to the command registry.

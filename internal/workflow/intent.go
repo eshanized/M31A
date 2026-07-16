@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/provider"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 const (

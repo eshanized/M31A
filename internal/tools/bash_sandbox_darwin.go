@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"

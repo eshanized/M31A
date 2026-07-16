@@ -11,10 +11,10 @@ import (
 	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/ledger"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // ShipSummary holds the session completion summary.

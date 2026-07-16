@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/decision"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/taskrunner"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string, goal string) taskrunner.TaskResult {

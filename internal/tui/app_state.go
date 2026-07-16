@@ -17,7 +17,6 @@ import (
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/autodream"
@@ -28,6 +27,7 @@ import (
 	"github.com/eshanized/M31A/pkg/narrative"
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // workflowEngineInterface is the interface that AppState uses to invoke workflow phases.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // TestDetectProjectType_DeterministicOnMultiFramework is a regression test

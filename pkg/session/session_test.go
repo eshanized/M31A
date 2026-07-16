@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // TestSession_SetWorkflowState_RoundTrip verifies that the in-memory

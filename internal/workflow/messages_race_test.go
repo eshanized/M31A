@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // TestConcurrentMessagesReadDuringWrite tests for race conditions between

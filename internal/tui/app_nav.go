@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/layout"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/session"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // routeToScreen returns the initialization cmd for the current screen.

@@ -13,9 +13,9 @@ import (
 
 	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	m31types "github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/taskrunner"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 func TestAskUserQuestion_Execute_ContextCancel(t *testing.T) {

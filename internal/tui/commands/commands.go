@@ -15,7 +15,6 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/autodream"
 	"github.com/eshanized/M31A/pkg/history"
 	"github.com/eshanized/M31A/pkg/keychain"
@@ -23,6 +22,7 @@ import (
 	"github.com/eshanized/M31A/pkg/rollback"
 	"github.com/eshanized/M31A/pkg/session"
 	"github.com/eshanized/M31A/pkg/skills"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // CommandInfo describes a slash command for autocomplete and help.

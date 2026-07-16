@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/pkg/types"
 )
 
 // PlanCheckResult holds the outcome of the plan checker review.

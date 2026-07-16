@@ -12,10 +12,10 @@ import (
 	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/pkg/arbitrage"
 	"github.com/eshanized/M31A/pkg/metrics"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 // ─── Bubble Tea Model interface ───────────────────────────────────────────────

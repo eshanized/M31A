@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 func TestWebFetch_Blocks_PrivateIPv4(t *testing.T) {

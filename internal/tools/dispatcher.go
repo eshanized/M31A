@@ -13,8 +13,8 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/pkg/metrics"
+	"github.com/eshanized/M31A/pkg/types"
 )
 
 type Dispatcher struct {

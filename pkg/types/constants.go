@@ -123,6 +123,12 @@ const (
 	// DefaultMaxParallelTasks is the default maximum number of tasks to execute
 	// concurrently within a group. Configurable via Runner.MaxParallel.
 	DefaultMaxParallelTasks = 4
+
+	// Provider name constants — single source of truth for provider identifiers.
+	// Used across the codebase to avoid magic strings and enable safe refactoring.
+	ProviderOpenRouter = "openrouter"
+	ProviderZen        = "zen"
+	ProviderNvidia     = "nvidia"
 )
 
 // SkipDirs is the list of directories to skip during file traversal.
