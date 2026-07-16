@@ -1,3 +1,17 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0.0
+milestone_name: milestone
+status: unknown
+last_updated: "2026-07-16T01:07:56.825Z"
+progress:
+  total_phases: 8
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 0
+  percent: 0
+---
+
 # STATE.md — M31A
 
 ## Project Status
@@ -22,6 +36,7 @@
 ## Active Work
 
 Phase 1 context captured in `.planning/phases/08-investigate-and-fix-tui-blank-screens-issue-all-screens-rend/08-CONTEXT.md`. Key findings:
+
 - TTY requirement confirmed — prioritize real terminal
 - WindowSizeMsg timing is expected Bubble Tea behavior
 - Theme: lipgloss compatibility suspected
@@ -50,4 +65,5 @@ Phase 1 context captured in `.planning/phases/08-investigate-and-fix-tui-blank-s
 - **Branch**: master
 - **Last Commit**: docs(08): capture phase context for TUI blank screens investigation (fecd057e)
 - **Uncommitted**: none
+
 EOF

@@ -38,6 +38,9 @@ func (m *AppState) routeToScreen() tea.Cmd {
 			cw, ch := m.contentDimensions()
 			m.replModel.SetDimensions(cw, ch)
 		}
+		if m.router != nil {
+			m.router.Register(ScreenREPL, m.replModel)
+		}
 		return m.replModel.Init()
 	case ScreenModelSelector:
 		if m.msModel == nil {
@@ -392,6 +395,9 @@ func (m *AppState) ensureSubModel(screen Screen) tea.Cmd {
 	case ScreenREPL:
 		m.ensureReplModel()
 		m.replModel.SetDimensions(cw, ch)
+		if m.router != nil {
+			m.router.Register(ScreenREPL, m.replModel)
+		}
 		return nil
 	case ScreenModelSelector:
 		if m.msModel == nil {

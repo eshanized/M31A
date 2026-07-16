@@ -24,7 +24,7 @@ func (m *ReplModel) Init() tea.Cmd {
 
 // Update processes messages for the REPL. Delegates to handleKeyMsg,
 // handleStreamMsg, etc. based on message type.
-func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *ReplModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
