@@ -3,14 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: milestone_complete
-last_updated: 2026-07-16T22:49:39.915Z
+last_updated: "2026-07-17T11:55:16.530Z"
 progress:
-  total_phases: 9
-  completed_phases: 1
-  total_plans: 10
+  total_phases: 11
+  completed_phases: 2
+  total_plans: 13
   completed_plans: 13
-  percent: 11
-stopped_at: Milestone complete (Phase 09 was final phase)
+  percent: 18
 ---
 
 # STATE.md — M31A
@@ -34,16 +33,18 @@ stopped_at: Milestone complete (Phase 09 was final phase)
 | 6 | Observability & UX Polish | Pending | — | — |
 | 7 | Release Hardening | Pending | — | — |
 | 9 | Architecture Upgrade & Directory Restructuring | **Complete** | 2026-07-16 | 2026-07-17 |
+| 10 | Fix test errors from architecture upgrade | Context Done | 2026-07-17 | — |
 
 ## Active Work
 
-Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT.md`. Key decisions:
+Phase 10 context captured in `.planning/phases/10-fix-test-errors-from-architecture-upgrade/10-CONTEXT.md`. Key decisions:
 
-- Conservative package splitting — only clear domain boundaries
-- Delete `internal/types/` aliases, import `pkg/types/` directly
-- Move `pkg/` contents into `internal/` (no external consumers)
-- Screen sub-packages for TUI, domain grouping for tools
-- Interface-driven boundaries + constructor injection
+- Move ALL test infrastructure to `internal/testutil/`
+- Organize with subdirectories: mocks/, builders/, fixtures/
+- Use `package testutil` as umbrella package
+- Centralize integration tests in testutil/integration/
+- Use go:embed for fixture loading
+- Use goimports automation for import path updates
 
 ## Session History
 
@@ -57,6 +58,7 @@ Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT
 | 2026-07-17 | 9 | **Wave 3 complete** — Plans 09-03 TUI Screen Extraction, 09-04 Tool Domain Grouping, 09-05 Workflow Engine Decomposition executed |
 | 2026-07-17 | 9 | **Wave 4 complete** — Plan 09-06 TUI Handler Grouping executed (handlers/ sub-package created) |
 | 2026-07-17 | 9 | **All 10 plans executed** — Phase 9 Architecture Upgrade complete |
+| 2026-07-17 | 10 | Phase context captured — test infrastructure reorganization decisions locked |
 
 ## Deferred Ideas Log
 
@@ -76,8 +78,8 @@ Phase 9 context captured in `.planning/phases/09-architecture-upgrade/09-CONTEXT
 
 ## Current Position
 
-Phase: 09-architecture-upgrade — **COMPLETE**
-Plan: All 10 plans — **COMPLETE**
-Next: Phase 1 — Fix TUI Blank Screens
+Phase: 10-fix-test-errors-from-architecture-upgrade — **Context Done**
+Plan: No plans yet
+Next: Run `/gsd-plan-phase 10` to create implementation plans
 
 EOF
