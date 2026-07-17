@@ -12,6 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/commands"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // CommandPaletteScreenModel is a dedicated full-screen command palette with
@@ -133,11 +134,11 @@ func (m *CommandPaletteScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.selected < len(m.filtered) {
 				entry := m.filtered[m.selected]
-				if entry.cmd.Execute != nil {
-					return m, entry.cmd.Execute()
+				if entry.Cmd.Execute != nil {
+					return m, entry.Cmd.Execute()
 				}
 				return m, func() tea.Msg {
-					return tuitypes.SlashCommandMsg{Command: entry.cmd.Slash}
+					return tuitypes.SlashCommandMsg{Command: entry.Cmd.Slash}
 				}
 			}
 		case "backspace":
@@ -184,8 +185,8 @@ func (m *CommandPaletteScreenModel) selectedRow() int {
 	seen := make(map[tui.CommandCategory]bool)
 	row := 0
 	for i, e := range m.filtered {
-		if !seen[e.category] {
-			seen[e.category] = true
+		if !seen[e.Category] {
+			seen[e.Category] = true
 			row++ // category header
 		}
 		if i == m.selected {
@@ -210,9 +211,9 @@ func (m *CommandPaletteScreenModel) filterCommands() {
 	}
 	var scored []scoredEntry
 	for _, e := range m.entries {
-		name := strings.ToLower(e.cmd.Name)
-		desc := strings.ToLower(e.cmd.Description)
-		cat := strings.ToLower(string(e.category))
+		name := strings.ToLower(e.Cmd.Name)
+		desc := strings.ToLower(e.Cmd.Description)
+		cat := strings.ToLower(string(e.Category))
 		nameScore, nameMatch := tui.FuzzyScore(name, q)
 		descScore, descMatch := tui.FuzzyScore(desc, q)
 		catScore, catMatch := tui.FuzzyScore(cat, q)
@@ -297,7 +298,7 @@ func (m *CommandPaletteScreenModel) renderSearchBar(width int) string {
 
 	searchContent := label + queryText + cursor + count
 	if lipgloss.Width(searchContent) > width {
-		searchContent = TruncateWithEllipsis(searchContent, width)
+		searchContent = tuitypes.TruncateWithEllipsis(searchContent, width)
 	}
 
 	return lipgloss.NewStyle().
@@ -331,14 +332,14 @@ func (m *CommandPaletteScreenModel) renderListContent() string {
 
 	for i, entry := range m.filtered {
 		// Category header
-		if !seenCategories[entry.category] {
-			seenCategories[entry.category] = true
+		if !seenCategories[entry.Category] {
+			seenCategories[entry.Category] = true
 			catHeader := lipgloss.NewStyle().
 				Foreground(t.TextSecondary).
 				Bold(true).
 				PaddingLeft(1).
 				PaddingTop(1).
-				Render(string(entry.category))
+				Render(string(entry.Category))
 			lines = append(lines, catHeader)
 		}
 
@@ -346,11 +347,11 @@ func (m *CommandPaletteScreenModel) renderListContent() string {
 		isSelected := i == m.selected
 		var line string
 
-		descText := "  " + entry.cmd.Description
+		descText := "  " + entry.Cmd.Description
 
 		if isSelected {
 			indicator := lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
-			slashPart := lipgloss.NewStyle().Foreground(t.Background).Bold(true).Render(entry.cmd.Slash)
+			slashPart := lipgloss.NewStyle().Foreground(t.Background).Bold(true).Render(entry.Cmd.Slash)
 			descPart := lipgloss.NewStyle().Foreground(t.Background).Render(descText)
 			line = indicator + slashPart + descPart
 			line = lipgloss.NewStyle().
@@ -359,13 +360,13 @@ func (m *CommandPaletteScreenModel) renderListContent() string {
 				Width(w).
 				Render(line)
 		} else {
-			slashPart := lipgloss.NewStyle().Foreground(t.Brand).Render(entry.cmd.Slash)
+			slashPart := lipgloss.NewStyle().Foreground(t.Brand).Render(entry.Cmd.Slash)
 			descPart := lipgloss.NewStyle().Foreground(t.TextMuted).Render(descText)
 			line = "  " + slashPart + descPart
 		}
 
 		if lipgloss.Width(line) > w {
-			line = TruncateWithEllipsis(line, w)
+			line = tuitypes.TruncateWithEllipsis(line, w)
 		}
 		lines = append(lines, line)
 	}
@@ -403,7 +404,7 @@ func (m *CommandPaletteScreenModel) renderDetailPanel(w, h int) string {
 	cmdName := lipgloss.NewStyle().
 		Foreground(t.Brand).
 		Bold(true).
-		Render(entry.cmd.Slash)
+		Render(entry.Cmd.Slash)
 
 	// Divider
 	divider := lipgloss.NewStyle().
@@ -415,27 +416,27 @@ func (m *CommandPaletteScreenModel) renderDetailPanel(w, h int) string {
 		Foreground(t.TextSecondary).
 		Background(t.SurfaceElevated).
 		Padding(0, 1).
-		Render(string(entry.category))
+		Render(string(entry.Category))
 
 	// Shortcut
 	shortcutLine := ""
-	if entry.shortcut != "" {
+	if entry.Shortcut != "" {
 		shortcutLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Shortcut  ")
-		shortcutVal := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(entry.shortcut)
+		shortcutVal := lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(entry.Shortcut)
 		shortcutLine = shortcutLabel + shortcutVal
 	}
 
 	// Description
 	descLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Description")
-	descVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.cmd.Description)
+	descVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.Cmd.Description)
 
 	// Slash format
 	slashLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Command")
-	slashVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.cmd.Slash)
+	slashVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.Cmd.Slash)
 
 	// Name label
 	nameLabel := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Name")
-	nameVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.cmd.Name)
+	nameVal := lipgloss.NewStyle().Foreground(t.Text).PaddingLeft(2).Render(entry.Cmd.Name)
 
 	// Build detail content
 	var parts []string
@@ -507,7 +508,7 @@ func (m *CommandPaletteScreenModel) renderHighlightedQuery() string {
 	if len(m.filtered) == 0 {
 		return lipgloss.NewStyle().Foreground(t.Error).Render(m.query)
 	}
-	bestTarget := strings.ToLower(m.filtered[0].cmd.Name)
+	bestTarget := strings.ToLower(m.filtered[0].Cmd.Name)
 	query := strings.ToLower(m.query)
 	var sb strings.Builder
 	qi := 0

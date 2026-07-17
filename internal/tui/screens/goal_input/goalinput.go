@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
@@ -72,7 +71,7 @@ func (gi *GoalInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Cancel → go back to REPL
 			return gi, func() tea.Msg {
-				return AppMsg{Screen: ScreenREPL}
+				return tuitypes.AppMsg{Screen: tuitypes.ScreenREPL}
 			}
 		case "ctrl+enter":
 			// Submit
@@ -155,7 +154,7 @@ func (gi *GoalInputModel) renderRecent() string {
 			prefix = lipgloss.NewStyle().Foreground(t.Brand).Render("▸ ")
 			style = style.Foreground(t.Brand).Bold(true)
 		}
-		rows = append(rows, fmt.Sprintf("%s%s. %s", prefix, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d", i+1)), style.Render(components.TruncateWithEllipsis(g, maxGoalLen))))
+		rows = append(rows, fmt.Sprintf("%s%s. %s", prefix, lipgloss.NewStyle().Foreground(t.TextMuted).Render(fmt.Sprintf("%d", i+1)), style.Render(tuitypes.TruncateWithEllipsis(g, maxGoalLen))))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		"  "+title, strings.Join(rows, "\n"))

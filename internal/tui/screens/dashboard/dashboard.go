@@ -99,24 +99,24 @@ func (dm *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var screen tuitypes.Screen
 			switch types.WorkflowPhase(dm.current) {
 			case types.PhaseInitialize:
-				screen = ScreenREPL
+				screen = tuitypes.ScreenREPL
 			case types.PhaseDiscuss:
-				screen = ScreenDiscuss
+				screen = tuitypes.ScreenDiscuss
 			case types.PhasePlan:
-				screen = ScreenPlan
+				screen = tuitypes.ScreenPlan
 			case types.PhaseExecute:
-				screen = ScreenExecute
+				screen = tuitypes.ScreenExecute
 			case types.PhaseVerify:
-				screen = ScreenVerify
+				screen = tuitypes.ScreenVerify
 			case types.PhaseRuntime:
-				screen = ScreenRuntimeCheck
+				screen = tuitypes.ScreenRuntimeCheck
 			case types.PhaseShip:
-				screen = ScreenShip
+				screen = tuitypes.ScreenShip
 			default:
 				return dm, nil
 			}
 			return dm, func() tea.Msg {
-				return AppMsg{tuitypes.Screen: screen}
+				return tuitypes.AppMsg{Screen: screen}
 			}
 		}
 	}

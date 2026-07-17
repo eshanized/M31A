@@ -19,7 +19,7 @@ func activeModelID(m *types.ModelInfo) string {
 }
 
 // makeAssistantMsg creates a standard assistant message with role, content, and segment.
-func makeAssistantMsg(content string) types.Message {
+func MakeAssistantMsg(content string) types.Message {
 	return types.Message{
 		Role:    "assistant",
 		Content: content,
@@ -35,7 +35,7 @@ func makeAssistantMsg(content string) types.Message {
 // makeErrorBannerMsg creates an assistant message carrying a plain-text error
 // banner. Styling is applied by the message renderer (not here) so that ANSI
 // escape codes never enter the markdown pipeline and get mangled.
-func makeErrorBannerMsg(text string, providerName string) types.Message {
+func MakeErrorBannerMsg(text string, providerName string) types.Message {
 	content := text
 	if providerName != "" {
 		content = text + " (" + providerName + ")"
@@ -53,15 +53,15 @@ func makeErrorBannerMsg(text string, providerName string) types.Message {
 }
 
 // makeUserMsg creates a standard user message with proper rendering properties.
-func makeUserMsg(content string) types.Message {
-	return makeUserMsgWithSkip(content, false)
+func MakeUserMsg(content string) types.Message {
+	return MakeUserMsgWithSkip(content, false)
 }
 
-// makeUserMsgWithSkip creates a user message with an optional SkipForLLM flag.
+// MakeUserMsgWithSkip creates a user message with an optional SkipForLLM flag.
 // When skipForLLM is true, the message is displayed in the REPL but excluded
 // from the LLM chat history. This prevents double-sending when sendChatMessage
 // replaces the display message with an enriched (or plain) version.
-func makeUserMsgWithSkip(content string, skipForLLM bool) types.Message {
+func MakeUserMsgWithSkip(content string, skipForLLM bool) types.Message {
 	return types.Message{
 		Role:       "user",
 		Content:    content,

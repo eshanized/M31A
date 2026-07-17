@@ -48,7 +48,7 @@ func (ds *DecisionScreen) SetTheme(t theme.Theme) {
 func (ds *DecisionScreen) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (ds *DecisionScreen) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (ds *DecisionScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		ds.SetDimensions(msg.Width, msg.Height)

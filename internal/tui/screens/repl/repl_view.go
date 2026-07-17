@@ -105,7 +105,7 @@ func (m *ReplModel) View() string {
 	// ── Floating overlays (anchored to viewport's bottom rows) ─────────────
 	var overlays []string
 	if m.mentionVisible && len(m.mentionEntries) > 0 {
-		overlays = append(overlays, m.renderMentionSuggestions(rw))
+		overlays = append(overlays, RenderMentionSuggestions(m, rw))
 	}
 	if m.slashVisible && len(m.slashSuggestions) > 0 {
 		overlays = append(overlays, m.renderSlashSuggestions(rw))
@@ -244,7 +244,7 @@ func (m *ReplModel) ViewContent(contentHeight, contentWidth int) string {
 
 	// @-mention dropdown.
 	if m.mentionVisible && len(m.mentionEntries) > 0 {
-		overlays = append(overlays, m.renderMentionSuggestions(rw))
+		overlays = append(overlays, RenderMentionSuggestions(m, rw))
 	}
 	// Slash-command dropdown.
 	if m.slashVisible && len(m.slashSuggestions) > 0 {
@@ -378,7 +378,7 @@ func (m *ReplModel) renderSlashSuggestions(width int) string {
 		desc := descStyle.Render("  " + cmd.Description)
 		line := "  " + nameStyle.Render(slash) + desc
 		if lipgloss.Width(line) > width {
-			line = components.TruncateWithEllipsis(line, width)
+			line = tuitypes.TruncateWithEllipsis(line, width)
 		}
 		lines = append(lines, line)
 	}

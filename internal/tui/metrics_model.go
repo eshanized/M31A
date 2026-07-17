@@ -121,7 +121,7 @@ func (mm *MetricsModel) ApplyStats(s metricsStats) {
 func (mm *MetricsModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (mm *MetricsModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (mm *MetricsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		mm.width = msg.Width

@@ -1,12 +1,12 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/components"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // repl_search.go — inline viewport search (Ctrl+F).
@@ -154,7 +154,7 @@ func (m *ReplModel) renderSearchBar(width int) string {
 
 	content := label + queryText + cursor + countText + hint
 	if lipgloss.Width(content) > width {
-		content = components.TruncateWithEllipsis(content, width)
+		content = tuitypes.TruncateWithEllipsis(content, width)
 	}
 
 	return lipgloss.NewStyle().

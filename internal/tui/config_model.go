@@ -195,7 +195,7 @@ func (m *ConfigModel) SetTheme(t theme.Theme) {
 	m.theme = t
 }
 
-func (m *ConfigModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (m *ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.confirmingExit {
@@ -225,7 +225,7 @@ func (m *ConfigModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		return m, func() tea.Msg { return PopScreenMsg{} }
@@ -236,7 +236,7 @@ func (m *ConfigModel) updateConfirmExit(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		if m.dirty {
@@ -301,7 +301,7 @@ func (m *ConfigModel) updateBrowsing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConfigModel) activateField() (Screenable, tea.Cmd) {
+func (m *ConfigModel) activateField() (tea.Model, tea.Cmd) {
 	if len(m.sections) == 0 {
 		return m, nil
 	}
@@ -362,7 +362,7 @@ func (m *ConfigModel) activateField() (Screenable, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.editing = false
@@ -410,7 +410,7 @@ func (m *ConfigModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *ConfigModel) saveConfig() (Screenable, tea.Cmd) {
+func (m *ConfigModel) saveConfig() (tea.Model, tea.Cmd) {
 	if m.cfg == nil || m.cfgPath == "" {
 		m.statusMsg = "✗ No config path set"
 		m.statusTime = time.Now()
@@ -430,7 +430,7 @@ func (m *ConfigModel) saveConfig() (Screenable, tea.Cmd) {
 	return m, func() tea.Msg { return ConfigSavedMsg{} }
 }
 
-func (m *ConfigModel) saveLocalConfig() (Screenable, tea.Cmd) {
+func (m *ConfigModel) saveLocalConfig() (tea.Model, tea.Cmd) {
 	if m.cfg == nil {
 		m.statusMsg = "✗ No config loaded"
 		m.statusTime = time.Now()

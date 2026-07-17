@@ -15,7 +15,7 @@ import (
 // and scrubs sensitive environment variables.
 func applyBashSandbox(cmd *exec.Cmd, workDir string) error {
 	// Scrub sensitive environment variables from the subprocess
-	scrubEnvironment(cmd)
+	ScrubEnvironment(cmd)
 
 	// Apply sandbox-exec profile if available
 	if err := applySandboxExec(cmd, workDir); err != nil {
@@ -96,8 +96,8 @@ func applySandboxExec(cmd *exec.Cmd, workDir string) error {
 	return nil
 }
 
-// scrubEnvironment removes sensitive environment variables from the subprocess.
-func scrubEnvironment(cmd *exec.Cmd) {
+// ScrubEnvironment removes sensitive environment variables from the subprocess.
+func ScrubEnvironment(cmd *exec.Cmd) {
 	env := os.Environ()
 
 	sensitiveVars := []string{

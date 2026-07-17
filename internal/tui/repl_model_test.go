@@ -20,8 +20,8 @@ func TestReplView_WithMessages_RendersMessages(t *testing.T) {
 	tm := theme.NewManager(theme.ModeDark)
 	m := NewReplModel(tm.Current(), "test")
 	m.SetDimensions(80, 24)
-	m.AddMessage(makeUserMsg("hello"))
-	m.AddMessage(makeAssistantMsg("hi there"))
+	m.AddMessage(MakeUserMsg("hello"))
+	m.AddMessage(MakeAssistantMsg("hi there"))
 	view := m.View()
 	if view == "" {
 		t.Error("REPL with messages should render non-empty view")

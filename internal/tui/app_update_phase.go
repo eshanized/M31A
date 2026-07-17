@@ -62,7 +62,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 
 	if msg.Error != "" {
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg("Workflow error: " + msg.Error))
+			m.replModel.AddMessage(MakeAssistantMsg("Workflow error: " + msg.Error))
 		}
 		m.workflowPhase = types.PhaseIdle
 		m.screen = ScreenREPL
@@ -81,7 +81,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 			}
 			summary += fmt.Sprintf(" (%d/%d tasks)", done, len(msg.Tasks))
 		}
-		m.replModel.AddMessage(makeAssistantMsg(summary))
+		m.replModel.AddMessage(MakeAssistantMsg(summary))
 	}
 
 	// Use the mode from the phase result, falling back to the stored mode
@@ -208,7 +208,7 @@ func (m *AppState) handlePhaseResult(msg PhaseResultMsg) tea.Cmd {
 				fmt.Fprintf(&sb, "  %d. [%s] %s\n", task.ID, task.Action, task.Description)
 			}
 			sb.WriteString("\nPress `r` to refine or approve to execute.")
-			m.replModel.AddMessage(makeAssistantMsg(sb.String()))
+			m.replModel.AddMessage(MakeAssistantMsg(sb.String()))
 		}
 		m.persistWorkflowState()
 		return nil
@@ -329,7 +329,7 @@ func countDone(tasks []types.Task) int {
 }
 
 // handlePhaseTransitionDecision processes the user's decision on phase transition.
-func (m *AppState) handlePhaseTransitionDecision(msg PhaseTransitionMsg) (Screenable, tea.Cmd) {
+func (m *AppState) handlePhaseTransitionDecision(msg PhaseTransitionMsg) (tea.Model, tea.Cmd) {
 	if msg.Approved {
 		// Proceed to next phase
 		m.setWorkflowPhase(msg.To)

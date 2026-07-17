@@ -52,9 +52,9 @@ type HomeModel struct {
 	height int
 
 	// Slash command autocomplete state
-	cmdRegistry      *CommandRegistry
+	cmdRegistry      *commands.CommandRegistry
 	slashVisible     bool
-	slashSuggestions []CommandInfo
+	slashSuggestions []commands.CommandInfo
 	slashSelected    int
 
 	// First-visit tour state
@@ -96,7 +96,7 @@ func (hm *HomeModel) SetConfig(cfg *config.Config) {
 }
 
 // SetCommandRegistry sets the command registry for slash command suggestions.
-func (hm *HomeModel) SetCommandRegistry(registry *CommandRegistry) {
+func (hm *HomeModel) SetCommandRegistry(registry *commands.CommandRegistry) {
 	hm.cmdRegistry = registry
 }
 

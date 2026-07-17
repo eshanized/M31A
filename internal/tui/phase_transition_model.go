@@ -37,7 +37,7 @@ func NewPhaseTransitionModel(t theme.Theme, from, to types.WorkflowPhase, summar
 
 func (m *PhaseTransitionModel) Init() tea.Cmd { return nil }
 
-func (m *PhaseTransitionModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (m *PhaseTransitionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width

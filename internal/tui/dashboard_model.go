@@ -84,7 +84,7 @@ func (dm *DashboardModel) SetDimensions(w, h int) {
 func (dm *DashboardModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (dm *DashboardModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (dm *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		dm.SetDimensions(msg.Width, msg.Height)

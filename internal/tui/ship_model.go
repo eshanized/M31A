@@ -80,7 +80,7 @@ func (sm *ShipModel) SetDemonstration(content string) {
 }
 
 // Update implements Screenable.
-func (sm *ShipModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (sm *ShipModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		sm.width = msg.Width

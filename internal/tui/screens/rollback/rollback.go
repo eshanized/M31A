@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/rollback"
-	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // RollbackModel shows the git commit timeline and allows resetting to any commit.
@@ -240,7 +240,7 @@ func (rm *RollbackModel) renderCommitRow(e rollback.RollbackEntry, selected bool
 	}
 
 	ts := c.Timestamp.Format("2006-01-02 15:04")
-	msg := components.TruncateWithEllipsis(c.Message, w-30)
+	msg := tuitypes.TruncateWithEllipsis(c.Message, w-30)
 
 	return prefix +
 		hashStyle.Render(c.ShortHash) + "  " +
@@ -253,7 +253,7 @@ func (rm *RollbackModel) renderDiffView() string {
 	t := rm.theme
 	e := rm.entries[rm.cursor]
 	subTitle := lipgloss.NewStyle().Foreground(t.TextMuted).PaddingLeft(2).
-		Render(fmt.Sprintf("Diff for %s — %s", e.CommitInfo.ShortHash, components.TruncateWithEllipsis(e.CommitInfo.Message, 50)))
+		Render(fmt.Sprintf("Diff for %s — %s", e.CommitInfo.ShortHash, tuitypes.TruncateWithEllipsis(e.CommitInfo.Message, 50)))
 	return lipgloss.JoinVertical(lipgloss.Left,
 		subTitle, rm.viewport.View())
 }
@@ -264,7 +264,29 @@ func (rm *RollbackModel) renderDiffContent(e rollback.RollbackEntry) string {
 		return lipgloss.NewStyle().Foreground(rm.theme.TextMuted).
 			Render("  (current HEAD — no diff)")
 	}
-	return components.ColorizeDiff(e.Diff, rm.theme)
+	return colorizeDiff(e.Diff, rm.theme)
+}
+
+// colorizeDiff applies basic syntax highlighting to a diff string.
+func colorizeDiff(diff string, t theme.Theme) string {
+	var b strings.Builder
+	lines := strings.Split(diff, "\n")
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			b.WriteString(lipgloss.NewStyle().Foreground(t.Brand).Render(line))
+		case strings.HasPrefix(line, "+"):
+			b.WriteString(lipgloss.NewStyle().Foreground(t.Success).Render(line))
+		case strings.HasPrefix(line, "-"):
+			b.WriteString(lipgloss.NewStyle().Foreground(t.Error).Render(line))
+		case strings.HasPrefix(line, "@@"):
+			b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Render(line))
+		default:
+			b.WriteString(line)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // clampScroll ensures the cursor is visible in the list.

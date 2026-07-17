@@ -42,7 +42,7 @@ func (cq *ConfirmQuitModel) SetDimensions(w, h int) {
 func (cq *ConfirmQuitModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable interface.
-func (cq *ConfirmQuitModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (cq *ConfirmQuitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		cq.SetDimensions(msg.Width, msg.Height)

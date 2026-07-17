@@ -78,7 +78,7 @@ func TestHandleQuestionResponseMsg_NilDispatcher(t *testing.T) {
 
 func TestHandleToolsQuestionResponse_NilDispatcher(t *testing.T) {
 	m := newTestAppState()
-	msg := tools.QuestionResponse{Answer: "yes"}
+	msg := types.QuestionResponse{Answer: "yes"}
 	result, cmd := handleToolsQuestionResponse(m, msg)
 	if result == nil {
 		t.Fatal("expected non-nil model")

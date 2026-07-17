@@ -50,7 +50,7 @@ func (ns *NarrativeState) Clear() {
 }
 
 // renderNarrativeSidebar renders the narrative state for the sidebar.
-func renderNarrativeSidebar(ns *NarrativeState, t theme.Theme, width int) []string {
+func RenderNarrativeSidebar(ns *NarrativeState, t theme.Theme, width int) []string {
 	if ns == nil {
 		return nil
 	}

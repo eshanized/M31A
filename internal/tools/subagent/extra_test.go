@@ -710,6 +710,9 @@ func (d *mockDispatcher) UnregisterTool(name string) {
 
 func (d *mockDispatcher) Stop() {}
 
+// SetPermission implements ToolDispatcher interface.
+func (d *mockDispatcher) SetPermission(name string, allowed bool) {}
+
 type mockWorktreeOps struct {
 	removed []string
 	mu      sync.Mutex

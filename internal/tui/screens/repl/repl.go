@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/history"
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
@@ -180,8 +181,8 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 
 	case "enter":
 		if m.mentionVisible && len(m.mentionEntries) > 0 {
-			m.completeMention()
-			m.updateMentionSuggestions()
+			completeMention(m)
+			updateMentionSuggestions(m)
 			return nil
 		}
 		if m.slashVisible && len(m.slashSuggestions) > 0 {
@@ -198,8 +199,8 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 
 	case "tab":
 		if m.mentionVisible && len(m.mentionEntries) > 0 {
-			m.completeMention()
-			m.updateMentionSuggestions()
+			completeMention(m)
+			updateMentionSuggestions(m)
 			return nil
 		}
 		if m.slashVisible && len(m.slashSuggestions) > 0 {
@@ -328,7 +329,7 @@ func (m *ReplModel) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		m.updateSlashSuggestions()
 	}
 	if strings.Contains(current, "@") {
-		m.updateMentionSuggestions()
+		updateMentionSuggestions(m)
 	}
 	return cmd
 }
@@ -371,7 +372,7 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		}
 
 		// Add user message so welcome screen is replaced by conversation
-		m.messages = append(m.messages, makeUserMsg(input))
+		m.messages = append(m.messages, tui.MakeUserMsg(input))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -390,9 +391,9 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 			m.frecentHistory.Upsert(input)
 		}
 
-		m.messages = append(m.messages, makeUserMsg(input))
+		m.messages = append(m.messages, tui.MakeUserMsg(input))
 		// Add temporary "Running…" feedback
-		m.messages = append(m.messages, makeAssistantMsg("*Running shell command…*"))
+		m.messages = append(m.messages, tui.MakeAssistantMsg("*Running shell command…*"))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -412,7 +413,7 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 
 	// Display the original input (without injected file content).
 	// Mark SkipForLLM so sendChatMessage replaces it instead of duplicating.
-	m.messages = append(m.messages, makeUserMsgWithSkip(input, true))
+	m.messages = append(m.messages, tui.MakeUserMsgWithSkip(input, true))
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false
@@ -513,7 +514,7 @@ func (m *ReplModel) navigateHistoryDown() {
 // killToLineEnd deletes from cursor to end of line (Ctrl+K).
 func (m *ReplModel) killToLineEnd() {
 	val := m.textarea.Value()
-	pos := m.cursorPosition()
+	pos := cursorPosition(m)
 	if pos >= len(val) {
 		return
 	}
@@ -531,7 +532,7 @@ func (m *ReplModel) killToLineEnd() {
 // deletePreviousWord deletes the previous word (Ctrl+W).
 func (m *ReplModel) deletePreviousWord() {
 	val := m.textarea.Value()
-	pos := m.cursorPosition()
+	pos := cursorPosition(m)
 	if pos == 0 {
 		return
 	}

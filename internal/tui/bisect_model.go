@@ -63,7 +63,7 @@ func (bm *BisectModel) SetDimensions(w, h int) {
 func (bm *BisectModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (bm *BisectModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (bm *BisectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		bm.SetDimensions(msg.Width, msg.Height)

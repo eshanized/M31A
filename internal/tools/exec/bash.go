@@ -137,7 +137,7 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	// Check for dangerous commands before execution
-	if reason, blocked := checkDangerousCommand(command, t.additionalBlockedCommands, t.additionalObfuscationPatterns); blocked {
+	if reason, blocked := CheckDangerousCommand(command, t.additionalBlockedCommands, t.additionalObfuscationPatterns); blocked {
 		return types.ToolResult{}, types.NewToolError(
 			fmt.Errorf("command blocked: %s", reason),
 			"Modify the command to avoid destructive patterns. If this is intentional, use a more specific command.",
@@ -372,7 +372,7 @@ var (
 	}
 )
 
-func checkDangerousCommand(command string, additionalBlocked []string, additionalObfuscation []string) (string, bool) {
+func CheckDangerousCommand(command string, additionalBlocked []string, additionalObfuscation []string) (string, bool) {
 	normalized := normalizeCommand(command)
 
 	// Block if variable expansion detected (prevents injection via env vars)

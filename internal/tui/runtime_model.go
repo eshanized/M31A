@@ -81,7 +81,7 @@ func (rm *RuntimeModel) SetSummary(summary workflow.RuntimeSummary) {
 type RuntimeTickMsg struct{}
 
 // Update handles runtime screen key events.
-func (rm *RuntimeModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (rm *RuntimeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		rm.width = msg.Width

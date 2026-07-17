@@ -44,6 +44,11 @@ func NewAgent(m *subagent.Manager, isChild bool, depth int, profiles map[string]
 	return &Agent{manager: m, isChild: isChild, depth: depth, profiles: profiles}
 }
 
+// IsChild returns whether this agent is a child agent.
+func (a *Agent) IsChild() bool {
+	return a.isChild
+}
+
 func (t *Agent) Name() string               { return "Agent" }
 func (t *Agent) RiskLevel() types.RiskLevel { return types.RiskSafe }
 
@@ -203,6 +208,7 @@ type ToolDispatcher interface {
 	Stop()
 	UnregisterTool(name string)
 	Register(types.Tool) error
+	SetPermission(name string, allowed bool)
 }
 
 // NewDispatcher is a function variable that must be initialized by the root tools package.
@@ -252,6 +258,8 @@ func (a *dispatcherAdapter) ListTools() []subagent.ToolDescriptor {
 }
 
 func (a *dispatcherAdapter) Stop() { a.d.Stop() }
+
+func (a *dispatcherAdapter) SetPermission(name string, allowed bool) { a.d.SetPermission(name, allowed) }
 
 func (a *dispatcherAdapter) UnregisterTool(name string) { a.d.UnregisterTool(name) }
 

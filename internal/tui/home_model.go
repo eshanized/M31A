@@ -194,7 +194,7 @@ func (hm *HomeModel) handleSlashComplete() tea.Cmd {
 }
 
 // Update handles key and tick messages.
-func (hm *HomeModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (hm *HomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		hm.SetDimensions(msg.Width, msg.Height)

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -283,7 +284,7 @@ func (m *ReplModel) handleStreamErrorMsg(msg streaming.StreamErrorMsg) {
 			"message", msg.Err.Error())
 	}
 
-	m.messages = append(m.messages, makeErrorBannerMsg(plainErrorBanner(msg.Err, msg.ProviderName), msg.ProviderName))
+	m.messages = append(m.messages, tui.MakeErrorBannerMsg(plainErrorBanner(msg.Err, msg.ProviderName), msg.ProviderName))
 
 	m.streaming = false
 	m.thinking = false

@@ -154,6 +154,7 @@ type ToolDispatcher interface {
 	ListTools() []ToolDescriptor
 	UnregisterTool(name string)
 	Stop()
+	SetPermission(name string, allowed bool)
 }
 
 // ToolDescriptor describes a single tool for the provider tool-definition

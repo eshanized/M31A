@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -96,7 +97,7 @@ func (m *PhaseModelPickerModel) renderPanel(idx, width int, t theme.Theme) strin
 		badge := lipgloss.NewStyle().
 			Foreground(t.Success).
 			Bold(true).
-			Render("✓ " + TruncateWithEllipsis(name, width-6))
+			Render("✓ " + tuitypes.TruncateWithEllipsis(name, width-6))
 		sb.WriteString(badge + "\n")
 	} else {
 		sb.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Render("(using default)") + "\n")
@@ -151,8 +152,8 @@ func renderModelRow(m types.ModelInfo, selected bool, maxW int, t theme.Theme) s
 		textStyle = textStyle.Bold(true).Foreground(t.Brand)
 	}
 
-	nameStr := TruncateWithEllipsis(name, maxW-18)
-	provStr := lipgloss.NewStyle().Foreground(t.TextMuted).Render(TruncateWithEllipsis(m.Provider, 12))
+	nameStr := tuitypes.TruncateWithEllipsis(name, maxW-18)
+	provStr := lipgloss.NewStyle().Foreground(t.TextMuted).Render(tuitypes.TruncateWithEllipsis(m.Provider, 12))
 
 	return cursor + textStyle.Render(nameStr) + "  " + provStr
 }

@@ -23,7 +23,7 @@ type helpSection struct {
 type HelpModel struct {
 	theme       theme.Theme
 	sections    []helpSection
-	keyRegistry *KeyRegistry
+	keyRegistry *tuitypes.KeyRegistry
 	viewport    viewport.Model
 	width       int
 	height      int
@@ -38,7 +38,7 @@ func NewHelpModel(t theme.Theme) *HelpModel {
 }
 
 // SetKeyRegistry sets the key registry for dynamic help generation.
-func (hm *HelpModel) SetKeyRegistry(kr *KeyRegistry) {
+func (hm *HelpModel) SetKeyRegistry(kr *tuitypes.KeyRegistry) {
 	hm.keyRegistry = kr
 	hm.rebuildSections()
 }
@@ -59,7 +59,7 @@ func (hm *HelpModel) rebuildSections() {
 	globalItems = append(globalItems, [2]string{"?", "Toggle this help"})
 	globalItems = append(globalItems, [2]string{"ctrl+c", "Cancel / quit (double to exit)"})
 	globalItems = append(globalItems, [2]string{"ctrl+p", "Command palette"})
-	for _, b := range kr.GetContextSpecificBindings(CtxGlobal) {
+	for _, b := range kr.GetContextSpecificBindings(tuitypes.CtxGlobal) {
 		if strings.HasPrefix(b.Key, leaderPrefix) {
 			continue // leader chords go in their own section
 		}
@@ -79,7 +79,7 @@ func (hm *HelpModel) rebuildSections() {
 	replItems = append(replItems, [2]string{"ctrl+u / pgup", "Scroll page up"})
 	replItems = append(replItems, [2]string{"ctrl+d / pgdn", "Scroll page down"})
 	replItems = append(replItems, [2]string{"j / k", "Scroll line down/up (empty input)"})
-	for _, b := range kr.GetContextSpecificBindings(CtxREPL) {
+	for _, b := range kr.GetContextSpecificBindings(tuitypes.CtxREPL) {
 		if strings.HasPrefix(b.Key, leaderPrefix) {
 			continue
 		}
@@ -99,7 +99,7 @@ func (hm *HelpModel) rebuildSections() {
 	// ── Leader Key section (all chord bindings) ─────────────────────
 	seen := make(map[string]bool)
 	var leaderItems [][2]string
-	for _, b := range kr.GetContextSpecificBindings(CtxGlobal) {
+	for _, b := range kr.GetContextSpecificBindings(tuitypes.CtxGlobal) {
 		if strings.HasPrefix(b.Key, leaderPrefix) {
 			shortKey := strings.TrimPrefix(b.Key, leaderPrefix)
 			if !seen[shortKey] {
@@ -108,7 +108,7 @@ func (hm *HelpModel) rebuildSections() {
 			}
 		}
 	}
-	for _, b := range kr.GetContextSpecificBindings(CtxREPL) {
+	for _, b := range kr.GetContextSpecificBindings(tuitypes.CtxREPL) {
 		if strings.HasPrefix(b.Key, leaderPrefix) {
 			shortKey := strings.TrimPrefix(b.Key, leaderPrefix)
 			if !seen[shortKey] {

@@ -540,7 +540,7 @@ func TestParseStatusIcon(t *testing.T) {
 func TestHtmlTableToMarkdown_SimpleTable(t *testing.T) {
 	// Use a simple table structure the parser handles
 	html := "<table><tr><td>cell1</td></tr></table>"
-	result := htmlTableToMarkdown(html)
+	result := HtmlTableToMarkdown(html)
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
@@ -548,14 +548,14 @@ func TestHtmlTableToMarkdown_SimpleTable(t *testing.T) {
 
 func TestHtmlTableToMarkdown_NoTable(t *testing.T) {
 	html := "<p>No table here</p>"
-	result := htmlTableToMarkdown(html)
+	result := HtmlTableToMarkdown(html)
 	if result != html {
 		t.Error("expected unchanged for no table")
 	}
 }
 
 func TestHtmlTableToMarkdown_Empty(t *testing.T) {
-	result := htmlTableToMarkdown("")
+	result := HtmlTableToMarkdown("")
 	if result != "" {
 		t.Error("expected empty result")
 	}
@@ -563,7 +563,7 @@ func TestHtmlTableToMarkdown_Empty(t *testing.T) {
 
 func TestHtmlTableToMarkdown_SingleCell(t *testing.T) {
 	// Empty table returns unchanged
-	result := htmlTableToMarkdown("<table></table>")
+	result := HtmlTableToMarkdown("<table></table>")
 	if result != "<table></table>" {
 		t.Errorf("expected unchanged, got: %s", result)
 	}

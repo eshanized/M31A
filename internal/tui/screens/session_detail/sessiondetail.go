@@ -59,7 +59,7 @@ func (sd *SessionDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if sd.sess != nil {
 				return sd, func() tea.Msg {
-					return tuitypes.AppMsg{tuitypes.Screen: tuitypes.ScreenREPL, SessionID: sd.sess.ID}
+					return tuitypes.AppMsg{Screen: tuitypes.ScreenREPL, SessionID: sd.sess.ID}
 				}
 			}
 		}

@@ -327,7 +327,7 @@ func (hm *HelpModel) SetDimensions(w, h int) {
 func (hm *HelpModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable interface.
-func (hm *HelpModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (hm *HelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		hm.width = msg.Width

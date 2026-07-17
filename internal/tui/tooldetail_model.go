@@ -56,7 +56,7 @@ func (td *ToolDetailModel) SetDimensions(w, h int) {
 func (td *ToolDetailModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (td *ToolDetailModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (td *ToolDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		td.SetDimensions(msg.Width, msg.Height)

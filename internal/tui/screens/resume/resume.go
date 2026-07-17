@@ -144,7 +144,7 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				id := rm.sessions[rm.cursor].ID
 				return rm, func() tea.Msg {
 					return tuitypes.AppMsg{
-						Screen:    ScreenREPL,
+						Screen:    tuitypes.ScreenREPL,
 						SessionID: id,
 					}
 				}
@@ -152,7 +152,7 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			return rm, func() tea.Msg {
 				return tuitypes.AppMsg{
-					Screen: ScreenREPL,
+					Screen: tuitypes.ScreenREPL,
 					Action: "new_session",
 				}
 			}
@@ -178,7 +178,7 @@ func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				id := rm.sessions[rm.cursor].ID
 				return rm, func() tea.Msg {
 					return tuitypes.AppMsg{
-						Screen:    ScreenSessionDetail,
+						Screen:    tuitypes.ScreenSessionDetail,
 						SessionID: id,
 					}
 				}

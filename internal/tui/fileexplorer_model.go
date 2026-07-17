@@ -53,7 +53,7 @@ func (fe *FileExplorerModel) SetDimensions(w, h int) {
 func (fe *FileExplorerModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable interface.
-func (fe *FileExplorerModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (fe *FileExplorerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		fe.SetDimensions(msg.Width, msg.Height)

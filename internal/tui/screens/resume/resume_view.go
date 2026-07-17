@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/tui/screens/repl"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
@@ -98,7 +98,7 @@ func renderSessionInfoRow(info session.SessionInfo, selected bool, w int, t them
 
 	meta := lipgloss.NewStyle().Foreground(t.TextMuted).
 		Render(fmt.Sprintf("%s · %s · %d msgs · %s",
-			repl.ProviderShortName(provider), phase, info.MessageCount, age))
+			tuitypes.ProviderShortName(provider), phase, info.MessageCount, age))
 
 	shortID := info.ID
 	if len(shortID) > 12 {

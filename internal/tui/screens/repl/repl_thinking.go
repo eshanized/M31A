@@ -3,6 +3,7 @@ package repl
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // ThinkingBlock represents an expandable thinking block in the REPL.
@@ -21,12 +22,12 @@ func (m *ReplModel) renderThinkingToggleHint(blockIndex int, durationMs int64) s
 	if block.IsExpanded() {
 		label = "▼ Hide thinking"
 		if durationMs > 0 {
-			label += " · " + formatDurationMs(durationMs) + "s"
+			label += " · " + tuitypes.FormatDurationMs(durationMs) + "s"
 		}
 	} else {
 		label = "▶ Show thinking"
 		if durationMs > 0 {
-			label += " · " + formatDurationMs(durationMs) + "s"
+			label += " · " + tuitypes.FormatDurationMs(durationMs) + "s"
 		}
 	}
 

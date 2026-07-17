@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/screens/plan_refine"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -37,7 +38,7 @@ type PlanModel struct {
 	// Mode flags
 	confirmMode bool
 	refineMode  bool
-	refineInput *PlanRefineModel
+	refineInput *plan_refine.PlanRefineModel
 }
 
 // NewPlanModel creates a PlanModel.
@@ -233,7 +234,7 @@ func (pm *PlanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return pm, nil
 		case "r":
 			pm.refineMode = true
-			pm.refineInput = NewPlanRefineModel(pm.theme, pm.width)
+			pm.refineInput = plan_refine.NewPlanRefineModel(pm.theme, pm.width)
 			return pm, nil
 		case "esc", "q":
 			return pm, func() tea.Msg {
@@ -254,7 +255,7 @@ func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		pm.confirmMode = false
 		pm.refineMode = true
-		pm.refineInput = NewPlanRefineModel(pm.theme, pm.width)
+		pm.refineInput = plan_refine.NewPlanRefineModel(pm.theme, pm.width)
 		return pm, nil
 	case "esc", "n", "N":
 		pm.confirmMode = false
@@ -285,7 +286,7 @@ func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if pm.refineInput != nil {
 		newRefine, cmd := pm.refineInput.Update(msg)
-		if nr, ok := newRefine.(*PlanRefineModel); ok {
+		if nr, ok := newRefine.(*plan_refine.PlanRefineModel); ok {
 			pm.refineInput = nr
 		}
 		return pm, cmd
@@ -363,7 +364,7 @@ func (pm *PlanModel) renderTasks() string {
 				if maxDescLen < 20 {
 					maxDescLen = 20
 				}
-				descText := TruncateEnd(task.Description, maxDescLen)
+				descText := tuitypes.TruncateEnd(task.Description, maxDescLen)
 				desc = " " + lipgloss.NewStyle().Foreground(t.TextSecondary).Render("— "+descText)
 			}
 

@@ -10,9 +10,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
+
+// phaseModelPickerLoadedMsg carries models fetched asynchronously for the phase model picker.
+type phaseModelPickerLoadedMsg struct {
+	providerName string
+	models       []types.ModelInfo
+	err          error
+}
 
 // pickerPanel is one of the two model-selection panels (Planning or Coding).
 type pickerPanel struct {
@@ -44,7 +52,7 @@ func newPickerPanel(label, description string) pickerPanel {
 func (p *pickerPanel) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(p.searchInput.Value()))
 	if query == "" {
-		p.filtered = filterChatModels(p.models)
+		p.filtered = tuitypes.FilterChatModels(p.models)
 		return
 	}
 	p.filtered = nil
@@ -129,7 +137,7 @@ func (m *PhaseModelPickerModel) Init() tea.Cmd {
 		m.panels[1].loading = false
 		return nil
 	}
-	cmds := []tea.Cmd{StreamTickCmd()}
+	cmds := []tea.Cmd{streaming.StreamTickCmd()}
 	for _, name := range names {
 		cmds = append(cmds, m.fetchCmd(name))
 	}
@@ -143,32 +151,32 @@ func (m *PhaseModelPickerModel) fetchCmd(provName string) tea.Cmd {
 	return func() tea.Msg {
 		p, err := m.registry.Get(provName)
 		if err != nil {
-			return modelSelectorLoadedMsg{providerName: provName, err: err}
+			return phaseModelPickerLoadedMsg{providerName: provName, err: err}
 		}
 		fetchCtx, cancel := context.WithTimeout(m.ctx, types.FetchModelsTimeout)
 		defer cancel()
 		models, err := p.FetchModels(fetchCtx)
-		return modelSelectorLoadedMsg{providerName: provName, models: models, err: err}
+		return phaseModelPickerLoadedMsg{providerName: provName, models: models, err: err}
 	}
 }
 
 // Update handles messages.
-func (m *$1Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *PhaseModelPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
 
-	case TickMsg:
+	case streaming.TickMsg:
 		if m.panels[0].loading || m.panels[1].loading {
 			m.panels[0].spinner.Next()
 			m.panels[1].spinner.Next()
-			return m, StreamTickCmd()
+			return m, streaming.StreamTickCmd()
 		}
 		return m, nil
 
-	case modelSelectorLoadedMsg:
+	case phaseModelPickerLoadedMsg:
 		m.loadedProviders[msg.providerName] = true
 		if msg.err == nil && len(msg.models) > 0 {
 			// Ensure each model has its Provider field set from the source provider.

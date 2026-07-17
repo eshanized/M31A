@@ -186,6 +186,16 @@ func (r *KeyRegistry) IsLeaderActive() bool {
 	return r.leaderActive
 }
 
+// LeaderKey returns the configured leader key.
+func (r *KeyRegistry) LeaderKey() string {
+	return r.leaderKey
+}
+
+// GetContextSpecificBindings returns the key bindings for a specific context.
+func (r *KeyRegistry) GetContextSpecificBindings(ctx KeyContext) []KeyBinding {
+	return r.bindings[ctx]
+}
+
 // RenderWhichKey renders the which-key overlay for the given context.
 func (r *KeyRegistry) RenderWhichKey(ctx KeyContext, width int, brand, textSecondary, textMuted lipgloss.Color) string {
 	// Implementation will be provided by the main tui package
@@ -272,6 +282,18 @@ func TruncateEnd(s string, maxLen int) string {
 	return s[:maxLen-1] + "…"
 }
 
+// TruncateMiddle truncates a string to maxLen, keeping the start and end with "…" in the middle.
+func TruncateMiddle(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	half := (maxLen - 1) / 2
+	return s[:half] + "…" + s[len(s)-(maxLen-half-1):]
+}
+
 // formatSI formats an integer with SI suffix (K, M).
 func formatSI(n int) string {
 	switch {
@@ -285,7 +307,7 @@ func formatSI(n int) string {
 }
 
 // formatDurationMs formats a duration in milliseconds as a human-readable string.
-func formatDurationMs(ms int64) string {
+func FormatDurationMs(ms int64) string {
 	if ms < 0 {
 		return "0s"
 	}
@@ -316,6 +338,17 @@ func ProviderShortName(name string) string {
 	default:
 		return name
 	}
+}
+
+// filterChatModels returns only models that support chat completions.
+func FilterChatModels(models []types.ModelInfo) []types.ModelInfo {
+	out := make([]types.ModelInfo, 0, len(models))
+	for _, m := range models {
+		if m.Capabilities.Chat {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Screen identifies which full-screen view is active.

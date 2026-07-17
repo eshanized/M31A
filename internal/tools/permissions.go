@@ -69,16 +69,10 @@ func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember b
 	// Fallback to shared channel for backwards compatibility
 	select {
 	case d.responseCh <- resp:
-	default:
-		slog.Warn("permission response dropped: shared channel full",
-			"request_id", requestID, "allowed", allowed)
+default:
+			slog.Warn("permission response dropped: shared channel full",
+				"request_id", requestID, "allowed", allowed)
 	}
-}
-
-func (d *Dispatcher) SetPermission(toolName string, allowed bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.permissions[toolName] = allowed
 }
 
 // ApproveBatch records a batch approval for the given tool+risk combination.

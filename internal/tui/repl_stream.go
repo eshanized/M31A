@@ -282,7 +282,7 @@ func (m *ReplModel) handleStreamErrorMsg(msg StreamErrorMsg) {
 			"message", msg.Err.Error())
 	}
 
-	m.messages = append(m.messages, makeErrorBannerMsg(plainErrorBanner(msg.Err, msg.ProviderName), msg.ProviderName))
+	m.messages = append(m.messages, MakeErrorBannerMsg(plainErrorBanner(msg.Err, msg.ProviderName), msg.ProviderName))
 
 	m.streaming = false
 	m.thinking = false

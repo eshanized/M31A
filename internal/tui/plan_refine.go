@@ -29,7 +29,7 @@ func NewPlanRefineModel(t theme.Theme, width int) *PlanRefineModel {
 }
 
 // Update implements Screenable.
-func (pm *PlanRefineModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (pm *PlanRefineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {

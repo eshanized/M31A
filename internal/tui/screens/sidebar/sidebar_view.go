@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
@@ -28,7 +29,7 @@ func (s *SidebarModel) View() string {
 	case SidebarModeActive:
 		lines = s.renderActive(contentW)
 	case SidebarModeNarrative:
-		lines = renderNarrativeSidebar(s.narrativeState, t, contentW)
+		lines = tui.RenderNarrativeSidebar(s.narrativeState, t, contentW)
 		if len(lines) == 0 {
 			lines = s.renderIdle(contentW)
 		}

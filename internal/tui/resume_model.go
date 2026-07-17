@@ -92,7 +92,7 @@ func (rm *ResumeModel) Init() tea.Cmd {
 }
 
 // Update implements Screenable.
-func (rm *ResumeModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (rm *ResumeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		rm.width = msg.Width

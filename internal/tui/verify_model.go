@@ -113,7 +113,7 @@ func (vm *VerifyModel) TickSpinner() {
 }
 
 // Update handles verify screen key events.
-func (vm *VerifyModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (vm *VerifyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {

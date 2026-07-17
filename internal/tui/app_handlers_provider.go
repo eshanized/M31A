@@ -43,7 +43,7 @@ func (m *AppState) handleHealthCheckResult(msg HealthCheckResultMsg) []tea.Cmd {
 		} else {
 			text = fmt.Sprintf("%s Health check: %s (%s)", emoji, status, fmt.Sprintf("%dms", result.LatencyMs))
 		}
-		m.replModel.AddMessage(makeAssistantMsg(text))
+		m.replModel.AddMessage(MakeAssistantMsg(text))
 	}
 
 	return nil

@@ -1,10 +1,10 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/components"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // repl_quickactions.go — quick-actions dropdown overlay (ctrl+q).
@@ -58,7 +58,7 @@ func (m *ReplModel) renderQuickActionsOverlay(width int) string {
 		desc := lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + item.desc)
 		line := "  " + slash + desc
 		if lipgloss.Width(line) > width {
-			line = components.TruncateWithEllipsis(line, width)
+			line = tuitypes.TruncateWithEllipsis(line, width)
 		}
 		lines = append(lines, line)
 	}

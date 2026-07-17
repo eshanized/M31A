@@ -46,7 +46,7 @@ func (sd *SessionDetailModel) SetDimensions(w, h int) {
 func (sd *SessionDetailModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (sd *SessionDetailModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (sd *SessionDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		sd.SetDimensions(msg.Width, msg.Height)

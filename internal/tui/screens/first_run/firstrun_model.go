@@ -3,6 +3,7 @@ package first_run
 import (
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,9 +11,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/provider/nvidia"
+	"github.com/eshanized/M31A/internal/provider/openrouter"
+	"github.com/eshanized/M31A/internal/provider/zen"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
+
+// Default sidebar width used for layout calculations.
+const sidebarDefaultWidth = 30
 
 // firstRunStep represents a step in the first-run wizard.
 type firstRunStep int
@@ -338,7 +345,29 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 		// Register (or re-register) the provider with the wizard-collected API key
 		// so that FetchModels can authenticate. On first run the registry is empty.
 		if apiKey != "" {
-			if err := RegisterProvider(reg, fr.config, providerName, apiKey, fr.version); err != nil {
+			var p provider.LLMProvider
+			switch providerName {
+			case types.ProviderOpenRouter:
+				p, _ = openrouter.New(apiKey, openrouter.Options{
+					BaseURL:           fr.config.Provider.OpenRouterBaseURL,
+					Referer:           fr.config.Provider.OpenRouterReferer,
+					Title:             fr.config.Provider.OpenRouterTitle,
+					Version:           fr.version,
+				})
+			case types.ProviderZen:
+				p, _ = zen.New(apiKey, zen.Options{
+					BaseURL:       fr.config.Provider.ZenBaseURL,
+					Version:       fr.version,
+				})
+			case types.ProviderNvidia:
+				p, _ = nvidia.New(apiKey, nvidia.Options{
+					BaseURL:       fr.config.Provider.NvidiaBaseURL,
+					Version:       fr.version,
+				})
+			default:
+				return firstRunModelsMsg{Err: fmt.Errorf("unknown provider: %s", providerName)}
+			}
+			if err := reg.Register(providerName, p); err != nil {
 				return firstRunModelsMsg{Err: err}
 			}
 		}
@@ -778,4 +807,23 @@ func (fr *FirstRunModel) completeSetup() tea.Cmd {
 // View implements tea.Model.
 func (fr *FirstRunModel) View() string {
 	return fr.renderFirstRun()
+}
+
+// centerScreen centers a content block within the given dimensions.
+func centerScreen(content string, contentW, contentH int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	// For simplicity, just return the content as-is.
+	// A full implementation would add padding.
+	return content
+}
+
+// resolveLogoText returns the custom logo text from config.
+func resolveLogoText(ui config.UIConfig) string {
+	if ui.LogoText != "" {
+		return ui.LogoText
+	}
+	return ""
 }

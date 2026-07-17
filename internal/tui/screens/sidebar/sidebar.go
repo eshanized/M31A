@@ -2,6 +2,7 @@ package sidebar
 
 
 import (
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
 	"strings"
@@ -139,7 +140,7 @@ type SidebarModel struct {
 	subAgentActive int
 
 	// Narrative state
-	narrativeState *NarrativeState
+	narrativeState *tui.NarrativeState
 }
 
 // NewSidebarModel creates a new SidebarModel.
@@ -179,7 +180,7 @@ func (s *SidebarModel) SetShutdownContext(ctx context.Context) {
 }
 
 // SetNarrativeState sets the narrative state for the narrative sidebar mode.
-func (s *SidebarModel) SetNarrativeState(ns *NarrativeState) {
+func (s *SidebarModel) SetNarrativeState(ns *tui.NarrativeState) {
 	s.narrativeState = ns
 }
 
@@ -688,7 +689,7 @@ func (s *SidebarModel) showFileDiff(node *components.FileNode) tea.Cmd {
 		if err != nil || strings.TrimSpace(diff) == "" {
 			return nil
 		}
-		return DiffScreenMsg{
+		return tui.DiffScreenMsg{
 			Diff:  diff,
 			Title: "diff — " + filePath,
 		}
@@ -748,7 +749,7 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 				return s, nil
 			default:
 			}
-			return s, tea.Batch(s.refreshCmd(), NextSidebarRefreshTick(s.shutdownCtx, tuitypes.SidebarRefreshInterval))
+			return s, tea.Batch(s.refreshCmd(), tui.NextSidebarRefreshTick(s.shutdownCtx, tuitypes.SidebarRefreshInterval))
 		}
 		return s, nil
 	}
@@ -759,7 +760,7 @@ func (s *SidebarModel) Update(msg tea.Msg) (*SidebarModel, tea.Cmd) {
 	}
 
 	if s.visible && s.shutdownCtx != nil && !s.loading {
-		return s, NextSidebarRefreshTick(s.shutdownCtx, tuitypes.SidebarRefreshInterval)
+		return s, tui.NextSidebarRefreshTick(s.shutdownCtx, tuitypes.SidebarRefreshInterval)
 	}
 
 	return s, nil

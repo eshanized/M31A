@@ -53,7 +53,7 @@ func (nm *NotificationModel) SetDimensions(w, h int) {
 func (nm *NotificationModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (nm *NotificationModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (nm *NotificationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		nm.SetDimensions(msg.Width, msg.Height)

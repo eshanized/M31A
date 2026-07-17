@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // modelselector_view.go — view rendering for the Model Selector.
@@ -97,7 +98,7 @@ func (ms *ModelSelector) renderDetailPane() string {
 	t := ms.theme
 
 	var lines []string
-	truncatedName := TruncateMiddle(m.Name, 40)
+	truncatedName := tuitypes.TruncateMiddle(m.Name, 40)
 	lines = append(lines, lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render(truncatedName))
 	if m.Description != "" {
 		lines = append(lines, "")

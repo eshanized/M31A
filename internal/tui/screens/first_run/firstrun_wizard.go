@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -388,7 +389,7 @@ func (fr *FirstRunModel) renderModelRow(m types.ModelInfo, selected bool, maxW i
 	if maxName > maxW-10 {
 		maxName = maxW - 10
 	}
-	nameStr := nameStyle.Render(TruncateWithEllipsis(name, maxName))
+	nameStr := nameStyle.Render(tuitypes.TruncateWithEllipsis(name, maxName))
 
 	// Pricing badge
 	var priceBadge string

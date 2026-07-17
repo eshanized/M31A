@@ -342,7 +342,7 @@ func (m *ReplModel) ShowQuestion(msg QuestionRequestMsg) {
 	if header == "" {
 		header = "Question"
 	}
-	qMsg := makeAssistantMsg(header + "\n\n" + msg.Question)
+	qMsg := MakeAssistantMsg(header + "\n\n" + msg.Question)
 	m.AddMessage(qMsg)
 }
 

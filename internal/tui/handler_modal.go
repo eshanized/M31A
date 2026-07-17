@@ -57,7 +57,7 @@ func handleDismissToastMsg(m *AppState, msg DismissToastMsg) (tea.Model, tea.Cmd
 // handleErrorMsg processes error messages: adds an error banner to the REPL.
 func handleErrorMsg(m *AppState, msg ErrorMsg) (tea.Model, tea.Cmd) {
 	if m.replModel != nil {
-		m.replModel.AddMessage(makeErrorBannerMsg(plainErrorBanner(msg.Err, m.activeProvider), m.activeProvider))
+		m.replModel.AddMessage(MakeErrorBannerMsg(plainErrorBanner(msg.Err, m.activeProvider), m.activeProvider))
 	}
 	return m, nil
 }

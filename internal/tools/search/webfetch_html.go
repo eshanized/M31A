@@ -120,15 +120,15 @@ func convertTables(rawHTML, lower string) (string, string) {
 	// Process tables in reverse order to preserve positions
 	for i := len(tables) - 1; i >= 0; i-- {
 		t := tables[i]
-		md := htmlTableToMarkdown(t.html)
+		md := HtmlTableToMarkdown(t.html)
 		rawHTML = rawHTML[:t.start] + "\n" + md + "\n" + rawHTML[t.end:]
 	}
 
 	return rawHTML, strings.ToLower(rawHTML)
 }
 
-// htmlTableToMarkdown converts a single HTML table to markdown.
-func htmlTableToMarkdown(tableHTML string) string {
+// HtmlTableToMarkdown converts a single HTML table to markdown.
+func HtmlTableToMarkdown(tableHTML string) string {
 	var rows [][]string
 	var headerIdx int
 

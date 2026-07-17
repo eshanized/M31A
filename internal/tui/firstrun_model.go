@@ -242,7 +242,7 @@ func (fr *FirstRunModel) Init() tea.Cmd {
 }
 
 // Update implements Screenable.
-func (fr *FirstRunModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (fr *FirstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		fr.width = msg.Width
@@ -444,7 +444,7 @@ func (fr *FirstRunModel) validateKeyCmd(providerID, apiKey string) tea.Cmd {
 }
 
 // handleKey routes key events per step.
-func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch fr.step {
 	case stepWelcome:
 		switch msg.String() {
@@ -618,7 +618,7 @@ func (fr *FirstRunModel) handleKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 }
 
 // handleMouse processes mouse events for the first-run wizard.
-func (fr *FirstRunModel) handleMouse(msg tea.MouseMsg) (Screenable, tea.Cmd) {
+func (fr *FirstRunModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return fr, nil
 	}

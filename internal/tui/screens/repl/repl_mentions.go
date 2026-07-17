@@ -1,12 +1,12 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/components"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/tools"
 )
 
@@ -14,7 +14,7 @@ import (
 
 // cursorPosition returns the absolute character offset of the cursor in the
 // textarea value. It computes this from the public Line()/LineInfo() API.
-func (m *ReplModel) cursorPosition() int {
+func cursorPosition(m *ReplModel) int {
 	val := m.textarea.Value()
 	row := m.textarea.Line()
 	info := m.textarea.LineInfo()
@@ -40,9 +40,9 @@ func (m *ReplModel) cursorPosition() int {
 // updateMentionSuggestions inspects the current textarea value for an active
 // @-mention and updates mentionEntries. The detection is cursor-aware: it finds
 // the last '@' at or before the cursor that is not separated by whitespace.
-func (m *ReplModel) updateMentionSuggestions() {
+func updateMentionSuggestions(m *ReplModel) {
 	val := m.textarea.Value()
-	cursorPos := m.cursorPosition()
+	cursorPos := cursorPosition(m)
 
 	// Walk backwards from cursor position to find "@" not separated by whitespace.
 	atIdx := -1
@@ -95,7 +95,7 @@ func (m *ReplModel) updateMentionSuggestions() {
 }
 
 // completeMention replaces the active @query in the textarea with the selected path.
-func (m *ReplModel) completeMention() {
+func completeMention(m *ReplModel) {
 	if !m.mentionVisible || len(m.mentionEntries) == 0 {
 		return
 	}
@@ -129,14 +129,14 @@ func (m *ReplModel) completeMention() {
 		m.mentionQuery = ""
 	} else {
 		// Directory selected — re-filter so user can keep narrowing.
-		m.updateMentionSuggestions()
+		updateMentionSuggestions(m)
 	}
 }
 
 // ─── Mention dropdown rendering ───────────────────────────────────────────────
 
 // renderMentionSuggestions renders the @-mention autocomplete dropdown.
-func (m *ReplModel) renderMentionSuggestions(width int) string {
+func RenderMentionSuggestions(m *ReplModel, width int) string {
 	t := m.theme
 	var lines []string
 
@@ -187,7 +187,7 @@ func (m *ReplModel) renderMentionSuggestions(width int) string {
 		line := "  " + at + dirPart + name + metaPart
 
 		if lipgloss.Width(line) > width-4 {
-			line = components.TruncateWithEllipsis(line, width-4)
+			line = tuitypes.TruncateWithEllipsis(line, width-4)
 		}
 		lines = append(lines, line)
 	}

@@ -43,7 +43,7 @@ type CommandPaletteModel struct {
 
 // NewCommandPalette creates a new command palette model.
 func NewCommandPalette(registry *CommandRegistry, t theme.Theme) *CommandPaletteModel {
-	entries := buildPaletteEntries(registry)
+	entries := BuildPaletteEntries(registry)
 	return &CommandPaletteModel{
 		theme:    t,
 		entries:  entries,
@@ -51,7 +51,7 @@ func NewCommandPalette(registry *CommandRegistry, t theme.Theme) *CommandPalette
 	}
 }
 
-// buildPaletteEntries categorizes all registered commands and assigns known shortcuts.
+// BuildPaletteEntries categorizes all registered commands and assigns known shortcuts.
 func BuildPaletteEntries(registry *CommandRegistry) []PaletteEntry {
 	if registry == nil {
 		return nil
@@ -117,9 +117,9 @@ func BuildPaletteEntries(registry *CommandRegistry) []PaletteEntry {
 			cat = CatCore
 		}
 		entries = append(entries, PaletteEntry{
-			cmd:      cmd,
-			category: cat,
-			shortcut: shortcuts[cmd.Name],
+			Cmd:      cmd,
+			Category: cat,
+			Shortcut: shortcuts[cmd.Name],
 		})
 	}
 
@@ -179,11 +179,11 @@ func (cp *CommandPaletteModel) Update(msg tea.Msg) (*CommandPaletteModel, tea.Cm
 			if cp.selected < len(cp.filtered) {
 				entry := cp.filtered[cp.selected]
 				cp.Close()
-				if entry.cmd.Execute != nil {
-					return cp, entry.cmd.Execute()
+				if entry.Cmd.Execute != nil {
+					return cp, entry.Cmd.Execute()
 				}
 				return cp, func() tea.Msg {
-					return SlashCommandMsg{Command: entry.cmd.Slash}
+					return SlashCommandMsg{Command: entry.Cmd.Slash}
 				}
 			}
 		case "backspace":
@@ -215,12 +215,12 @@ func (cp *CommandPaletteModel) filterCommands() {
 	}
 	var scored []scoredEntry
 	for _, e := range cp.entries {
-		name := strings.ToLower(e.cmd.Name)
-		desc := strings.ToLower(e.cmd.Description)
-		cat := strings.ToLower(string(e.category))
-		nameScore, nameMatch := fuzzyScore(name, q)
-		descScore, descMatch := fuzzyScore(desc, q)
-		catScore, catMatch := fuzzyScore(cat, q)
+		name := strings.ToLower(e.Cmd.Name)
+		desc := strings.ToLower(e.Cmd.Description)
+		cat := strings.ToLower(string(e.Category))
+		nameScore, nameMatch := FuzzyScore(name, q)
+		descScore, descMatch := FuzzyScore(desc, q)
+		catScore, catMatch := FuzzyScore(cat, q)
 		if nameMatch || descMatch || catMatch {
 			best := nameScore
 			if descScore > best {
@@ -241,7 +241,7 @@ func (cp *CommandPaletteModel) filterCommands() {
 	}
 }
 
-// fuzzyScore returns a relevance score and whether the query matches the target.
+// FuzzyScore returns a relevance score and whether the query matches the target.
 // Higher scores indicate better matches. Consecutive character matches and
 // word-boundary matches score higher.
 func FuzzyScore(target, query string) (int, bool) {
@@ -323,10 +323,10 @@ func (cp *CommandPaletteModel) View() string {
 		entry := cp.filtered[i]
 
 		// Insert category header (only before entries, not counted as item)
-		if !seenCategories[entry.category] {
-			seenCategories[entry.category] = true
+		if !seenCategories[entry.Category] {
+			seenCategories[entry.Category] = true
 			if entryIdx >= start {
-				items = append(items, cp.renderCategoryHeader(entry.category))
+				items = append(items, cp.renderCategoryHeader(entry.Category))
 			}
 		}
 
@@ -397,16 +397,16 @@ func (cp *CommandPaletteModel) renderEntry(idx int, entry PaletteEntry, paletteW
 	if isSelected {
 		slashPart = lipgloss.NewStyle().
 			Foreground(t.Background).
-			Render(entry.cmd.Slash)
+			Render(entry.Cmd.Slash)
 	} else {
 		slashPart = lipgloss.NewStyle().
 			Foreground(t.Brand).
-			Render(entry.cmd.Slash)
+			Render(entry.Cmd.Slash)
 	}
 
 	// Description in muted (or background if selected)
 	var descPart string
-	descText := "  " + entry.cmd.Description
+	descText := "  " + entry.Cmd.Description
 	if isSelected {
 		descPart = lipgloss.NewStyle().
 			Foreground(t.Background).
@@ -419,8 +419,8 @@ func (cp *CommandPaletteModel) renderEntry(idx int, entry PaletteEntry, paletteW
 
 	// Shortcut if available (right-aligned with spacer)
 	shortcutPart := ""
-	if entry.shortcut != "" {
-		shortcutText := "  " + entry.shortcut + "  "
+	if entry.Shortcut != "" {
+		shortcutText := "  " + entry.Shortcut + "  "
 		if isSelected {
 			shortcutPart = lipgloss.NewStyle().
 				Foreground(t.Background).
@@ -456,7 +456,7 @@ func (cp *CommandPaletteModel) renderHighlightedQuery(t theme.Theme) string {
 	if len(cp.filtered) == 0 {
 		return lipgloss.NewStyle().Foreground(t.Error).Render(cp.query)
 	}
-	bestTarget := strings.ToLower(cp.filtered[0].cmd.Name)
+	bestTarget := strings.ToLower(cp.filtered[0].Cmd.Name)
 	query := strings.ToLower(cp.query)
 	var sb strings.Builder
 	qi := 0

@@ -20,12 +20,12 @@ func TestAgent_NewAgent(t *testing.T) {
 func TestAgent_IsChildField(t *testing.T) {
 	t.Parallel()
 	a := NewAgent(nil, true, 1, nil)
-	if !a.isChild {
+	if !a.IsChild() {
 		t.Error("expected isChild to be true")
 	}
 
 	b := NewAgent(nil, false, 0, nil)
-	if b.isChild {
+	if b.IsChild() {
 		t.Error("expected isChild to be false")
 	}
 }

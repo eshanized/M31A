@@ -28,7 +28,7 @@ func (s *SidebarModel) View() string {
 	case SidebarModeActive:
 		lines = s.renderActive(contentW)
 	case SidebarModeNarrative:
-		lines = renderNarrativeSidebar(s.narrativeState, t, contentW)
+		lines = RenderNarrativeSidebar(s.narrativeState, t, contentW)
 		if len(lines) == 0 {
 			lines = s.renderIdle(contentW)
 		}

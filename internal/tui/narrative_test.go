@@ -144,16 +144,16 @@ func TestRenderNarrativeSidebar(t *testing.T) {
 		Category: narrative.CategoryExecuting,
 	})
 
-	lines := renderNarrativeSidebar(ns, testTheme(), 30)
+	lines := RenderNarrativeSidebar(ns, testTheme(), 30)
 	if len(lines) == 0 {
-		t.Error("renderNarrativeSidebar should produce at least one line")
+		t.Error("RenderNarrativeSidebar should produce at least one line")
 	}
 }
 
 func TestRenderNarrativeSidebarEmpty(t *testing.T) {
-	lines := renderNarrativeSidebar(nil, testTheme(), 30)
+	lines := RenderNarrativeSidebar(nil, testTheme(), 30)
 	if lines != nil {
-		t.Error("renderNarrativeSidebar(nil) should return nil")
+		t.Error("RenderNarrativeSidebar(nil) should return nil")
 	}
 }
 

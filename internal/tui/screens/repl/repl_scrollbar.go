@@ -1,12 +1,12 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/components"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // overlayScrollbar overlays a 1-column scrollbar track on the right edge of
@@ -95,11 +95,11 @@ func overlayScrollbar(rendered string, vp viewport.Model, s theme.SemanticStyles
 }
 
 // truncateStyledToWidth truncates a styled (ANSI-escaped) string to at most
-// maxW visible columns. Uses components.TruncateWithEllipsis to handle escape sequences.
+// maxW visible columns. Uses tuitypes.TruncateWithEllipsis to handle escape sequences.
 func truncateStyledToWidth(s string, maxW int) string {
 	w := lipgloss.Width(s)
 	if w <= maxW {
 		return s
 	}
-	return components.TruncateWithEllipsis(s, maxW)
+	return tuitypes.TruncateWithEllipsis(s, maxW)
 }

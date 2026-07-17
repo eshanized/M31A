@@ -11,6 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/streaming"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
 )
@@ -92,7 +93,7 @@ func (ms *ModelSelector) Init() tea.Cmd {
 	ms.activeProvider = ms.registry.Active()
 
 	cmds := make([]tea.Cmd, 0, len(provNames)+1)
-	cmds = append(cmds, StreamTickCmd())
+	cmds = append(cmds, streaming.StreamTickCmd())
 	for _, name := range provNames {
 		cmds = append(cmds, ms.fetchModelsCmd(name))
 	}
@@ -123,10 +124,10 @@ func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ms.height = msg.Height
 		return ms, nil
 
-	case TickMsg:
+	case streaming.TickMsg:
 		if ms.loading {
 			ms.spinner.Next()
-			return ms, StreamTickCmd()
+			return ms, streaming.StreamTickCmd()
 		}
 		return ms, nil
 
@@ -165,7 +166,7 @@ func (ms *ModelSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return ms, func() tea.Msg {
-				return tuitypes.AppMsg{tuitypes.Screen: tuitypes.ScreenREPL}
+				return tuitypes.AppMsg{Screen: tuitypes.ScreenREPL}
 			}
 		case "up", "k":
 			if ms.cursor > 0 {

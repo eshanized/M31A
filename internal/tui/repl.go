@@ -24,7 +24,7 @@ func (m *ReplModel) Init() tea.Cmd {
 
 // Update processes messages for the REPL. Delegates to handleKeyMsg,
 // handleStreamMsg, etc. based on message type.
-func (m *ReplModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -369,7 +369,7 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 		}
 
 		// Add user message so welcome screen is replaced by conversation
-		m.messages = append(m.messages, makeUserMsg(input))
+		m.messages = append(m.messages, MakeUserMsg(input))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -388,9 +388,9 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 			m.frecentHistory.Upsert(input)
 		}
 
-		m.messages = append(m.messages, makeUserMsg(input))
+		m.messages = append(m.messages, MakeUserMsg(input))
 		// Add temporary "Running…" feedback
-		m.messages = append(m.messages, makeAssistantMsg("*Running shell command…*"))
+		m.messages = append(m.messages, MakeAssistantMsg("*Running shell command…*"))
 		m.renderMessages()
 		m.viewport.GotoBottom()
 		m.userScrolled = false
@@ -410,7 +410,7 @@ func (m *ReplModel) handleEnterKey() tea.Cmd {
 
 	// Display the original input (without injected file content).
 	// Mark SkipForLLM so sendChatMessage replaces it instead of duplicating.
-	m.messages = append(m.messages, makeUserMsgWithSkip(input, true))
+	m.messages = append(m.messages, MakeUserMsgWithSkip(input, true))
 	m.renderMessages()
 	m.viewport.GotoBottom()
 	m.userScrolled = false

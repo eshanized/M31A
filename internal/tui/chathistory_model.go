@@ -64,7 +64,7 @@ func (ch *ChatHistoryModel) SetMessages(msgs []types.Message) {
 func (ch *ChatHistoryModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (ch *ChatHistoryModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (ch *ChatHistoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		ch.SetDimensions(msg.Width, msg.Height)

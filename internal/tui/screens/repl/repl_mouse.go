@@ -74,8 +74,8 @@ func (m *ReplModel) handleLeftClick(msg tea.MouseMsg) tea.Cmd {
 		if idx, ok := m.hitTestMentionOverlay(y); ok {
 			if idx >= 0 && idx < len(m.mentionEntries) {
 				m.mentionSelected = idx
-				m.completeMention()
-				m.updateMentionSuggestions()
+				completeMention(m)
+				updateMentionSuggestions(m)
 				return nil
 			}
 		}
@@ -206,8 +206,8 @@ func (m *ReplModel) mentionOverlayHeight() int {
 	if !m.mentionVisible || len(m.mentionEntries) == 0 {
 		return 0
 	}
-	// renderMentionSuggestions returns a rounded-border box with N entry rows.
-	rendered := m.renderMentionSuggestions(m.replWidth())
+	// RenderMentionSuggestions returns a rounded-border box with N entry rows.
+	rendered := RenderMentionSuggestions(m, m.replWidth())
 	return strings.Count(rendered, "\n") + 1
 }
 

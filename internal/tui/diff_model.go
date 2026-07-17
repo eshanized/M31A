@@ -99,7 +99,7 @@ func (dm *DiffModel) SetTitle(title string) {
 func (dm *DiffModel) Init() tea.Cmd { return nil }
 
 // Update implements Screenable.
-func (dm *DiffModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (dm *DiffModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		dm.SetDimensions(msg.Width, msg.Height)

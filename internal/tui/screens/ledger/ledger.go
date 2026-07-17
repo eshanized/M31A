@@ -143,9 +143,9 @@ func (lm *LedgerModel) renderEntries() string {
 	rows = append(rows, header, divRow)
 	for _, e := range lm.entries {
 		ts := e.Timestamp.Format("2006-01-02 15:04")
-		modelShort := TruncateWithEllipsis(e.Model, 14)
+		modelShort := tuitypes.TruncateWithEllipsis(e.Model, 14)
 		row := fmt.Sprintf("  %-12s  %-20s  %-14s  %8d  %6d  $%7.4f",
-			TruncateWithEllipsis(e.SessionID, 12),
+			tuitypes.TruncateWithEllipsis(e.SessionID, 12),
 			ts,
 			modelShort,
 			e.TaskCount,

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // resolveLogoText returns the custom logo text from config.
@@ -160,7 +161,7 @@ func (hm *HomeModel) renderSlashSuggestions(width int) string {
 		desc := descStyle.Render("  " + cmd.Description)
 		line := "  " + nameStyle.Render(slash) + desc
 		if lipgloss.Width(line) > width {
-			line = TruncateWithEllipsis(line, width)
+			line = tuitypes.TruncateWithEllipsis(line, width)
 		}
 		lines = append(lines, line)
 	}

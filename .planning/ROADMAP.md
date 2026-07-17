@@ -202,6 +202,16 @@ Plans:
 - Plan 09: Constructor Injection — Wire dependencies at composition root
 - Plan 10: Final Verification — Phase gate validation
 
+### Phase 10: Fix test errors from architecture upgrade
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
+
 ---
 
 ## Cross-Phase Notes
@@ -230,3 +240,13 @@ Plans:
 - `.planning/codebase/CONVENTIONS.md` — code style
 
 EOF
+
+### Phase 09.1: Fix test errors from architecture upgrade (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 09.1 to break down)

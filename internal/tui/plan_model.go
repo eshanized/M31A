@@ -198,7 +198,7 @@ func (pm *PlanModel) initViewport() {
 }
 
 // Update handles plan screen key events.
-func (pm *PlanModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (pm *PlanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if pm.refineMode && pm.refineInput != nil {
 		return pm.handleRefineUpdate(msg)
 	}
@@ -242,7 +242,7 @@ func (pm *PlanModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	return pm, nil
 }
 
-func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		pm.confirmMode = false
@@ -261,7 +261,7 @@ func (pm *PlanModel) handleConfirmKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	return pm, nil
 }
 
-func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (Screenable, tea.Cmd) {
+func (pm *PlanModel) handleRefineUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {

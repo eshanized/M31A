@@ -14,14 +14,14 @@ import (
 // sandboxing provided on all platforms: sensitive environment variables are
 // removed before the subprocess is started.
 func applyBashSandbox(cmd *exec.Cmd, workDir string) error {
-	scrubEnvironment(cmd)
+	ScrubEnvironment(cmd)
 
 	slog.Debug("platform sandbox not available, using env-scrub-only mode")
 	return nil
 }
 
-// scrubEnvironment removes sensitive environment variables from the subprocess.
-func scrubEnvironment(cmd *exec.Cmd) {
+// ScrubEnvironment removes sensitive environment variables from the subprocess.
+func ScrubEnvironment(cmd *exec.Cmd) {
 	env := os.Environ()
 
 	sensitiveVars := []string{

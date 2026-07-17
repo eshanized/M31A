@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // Update implements tea.Model. It is the single dispatch point for all messages.
@@ -145,7 +145,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case QuestionResponseMsg:
 		_, cmd := handleQuestionResponseMsg(m, msg)
 		cmds = append(cmds, cmd)
-	case tools.QuestionResponse:
+	case types.QuestionResponse:
 		_, cmd := handleToolsQuestionResponse(m, msg)
 		cmds = append(cmds, cmd)
 

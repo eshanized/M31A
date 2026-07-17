@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -52,7 +53,7 @@ func (ms *ModelSelector) computeColumnWidths(visible []types.ModelInfo) (nameW, 
 		if displayName == "" {
 			displayName = m.ID
 		}
-		n := len(displayName + " [" + ProviderShortName(m.Provider) + "]")
+		n := len(displayName + " [" + tuitypes.ProviderShortName(m.Provider) + "]")
 		if n > nameW {
 			nameW = n
 		}
@@ -85,7 +86,7 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool, nameW,
 	if displayName == "" {
 		displayName = m.ID
 	}
-	nameCol := displayName + " [" + ProviderShortName(m.Provider) + "]"
+	nameCol := displayName + " [" + tuitypes.ProviderShortName(m.Provider) + "]"
 
 	// Context length
 	ctxCol := ""
@@ -120,7 +121,7 @@ func (ms *ModelSelector) renderModelRow(m types.ModelInfo, selected bool, nameW,
 
 	// Truncate to available width.
 	if len(rowContent) > avail {
-		rowContent = TruncateEnd(rowContent, avail)
+		rowContent = tuitypes.TruncateEnd(rowContent, avail)
 	}
 
 	var nameStyle lipgloss.Style

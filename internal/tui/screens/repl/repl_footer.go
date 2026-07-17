@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // StatusBarInfo carries optional info to render in the status bar.
@@ -180,7 +181,7 @@ func RenderStatusBar(s theme.SemanticStyles, width int, info *StatusBarInfo) str
 		if maxLeft < 1 {
 			maxLeft = 1
 		}
-		result = components.TruncateWithEllipsis(leftText, maxLeft)
+		result = tuitypes.TruncateWithEllipsis(leftText, maxLeft)
 		resultWidth = lipgloss.Width(result)
 	}
 

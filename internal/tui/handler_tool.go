@@ -4,8 +4,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tui/components"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // handler_tool.go — permission and tool message handling extracted from Update().
@@ -41,7 +41,7 @@ func handlePermissionTickMsg(m *AppState, msg PermissionTickMsg) (tea.Model, tea
 // handleQuestionRequestMsg processes a question request, showing the question modal.
 func handleQuestionRequestMsg(m *AppState, msg QuestionRequestMsg) (tea.Model, tea.Cmd) {
 	m.questionRequest = &msg
-	qModel := components.NewQuestionModel(tools.QuestionRequest{
+	qModel := components.NewQuestionModel(types.QuestionRequest{
 		Question:    msg.Question,
 		Header:      msg.Header,
 		Options:     msg.Options,
@@ -57,7 +57,7 @@ func handleQuestionResponseMsg(m *AppState, msg QuestionResponseMsg) (tea.Model,
 	return m, m.handleQuestionResponse(msg)
 }
 
-// handleToolsQuestionResponse processes a tools.QuestionResponse directly.
-func handleToolsQuestionResponse(m *AppState, msg tools.QuestionResponse) (tea.Model, tea.Cmd) {
+// handleToolsQuestionResponse processes a types.QuestionResponse directly.
+func handleToolsQuestionResponse(m *AppState, msg types.QuestionResponse) (tea.Model, tea.Cmd) {
 	return m, m.handleQuestionResponse(QuestionResponseMsg{Answer: msg.Answer})
 }

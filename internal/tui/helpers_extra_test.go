@@ -30,7 +30,7 @@ func TestActiveModelID(t *testing.T) {
 }
 
 func TestMakeAssistantMsg(t *testing.T) {
-	msg := makeAssistantMsg("hello")
+	msg := MakeAssistantMsg("hello")
 
 	if msg.Role != "assistant" {
 		t.Errorf("Role = %q, want %q", msg.Role, "assistant")
@@ -68,7 +68,7 @@ func TestMakeErrorBannerMsg(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg := makeErrorBannerMsg(tt.text, tt.provider)
+			msg := MakeErrorBannerMsg(tt.text, tt.provider)
 			if msg.Content != tt.want {
 				t.Errorf("Content = %q, want %q", msg.Content, tt.want)
 			}
@@ -83,7 +83,7 @@ func TestMakeErrorBannerMsg(t *testing.T) {
 }
 
 func TestMakeUserMsg(t *testing.T) {
-	msg := makeUserMsg("hello")
+	msg := MakeUserMsg("hello")
 
 	if msg.Role != "user" {
 		t.Errorf("Role = %q, want %q", msg.Role, "user")
@@ -114,7 +114,7 @@ func TestMakeUserMsgWithSkip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg := makeUserMsgWithSkip(tt.content, tt.skip)
+			msg := MakeUserMsgWithSkip(tt.content, tt.skip)
 			if msg.Content != tt.content {
 				t.Errorf("Content = %q, want %q", msg.Content, tt.content)
 			}

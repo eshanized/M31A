@@ -36,7 +36,7 @@ func (m *AppState) handleSubagentEvent(msg SubagentEventMsg) []tea.Cmd {
 			if label == "" {
 				label = msg.Event.AgentID
 			}
-			m.replModel.AddMessage(makeAssistantMsg(
+			m.replModel.AddMessage(MakeAssistantMsg(
 				fmt.Sprintf("**Subagent %s** spawned", label),
 			))
 		case subagent.EventDone:
@@ -49,7 +49,7 @@ func (m *AppState) handleSubagentEvent(msg SubagentEventMsg) []tea.Cmd {
 			if msg.Event.Summary != "" {
 				body += "\n\n" + msg.Event.Summary
 			}
-			m.replModel.AddMessage(makeAssistantMsg(body))
+			m.replModel.AddMessage(MakeAssistantMsg(body))
 			if m.subagentManager != nil {
 				agentID := msg.Event.AgentID
 				cmds = append(cmds, func() tea.Msg {
@@ -64,7 +64,7 @@ func (m *AppState) handleSubagentEvent(msg SubagentEventMsg) []tea.Cmd {
 			if label == "" {
 				label = msg.Event.AgentID
 			}
-			m.replModel.AddMessage(makeAssistantMsg(
+			m.replModel.AddMessage(MakeAssistantMsg(
 				fmt.Sprintf("**Subagent %s errored:** %s", label, msg.Event.Error),
 			))
 			if m.subagentManager != nil {

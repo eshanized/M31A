@@ -12,6 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/internal/arbitrage"
 	"github.com/eshanized/M31A/internal/metrics"
@@ -165,7 +166,7 @@ func (m *AppState) Shutdown() {
 	// W3: Stop all managed dev servers so child processes do not orphan.
 	if m.dispatcher != nil {
 		if tool, ok := m.dispatcher.GetTool("DevServer"); ok {
-			if ds, castOK := tool.(*tools.DevServer); castOK {
+			if ds, castOK := tool.(*exec.DevServer); castOK {
 				ds.StopAll()
 			}
 		}
@@ -340,7 +341,7 @@ func (m *AppState) RunPhaseCmd(phase types.WorkflowPhase) tea.Cmd {
 
 	// Inline phase starting feedback in the REPL
 	if m.replModel != nil {
-		m.replModel.AddMessage(makeAssistantMsg(
+		m.replModel.AddMessage(MakeAssistantMsg(
 			fmt.Sprintf("**Phase: %s** — starting…", phase),
 		))
 	}

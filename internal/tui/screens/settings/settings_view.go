@@ -45,3 +45,31 @@ func maskedKey(key string) string {
 	}
 	return fmt.Sprintf("••••••••%s", tail)
 }
+
+// renderLeftNav renders the left navigation sidebar for settings tabs.
+func (s *SettingsModel) renderLeftNav() string {
+	t := s.theme
+	tabNames := []string{"Provider", "Model", "UI", "Keys", "Workflow", "About"}
+	var items []string
+	for i, name := range tabNames {
+		style := lipgloss.NewStyle().PaddingLeft(2).PaddingRight(2)
+		if s.activeTab == SettingsTab(i) {
+			style = style.Background(t.Brand).Foreground(t.TextPrimary)
+		} else {
+			style = style.Foreground(t.TextMuted)
+		}
+		items = append(items, style.Render(name))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, items...)
+}
+
+// renderSectionHeader renders a section header for settings content.
+func renderSectionHeader(title string, width int) string {
+	t := theme.Default()
+	return lipgloss.NewStyle().
+		Foreground(t.Brand).
+		Bold(true).
+		PaddingLeft(2).
+		Width(width - 4).
+		Render(title)
+}

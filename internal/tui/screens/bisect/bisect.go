@@ -233,7 +233,7 @@ func (bm *BisectModel) View() string {
 			}
 			hashStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Render(hash)
 			msgStyled := lipgloss.NewStyle().Foreground(t.Text).Render(
-				components.TruncateWithEllipsis(c.Message, w-30))
+				tuitypes.TruncateWithEllipsis(c.Message, w-30))
 			prefix := components.CursorIndicator{Selected: selected, Theme: t}.Render()
 			lines = append(lines, fmt.Sprintf("%s%s  %s  %s", prefix, iconStyled, hashStyled, msgStyled))
 		}

@@ -19,7 +19,7 @@ import (
 // unavailable, only environment scrubbing is applied (graceful degradation).
 func applyBashSandbox(cmd *exec.Cmd, workDir string) error {
 	// Scrub sensitive environment variables from the subprocess
-	scrubEnvironment(cmd)
+	ScrubEnvironment(cmd)
 
 	// Attempt Landlock filesystem restriction
 	if err := applyLandlock(cmd, workDir); err != nil {
@@ -170,8 +170,8 @@ func applyLandlock(cmd *exec.Cmd, workDir string) error {
 	return nil
 }
 
-// scrubEnvironment removes sensitive environment variables from the subprocess.
-func scrubEnvironment(cmd *exec.Cmd) {
+// ScrubEnvironment removes sensitive environment variables from the subprocess.
+func ScrubEnvironment(cmd *exec.Cmd) {
 	// Start from the current environment
 	env := os.Environ()
 

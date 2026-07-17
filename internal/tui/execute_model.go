@@ -167,7 +167,7 @@ func (em *ExecuteModel) hasActiveTasks() bool {
 }
 
 // Update handles execute screen key events.
-func (em *ExecuteModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (em *ExecuteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {

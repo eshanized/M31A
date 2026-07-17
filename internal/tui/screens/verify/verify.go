@@ -149,7 +149,7 @@ func (vm *VerifyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			// Continue → go to ship
 			return vm, func() tea.Msg {
-				return tuitypes.AppMsg{tuitypes.Screen: tuitypes.ScreenShip}
+				return tuitypes.AppMsg{Screen: tuitypes.ScreenShip}
 			}
 		case "h":
 			// Trigger heal for the task at healCursor
@@ -165,14 +165,14 @@ func (vm *VerifyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			// Skip — go to ship anyway
 			return vm, func() tea.Msg {
-				return tuitypes.AppMsg{tuitypes.Screen: tuitypes.ScreenShip}
+				return tuitypes.AppMsg{Screen: tuitypes.ScreenShip}
 			}
 		case "esc", "q":
 			return vm, func() tea.Msg {
 				return tuitypes.PopScreenMsg{}
 			}
 		}
-	case HealResultMsg:
+	case tuitypes.HealResultMsg:
 		vm.StopHealing()
 		if msg.Success {
 			for i := range vm.tasks {

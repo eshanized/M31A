@@ -205,7 +205,7 @@ func (s *SettingsModel) startHealthChecks() tea.Cmd {
 }
 
 // Update handles settings screen key events.
-func (s *SettingsModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (s *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case settingsHealthMsg:
 		s.healthResults = msg.Results
@@ -314,7 +314,7 @@ func (s *SettingsModel) isCurrentFieldChoice() bool {
 }
 
 // cycleChoice changes the current choice field by delta.
-func (s *SettingsModel) cycleChoice(delta int) (Screenable, tea.Cmd) {
+func (s *SettingsModel) cycleChoice(delta int) (tea.Model, tea.Cmd) {
 	if s.config == nil {
 		return s, nil
 	}
@@ -332,7 +332,7 @@ func (s *SettingsModel) cycleChoice(delta int) (Screenable, tea.Cmd) {
 }
 
 // activateField starts editing or toggling the current field.
-func (s *SettingsModel) activateField() (Screenable, tea.Cmd) {
+func (s *SettingsModel) activateField() (tea.Model, tea.Cmd) {
 	if len(s.fields) == 0 || s.fieldCursor >= len(s.fields) {
 		return s, nil
 	}
@@ -359,7 +359,7 @@ func (s *SettingsModel) activateField() (Screenable, tea.Cmd) {
 	return s, nil
 }
 
-func (s *SettingsModel) toggleBool(f settingsField) (Screenable, tea.Cmd) {
+func (s *SettingsModel) toggleBool(f settingsField) (tea.Model, tea.Cmd) {
 	current := s.getFieldValue(f)
 	newVal := "no"
 	if current == "no" || current == "" {
@@ -419,7 +419,7 @@ func (s *SettingsModel) getFieldValue(f settingsField) string {
 }
 
 // setFieldValue writes a new value to config and applies instant reload.
-func (s *SettingsModel) setFieldValue(f settingsField, val string) (Screenable, tea.Cmd) {
+func (s *SettingsModel) setFieldValue(f settingsField, val string) (tea.Model, tea.Cmd) {
 	if s.config == nil {
 		s.config = config.DefaultConfig()
 	}
@@ -501,7 +501,7 @@ func (s *SettingsModel) setFieldValue(f settingsField, val string) (Screenable, 
 	return s, cmd
 }
 
-func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		s.editing = false
@@ -528,7 +528,7 @@ func (s *SettingsModel) updateEditing(msg tea.KeyMsg) (Screenable, tea.Cmd) {
 	return s, cmd
 }
 
-func (s *SettingsModel) saveConfig() (Screenable, tea.Cmd) {
+func (s *SettingsModel) saveConfig() (tea.Model, tea.Cmd) {
 	if s.config == nil || s.configPath == "" {
 		s.statusMsg = "No config path set."
 		s.statusTime = time.Now()
@@ -544,7 +544,7 @@ func (s *SettingsModel) saveConfig() (Screenable, tea.Cmd) {
 	return s, func() tea.Msg { return SettingsSavedMsg{} }
 }
 
-func (s *SettingsModel) saveLocalConfig() (Screenable, tea.Cmd) {
+func (s *SettingsModel) saveLocalConfig() (tea.Model, tea.Cmd) {
 	if s.config == nil {
 		s.statusMsg = "No config loaded."
 		s.statusTime = time.Now()

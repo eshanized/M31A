@@ -27,7 +27,7 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			m.pendingConfirm = nil
 			m.confirmPrompt = ""
 			if m.replModel != nil {
-				m.replModel.AddMessage(makeAssistantMsg("Cancelled."))
+				m.replModel.AddMessage(MakeAssistantMsg("Cancelled."))
 			}
 			return nil
 		}
@@ -53,7 +53,7 @@ func (m *AppState) routeKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			m.pendingIntent = nil
 			m.pendingIntentInput = ""
 			if m.replModel != nil {
-				m.replModel.AddMessage(makeAssistantMsg("Proceeding in chat mode."))
+				m.replModel.AddMessage(MakeAssistantMsg("Proceeding in chat mode."))
 			}
 			p := m.registry.ActiveProvider()
 			if p != nil && m.agentMode {

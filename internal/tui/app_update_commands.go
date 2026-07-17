@@ -81,7 +81,7 @@ func (m *AppState) handleSlashCommand(input string, attachedFiles int) tea.Cmd {
 
 		// Unknown command
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
+			m.replModel.AddMessage(MakeAssistantMsg(
 				"Unknown command. Type /help for available commands.",
 			))
 		}
@@ -111,14 +111,14 @@ func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
 		}
 		m.confirmPrompt = prompt
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(prompt + " (y/n)"))
+			m.replModel.AddMessage(MakeAssistantMsg(prompt + " (y/n)"))
 		}
 		return nil
 	}
 
 	// Show the result message in REPL if any
 	if result.Message != "" && m.replModel != nil {
-		m.replModel.AddMessage(makeAssistantMsg(result.Message))
+		m.replModel.AddMessage(MakeAssistantMsg(result.Message))
 	}
 
 	// Screen transition
@@ -159,7 +159,7 @@ func (m *AppState) processCommandResult(result CommandResult) tea.Cmd {
 func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	if m.registry == nil || m.activeProvider == "" {
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
+			m.replModel.AddMessage(MakeAssistantMsg(
 				"No provider configured. Run /settings to add an API key.",
 			))
 		}
@@ -169,7 +169,7 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 	p := m.registry.ActiveProvider()
 	if p == nil {
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(
+			m.replModel.AddMessage(MakeAssistantMsg(
 				"Provider not available. Run /settings to configure.",
 			))
 		}
@@ -190,7 +190,7 @@ func (m *AppState) sendChatMessage(input string, t theme.Theme) tea.Cmd {
 		}
 		if m.activeModel == nil {
 			if m.replModel != nil {
-				m.replModel.AddMessage(makeAssistantMsg(
+				m.replModel.AddMessage(MakeAssistantMsg(
 					"No model selected. Run /model to choose one.",
 				))
 			}
@@ -231,7 +231,7 @@ func (m *AppState) startAgentLoop(p provider.LLMProvider, input string) tea.Cmd 
 		registry, err := workflow.LoadPrompts(m.config.Prompts, "")
 		if err != nil {
 			if m.replModel != nil {
-				m.replModel.AddMessage(makeAssistantMsg(
+				m.replModel.AddMessage(MakeAssistantMsg(
 					fmt.Sprintf("Failed to load prompts: %s", m31errors.UserMessage(err)),
 				))
 			}
@@ -456,7 +456,7 @@ func (m *AppState) handleIntentClassified(msg IntentClassifiedMsg) tea.Cmd {
 		prompt := fmt.Sprintf("This looks like a **%s** request (confidence: %.0f%%). Start a structured workflow? (y/n)",
 			intentLabel, result.Confidence*100)
 		if m.replModel != nil {
-			m.replModel.AddMessage(makeAssistantMsg(prompt))
+			m.replModel.AddMessage(MakeAssistantMsg(prompt))
 		}
 		return nil
 	}

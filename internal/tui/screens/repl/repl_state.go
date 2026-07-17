@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
 	"fmt"
@@ -345,7 +346,7 @@ func (m *ReplModel) ShowQuestion(msg tuitypes.QuestionRequestMsg) {
 	if header == "" {
 		header = "Question"
 	}
-	qMsg := makeAssistantMsg(header + "\n\n" + msg.Question)
+	qMsg := tui.MakeAssistantMsg(header + "\n\n" + msg.Question)
 	m.AddMessage(qMsg)
 }
 

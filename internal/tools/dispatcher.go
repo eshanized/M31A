@@ -219,6 +219,13 @@ func (d *Dispatcher) UnregisterTool(name string) {
 	d.Unregister(name)
 }
 
+// SetPermission sets the permission for a tool (always allow/deny).
+func (d *Dispatcher) SetPermission(name string, allowed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.permissions[name] = allowed
+}
+
 func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.ToolResult, error) {
 	start := time.Now()
 

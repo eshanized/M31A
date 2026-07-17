@@ -38,6 +38,9 @@ func (f *fakeDispatcher) UnregisterTool(_ string) {}
 
 func (f *fakeDispatcher) Stop() { f.stop.Store(true) }
 
+// SetPermission implements ToolDispatcher interface.
+func (f *fakeDispatcher) SetPermission(name string, allowed bool) {}
+
 // stubProvider is a minimal LLMProvider for tests that need a registry.
 type stubProvider struct{}
 

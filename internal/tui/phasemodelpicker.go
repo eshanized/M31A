@@ -151,7 +151,7 @@ func (m *PhaseModelPickerModel) fetchCmd(provName string) tea.Cmd {
 }
 
 // Update handles messages.
-func (m *PhaseModelPickerModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
+func (m *PhaseModelPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -203,7 +203,7 @@ func (m *PhaseModelPickerModel) Update(msg tea.Msg) (Screenable, tea.Cmd) {
 	return m, nil
 }
 
-func (m *PhaseModelPickerModel) handleKey(msg tea.KeyMsg) (Screenable, tea.Cmd) {
+func (m *PhaseModelPickerModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		// Skip picker — use default models for both phases.
