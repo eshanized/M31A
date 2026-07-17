@@ -13,18 +13,18 @@ import (
 func setupTestBash(t *testing.T) *exec.Bash {
 	t.Helper()
 	dir := t.TempDir()
-	return exec.NewBash(dir, 60, nil, nil) // workDir, maxTimeoutSecs, blockedCommands, obfuscationPatterns
+	return exec.NewBash(dir, 60, nil, nil)
 }
 
 func TestBash_WorkdirValidation(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	// Test that working directory is enforced
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "pwd"}`),
+		Params: map[string]any{
+			"command": "pwd",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -32,16 +32,18 @@ func TestBash_WorkdirValidation(t *testing.T) {
 	if result.Error != "" {
 		t.Fatalf("Unexpected error: %s", result.Error)
 	}
+	_ = result
 }
 
 func TestBash_CommandExecution(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "echo hello"}`),
+		Params: map[string]any{
+			"command": "echo hello",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -58,29 +60,27 @@ func TestBash_TimeoutHandling(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	// Command that takes longer than timeout
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "sleep 2"}`),
+		Params: map[string]any{
+			"command": "sleep 2",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	// Should either timeout or complete
-	if result.Error == "" && !containsString(result.Output, "hello") {
-		// Might have timed out or completed
-	}
+	_ = result
 }
 
 func TestBash_CommandSubstitution(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "echo $(echo nested)"}`),
+		Params: map[string]any{
+			"command": "echo $(echo nested)",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -97,15 +97,15 @@ func TestBash_StderrCapture(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "echo error >&2"}`),
+		Params: map[string]any{
+			"command": "echo error >&2",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	// Stderr should be captured in output or separate field
 	if result.Error != "" {
 		t.Fatalf("Unexpected error: %s", result.Error)
 	}
@@ -115,22 +115,22 @@ func TestBash_EmptyCommand(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": ""}`),
+		Params: map[string]any{
+			"command": "",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	// Empty command should produce some output or error
+	_ = result
 }
 
 func TestBash_WorkingDirectory(t *testing.T) {
 	b := setupTestBash(t)
 	ctx := context.Background()
 
-	// Create a temp file
 	tmpDir := b.WorkDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("hello"), 0644)
@@ -138,10 +138,11 @@ func TestBash_WorkingDirectory(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	result, err := b.Execute(ctx, types.ToolCall{
-		ID:   "call1",
+	result, err := b.Execute(ctx, types.ToolInput{
 		Name: "Bash",
-		Input: []byte(`{"command": "cat test.txt"}`),
+		Params: map[string]any{
+			"command": "cat test.txt",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)

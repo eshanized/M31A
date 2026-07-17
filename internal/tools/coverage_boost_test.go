@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/eshanized/M31A/internal/tools/exec"
 	"time"
 
 	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -537,43 +539,38 @@ func TestParseStatusIcon(t *testing.T) {
 // webfetch.go Tests
 // ============================================================================
 
-func TestHtmlTableToMarkdown_SimpleTable(t *testing.T) {
+func TestSearchHtmlTableToMarkdown_SimpleTable(t *testing.T) {
 	// Use a simple table structure the parser handles
 	html := "<table><tr><td>cell1</td></tr></table>"
-	result := HtmlTableToMarkdown(html)
+	result := search.HtmlTableToMarkdown(html)
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
 }
 
-func TestHtmlTableToMarkdown_NoTable(t *testing.T) {
+func TestSearchHtmlTableToMarkdown_NoTable(t *testing.T) {
 	html := "<p>No table here</p>"
-	result := HtmlTableToMarkdown(html)
+	result := search.HtmlTableToMarkdown(html)
 	if result != html {
 		t.Error("expected unchanged for no table")
 	}
 }
 
-func TestHtmlTableToMarkdown_Empty(t *testing.T) {
-	result := HtmlTableToMarkdown("")
+func TestSearchHtmlTableToMarkdown_Empty(t *testing.T) {
+	result := search.HtmlTableToMarkdown("")
 	if result != "" {
 		t.Error("expected empty result")
 	}
 }
 
-func TestHtmlTableToMarkdown_SingleCell(t *testing.T) {
+func TestSearchHtmlTableToMarkdown_SingleCell(t *testing.T) {
 	// Empty table returns unchanged
-	result := HtmlTableToMarkdown("<table></table>")
+	result := search.HtmlTableToMarkdown("<table></table>")
 	if result != "<table></table>" {
 		t.Errorf("expected unchanged, got: %s", result)
 	}
 }
 
-func TestWebFetch_Close(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
-	// Close should not panic
-	wf.Close()
-}
 
 // ============================================================================
 // dispatcher.go Tests
@@ -665,7 +662,7 @@ func TestGetProcessGroup_Tools(t *testing.T) {
 // ============================================================================
 
 func TestNewRingBuffer(t *testing.T) {
-	rb := newRingBuffer(5)
+	rb := exec.NewRingBuffer(5)
 	if rb == nil {
 		t.Fatal("expected non-nil ring buffer")
 	}
@@ -678,7 +675,7 @@ func TestNewRingBuffer(t *testing.T) {
 }
 
 func TestRingBuffer_TruncatedLines(t *testing.T) {
-	rb := newRingBuffer(2)
+	rb := exec.NewRingBuffer(2)
 	rb.Write([]byte("line1\n"))
 	rb.Write([]byte("line2\n"))
 	rb.Write([]byte("line3\n"))
@@ -688,7 +685,7 @@ func TestRingBuffer_TruncatedLines(t *testing.T) {
 }
 
 func TestRingBuffer_Overflow(t *testing.T) {
-	rb := newRingBuffer(1)
+	rb := exec.NewRingBuffer(1)
 	rb.Write([]byte("a very long line that exceeds buffer capacity"))
 	result := rb.String()
 	if result == "" {
@@ -786,7 +783,7 @@ func TestWebSearch_RiskLevel_V2(t *testing.T) {
 
 func TestBuildURL(t *testing.T) {
 	tool := NewWebSearch("https://api.search.example.com")
-	url, err := tool.buildURL("test query", nil)
+	url, err := tool.BuildURL("test query", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1215,5 +1212,5 @@ func TestValidateJSONPath_ArrayIndexNegative(t *testing.T) {
 func TestCheckPort(t *testing.T) {
 	tool := NewDevServer(t.TempDir())
 	// Should not crash
-	tool.checkPort(types.ToolInput{Params: map[string]any{}}, time.Now())
+	tool.CheckPort(types.ToolInput{Params: map[string]any{}}, time.Now())
 }

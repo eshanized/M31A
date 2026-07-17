@@ -96,6 +96,11 @@ func (t *Bash) Description() string {
 	return "Execute a shell command with output capping, timeout, and working directory support. Use the workdir parameter to run commands in a different directory without chaining cd commands."
 }
 
+// WorkDir returns the working directory for this Bash tool.
+func (t *Bash) WorkDir() string {
+	return t.workDir
+}
+
 func (t *Bash) RiskLevel() types.RiskLevel {
 	return types.RiskDangerous
 }

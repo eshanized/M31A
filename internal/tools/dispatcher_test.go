@@ -961,7 +961,7 @@ func TestDispatcher_QuestionChannels(t *testing.T) {
 		t.Error("QuestionRequestCh should not be nil")
 	}
 	if d.QuestionResponseCh() == nil {
-		t.Error("QuestionResponseCh should not be nil")
+		t.Error("types.QuestionResponseCh should not be nil")
 	}
 }
 
@@ -970,7 +970,7 @@ func TestDispatcher_RespondQuestion_Routing(t *testing.T) {
 
 	// Register a per-request channel
 	reqID := int64(42)
-	respCh := make(chan QuestionResponse, 1)
+	respCh := make(chan types.QuestionResponse, 1)
 	d.pendingQuestions.Store(reqID, respCh)
 
 	d.RespondQuestion(reqID, "yes")

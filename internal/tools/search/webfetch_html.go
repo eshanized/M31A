@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-func htmlToMarkdown(rawHTML string) string {
+func HtmlToMarkdown(rawHTML string) string {
 	// Strip script and style elements first
-	rawHTML = stripTags(rawHTML, "script", "style")
+	rawHTML = StripTags(rawHTML, "script", "style")
 
 	// Compute lowercase once for all case-insensitive tag matching
 	lower := strings.ToLower(rawHTML)
@@ -17,31 +17,31 @@ func htmlToMarkdown(rawHTML string) string {
 	rawHTML, lower = convertTables(rawHTML, lower)
 
 	// Handle common block elements with newlines
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "p", "\n\n")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "div", "\n")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "br", "\n")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "hr", "\n---\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "p", "\n\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "div", "\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "br", "\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "hr", "\n---\n")
 
 	// Handle headings with proper markdown
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h1", "\n# ")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h2", "\n## ")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h3", "\n### ")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h4", "\n#### ")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h5", "\n##### ")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "h6", "\n###### ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h1", "\n# ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h2", "\n## ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h3", "\n### ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h4", "\n#### ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h5", "\n##### ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "h6", "\n###### ")
 
 	// Handle blockquotes
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "blockquote", "\n> ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "blockquote", "\n> ")
 
 	// Handle unordered lists
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "ul", "\n")
-	rawHTML, _ = replaceBlockTag(rawHTML, lower, "li", "\n- ")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "ul", "\n")
+	rawHTML, _ = ReplaceBlockTag(rawHTML, lower, "li", "\n- ")
 
 	// Handle ordered lists (convert <li> inside <ol> to numbered)
 	rawHTML = convertOrderedList(rawHTML)
 
 	// Handle links: <a href="url">text</a> -> [text](url)
-	rawHTML = convertLinks(rawHTML, strings.ToLower(rawHTML))
+	rawHTML = ConvertLinks(rawHTML, strings.ToLower(rawHTML))
 	lower = strings.ToLower(rawHTML)
 
 	// Handle images: <img src="url" alt="text"> -> ![text](url)
@@ -49,33 +49,33 @@ func htmlToMarkdown(rawHTML string) string {
 	lower = strings.ToLower(rawHTML)
 
 	// Handle inline formatting
-	rawHTML = replaceInlineTag(rawHTML, lower, "strong", "**")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "strong", "**")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "b", "**")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "b", "**")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "em", "*")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "em", "*")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "i", "*")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "i", "*")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "code", "`")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "code", "`")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "kbd", "`")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "kbd", "`")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "samp", "`")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "samp", "`")
 	lower = strings.ToLower(rawHTML)
-	rawHTML = replaceInlineTag(rawHTML, lower, "pre", "\n```\n")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "pre", "\n```\n")
 
 	// Handle <abbr title="...">text</abbr> -> text (title)
 	rawHTML = convertAbbreviations(rawHTML, strings.ToLower(rawHTML))
 
 	// Strip all remaining tags
-	rawHTML = stripAllTags(rawHTML)
+	rawHTML = StripAllTags(rawHTML)
 
 	// Decode common HTML entities
 	rawHTML = decodeHTMLEntities(rawHTML)
 
 	// Normalize whitespace
-	rawHTML = normalizeWhitespace(rawHTML)
+	rawHTML = NormalizeWhitespace(rawHTML)
 
 	return strings.TrimSpace(rawHTML)
 }
@@ -176,7 +176,7 @@ func HtmlTableToMarkdown(tableHTML string) string {
 			}
 			cellContent := strings.TrimSpace(tableHTML[cellContentStart : cellContentStart+closeTagIdx])
 			// Strip any inner tags
-			cellContent = stripAllTags(cellContent)
+			cellContent = StripAllTags(cellContent)
 			cellContent = decodeHTMLEntities(cellContent)
 			cellContent = strings.TrimSpace(cellContent)
 			// Escape pipes in cell content
@@ -375,29 +375,29 @@ func convertImages(rawHTML, lower string) string {
 // convertAbbreviations removes <abbr> tags, keeping just the text content.
 func convertAbbreviations(rawHTML, lower string) string {
 	// Simple approach: just strip <abbr ...> and </abbr> tags
-	rawHTML = replaceInlineTag(rawHTML, lower, "abbr", "")
+	rawHTML = ReplaceInlineTag(rawHTML, lower, "abbr", "")
 	return rawHTML
 }
 
 // htmlToText extracts plain text from HTML.
-func htmlToText(rawHTML string) string {
-	rawHTML = stripTags(rawHTML, "script", "style")
+func HtmlToText(rawHTML string) string {
+	rawHTML = StripTags(rawHTML, "script", "style")
 	lower := strings.ToLower(rawHTML)
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "p", "\n\n")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "br", "\n")
-	rawHTML, lower = replaceBlockTag(rawHTML, lower, "li", "\n- ")
-	rawHTML, _ = replaceBlockTag(rawHTML, lower, "blockquote", "\n> ")
-	rawHTML = stripAllTags(rawHTML)
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "p", "\n\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "br", "\n")
+	rawHTML, lower = ReplaceBlockTag(rawHTML, lower, "li", "\n- ")
+	rawHTML, _ = ReplaceBlockTag(rawHTML, lower, "blockquote", "\n> ")
+	rawHTML = StripAllTags(rawHTML)
 
 	// Decode entities
 	rawHTML = decodeHTMLEntities(rawHTML)
 
-	return normalizeWhitespace(rawHTML)
+	return NormalizeWhitespace(rawHTML)
 }
 
-// stripTags removes all occurrences of the given HTML tags and their content.
+// StripTags removes all occurrences of the given HTML tags and their content.
 // Uses strings.Builder for efficient string construction instead of O(N²) concatenation.
-func stripTags(rawHTML string, tags ...string) string {
+func StripTags(rawHTML string, tags ...string) string {
 	for _, tag := range tags {
 		openTag := "<" + tag
 		closeTag := "</" + tag + ">"
@@ -443,7 +443,7 @@ func stripTags(rawHTML string, tags ...string) string {
 // replaceBlockTag replaces block-level HTML tags with the given replacement string.
 // Returns both the modified HTML and its pre-computed lowercase, avoiding the
 // caller needing to recompute strings.ToLower after every call.
-func replaceBlockTag(rawHTML, lower, tag, replacement string) (string, string) {
+func ReplaceBlockTag(rawHTML, lower, tag, replacement string) (string, string) {
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
 	var result strings.Builder
@@ -483,7 +483,7 @@ func replaceBlockTag(rawHTML, lower, tag, replacement string) (string, string) {
 // Collects all match positions first, then applies replacements in reverse order
 // so earlier positions remain valid. Only one ToLower recompute is needed after
 // the caller uses the result.
-func replaceInlineTag(rawHTML, lower, tag, marker string) string {
+func ReplaceInlineTag(rawHTML, lower, tag, marker string) string {
 	openTag := "<" + tag
 	closeTag := "</" + tag + ">"
 
@@ -548,10 +548,10 @@ func replaceInlineTag(rawHTML, lower, tag, marker string) string {
 	return b.String()
 }
 
-// convertLinks converts <a href="url">text</a> to [text](url).
+// ConvertLinks converts <a href="url">text</a> to [text](url).
 // Collects all link matches first, then applies replacements in reverse order
 // so position shifts don't invalidate earlier indices.
-func convertLinks(rawHTML, lower string) string {
+func ConvertLinks(rawHTML, lower string) string {
 	type linkMatch struct {
 		start    int
 		closeEnd int
@@ -662,7 +662,7 @@ func decodeHTMLEntities(s string) string {
 	return strings.ReplaceAll(s, "\u00a0", " ")
 }
 
-func stripAllTags(rawHTML string) string {
+func StripAllTags(rawHTML string) string {
 	var b strings.Builder
 	inTag := false
 	for _, ch := range rawHTML {
@@ -681,7 +681,7 @@ func stripAllTags(rawHTML string) string {
 	return b.String()
 }
 
-func normalizeWhitespace(s string) string {
+func NormalizeWhitespace(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	prevNewlines := 0

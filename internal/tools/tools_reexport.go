@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/eshanized/M31A/internal/tools/ai"
-	"github.com/eshanized/M31A/internal/tools/exec"
+	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/tools/subagent"
@@ -29,8 +29,8 @@ func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.Permiss
 }
 
 // Re-export tool constructors from sub-packages (only those NOT already in main tools package)
-func NewBash(workDir string, maxTimeoutSecs int, additionalBlockedCommands []string, additionalObfuscationPatterns []string) *exec.Bash {
-	return exec.NewBash(workDir, maxTimeoutSecs, additionalBlockedCommands, additionalObfuscationPatterns)
+func NewBash(workDir string, maxTimeoutSecs int, additionalBlockedCommands []string, additionalObfuscationPatterns []string) *toolsExec.Bash {
+	return toolsExec.NewBash(workDir, maxTimeoutSecs, additionalBlockedCommands, additionalObfuscationPatterns)
 }
 
 func NewFileRead(workDir string) *fileops.FileRead {
@@ -73,8 +73,8 @@ func NewWebSearch(baseURL string) *search.WebSearch {
 	return search.NewWebSearch(baseURL)
 }
 
-func NewDevServer(workDir string) *exec.DevServer {
-	return exec.NewDevServer(workDir)
+func NewDevServer(workDir string) *toolsExec.DevServer {
+	return toolsExec.NewDevServer(workDir)
 }
 
 func NewAskUserQuestion(requestCh chan types.QuestionRequest, responseCh chan types.QuestionResponse, pending *sync.Map) *ai.AskUserQuestion {
@@ -82,9 +82,9 @@ func NewAskUserQuestion(requestCh chan types.QuestionRequest, responseCh chan ty
 }
 
 func CheckDangerousCommand(command string, additionalBlocked []string, additionalObfuscation []string) (string, bool) {
-	return exec.CheckDangerousCommand(command, additionalBlocked, additionalObfuscation)
+	return toolsExec.CheckDangerousCommand(command, additionalBlocked, additionalObfuscation)
 }
 
 func ScrubEnvironment(cmd *exec.Cmd) {
-	exec.ScrubEnvironment(cmd)
+	toolsExec.ScrubEnvironment(cmd)
 }

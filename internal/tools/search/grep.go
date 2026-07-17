@@ -355,7 +355,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		}
 
 		// Check gitignore
-		if matchesGitignore(path, gitignorePatterns, t.workDir) {
+		if MatchesGitignore(path, gitignorePatterns, t.workDir) {
 			return nil
 		}
 
@@ -539,9 +539,9 @@ func (c *gitignoreCache) getOrCreate(dir string) *gitignoreCacheEntry {
 	return entry
 }
 
-// loadGitignoreCached returns cached gitignore patterns, re-reading from disk
+// LoadGitignoreCached returns cached gitignore patterns, re-reading from disk
 // only if the .gitignore file has been modified since the last read.
-func loadGitignoreCached(dir string) []string {
+func LoadGitignoreCached(dir string) []string {
 	path := filepath.Join(dir, ".gitignore")
 	info, err := os.Stat(path)
 	if err != nil {
@@ -579,10 +579,10 @@ func loadGitignoreCached(dir string) []string {
 }
 
 func loadGitignore(dir string) []string {
-	return loadGitignoreCached(dir)
+	return LoadGitignoreCached(dir)
 }
 
-func matchesGitignore(path string, patterns []string, workDir string) bool {
+func MatchesGitignore(path string, patterns []string, workDir string) bool {
 	// Convert to relative path for matching
 	relPath, err := filepath.Rel(workDir, path)
 	if err != nil {

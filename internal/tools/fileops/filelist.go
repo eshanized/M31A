@@ -144,7 +144,7 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 			sizeStr := ""
 			if !entry.IsDir() {
-				sizeStr = fmt.Sprintf(" (%s)", humanSize(info.Size()))
+				sizeStr = fmt.Sprintf(" (%s)", HumanSize(info.Size()))
 			}
 
 			sb.WriteString(prefix + connector + name + sizeStr + "\n")
@@ -169,7 +169,7 @@ func (t *FileList) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}, nil
 }
 
-func humanSize(b int64) string {
+func HumanSize(b int64) string {
 	const unit = 1024
 	if b < unit {
 		return fmt.Sprintf("%d B", b)

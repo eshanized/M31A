@@ -15,17 +15,19 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/tools/fileops"
+	"github.com/eshanized/M31A/internal/tools/search"
 )
 
 // ---------------------------------------------------------------------------
-// Edit: cascadingReplace edge cases (trimmed and fuzzy fallback paths)
+// Edit: fileops.CascadingReplace edge cases (trimmed and fuzzy fallback paths)
 // ---------------------------------------------------------------------------
 
 func TestCascadingReplace_TrimmedFallback(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo"
 	// Exact match fails because of leading spaces; trimmed should match
-	result, strategy, _, err := cascadingReplace(content, "hello\nworld", "REPLACED", false, 0.8)
+	result, strategy, _, err := fileops.CascadingReplace(content, "hello\nworld", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -42,7 +44,7 @@ func TestCascadingReplace_NormalizedFallback(t *testing.T) {
 	content := "hello    world\nfoo   bar"
 	// Trimmed fails because trimmed lines differ by whitespace;
 	// normalized normalizes fields so it should match
-	result, strategy, _, err := cascadingReplace(content, "hello world\nfoo bar", "REPLACED", false, 0.8)
+	result, strategy, _, err := fileops.CascadingReplace(content, "hello world\nfoo bar", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +63,7 @@ func TestCascadingReplace_AnchorFallback(t *testing.T) {
 	newStr := "REPLACED"
 	// Exact, trimmed, normalized all fail;
 	// anchor should match via Levenshtein on middle lines
-	result, strategy, _, err := cascadingReplace(content, oldStr, newStr, false, 0.8)
+	result, strategy, _, err := fileops.CascadingReplace(content, oldStr, newStr, false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestCascadingReplace_AnchorFallback(t *testing.T) {
 func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 	t.Parallel()
 	content := "hello world"
-	result, strategy, _, err := cascadingReplace(content, "hello world", "REPLACED", false, 0.8)
+	result, strategy, _, err := fileops.CascadingReplace(content, "hello world", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +92,7 @@ func TestCascadingReplace_ExactMatchTakesPriority(t *testing.T) {
 
 func TestCascadingReplace_EmptyContent(t *testing.T) {
 	t.Parallel()
-	_, _, _, err := cascadingReplace("", "hello", "world", false, 0.8)
+	_, _, _, err := fileops.CascadingReplace("", "hello", "world", false, 0.8)
 	if err == nil {
 		t.Error("expected error for empty content")
 	}
@@ -100,7 +102,7 @@ func TestCascadingReplace_EmptyOldString(t *testing.T) {
 	t.Parallel()
 	// empty oldString matches at index 0 in strings.Index, so it returns exact-match
 	// Actually strings.Index returns 0 for empty substring
-	result, strategy, _, err := cascadingReplace("hello world", "", "REPLACED", false, 0.8)
+	result, strategy, _, err := fileops.CascadingReplace("hello world", "", "REPLACED", false, 0.8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestCascadingReplace_EmptyOldString(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: anchorReplace edge cases
+// Edit: fileops.AnchorReplace edge cases
 // ---------------------------------------------------------------------------
 
 func TestAnchorReplace_NoMiddleLines(t *testing.T) {
@@ -119,7 +121,7 @@ func TestAnchorReplace_NoMiddleLines(t *testing.T) {
 	oldStr := "alpha\nbeta\ngamma"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	result, err := anchorReplace(content, contentLines, oldStr, newStr)
+	result, err := fileops.AnchorReplace(content, contentLines, oldStr, newStr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestAnchorReplace_MiddleLinesBelowThreshold(t *testing.T) {
 	oldStr := "first\nslightly similar\nalso somewhat\nlast"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := anchorReplace(content, contentLines, oldStr, newStr)
+	_, err := fileops.AnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when middle lines differ significantly")
 	}
@@ -147,7 +149,7 @@ func TestAnchorReplace_FirstLineNoMatch(t *testing.T) {
 	oldStr := "zzzz\nbeta\ngamma"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := anchorReplace(content, contentLines, oldStr, newStr)
+	_, err := fileops.AnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when first line doesn't match")
 	}
@@ -159,7 +161,7 @@ func TestAnchorReplace_LastLineNoMatch(t *testing.T) {
 	oldStr := "alpha\nbeta\nzzzz"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := anchorReplace(content, contentLines, oldStr, newStr)
+	_, err := fileops.AnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when last line doesn't match")
 	}
@@ -169,7 +171,7 @@ func TestAnchorReplace_TooFewLines_AllOldLinesMatch(t *testing.T) {
 	t.Parallel()
 	content := "one\ntwo"
 	contentLines := strings.Split(content, "\n")
-	_, err := anchorReplace(content, contentLines, "one\ntwo", "new")
+	_, err := fileops.AnchorReplace(content, contentLines, "one\ntwo", "new")
 	if err == nil {
 		t.Error("expected error for fewer than MinLinesForFuzzy lines")
 	}
@@ -181,21 +183,21 @@ func TestAnchorReplace_ContentTooShort(t *testing.T) {
 	oldStr := "short\nsecond\nthird"
 	newStr := "REPLACED"
 	contentLines := strings.Split(content, "\n")
-	_, err := anchorReplace(content, contentLines, oldStr, newStr)
+	_, err := fileops.AnchorReplace(content, contentLines, oldStr, newStr)
 	if err == nil {
 		t.Error("expected error when content is shorter than old string")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: trimmedReplace edge cases
+// Edit: fileops.TrimmedReplace edge cases
 // ---------------------------------------------------------------------------
 
 func TestTrimmedReplace_WhitespaceOnlyDiffers(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  baz"
 	contentLines := strings.Split(content, "\n")
-	result, err := trimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
+	result, err := fileops.TrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +210,7 @@ func TestTrimmedReplace_MultipleOccurrences(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world\n  foo\n  hello\n  world"
 	contentLines := strings.Split(content, "\n")
-	result, err := trimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
+	result, err := fileops.TrimmedReplace(content, contentLines, "hello\nworld", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -222,7 +224,7 @@ func TestTrimmedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb\nccc"
 	contentLines := strings.Split(content, "\n")
-	_, err := trimmedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
+	_, err := fileops.TrimmedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
@@ -232,7 +234,7 @@ func TestTrimmedReplace_SingleLine(t *testing.T) {
 	t.Parallel()
 	content := "  hello\n  world"
 	contentLines := strings.Split(content, "\n")
-	result, err := trimmedReplace(content, contentLines, "hello", "REPLACED")
+	result, err := fileops.TrimmedReplace(content, contentLines, "hello", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestTrimmedReplace_IndentationPreserved(t *testing.T) {
 	t.Parallel()
 	content := "\t\thello\n\t\tworld"
 	contentLines := strings.Split(content, "\n")
-	result, err := trimmedReplace(content, contentLines, "hello\nworld", "replaced\nhere")
+	result, err := fileops.TrimmedReplace(content, contentLines, "hello\nworld", "replaced\nhere")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -255,14 +257,14 @@ func TestTrimmedReplace_IndentationPreserved(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: normalizedReplace edge cases
+// Edit: fileops.NormalizedReplace edge cases
 // ---------------------------------------------------------------------------
 
 func TestNormalizedReplace_NoMatch(t *testing.T) {
 	t.Parallel()
 	content := "aaa\nbbb"
 	contentLines := strings.Split(content, "\n")
-	_, err := normalizedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
+	_, err := fileops.NormalizedReplace(content, contentLines, "xxx\nyyy", "REPLACED")
 	if err == nil {
 		t.Error("expected error when no match found")
 	}
@@ -272,7 +274,7 @@ func TestNormalizedReplace_MultipleSpaces(t *testing.T) {
 	t.Parallel()
 	content := "hello     world"
 	contentLines := strings.Split(content, "\n")
-	result, err := normalizedReplace(content, contentLines, "hello world", "REPLACED")
+	result, err := fileops.NormalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -285,7 +287,7 @@ func TestNormalizedReplace_Tabs(t *testing.T) {
 	t.Parallel()
 	content := "hello\t\tworld"
 	contentLines := strings.Split(content, "\n")
-	result, err := normalizedReplace(content, contentLines, "hello world", "REPLACED")
+	result, err := fileops.NormalizedReplace(content, contentLines, "hello world", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,7 +300,7 @@ func TestNormalizedReplace_MultiLine(t *testing.T) {
 	t.Parallel()
 	content := "line1   with   spaces\nline2  with  tabs"
 	contentLines := strings.Split(content, "\n")
-	result, err := normalizedReplace(content, contentLines, "line1 with spaces\nline2 with tabs", "REPLACED")
+	result, err := fileops.NormalizedReplace(content, contentLines, "line1 with spaces\nline2 with tabs", "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -308,57 +310,57 @@ func TestNormalizedReplace_MultiLine(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edit: levenshteinSimilarity edge cases
+// Edit: fileops.LevenshteinSimilarity edge cases
 // ---------------------------------------------------------------------------
 
 func TestLevenshteinSimilarity_OneEmpty(t *testing.T) {
 	t.Parallel()
-	if s := levenshteinSimilarity("abc", ""); s != 0.0 {
+	if s := fileops.LevenshteinSimilarity("abc", ""); s != 0.0 {
 		t.Errorf("similarity('abc', '') = %f, want 0.0", s)
 	}
-	if s := levenshteinSimilarity("", "abc"); s != 0.0 {
+	if s := fileops.LevenshteinSimilarity("", "abc"); s != 0.0 {
 		t.Errorf("similarity('', 'abc') = %f, want 0.0", s)
 	}
 }
 
 func TestLevenshteinSimilarity_CompletelyDifferent(t *testing.T) {
 	t.Parallel()
-	s := levenshteinSimilarity("aaa", "bbb")
+	s := fileops.LevenshteinSimilarity("aaa", "bbb")
 	if s != 0.0 {
 		t.Errorf("similarity('aaa', 'bbb') = %f, want 0.0", s)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: levenshteinDistance edge cases
+// Edit: LevenshteinDistance edge cases
 // ---------------------------------------------------------------------------
 
 func TestLevenshteinDistance_LongStrings(t *testing.T) {
 	t.Parallel()
 	a := strings.Repeat("a", 100)
 	b := strings.Repeat("b", 100)
-	if d := levenshteinDistance(a, b); d != 100 {
+	if d := LevenshteinDistance(a, b); d != 100 {
 		t.Errorf("distance(long_a, long_b) = %d, want 100", d)
 	}
 }
 
 func TestLevenshteinDistance_SubsetString(t *testing.T) {
 	t.Parallel()
-	if d := levenshteinDistance("abc", "ab"); d != 1 {
+	if d := LevenshteinDistance("abc", "ab"); d != 1 {
 		t.Errorf("distance('abc', 'ab') = %d, want 1", d)
 	}
-	if d := levenshteinDistance("ab", "abc"); d != 1 {
+	if d := LevenshteinDistance("ab", "abc"); d != 1 {
 		t.Errorf("distance('ab', 'abc') = %d, want 1", d)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: generateDiffSummary edge cases
+// Edit: fileops.GenerateDiffSummary edge cases
 // ---------------------------------------------------------------------------
 
 func TestGenerateDiffSummary_Identical(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "line1\nline2", "line1\nline2")
+	summary := fileops.GenerateDiffSummary("test.txt", "line1\nline2", "line1\nline2")
 	if !strings.Contains(summary, "--- test.txt") {
 		t.Errorf("expected '--- test.txt' in summary, got %q", summary)
 	}
@@ -370,7 +372,7 @@ func TestGenerateDiffSummary_Identical(t *testing.T) {
 
 func TestGenerateDiffSummary_AddedLines(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "line1", "line1\nline2\nline3")
+	summary := fileops.GenerateDiffSummary("test.txt", "line1", "line1\nline2\nline3")
 	if !strings.Contains(summary, "+line2") {
 		t.Errorf("expected '+line2' in diff, got %q", summary)
 	}
@@ -378,7 +380,7 @@ func TestGenerateDiffSummary_AddedLines(t *testing.T) {
 
 func TestGenerateDiffSummary_RemovedLines(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "line1\nline2\nline3", "line1")
+	summary := fileops.GenerateDiffSummary("test.txt", "line1\nline2\nline3", "line1")
 	if !strings.Contains(summary, "-line2") {
 		t.Errorf("expected '-line2' in diff, got %q", summary)
 	}
@@ -386,7 +388,7 @@ func TestGenerateDiffSummary_RemovedLines(t *testing.T) {
 
 func TestGenerateDiffSummary_EmptyOld(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "", "new content")
+	summary := fileops.GenerateDiffSummary("test.txt", "", "new content")
 	if !strings.Contains(summary, "+") {
 		t.Errorf("expected '+' in summary for added content, got %q", summary)
 	}
@@ -394,7 +396,7 @@ func TestGenerateDiffSummary_EmptyOld(t *testing.T) {
 
 func TestGenerateDiffSummary_EmptyNew(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "old content", "")
+	summary := fileops.GenerateDiffSummary("test.txt", "old content", "")
 	if !strings.Contains(summary, "-") {
 		t.Errorf("expected '-' in summary for removed content, got %q", summary)
 	}
@@ -402,20 +404,20 @@ func TestGenerateDiffSummary_EmptyNew(t *testing.T) {
 
 func TestGenerateDiffSummary_BothEmpty(t *testing.T) {
 	t.Parallel()
-	summary := generateDiffSummary("test.txt", "", "")
+	summary := fileops.GenerateDiffSummary("test.txt", "", "")
 	if summary == "" {
 		t.Error("expected non-empty summary")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Edit: replaceByLineRange edge cases
+// Edit: fileops.ReplaceByLineRange edge cases
 // ---------------------------------------------------------------------------
 
 func TestReplaceByLineRange_ReplaceAll(t *testing.T) {
 	t.Parallel()
 	content := "line1\nline2\nline3"
-	result, err := replaceByLineRange(content, 1, 3, "replaced")
+	result, err := fileops.ReplaceByLineRange(content, 1, 3, "replaced")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -427,7 +429,7 @@ func TestReplaceByLineRange_ReplaceAll(t *testing.T) {
 func TestReplaceByLineRange_ReplaceFirst(t *testing.T) {
 	t.Parallel()
 	content := "line1\nline2\nline3"
-	result, err := replaceByLineRange(content, 1, 1, "REPLACED")
+	result, err := fileops.ReplaceByLineRange(content, 1, 1, "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -439,7 +441,7 @@ func TestReplaceByLineRange_ReplaceFirst(t *testing.T) {
 func TestReplaceByLineRange_ReplaceLast(t *testing.T) {
 	t.Parallel()
 	content := "line1\nline2\nline3"
-	result, err := replaceByLineRange(content, 3, 3, "REPLACED")
+	result, err := fileops.ReplaceByLineRange(content, 3, 3, "REPLACED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +453,7 @@ func TestReplaceByLineRange_ReplaceLast(t *testing.T) {
 func TestReplaceByLineRange_EndLineBeforeStartLine(t *testing.T) {
 	t.Parallel()
 	content := "line1\nline2\nline3"
-	_, err := replaceByLineRange(content, 3, 1, "x")
+	_, err := fileops.ReplaceByLineRange(content, 3, 1, "x")
 	if err == nil {
 		t.Error("expected error when end < start")
 	}
@@ -460,7 +462,7 @@ func TestReplaceByLineRange_EndLineBeforeStartLine(t *testing.T) {
 func TestReplaceByLineRange_EmptyContent(t *testing.T) {
 	t.Parallel()
 	// "" splits to [""], which has 1 line. startLine=1 is valid.
-	result, err := replaceByLineRange("", 1, 1, "replaced")
+	result, err := fileops.ReplaceByLineRange("", 1, 1, "replaced")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -470,13 +472,13 @@ func TestReplaceByLineRange_EmptyContent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: loadGitignoreCached edge cases
+// Grep: search.LoadGitignoreCached edge cases
 // ---------------------------------------------------------------------------
 
 func TestLoadGitignoreCached_EmptyDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	patterns := loadGitignoreCached(dir)
+	patterns := search.LoadGitignoreCached(dir)
 	if patterns != nil {
 		t.Errorf("expected nil patterns for empty dir, got: %v", patterns)
 	}
@@ -487,8 +489,8 @@ func TestLoadGitignoreCached_CacheHit(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0644)
 
-	patterns1 := loadGitignoreCached(dir)
-	patterns2 := loadGitignoreCached(dir)
+	patterns1 := search.LoadGitignoreCached(dir)
+	patterns2 := search.LoadGitignoreCached(dir)
 	if len(patterns1) != len(patterns2) {
 		t.Errorf("expected cached results, got %d then %d patterns", len(patterns1), len(patterns2))
 	}
@@ -499,7 +501,7 @@ func TestLoadGitignoreCached_CacheInvalidation(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0644)
 
-	patterns1 := loadGitignoreCached(dir)
+	patterns1 := search.LoadGitignoreCached(dir)
 	if len(patterns1) != 1 {
 		t.Fatalf("expected 1 pattern, got %d", len(patterns1))
 	}
@@ -507,7 +509,7 @@ func TestLoadGitignoreCached_CacheInvalidation(t *testing.T) {
 	// Modify .gitignore
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n*.tmp\n"), 0644)
 
-	patterns2 := loadGitignoreCached(dir)
+	patterns2 := search.LoadGitignoreCached(dir)
 	if len(patterns2) != 2 {
 		t.Errorf("expected 2 patterns after cache invalidation, got %d", len(patterns2))
 	}
@@ -517,14 +519,14 @@ func TestLoadGitignoreCached_AllCommentsAndBlanks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("# comment\n\n# another comment\n\n"), 0644)
-	patterns := loadGitignoreCached(dir)
+	patterns := search.LoadGitignoreCached(dir)
 	if len(patterns) != 0 {
 		t.Errorf("expected 0 patterns for all comments, got %d", len(patterns))
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Grep: matchesGitignore edge cases
+// Grep: search.MatchesGitignore edge cases
 // ---------------------------------------------------------------------------
 
 func TestMatchesGitignore_DirectoryPattern(t *testing.T) {
@@ -532,7 +534,7 @@ func TestMatchesGitignore_DirectoryPattern(t *testing.T) {
 	patterns := []string{"vendor/**"}
 	workDir := "/home/user/project"
 	path := filepath.Join(workDir, "vendor", "lib", "code.go")
-	if !matchesGitignore(path, patterns, workDir) {
+	if !search.MatchesGitignore(path, patterns, workDir) {
 		t.Error("expected vendor/lib/code.go to match vendor/**")
 	}
 }
@@ -542,7 +544,7 @@ func TestMatchesGitignore_NestedPattern(t *testing.T) {
 	patterns := []string{"src/vendor/**"}
 	workDir := "/home/user/project"
 	path := filepath.Join(workDir, "src", "vendor", "dep.go")
-	if !matchesGitignore(path, patterns, workDir) {
+	if !search.MatchesGitignore(path, patterns, workDir) {
 		t.Error("expected src/vendor/dep.go to match src/vendor/**")
 	}
 }
@@ -552,17 +554,17 @@ func TestMatchesGitignore_NoMatch(t *testing.T) {
 	patterns := []string{"*.log"}
 	workDir := "/home/user/project"
 	path := filepath.Join(workDir, "main.go")
-	if matchesGitignore(path, patterns, workDir) {
+	if search.MatchesGitignore(path, patterns, workDir) {
 		t.Error("expected main.go to not match *.log")
 	}
 }
 
 func TestMatchesGitignore_EmptyPatterns(t *testing.T) {
 	t.Parallel()
-	if matchesGitignore("/some/path", nil, "/") {
+	if search.MatchesGitignore("/some/path", nil, "/") {
 		t.Error("expected no match with nil patterns")
 	}
-	if matchesGitignore("/some/path", []string{}, "/") {
+	if search.MatchesGitignore("/some/path", []string{}, "/") {
 		t.Error("expected no match with empty patterns")
 	}
 }
@@ -572,7 +574,7 @@ func TestMatchesGitignore_FilenameOnlyPattern(t *testing.T) {
 	patterns := []string{".DS_Store"}
 	workDir := "/home/user/project"
 	path := filepath.Join(workDir, ".DS_Store")
-	if !matchesGitignore(path, patterns, workDir) {
+	if !search.MatchesGitignore(path, patterns, workDir) {
 		t.Error("expected .DS_Store to match")
 	}
 }
@@ -1387,13 +1389,13 @@ func TestTodoWrite_RiskLevel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: isPrivateIP additional edge cases
+// WebFetch: search.IsPrivateIP additional edge cases
 // ---------------------------------------------------------------------------
 
 func TestIsPrivateIP_IPv6ULA(t *testing.T) {
 	t.Parallel()
 	ip := net.ParseIP("fd00::1")
-	if !isPrivateIP(ip) {
+	if !search.IsPrivateIP(ip) {
 		t.Error("expected fd00::1 to be private (IPv6 ULA)")
 	}
 }
@@ -1401,7 +1403,7 @@ func TestIsPrivateIP_IPv6ULA(t *testing.T) {
 func TestIsPrivateIP_IPv6LinkLocal(t *testing.T) {
 	t.Parallel()
 	ip := net.ParseIP("fe80::1")
-	if !isPrivateIP(ip) {
+	if !search.IsPrivateIP(ip) {
 		t.Error("expected fe80::1 to be private (link-local)")
 	}
 }
@@ -1409,7 +1411,7 @@ func TestIsPrivateIP_IPv6LinkLocal(t *testing.T) {
 func TestIsPrivateIP_IPv6Loopback(t *testing.T) {
 	t.Parallel()
 	ip := net.ParseIP("::1")
-	if !isPrivateIP(ip) {
+	if !search.IsPrivateIP(ip) {
 		t.Error("expected ::1 to be private (IPv6 loopback)")
 	}
 }
@@ -1417,7 +1419,7 @@ func TestIsPrivateIP_IPv6Loopback(t *testing.T) {
 func TestIsPrivateIP_IPv4MappedIPv6(t *testing.T) {
 	t.Parallel()
 	ip := net.ParseIP("::ffff:10.0.0.1")
-	if !isPrivateIP(ip) {
+	if !search.IsPrivateIP(ip) {
 		t.Error("expected ::ffff:10.0.0.1 to be private (IPv4-mapped)")
 	}
 }
@@ -1427,28 +1429,28 @@ func TestIsPrivateIP_NilIP(t *testing.T) {
 	// net.ParseIP returns nil for invalid strings
 	defer func() {
 		if r := recover(); r != nil {
-			t.Errorf("isPrivateIP panicked on nil IP: %v", r)
+			t.Errorf("search.IsPrivateIP panicked on nil IP: %v", r)
 		}
 	}()
-	// nil IP dereference — isPrivateIP should handle gracefully via method calls
+	// nil IP dereference — search.IsPrivateIP should handle gracefully via method calls
 	// Actually net.IP methods on nil return false, so this is fine
 }
 
 func TestIsPrivateIP_PublicIPv6(t *testing.T) {
 	t.Parallel()
 	ip := net.ParseIP("2001:4860:4860::8888")
-	if isPrivateIP(ip) {
+	if search.IsPrivateIP(ip) {
 		t.Error("expected Google public IPv6 to not be private")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: htmlToMarkdown edge cases
+// WebFetch: search.HtmlToMarkdown edge cases
 // ---------------------------------------------------------------------------
 
 func TestHtmlToMarkdown_EmptyHTML(t *testing.T) {
 	t.Parallel()
-	got := htmlToMarkdown("")
+	got := search.HtmlToMarkdown("")
 	if got != "" {
 		t.Errorf("expected empty string for empty HTML, got %q", got)
 	}
@@ -1456,7 +1458,7 @@ func TestHtmlToMarkdown_EmptyHTML(t *testing.T) {
 
 func TestHtmlToMarkdown_PlainText(t *testing.T) {
 	t.Parallel()
-	got := htmlToMarkdown("just plain text")
+	got := search.HtmlToMarkdown("just plain text")
 	if got != "just plain text" {
 		t.Errorf("expected 'just plain text', got %q", got)
 	}
@@ -1465,7 +1467,7 @@ func TestHtmlToMarkdown_PlainText(t *testing.T) {
 func TestHtmlToMarkdown_LinkWithSingleQuotes(t *testing.T) {
 	t.Parallel()
 	input := `<a href='https://example.com'>Example</a>`
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "[Example](https://example.com)") {
 		t.Errorf("expected markdown link, got %q", got)
 	}
@@ -1474,7 +1476,7 @@ func TestHtmlToMarkdown_LinkWithSingleQuotes(t *testing.T) {
 func TestHtmlToMarkdown_LinkWithoutHref(t *testing.T) {
 	t.Parallel()
 	input := `<a>no href</a>`
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if got == "" {
 		t.Error("expected non-empty output")
 	}
@@ -1483,7 +1485,7 @@ func TestHtmlToMarkdown_LinkWithoutHref(t *testing.T) {
 func TestHtmlToMarkdown_CodeTag(t *testing.T) {
 	t.Parallel()
 	input := "<code>fmt.Println()</code>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "`fmt.Println()`") {
 		t.Errorf("expected backtick-wrapped code, got %q", got)
 	}
@@ -1492,7 +1494,7 @@ func TestHtmlToMarkdown_CodeTag(t *testing.T) {
 func TestHtmlToMarkdown_BTag(t *testing.T) {
 	t.Parallel()
 	input := "<b>bold text</b>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "**bold text**") {
 		t.Errorf("expected **bold text**, got %q", got)
 	}
@@ -1501,7 +1503,7 @@ func TestHtmlToMarkdown_BTag(t *testing.T) {
 func TestHtmlToMarkdown_ITag(t *testing.T) {
 	t.Parallel()
 	input := "<i>italic text</i>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "*italic text*") {
 		t.Errorf("expected *italic text*, got %q", got)
 	}
@@ -1510,7 +1512,7 @@ func TestHtmlToMarkdown_ITag(t *testing.T) {
 func TestHtmlToMarkdown_H3H4Tags(t *testing.T) {
 	t.Parallel()
 	input := "<h3>Third</h3><h4>Fourth</h4>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "### Third") {
 		t.Errorf("expected '### Third', got %q", got)
 	}
@@ -1522,7 +1524,7 @@ func TestHtmlToMarkdown_H3H4Tags(t *testing.T) {
 func TestHtmlToMarkdown_DivTag(t *testing.T) {
 	t.Parallel()
 	input := "<div>hello</div><div>world</div>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "hello") || !strings.Contains(got, "world") {
 		t.Errorf("expected 'hello' and 'world', got %q", got)
 	}
@@ -1531,7 +1533,7 @@ func TestHtmlToMarkdown_DivTag(t *testing.T) {
 func TestHtmlToMarkdown_BrTag(t *testing.T) {
 	t.Parallel()
 	input := "line1<br>line2"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "line1") || !strings.Contains(got, "line2") {
 		t.Errorf("expected both lines, got %q", got)
 	}
@@ -1540,19 +1542,19 @@ func TestHtmlToMarkdown_BrTag(t *testing.T) {
 func TestHtmlToMarkdown_ListItems(t *testing.T) {
 	t.Parallel()
 	input := "<ul><li>item1</li><li>item2</li></ul>"
-	got := htmlToMarkdown(input)
+	got := search.HtmlToMarkdown(input)
 	if !strings.Contains(got, "item1") || !strings.Contains(got, "item2") {
 		t.Errorf("expected list items, got %q", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: htmlToText edge cases
+// WebFetch: search.HtmlToText edge cases
 // ---------------------------------------------------------------------------
 
 func TestHtmlToText_EmptyHTML(t *testing.T) {
 	t.Parallel()
-	got := htmlToText("")
+	got := search.HtmlToText("")
 	if got != "" {
 		t.Errorf("expected empty string for empty HTML, got %q", got)
 	}
@@ -1560,7 +1562,7 @@ func TestHtmlToText_EmptyHTML(t *testing.T) {
 
 func TestHtmlToText_PlainText(t *testing.T) {
 	t.Parallel()
-	got := htmlToText("just plain text")
+	got := search.HtmlToText("just plain text")
 	if got != "just plain text" {
 		t.Errorf("expected 'just plain text', got %q", got)
 	}
@@ -1569,7 +1571,7 @@ func TestHtmlToText_PlainText(t *testing.T) {
 func TestHtmlToText_StripsScriptAndStyle(t *testing.T) {
 	t.Parallel()
 	input := "<script>evil</script><style>css</style><p>visible</p>"
-	got := htmlToText(input)
+	got := search.HtmlToText(input)
 	if strings.Contains(got, "evil") || strings.Contains(got, "css") {
 		t.Errorf("expected script/style to be stripped, got %q", got)
 	}
@@ -1579,14 +1581,14 @@ func TestHtmlToText_StripsScriptAndStyle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: stripTags edge cases
+// WebFetch: search.StripTags edge cases
 // ---------------------------------------------------------------------------
 
 func TestStripTags_NoClosingTag(t *testing.T) {
 	t.Parallel()
 	input := "before<script>unclosed"
-	got := stripTags(input, "script")
-	// When there's no closing tag, stripTags breaks and returns original
+	got := search.StripTags(input, "script")
+	// When there's no closing tag, search.StripTags breaks and returns original
 	if got != input {
 		t.Errorf("expected original input when no closing tag, got %q", got)
 	}
@@ -1594,12 +1596,12 @@ func TestStripTags_NoClosingTag(t *testing.T) {
 
 func TestStripTags_SelfClosing(t *testing.T) {
 	t.Parallel()
-	// The self-closing check in stripTags looks for "/" at end of tag content
+	// The self-closing check in search.StripTags looks for "/" at end of tag content
 	// before the ">". For <script/>, the tag content is "<script/>" which
 	// doesn't end with "/" (it ends with ">"). So self-closing isn't detected
 	// and the unclosed-tag fallback returns the original string.
 	input := "before<script/>after"
-	got := stripTags(input, "script")
+	got := search.StripTags(input, "script")
 	// This tests the actual behavior: self-closing isn't detected
 	if got != input {
 		t.Errorf("expected original input for self-closing tag (not detected), got %q", got)
@@ -1609,7 +1611,7 @@ func TestStripTags_SelfClosing(t *testing.T) {
 func TestStripTags_NoTags(t *testing.T) {
 	t.Parallel()
 	input := "plain text"
-	got := stripTags(input, "script")
+	got := search.StripTags(input, "script")
 	if got != "plain text" {
 		t.Errorf("expected 'plain text', got %q", got)
 	}
@@ -1618,21 +1620,21 @@ func TestStripTags_NoTags(t *testing.T) {
 func TestStripTags_NoOpenTag(t *testing.T) {
 	t.Parallel()
 	input := "before</script>after"
-	got := stripTags(input, "script")
+	got := search.StripTags(input, "script")
 	if got != input {
 		t.Errorf("expected original when no open tag, got %q", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: convertLinks edge cases
+// WebFetch: search.ConvertLinks edge cases
 // ---------------------------------------------------------------------------
 
 func TestConvertLinks_NoClosingTag(t *testing.T) {
 	t.Parallel()
 	input := `<a href="https://example.com">no close`
 	lower := strings.ToLower(input)
-	got := convertLinks(input, lower)
+	got := search.ConvertLinks(input, lower)
 	if got != input {
 		t.Errorf("expected original input when no closing tag, got %q", got)
 	}
@@ -1642,7 +1644,7 @@ func TestConvertLinks_UnquotedHref(t *testing.T) {
 	t.Parallel()
 	input := `<a href=https://example.com>Example</a>`
 	lower := strings.ToLower(input)
-	got := convertLinks(input, lower)
+	got := search.ConvertLinks(input, lower)
 	if !strings.Contains(got, "[Example](https://example.com)") {
 		t.Errorf("expected markdown link, got %q", got)
 	}
@@ -1652,7 +1654,7 @@ func TestConvertLinks_NoLinks(t *testing.T) {
 	t.Parallel()
 	input := "plain text with no links"
 	lower := strings.ToLower(input)
-	got := convertLinks(input, lower)
+	got := search.ConvertLinks(input, lower)
 	if got != input {
 		t.Errorf("expected original text, got %q", got)
 	}
@@ -1662,7 +1664,7 @@ func TestConvertLinks_MissingHrefValue(t *testing.T) {
 	t.Parallel()
 	input := `<a >no href attr</a>`
 	lower := strings.ToLower(input)
-	got := convertLinks(input, lower)
+	got := search.ConvertLinks(input, lower)
 	if got == "" {
 		t.Error("expected non-empty output")
 	}
@@ -1676,7 +1678,7 @@ func TestReplaceInlineTag_NoMatch(t *testing.T) {
 	t.Parallel()
 	input := "no tags here"
 	lower := strings.ToLower(input)
-	got := replaceInlineTag(input, lower, "strong", "**")
+	got := search.ReplaceInlineTag(input, lower, "strong", "**")
 	if got != input {
 		t.Errorf("expected original text when no tag, got %q", got)
 	}
@@ -1686,7 +1688,7 @@ func TestReplaceInlineTag_MultipleOccurrences(t *testing.T) {
 	t.Parallel()
 	input := "<em>first</em> and <em>second</em>"
 	lower := strings.ToLower(input)
-	got := replaceInlineTag(input, lower, "em", "*")
+	got := search.ReplaceInlineTag(input, lower, "em", "*")
 	if !strings.Contains(got, "*first*") || !strings.Contains(got, "*second*") {
 		t.Errorf("expected both occurrences replaced, got %q", got)
 	}
@@ -1700,7 +1702,7 @@ func TestReplaceBlockTag_NoMatch(t *testing.T) {
 	t.Parallel()
 	input := "no tags here"
 	lower := strings.ToLower(input)
-	got, _ := replaceBlockTag(input, lower, "div", "\n")
+	got, _ := search.ReplaceBlockTag(input, lower, "div", "\n")
 	if got != input {
 		t.Errorf("expected original text when no tag, got %q", got)
 	}
@@ -1710,7 +1712,7 @@ func TestReplaceBlockTag_MissingCloseTag(t *testing.T) {
 	t.Parallel()
 	input := "<div>unclosed"
 	lower := strings.ToLower(input)
-	got, _ := replaceBlockTag(input, lower, "div", "\n")
+	got, _ := search.ReplaceBlockTag(input, lower, "div", "\n")
 	if got != input {
 		t.Errorf("expected original when no close tag, got %q", got)
 	}
@@ -1723,7 +1725,7 @@ func TestReplaceBlockTag_MissingCloseTag(t *testing.T) {
 func TestNormalizeWhitespace_MultipleNewlines(t *testing.T) {
 	t.Parallel()
 	input := "a\n\n\n\n\n\nb"
-	got := normalizeWhitespace(input)
+	got := search.NormalizeWhitespace(input)
 	if strings.Count(got, "\n") > 2 {
 		t.Errorf("expected at most 2 newlines, got %q", got)
 	}
@@ -1732,7 +1734,7 @@ func TestNormalizeWhitespace_MultipleNewlines(t *testing.T) {
 func TestNormalizeWhitespace_MixedSpacesAndTabs(t *testing.T) {
 	t.Parallel()
 	input := "hello \t world \t "
-	got := normalizeWhitespace(input)
+	got := search.NormalizeWhitespace(input)
 	if got != "hello world" {
 		t.Errorf("expected 'hello world', got %q", got)
 	}
@@ -1741,7 +1743,7 @@ func TestNormalizeWhitespace_MixedSpacesAndTabs(t *testing.T) {
 func TestNormalizeWhitespace_OnlySpaces(t *testing.T) {
 	t.Parallel()
 	input := "   "
-	got := normalizeWhitespace(input)
+	got := search.NormalizeWhitespace(input)
 	if got != "" {
 		t.Errorf("expected empty string for only spaces, got %q", got)
 	}
@@ -2509,7 +2511,7 @@ func TestTodoWrite_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	schema := wf.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2526,7 +2528,7 @@ func TestWebFetch_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_MissingURLParam(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name:   "WebFetch",
 		Params: map[string]any{},
@@ -2538,7 +2540,7 @@ func TestWebFetch_MissingURLParam(t *testing.T) {
 
 func TestWebFetch_URLNotString(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2552,7 +2554,7 @@ func TestWebFetch_URLNotString(t *testing.T) {
 
 func TestWebFetch_InvalidFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2567,7 +2569,7 @@ func TestWebFetch_InvalidFormat(t *testing.T) {
 
 func TestWebFetch_NonHTTPScheme(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2584,7 +2586,7 @@ func TestWebFetch_NonHTTPScheme(t *testing.T) {
 
 func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2599,7 +2601,7 @@ func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 
 func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2614,7 +2616,7 @@ func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 
 func TestWebFetch_NonFloatTimeout(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	// timeout not a float64 → default to 30, then the request itself fails
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -2635,20 +2637,20 @@ func TestWebFetch_NonFloatTimeout(t *testing.T) {
 
 func TestSetVersion_EmptyString(t *testing.T) {
 	// Save original
-	orig := getVersion()
+	orig := search.GetVersion()
 	defer SetVersion(orig)
 
 	SetVersion("1.0.0")
 	SetVersion("") // empty should not overwrite
-	if v := getVersion(); v != "1.0.0" {
+	if v := search.GetVersion(); v != "1.0.0" {
 		t.Errorf("expected '1.0.0' after empty SetVersion, got %q", v)
 	}
 }
 
 func TestGetVersion_Default(t *testing.T) {
 	// Reset version to empty
-	Version = atomic.Value{}
-	if v := getVersion(); v != "dev" {
+	search.Version = atomic.Value{}
+	if v := search.GetVersion(); v != "dev" {
 		t.Errorf("expected 'dev' default, got %q", v)
 	}
 }
@@ -2862,36 +2864,36 @@ func TestDispatcher_Stop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// humanSize: additional edge cases
+// fileops.HumanSize: additional edge cases
 // ---------------------------------------------------------------------------
 
 func TestHumanSize_ExactKB(t *testing.T) {
 	t.Parallel()
-	got := humanSize(1024)
+	got := fileops.HumanSize(1024)
 	if got != "1.0 KB" {
-		t.Errorf("humanSize(1024) = %q, want '1.0 KB'", got)
+		t.Errorf("fileops.HumanSize(1024) = %q, want '1.0 KB'", got)
 	}
 }
 
 func TestHumanSize_ExactMB(t *testing.T) {
 	t.Parallel()
-	got := humanSize(1048576)
+	got := fileops.HumanSize(1048576)
 	if got != "1.0 MB" {
-		t.Errorf("humanSize(1048576) = %q, want '1.0 MB'", got)
+		t.Errorf("fileops.HumanSize(1048576) = %q, want '1.0 MB'", got)
 	}
 }
 
 func TestHumanSize_ExactGB(t *testing.T) {
 	t.Parallel()
-	got := humanSize(1073741824)
+	got := fileops.HumanSize(1073741824)
 	if got != "1.0 GB" {
-		t.Errorf("humanSize(1073741824) = %q, want '1.0 GB'", got)
+		t.Errorf("fileops.HumanSize(1073741824) = %q, want '1.0 GB'", got)
 	}
 }
 
 func TestHumanSize_VeryLarge(t *testing.T) {
 	t.Parallel()
-	got := humanSize(1 << 50) // 1 PB
+	got := fileops.HumanSize(1 << 50) // 1 PB
 	if got == "" {
 		t.Error("expected non-empty result for very large value")
 	}
@@ -2982,7 +2984,7 @@ func TestFileRead_ContextCancelled(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.resolveAndCheck(context.Background(), "://invalid")
 	if err == nil {
 		t.Error("expected error for invalid URL")
@@ -2991,7 +2993,7 @@ func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.resolveAndCheck(context.Background(), "http://")
 	if err == nil {
 		t.Error("expected error for URL with no host")
@@ -3000,7 +3002,7 @@ func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.resolveAndCheck(context.Background(), "http://127.0.0.1:80")
 	if err == nil {
 		t.Error("expected error for literal private IP")
@@ -3009,7 +3011,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.resolveAndCheck(context.Background(), "http://8.8.8.8:80")
 	if err != nil {
 		t.Errorf("expected no error for public IP, got: %v", err)
@@ -3022,7 +3024,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	addrs, err := wf.resolveAndCache(context.Background(), "127.0.0.1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3087,7 +3089,7 @@ func TestEdit_Execute_LineRange_OutOfRange(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_ExpiredCache(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	// Store an expired entry directly in the shared cache
 	wf.dnsCache.cache.Store("expired.example.com", &dnsCacheEntry{
 		addrs:   []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
@@ -3230,13 +3232,13 @@ func TestDecodeHTMLEntities_AllEntities(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// webfetch: stripAllTags edge cases
+// webfetch: search.StripAllTags edge cases
 // ---------------------------------------------------------------------------
 
 func TestStripAllTags_NestedTags(t *testing.T) {
 	t.Parallel()
 	input := "<div><p><span>deep</span></p></div>"
-	got := stripAllTags(input)
+	got := search.StripAllTags(input)
 	if got != "deep" {
 		t.Errorf("expected 'deep', got %q", got)
 	}
@@ -3245,7 +3247,7 @@ func TestStripAllTags_NestedTags(t *testing.T) {
 func TestStripAllTags_AdjacentTags(t *testing.T) {
 	t.Parallel()
 	input := "<b>bold</b><i>italic</i>"
-	got := stripAllTags(input)
+	got := search.StripAllTags(input)
 	if got != "bolditalic" {
 		t.Errorf("expected 'bolditalic', got %q", got)
 	}
@@ -3258,7 +3260,7 @@ func TestStripAllTags_AdjacentTags(t *testing.T) {
 func TestNormalizeWhitespace_NewlinesPreserved(t *testing.T) {
 	t.Parallel()
 	input := "line1\nline2"
-	got := normalizeWhitespace(input)
+	got := search.NormalizeWhitespace(input)
 	if got != "line1\nline2" {
 		t.Errorf("expected newlines preserved, got %q", got)
 	}
@@ -3267,7 +3269,7 @@ func TestNormalizeWhitespace_NewlinesPreserved(t *testing.T) {
 func TestNormalizeWhitespace_TrailingWhitespace(t *testing.T) {
 	t.Parallel()
 	input := "hello   "
-	got := normalizeWhitespace(input)
+	got := search.NormalizeWhitespace(input)
 	if got != "hello" {
 		t.Errorf("expected trailing whitespace trimmed, got %q", got)
 	}
@@ -3753,7 +3755,7 @@ func TestAskUserQuestion_NonFloatTimeout(t *testing.T) {
 
 func TestWebFetch_RiskLevel(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	if wf.RiskLevel() != types.RiskMedium {
 		t.Errorf("expected RiskMedium, got %s", wf.RiskLevel())
 	}
@@ -3761,7 +3763,7 @@ func TestWebFetch_RiskLevel(t *testing.T) {
 
 func TestWebFetch_NewWithPrivateIPsAllowed(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), true, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	if !wf.allowPrivateIPs {
 		t.Error("expected allowPrivateIPs to be true")
 	}
@@ -3769,20 +3771,20 @@ func TestWebFetch_NewWithPrivateIPsAllowed(t *testing.T) {
 
 func TestWebFetch_GetVersionDefault(t *testing.T) {
 	// Save and restore
-	Version = atomic.Value{}
-	v := getVersion()
+	search.Version = atomic.Value{}
+	v := search.GetVersion()
 	if v != "dev" {
 		t.Errorf("expected 'dev' default version, got %q", v)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// humanSize: very large values
+// fileops.HumanSize: very large values
 // ---------------------------------------------------------------------------
 
 func TestHumanSize_Petabyte(t *testing.T) {
 	t.Parallel()
-	got := humanSize(1 << 50)
+	got := fileops.HumanSize(1 << 50)
 	if got == "" {
 		t.Error("expected non-empty result")
 	}
@@ -3791,7 +3793,7 @@ func TestHumanSize_Petabyte(t *testing.T) {
 func TestHumanSize_Exabyte(t *testing.T) {
 	t.Parallel()
 	// Beyond the units array — should cap at last unit
-	got := humanSize(1 << 60)
+	got := fileops.HumanSize(1 << 60)
 	if got == "" {
 		t.Error("expected non-empty result")
 	}
@@ -4167,7 +4169,7 @@ func TestDefaultDispatcher_ErrorPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// humanSize: additional coverage for PB range
+// fileops.HumanSize: additional coverage for PB range
 // ---------------------------------------------------------------------------
 
 func TestHumanSize_AllUnits(t *testing.T) {
@@ -4186,9 +4188,9 @@ func TestHumanSize_AllUnits(t *testing.T) {
 		{1024 * 1024 * 1024 * 1024 * 1024 * 1024, "1.0 EB"},
 	}
 	for _, tt := range tests {
-		got := humanSize(tt.bytes)
+		got := fileops.HumanSize(tt.bytes)
 		if got != tt.want {
-			t.Errorf("humanSize(%d) = %q, want %q", tt.bytes, got, tt.want)
+			t.Errorf("fileops.HumanSize(%d) = %q, want %q", tt.bytes, got, tt.want)
 		}
 	}
 }
@@ -4332,7 +4334,7 @@ func TestGlob_RGEmptyResult(t *testing.T) {
 
 func TestWebFetch_Execute_TextFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	// This will fail with SSRF since it's a literal IP
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -4352,7 +4354,7 @@ func TestWebFetch_Execute_TextFormat(t *testing.T) {
 
 func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4371,7 +4373,7 @@ func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 
 func TestWebFetch_Execute_MarkdownFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4409,7 +4411,7 @@ func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_NonExistentHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.resolveAndCache(context.Background(), "this-host-does-not-exist-xyz123.invalid")
 	if err == nil {
 		t.Error("expected DNS resolution error for non-existent host")

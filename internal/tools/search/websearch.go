@@ -66,7 +66,7 @@ func NewWebSearch(baseURL string) *WebSearch {
 				}
 if !ws.allowPrivateIPs {
 				for _, ip := range ips {
-					if isPrivateIP(ips[0].IP.String()) || isReservedIP(ip.IP) {
+					if IsPrivateIP(ips[0].IP) || isReservedIP(ip.IP) {
 						return nil, fmt.Errorf("blocked: %s is a private or reserved IP", ip.IP)
 					}
 				}
@@ -92,7 +92,7 @@ if !ws.allowPrivateIPs {
 				return fmt.Errorf("no IP addresses resolved for redirect to %s", req.URL.Host)
 			}
 			for _, ip := range ips {
-				if isPrivateIP(ips[0].IP.String()) || isReservedIP(ip.IP) {
+				if IsPrivateIP(ips[0].IP) || isReservedIP(ip.IP) {
 					return fmt.Errorf("redirect to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
 				}
 			}
@@ -171,7 +171,7 @@ func (t *WebSearch) Execute(ctx context.Context, input types.ToolInput) (types.T
 		maxResults = MaxSearchResults
 	}
 
-	searchURL, err := t.buildURL(query, input.Params)
+	searchURL, err := t.BuildURL(query, input.Params)
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("failed to build search URL: %w", err)
 	}
@@ -180,7 +180,7 @@ func (t *WebSearch) Execute(ctx context.Context, input types.ToolInput) (types.T
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s (AI Coding Agent; +https://github.com/eshanized/M31A)", getVersion()))
+	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s (AI Coding Agent; +https://github.com/eshanized/M31A)", GetVersion()))
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := t.client.Do(req)
@@ -239,7 +239,7 @@ func (t *WebSearch) Execute(ctx context.Context, input types.ToolInput) (types.T
 	}, nil
 }
 
-func (t *WebSearch) buildURL(query string, params map[string]any) (string, error) {
+func (t *WebSearch) BuildURL(query string, params map[string]any) (string, error) {
 	q := url.Values{}
 	q.Set("q", query)
 	q.Set("format", "json")

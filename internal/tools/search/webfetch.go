@@ -37,7 +37,7 @@ func SetVersion(v string) {
 }
 
 // getVersion returns the current version string, defaulting to "dev" if unset.
-func getVersion() string {
+func GetVersion() string {
 	if v := Version.Load(); v != nil {
 		if vs, ok := v.(string); ok && vs != "" {
 			return vs
@@ -122,7 +122,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	// Block private IPs (SSRF protection)
 	host := parsedURL.Hostname()
-	if isPrivateIP(host) {
+	if IsPrivateIPFromHost(host) {
 		return types.ToolResult{}, fmt.Errorf("%w: access to private IP blocked", errors.ErrPrivateIPBlocked)
 	}
 
@@ -179,7 +179,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		}
 	}
 
-	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s", getVersion()))
+	req.Header.Set("User-Agent", fmt.Sprintf("M31A/%s", GetVersion()))
 
 	client := t.httpClient
 	if timeout != t.timeout {
@@ -218,9 +218,9 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	var result string
 	switch {
 	case isHTML && format == "markdown":
-		result = htmlToMarkdown(string(respBody))
+		result = HtmlToMarkdown(string(respBody))
 	case isHTML && format == "text":
-		result = htmlToText(string(respBody))
+		result = HtmlToText(string(respBody))
 	case isHTML && format == "html":
 		result = string(respBody)
 	default:
@@ -233,7 +233,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 	}, nil
 }
 
-func isPrivateIP(host string) bool {
+func IsPrivateIPFromHost(host string) bool {
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return false
@@ -244,6 +244,48 @@ func isPrivateIP(host string) bool {
 		}
 	}
 	return false
+}
+
+// resolveAndCheck resolves the host from a URL and checks if it is a private IP.
+func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return err
+	}
+	host := parsedURL.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+	if IsPrivateIPFromHost(host) {
+		return fmt.Errorf("private IP not allowed: %s", host)
+	}
+	return nil
+}
+
+// resolveAndCache resolves the DNS for a hostname and caches the result.
+func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IP, error) {
+	if t.dnsCache != nil {
+		if entry, ok := t.dnsCache.cache.Load(host); ok {
+			entry := entry.(*dnsCacheEntry)
+			if time.Now().Before(entry.expires) {
+				return entry.addrs, nil
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrs, err := net.LookupIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if t.dnsCache != nil {
+		
+t.dnsCache.cache.Store(host, &dnsCacheEntry{
+			addrs:   addrs,
+			expires: time.Now().Add(5 * time.Minute),
+		})
+	}
+	return addrs, nil
 }
 
 func isRetryableError(err error) bool {

@@ -46,7 +46,7 @@ type ringBuffer struct {
 	lines    int
 }
 
-func newRingBuffer(maxBytes int) *ringBuffer {
+func NewRingBuffer(maxBytes int) *ringBuffer {
 	return &ringBuffer{maxBytes: maxBytes}
 }
 
@@ -163,7 +163,7 @@ func (d *DevServer) Execute(ctx context.Context, input types.ToolInput) (types.T
 	case "status":
 		return d.listServers(start)
 	case "check_port":
-		return d.checkPort(input, start)
+		return d.CheckPort(input, start)
 	case "logs":
 		return d.getLogs(input, start)
 	case "restart":
@@ -200,7 +200,7 @@ func (d *DevServer) startServer(ctx context.Context, input types.ToolInput, star
 	cmd.Env = mergeEnv(os.Environ(), env)
 
 	// Capture logs via ring buffer
-	logs := newRingBuffer(maxLogBytes)
+	logs := NewRingBuffer(maxLogBytes)
 	cmd.Stdout = logs
 	cmd.Stderr = logs
 
@@ -457,7 +457,7 @@ func (d *DevServer) getLogs(input types.ToolInput, start time.Time) (types.ToolR
 	}, nil
 }
 
-func (d *DevServer) checkPort(input types.ToolInput, start time.Time) (types.ToolResult, error) {
+func (d *DevServer) CheckPort(input types.ToolInput, start time.Time) (types.ToolResult, error) {
 	port := 0
 	if p, ok := input.Params["port"].(float64); ok {
 		port = int(p)

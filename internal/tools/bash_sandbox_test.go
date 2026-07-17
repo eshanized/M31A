@@ -15,7 +15,7 @@ import (
 func TestScrubEnvironment_RemovesSensitiveVars(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.CommandContext(context.Background(), "echo", "test")
+	cmd := stdExec.CommandContext(context.Background(), "echo", "test")
 
 	// Set a bunch of sensitive environment variables
 	originalVars := map[string]string{
@@ -84,7 +84,7 @@ func TestScrubEnvironment_RemovesSensitiveVars(t *testing.T) {
 func TestScrubEnvironment_PrefixMatching(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.CommandContext(context.Background(), "echo", "test")
+	cmd := stdExec.CommandContext(context.Background(), "echo", "test")
 
 	// Set env vars with sensitive prefixes (must START with the prefix)
 	os.Setenv("API_KEY_FOO", "secret123")
@@ -134,7 +134,7 @@ func TestScrubEnvironment_PrefixMatching(t *testing.T) {
 func TestScrubEnvironment_DoesNotRemoveNonPrefixedVars(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.CommandContext(context.Background(), "echo", "test")
+	cmd := stdExec.CommandContext(context.Background(), "echo", "test")
 
 	// These should NOT be removed (they don't start with the sensitive prefixes)
 	os.Setenv("MY_API_SETTING", "value1")

@@ -175,7 +175,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		if !ok {
 			return types.ToolResult{}, fmt.Errorf("parameter end_line must be an integer")
 		}
-		newContent, matchErr = replaceByLineRange(normalizedContent, startLine, endLine, normalizedNewString)
+		newContent, matchErr = ReplaceByLineRange(normalizedContent, startLine, endLine, normalizedNewString)
 		strategy = "line-range"
 		confidence = 1.0
 	} else {
@@ -190,7 +190,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		}
 		normalizedOldString := strings.ReplaceAll(oldString, "\r\n", "\n")
 
-		newContent, strategy, confidence, matchErr = cascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll, t.ConfidenceThreshold)
+		newContent, strategy, confidence, matchErr = CascadingReplace(normalizedContent, normalizedOldString, normalizedNewString, replaceAll, t.ConfidenceThreshold)
 	}
 
 	// Record edit strategy usage
@@ -214,7 +214,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	// Generate diff summary
-	diffSummary := generateDiffSummary(path, content, newContent)
+	diffSummary := GenerateDiffSummary(path, content, newContent)
 
 	elapsed := time.Since(start).Milliseconds()
 	return types.ToolResult{
@@ -292,7 +292,7 @@ func (t *Edit) pruneBackups(sanitizedPrefix string) {
 	pruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
 }
 
-func replaceByLineRange(content string, startLine, endLine int, newContent string) (string, error) {
+func ReplaceByLineRange(content string, startLine, endLine int, newContent string) (string, error) {
 	lines := strings.Split(content, "\n")
 
 	if startLine < 1 || startLine > len(lines) {
@@ -318,7 +318,7 @@ func replaceByLineRange(content string, startLine, endLine int, newContent strin
 	return strings.Join(newLines, "\n"), nil
 }
 
-func cascadingReplace(content, oldString, newString string, replaceAll bool, threshold float64) (string, string, float64, error) {
+func CascadingReplace(content, oldString, newString string, replaceAll bool, threshold float64) (string, string, float64, error) {
 	// Split content once for all strategies
 	contentLines := strings.Split(content, "\n")
 
@@ -331,17 +331,17 @@ func cascadingReplace(content, oldString, newString string, replaceAll bool, thr
 	}
 
 	// Strategy 2: Trimmed match — trim each line before comparing (confidence: 0.95)
-	if result, err := trimmedReplace(content, contentLines, oldString, newString); err == nil {
+	if result, err := TrimmedReplace(content, contentLines, oldString, newString); err == nil {
 		return result, StrategyTrimmed.Name, StrategyTrimmed.Confidence, nil
 	}
 
 	// Strategy 3: Normalized match — full whitespace + indent normalization (confidence: 0.9)
-	if result, err := normalizedReplace(content, contentLines, oldString, newString); err == nil {
+	if result, err := NormalizedReplace(content, contentLines, oldString, newString); err == nil {
 		return result, StrategyNormalized.Name, StrategyNormalized.Confidence, nil
 	}
 
 	// Strategy 4: Anchor match — first+last line anchoring with Levenshtein (confidence: 0.85)
-	if result, err := anchorReplace(content, contentLines, oldString, newString); err == nil {
+	if result, err := AnchorReplace(content, contentLines, oldString, newString); err == nil {
 		return result, StrategyAnchor.Name, StrategyAnchor.Confidence, nil
 	}
 
@@ -366,9 +366,9 @@ func cascadingReplace(content, oldString, newString string, replaceAll bool, thr
 	)
 }
 
-// trimmedReplace matches by trimming whitespace from each line.
+// TrimmedReplace matches by trimming whitespace from each line.
 // Merges the old line-trimmed and whitespace-normalized strategies.
-func trimmedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+func TrimmedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
 
 	oldTrimmed := make([]string, len(oldLines))
@@ -426,9 +426,9 @@ func trimmedReplace(content string, contentLines []string, oldString, newString 
 	return "", fmt.Errorf("no trimmed match found")
 }
 
-// normalizedReplace matches after normalizing whitespace and indentation.
+// NormalizedReplace matches after normalizing whitespace and indentation.
 // Merges the old whitespace-normalized and indent-normalized strategies.
-func normalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+func NormalizedReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	// Full normalization: collapse whitespace, normalize tabs to spaces
 	normalize := func(s string) string {
 		s = strings.ReplaceAll(s, "\t", "    ")
@@ -470,9 +470,9 @@ func normalizedReplace(content string, contentLines []string, oldString, newStri
 	return "", fmt.Errorf("no normalized match found")
 }
 
-// anchorReplace matches using first+last line anchoring with Levenshtein
+// AnchorReplace matches using first+last line anchoring with Levenshtein
 // similarity for middle lines. Requires at least MinLinesForFuzzy lines.
-func anchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
+func AnchorReplace(content string, contentLines []string, oldString, newString string) (string, error) {
 	oldLines := strings.Split(oldString, "\n")
 	if len(oldLines) < MinLinesForFuzzy {
 		return "", fmt.Errorf("anchor replace requires at least %d lines", MinLinesForFuzzy)
@@ -579,7 +579,7 @@ func fuzzyReplace(content string, contentLines []string, oldString, newString st
 			} else if len(a) == 0 || len(b) == 0 {
 				totalSim += 0.0
 			} else {
-				totalSim += levenshteinSimilarity(a, b)
+				totalSim += LevenshteinSimilarity(a, b)
 			}
 		}
 		avgSim := totalSim / float64(len(oldLines))
@@ -607,7 +607,7 @@ func fuzzyReplace(content string, contentLines []string, oldString, newString st
 	return strings.Join(newLines, "\n"), confidence, nil
 }
 
-func levenshteinSimilarity(a, b string) float64 {
+func LevenshteinSimilarity(a, b string) float64 {
 	if a == b {
 		return 1.0
 	}
@@ -615,7 +615,7 @@ func levenshteinSimilarity(a, b string) float64 {
 		return 0.0
 	}
 
-	dist := levenshteinDistance(a, b)
+	dist := LevenshteinDistance(a, b)
 	maxLen := len(a)
 	if len(b) > maxLen {
 		maxLen = len(b)
@@ -623,20 +623,11 @@ func levenshteinSimilarity(a, b string) float64 {
 	return 1.0 - float64(dist)/float64(maxLen)
 }
 
-func levenshteinDistance(a, b string) int {
-	// Allocate buffers for Levenshtein distance calculation
-	prev := make([]int, len(b)+1)
-	curr := make([]int, len(b)+1)
-	for i := range prev {
-		prev[i] = i
-	}
-	return LevenshteinBuf(a, b, prev, curr)
-}
 
 // maxLCSMatrixSize caps the LCS matrix at ~16MB (4M cells × 4 bytes/int).
 const maxLCSMatrixSize = 2000 * 2000
 
-func generateDiffSummary(path, oldContent, newContent string) string {
+func GenerateDiffSummary(path, oldContent, newContent string) string {
 	oldLines := strings.Split(oldContent, "\n")
 	newLines := strings.Split(newContent, "\n")
 
