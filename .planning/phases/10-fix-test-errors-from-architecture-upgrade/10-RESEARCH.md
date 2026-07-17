@@ -382,22 +382,16 @@ var LargeSessionJSON []byte
 
 **If this table is empty:** All claims in this research were verified or cited — no user confirmation needed.
 
-## Open Questions
+## Open Questions — RESOLVED
 
 1. **Should pkg/types/ be created as an alias to internal/types/?**
-   - What we know: Phase 9 plan intended to move pkg/ contents to internal/, but internal/types/ still exists with actual definitions
-   - What's unclear: Whether to complete the original plan or keep current structure
-   - Recommendation: Keep internal/types/ as-is for now. It's working and all imports are correct. Defer to a future phase if needed.
+   - **RESOLVED: No.** `internal/types/` exists with actual type definitions (constants.go, fileutil.go, git.go, plan.go, toolcall.go, types.go — 6 files, ~12KB). `pkg/types/` does NOT exist. Phase 9's migration was already completed correctly — all 126+ test files import `internal/types`. No alias needed. No action required.
 
 2. **How to handle package-specific test helpers that need internal access?**
-   - What we know: Some test helpers use unexported fields or functions
-   - What's unclear: Whether to keep them colocated or refactor to use exported APIs
-   - Recommendation: Keep package-specific helpers colocated. Only centralize truly shared utilities.
+   - **RESOLVED: Keep package-specific helpers colocated.** Go test files (`*_test.go`) in the same package can access unexported identifiers. Moving such helpers to `testutil/` (a different package) would break access to unexported fields. Only centralize helpers that use exported APIs. Pattern: `mockProvider` (implements exported `provider.LLMProvider` interface) → centralize in `testutil/mocks/`. `setupTestEngine` (accesses `workflow.Engine` unexported fields) → keep colocated or refactor to use exported constructors.
 
 3. **What about the e2e_test.go location?**
-   - What we know: Currently at project root, imports m31a_test package
-   - What's unclear: Whether moving to testutil/e2e/ would break the build tag or import pattern
-   - Recommendation: Investigate if the build tag pattern changes. If it does, keep at root or use a build tag.
+   - **RESOLVED: Move is safe.** `e2e_test.go` uses `buildBinary()` which calls `go build -o bin ./cmd/m31a` — this works from any directory in the module since `./cmd/m31a` resolves from the module root (found via `go.mod`). Moving to `internal/testutil/e2e/e2e_test.go` only requires updating the package declaration from `m31a_test` to `e2e_test`. The `buildBinary()` helper's `cmd.Dir = mustGetwd(t)` ensures the build runs from the correct working directory. **Recommendation:** Move per D-07.
 
 ## Environment Availability
 
