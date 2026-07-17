@@ -9,29 +9,14 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/types"
 )
-
-type mockTool struct {
-	name      string
-	riskLevel types.RiskLevel
-	execFunc  func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
-}
-
-func (m *mockTool) Name() string               { return m.name }
-func (m *mockTool) Description() string        { return "mock tool for testing" }
-func (m *mockTool) RiskLevel() types.RiskLevel { return m.riskLevel }
-func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
-	if m.execFunc != nil {
-		return m.execFunc(ctx, input)
-	}
-	return types.ToolResult{Output: "ok"}, nil
-}
 
 func TestDispatcher_RegisterAndExecute(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -70,7 +55,7 @@ func TestDispatcher_UnknownTool(t *testing.T) {
 func TestDispatcher_SafeToolNoPermission(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "safe", RiskLevel_: types.RiskSafe})
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -84,7 +69,7 @@ func TestDispatcher_SafeToolNoPermission(t *testing.T) {
 
 func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -113,7 +98,7 @@ func TestDispatcher_DangerousToolPermissionGranted(t *testing.T) {
 
 func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -135,7 +120,7 @@ func TestDispatcher_DangerousToolPermissionDenied(t *testing.T) {
 
 func TestDispatcher_RememberedPermission(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
 
 	// First call — approve with remember=true
 	errCh1 := make(chan error, 1)
@@ -172,9 +157,9 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 func TestDispatcher_List(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "zzz", riskLevel: types.RiskSafe})
-	d.Register(&mockTool{name: "aaa", riskLevel: types.RiskSafe})
-	d.Register(&mockTool{name: "mmm", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "zzz", RiskLevel_: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "aaa", RiskLevel_: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "mmm", RiskLevel_: types.RiskSafe})
 
 	names := d.List()
 	if len(names) != 3 {
@@ -188,7 +173,7 @@ func TestDispatcher_List(t *testing.T) {
 func TestDispatcher_GetTool(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 
 	tool, ok := d.GetTool("test")
 	if !ok {
@@ -298,7 +283,7 @@ func TestExtractCommandString_Fallback(t *testing.T) {
 
 func TestDispatcher_DestructiveToolPermission(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "filewrite", riskLevel: types.RiskDestructive})
+	d.Register(&mocks.MockTool{Name_: "filewrite", RiskLevel_: types.RiskDestructive})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -327,7 +312,7 @@ func TestDispatcher_DestructiveToolPermission(t *testing.T) {
 
 func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -357,11 +342,11 @@ func TestDispatcher_DangerousToolContextCancelled(t *testing.T) {
 func TestDispatcher_RegisterDuplicate(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	if err := d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe}); err != nil {
+	if err := d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe}); err != nil {
 		t.Fatalf("first register failed: %v", err)
 	}
 
-	err := d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	err := d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 	if err == nil {
 		t.Error("expected error for duplicate registration")
 	}
@@ -494,7 +479,7 @@ func TestCheckPermission_RuleAllow(t *testing.T) {
 			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
 		Name:   "Bash",
@@ -523,7 +508,7 @@ func TestCheckPermission_RuleDeny(t *testing.T) {
 			{Tool: "Bash", Pattern: "**/*.go", Action: "deny"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
 		Name:   "Bash",
@@ -549,7 +534,7 @@ func TestCheckPermission_RuleAsk(t *testing.T) {
 			{Tool: "Bash", Pattern: "**/*.go", Action: "ask"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
 		Name:   "Bash",
@@ -578,7 +563,7 @@ func TestCheckPermission_NoMatchFallthrough(t *testing.T) {
 			{Tool: "Bash", Pattern: "*.py", Action: "allow"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	// .go file should not match *.py pattern
 	allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
@@ -605,7 +590,7 @@ func TestCheckPermission_ToolFilter(t *testing.T) {
 			{Tool: "Grep", Pattern: "**", Action: "allow"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	// Bash is not Grep — tool filter prevents match
 	_, pctx, err := d.checkPermission("Bash", types.ToolInput{
@@ -636,7 +621,7 @@ func TestCheckPermission_MultipleRulesFirstWins(t *testing.T) {
 			{Tool: "Bash", Pattern: "**/*.go", Action: "allow"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	t.Run("secret key denied by first rule", func(t *testing.T) {
 		allowed, pctx, err := d.checkPermission("Bash", types.ToolInput{
@@ -684,7 +669,7 @@ func TestSelectAgent(t *testing.T) {
 			},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	t.Run("select build agent succeeds", func(t *testing.T) {
 		err := d.SelectAgent("build")
@@ -742,7 +727,7 @@ func TestPermissionContext_Fields(t *testing.T) {
 				{Tool: "Bash", Pattern: "**/secret*", Action: "deny"},
 			},
 		})
-		d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+		d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 		_, pctx, _ := d.checkPermission("Bash", types.ToolInput{
 			Name:   "Bash",
@@ -767,7 +752,7 @@ func TestPermissionContext_Fields(t *testing.T) {
 
 	t.Run("no match returns risk_level source", func(t *testing.T) {
 		d := testDispatcher(t)
-		d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+		d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 		_, pctx, err := d.checkPermission("Bash", types.ToolInput{
 			Name:   "Bash",
@@ -826,7 +811,7 @@ func TestDoublestarMatch(t *testing.T) {
 
 func TestDispatcher_PermissionChannelFull(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
 
 	// Fill the request channel (buffer size is 8)
 	for i := 0; i < 8; i++ {
@@ -846,7 +831,7 @@ func TestDispatcher_PermissionChannelFull(t *testing.T) {
 func TestToolInputJSON(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "safe", RiskLevel_: types.RiskSafe})
 
 	_, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -867,7 +852,7 @@ func TestToolInputJSON(t *testing.T) {
 func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -885,7 +870,7 @@ func TestDispatcher_EmptyInputForKnownTool(t *testing.T) {
 func TestDispatcher_EmptyBytesInput(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -903,7 +888,7 @@ func TestDispatcher_EmptyBytesInput(t *testing.T) {
 func TestDispatcher_NullInput(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
 
 	result, err := d.Execute(context.Background(), types.ToolCall{
 		ID:    "call1",
@@ -918,7 +903,7 @@ func TestDispatcher_NullInput(t *testing.T) {
 
 func TestDispatcher_UpdatePermissions(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskSafe})
 
 	cfg := &config.PermissionsConfig{
 		Rules: []config.PermissionRule{

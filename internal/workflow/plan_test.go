@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -20,8 +21,8 @@ func TestEngine_RunPlan_Success(t *testing.T) {
 	}
 
 	// Mock provider returns valid JSON tasks
-	mp := engine.provider.(*mockProvider)
-	mp.response = `[{"id":1,"action":"Create","description":"Create main.go","dependencies":[],"files":["main.go"],"acceptance_criteria":["compiles"]}]`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `[{"id":1,"action":"Create","description":"Create main.go","dependencies":[],"files":["main.go"],"acceptance_criteria":["compiles"]}]`
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Build a REST API")
 	if err != nil {
@@ -49,8 +50,8 @@ func TestEngine_RunPlan_ParsesJSONFromMarkdown(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.response = "```json\n[{\"id\":1,\"action\":\"Create\",\"description\":\"Task\",\"dependencies\":[],\"files\":[],\"acceptance_criteria\":[\"task completes\"]}]\n```"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "```json\n[{\"id\":1,\"action\":\"Create\",\"description\":\"Task\",\"dependencies\":[],\"files\":[],\"acceptance_criteria\":[\"task completes\"]}]\n```"
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
@@ -72,8 +73,8 @@ func TestEngine_RunPlan_FailsOnInvalidJSON(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.response = "this is not json"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "this is not json"
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
@@ -93,8 +94,8 @@ func TestEngine_RunPlan_FailsOnValidationErrors(t *testing.T) {
 	}
 
 	// Task with missing description fails validation
-	mp := engine.provider.(*mockProvider)
-	mp.response = `[{"id":1,"action":"Create","dependencies":[],"files":[],"acceptance_criteria":[]}]`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `[{"id":1,"action":"Create","dependencies":[],"files":[],"acceptance_criteria":[]}]`
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
@@ -189,8 +190,8 @@ func TestEngine_Plan_SavesTasks(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.response = `[{"id":1,"action":"Create","description":"Task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `[{"id":1,"action":"Create","description":"Task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`
 
 	_, err = engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
@@ -214,9 +215,9 @@ func TestEngine_RunPlan_RetryWithErrorFeedback(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
+	mp := engine.provider.(*mocks.MockProvider)
 	// First call: invalid JSON (missing description), second call: valid JSON
-	mp.multiResponses = []string{
+	mp.MultiResponses = []string{
 		`[{"id":1,"action":"Create","dependencies":[],"files":[],"acceptance_criteria":[]}]`,
 		`[{"id":1,"action":"Create","description":"Fixed task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`,
 	}
@@ -228,8 +229,8 @@ func TestEngine_RunPlan_RetryWithErrorFeedback(t *testing.T) {
 	if !result.Success {
 		t.Fatal("Plan should succeed after retry")
 	}
-	if mp.callCount != 2 {
-		t.Errorf("Expected 2 LLM calls (invalid + retry), got %d", mp.callCount)
+	if mp.CallCount_ != 2 {
+		t.Errorf("Expected 2 LLM calls (invalid + retry), got %d", mp.CallCount_)
 	}
 	if len(result.Tasks) != 1 {
 		t.Fatalf("Expected 1 task, got %d", len(result.Tasks))
@@ -248,8 +249,8 @@ func TestEngine_RunPlan_ManualFallback(t *testing.T) {
 	}
 
 	// Always return invalid JSON — should fail after MaxPlanRetries
-	mp := engine.provider.(*mockProvider)
-	mp.response = "not json at all"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "not json at all"
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {

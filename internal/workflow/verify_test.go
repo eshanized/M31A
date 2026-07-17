@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
@@ -196,8 +197,13 @@ func TestEngine_SessionStartHash(t *testing.T) {
 	}
 
 	planningDir := engine.planningDir
+	d, derr := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), dir, nil, nil)
+	if derr != nil {
+		t.Fatalf("DefaultDispatcher failed: %v", derr)
+	}
+	t.Cleanup(func() { d.Stop() })
 	eng, _ := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
-		&mockProvider{}, "test-model", tools.NewDispatcher(nil), tokens.NewEstimator("test-model"), mgr, nil)
+		mocks.NewMockProvider("mock"), "test-model", d, tokens.NewEstimator("test-model"), mgr, nil)
 	eng.SetGit(engine.git)
 
 	if eng.sessionStartHash == "" {

@@ -19,6 +19,7 @@ import (
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -1035,7 +1036,7 @@ func TestEngine_PreflightContextCheck_NilProvider(t *testing.T) {
 
 func TestEngine_PreflightContextCheck_WithinThreshold(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.provider = &mockProvider{}
+	engine.provider = &mocks.MockProvider{}
 	messages := []m31types.Message{{Role: "user", Content: "short"}}
 	result, err := engine.preflightContextCheck(messages)
 	if err != nil {

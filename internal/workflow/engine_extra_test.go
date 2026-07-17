@@ -11,6 +11,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -363,7 +364,7 @@ func TestModelForPhase_AllPhases(t *testing.T) {
 
 func TestSetModel_WithProvider(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	newProvider := &mockProvider{response: "new"}
+	newProvider := &mocks.MockProvider{Response_: "new"}
 	engine.SetModel("new-model", newProvider)
 	if engine.modelID != "new-model" {
 		t.Errorf("expected modelID 'new-model', got %q", engine.modelID)
@@ -1678,8 +1679,8 @@ func TestRunPlan_InvalidJSONFallback(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.response = "plain text with no JSON"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "plain text with no JSON"
 
 	_, err = engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
@@ -1759,7 +1760,7 @@ func TestStreamLLM_WithoutTools(t *testing.T) {
 
 func TestStreamLLM_LLMError(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.provider = &mockProvider{err: context.DeadlineExceeded}
+	engine.provider = &mocks.MockProvider{Err_: context.DeadlineExceeded}
 	messages := []m31types.Message{
 		{Role: "user", Content: "hello"},
 	}
@@ -1801,7 +1802,7 @@ func TestStreamLLMStreaming_WithoutTools(t *testing.T) {
 
 func TestStreamLLMStreaming_LLMError(t *testing.T) {
 	engine, _ := setupTestEngine(t)
-	engine.provider = &mockProvider{err: context.DeadlineExceeded}
+	engine.provider = &mocks.MockProvider{Err_: context.DeadlineExceeded}
 	messages := []m31types.Message{
 		{Role: "user", Content: "hello"},
 	}
@@ -1842,8 +1843,8 @@ func TestRunPlan_WithRefinement(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		`[{"id":1,"action":"Create","description":"v1 task","dependencies":[],"files":["a.go"],"acceptance_criteria":["works"]}]`,
 		`[{"id":1,"action":"Create","description":"v2 task","dependencies":[],"files":["a.go"],"acceptance_criteria":["works"]}]`,
 	}
@@ -1889,8 +1890,8 @@ func TestRunExecute_WithTasks(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.response = `{"name":"Bash","input":{"command":"echo test"}}`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `{"name":"Bash","input":{"command":"echo test"}}`
 
 	tasks := []m31types.Task{
 		{ID: 1, Action: "Create", Description: "test task", Files: []string{"test.go"}, Status: m31types.StatusPending},
@@ -1943,7 +1944,7 @@ func TestHealTask_LLMError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	engine.provider = &mockProvider{err: context.DeadlineExceeded}
+	engine.provider = &mocks.MockProvider{Err_: context.DeadlineExceeded}
 
 	tasks := []m31types.Task{
 		{ID: 1, Action: "Create", Description: "failed task", Status: m31types.StatusFailed, Files: []string{"a.go"}},
@@ -2158,8 +2159,8 @@ func TestRunPlan_LLMErrorAllRetries(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	mp := engine.provider.(*mockProvider)
-	mp.err = context.DeadlineExceeded
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Err_ = context.DeadlineExceeded
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil && result != nil && !result.Success {
@@ -2282,8 +2283,8 @@ func TestExecuteTaskWithTools_ToolExecutionError(t *testing.T) {
 	}
 
 	// Return a tool call that will fail (FileRead of nonexistent)
-	mp := engine.provider.(*mockProvider)
-	mp.response = `[{"name":"FileRead","input":{"path":"/nonexistent/path/file.go"}}]`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `[{"name":"FileRead","input":{"path":"/nonexistent/path/file.go"}}]`
 
 	task := m31types.Task{
 		ID:          1,
@@ -2305,9 +2306,9 @@ func TestExecuteTaskWithTools_NoToolCallsForFileTask(t *testing.T) {
 	}
 
 	// LLM returns text with no tool calls, task has files
-	mp := engine.provider.(*mockProvider)
-	mp.response = "I created the file for you"
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "I created the file for you"
+	mp.MultiResponses = []string{
 		"I created the file for you",
 		"I created the file for you",
 		"I created the file for you",
@@ -2335,8 +2336,8 @@ func TestExecuteTaskWithTools_NativeToolCalls(t *testing.T) {
 	}
 
 	// Return native tool calls via multiResponses
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"ok",
 		"done",
 	}
@@ -2626,8 +2627,8 @@ func TestExecuteTaskWithTools_NilNativeTools_FallbackToParse(t *testing.T) {
 	}
 
 	// Return content with tool calls in code blocks (parsed, not native)
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"```json\n{\"name\":\"Bash\",\"input\":{\"command\":\"echo hello\"}}\n```",
 		"Tool executed successfully",
 	}
@@ -2789,8 +2790,8 @@ func TestHealTask_SuccessfulHeal(t *testing.T) {
 	}
 
 	// Mock provider returns tool call to create a file
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		`{"name":"FileWrite","input":{"path":"fixed.go","content":"package main"}}`,
 		"File written successfully",
 	}
@@ -2812,8 +2813,8 @@ func TestHealTask_LLMReturnsNoToolCalls(t *testing.T) {
 	}
 
 	// LLM returns plain text, no tool calls
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"I fixed the issue by editing the file.",
 		"I fixed the issue by editing the file.",
 		"I fixed the issue by editing the file.",
@@ -3178,8 +3179,8 @@ func TestRunVerify_TaskFailsVerification_HealSucceeds(t *testing.T) {
 	}
 
 	// Mock provider: first call is for heal (returns tool call to write file)
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"```json\n{\"name\":\"Bash\",\"input\":{\"command\":\"echo ok\"}}\n```",
 		"Tool executed successfully",
 	}
@@ -3314,8 +3315,8 @@ func TestRunExecute_TaskWithAcceptanceCriteria(t *testing.T) {
 	_, _ = engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
 
 	// Mock provider returns file write tool call
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"```json\n{\"name\":\"Bash\",\"input\":{\"command\":\"echo ok\"}}\n```",
 		"Tool executed successfully",
 		"```json\n{\"name\":\"Bash\",\"input\":{\"command\":\"echo ok\"}}\n```",
@@ -3337,8 +3338,8 @@ func TestRunExecute_NoToolCallsForFileTask(t *testing.T) {
 	_, _ = engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
 
 	// Provider returns plain text only (no tool calls)
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"I'll create the file now.",
 		"I'll create the file now.",
 		"I'll create the file now.",
@@ -3392,8 +3393,8 @@ func TestRunPlan_WithExistingTasksForRetry(t *testing.T) {
 	_, _ = engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
 
 	// Mock provider for plan generation
-	mp := engine.provider.(*mockProvider)
-	mp.multiResponses = []string{
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.MultiResponses = []string{
 		"# Plan\n## Summary\nRetry plan\n## Tasks\n- [x] Create a.go: main file",
 		"# Plan\n## Summary\nRetry plan\n## Tasks\n- [x] Create a.go: main file",
 	}

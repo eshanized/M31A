@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
@@ -45,8 +46,8 @@ func TestEngine_RunExecute_WithTasks(t *testing.T) {
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
 	// Mock provider returns content
-	mp := engine.provider.(*mockProvider)
-	mp.response = "Task completed"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "Task completed"
 
 	result, err := engine.RunPhase(context.Background(), m31types.PhaseExecute, "Test")
 	if err != nil {
@@ -118,8 +119,8 @@ func TestEngine_ExecuteTaskWithTools_ToolDispatch(t *testing.T) {
 	allTasks := []m31types.Task{task}
 
 	// The mock provider returns content without tool calls
-	mp := engine.provider.(*mockProvider)
-	mp.response = "Done"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "Done"
 
 	result := engine.executeTaskWithTools(context.Background(), &task, allTasks, "")
 	// File-changing task with no tool calls should fail (G05 guard)
@@ -135,8 +136,8 @@ func TestEngine_ExecuteTaskWithTools_LLMError(t *testing.T) {
 	allTasks := []m31types.Task{task}
 
 	// Make provider return error
-	mp := engine.provider.(*mockProvider)
-	mp.err = context.Canceled
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Err_ = context.Canceled
 
 	result := engine.executeTaskWithTools(context.Background(), &task, allTasks, "")
 	if result.Success {
@@ -158,8 +159,8 @@ func TestEngine_HealTask(t *testing.T) {
 	}
 
 	// Provide a response that contains a valid tool call
-	mp := engine.provider.(*mockProvider)
-	mp.response = `{"name":"FileWrite","input":{"name":"FileWrite","params":{"path":"main.go","content":"package main"}}}`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `{"name":"FileWrite","input":{"name":"FileWrite","params":{"path":"main.go","content":"package main"}}}`
 
 	result := engine.healTask(context.Background(), task, "compilation error", "")
 	// Heal uses mock provider which returns content
@@ -173,8 +174,8 @@ func TestEngine_HealTask_LLMError(t *testing.T) {
 
 	task := m31types.Task{ID: 1, Action: "Create", Description: "Fix bug"}
 
-	mp := engine.provider.(*mockProvider)
-	mp.err = context.Canceled
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Err_ = context.Canceled
 
 	result := engine.healTask(context.Background(), task, "compilation error", "")
 	if result.Success {
@@ -218,8 +219,8 @@ func TestEngine_ExecuteTaskWithTools_EmptyResponse(t *testing.T) {
 	allTasks := []m31types.Task{task}
 
 	// Empty response — should fail for file-changing task (G05 guard)
-	mp := engine.provider.(*mockProvider)
-	mp.response = ""
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = ""
 
 	result := engine.executeTaskWithTools(context.Background(), &task, allTasks, "")
 	if result.Success {
@@ -243,8 +244,8 @@ func TestEngine_ExecuteTaskWithTools_MultipleToolCalls(t *testing.T) {
 	allTasks := []m31types.Task{task}
 
 	// Response with multiple tool calls
-	mp := engine.provider.(*mockProvider)
-	mp.response = `{"name":"Bash","input":{"name":"Bash","params":{"command":"echo hello"}}} and also {"name":"FileRead","input":{"name":"FileRead","params":{"path":"main.go"}}}`
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = `{"name":"Bash","input":{"name":"Bash","params":{"command":"echo hello"}}} and also {"name":"FileRead","input":{"name":"FileRead","params":{"path":"main.go"}}}`
 
 	result := engine.executeTaskWithTools(context.Background(), &task, allTasks, "")
 	// Should handle multiple tool calls
@@ -266,9 +267,9 @@ func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 	allTasks := []m31types.Task{task}
 
 	// Set LLM to always error — verify heal attempts are made
-	mp := engine.provider.(*mockProvider)
-	mp.response = "Done"
-	mp.err = context.Canceled
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "Done"
+	mp.Err_ = context.Canceled
 
 	result := engine.executeTaskWithTools(context.Background(), &task, allTasks, "")
 	// With constant LLM error, heal attempts should exhaust and fail
@@ -282,7 +283,7 @@ func TestEngine_ExecuteTaskWithTools_SelfHeal(t *testing.T) {
 
 // mockProviderWithCapture records messages passed on ChatCompletionStream calls.
 type mockProviderWithCapture struct {
-	mockProvider
+	mocks.MockProvider
 	capturedMessages []m31types.Message
 	capturedCounts   []int // messages count per call
 }
@@ -296,11 +297,11 @@ func (m *mockProviderWithCapture) ChatCompletionStream(ctx context.Context, req 
 	}
 	// Delegate to the embedded mock but bypass its callCount increment
 	// by using the response directly
-	content := m.response
-	if len(m.multiResponses) > 0 {
+	content := m.Response_
+	if len(m.MultiResponses) > 0 {
 		idx := len(m.capturedCounts) - 1
-		if idx < len(m.multiResponses) {
-			content = m.multiResponses[idx]
+		if idx < len(m.MultiResponses) {
+			content = m.MultiResponses[idx]
 		}
 	}
 	if content == "" {
@@ -315,7 +316,7 @@ func (m *mockProviderWithCapture) ChatCompletionStream(ctx context.Context, req 
 		return &m31types.StreamChunk{Delta: content}, nil
 	}
 	closeFn := func() error { return nil }
-	return &m31types.StreamIterator{Next: next, Close: closeFn}, m.err
+	return &m31types.StreamIterator{Next: next, Close: closeFn}, m.Err_
 }
 
 func TestExecute_OneAssistantPerTurn(t *testing.T) {
@@ -333,11 +334,11 @@ func TestExecute_OneAssistantPerTurn(t *testing.T) {
 		"```json\n{\"name\":\"FileRead\",\"input\":{\"name\":\"FileRead\",\"params\":{\"path\":\"main.go\"}}}\n```"
 
 	mp := &mockProviderWithCapture{
-		mockProvider: mockProvider{
-			response: toolCallResponse,
+		MockProvider: mocks.MockProvider{
+			Response_: toolCallResponse,
 		},
 	}
-	mp.multiResponses = []string{
+	mp.MultiResponses = []string{
 		toolCallResponse,
 		"Done",
 	}

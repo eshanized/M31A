@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/types"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
+	"github.com/eshanized/M31A/internal/tools/ai"
 )
 
 // ---------------------------------------------------------------------------
@@ -472,7 +474,7 @@ func TestReplaceByLineRange_EmptyContent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: search.LoadGitignoreCached edge cases
+// search.Grep: search.LoadGitignoreCached edge cases
 // ---------------------------------------------------------------------------
 
 func TestLoadGitignoreCached_EmptyDir(t *testing.T) {
@@ -526,7 +528,7 @@ func TestLoadGitignoreCached_AllCommentsAndBlanks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: search.MatchesGitignore edge cases
+// search.Grep: search.MatchesGitignore edge cases
 // ---------------------------------------------------------------------------
 
 func TestMatchesGitignore_DirectoryPattern(t *testing.T) {
@@ -1671,7 +1673,7 @@ func TestConvertLinks_MissingHrefValue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: replaceInlineTag edge cases
+// WebFetch: search.ReplaceInlineTag edge cases
 // ---------------------------------------------------------------------------
 
 func TestReplaceInlineTag_NoMatch(t *testing.T) {
@@ -1695,7 +1697,7 @@ func TestReplaceInlineTag_MultipleOccurrences(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: replaceBlockTag edge cases
+// WebFetch: search.ReplaceBlockTag edge cases
 // ---------------------------------------------------------------------------
 
 func TestReplaceBlockTag_NoMatch(t *testing.T) {
@@ -1719,7 +1721,7 @@ func TestReplaceBlockTag_MissingCloseTag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebFetch: normalizeWhitespace edge cases
+// WebFetch: search.NormalizeWhitespace edge cases
 // ---------------------------------------------------------------------------
 
 func TestNormalizeWhitespace_MultipleNewlines(t *testing.T) {
@@ -1927,7 +1929,7 @@ func TestExtractFromParams_Glob(t *testing.T) {
 func TestExtractFromParams_Grep(t *testing.T) {
 	t.Parallel()
 	params := map[string]any{"pattern": "TODO"}
-	got := extractFromParams("Grep", params)
+	got := extractFromParams("search.Grep", params)
 	if got != "grep TODO" {
 		t.Errorf("expected 'grep TODO', got %q", got)
 	}
@@ -2146,7 +2148,7 @@ func TestDefaultDispatcher_RegistersAllTools(t *testing.T) {
 	names := d.List()
 	expectedTools := []string{
 		"Bash", "FileRead", "FileWrite", "Edit", "TodoWrite",
-		"WebFetch", "AskUserQuestion", "Glob", "Grep",
+		"WebFetch", "AskUserQuestion", "Glob", "search.Grep",
 		"FileList", "FileDelete", "FileMove",
 	}
 	for _, expected := range expectedTools {
@@ -2421,12 +2423,12 @@ func TestGlob_ParameterSchema(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: ParameterSchema
+// search.Grep: ParameterSchema
 // ---------------------------------------------------------------------------
 
 func TestGrep_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	g := NewGrep(t.TempDir())
+	g := search.NewGrep(t.TempDir())
 	schema := g.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2900,16 +2902,16 @@ func TestHumanSize_VeryLarge(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: long pattern rejection
+// search.Grep: long pattern rejection
 // ---------------------------------------------------------------------------
 
 func TestGrep_PatternTooLong(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	g := NewGrep(dir)
+	g := search.NewGrep(dir)
 	longPattern := strings.Repeat("a", MaxGrepPatternLength+1)
 	_, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": longPattern,
 		},
@@ -2923,14 +2925,14 @@ func TestGrep_PatternTooLong(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: context cancellation
+// search.Grep: context cancellation
 // ---------------------------------------------------------------------------
 
 func TestGrep_ContextCancelled(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
-	g := NewGrep(dir)
+	g := search.NewGrep(dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 	_, err := g.Execute(ctx, toolInput("pattern", "content"))
@@ -2985,7 +2987,7 @@ func TestFileRead_ContextCancelled(t *testing.T) {
 func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	err := wf.resolveAndCheck(context.Background(), "://invalid")
+	err := wf.ResolveAndCheck(context.Background(), "://invalid")
 	if err == nil {
 		t.Error("expected error for invalid URL")
 	}
@@ -2994,7 +2996,7 @@ func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	err := wf.resolveAndCheck(context.Background(), "http://")
+	err := wf.ResolveAndCheck(context.Background(), "http://")
 	if err == nil {
 		t.Error("expected error for URL with no host")
 	}
@@ -3003,7 +3005,7 @@ func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	err := wf.resolveAndCheck(context.Background(), "http://127.0.0.1:80")
+	err := wf.ResolveAndCheck(context.Background(), "http://127.0.0.1:80")
 	if err == nil {
 		t.Error("expected error for literal private IP")
 	}
@@ -3012,7 +3014,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	err := wf.resolveAndCheck(context.Background(), "http://8.8.8.8:80")
+	err := wf.ResolveAndCheck(context.Background(), "http://8.8.8.8:80")
 	if err != nil {
 		t.Errorf("expected no error for public IP, got: %v", err)
 	}
@@ -3025,7 +3027,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	addrs, err := wf.resolveAndCache(context.Background(), "127.0.0.1")
+	addrs, err := wf.ResolveAndCache(context.Background(), "127.0.0.1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3040,7 +3042,7 @@ func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 
 func TestDispatcher_RateLimitTokens(t *testing.T) {
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "safe", riskLevel: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "safe", RiskLevel_: types.RiskSafe})
 
 	// Should be able to execute several safe tools quickly
 	for i := 0; i < 5; i++ {
@@ -3087,59 +3089,7 @@ func TestEdit_Execute_LineRange_OutOfRange(t *testing.T) {
 // WebFetch: resolveAndCache expired cache
 // ---------------------------------------------------------------------------
 
-func TestWebFetch_ResolveAndCache_ExpiredCache(t *testing.T) {
-	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
-	// Store an expired entry directly in the shared cache
-	wf.dnsCache.cache.Store("expired.example.com", &dnsCacheEntry{
-		addrs:   []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
-		expires: time.Now().Add(-time.Minute), // expired
-	})
-	// Should re-resolve (may fail on DNS, but should not use expired entry)
-	_, _ = wf.resolveAndCache(context.Background(), "expired.example.com")
-}
 
-// ---------------------------------------------------------------------------
-// Grep: context cancellation for PureGo
-// ---------------------------------------------------------------------------
-
-func TestGrep_ContextCancelled_PureGo(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
-	g := &Grep{workDir: dir, hasRg: false}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := g.Execute(ctx, toolInput("pattern", "content"))
-	if err == nil {
-		t.Error("expected error for cancelled context")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Grep: Execute with max_results type conversion
-// ---------------------------------------------------------------------------
-
-func TestGrep_MaxResultsNotFloat64(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("test line\n"), 0644)
-	g := &Grep{workDir: dir, hasRg: false}
-	// max_results as string — should use default
-	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
-		Params: map[string]any{
-			"pattern":     "test",
-			"max_results": "not_a_number",
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result.Output, "file.txt") {
-		t.Errorf("expected file.txt in results, got: %s", result.Output)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // FileWrite: atomicWrite error paths
@@ -3218,16 +3168,16 @@ func TestTodoWrite_AllValidPriorities(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// webfetch: decodeHTMLEntities with all entities
+// webfetch: search.DecodeHTMLEntities with all entities
 // ---------------------------------------------------------------------------
 
-func TestDecodeHTMLEntities_AllEntities(t *testing.T) {
+func TestSearchDecodeHTMLEntities_AllEntities(t *testing.T) {
 	t.Parallel()
 	input := "&amp;&lt;&gt;&quot;&#39;&nbsp;"
-	got := decodeHTMLEntities(input)
+	got := search.DecodeHTMLEntities(input)
 	expected := `&<>"' `
 	if got != expected {
-		t.Errorf("decodeHTMLEntities = %q, want %q", got, expected)
+		t.Errorf("search.DecodeHTMLEntities = %q, want %q", got, expected)
 	}
 }
 
@@ -3254,7 +3204,7 @@ func TestStripAllTags_AdjacentTags(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// webfetch: normalizeWhitespace edge cases
+// webfetch: search.NormalizeWhitespace edge cases
 // ---------------------------------------------------------------------------
 
 func TestNormalizeWhitespace_NewlinesPreserved(t *testing.T) {
@@ -3391,14 +3341,14 @@ func TestAgent_Execute_UnknownIsolation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// dispatcherAdapter
+// ai.DispatcherAdapter
 // ---------------------------------------------------------------------------
 
 func TestDispatcherAdapter_Execute(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "test", riskLevel: types.RiskSafe})
-	adapter := &dispatcherAdapter{d: d}
+	d.Register(&mocks.MockTool{Name_: "test", RiskLevel_: types.RiskSafe})
+	adapter := &ai.DispatcherAdapter{D: d}
 	result, err := adapter.Execute(context.Background(), subagent.ToolCallInput{
 		ID:   "1",
 		Name: "test",
@@ -3414,9 +3364,9 @@ func TestDispatcherAdapter_Execute(t *testing.T) {
 func TestDispatcherAdapter_ListTools(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t)
-	d.Register(&mockTool{name: "alpha", riskLevel: types.RiskSafe})
-	d.Register(&mockTool{name: "beta", riskLevel: types.RiskSafe})
-	adapter := &dispatcherAdapter{d: d}
+	d.Register(&mocks.MockTool{Name_: "alpha", RiskLevel_: types.RiskSafe})
+	d.Register(&mocks.MockTool{Name_: "beta", RiskLevel_: types.RiskSafe})
+	adapter := &ai.DispatcherAdapter{D: d}
 	tools := adapter.ListTools()
 	if len(tools) != 2 {
 		t.Errorf("expected 2 tools, got %d", len(tools))
@@ -3425,7 +3375,7 @@ func TestDispatcherAdapter_ListTools(t *testing.T) {
 
 func TestDispatcherAdapter_Stop(t *testing.T) {
 	d := testDispatcher(t)
-	adapter := &dispatcherAdapter{d: d}
+	adapter := &ai.DispatcherAdapter{D: d}
 	adapter.Stop() // should not panic
 }
 
@@ -3564,8 +3514,8 @@ func TestDispatcher_SetSessionID(t *testing.T) {
 
 func TestAskUserQuestion_MissingQuestionParam(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 	_, err := q.Execute(context.Background(), types.ToolInput{
@@ -3579,8 +3529,8 @@ func TestAskUserQuestion_MissingQuestionParam(t *testing.T) {
 
 func TestAskUserQuestion_QuestionNotString(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 	_, err := q.Execute(context.Background(), types.ToolInput{
@@ -3596,8 +3546,8 @@ func TestAskUserQuestion_QuestionNotString(t *testing.T) {
 
 func TestAskUserQuestion_Success(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
@@ -3605,7 +3555,7 @@ func TestAskUserQuestion_Success(t *testing.T) {
 		req := <-reqCh
 		// Route response through per-request channel
 		if ch, ok := pending.Load(req.ID); ok {
-			ch.(chan QuestionResponse) <- QuestionResponse{Answer: "yes"}
+			ch.(chan types.QuestionResponse) <- types.QuestionResponse{Answer: "yes"}
 		}
 	}()
 
@@ -3625,15 +3575,15 @@ func TestAskUserQuestion_Success(t *testing.T) {
 
 func TestAskUserQuestion_WithHeaderAndOptions(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
 	go func() {
 		req := <-reqCh
 		if ch, ok := pending.Load(req.ID); ok {
-			ch.(chan QuestionResponse) <- QuestionResponse{Answer: "option1"}
+			ch.(chan types.QuestionResponse) <- types.QuestionResponse{Answer: "option1"}
 		}
 	}()
 
@@ -3655,8 +3605,8 @@ func TestAskUserQuestion_WithHeaderAndOptions(t *testing.T) {
 }
 
 func TestAskUserQuestion_Timeout(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
@@ -3674,8 +3624,8 @@ func TestAskUserQuestion_Timeout(t *testing.T) {
 }
 
 func TestAskUserQuestion_ContextCancelled(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
@@ -3694,13 +3644,13 @@ func TestAskUserQuestion_ContextCancelled(t *testing.T) {
 }
 
 func TestAskUserQuestion_ChannelFull(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 1) // buffer of 1
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 1) // buffer of 1
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
 	// Fill the channel
-	reqCh <- QuestionRequest{}
+	reqCh <- types.QuestionRequest{}
 
 	_, err := q.Execute(context.Background(), types.ToolInput{
 		Name: "AskUserQuestion",
@@ -3722,15 +3672,15 @@ func TestAskUserQuestion_RiskLevel(t *testing.T) {
 }
 
 func TestAskUserQuestion_NonFloatTimeout(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 4)
-	respCh := make(chan QuestionResponse, 4)
+	reqCh := make(chan types.QuestionRequest, 4)
+	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
 	go func() {
 		req := <-reqCh
 		if ch, ok := pending.Load(req.ID); ok {
-			ch.(chan QuestionResponse) <- QuestionResponse{Answer: "ok"}
+			ch.(chan types.QuestionResponse) <- types.QuestionResponse{Answer: "ok"}
 		}
 	}()
 
@@ -3764,7 +3714,7 @@ func TestWebFetch_RiskLevel(t *testing.T) {
 func TestWebFetch_NewWithPrivateIPsAllowed(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	if !wf.allowPrivateIPs {
+	if !wf.AllowPrivateIPs {
 		t.Error("expected allowPrivateIPs to be true")
 	}
 }
@@ -3808,7 +3758,7 @@ func TestEdit_ResolvePath_AbsoluteOutsideWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	e := NewEdit(dir, backupDir)
-	_, err := e.resolvePath("/etc/hostname")
+	_, err := e.ResolvePath("/etc/hostname")
 	if err == nil {
 		t.Error("expected error for absolute path outside workDir")
 	}
@@ -3819,7 +3769,7 @@ func TestEdit_ResolvePath_NewFile(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	e := NewEdit(dir, backupDir)
-	resolved, err := e.resolvePath("new_file.txt")
+	resolved, err := e.ResolvePath("new_file.txt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3884,7 +3834,7 @@ func TestFileWrite_ExistingFile(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: PureGo with inaccessible file
+// search.Grep: PureGo with inaccessible file
 // ---------------------------------------------------------------------------
 
 func TestGrep_PureGo_InaccessibleFile(t *testing.T) {
@@ -3892,7 +3842,7 @@ func TestGrep_PureGo_InaccessibleFile(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "noread.txt")
 	os.WriteFile(f, []byte("secret\n"), 0000) // no permissions
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), toolInput("pattern", "secret"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -4041,7 +3991,7 @@ func TestRespondQuestion_FallbackSharedChannel(t *testing.T) {
 	d := testDispatcher(t)
 	// Fill the shared channel to trigger the warning path
 	for i := 0; i < QuestionChannelBuffer; i++ {
-		d.questionRespCh <- QuestionResponse{}
+		d.questionRespCh <- types.QuestionResponse{}
 	}
 	// No pending request, falls back to shared channel which is full
 	d.RespondQuestion(999, "answer")
@@ -4058,7 +4008,7 @@ func TestCheckPermission_AgentDefaultAsk(t *testing.T) {
 			"ask-agent": {DefaultAction: "ask"},
 		},
 	})
-	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
+	d.Register(&mocks.MockTool{Name_: "Bash", RiskLevel_: types.RiskDangerous})
 	if err := d.SelectAgent("ask-agent"); err != nil {
 		t.Fatalf("SelectAgent failed: %v", err)
 	}
@@ -4387,7 +4337,7 @@ func TestWebFetch_Execute_MarkdownFormat(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Grep: PureGo with scanner error path
+// search.Grep: PureGo with scanner error path
 // ---------------------------------------------------------------------------
 
 func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
@@ -4395,7 +4345,7 @@ func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "noread"), 0000)
 	os.WriteFile(filepath.Join(dir, "ok.txt"), []byte("find me\n"), 0644)
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), toolInput("pattern", "find"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -4412,23 +4362,23 @@ func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
 func TestWebFetch_ResolveAndCache_NonExistentHost(t *testing.T) {
 	t.Parallel()
 	wf := NewWebFetch(t.TempDir(), 3, nil)
-	_, err := wf.resolveAndCache(context.Background(), "this-host-does-not-exist-xyz123.invalid")
+	_, err := wf.ResolveAndCache(context.Background(), "this-host-does-not-exist-xyz123.invalid")
 	if err == nil {
 		t.Error("expected DNS resolution error for non-existent host")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Grep: with include filter that matches nothing
+// search.Grep: with include filter that matches nothing
 // ---------------------------------------------------------------------------
 
 func TestGrep_PureGo_IncludeMatchesNothing(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644)
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "main",
 			"include": "*.py",

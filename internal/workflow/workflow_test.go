@@ -12,6 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/ledger"
 	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/taskrunner"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -186,8 +187,8 @@ func TestExecute_CheckpointBeforeEachTask(t *testing.T) {
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
 	// Mock provider returns simple content
-	mp := engine.provider.(*mockProvider)
-	mp.response = "Done"
+	mp := engine.provider.(*mocks.MockProvider)
+	mp.Response_ = "Done"
 
 	// Run execute
 	_, err = engine.RunPhase(t.Context(), types.PhaseExecute, "Test")

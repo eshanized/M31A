@@ -79,7 +79,11 @@ func TestFullWorkflow(t *testing.T) {
 	planningDir := filepath.Join(dir, ".m31a")
 
 	// Create dispatcher
-	dispatcher := tools.NewDispatcher(nil)
+	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), dir, nil, nil)
+	if err != nil {
+		t.Fatalf("DefaultDispatcher failed: %v", err)
+	}
+	t.Cleanup(func() { dispatcher.Stop() })
 
 	// Create mock provider with responses for each phase
 	// Call 0: Discuss — questions

@@ -13,6 +13,7 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/session"
@@ -41,7 +42,12 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
 	// Create dispatcher with tools
-	dispatcher := tools.NewDispatcher(nil)
+	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), sessionBaseDir, nil, nil)
+	if err != nil {
+		t.Fatalf("DefaultDispatcher failed: %v", err)
+	}
+	t.Cleanup(func() { dispatcher.Stop() })
+
 	dispatcher.Register(tools.NewBash(dir, 1800, nil, nil))
 	dispatcher.Register(tools.NewFileRead(dir))
 	dispatcher.Register(tools.NewFileWrite(dir, filepath.Join(dir, "backups")))
@@ -59,55 +65,12 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	est := tokens.NewEstimator("test-model")
 
 	engine, _ := NewEngine(s.ID, dir, filepath.Join(dir, "backups"), planningDir,
-		&mockProvider{}, "test-model", dispatcher, est, mgr, nil)
-	engine.git = g
+		mocks.NewMockProvider("mock"), "test-model", dispatcher, est, mgr, nil)
+	engine.SetGit(g)
 
 	cleanup := func() {}
 	return engine, cleanup
 }
-
-// Mock provider for testing
-type mockProvider struct {
-	response       string
-	err            error
-	callCount      int
-	multiResponses []string // if set, returns responses[callCount] per call
-}
-
-func (m *mockProvider) Name() string   { return "mock" }
-func (m *mockProvider) APIKey() string { return "test-key" }
-func (m *mockProvider) FetchModels(ctx context.Context) ([]m31types.ModelInfo, error) {
-	return nil, nil
-}
-func (m *mockProvider) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*m31types.StreamIterator, error) {
-	m.callCount++
-	content := m.response
-	if len(m.multiResponses) > 0 {
-		idx := m.callCount - 1
-		if idx < len(m.multiResponses) {
-			content = m.multiResponses[idx]
-		}
-	}
-	if content == "" {
-		content = "OK"
-	}
-	done := false
-	next := func() (*m31types.StreamChunk, error) {
-		if done {
-			return nil, io.EOF
-		}
-		done = true
-		return &m31types.StreamChunk{Delta: content}, nil
-	}
-	close := func() error { return nil }
-	return &m31types.StreamIterator{Next: next, Close: close}, m.err
-}
-func (m *mockProvider) EstimateCost(modelID string, usage m31types.Usage) float64 { return 0 }
-func (m *mockProvider) HealthCheck(ctx context.Context) m31types.HealthStatus {
-	return m31types.HealthStatus{Status: "live"}
-}
-func (m *mockProvider) GetModel(id string) (*m31types.ModelInfo, error) { return nil, nil }
-func (m *mockProvider) CachedModels() []m31types.ModelInfo              { return nil }
 
 func TestEngine_Initialization(t *testing.T) {
 	engine, _ := setupTestEngine(t)
@@ -713,7 +676,7 @@ func TestVerifyTask_ContextTimeout(t *testing.T) {
 
 // mockProviderWithModel returns a provider that serves a specific ModelInfo.
 type mockProviderWithModel struct {
-	mockProvider
+	mocks.MockProvider
 	model *m31types.ModelInfo
 }
 
@@ -926,7 +889,7 @@ func TestStreamLLMWithTools_SendsToolsInRequest(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
 	var capturedReq provider.ChatRequest
-	mp := engine.provider.(*mockProvider)
+	mp := engine.provider.(*mocks.MockProvider)
 
 	mp2 := &capturingProvider{
 		inner: mp,
@@ -946,7 +909,7 @@ func TestStreamLLMWithTools_SendsToolsInRequest(t *testing.T) {
 }
 
 type capturingProvider struct {
-	inner  *mockProvider
+	inner  *mocks.MockProvider
 	onCall func(req provider.ChatRequest)
 }
 

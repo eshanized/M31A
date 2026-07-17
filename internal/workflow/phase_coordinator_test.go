@@ -9,17 +9,9 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
-
-// mockDispatcher implements the Dispatcher interface for testing.
-type mockDispatcher struct {
-	revoked bool
-}
-
-func (d *mockDispatcher) RevokeBatchApprovals() {
-	d.revoked = true
-}
 
 // mockEmitFn captures emitted messages for testing.
 type mockEmitFn struct {
@@ -44,7 +36,7 @@ func setupTestPhaseCoordinator(t *testing.T) (*PhaseCoordinator, *mockEmitFn) {
 	emitter := &mockEmitFn{}
 	logger := slog.Default()
 
-	pc := NewPhaseCoordinator(sm, cache, sessionMgr, "test-session", costTracker, nil, &mockDispatcher{}, logger, emitter.emit)
+	pc := NewPhaseCoordinator(sm, cache, sessionMgr, "test-session", costTracker, nil, &mocks.WorkflowDispatcher{}, logger, emitter.emit)
 	return pc, emitter
 }
 
@@ -74,7 +66,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BudgetCheck(t *testing.T) {
 	emitter := &mockEmitFn{}
 	logger := slog.Default()
 
-	pc := NewPhaseCoordinator(sm, cache, sessionMgr, "test-session", costTracker, nil, &mockDispatcher{}, logger, emitter.emit)
+	pc := NewPhaseCoordinator(sm, cache, sessionMgr, "test-session", costTracker, nil, &mocks.WorkflowDispatcher{}, logger, emitter.emit)
 
 	// Test with budget under limit
 	cfg := &testConfig{budgetLimit: 1.0}
@@ -97,7 +89,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BudgetCheck(t *testing.T) {
 
 func TestPhaseCoordinator_PrePhaseSetup_BatchApprovalRevocation(t *testing.T) {
 	pc, _ := setupTestPhaseCoordinator(t)
-	pc.dispatcher = &mockDispatcher{}
+	pc.dispatcher = &mocks.WorkflowDispatcher{}
 
 	messages := []m31types.Message{{Role: "user", Content: "test"}}
 	_, err := pc.PrePhaseSetup(context.TODO(), m31types.PhaseInitialize, nil, messages, nil)
@@ -105,7 +97,7 @@ func TestPhaseCoordinator_PrePhaseSetup_BatchApprovalRevocation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !pc.dispatcher.(*mockDispatcher).revoked {
+	if !pc.dispatcher.(*mocks.WorkflowDispatcher).Revoked {
 		t.Error("expected batch approvals to be revoked")
 	}
 }
