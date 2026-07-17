@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // ─── Mention suggestion management ───────────────────────────────────────────

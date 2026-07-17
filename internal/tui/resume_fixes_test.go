@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 func TestResumeModel_SetTotalCount(t *testing.T) {

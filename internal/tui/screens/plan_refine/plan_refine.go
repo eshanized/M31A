@@ -1,6 +1,5 @@
 package plan_refine
 
-
 import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"

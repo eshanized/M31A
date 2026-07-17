@@ -19,7 +19,7 @@ const (
 // when the count reaches maxBackups. Backups are sorted lexicographically
 // (timestamp in the name ensures chronological order). Also enforces disk
 // space limits to prevent backup accumulation from filling the disk.
-func pruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
+func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return

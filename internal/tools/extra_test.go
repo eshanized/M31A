@@ -14,11 +14,11 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/testutil/mocks"
-	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/tools/ai"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
-	"github.com/eshanized/M31A/internal/tools/ai"
+	"github.com/eshanized/M31A/internal/tools/subagent"
+	"github.com/eshanized/M31A/internal/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -3088,8 +3088,6 @@ func TestEdit_Execute_LineRange_OutOfRange(t *testing.T) {
 // ---------------------------------------------------------------------------
 // WebFetch: resolveAndCache expired cache
 // ---------------------------------------------------------------------------
-
-
 
 // ---------------------------------------------------------------------------
 // FileWrite: atomicWrite error paths

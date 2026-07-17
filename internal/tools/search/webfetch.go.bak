@@ -48,10 +48,9 @@ func GetVersion() string {
 
 // WebFetch fetches URLs with automatic HTML-to-markdown/text conversion.
 type WebFetch struct {
-	AllowPrivateIPs bool
-	httpClient      *http.Client
-	timeout         time.Duration
-	dnsCache        *DNSCache
+	httpClient *http.Client
+	timeout    time.Duration
+	dnsCache   *DNSCache
 }
 
 // NewWebFetch creates a new WebFetch tool instance.
@@ -69,9 +68,8 @@ func NewWebFetch(workDir string, timeoutSecs int, dnsCache *DNSCache) *WebFetch 
 				return nil
 			},
 		},
-		timeout:         time.Duration(timeoutSecs) * time.Second,
-		AllowPrivateIPs: true,
-		dnsCache:        dnsCache,
+		timeout:  time.Duration(timeoutSecs) * time.Second,
+		dnsCache: dnsCache,
 	}
 }
 
@@ -124,7 +122,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	// Block private IPs (SSRF protection)
 	host := parsedURL.Hostname()
-	if !t.AllowPrivateIPs && IsPrivateIPFromHost(host) {
+	if IsPrivateIPFromHost(host) {
 		return types.ToolResult{}, fmt.Errorf("%w: access to private IP blocked", errors.ErrPrivateIPBlocked)
 	}
 
@@ -249,7 +247,7 @@ func IsPrivateIPFromHost(host string) bool {
 }
 
 // resolveAndCheck resolves the host from a URL and checks if it is a private IP.
-func (t *WebFetch) ResolveAndCheck(ctx context.Context, urlStr string) error {
+func (t *WebFetch) resolveAndCheck(ctx context.Context, urlStr string) error {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return err
@@ -258,49 +256,38 @@ func (t *WebFetch) ResolveAndCheck(ctx context.Context, urlStr string) error {
 	if host == "" {
 		return fmt.Errorf("URL has no host")
 	}
-	if !t.AllowPrivateIPs && IsPrivateIPFromHost(host) {
+	if IsPrivateIPFromHost(host) {
 		return fmt.Errorf("private IP not allowed: %s", host)
 	}
 	return nil
 }
 
 // resolveAndCache resolves the DNS for a hostname and caches the result.
-func (t *WebFetch) ResolveAndCache(ctx context.Context, host string) ([]net.IP, error) {
+func (t *WebFetch) resolveAndCache(ctx context.Context, host string) ([]net.IP, error) {
 	if t.dnsCache != nil {
 		if entry, ok := t.dnsCache.cache.Load(host); ok {
 			entry := entry.(*dnsCacheEntry)
 			if time.Now().Before(entry.expires) {
-				ips := make([]net.IP, len(entry.addrs))
-				for i, addr := range entry.addrs {
-					ips[i] = addr.IP
-				}
-				return ips, nil
+				return entry.addrs, nil
 			}
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := net.LookupIP(host)
+	addrs, err := net.LookupIP(ctx, "ip", host)
 	if err != nil {
 		return nil, err
 	}
 	if t.dnsCache != nil {
-
-		t.dnsCache.cache.Store(host, &dnsCacheEntry{
-			addrs:   toIPAddr(addrs),
+		
+t.dnsCache.cache.Store(host, &dnsCacheEntry{
+			addrs:   addrs,
 			expires: time.Now().Add(5 * time.Minute),
 		})
 	}
 	return addrs, nil
 }
 
-func toIPAddr(ips []net.IP) []net.IPAddr {
-	addrs := make([]net.IPAddr, len(ips))
-	for i, ip := range ips {
-		addrs[i] = net.IPAddr{IP: ip}
-	}
-	return addrs
-}
 func isRetryableError(err error) bool {
 	errStr := err.Error()
 	if strings.Contains(errStr, "request failed") && !strings.Contains(errStr, "HTTP 4") {

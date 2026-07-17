@@ -64,8 +64,8 @@ func TestEmitter_ConcurrentEvents(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < eventsPerGoroutine; j++ {
-				engine.Emit(workflow.TaskStartMsg{TaskID: id * 100 + j, Description: "test"})
-				engine.Emit(workflow.TaskUpdateMsg{TaskID: id * 100 + j, Status: workflow.TaskStatusRunning})
+				engine.Emit(workflow.TaskStartMsg{TaskID: id*100 + j, Description: "test"})
+				engine.Emit(workflow.TaskUpdateMsg{TaskID: id*100 + j, Status: workflow.TaskStatusRunning})
 				engine.Emit(workflow.ToolStartMsg{ToolCall: types.ToolCall{ID: "call", Name: "test", Input: []byte("{}")}})
 				engine.Emit(workflow.ToolCompleteMsg{ToolCall: types.ToolCall{ID: "call", Name: "test"}, Err: nil, DurationMs: 1})
 			}

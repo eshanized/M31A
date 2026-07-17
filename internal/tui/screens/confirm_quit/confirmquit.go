@@ -1,11 +1,10 @@
 package confirm_quit
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // ConfirmQuitModel shows a confirmation dialog when quitting during active processing.

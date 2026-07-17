@@ -120,7 +120,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}
 
 	// Resolve target path
-	targetPath, err := t.resolvePath(path)
+	targetPath, err := t.ResolvePath(path)
 	if err != nil {
 		return types.ToolResult{}, err
 	}
@@ -223,7 +223,7 @@ func (t *Edit) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	}, nil
 }
 
-func (t *Edit) resolvePath(path string) (string, error) {
+func (t *Edit) ResolvePath(path string) (string, error) {
 	return ResolveAndContainPath(path, t.workDir)
 }
 
@@ -289,7 +289,7 @@ func (t *Edit) atomicWrite(targetPath, newContent string, oldContent []byte) err
 }
 
 func (t *Edit) pruneBackups(sanitizedPrefix string) {
-	pruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
+	PruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
 }
 
 func ReplaceByLineRange(content string, startLine, endLine int, newContent string) (string, error) {
@@ -622,7 +622,6 @@ func LevenshteinSimilarity(a, b string) float64 {
 	}
 	return 1.0 - float64(dist)/float64(maxLen)
 }
-
 
 // maxLCSMatrixSize caps the LCS matrix at ~16MB (4M cells × 4 bytes/int).
 const maxLCSMatrixSize = 2000 * 2000

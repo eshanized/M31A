@@ -214,5 +214,5 @@ func (t *FileWrite) Execute(ctx context.Context, input types.ToolInput) (types.T
 // count exceeds MaxBackupsPerFile. Called BEFORE writing the new backup so
 // that the just-written backup is never accidentally pruned.
 func (t *FileWrite) pruneBackups(sanitizedPrefix string) {
-	pruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
+	PruneBackupsByPrefix(t.backupDir, sanitizedPrefix, MaxBackupsPerFile)
 }

@@ -1,6 +1,5 @@
 package rollback
 
-
 import (
 	"fmt"
 	"strings"

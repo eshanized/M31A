@@ -1,6 +1,5 @@
 package phase_transition
 
-
 import (
 	"fmt"
 	"strings"

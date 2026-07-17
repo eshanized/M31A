@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/bisect"
+	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

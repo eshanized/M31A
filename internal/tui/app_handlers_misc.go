@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // app_handlers_misc.go — miscellaneous event handling extracted from Update().

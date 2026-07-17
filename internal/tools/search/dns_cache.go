@@ -44,6 +44,14 @@ func NewDNSCache(ttl time.Duration, evictThreshold int32) *DNSCache {
 }
 
 // Size returns the approximate number of entries in the cache.
+// Store stores a DNS cache entry directly (for testing purposes).
+func (dc *DNSCache) Store(host string, addrs []net.IPAddr, expires time.Time) {
+	dc.cache.Store(host, &dnsCacheEntry{
+		addrs:   addrs,
+		expires: expires,
+	})
+}
+
 func (dc *DNSCache) Size() int32 {
 	var count int32
 	dc.cache.Range(func(_, _ any) bool {

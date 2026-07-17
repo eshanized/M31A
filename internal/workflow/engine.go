@@ -17,19 +17,19 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/codeintel"
+	"github.com/eshanized/M31A/internal/compaction"
 	"github.com/eshanized/M31A/internal/config"
 	ctxsrc "github.com/eshanized/M31A/internal/context"
 	"github.com/eshanized/M31A/internal/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/tokens"
-	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/compaction"
 	"github.com/eshanized/M31A/internal/ledger"
 	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/provider"
 	"github.com/eshanized/M31A/internal/retry"
 	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

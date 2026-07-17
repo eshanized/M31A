@@ -1,6 +1,5 @@
 package file_explorer
 
-
 import (
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"os"

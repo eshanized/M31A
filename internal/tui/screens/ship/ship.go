@@ -1,6 +1,5 @@
 package ship
 
-
 import (
 	"fmt"
 	"strings"

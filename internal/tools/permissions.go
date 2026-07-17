@@ -69,9 +69,9 @@ func (d *Dispatcher) ApprovePermission(requestID int64, allowed bool, remember b
 	// Fallback to shared channel for backwards compatibility
 	select {
 	case d.responseCh <- resp:
-default:
-			slog.Warn("permission response dropped: shared channel full",
-				"request_id", requestID, "allowed", allowed)
+	default:
+		slog.Warn("permission response dropped: shared channel full",
+			"request_id", requestID, "allowed", allowed)
 	}
 }
 

@@ -1,9 +1,8 @@
 package model_selector
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"

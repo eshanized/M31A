@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tools/exec"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/eshanized/M31A/internal/tools/exec"
 	"time"
 
 	"github.com/eshanized/M31A/internal/metrics"
@@ -570,7 +570,6 @@ func TestSearchHtmlTableToMarkdown_SingleCell(t *testing.T) {
 		t.Errorf("expected unchanged, got: %s", result)
 	}
 }
-
 
 // ============================================================================
 // dispatcher.go Tests

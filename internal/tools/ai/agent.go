@@ -215,17 +215,17 @@ type ToolDispatcher interface {
 // This avoids circular imports between ai and tools packages.
 var NewDispatcher func(workDir, backupDir, sessionsDir string, permCfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (ToolDispatcher, error)
 
-// dispatcherAdapter wraps a ToolDispatcher so it satisfies the
+// DispatcherAdapter wraps a ToolDispatcher so it satisfies the
 // subagent.ToolDispatcher interface without introducing an import cycle.
-type dispatcherAdapter struct {
-	d ToolDispatcher
+type DispatcherAdapter struct {
+	D ToolDispatcher
 }
 
 // Compile-time interface check
-var _ subagent.ToolDispatcher = (*dispatcherAdapter)(nil)
+var _ subagent.ToolDispatcher = (*DispatcherAdapter)(nil)
 
-func (a *dispatcherAdapter) Execute(ctx context.Context, call subagent.ToolCallInput) (subagent.ToolCallOutput, error) {
-	res, err := a.d.Execute(ctx, types.ToolCall{
+func (a *DispatcherAdapter) Execute(ctx context.Context, call subagent.ToolCallInput) (subagent.ToolCallOutput, error) {
+	res, err := a.D.Execute(ctx, types.ToolCall{
 		ID:    call.ID,
 		Name:  call.Name,
 		Input: call.Input,
@@ -238,10 +238,10 @@ func (a *dispatcherAdapter) Execute(ctx context.Context, call subagent.ToolCallI
 	}, err
 }
 
-func (a *dispatcherAdapter) ListTools() []subagent.ToolDescriptor {
+func (a *DispatcherAdapter) ListTools() []subagent.ToolDescriptor {
 	var out []subagent.ToolDescriptor
-	for _, name := range a.d.List() {
-		t, ok := a.d.GetTool(name)
+	for _, name := range a.D.List() {
+		t, ok := a.D.GetTool(name)
 		if !ok {
 			continue
 		}
@@ -257,11 +257,13 @@ func (a *dispatcherAdapter) ListTools() []subagent.ToolDescriptor {
 	return out
 }
 
-func (a *dispatcherAdapter) Stop() { a.d.Stop() }
+func (a *DispatcherAdapter) Stop() { a.D.Stop() }
 
-func (a *dispatcherAdapter) SetPermission(name string, allowed bool) { a.d.SetPermission(name, allowed) }
+func (a *DispatcherAdapter) SetPermission(name string, allowed bool) {
+	a.D.SetPermission(name, allowed)
+}
 
-func (a *dispatcherAdapter) UnregisterTool(name string) { a.d.UnregisterTool(name) }
+func (a *DispatcherAdapter) UnregisterTool(name string) { a.D.UnregisterTool(name) }
 
 // NewDispatcherFactory returns a DispatcherFactory that creates a fresh
 // ToolDispatcher for each subagent workspace. The factory registers the
@@ -282,6 +284,6 @@ func NewDispatcherFactory(backupDir, sessionsDir string, permCfg *config.Permiss
 				return nil, err
 			}
 		}
-		return &dispatcherAdapter{d: d}, nil
+		return &DispatcherAdapter{D: d}, nil
 	}
 }

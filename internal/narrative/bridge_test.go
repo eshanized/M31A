@@ -3,8 +3,8 @@ package narrative
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/workflow"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 func TestBridgeTaskStart(t *testing.T) {

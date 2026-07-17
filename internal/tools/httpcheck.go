@@ -44,11 +44,11 @@ func newSSRFProtectedTransport() *http.Transport {
 			}
 
 			// Check for private/reserved IPs
-for _, ip := range ips {
-			if search.IsPrivateIP(ip.IP) || search.IsReservedIP(ip.IP) {
-				return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+			for _, ip := range ips {
+				if search.IsPrivateIP(ip.IP) || search.IsReservedIP(ip.IP) {
+					return nil, fmt.Errorf("access to private/reserved IP %s is blocked: %w", ip.IP, errors.ErrPrivateIPBlocked)
+				}
 			}
-		}
 
 			// Pin the first IP for connection
 			pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)

@@ -1,10 +1,9 @@
 package settings
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"os"
 	"strconv"
 	"strings"

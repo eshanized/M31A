@@ -4,12 +4,12 @@ import (
 	"os/exec"
 	"sync"
 
+	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/types"
 )
 

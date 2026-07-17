@@ -1,11 +1,10 @@
 package chat_history
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
 )
 

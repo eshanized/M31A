@@ -14,9 +14,6 @@ type MockTool struct {
 	ExecFunc     func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
 }
 
-// Compile-time interface check.
-var _ types.Tool = (*MockTool)(nil)
-
 // NewMockTool creates a MockTool with the given name and risk level.
 func NewMockTool(name string, riskLevel types.RiskLevel) *MockTool {
 	return &MockTool{

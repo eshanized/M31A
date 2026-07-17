@@ -142,7 +142,6 @@ func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
 	}
 }
 
-
 func containsSubstr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

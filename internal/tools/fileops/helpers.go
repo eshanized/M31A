@@ -9,7 +9,7 @@ import (
 
 // pruneBackupsByPrefix removes the oldest backups matching the given prefix
 // when the count exceeds maxBackups.
-func pruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
+func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return

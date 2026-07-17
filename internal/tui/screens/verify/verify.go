@@ -1,9 +1,8 @@
 package verify
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"

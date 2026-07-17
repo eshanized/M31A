@@ -1,10 +1,9 @@
 package sidebar
 
-
 import (
+	"context"
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
-	"context"
 	"strings"
 	"time"
 

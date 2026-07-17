@@ -131,9 +131,9 @@ func TestCheckDangerousCommand_ObfuscationDetection(t *testing.T) {
 
 func TestCheckDangerousCommand_CustomBlockedCommands(t *testing.T) {
 	tests := []struct {
-		name           string
-		command        string
-		customBlocked  []string
+		name            string
+		command         string
+		customBlocked   []string
 		expectedBlocked bool
 	}{
 		{"custom blocked command", "my-custom-cmd", []string{"my-custom-cmd"}, true},
@@ -154,10 +154,10 @@ func TestCheckDangerousCommand_CustomBlockedCommands(t *testing.T) {
 
 func TestCheckDangerousCommand_CustomObfuscationPatterns(t *testing.T) {
 	tests := []struct {
-		name            string
-		command         string
+		name              string
+		command           string
 		customObfuscation []string
-		expectedBlocked  bool
+		expectedBlocked   bool
 	}{
 		{"custom obfuscation pattern", "evil-command", []string{"evil"}, true},
 		{"not in custom patterns", "evil-command", []string{"bad"}, false},

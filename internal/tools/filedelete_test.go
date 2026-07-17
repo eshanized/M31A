@@ -98,5 +98,5 @@ func TestFileDelete_PruneBackups(t *testing.T) {
 	}
 
 	// pruneBackups should not panic
-	fd.pruneBackups("test.txt.deleted")
+	PruneBackupsByPrefix(fd.BackupDir, "test.txt.deleted", MaxBackupsPerFile)
 }

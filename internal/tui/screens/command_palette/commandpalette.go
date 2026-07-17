@@ -1,6 +1,5 @@
 package command_palette
 
-
 import (
 	"fmt"
 	"sort"

@@ -1,8 +1,8 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"path/filepath"
 	"strings"
 	"time"

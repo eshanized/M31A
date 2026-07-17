@@ -13,10 +13,10 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/testutil/mocks"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

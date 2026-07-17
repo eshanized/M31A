@@ -1,6 +1,5 @@
 package diff
 
-
 import (
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"

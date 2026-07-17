@@ -64,13 +64,13 @@ func NewWebSearch(baseURL string) *WebSearch {
 				if len(ips) == 0 {
 					return nil, fmt.Errorf("no IP addresses resolved for %s", host)
 				}
-if !ws.allowPrivateIPs {
-				for _, ip := range ips {
-					if IsPrivateIP(ips[0].IP) || isReservedIP(ip.IP) {
-						return nil, fmt.Errorf("blocked: %s is a private or reserved IP", ip.IP)
+				if !ws.allowPrivateIPs {
+					for _, ip := range ips {
+						if IsPrivateIP(ips[0].IP) || isReservedIP(ip.IP) {
+							return nil, fmt.Errorf("blocked: %s is a private or reserved IP", ip.IP)
+						}
 					}
 				}
-			}
 				pinnedAddr := net.JoinHostPort(ips[0].IP.String(), port)
 				dialer := &net.Dialer{Timeout: 10 * time.Second}
 				return dialer.DialContext(ctx, network, pinnedAddr)

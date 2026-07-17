@@ -315,8 +315,8 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 // limitWriter wraps an io.Writer and limits the total bytes written.
 type limitWriter struct {
-	limit int64
-	w     io.Writer
+	limit   int64
+	w       io.Writer
 	written int64
 }
 

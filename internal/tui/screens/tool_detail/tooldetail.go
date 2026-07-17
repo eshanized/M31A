@@ -1,6 +1,5 @@
 package tool_detail
 
-
 import (
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"

@@ -1,5 +1,9 @@
 // Package mocks provides centralized mock implementations of provider and
 // tool interfaces for use across all test files in the M31A project.
+//
+// Note: Compile-time interface checks (var _ Interface = (*MockType)(nil))
+// are intentionally omitted to avoid import cycles. Each consumer test file
+// should verify interface compliance locally if needed.
 package mocks
 
 import (
@@ -20,9 +24,6 @@ type MockProvider struct {
 	MultiResponses []string
 	HealthStatus_  types.HealthStatus
 }
-
-// Compile-time interface check.
-var _ provider.LLMProvider = (*MockProvider)(nil)
 
 // NewMockProvider creates a MockProvider with sensible defaults.
 func NewMockProvider(name string) *MockProvider {

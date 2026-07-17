@@ -72,7 +72,7 @@ func HtmlToMarkdown(rawHTML string) string {
 	rawHTML = StripAllTags(rawHTML)
 
 	// Decode common HTML entities
-	rawHTML = decodeHTMLEntities(rawHTML)
+	rawHTML = DecodeHTMLEntities(rawHTML)
 
 	// Normalize whitespace
 	rawHTML = NormalizeWhitespace(rawHTML)
@@ -177,7 +177,7 @@ func HtmlTableToMarkdown(tableHTML string) string {
 			cellContent := strings.TrimSpace(tableHTML[cellContentStart : cellContentStart+closeTagIdx])
 			// Strip any inner tags
 			cellContent = StripAllTags(cellContent)
-			cellContent = decodeHTMLEntities(cellContent)
+			cellContent = DecodeHTMLEntities(cellContent)
 			cellContent = strings.TrimSpace(cellContent)
 			// Escape pipes in cell content
 			cellContent = strings.ReplaceAll(cellContent, "|", "\\|")
@@ -390,7 +390,7 @@ func HtmlToText(rawHTML string) string {
 	rawHTML = StripAllTags(rawHTML)
 
 	// Decode entities
-	rawHTML = decodeHTMLEntities(rawHTML)
+	rawHTML = DecodeHTMLEntities(rawHTML)
 
 	return NormalizeWhitespace(rawHTML)
 }
@@ -653,11 +653,11 @@ func ConvertLinks(rawHTML, lower string) string {
 	return string(result)
 }
 
-// decodeHTMLEntities replaces HTML entities with their character equivalents.
+// DecodeHTMLEntities replaces HTML entities with their character equivalents.
 // Uses the standard library's html.UnescapeString for comprehensive coverage
 // of named, numeric, and hex entities. Non-breaking spaces are normalised to
 // regular spaces for downstream text processing.
-func decodeHTMLEntities(s string) string {
+func DecodeHTMLEntities(s string) string {
 	s = html.UnescapeString(s)
 	return strings.ReplaceAll(s, "\u00a0", " ")
 }

@@ -1,9 +1,8 @@
 package bisect
 
-
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"

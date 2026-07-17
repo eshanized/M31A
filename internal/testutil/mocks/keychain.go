@@ -1,8 +1,6 @@
 package mocks
 
 import (
-	"errors"
-
 	"github.com/eshanized/M31A/internal/keychain"
 )
 
@@ -10,9 +8,6 @@ import (
 type MockKeychain struct {
 	Store map[string]string
 }
-
-// Compile-time interface check.
-var _ keychain.Keychain = (*MockKeychain)(nil)
 
 // NewMockKeychain creates a MockKeychain with an empty store.
 func NewMockKeychain() *MockKeychain {
@@ -22,7 +17,7 @@ func NewMockKeychain() *MockKeychain {
 func (m *MockKeychain) Get(service string) (string, error) {
 	val, ok := m.Store[service]
 	if !ok {
-		return "", errors.New("not found")
+		return "", keychain.ErrKeyNotFound
 	}
 	return val, nil
 }

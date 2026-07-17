@@ -1,9 +1,9 @@
 package first_run
 
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
 	"fmt"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"
 	"time"
 
@@ -349,20 +349,20 @@ func (fr *FirstRunModel) fetchModelsCmd() tea.Cmd {
 			switch providerName {
 			case types.ProviderOpenRouter:
 				p, _ = openrouter.New(apiKey, openrouter.Options{
-					BaseURL:           fr.config.Provider.OpenRouterBaseURL,
-					Referer:           fr.config.Provider.OpenRouterReferer,
-					Title:             fr.config.Provider.OpenRouterTitle,
-					Version:           fr.version,
+					BaseURL: fr.config.Provider.OpenRouterBaseURL,
+					Referer: fr.config.Provider.OpenRouterReferer,
+					Title:   fr.config.Provider.OpenRouterTitle,
+					Version: fr.version,
 				})
 			case types.ProviderZen:
 				p, _ = zen.New(apiKey, zen.Options{
-					BaseURL:       fr.config.Provider.ZenBaseURL,
-					Version:       fr.version,
+					BaseURL: fr.config.Provider.ZenBaseURL,
+					Version: fr.version,
 				})
 			case types.ProviderNvidia:
 				p, _ = nvidia.New(apiKey, nvidia.Options{
-					BaseURL:       fr.config.Provider.NvidiaBaseURL,
-					Version:       fr.version,
+					BaseURL: fr.config.Provider.NvidiaBaseURL,
+					Version: fr.version,
 				})
 			default:
 				return firstRunModelsMsg{Err: fmt.Errorf("unknown provider: %s", providerName)}

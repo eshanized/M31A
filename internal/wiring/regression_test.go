@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/decision"
-	"github.com/eshanized/M31A/internal/workflow"
 	"github.com/eshanized/M31A/internal/taskrunner"
 	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // ─── W5: Task runner skips completed tasks on resume ─────────────────────────

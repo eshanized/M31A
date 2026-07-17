@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -31,9 +32,9 @@ func TestIsCommentLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.line, func(t *testing.T) {
-			got := isCommentLine(tc.line)
+			got := IsCommentLine(tc.line)
 			if got != tc.want {
-				t.Errorf("isCommentLine(%q) = %v, want %v", tc.line, got, tc.want)
+				t.Errorf("IsCommentLine(%q) = %v, want %v", tc.line, got, tc.want)
 			}
 		})
 	}
@@ -53,11 +54,11 @@ func main() {
 `
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte(content), 0644)
 
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 
 	// Without skip_comments: should find "TODO" in comment
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "TODO",
 		},
@@ -71,7 +72,7 @@ func main() {
 
 	// With skip_comments: should NOT find "TODO" in comment
 	result, err = g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":       "TODO",
 			"skip_comments": true,
@@ -97,11 +98,11 @@ func main() {
 `
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte(content), 0644)
 
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 
 	// Without skip_comments: find both
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "x := 42",
 		},
@@ -116,7 +117,7 @@ func main() {
 
 	// With skip_comments: find only the code line
 	result, err = g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":       "x := 42",
 			"skip_comments": true,
@@ -141,11 +142,11 @@ func main() {}
 `
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte(content), 0644)
 
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 
 	// skip_comments=false (default) should find comment
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":       "comment",
 			"skip_comments": false,
@@ -167,10 +168,10 @@ func TestGrep_SkipComments_EmptyResult(t *testing.T) {
 `
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte(content), 0644)
 
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":       "comment",
 			"skip_comments": true,
@@ -199,10 +200,10 @@ func TestGrep_SkipComments_WithGlob(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("// TODO fix this\nfunc main() {}\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# TODO: update\n"), 0644)
 
-	g := &Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":       "TODO",
 			"include":       "*.go",

@@ -2,7 +2,6 @@ package repl
 
 import (
 	"strings"
-
 )
 
 // updateSlashSuggestions updates slash command autocomplete based on current input.

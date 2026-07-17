@@ -8,15 +8,15 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/arbitrage"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/metrics"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/exec"
-	"github.com/eshanized/M31A/internal/workflow"
-	"github.com/eshanized/M31A/internal/arbitrage"
-	"github.com/eshanized/M31A/internal/metrics"
 	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // ─── Bubble Tea Model interface ───────────────────────────────────────────────

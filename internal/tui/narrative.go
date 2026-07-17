@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/narrative"
+	"github.com/eshanized/M31A/internal/tui/theme"
 )
 
 // NarrativeBubbleMsg is the Bubble Tea message carrying a processed narrative.

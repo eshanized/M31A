@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )

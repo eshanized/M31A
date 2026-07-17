@@ -131,7 +131,7 @@ func (t *FileMove) Execute(ctx context.Context, input types.ToolInput) (types.To
 				if readErr == nil {
 					_ = os.WriteFile(backupPath, existingContent, FilePermission)
 					// Prune old backups for this file
-					pruneBackupsByPrefix(t.backupDir, sanitized, MaxBackupsPerFile)
+					PruneBackupsByPrefix(t.backupDir, sanitized, MaxBackupsPerFile)
 				}
 			}
 		}

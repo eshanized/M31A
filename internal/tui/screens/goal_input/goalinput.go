@@ -1,6 +1,5 @@
 package goal_input
 
-
 import (
 	"fmt"
 	"strings"
@@ -8,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/tui/theme"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )
 
 // GoalInputModel is a full-screen textarea for entering workflow goals.

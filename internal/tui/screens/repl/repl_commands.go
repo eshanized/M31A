@@ -1,8 +1,8 @@
 package repl
 
 import (
-	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"context"
+	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"strings"
 	"time"
 

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/workflow"
 )
 
 // WorkflowDispatcher implements workflow.Dispatcher for testing.
@@ -13,9 +12,6 @@ import (
 type WorkflowDispatcher struct {
 	Revoked bool
 }
-
-// Compile-time interface check.
-var _ workflow.Dispatcher = (*WorkflowDispatcher)(nil)
 
 func (d *WorkflowDispatcher) RevokeBatchApprovals() {
 	d.Revoked = true
@@ -26,9 +22,6 @@ func (d *WorkflowDispatcher) RevokeBatchApprovals() {
 type SubagentDispatcher struct {
 	Tools []subagent.ToolDescriptor
 }
-
-// Compile-time interface check.
-var _ subagent.ToolDispatcher = (*SubagentDispatcher)(nil)
 
 func (d *SubagentDispatcher) Execute(_ context.Context, _ subagent.ToolCallInput) (subagent.ToolCallOutput, error) {
 	return subagent.ToolCallOutput{Output: "ok"}, nil

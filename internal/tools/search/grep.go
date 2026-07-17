@@ -29,16 +29,16 @@ const (
 )
 
 type Grep struct {
-	workDir string
-	hasRg   bool
+	WorkDir string
+	HasRg   bool
 }
 
 // NewGrep creates a new Grep tool instance.
-func NewGrep(workDir string) *Grep {
+func NewGrep(WorkDir string) *Grep {
 	_, err := exec.LookPath("rg")
 	return &Grep{
-		workDir: workDir,
-		hasRg:   err == nil,
+		WorkDir: WorkDir,
+		HasRg:   err == nil,
 	}
 }
 
@@ -127,19 +127,19 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 		pattern = regexp.QuoteMeta(pattern)
 	}
 
-	searchPath := t.workDir
+	searchPath := t.WorkDir
 	if pathRaw, ok := input.Params["path"]; ok {
 		if pathStr, ok := pathRaw.(string); ok {
 			joined := pathStr
 			if !filepath.IsAbs(pathStr) {
-				joined = filepath.Join(t.workDir, pathStr)
+				joined = filepath.Join(t.WorkDir, pathStr)
 			}
 			resolved, err := filepath.EvalSymlinks(joined)
 			if err != nil {
 				return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
 			}
-			// Containment check: ensure resolved path is within workDir
-			absWork, err := filepath.Abs(t.workDir)
+			// Containment check: ensure resolved path is within WorkDir
+			absWork, err := filepath.Abs(t.WorkDir)
 			if err != nil {
 				return types.ToolResult{}, fmt.Errorf("cannot resolve workdir: %w", err)
 			}
@@ -187,7 +187,7 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	var result types.ToolResult
 	var err error
-	if t.hasRg {
+	if t.HasRg {
 		result, err = t.grepWithRG(ctx, pattern, searchPath, globFilter, maxResults, contextLines, skipComments)
 	} else {
 		result, err = t.grepPureGo(ctx, pattern, searchPath, globFilter, maxResults, contextLines, skipComments)
@@ -224,7 +224,7 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 	args = append(args, searchPath)
 
 	cmd := exec.CommandContext(ctx, "rg", args...)
-	cmd.Dir = t.workDir
+	cmd.Dir = t.WorkDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("rg stdout pipe failed: %w", err)
@@ -259,7 +259,7 @@ func (t *Grep) grepWithRG(ctx context.Context, pattern, searchPath, glob string,
 				continue
 			}
 			content := strings.TrimRight(data.Lines.Text, "\n\r")
-			if skipComments && isCommentLine(content) {
+			if skipComments && IsCommentLine(content) {
 				continue
 			}
 			results = append(results, fmt.Sprintf("%s:%d: %s", data.Path.Text, data.LineNumber, content))
@@ -325,7 +325,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		return types.ToolResult{}, fmt.Errorf("invalid regex: %w", err)
 	}
 
-	gitignorePatterns := loadGitignore(t.workDir)
+	gitignorePatterns := loadGitignore(t.WorkDir)
 
 	var results []string
 	truncated := false
@@ -347,7 +347,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 
 		// Check glob filter
 		if glob != "" {
-			relPath, _ := filepath.Rel(t.workDir, path)
+			relPath, _ := filepath.Rel(t.WorkDir, path)
 			match, matchErr := doublestar.Match(glob, relPath)
 			if matchErr != nil || !match {
 				return nil
@@ -355,7 +355,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		}
 
 		// Check gitignore
-		if MatchesGitignore(path, gitignorePatterns, t.workDir) {
+		if MatchesGitignore(path, gitignorePatterns, t.WorkDir) {
 			return nil
 		}
 
@@ -396,7 +396,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 			for scanner.Scan() {
 				lineNum++
 				line := scanner.Text()
-				if skipComments && isCommentLine(line) {
+				if skipComments && IsCommentLine(line) {
 					continue
 				}
 				if re.MatchString(line) {
@@ -404,7 +404,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 						truncated = true
 						return filepath.SkipAll
 					}
-					relPath, _ := filepath.Rel(t.workDir, path)
+					relPath, _ := filepath.Rel(t.WorkDir, path)
 					results = append(results, fmt.Sprintf("%s:%d: %s", relPath, lineNum, line))
 				}
 			}
@@ -428,7 +428,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 					rCount++
 				}
 
-				if skipComments && isCommentLine(line) {
+				if skipComments && IsCommentLine(line) {
 					continue
 				}
 				if re.MatchString(line) {
@@ -436,7 +436,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 						truncated = true
 						return filepath.SkipAll
 					}
-					relPath, _ := filepath.Rel(t.workDir, path)
+					relPath, _ := filepath.Rel(t.WorkDir, path)
 
 					ctxStart := lineNum - contextLines
 					if ctxStart < 1 {
@@ -582,9 +582,9 @@ func loadGitignore(dir string) []string {
 	return LoadGitignoreCached(dir)
 }
 
-func MatchesGitignore(path string, patterns []string, workDir string) bool {
+func MatchesGitignore(path string, patterns []string, WorkDir string) bool {
 	// Convert to relative path for matching
-	relPath, err := filepath.Rel(workDir, path)
+	relPath, err := filepath.Rel(WorkDir, path)
 	if err != nil {
 		relPath = path
 	}
@@ -612,9 +612,9 @@ var redosDetector = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*{]`)
 // a*+, a+*) which can cause catastrophic backtracking.
 var adjacentQuantifierDetector = regexp.MustCompile(`[+*][+*]`)
 
-// isCommentLine returns true if the line is a comment in common languages.
+// IsCommentLine returns true if the line is a comment in common languages.
 // Supports: //, #, /*, *, --, ; at the start of a line (after optional whitespace).
-func isCommentLine(line string) bool {
+func IsCommentLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return false
