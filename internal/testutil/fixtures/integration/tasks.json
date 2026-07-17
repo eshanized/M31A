@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "action": "Create",
+    "description": "Create main.go",
+    "dependencies": [],
+    "files": ["main.go"],
+    "acceptance_criteria": ["compiles"]
+  },
+  {
+    "id": 2,
+    "action": "Create",
+    "description": "Add tests",
+    "dependencies": [1],
+    "files": ["main_test.go"],
+    "acceptance_criteria": ["tests pass"]
+  }
+]

@@ -1,0 +1,16 @@
+# Full TOML config for unit tests
+[provider]
+default = "openrouter"
+
+[provider.openrouter]
+api_key = "test-key"
+
+[provider.zen]
+api_key = "zen-test-key"
+
+[provider.nvidia]
+api_key = "nvidia-test-key"
+
+[workflow]
+max_retries = 3
+timeout_seconds = 300

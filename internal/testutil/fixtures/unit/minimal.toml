@@ -1,0 +1,6 @@
+# Minimal TOML config for unit tests
+[provider]
+default = "openrouter"
+
+[provider.openrouter]
+api_key = "test-key"
