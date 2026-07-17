@@ -2,7 +2,6 @@ package session
 
 import (
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -11,19 +10,15 @@ import (
 )
 
 // newTestManager creates a Manager backed by a temp directory.
-// The caller must call os.RemoveAll on the returned dir string.
+// The temp directory is automatically cleaned up by t.TempDir().
 func newTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "m31a-session-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	dir := t.TempDir()
 	return NewManager(dir, dir, ManagerOpts{}), dir
 }
 
 func TestSession_NewAndLoad(t *testing.T) {
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
+	mgr, _ := newTestManager(t)
 
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -62,8 +57,7 @@ func TestSession_NewAndLoad(t *testing.T) {
 }
 
 func TestSession_IDLength(t *testing.T) {
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
+	mgr, _ := newTestManager(t)
 
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
 	if err != nil {
@@ -82,8 +76,7 @@ func TestSession_IDLength(t *testing.T) {
 }
 
 func TestSession_NewSetsTimestamps(t *testing.T) {
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
+	mgr, _ := newTestManager(t)
 
 	before := time.Now()
 	s, err := mgr.NewSession("claude-3", "zen")
@@ -102,8 +95,7 @@ func TestSession_NewSetsTimestamps(t *testing.T) {
 }
 
 func TestSession_LoadMissing(t *testing.T) {
-	mgr, dir := newTestManager(t)
-	defer os.RemoveAll(dir)
+	mgr, _ := newTestManager(t)
 
 	_, err := mgr.LoadSession("nonexistent")
 	if !errors.Is(err, m31errors.ErrSessionNotFound) {

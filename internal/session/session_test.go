@@ -1,7 +1,6 @@
 package session
 
 import (
-	"os"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/types"
@@ -73,11 +72,7 @@ func TestSession_NewSession_InitializesWorkflowFields(t *testing.T) {
 // state to session.json and LoadWorkflowState reads it back
 // verbatim. This is the core D-06 guarantee.
 func TestManager_UpdateWorkflowState_PersistsAndLoads(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-update-wf-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 
@@ -115,11 +110,7 @@ func TestManager_UpdateWorkflowState_PersistsAndLoads(t *testing.T) {
 // behavior, no merge). This matches the setter semantics on the
 // Session struct.
 func TestManager_UpdateWorkflowState_OverwritesPrevious(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-update-wf2-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
@@ -158,11 +149,7 @@ func TestManager_UpdateWorkflowState_OverwritesPrevious(t *testing.T) {
 // without an error. This matches the contract documented in the
 // 14-04 plan: missing sessions return zero state, not an error.
 func TestManager_LoadWorkflowState_ReturnsZeroForUnset(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-load-wf-unset-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 
@@ -187,11 +174,7 @@ func TestManager_LoadWorkflowState_ReturnsZeroForUnset(t *testing.T) {
 // has never had its workflow state explicitly set (e.g. immediately
 // after NewSession, before any phase transition).
 func TestManager_LoadWorkflowState_ReturnsZeroForUnsetSession(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-load-wf-unset2-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
@@ -220,11 +203,7 @@ func TestManager_LoadWorkflowState_ReturnsZeroForUnsetSession(t *testing.T) {
 // values, LoadWorkflowState returns zero values (the persisted
 // state has been cleared).
 func TestManager_UpdateWorkflowState_AfterReset(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-reset-wf-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 	s, err := mgr.NewSession("gpt-4o", "openrouter")
@@ -260,16 +239,12 @@ func TestManager_UpdateWorkflowState_AfterReset(t *testing.T) {
 // doesn't exist on disk. This is the failure mode that the
 // /workflow resume error path relies on.
 func TestManager_UpdateWorkflowState_NonexistentSession(t *testing.T) {
-	dir, err := os.MkdirTemp("", "m31a-update-wf-missing-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	mgr := NewManager(dir, dir, ManagerOpts{})
 
 	// Try to update a session that doesn't exist
-	err = mgr.UpdateWorkflowState("nonexistent", "goal", types.PhasePlan, nil)
+	err := mgr.UpdateWorkflowState("nonexistent", "goal", types.PhasePlan, nil)
 	if err == nil {
 		t.Error("expected error for nonexistent session, got nil")
 	}
