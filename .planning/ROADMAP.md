@@ -204,13 +204,15 @@ Plans:
 
 ### Phase 10: Fix test errors from architecture upgrade
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Fix test failures introduced by Phase 9 restructuring and centralize test helpers/fixtures in `internal/testutil/`. This phase reorganizes test infrastructure — it does not add new test coverage or change test behavior.
+**Requirements**: NFR-4 (Maintainability)
 **Depends on:** Phase 9
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 10 to break down)
+- [ ] 10-01-PLAN.md — Fix build errors: fileops field name mismatch, session test temp dirs
+- [ ] 10-02-PLAN.md — Centralize shared mocks and test builders in testutil/
+- [ ] 10-03-PLAN.md — Create fixtures with go:embed, move e2e/integration tests to testutil/
 
 ---
 
