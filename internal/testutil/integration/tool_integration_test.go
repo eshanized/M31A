@@ -1,4 +1,5 @@
-package tools
+// Package integration_test contains cross-package integration tests.
+package integration_test
 
 import (
 	"context"
@@ -7,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/types"
 )
 
@@ -24,7 +26,7 @@ func TestEdit_Execute_ExactMatch_FileIO(t *testing.T) {
 	filePath := filepath.Join(dir, "main.go")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "main.go",
@@ -58,7 +60,7 @@ func TestEdit_Execute_ReplaceAll(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":        "file.txt",
@@ -90,7 +92,7 @@ func TestEdit_Execute_CRLF_RoundTrip(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -126,7 +128,7 @@ func TestEdit_Execute_PathTraversal(t *testing.T) {
 	os.MkdirAll(outsideDir, 0755)
 	os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	_, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "../outside/secret.txt",
@@ -148,7 +150,7 @@ func TestEdit_Execute_BinaryRejection(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte("hello world"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	_, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -170,7 +172,7 @@ func TestEdit_Execute_ContextCancellation(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte("hello"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
@@ -196,7 +198,7 @@ func TestEdit_Execute_Integration_LineRange(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -229,7 +231,7 @@ func TestEdit_Execute_Integration_Fuzzy(t *testing.T) {
 	filePath := filepath.Join(dir, "file.go")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	// Use a slightly different old_string to trigger fuzzy match
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -262,7 +264,7 @@ func TestEdit_Execute_NoMatchReturnsError(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -293,7 +295,7 @@ func TestEdit_Execute_BackupCreated(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte("original"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	_, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -331,7 +333,7 @@ func TestEdit_Execute_BackupPruning(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte("v0"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	// Edit 15 times to trigger pruning (MaxBackupsPerFile = 10)
 	for i := 0; i < 15; i++ {
 		content, _ := os.ReadFile(filePath)
@@ -373,7 +375,7 @@ func TestEdit_Execute_TempFileCleanup(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte("hello"), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	_, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
@@ -405,7 +407,7 @@ func TestEdit_Execute_IndentNormalized(t *testing.T) {
 	filePath := filepath.Join(dir, "file.go")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	// old_string uses spaces instead of tabs
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -438,7 +440,7 @@ func TestEdit_Execute_BlankLineHandling(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	// old_string matches content exactly (no blank lines in either)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -470,7 +472,7 @@ func TestEdit_Execute_OldStringAndLineRange(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	// Both old_string and line range provided — line range should take priority
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -506,7 +508,7 @@ func TestEdit_Execute_LargeFileRejection(t *testing.T) {
 	bigContent := strings.Repeat("x", types.MaxFileSize+1)
 	os.WriteFile(filePath, []byte(bigContent), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	_, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "large.txt",
@@ -529,7 +531,7 @@ func TestEdit_Execute_StrategyReported(t *testing.T) {
 	filePath := filepath.Join(dir, "file.txt")
 	os.WriteFile(filePath, []byte(content), 0644)
 
-	edit := NewEdit(dir, backupDir)
+	edit := tools.NewEdit(dir, backupDir)
 	result, err := edit.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "file.txt",
