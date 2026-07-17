@@ -2,14 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
+current_phase: 10
+current_phase_name: fix-test-errors-from-architecture-upgrade
 status: milestone_complete
-last_updated: "2026-07-17T11:55:16.530Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-07-17T22:29:51.606Z"
 progress:
-  total_phases: 11
+  total_phases: 5
   completed_phases: 2
-  total_plans: 13
-  completed_plans: 13
-  percent: 18
+  total_plans: 17
+  completed_plans: 15
 ---
 
 # STATE.md — M31A
@@ -78,8 +80,26 @@ Phase 10 context captured in `.planning/phases/10-fix-test-errors-from-architect
 
 ## Current Position
 
-Phase: 10-fix-test-errors-from-architecture-upgrade — **Plan Ready**
-Plan: 3 plans created (10-01, 10-02, 10-03)
+Phase: 10 (fix-test-errors-from-architecture-upgrade) — EXECUTING
+Plan: 2 of 3
 Next: Run `/gsd-execute-phase 10` to execute plans
 
 EOF
+
+## Performance Metrics
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 10 P2 | 1h 41m | 3 tasks | 19 files |
+
+## Decisions
+
+- [Phase ?]: Removed builders/engine.go due to import cycle: builders->workflow->tools->builders
+- [Phase ?]: Kept local mocks in provider/registry_test.go, keychain/keychain_test.go, config/loader_test.go due to import cycles
+- [Phase ?]: workflow.Dispatcher is concrete type not interface - created minimal WorkflowDispatcher mock for phase coordinator
+
+## Session
+
+**Last session:** 2026-07-17T22:29:51.598Z
+**Stopped at:** Completed 10-02-PLAN.md
+**Resume file:** None

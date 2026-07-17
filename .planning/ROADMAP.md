@@ -41,6 +41,7 @@
 **Estimated Effort**: 2-3 days (3 plans)
 
 **Plans**:
+
 - Plan 01: Screenable interface audit and ReplModel.SetDimensions implementation
 - Plan 02: Theme/color audit, dimension guards, PageChrome/UltraNarrow hardening
 - Plan 03: Test infrastructure + manual real-terminal verification (FirstRun→Home→REPL)
@@ -178,6 +179,7 @@ Plans:
 **Requirements**: NFR-4 (Maintainability)
 
 **Success Criteria**:
+
 - `pkg/` → `internal/` migration complete (17 packages)
 - `internal/types/` alias layer removed
 - TUI screens in `internal/tui/screens/<name>/` (34 sub-packages)
@@ -191,6 +193,7 @@ Plans:
 **Estimated Effort**: 3-4 days
 
 **Plans** (10 plans, each independently compilable/testable):
+
 - Plan 01: Type Layering Cleanup — Remove internal/types/ alias layer
 - Plan 02: Package Reorganization — Move pkg/ to internal/
 - Plan 03: TUI Screen Sub-Packages — Extract 34 screens to internal/tui/screens/
@@ -207,11 +210,12 @@ Plans:
 **Goal:** Fix test failures introduced by Phase 9 restructuring and centralize test helpers/fixtures in `internal/testutil/`. This phase reorganizes test infrastructure — it does not add new test coverage or change test behavior.
 **Requirements**: NFR-4 (Maintainability)
 **Depends on:** Phase 9
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
-- [ ] 10-01-PLAN.md — Fix build errors: fileops field name mismatch, session test temp dirs
-- [ ] 10-02-PLAN.md — Centralize shared mocks and test builders in testutil/
+
+- [x] 10-01-PLAN.md — Fix build errors: fileops field name mismatch, session test temp dirs
+- [x] 10-02-PLAN.md — Centralize shared mocks and test builders in testutil/
 - [ ] 10-03-PLAN.md — Create fixtures with go:embed, move e2e/integration tests to testutil/
 
 ---
@@ -251,4 +255,5 @@ EOF
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (run /gsd-plan-phase 09.1 to break down)
