@@ -89,7 +89,7 @@ func (t *FileDelete) Execute(ctx context.Context, input types.ToolInput) (types.
 	if !permanent {
 		// Backup before delete
 		backupPrefix := filepath.Base(absPath) + ".deleted"
-		pruneBackupsByPrefix(t.backupDir, backupPrefix, MaxBackupsPerFile)
+		PruneBackupsByPrefix(t.backupDir, backupPrefix, MaxBackupsPerFile)
 		backupPath := filepath.Join(t.backupDir, backupPrefix+"."+time.Now().Format("20060102150405"))
 		if err := os.MkdirAll(t.backupDir, DirPermission); err != nil {
 			return types.ToolResult{}, fmt.Errorf("cannot create backup directory: %w", err)
