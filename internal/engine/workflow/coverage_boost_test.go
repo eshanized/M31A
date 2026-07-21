@@ -16,8 +16,8 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/engine/decision"
-	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/integrations/git"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"

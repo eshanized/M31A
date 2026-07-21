@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/keychain"
+	"github.com/eshanized/M31A/internal/integrations/keychain"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/shell"
+	"github.com/eshanized/M31A/internal/integrations/shell"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

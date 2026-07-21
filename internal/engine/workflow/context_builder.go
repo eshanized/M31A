@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/config"
-	ctxsrc "github.com/eshanized/M31A/internal/context"
+	ctxsrc "github.com/eshanized/M31A/internal/integrations/context"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 )
 

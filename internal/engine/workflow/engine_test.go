@@ -11,8 +11,8 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/git"
-	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/integrations/git"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/engine/tokens"

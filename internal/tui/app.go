@@ -8,10 +8,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/arbitrage"
+	"github.com/eshanized/M31A/internal/integrations/arbitrage"
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/exec"

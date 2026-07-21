@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/integrations/git"
 )
 
 // DateTimeSource provides the current date and time.

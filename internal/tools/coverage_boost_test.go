@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/types"
 )

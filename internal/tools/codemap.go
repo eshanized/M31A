@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/codeintel"
+	"github.com/eshanized/M31A/internal/integrations/codeintel"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )

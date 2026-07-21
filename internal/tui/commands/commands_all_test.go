@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/autodream"
+	"github.com/eshanized/M31A/internal/integrations/autodream"
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/ledger"
+	"github.com/eshanized/M31A/internal/integrations/ledger"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )

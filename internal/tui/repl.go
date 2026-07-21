@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/history"
+	"github.com/eshanized/M31A/internal/integrations/history"
 )
 
 // ResizeTickMsg is emitted after a resize debounce period completes.

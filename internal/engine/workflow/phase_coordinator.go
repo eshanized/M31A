@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/eshanized/M31A/internal/metrics"
-	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/engine/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

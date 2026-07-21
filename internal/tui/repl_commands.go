@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/shell"
+	"github.com/eshanized/M31A/internal/integrations/shell"
 )
 
 // executeShellCommand runs a shell command (prefixed with !) and adds the result to messages.

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/arbitrage"
+	"github.com/eshanized/M31A/internal/integrations/arbitrage"
 	"github.com/eshanized/M31A/internal/types"
 )
 

@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/arbitrage"
+	"github.com/eshanized/M31A/internal/integrations/arbitrage"
 )
 
 func TestHandleGoalSubmittedMsg_Signature(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/provider/nvidia"
-	"github.com/eshanized/M31A/internal/provider/openrouter"
-	"github.com/eshanized/M31A/internal/provider/zen"
+	"github.com/eshanized/M31A/internal/integrations/provider"
+	"github.com/eshanized/M31A/internal/integrations/provider/nvidia"
+	"github.com/eshanized/M31A/internal/integrations/provider/openrouter"
+	"github.com/eshanized/M31A/internal/integrations/provider/zen"
 	"github.com/eshanized/M31A/internal/types"
 )
 

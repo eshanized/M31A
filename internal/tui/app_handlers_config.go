@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // app_handlers_config.go — configuration and settings event handling extracted from Update().

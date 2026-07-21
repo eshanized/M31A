@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/integrations/git"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

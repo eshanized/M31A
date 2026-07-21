@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eshanized/M31A/internal/git"
+	"github.com/eshanized/M31A/internal/integrations/git"
 )
 
 // GitWorktrees is a WorktreeOps implementation backed by the local git

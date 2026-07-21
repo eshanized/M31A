@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"github.com/eshanized/M31A/internal/keychain"
+	"github.com/eshanized/M31A/internal/integrations/keychain"
 )
 
 // MockKeychain implements keychain.Keychain with an in-memory map for testing.

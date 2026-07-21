@@ -1,4 +1,4 @@
-package nvidia
+package zen
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/provider"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/tests/testutil"
 	"github.com/eshanized/M31A/internal/types"
 )
 
 func TestIntegration_HealthCheck(t *testing.T) {
 	testutil.LoadTestDotEnv(t)
-	apiKey := testutil.RequireAnyAPIKey(t, "M31A_NVIDIA_API_KEY", "NVIDIA_API_KEY")
+	apiKey := testutil.RequireAnyAPIKey(t, "M31A_ZEN_API_KEY", "ZEN_API_KEY")
 
 	c, err := New(apiKey, Options{})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestIntegration_HealthCheck(t *testing.T) {
 
 func TestIntegration_FetchModels(t *testing.T) {
 	testutil.LoadTestDotEnv(t)
-	apiKey := testutil.RequireAnyAPIKey(t, "M31A_NVIDIA_API_KEY", "NVIDIA_API_KEY")
+	apiKey := testutil.RequireAnyAPIKey(t, "M31A_ZEN_API_KEY", "ZEN_API_KEY")
 
 	c, err := New(apiKey, Options{})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestIntegration_FetchModels(t *testing.T) {
 
 func TestIntegration_ChatCompletion(t *testing.T) {
 	testutil.LoadTestDotEnv(t)
-	apiKey := testutil.RequireAnyAPIKey(t, "M31A_NVIDIA_API_KEY", "NVIDIA_API_KEY")
+	apiKey := testutil.RequireAnyAPIKey(t, "M31A_ZEN_API_KEY", "ZEN_API_KEY")
 
 	c, err := New(apiKey, Options{})
 	if err != nil {
@@ -57,11 +57,7 @@ func TestIntegration_ChatCompletion(t *testing.T) {
 	}
 
 	// Try multiple models in case one isn't available
-	models := []string{
-		"meta/llama-3.1-8b-instruct",
-		"meta/llama-3.1-70b-instruct",
-		"google/gemma-2-9b-it",
-	}
+	models := []string{"deepseek/deepseek-r1", "deepseek/deepseek-chat", "meta-llama/llama-3.1-8b-instruct"}
 
 	var lastErr error
 	for _, model := range models {

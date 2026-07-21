@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/shell"
+	"github.com/eshanized/M31A/internal/integrations/shell"
 	"github.com/eshanized/M31A/internal/types"
 )
 

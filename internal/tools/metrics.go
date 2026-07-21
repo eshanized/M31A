@@ -7,7 +7,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/metrics"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/types"
 )
 

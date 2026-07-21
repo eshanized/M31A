@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/ledger"
+	"github.com/eshanized/M31A/internal/integrations/ledger"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 
