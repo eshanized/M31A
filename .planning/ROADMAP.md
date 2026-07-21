@@ -13,3 +13,13 @@
 - Verify all tests pass after reorganization
 
 **Out of scope:** New features, new tools, new providers, behavioral changes.
+
+**Plans:** 6 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Foundation layer: move types, errors, config, fileutil, retry to core/ and infrastructure/
+- [ ] 01-02-PLAN.md — Engine layer: move workflow, taskrunner, bisect, rollback, session, compaction, narrative, decision, tokens, coordinator to engine/
+- [ ] 01-03-PLAN.md — Integrations layer: move provider, git, keychain, shell, context, history, ledger, metrics, logging, log, autodream, arbitrage, codeintel, skills to integrations/
+- [ ] 01-04-PLAN.md — UI layer: move tui to ui/tui/
+- [ ] 01-05-PLAN.md — Global import update: sed replacements for all remaining import paths + compile check
+- [ ] 01-06-PLAN.md — Root cleanup: test consolidation, doc archival, backup deletion, final test
