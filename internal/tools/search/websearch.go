@@ -34,6 +34,16 @@ type WebSearch struct {
 	dnsCache        *DNSCache
 }
 
+// SetAllowPrivateIPs enables or disables private IP access for testing.
+func (ws *WebSearch) SetAllowPrivateIPs(allow bool) {
+	ws.allowPrivateIPs = allow
+}
+
+// BaseURL returns the configured base URL.
+func (ws *WebSearch) BaseURL() string {
+	return ws.baseURL
+}
+
 // NewWebSearch creates a new WebSearch tool instance.
 func NewWebSearch(baseURL string) *WebSearch {
 	if baseURL == "" {

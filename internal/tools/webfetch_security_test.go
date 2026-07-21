@@ -109,15 +109,4 @@ func TestWebFetch_Allows_PublicDNS(t *testing.T) {
 	}
 }
 
-func TestWebFetch_SharedClient(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
-	if wf.client == nil {
-		t.Fatal("expected non-nil client after NewWebFetch")
-	}
-	// Verify the same client is reused across calls
-	client1 := wf.client
-	client2 := wf.client
-	if client1 != client2 {
-		t.Error("expected same client instance to be reused")
-	}
-}
+

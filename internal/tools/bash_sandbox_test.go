@@ -5,8 +5,6 @@ import (
 	"os"
 	stdExec "os/exec"
 	"testing"
-
-	"github.com/eshanized/M31A/internal/tools/exec"
 )
 
 // This test file tests the scrubEnvironment functionality which is platform-specific.

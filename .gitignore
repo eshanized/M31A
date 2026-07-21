@@ -13,6 +13,9 @@
 *.out
 coverage.out
 coverage.html
+*.bak
+*.bak2
+*.patch
 /dist/
 /.goreleaser-dist/
 

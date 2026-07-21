@@ -11,6 +11,17 @@ import (
 	"github.com/eshanized/M31A/internal/core/types"
 )
 
+type searxngResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Content string `json:"content"`
+	Engine  string `json:"engine"`
+}
+
+type searxngResponse struct {
+	Results []searxngResult `json:"results"`
+}
+
 func TestWebSearch_Name(t *testing.T) {
 	ws := NewWebSearch("")
 	if ws.Name() != "WebSearch" {
@@ -105,7 +116,7 @@ func TestWebSearch_Success(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -146,7 +157,7 @@ func TestWebSearch_Truncation(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -176,7 +187,7 @@ func TestWebSearch_EnginesParam(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -201,7 +212,7 @@ func TestWebSearch_NoResults(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "xyznonexistent"},
@@ -221,7 +232,7 @@ func TestWebSearch_HTTPError(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "test"},
@@ -242,7 +253,7 @@ func TestWebSearch_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	_, err := ws.Execute(context.Background(), types.ToolInput{
 		Name:   "WebSearch",
 		Params: map[string]any{"query": "test"},
@@ -262,7 +273,7 @@ func TestWebSearch_ContextCancellation(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := ws.Execute(ctx, types.ToolInput{
@@ -289,7 +300,7 @@ func TestWebSearch_MaxResultsClamp(t *testing.T) {
 	defer srv.Close()
 
 	ws := NewWebSearch(srv.URL)
-	ws.allowPrivateIPs = true
+	ws.SetAllowPrivateIPs(true)
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Name: "WebSearch",
 		Params: map[string]any{
@@ -308,14 +319,14 @@ func TestWebSearch_MaxResultsClamp(t *testing.T) {
 
 func TestWebSearch_DefaultBaseURL(t *testing.T) {
 	ws := NewWebSearch("")
-	if ws.baseURL != DefaultSearchBaseURL {
-		t.Errorf("expected default base URL %s, got %s", DefaultSearchBaseURL, ws.baseURL)
+	if ws.BaseURL() != DefaultSearchBaseURL {
+		t.Errorf("expected default base URL %s, got %s", DefaultSearchBaseURL, ws.BaseURL())
 	}
 }
 
 func TestWebSearch_TrailingSlashStripped(t *testing.T) {
 	ws := NewWebSearch("https://example.com/")
-	if ws.baseURL != "https://example.com" {
-		t.Errorf("expected trailing slash stripped, got %s", ws.baseURL)
+	if ws.BaseURL() != "https://example.com" {
+		t.Errorf("expected trailing slash stripped, got %s", ws.BaseURL())
 	}
 }

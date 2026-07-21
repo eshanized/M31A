@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
