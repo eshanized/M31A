@@ -11,7 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/tui"
+	"github.com/eshanized/M31A/internal/ui/tui"
 	"github.com/eshanized/M31A/internal/types"
 )
 

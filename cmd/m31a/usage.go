@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/eshanized/M31A/internal/tui"
+	"github.com/eshanized/M31A/internal/ui/tui"
 )
 
 // printUsage prints the usage information including dynamically generated
