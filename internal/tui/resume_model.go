@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 

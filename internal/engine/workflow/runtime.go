@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/shell"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

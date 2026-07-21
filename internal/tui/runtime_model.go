@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/tui/components"
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 // RuntimeModel displays runtime verification results (dev server + smoke tests).

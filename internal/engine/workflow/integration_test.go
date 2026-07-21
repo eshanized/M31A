@@ -9,8 +9,8 @@ import (
 
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

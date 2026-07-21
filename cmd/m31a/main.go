@@ -22,15 +22,15 @@ import (
 	"github.com/eshanized/M31A/internal/ledger"
 	"github.com/eshanized/M31A/internal/log"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/rollback"
-	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/engine/rollback"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tui"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 var (

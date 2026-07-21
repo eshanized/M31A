@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/types"
 )
 

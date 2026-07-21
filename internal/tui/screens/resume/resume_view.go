@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/tui/theme"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 )

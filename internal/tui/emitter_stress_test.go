@@ -6,7 +6,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/config"
 	"github.com/eshanized/M31A/internal/tools"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 func setupTestDispatcher(t *testing.T) (*tools.Dispatcher, func()) {

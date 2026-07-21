@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 

@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tui/tuitypes"
 	"github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 // handleHelp navigates to the Help screen with scrollable keybinding reference.

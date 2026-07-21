@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tui/theme"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 func newTestAppStateForWorkflow() *AppState {

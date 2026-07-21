@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/workflow/prompts"
+	"github.com/eshanized/M31A/internal/engine/workflow/prompts"
 )
 
 //go:embed prompts/models/*.txt

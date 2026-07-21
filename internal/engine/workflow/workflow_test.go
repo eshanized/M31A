@@ -10,8 +10,8 @@ import (
 
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/ledger"
-	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/taskrunner"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/taskrunner"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/types"
 )

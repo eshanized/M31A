@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/coordinator"
+	"github.com/eshanized/M31A/internal/engine/coordinator"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/types"
 )

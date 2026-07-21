@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/decision"
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/decision"
+	"github.com/eshanized/M31A/internal/engine/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

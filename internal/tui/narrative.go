@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/narrative"
+	"github.com/eshanized/M31A/internal/engine/narrative"
 	"github.com/eshanized/M31A/internal/tui/theme"
 )
 

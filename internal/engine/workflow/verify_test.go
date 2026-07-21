@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/tests/testutil/mocks"
-	"github.com/eshanized/M31A/internal/tokens"
+	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

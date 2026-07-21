@@ -8,7 +8,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/metrics"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/session"
+	"github.com/eshanized/M31A/internal/engine/session"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

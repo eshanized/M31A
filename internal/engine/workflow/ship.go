@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/decision"
+	"github.com/eshanized/M31A/internal/engine/decision"
 	m31errors "github.com/eshanized/M31A/internal/errors"
 	"github.com/eshanized/M31A/internal/git"
 	"github.com/eshanized/M31A/internal/ledger"
-	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/taskrunner"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/taskrunner"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

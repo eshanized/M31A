@@ -1,7 +1,7 @@
 package workflow
 
 import (
-	"github.com/eshanized/M31A/internal/decision"
+	"github.com/eshanized/M31A/internal/engine/decision"
 	"github.com/eshanized/M31A/internal/git"
 	m31types "github.com/eshanized/M31A/internal/types"
 )

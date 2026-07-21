@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	m31types "github.com/eshanized/M31A/internal/types"
-	"github.com/eshanized/M31A/internal/workflow"
+	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 
 func TestBridgeTaskStart(t *testing.T) {
