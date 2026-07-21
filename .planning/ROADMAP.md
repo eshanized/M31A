@@ -23,3 +23,17 @@ Plans:
 - [ ] 01-04-PLAN.md — UI layer: move tui to ui/tui/
 - [ ] 01-05-PLAN.md — Global import update: sed replacements for all remaining import paths + compile check
 - [ ] 01-06-PLAN.md — Root cleanup: test consolidation, doc archival, backup deletion, final test
+
+## Phase 2: Fix Test Hanging and CI Issues
+**Goal:** Investigate and resolve test hanging issues and CI pipeline problems to ensure reliable test execution.
+
+**Scope:**
+- Deep investigation of test hanging root causes
+- CI pipeline fixes and reliability improvements
+- Test reliability and stability improvements
+- Identify and fix flaky tests
+- Improve test execution timeouts and resource management
+
+**Out of scope:** New features, new tools, new providers, behavioral changes.
+
+**Plans:** 0 plans
