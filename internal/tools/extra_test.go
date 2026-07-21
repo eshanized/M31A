@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/testutil/mocks"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"

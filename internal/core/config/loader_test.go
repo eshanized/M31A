@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/eshanized/M31A/internal/testutil"
+	"github.com/eshanized/M31A/tests/testutil"
 )
 
 // mockKeychain implements the keychain.Keychain interface for testing.

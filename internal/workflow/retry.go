@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/eshanized/M31A/internal/retry"
+	"github.com/eshanized/M31A/internal/infrastructure/retry"
 )
 
 // RetryConfig configures retry behavior with exponential backoff.

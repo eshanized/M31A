@@ -12,7 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/ledger"
 	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/taskrunner"
-	"github.com/eshanized/M31A/internal/testutil/mocks"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/types"
 )
 

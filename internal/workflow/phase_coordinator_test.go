@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/session"
-	"github.com/eshanized/M31A/internal/testutil/mocks"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/types"
 )
 

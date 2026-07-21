@@ -9,7 +9,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/eshanized/M31A/internal/config"
 	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/testutil/mocks"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/types"
 )
 

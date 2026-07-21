@@ -26,7 +26,7 @@ import (
 	"github.com/eshanized/M31A/internal/ledger"
 	"github.com/eshanized/M31A/internal/metrics"
 	"github.com/eshanized/M31A/internal/provider"
-	"github.com/eshanized/M31A/internal/retry"
+	"github.com/eshanized/M31A/internal/infrastructure/retry"
 	"github.com/eshanized/M31A/internal/session"
 	"github.com/eshanized/M31A/internal/tokens"
 	"github.com/eshanized/M31A/internal/tools"

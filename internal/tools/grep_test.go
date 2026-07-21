@@ -35,7 +35,7 @@ func TestGrep_WithGlob(t *testing.T) {
 
 	g := search.NewGrep(dir)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "Grep",
 		Params: map[string]any{
 			"pattern": "main",
 			"include": "*.go",
@@ -79,7 +79,7 @@ func TestGrep_MaxResults(t *testing.T) {
 
 	g := search.NewGrep(dir)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "Grep",
 		Params: map[string]any{
 			"pattern":     "foo",
 			"max_results": float64(50),
@@ -127,7 +127,7 @@ func TestGrep_MissingPatternParam(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	g := search.NewGrep(dir)
-	_, err := g.Execute(context.Background(), types.ToolInput{Name: "search.search.Grep", Params: map[string]any{}})
+	_, err := g.Execute(context.Background(), types.ToolInput{Name: "Grep", Params: map[string]any{}})
 	if err == nil {
 		t.Error("expected error for missing pattern param")
 	}
@@ -141,7 +141,7 @@ func TestGrep_RelativePath(t *testing.T) {
 
 	g := search.NewGrep(dir)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "Grep",
 		Params: map[string]any{
 			"pattern": "main",
 			"path":    "src/pkg",

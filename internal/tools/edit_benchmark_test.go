@@ -25,10 +25,8 @@ func BenchmarkCascadingReplace(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
 			content := generateContent(size.lines, size.lineLen)
-			oldString := "old"
-			_ = oldString
-			newString := "new"
-			_ = newString
+oldString := "old"
+		newString := "new"
 			// Insert target strings at various positions
 			content = insertTarget(content, "old", 0.25)
 			content = insertTarget(content, "old", 0.5)
@@ -70,14 +68,8 @@ func BenchmarkCascadingReplace(b *testing.B) {
 func BenchmarkCascadingReplace_Strategies(b *testing.B) {
 	content := generateContent(1000, 100)
 	oldString := "target"
-	_ = oldString
-	_ = oldString
-	_ = oldString
-	newString := "replacement"
-	_ = newString
-	_ = newString
-	_ = newString
-	lines := strings.Split(content, "\n")
+		newString := "replacement"
+		lines := strings.Split(content, "\n")
 	content = insertTarget(content, "target", 0.5)
 
 	b.Run("cascading", func(b *testing.B) {

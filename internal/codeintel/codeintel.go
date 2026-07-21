@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/fileutil"
+	"github.com/eshanized/M31A/internal/infrastructure/fileutil"
 )
 
 // Indexer provides a unified API for codebase intelligence: parsing, import

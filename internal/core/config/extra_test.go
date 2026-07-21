@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/testutil"
+	"github.com/eshanized/M31A/tests/testutil"
 )
 
 // ── LocalConfigPath ──────────────────────────────────────────────────────────

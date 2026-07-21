@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/testutil"
+	"github.com/eshanized/M31A/tests/testutil"
 )
 
 func TestIntegration_ResolveAPIKeys_FromEnv(t *testing.T) {

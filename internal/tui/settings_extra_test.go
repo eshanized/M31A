@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/testutil"
+	"github.com/eshanized/M31A/tests/testutil"
 )
 
 func TestSettingsGetFieldValueAllKeys(t *testing.T) {
