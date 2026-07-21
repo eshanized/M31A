@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/ui/tui/components"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // handler_tool.go — permission and tool message handling extracted from Update().

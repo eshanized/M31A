@@ -8,13 +8,13 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/integrations/history"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 const (

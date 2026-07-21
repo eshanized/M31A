@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/tests/testutil"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )

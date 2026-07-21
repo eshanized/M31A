@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestWebFetch_Blocks_PrivateIPv4(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -27,7 +27,7 @@ func TestWebFetch_Blocks_PrivateIPv4(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_Loopback(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -44,7 +44,7 @@ func TestWebFetch_Blocks_Loopback(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_PrivateIPv6_ULA(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -61,7 +61,7 @@ func TestWebFetch_Blocks_PrivateIPv6_ULA(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_PrivateIPv6_LinkLocal(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -78,7 +78,7 @@ func TestWebFetch_Blocks_PrivateIPv6_LinkLocal(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_IPv4MappedIPv6(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -95,7 +95,7 @@ func TestWebFetch_Blocks_IPv4MappedIPv6(t *testing.T) {
 }
 
 func TestWebFetch_Allows_PublicDNS(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -110,7 +110,7 @@ func TestWebFetch_Allows_PublicDNS(t *testing.T) {
 }
 
 func TestWebFetch_SharedClient(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), false, 3, 100)
+	wf := NewWebFetch(t.TempDir(), 3, nil)
 	if wf.client == nil {
 		t.Fatal("expected non-nil client after NewWebFetch")
 	}

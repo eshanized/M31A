@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
 type Registry struct {

@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/ai"
 )
 
 func TestAskUserQuestion_Execute_ContextCancel(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 1)
-	respCh := make(chan QuestionResponse, 1)
+	reqCh := make(chan types.QuestionRequest, 1)
+	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
 	q := NewAskUserQuestion(reqCh, respCh, pending)
 
@@ -33,8 +34,8 @@ func TestAskUserQuestion_Execute_ContextCancel(t *testing.T) {
 
 func TestAskUserQuestion_Execute_TimeoutWaiting(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 1)
-	respCh := make(chan QuestionResponse, 1)
+	reqCh := make(chan types.QuestionRequest, 1)
+	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
 	q := NewAskUserQuestion(reqCh, respCh, pending)
 
@@ -60,15 +61,15 @@ func TestAskUserQuestion_Execute_TimeoutWaiting(t *testing.T) {
 
 func TestAskUserQuestion_Execute_SuccessResponse(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 1)
-	respCh := make(chan QuestionResponse, 1)
+	reqCh := make(chan types.QuestionRequest, 1)
+	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
 	q := NewAskUserQuestion(reqCh, respCh, pending)
 
 	go func() {
 		req := <-reqCh
 		if ch, ok := pending.Load(req.ID); ok {
-			ch.(chan QuestionResponse) <- QuestionResponse{Answer: "Bob"}
+			ch.(chan types.QuestionResponse) <- types.QuestionResponse{Answer: "Bob"}
 		}
 	}()
 
@@ -90,15 +91,15 @@ func TestAskUserQuestion_Execute_SuccessResponse(t *testing.T) {
 
 func TestAskUserQuestion_Execute_WithCustomAnswer(t *testing.T) {
 	t.Parallel()
-	reqCh := make(chan QuestionRequest, 1)
-	respCh := make(chan QuestionResponse, 1)
+	reqCh := make(chan types.QuestionRequest, 1)
+	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
 	q := NewAskUserQuestion(reqCh, respCh, pending)
 
 	go func() {
 		req := <-reqCh
 		if ch, ok := pending.Load(req.ID); ok {
-			ch.(chan QuestionResponse) <- QuestionResponse{Answer: "custom answer"}
+			ch.(chan types.QuestionResponse) <- types.QuestionResponse{Answer: "custom answer"}
 		}
 	}()
 
@@ -121,7 +122,7 @@ func TestNextQuestionRequestID_Unique(t *testing.T) {
 	t.Parallel()
 	ids := make(map[int64]bool)
 	for i := 0; i < 100; i++ {
-		id := nextQuestionRequestID()
+		id := ai.NextQuestionRequestID()
 		if ids[id] {
 			t.Fatalf("duplicate ID: %d", id)
 		}

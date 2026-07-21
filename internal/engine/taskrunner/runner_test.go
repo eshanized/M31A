@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func newTask(id int, desc string, deps []int) types.Task {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestFileDelete_Execute_DeleteWithBackup(t *testing.T) {
@@ -90,7 +90,7 @@ func TestFileDelete_PruneBackups(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	_ = NewFileDelete(dir, backupDir)
 
 	// Create multiple backups to test pruning
 	for i := 0; i < MaxBackupsPerFile+2; i++ {

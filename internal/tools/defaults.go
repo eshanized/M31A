@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	"github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"

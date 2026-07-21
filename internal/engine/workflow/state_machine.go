@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // StateMachine manages workflow phase transitions with thread-safe state tracking.

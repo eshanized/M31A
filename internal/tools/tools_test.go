@@ -19,7 +19,7 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		{"Glob", NewGlob(".").ParameterSchema()},
 		{"Grep", NewGrep(".").ParameterSchema()},
 		{"Edit", NewEdit(".", ".").ParameterSchema()},
-		{"WebFetch", NewWebFetch(".", false, 3, 100).ParameterSchema()},
+		{"WebFetch", NewWebFetch(".", 3, nil).ParameterSchema()},
 		{"TodoWrite", NewTodoWrite(".", "test").ParameterSchema()},
 	}
 

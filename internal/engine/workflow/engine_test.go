@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/core/config"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func setupTestEngine(t *testing.T) (*Engine, func()) {

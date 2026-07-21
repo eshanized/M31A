@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func setupTestPersistentPermissions(t *testing.T) (*PersistentPermissions, string) {

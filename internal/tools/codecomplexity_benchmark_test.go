@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // BenchmarkCodeComplexity benchmarks the CodeComplexity tool's analysis.

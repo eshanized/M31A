@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // CurrentSchemaVersion is the current session schema version.

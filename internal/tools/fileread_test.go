@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestFileRead_SimpleRead(t *testing.T) {

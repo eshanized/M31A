@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func testAppState() *AppState {

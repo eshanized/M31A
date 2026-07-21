@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 const (

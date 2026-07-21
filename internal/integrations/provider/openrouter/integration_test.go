@@ -6,7 +6,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/tests/testutil"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestIntegration_HealthCheck(t *testing.T) {

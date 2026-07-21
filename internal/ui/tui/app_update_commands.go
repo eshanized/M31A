@@ -9,12 +9,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/integrations/codeintel"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/ui/tui/streaming"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 

@@ -3,7 +3,7 @@ package tools
 import (
 	"sync/atomic"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // permissionRequestID is a monotonically increasing counter for correlating

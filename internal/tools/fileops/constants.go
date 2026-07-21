@@ -1,7 +1,7 @@
 package fileops
 
 import (
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Re-export constants from internal/types to avoid duplication.

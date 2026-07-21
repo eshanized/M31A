@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // CommitInfo is a type alias for the canonical definition in internal/types.

@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
 // ---------------------------------------------------------------------------

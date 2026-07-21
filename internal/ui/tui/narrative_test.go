@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/engine/narrative"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 

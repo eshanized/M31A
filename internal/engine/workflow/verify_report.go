@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // VerifyReport holds the structured verification report.

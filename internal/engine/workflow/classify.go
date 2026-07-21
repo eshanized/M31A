@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // trivialIndicators are keywords/phrases suggesting a trivial, single-action goal.

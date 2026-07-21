@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/integrations/autodream"
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/integrations/ledger"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"

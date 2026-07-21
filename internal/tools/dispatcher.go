@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eshanized/M31A/internal/config"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/core/config"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 type Dispatcher struct {

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // Package-level compiled regexes (PERF-26/27/28) — compiled once at init time

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestEngine_RunShip(t *testing.T) {

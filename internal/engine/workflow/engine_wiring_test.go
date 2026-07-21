@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/config"
-	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/config"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // TestEnginePhaseCoordinatorWiring verifies that NewEngineFromOptions

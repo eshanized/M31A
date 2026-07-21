@@ -11,7 +11,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/engine/decision"
 	"github.com/eshanized/M31A/internal/engine/session"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // runPlan generates a rich implementation plan and task list to accomplish the goal.

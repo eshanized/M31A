@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // classifyTestCase defines a labeled prompt with expected heuristic classification.

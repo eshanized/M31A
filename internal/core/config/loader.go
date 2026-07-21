@@ -14,7 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/eshanized/M31A/internal/infrastructure/fileutil"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/fsnotify/fsnotify"
 )
 

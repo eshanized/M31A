@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/integrations/autodream"
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/history"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
@@ -22,7 +22,7 @@ import (
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // CommandInfo describes a slash command for autocomplete and help.

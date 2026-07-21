@@ -9,13 +9,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/integrations/arbitrage"
-	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/exec"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
 )
 

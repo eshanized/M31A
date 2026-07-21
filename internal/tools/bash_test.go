@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tools/exec"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func setupTestBash(t *testing.T) *exec.Bash {

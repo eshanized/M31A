@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/eshanized/M31A/internal/config"
+import "github.com/eshanized/M31A/internal/core/config"
 
 // getProviderFieldValue reads provider section values from config.
 func getProviderFieldValue(c *config.Config, key string) (string, bool) {

@@ -3,7 +3,7 @@ package mocks
 import (
 	"context"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // MockTool implements types.Tool for testing.

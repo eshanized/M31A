@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Compile-time interface check
@@ -325,7 +325,7 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		return types.ToolResult{}, fmt.Errorf("invalid regex: %w", err)
 	}
 
-	gitignorePatterns := loadGitignore(t.WorkDir)
+	gitignorePatterns := LoadGitignore(t.WorkDir)
 
 	var results []string
 	truncated := false
@@ -578,7 +578,7 @@ func LoadGitignoreCached(dir string) []string {
 	return patterns
 }
 
-func loadGitignore(dir string) []string {
+func LoadGitignore(dir string) []string {
 	return LoadGitignoreCached(dir)
 }
 

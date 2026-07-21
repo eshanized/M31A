@@ -10,7 +10,7 @@ import (
 
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // mockEmitFn captures emitted messages for testing.

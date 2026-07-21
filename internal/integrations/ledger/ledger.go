@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // LedgerEntry represents a single session record stored in the ledger.

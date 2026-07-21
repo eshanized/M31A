@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
 // TestParseToolCalls_OversizedInput_ReturnsErrTooLarge verifies that

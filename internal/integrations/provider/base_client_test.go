@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestNewBaseClient_AllFields(t *testing.T) {

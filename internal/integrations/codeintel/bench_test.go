@@ -15,7 +15,7 @@ var benchGoSrc = []byte(`package main
 import (
 	"fmt"
 	"net/http"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 type Engine struct {

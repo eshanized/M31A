@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
 func setupBisectRepo(t *testing.T) (string, *Bisect) {

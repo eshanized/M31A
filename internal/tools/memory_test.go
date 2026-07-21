@@ -3,10 +3,12 @@ package tools
 import (
 	"bytes"
 	"testing"
+
+	"github.com/eshanized/M31A/internal/tools/ai"
 )
 
 func TestBufferPool_GetPut(t *testing.T) {
-	buf := GetBuffer()
+	buf := ai.GetBuffer()
 	if buf == nil {
 		t.Fatal("GetBuffer returned nil")
 	}
@@ -21,44 +23,44 @@ func TestBufferPool_GetPut(t *testing.T) {
 	}
 
 	// Put it back
-	PutBuffer(buf)
+	ai.PutBuffer(buf)
 
 	// Get another buffer — should be reset
-	buf2 := GetBuffer()
+	buf2 := ai.GetBuffer()
 	if buf2.Len() != 0 {
 		t.Fatalf("GetBuffer after Put: expected empty, got %d bytes", buf2.Len())
 	}
-	PutBuffer(buf2)
+	ai.PutBuffer(buf2)
 }
 
 func TestBufferPool_NilPut(t *testing.T) {
 	// Should not panic
-	PutBuffer(nil)
+	ai.PutBuffer(nil)
 }
 
 func TestBufferPool_MultipleBuffers(t *testing.T) {
 	buffers := make([]*bytes.Buffer, 10)
 	for i := range buffers {
-		buffers[i] = GetBuffer()
+		buffers[i] = ai.GetBuffer()
 		buffers[i].WriteString("test")
 	}
 
 	for _, buf := range buffers {
-		PutBuffer(buf)
+		ai.PutBuffer(buf)
 	}
 
 	// Get them back — all should be empty
 	for i := range buffers {
-		buffers[i] = GetBuffer()
+		buffers[i] = ai.GetBuffer()
 		if buffers[i].Len() != 0 {
 			t.Fatalf("buffer %d: expected empty after pool reuse, got %d", i, buffers[i].Len())
 		}
-		PutBuffer(buffers[i])
+		ai.PutBuffer(buffers[i])
 	}
 }
 
 func TestPreallocateSlice(t *testing.T) {
-	s := PreallocateSlice[int](10)
+	s := ai.PreallocateSlice[int](10)
 	if s == nil {
 		t.Fatal("PreallocateSlice returned nil")
 	}
@@ -70,14 +72,14 @@ func TestPreallocateSlice(t *testing.T) {
 	}
 
 	// Zero hint
-	s2 := PreallocateSlice[int](0)
+	s2 := ai.PreallocateSlice[int](0)
 	if s2 != nil {
 		t.Fatal("PreallocateSlice(0) should return nil")
 	}
 }
 
 func TestSizeHintMap(t *testing.T) {
-	m := SizeHintMap[string, int](100)
+	m := ai.SizeHintMap[string, int](100)
 	if m == nil {
 		t.Fatal("SizeHintMap returned nil")
 	}
@@ -91,14 +93,14 @@ func TestSizeHintMap(t *testing.T) {
 	}
 
 	// Zero hint
-	m2 := SizeHintMap[string, int](0)
+	m2 := ai.SizeHintMap[string, int](0)
 	if m2 == nil {
 		t.Fatal("SizeHintMap(0) should return non-nil empty map")
 	}
 }
 
 func TestPoolStats(t *testing.T) {
-	stats := PoolStats()
+	stats := ai.PoolStats()
 	// Just verify it doesn't panic
 	_ = stats
 }

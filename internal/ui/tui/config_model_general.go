@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 )
 
 // getGeneralFieldValue reads general section values (model, permissions, agents, git, verify) from config.

@@ -3,7 +3,7 @@ package config
 import (
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 type Config struct {

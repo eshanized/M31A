@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // ErrInvalidHash is returned when a commit hash is not found in the repository.

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/tests/testutil"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestScreen_Label(t *testing.T) {

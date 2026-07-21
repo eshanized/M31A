@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // securityKeywords are terms that indicate security-relevant work.

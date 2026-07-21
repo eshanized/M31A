@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // handleNew starts a fresh workflow by resetting workflow state and opening the goal input.

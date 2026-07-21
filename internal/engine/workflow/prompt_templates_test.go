@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 )
 
 func TestSelectTemplate(t *testing.T) {

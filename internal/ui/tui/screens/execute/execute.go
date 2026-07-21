@@ -12,7 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/ui/tui/streaming"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // ExecuteModel displays real-time task execution progress.

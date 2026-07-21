@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/errors"
+	"github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/tools/search"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 var _ types.Tool = (*HTTPCheck)(nil)

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/integrations/git"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // setupRollback creates a temporary git repo and returns a Rollback instance.

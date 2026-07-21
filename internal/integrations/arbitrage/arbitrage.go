@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // ComplexityLevel represents the complexity classification of a task.

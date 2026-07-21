@@ -9,8 +9,8 @@ import (
 	"sort"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Checkpoint represents a point-in-time snapshot of workflow state, used by

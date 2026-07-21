@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestRunExecutePreflight(t *testing.T) {

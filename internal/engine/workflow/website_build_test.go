@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
-	m31types "github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/config"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // --- PromptRegistry Tests ---

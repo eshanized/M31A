@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tools/search"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestIsCommentLine(t *testing.T) {
@@ -32,7 +32,7 @@ func TestIsCommentLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.line, func(t *testing.T) {
-			got := IsCommentLine(tc.line)
+			got := search.IsCommentLine(tc.line)
 			if got != tc.want {
 				t.Errorf("IsCommentLine(%q) = %v, want %v", tc.line, got, tc.want)
 			}

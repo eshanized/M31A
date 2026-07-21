@@ -1,13 +1,26 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/config"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
+
+type mockTool struct {
+	name      string
+	riskLevel types.RiskLevel
+}
+
+func (m *mockTool) Name() string               { return m.name }
+func (m *mockTool) Description() string        { return "mock tool" }
+func (m *mockTool) RiskLevel() types.RiskLevel { return m.riskLevel }
+func (m *mockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+	return types.ToolResult{Output: "success"}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Agent-based permission tests (complementary to dispatcher_test.go)

@@ -11,7 +11,7 @@ import (
 	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"github.com/eshanized/M31A/internal/ui/tui/streaming"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // phaseModelPickerLoadedMsg carries models fetched asynchronously for the phase model picker.

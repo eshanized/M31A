@@ -41,9 +41,8 @@ oldString := "old"
 						switch strategy {
 						case "cascading":
 							_, _, _, err = fileops.CascadingReplace(content, oldString, newString, false, 0.8)
-						case "trimmed":
-							lines := strings.Split(content, "\n")
-							_, err = fileops.TrimmedReplace(content, strings.Split(content, "\n"), oldString, newString)
+					case "trimmed":
+						_, err = fileops.TrimmedReplace(content, strings.Split(content, "\n"), oldString, newString)
 						case "normalized":
 							lines := strings.Split(content, "\n")
 							_, err = fileops.NormalizedReplace(content, lines, oldString, newString)
@@ -67,9 +66,6 @@ oldString := "old"
 // BenchmarkCascadingReplace_Strategies benchmarks each strategy individually.
 func BenchmarkCascadingReplace_Strategies(b *testing.B) {
 	content := generateContent(1000, 100)
-	oldString := "target"
-		newString := "replacement"
-		lines := strings.Split(content, "\n")
 	content = insertTarget(content, "target", 0.5)
 
 	b.Run("cascading", func(b *testing.B) {

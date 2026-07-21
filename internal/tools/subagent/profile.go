@@ -3,7 +3,7 @@ package subagent
 import (
 	"sort"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 )
 
 // AgentProfile defines a named subagent type with its own system prompt,

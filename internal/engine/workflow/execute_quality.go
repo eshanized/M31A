@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // QualityGateResult holds the outcome of checking acceptance criteria against file state.

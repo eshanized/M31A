@@ -18,10 +18,10 @@ import (
 
 	"github.com/eshanized/M31A/internal/integrations/codeintel"
 	"github.com/eshanized/M31A/internal/engine/compaction"
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 	ctxsrc "github.com/eshanized/M31A/internal/integrations/context"
 	"github.com/eshanized/M31A/internal/engine/decision"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/ledger"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
@@ -30,7 +30,7 @@ import (
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 //go:embed templates/website-nextjs/*

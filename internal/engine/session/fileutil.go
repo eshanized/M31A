@@ -2,7 +2,7 @@
 
 package session
 
-import "github.com/eshanized/M31A/internal/types"
+import "github.com/eshanized/M31A/internal/core/types"
 
 // fileLock is a type alias for pkg/types.FileLock.
 type fileLock = types.FileLock

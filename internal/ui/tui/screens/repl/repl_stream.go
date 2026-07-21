@@ -10,12 +10,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/ui/tui"
 	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"github.com/eshanized/M31A/internal/ui/tui/streaming"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // AppendStreamChunk appends a streamed token from a workflow phase to the REPL's streaming buffer.

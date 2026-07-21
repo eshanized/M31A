@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 )
 
 // testDispatcher returns a new Dispatcher that will be stopped when the test ends.

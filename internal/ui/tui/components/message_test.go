@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestNewMessageRenderer_DarkTheme(t *testing.T) {

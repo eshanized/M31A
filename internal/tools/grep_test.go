@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/tools/search"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestGrep_SimpleSearch(t *testing.T) {
@@ -158,8 +158,8 @@ func TestGrep_RelativePath(t *testing.T) {
 func TestGrep_Name(t *testing.T) {
 	t.Parallel()
 	g := search.NewGrep(t.TempDir())
-	if g.Name() != "search.search.Grep" {
-		t.Errorf("expected name 'search.search.Grep', got %s", g.Name())
+	if g.Name() != "search.Grep" {
+		t.Errorf("expected name 'search.Grep', got %s", g.Name())
 	}
 }
 
@@ -186,7 +186,7 @@ func TestGrep_PureGoSearch(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "util.go"), []byte("package util\nfunc helper() {}\n"), 0644)
 
 	// Force pure-Go by creating a grep without rg
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), grepToolInput("pattern", "main"))
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestGrep_PureGoNoMatches(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("no match here\n"), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), grepToolInput("pattern", "xyz_nonexistent"))
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestGrep_PureGoNoMatches(t *testing.T) {
 func TestGrep_PureGoInvalidRegex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	_, err := g.Execute(context.Background(), grepToolInput("pattern", "[invalid"))
 	if err == nil {
 		t.Error("expected error for invalid regex")
@@ -230,9 +230,9 @@ func TestGrep_PureGoGlobFilter(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Main Project\n"), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "main",
 			"glob":    "*.go",
@@ -256,7 +256,7 @@ func TestGrep_PureGoHiddenDirSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".hidden", "secret.go"), []byte("package hidden\nfunc secret() {}\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "visible.go"), []byte("package main\nfunc visible() {}\n"), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), grepToolInput("pattern", "func"))
 	if err != nil {
 		t.Fatal(err)
@@ -275,9 +275,9 @@ func TestGrep_PureGoMaxResults(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content.String()), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":     "foo",
 			"max_results": float64(10),
@@ -304,7 +304,7 @@ node_modules/
 `
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(content), 0644)
 
-	patterns := loadGitignore(dir)
+	patterns := search.LoadGitignore(dir)
 	if len(patterns) != 4 {
 		t.Errorf("expected 4 patterns, got %d: %v", len(patterns), patterns)
 	}
@@ -323,7 +323,7 @@ node_modules/
 func TestLoadGitignore_NoFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	patterns := loadGitignore(dir)
+	patterns := search.LoadGitignore(dir)
 	if patterns != nil {
 		t.Errorf("expected nil patterns when no .gitignore, got: %v", patterns)
 	}
@@ -333,16 +333,16 @@ func TestMatchesGitignore(t *testing.T) {
 	t.Parallel()
 	patterns := []string{"*.log", "*.tmp", "node_modules"}
 
-	if !matchesGitignore("test.log", patterns, ".") {
+	if !search.MatchesGitignore("test.log", patterns, ".") {
 		t.Error("expected test.log to match *.log")
 	}
-	if !matchesGitignore("data.tmp", patterns, ".") {
+	if !search.MatchesGitignore("data.tmp", patterns, ".") {
 		t.Error("expected data.tmp to match *.tmp")
 	}
-	if matchesGitignore("main.go", patterns, ".") {
+	if search.MatchesGitignore("main.go", patterns, ".") {
 		t.Error("expected main.go to not match any pattern")
 	}
-	if !matchesGitignore("node_modules", patterns, ".") {
+	if !search.MatchesGitignore("node_modules", patterns, ".") {
 		t.Error("expected node_modules to match")
 	}
 }
@@ -352,14 +352,14 @@ func TestGrep_PathOutsideWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	g := search.NewGrep(dir)
 	_, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "test",
 			"path":    "/etc",
 		},
 	})
 	if err == nil {
-		t.Fatal("expected error for path outside workDir")
+		t.Fatal("expected error for path outside WorkDir")
 	}
 	if !strings.Contains(err.Error(), "path escapes work directory") {
 		t.Errorf("expected 'path escapes work directory' error, got: %v", err)
@@ -372,9 +372,9 @@ func TestGrep_BadPathType(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("test\n"), 0644)
 
 	g := search.NewGrep(dir)
-	// Pass non-string path (should be ignored, fall through to workDir)
+	// Pass non-string path (should be ignored, fall through to WorkDir)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "test",
 			"path":    123, // invalid type
@@ -396,7 +396,7 @@ func TestGrep_BadGlobType(t *testing.T) {
 	g := search.NewGrep(dir)
 	// Pass non-string glob (should be ignored)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "test",
 			"glob":    123, // invalid type
@@ -418,7 +418,7 @@ func TestGrep_BadMaxResultsType(t *testing.T) {
 	g := search.NewGrep(dir)
 	// Pass non-float64 max_results (should use default of 100)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern":     "test",
 			"max_results": "not_a_number",
@@ -438,7 +438,7 @@ func TestGrep_PureGoBinaryFileSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "data.bin"), []byte("foo\x00bar"), 0644)
 	os.WriteFile(filepath.Join(dir, "text.txt"), []byte("foo bar\n"), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), grepToolInput("pattern", "foo"))
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestGrep_PureGoGitignoreFilter(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "app.go"), []byte("go content with test\n"), 0644)
 
-	g := &search.search.Grep{workDir: dir, hasRg: false}
+	g := &search.Grep{WorkDir: dir, HasRg: false}
 	result, err := g.Execute(context.Background(), grepToolInput("pattern", "test"))
 	if err != nil {
 		t.Fatal(err)
@@ -475,7 +475,7 @@ func TestGrep_PatternNotString(t *testing.T) {
 	dir := t.TempDir()
 	g := search.NewGrep(dir)
 	_, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": 123, // not a string
 		},
@@ -498,7 +498,7 @@ func TestGrep_IncludeSchemaKey(t *testing.T) {
 	g := search.NewGrep(dir)
 	// Use the schema-aligned "include" key (not the old "glob" key)
 	result, err := g.Execute(context.Background(), types.ToolInput{
-		Name: "search.search.Grep",
+		Name: "search.Grep",
 		Params: map[string]any{
 			"pattern": "main",
 			"include": "*.go",
@@ -519,7 +519,7 @@ func TestGrep_IncludeSchemaKey(t *testing.T) {
 
 func grepToolInput(key, value string) types.ToolInput {
 	return types.ToolInput{
-		Name: "search.search.search.Grep",
+		Name: "search.search.Grep",
 		Params: map[string]any{
 			key: value,
 		},

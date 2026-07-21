@@ -6,7 +6,7 @@ package metrics
 import (
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // ToolMetric captures the execution metrics for a single tool type.

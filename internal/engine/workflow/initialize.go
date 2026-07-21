@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/engine/session"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // runInitialize detects project type, initializes git if needed, and creates planning files.

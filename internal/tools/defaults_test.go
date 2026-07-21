@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/config"
+	"github.com/eshanized/M31A/internal/core/config"
 )
 
 func TestDefaultDispatcher_CreatesAllTools(t *testing.T) {

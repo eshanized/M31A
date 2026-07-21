@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/engine/tokens"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // --- SplitMessages edge cases ---

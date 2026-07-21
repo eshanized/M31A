@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/integrations/shell"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 var _ types.Tool = (*DevServer)(nil)

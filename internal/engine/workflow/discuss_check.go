@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // DiscussIssue represents a quality issue found in generated questions.

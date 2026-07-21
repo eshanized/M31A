@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Compile-time interface check
@@ -62,7 +62,7 @@ func (t *AskUserQuestion) ParameterSchema() string {
 
 var questionRequestIDCounter atomic.Int64
 
-func nextQuestionRequestID() int64 {
+func NextQuestionRequestID() int64 {
 	return questionRequestIDCounter.Add(1)
 }
 
@@ -116,7 +116,7 @@ func (t *AskUserQuestion) Execute(ctx context.Context, input types.ToolInput) (t
 		timeoutSecs = 300
 	}
 
-	reqID := nextQuestionRequestID()
+	reqID := NextQuestionRequestID()
 	respCh := make(chan types.QuestionResponse, 1)
 	t.pending.Store(reqID, respCh)
 

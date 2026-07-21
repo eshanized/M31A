@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/config"
-	"github.com/eshanized/M31A/internal/types"
+	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow/prompts"
 )
 

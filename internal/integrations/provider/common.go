@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // HTTPStatusError carries the HTTP status code from a provider response,

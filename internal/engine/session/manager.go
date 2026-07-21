@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/engine/coordinator"
-	m31errors "github.com/eshanized/M31A/internal/errors"
-	"github.com/eshanized/M31A/internal/types"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Manager provides session operations. Sessions are stored project-locally

@@ -12,7 +12,7 @@ import (
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // multiTurnMockProvider returns different responses based on the call count.

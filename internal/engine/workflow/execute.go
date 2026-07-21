@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/engine/decision"
-	m31errors "github.com/eshanized/M31A/internal/errors"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/engine/taskrunner"
-	m31types "github.com/eshanized/M31A/internal/types"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.
