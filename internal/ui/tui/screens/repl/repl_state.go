@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/history"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/tools"
@@ -18,7 +19,6 @@ import (
 	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"github.com/eshanized/M31A/internal/ui/tui/streaming"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // updatePlaceholder sets the textarea placeholder based on current state

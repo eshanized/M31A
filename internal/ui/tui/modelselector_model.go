@@ -6,11 +6,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/integrations/provider"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // modelSelectorLoadedMsg carries models fetched asynchronously.

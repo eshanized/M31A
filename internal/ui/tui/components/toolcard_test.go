@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 func TestNewToolCard_Bash(t *testing.T) {

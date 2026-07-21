@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/decision"
 	"github.com/eshanized/M31A/internal/engine/taskrunner"
-	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func (e *Engine) healTask(ctx context.Context, task m31types.Task, failure string, goal string) taskrunner.TaskResult {

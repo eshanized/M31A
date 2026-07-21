@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/tests/testutil/mocks"
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 )
 
 func TestEngine_RunPlan_Success(t *testing.T) {

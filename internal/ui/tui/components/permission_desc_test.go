@@ -3,8 +3,8 @@ package components
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools"
 )
 
 func TestGenerateDescription_Bash(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"time"
 
+	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/engine/session"
-	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // PhaseCoordinator orchestrates phase execution lifecycle including

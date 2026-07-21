@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/integrations/shell"
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/shell"
 )
 
 // readTaskFiles reads the content of files for a task.

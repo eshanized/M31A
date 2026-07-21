@@ -7,10 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/ui/tui/components"
-	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
+	"github.com/eshanized/M31A/internal/ui/tui/components"
+	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 // VerifyModel displays task verification results and provides self-healing.

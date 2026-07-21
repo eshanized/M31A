@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eshanized/M31A/tests/testutil"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/tests/testutil"
 )
 
 // ── getSharedTransport ───────────────────────────────────────────────────────

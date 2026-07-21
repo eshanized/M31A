@@ -1,8 +1,8 @@
 package tools
 
 import (
-	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // BuildToolDefs creates provider.ToolDefinition slices from a Dispatcher's

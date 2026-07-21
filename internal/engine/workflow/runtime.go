@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/integrations/shell"
-	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // SmokeTestResult holds the result of a single HTTP smoke test.

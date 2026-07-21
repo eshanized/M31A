@@ -9,20 +9,20 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/integrations/autodream"
 	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/rollback"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/integrations/autodream"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/history"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
 	"github.com/eshanized/M31A/internal/integrations/ledger"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/engine/rollback"
-	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/integrations/skills"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // CommandInfo describes a slash command for autocomplete and help.

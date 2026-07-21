@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/core/config"
-	ctxsrc "github.com/eshanized/M31A/internal/integrations/context"
 	"github.com/eshanized/M31A/internal/engine/tokens"
+	ctxsrc "github.com/eshanized/M31A/internal/integrations/context"
 )
 
 // ContextBuilder assembles system prompts and context for workflow phases.

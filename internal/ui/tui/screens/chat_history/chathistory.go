@@ -3,9 +3,9 @@ package chat_history
 import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // ChatHistoryModel displays all messages in the current session as a scrollable table.

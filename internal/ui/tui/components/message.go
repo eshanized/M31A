@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 // GutterWidth is the fixed width for the role gutter.

@@ -5,12 +5,12 @@ import (
 	"sync"
 
 	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/tools/subagent"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // Re-export SetVersion from search package

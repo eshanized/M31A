@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // loop is the per-subagent agentic conversation loop.

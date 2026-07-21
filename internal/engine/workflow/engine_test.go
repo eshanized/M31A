@@ -11,13 +11,13 @@ import (
 
 	"github.com/eshanized/M31A/internal/core/config"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/engine/session"
-	"github.com/eshanized/M31A/tests/testutil/mocks"
-	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 )
 
 func setupTestEngine(t *testing.T) (*Engine, func()) {

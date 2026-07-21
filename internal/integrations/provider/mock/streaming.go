@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // StreamingMockProvider is a test LLM provider that streams configurable chunks

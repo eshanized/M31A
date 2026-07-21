@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/integrations/shell"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/shell"
 )
 
 var _ types.Tool = (*DevServer)(nil)

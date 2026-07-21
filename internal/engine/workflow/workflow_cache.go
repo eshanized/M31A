@@ -3,8 +3,8 @@ package workflow
 import (
 	"sync"
 
-	"github.com/eshanized/M31A/internal/integrations/provider"
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // WorkflowCache manages all cached data previously embedded in WorkflowState.

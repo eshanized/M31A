@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/core/config"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/decision"
+	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
-	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // ============================================================================

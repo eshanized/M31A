@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/integrations/provider/nvidia"
 	"github.com/eshanized/M31A/internal/integrations/provider/openrouter"
 	"github.com/eshanized/M31A/internal/integrations/provider/zen"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // RegisterProvider creates and registers a provider client in the registry

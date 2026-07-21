@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/engine/workflow"
+	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 func newTestAppStateForWorkflow() *AppState {

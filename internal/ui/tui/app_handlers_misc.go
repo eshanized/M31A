@@ -6,9 +6,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 )
 
 // app_handlers_misc.go — miscellaneous event handling extracted from Update().

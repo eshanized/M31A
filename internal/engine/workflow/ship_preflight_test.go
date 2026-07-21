@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/integrations/git"
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/git"
 )
 
 func TestRunShipPreflight(t *testing.T) {

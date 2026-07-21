@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/tests/testutil/mocks"
-	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestEngine_RunExecute_NoTasks(t *testing.T) {

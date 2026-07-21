@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/engine/bisect"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
-	"github.com/eshanized/M31A/internal/engine/session"
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/bisect"
+	"github.com/eshanized/M31A/internal/engine/session"
 )
 
 // runVerify checks task outputs for correctness and triggers self-heal/bisect on failure.

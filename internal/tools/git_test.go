@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/integrations/git"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/git"
 )
 
 func TestGit_ArgValidation(t *testing.T) {

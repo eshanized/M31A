@@ -108,5 +108,3 @@ func TestWebFetch_Allows_PublicDNS(t *testing.T) {
 		t.Fatalf("public URL should not be blocked by SSRF, got: %v", err)
 	}
 }
-
-

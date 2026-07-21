@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/config"
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/ui/tui"
-	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // TestMain runs setup/teardown for the test suite.

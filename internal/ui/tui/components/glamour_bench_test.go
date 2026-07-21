@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/eshanized/M31A/internal/ui/tui/theme"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 // BenchmarkGlamourRender measures the raw Glamour render cost for various content sizes.

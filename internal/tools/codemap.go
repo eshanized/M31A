@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshanized/M31A/internal/integrations/codeintel"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/codeintel"
 )
 
 // Compile-time interface check

@@ -12,10 +12,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/core/config"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
-	"github.com/eshanized/M31A/internal/integrations/provider"
-	"github.com/eshanized/M31A/internal/engine/tokens"
-	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/tokens"
+	"github.com/eshanized/M31A/internal/integrations/provider"
+	"github.com/eshanized/M31A/internal/tools"
 )
 
 const agentMaxIterations = 50

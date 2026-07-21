@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eshanized/M31A/internal/engine/decision"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
-	"github.com/eshanized/M31A/internal/integrations/git"
-	"github.com/eshanized/M31A/internal/integrations/ledger"
+	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/engine/decision"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/engine/taskrunner"
-	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/git"
+	"github.com/eshanized/M31A/internal/integrations/ledger"
 )
 
 // ShipSummary holds the session completion summary.

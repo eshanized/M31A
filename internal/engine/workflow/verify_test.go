@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eshanized/M31A/tests/testutil/mocks"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/tokens"
 	"github.com/eshanized/M31A/internal/tools"
-	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 )
 
 func TestEngine_RunVerify_NoTasks(t *testing.T) {

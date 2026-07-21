@@ -25,8 +25,8 @@ func BenchmarkCascadingReplace(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
 			content := generateContent(size.lines, size.lineLen)
-oldString := "old"
-		newString := "new"
+			oldString := "old"
+			newString := "new"
 			// Insert target strings at various positions
 			content = insertTarget(content, "old", 0.25)
 			content = insertTarget(content, "old", 0.5)
@@ -41,8 +41,8 @@ oldString := "old"
 						switch strategy {
 						case "cascading":
 							_, _, _, err = fileops.CascadingReplace(content, oldString, newString, false, 0.8)
-					case "trimmed":
-						_, err = fileops.TrimmedReplace(content, strings.Split(content, "\n"), oldString, newString)
+						case "trimmed":
+							_, err = fileops.TrimmedReplace(content, strings.Split(content, "\n"), oldString, newString)
 						case "normalized":
 							lines := strings.Split(content, "\n")
 							_, err = fileops.NormalizedReplace(content, lines, oldString, newString)

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/eshanized/M31A/internal/core/config"
-	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/subagent"
 )
 
 // Compile-time interface check
