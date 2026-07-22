@@ -86,13 +86,20 @@ func (b *Bisect) Run(sessionStartHash, headHash string, checkFn func() bool) (re
 	}
 
 	// Bisect loop
+	const maxIterations = 50
+	iteration := 0
 	for {
+		iteration++
+		if iteration > maxIterations {
+			return nil, fmt.Errorf("bisect did not converge after %d iterations", maxIterations)
+		}
+
 		// Check if bisect is complete
 		logOut, logErr := b.run("bisect", "log")
 		if logErr != nil {
 			return nil, fmt.Errorf("bisect log: %w", logErr)
 		}
-		if strings.Contains(logOut, "first bad commit") {
+		if strings.Contains(logOut, "first bad commit") || strings.Contains(logOut, "first 'bad' commit") {
 			break
 		}
 
@@ -150,19 +157,22 @@ func parseBisectLog(log string) string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Standard format: "# first bad commit: [abc123] commit message"
-		if strings.HasPrefix(line, "# first bad commit:") {
-			rest := strings.TrimSpace(strings.TrimPrefix(line, "# first bad commit:"))
+		// Also handles quoted variant: "# first 'bad' commit: [abc123] ..."
+		if strings.Contains(line, "first") && strings.Contains(line, "bad") && strings.Contains(line, "commit:") {
 			// Extract from [hash] format
-			if strings.HasPrefix(rest, "[") {
-				closeIdx := strings.Index(rest, "]")
+			if idx := strings.Index(line, "["); idx >= 0 {
+				closeIdx := strings.Index(line[idx:], "]")
 				if closeIdx > 0 {
-					return rest[1:closeIdx]
+					return line[idx+1 : idx+closeIdx]
 				}
 			}
-			// Or just take the first word
-			parts := strings.Fields(rest)
-			if len(parts) > 0 {
-				return parts[0]
+			// Or just take the first word after "commit:"
+			partsAfter := strings.SplitAfter(line, "commit:")
+			if len(partsAfter) > 1 {
+				parts := strings.Fields(strings.TrimSpace(partsAfter[1]))
+				if len(parts) > 0 {
+					return parts[0]
+				}
 			}
 		}
 		// Some git versions use different format

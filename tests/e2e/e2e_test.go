@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/eshanized/M31A/internal/testutil/ci"
 )
 
 // TestBinary_Version verifies the binary prints version info.
@@ -50,6 +52,7 @@ func TestBinary_Prompt_NoProvider(t *testing.T) {
 
 // TestBinary_Prompt_NvidiaRealAPI tests real NVIDIA API call end-to-end.
 func TestBinary_Prompt_NvidiaRealAPI(t *testing.T) {
+	ci.SkipIfCI(t, "requires NVIDIA_API_KEY and network access not available in CI")
 	apiKey := os.Getenv("NVIDIA_API_KEY")
 	if apiKey == "" {
 		t.Skip("NVIDIA_API_KEY not set — skipping real API test")
@@ -74,6 +77,7 @@ func TestBinary_Prompt_NvidiaRealAPI(t *testing.T) {
 
 // TestBinary_Prompt_ZenRealAPI tests real Zen API call end-to-end.
 func TestBinary_Prompt_ZenRealAPI(t *testing.T) {
+	ci.SkipIfCI(t, "requires ZEN_API_KEY and network access not available in CI")
 	apiKey := os.Getenv("ZEN_API_KEY")
 	if apiKey == "" {
 		t.Skip("ZEN_API_KEY not set — skipping real API test")
@@ -103,6 +107,7 @@ func TestBinary_Prompt_ZenRealAPI(t *testing.T) {
 
 // TestBinary_Prompt_OpenRouterRealAPI tests real OpenRouter API call end-to-end.
 func TestBinary_Prompt_OpenRouterRealAPI(t *testing.T) {
+	ci.SkipIfCI(t, "requires OPENROUTER_API_KEY and network access not available in CI")
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
 	if apiKey == "" {
 		t.Skip("OPENROUTER_API_KEY not set — skipping real API test")

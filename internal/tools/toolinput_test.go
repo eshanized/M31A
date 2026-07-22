@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
 )
 
 func TestDispatcher_PermissionDenied_Typed(t *testing.T) {
@@ -94,8 +96,18 @@ func TestDispatcher_PermissionTimeout_Typed(t *testing.T) {
 
 func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
 	d := testDispatcher(t)
-	bash := NewBash(t.TempDir(), 1800, nil, nil)
-	d.Register(bash)
+	// Unregister the real Bash tool (which applies Landlock sandboxing that
+	// can hang the test process) and replace with a mock that returns output
+	// containing "hello" without subprocess execution.
+	d.Unregister("Bash")
+	mock := &mocks.MockTool{
+		Name_:      "Bash",
+		RiskLevel_: types.RiskDangerous,
+		ExecFunc: func(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+			return types.ToolResult{Output: "hello from mock"}, nil
+		},
+	}
+	d.Register(mock)
 
 	call := types.ToolCall{
 		ID:   "test-3",
@@ -134,7 +146,7 @@ func TestDispatcher_PermissionAllowed_NoError(t *testing.T) {
 		if r.res.Error != "" {
 			t.Fatalf("unexpected ToolResult.Error: %s", r.res.Error)
 		}
-		if !containsString(r.res.Output, "hello") {
+		if !strings.Contains(r.res.Output, "hello") {
 			t.Fatalf("expected output to contain 'hello', got: %s", r.res.Output)
 		}
 	case <-ctx.Done():

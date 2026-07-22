@@ -1126,6 +1126,12 @@ func TestFileRead_OffsetTruncated(t *testing.T) {
 
 func TestDispatcher_SyncTodoFromTasks_NilTodoWrite(t *testing.T) {
 	d := testDispatcher(t)
+	// The DefaultDispatcher creates TodoWrite with an empty sessionID.
+	// Set a valid sessionID before calling SyncTodoFromTasks to avoid
+	// "invalid session ID" validation error in writeTodoFile.
+	if d.todoWrite != nil {
+		d.todoWrite.SetSessionID("test-session")
+	}
 	err := d.SyncTodoFromTasks([]types.Task{})
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)

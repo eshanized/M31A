@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
@@ -98,22 +99,35 @@ func TestBisect_Successful(t *testing.T) {
 		return len(content) > 20 // "helper" version is longer
 	}
 
-	result, err := b.Run(sessionStartHash, headHash, checkFn)
-	if err != nil {
-		t.Fatalf("Run failed: %v", err)
+	// Wrap b.Run in a timeout guard to prevent indefinite hanging.
+	// Each git command has a 30s timeout via execGit, but the bisect loop
+	// runs multiple commands sequentially which can exceed the test timeout.
+	type runResult struct {
+		result *BisectResult
+		err    error
 	}
+	runCh := make(chan runResult, 1)
+	go func() {
+		r, e := b.Run(sessionStartHash, headHash, checkFn)
+		runCh <- runResult{r, e}
+	}()
 
-	if checkCalls == 0 {
-		t.Fatal("Expected checkFn to be called at least once")
-	}
-
-	// The bisect should have identified the offending commit
-	if result.OffendingCommit.ShortHash == "" {
-		t.Fatal("Expected non-empty offending commit")
-	}
-
-	if result.Diff == "" {
-		t.Fatal("Expected non-empty diff")
+	select {
+	case res := <-runCh:
+		if res.err != nil {
+			t.Fatalf("Run failed: %v", res.err)
+		}
+		if checkCalls == 0 {
+			t.Fatal("Expected checkFn to be called at least once")
+		}
+		if res.result.OffendingCommit.ShortHash == "" {
+			t.Fatal("Expected non-empty offending commit")
+		}
+		if res.result.Diff == "" {
+			t.Fatal("Expected non-empty diff")
+		}
+	case <-time.After(25 * time.Second):
+		t.Fatal("bisect Run timed out after 25 seconds — possible infinite loop")
 	}
 }
 
