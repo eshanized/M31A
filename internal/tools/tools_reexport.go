@@ -6,11 +6,13 @@ import (
 
 	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/tools/subagent"
+	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
 func init() {
@@ -105,3 +107,11 @@ func LevenshteinBuf(a, b string, prev, curr []int) int {
 func HumanSize(b int64) string {
 	return fileops.HumanSize(b)
 }
+
+// Re-export NewMetricsTool from search package
+func NewMetricsTool(collector *metrics.Collector) *search.MetricsTool {
+	return search.NewMetricsTool(collector)
+}
+
+// Re-export TodoItem type from todo package
+type TodoItem = todo.TodoItem
