@@ -67,4 +67,17 @@ Plans:
 
 **Out of scope:** New features, new tools, behavioral changes, external API changes.
 
-**Plans:** TBD (pending discussion and planning)
+**Plans:** 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Tools reorganization: move git, todo, codeanalysis, network tools to subdirectories
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-02-PLAN.md — TUI reorganization: group files by responsibility (core/, handlers/, input/, update/, routing/)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-03-PLAN.md — Import path updates and test consolidation: update all imports, consolidate tests to tests/ directory
