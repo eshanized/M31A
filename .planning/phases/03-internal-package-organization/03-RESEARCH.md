@@ -696,22 +696,22 @@ go build ./...
 
 **If this table is empty:** All claims in this research were verified or cited — no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Which tests need unexported access?**
-   - What we know: Some tests access unexported functions
-   - What's unclear: Exact list of tests requiring source location
-   - Recommendation: Analyze test files before moving to tests/ directory
+   - What we know: Some tests access unexported functions/types
+   - Resolution: Analyze each test file at execution time — tests referencing unexported identifiers (lowercase functions, unexported struct fields, package-level vars) stay with source files. Tests using only exported API move to tests/ directory. The executor runs `grep` for unexported access patterns before moving.
+   - Impact: Plan 03 Task 2 includes an analysis step per D-13
 
 2. **How to handle backward compatibility?**
-   - What we know: Import paths will change
-   - What's unclear: Whether to maintain re-exports for external consumers
-   - Recommendation: Use tools_reexport.go pattern for temporary compatibility
+   - What we know: Import paths will change for all consumers
+   - Resolution: Use tools_reexport.go to maintain re-exports from the root tools package. This provides a temporary compatibility shim so external consumers (if any) don't break immediately. Re-exports can be removed in a future cleanup phase.
+   - Impact: Plan 01 Task 2 updates tools_reexport.go with subpackage re-exports
 
 3. **What's the migration order?**
-   - What we know: Multiple directories need reorganization
-   - What's unclear: Optimal sequence to minimize breakage
-   - Recommendation: Start with tools/ (fewer dependencies), then TUI
+   - What we know: Multiple directories need reorganization (tools root, TUI root, screens, tests)
+   - Resolution: Wave 1 — tools root files to subdirectories (fewest downstream deps). Wave 2 — TUI root files: app_*.go to responsibility dirs, *_model.go to screens/, repl_*.go to screens/repl/. Wave 3 — import path updates across full codebase, test consolidation per D-11/D-12/D-13.
+   - Impact: Plan wave assignments follow this sequence
 
 ## Environment Availability
 
