@@ -13,6 +13,10 @@ import (
 	"github.com/eshanized/M31A/internal/tools/subagent"
 )
 
+func init() {
+	ai.NewDispatcher = NewDispatcher
+}
+
 // Re-export SetVersion from search package
 func SetVersion(v string) {
 	search.SetVersion(v)
