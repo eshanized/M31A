@@ -76,23 +76,23 @@ run-latest:
 ## test              — Run all tests with race detector and coverage
 test:
 	@printf "\033[0;32m[test]\033[0m Running tests with race detector...\n"
-	@$(GO) test -race -cover -coverprofile=$(COVER_OUT) ./...
+	@$(GO) test -race -cover -timeout 30s -coverprofile=$(COVER_OUT) ./...
 	@printf "\033[0;32m[test]\033[0m Coverage report: $(COVER_OUT)\n"
 
 ## test-fast         — Run tests without race detector (faster)
 test-fast:
 	@printf "\033[0;32m[test]\033[0m Running tests (fast mode)...\n"
-	@$(GO) test -cover ./...
+	@$(GO) test -timeout 30s -cover ./...
 
 ## test-verbose      — Run tests with verbose output
 test-verbose:
 	@printf "\033[0;32m[test]\033[0m Running tests (verbose)...\n"
-	@$(GO) test -v -race -cover ./...
+	@$(GO) test -v -race -cover -timeout 30s ./...
 
 ## test-specific     — Run specific test (e.g., make test-specific TEST=TestReplModel)
 test-specific:
 	@printf "\033[0;32m[test]\033[0m Running: $(TEST)\n"
-	@$(GO) test -v -race -run $(TEST) ./...
+	@$(GO) test -v -race -timeout 30s -run $(TEST) ./...
 
 ## bench             — Run benchmarks
 bench:
