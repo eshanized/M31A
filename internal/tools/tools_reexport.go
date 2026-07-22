@@ -92,3 +92,16 @@ func CheckDangerousCommand(command string, additionalBlocked []string, additiona
 func ScrubEnvironment(cmd *exec.Cmd) {
 	toolsExec.ScrubEnvironment(cmd)
 }
+
+// Re-export utility functions from fileops for backward compatibility
+func LevenshteinDistance(a, b string) int {
+	return fileops.LevenshteinDistance(a, b)
+}
+
+func LevenshteinBuf(a, b string, prev, curr []int) int {
+	return fileops.LevenshteinBuf(a, b, prev, curr)
+}
+
+func HumanSize(b int64) string {
+	return fileops.HumanSize(b)
+}

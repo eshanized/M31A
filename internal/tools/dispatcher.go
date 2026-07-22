@@ -15,8 +15,10 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
+	"github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/subagent"
+	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
 type Dispatcher struct {
@@ -26,8 +28,8 @@ type Dispatcher struct {
 	requestCh         chan PermissionRequest
 	responseCh        chan PermissionResponse
 	pendingResponses  sync.Map // map[int64]chan PermissionResponse — per-request routing
-	todoWrite         *TodoWrite
-	todoRead          *TodoRead
+	todoWrite         *todo.TodoWrite
+	todoRead          *todo.TodoRead
 	questionReqCh     chan types.QuestionRequest
 	questionRespCh    chan types.QuestionResponse
 	pendingQuestions  sync.Map // map[int64]chan types.QuestionResponse — per-request routing
@@ -58,7 +60,7 @@ type Dispatcher struct {
 	// C-12: sync.Once prevents TOCTOU race in Stop().
 	stopOnce sync.Once
 	// outputStore bounds tool output to prevent context window exhaustion.
-	outputStore *OutputStore
+	outputStore *exec.OutputStore
 	// collector captures tool execution metrics (call count, success/fail, duration).
 	collector *metrics.Collector
 	// persistentPerms handles saving permission rules to disk.
@@ -397,7 +399,7 @@ func (d *Dispatcher) SetSessionID(id string) {
 }
 
 // SetTodoWriteCallback sets the callback invoked after successful TodoWrite tool executions.
-func (d *Dispatcher) SetTodoWriteCallback(fn func(items []TodoItem)) {
+func (d *Dispatcher) SetTodoWriteCallback(fn func(items []todo.TodoItem)) {
 	if d.todoWrite != nil {
 		d.todoWrite.SetOnUpdate(fn)
 	}
@@ -413,7 +415,7 @@ func (d *Dispatcher) SyncTodoFromTasks(tasks []types.Task) error {
 }
 
 // SetOutputStore configures the output store for bounding tool output.
-func (d *Dispatcher) SetOutputStore(store *OutputStore) {
+func (d *Dispatcher) SetOutputStore(store *exec.OutputStore) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.outputStore = store

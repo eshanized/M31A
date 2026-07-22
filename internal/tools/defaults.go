@@ -7,9 +7,13 @@ import (
 
 	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/tools/ai"
+	"github.com/eshanized/M31A/internal/tools/codeanalysis"
 	"github.com/eshanized/M31A/internal/tools/exec"
 	"github.com/eshanized/M31A/internal/tools/fileops"
+	"github.com/eshanized/M31A/internal/tools/git"
+	"github.com/eshanized/M31A/internal/tools/network"
 	"github.com/eshanized/M31A/internal/tools/search"
+	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
 func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (*Dispatcher, error) {
@@ -42,7 +46,7 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 			maxBytes = toolsCfg.OutputMaxBytes
 		}
 	}
-	store := NewOutputStore(outputDir, maxLines, maxBytes)
+	store := exec.NewOutputStore(outputDir, maxLines, maxBytes)
 	d.SetOutputStore(store)
 	// Best-effort cleanup of old output files on startup
 	_, _ = store.Cleanup(OutputRetentionDays * 24 * time.Hour)
@@ -118,28 +122,28 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 	}
 
 	// Register todo tools (still at root)
-	todo := NewTodoWrite(sessionsDir, "")
-	d.todoWrite = todo
-	if err := d.Register(todo); err != nil {
+	t := todo.NewTodoWrite(sessionsDir, "")
+	d.todoWrite = t
+	if err := d.Register(t); err != nil {
 		return nil, err
 	}
-	todoRead := NewTodoRead(sessionsDir, "")
-	d.todoRead = todoRead
-	if err := d.Register(todoRead); err != nil {
+	tr := todo.NewTodoRead(sessionsDir, "")
+	d.todoRead = tr
+	if err := d.Register(tr); err != nil {
 		return nil, err
 	}
 
 	// Register remaining root tools
-	if err := d.Register(NewCodeMap(workDir)); err != nil {
+	if err := d.Register(codeanalysis.NewCodeMap(workDir)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewCodeComplexity(workDir, nil)); err != nil {
+	if err := d.Register(codeanalysis.NewCodeComplexity(workDir, nil)); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewHTTPCheck()); err != nil {
+	if err := d.Register(network.NewHTTPCheck()); err != nil {
 		return nil, err
 	}
-	if err := d.Register(NewGit(workDir)); err != nil {
+	if err := d.Register(git.NewGit(workDir)); err != nil {
 		return nil, err
 	}
 	return d, nil

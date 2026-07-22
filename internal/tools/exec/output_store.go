@@ -1,4 +1,4 @@
-package tools
+package exec
 
 import (
 	"fmt"
@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/eshanized/M31A/internal/core/types"
 )
 
 // OutputStore bounds tool output to prevent single tool calls from consuming
@@ -76,7 +78,7 @@ func (s *OutputStore) saveFull(output string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := os.MkdirAll(s.baseDir, DirPermission); err != nil {
+	if err := os.MkdirAll(s.baseDir, types.DirPermission); err != nil {
 		return "", fmt.Errorf("create output store dir: %w", err)
 	}
 

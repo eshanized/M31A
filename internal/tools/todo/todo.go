@@ -1,4 +1,4 @@
-package tools
+package todo
 
 import (
 	"context"
@@ -257,7 +257,7 @@ func (t *TodoWrite) writeTodoFile(items []TodoItem) error {
 		return fmt.Errorf("%w: invalid session ID: must be alphanumeric", m31errors.ErrToolExecution)
 	}
 	sessionDir := filepath.Join(t.sessionsDir, sid)
-	if err := os.MkdirAll(sessionDir, DirPermission); err != nil {
+	if err := os.MkdirAll(sessionDir, types.DirPermission); err != nil {
 		return fmt.Errorf("%w: cannot create session directory: %w", m31errors.ErrToolExecution, err)
 	}
 
@@ -269,7 +269,7 @@ func (t *TodoWrite) writeTodoFile(items []TodoItem) error {
 		return fmt.Errorf("%w: cannot generate temp name: %w", m31errors.ErrToolExecution, err)
 	}
 	tmpPath := filepath.Join(sessionDir, ".m31a_tmp_"+hex.EncodeToString(randBytes))
-	if err := os.WriteFile(tmpPath, content, FilePermission); err != nil {
+	if err := os.WriteFile(tmpPath, content, types.FilePermission); err != nil {
 		return fmt.Errorf("%w: cannot write temp file: %w", m31errors.ErrToolExecution, err)
 	}
 	if err := os.Rename(tmpPath, todoPath); err != nil {
