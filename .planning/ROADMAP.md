@@ -46,9 +46,9 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Test hanging investigation + timeout infrastructure (Makefile timeouts, testtimeout package, full test suite run)
-- [ ] 02-02-PLAN.md — CI pipeline fixes (GitHub Actions timeouts, Go version pinning, module caching, artifact collection)
+- [x] 02-01-PLAN.md — Test hanging investigation + timeout infrastructure (Makefile timeouts, testtimeout package, full test suite run)
+- [x] 02-02-PLAN.md — CI pipeline fixes (GitHub Actions timeouts, Go version pinning, module caching, artifact collection)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-03-PLAN.md — Fix hanging tests + CI detection (resolve identified issues, add isCI() helper)
+- [x] 02-03-PLAN.md — Fix hanging tests + CI detection (resolve identified issues, add isCI() helper)
