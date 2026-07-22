@@ -36,4 +36,8 @@ Plans:
 
 **Out of scope:** New features, new tools, new providers, behavioral changes.
 
-**Plans:** 0 plans
+**Plans:** 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Test hanging investigation + timeout infrastructure (Makefile timeouts, testtimeout package, full test suite run)
+- [ ] 02-02-PLAN.md — CI pipeline fixes (GitHub Actions timeouts, Go version pinning, module caching, artifact collection)
