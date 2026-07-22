@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/fileops"
 )
 
 func TestFileDelete_Execute_DeleteWithBackup(t *testing.T) {
@@ -93,10 +94,10 @@ func TestFileDelete_PruneBackups(t *testing.T) {
 	_ = NewFileDelete(dir, backupDir)
 
 	// Create multiple backups to test pruning
-	for i := 0; i < MaxBackupsPerFile+2; i++ {
+	for i := 0; i < fileops.MaxBackupsPerFile+2; i++ {
 		os.WriteFile(filepath.Join(backupDir, "test.txt.deleted.2024010100000"+string(rune('0'+i))), []byte("x"), 0o644)
 	}
 
 	// pruneBackups should not panic
-	PruneBackupsByPrefix(backupDir, "test.txt.deleted", MaxBackupsPerFile)
+	fileops.PruneBackupsByPrefix(backupDir, "test.txt.deleted", fileops.MaxBackupsPerFile)
 }

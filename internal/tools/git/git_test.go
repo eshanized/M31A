@@ -1,4 +1,4 @@
-package tools
+package git
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
-	"github.com/eshanized/M31A/internal/integrations/git"
+	intgit "github.com/eshanized/M31A/internal/integrations/git"
 )
 
 func TestGit_ArgValidation(t *testing.T) {
@@ -99,7 +99,7 @@ func TestGit_ExtractCommitMessage(t *testing.T) {
 func setupTestGit(t *testing.T) (*Git, string) {
 	t.Helper()
 	dir := t.TempDir()
-	g := git.New(dir)
+	g := intgit.New(dir)
 	g.Init()
 	g.ConfigUser("Test User", "test@example.com")
 	return NewGit(dir), dir

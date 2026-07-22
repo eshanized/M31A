@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
 func TestParameterSchema_AllTools(t *testing.T) {
@@ -20,7 +22,7 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		{"Grep", NewGrep(".").ParameterSchema()},
 		{"Edit", NewEdit(".", ".").ParameterSchema()},
 		{"WebFetch", NewWebFetch(".", 3, nil).ParameterSchema()},
-		{"TodoWrite", NewTodoWrite(".", "test").ParameterSchema()},
+		{"TodoWrite", todo.NewTodoWrite(".", "test").ParameterSchema()},
 	}
 
 	for _, s := range schemas {
