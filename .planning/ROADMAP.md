@@ -52,3 +52,19 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 02-03-PLAN.md — Fix hanging tests + CI detection (resolve identified issues, add isCI() helper)
+
+## Phase 3: Internal Package Organization
+
+**Goal:** Reorganize `internal/tools/` and `internal/ui/tui/` directories for better maintainability, clearer boundaries, and professional code structure.
+
+**Scope:**
+
+- Audit current flat structure of `internal/tools/` (71 files) and `internal/ui/tui/` (182 files)
+- Group related files into logical subpackages
+- Establish clear package boundaries and responsibilities
+- Ensure import paths remain clean and logical
+- Verify all tests pass after reorganization
+
+**Out of scope:** New features, new tools, behavioral changes, external API changes.
+
+**Plans:** TBD (pending discussion and planning)
