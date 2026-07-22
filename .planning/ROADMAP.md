@@ -1,9 +1,11 @@
 # Roadmap — M31A
 
 ## Phase 1: Repo Reorganization
+
 **Goal:** Reorganize files and complete repo structure as a professional-grade open source project.
 
 **Scope:**
+
 - Audit current directory layout against Go project conventions
 - Reorganize internal packages for clarity and maintainability
 - Consolidate scattered root-level files (reports, docs) into proper locations
@@ -17,6 +19,7 @@
 **Plans:** 6 plans
 
 Plans:
+
 - [ ] 01-01-PLAN.md — Foundation layer: move types, errors, config, fileutil, retry to core/ and infrastructure/
 - [ ] 01-02-PLAN.md — Engine layer: move workflow, taskrunner, bisect, rollback, session, compaction, narrative, decision, tokens, coordinator to engine/
 - [ ] 01-03-PLAN.md — Integrations layer: move provider, git, keychain, shell, context, history, ledger, metrics, logging, log, autodream, arbitrage, codeintel, skills to integrations/
@@ -25,9 +28,11 @@ Plans:
 - [ ] 01-06-PLAN.md — Root cleanup: test consolidation, doc archival, backup deletion, final test
 
 ## Phase 2: Fix Test Hanging and CI Issues
+
 **Goal:** Investigate and resolve test hanging issues and CI pipeline problems to ensure reliable test execution.
 
 **Scope:**
+
 - Deep investigation of test hanging root causes
 - CI pipeline fixes and reliability improvements
 - Test reliability and stability improvements
@@ -36,8 +41,14 @@ Plans:
 
 **Out of scope:** New features, new tools, new providers, behavioral changes.
 
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 02-01-PLAN.md — Test hanging investigation + timeout infrastructure (Makefile timeouts, testtimeout package, full test suite run)
 - [ ] 02-02-PLAN.md — CI pipeline fixes (GitHub Actions timeouts, Go version pinning, module caching, artifact collection)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-03-PLAN.md — Fix hanging tests + CI detection (resolve identified issues, add isCI() helper)
