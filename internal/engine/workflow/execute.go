@@ -568,7 +568,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		e.toolCallsSinceLastCompact += toolCallCount
 		if e.cfg != nil && e.cfg.Compaction.Proactive && e.toolCallsSinceLastCompact >= e.cfg.Compaction.ToolCallsThreshold {
 			e.toolCallsSinceLastCompact = 0
-			e.proactiveCompactCheck(messages) //nolint:errcheck // compaction has side effects (emit, log); return value unused here
+			messages = e.proactiveCompactCheck(messages)
 		}
 
 		if toolErr {

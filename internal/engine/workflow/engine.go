@@ -857,7 +857,10 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	// Reset tool call counter for proactive compaction tracking
 	e.toolCallsSinceLastCompact = 0
 
-	e.stateMachine.SetPhase(phase)
+	from := e.stateMachine.CurrentPhase()
+	if err := e.stateMachine.Transition(from, phase); err != nil {
+		return nil, fmt.Errorf("phase transition to %s: %w", phase, err)
+	}
 
 	var result *PhaseResult
 
