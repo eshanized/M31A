@@ -284,7 +284,13 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 
 	err := cmd.Wait()
 	close(cmdDone)
+
+	// Close write ends AFTER child exits so readers see EOF
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
 	wg.Wait()
+	slog.Debug("bash command wg done")
 
 	elapsed := time.Since(start).Milliseconds()
 

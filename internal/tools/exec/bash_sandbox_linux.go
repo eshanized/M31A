@@ -17,9 +17,16 @@ import (
 // It uses Landlock (when available) to restrict filesystem access and scrubs
 // sensitive environment variables. On kernels before 5.13 or when Landlock is
 // unavailable, only environment scrubbing is applied (graceful degradation).
+// Set M31A_SKIP_LANDLOCK=1 to disable Landlock (useful for testing).
 func applyBashSandbox(cmd *exec.Cmd, workDir string) error {
 	// Scrub sensitive environment variables from the subprocess
 	ScrubEnvironment(cmd)
+
+	// Skip Landlock if explicitly disabled (e.g., for testing)
+	if os.Getenv("M31A_SKIP_LANDLOCK") == "1" {
+		slog.Debug("landlock disabled via M31A_SKIP_LANDLOCK")
+		return nil
+	}
 
 	// Attempt Landlock filesystem restriction
 	if err := applyLandlock(cmd, workDir); err != nil {
