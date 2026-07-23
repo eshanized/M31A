@@ -156,8 +156,20 @@ func TestBinary_Prompt_Timeout(t *testing.T) {
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "m31a")
+	// Find project root by looking for go.mod
+	dir := mustGetwd(t)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find project root (go.mod)")
+		}
+		dir = parent
+	}
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/m31a")
-	cmd.Dir = filepath.Join(mustGetwd(t), ".")
+	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build failed: %v\n%s", err, string(out))

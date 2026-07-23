@@ -294,18 +294,6 @@ func TruncateMiddle(s string, maxLen int) string {
 	return s[:half] + "…" + s[len(s)-(maxLen-half-1):]
 }
 
-// formatSI formats an integer with SI suffix (K, M).
-func formatSI(n int) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	case n >= 1_000:
-		return fmt.Sprintf("%.0fK", float64(n)/1_000)
-	default:
-		return fmt.Sprintf("%d", n)
-	}
-}
-
 // formatDurationMs formats a duration in milliseconds as a human-readable string.
 func FormatDurationMs(ms int64) string {
 	if ms < 0 {

@@ -194,27 +194,3 @@ type PhaseTransitionMsg struct {
 	From     types.WorkflowPhase
 	To       types.WorkflowPhase
 }
-
-// phaseTransitionSummary generates a human-readable summary of what was accomplished in a phase.
-func phaseTransitionSummary(phase types.WorkflowPhase, tasks []types.Task) string {
-	switch phase {
-	case types.PhaseDiscuss:
-		return "Project requirements gathered and clarified."
-	case types.PhasePlan:
-		return fmt.Sprintf("Plan generated with %d tasks.", len(tasks))
-	case types.PhaseExecute:
-		done := 0
-		for _, t := range tasks {
-			if t.Status == types.StatusDone {
-				done++
-			}
-		}
-		return fmt.Sprintf("Execution complete: %d/%d tasks done.", done, len(tasks))
-	case types.PhaseVerify:
-		return "Verification checks passed."
-	case types.PhaseRuntime:
-		return "Runtime smoke tests completed."
-	default:
-		return ""
-	}
-}

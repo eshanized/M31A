@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/ui/tui/components"
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 )
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -389,4 +390,69 @@ func (m *ReplModel) renderSlashSuggestions(width int) string {
 		Render(strings.Join(lines, "\n"))
 
 	return box
+}
+
+// RenderMentionSuggestions renders the @-mention autocomplete dropdown.
+func RenderMentionSuggestions(m *ReplModel, width int) string {
+	t := m.theme
+	var lines []string
+
+	for i, entry := range m.mentionEntries {
+		icon := "  "
+		if entry.IsDir {
+			icon = "▸ "
+		}
+
+		pathStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
+		atStyle := lipgloss.NewStyle().Foreground(t.Brand).Bold(true)
+		metaStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+
+		if i == m.mentionSelected {
+			bg := t.Brand
+			nameStyle = nameStyle.Background(bg).Foreground(t.Background)
+			pathStyle = pathStyle.Background(bg).Foreground(t.Background)
+			atStyle = atStyle.Background(bg).Foreground(t.Background)
+			metaStyle = metaStyle.Background(bg).Foreground(t.Background)
+		}
+
+		dir := filepath.Dir(entry.Path)
+		dirPart := ""
+		if dir != "." {
+			dirPart = pathStyle.Render(dir + string(filepath.Separator))
+		}
+
+		metaPart := ""
+		if !entry.IsDir {
+			lineCount := 0
+			if m.mentionCompleter != nil {
+				lineCount = m.mentionCompleter.GetLineCount(&entry)
+			}
+			if lineCount > 0 {
+				metaPart = metaStyle.Render(fmt.Sprintf("  %dL", lineCount))
+			} else if entry.Size > 0 {
+				metaPart = metaStyle.Render(fmt.Sprintf("  %s", humanSize(entry.Size)))
+			}
+		}
+
+		name := nameStyle.Render(icon + entry.DisplayName)
+		at := atStyle.Render("@")
+		line := "  " + at + dirPart + name + metaPart
+
+		if lipgloss.Width(line) > width-4 {
+			line = tuitypes.TruncateWithEllipsis(line, width-4)
+		}
+		lines = append(lines, line)
+	}
+
+	hintStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	footer := hintStyle.Render("  tab select · ↑↓ navigate · esc cancel")
+
+	content := strings.Join(lines, "\n") + "\n" + footer
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Brand).
+		Width(width - 2).
+		Render(content)
 }

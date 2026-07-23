@@ -25,8 +25,6 @@ type PlanModel struct {
 	provider     string
 	estCost      float64
 	costEstimate string
-	timeEstimate string
-	sessionID    string
 	width        int
 	height       int
 	viewport     viewport.Model

@@ -204,7 +204,7 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 		}
 		return types.ToolResult{}, fmt.Errorf("%w: request failed: %w", errors.ErrToolExecution, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -278,9 +278,9 @@ func (t *WebFetch) ResolveAndCache(ctx context.Context, host string) ([]net.IP, 
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := net.LookupIP(host)
+	addrs, err := t.lookupIPWithContext(ctx2, host)
 	if err != nil {
 		return nil, err
 	}
@@ -294,24 +294,28 @@ func (t *WebFetch) ResolveAndCache(ctx context.Context, host string) ([]net.IP, 
 	return addrs, nil
 }
 
+func (t *WebFetch) lookupIPWithContext(ctx context.Context, host string) ([]net.IP, error) {
+	type result struct {
+		ips []net.IP
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		ips, err := net.LookupIP(host)
+		ch <- result{ips: ips, err: err}
+	}()
+	select {
+	case r := <-ch:
+		return r.ips, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func toIPAddr(ips []net.IP) []net.IPAddr {
 	addrs := make([]net.IPAddr, len(ips))
 	for i, ip := range ips {
 		addrs[i] = net.IPAddr{IP: ip}
 	}
 	return addrs
-}
-func isRetryableError(err error) bool {
-	errStr := err.Error()
-	if strings.Contains(errStr, "request failed") && !strings.Contains(errStr, "HTTP 4") {
-		return true
-	}
-	if strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "EOF") ||
-		strings.Contains(errStr, "i/o timeout") {
-		return true
-	}
-	return false
 }

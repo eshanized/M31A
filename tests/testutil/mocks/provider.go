@@ -95,11 +95,11 @@ func (m *MockProvider) ChatCompletionStream(_ context.Context, _ provider.ChatRe
 				if input, ok := toolCallJSON["input"]; ok {
 					inputBytes, _ := json.Marshal(input)
 					toolCallChunk = &types.StreamChunk{
-						Type:      "tool_call",
-						Index:     0,
+						Type:       "tool_call",
+						Index:      0,
 						ToolCallID: "call_test_1",
-						ToolName:  name,
-						ToolInput: string(inputBytes),
+						ToolName:   name,
+						ToolInput:  string(inputBytes),
 					}
 				}
 			}

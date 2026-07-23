@@ -560,14 +560,6 @@ func (fr *FirstRunModel) renderProviderSelect() string {
 	return strings.Join(lines, "\n")
 }
 
-// plural returns "s" when n != 1, for use in count-bearing status strings.
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
-}
-
 // renderProviderSummary renders a compact count line: "N selected ────────".
 func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
 	t := fr.theme
@@ -587,17 +579,6 @@ func (fr *FirstRunModel) renderProviderSummary(innerW int) string {
 	rule := lipgloss.NewStyle().Foreground(t.Border).
 		Render(strings.Repeat("─", innerW-lipgloss.Width(label)-2))
 	return label + " " + rule
-}
-
-// lookupProviderInfo returns catalog metadata for a provider ID, falling back
-// to a minimal entry if the ID isn't in the catalog.
-func lookupProviderInfo(id string) providerInfo {
-	for _, p := range providerCatalog {
-		if p.ID == id {
-			return p
-		}
-	}
-	return providerInfo{ID: id, Name: id, Icon: "◆"}
 }
 
 func (fr *FirstRunModel) renderProviderCard(p providerInfo, selected bool, w int) string {

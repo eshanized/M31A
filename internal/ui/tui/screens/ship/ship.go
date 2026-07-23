@@ -37,7 +37,6 @@ type ShipSummary struct {
 type ShipModel struct {
 	summary       ShipSummary
 	theme         theme.Theme
-	sessionID     string
 	width         int
 	height        int
 	demonstration string

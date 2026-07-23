@@ -101,7 +101,7 @@ func TestExecuteEmptyState(t *testing.T) {
 }
 
 func TestVerifyEmptyState(t *testing.T) {
-es := components.VerifyEmptyState(theme.Dark(), 80, 24)
+	es := components.VerifyEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("VerifyEmptyState.Icon should not be empty")
 	}
@@ -115,7 +115,7 @@ es := components.VerifyEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestShipEmptyState(t *testing.T) {
-es := components.ShipEmptyState(theme.Dark(), 80, 24)
+	es := components.ShipEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("ShipEmptyState.Icon should not be empty")
 	}
@@ -129,7 +129,7 @@ es := components.ShipEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestDiscussEmptyState(t *testing.T) {
-es := components.DiscussEmptyState(theme.Dark(), 80, 24)
+	es := components.DiscussEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DiscussEmptyState.Icon should not be empty")
 	}
@@ -143,7 +143,7 @@ es := components.DiscussEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestRuntimeEmptyState(t *testing.T) {
-es := components.RuntimeEmptyState(theme.Dark(), 80, 24)
+	es := components.RuntimeEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("RuntimeEmptyState.Icon should not be empty")
 	}
@@ -157,7 +157,7 @@ es := components.RuntimeEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestSettingsEmptyState(t *testing.T) {
-es := components.SettingsEmptyState(theme.Dark(), 80, 24)
+	es := components.SettingsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("SettingsEmptyState.Icon should not be empty")
 	}
@@ -171,7 +171,7 @@ es := components.SettingsEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestLedgerEmptyState(t *testing.T) {
-es := components.LedgerEmptyState(theme.Dark(), 80, 24)
+	es := components.LedgerEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("LedgerEmptyState.Icon should not be empty")
 	}
@@ -185,7 +185,7 @@ es := components.LedgerEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestMetricsEmptyState(t *testing.T) {
-es := components.MetricsEmptyState(theme.Dark(), 80, 24)
+	es := components.MetricsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("MetricsEmptyState.Icon should not be empty")
 	}
@@ -199,7 +199,7 @@ es := components.MetricsEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestRollbackEmptyState(t *testing.T) {
-es := components.RollbackEmptyState(theme.Dark(), 80, 24)
+	es := components.RollbackEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("RollbackEmptyState.Icon should not be empty")
 	}
@@ -213,7 +213,7 @@ es := components.RollbackEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestBisectEmptyState(t *testing.T) {
-es := components.BisectEmptyState(theme.Dark(), 80, 24)
+	es := components.BisectEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("BisectEmptyState.Icon should not be empty")
 	}
@@ -227,7 +227,7 @@ es := components.BisectEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestDecisionsEmptyState(t *testing.T) {
-es := components.DecisionsEmptyState(theme.Dark(), 80, 24)
+	es := components.DecisionsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DecisionsEmptyState.Icon should not be empty")
 	}
@@ -241,7 +241,7 @@ es := components.DecisionsEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestSubagentsEmptyState(t *testing.T) {
-es := components.SubagentsEmptyState(theme.Dark(), 80, 24)
+	es := components.SubagentsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("SubagentsEmptyState.Icon should not be empty")
 	}
@@ -255,7 +255,7 @@ es := components.SubagentsEmptyState(theme.Dark(), 80, 24)
 }
 
 func TestDiffEmptyState(t *testing.T) {
-es := components.DiffEmptyState(theme.Dark(), 80, 24)
+	es := components.DiffEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DiffEmptyState.Icon should not be empty")
 	}

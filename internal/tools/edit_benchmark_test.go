@@ -114,7 +114,7 @@ func BenchmarkCascadingReplace_Strategies(b *testing.B) {
 func generateContent(lines, lineLen int) string {
 	var b strings.Builder
 	for i := 0; i < lines; i++ {
-		b.WriteString(fmt.Sprintf("line %05d: %s\n", i, strings.Repeat("x", lineLen)))
+		fmt.Fprintf(&b, "line %05d: %s\n", i, strings.Repeat("x", lineLen))
 	}
 	return b.String()
 }

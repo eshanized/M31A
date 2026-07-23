@@ -19,7 +19,6 @@ import (
 type ExecuteModel struct {
 	tasks     []types.Task
 	theme     theme.Theme
-	sessionID string
 	width     int
 	height    int
 	viewport  viewport.Model

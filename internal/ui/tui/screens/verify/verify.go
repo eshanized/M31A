@@ -20,7 +20,6 @@ type VerifyModel struct {
 	tasks       []types.Task
 	results     map[int]workflow.VerificationResult
 	theme       theme.Theme
-	sessionID   string
 	width       int
 	height      int
 	viewport    viewport.Model

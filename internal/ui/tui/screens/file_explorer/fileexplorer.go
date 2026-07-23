@@ -1,8 +1,6 @@
 package file_explorer
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
@@ -83,62 +81,4 @@ func (fe *FileExplorerModel) View() string {
 		Theme: t,
 	}.Render()
 	return strings.Join([]string{"", title, "", fe.tree.View(), "", footer}, "\n")
-}
-
-// buildFileTree recursively builds a file tree from the given directory.
-// maxDepth controls how deep to recurse (0 = just the root).
-func buildFileTree(rootPath string, depth, maxDepth int) *components.FileNode {
-	info, err := os.Stat(rootPath)
-	if err != nil {
-		return nil
-	}
-
-	node := &components.FileNode{
-		Name:  filepath.Base(rootPath),
-		Path:  rootPath,
-		IsDir: info.IsDir(),
-		Depth: depth,
-	}
-
-	if !info.IsDir() || depth >= maxDepth {
-		return node
-	}
-
-	entries, err := os.ReadDir(rootPath)
-	if err != nil {
-		return node
-	}
-
-	// Separate dirs and files, sort alphabetically
-	var dirs, files []os.DirEntry
-	for _, e := range entries {
-		name := e.Name()
-		// Skip hidden files and common non-project directories
-		if strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules" {
-			continue
-		}
-		if e.IsDir() {
-			dirs = append(dirs, e)
-		} else {
-			files = append(files, e)
-		}
-	}
-
-	// Add directories first, then files
-	for _, d := range dirs {
-		child := buildFileTree(filepath.Join(rootPath, d.Name()), depth+1, maxDepth)
-		if child != nil {
-			node.Children = append(node.Children, child)
-		}
-	}
-	for _, f := range files {
-		node.Children = append(node.Children, &components.FileNode{
-			Name:  f.Name(),
-			Path:  filepath.Join(rootPath, f.Name()),
-			IsDir: false,
-			Depth: depth + 1,
-		})
-	}
-
-	return node
 }
