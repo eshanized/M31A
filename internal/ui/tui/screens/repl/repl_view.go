@@ -2,10 +2,11 @@ package repl
 
 import (
 	"fmt"
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/ui/tui/components"

@@ -3,11 +3,12 @@ package settings
 import (
 	"context"
 	"fmt"
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"

@@ -2,8 +2,9 @@ package session_detail
 
 import (
 	"fmt"
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"strings"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

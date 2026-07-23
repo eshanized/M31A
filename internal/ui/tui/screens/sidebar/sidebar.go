@@ -2,10 +2,11 @@ package sidebar
 
 import (
 	"context"
-	"github.com/eshanized/M31A/internal/ui/tui"
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/ui/tui"
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/core/types"

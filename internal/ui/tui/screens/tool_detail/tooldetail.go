@@ -1,8 +1,9 @@
 package tool_detail
 
 import (
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"strings"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"

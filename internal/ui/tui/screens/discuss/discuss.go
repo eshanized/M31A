@@ -2,9 +2,10 @@ package discuss
 
 import (
 	"fmt"
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"strings"
 	"time"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"

@@ -1,8 +1,9 @@
 package notification
 
 import (
-	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"strings"
+
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/ui/tui/components"

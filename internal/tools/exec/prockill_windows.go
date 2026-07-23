@@ -2,11 +2,6 @@
 
 package exec
 
-import (
-	"strconv"
-	"syscall"
-)
-
 // getProcessGroup is not applicable on Windows.
 // Returns 0, nil (no process group support).
 func getProcessGroup(pid int) (int, error) {
