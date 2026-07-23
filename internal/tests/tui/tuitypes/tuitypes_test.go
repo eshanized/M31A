@@ -1,6 +1,7 @@
-package tuitypes
+package tuitypes_test
 
 import (
+	"github.com/eshanized/M31A/internal/ui/tui/tuitypes"
 	"os"
 	"testing"
 	"time"
@@ -11,82 +12,82 @@ import (
 
 func TestScreen_Label(t *testing.T) {
 	tests := []struct {
-		screen Screen
+		screen tuitypes.Screen
 		label  string
 	}{
-		{ScreenFirstRun, "Setup"},
-		{ScreenREPL, "Chat"},
-		{ScreenModelSelector, "Models"},
-		{ScreenSettings, "Settings"},
-		{ScreenResume, "Sessions"},
-		{ScreenPermission, "Permission"},
-		{ScreenPlan, "Plan"},
-		{ScreenExecute, "Execute"},
-		{ScreenVerify, "Verify"},
-		{ScreenShip, "Ship"},
-		{ScreenDiff, "Diff"},
-		{ScreenLedger, "Ledger"},
-		{ScreenRollback, "Rollback"},
-		{ScreenGoalInput, "Goal"},
-		{ScreenDiscuss, "Discuss"},
-		{ScreenMetrics, "Metrics"},
-		{ScreenConfig, "Config"},
-		{ScreenHelp, "Help"},
-		{ScreenBisect, "Bisect"},
-		{ScreenNotifications, "Notifications"},
-		{ScreenDashboard, "Dashboard"},
-		{ScreenSessionDetail, "Session"},
-		{ScreenFileExplorer, "Files"},
-		{ScreenToolDetail, "Tool Output"},
-		{ScreenPhaseModelPicker, "Model Setup"},
-		{ScreenGhostPicker, "Ghost Picker"},
-		{ScreenGhostOutput, "Ghost Output"},
-		{ScreenConfirmQuit, "Confirm Quit"},
-		{ScreenChatHistory, "Chat History"},
-		{ScreenCommandPalette, "Commands"},
-		{ScreenRuntimeCheck, "Runtime Check"},
-		{ScreenHome, "Home"},
+		{tuitypes.ScreenFirstRun, "Setup"},
+		{tuitypes.ScreenREPL, "Chat"},
+		{tuitypes.ScreenModelSelector, "Models"},
+		{tuitypes.ScreenSettings, "Settings"},
+		{tuitypes.ScreenResume, "Sessions"},
+		{tuitypes.ScreenPermission, "Permission"},
+		{tuitypes.ScreenPlan, "Plan"},
+		{tuitypes.ScreenExecute, "Execute"},
+		{tuitypes.ScreenVerify, "Verify"},
+		{tuitypes.ScreenShip, "Ship"},
+		{tuitypes.ScreenDiff, "Diff"},
+		{tuitypes.ScreenLedger, "Ledger"},
+		{tuitypes.ScreenRollback, "Rollback"},
+		{tuitypes.ScreenGoalInput, "Goal"},
+		{tuitypes.ScreenDiscuss, "Discuss"},
+		{tuitypes.ScreenMetrics, "Metrics"},
+		{tuitypes.ScreenConfig, "Config"},
+		{tuitypes.ScreenHelp, "Help"},
+		{tuitypes.ScreenBisect, "Bisect"},
+		{tuitypes.ScreenNotifications, "Notifications"},
+		{tuitypes.ScreenDashboard, "Dashboard"},
+		{tuitypes.ScreenSessionDetail, "Session"},
+		{tuitypes.ScreenFileExplorer, "Files"},
+		{tuitypes.ScreenToolDetail, "Tool Output"},
+		{tuitypes.ScreenPhaseModelPicker, "Model Setup"},
+		{tuitypes.ScreenGhostPicker, "Ghost Picker"},
+		{tuitypes.ScreenGhostOutput, "Ghost Output"},
+		{tuitypes.ScreenConfirmQuit, "Confirm Quit"},
+		{tuitypes.ScreenChatHistory, "Chat History"},
+		{tuitypes.ScreenCommandPalette, "Commands"},
+		{tuitypes.ScreenRuntimeCheck, "Runtime Check"},
+		{tuitypes.ScreenHome, "Home"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.label, func(t *testing.T) {
 			if got := tt.screen.Label(); got != tt.label {
-				t.Errorf("Screen(%d).Label() = %q, want %q", tt.screen, got, tt.label)
+				t.Errorf("tuitypes.Screen(%d).Label() = %q, want %q", tt.screen, got, tt.label)
 			}
 		})
 	}
 }
 
 func TestScreen_Label_Unknown(t *testing.T) {
-	s := Screen(999)
+	s := tuitypes.Screen(999)
 	if got := s.Label(); got != "Unknown" {
-		t.Errorf("Screen(999).Label() = %q, want %q", got, "Unknown")
+		t.Errorf("tuitypes.Screen(999).Label() = %q, want %q", got, "Unknown")
 	}
 }
 
 func TestScreen_Constants(t *testing.T) {
-	if ScreenFirstRun != 0 {
-		t.Errorf("ScreenFirstRun = %d, want 0", ScreenFirstRun)
+	if tuitypes.ScreenFirstRun != 0 {
+		t.Errorf("tuitypes.ScreenFirstRun = %d, want 0", tuitypes.ScreenFirstRun)
 	}
-	if ScreenREPL != 1 {
-		t.Errorf("ScreenREPL = %d, want 1", ScreenREPL)
+	if tuitypes.ScreenREPL != 1 {
+		t.Errorf("tuitypes.ScreenREPL = %d, want 1", tuitypes.ScreenREPL)
 	}
-	if ScreenHome != 32 {
-		t.Errorf("ScreenHome = %d, want 32", ScreenHome)
+	if tuitypes.ScreenHome != 32 {
+		t.Errorf("tuitypes.ScreenHome = %d, want 32", tuitypes.ScreenHome)
 	}
 }
 
 func TestAppMsg(t *testing.T) {
-	msg := AppMsg{
-		Screen:        ScreenREPL,
+	msg := tuitypes.AppMsg{
+		Screen:        tuitypes.ScreenREPL,
 		Action:        "new_session",
 		SessionID:     "session123",
 		SaveKeychain:  true,
-		ModelSelected: &ModelSelectedMsg{},
+		ModelSelected: &tuitypes.ModelSelectedMsg{},
 	}
 
-	if msg.Screen != ScreenREPL {
-		t.Errorf("Screen = %d, want %d", msg.Screen, ScreenREPL)
+	if msg.Screen != tuitypes.ScreenREPL {
+		t.Errorf("tuitypes.Screen = %d, want %d", msg.Screen, tuitypes.ScreenREPL)
 	}
 	if msg.Action != "new_session" {
 		t.Errorf("Action = %q, want %q", msg.Action, "new_session")
@@ -105,7 +106,7 @@ func TestModelSelectedMsg(t *testing.T) {
 		Provider: "openai",
 		Name:     "GPT-4",
 	}
-	msg := ModelSelectedMsg{
+	msg := tuitypes.ModelSelectedMsg{
 		Model:    model,
 		Provider: "openai",
 	}
@@ -125,7 +126,7 @@ func TestProviderEntry(t *testing.T) {
 	if apiKey == "" {
 		apiKey = "sk-123"
 	}
-	entry := ProviderEntry{
+	entry := tuitypes.ProviderEntry{
 		ID:     "openai",
 		APIKey: apiKey,
 	}
@@ -145,8 +146,8 @@ func TestFirstRunCompleteMsg(t *testing.T) {
 	if apiKey == "" {
 		apiKey = "sk-123"
 	}
-	msg := FirstRunCompleteMsg{
-		Providers: []ProviderEntry{
+	msg := tuitypes.FirstRunCompleteMsg{
+		Providers: []tuitypes.ProviderEntry{
 			{ID: "openai", APIKey: apiKey},
 		},
 		ModelID:         "gpt-4",
@@ -164,7 +165,7 @@ func TestFirstRunCompleteMsg(t *testing.T) {
 
 func TestHealthCheckTickMsg(t *testing.T) {
 	now := time.Now()
-	msg := HealthCheckTickMsg{Time: now}
+	msg := tuitypes.HealthCheckTickMsg{Time: now}
 
 	if !msg.Time.Equal(now) {
 		t.Errorf("Time = %v, want %v", msg.Time, now)
@@ -172,7 +173,7 @@ func TestHealthCheckTickMsg(t *testing.T) {
 }
 
 func TestHealthCheckResultMsg(t *testing.T) {
-	msg := HealthCheckResultMsg{}
+	msg := tuitypes.HealthCheckResultMsg{}
 
 	if msg.Result.Status != "" {
 		t.Errorf("Status = %q, want empty", msg.Result.Status)
@@ -180,7 +181,7 @@ func TestHealthCheckResultMsg(t *testing.T) {
 }
 
 func TestRefreshCacheMsg(t *testing.T) {
-	msg := RefreshCacheMsg{ProviderName: "openai"}
+	msg := tuitypes.RefreshCacheMsg{ProviderName: "openai"}
 
 	if msg.ProviderName != "openai" {
 		t.Errorf("ProviderName = %q, want %q", msg.ProviderName, "openai")
@@ -189,7 +190,7 @@ func TestRefreshCacheMsg(t *testing.T) {
 
 func TestErrorMsg(t *testing.T) {
 	err := &testError{msg: "test error"}
-	msg := ErrorMsg{Err: err}
+	msg := tuitypes.ErrorMsg{Err: err}
 
 	if msg.Err == nil {
 		t.Error("Err is nil")
@@ -200,7 +201,7 @@ func TestErrorMsg(t *testing.T) {
 }
 
 func TestPermissionRequestMsg(t *testing.T) {
-	msg := PermissionRequestMsg{}
+	msg := tuitypes.PermissionRequestMsg{}
 
 	if msg.Request.ToolName != "" {
 		t.Errorf("Request.ToolName = %q, want empty", msg.Request.ToolName)
@@ -208,7 +209,7 @@ func TestPermissionRequestMsg(t *testing.T) {
 }
 
 func TestPermissionResponseMsg(t *testing.T) {
-	msg := PermissionResponseMsg{}
+	msg := tuitypes.PermissionResponseMsg{}
 
 	if msg.Response.RequestID != 0 {
 		t.Errorf("Response.RequestID = %d, want 0", msg.Response.RequestID)
@@ -216,7 +217,7 @@ func TestPermissionResponseMsg(t *testing.T) {
 }
 
 func TestQuestionRequestMsg(t *testing.T) {
-	msg := QuestionRequestMsg{
+	msg := tuitypes.QuestionRequestMsg{
 		ID:          1,
 		Question:    "What is your name?",
 		Header:      "Name",
@@ -237,7 +238,7 @@ func TestQuestionRequestMsg(t *testing.T) {
 }
 
 func TestQuestionResponseMsg(t *testing.T) {
-	msg := QuestionResponseMsg{Answer: "Alice"}
+	msg := tuitypes.QuestionResponseMsg{Answer: "Alice"}
 
 	if msg.Answer != "Alice" {
 		t.Errorf("Answer = %q, want %q", msg.Answer, "Alice")
@@ -245,7 +246,7 @@ func TestQuestionResponseMsg(t *testing.T) {
 }
 
 func TestPhaseResultMsg(t *testing.T) {
-	msg := PhaseResultMsg{
+	msg := tuitypes.PhaseResultMsg{
 		Success: true,
 		Error:   "",
 	}
@@ -256,7 +257,7 @@ func TestPhaseResultMsg(t *testing.T) {
 }
 
 func TestPlanReadyMsg(t *testing.T) {
-	msg := PlanReadyMsg{
+	msg := tuitypes.PlanReadyMsg{
 		Tasks:        nil,
 		CostEstimate: "$0.50",
 		TimeEstimate: "5m",
@@ -268,7 +269,7 @@ func TestPlanReadyMsg(t *testing.T) {
 }
 
 func TestGoalSubmittedMsg(t *testing.T) {
-	msg := GoalSubmittedMsg{Goal: "Build a web app"}
+	msg := tuitypes.GoalSubmittedMsg{Goal: "Build a web app"}
 
 	if msg.Goal != "Build a web app" {
 		t.Errorf("Goal = %q, want %q", msg.Goal, "Build a web app")
@@ -276,7 +277,7 @@ func TestGoalSubmittedMsg(t *testing.T) {
 }
 
 func TestPhaseModelPickedMsg(t *testing.T) {
-	msg := PhaseModelPickedMsg{
+	msg := tuitypes.PhaseModelPickedMsg{
 		PlanningModelID:  "gpt-4",
 		PlanningProvider: "openai",
 		CodingModelID:    "claude-3",
@@ -292,7 +293,7 @@ func TestPhaseModelPickedMsg(t *testing.T) {
 }
 
 func TestSlashCommandMsg(t *testing.T) {
-	msg := SlashCommandMsg{
+	msg := tuitypes.SlashCommandMsg{
 		Command:       "/help",
 		AttachedFiles: 3,
 	}
@@ -306,7 +307,7 @@ func TestSlashCommandMsg(t *testing.T) {
 }
 
 func TestHomeSubmitMsg(t *testing.T) {
-	msg := HomeSubmitMsg{Text: "hello world"}
+	msg := tuitypes.HomeSubmitMsg{Text: "hello world"}
 
 	if msg.Text != "hello world" {
 		t.Errorf("Text = %q, want %q", msg.Text, "hello world")
@@ -314,7 +315,7 @@ func TestHomeSubmitMsg(t *testing.T) {
 }
 
 func TestToastMsg(t *testing.T) {
-	msg := ToastMsg{
+	msg := tuitypes.ToastMsg{
 		Text:     "Operation successful",
 		Duration: 5 * time.Second,
 		Type:     "success",
@@ -332,7 +333,7 @@ func TestToastMsg(t *testing.T) {
 }
 
 func TestToast(t *testing.T) {
-	toast := Toast{
+	toast := tuitypes.Toast{
 		ID:        1,
 		Text:      "Test toast",
 		Type:      "info",
@@ -350,7 +351,7 @@ func TestToast(t *testing.T) {
 }
 
 func TestFallbackEventMsg(t *testing.T) {
-	msg := FallbackEventMsg{
+	msg := tuitypes.FallbackEventMsg{
 		From:   "openai",
 		To:     "anthropic",
 		Reason: "rate limited",
@@ -365,7 +366,7 @@ func TestFallbackEventMsg(t *testing.T) {
 }
 
 func TestSidebarFile(t *testing.T) {
-	file := SidebarFile{
+	file := tuitypes.SidebarFile{
 		Path:   "main.go",
 		Status: "modified",
 	}
@@ -379,7 +380,7 @@ func TestSidebarFile(t *testing.T) {
 }
 
 func TestSidebarTodoItem(t *testing.T) {
-	item := SidebarTodoItem{
+	item := tuitypes.SidebarTodoItem{
 		Content:  "Implement feature",
 		Status:   "in_progress",
 		Priority: "high",
@@ -396,8 +397,8 @@ func TestSidebarTodoItem(t *testing.T) {
 }
 
 func TestGhostResult(t *testing.T) {
-	result := &GhostResult{
-		Files: []GhostFile{
+	result := &tuitypes.GhostResult{
+		Files: []tuitypes.GhostFile{
 			{Path: "file1.go", Content: "content", Prompt: "prompt"},
 		},
 		Warnings: []string{"warning1"},
@@ -412,7 +413,7 @@ func TestGhostResult(t *testing.T) {
 }
 
 func TestDiffScreenMsg(t *testing.T) {
-	msg := DiffScreenMsg{
+	msg := tuitypes.DiffScreenMsg{
 		Diff:  "diff content",
 		Title: "My Diff",
 		Lines: []string{"line1", "line2"},
@@ -427,7 +428,7 @@ func TestDiffScreenMsg(t *testing.T) {
 }
 
 func TestSessionDetailRequestMsg(t *testing.T) {
-	msg := SessionDetailRequestMsg{}
+	msg := tuitypes.SessionDetailRequestMsg{}
 
 	if msg.Session != nil {
 		t.Error("Session should be nil")
@@ -435,7 +436,7 @@ func TestSessionDetailRequestMsg(t *testing.T) {
 }
 
 func TestIntentClassifiedMsg(t *testing.T) {
-	msg := IntentClassifiedMsg{
+	msg := tuitypes.IntentClassifiedMsg{
 		Input: "test input",
 	}
 

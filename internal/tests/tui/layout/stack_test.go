@@ -1,6 +1,7 @@
-package layout
+package layout_test
 
 import (
+	"github.com/eshanized/M31A/internal/ui/tui/layout"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ func TestRenderModalOverlay_PreservesANSI(t *testing.T) {
 	base := "\x1b[31mred text\x1b[0m\n\x1b[32mgreen text\x1b[0m\n\x1b[34mblue text\x1b[0m"
 	modal := "Hello"
 
-	result := RenderModalOverlay(base, modal, 40, 5, tm)
+	result := layout.RenderModalOverlay(base, modal, 40, 5, tm)
 
 	if !strings.Contains(result, "Hello") {
 		t.Errorf("expected modal text 'Hello' in output, got:\n%s", result)
@@ -31,7 +32,7 @@ func TestRenderModalOverlay_EmptyBase(t *testing.T) {
 	tm := theme.Dark()
 	modal := "Modal Content"
 
-	result := RenderModalOverlay("", modal, 60, 10, tm)
+	result := layout.RenderModalOverlay("", modal, 60, 10, tm)
 
 	if !strings.Contains(result, "Modal Content") {
 		t.Errorf("expected modal text in output, got:\n%s", result)
@@ -48,7 +49,7 @@ func TestRenderModalOverlay_StyledModal(t *testing.T) {
 	base := strings.Repeat("plain text\n", 10)
 	modal := "\x1b[1;34m╔══════════╗\x1b[0m\n\x1b[1;34m║ Modal    ║\x1b[0m\n\x1b[1;34m╚══════════╝\x1b[0m"
 
-	result := RenderModalOverlay(base, modal, 60, 10, tm)
+	result := layout.RenderModalOverlay(base, modal, 60, 10, tm)
 
 	if !strings.Contains(result, "Modal") {
 		t.Errorf("expected modal text in output, got:\n%s", result)
@@ -63,7 +64,7 @@ func TestRenderModalOverlay_ModalCentered(t *testing.T) {
 	base := ""
 	modal := "X"
 
-	result := RenderModalOverlay(base, modal, 20, 5, tm)
+	result := layout.RenderModalOverlay(base, modal, 20, 5, tm)
 
 	lines := strings.Split(result, "\n")
 	modalLine := lines[2]

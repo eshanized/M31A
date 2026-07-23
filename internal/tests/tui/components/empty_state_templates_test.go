@@ -1,17 +1,18 @@
-package components
+package components_test
 
 import (
+	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
 )
 
 func TestEmptyState_Render(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Icon:     "◈",
 		Title:    "Test Title",
 		Subtitle: "Test subtitle",
-		Actions: []Action{
+		Actions: []components.Action{
 			{Label: "Action 1", Hint: "hint 1"},
 			{Label: "Action 2", Hint: "hint 2"},
 		},
@@ -27,7 +28,7 @@ func TestEmptyState_Render(t *testing.T) {
 }
 
 func TestEmptyState_RenderMinimal(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Title:  "Minimal",
 		Theme:  theme.Dark(),
 		Width:  40,
@@ -41,7 +42,7 @@ func TestEmptyState_RenderMinimal(t *testing.T) {
 }
 
 func TestEmptyState_RenderSmall(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Title:  "Small",
 		Theme:  theme.Dark(),
 		Width:  10,
@@ -55,7 +56,7 @@ func TestEmptyState_RenderSmall(t *testing.T) {
 }
 
 func TestREPLEmptyState(t *testing.T) {
-	es := REPLEmptyState(theme.Dark(), 80, 24)
+	es := components.REPLEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("REPLEmptyState.Icon should not be empty")
 	}
@@ -72,7 +73,7 @@ func TestREPLEmptyState(t *testing.T) {
 }
 
 func TestPlanEmptyState(t *testing.T) {
-	es := PlanEmptyState(theme.Dark(), 80, 24)
+	es := components.PlanEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("PlanEmptyState.Icon should not be empty")
 	}
@@ -86,7 +87,7 @@ func TestPlanEmptyState(t *testing.T) {
 }
 
 func TestExecuteEmptyState(t *testing.T) {
-	es := ExecuteEmptyState(theme.Dark(), 80, 24)
+	es := components.ExecuteEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("ExecuteEmptyState.Icon should not be empty")
 	}
@@ -100,7 +101,7 @@ func TestExecuteEmptyState(t *testing.T) {
 }
 
 func TestVerifyEmptyState(t *testing.T) {
-	es := VerifyEmptyState(theme.Dark(), 80, 24)
+es := components.VerifyEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("VerifyEmptyState.Icon should not be empty")
 	}
@@ -114,7 +115,7 @@ func TestVerifyEmptyState(t *testing.T) {
 }
 
 func TestShipEmptyState(t *testing.T) {
-	es := ShipEmptyState(theme.Dark(), 80, 24)
+es := components.ShipEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("ShipEmptyState.Icon should not be empty")
 	}
@@ -128,7 +129,7 @@ func TestShipEmptyState(t *testing.T) {
 }
 
 func TestDiscussEmptyState(t *testing.T) {
-	es := DiscussEmptyState(theme.Dark(), 80, 24)
+es := components.DiscussEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DiscussEmptyState.Icon should not be empty")
 	}
@@ -142,7 +143,7 @@ func TestDiscussEmptyState(t *testing.T) {
 }
 
 func TestRuntimeEmptyState(t *testing.T) {
-	es := RuntimeEmptyState(theme.Dark(), 80, 24)
+es := components.RuntimeEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("RuntimeEmptyState.Icon should not be empty")
 	}
@@ -156,7 +157,7 @@ func TestRuntimeEmptyState(t *testing.T) {
 }
 
 func TestSettingsEmptyState(t *testing.T) {
-	es := SettingsEmptyState(theme.Dark(), 80, 24)
+es := components.SettingsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("SettingsEmptyState.Icon should not be empty")
 	}
@@ -170,7 +171,7 @@ func TestSettingsEmptyState(t *testing.T) {
 }
 
 func TestLedgerEmptyState(t *testing.T) {
-	es := LedgerEmptyState(theme.Dark(), 80, 24)
+es := components.LedgerEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("LedgerEmptyState.Icon should not be empty")
 	}
@@ -184,7 +185,7 @@ func TestLedgerEmptyState(t *testing.T) {
 }
 
 func TestMetricsEmptyState(t *testing.T) {
-	es := MetricsEmptyState(theme.Dark(), 80, 24)
+es := components.MetricsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("MetricsEmptyState.Icon should not be empty")
 	}
@@ -198,7 +199,7 @@ func TestMetricsEmptyState(t *testing.T) {
 }
 
 func TestRollbackEmptyState(t *testing.T) {
-	es := RollbackEmptyState(theme.Dark(), 80, 24)
+es := components.RollbackEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("RollbackEmptyState.Icon should not be empty")
 	}
@@ -212,7 +213,7 @@ func TestRollbackEmptyState(t *testing.T) {
 }
 
 func TestBisectEmptyState(t *testing.T) {
-	es := BisectEmptyState(theme.Dark(), 80, 24)
+es := components.BisectEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("BisectEmptyState.Icon should not be empty")
 	}
@@ -226,7 +227,7 @@ func TestBisectEmptyState(t *testing.T) {
 }
 
 func TestDecisionsEmptyState(t *testing.T) {
-	es := DecisionsEmptyState(theme.Dark(), 80, 24)
+es := components.DecisionsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DecisionsEmptyState.Icon should not be empty")
 	}
@@ -240,7 +241,7 @@ func TestDecisionsEmptyState(t *testing.T) {
 }
 
 func TestSubagentsEmptyState(t *testing.T) {
-	es := SubagentsEmptyState(theme.Dark(), 80, 24)
+es := components.SubagentsEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("SubagentsEmptyState.Icon should not be empty")
 	}
@@ -254,7 +255,7 @@ func TestSubagentsEmptyState(t *testing.T) {
 }
 
 func TestDiffEmptyState(t *testing.T) {
-	es := DiffEmptyState(theme.Dark(), 80, 24)
+es := components.DiffEmptyState(theme.Dark(), 80, 24)
 	if es.Icon == "" {
 		t.Error("DiffEmptyState.Icon should not be empty")
 	}
@@ -268,7 +269,7 @@ func TestDiffEmptyState(t *testing.T) {
 }
 
 func TestEmptyState_NoActions(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Icon:     "◈",
 		Title:    "No Actions",
 		Subtitle: "This empty state has no actions",
@@ -284,7 +285,7 @@ func TestEmptyState_NoActions(t *testing.T) {
 }
 
 func TestEmptyState_DefaultIcon(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Title:  "Default Icon",
 		Theme:  theme.Dark(),
 		Width:  80,
@@ -298,7 +299,7 @@ func TestEmptyState_DefaultIcon(t *testing.T) {
 }
 
 func TestEmptyState_NarrowTerminal(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Title:  "Narrow",
 		Theme:  theme.Dark(),
 		Width:  40,
@@ -312,7 +313,7 @@ func TestEmptyState_NarrowTerminal(t *testing.T) {
 }
 
 func TestEmptyState_WideTerminal(t *testing.T) {
-	es := EmptyState{
+	es := components.EmptyState{
 		Title:  "Wide",
 		Theme:  theme.Dark(),
 		Width:  200,

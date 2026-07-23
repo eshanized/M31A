@@ -1,6 +1,7 @@
-package exec
+package exec_test
 
 import (
+	"github.com/eshanized/M31A/internal/tools/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,7 +16,7 @@ func TestWithMutex(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			WithMutex(&mu, func() {
+			exec.WithMutex(&mu, func() {
 				counter++
 			})
 		}()
@@ -38,7 +39,7 @@ func TestWithRWMutex_Read(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			WithRWMutex(&mu, func() {
+			exec.WithRWMutex(&mu, func() {
 				_ = value
 				readCount.Add(1)
 			}, false)
@@ -60,7 +61,7 @@ func TestWithRWMutex_Write(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			WithRWMutex(&mu, func() {
+			exec.WithRWMutex(&mu, func() {
 				counter++
 			}, true)
 		}()
@@ -73,7 +74,7 @@ func TestWithRWMutex_Write(t *testing.T) {
 }
 
 func TestReviewConcurrency(t *testing.T) {
-	result := ReviewConcurrency()
+	result := exec.ReviewConcurrency()
 	if len(result.SafePatterns) == 0 {
 		t.Error("ReviewConcurrency: expected at least one safe pattern")
 	}

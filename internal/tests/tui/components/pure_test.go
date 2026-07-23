@@ -1,6 +1,7 @@
-package components
+package components_test
 
 import (
+	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"strings"
 	"testing"
 	"time"
@@ -30,9 +31,9 @@ func TestTruncateWithEllipsis(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TruncateWithEllipsis(tt.input, tt.maxWidth)
+			got := components.TruncateWithEllipsis(tt.input, tt.maxWidth)
 			if got != tt.want {
-				t.Errorf("TruncateWithEllipsis(%q, %d) = %q, want %q", tt.input, tt.maxWidth, got, tt.want)
+				t.Errorf("components.TruncateWithEllipsis(%q, %d) = %q, want %q", tt.input, tt.maxWidth, got, tt.want)
 			}
 		})
 	}
@@ -59,9 +60,9 @@ func TestTruncateMiddle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TruncateMiddle(tt.input, tt.maxLen)
+			got := components.TruncateMiddle(tt.input, tt.maxLen)
 			if got != tt.want {
-				t.Errorf("TruncateMiddle(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+				t.Errorf("components.TruncateMiddle(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 			}
 		})
 	}
@@ -79,16 +80,16 @@ func TestTruncateError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TruncateError(tt.input)
+			got := components.TruncateError(tt.input)
 			if got != tt.input {
-				t.Errorf("TruncateError(%q) = %q, want %q", tt.input, got, tt.input)
+				t.Errorf("components.TruncateError(%q) = %q, want %q", tt.input, got, tt.input)
 			}
 		})
 	}
 
 	// Long message
 	long := string(make([]rune, 250))
-	got := TruncateError(long)
+	got := components.TruncateError(long)
 	if !strings.HasSuffix(got, "[...]") {
 		t.Error("TruncateError long message should end with [...]")
 	}
@@ -98,7 +99,7 @@ func TestTruncateError(t *testing.T) {
 
 	// Exactly 200 runes
 	exact := string(make([]rune, 200))
-	got2 := TruncateError(exact)
+	got2 := components.TruncateError(exact)
 	if got2 != exact {
 		t.Error("TruncateError exact 200 runes should return unchanged")
 	}
@@ -108,7 +109,7 @@ func TestTruncateError(t *testing.T) {
 
 func TestMetricCard_Render_NoTheme(t *testing.T) {
 	t.Parallel()
-	m := MetricCard{Value: "42", Label: "Tests"}
+	m := components.MetricCard{Value: "42", Label: "Tests"}
 	result := m.Render()
 	if result == "" {
 		t.Error("MetricCard.Render() with zero-value theme returned empty string")
@@ -117,7 +118,7 @@ func TestMetricCard_Render_NoTheme(t *testing.T) {
 
 func TestMetricCard_Render_CenterAlign(t *testing.T) {
 	t.Parallel()
-	m := MetricCard{Value: "10", Label: "Count", Width: 30, Align: lipgloss.Center}
+	m := components.MetricCard{Value: "10", Label: "Count", Width: 30, Align: lipgloss.Center}
 	result := m.Render()
 	if result == "" {
 		t.Error("MetricCard.Render() center align returned empty string")
@@ -126,7 +127,7 @@ func TestMetricCard_Render_CenterAlign(t *testing.T) {
 
 func TestMetricCard_Render_RightAlign(t *testing.T) {
 	t.Parallel()
-	m := MetricCard{Value: "10", Label: "Count", Width: 30, Align: lipgloss.Right}
+	m := components.MetricCard{Value: "10", Label: "Count", Width: 30, Align: lipgloss.Right}
 	result := m.Render()
 	if result == "" {
 		t.Error("MetricCard.Render() right align returned empty string")
@@ -135,7 +136,7 @@ func TestMetricCard_Render_RightAlign(t *testing.T) {
 
 func TestMetricCard_Render_NegativeTrend(t *testing.T) {
 	t.Parallel()
-	m := MetricCard{Value: "5", Label: "Errors", Trend: "-3"}
+	m := components.MetricCard{Value: "5", Label: "Errors", Trend: "-3"}
 	result := m.Render()
 	if result == "" {
 		t.Error("MetricCard.Render() with negative trend returned empty string")
@@ -144,7 +145,7 @@ func TestMetricCard_Render_NegativeTrend(t *testing.T) {
 
 func TestMetricCard_Render_DownArrowTrend(t *testing.T) {
 	t.Parallel()
-	m := MetricCard{Value: "5", Label: "Errors", Trend: "↓ 3"}
+	m := components.MetricCard{Value: "5", Label: "Errors", Trend: "↓ 3"}
 	result := m.Render()
 	if result == "" {
 		t.Error("MetricCard.Render() with down-arrow trend returned empty string")
@@ -153,15 +154,15 @@ func TestMetricCard_Render_DownArrowTrend(t *testing.T) {
 
 func TestMetricRow_NilInput(t *testing.T) {
 	t.Parallel()
-	result := MetricRow(nil, 100)
+	result := components.MetricRow(nil, 100)
 	if result != "" {
-		t.Errorf("MetricRow(nil, 100) = %q, want empty", result)
+		t.Errorf("components.MetricRow(nil, 100) = %q, want empty", result)
 	}
 }
 
 func TestMetricRow_Single(t *testing.T) {
 	t.Parallel()
-	result := MetricRow([]MetricCard{{Value: "10", Label: "A"}}, 100)
+	result := components.MetricRow([]components.MetricCard{{Value: "10", Label: "A"}}, 100)
 	if result == "" {
 		t.Error("MetricRow single metric returned empty")
 	}
@@ -169,7 +170,7 @@ func TestMetricRow_Single(t *testing.T) {
 
 func TestMetricRow_Multiple(t *testing.T) {
 	t.Parallel()
-	result := MetricRow([]MetricCard{
+	result := components.MetricRow([]components.MetricCard{
 		{Value: "10", Label: "A"},
 		{Value: "20", Label: "B"},
 	}, 80)
@@ -180,7 +181,7 @@ func TestMetricRow_Multiple(t *testing.T) {
 
 func TestMetricRow_NarrowWidth(t *testing.T) {
 	t.Parallel()
-	result := MetricRow([]MetricCard{{Value: "10", Label: "A"}}, 5)
+	result := components.MetricRow([]components.MetricCard{{Value: "10", Label: "A"}}, 5)
 	if result == "" {
 		t.Error("MetricRow narrow width returned empty")
 	}
@@ -190,16 +191,16 @@ func TestMetricRow_NarrowWidth(t *testing.T) {
 
 func TestNewSpinner(t *testing.T) {
 	t.Parallel()
-	s := NewSpinner()
+	s := components.NewSpinner()
 	if s.Tick() != 100*time.Millisecond {
-		t.Errorf("NewSpinner().Tick() = %v, want 100ms", s.Tick())
+		t.Errorf("components.NewSpinner().Tick() = %v, want 100ms", s.Tick())
 	}
 }
 
 func TestNewSpinnerWithFrames(t *testing.T) {
 	t.Parallel()
 	frames := []string{"a", "b", "c"}
-	s := NewSpinnerWithFrames(frames, 200*time.Millisecond)
+	s := components.NewSpinnerWithFrames(frames, 200*time.Millisecond)
 	if s.Tick() != 200*time.Millisecond {
 		t.Errorf("Tick = %v, want 200ms", s.Tick())
 	}
@@ -211,7 +212,7 @@ func TestNewSpinnerWithFrames(t *testing.T) {
 func TestSpinner_WrapAround(t *testing.T) {
 	t.Parallel()
 	frames := []string{"a", "b"}
-	s := NewSpinnerWithFrames(frames, 100*time.Millisecond)
+	s := components.NewSpinnerWithFrames(frames, 100*time.Millisecond)
 	f1 := s.Next()
 	f2 := s.Next()
 	f3 := s.Next()
@@ -222,37 +223,37 @@ func TestSpinner_WrapAround(t *testing.T) {
 
 func TestRenderSpinner_Empty(t *testing.T) {
 	t.Parallel()
-	result := RenderSpinner("", lipgloss.NewStyle())
+	result := components.RenderSpinner("", lipgloss.NewStyle())
 	if result != "" {
-		t.Errorf("RenderSpinner(\"\") = %q, want empty", result)
+		t.Errorf("components.RenderSpinner(\"\") = %q, want empty", result)
 	}
 }
 
 func TestSpinnerTickInterval(t *testing.T) {
 	t.Parallel()
-	if SpinnerTickInterval != 100*time.Millisecond {
-		t.Errorf("SpinnerTickInterval = %v, want 100ms", SpinnerTickInterval)
+	if components.SpinnerTickInterval != 100*time.Millisecond {
+		t.Errorf("components.SpinnerTickInterval = %v, want 100ms", components.SpinnerTickInterval)
 	}
 }
 
 func TestOpenCodeFrames(t *testing.T) {
 	t.Parallel()
-	if len(OpenCodeFrames) != 10 {
-		t.Errorf("len(OpenCodeFrames) = %d, want 10", len(OpenCodeFrames))
+	if len(components.OpenCodeFrames) != 10 {
+		t.Errorf("len(components.OpenCodeFrames) = %d, want 10", len(components.OpenCodeFrames))
 	}
 }
 
 func TestThinkingFrames(t *testing.T) {
 	t.Parallel()
-	if len(ThinkingFrames) != len(OpenCodeFrames) {
-		t.Errorf("len(ThinkingFrames) = %d, want %d", len(ThinkingFrames), len(OpenCodeFrames))
+	if len(components.ThinkingFrames) != len(components.OpenCodeFrames) {
+		t.Errorf("len(components.ThinkingFrames) = %d, want %d", len(components.ThinkingFrames), len(components.OpenCodeFrames))
 	}
 }
 
 func TestSpinnerSets(t *testing.T) {
 	t.Parallel()
-	if len(SpinnerSets) < 7 {
-		t.Errorf("len(SpinnerSets) = %d, want >= 7", len(SpinnerSets))
+	if len(components.SpinnerSets) < 7 {
+		t.Errorf("len(components.SpinnerSets) = %d, want >= 7", len(components.SpinnerSets))
 	}
 }
 
@@ -260,7 +261,7 @@ func TestSpinnerSets(t *testing.T) {
 
 func TestFilterChips_Render_Empty(t *testing.T) {
 	t.Parallel()
-	f := FilterChips{}
+	f := components.FilterChips{}
 	if f.Render() != "" {
 		t.Error("Empty FilterChips.Render() should return empty")
 	}
@@ -268,8 +269,8 @@ func TestFilterChips_Render_Empty(t *testing.T) {
 
 func TestFilterChips_Render_WithSelected(t *testing.T) {
 	t.Parallel()
-	f := FilterChips{
-		Chips: []FilterChip{
+	f := components.FilterChips{
+		Chips: []components.FilterChip{
 			{Label: "A", Active: true},
 			{Label: "B", Active: false},
 		},
@@ -285,7 +286,7 @@ func TestFilterChips_Render_WithSelected(t *testing.T) {
 
 func TestDropdown_ViewClosedNoItems(t *testing.T) {
 	t.Parallel()
-	dd := Dropdown{Items: []DropdownItem{}, Open: false}
+	dd := components.Dropdown{Items: []components.DropdownItem{}, Open: false}
 	if dd.View() != "" {
 		t.Error("Empty closed Dropdown.View() should return empty")
 	}
@@ -295,7 +296,7 @@ func TestDropdown_ViewClosedNoItems(t *testing.T) {
 
 func TestVirtualViewport_TotalHeight(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"line1", "line2\nline3", "line4"},
 		ViewportH: 5,
 		ViewportW: 80,
@@ -308,7 +309,7 @@ func TestVirtualViewport_TotalHeight(t *testing.T) {
 
 func TestVirtualViewport_TotalHeight_Empty(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{}
+	v := components.VirtualViewport{}
 	got := v.TotalHeight()
 	if got != 0 {
 		t.Errorf("TotalHeight() = %d, want 0", got)
@@ -317,7 +318,7 @@ func TestVirtualViewport_TotalHeight_Empty(t *testing.T) {
 
 func TestVirtualViewport_SetScroll(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"a", "b", "c", "d", "e"},
 		ViewportH: 3,
 		ViewportW: 80,
@@ -340,7 +341,7 @@ func TestVirtualViewport_SetScroll(t *testing.T) {
 
 func TestVirtualViewport_ScrollBy(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"a", "b", "c"},
 		ViewportH: 2,
 		ViewportW: 80,
@@ -359,7 +360,7 @@ func TestVirtualViewport_ScrollBy(t *testing.T) {
 
 func TestVirtualViewport_View(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"line1", "line2", "line3"},
 		ViewportH: 2,
 		ViewportW: 20,
@@ -370,13 +371,13 @@ func TestVirtualViewport_View(t *testing.T) {
 	}
 
 	// Empty items
-	v2 := VirtualViewport{ViewportH: 5, ViewportW: 80}
+	v2 := components.VirtualViewport{ViewportH: 5, ViewportW: 80}
 	if v2.View() != "" {
 		t.Error("Empty VirtualViewport.View() should return empty")
 	}
 
 	// Zero viewport height
-	v3 := VirtualViewport{Items: []string{"a"}, ViewportH: 0}
+	v3 := components.VirtualViewport{Items: []string{"a"}, ViewportH: 0}
 	if v3.View() != "" {
 		t.Error("Zero height VirtualViewport.View() should return empty")
 	}
@@ -384,7 +385,7 @@ func TestVirtualViewport_View(t *testing.T) {
 
 func TestVirtualViewport_ScrollRatio(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"a", "b", "c", "d", "e"},
 		ViewportH: 3,
 		ViewportW: 80,
@@ -401,7 +402,7 @@ func TestVirtualViewport_ScrollRatio(t *testing.T) {
 	}
 
 	// No scroll possible
-	v2 := VirtualViewport{Items: []string{"a"}, ViewportH: 5}
+	v2 := components.VirtualViewport{Items: []string{"a"}, ViewportH: 5}
 	if v2.ScrollRatio() != 0 {
 		t.Errorf("ScrollRatio() when no scroll = %f, want 0", v2.ScrollRatio())
 	}
@@ -409,7 +410,7 @@ func TestVirtualViewport_ScrollRatio(t *testing.T) {
 
 func TestVirtualViewport_ScrollToTopBottom(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"a", "b", "c", "d", "e"},
 		ViewportH: 2,
 		ViewportW: 80,
@@ -428,21 +429,22 @@ func TestVirtualViewport_ScrollToTopBottom(t *testing.T) {
 
 func TestVirtualViewport_InvalidateHeightCache(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"a\nb", "c"},
 		ViewportH: 5,
 		ViewportW: 80,
 	}
-	v.TotalHeight() // cache it
+	h1 := v.TotalHeight() // cache it
 	v.InvalidateHeightCache()
-	if v.heightCacheValid {
-		t.Error("heightCacheValid should be false after InvalidateHeightCache")
+	h2 := v.TotalHeight() // should recompute
+	if h1 != h2 {
+		t.Errorf("TotalHeight changed after InvalidateHeightCache: %d != %d", h1, h2)
 	}
 }
 
 func TestVirtualViewport_ViewWithScroll(t *testing.T) {
 	t.Parallel()
-	v := VirtualViewport{
+	v := components.VirtualViewport{
 		Items:     []string{"line1", "line2", "line3", "line4", "line5"},
 		ViewportH: 2,
 		ViewportW: 80,

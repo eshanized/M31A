@@ -1,6 +1,7 @@
-package components
+package components_test
 
 import (
+	"github.com/eshanized/M31A/internal/ui/tui/components"
 	"testing"
 
 	"github.com/eshanized/M31A/internal/ui/tui/theme"
@@ -11,7 +12,7 @@ import (
 func TestContext_Fields(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	ctx := Context{
+	ctx := components.Context{
 		Width:   80,
 		Height:  24,
 		Theme:   th,
@@ -36,7 +37,7 @@ func TestContext_Fields(t *testing.T) {
 func TestContext_S_WithCache(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	ctx := Context{
+	ctx := components.Context{
 		Width:  80,
 		Height: 24,
 		Theme:  th,
@@ -51,7 +52,7 @@ func TestContext_S_WithCache(t *testing.T) {
 func TestContext_S_WithoutCache(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	ctx := Context{
+	ctx := components.Context{
 		Width:  80,
 		Height: 24,
 		Theme:  th,
@@ -66,7 +67,7 @@ func TestContext_S_WithoutCache(t *testing.T) {
 func TestNewContext(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	ctx := NewContext(80, 24, th)
+	ctx := components.NewContext(80, 24, th)
 	if ctx.Width != 80 {
 		t.Errorf("Width = %d, want 80", ctx.Width)
 	}
@@ -83,12 +84,12 @@ func TestNewContext(t *testing.T) {
 func TestSimpleBadge_Render_AllTypes(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	types := []BadgeType{BadgeBrand, BadgeSuccess, BadgeError, BadgeWarning, BadgeInfo, BadgeNeutral}
+	types := []components.BadgeType{components.BadgeBrand, components.BadgeSuccess, components.BadgeError, components.BadgeWarning, components.BadgeInfo, components.BadgeNeutral}
 	for _, bt := range types {
-		badge := SimpleBadge{Text: "test", Type: bt, Theme: th}
+		badge := components.SimpleBadge{Text: "test", Type: bt, Theme: th}
 		got := badge.Render()
 		if got == "" {
-			t.Errorf("SimpleBadge type %d should render non-empty", bt)
+			t.Errorf("components.SimpleBadge type %d should render non-empty", bt)
 		}
 	}
 }
@@ -96,7 +97,7 @@ func TestSimpleBadge_Render_AllTypes(t *testing.T) {
 func TestSimpleBadge_Render_Compact(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	badge := SimpleBadge{Text: "test", Type: BadgeBrand, Compact: true, Theme: th}
+	badge := components.SimpleBadge{Text: "test", Type: components.BadgeBrand, Compact: true, Theme: th}
 	got := badge.Render()
 	if got == "" {
 		t.Error("Compact badge should render non-empty")
@@ -106,18 +107,18 @@ func TestSimpleBadge_Render_Compact(t *testing.T) {
 func TestSimpleBadge_Render_NonCompact(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	badge := SimpleBadge{Text: "test", Type: BadgeBrand, Compact: false, Theme: th}
+	badge := components.SimpleBadge{Text: "test", Type: components.BadgeBrand, Compact: false, Theme: th}
 	got := badge.Render()
 	if got == "" {
 		t.Error("Non-compact badge should render non-empty")
 	}
 }
 
-// --- Badge ---
+// --- components.Badge ---
 
 func TestBadge_Render_Empty(t *testing.T) {
 	t.Parallel()
-	badge := Badge{}
+	badge := components.Badge{}
 	got := badge.Render()
 	if got != "" {
 		t.Error("Empty badge should render empty string")
@@ -127,7 +128,7 @@ func TestBadge_Render_Empty(t *testing.T) {
 func TestBadge_Render_NonEmpty(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	badge := NewBadge("test", BadgeSuccessPreset, th)
+	badge := components.NewBadge("test", components.BadgeSuccessPreset, th)
 	got := badge.Render()
 	if got == "" {
 		t.Error("Non-empty badge should render non-empty string")
@@ -139,12 +140,12 @@ func TestBadge_Render_NonEmpty(t *testing.T) {
 func TestNewBadge_AllPresets(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	presets := []BadgePreset{
-		BadgeSuccessPreset, BadgeWarningPreset, BadgeErrorPreset,
-		BadgeInfoPreset, BadgeBrandPreset, BadgeMutedPreset,
+	presets := []components.BadgePreset{
+		components.BadgeSuccessPreset, components.BadgeWarningPreset, components.BadgeErrorPreset,
+		components.BadgeInfoPreset, components.BadgeBrandPreset, components.BadgeMutedPreset,
 	}
 	for _, p := range presets {
-		badge := NewBadge("test", p, th)
+		badge := components.NewBadge("test", p, th)
 		if badge.Label != "test" {
 			t.Errorf("preset %d: label = %q, want test", p, badge.Label)
 		}
@@ -160,27 +161,27 @@ func TestNewBadge_AllPresets(t *testing.T) {
 func TestRenderBadges_Multiple(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
-	badges := []Badge{
-		NewBadge("fast", BadgeSuccessPreset, th),
-		NewBadge("cheap", BadgeInfoPreset, th),
-		NewBadge("safe", BadgeWarningPreset, th),
+	badges := []components.Badge{
+		components.NewBadge("fast", components.BadgeSuccessPreset, th),
+		components.NewBadge("cheap", components.BadgeInfoPreset, th),
+		components.NewBadge("safe", components.BadgeWarningPreset, th),
 	}
-	got := RenderBadges(badges)
+	got := components.RenderBadges(badges)
 	if got == "" {
 		t.Error("RenderBadges should return non-empty")
 	}
 }
 
-// --- CapabilityBadge ---
+// --- components.CapabilityBadge ---
 
 func TestCapabilityBadge_Various(t *testing.T) {
 	t.Parallel()
 	th := theme.Dark()
 	caps := []string{"reasoning", "vision", "code", "fast"}
 	for _, cap := range caps {
-		badge := CapabilityBadge(cap, th)
+		badge := components.CapabilityBadge(cap, th)
 		if badge.Label != cap {
-			t.Errorf("CapabilityBadge label = %q, want %q", badge.Label, cap)
+			t.Errorf("components.CapabilityBadge label = %q, want %q", badge.Label, cap)
 		}
 	}
 }
@@ -192,34 +193,34 @@ func TestStatusBadge_AllStatuses(t *testing.T) {
 	th := theme.Dark()
 	statuses := []string{"done", "pass", "complete", "running", "thinking", "pending", "failed", "error", "warning", "skipped", "unknown"}
 	for _, status := range statuses {
-		badge := StatusBadge(status, th)
+		badge := components.StatusBadge(status, th)
 		if badge.Label != status {
-			t.Errorf("StatusBadge(%q) label = %q", status, badge.Label)
+			t.Errorf("components.StatusBadge(%q) label = %q", status, badge.Label)
 		}
 	}
 }
 
-// --- BadgeType constants ---
+// --- components.BadgeType constants ---
 
 func TestBadgeType_Constants(t *testing.T) {
 	t.Parallel()
-	if BadgeBrand != 0 {
-		t.Errorf("BadgeBrand = %d, want 0", BadgeBrand)
+	if components.BadgeBrand != 0 {
+		t.Errorf("components.BadgeBrand = %d, want 0", components.BadgeBrand)
 	}
-	if BadgeSuccess != 1 {
-		t.Errorf("BadgeSuccess = %d, want 1", BadgeSuccess)
+	if components.BadgeSuccess != 1 {
+		t.Errorf("components.BadgeSuccess = %d, want 1", components.BadgeSuccess)
 	}
-	if BadgeError != 2 {
-		t.Errorf("BadgeError = %d, want 2", BadgeError)
+	if components.BadgeError != 2 {
+		t.Errorf("components.BadgeError = %d, want 2", components.BadgeError)
 	}
-	if BadgeWarning != 3 {
-		t.Errorf("BadgeWarning = %d, want 3", BadgeWarning)
+	if components.BadgeWarning != 3 {
+		t.Errorf("components.BadgeWarning = %d, want 3", components.BadgeWarning)
 	}
-	if BadgeInfo != 4 {
-		t.Errorf("BadgeInfo = %d, want 4", BadgeInfo)
+	if components.BadgeInfo != 4 {
+		t.Errorf("components.BadgeInfo = %d, want 4", components.BadgeInfo)
 	}
-	if BadgeNeutral != 5 {
-		t.Errorf("BadgeNeutral = %d, want 5", BadgeNeutral)
+	if components.BadgeNeutral != 5 {
+		t.Errorf("components.BadgeNeutral = %d, want 5", components.BadgeNeutral)
 	}
 }
 
@@ -227,22 +228,22 @@ func TestBadgeType_Constants(t *testing.T) {
 
 func TestBadgePreset_Constants(t *testing.T) {
 	t.Parallel()
-	if BadgeSuccessPreset != 0 {
-		t.Errorf("BadgeSuccessPreset = %d, want 0", BadgeSuccessPreset)
+	if components.BadgeSuccessPreset != 0 {
+		t.Errorf("components.BadgeSuccessPreset = %d, want 0", components.BadgeSuccessPreset)
 	}
-	if BadgeWarningPreset != 1 {
-		t.Errorf("BadgeWarningPreset = %d, want 1", BadgeWarningPreset)
+	if components.BadgeWarningPreset != 1 {
+		t.Errorf("components.BadgeWarningPreset = %d, want 1", components.BadgeWarningPreset)
 	}
-	if BadgeErrorPreset != 2 {
-		t.Errorf("BadgeErrorPreset = %d, want 2", BadgeErrorPreset)
+	if components.BadgeErrorPreset != 2 {
+		t.Errorf("components.BadgeErrorPreset = %d, want 2", components.BadgeErrorPreset)
 	}
-	if BadgeInfoPreset != 3 {
-		t.Errorf("BadgeInfoPreset = %d, want 3", BadgeInfoPreset)
+	if components.BadgeInfoPreset != 3 {
+		t.Errorf("components.BadgeInfoPreset = %d, want 3", components.BadgeInfoPreset)
 	}
-	if BadgeBrandPreset != 4 {
-		t.Errorf("BadgeBrandPreset = %d, want 4", BadgeBrandPreset)
+	if components.BadgeBrandPreset != 4 {
+		t.Errorf("components.BadgeBrandPreset = %d, want 4", components.BadgeBrandPreset)
 	}
-	if BadgeMutedPreset != 5 {
-		t.Errorf("BadgeMutedPreset = %d, want 5", BadgeMutedPreset)
+	if components.BadgeMutedPreset != 5 {
+		t.Errorf("components.BadgeMutedPreset = %d, want 5", components.BadgeMutedPreset)
 	}
 }
