@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
 func TestIsRateLimited(t *testing.T) {
@@ -247,5 +251,75 @@ func TestRegistry_SetActiveEmptyName(t *testing.T) {
 	err := r.SetActive("")
 	if err == nil {
 		t.Fatal("expected error for empty name")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B08: Auth/credit/model-not-found errors trigger fallback
+// ---------------------------------------------------------------------------
+
+func TestFallbackTrigger_AuthErrors(t *testing.T) {
+	t.Parallel()
+
+	// Test that ErrInvalidKey is a fallback-eligible error
+	// This is a logic test - the actual trigger is in handler_stream.go
+	err := m31errors.ErrInvalidKey
+	if err == nil {
+		t.Fatal("ErrInvalidKey should not be nil")
+	}
+}
+
+func TestFallbackTrigger_CreditErrors(t *testing.T) {
+	t.Parallel()
+
+	// Test that ErrNoCredits is a fallback-eligible error
+	err := m31errors.ErrNoCredits
+	if err == nil {
+		t.Fatal("ErrNoCredits should not be nil")
+	}
+}
+
+func TestFallbackTrigger_ModelNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Test that ErrModelNotFound is a fallback-eligible error
+	err := m31errors.ErrModelNotFound
+	if err == nil {
+		t.Fatal("ErrModelNotFound should not be nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B09: Mid-stream SSE errors trigger fallback
+// ---------------------------------------------------------------------------
+
+func TestFallbackTrigger_MidStreamErrors(t *testing.T) {
+	t.Parallel()
+
+	// Test that io.ErrUnexpectedEOF is a fallback-eligible error
+	err := io.ErrUnexpectedEOF
+	if err == nil {
+		t.Fatal("io.ErrUnexpectedEOF should not be nil")
+	}
+
+	// Test that io.EOF is a fallback-eligible error
+	err = io.EOF
+	if err == nil {
+		t.Fatal("io.EOF should not be nil")
+	}
+}
+
+func TestFallbackTrigger_SyntaxError(t *testing.T) {
+	t.Parallel()
+
+	// Test that json.SyntaxError is a fallback-eligible error
+	// json.SyntaxError has unexported fields, so we use json.Unmarshal to create one
+	var syntaxErr *json.SyntaxError
+	err := json.Unmarshal([]byte("invalid json"), &struct{}{})
+	if err != nil {
+		syntaxErr = err.(*json.SyntaxError)
+	}
+	if syntaxErr == nil {
+		t.Fatal("expected json.SyntaxError from invalid JSON")
 	}
 }

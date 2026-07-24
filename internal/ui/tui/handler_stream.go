@@ -2,7 +2,9 @@ package tui
 
 import (
 	stderrors "errors"
+	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,6 +47,12 @@ func handleStreamDoneMsg(m *AppState, msg streaming.StreamDoneMsg) (tea.Model, t
 	return m, tea.Batch(cmds...)
 }
 
+// isSyntaxError checks if an error is a JSON syntax error.
+func isSyntaxError(err error) bool {
+	var syntaxErr *json.SyntaxError
+	return stderrors.As(err, &syntaxErr)
+}
+
 // handleStreamErrorMsg processes a stream error.
 func handleStreamErrorMsg(m *AppState, msg streaming.StreamErrorMsg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -52,9 +60,17 @@ func handleStreamErrorMsg(m *AppState, msg streaming.StreamErrorMsg) (tea.Model,
 		m.replModel.handleStreamErrorMsg(msg)
 	}
 	m.streamCancelFn = nil
-	// Auto-fallback on rate limit or provider unreachable
+	// Auto-fallback on rate limit, provider unreachable, auth/credit/model errors,
+	// or mid-stream SSE errors
 	if m.config != nil && m.config.Provider.AutoFallback && m.registry != nil {
-		if stderrors.Is(msg.Err, m31errors.ErrRateLimited) || stderrors.Is(msg.Err, m31errors.ErrProviderUnreachable) {
+		if stderrors.Is(msg.Err, m31errors.ErrRateLimited) ||
+			stderrors.Is(msg.Err, m31errors.ErrProviderUnreachable) ||
+			stderrors.Is(msg.Err, m31errors.ErrInvalidKey) ||
+			stderrors.Is(msg.Err, m31errors.ErrNoCredits) ||
+			stderrors.Is(msg.Err, m31errors.ErrModelNotFound) ||
+			stderrors.Is(msg.Err, io.ErrUnexpectedEOF) ||
+			stderrors.Is(msg.Err, io.EOF) ||
+			isSyntaxError(msg.Err) {
 			cmds = append(cmds, m.attemptAutoFallback(msg.Err))
 		}
 	}
