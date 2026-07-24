@@ -1098,9 +1098,17 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 
 	// Cache per-message token counts to avoid O(N*K) recomputation in truncation loops.
 	// Each message's token count is estimated once, then updated incrementally after truncation.
+	// B17: Include per-message overhead (4 tokens) to match EstimateMessages used in preflight.
+	const perMessageOverhead = 4
 	msgTokens := make([]int, len(msgs))
 	for i, msg := range msgs {
-		msgTokens[i] = e.tokens.Estimate(msg.Content)
+		msgTokens[i] = e.tokens.Estimate(msg.Content) + perMessageOverhead
+		for _, tc := range msg.ToolCalls {
+			if len(tc.Input) > 0 {
+				msgTokens[i] += e.tokens.Estimate(string(tc.Input))
+			}
+			msgTokens[i] += e.tokens.Estimate(tc.Name)
+		}
 	}
 	estimateTotal := func() int {
 		total := 0

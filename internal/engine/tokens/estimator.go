@@ -191,7 +191,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.0
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -203,7 +203,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 2.8
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -215,7 +215,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.5
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -227,7 +227,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.0
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -240,7 +240,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 2.5
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*4/3, 1)
 
@@ -252,7 +252,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.5
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -264,7 +264,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.0
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(wordCount*3/2, 1)
 
@@ -276,7 +276,7 @@ func (e *Estimator) estimateWithProvider(text string) int {
 			if code {
 				ratio = 3.0
 			}
-			return int(float64(chars) / ratio)
+			return int(math.Ceil(float64(chars) / ratio))
 		}
 		return max(int(float64(wordCount)*1.5), 1)
 	}

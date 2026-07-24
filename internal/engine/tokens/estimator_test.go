@@ -468,3 +468,43 @@ func TestEstimateMessages_MultiMessage(t *testing.T) {
 		t.Errorf("expected positive total estimate, got %d", totalEstimate)
 	}
 }
+
+// B16: Verify math.Ceil is used (no truncation)
+func TestEstimate_Ceiling(t *testing.T) {
+	e := NewEstimator("unknown-model")
+	// 101 chars / 3.8 ratio (Anthropic-like) = 26.58 → should ceil to 27, not truncate to 26
+	text := strings.Repeat("a", 101)
+	got := e.estimateWithProvider(text)
+	if got < 1 {
+		t.Errorf("expected positive estimate, got %d", got)
+	}
+	// Verify ceiling: int(101/3.8) = 26 (truncate), int(math.Ceil(101/3.8)) = 27
+	// For unknown provider with ratio 3.8: 101/3.8 = 26.578...
+	expected := 27
+	if got != expected {
+		t.Errorf("expected ceiling estimate %d, got %d (truncation detected)", expected, got)
+	}
+}
+
+func TestEstimate_CeilingClassCoverage(t *testing.T) {
+	e := NewEstimator("unknown-model")
+	tests := []struct {
+		name     string
+		chars    int
+		expected int
+	}{
+		{"101 chars", 101, 27},  // 101/3.8 = 26.58 → 27
+		{"51 chars", 51, 14},    // 51/3.8 = 13.42 → 14
+		{"200 chars", 200, 53},  // 200/3.8 = 52.63 → 53
+		{"300 chars", 300, 79},  // 300/3.8 = 78.95 → 79
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text := strings.Repeat("a", tt.chars)
+			got := e.estimateWithProvider(text)
+			if got != tt.expected {
+				t.Errorf("expected %d, got %d", tt.expected, got)
+			}
+		})
+	}
+}

@@ -403,3 +403,46 @@ func TestMergeConfig_SkillsConfig(t *testing.T) {
 		t.Errorf("expected './skills', got %q", base.Skills.Sources[0])
 	}
 }
+
+// B18: Zero-value override works when key is explicitly defined
+func TestMergeConfig_ZeroIntOverride(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{UI: UIConfig{MaxIterations: 50}}
+	overlay := &Config{UI: UIConfig{MaxIterations: 0}}
+	defined := map[string]bool{"ui.max_iterations": true}
+
+	MergeConfig(base, overlay, defined)
+
+	if base.UI.MaxIterations != 0 {
+		t.Errorf("expected 0 (explicit zero override), got %d", base.UI.MaxIterations)
+	}
+}
+
+func TestMergeConfig_ZeroFloatOverride(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Model: ModelConfig{ArbitrageThreshold: 0.5}}
+	overlay := &Config{Model: ModelConfig{ArbitrageThreshold: 0}}
+	defined := map[string]bool{"model.arbitrage_threshold": true}
+
+	MergeConfig(base, overlay, defined)
+
+	if base.Model.ArbitrageThreshold != 0 {
+		t.Errorf("expected 0 (explicit zero override), got %f", base.Model.ArbitrageThreshold)
+	}
+}
+
+func TestMergeConfig_ZeroIntPreservedWhenUndefined(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{UI: UIConfig{MaxIterations: 50}}
+	overlay := &Config{UI: UIConfig{MaxIterations: 0}}
+	// defined is nil — key not in overlay, so base should be preserved
+
+	MergeConfig(base, overlay, nil)
+
+	if base.UI.MaxIterations != 50 {
+		t.Errorf("expected 50 preserved (undefined zero), got %d", base.UI.MaxIterations)
+	}
+}

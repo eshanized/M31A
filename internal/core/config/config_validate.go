@@ -318,6 +318,29 @@ func applyVarSubstitution(cfg *Config) []string {
 	unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.DefaultMode, "permissions.default_mode")...)
 	unresolved = append(unresolved, substituteVarsReport(&cfg.Tools.WebSearchBaseURL, "tools.websearch_base_url")...)
 
+	// Git fields
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Git.UserName, "git.user_name")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Git.UserEmail, "git.user_email")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Git.CommitPrefix, "git.commit_prefix")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Git.FixPrefix, "git.fix_prefix")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Git.ShipPrefix, "git.ship_prefix")...)
+
+	// Compaction fields
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Compaction.SummaryTemplate, "compaction.summary_template")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Compaction.SummaryTemplateFile, "compaction.summary_template_file")...)
+
+	// Prompt fields
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Prompts.SystemPromptFile, "prompts.system_prompt_file")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Prompts.ProjectPromptDir, "prompts.project_prompt_dir")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Prompts.GlobalPromptDir, "prompts.global_prompt_dir")...)
+
+	// Template fields
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Templates.ExternalDir, "templates.external_dir")...)
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Templates.WebsiteFramework, "templates.website_framework")...)
+
+	// Verify fields
+	unresolved = append(unresolved, substituteVarsReport(&cfg.Verify.LintCommand, "verify.lint_command")...)
+
 	for i := range cfg.Permissions.Rules {
 		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Tool, fmt.Sprintf("permissions.rules[%d].tool", i))...)
 		unresolved = append(unresolved, substituteVarsReport(&cfg.Permissions.Rules[i].Pattern, fmt.Sprintf("permissions.rules[%d].pattern", i))...)
