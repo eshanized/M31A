@@ -30,7 +30,7 @@ type Manager struct {
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
 	lock            *fileLock
 	coordinator     *coordinator.Coordinator[string] // per-session concurrency control
-	checkpointMu    sync.Mutex                        // protects checkpoint read-modify-write
+	checkpointMu    sync.Mutex                       // protects checkpoint read-modify-write
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -334,18 +334,18 @@ func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.Workflo
 // sessionMetadata is a metadata-only view of Session for JSON serialization.
 // It excludes Messages and Tasks to keep session.json lightweight.
 type sessionMetadata struct {
-	SchemaVersion    int                  `json:"schema_version"`
-	ID               string               `json:"id"`
-	ChildrenIDs      []string             `json:"children_ids"`
-	Model            string               `json:"model"`
-	Provider         string               `json:"provider"`
-	StartedAt        time.Time            `json:"started_at"`
-	MessageCount     int                  `json:"message_count"`
-	WorkflowPhase    types.WorkflowPhase  `json:"workflow_phase"`
-	Project          *types.ProjectState  `json:"project,omitempty"`
-	ResumedAt        *time.Time           `json:"resumed_at,omitempty"`
-	WorkflowGoal     string               `json:"workflow_goal,omitempty"`
-	DiscussQuestions []string             `json:"discuss_questions,omitempty"`
+	SchemaVersion    int                 `json:"schema_version"`
+	ID               string              `json:"id"`
+	ChildrenIDs      []string            `json:"children_ids"`
+	Model            string              `json:"model"`
+	Provider         string              `json:"provider"`
+	StartedAt        time.Time           `json:"started_at"`
+	MessageCount     int                 `json:"message_count"`
+	WorkflowPhase    types.WorkflowPhase `json:"workflow_phase"`
+	Project          *types.ProjectState `json:"project,omitempty"`
+	ResumedAt        *time.Time          `json:"resumed_at,omitempty"`
+	WorkflowGoal     string              `json:"workflow_goal,omitempty"`
+	DiscussQuestions []string            `json:"discuss_questions,omitempty"`
 }
 
 // saveSessionAtomic writes session metadata to session.json atomically.

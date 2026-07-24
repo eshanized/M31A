@@ -1,8 +1,8 @@
 package tui
 
 import (
-	stderrors "errors"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"time"

@@ -55,13 +55,13 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.resizeTimer != nil {
 				m.resizeTimer.Stop()
 			}
-		// Debounce: wait 100ms of no resize events before re-rendering
-		m.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
-			// Send a message to trigger re-render — never mutate model state from goroutine
-			if m.program != nil {
-				m.program.Send(resizeDebounceMsg{})
-			}
-		})
+			// Debounce: wait 100ms of no resize events before re-rendering
+			m.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+				// Send a message to trigger re-render — never mutate model state from goroutine
+				if m.program != nil {
+					m.program.Send(resizeDebounceMsg{})
+				}
+			})
 		}
 		// Always re-render on first init (width == 0)
 		if m.lastWidth == 0 {

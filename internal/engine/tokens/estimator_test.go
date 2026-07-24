@@ -493,10 +493,10 @@ func TestEstimate_CeilingClassCoverage(t *testing.T) {
 		chars    int
 		expected int
 	}{
-		{"101 chars", 101, 27},  // 101/3.8 = 26.58 → 27
-		{"51 chars", 51, 14},    // 51/3.8 = 13.42 → 14
-		{"200 chars", 200, 53},  // 200/3.8 = 52.63 → 53
-		{"300 chars", 300, 79},  // 300/3.8 = 78.95 → 79
+		{"101 chars", 101, 27}, // 101/3.8 = 26.58 → 27
+		{"51 chars", 51, 14},   // 51/3.8 = 13.42 → 14
+		{"200 chars", 200, 53}, // 200/3.8 = 52.63 → 53
+		{"300 chars", 300, 79}, // 300/3.8 = 78.95 → 79
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

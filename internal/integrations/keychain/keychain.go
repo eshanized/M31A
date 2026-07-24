@@ -46,7 +46,7 @@ type Keychain interface {
 // for blacklistTTL duration. After the TTL expires, the backend is retried.
 // This prevents repeated D-Bus/pass connection attempts while allowing recovery.
 type cachedKeychain struct {
-	inner           Keychain
+	inner            Keychain
 	unavailableSince atomic.Int64 // Unix nanoseconds when blacklisted; 0 = available
 }
 

@@ -759,22 +759,22 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	if planMarkdown == "" {
 		planMarkdown = e.state.planMarkdown
 	}
-		if planMarkdown != "" {
-			var plan *m31types.Plan
-			planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
-			e.cacheMu.RLock()
-			cache := e.cache
-			e.cacheMu.RUnlock()
-			if cached := cache.GetPlan(planHash); cached != nil {
-				plan = cached
-			} else {
-				var parseErr error
-				plan, parseErr = ParsePlan(planMarkdown)
-				if parseErr != nil {
-					e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
-				}
-				cache.SetPlan(planHash, plan)
+	if planMarkdown != "" {
+		var plan *m31types.Plan
+		planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
+		e.cacheMu.RLock()
+		cache := e.cache
+		e.cacheMu.RUnlock()
+		if cached := cache.GetPlan(planHash); cached != nil {
+			plan = cached
+		} else {
+			var parseErr error
+			plan, parseErr = ParsePlan(planMarkdown)
+			if parseErr != nil {
+				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
 			}
+			cache.SetPlan(planHash, plan)
+		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"
 			if plan.Summary != "" {
