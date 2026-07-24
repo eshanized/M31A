@@ -1,7 +1,9 @@
 package keychain
 
 import (
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // mockKeychain implements Keychain with an in-memory map for testing.
@@ -188,4 +190,120 @@ func TestKeychain_MultipleServices(t *testing.T) {
 	if val2 != "zen-key" {
 		t.Errorf("zen = %q, want %q", val2, "zen-key")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// B21: TTL-based keychain blacklist recovery
+// ---------------------------------------------------------------------------
+
+// unavailableKeychain always returns ErrKeychainUnavailable.
+type unavailableKeychain struct {
+	callCount int
+}
+
+func (u *unavailableKeychain) Get(service string) (string, error) {
+	u.callCount++
+	return "", ErrKeychainUnavailable
+}
+
+func (u *unavailableKeychain) Set(service, value string) error {
+	u.callCount++
+	return ErrKeychainUnavailable
+}
+
+func (u *unavailableKeychain) Delete(service string) error {
+	u.callCount++
+	return ErrKeychainUnavailable
+}
+
+func TestKeychainBlacklist_Recovers(t *testing.T) {
+	inner := &unavailableKeychain{}
+	kc := NewCached(inner)
+
+	// First call should blacklist
+	_, err := kc.Get("test")
+	if err != ErrKeychainUnavailable {
+		t.Fatalf("expected ErrKeychainUnavailable, got %v", err)
+	}
+
+	// Immediately after, should be blacklisted (no retry)
+	_, err = kc.Get("test")
+	if err != ErrKeychainUnavailable {
+		t.Fatalf("expected ErrKeychainUnavailable while blacklisted, got %v", err)
+	}
+
+	// Simulate TTL expiry by manually setting the timestamp to the past
+	cc := kc.(*cachedKeychain)
+	cc.unavailableSince.Store(time.Now().Add(-blacklistTTL - time.Second).UnixNano())
+
+	// After TTL expiry, should retry and blacklist again
+	_, err = kc.Get("test")
+	if err != ErrKeychainUnavailable {
+		t.Fatalf("expected retry after TTL expiry, got %v", err)
+	}
+
+	// Verify the inner was called again (retry happened): 2 calls total
+	// (1 initial blacklisting + 1 after TTL expiry)
+	if inner.callCount != 2 {
+		t.Errorf("expected 2 calls (1 before TTL + 1 after), got %d", inner.callCount)
+	}
+}
+
+func TestKeychainBlacklist_SuccessClearsBlacklist(t *testing.T) {
+	// Use a keychain that fails once then succeeds
+	var failOnce atomic.Bool
+	failOnce.Store(true)
+	inner := &conditionalKeychain{failOnce: &failOnce}
+
+	kc := NewCached(inner)
+
+	// First call fails, blacklists
+	_, err := kc.Get("test")
+	if err != ErrKeychainUnavailable {
+		t.Fatalf("expected ErrKeychainUnavailable, got %v", err)
+	}
+
+	// Simulate TTL expiry
+	cc := kc.(*cachedKeychain)
+	cc.unavailableSince.Store(time.Now().Add(-blacklistTTL - time.Second).UnixNano())
+
+	// Now the inner keychain succeeds
+	val, err := kc.Get("test")
+	if err != nil {
+		t.Fatalf("expected success after recovery, got %v", err)
+	}
+	if val != "ok" {
+		t.Errorf("expected 'ok', got %q", val)
+	}
+
+	// Verify blacklist was cleared (next call should succeed without retry)
+	val2, err := kc.Get("test2")
+	if err != nil {
+		t.Fatalf("expected success (blacklist cleared), got %v", err)
+	}
+	if val2 != "ok" {
+		t.Errorf("expected 'ok', got %q", val2)
+	}
+}
+
+// conditionalKeychain fails on first call, then succeeds.
+type conditionalKeychain struct {
+	failOnce *atomic.Bool
+	store    map[string]string
+}
+
+func (c *conditionalKeychain) Get(service string) (string, error) {
+	if c.failOnce.Load() {
+		c.failOnce.Store(false)
+		return "", ErrKeychainUnavailable
+	}
+	return "ok", nil
+}
+
+func (c *conditionalKeychain) Set(service, value string) error {
+	return nil
+}
+
+func (c *conditionalKeychain) Delete(service string) error {
+	return nil
 }

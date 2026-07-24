@@ -86,10 +86,11 @@ func FindFallbackProvider(registry *Registry, currentProvider string, fallbackPr
 	}
 
 	// Collect results as they arrive, short-circuiting on the first live
-	// provider in priority order. Falls back to a slow provider if no live
-	// one is found after all results arrive.
+	// provider in priority order. Falls back to a slow or degraded provider
+	// if no live one is found after all results arrive.
 	results := make(map[string]types.HealthStatus, len(candidates))
 	var slowFallback string
+	var degradedFallback string
 	priorityIdx := 0
 	for i := 0; i < len(candidates); i++ {
 		r := <-ch
@@ -117,16 +118,28 @@ func FindFallbackProvider(registry *Registry, currentProvider string, fallbackPr
 			if status.Status == "slow" && slowFallback == "" {
 				slowFallback = c.name
 			}
+			if status.Status == "degraded" && degradedFallback == "" {
+				degradedFallback = c.name
+			}
 		}
 	}
 
-	// No live provider found; use the first slow one if available
+	// No live provider found; use the first slow or degraded one if available
 	if slowFallback != "" {
 		if _, err := registry.TrySetActive(slowFallback); err == nil {
 			return slowFallback, &FallbackEvent{
 				From:   currentProvider,
 				To:     slowFallback,
 				Reason: "fallback_slow",
+			}, nil
+		}
+	}
+	if degradedFallback != "" {
+		if _, err := registry.TrySetActive(degradedFallback); err == nil {
+			return degradedFallback, &FallbackEvent{
+				From:   currentProvider,
+				To:     degradedFallback,
+				Reason: "fallback_degraded",
 			}, nil
 		}
 	}

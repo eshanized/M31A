@@ -1,11 +1,18 @@
 package keychain
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"time"
+)
 
 const (
 	servicePrefix = "m31a/"
 	// AccountName is the keychain account identifier used across all platforms.
 	AccountName = "m31a"
+
+	// blacklistTTL is how long the keychain stays blacklisted after a transient failure.
+	// After this period, the cached keychain will retry the backend.
+	blacklistTTL = 5 * time.Minute
 )
 
 // Keychain provides OS-native secure storage for API keys.
@@ -35,13 +42,32 @@ type Keychain interface {
 // provides its own New() implementation via build tags.
 
 // cachedKeychain wraps a Keychain and caches availability.
-// Once any operation returns ErrKeychainUnavailable, all subsequent operations
-// return ErrKeychainUnavailable immediately without attempting the backend.
-// This prevents repeated D-Bus/pass connection attempts and suppresses
-// duplicate warning logs.
+// Once any operation returns ErrKeychainUnavailable, the keychain is blacklisted
+// for blacklistTTL duration. After the TTL expires, the backend is retried.
+// This prevents repeated D-Bus/pass connection attempts while allowing recovery.
 type cachedKeychain struct {
-	inner       Keychain
-	unavailable atomic.Bool
+	inner           Keychain
+	unavailableSince atomic.Int64 // Unix nanoseconds when blacklisted; 0 = available
+}
+
+// isBlacklisted reports whether the keychain is currently blacklisted.
+// Returns false if the TTL has expired (allowing retry).
+func (c *cachedKeychain) isBlacklisted() bool {
+	ts := c.unavailableSince.Load()
+	if ts == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, ts)) < blacklistTTL
+}
+
+// blacklist marks the keychain as unavailable with current timestamp.
+func (c *cachedKeychain) blacklist() {
+	c.unavailableSince.Store(time.Now().UnixNano())
+}
+
+// clearBlacklist resets availability so next call retries the backend.
+func (c *cachedKeychain) clearBlacklist() {
+	c.unavailableSince.Store(0)
 }
 
 // NewCached wraps an existing Keychain with availability caching.
@@ -54,34 +80,41 @@ func NewCached(inner Keychain) Keychain {
 }
 
 func (c *cachedKeychain) Get(service string) (string, error) {
-	if c.unavailable.Load() {
+	if c.isBlacklisted() {
 		return "", ErrKeychainUnavailable
 	}
 	val, err := c.inner.Get(service)
 	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
-		c.unavailable.Store(true)
+		c.blacklist()
+		return val, err
 	}
+	// Success clears any stale blacklist
+	c.clearBlacklist()
 	return val, err
 }
 
 func (c *cachedKeychain) Set(service, value string) error {
-	if c.unavailable.Load() {
+	if c.isBlacklisted() {
 		return ErrKeychainUnavailable
 	}
 	err := c.inner.Set(service, value)
 	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
-		c.unavailable.Store(true)
+		c.blacklist()
+		return err
 	}
+	c.clearBlacklist()
 	return err
 }
 
 func (c *cachedKeychain) Delete(service string) error {
-	if c.unavailable.Load() {
+	if c.isBlacklisted() {
 		return ErrKeychainUnavailable
 	}
 	err := c.inner.Delete(service)
 	if err != nil && (err == ErrKeychainUnavailable || err == ErrNotImplemented) {
-		c.unavailable.Store(true)
+		c.blacklist()
+		return err
 	}
+	c.clearBlacklist()
 	return err
 }
