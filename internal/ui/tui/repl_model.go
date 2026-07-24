@@ -156,6 +156,7 @@ type ReplModel struct {
 	resizeTimer   *time.Timer
 	lastWidth     int // track last rendered width to skip height-only changes
 	resizePending bool
+	program       *tea.Program // program instance for sending messages from goroutines
 
 	// Mouse interaction state
 	scrollbarDragging bool // true while the user is dragging the scrollbar thumb
@@ -176,6 +177,10 @@ type ReplModel struct {
 	// revealed via the typewriter animation on the welcome screen (max 3).
 	welcomeRevealCount int
 }
+
+// resizeDebounceMsg is sent when the resize debounce timer fires.
+// It replaces direct goroutine mutation of resizePending.
+type resizeDebounceMsg struct{}
 
 // NewReplModel creates a new ReplModel.
 func NewReplModel(t theme.Theme, version string) ReplModel {
@@ -209,4 +214,9 @@ func NewReplModel(t theme.Theme, version string) ReplModel {
 		virtualBuffer:       5, // render 5 messages above/below visible range
 	}
 	return m
+}
+
+// SetProgram sets the tea.Program instance for sending messages from goroutines.
+func (m *ReplModel) SetProgram(p *tea.Program) {
+	m.program = p
 }

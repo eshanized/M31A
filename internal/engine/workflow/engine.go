@@ -452,14 +452,19 @@ func (e *Engine) LastHealReport() *m31types.HealReport {
 // It persists to both in-memory state and disk via the session manager.
 func (e *Engine) SaveCheckpointData(goal string) {
 	decisions := e.SnapshotDecisions()
+	e.state.planMu.RLock()
+	planVersion := e.state.planVersion
+	e.state.planMu.RUnlock()
 	cp := &CheckpointData{
 		Phase:       e.stateMachine.CurrentPhase(),
 		Goal:        goal,
-		PlanVersion: e.state.planVersion,
+		PlanVersion: planVersion,
 		Decisions:   decisions,
 		Timestamp:   time.Now(),
 	}
+	e.state.planMu.Lock()
 	e.state.checkpointData = cp
+	e.state.planMu.Unlock()
 
 	// Persist to disk so checkpoint data survives process crashes.
 	sessCheckpoint := session.Checkpoint{
@@ -495,11 +500,11 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 			Timestamp:   cp.Timestamp,
 		}
 	}
-	e.state.checkpointData = data
-	e.stateMachine.SetPhase(data.Phase)
 	e.state.planMu.Lock()
+	e.state.checkpointData = data
 	e.state.planVersion = data.PlanVersion
 	e.state.planMu.Unlock()
+	e.stateMachine.SetPhase(data.Phase)
 	// Restore decisions to the log
 	if data.Decisions != nil && e.state.decisionLog != nil {
 		for _, d := range data.Decisions {
@@ -567,7 +572,10 @@ func (e *Engine) Complete() {
 
 // GetCheckpointData returns the current checkpoint data, or nil if none.
 func (e *Engine) GetCheckpointData() *CheckpointData {
-	return e.state.checkpointData
+	e.state.planMu.RLock()
+	cp := e.state.checkpointData
+	e.state.planMu.RUnlock()
+	return cp
 }
 
 // ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
@@ -1277,22 +1285,29 @@ func (e *Engine) FinalizeDiscuss() error {
 // The plan phase reads this field to inject feedback into the LLM context.
 // Duplicate feedback is ignored — only new feedback bumps the plan version.
 func (e *Engine) SetRefinementFeedback(feedback string) {
-	if feedback != "" && feedback != e.state.refineFeedback {
-		e.state.refineFeedback = feedback
+	if feedback != "" {
 		e.state.planMu.Lock()
-		e.state.planVersion++
-		e.state.planMu.Unlock()
-		// Log plan revision decision
-		e.LogDecision(decision.DecisionReceipt{
-			Decision:  fmt.Sprintf("plan revision requested (v%d)", e.state.planVersion),
-			Rationale: truncateForLog(feedback, 200),
-			Category:  decision.CategoryPlan,
-			Cost: decision.Cost{
-				Attempts: e.state.planVersion,
-			},
-		})
-	} else if feedback == "" {
+		if feedback != e.state.refineFeedback {
+			e.state.refineFeedback = feedback
+			e.state.planVersion++
+			pv := e.state.planVersion
+			e.state.planMu.Unlock()
+			// Log plan revision decision
+			e.LogDecision(decision.DecisionReceipt{
+				Decision:  fmt.Sprintf("plan revision requested (v%d)", pv),
+				Rationale: truncateForLog(feedback, 200),
+				Category:  decision.CategoryPlan,
+				Cost: decision.Cost{
+					Attempts: pv,
+				},
+			})
+		} else {
+			e.state.planMu.Unlock()
+		}
+	} else {
+		e.state.planMu.Lock()
 		e.state.refineFeedback = feedback
+		e.state.planMu.Unlock()
 	}
 }
 

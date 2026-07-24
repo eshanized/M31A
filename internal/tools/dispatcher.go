@@ -311,9 +311,12 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	result, err := tool.Execute(ctx, input)
 	elapsed := time.Since(start).Milliseconds()
 
-	// Record tool execution metrics
-	if d.collector != nil {
-		d.collector.RecordToolCall(call.Name, err == nil, elapsed)
+	// Record tool execution metrics (B24 fix: protect collector read with lock)
+	d.mu.RLock()
+	collector := d.collector
+	d.mu.RUnlock()
+	if collector != nil {
+		collector.RecordToolCall(call.Name, err == nil, elapsed)
 	}
 
 	slog.Debug("tool executed", "tool", call.Name, "duration_ms", elapsed, "error", err)

@@ -776,3 +776,12 @@ func (m *AppState) checkAutoArbitrage() {
 	m.activeModel = modelInfo
 	m.addToast(fmt.Sprintf("Auto-arbitrage: switched to %s (%s task, saving $%.4f)", recommended, rec.Complexity, rec.Savings), "info")
 }
+
+// SetReplProgram wires the tea.Program into the REPL model so goroutines can
+// safely send messages through the Bubble Tea channel. This must be called
+// after tea.NewProgram returns but before Run() starts.
+func (m *AppState) SetReplProgram(p *tea.Program) {
+	if m.replModel != nil {
+		m.replModel.SetProgram(p)
+	}
+}

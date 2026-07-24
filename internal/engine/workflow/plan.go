@@ -28,11 +28,14 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 	var valErrs []string
 	var allValErrs []string
 
+	e.state.planMu.RLock()
 	isRefinement := e.state.refineFeedback != ""
+	pv := e.state.planVersion
+	e.state.planMu.RUnlock()
 	if isRefinement {
 		e.emit(IntermediateProgressMsg{
 			Phase:   "plan",
-			Message: fmt.Sprintf("Refining plan (v%d)...", e.state.planVersion+1),
+			Message: fmt.Sprintf("Refining plan (v%d)...", pv+1),
 		})
 	}
 
@@ -201,17 +204,22 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("checkpoint save failed", "error", err)
 	}
 
-	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhasePlan, fmt.Sprintf("%d tasks generated (v%d)", len(tasks), e.state.planVersion), "plan complete"); err != nil {
+	e.state.planMu.RLock()
+	pvForLog := e.state.planVersion
+	e.state.planMu.RUnlock()
+	if err := e.sessionMgr.SaveState(e.sessionID, m31types.PhasePlan, fmt.Sprintf("%d tasks generated (v%d)", len(tasks), pvForLog), "plan complete"); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
 
+	e.state.planMu.Lock()
 	e.state.refineFeedback = ""
+	e.state.planMu.Unlock()
 
-	e.logger.Info("plan phase complete", "task_count", len(tasks), "version", e.state.planVersion)
+	e.logger.Info("plan phase complete", "task_count", len(tasks), "version", pvForLog)
 
 	// Log plan decision
 	e.LogDecision(decision.DecisionReceipt{
-		Decision:  fmt.Sprintf("plan generated: %d tasks (v%d)", len(tasks), e.state.planVersion),
+		Decision:  fmt.Sprintf("plan generated: %d tasks (v%d)", len(tasks), pvForLog),
 		Rationale: "plan phase complete",
 		Category:  decision.CategoryPlan,
 		Cost: decision.Cost{
@@ -504,13 +512,17 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 		planCtx += "\n"
 	}
 
-	if e.state.refineFeedback != "" && e.state.planMarkdown != "" {
-		prevPlan := e.state.planMarkdown
+	e.state.planMu.RLock()
+	refineFB := e.state.refineFeedback
+	pvCtx := e.state.planVersion
+	prevPlan := e.state.planMarkdown
+	e.state.planMu.RUnlock()
+	if refineFB != "" && prevPlan != "" {
 		if len(prevPlan) > 4000 {
 			prevPlan = "... (summary truncated)\n" + prevPlan[len(prevPlan)-4000:]
 		}
-		planCtx += "## Previous Plan (v" + fmt.Sprintf("%d", e.state.planVersion) + ")\n" + prevPlan + "\n\n"
-		planCtx += "## User Refinement Feedback\n" + e.state.refineFeedback + "\n\n"
+		planCtx += "## Previous Plan (v" + fmt.Sprintf("%d", pvCtx) + ")\n" + prevPlan + "\n\n"
+		planCtx += "## User Refinement Feedback\n" + refineFB + "\n\n"
 		planCtx += "Please revise the plan above based on the user's feedback. Return the complete revised plan in the same format.\n\n"
 	}
 

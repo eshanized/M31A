@@ -55,14 +55,13 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.resizeTimer != nil {
 				m.resizeTimer.Stop()
 			}
-			// Debounce: wait 100ms of no resize events before re-rendering
-			m.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
-				// This runs in a goroutine — send a message to trigger re-render
-				// Note: we can't directly call m.renderMessages() from here
-				// because Bubble Tea is single-threaded. Instead, we set a flag
-				// and the next TickMsg will pick it up.
-				m.resizePending = true
-			})
+		// Debounce: wait 100ms of no resize events before re-rendering
+		m.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+			// Send a message to trigger re-render — never mutate model state from goroutine
+			if m.program != nil {
+				m.program.Send(resizeDebounceMsg{})
+			}
+		})
 		}
 		// Always re-render on first init (width == 0)
 		if m.lastWidth == 0 {
@@ -89,6 +88,10 @@ func (m *ReplModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c := m.handleMouseMsg(msg); c != nil {
 			cmds = append(cmds, c)
 		}
+
+	case resizeDebounceMsg:
+		// Handle resize debounce — set flag within Bubble Tea message loop (B23 fix)
+		m.resizePending = true
 
 	case StreamMsg:
 		cs := m.handleStreamMsg(msg)

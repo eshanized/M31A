@@ -536,6 +536,9 @@ func run() int {
 		tea.WithMouseAllMotion(),
 	)
 
+	// Wire program into REPL model so goroutines can send messages (B23 fix)
+	app.SetReplProgram(p)
+
 	// Signal handler sends tea.Quit through the program channel
 	// instead of calling app.Shutdown() directly from a goroutine.
 	// This ensures all state mutations happen inside Update(), preserving

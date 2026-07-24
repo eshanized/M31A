@@ -128,3 +128,71 @@ func TestShutdown_CacheRace(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestSaveCheckpointData_Concurrent verifies that concurrent SaveCheckpointData
+// and SetRefinementFeedback do not race on planVersion. Run with -race flag.
+func TestSaveCheckpointData_Concurrent(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	var wg sync.WaitGroup
+	const goroutines = 10
+	const iterations = 100
+
+	// Concurrent SaveCheckpointData (reads planVersion)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				engine.SaveCheckpointData("test goal")
+			}
+		}(i)
+	}
+
+	// Concurrent SetRefinementFeedback (writes planVersion indirectly)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				engine.SetRefinementFeedback("feedback")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+// TestGetCheckpointData_Concurrent verifies that concurrent GetCheckpointData
+// and SaveCheckpointData do not race. Run with -race flag.
+func TestGetCheckpointData_Concurrent(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	var wg sync.WaitGroup
+	const goroutines = 10
+	const iterations = 100
+
+	// Concurrent GetCheckpointData (reads checkpointData)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_ = engine.GetCheckpointData()
+			}
+		}(i)
+	}
+
+	// Concurrent SaveCheckpointData (writes checkpointData)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				engine.SaveCheckpointData("test goal")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
