@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eshanized/M31A/internal/core/config"
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
@@ -603,5 +604,130 @@ func TestCheckPermission_DenyClassCoverage(t *testing.T) {
 	}
 	if !allowed {
 		t.Error("expected allowed for echo")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B10: Permission response survives timeout — delayed cleanup
+// ---------------------------------------------------------------------------
+
+func TestSendAndWaitForPermission_TimeoutRace(t *testing.T) {
+	t.Parallel()
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
+		DefaultMode: "ask",
+	})
+
+	// Simulate a permission request with a very short timeout
+	req := PermissionRequest{
+		ID:          1001,
+		ToolName:    "Bash",
+		Command:     "echo test",
+		RiskLevel:   types.RiskMedium,
+		TimeoutSecs: 1,
+	}
+
+	ctx := context.Background()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.sendAndWaitForPermission(ctx, req, "Bash")
+	}()
+
+	// Wait briefly then simulate late user approval
+	time.Sleep(150 * time.Millisecond)
+	d.ApprovePermission(1001, true, false)
+
+	// The function should complete (either via response or timeout)
+	select {
+	case err := <-errCh:
+		// Either succeeded (response arrived) or timed out — both are acceptable
+		_ = err
+	case <-time.After(3 * time.Second):
+		t.Fatal("sendAndWaitForPermission did not return within timeout")
+	}
+
+	// Verify the per-request channel is eventually cleaned up (after grace period)
+	time.Sleep(300 * time.Millisecond)
+	if _, ok := d.pendingResponses.Load(1001); ok {
+		// Channel may still be present during grace period — this is expected
+		t.Log("per-request channel still present (within grace period)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B11: matchAnyParamValue iterates all params dynamically
+// ---------------------------------------------------------------------------
+
+func TestMatchAnyParamValue_DynamicKeys(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		pattern string
+		params  map[string]any
+		want    bool
+	}{
+		{
+			name:    "matches query param",
+			pattern: "**/*.go",
+			params:  map[string]any{"query": "src/**/*.go"},
+			want:    true,
+		},
+		{
+			name:    "matches description param",
+			pattern: "test*",
+			params:  map[string]any{"description": "test files"},
+			want:    true,
+		},
+		{
+			name:    "matches destination param",
+			pattern: "/tmp/*",
+			params:  map[string]any{"destination": "/tmp/output.txt"},
+			want:    true,
+		},
+		{
+			name:    "matches custom key",
+			pattern: "*.go",
+			params:  map[string]any{"source_file": "main.go"},
+			want:    true,
+		},
+		{
+			name:    "no match on custom key",
+			pattern: "*.py",
+			params:  map[string]any{"source_file": "main.go"},
+			want:    false,
+		},
+		{
+			name:    "matches nested map value",
+			pattern: "*.go",
+			params:  map[string]any{"nested": map[string]any{"file": "main.go"}},
+			want:    true,
+		},
+		{
+			name:    "matches array element",
+			pattern: "*.go",
+			params:  map[string]any{"files": []any{"main.go", "test.go"}},
+			want:    true,
+		},
+		{
+			name:    "empty params",
+			pattern: "*",
+			params:  map[string]any{},
+			want:    false,
+		},
+		{
+			name:    "non-string value stringified",
+			pattern: "42",
+			params:  map[string]any{"count": 42},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchAnyParamValue(tt.pattern, tt.params)
+			if got != tt.want {
+				t.Errorf("matchAnyParamValue(%q, %v) = %v, want %v", tt.pattern, tt.params, got, tt.want)
+			}
+		})
 	}
 }

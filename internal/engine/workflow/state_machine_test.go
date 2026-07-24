@@ -141,3 +141,32 @@ func TestStateMachine_TransitionFromWrongPhase(t *testing.T) {
 		t.Fatal("expected error when transitioning from wrong phase")
 	}
 }
+
+// B15: SetPhase resets discussPlanCycles counter
+func TestSetPhase_ResetsCycles(t *testing.T) {
+	sm := NewStateMachine()
+
+	// Drive discussPlanCycles up by oscillating Plan<->Discuss
+	sm.Transition(m31types.PhaseIdle, m31types.PhaseInitialize)
+	sm.Transition(m31types.PhaseInitialize, m31types.PhaseDiscuss)
+	sm.Transition(m31types.PhaseDiscuss, m31types.PhasePlan)
+	sm.Transition(m31types.PhasePlan, m31types.PhaseDiscuss)
+
+	// discussPlanCycles should now be 1
+	if sm.discussPlanCycles != 1 {
+		t.Fatalf("expected discussPlanCycles=1 after Plan->Discuss, got %d", sm.discussPlanCycles)
+	}
+
+	// SetPhase should reset the counter
+	sm.SetPhase(m31types.PhaseExecute)
+	if sm.discussPlanCycles != 0 {
+		t.Errorf("expected discussPlanCycles=0 after SetPhase, got %d", sm.discussPlanCycles)
+	}
+
+	// Verify we can still do Plan<->Discuss transitions (counter was reset)
+	sm.SetPhase(m31types.PhasePlan)
+	sm.Transition(m31types.PhasePlan, m31types.PhaseDiscuss)
+	if sm.discussPlanCycles != 1 {
+		t.Errorf("expected discussPlanCycles=1 after Plan->Discuss, got %d", sm.discussPlanCycles)
+	}
+}

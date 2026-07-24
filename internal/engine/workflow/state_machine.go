@@ -102,5 +102,6 @@ func (sm *StateMachine) SetPhase(phase m31types.WorkflowPhase) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.currentPhase = phase
+	sm.discussPlanCycles = 0
 	sm.history = append(sm.history, phase)
 }

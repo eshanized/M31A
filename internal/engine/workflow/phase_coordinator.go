@@ -112,7 +112,7 @@ func (pc *PhaseCoordinator) PostPhaseExecution(phase m31types.WorkflowPhase, res
 
 // CoordinateTransition handles transition side effects including checkpoint saving,
 // state persistence, and event emission.
-func (pc *PhaseCoordinator) CoordinateTransition(ctx context.Context, from, to m31types.WorkflowPhase) error {
+func (pc *PhaseCoordinator) CoordinateTransition(ctx context.Context, from, to m31types.WorkflowPhase, goal string, planVersion int) error {
 	// Emit phase transition start message
 	pc.emitFn(PhaseTransitionStartMsg{
 		From:    string(from),
@@ -122,8 +122,10 @@ func (pc *PhaseCoordinator) CoordinateTransition(ctx context.Context, from, to m
 
 	// Save checkpoint
 	cp := session.Checkpoint{
-		Phase:     to,
-		Timestamp: time.Now(),
+		Phase:       to,
+		Timestamp:   time.Now(),
+		Goal:        goal,
+		PlanVersion: planVersion,
 	}
 	if err := pc.sessionMgr.SaveCheckpoint(pc.sessionID, cp); err != nil {
 		pc.emitFn(PhaseTransitionCompleteMsg{

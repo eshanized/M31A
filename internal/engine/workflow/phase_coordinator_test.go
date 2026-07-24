@@ -124,7 +124,7 @@ func TestPhaseCoordinator_PostPhaseExecution(t *testing.T) {
 func TestPhaseCoordinator_CoordinateTransition(t *testing.T) {
 	pc, emitter := setupTestPhaseCoordinator(t)
 
-	err := pc.CoordinateTransition(context.TODO(), m31types.PhaseIdle, m31types.PhaseInitialize)
+	err := pc.CoordinateTransition(context.TODO(), m31types.PhaseIdle, m31types.PhaseInitialize, "test goal", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

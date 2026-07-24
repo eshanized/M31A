@@ -84,6 +84,9 @@ type WorkflowState struct {
 
 	// v1.5: Checkpoint resume
 	checkpointData *CheckpointData
+
+	// currentGoal tracks the active workflow goal for checkpoint persistence.
+	currentGoal string
 }
 
 // CheckpointData holds data that can be saved/restored across checkpoints.
@@ -833,6 +836,8 @@ func (e *Engine) GetCostInfo() (totalCost float64, budgetLimit float64, budgetRe
 
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
+	// Store current goal for checkpoint persistence (B14)
+	e.state.currentGoal = goal
 	// Budget guardrail: check cumulative cost before each phase.
 	// Kept inline because e.costTracker may be reassigned after construction
 	// (e.g., in tests), while PhaseCoordinator holds the original reference.
@@ -926,7 +931,7 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 	}
 
 	// Delegate transition side effects to PhaseCoordinator
-	return e.phaseCoordinator.CoordinateTransition(ctx, from, to)
+	return e.phaseCoordinator.CoordinateTransition(ctx, from, to, e.state.currentGoal, e.state.planVersion)
 }
 
 // SetGit sets the git instance on the engine.

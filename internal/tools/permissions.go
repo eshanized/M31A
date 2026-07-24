@@ -373,12 +373,7 @@ func riskLevelValue(r types.RiskLevel) int {
 }
 
 func matchAnyParamValue(pattern string, params map[string]any) bool {
-	paramKeys := []string{"path", "url", "command", "pattern"}
-	for _, key := range paramKeys {
-		v, ok := params[key]
-		if !ok {
-			continue
-		}
+	for _, v := range params {
 		if matchValue(v, pattern) {
 			return true
 		}
@@ -491,7 +486,15 @@ func (d *Dispatcher) sendAndWaitForPermission(ctx context.Context, req Permissio
 	// Create per-request response channel
 	respCh := make(chan PermissionResponse, 1)
 	d.pendingResponses.Store(req.ID, respCh)
-	defer d.pendingResponses.Delete(req.ID)
+	// B10 fix: delayed cleanup gives late-arriving responses a window to be
+	// delivered through the per-request channel instead of falling through
+	// to the shared responseCh where nobody would read them.
+	defer func() {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			d.pendingResponses.Delete(req.ID)
+		}()
+	}()
 
 	// Set queue depth before sending (how many are already waiting)
 	req.QueueDepth = int(d.pendingPermCount.Load())
