@@ -170,3 +170,69 @@ func TestSetPhase_ResetsCycles(t *testing.T) {
 		t.Errorf("expected discussPlanCycles=1 after Plan->Discuss, got %d", sm.discussPlanCycles)
 	}
 }
+
+// B25: Transition produces exactly one history entry (no duplicates)
+func TestStateMachine_NoDuplicateHistory(t *testing.T) {
+	sm := NewStateMachine()
+	initialLen := len(sm.History()) // 1 (PhaseIdle)
+
+	// Single transition should add exactly one entry
+	sm.Transition(m31types.PhaseIdle, m31types.PhaseInitialize)
+
+	history := sm.History()
+	if len(history) != initialLen+1 {
+		t.Errorf("expected history length %d after one transition, got %d", initialLen+1, len(history))
+	}
+	if history[len(history)-1] != m31types.PhaseInitialize {
+		t.Errorf("expected last entry PhaseInitialize, got %s", history[len(history)-1])
+	}
+}
+
+// B25: TUI flow (Transition only, no SetPhase) produces one entry per transition
+func TestStateMachine_TUIFlowSingleEntry(t *testing.T) {
+	sm := NewStateMachine()
+
+	// Simulate TUI flow: Idle → Initialize → Discuss → Plan → Execute
+	transitions := []struct {
+		from, to m31types.WorkflowPhase
+	}{
+		{m31types.PhaseIdle, m31types.PhaseInitialize},
+		{m31types.PhaseInitialize, m31types.PhaseDiscuss},
+		{m31types.PhaseDiscuss, m31types.PhasePlan},
+		{m31types.PhasePlan, m31types.PhaseExecute},
+	}
+
+	for i, tr := range transitions {
+		before := len(sm.History())
+		if err := sm.Transition(tr.from, tr.to); err != nil {
+			t.Fatalf("transition %d failed: %v", i, err)
+		}
+		after := len(sm.History())
+		if after != before+1 {
+			t.Errorf("transition %d: expected history to grow by 1, got %d→%d", i, before, after)
+		}
+	}
+}
+
+// B26: History is capped at maxHistorySize
+func TestStateMachine_HistoryCap(t *testing.T) {
+	sm := NewStateMachine()
+
+	// Drive transitions well beyond maxHistorySize
+	for i := 0; i < maxHistorySize+100; i++ {
+		// Alternate between valid transitions
+		if sm.CurrentPhase() == m31types.PhaseIdle {
+			sm.SetPhase(m31types.PhaseInitialize)
+		} else {
+			sm.SetPhase(m31types.PhaseIdle)
+		}
+	}
+
+	history := sm.History()
+	if len(history) > maxHistorySize {
+		t.Errorf("history length %d exceeds maxHistorySize %d", len(history), maxHistorySize)
+	}
+	if len(history) != maxHistorySize {
+		t.Errorf("expected history length %d, got %d", maxHistorySize, len(history))
+	}
+}

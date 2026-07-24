@@ -19,6 +19,10 @@ type StateMachine struct {
 	discussPlanCycles int
 }
 
+// maxHistorySize caps the history slice to prevent unbounded memory growth
+// in long-running sessions. Once exceeded, oldest entries are trimmed.
+const maxHistorySize = 1000
+
 // NewStateMachine creates a StateMachine initialized at PhaseIdle
 // with the standard M31A phase transition graph.
 func NewStateMachine() *StateMachine {
@@ -94,6 +98,9 @@ func (sm *StateMachine) Transition(from, to m31types.WorkflowPhase) error {
 
 	sm.currentPhase = to
 	sm.history = append(sm.history, to)
+	if len(sm.history) > maxHistorySize {
+		sm.history = sm.history[len(sm.history)-maxHistorySize:]
+	}
 	return nil
 }
 
@@ -104,4 +111,7 @@ func (sm *StateMachine) SetPhase(phase m31types.WorkflowPhase) {
 	sm.currentPhase = phase
 	sm.discussPlanCycles = 0
 	sm.history = append(sm.history, phase)
+	if len(sm.history) > maxHistorySize {
+		sm.history = sm.history[len(sm.history)-maxHistorySize:]
+	}
 }
