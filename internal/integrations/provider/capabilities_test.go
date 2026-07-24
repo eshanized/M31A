@@ -470,3 +470,40 @@ func TestDetectCapabilities_ConcurrentAccess(t *testing.T) {
 	// Clean up
 	SetCapabilityConfig(nil, nil, nil, nil, nil)
 }
+
+// B29: Default capabilities for unknown models are cached
+func TestDetectCapabilities_DefaultCached(t *testing.T) {
+	t.Parallel()
+
+	// Clear any cached entries for this model
+	model := "completely-unknown-model-xyz-123"
+	provider := "test-provider"
+	cacheKey := provider + "/" + model
+	modelCapabilitiesCacheMu.Lock()
+	delete(modelCapabilitiesCache, cacheKey)
+	modelCapabilitiesCacheMu.Unlock()
+
+	// First call should generate and cache default caps
+	caps1, err := DetectCapabilities(provider, model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify it's in the cache now
+	modelCapabilitiesCacheMu.Lock()
+	_, cached := modelCapabilitiesCache[cacheKey]
+	modelCapabilitiesCacheMu.Unlock()
+
+	if !cached {
+		t.Error("expected default capabilities to be cached after first call")
+	}
+
+	// Second call should return the same pointer (from cache)
+	caps2, err := DetectCapabilities(provider, model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if caps1 != caps2 {
+		t.Error("expected second call to return cached capabilities (same pointer)")
+	}
+}

@@ -731,3 +731,20 @@ func TestMatchAnyParamValue_DynamicKeys(t *testing.T) {
 		})
 	}
 }
+
+// B27: doublestar.Match errors are logged (malformed pattern doesn't panic)
+func TestMatchToolName_ErrorHandling(t *testing.T) {
+	// Malformed glob pattern (unclosed bracket) should not panic
+	got := matchToolName("[invalid", "test.go")
+	if got {
+		t.Error("expected false for malformed pattern")
+	}
+}
+
+func TestMatchAnyParamValue_ErrorHandling(t *testing.T) {
+	// Malformed glob pattern should not panic on string params
+	got := matchAnyParamValue("[invalid", map[string]any{"path": "test.go"})
+	if got {
+		t.Error("expected false for malformed pattern")
+	}
+}

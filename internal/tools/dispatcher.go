@@ -438,16 +438,23 @@ func (d *Dispatcher) Stop() {
 		d.rateTicker.Stop()
 		close(d.dangerousRateDone)
 		d.dangerousRateTicker.Stop()
-		// Drain stale responses from shared channels to prevent buildup
-		// from responses that arrive after per-request channels are deleted.
-		for {
-			select {
-			case <-d.responseCh:
-			default:
-				return
-			}
-		}
+		// Drain all channels to prevent goroutine leaks from pending sends.
+		d.drainChannels()
 	})
+}
+
+// drainChannels non-blockingly drains requestCh, questionReqCh, and responseCh
+// so that any goroutines blocked on sends can unblock and exit.
+func (d *Dispatcher) drainChannels() {
+	for {
+		select {
+		case <-d.requestCh:
+		case <-d.questionReqCh:
+		case <-d.responseCh:
+		default:
+			return
+		}
+	}
 }
 
 // toolResultError wraps a ToolResult to distinguish "permission rule error

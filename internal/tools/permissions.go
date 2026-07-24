@@ -353,7 +353,10 @@ func matchToolName(pattern, name string) bool {
 	if pattern == name || pattern == "*" {
 		return true
 	}
-	matched, _ := doublestar.Match(pattern, name)
+	matched, err := doublestar.Match(pattern, name)
+	if err != nil {
+		slog.Warn("invalid permission pattern", "pattern", pattern, "error", err)
+	}
 	return matched
 }
 
@@ -384,7 +387,10 @@ func matchAnyParamValue(pattern string, params map[string]any) bool {
 func matchValue(v any, pattern string) bool {
 	switch val := v.(type) {
 	case string:
-		matched, _ := doublestar.Match(pattern, val)
+		matched, err := doublestar.Match(pattern, val)
+		if err != nil {
+			slog.Warn("invalid permission pattern", "pattern", pattern, "error", err)
+		}
 		return matched
 	case map[string]any:
 		for _, inner := range val {
@@ -401,7 +407,10 @@ func matchValue(v any, pattern string) bool {
 	default:
 		// int, bool, etc. — stringify for matching
 		s := fmt.Sprintf("%v", val)
-		matched, _ := doublestar.Match(pattern, s)
+		matched, err := doublestar.Match(pattern, s)
+		if err != nil {
+			slog.Warn("invalid permission pattern", "pattern", pattern, "error", err)
+		}
 		return matched
 	}
 	return false

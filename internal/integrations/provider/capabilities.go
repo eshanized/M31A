@@ -363,6 +363,11 @@ func DetectCapabilities(provider, modelID string) (*ModelCapabilities, error) {
 		MaxOutputTokens:      2048,
 	}
 
+	// Cache default capabilities to avoid regenerating on every call (B29)
+	modelCapabilitiesCacheMu.Lock()
+	modelCapabilitiesCache[cacheKey] = defaultCaps
+	modelCapabilitiesCacheMu.Unlock()
+
 	return defaultCaps, nil
 }
 

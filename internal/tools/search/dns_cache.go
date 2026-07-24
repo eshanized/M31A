@@ -131,7 +131,11 @@ func (dc *DNSCache) evictOldest(maxSize int32) {
 	var entries []entryWithTime
 	dc.cache.Range(func(key, value any) bool {
 		if entry, ok := value.(*dnsCacheEntry); ok {
-			entries = append(entries, entryWithTime{key: key.(string), entry: entry})
+			keyStr, ok := key.(string)
+			if !ok {
+				return true // skip non-string keys
+			}
+			entries = append(entries, entryWithTime{key: keyStr, entry: entry})
 		}
 		return true
 	})

@@ -989,3 +989,44 @@ func TestDispatcher_RespondQuestion_FallbackToShared(t *testing.T) {
 		t.Fatal("timed out waiting for fallback response")
 	}
 }
+
+// B30: Stop() drains all channels
+func TestStop_DrainsChannels(t *testing.T) {
+	d := testDispatcher(t)
+
+	// Fill channels with pending items
+	d.requestCh <- PermissionRequest{ID: 100}
+	d.questionReqCh <- types.QuestionRequest{ID: 200}
+	d.responseCh <- PermissionResponse{RequestID: 300}
+
+	// Stop should drain all channels without blocking
+	done := make(chan struct{})
+	go func() {
+		d.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success — Stop completed and drained channels
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop() blocked — channels not drained")
+	}
+
+	// Verify channels are empty
+	select {
+	case <-d.requestCh:
+		t.Error("requestCh should be empty after Stop")
+	default:
+	}
+	select {
+	case <-d.questionReqCh:
+		t.Error("questionReqCh should be empty after Stop")
+	default:
+	}
+	select {
+	case <-d.responseCh:
+		t.Error("responseCh should be empty after Stop")
+	default:
+	}
+}
