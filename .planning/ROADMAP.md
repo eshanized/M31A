@@ -28,3 +28,28 @@ Plans:
 - [ ] 01-audit-fixes/01-04-PLAN.md — Batch 4: Low Severity (B25, B26, B27, B28, B29, B30)
 
 **Canonical refs:** `BUGS.md`
+
+## Phase 2: Fix CI Test Regressions
+
+**Goal:** Fix all 59 test failures across 6 root causes introduced during Phase 01 bug-fix batches, restoring CI to green.
+
+**Success Criteria:**
+- All 59 failing tests pass (`go test -race ./...` clean)
+- `go vet ./...` and `golangci-lint run` clean (including the execute.go:571 ineffassign)
+- No new test regressions introduced
+- Each fix validated by running the specific failing test in isolation
+
+**Root Causes (from TEST_FAILURES.md):**
+- A: Config merge `intField`/`float6Field` regression (6 tests) — `merge.go` missing non-zero fallback
+- B: Session manager `sessionMetadata` missing `Label` field (3 tests)
+- C: Workflow engine `RunPhase` transition enforcement (19 tests) — state machine blocks legal test paths
+- D: TestIsCI race condition (1 test) — parallel env-var mutation
+- E: Bash security patterns lost in directory restructure (23 tests) — `exec/bash.go` missing expanded blocklist
+- F: TestAskUserQuestion_Timeout assertion (1 test) — checks wrong error channel
+
+**Plans:** 0/2 plans planned
+
+Plans:
+- [ ] (planned)
+
+**Canonical refs:** `TEST_FAILURES.md`
