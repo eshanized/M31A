@@ -496,3 +496,112 @@ func TestPermissions_InvalidType(t *testing.T) {
 	// Clean up
 	d.pendingResponses.Delete(int64(42))
 }
+
+// ---------------------------------------------------------------------------
+// B03: Deny-wins evaluation tests
+// ---------------------------------------------------------------------------
+
+func TestCheckPermission_DenyWins(t *testing.T) {
+	t.Parallel()
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Action: "deny", Pattern: "rm -rf *"},
+			{Tool: "Bash", Action: "allow"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
+
+	// Deny before allow — deny should win
+	// Use "rm -rf test" which matches "rm -rf *" pattern
+	allowed, _, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "rm -rf test"},
+	})
+	if err == nil {
+		t.Fatal("expected permission denied error")
+	}
+	if allowed {
+		t.Error("expected denied, got allowed")
+	}
+	if err != m31errors.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied, got %v", err)
+	}
+}
+
+func TestCheckPermission_DenyAlwaysWins(t *testing.T) {
+	t.Parallel()
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Action: "allow"},
+			{Tool: "Bash", Action: "deny", Pattern: "rm -rf *"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
+
+	// Allow before deny — deny should still win
+	// Use "rm -rf test" which matches "rm -rf *" pattern
+	allowed, _, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "rm -rf test"},
+	})
+	if err == nil {
+		t.Fatal("expected permission denied error")
+	}
+	if allowed {
+		t.Error("expected denied, got allowed")
+	}
+	if err != m31errors.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied, got %v", err)
+	}
+}
+
+func TestCheckPermission_DenyClassCoverage(t *testing.T) {
+	t.Parallel()
+	d := testDispatcherWithConfig(t, &config.PermissionsConfig{
+		Rules: []config.PermissionRule{
+			{Tool: "Bash", Action: "deny", Pattern: "rm -rf *"},
+			{Tool: "Bash", Action: "deny", Pattern: "sudo *"},
+			{Tool: "Bash", Action: "allow", Pattern: "echo *"},
+		},
+	})
+	d.Register(&mockTool{name: "Bash", riskLevel: types.RiskDangerous})
+
+	// Test deny rule 1
+	// Use "rm -rf test" which matches "rm -rf *" pattern
+	allowed, _, err := d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "rm -rf test"},
+	})
+	if err != m31errors.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied for rm -rf, got %v", err)
+	}
+	if allowed {
+		t.Error("expected denied for rm -rf")
+	}
+
+	// Test deny rule 2
+	// Use "sudo apt install" which matches "sudo *" pattern
+	allowed, _, err = d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "sudo apt install"},
+	})
+	if err != m31errors.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied for sudo, got %v", err)
+	}
+	if allowed {
+		t.Error("expected denied for sudo")
+	}
+
+	// Test allow rule (should work)
+	// Use "echo hello" which matches "echo *" pattern
+	allowed, _, err = d.checkPermission("Bash", types.ToolInput{
+		Name:   "Bash",
+		Params: map[string]any{"command": "echo hello"},
+	})
+	if err != nil {
+		t.Errorf("expected no error for echo, got %v", err)
+	}
+	if !allowed {
+		t.Error("expected allowed for echo")
+	}
+}

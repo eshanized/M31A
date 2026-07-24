@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-// FileLock provides advisory file locking using flock(2).
+// FileLock provides kernel-managed file locking using fcntl(F_SETLK).
 // Used to prevent concurrent M31A instances from corrupting
 // shared session files in the same project directory.
 type FileLock struct {
@@ -34,9 +34,15 @@ func (fl *FileLock) Lock() error {
 	if err != nil {
 		return fmt.Errorf("open lock file %s: %w", fl.path, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	lock := syscall.Flock_t{
+		Type:   syscall.F_WRLCK,
+		Whence: int16(os.SEEK_SET),
+		Start:  0,
+		Len:    0,
+	}
+	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lock); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("flock %s: %w", fl.path, err)
+		return fmt.Errorf("fcntl lock %s: %w", fl.path, err)
 	}
 	fl.mu.Lock()
 	fl.file = f
@@ -54,12 +60,18 @@ func (fl *FileLock) TryLock() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open lock file %s: %w", fl.path, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	lock := syscall.Flock_t{
+		Type:   syscall.F_WRLCK,
+		Whence: int16(os.SEEK_SET),
+		Start:  0,
+		Len:    0,
+	}
+	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lock); err != nil {
 		_ = f.Close()
-		if err == syscall.EWOULDBLOCK {
+		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return false, nil
 		}
-		return false, fmt.Errorf("flock %s: %w", fl.path, err)
+		return false, fmt.Errorf("fcntl trylock %s: %w", fl.path, err)
 	}
 	fl.mu.Lock()
 	fl.file = f
@@ -76,7 +88,13 @@ func (fl *FileLock) Unlock() error {
 	if f == nil {
 		return nil
 	}
-	err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	lock := syscall.Flock_t{
+		Type:   syscall.F_UNLCK,
+		Whence: int16(os.SEEK_SET),
+		Start:  0,
+		Len:    0,
+	}
+	err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lock)
 	closeErr := f.Close()
 	if err != nil {
 		return fmt.Errorf("unlock %s: %w", fl.path, err)

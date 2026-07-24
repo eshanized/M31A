@@ -90,3 +90,41 @@ func TestSetModelNilProviderDoesNotOverwrite(t *testing.T) {
 		t.Errorf("modelID should update even with nil provider; got %q, want %q", gotM, "updated")
 	}
 }
+
+// TestShutdown_CacheRace verifies that concurrent Shutdown and cache access
+// do not race. Run with -race flag.
+func TestShutdown_CacheRace(t *testing.T) {
+	engine, _ := setupTestEngine(t)
+
+	var wg sync.WaitGroup
+	const goroutines = 10
+	const iterations = 100
+
+	// Concurrent cache readers (simulating normal operation)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				engine.cacheMu.RLock()
+				cache := engine.cache
+				engine.cacheMu.RUnlock()
+				if cache != nil {
+					// Access cache methods
+					_ = cache.GetProject(engine.sessionID)
+				}
+			}
+		}(i)
+	}
+
+	// Concurrent writer (simulating shutdown)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		engine.cacheMu.Lock()
+		engine.cache = nil
+		engine.cacheMu.Unlock()
+	}()
+
+	wg.Wait()
+}

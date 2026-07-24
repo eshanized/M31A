@@ -149,6 +149,8 @@ type Engine struct {
 	toolCallsSinceLastCompact int
 	// phaseCoordinator delegates pre-phase setup, post-phase metrics, and transition side effects.
 	phaseCoordinator *PhaseCoordinator
+	// cacheMu protects cache from concurrent access during shutdown
+	cacheMu sync.RWMutex
 	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
 	state *WorkflowState
 	// done is closed when the workflow completes or is shut down.
@@ -534,7 +536,9 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	}
 
 	// Cleanup resources.
+	e.cacheMu.Lock()
 	e.cache = nil
+	e.cacheMu.Unlock()
 
 	return nil
 }
@@ -768,7 +772,10 @@ func (e *Engine) compactedMessages(original []m31types.Message, summary string) 
 // on first access per session. Avoids redundant disk I/O + JSON parse across
 // buildDiscussContext, buildPlanContext, buildResearchContext, and buildExecuteContext.
 func (e *Engine) loadProjectCached() *m31types.ProjectState {
-	if cached := e.cache.GetProjectShared(e.sessionID); cached != nil {
+	e.cacheMu.RLock()
+	cache := e.cache
+	e.cacheMu.RUnlock()
+	if cached := cache.GetProjectShared(e.sessionID); cached != nil {
 		return cached
 	}
 	project, err := e.sessionMgr.LoadProject(e.sessionID)
@@ -776,7 +783,7 @@ func (e *Engine) loadProjectCached() *m31types.ProjectState {
 		e.logger.Warn("failed to load project", "error", err)
 		return nil
 	}
-	e.cache.SetProjectShared(e.sessionID, project)
+	cache.SetProjectShared(e.sessionID, project)
 	return project
 }
 
@@ -1310,7 +1317,10 @@ func (e *Engine) PlanVersion() int {
 // ParametersParsed field is populated once to avoid repeated
 // json.Unmarshal in BuildChatBody (PERF-25).
 func (e *Engine) buildToolDefinitions() []provider.ToolDefinition {
-	return e.cache.GetToolDefs(func() []provider.ToolDefinition {
+	e.cacheMu.RLock()
+	cache := e.cache
+	e.cacheMu.RUnlock()
+	return cache.GetToolDefs(func() []provider.ToolDefinition {
 		var defs []provider.ToolDefinition
 		for _, name := range e.dispatcher.List() {
 			tool, ok := e.dispatcher.GetTool(name)

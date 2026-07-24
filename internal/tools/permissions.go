@@ -278,10 +278,11 @@ func (d *Dispatcher) SelectAgent(agent string) error {
 }
 
 func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bool, *PermissionContext, error) {
-	// Last-match-wins evaluation: iterate all rules, the last matching rule
-	// determines the outcome. This allows more specific rules to override
-	// general ones by ordering them later in the list.
-	var lastMatch *struct {
+	// Deny-wins evaluation: iterate all rules, deny always wins regardless
+	// of order. On deny match, return immediately. On allow match, record
+	// as candidate but continue. After loop, return last allow candidate
+	// if any, else deny.
+	var allowCandidate *struct {
 		allowed bool
 		pctx    *PermissionContext
 		err     error
@@ -313,35 +314,25 @@ func (d *Dispatcher) checkPermission(toolName string, input types.ToolInput) (bo
 		}
 
 		switch rule.Action {
+		case "deny":
+			// Deny always wins — return immediately
+			return false, pctx, m31errors.ErrPermissionDenied
 		case "allow":
-			lastMatch = &struct {
+			allowCandidate = &struct {
 				allowed bool
 				pctx    *PermissionContext
 				err     error
 			}{true, pctx, nil}
-		case "deny":
-			lastMatch = &struct {
-				allowed bool
-				pctx    *PermissionContext
-				err     error
-			}{false, pctx, m31errors.ErrPermissionDenied}
 		case "ask":
-			lastMatch = &struct {
-				allowed bool
-				pctx    *PermissionContext
-				err     error
-			}{false, pctx, nil}
+			return false, pctx, nil
 		default:
-			lastMatch = &struct {
-				allowed bool
-				pctx    *PermissionContext
-				err     error
-			}{false, pctx, nil}
+			// Unknown action treated as deny
+			return false, pctx, nil
 		}
 	}
 
-	if lastMatch != nil {
-		return lastMatch.allowed, lastMatch.pctx, lastMatch.err
+	if allowCandidate != nil {
+		return allowCandidate.allowed, allowCandidate.pctx, allowCandidate.err
 	}
 
 	if d.activeAgent != "default" {

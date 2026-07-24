@@ -738,11 +738,14 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 
 	// Load PROJECT.md for project context — use shared cache
 	var project *m31types.ProjectState
-	if cached := e.cache.GetProject(e.sessionID); cached != nil {
+	e.cacheMu.RLock()
+	cache := e.cache
+	e.cacheMu.RUnlock()
+	if cached := cache.GetProject(e.sessionID); cached != nil {
 		project = cached
 	} else {
 		project = e.loadProjectCached()
-		e.cache.SetProject(e.sessionID, project)
+		cache.SetProject(e.sessionID, project)
 	}
 	projectCtx := ""
 	if project != nil {
@@ -756,19 +759,22 @@ func (e *Engine) buildExecuteContext(ctx context.Context, task m31types.Task, ta
 	if planMarkdown == "" {
 		planMarkdown = e.state.planMarkdown
 	}
-	if planMarkdown != "" {
-		var plan *m31types.Plan
-		planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
-		if cached := e.cache.GetPlan(planHash); cached != nil {
-			plan = cached
-		} else {
-			var parseErr error
-			plan, parseErr = ParsePlan(planMarkdown)
-			if parseErr != nil {
-				e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
+		if planMarkdown != "" {
+			var plan *m31types.Plan
+			planHash := fmt.Sprintf("%x", md5.Sum([]byte(planMarkdown)))
+			e.cacheMu.RLock()
+			cache := e.cache
+			e.cacheMu.RUnlock()
+			if cached := cache.GetPlan(planHash); cached != nil {
+				plan = cached
+			} else {
+				var parseErr error
+				plan, parseErr = ParsePlan(planMarkdown)
+				if parseErr != nil {
+					e.logger.Warn("failed to parse plan for execute context", "error", parseErr)
+				}
+				cache.SetPlan(planHash, plan)
 			}
-			e.cache.SetPlan(planHash, plan)
-		}
 		if plan != nil {
 			planCtx = "## Implementation Plan Context\n"
 			if plan.Summary != "" {
