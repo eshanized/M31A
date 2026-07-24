@@ -28,6 +28,9 @@ type Checkpoint struct {
 // If more than 2 checkpoints exist, the oldest are trimmed (only last 2 retained).
 // Writes are atomic (temp + rename) per M-20.
 func (m *Manager) SaveCheckpoint(sessionID string, cp Checkpoint) error {
+	m.checkpointMu.Lock()
+	defer m.checkpointMu.Unlock()
+
 	path := filepath.Join(m.projectDir(), "checkpoint.json")
 
 	// Read existing checkpoints directly (not via LoadCheckpoints which sorts)

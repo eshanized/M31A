@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
@@ -29,6 +30,7 @@ type Manager struct {
 	sessionCacheTTL time.Duration // TTL for session list cache (kept for API compatibility)
 	lock            *fileLock
 	coordinator     *coordinator.Coordinator[string] // per-session concurrency control
+	checkpointMu    sync.Mutex                        // protects checkpoint read-modify-write
 }
 
 // ManagerOpts holds optional settings for the Manager.
@@ -313,6 +315,11 @@ func (m *Manager) UpdateWorkflowState(id, goal string, phase types.WorkflowPhase
 
 // LoadWorkflowState reads the persisted workflow state from session.json.
 func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.WorkflowPhase, questions []string, err error) {
+	if err := m.lock.Lock(); err != nil {
+		return "", types.PhaseIdle, nil, fmt.Errorf("session lock: %w", err)
+	}
+	defer m.lock.Unlock() //nolint:errcheck
+
 	session, loadErr := m.loadSessionMetadata()
 	if loadErr != nil {
 		if errors.Is(loadErr, m31errors.ErrSessionCorrupted) || errors.Is(loadErr, m31errors.ErrSessionNotFound) {
@@ -324,9 +331,41 @@ func (m *Manager) LoadWorkflowState(id string) (goal string, phase types.Workflo
 	return g, p, q, nil
 }
 
+// sessionMetadata is a metadata-only view of Session for JSON serialization.
+// It excludes Messages and Tasks to keep session.json lightweight.
+type sessionMetadata struct {
+	SchemaVersion    int                  `json:"schema_version"`
+	ID               string               `json:"id"`
+	ChildrenIDs      []string             `json:"children_ids"`
+	Model            string               `json:"model"`
+	Provider         string               `json:"provider"`
+	StartedAt        time.Time            `json:"started_at"`
+	MessageCount     int                  `json:"message_count"`
+	WorkflowPhase    types.WorkflowPhase  `json:"workflow_phase"`
+	Project          *types.ProjectState  `json:"project,omitempty"`
+	ResumedAt        *time.Time           `json:"resumed_at,omitempty"`
+	WorkflowGoal     string               `json:"workflow_goal,omitempty"`
+	DiscussQuestions []string             `json:"discuss_questions,omitempty"`
+}
+
 // saveSessionAtomic writes session metadata to session.json atomically.
+// Only metadata fields are persisted — Messages and Tasks are excluded.
 func (m *Manager) saveSessionAtomic(session *Session) error {
-	data, err := json.Marshal(session)
+	meta := sessionMetadata{
+		SchemaVersion:    session.SchemaVersion,
+		ID:               session.ID,
+		ChildrenIDs:      session.ChildrenIDs,
+		Model:            session.Model,
+		Provider:         session.Provider,
+		StartedAt:        session.StartedAt,
+		MessageCount:     session.MessageCount,
+		WorkflowPhase:    session.WorkflowPhase,
+		Project:          session.Project,
+		ResumedAt:        session.ResumedAt,
+		WorkflowGoal:     session.WorkflowGoal,
+		DiscussQuestions: session.DiscussQuestions,
+	}
+	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("cannot marshal session: %w", err)
 	}
