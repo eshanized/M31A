@@ -13,7 +13,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/pkoukk/tiktoken-go v0.1.8
 	// DEP-1: golang.org/x/sync/singleflight — stable x/ package, appropriate usage
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.22.0
 )
 
 require (
