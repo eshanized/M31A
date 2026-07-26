@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/glamour v0.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/mattn/go-runewidth v0.0.19
+	github.com/mattn/go-runewidth v0.0.27
 	github.com/pkoukk/tiktoken-go v0.1.8
 	// DEP-1: golang.org/x/sync/singleflight — stable x/ package, appropriate usage
 	golang.org/x/sync v0.22.0
