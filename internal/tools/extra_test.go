@@ -3605,15 +3605,21 @@ func TestAskUserQuestion_Timeout(t *testing.T) {
 	q := NewAskUserQuestion(reqCh, respCh, &pending)
 
 	// Use very short timeout and don't respond
-	_, err := q.Execute(context.Background(), types.ToolInput{
+	result, err := q.Execute(context.Background(), types.ToolInput{
 		Name: "AskUserQuestion",
 		Params: map[string]any{
 			"question": "What?",
 			"timeout":  float64(1),
 		},
 	})
-	if err == nil {
-		t.Error("expected timeout error")
+
+	// FIX: Check result.Error, not err
+	if result.Error == "" {
+		t.Error("expected timeout error in result.Error")
+	}
+	// Timeout is a tool result, not execution failure — err should be nil
+	if err != nil {
+		t.Errorf("unexpected Go error: %v", err)
 	}
 }
 

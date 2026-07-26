@@ -2,73 +2,59 @@
 package ci
 
 import (
-	"os"
 	"testing"
 )
 
 func TestIsCI(t *testing.T) {
 
-	// Save original env
-	origCI := os.Getenv("CI")
-	origGH := os.Getenv("GITHUB_ACTIONS")
-	origGL := os.Getenv("GITLAB_CI")
-	origCN := os.Getenv("CI_NAME")
-	defer func() {
-		os.Setenv("CI", origCI)
-		os.Setenv("GITHUB_ACTIONS", origGH)
-		os.Setenv("GITLAB_CI", origGL)
-		os.Setenv("CI_NAME", origCN)
-	}()
-
 	tests := []struct {
 		name       string
-		setup      func()
+		envVar     string
+		envValue   string
 		wantResult bool
 	}{
 		{
-			name: "CI=true",
-			setup: func() {
-				os.Setenv("CI", "true")
-			},
+			name:       "CI=true",
+			envVar:     "CI",
+			envValue:   "true",
 			wantResult: true,
 		},
 		{
-			name: "GITHUB_ACTIONS=true",
-			setup: func() {
-				os.Setenv("GITHUB_ACTIONS", "true")
-			},
+			name:       "GITHUB_ACTIONS=true",
+			envVar:     "GITHUB_ACTIONS",
+			envValue:   "true",
 			wantResult: true,
 		},
 		{
-			name: "GITLAB_CI=true",
-			setup: func() {
-				os.Setenv("GITLAB_CI", "true")
-			},
+			name:       "GITLAB_CI=true",
+			envVar:     "GITLAB_CI",
+			envValue:   "true",
 			wantResult: true,
 		},
 		{
-			name: "CI_NAME=github",
-			setup: func() {
-				os.Setenv("CI_NAME", "github")
-			},
+			name:       "CI_NAME=github",
+			envVar:     "CI_NAME",
+			envValue:   "github",
 			wantResult: true,
 		},
 		{
-			name: "no CI vars set",
-			setup: func() {
-				os.Unsetenv("CI")
-				os.Unsetenv("GITHUB_ACTIONS")
-				os.Unsetenv("GITLAB_CI")
-				os.Unsetenv("CI_NAME")
-			},
+			name:       "no CI vars set",
+			envVar:     "",
+			envValue:   "",
 			wantResult: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tc.setup()
+			if tc.envVar != "" {
+				t.Setenv(tc.envVar, tc.envValue)
+			} else {
+				t.Setenv("CI", "")
+				t.Setenv("GITHUB_ACTIONS", "")
+				t.Setenv("GITLAB_CI", "")
+				t.Setenv("CI_NAME", "")
+			}
 			if got := IsCI(); got != tc.wantResult {
 				t.Errorf("IsCI() = %v, want %v", got, tc.wantResult)
 			}
@@ -77,13 +63,10 @@ func TestIsCI(t *testing.T) {
 }
 
 func TestSkipIfCI(t *testing.T) {
-	t.Parallel()
-
-	// Can't easily test Skip in parallel tests, just verify it doesn't panic outside CI
-	os.Unsetenv("CI")
-	os.Unsetenv("GITHUB_ACTIONS")
-	os.Unsetenv("GITLAB_CI")
-	os.Unsetenv("CI_NAME")
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("GITLAB_CI", "")
+	t.Setenv("CI_NAME", "")
 
 	t.Run("does not skip when not in CI", func(t *testing.T) {
 		skipped := false
