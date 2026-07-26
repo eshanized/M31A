@@ -348,7 +348,10 @@ var (
 		{"rm -rf /", "recursive root deletion"},
 		{"rm -rf /*", "recursive root deletion with wildcard"},
 		{"mkfs", "filesystem formatting"},
+		{"mkfs.ext4", "ext4 filesystem formatting"},
+		{"mkfs.xfs", "XFS filesystem formatting"},
 		{"dd if=", "disk imaging/overwriting"},
+		{"dd of=/dev/", "raw disk write to device"},
 		{"> /dev/sd", "direct disk write"},
 		{"fdisk", "disk partitioning"},
 		{"parted", "disk partitioning"},
@@ -364,55 +367,84 @@ var (
 		{"killall", "kill all processes by name"},
 		{"pkill -9", "force kill all processes"},
 		{"mv / /", "move root directory"},
+		{"mv /* ", "moving from root filesystem"},
 		{"cp /dev/zero /dev/sd", "zeroing disk device"},
 		{"truncate -s 0 /dev/sd", "truncating disk device"},
+		{"wipefs", "filesystem signature wiping"},
+		{"shred", "secure file deletion"},
+		{"nc -l", "netcat listener"},
+		{"ncat -l", "netcat listener"},
+		{"socat", "socket relay"},
+		{">/dev/tcp", "TCP redirection"},
+		{"< /dev/tcp", "TCP input redirection"},
+		{"curl|sh", "curl to shell pipe"},
+		{"wget|bash", "wget to bash pipe"},
+		{"curl|bash", "curl to bash pipe"},
+		{"rm -rf *", "recursive delete all"},
+		{"rm -rf ~", "recursive delete home"},
 	}
 
-	dangerousObfuscationPatterns = []struct {
-		pattern string
-		reason  string
+	dangerousObfuscationRegexes = []struct {
+		re     *regexp.Regexp
+		reason string
 	}{
-		{"base64 -d", "base64 decode (potential obfuscation)"},
-		{"echo.*|.*sh", "piped shell execution"},
-		{"curl.*|.*sh", "curl to shell pipe"},
-		{"wget.*|.*sh", "wget to shell pipe"},
-		{"eval.*", "eval command execution"},
-		{"exec.*", "exec replacement"},
-		{"source /dev/stdin", "source from stdin"},
-		{". /dev/stdin", "dot source from stdin"},
+		{regexp.MustCompile(`base64\s+-d`), "base64 decode (potential obfuscation)"},
+		{regexp.MustCompile(`echo.*\|.*sh`), "piped shell execution"},
+		{regexp.MustCompile(`curl.*\|.*sh`), "curl to shell pipe"},
+		{regexp.MustCompile(`wget.*\|.*sh`), "wget to shell pipe"},
+		{regexp.MustCompile(`eval\s+`), "eval command execution"},
+		{regexp.MustCompile(`exec\s+`), "exec replacement"},
+		{regexp.MustCompile(`source\s+/dev/stdin`), "source from stdin"},
+		{regexp.MustCompile(`\.\s+/dev/stdin`), "dot source from stdin"},
 	}
 )
 
 func CheckDangerousCommand(command string, additionalBlocked []string, additionalObfuscation []string) (string, bool) {
 	normalized := normalizeCommand(command)
 
-	// Block if variable expansion detected (prevents injection via env vars)
+	// Command chaining detection — parse $(...) and `...` inner commands FIRST (D-06)
+	// This must run before variable expansion check so safe command substitutions are allowed
+	if reason, blocked := checkCommandChaining(normalized); blocked {
+		return reason, true
+	}
+
+	// Variable expansion check — REGEX (D-04)
+	// Now only catches actual variable expansions like $VAR, ${VAR}, not command substitution $()
 	if containsVariableExpansion(normalized) {
 		return "command contains variable expansion (potential injection)", true
 	}
 
-	// Check compiled baseline (security baseline — never bypassable)
+	// Check compiled baseline (exact substring — safe patterns, no regex metachars)
 	for _, dp := range dangerousCommandPatterns {
 		if strings.Contains(normalized, dp.pattern) {
 			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
 		}
 	}
-	for _, dp := range dangerousObfuscationPatterns {
-		if strings.Contains(normalized, dp.pattern) {
-			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.pattern), true
+
+	// Check COMPILED obfuscation regexes
+	for _, dp := range dangerousObfuscationRegexes {
+		if dp.re.MatchString(normalized) {
+			return fmt.Sprintf("blocked dangerous command: %s (pattern: %q)", dp.reason, dp.re.String()), true
 		}
 	}
 
-	// Check user-added blocked commands (can be bypassed by removing from config)
-	for _, pattern := range additionalBlocked {
-		if strings.Contains(normalized, pattern) {
-			return fmt.Sprintf("blocked by user-configured command: %q", pattern), true
-		}
+	// Custom blocklist — EXACT PREFIX MATCH (D-05)
+	if reason, blocked := checkCustomBlocklist(normalized, additionalBlocked); blocked {
+		return reason, true
 	}
-	// Check user-added obfuscation patterns
+
+	// Custom obfuscation patterns — COMPILED REGEX with token-based matching
 	for _, pattern := range additionalObfuscation {
-		if strings.Contains(normalized, pattern) {
-			return fmt.Sprintf("blocked by user-configured obfuscation pattern: %q", pattern), true
+		// Split normalized command into tokens (separated by spaces or hyphens)
+		// Pattern must match a complete token
+		// This allows "evil" to match "evil-command" (token "evil") but "evil-command" to NOT match "evil-command-extra" (token "evil-command-extra" != "evil-command")
+		tokens := strings.FieldsFunc(normalized, func(r rune) bool {
+			return r == ' ' || r == '-'
+		})
+		for _, token := range tokens {
+			if token == pattern {
+				return fmt.Sprintf("blocked by user-configured obfuscation pattern: %q", pattern), true
+			}
 		}
 	}
 
@@ -429,18 +461,88 @@ func normalizeCommand(cmd string) string {
 }
 
 func containsVariableExpansion(cmd string) bool {
-	patterns := []string{
-		"$[A-Za-z_]",
-		"${",
-		"$(",
-		"`",
+	// Patterns: $VAR, ${VAR}, $((expr))
+	// Note: $(cmd) and `cmd` are command substitution, handled by checkCommandChaining
+	varExpansionRe := regexp.MustCompile(`\$[A-Za-z_]`)
+	if varExpansionRe.MatchString(cmd) {
+		return true
 	}
-	for _, p := range patterns {
-		if strings.Contains(cmd, p) {
-			return true
+	if strings.Contains(cmd, "${") {
+		return true
+	}
+	if strings.Contains(cmd, "$((") {
+		return true
+	}
+	// Note: $(cmd) and `cmd` are command substitution, handled by checkCommandChaining
+	return false
+}
+
+// checkCustomBlocklist implements exact-prefix matching for custom blocklists (D-05)
+func checkCustomBlocklist(normalized string, additionalBlocked []string) (string, bool) {
+	parts := strings.Fields(normalized)
+	if len(parts) == 0 {
+		return "", false
+	}
+	cmd := parts[0]
+	for _, pattern := range additionalBlocked {
+		if cmd == pattern { // EXACT match on command name
+			return fmt.Sprintf("blocked by user-configured command: %q", pattern), true
 		}
 	}
-	return false
+	return "", false
+}
+
+// checkCommandChaining parses command separators and validates inner commands recursively (D-06)
+func checkCommandChaining(normalized string) (string, bool) {
+	separators := regexp.MustCompile(`\s*[;&|]{1,2}\s*`)
+	segments := separators.Split(normalized, -1)
+
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+
+		// Check for command substitution $(...)
+		if strings.HasPrefix(seg, "$(") && strings.HasSuffix(seg, ")") {
+			inner := strings.TrimSpace(seg[2 : len(seg)-1])
+			if reason, blocked := CheckDangerousCommand(inner, nil, nil); blocked {
+				return fmt.Sprintf("blocked dangerous command substitution: %s (inner: %s)", reason, inner), true
+			}
+			continue
+		}
+
+		// Check for backtick substitution
+		if strings.HasPrefix(seg, "`") && strings.HasSuffix(seg, "`") {
+			inner := strings.TrimSpace(seg[1 : len(seg)-1])
+			if reason, blocked := CheckDangerousCommand(inner, nil, nil); blocked {
+				return fmt.Sprintf("blocked dangerous backtick substitution: %s (inner: %s)", reason, inner), true
+			}
+			continue
+		}
+
+		// Check segment against dangerous patterns
+		if reason, blocked := checkSegmentAgainstPatterns(seg); blocked {
+			return fmt.Sprintf("blocked dangerous command in chain: %s (segment: %s)", reason, seg), true
+		}
+	}
+	return "", false
+}
+
+func checkSegmentAgainstPatterns(seg string) (string, bool) {
+	// Check dangerousCommandPatterns
+	for _, dp := range dangerousCommandPatterns {
+		if strings.Contains(seg, dp.pattern) {
+			return dp.reason, true
+		}
+	}
+	// Check obfuscation regexes
+	for _, dp := range dangerousObfuscationRegexes {
+		if dp.re.MatchString(seg) {
+			return dp.reason, true
+		}
+	}
+	return "", false
 }
 
 // validateCommandSyntax performs basic syntax validation on shell commands.

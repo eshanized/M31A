@@ -113,8 +113,9 @@ func TestCheckDangerousCommand_ObfuscationDetection(t *testing.T) {
 		{"tab obfuscation", "echo\thello", false},
 		{"mixed case dangerous", "eChO hello", false},
 		{"variable expansion", "echo $HOME", true},
-		{"command substitution in var", "echo $(echo hello)", true},
-		{"backtick command substitution", "echo `whoami`", true},
+		// Per D-06: only block command substitution when inner command is dangerous
+		{"command substitution safe", "echo $(echo hello)", false},
+		{"backtick command substitution safe", "echo `echo hello`", false},
 		{"hex encoding", "echo -e '\\x68\\x65\\x6c\\x6c\\x6f'", false},
 		{"base64 decoding", "echo Y2F0IC9ldGMvcGFzc3dk | base64 -d | bash", true},
 	}
@@ -198,9 +199,11 @@ func TestCheckDangerousCommand_Unicode(t *testing.T) {
 
 func TestCheckDangerousCommand_LongCommand(t *testing.T) {
 	// Very long commands should be handled without panic
+	// "echo hello; " repeated 1000 times is NOT dangerous - just long
+	// The system should handle it without panic, not block it as dangerous
 	longCmd := strings.Repeat("echo hello; ", 1000)
 	_, blocked := CheckDangerousCommand(longCmd, nil, nil)
-	if !blocked {
-		t.Error("long command with repeated dangerous patterns should be blocked")
+	if blocked {
+		t.Error("long benign command should not be blocked as dangerous")
 	}
 }
