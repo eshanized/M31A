@@ -346,6 +346,7 @@ type sessionMetadata struct {
 	ResumedAt        *time.Time          `json:"resumed_at,omitempty"`
 	WorkflowGoal     string              `json:"workflow_goal,omitempty"`
 	DiscussQuestions []string            `json:"discuss_questions,omitempty"`
+	Label            string              `json:"label,omitempty"`
 }
 
 // saveSessionAtomic writes session metadata to session.json atomically.
@@ -364,6 +365,7 @@ func (m *Manager) saveSessionAtomic(session *Session) error {
 		ResumedAt:        session.ResumedAt,
 		WorkflowGoal:     session.WorkflowGoal,
 		DiscussQuestions: session.DiscussQuestions,
+		Label:            session.Label,
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {

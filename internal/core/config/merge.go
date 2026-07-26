@@ -39,7 +39,7 @@ func (m mergeHelper) boolField(base, overlay *bool, key string) {
 // intField copies overlay to base if explicitly defined in the overlay.
 // This allows zero-value overrides (e.g., setting max_iterations = 0).
 func (m mergeHelper) intField(base, overlay *int, key string) {
-	if m.hasKey(key) {
+	if m.hasKey(key) || *overlay != 0 {
 		*base = *overlay
 	}
 }
@@ -47,7 +47,7 @@ func (m mergeHelper) intField(base, overlay *int, key string) {
 // float64Field copies overlay to base if explicitly defined in the overlay.
 // This allows zero-value overrides.
 func (m mergeHelper) float64Field(base, overlay *float64, key string) {
-	if m.hasKey(key) {
+	if m.hasKey(key) || *overlay != 0 {
 		*base = *overlay
 	}
 }
