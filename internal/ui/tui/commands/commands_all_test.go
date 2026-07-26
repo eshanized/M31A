@@ -426,8 +426,11 @@ func TestHandlePhase_AllPhases(t *testing.T) {
 
 func TestHandlePhase_InvalidPhaseName(t *testing.T) {
 	t.Parallel()
+	// Use a properly initialized session manager to avoid nil pointer deref
+	mgr := session.NewManager(t.TempDir(), t.TempDir(), session.ManagerOpts{})
+
 	r := handlePhase([]string{"bogus"}, CommandContext{
-		SessionManager: &session.Manager{},
+		SessionManager: mgr,
 		SessionID:      "test",
 	})
 	// Will fail because LoadWorkflowState fails on empty manager
