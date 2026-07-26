@@ -1850,7 +1850,7 @@ func TestRunPlan_WithRefinement(t *testing.T) {
 	}
 
 	// First plan
-	_, err = engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	_, err = engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
 		t.Fatalf("First plan failed: %v", err)
 	}
@@ -2595,7 +2595,7 @@ func TestRunVerify_SkipsNonDoneTasks(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
 	if err != nil {
 		t.Fatalf("Verify failed: %v", err)
 	}

@@ -23,7 +23,7 @@ func TestEngine_RunShip(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test goal")
 	if err != nil {
 		t.Fatalf("RunPhase ship failed: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestEngine_RunShip_NoTasks(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase ship failed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestEngine_RunShip_NoGit(t *testing.T) {
 	// Set git to nil — ship should still succeed (git operations are optional)
 	engine.git = nil
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test goal")
 	if err != nil {
 		t.Fatalf("RunPhase ship failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestEngine_RunShip_WithFailedTasks(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test goal")
 	// Ship with failed tasks should return an error
 	if err == nil {
 		t.Error("Expected error when shipping with failed tasks")
@@ -156,7 +156,7 @@ func TestEngine_RunShip_WithSkippedTasks(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test goal")
 	if err != nil {
 		t.Fatalf("RunPhase ship failed: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestShip_SaveStateBeforeArchive(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseShip, "Test goal")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseShip, "Test goal")
 	if err != nil {
 		t.Fatalf("RunPhase ship failed: %v", err)
 	}

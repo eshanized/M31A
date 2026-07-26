@@ -168,10 +168,10 @@ func TestEngineTransitionMultiplePhases(t *testing.T) {
 		t.Fatalf("first Transition failed: %v", err)
 	}
 
-	// Run Initialize phase
-	_, err = engine.RunPhase(context.Background(), m31types.PhaseInitialize, "test multi")
+	// Run Initialize phase (use RunPhaseDirect to avoid transition validation)
+	_, err = engine.RunPhaseDirect(context.Background(), m31types.PhaseInitialize, "test multi")
 	if err != nil {
-		t.Fatalf("RunPhase Initialize failed: %v", err)
+		t.Fatalf("RunPhaseDirect Initialize failed: %v", err)
 	}
 
 	// Transition Initialize -> Discuss

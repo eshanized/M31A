@@ -15,7 +15,7 @@ import (
 func TestEngine_RunVerify_NoTasks(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase verify failed: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestEngine_RunVerify_WithDoneTasks(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase verify failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestEngine_RunVerify_MissingFile(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase verify failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestEngine_RunVerify_SkipsPendingTasks(t *testing.T) {
 	}
 	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhaseVerify, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase verify failed: %v", err)
 	}

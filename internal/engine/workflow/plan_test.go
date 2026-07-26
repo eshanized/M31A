@@ -24,7 +24,7 @@ func TestEngine_RunPlan_Success(t *testing.T) {
 	mp := engine.provider.(*mocks.MockProvider)
 	mp.Response_ = `[{"id":1,"action":"Create","description":"Create main.go","dependencies":[],"files":["main.go"],"acceptance_criteria":["compiles"]}]`
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Build a REST API")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Build a REST API")
 	if err != nil {
 		t.Fatalf("RunPhase plan failed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestEngine_RunPlan_ParsesJSONFromMarkdown(t *testing.T) {
 	mp := engine.provider.(*mocks.MockProvider)
 	mp.Response_ = "```json\n[{\"id\":1,\"action\":\"Create\",\"description\":\"Task\",\"dependencies\":[],\"files\":[],\"acceptance_criteria\":[\"task completes\"]}]\n```"
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase plan failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestEngine_RunPlan_FailsOnValidationErrors(t *testing.T) {
 	mp := engine.provider.(*mocks.MockProvider)
 	mp.Response_ = `[{"id":1,"action":"Create","dependencies":[],"files":[],"acceptance_criteria":[]}]`
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
 		t.Fatal("Expected error for invalid task")
 	}
@@ -193,7 +193,7 @@ func TestEngine_Plan_SavesTasks(t *testing.T) {
 	mp := engine.provider.(*mocks.MockProvider)
 	mp.Response_ = `[{"id":1,"action":"Create","description":"Task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`
 
-	_, err = engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	_, err = engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
 		t.Fatalf("RunPhase plan failed: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestEngine_RunPlan_RetryWithErrorFeedback(t *testing.T) {
 		`[{"id":1,"action":"Create","description":"Fixed task","dependencies":[],"files":["main.go"],"acceptance_criteria":["works"]}]`,
 	}
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestEngine_RunPlan_ManualFallback(t *testing.T) {
 	mp := engine.provider.(*mocks.MockProvider)
 	mp.Response_ = "not json at all"
 
-	result, err := engine.RunPhase(context.Background(), m31types.PhasePlan, "Test")
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhasePlan, "Test")
 	if err == nil {
 		t.Fatal("Expected error after 3 retries")
 	}

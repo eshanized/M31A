@@ -241,6 +241,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 	if e.cfg != nil && e.cfg.Features.MaxHealAttempts > 0 {
 		maxHeals = e.cfg.Features.MaxHealAttempts
 	}
+	var messages []m31types.Message
 	for task.HealsAttempted < maxHeals {
 		// Re-check quality gate after a successful heal before calling LLM again
 		if qualityGatePending {
@@ -276,7 +277,14 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		}
 
 		// Build context
-		messages := e.buildExecuteContext(ctx, *task, allTasks, goal)
+		messages = e.buildExecuteContext(ctx, *task, allTasks, goal)
+
+		// Wave 2B: proactive compaction during Execute phase — run on every iteration
+		// so compacted messages are used for the immediate LLM call.
+		e.toolCallsSinceLastCompact = 0
+		if e.cfg != nil && e.cfg.Compaction.Proactive {
+			messages = e.proactiveCompactCheck(messages)
+		}
 
 		// Stream LLM with native tool calling
 		content, toolCalls, err := e.streamLLMWithTools(ctx, messages)
@@ -561,18 +569,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 		}
 
-		toolErr := len(toolErrMessages) > 0
-		toolCallCount := len(toolExecResults)
+toolErr := len(toolErrMessages) > 0
+	toolCallCount := len(toolExecResults)
 
-		// Wave 2B: proactive compaction during Execute phase
-		e.toolCallsSinceLastCompact += toolCallCount
-		if e.cfg != nil && e.cfg.Compaction.Proactive && e.toolCallsSinceLastCompact >= e.cfg.Compaction.ToolCallsThreshold {
-			e.toolCallsSinceLastCompact = 0
-			messages = e.proactiveCompactCheck(messages)
-		}
-
-		if toolErr {
-			if task.HealsAttempted >= m31types.MaxHealAttempts {
+	if toolErr {
+		if task.HealsAttempted >= m31types.MaxHealAttempts {
 				return taskrunner.TaskResult{
 					Success: false,
 					Error:   strings.Join(toolErrMessages, "; "),

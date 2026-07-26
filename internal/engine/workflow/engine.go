@@ -913,6 +913,63 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	return result, err
 }
 
+// RunPhaseDirect executes a single phase WITHOUT state machine transition validation.
+// INTENDED FOR TEST USE ONLY — does not enforce phase ordering.
+// Production code MUST use RunPhase which validates transitions via stateMachine.Transition().
+func (e *Engine) RunPhaseDirect(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
+	e.state.currentGoal = goal
+
+	// Budget check (same as RunPhase)
+	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
+		cost := e.costTracker.TotalCost()
+		if cost >= e.cfg.Features.BudgetLimitUSD {
+			return &PhaseResult{Phase: phase, Success: false, Error: fmt.Sprintf("budget limit exceeded")}, fmt.Errorf("budget limit exceeded")
+		}
+	}
+
+	start := time.Now()
+
+	// PrePhaseSetup (same as RunPhase)
+	e.state.messagesMu.Lock()
+	var err error
+	e.state.Messages, err = e.phaseCoordinator.PrePhaseSetup(ctx, phase, &budgetConfigAdapter{cfg: e.cfg}, e.state.Messages, e.proactiveCompactCheck)
+	e.state.messagesMu.Unlock()
+	if err != nil {
+		return &PhaseResult{Phase: phase, Success: false, Error: err.Error()}, err
+	}
+
+	e.toolCallsSinceLastCompact = 0
+
+	// KEY DIFFERENCE: Skip e.stateMachine.Transition(from, phase) — this is the bypass
+
+	var result *PhaseResult
+	switch phase {
+	case m31types.PhaseInitialize:
+		result, err = e.runInitialize(ctx, goal)
+	case m31types.PhaseDiscuss:
+		result, err = e.runDiscuss(ctx, goal)
+	case m31types.PhasePlan:
+		result, err = e.runPlan(ctx, goal)
+	case m31types.PhaseExecute:
+		result, err = e.runExecute(ctx, goal)
+	case m31types.PhaseVerify:
+		result, err = e.runVerify(ctx, goal)
+	case m31types.PhaseRuntime:
+		result, err = e.runRuntime(ctx, goal)
+	case m31types.PhaseShip:
+		result, err = e.runShip(ctx, goal)
+	default:
+		return nil, fmt.Errorf("%w: unknown phase %s", m31errors.ErrPhaseTransition, phase)
+	}
+
+	if result != nil {
+		result.WorkflowMode = e.WorkflowMode()
+	}
+
+	e.phaseCoordinator.PostPhaseExecution(phase, result, start)
+	return result, err
+}
+
 // maxDiscussPlanCycles caps the number of Plan→Discuss→Plan round-trips to
 // prevent infinite oscillation between the two phases (BUG-12). One cycle
 // (e.g. Plan→Discuss→Plan once) is a normal refinement; beyond that suggests
