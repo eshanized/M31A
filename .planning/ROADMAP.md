@@ -96,11 +96,9 @@ Plans:
 **Goal:** Remove clearly dead code (deprecated functions, unused utilities, wrapper/re-exports, unreferenced packages) verified via grep to have zero production callers, reducing codebase maintenance surface.
 **Requirements**: D-01 through D-07 from CONTEXT.md
 **Depends on:** Phase 3
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans executed
 
 Plans:
 
-- [x] 04-01-PLAN.md
-- [ ] 04-02-PLAN.md
-- [ ] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-01-PLAN.md — Wave 1: Remove deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
-- [ ] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-02-PLAN.md — Wave 2: Remove provider functions, tuitypes/theme utilities, a11y package, final verification
+- [x] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-01-PLAN.md — Wave 1: Remove deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
+- [x] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-02-PLAN.md — Wave 2: Remove provider functions, tuitypes/theme utilities, a11y package, final verification
