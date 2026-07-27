@@ -47,12 +47,12 @@ Plans:
 - E: Bash security patterns lost in directory restructure (23 tests) — `exec/bash.go` missing expanded blocklist
 - F: TestAskUserQuestion_Timeout assertion (1 test) — checks wrong error channel
 
-**Plans:** 4/4 plans planned
+**Plans:** 4/4 plans executed
 
 Plans:
-- [ ] 02-fix-ci-regressions/02-01-PLAN.md — Root Cause A: Config merge int/float regression (6 tests) + Root Cause B: Session Label field (3 tests)
-- [ ] 02-fix-ci-regressions/02-02-PLAN.md — Root Cause C: Workflow engine RunPhase transitions (19 tests) + execute.go:571 lint
-- [ ] 02-fix-ci-regressions/02-03-PLAN.md — Root Cause D: TestIsCI race (1 test) + Root Cause F: AskUserQuestion timeout (1 test)
-- [ ] 02-fix-ci-regressions/02-04-PLAN.md — Root Cause E: Bash security patterns restore + regex upgrade (23 tests)
+- [x] 02-fix-ci-regressions/02-01-PLAN.md — Root Cause A: Config merge int/float regression (6 tests) + Root Cause B: Session Label field (3 tests)
+- [x] 02-fix-ci-regressions/02-02-PLAN.md — Root Cause C: Workflow engine RunPhase transitions (19 tests) + execute.go:571 lint
+- [x] 02-fix-ci-regressions/02-03-PLAN.md — Root Cause D: TestIsCI race (1 test) + Root Cause F: AskUserQuestion timeout (1 test)
+- [x] 02-fix-ci-regressions/02-04-PLAN.md — Root Cause E: Bash security patterns restore + regex upgrade (23 tests)
 
 **Canonical refs:** `TEST_FAILURES.md`
