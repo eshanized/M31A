@@ -5,11 +5,11 @@ milestone_name: milestone
 status: in-progress
 last_updated: "2026-07-27T02:57:38.934Z"
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 3
   total_plans: 9
   completed_plans: 9
-  percent: 100
+  percent: 75
 ---
 
 # STATE.md — M31A
@@ -33,3 +33,8 @@ progress:
 - Plan 02-04 executed (2026-07-27) — Root Cause E: Bash security patterns restore from f35077bd + regex upgrades (23 tests)
 - Phase 03 context gathered (2026-07-27) — lint, test, and security issues documented in CONTEXT.md
 - Plan 03-01 executed (2026-07-27) — Lint: os.SEEK_SET → io.SeekStart, Tests: session.Manager init + context cancellation, Security: goldmark v1.8.4
+
+## Accumulated Context
+
+### Roadmap Evolution
+- Phase 04 added: Audit and remove unused/irrelevant code from M31A codebase
