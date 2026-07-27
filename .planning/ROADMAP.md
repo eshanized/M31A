@@ -74,9 +74,9 @@ Plans:
 - Tests: `TestAskUserQuestion_ChannelFull` timeout issues in `internal/tools`
 - Security: GO-2026-5320 XSS in goldmark@v1.5.2
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans executed
 
 Plans:
-- [ ] 03-fix-remaining-ci-issues/03-PLAN-01.md — Lint fixes (os.SEEK_SET), test fixes (2 tests), security upgrade (goldmark)
+- [x] 03-fix-remaining-ci-issues/03-01-PLAN.md — Lint fixes (os.SEEK_SET), test fixes (2 tests), security upgrade (goldmark)
 
 **Canonical refs:** 03-CONTEXT.md, 03-RESEARCH.md
