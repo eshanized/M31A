@@ -3652,7 +3652,9 @@ func TestAskUserQuestion_ChannelFull(t *testing.T) {
 	// Fill the channel
 	reqCh <- types.QuestionRequest{}
 
-	_, err := q.Execute(context.Background(), types.ToolInput{
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately so the select picks ctx.Done()
+	_, err := q.Execute(ctx, types.ToolInput{
 		Name: "AskUserQuestion",
 		Params: map[string]any{
 			"question": "What?",

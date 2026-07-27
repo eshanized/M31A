@@ -621,8 +621,10 @@ func TestRegistry_Execute_PhaseAliases(t *testing.T) {
 	for _, cmd := range aliases {
 		t.Run(cmd, func(t *testing.T) {
 			t.Parallel()
+			tmpDir := t.TempDir()
+			mgr := session.NewManager(tmpDir, tmpDir, session.ManagerOpts{})
 			result, handled := r.Execute(cmd, CommandContext{
-				SessionManager: &session.Manager{},
+				SessionManager: mgr,
 				SessionID:      "test",
 			})
 			if !handled {
