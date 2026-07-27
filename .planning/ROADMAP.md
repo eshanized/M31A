@@ -80,3 +80,14 @@ Plans:
 - [x] 03-fix-remaining-ci-issues/03-01-PLAN.md — Lint fixes (os.SEEK_SET), test fixes (2 tests), security upgrade (goldmark)
 
 **Canonical refs:** 03-CONTEXT.md, 03-RESEARCH.md
+
+### Phase 4: Audit and remove unused/irrelevant code from M31A codebase
+
+**Goal:** Remove clearly dead code (deprecated functions, unused utilities, wrapper/re-exports, unreferenced packages) verified via grep to have zero production callers, reducing codebase maintenance surface.
+**Requirements**: D-01 through D-07 from CONTEXT.md
+**Depends on:** Phase 3
+**Plans:** 2 plans
+
+Plans:
+- [ ] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-01-PLAN.md — Wave 1: Remove deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
+- [ ] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-02-PLAN.md — Wave 2: Remove provider functions, tuitypes/theme utilities, a11y package, final verification
