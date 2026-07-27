@@ -30,8 +30,8 @@ func TestSaveCheckpoint_Concurrent(t *testing.T) {
 				Goal:      "test goal",
 				Timestamp: time.Now().Add(time.Duration(id) * time.Millisecond),
 			}
-			if err := mgr.SaveCheckpoint(s.ID, cp); err != nil {
-				t.Errorf("goroutine %d: SaveCheckpoint failed: %v", id, err)
+			if saveErr := mgr.SaveCheckpoint(s.ID, cp); saveErr != nil {
+				t.Errorf("goroutine %d: SaveCheckpoint failed: %v", id, saveErr)
 			}
 		}(i)
 	}

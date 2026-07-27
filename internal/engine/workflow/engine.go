@@ -878,8 +878,8 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	e.toolCallsSinceLastCompact = 0
 
 	from := e.stateMachine.CurrentPhase()
-	if err := e.stateMachine.Transition(from, phase); err != nil {
-		return nil, fmt.Errorf("phase transition to %s: %w", phase, err)
+	if transitionErr := e.stateMachine.Transition(from, phase); transitionErr != nil {
+		return nil, fmt.Errorf("phase transition to %s: %w", phase, transitionErr)
 	}
 
 	var result *PhaseResult
@@ -923,7 +923,7 @@ func (e *Engine) RunPhaseDirect(ctx context.Context, phase m31types.WorkflowPhas
 	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
 		cost := e.costTracker.TotalCost()
 		if cost >= e.cfg.Features.BudgetLimitUSD {
-			return &PhaseResult{Phase: phase, Success: false, Error: fmt.Sprintf("budget limit exceeded")}, fmt.Errorf("budget limit exceeded")
+			return &PhaseResult{Phase: phase, Success: false, Error: "budget limit exceeded"}, fmt.Errorf("budget limit exceeded")
 		}
 	}
 

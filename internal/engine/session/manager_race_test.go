@@ -59,8 +59,9 @@ func TestSaveSessionAtomic_PreservesMessages(t *testing.T) {
 	}
 
 	// Save the session
-	if err := mgr.saveSessionAtomic(s); err != nil {
-		t.Fatalf("saveSessionAtomic failed: %v", err)
+	saveErr := mgr.saveSessionAtomic(s)
+	if saveErr != nil {
+		t.Fatalf("saveSessionAtomic failed: %v", saveErr)
 	}
 
 	// Read the session.json file
