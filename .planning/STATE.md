@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-07-27T04:00:04.177Z"
+last_updated: "2026-07-27T17:32:00Z"
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 11
-  completed_plans: 9
-  percent: 75
+  completed_plans: 10
+  percent: 83
 ---
 
 # STATE.md — M31A
@@ -17,7 +17,7 @@ progress:
 ## Current Phase
 
 - Phase: 04 (Audit and remove unused/irrelevant code from M31A codebase)
-- Status: **Planned** — ready for execution
+- Status: **In Progress** — Plan 04-01 complete, Plan 04-02 ready
 
 ## Session History
 
@@ -35,6 +35,7 @@ progress:
 - Plan 03-01 executed (2026-07-27) — Lint: os.SEEK_SET → io.SeekStart, Tests: session.Manager init + context cancellation, Security: goldmark v1.8.4
 - Phase 04 context gathered (2026-07-27) — dead code audit documented in CONTEXT.md, research identified 7 categories
 - Plan 04-01 created (2026-07-27) — Wave 1: deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
+- Plan 04-01 executed (2026-07-27) — Removed BrandGradientStyle, ThinkingGradientStyle, buffer pool utils, unused re-exports (truncate.go kept: plan grep incorrect)
 - Plan 04-02 created (2026-07-27) — Wave 2: provider functions, tuitypes/theme utilities, a11y package, final verification
 
 ## Accumulated Context
