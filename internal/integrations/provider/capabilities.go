@@ -20,13 +20,12 @@ type capabilityConfigData struct {
 	extraToolCapablePatterns    []string
 	extraCompletionOnlyPatterns []string
 	extraNonChatPatterns        []string
-	knownCapabilities           map[string]ModelCapabilities
 }
 
 // SetCapabilityConfig initializes the package-level capability configuration.
 // Must be called once at startup before any capability detection functions
 // are invoked. Pass nil or empty config to keep built-in defaults.
-func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, extraNonChat []string, knownCaps map[string]ModelCapabilities) {
+func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, extraNonChat []string) {
 	capabilityConfigMu.Lock()
 	defer capabilityConfigMu.Unlock()
 	capabilityConfig = capabilityConfigData{
@@ -34,12 +33,7 @@ func SetCapabilityConfig(extraReasoning, extraToolCapable, extraCompletionOnly, 
 		extraToolCapablePatterns:    extraToolCapable,
 		extraCompletionOnlyPatterns: extraCompletionOnly,
 		extraNonChatPatterns:        extraNonChat,
-		knownCapabilities:           knownCaps,
 	}
-	// Clear the capabilities cache so new config takes effect immediately.
-	modelCapabilitiesCacheMu.Lock()
-	modelCapabilitiesCache = make(map[string]*ModelCapabilities)
-	modelCapabilitiesCacheMu.Unlock()
 }
 
 // defaultReasoningPatterns are the default ID patterns that indicate reasoning/thinking models.
@@ -111,83 +105,6 @@ type ModelCapabilities struct {
 	SupportsSystemPrompt bool
 	MaxContextWindow     int
 	MaxOutputTokens      int
-}
-
-// modelCapabilitiesCache stores detected capabilities to avoid repeated lookups.
-// Protected by modelCapabilitiesCacheMu — typed map replaces sync.Map for
-// compile-time type safety and to prevent the data race from value-type
-// replacement (BUG-06, BUG-07, BUG-19).
-var (
-	modelCapabilitiesCacheMu sync.RWMutex
-	modelCapabilitiesCache   = make(map[string]*ModelCapabilities)
-)
-
-// knownModelCapabilities is a hardcoded fallback table for well-known models.
-// This is used when runtime detection fails or is not available.
-var knownModelCapabilities = map[string]ModelCapabilities{
-	// OpenAI models
-	"gpt-4o": {
-		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 128000, MaxOutputTokens: 16384,
-	},
-	"gpt-4-turbo": {
-		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 128000, MaxOutputTokens: 4096,
-	},
-	"o1-preview": {
-		SupportsTools: false, SupportsImages: true, SupportsStreaming: false,
-		SupportsJSON: false, SupportsSystemPrompt: false,
-		MaxContextWindow: 128000, MaxOutputTokens: 32768,
-	},
-	// Anthropic models
-	"claude-3-opus": {
-		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 200000, MaxOutputTokens: 4096,
-	},
-	"claude-3-5-sonnet": {
-		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 200000, MaxOutputTokens: 8192,
-	},
-	// Google models
-	"gemini-pro": {
-		SupportsTools: true, SupportsImages: true, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 32760, MaxOutputTokens: 8192,
-	},
-	// Meta models
-	"llama-3-70b": {
-		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 8192, MaxOutputTokens: 2048,
-	},
-	// Mistral models
-	"mistral-large": {
-		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 32768, MaxOutputTokens: 4096,
-	},
-	// Qwen models
-	"qwen-2.5": {
-		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 32768, MaxOutputTokens: 8192,
-	},
-	// DeepSeek models
-	"deepseek-chat": {
-		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 32768, MaxOutputTokens: 4096,
-	},
-	// Cohere models
-	"command-r-plus": {
-		SupportsTools: true, SupportsImages: false, SupportsStreaming: true,
-		SupportsJSON: true, SupportsSystemPrompt: true,
-		MaxContextWindow: 128000, MaxOutputTokens: 4096,
-	},
 }
 
 // IsNonChatModel reports whether a model ID belongs to a model that does not

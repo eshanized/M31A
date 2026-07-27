@@ -178,7 +178,7 @@ func TestParseModelCapabilities_ChatCompletionOnly(t *testing.T) {
 func TestParseModelCapabilities_ConfigExtraToolPatterns(t *testing.T) {
 	// NOT parallel — modifies global capability config
 	// Set config with extra tool-capable pattern
-	SetCapabilityConfig(nil, []string{"custom-tool-model"}, nil, nil, nil)
+	SetCapabilityConfig(nil, []string{"custom-tool-model"}, nil, nil)
 
 	caps := ParseModelCapabilities("vendor/custom-tool-model-large")
 	if !caps.Tools {
@@ -186,40 +186,40 @@ func TestParseModelCapabilities_ConfigExtraToolPatterns(t *testing.T) {
 	}
 
 	// Reset immediately
-	SetCapabilityConfig(nil, nil, nil, nil, nil)
+	SetCapabilityConfig(nil, nil, nil, nil)
 }
 
 func TestParseModelCapabilities_ConfigExtraReasoningPatterns(t *testing.T) {
 	// NOT parallel — modifies global capability config
-	SetCapabilityConfig([]string{"my-reason"}, nil, nil, nil, nil)
+	SetCapabilityConfig([]string{"my-reason"}, nil, nil, nil)
 
 	caps := ParseModelCapabilities("custom/my-reason-model")
 	if !caps.Reasoning {
 		t.Error("expected Reasoning=true with config extra reasoning pattern")
 	}
 
-	SetCapabilityConfig(nil, nil, nil, nil, nil)
+	SetCapabilityConfig(nil, nil, nil, nil)
 }
 
 func TestParseModelCapabilities_ConfigExtraCompletionOnlyPatterns(t *testing.T) {
 	// NOT parallel — modifies global capability config
-	SetCapabilityConfig(nil, nil, []string{"my-completion-only"}, nil, nil)
+	SetCapabilityConfig(nil, nil, []string{"my-completion-only"}, nil)
 
 	caps := ParseModelCapabilities("vendor/my-completion-only-model")
 	if caps.Chat {
 		t.Error("expected Chat=false with config extra completion-only pattern")
 	}
 
-	SetCapabilityConfig(nil, nil, nil, nil, nil)
+	SetCapabilityConfig(nil, nil, nil, nil)
 }
 
 func TestParseModelCapabilities_ConfigExtraNonChatPatterns(t *testing.T) {
 	// NOT parallel — modifies global capability config
-	SetCapabilityConfig(nil, nil, nil, []string{"my-embed"}, nil)
+	SetCapabilityConfig(nil, nil, nil, []string{"my-embed"})
 
 	if !IsNonChatModel("vendor/my-embed-model") {
 		t.Error("expected IsNonChatModel=true with config extra non-chat pattern")
 	}
 
-	SetCapabilityConfig(nil, nil, nil, nil, nil)
+	SetCapabilityConfig(nil, nil, nil, nil)
 }

@@ -520,8 +520,8 @@ func (d *Dispatcher) RespondQuestion(requestID int64, answer string) {
 	// Fallback to shared channel
 	select {
 	case d.questionRespCh <- resp:
-	case <-time.After(30 * time.Second):
-		slog.Warn("question response dropped: shared channel full")
+	default:
+		slog.Warn("question response dropped: shared channel full", "request_id", requestID)
 	}
 }
 
