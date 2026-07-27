@@ -65,13 +65,18 @@ Plans:
 - `golangci-lint run` clean (0 issues)
 - `go test -race ./...` clean (all tests pass)
 - `go vet ./...` clean
-- No security vulnerabilities (CodeQL clean)
+- No security vulnerabilities (CodeQL/govulncheck clean)
 - CI pipeline passes on GitHub Actions
 
 **Known Issues:**
 - Lint: 3 staticcheck SA1019 warnings in `internal/core/types/fileutil.go` (deprecated `os.SEEK_SET`)
 - Tests: `TestRegistry_Execute_PhaseAliases` nil pointer dereference in `FileLock.Lock`
 - Tests: `TestAskUserQuestion_ChannelFull` timeout issues in `internal/tools`
-- Security: CodeQL findings to investigate
+- Security: GO-2026-5320 XSS in goldmark@v1.5.2
 
-**Canonical refs:** (to be determined during discussion)
+**Plans:** 1 plan
+
+Plans:
+- [ ] 03-fix-remaining-ci-issues/03-PLAN-01.md — Lint fixes (os.SEEK_SET), test fixes (2 tests), security upgrade (goldmark)
+
+**Canonical refs:** 03-CONTEXT.md, 03-RESEARCH.md
