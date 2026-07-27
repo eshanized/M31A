@@ -56,3 +56,22 @@ Plans:
 - [x] 02-fix-ci-regressions/02-04-PLAN.md — Root Cause E: Bash security patterns restore + regex upgrade (23 tests)
 
 **Canonical refs:** `TEST_FAILURES.md`
+
+## Phase 3: Fix Remaining CI Issues
+
+**Goal:** Fix all remaining lint errors, test failures, and security issues blocking CI from passing.
+
+**Success Criteria:**
+- `golangci-lint run` clean (0 issues)
+- `go test -race ./...` clean (all tests pass)
+- `go vet ./...` clean
+- No security vulnerabilities (CodeQL clean)
+- CI pipeline passes on GitHub Actions
+
+**Known Issues:**
+- Lint: 3 staticcheck SA1019 warnings in `internal/core/types/fileutil.go` (deprecated `os.SEEK_SET`)
+- Tests: `TestRegistry_Execute_PhaseAliases` nil pointer dereference in `FileLock.Lock`
+- Tests: `TestAskUserQuestion_ChannelFull` timeout issues in `internal/tools`
+- Security: CodeQL findings to investigate
+
+**Canonical refs:** (to be determined during discussion)
