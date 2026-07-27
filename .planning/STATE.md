@@ -16,8 +16,8 @@ progress:
 
 ## Current Phase
 
-- Phase: 03 (Fix Remaining CI Issues)
-- Status: **Complete** — all plans executed
+- Phase: 04 (Audit and remove unused/irrelevant code from M31A codebase)
+- Status: **Planned** — ready for execution
 
 ## Session History
 
@@ -33,6 +33,9 @@ progress:
 - Plan 02-04 executed (2026-07-27) — Root Cause E: Bash security patterns restore from f35077bd + regex upgrades (23 tests)
 - Phase 03 context gathered (2026-07-27) — lint, test, and security issues documented in CONTEXT.md
 - Plan 03-01 executed (2026-07-27) — Lint: os.SEEK_SET → io.SeekStart, Tests: session.Manager init + context cancellation, Security: goldmark v1.8.4
+- Phase 04 context gathered (2026-07-27) — dead code audit documented in CONTEXT.md, research identified 7 categories
+- Plan 04-01 created (2026-07-27) — Wave 1: deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
+- Plan 04-02 created (2026-07-27) — Wave 2: provider functions, tuitypes/theme utilities, a11y package, final verification
 
 ## Accumulated Context
 
