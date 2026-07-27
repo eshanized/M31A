@@ -569,11 +569,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 		}
 
-toolErr := len(toolErrMessages) > 0
-	toolCallCount := len(toolExecResults)
+		toolErr := len(toolErrMessages) > 0
+		toolCallCount := len(toolExecResults)
 
-	if toolErr {
-		if task.HealsAttempted >= m31types.MaxHealAttempts {
+		if toolErr {
+			if task.HealsAttempted >= m31types.MaxHealAttempts {
 				return taskrunner.TaskResult{
 					Success: false,
 					Error:   strings.Join(toolErrMessages, "; "),
