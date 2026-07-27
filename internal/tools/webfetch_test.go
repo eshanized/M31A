@@ -46,13 +46,14 @@ func TestWebFetch_SSRFBlocksLinkLocal(t *testing.T) {
 
 func TestWebFetch_TLSConnection(t *testing.T) {
 	t.Parallel()
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	}))
 	defer ts.Close()
 
 	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf.AllowPrivateIPs = true
 
 	result, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",

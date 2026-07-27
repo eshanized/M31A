@@ -22,7 +22,7 @@ func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 		}
 	}
 
-	if len(backups) <= maxBackups {
+	if len(backups) < maxBackups {
 		return
 	}
 
@@ -37,7 +37,7 @@ func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 	})
 
 	// Remove oldest backups
-	for i := 0; i < len(backups)-maxBackups; i++ {
+	for i := 0; i < len(backups)-maxBackups+1; i++ {
 		_ = os.Remove(filepath.Join(backupDir, backups[i]))
 	}
 }

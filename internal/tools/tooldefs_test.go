@@ -8,7 +8,8 @@ import (
 
 func TestBuildToolDefs_IncludesAllRegistered(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t)
+	d := newDispatcher(nil)
+	t.Cleanup(func() { d.Stop() })
 	d.Register(&mockTool{name: "Alpha", riskLevel: types.RiskSafe})
 	d.Register(&mockTool{name: "Beta", riskLevel: types.RiskMedium})
 	d.Register(&mockTool{name: "Gamma", riskLevel: types.RiskDangerous})
@@ -34,7 +35,8 @@ func TestBuildToolDefs_IncludesAllRegistered(t *testing.T) {
 
 func TestBuildToolDefs_WithSchemaProvider(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t)
+	d := newDispatcher(nil)
+	t.Cleanup(func() { d.Stop() })
 	bash := NewBash(t.TempDir(), 1800, nil, nil)
 	d.Register(bash)
 
@@ -54,7 +56,8 @@ func TestBuildToolDefs_WithSchemaProvider(t *testing.T) {
 
 func TestBuildToolDefs_DefinitionType_Implicit(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t)
+	d := newDispatcher(nil)
+	t.Cleanup(func() { d.Stop() })
 	d.Register(&mockTool{name: "Test", riskLevel: types.RiskSafe})
 	defs := BuildToolDefs(d)
 	if len(defs) != 1 {

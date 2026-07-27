@@ -136,21 +136,21 @@ func TestScrubEnvironment_DoesNotRemoveNonPrefixedVars(t *testing.T) {
 
 	cmd := stdExec.CommandContext(context.Background(), "echo", "test")
 
-	// These should NOT be removed (they don't start with the sensitive prefixes)
+	// These should NOT be removed (they don't contain sensitive keywords as prefix or suffix)
 	os.Setenv("MY_API_SETTING", "value1")
-	os.Setenv("CONFIG_TOKEN", "value2")
-	os.Setenv("MY_SECRET_CODE", "value3")
-	os.Setenv("DB_PASSWORD_HASH", "value4")
+	os.Setenv("CONFIG_NAME", "value2")
+	os.Setenv("MY_COLOR_CODE", "value3")
+	os.Setenv("DB_HOST_ADDRESS", "value4")
 	defer func() {
 		os.Unsetenv("MY_API_SETTING")
-		os.Unsetenv("CONFIG_TOKEN")
-		os.Unsetenv("MY_SECRET_CODE")
-		os.Unsetenv("DB_PASSWORD_HASH")
+		os.Unsetenv("CONFIG_NAME")
+		os.Unsetenv("MY_COLOR_CODE")
+		os.Unsetenv("DB_HOST_ADDRESS")
 	}()
 
 	toolsExec.ScrubEnvironment(cmd)
 
-	// These should be preserved since they don't START with the prefixes
+	// These should be preserved since they don't contain sensitive keywords
 	found := map[string]bool{}
 	for _, env := range cmd.Env {
 		found[env] = true
@@ -158,13 +158,13 @@ func TestScrubEnvironment_DoesNotRemoveNonPrefixedVars(t *testing.T) {
 	if !found["MY_API_SETTING=value1"] {
 		t.Error("MY_API_SETTING should be preserved")
 	}
-	if !found["CONFIG_TOKEN=value2"] {
-		t.Error("CONFIG_TOKEN should be preserved")
+	if !found["CONFIG_NAME=value2"] {
+		t.Error("CONFIG_NAME should be preserved")
 	}
-	if !found["MY_SECRET_CODE=value3"] {
-		t.Error("MY_SECRET_CODE should be preserved")
+	if !found["MY_COLOR_CODE=value3"] {
+		t.Error("MY_COLOR_CODE should be preserved")
 	}
-	if !found["DB_PASSWORD_HASH=value4"] {
-		t.Error("DB_PASSWORD_HASH should be preserved")
+	if !found["DB_HOST_ADDRESS=value4"] {
+		t.Error("DB_HOST_ADDRESS should be preserved")
 	}
 }

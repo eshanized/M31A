@@ -70,7 +70,7 @@ func NewWebFetch(workDir string, timeoutSecs int, dnsCache *DNSCache) *WebFetch 
 			},
 		},
 		timeout:         time.Duration(timeoutSecs) * time.Second,
-		AllowPrivateIPs: true,
+		AllowPrivateIPs: false,
 		dnsCache:        dnsCache,
 	}
 }
@@ -147,7 +147,10 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	timeout := t.timeout
 	if tRaw, ok := input.Params["timeout"]; ok {
-		if tInt, ok := tRaw.(float64); ok && tInt > 0 && tInt <= MaxTimeoutSecs {
+		if tInt, ok := tRaw.(float64); ok {
+			if tInt <= 0 || tInt > MaxTimeoutSecs {
+				return types.ToolResult{}, fmt.Errorf("%w: timeout must be between 1 and %d seconds", errors.ErrToolExecution, MaxTimeoutSecs)
+			}
 			timeout = time.Duration(tInt) * time.Second
 		}
 	}
@@ -236,6 +239,10 @@ func (t *WebFetch) Execute(ctx context.Context, input types.ToolInput) (types.To
 }
 
 func IsPrivateIPFromHost(host string) bool {
+	// If host is already an IP literal, check it directly.
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate()
+	}
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return false

@@ -156,7 +156,8 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 
 func TestDispatcher_List(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t)
+	d := newDispatcher(nil)
+	t.Cleanup(func() { d.Stop() })
 	d.Register(&mocks.MockTool{Name_: "zzz", RiskLevel_: types.RiskSafe})
 	d.Register(&mocks.MockTool{Name_: "aaa", RiskLevel_: types.RiskSafe})
 	d.Register(&mocks.MockTool{Name_: "mmm", RiskLevel_: types.RiskSafe})

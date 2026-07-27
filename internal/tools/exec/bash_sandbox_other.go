@@ -68,7 +68,7 @@ func ScrubEnvironment(cmd *exec.Cmd) {
 
 		if !sensitive {
 			for _, prefix := range sensitivePrefixes {
-				if strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(prefix)) {
+				if strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(prefix)) || strings.HasSuffix(strings.ToUpper(key), strings.ToUpper(prefix)) {
 					sensitive = true
 					break
 				}

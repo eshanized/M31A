@@ -228,10 +228,10 @@ func ScrubEnvironment(cmd *exec.Cmd) {
 			}
 		}
 
-		// Check prefix matches (case-insensitive for safety)
+		// Check prefix/suffix/contains matches (case-insensitive for safety)
 		if !sensitive {
-			for _, prefix := range sensitivePrefixes {
-				if hasPrefixFold(key, prefix) {
+			for _, pattern := range sensitivePrefixes {
+				if hasPrefixFold(key, pattern) || hasSuffixFold(key, pattern) {
 					sensitive = true
 					break
 				}
@@ -284,4 +284,12 @@ func hasPrefixFold(s, prefix string) bool {
 		}
 	}
 	return true
+}
+
+// hasSuffixFold checks if s ends with suffix (case-insensitive).
+func hasSuffixFold(s, suffix string) bool {
+	if len(s) < len(suffix) {
+		return false
+	}
+	return hasPrefixFold(s[len(s)-len(suffix):], suffix)
 }

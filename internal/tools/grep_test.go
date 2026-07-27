@@ -158,8 +158,8 @@ func TestGrep_RelativePath(t *testing.T) {
 func TestGrep_Name(t *testing.T) {
 	t.Parallel()
 	g := search.NewGrep(t.TempDir())
-	if g.Name() != "search.Grep" {
-		t.Errorf("expected name 'search.Grep', got %s", g.Name())
+	if g.Name() != "Grep" {
+		t.Errorf("expected name 'Grep', got %s", g.Name())
 	}
 }
 
