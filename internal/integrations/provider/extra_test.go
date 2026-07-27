@@ -211,7 +211,7 @@ func TestBaseClient_CachedModels_Empty(t *testing.T) {
 func TestBaseClient_MakeIterator(t *testing.T) {
 	t.Parallel()
 	resp := bodyReader("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
-	sse := NewSSEParser(resp)
+	sse := NewSSEParserWithContext(resp, context.Background())
 
 	c := NewBaseClient("", "", "", 0, 0, 0, 0)
 	iter := c.MakeIterator(sse, "any/model")
@@ -248,7 +248,7 @@ func TestBaseClient_MakeIterator_EmptyData(t *testing.T) {
 	// Send an event with only event type but no data lines, followed by EOF.
 	// The parser now recursively skips empty events, so this results in EOF.
 	resp := bodyReader("event: ping\n\n")
-	sse := NewSSEParser(resp)
+	sse := NewSSEParserWithContext(resp, context.Background())
 
 	c := NewBaseClient("", "", "", 0, 0, 0, 0)
 	iter := c.MakeIterator(sse, "any/model")
@@ -841,7 +841,7 @@ func TestParseSSEChunk_NonObjectFirstChoice(t *testing.T) {
 
 func TestSSEParser_CarriageReturn(t *testing.T) {
 	resp := bodyReader("data: {\"key\":\"val\"}\r\n\r\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, data, err := p.Next()
@@ -857,7 +857,7 @@ func TestSSEParser_KeepAlive(t *testing.T) {
 	// A comment line followed by empty line is a keep-alive (no data).
 	// The actual data event follows after.
 	resp := bodyReader(":\n\ndata: {\"ok\":true}\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	// The parser now recursively skips keep-alive events, so the first
@@ -873,7 +873,7 @@ func TestSSEParser_KeepAlive(t *testing.T) {
 
 func TestSSEParser_IdField(t *testing.T) {
 	resp := bodyReader("id: 123\ndata: {\"ok\":true}\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, data, err := p.Next()
@@ -887,7 +887,7 @@ func TestSSEParser_IdField(t *testing.T) {
 
 func TestSSEParser_RetryField(t *testing.T) {
 	resp := bodyReader("retry: 5000\ndata: {\"ok\":true}\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, data, err := p.Next()
@@ -901,7 +901,7 @@ func TestSSEParser_RetryField(t *testing.T) {
 
 func TestSSEParser_CloseIdempotent(t *testing.T) {
 	resp := bodyReader("data: {}\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 
 	if err := p.Close(); err != nil {
 		t.Fatalf("first Close failed: %v", err)

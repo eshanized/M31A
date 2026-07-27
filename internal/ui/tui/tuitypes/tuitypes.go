@@ -7,7 +7,6 @@ package tuitypes
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -292,24 +291,6 @@ func TruncateMiddle(s string, maxLen int) string {
 	}
 	half := (maxLen - 1) / 2
 	return s[:half] + "…" + s[len(s)-(maxLen-half-1):]
-}
-
-// formatDurationMs formats a duration in milliseconds as a human-readable string.
-func FormatDurationMs(ms int64) string {
-	if ms < 0 {
-		return "0s"
-	}
-	s := ms / 1000
-	m := s / 60
-	h := m / 60
-	switch {
-	case h > 0:
-		return fmt.Sprintf("%dh%dm", h, m%60)
-	case m > 0:
-		return fmt.Sprintf("%dm%ds", m, s%60)
-	default:
-		return fmt.Sprintf("%ds", s)
-	}
 }
 
 // ProviderShortName returns a short display name for a provider.

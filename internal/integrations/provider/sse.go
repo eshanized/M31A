@@ -20,10 +20,6 @@ type SSEParser struct {
 	watchdog  *time.Timer
 }
 
-func NewSSEParser(resp *http.Response) *SSEParser {
-	return NewSSEParserWithContext(resp, context.Background())
-}
-
 func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParser {
 	ctx, cancel := context.WithCancel(ctx)
 	scanner := bufio.NewScanner(resp.Body)

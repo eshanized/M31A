@@ -29,16 +29,6 @@ func DetectColorProfile() ColorProfile {
 	return Profile16
 }
 
-// PaletteForProfile returns a Theme suitable for the given color profile.
-func PaletteForProfile(profile ColorProfile) Theme {
-	switch profile {
-	case Profile16:
-		return ansiPalette()
-	default:
-		return M31A()
-	}
-}
-
 // ansiPalette returns a Theme that uses ANSI 16-color names
 // for reliable rendering on terminals without 256-color or truecolor support.
 func ansiPalette() Theme {

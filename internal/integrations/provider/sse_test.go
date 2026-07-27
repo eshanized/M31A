@@ -16,7 +16,7 @@ func bodyReader(s string) *http.Response {
 
 func TestSSEParser_SingleDataLine(t *testing.T) {
 	resp := bodyReader("data: {\"key\":\"val\"}\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	eventType, data, err := p.Next()
@@ -38,7 +38,7 @@ func TestSSEParser_SingleDataLine(t *testing.T) {
 
 func TestSSEParser_MultiLineData(t *testing.T) {
 	resp := bodyReader("data: line1\ndata: line2\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, data, err := p.Next()
@@ -52,7 +52,7 @@ func TestSSEParser_MultiLineData(t *testing.T) {
 
 func TestSSEParser_EventType(t *testing.T) {
 	resp := bodyReader("event: message\ndata: hello\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	eventType, data, err := p.Next()
@@ -69,7 +69,7 @@ func TestSSEParser_EventType(t *testing.T) {
 
 func TestSSEParser_DoneSentinel(t *testing.T) {
 	resp := bodyReader("data: [DONE]\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, _, err := p.Next()
@@ -80,7 +80,7 @@ func TestSSEParser_DoneSentinel(t *testing.T) {
 
 func TestSSEParser_EmptyStream(t *testing.T) {
 	resp := bodyReader("")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, _, err := p.Next()
@@ -91,7 +91,7 @@ func TestSSEParser_EmptyStream(t *testing.T) {
 
 func TestSSEParser_DoneWithWhitespace(t *testing.T) {
 	resp := bodyReader("data: [DONE] \n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, _, err := p.Next()
@@ -102,7 +102,7 @@ func TestSSEParser_DoneWithWhitespace(t *testing.T) {
 
 func TestSSEParser_DoneWithoutWhitespace(t *testing.T) {
 	resp := bodyReader("data: [DONE]\n\n")
-	p := NewSSEParser(resp)
+	p := NewSSEParserWithContext(resp, context.Background())
 	defer p.Close()
 
 	_, _, err := p.Next()

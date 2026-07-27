@@ -79,7 +79,7 @@ func TestSSE_CloseReleasesBody(t *testing.T) {
 		Body:       body,
 	}
 
-	parser := NewSSEParser(resp)
+	parser := NewSSEParserWithContext(resp, context.Background())
 
 	// Consume all events
 	for {
@@ -109,7 +109,7 @@ func TestSSE_TruncatedStream_Typed(t *testing.T) {
 		Body:       body,
 	}
 
-	parser := NewSSEParser(resp)
+	parser := NewSSEParserWithContext(resp, context.Background())
 
 	// First call returns data
 	_, _, err := parser.Next()

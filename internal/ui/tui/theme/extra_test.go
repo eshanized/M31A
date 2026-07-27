@@ -305,17 +305,6 @@ func TestLight_AllFieldsNonEmpty(t *testing.T) {
 	}
 }
 
-func TestPaletteForProfile_AllProfiles(t *testing.T) {
-	t.Parallel()
-	profiles := []ColorProfile{ProfileTrueColor, Profile256, Profile16}
-	for _, p := range profiles {
-		pal := PaletteForProfile(p)
-		if pal.Background == "" {
-			t.Errorf("PaletteForProfile(%d).Background is empty", p)
-		}
-	}
-}
-
 func TestManager_AllModes(t *testing.T) {
 	t.Parallel()
 	modes := []Mode{ModeDark}

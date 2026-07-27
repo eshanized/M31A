@@ -240,45 +240,6 @@ func TestBuildSemanticStyles_Overlay(t *testing.T) {
 	}
 }
 
-// --- ColorProfile ---
-
-func TestDetectColorProfile_FromEnv(t *testing.T) {
-	t.Parallel()
-	// DetectColorProfile reads from env, just verify it doesn't panic
-	profile := DetectColorProfile()
-	if profile != ProfileTrueColor && profile != Profile256 && profile != Profile16 {
-		t.Errorf("unexpected profile: %d", profile)
-	}
-}
-
-func TestPaletteForProfile_TrueColor(t *testing.T) {
-	t.Parallel()
-	th := PaletteForProfile(ProfileTrueColor)
-	if th.Background == "" {
-		t.Error("PaletteForProfile(ProfileTrueColor) should have Background")
-	}
-}
-
-func TestPaletteForProfile_256(t *testing.T) {
-	t.Parallel()
-	th := PaletteForProfile(Profile256)
-	if th.Background == "" {
-		t.Error("PaletteForProfile(Profile256) should have Background")
-	}
-}
-
-func TestPaletteForProfile_16(t *testing.T) {
-	t.Parallel()
-	th := PaletteForProfile(Profile16)
-	if th.Background == "" {
-		t.Error("PaletteForProfile(Profile16) should have Background")
-	}
-	// ANSI palette should use 16-color values
-	if th.Brand == "" {
-		t.Error("PaletteForProfile(Profile16) should have Brand")
-	}
-}
-
 // --- Theme modes ---
 
 func TestMode_Constants(t *testing.T) {
