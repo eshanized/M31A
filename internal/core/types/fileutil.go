@@ -4,6 +4,7 @@ package types
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,7 +37,7 @@ func (fl *FileLock) Lock() error {
 	}
 	lock := syscall.Flock_t{
 		Type:   syscall.F_WRLCK,
-		Whence: int16(os.SEEK_SET),
+		Whence: int16(io.SeekStart),
 		Start:  0,
 		Len:    0,
 	}
@@ -62,7 +63,7 @@ func (fl *FileLock) TryLock() (bool, error) {
 	}
 	lock := syscall.Flock_t{
 		Type:   syscall.F_WRLCK,
-		Whence: int16(os.SEEK_SET),
+		Whence: int16(io.SeekStart),
 		Start:  0,
 		Len:    0,
 	}
@@ -90,7 +91,7 @@ func (fl *FileLock) Unlock() error {
 	}
 	lock := syscall.Flock_t{
 		Type:   syscall.F_UNLCK,
-		Whence: int16(os.SEEK_SET),
+		Whence: int16(io.SeekStart),
 		Start:  0,
 		Len:    0,
 	}
