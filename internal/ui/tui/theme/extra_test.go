@@ -122,18 +122,6 @@ func TestBorderByName_SpecificTypes(t *testing.T) {
 	}
 }
 
-func TestBrandGradientStyle(t *testing.T) {
-	t.Parallel()
-	s := BrandGradientStyle()
-	_ = s // just verify it doesn't panic
-}
-
-func TestThinkingGradientStyle(t *testing.T) {
-	t.Parallel()
-	s := ThinkingGradientStyle()
-	_ = s // just verify it doesn't panic
-}
-
 func TestWithAccent(t *testing.T) {
 	t.Parallel()
 	d := Dark()

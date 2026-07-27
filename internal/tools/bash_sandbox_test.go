@@ -5,6 +5,8 @@ import (
 	"os"
 	stdExec "os/exec"
 	"testing"
+
+	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 )
 
 // This test file tests the scrubEnvironment functionality which is platform-specific.
@@ -37,7 +39,7 @@ func TestScrubEnvironment_RemovesSensitiveVars(t *testing.T) {
 	os.Setenv("MY_CUSTOM_VAR", "safe-value")
 	defer os.Unsetenv("MY_CUSTOM_VAR")
 
-	ScrubEnvironment(cmd)
+	toolsExec.ScrubEnvironment(cmd)
 
 	// Verify sensitive vars are removed
 	for _, env := range cmd.Env {
@@ -98,7 +100,7 @@ func TestScrubEnvironment_PrefixMatching(t *testing.T) {
 		os.Unsetenv("SAFE_VAR")
 	}()
 
-	ScrubEnvironment(cmd)
+	toolsExec.ScrubEnvironment(cmd)
 
 	// Verify prefixed vars are removed
 	for _, env := range cmd.Env {
@@ -146,7 +148,7 @@ func TestScrubEnvironment_DoesNotRemoveNonPrefixedVars(t *testing.T) {
 		os.Unsetenv("DB_PASSWORD_HASH")
 	}()
 
-	ScrubEnvironment(cmd)
+	toolsExec.ScrubEnvironment(cmd)
 
 	// These should be preserved since they don't START with the prefixes
 	found := map[string]bool{}

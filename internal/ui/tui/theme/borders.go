@@ -26,22 +26,6 @@ var DashedBorder = lipgloss.Border{
 	BottomRight: "┘",
 }
 
-// BrandGradientStyle is deprecated. Use AccentPrimary color directly.
-// Kept for backward compatibility during migration.
-func BrandGradientStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Border(NormalBorder).
-		BorderForeground(lipgloss.Color(AccentPrimary))
-}
-
-// ThinkingGradientStyle is deprecated. Use Thinking color directly.
-// Kept for backward compatibility during migration.
-func ThinkingGradientStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Border(NormalBorder).
-		BorderForeground(lipgloss.Color(Thinking))
-}
-
 // BorderByName returns a border by semantic name.
 func BorderByName(name string) lipgloss.Border {
 	switch name {

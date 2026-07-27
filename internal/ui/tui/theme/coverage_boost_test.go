@@ -521,26 +521,6 @@ func TestRenderWithShadow_MultiLine(t *testing.T) {
 	}
 }
 
-// --- BrandGradientStyle ---
-
-func TestBrandGradientStyle_NonEmpty(t *testing.T) {
-	t.Parallel()
-	s := BrandGradientStyle()
-	if s.Render("test") == "" {
-		t.Error("BrandGradientStyle should render non-empty")
-	}
-}
-
-// --- ThinkingGradientStyle ---
-
-func TestThinkingGradientStyle_NonEmpty(t *testing.T) {
-	t.Parallel()
-	s := ThinkingGradientStyle()
-	if s.Render("test") == "" {
-		t.Error("ThinkingGradientStyle should render non-empty")
-	}
-}
-
 // --- applyThemeStyles ---
 
 func TestApplyThemeStyles_AllStylesSet(t *testing.T) {

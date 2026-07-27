@@ -3,6 +3,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
 )
 
 // These tests verify the CheckDangerousCommand function behavior
@@ -35,7 +37,7 @@ func TestCheckDangerousCommand_Baseline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, nil, nil)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, nil, nil)
 			if blocked != tt.blocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.blocked)
 			}
@@ -63,7 +65,7 @@ func TestCheckDangerousCommand_ExpandedBlocklist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, nil, nil)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, nil, nil)
 			if blocked != tt.blocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.blocked)
 			}
@@ -95,7 +97,7 @@ func TestCheckDangerousCommand_ChainingDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, nil, nil)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, nil, nil)
 			if blocked != tt.blocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.blocked)
 			}
@@ -122,7 +124,7 @@ func TestCheckDangerousCommand_ObfuscationDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, nil, nil)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, nil, nil)
 			if blocked != tt.blocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.blocked)
 			}
@@ -145,7 +147,7 @@ func TestCheckDangerousCommand_CustomBlockedCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, tt.customBlocked, nil)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, tt.customBlocked, nil)
 			if blocked != tt.expectedBlocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.expectedBlocked)
 			}
@@ -167,7 +169,7 @@ func TestCheckDangerousCommand_CustomObfuscationPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, blocked := CheckDangerousCommand(tt.command, nil, tt.customObfuscation)
+			_, blocked := toolsExec.CheckDangerousCommand(tt.command, nil, tt.customObfuscation)
 			if blocked != tt.expectedBlocked {
 				t.Errorf("CheckDangerousCommand(%q): got blocked=%v, want %v", tt.command, blocked, tt.expectedBlocked)
 			}
@@ -176,14 +178,14 @@ func TestCheckDangerousCommand_CustomObfuscationPatterns(t *testing.T) {
 }
 
 func TestCheckDangerousCommand_EmptyCommand(t *testing.T) {
-	_, blocked := CheckDangerousCommand("", nil, nil)
+	_, blocked := toolsExec.CheckDangerousCommand("", nil, nil)
 	if blocked {
 		t.Error("empty command should not be blocked")
 	}
 }
 
 func TestCheckDangerousCommand_WhitespaceOnly(t *testing.T) {
-	_, blocked := CheckDangerousCommand("   ", nil, nil)
+	_, blocked := toolsExec.CheckDangerousCommand("   ", nil, nil)
 	if blocked {
 		t.Error("whitespace-only command should not be blocked")
 	}
@@ -191,7 +193,7 @@ func TestCheckDangerousCommand_WhitespaceOnly(t *testing.T) {
 
 func TestCheckDangerousCommand_Unicode(t *testing.T) {
 	// Unicode commands should be handled gracefully
-	_, blocked := CheckDangerousCommand("echo café", nil, nil)
+	_, blocked := toolsExec.CheckDangerousCommand("echo café", nil, nil)
 	if blocked {
 		t.Error("unicode command should not be blocked")
 	}
@@ -202,7 +204,7 @@ func TestCheckDangerousCommand_LongCommand(t *testing.T) {
 	// "echo hello; " repeated 1000 times is NOT dangerous - just long
 	// The system should handle it without panic, not block it as dangerous
 	longCmd := strings.Repeat("echo hello; ", 1000)
-	_, blocked := CheckDangerousCommand(longCmd, nil, nil)
+	_, blocked := toolsExec.CheckDangerousCommand(longCmd, nil, nil)
 	if blocked {
 		t.Error("long benign command should not be blocked as dangerous")
 	}
