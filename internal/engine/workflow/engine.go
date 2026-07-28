@@ -2,7 +2,9 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -666,6 +668,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 			ctxsrc.DateTimeSource{},
 			ctxsrc.EnvironmentSource{WorkDir: opts.WorkDir},
 			ctxsrc.GitSource{WorkDir: opts.WorkDir},
+			ctxsrc.InstructionsSource{ProjectRoot: projectRoot, WorkDir: opts.WorkDir},
 		),
 		collector:    opts.Collector,
 		stateMachine: NewStateMachine(),
@@ -1682,6 +1685,28 @@ func (e *Engine) calibrateFromUsage(messages []m31types.Message, usage *m31types
 	e.tokens.Calibrate(estimated, usage.PromptTokens)
 }
 
+// computePromptHash returns a short SHA-256 hash of the message content for metrics tracking.
+func computePromptHash(messages []m31types.Message) string {
+	h := sha256.New()
+	for _, m := range messages {
+		h.Write([]byte(m.Role))
+		h.Write([]byte{0})
+		h.Write([]byte(m.Content))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// recordLLMInteractionWithPrompt records detailed LLM metrics including prompt hash.
+func (e *Engine) recordLLMInteractionWithPrompt(messages []m31types.Message, usage *m31types.Usage, cost float64) {
+	if e.collector == nil || usage == nil {
+		return
+	}
+	phase := e.stateMachine.CurrentPhase()
+	promptHash := computePromptHash(messages)
+	e.collector.RecordLLMInteractionWithPrompt(phase, usage, cost, promptHash, false)
+}
+
 // streamLLMWithTools sends a chat request with tool definitions and returns
 // both the text content and any native tool calls from the response.
 // Used by execute and heal phases for structured tool dispatch.
@@ -1693,6 +1718,7 @@ func (e *Engine) streamLLMWithTools(ctx context.Context, messages []m31types.Mes
 
 	content, toolCalls, usage, err := e.consumeStreamWithTools(iterator)
 	e.calibrateFromUsage(messages, usage)
+	e.recordLLMInteractionWithPrompt(messages, usage, 0)
 	e.emitThinkingDone()
 	return content, toolCalls, err
 }
@@ -1706,6 +1732,7 @@ func (e *Engine) streamLLM(ctx context.Context, messages []m31types.Message, too
 
 	result, usage, err := e.consumeStream(iterator)
 	e.calibrateFromUsage(messages, usage)
+	e.recordLLMInteractionWithPrompt(messages, usage, 0)
 	e.emitThinkingDone()
 	return result, err
 }

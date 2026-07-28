@@ -296,6 +296,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 			failureReason := fmt.Sprintf("LLM stream failed: %v", err)
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
+				if e.collector != nil {
+					e.collector.RecordHealLoop(m31types.PhaseExecute)
+				}
 				return taskrunner.TaskResult{Success: false, Error: failureReason}
 			}
 			task.HealsAttempted++
@@ -308,7 +311,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			if e.collector != nil {
 				e.collector.RecordHealTrigger(m31types.PhaseExecute)
 			}
+			healStart := time.Now()
 			healResult := e.healTask(ctx, *task, failureReason, goal)
+			healDuration := time.Since(healStart).Milliseconds()
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -318,6 +323,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			})
 			if e.collector != nil {
 				e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+				e.collector.RecordHealDuration(m31types.PhaseExecute, healDuration)
 			}
 			if !healResult.Success {
 				return healResult
@@ -381,6 +387,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 				if parseErr != nil {
 					failureReason := fmt.Sprintf("tool call parsing failed: %v", parseErr)
 					if task.HealsAttempted >= m31types.MaxHealAttempts {
+						if e.collector != nil {
+							e.collector.RecordHealLoop(m31types.PhaseExecute)
+						}
 						return taskrunner.TaskResult{Success: false, Error: failureReason}
 					}
 					task.HealsAttempted++
@@ -393,7 +402,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					if e.collector != nil {
 						e.collector.RecordHealTrigger(m31types.PhaseExecute)
 					}
+					healStart := time.Now()
 					healResult := e.healTask(ctx, *task, failureReason, goal)
+					healDuration := time.Since(healStart).Milliseconds()
 					e.emit(SelfHealCompleteMsg{
 						TaskID:  task.ID,
 						Attempt: task.HealsAttempted,
@@ -403,6 +414,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					})
 					if e.collector != nil {
 						e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+						e.collector.RecordHealDuration(m31types.PhaseExecute, healDuration)
 					}
 					if !healResult.Success {
 						return healResult
@@ -574,6 +586,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 		if toolErr {
 			if task.HealsAttempted >= m31types.MaxHealAttempts {
+				if e.collector != nil {
+					e.collector.RecordHealLoop(m31types.PhaseExecute)
+				}
 				return taskrunner.TaskResult{
 					Success: false,
 					Error:   strings.Join(toolErrMessages, "; "),
@@ -590,7 +605,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			if e.collector != nil {
 				e.collector.RecordHealTrigger(m31types.PhaseExecute)
 			}
+			healStart := time.Now()
 			healResult := e.healTask(ctx, *task, failureReason, goal)
+			healDuration := time.Since(healStart).Milliseconds()
 			e.emit(SelfHealCompleteMsg{
 				TaskID:  task.ID,
 				Attempt: task.HealsAttempted,
@@ -600,6 +617,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			})
 			if e.collector != nil {
 				e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+				e.collector.RecordHealDuration(m31types.PhaseExecute, healDuration)
 			}
 			if !healResult.Success {
 				return healResult
@@ -671,7 +689,9 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					if e.collector != nil {
 						e.collector.RecordHealTrigger(m31types.PhaseExecute)
 					}
+					healStart := time.Now()
 					healResult := e.healTask(ctx, *task, failureReason, goal)
+					healDuration := time.Since(healStart).Milliseconds()
 					e.emit(SelfHealCompleteMsg{
 						TaskID:  task.ID,
 						Attempt: task.HealsAttempted,
@@ -681,6 +701,7 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 					})
 					if e.collector != nil {
 						e.collector.RecordHealOutcome(m31types.PhaseExecute, healResult.Success)
+						e.collector.RecordHealDuration(m31types.PhaseExecute, healDuration)
 					}
 					if !healResult.Success {
 						return healResult
@@ -708,6 +729,11 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			DurationMs: time.Since(start).Milliseconds(),
 			ToolCalls:  toolCallCount,
 		}
+	}
+
+	// All heal attempts exhausted — record heal loop for metrics.
+	if e.collector != nil {
+		e.collector.RecordHealLoop(m31types.PhaseExecute)
 	}
 
 	return taskrunner.TaskResult{

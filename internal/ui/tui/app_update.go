@@ -100,6 +100,12 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd := handleStreamErrorMsg(m, msg)
 		cmds = append(cmds, cmd)
 
+	// ── Stream chunk from workflow phases ──────────────────────────────────
+	case StreamChunkMsg:
+		if m.replModel != nil && msg.Chunk != nil {
+			m.replModel.AppendStreamChunk(msg.Chunk)
+		}
+
 	// ── Agent loop ────────────────────────────────────────────────────────
 	case AgentStreamMsg, AgentThinkingMsg, AgentToolStartMsg, AgentToolProgressMsg,
 		AgentToolDoneMsg, AgentIterationDoneMsg, AgentIterationMsg,
