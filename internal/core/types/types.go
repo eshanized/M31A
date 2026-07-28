@@ -267,21 +267,6 @@ type Task struct {
 	CommitHash         string     `json:"commit_hash,omitempty"`
 }
 
-// ClampHealsAttempted ensures HealsAttempted does not exceed MaxHealAttempts.
-// Call this after incrementing HealsAttempted to enforce the type-level bound.
-func (t *Task) ClampHealsAttempted() {
-	if t.HealsAttempted > MaxHealAttempts {
-		t.HealsAttempted = MaxHealAttempts
-	}
-}
-
-// FilePrediction action constants for consistent action values.
-const (
-	FileActionCreate = "create"
-	FileActionModify = "modify"
-	FileActionDelete = "delete"
-)
-
 type ProjectState struct {
 	Goal        string            `json:"goal"`
 	ProjectType string            `json:"project_type"`

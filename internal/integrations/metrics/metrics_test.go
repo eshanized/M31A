@@ -653,37 +653,6 @@ func TestCollector_CombinedScenario(t *testing.T) {
 	}
 }
 
-// --- HashPrompt tests ---
-
-func TestHashPrompt_Deterministic(t *testing.T) {
-	t.Parallel()
-	h1 := HashPrompt("hello world")
-	h2 := HashPrompt("hello world")
-	if h1 != h2 {
-		t.Errorf("HashPrompt not deterministic: %q != %q", h1, h2)
-	}
-	if len(h1) != 16 {
-		t.Errorf("HashPrompt length = %d, want 16", len(h1))
-	}
-}
-
-func TestHashPrompt_DifferentInputs(t *testing.T) {
-	t.Parallel()
-	h1 := HashPrompt("prompt A")
-	h2 := HashPrompt("prompt B")
-	if h1 == h2 {
-		t.Errorf("different inputs produced same hash: %q", h1)
-	}
-}
-
-func TestHashPrompt_Empty(t *testing.T) {
-	t.Parallel()
-	h := HashPrompt("")
-	if len(h) != 16 {
-		t.Errorf("HashPrompt empty length = %d, want 16", len(h))
-	}
-}
-
 // --- RecordLLMInteractionWithPrompt tests ---
 
 func TestCollector_RecordLLMInteractionWithPrompt(t *testing.T) {

@@ -2,7 +2,6 @@ package context
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 )
 
@@ -170,81 +169,6 @@ func TestChangeType_Constants(t *testing.T) {
 	}
 	if ChangeRemoved != 2 {
 		t.Errorf("ChangeRemoved = %d, want 2", ChangeRemoved)
-	}
-}
-
-func TestNewSnapshot(t *testing.T) {
-	state := map[string]string{"key": "value"}
-	snap := NewSnapshot(state)
-
-	if snap == nil {
-		t.Fatal("NewSnapshot() returned nil")
-	}
-	if snap.State["key"] != "value" {
-		t.Errorf("State[key] = %q, want %q", snap.State["key"], "value")
-	}
-}
-
-func TestSnapshot_Encode(t *testing.T) {
-	state := map[string]string{"key": "value", "key2": "value2"}
-	snap := NewSnapshot(state)
-
-	data, err := snap.Encode()
-	if err != nil {
-		t.Fatalf("Encode() error = %v", err)
-	}
-
-	// Verify it's valid JSON
-	var decoded map[string]string
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("encoded data is not valid JSON: %v", err)
-	}
-	if decoded["key"] != "value" {
-		t.Errorf("decoded key = %q, want %q", decoded["key"], "value")
-	}
-}
-
-func TestSnapshot_Encode_Empty(t *testing.T) {
-	snap := NewSnapshot(map[string]string{})
-
-	data, err := snap.Encode()
-	if err != nil {
-		t.Fatalf("Encode() error = %v", err)
-	}
-	if string(data) != "{}" {
-		t.Errorf("encoded empty map = %q, want %q", string(data), "{}")
-	}
-}
-
-func TestDecodeSnapshot(t *testing.T) {
-	data := []byte(`{"key":"value","key2":"value2"}`)
-
-	state, err := DecodeSnapshot(data)
-	if err != nil {
-		t.Fatalf("DecodeSnapshot() error = %v", err)
-	}
-	if state["key"] != "value" {
-		t.Errorf("state[key] = %q, want %q", state["key"], "value")
-	}
-	if state["key2"] != "value2" {
-		t.Errorf("state[key2] = %q, want %q", state["key2"], "value2")
-	}
-}
-
-func TestDecodeSnapshot_InvalidJSON(t *testing.T) {
-	_, err := DecodeSnapshot([]byte("invalid"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-}
-
-func TestDecodeSnapshot_EmptyObject(t *testing.T) {
-	state, err := DecodeSnapshot([]byte("{}"))
-	if err != nil {
-		t.Fatalf("DecodeSnapshot() error = %v", err)
-	}
-	if len(state) != 0 {
-		t.Errorf("expected empty map, got %d entries", len(state))
 	}
 }
 

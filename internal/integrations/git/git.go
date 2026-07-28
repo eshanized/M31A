@@ -16,9 +16,6 @@ import (
 // CommitInfo is a type alias for the canonical definition in internal/types.
 type CommitInfo = types.CommitInfo
 
-// Compile-time check: *Git must satisfy types.GitClient.
-var _ types.GitClient = (*Git)(nil)
-
 // Git wraps git operations for a working directory.
 type Git struct {
 	workDir string
@@ -701,50 +698,6 @@ func (g *Git) AbsPath(rel string) string {
 	return filepath.Join(g.workDir, rel)
 }
 
-// Fetch fetches from a remote repository.
-func (g *Git) Fetch(remote string) error {
-	if remote == "" {
-		remote = "origin"
-	}
-	if _, err := g.run("fetch", remote); err != nil {
-		return fmt.Errorf("git fetch %s: %w", remote, err)
-	}
-	return nil
-}
-
-// Pull pulls from a remote, optionally rebasing.
-func (g *Git) Pull(remote, branch string, rebase bool) error {
-	if remote == "" {
-		remote = "origin"
-	}
-	args := []string{"pull", remote}
-	if branch != "" {
-		args = append(args, branch)
-	}
-	if rebase {
-		args = append(args, "--rebase")
-	}
-	if _, err := g.run(args...); err != nil {
-		return fmt.Errorf("git pull: %w", err)
-	}
-	return nil
-}
-
-// Push pushes to a remote repository.
-func (g *Git) Push(remote, branch string) error {
-	if remote == "" {
-		remote = "origin"
-	}
-	args := []string{"push", remote}
-	if branch != "" {
-		args = append(args, branch)
-	}
-	if _, err := g.run(args...); err != nil {
-		return fmt.Errorf("git push: %w", err)
-	}
-	return nil
-}
-
 // CheckoutBranch checks out a branch, optionally creating it.
 func (g *Git) CheckoutBranch(name string, create bool) error {
 	args := []string{"checkout"}
@@ -774,28 +727,6 @@ func (g *Git) StashList() ([]string, error) {
 func (g *Git) StashApply(index int) error {
 	if _, err := g.run("stash", "apply", fmt.Sprintf("stash@{%d}", index)); err != nil {
 		return fmt.Errorf("git stash apply: %w", err)
-	}
-	return nil
-}
-
-// Merge merges a branch into the current branch.
-func (g *Git) Merge(branch string) error {
-	if _, err := g.run("merge", "--", branch); err != nil {
-		return fmt.Errorf("git merge %s: %w", branch, err)
-	}
-	return nil
-}
-
-// Tag creates a lightweight or annotated tag.
-func (g *Git) Tag(name, msg string) error {
-	if msg != "" {
-		if _, err := g.run("tag", "-a", "--", name, "--message="+msg); err != nil {
-			return fmt.Errorf("git tag: %w", err)
-		}
-	} else {
-		if _, err := g.run("tag", "--", name); err != nil {
-			return fmt.Errorf("git tag: %w", err)
-		}
 	}
 	return nil
 }

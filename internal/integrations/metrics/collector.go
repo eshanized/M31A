@@ -1,8 +1,6 @@
 package metrics
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -486,9 +484,3 @@ func (c *Collector) Stop() {
 	)
 }
 
-// HashPrompt computes a short SHA-256 hash of a prompt string.
-// Returns the first 16 hex characters for compactness.
-func HashPrompt(prompt string) string {
-	h := sha256.Sum256([]byte(prompt))
-	return hex.EncodeToString(h[:])[:16]
-}

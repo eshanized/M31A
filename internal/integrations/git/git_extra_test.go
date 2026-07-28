@@ -475,51 +475,6 @@ func TestGit_StashApply(t *testing.T) {
 	}
 }
 
-func TestGit_Merge(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("main"), 0644)
-	g.Commit("initial")
-
-	g.CreateBranch("feature")
-	g.CheckoutBranch("feature", false)
-
-	os.WriteFile(filepath.Join(g.workDir, "b.txt"), []byte("feature"), 0644)
-	g.Commit("feature commit")
-
-	g.CheckoutBranch("main", false)
-	if err := g.Merge("feature"); err != nil {
-		t.Fatalf("Merge failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(g.workDir, "b.txt"))
-	if err != nil {
-		t.Fatalf("File b.txt should exist after merge: %v", err)
-	}
-	if string(content) != "feature" {
-		t.Errorf("Expected 'feature', got %q", string(content))
-	}
-}
-
-func TestGit_Tag_Lightweight(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
-
-	if err := g.Tag("v1.0", ""); err != nil {
-		t.Fatalf("Tag lightweight failed: %v", err)
-	}
-
-	out, err := g.Run("tag")
-	if err != nil {
-		t.Fatalf("Run tag failed: %v", err)
-	}
-	if !strings.Contains(out, "v1.0") {
-		t.Errorf("Expected tag v1.0, got %q", out)
-	}
-}
-
 func TestGit_BranchList(t *testing.T) {
 	g, _ := setupRepo(t)
 
@@ -577,60 +532,6 @@ func TestGit_AbsPath(t *testing.T) {
 	}
 }
 
-func TestGit_Fetch_NoRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Fetch("origin")
-	if err == nil {
-		t.Fatal("Expected error when fetching with no remote")
-	}
-}
-
-func TestGit_Fetch_EmptyRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Fetch("")
-	if err == nil {
-		t.Fatal("Expected error when fetching with default remote")
-	}
-}
-
-func TestGit_Pull_NoRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Pull("origin", "", false)
-	if err == nil {
-		t.Fatal("Expected error when pulling with no remote")
-	}
-}
-
-func TestGit_Pull_EmptyRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Pull("", "", false)
-	if err == nil {
-		t.Fatal("Expected error when pulling with default remote")
-	}
-}
-
-func TestGit_Push_NoRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Push("origin", "")
-	if err == nil {
-		t.Fatal("Expected error when pushing with no remote")
-	}
-}
-
-func TestGit_Push_EmptyRemote(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Push("", "")
-	if err == nil {
-		t.Fatal("Expected error when pushing with default remote")
-	}
-}
-
 func TestGit_DiffRefs_InvalidRef(t *testing.T) {
 	g, _ := setupRepo(t)
 
@@ -646,33 +547,6 @@ func TestGit_DiffRefs_DotDot(t *testing.T) {
 	_, err := g.DiffRefs("a..b", "")
 	if err == nil {
 		t.Fatal("Expected error for ref containing '..'")
-	}
-}
-
-func TestGit_Pull_WithRebase(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Pull("origin", "main", true)
-	if err == nil {
-		t.Fatal("Expected error when pulling with rebase and no remote")
-	}
-}
-
-func TestGit_Pull_WithBranch(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Pull("origin", "main", false)
-	if err == nil {
-		t.Fatal("Expected error when pulling with branch and no remote")
-	}
-}
-
-func TestGit_Push_WithBranch(t *testing.T) {
-	g, _ := setupRepo(t)
-
-	err := g.Push("origin", "main")
-	if err == nil {
-		t.Fatal("Expected error when pushing with branch and no remote")
 	}
 }
 
@@ -819,18 +693,4 @@ func TestGit_DiffStaged_Empty(t *testing.T) {
 	}
 }
 
-func TestGit_Tag_LightweightOnly(t *testing.T) {
-	g, _ := setupRepo(t)
 
-	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
-
-	if err := g.Tag("v1", ""); err != nil {
-		t.Fatalf("Lightweight tag failed: %v", err)
-	}
-
-	out, _ := g.Run("tag", "-l", "v1")
-	if !strings.Contains(out, "v1") {
-		t.Error("Expected tag v1 to exist")
-	}
-}
