@@ -11,6 +11,7 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/bisect"
+	"github.com/eshanized/M31A/internal/engine/rollback"
 	"github.com/eshanized/M31A/internal/engine/session"
 )
 
@@ -280,6 +281,14 @@ func (e *Engine) tryBisectHeal(ctx context.Context, taskEntry *m31types.Task, ta
 
 	e.logger.Info("bisect found offending commit",
 		"commit", bisectResult.OffendingCommit.ShortHash)
+
+	// Wire rollback: revert the offending commit to undo the bad changes
+	// without changing HEAD. Rollback failure is logged as warning — it
+	// should not block the workflow.
+	if err := rollback.SoftReset(bisectResult.OffendingCommit.Hash, e.workDir); err != nil {
+		e.logger.Warn("rollback after bisect failed",
+			"offender", bisectResult.OffendingCommit.ShortHash, "error", err)
+	}
 
 	// Targeted heal using bisect context
 	failure := fmt.Sprintf("bisect identified commit %s as introducing the failure:\n%s\n\nVerification errors: %v",

@@ -3,6 +3,7 @@ package rollback
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -359,4 +360,115 @@ func splitLines(s string) []string {
 		}
 	}
 	return lines
+}
+
+// SoftReset reverts the changes introduced by the specified commit without
+// changing HEAD. Uses `git revert --no-commit <offenderHash>` to undo the
+// bad commit's changes in the working tree. This is used after bisect
+// identifies an offending commit to clean up the damage without altering
+// the commit history.
+func SoftReset(offenderHash string, workDir string) error {
+	g := newExecGitRunner(workDir)
+	args := []string{"revert", "--no-commit", offenderHash}
+	if _, err := g.Run(args...); err != nil {
+		return fmt.Errorf("git revert --no-commit %s: %w", offenderHash, err)
+	}
+	return nil
+}
+
+// execGitRunner is a minimal GitRunner implementation backed by os/exec.
+// Used by the standalone SoftReset function when no *git.Git instance is available.
+type execGitRunner struct {
+	workDir string
+}
+
+func newExecGitRunner(workDir string) *execGitRunner {
+	return &execGitRunner{workDir: workDir}
+}
+
+func (g *execGitRunner) Run(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = g.workDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("git %s: %w (%s)", args[0], err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (g *execGitRunner) LogAll() ([]types.CommitInfo, error) {
+	out, err := g.Run("log", "--format=%H|%h|%an|%s|%aI")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return []types.CommitInfo{}, nil
+	}
+	var commits []types.CommitInfo
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 5 {
+			continue
+		}
+		ts, _ := time.Parse(time.RFC3339, parts[4])
+		commits = append(commits, types.CommitInfo{
+			Hash:      parts[0],
+			ShortHash: parts[1],
+			Author:    parts[2],
+			Message:   parts[3],
+			Timestamp: ts,
+		})
+	}
+	return commits, nil
+}
+
+func (g *execGitRunner) HeadHash() (string, error) {
+	return g.Run("rev-parse", "HEAD")
+}
+
+func (g *execGitRunner) DiffRefs(ref1, ref2 string) (string, error) {
+	return g.Run("diff", ref1, ref2)
+}
+
+func (g *execGitRunner) ResetSoft(commit string) error {
+	_, err := g.Run("reset", "--soft", commit)
+	return err
+}
+
+func (g *execGitRunner) ResetHard(commit string) error {
+	_, err := g.Run("reset", "--hard", commit)
+	return err
+}
+
+func (g *execGitRunner) StashPush(message string) error {
+	_, err := g.Run("stash", "push", "--message="+message)
+	return err
+}
+
+func (g *execGitRunner) StashPop() error {
+	_, err := g.Run("stash", "pop")
+	return err
+}
+
+func (g *execGitRunner) CountCommits(startHash, endHash string) (int, error) {
+	out, err := g.Run("rev-list", "--count", startHash+".."+endHash)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	if _, scanErr := fmt.Sscanf(out, "%d", &count); scanErr != nil {
+		return 0, scanErr
+	}
+	return count, nil
+}
+
+func (g *execGitRunner) HasUncommittedChanges() (bool, error) {
+	out, err := g.Run("status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
 }
