@@ -61,6 +61,19 @@ func (m mergeHelper) sliceField(base, overlay *[]string, key string) {
 	}
 }
 
+// stringMapField copies overlay entries into base map. Non-empty overlay keys
+// override corresponding base keys; base keys not in overlay are preserved.
+func (m mergeHelper) stringMapField(base, overlay *map[string]string, key string) {
+	if len(*overlay) > 0 {
+		if *base == nil {
+			*base = make(map[string]string)
+		}
+		for k, v := range *overlay {
+			(*base)[k] = v
+		}
+	}
+}
+
 // mergeSlice copies overlay to base if non-nil and non-empty.
 // Used for PermissionRule slices and similar typed slices.
 func mergeSlice[T any](base, overlay *[]T, key string) {
@@ -94,6 +107,10 @@ func MergeConfig(base, overlay *Config, defined map[string]bool) {
 	h.mergeCompactionConfig(&base.Compaction, &overlay.Compaction, "compaction")
 	h.mergeInstructionsConfig(&base.Instructions, &overlay.Instructions, "instructions")
 	h.mergeSkillsConfig(&base.Skills, &overlay.Skills, "skills")
+	h.mergeNarrativeConfig(&base.Narrative, &overlay.Narrative, "narrative")
+	h.mergeModelCapabilitiesConfig(&base.ModelCapabilities, &overlay.ModelCapabilities, "model_capabilities")
+	h.mergePromptConfig(&base.Prompts, &overlay.Prompts, "prompts")
+	h.mergeTemplateConfig(&base.Templates, &overlay.Templates, "templates")
 }
 
 func (h mergeHelper) mergeProviderConfig(base, overlay *ProviderConfig, prefix string) {
@@ -107,6 +124,9 @@ func (h mergeHelper) mergeProviderConfig(base, overlay *ProviderConfig, prefix s
 	h.stringField(&base.NvidiaBaseURL, &overlay.NvidiaBaseURL, prefix+".nvidia_base_url")
 	h.stringField(&base.OpenRouterReferer, &overlay.OpenRouterReferer, prefix+".openrouter_referer")
 	h.stringField(&base.OpenRouterTitle, &overlay.OpenRouterTitle, prefix+".openrouter_title")
+	h.sliceField(&base.FallbackPriority, &overlay.FallbackPriority, prefix+".fallback_priority")
+	h.intField(&base.HealthCheckTimeoutSecs, &overlay.HealthCheckTimeoutSecs, prefix+".health_check_timeout_secs")
+	h.sliceField(&base.RegistrationOrder, &overlay.RegistrationOrder, prefix+".registration_order")
 }
 
 func (h mergeHelper) mergeCredentialConfig(base, overlay *ProviderCredentialConfig, prefix string) {
@@ -259,6 +279,28 @@ func (h mergeHelper) mergeFeaturesConfig(base, overlay *FeaturesConfig, prefix s
 	// Intent classification
 	h.boolField(&base.IntentClassification, &overlay.IntentClassification, prefix+".intent_classification")
 	h.intField(&base.IntentClassifyTimeoutSecs, &overlay.IntentClassifyTimeoutSecs, prefix+".intent_classify_timeout_secs")
+
+	// Workflow thresholds (F-030, F-031)
+	h.intField(&base.MaxHealAttempts, &overlay.MaxHealAttempts, prefix+".max_heal_attempts")
+	h.intField(&base.MaxPlanRetries, &overlay.MaxPlanRetries, prefix+".max_plan_retries")
+
+	// Context (F-033)
+	h.float64Field(&base.ContextTruncationThreshold, &overlay.ContextTruncationThreshold, prefix+".context_truncation_threshold")
+
+	// Retry policy (F-061)
+	h.intField(&base.RetryMaxAttempts, &overlay.RetryMaxAttempts, prefix+".retry_max_attempts")
+	h.intField(&base.RetryBaseDelayMs, &overlay.RetryBaseDelayMs, prefix+".retry_base_delay_ms")
+	h.intField(&base.RetryMaxDelayMs, &overlay.RetryMaxDelayMs, prefix+".retry_max_delay_ms")
+	h.float64Field(&base.RetryBackoffMultiplier, &overlay.RetryBackoffMultiplier, prefix+".retry_backoff_multiplier")
+
+	// Retry-after (F-062)
+	h.intField(&base.MaxRetryAfterSecs, &overlay.MaxRetryAfterSecs, prefix+".max_retry_after_secs")
+
+	// Task runner (F-076)
+	h.intField(&base.MaxParallelTasks, &overlay.MaxParallelTasks, prefix+".max_parallel_tasks")
+
+	// Coordinator (F-078)
+	h.intField(&base.CoordinatorTimeoutSecs, &overlay.CoordinatorTimeoutSecs, prefix+".coordinator_timeout_secs")
 }
 
 func (h mergeHelper) mergeLedgerConfig(base, overlay *LedgerConfig, prefix string) {
@@ -278,6 +320,38 @@ func (h mergeHelper) mergeToolsConfig(base, overlay *ToolsConfig, prefix string)
 	h.boolField(&base.WebSearchEnabled, &overlay.WebSearchEnabled, prefix+".websearch_enabled")
 	h.intField(&base.OutputMaxLines, &overlay.OutputMaxLines, prefix+".output_max_lines")
 	h.intField(&base.OutputMaxBytes, &overlay.OutputMaxBytes, prefix+".output_max_bytes")
+
+	// Rate limiting (F-018)
+	h.intField(&base.RateLimitBurst, &overlay.RateLimitBurst, prefix+".rate_limit_burst")
+	h.intField(&base.RateLimitPerSec, &overlay.RateLimitPerSec, prefix+".rate_limit_per_sec")
+	h.intField(&base.DangerousRateLimitBurst, &overlay.DangerousRateLimitBurst, prefix+".dangerous_rate_limit_burst")
+	h.intField(&base.DangerousRateLimitPerSec, &overlay.DangerousRateLimitPerSec, prefix+".dangerous_rate_limit_per_sec")
+	h.intField(&base.MaxConcurrent, &overlay.MaxConcurrent, prefix+".max_concurrent")
+
+	// Output bounds (F-019)
+	h.intField(&base.OutputRetentionDays, &overlay.OutputRetentionDays, prefix+".output_retention_days")
+
+	// DNS (F-023)
+	h.intField(&base.DnsCacheTTLSecs, &overlay.DnsCacheTTLSecs, prefix+".dns_cache_ttl_secs")
+
+	// Edit tool (F-024)
+	h.float64Field(&base.FuzzyThreshold, &overlay.FuzzyThreshold, prefix+".fuzzy_threshold")
+	h.intField(&base.MinLinesForFuzzy, &overlay.MinLinesForFuzzy, prefix+".min_lines_for_fuzzy")
+
+	// Bash (F-020)
+	h.intField(&base.BashMaxTimeoutSecs, &overlay.BashMaxTimeoutSecs, prefix+".bash_max_timeout_secs")
+
+	// WebFetch (F-021)
+	h.intField(&base.WebfetchMaxRetries, &overlay.WebfetchMaxRetries, prefix+".webfetch_max_retries")
+	h.intField(&base.WebfetchRetryDelayMs, &overlay.WebfetchRetryDelayMs, prefix+".webfetch_retry_delay_ms")
+
+	// Execute phase (F-086, F-087)
+	h.intField(&base.MaxToolConcurrency, &overlay.MaxToolConcurrency, prefix+".max_tool_concurrency")
+	h.intField(&base.LoopDetectWindow, &overlay.LoopDetectWindow, prefix+".loop_detect_window")
+
+	// Dangerous command extensions (F-017)
+	h.sliceField(&base.AdditionalBlockedCommands, &overlay.AdditionalBlockedCommands, prefix+".additional_blocked_commands")
+	h.sliceField(&base.AdditionalObfuscationPatterns, &overlay.AdditionalObfuscationPatterns, prefix+".additional_obfuscation_patterns")
 }
 
 func (h mergeHelper) mergeAgentsConfig(base, overlay *AgentsConfig, prefix string) {
@@ -330,6 +404,7 @@ func (h mergeHelper) mergeGitConfig(base, overlay *GitConfig, prefix string) {
 func (h mergeHelper) mergeVerifyConfig(base, overlay *VerifyConfig, prefix string) {
 	h.stringField(&base.BuildCommand, &overlay.BuildCommand, prefix+".build_command")
 	h.stringField(&base.TestCommand, &overlay.TestCommand, prefix+".test_command")
+	h.stringField(&base.LintCommand, &overlay.LintCommand, prefix+".lint_command")
 }
 
 func (h mergeHelper) mergeCompactionConfig(base, overlay *CompactionConfig, prefix string) {
@@ -339,6 +414,8 @@ func (h mergeHelper) mergeCompactionConfig(base, overlay *CompactionConfig, pref
 	h.boolField(&base.Proactive, &overlay.Proactive, prefix+".proactive")
 	h.intField(&base.ToolCallsThreshold, &overlay.ToolCallsThreshold, prefix+".tool_calls_threshold")
 	h.intField(&base.PhaseTransitionPct, &overlay.PhaseTransitionPct, prefix+".phase_transition_pct")
+	h.stringField(&base.SummaryTemplate, &overlay.SummaryTemplate, prefix+".summary_template")
+	h.stringField(&base.SummaryTemplateFile, &overlay.SummaryTemplateFile, prefix+".summary_template_file")
 }
 
 func (h mergeHelper) mergeInstructionsConfig(base, overlay *InstructionsConfig, prefix string) {
@@ -348,4 +425,52 @@ func (h mergeHelper) mergeInstructionsConfig(base, overlay *InstructionsConfig, 
 
 func (h mergeHelper) mergeSkillsConfig(base, overlay *SkillsConfig, prefix string) {
 	h.sliceField(&base.Sources, &overlay.Sources, prefix+".sources")
+}
+
+func (h mergeHelper) mergeNarrativeConfig(base, overlay *NarrativeConfig, prefix string) {
+	h.stringMapField(&base.TemplateOverrides, &overlay.TemplateOverrides, prefix+".template_overrides")
+	h.stringMapField(&base.ClassificationOverrides, &overlay.ClassificationOverrides, prefix+".classification_overrides")
+}
+
+func (h mergeHelper) mergeModelCapabilitiesConfig(base, overlay *ModelCapabilitiesConfig, prefix string) {
+	h.sliceField(&base.ExtraReasoningPatterns, &overlay.ExtraReasoningPatterns, prefix+".extra_reasoning_patterns")
+	h.sliceField(&base.ExtraToolCapablePatterns, &overlay.ExtraToolCapablePatterns, prefix+".extra_tool_capable_patterns")
+	h.sliceField(&base.ExtraCompletionOnlyPatterns, &overlay.ExtraCompletionOnlyPatterns, prefix+".extra_completion_only_patterns")
+	h.sliceField(&base.ExtraNonChatPatterns, &overlay.ExtraNonChatPatterns, prefix+".extra_non_chat_patterns")
+
+	if overlay.KnownCapabilities != nil {
+		if base.KnownCapabilities == nil {
+			base.KnownCapabilities = make(map[string]ModelCapabilityOverride)
+		}
+		for name, overlayCap := range overlay.KnownCapabilities {
+			base.KnownCapabilities[name] = overlayCap
+		}
+	}
+}
+
+func (h mergeHelper) mergePromptConfig(base, overlay *PromptConfig, prefix string) {
+	h.stringField(&base.SystemPromptFile, &overlay.SystemPromptFile, prefix+".system_prompt_file")
+	h.stringField(&base.ProjectPromptDir, &overlay.ProjectPromptDir, prefix+".project_prompt_dir")
+	h.stringField(&base.GlobalPromptDir, &overlay.GlobalPromptDir, prefix+".global_prompt_dir")
+	h.stringMapField(&base.Overrides, &overlay.Overrides, prefix+".overrides")
+	h.stringMapField(&base.ModelTemplateOverrides, &overlay.ModelTemplateOverrides, prefix+".model_template_overrides")
+}
+
+func (h mergeHelper) mergeTemplateConfig(base, overlay *TemplateConfig, prefix string) {
+	h.stringField(&base.ExternalDir, &overlay.ExternalDir, prefix+".external_dir")
+	h.stringField(&base.WebsiteFramework, &overlay.WebsiteFramework, prefix+".website_framework")
+
+	if overlay.CustomPalettes != nil {
+		if base.CustomPalettes == nil {
+			base.CustomPalettes = make(map[string]map[string]string)
+		}
+		for paletteName, overlayColors := range overlay.CustomPalettes {
+			if base.CustomPalettes[paletteName] == nil {
+				base.CustomPalettes[paletteName] = make(map[string]string)
+			}
+			for k, v := range overlayColors {
+				base.CustomPalettes[paletteName][k] = v
+			}
+		}
+	}
 }

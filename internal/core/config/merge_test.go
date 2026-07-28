@@ -446,3 +446,362 @@ func TestMergeConfig_ZeroIntPreservedWhenUndefined(t *testing.T) {
 		t.Errorf("expected 50 preserved (undefined zero), got %d", base.UI.MaxIterations)
 	}
 }
+
+func TestMergeConfig_ProviderFallbackPriority(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Provider: ProviderConfig{
+		FallbackPriority:        []string{"openrouter", "zen"},
+		HealthCheckTimeoutSecs:  5,
+		RegistrationOrder:       []string{"zen", "nvidia"},
+	}}
+	overlay := &Config{Provider: ProviderConfig{
+		FallbackPriority:        []string{"nvidia", "zen", "openrouter"},
+		HealthCheckTimeoutSecs:  15,
+		RegistrationOrder:       []string{"openrouter", "nvidia", "zen"},
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if len(base.Provider.FallbackPriority) != 3 {
+		t.Fatalf("expected 3 fallback priorities, got %d", len(base.Provider.FallbackPriority))
+	}
+	if base.Provider.FallbackPriority[0] != "nvidia" {
+		t.Errorf("expected 'nvidia' first, got %q", base.Provider.FallbackPriority[0])
+	}
+	if base.Provider.HealthCheckTimeoutSecs != 15 {
+		t.Errorf("expected 15, got %d", base.Provider.HealthCheckTimeoutSecs)
+	}
+	if len(base.Provider.RegistrationOrder) != 3 {
+		t.Fatalf("expected 3 registration order, got %d", len(base.Provider.RegistrationOrder))
+	}
+}
+
+func TestMergeConfig_NarrativeConfig(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Narrative: NarrativeConfig{
+		TemplateOverrides:       map[string]string{"task_complete": "Done!"},
+		ClassificationOverrides: map[string]string{"tool_call": "expanded"},
+	}}
+	overlay := &Config{Narrative: NarrativeConfig{
+		TemplateOverrides:       map[string]string{"task_complete": "Finished!", "error": "Oops!"},
+		ClassificationOverrides: map[string]string{"tool_call": "hidden"},
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if base.Narrative.TemplateOverrides["task_complete"] != "Finished!" {
+		t.Errorf("expected 'Finished!', got %q", base.Narrative.TemplateOverrides["task_complete"])
+	}
+	if base.Narrative.TemplateOverrides["error"] != "Oops!" {
+		t.Errorf("expected 'Oops!' merged in, got %q", base.Narrative.TemplateOverrides["error"])
+	}
+	if base.Narrative.ClassificationOverrides["tool_call"] != "hidden" {
+		t.Errorf("expected 'hidden', got %q", base.Narrative.ClassificationOverrides["tool_call"])
+	}
+}
+
+func TestMergeConfig_ModelCapabilitiesConfig(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{ModelCapabilities: ModelCapabilitiesConfig{
+		ExtraReasoningPatterns: []string{"pattern_a"},
+		KnownCapabilities: map[string]ModelCapabilityOverride{
+			"gpt-4": {ContextLength: 8192},
+		},
+	}}
+	overlay := &Config{ModelCapabilities: ModelCapabilitiesConfig{
+		ExtraReasoningPatterns:     []string{"pattern_b"},
+		ExtraToolCapablePatterns:   []string{"tool_pattern"},
+		ExtraCompletionOnlyPatterns: []string{"completion_pattern"},
+		ExtraNonChatPatterns:       []string{"non_chat_pattern"},
+		KnownCapabilities: map[string]ModelCapabilityOverride{
+			"claude-3": {ContextLength: 200000, SupportsReasoning: true},
+		},
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if len(base.ModelCapabilities.ExtraReasoningPatterns) != 1 {
+		t.Errorf("expected 1 reasoning pattern (overlay replaces), got %d", len(base.ModelCapabilities.ExtraReasoningPatterns))
+	}
+	if base.ModelCapabilities.ExtraReasoningPatterns[0] != "pattern_b" {
+		t.Errorf("expected 'pattern_b', got %q", base.ModelCapabilities.ExtraReasoningPatterns[0])
+	}
+	if len(base.ModelCapabilities.ExtraToolCapablePatterns) != 1 {
+		t.Errorf("expected 1 tool capable pattern, got %d", len(base.ModelCapabilities.ExtraToolCapablePatterns))
+	}
+	if len(base.ModelCapabilities.ExtraCompletionOnlyPatterns) != 1 {
+		t.Errorf("expected 1 completion only pattern, got %d", len(base.ModelCapabilities.ExtraCompletionOnlyPatterns))
+	}
+	if len(base.ModelCapabilities.ExtraNonChatPatterns) != 1 {
+		t.Errorf("expected 1 non chat pattern, got %d", len(base.ModelCapabilities.ExtraNonChatPatterns))
+	}
+	// KnownCapabilities should have both gpt-4 and claude-3
+	if len(base.ModelCapabilities.KnownCapabilities) != 2 {
+		t.Fatalf("expected 2 known capabilities, got %d", len(base.ModelCapabilities.KnownCapabilities))
+	}
+	if base.ModelCapabilities.KnownCapabilities["gpt-4"].ContextLength != 8192 {
+		t.Error("expected gpt-4 preserved")
+	}
+	if base.ModelCapabilities.KnownCapabilities["claude-3"].ContextLength != 200000 {
+		t.Error("expected claude-3 merged")
+	}
+}
+
+func TestMergeConfig_PromptConfig(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Prompts: PromptConfig{
+		SystemPromptFile:  "/base/system.md",
+		ProjectPromptDir:  "/base/prompts",
+		Overrides:         map[string]string{"execute-task": "/base/execute.md"},
+	}}
+	overlay := &Config{Prompts: PromptConfig{
+		SystemPromptFile:          "/overlay/system.md",
+		GlobalPromptDir:           "/overlay/global",
+		Overrides:                 map[string]string{"execute-task": "/overlay/execute.md", "plan": "/overlay/plan.md"},
+		ModelTemplateOverrides:    map[string]string{"mistral": "/overlay/mistral.txt"},
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if base.Prompts.SystemPromptFile != "/overlay/system.md" {
+		t.Errorf("expected '/overlay/system.md', got %q", base.Prompts.SystemPromptFile)
+	}
+	if base.Prompts.ProjectPromptDir != "/base/prompts" {
+		t.Errorf("expected '/base/prompts' preserved, got %q", base.Prompts.ProjectPromptDir)
+	}
+	if base.Prompts.GlobalPromptDir != "/overlay/global" {
+		t.Errorf("expected '/overlay/global', got %q", base.Prompts.GlobalPromptDir)
+	}
+	if base.Prompts.Overrides["execute-task"] != "/overlay/execute.md" {
+		t.Errorf("expected override merged, got %q", base.Prompts.Overrides["execute-task"])
+	}
+	if base.Prompts.Overrides["plan"] != "/overlay/plan.md" {
+		t.Errorf("expected new override merged, got %q", base.Prompts.Overrides["plan"])
+	}
+	if len(base.Prompts.ModelTemplateOverrides) != 1 {
+		t.Errorf("expected 1 model template override, got %d", len(base.Prompts.ModelTemplateOverrides))
+	}
+}
+
+func TestMergeConfig_TemplateConfig(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Templates: TemplateConfig{
+		ExternalDir:     "/base/templates",
+		WebsiteFramework: "vue",
+		CustomPalettes: map[string]map[string]string{
+			"my_palette": {"primary": "#000"},
+		},
+	}}
+	overlay := &Config{Templates: TemplateConfig{
+		ExternalDir:     "/overlay/templates",
+		WebsiteFramework: "svelte",
+		CustomPalettes: map[string]map[string]string{
+			"my_palette":  {"primary": "#FFF", "secondary": "#CCC"},
+			"new_palette": {"accent": "#00F"},
+		},
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if base.Templates.ExternalDir != "/overlay/templates" {
+		t.Errorf("expected '/overlay/templates', got %q", base.Templates.ExternalDir)
+	}
+	if base.Templates.WebsiteFramework != "svelte" {
+		t.Errorf("expected 'svelte', got %q", base.Templates.WebsiteFramework)
+	}
+	if base.Templates.CustomPalettes["my_palette"]["primary"] != "#FFF" {
+		t.Errorf("expected '#FFF' merged, got %q", base.Templates.CustomPalettes["my_palette"]["primary"])
+	}
+	if base.Templates.CustomPalettes["my_palette"]["secondary"] != "#CCC" {
+		t.Errorf("expected '#CCC' merged, got %q", base.Templates.CustomPalettes["my_palette"]["secondary"])
+	}
+	if base.Templates.CustomPalettes["new_palette"]["accent"] != "#00F" {
+		t.Errorf("expected new palette merged, got %q", base.Templates.CustomPalettes["new_palette"]["accent"])
+	}
+}
+
+func TestMergeConfig_FeaturesMissingFields(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Features: FeaturesConfig{
+		MaxHealAttempts:           3,
+		MaxPlanRetries:            2,
+		ContextTruncationThreshold: 0.8,
+		RetryMaxAttempts:          5,
+		RetryBaseDelayMs:          100,
+		RetryMaxDelayMs:           5000,
+		RetryBackoffMultiplier:    2.0,
+		MaxRetryAfterSecs:         30,
+		MaxParallelTasks:          4,
+		CoordinatorTimeoutSecs:    60,
+	}}
+	overlay := &Config{Features: FeaturesConfig{
+		MaxHealAttempts:           5,
+		MaxPlanRetries:            3,
+		ContextTruncationThreshold: 0.9,
+		RetryMaxAttempts:          10,
+		RetryBaseDelayMs:          200,
+		RetryMaxDelayMs:           10000,
+		RetryBackoffMultiplier:    3.0,
+		MaxRetryAfterSecs:         60,
+		MaxParallelTasks:          8,
+		CoordinatorTimeoutSecs:    120,
+	}}
+
+	defined := map[string]bool{
+		"features.max_heal_attempts":            true,
+		"features.max_plan_retries":             true,
+		"features.context_truncation_threshold": true,
+		"features.retry_max_attempts":           true,
+		"features.retry_base_delay_ms":          true,
+		"features.retry_max_delay_ms":           true,
+		"features.retry_backoff_multiplier":     true,
+		"features.max_retry_after_secs":         true,
+		"features.max_parallel_tasks":           true,
+		"features.coordinator_timeout_secs":     true,
+	}
+	MergeConfig(base, overlay, defined)
+
+	if base.Features.MaxHealAttempts != 5 {
+		t.Errorf("expected 5, got %d", base.Features.MaxHealAttempts)
+	}
+	if base.Features.MaxPlanRetries != 3 {
+		t.Errorf("expected 3, got %d", base.Features.MaxPlanRetries)
+	}
+	if base.Features.ContextTruncationThreshold != 0.9 {
+		t.Errorf("expected 0.9, got %f", base.Features.ContextTruncationThreshold)
+	}
+	if base.Features.RetryMaxAttempts != 10 {
+		t.Errorf("expected 10, got %d", base.Features.RetryMaxAttempts)
+	}
+	if base.Features.RetryBackoffMultiplier != 3.0 {
+		t.Errorf("expected 3.0, got %f", base.Features.RetryBackoffMultiplier)
+	}
+	if base.Features.MaxParallelTasks != 8 {
+		t.Errorf("expected 8, got %d", base.Features.MaxParallelTasks)
+	}
+}
+
+func TestMergeConfig_ToolsMissingFields(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Tools: ToolsConfig{
+		RateLimitBurst:           10,
+		RateLimitPerSec:          5,
+		DangerousRateLimitBurst:  3,
+		DangerousRateLimitPerSec: 1,
+		MaxConcurrent:            4,
+		OutputRetentionDays:      7,
+		DnsCacheTTLSecs:          300,
+		FuzzyThreshold:           0.8,
+		MinLinesForFuzzy:         50,
+		BashMaxTimeoutSecs:       60,
+		WebfetchMaxRetries:       3,
+		WebfetchRetryDelayMs:     1000,
+		MaxToolConcurrency:       4,
+		LoopDetectWindow:         10,
+	}}
+	overlay := &Config{Tools: ToolsConfig{
+		RateLimitBurst:           20,
+		RateLimitPerSec:          10,
+		DangerousRateLimitBurst:  5,
+		DangerousRateLimitPerSec: 2,
+		MaxConcurrent:            8,
+		OutputRetentionDays:      30,
+		DnsCacheTTLSecs:          600,
+		FuzzyThreshold:           0.9,
+		MinLinesForFuzzy:         100,
+		BashMaxTimeoutSecs:       120,
+		WebfetchMaxRetries:       5,
+		WebfetchRetryDelayMs:     2000,
+		MaxToolConcurrency:       8,
+		LoopDetectWindow:         20,
+		AdditionalBlockedCommands: []string{"docker rm"},
+		AdditionalObfuscationPatterns: []string{"base64"},
+	}}
+
+	defined := map[string]bool{
+		"tools.rate_limit_burst":                 true,
+		"tools.rate_limit_per_sec":              true,
+		"tools.dangerous_rate_limit_burst":      true,
+		"tools.dangerous_rate_limit_per_sec":    true,
+		"tools.max_concurrent":                  true,
+		"tools.output_retention_days":           true,
+		"tools.dns_cache_ttl_secs":              true,
+		"tools.fuzzy_threshold":                 true,
+		"tools.min_lines_for_fuzzy":             true,
+		"tools.bash_max_timeout_secs":           true,
+		"tools.webfetch_max_retries":            true,
+		"tools.webfetch_retry_delay_ms":         true,
+		"tools.max_tool_concurrency":            true,
+		"tools.loop_detect_window":              true,
+		"tools.additional_blocked_commands":     true,
+		"tools.additional_obfuscation_patterns": true,
+	}
+	MergeConfig(base, overlay, defined)
+
+	if base.Tools.RateLimitBurst != 20 {
+		t.Errorf("expected 20, got %d", base.Tools.RateLimitBurst)
+	}
+	if base.Tools.MaxConcurrent != 8 {
+		t.Errorf("expected 8, got %d", base.Tools.MaxConcurrent)
+	}
+	if base.Tools.FuzzyThreshold != 0.9 {
+		t.Errorf("expected 0.9, got %f", base.Tools.FuzzyThreshold)
+	}
+	if len(base.Tools.AdditionalBlockedCommands) != 1 {
+		t.Errorf("expected 1 blocked command, got %d", len(base.Tools.AdditionalBlockedCommands))
+	}
+	if base.Tools.AdditionalBlockedCommands[0] != "docker rm" {
+		t.Errorf("expected 'docker rm', got %q", base.Tools.AdditionalBlockedCommands[0])
+	}
+}
+
+func TestMergeConfig_CompactionMissingFields(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Compaction: CompactionConfig{
+		SummaryTemplate:     "old template",
+		SummaryTemplateFile: "/old/path.md",
+	}}
+	overlay := &Config{Compaction: CompactionConfig{
+		SummaryTemplate:     "new template",
+		SummaryTemplateFile: "/new/path.md",
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if base.Compaction.SummaryTemplate != "new template" {
+		t.Errorf("expected 'new template', got %q", base.Compaction.SummaryTemplate)
+	}
+	if base.Compaction.SummaryTemplateFile != "/new/path.md" {
+		t.Errorf("expected '/new/path.md', got %q", base.Compaction.SummaryTemplateFile)
+	}
+}
+
+func TestMergeConfig_VerifyLintCommand(t *testing.T) {
+	t.Parallel()
+
+	base := &Config{Verify: VerifyConfig{
+		BuildCommand: "go build",
+		TestCommand:  "go test",
+		LintCommand:  "golangci-lint",
+	}}
+	overlay := &Config{Verify: VerifyConfig{
+		LintCommand: "staticcheck",
+	}}
+
+	MergeConfig(base, overlay, nil)
+
+	if base.Verify.LintCommand != "staticcheck" {
+		t.Errorf("expected 'staticcheck', got %q", base.Verify.LintCommand)
+	}
+	if base.Verify.BuildCommand != "go build" {
+		t.Errorf("expected 'go build' preserved, got %q", base.Verify.BuildCommand)
+	}
+}
