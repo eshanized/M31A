@@ -43,11 +43,6 @@ func TestUserMessage(t *testing.T) {
 		{"ErrSessionPermission", ErrSessionPermission, "Cannot access session — check file permissions"},
 
 		// New sentinel errors
-		{"ErrInvalidInput", ErrInvalidInput, "Invalid input — check your parameters"},
-		{"ErrNotFound", ErrNotFound, "Not found — check the resource or path"},
-		{"ErrAlreadyExists", ErrAlreadyExists, "Already exists — the resource is already present"},
-		{"ErrCancelled", ErrCancelled, "Operation cancelled"},
-		{"ErrInternal", ErrInternal, "Internal error — try again or check the logs"},
 		{"ErrNotImplemented", ErrNotImplemented, "Not implemented — this feature is not yet available"},
 
 		// Wrapped sentinel errors
@@ -233,8 +228,7 @@ func TestSentinelsAreUnique(t *testing.T) {
 		ErrCheckpointNotFound, ErrToolInputTooLarge, ErrInvalidTimeout,
 		ErrPrivateIPBlocked, ErrStreamTruncated, ErrBisectResetFailed,
 		ErrBisectFailed, ErrSessionNotFound, ErrSessionPermission,
-		ErrGitNotInitialized, ErrInvalidInput, ErrNotFound,
-		ErrAlreadyExists, ErrCancelled, ErrInternal, ErrNotImplemented,
+		ErrGitNotInitialized, ErrNotImplemented,
 	}
 
 	seen := make(map[error]bool)
