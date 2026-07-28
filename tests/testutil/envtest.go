@@ -7,24 +7,6 @@ import (
 	"testing"
 )
 
-// RequireAPIKey skips the test if the named environment variable is not set
-// or is empty. Use this for tests that need real API keys from .env.
-//
-// Example:
-//
-//	func TestLiveChat(t *testing.T) {
-//	    key := testutil.RequireAPIKey(t, "OPENROUTER_API_KEY")
-//	    // ... use key
-//	}
-func RequireAPIKey(t *testing.T, envVar string) string {
-	t.Helper()
-	if v := os.Getenv(envVar); v != "" {
-		return v
-	}
-	t.Skipf("skipping: %s not set in environment (add to .env)", envVar)
-	return ""
-}
-
 // RequireAnyAPIKey skips the test unless at least one of the named env vars
 // is set. Returns the value of the first one found.
 func RequireAnyAPIKey(t *testing.T, envVars ...string) string {

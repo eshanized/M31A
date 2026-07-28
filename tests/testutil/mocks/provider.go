@@ -34,15 +34,6 @@ func NewMockProvider(name string) *MockProvider {
 	}
 }
 
-// NewMockProviderWithResponse creates a MockProvider that returns the given response.
-func NewMockProviderWithResponse(name, response string) *MockProvider {
-	return &MockProvider{
-		Name_:         name,
-		Response_:     response,
-		HealthStatus_: types.HealthStatus{Status: "live"},
-	}
-}
-
 func (m *MockProvider) Name() string   { return m.Name_ }
 func (m *MockProvider) APIKey() string { return m.APIKey_ }
 

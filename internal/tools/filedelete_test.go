@@ -15,7 +15,7 @@ func TestFileDelete_Execute_DeleteWithBackup(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 
 	testFile := filepath.Join(dir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("hello"), 0o644); err != nil {
@@ -43,7 +43,7 @@ func TestFileDelete_Execute_Permanent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 
 	testFile := filepath.Join(dir, "perm.txt")
 	if err := os.WriteFile(testFile, []byte("data"), 0o644); err != nil {
@@ -68,7 +68,7 @@ func TestFileDelete_Execute_Permanent(t *testing.T) {
 func TestFileDelete_Execute_DirectoryBlocked(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fd := NewFileDelete(dir, t.TempDir())
+	fd := fileops.NewFileDelete(dir, t.TempDir())
 
 	subdir := filepath.Join(dir, "subdir")
 	os.MkdirAll(subdir, 0o755)
@@ -91,7 +91,7 @@ func TestFileDelete_PruneBackups(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	_ = NewFileDelete(dir, backupDir)
+	_ = fileops.NewFileDelete(dir, backupDir)
 
 	// Create multiple backups to test pruning
 	for i := 0; i < fileops.MaxBackupsPerFile+2; i++ {

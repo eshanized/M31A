@@ -7,10 +7,11 @@ import (
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/search"
 )
 
 func TestWebFetch_Blocks_PrivateIPv4(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -27,7 +28,7 @@ func TestWebFetch_Blocks_PrivateIPv4(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_Loopback(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -44,7 +45,7 @@ func TestWebFetch_Blocks_Loopback(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_PrivateIPv6_ULA(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -61,7 +62,7 @@ func TestWebFetch_Blocks_PrivateIPv6_ULA(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_PrivateIPv6_LinkLocal(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -78,7 +79,7 @@ func TestWebFetch_Blocks_PrivateIPv6_LinkLocal(t *testing.T) {
 }
 
 func TestWebFetch_Blocks_IPv4MappedIPv6(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -95,7 +96,7 @@ func TestWebFetch_Blocks_IPv4MappedIPv6(t *testing.T) {
 }
 
 func TestWebFetch_Allows_PublicDNS(t *testing.T) {
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	input := types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/eshanized/M31A/internal/tools/fileops"
+	"github.com/eshanized/M31A/internal/tools/search"
 	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
@@ -16,12 +18,12 @@ func TestParameterSchema_AllTools(t *testing.T) {
 		schema string
 	}{
 		{"Bash", NewBash(".", 1800, nil, nil).ParameterSchema()},
-		{"FileRead", NewFileRead(".").ParameterSchema()},
-		{"FileWrite", NewFileWrite(".", ".").ParameterSchema()},
-		{"Glob", NewGlob(".").ParameterSchema()},
-		{"Grep", NewGrep(".").ParameterSchema()},
-		{"Edit", NewEdit(".", ".").ParameterSchema()},
-		{"WebFetch", NewWebFetch(".", 3, nil).ParameterSchema()},
+		{"FileRead", fileops.NewFileRead(".").ParameterSchema()},
+		{"FileWrite", fileops.NewFileWrite(".", ".").ParameterSchema()},
+		{"Glob", search.NewGlob(".").ParameterSchema()},
+		{"Grep", search.NewGrep(".").ParameterSchema()},
+		{"Edit", fileops.NewEdit(".", ".").ParameterSchema()},
+		{"WebFetch", search.NewWebFetch(".", 3, nil).ParameterSchema()},
 		{"TodoWrite", todo.NewTodoWrite(".", "test").ParameterSchema()},
 	}
 

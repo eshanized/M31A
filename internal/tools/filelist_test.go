@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/fileops"
 )
 
 func TestFileList_Execute_EmptyDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name:   "FileList",
@@ -34,7 +35,7 @@ func TestFileList_Execute_SubDir(t *testing.T) {
 	os.MkdirAll(subdir, 0o755)
 	os.WriteFile(filepath.Join(subdir, "file.txt"), []byte("content"), 0o644)
 
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -56,7 +57,7 @@ func TestFileList_Execute_MaxDepth(t *testing.T) {
 	os.MkdirAll(deep, 0o755)
 	os.WriteFile(filepath.Join(deep, "deep.txt"), []byte("x"), 0o644)
 
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -75,7 +76,7 @@ func TestFileList_Execute_MaxDepth(t *testing.T) {
 func TestFileList_Execute_NotFound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 
 	_, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
@@ -91,7 +92,7 @@ func TestFileList_Execute_NotFound(t *testing.T) {
 func TestFileList_Execute_NonStringPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 
 	// Non-string path should use default directory
 	result, err := fl.Execute(context.Background(), types.ToolInput{
@@ -114,7 +115,7 @@ func TestFileList_Execute_WithFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("hello"), 0o644)
 
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name:   "FileList",
 		Params: map[string]any{},

@@ -14,15 +14,6 @@ type MockTool struct {
 	ExecFunc     func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
 }
 
-// NewMockTool creates a MockTool with the given name and risk level.
-func NewMockTool(name string, riskLevel types.RiskLevel) *MockTool {
-	return &MockTool{
-		Name_:        name,
-		Description_: "mock tool for testing",
-		RiskLevel_:   riskLevel,
-	}
-}
-
 func (m *MockTool) Name() string               { return m.Name_ }
 func (m *MockTool) Description() string        { return m.Description_ }
 func (m *MockTool) RiskLevel() types.RiskLevel { return m.RiskLevel_ }

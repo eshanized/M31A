@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/fileops"
 )
 
 func TestFileMove_Execute_RelativePaths(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 
 	src := filepath.Join(dir, "old.txt")
 	dst := filepath.Join(dir, "new.txt")
@@ -45,7 +46,7 @@ func TestFileMove_Execute_RelativePaths(t *testing.T) {
 func TestFileMove_Execute_CreatesDirs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 
 	src := filepath.Join(dir, "a.txt")
 	dst := filepath.Join(dir, "sub", "b.txt")

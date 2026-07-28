@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/search"
 )
 
 func TestWebFetch_SSRFBlocksPrivateIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -29,7 +30,7 @@ func TestWebFetch_SSRFBlocksPrivateIP(t *testing.T) {
 
 func TestWebFetch_SSRFBlocksLinkLocal(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -52,7 +53,7 @@ func TestWebFetch_TLSConnection(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	wf.AllowPrivateIPs = true
 
 	result, err := wf.Execute(context.Background(), types.ToolInput{

@@ -16,7 +16,7 @@ func TestAskUserQuestion_Execute_ContextCancel(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 1)
 	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
-	q := NewAskUserQuestion(reqCh, respCh, pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, pending)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -37,7 +37,7 @@ func TestAskUserQuestion_Execute_TimeoutWaiting(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 1)
 	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
-	q := NewAskUserQuestion(reqCh, respCh, pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, pending)
 
 	// Drain request but don't respond
 	go func() {
@@ -64,7 +64,7 @@ func TestAskUserQuestion_Execute_SuccessResponse(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 1)
 	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
-	q := NewAskUserQuestion(reqCh, respCh, pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, pending)
 
 	go func() {
 		req := <-reqCh
@@ -94,7 +94,7 @@ func TestAskUserQuestion_Execute_WithCustomAnswer(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 1)
 	respCh := make(chan types.QuestionResponse, 1)
 	pending := &sync.Map{}
-	q := NewAskUserQuestion(reqCh, respCh, pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, pending)
 
 	go func() {
 		req := <-reqCh

@@ -1,10 +1,7 @@
 package tools
 
 import (
-	"sync"
-
 	"github.com/eshanized/M31A/internal/core/config"
-	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/tools/ai"
 	toolsExec "github.com/eshanized/M31A/internal/tools/exec"
@@ -46,18 +43,6 @@ func NewFileWrite(workDir, backupDir string) *fileops.FileWrite {
 	return fileops.NewFileWrite(workDir, backupDir)
 }
 
-func NewFileList(workDir string) *fileops.FileList {
-	return fileops.NewFileList(workDir)
-}
-
-func NewFileDelete(workDir, backupDir string) *fileops.FileDelete {
-	return fileops.NewFileDelete(workDir, backupDir)
-}
-
-func NewFileMove(workDir, backupDir string) *fileops.FileMove {
-	return fileops.NewFileMove(workDir, backupDir)
-}
-
 func NewEdit(workDir, backupDir string) *fileops.Edit {
 	return fileops.NewEdit(workDir, backupDir)
 }
@@ -68,22 +53,6 @@ func NewGlob(workDir string) *search.Glob {
 
 func NewGrep(workDir string) *search.Grep {
 	return search.NewGrep(workDir)
-}
-
-func NewWebFetch(workDir string, timeoutSecs int, dnsCache *search.DNSCache) *search.WebFetch {
-	return search.NewWebFetch(workDir, timeoutSecs, dnsCache)
-}
-
-func NewWebSearch(baseURL string) *search.WebSearch {
-	return search.NewWebSearch(baseURL)
-}
-
-func NewDevServer(workDir string) *toolsExec.DevServer {
-	return toolsExec.NewDevServer(workDir)
-}
-
-func NewAskUserQuestion(requestCh chan types.QuestionRequest, responseCh chan types.QuestionResponse, pending *sync.Map) *ai.AskUserQuestion {
-	return ai.NewAskUserQuestion(requestCh, responseCh, pending)
 }
 
 // Re-export utility functions from fileops for backward compatibility

@@ -589,7 +589,7 @@ func TestFileDelete_MissingPathParam(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	_, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{},
@@ -603,7 +603,7 @@ func TestFileDelete_PathNotString(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	_, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{"path": 123},
@@ -617,7 +617,7 @@ func TestFileDelete_FileNotFound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	_, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{"path": "nonexistent.txt"},
@@ -635,7 +635,7 @@ func TestFileDelete_IsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "subdir"), 0755)
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	_, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{"path": "subdir"},
@@ -652,7 +652,7 @@ func TestFileDelete_PathOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	backupDir := t.TempDir()
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	_, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{"path": "/etc/hostname"},
@@ -667,7 +667,7 @@ func TestFileDelete_PermanentDelete(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "to_delete.txt"), []byte("content"), 0644)
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	result, err := fd.Execute(context.Background(), types.ToolInput{
 		Name: "FileDelete",
 		Params: map[string]any{
@@ -692,7 +692,7 @@ func TestFileDelete_BackupOnDelete(t *testing.T) {
 	backupDir := t.TempDir()
 	content := "important content"
 	os.WriteFile(filepath.Join(dir, "important.txt"), []byte(content), 0644)
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	result, err := fd.Execute(context.Background(), types.ToolInput{
 		Name:   "FileDelete",
 		Params: map[string]any{"path": "important.txt"},
@@ -718,7 +718,7 @@ func TestFileDelete_NonPermanentParams(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	result, err := fd.Execute(context.Background(), types.ToolInput{
 		Name: "FileDelete",
 		Params: map[string]any{
@@ -739,7 +739,7 @@ func TestFileDelete_NonBoolPermanent(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
-	fd := NewFileDelete(dir, backupDir)
+	fd := fileops.NewFileDelete(dir, backupDir)
 	// permanent = "not_a_bool" → treated as false (default)
 	result, err := fd.Execute(context.Background(), types.ToolInput{
 		Name: "FileDelete",
@@ -758,7 +758,7 @@ func TestFileDelete_NonBoolPermanent(t *testing.T) {
 
 func TestFileDelete_Name(t *testing.T) {
 	t.Parallel()
-	fd := NewFileDelete(t.TempDir(), t.TempDir())
+	fd := fileops.NewFileDelete(t.TempDir(), t.TempDir())
 	if fd.Name() != "FileDelete" {
 		t.Errorf("expected name 'FileDelete', got %s", fd.Name())
 	}
@@ -766,7 +766,7 @@ func TestFileDelete_Name(t *testing.T) {
 
 func TestFileDelete_Description(t *testing.T) {
 	t.Parallel()
-	fd := NewFileDelete(t.TempDir(), t.TempDir())
+	fd := fileops.NewFileDelete(t.TempDir(), t.TempDir())
 	if fd.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -774,7 +774,7 @@ func TestFileDelete_Description(t *testing.T) {
 
 func TestFileDelete_RiskLevel(t *testing.T) {
 	t.Parallel()
-	fd := NewFileDelete(t.TempDir(), t.TempDir())
+	fd := fileops.NewFileDelete(t.TempDir(), t.TempDir())
 	if fd.RiskLevel() != types.RiskDangerous {
 		t.Errorf("expected RiskDangerous, got %s", fd.RiskLevel())
 	}
@@ -787,7 +787,7 @@ func TestFileDelete_RiskLevel(t *testing.T) {
 func TestFileList_MissingPathParam(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name:   "FileList",
 		Params: map[string]any{},
@@ -804,7 +804,7 @@ func TestFileList_MissingPathParam(t *testing.T) {
 func TestFileList_AbsolutePathParam(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -822,7 +822,7 @@ func TestFileList_AbsolutePathParam(t *testing.T) {
 func TestFileList_DirectoryNotFound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	_, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -837,7 +837,7 @@ func TestFileList_DirectoryNotFound(t *testing.T) {
 func TestFileList_PathOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	_, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -854,7 +854,7 @@ func TestFileList_MaxDepth(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "a", "b", "c", "d"), 0755)
 	os.WriteFile(filepath.Join(dir, "a", "b", "c", "d", "deep.txt"), []byte("deep"), 0644)
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -874,7 +874,7 @@ func TestFileList_MaxDepthCapped(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	_, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -889,7 +889,7 @@ func TestFileList_MaxDepthCapped(t *testing.T) {
 func TestFileList_NonNumericDepth(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	_, err := fl.Execute(context.Background(), types.ToolInput{
 		Name: "FileList",
 		Params: map[string]any{
@@ -907,7 +907,7 @@ func TestFileList_SkipDirs(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0755)
 	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "index.js"), []byte("module"), 0644)
 	os.WriteFile(filepath.Join(dir, "app.go"), []byte("package main"), 0644)
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name:   "FileList",
 		Params: map[string]any{},
@@ -923,7 +923,7 @@ func TestFileList_SkipDirs(t *testing.T) {
 func TestFileList_EmptyDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fl := NewFileList(dir)
+	fl := fileops.NewFileList(dir)
 	result, err := fl.Execute(context.Background(), types.ToolInput{
 		Name:   "FileList",
 		Params: map[string]any{},
@@ -938,7 +938,7 @@ func TestFileList_EmptyDir(t *testing.T) {
 
 func TestFileList_Name(t *testing.T) {
 	t.Parallel()
-	fl := NewFileList(t.TempDir())
+	fl := fileops.NewFileList(t.TempDir())
 	if fl.Name() != "FileList" {
 		t.Errorf("expected name 'FileList', got %s", fl.Name())
 	}
@@ -946,7 +946,7 @@ func TestFileList_Name(t *testing.T) {
 
 func TestFileList_Description(t *testing.T) {
 	t.Parallel()
-	fl := NewFileList(t.TempDir())
+	fl := fileops.NewFileList(t.TempDir())
 	if fl.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -954,7 +954,7 @@ func TestFileList_Description(t *testing.T) {
 
 func TestFileList_RiskLevel(t *testing.T) {
 	t.Parallel()
-	fl := NewFileList(t.TempDir())
+	fl := fileops.NewFileList(t.TempDir())
 	if fl.RiskLevel() != types.RiskSafe {
 		t.Errorf("expected RiskSafe, got %s", fl.RiskLevel())
 	}
@@ -968,7 +968,7 @@ func TestFileMove_SimpleMove(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	result, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -990,7 +990,7 @@ func TestFileMove_SimpleMove(t *testing.T) {
 func TestFileMove_MissingSource(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name:   "FileMove",
 		Params: map[string]any{},
@@ -1003,7 +1003,7 @@ func TestFileMove_MissingSource(t *testing.T) {
 func TestFileMove_SourceNotString(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1019,7 +1019,7 @@ func TestFileMove_SourceNotString(t *testing.T) {
 func TestFileMove_MissingDestination(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1034,7 +1034,7 @@ func TestFileMove_MissingDestination(t *testing.T) {
 func TestFileMove_DestinationNotString(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1050,7 +1050,7 @@ func TestFileMove_DestinationNotString(t *testing.T) {
 func TestFileMove_SourceNotFound(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1069,7 +1069,7 @@ func TestFileMove_SourceNotFound(t *testing.T) {
 func TestFileMove_SourceOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1086,7 +1086,7 @@ func TestFileMove_DestinationOutsideWorkDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1103,7 +1103,7 @@ func TestFileMove_WithSubdirectory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("content"), 0644)
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	_, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -1121,7 +1121,7 @@ func TestFileMove_WithSubdirectory(t *testing.T) {
 
 func TestFileMove_Name(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir(), t.TempDir())
+	fm := fileops.NewFileMove(t.TempDir(), t.TempDir())
 	if fm.Name() != "FileMove" {
 		t.Errorf("expected name 'FileMove', got %s", fm.Name())
 	}
@@ -1129,7 +1129,7 @@ func TestFileMove_Name(t *testing.T) {
 
 func TestFileMove_Description(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir(), t.TempDir())
+	fm := fileops.NewFileMove(t.TempDir(), t.TempDir())
 	if fm.Description() == "" {
 		t.Error("expected non-empty description")
 	}
@@ -1137,7 +1137,7 @@ func TestFileMove_Description(t *testing.T) {
 
 func TestFileMove_RiskLevel(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir(), t.TempDir())
+	fm := fileops.NewFileMove(t.TempDir(), t.TempDir())
 	if fm.RiskLevel() != types.RiskDangerous {
 		t.Errorf("expected RiskDangerous, got %s", fm.RiskLevel())
 	}
@@ -2444,7 +2444,7 @@ func TestGrep_ParameterSchema(t *testing.T) {
 
 func TestFileList_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	fl := NewFileList(t.TempDir())
+	fl := fileops.NewFileList(t.TempDir())
 	schema := fl.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2461,7 +2461,7 @@ func TestFileList_ParameterSchema(t *testing.T) {
 
 func TestFileDelete_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	fd := NewFileDelete(t.TempDir(), t.TempDir())
+	fd := fileops.NewFileDelete(t.TempDir(), t.TempDir())
 	schema := fd.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2478,7 +2478,7 @@ func TestFileDelete_ParameterSchema(t *testing.T) {
 
 func TestFileMove_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	fm := NewFileMove(t.TempDir(), t.TempDir())
+	fm := fileops.NewFileMove(t.TempDir(), t.TempDir())
 	schema := fm.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2512,7 +2512,7 @@ func TestTodoWrite_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_ParameterSchema(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	schema := wf.ParameterSchema()
 	if schema == "" {
 		t.Error("expected non-empty parameter schema")
@@ -2529,7 +2529,7 @@ func TestWebFetch_ParameterSchema(t *testing.T) {
 
 func TestWebFetch_MissingURLParam(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name:   "WebFetch",
 		Params: map[string]any{},
@@ -2541,7 +2541,7 @@ func TestWebFetch_MissingURLParam(t *testing.T) {
 
 func TestWebFetch_URLNotString(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2555,7 +2555,7 @@ func TestWebFetch_URLNotString(t *testing.T) {
 
 func TestWebFetch_InvalidFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2570,7 +2570,7 @@ func TestWebFetch_InvalidFormat(t *testing.T) {
 
 func TestWebFetch_NonHTTPScheme(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2587,7 +2587,7 @@ func TestWebFetch_NonHTTPScheme(t *testing.T) {
 
 func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2602,7 +2602,7 @@ func TestWebFetch_TimeoutOutOfRange(t *testing.T) {
 
 func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -2617,7 +2617,7 @@ func TestWebFetch_TimeoutTooHigh(t *testing.T) {
 
 func TestWebFetch_NonFloatTimeout(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	// timeout not a float64 → default to 30, then the request itself fails
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -2985,7 +2985,7 @@ func TestFileRead_ContextCancelled(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.ResolveAndCheck(context.Background(), "://invalid")
 	if err == nil {
 		t.Error("expected error for invalid URL")
@@ -2994,7 +2994,7 @@ func TestWebFetch_ResolveAndCheck_InvalidURL(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.ResolveAndCheck(context.Background(), "http://")
 	if err == nil {
 		t.Error("expected error for URL with no host")
@@ -3003,7 +3003,7 @@ func TestWebFetch_ResolveAndCheck_NoHost(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.ResolveAndCheck(context.Background(), "http://127.0.0.1:80")
 	if err == nil {
 		t.Error("expected error for literal private IP")
@@ -3012,7 +3012,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPrivateIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	err := wf.ResolveAndCheck(context.Background(), "http://8.8.8.8:80")
 	if err != nil {
 		t.Errorf("expected no error for public IP, got: %v", err)
@@ -3025,7 +3025,7 @@ func TestWebFetch_ResolveAndCheck_LiteralPublicIP(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_LiteralIP(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	addrs, err := wf.ResolveAndCache(context.Background(), "127.0.0.1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3513,7 +3513,7 @@ func TestAskUserQuestion_MissingQuestionParam(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 	_, err := q.Execute(context.Background(), types.ToolInput{
 		Name:   "AskUserQuestion",
 		Params: map[string]any{},
@@ -3528,7 +3528,7 @@ func TestAskUserQuestion_QuestionNotString(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 	_, err := q.Execute(context.Background(), types.ToolInput{
 		Name: "AskUserQuestion",
 		Params: map[string]any{
@@ -3545,7 +3545,7 @@ func TestAskUserQuestion_Success(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	go func() {
 		req := <-reqCh
@@ -3574,7 +3574,7 @@ func TestAskUserQuestion_WithHeaderAndOptions(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	go func() {
 		req := <-reqCh
@@ -3604,7 +3604,7 @@ func TestAskUserQuestion_Timeout(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	// Use very short timeout and don't respond
 	result, err := q.Execute(context.Background(), types.ToolInput{
@@ -3629,7 +3629,7 @@ func TestAskUserQuestion_ContextCancelled(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -3649,7 +3649,7 @@ func TestAskUserQuestion_ChannelFull(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 1) // buffer of 1
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	// Fill the channel
 	reqCh <- types.QuestionRequest{}
@@ -3669,7 +3669,7 @@ func TestAskUserQuestion_ChannelFull(t *testing.T) {
 
 func TestAskUserQuestion_RiskLevel(t *testing.T) {
 	t.Parallel()
-	q := NewAskUserQuestion(nil, nil, nil)
+	q := ai.NewAskUserQuestion(nil, nil, nil)
 	if q.RiskLevel() != types.RiskSafe {
 		t.Errorf("expected RiskSafe, got %s", q.RiskLevel())
 	}
@@ -3679,7 +3679,7 @@ func TestAskUserQuestion_NonFloatTimeout(t *testing.T) {
 	reqCh := make(chan types.QuestionRequest, 4)
 	respCh := make(chan types.QuestionResponse, 4)
 	var pending sync.Map
-	q := NewAskUserQuestion(reqCh, respCh, &pending)
+	q := ai.NewAskUserQuestion(reqCh, respCh, &pending)
 
 	go func() {
 		req := <-reqCh
@@ -3709,7 +3709,7 @@ func TestAskUserQuestion_NonFloatTimeout(t *testing.T) {
 
 func TestWebFetch_RiskLevel(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	if wf.RiskLevel() != types.RiskMedium {
 		t.Errorf("expected RiskMedium, got %s", wf.RiskLevel())
 	}
@@ -3717,7 +3717,7 @@ func TestWebFetch_RiskLevel(t *testing.T) {
 
 func TestWebFetch_NewWithPrivateIPsAllowed(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	if wf.AllowPrivateIPs {
 		t.Error("expected allowPrivateIPs to be false by default (SSRF protection)")
 	}
@@ -3791,7 +3791,7 @@ func TestFileMove_DestinationExists(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "src.txt"), []byte("source"), 0644)
 	os.WriteFile(filepath.Join(dir, "dst.txt"), []byte("dest"), 0644)
-	fm := NewFileMove(dir, t.TempDir())
+	fm := fileops.NewFileMove(dir, t.TempDir())
 	result, err := fm.Execute(context.Background(), types.ToolInput{
 		Name: "FileMove",
 		Params: map[string]any{
@@ -4288,7 +4288,7 @@ func TestGlob_RGEmptyResult(t *testing.T) {
 
 func TestWebFetch_Execute_TextFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	// This will fail with SSRF since it's a literal IP
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
@@ -4308,7 +4308,7 @@ func TestWebFetch_Execute_TextFormat(t *testing.T) {
 
 func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4327,7 +4327,7 @@ func TestWebFetch_Execute_HTMLFormat(t *testing.T) {
 
 func TestWebFetch_Execute_MarkdownFormat(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.Execute(context.Background(), types.ToolInput{
 		Name: "WebFetch",
 		Params: map[string]any{
@@ -4365,7 +4365,7 @@ func TestGrep_PureGo_WithInaccessibleDir(t *testing.T) {
 
 func TestWebFetch_ResolveAndCache_NonExistentHost(t *testing.T) {
 	t.Parallel()
-	wf := NewWebFetch(t.TempDir(), 3, nil)
+	wf := search.NewWebFetch(t.TempDir(), 3, nil)
 	_, err := wf.ResolveAndCache(context.Background(), "this-host-does-not-exist-xyz123.invalid")
 	if err == nil {
 		t.Error("expected DNS resolution error for non-existent host")
