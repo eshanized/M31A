@@ -55,6 +55,7 @@ func printUsage(registry *tui.CommandRegistry) {
 	fmt.Fprintf(os.Stderr, "  M31A_CONFIG              Config file path (default: ~/.m31a/config.toml)\n")
 	fmt.Fprintf(os.Stderr, "  M31A_OPENROUTER_API_KEY  OpenRouter API key\n")
 	fmt.Fprintf(os.Stderr, "  M31A_ZEN_API_KEY         Zen API key\n")
+	fmt.Fprintf(os.Stderr, "  M31A_NVIDIA_API_KEY      NVIDIA API key\n")
 	fmt.Fprintf(os.Stderr, "  M31A_LOG_FORMAT          Log format: json, text (default: json)\n")
 	fmt.Fprintf(os.Stderr, "  M31A_LOG_LEVEL           Log level: debug, info, warn, error (default: info)\n")
 }

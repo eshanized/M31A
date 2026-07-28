@@ -678,11 +678,16 @@ func extractFromParams(toolName string, params map[string]any) string {
 			return fmt.Sprintf("agent: %s", desc)
 		}
 		return "spawn agent"
-	case "MetricsTool":
+	case "Metrics":
 		if mode, ok := params["mode"].(string); ok && mode != "" {
 			return fmt.Sprintf("metrics (%s)", mode)
 		}
 		return "show metrics"
+	case "Git":
+		if action, ok := params["action"].(string); ok && action != "" {
+			return fmt.Sprintf("git %s", action)
+		}
+		return "git operation"
 	}
 	return ""
 }

@@ -296,8 +296,6 @@ func knownConfigKeys() map[string]bool {
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
-			// Common typos / sub-tables that appear in user configs
-			"types.ProviderOpenRouter": true, "types.ProviderZen": true, "types.ProviderNvidia": true,
 		}
 	})
 	return knownKeysMap
