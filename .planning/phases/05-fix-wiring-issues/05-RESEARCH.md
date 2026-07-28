@@ -413,25 +413,10 @@ for i, name := range cfg.Provider.FallbackPriority {
 
 ## Open Questions
 
-1. **W08 (arbitrager field always nil):** The `arbitrager` field in `app_state.go:209` is never assigned. D-01 says wire it in, but there's no clear consumer. Recommend: remove the field (it's dead code) unless the user wants to wire in the `arbitrage.Scorer`.
-   - What we know: Field exists but no assignment anywhere in codebase
-   - What's unclear: Whether this was intended for future use or is genuinely dead
-   - Recommendation: Remove (D-02 applies — zero references outside definition)
-
-2. **W20-W22 (workflow placeholders):** `ModelForPhase()` returns `""`, `ProviderForPhase()` returns `nil`, `BuildAgentSwitchMessage` is never called, `IsPlanComplete` is never called. D-01 says wire them in, but there are no intended consumers.
-   - What we know: All four are dead placeholders with no callers
-   - What's unclear: Whether they were intended for future use
-   - Recommendation: Remove (D-02 applies — zero references outside definition)
-
-3. **W25 (StreamingMockProvider):** Never imported. D-01 says wire it in, but there's no consumer.
-   - What we know: Mock exists but no test imports it
-   - What's unclear: Whether it was intended for a test that was never written
-   - Recommendation: Remove (D-02 applies — zero references)
-
-4. **W47 (TokenEstimator interface):** Never wired into autodream. D-01 says wire it in.
-   - What we know: Interface defined but never used as parameter
-   - What's unclear: Whether autodream was intended to use it
-   - Recommendation: Remove (D-02 applies — zero references as parameter)
+1. **W08 (arbitrager field always nil):** RESOLVED — Remove field. No assignment exists anywhere in codebase; D-02 applies (zero references outside definition).
+2. **W20-W22 (workflow placeholders):** RESOLVED — Remove all four. ModelForPhase/ProviderForPhase return empty/nil, BuildAgentSwitchMessage/IsPlanComplete have zero callers. D-02 applies.
+3. **W25 (StreamingMockProvider):** RESOLVED — Remove. Never imported. D-02 applies.
+4. **W47 (TokenEstimator interface):** RESOLVED — Remove. Never used as parameter. D-02 applies.
 
 ## Environment Availability
 

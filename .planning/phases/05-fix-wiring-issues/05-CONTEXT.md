@@ -14,8 +14,8 @@ Resolve all 50 wiring issues (W01-W50) from the wiring audit (WIRING_ISSUES.md).
 ## Implementation Decisions
 
 ### Fix Strategy
-- **D-01:** Wire in everything — dead producers that have intended consumers get connected, not deleted. Applies to W02 (rollback), W03 (InstructionsSource), W04-W06 (metrics), W07 (StreamChunkMsg), W08 (arbitrager), W18-W19 (narrative events), W20-W22 (workflow placeholders), W25 (StreamingMockProvider), W47 (TokenEstimator).
-- **D-02:** Delete confirmed dead code with zero references — packages, functions, constants, test utilities that have no intended consumer. Applies to W09 (pkg/errors), W10 (logging package), W11 (screens/ dir), W16-W17 (dead constants/errors), W23 (exec constants), W30-W32 (layout primitives), W33-W43 (test mocks/fixtures), W44-W50 (unused methods/interfaces/constants).
+- **D-01:** Wire in everything — dead producers that have intended consumers get connected, not deleted. Applies to W02 (rollback), W03 (InstructionsSource), W04-W06 (metrics), W07 (StreamChunkMsg), W18-W19 (narrative events).
+- **D-02:** Delete confirmed dead code — items with zero references OR zero intended consumers. Applies to W08 (arbitrager, field never assigned), W09 (pkg/errors), W10 (logging package), W11 (screens/ dir), W16-W17 (dead constants/errors), W20-W22 (workflow placeholders, no callers), W23 (exec constants), W25 (StreamingMockProvider, never imported), W30-W32 (layout primitives), W33-W43 (test mocks/fixtures), W44-W50 (unused methods/interfaces/constants), W47 (TokenEstimator, never used as parameter).
 
 ### Batching Strategy
 - **D-03:** Batch by severity per the audit ratings: Critical (W01, W02) → High (W03-W15) → Medium (W16-W32) → Low (W33-W50). Four batches, one commit per issue (50 atomic commits).
