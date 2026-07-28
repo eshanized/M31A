@@ -102,3 +102,33 @@ Plans:
 
 - [x] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-01-PLAN.md — Wave 1: Remove deprecated theme functions, buffer pool utilities, truncate wrappers, tools re-exports
 - [x] 04-audit-and-remove-unused-irrelevant-code-from-m31a-codebase/04-02-PLAN.md — Wave 2: Remove provider functions, tuitypes/theme utilities, a11y package, final verification
+
+## Phase 5: Fix Wiring Issues
+
+**Goal:** Resolve all 50 wiring issues (W01-W50) from the wiring audit (WIRING_ISSUES.md), connecting dead producers to consumers, fixing config drift, completing partial registrations, and closing message routing gaps.
+
+**Success Criteria:**
+
+- All 50 wiring issues (W01-W50) fixed with integration tests
+- `go build ./...`, `go vet ./...`, `golangci-lint run`, `go test -race ./...` all clean
+- Each wiring fix has a test that fails on current code and passes after fix
+- Dead code with zero references removed (~40 items)
+- WIRING_ISSUES.md updated to reflect resolved status
+
+**Batches (by severity):**
+
+1. Critical (W01, W02) — Config merge, rollback integration
+2. High (W03-W15) — InstructionsSource, metrics, StreamChunkMsg, permissions, config help
+3. Medium (W16-W32) — Narrative events, exec constants, IP dedup, Zen parity, dead code
+4. Low (W33-W50) — Test utilities, mock cleanup, unused methods/interfaces
+
+**Plans:** 0/4 plans executed
+
+Plans:
+
+- [ ] 05-fix-wiring-issues/05-01-PLAN.md — Batch 1: Critical (W01, W02)
+- [ ] 05-fix-wiring-issues/05-02-PLAN.md — Batch 2: High (W03-W15)
+- [ ] 05-fix-wiring-issues/05-03-PLAN.md — Batch 3: Medium (W16-W32)
+- [ ] 05-fix-wiring-issues/05-04-PLAN.md — Batch 4: Low (W33-W50)
+
+**Canonical refs:** WIRING_ISSUES.md, 05-CONTEXT.md
