@@ -483,4 +483,3 @@ func (c *Collector) Stop() {
 		"llm_interactions", len(snap.LLMs),
 	)
 }
-

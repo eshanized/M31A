@@ -692,5 +692,3 @@ func TestGit_DiffStaged_Empty(t *testing.T) {
 		t.Errorf("Expected empty staged diff, got %q", diff)
 	}
 }
-
-

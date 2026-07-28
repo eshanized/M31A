@@ -451,14 +451,14 @@ func TestMergeConfig_ProviderFallbackPriority(t *testing.T) {
 	t.Parallel()
 
 	base := &Config{Provider: ProviderConfig{
-		FallbackPriority:        []string{"openrouter", "zen"},
-		HealthCheckTimeoutSecs:  5,
-		RegistrationOrder:       []string{"zen", "nvidia"},
+		FallbackPriority:       []string{"openrouter", "zen"},
+		HealthCheckTimeoutSecs: 5,
+		RegistrationOrder:      []string{"zen", "nvidia"},
 	}}
 	overlay := &Config{Provider: ProviderConfig{
-		FallbackPriority:        []string{"nvidia", "zen", "openrouter"},
-		HealthCheckTimeoutSecs:  15,
-		RegistrationOrder:       []string{"openrouter", "nvidia", "zen"},
+		FallbackPriority:       []string{"nvidia", "zen", "openrouter"},
+		HealthCheckTimeoutSecs: 15,
+		RegistrationOrder:      []string{"openrouter", "nvidia", "zen"},
 	}}
 
 	MergeConfig(base, overlay, nil)
@@ -512,10 +512,10 @@ func TestMergeConfig_ModelCapabilitiesConfig(t *testing.T) {
 		},
 	}}
 	overlay := &Config{ModelCapabilities: ModelCapabilitiesConfig{
-		ExtraReasoningPatterns:     []string{"pattern_b"},
-		ExtraToolCapablePatterns:   []string{"tool_pattern"},
+		ExtraReasoningPatterns:      []string{"pattern_b"},
+		ExtraToolCapablePatterns:    []string{"tool_pattern"},
 		ExtraCompletionOnlyPatterns: []string{"completion_pattern"},
-		ExtraNonChatPatterns:       []string{"non_chat_pattern"},
+		ExtraNonChatPatterns:        []string{"non_chat_pattern"},
 		KnownCapabilities: map[string]ModelCapabilityOverride{
 			"claude-3": {ContextLength: 200000, SupportsReasoning: true},
 		},
@@ -554,15 +554,15 @@ func TestMergeConfig_PromptConfig(t *testing.T) {
 	t.Parallel()
 
 	base := &Config{Prompts: PromptConfig{
-		SystemPromptFile:  "/base/system.md",
-		ProjectPromptDir:  "/base/prompts",
-		Overrides:         map[string]string{"execute-task": "/base/execute.md"},
+		SystemPromptFile: "/base/system.md",
+		ProjectPromptDir: "/base/prompts",
+		Overrides:        map[string]string{"execute-task": "/base/execute.md"},
 	}}
 	overlay := &Config{Prompts: PromptConfig{
-		SystemPromptFile:          "/overlay/system.md",
-		GlobalPromptDir:           "/overlay/global",
-		Overrides:                 map[string]string{"execute-task": "/overlay/execute.md", "plan": "/overlay/plan.md"},
-		ModelTemplateOverrides:    map[string]string{"mistral": "/overlay/mistral.txt"},
+		SystemPromptFile:       "/overlay/system.md",
+		GlobalPromptDir:        "/overlay/global",
+		Overrides:              map[string]string{"execute-task": "/overlay/execute.md", "plan": "/overlay/plan.md"},
+		ModelTemplateOverrides: map[string]string{"mistral": "/overlay/mistral.txt"},
 	}}
 
 	MergeConfig(base, overlay, nil)
@@ -591,14 +591,14 @@ func TestMergeConfig_TemplateConfig(t *testing.T) {
 	t.Parallel()
 
 	base := &Config{Templates: TemplateConfig{
-		ExternalDir:     "/base/templates",
+		ExternalDir:      "/base/templates",
 		WebsiteFramework: "vue",
 		CustomPalettes: map[string]map[string]string{
 			"my_palette": {"primary": "#000"},
 		},
 	}}
 	overlay := &Config{Templates: TemplateConfig{
-		ExternalDir:     "/overlay/templates",
+		ExternalDir:      "/overlay/templates",
 		WebsiteFramework: "svelte",
 		CustomPalettes: map[string]map[string]string{
 			"my_palette":  {"primary": "#FFF", "secondary": "#CCC"},
@@ -629,28 +629,28 @@ func TestMergeConfig_FeaturesMissingFields(t *testing.T) {
 	t.Parallel()
 
 	base := &Config{Features: FeaturesConfig{
-		MaxHealAttempts:           3,
-		MaxPlanRetries:            2,
+		MaxHealAttempts:            3,
+		MaxPlanRetries:             2,
 		ContextTruncationThreshold: 0.8,
-		RetryMaxAttempts:          5,
-		RetryBaseDelayMs:          100,
-		RetryMaxDelayMs:           5000,
-		RetryBackoffMultiplier:    2.0,
-		MaxRetryAfterSecs:         30,
-		MaxParallelTasks:          4,
-		CoordinatorTimeoutSecs:    60,
+		RetryMaxAttempts:           5,
+		RetryBaseDelayMs:           100,
+		RetryMaxDelayMs:            5000,
+		RetryBackoffMultiplier:     2.0,
+		MaxRetryAfterSecs:          30,
+		MaxParallelTasks:           4,
+		CoordinatorTimeoutSecs:     60,
 	}}
 	overlay := &Config{Features: FeaturesConfig{
-		MaxHealAttempts:           5,
-		MaxPlanRetries:            3,
+		MaxHealAttempts:            5,
+		MaxPlanRetries:             3,
 		ContextTruncationThreshold: 0.9,
-		RetryMaxAttempts:          10,
-		RetryBaseDelayMs:          200,
-		RetryMaxDelayMs:           10000,
-		RetryBackoffMultiplier:    3.0,
-		MaxRetryAfterSecs:         60,
-		MaxParallelTasks:          8,
-		CoordinatorTimeoutSecs:    120,
+		RetryMaxAttempts:           10,
+		RetryBaseDelayMs:           200,
+		RetryMaxDelayMs:            10000,
+		RetryBackoffMultiplier:     3.0,
+		MaxRetryAfterSecs:          60,
+		MaxParallelTasks:           8,
+		CoordinatorTimeoutSecs:     120,
 	}}
 
 	defined := map[string]bool{
@@ -707,26 +707,26 @@ func TestMergeConfig_ToolsMissingFields(t *testing.T) {
 		LoopDetectWindow:         10,
 	}}
 	overlay := &Config{Tools: ToolsConfig{
-		RateLimitBurst:           20,
-		RateLimitPerSec:          10,
-		DangerousRateLimitBurst:  5,
-		DangerousRateLimitPerSec: 2,
-		MaxConcurrent:            8,
-		OutputRetentionDays:      30,
-		DnsCacheTTLSecs:          600,
-		FuzzyThreshold:           0.9,
-		MinLinesForFuzzy:         100,
-		BashMaxTimeoutSecs:       120,
-		WebfetchMaxRetries:       5,
-		WebfetchRetryDelayMs:     2000,
-		MaxToolConcurrency:       8,
-		LoopDetectWindow:         20,
-		AdditionalBlockedCommands: []string{"docker rm"},
+		RateLimitBurst:                20,
+		RateLimitPerSec:               10,
+		DangerousRateLimitBurst:       5,
+		DangerousRateLimitPerSec:      2,
+		MaxConcurrent:                 8,
+		OutputRetentionDays:           30,
+		DnsCacheTTLSecs:               600,
+		FuzzyThreshold:                0.9,
+		MinLinesForFuzzy:              100,
+		BashMaxTimeoutSecs:            120,
+		WebfetchMaxRetries:            5,
+		WebfetchRetryDelayMs:          2000,
+		MaxToolConcurrency:            8,
+		LoopDetectWindow:              20,
+		AdditionalBlockedCommands:     []string{"docker rm"},
 		AdditionalObfuscationPatterns: []string{"base64"},
 	}}
 
 	defined := map[string]bool{
-		"tools.rate_limit_burst":                 true,
+		"tools.rate_limit_burst":                true,
 		"tools.rate_limit_per_sec":              true,
 		"tools.dangerous_rate_limit_burst":      true,
 		"tools.dangerous_rate_limit_per_sec":    true,

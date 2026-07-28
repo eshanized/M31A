@@ -72,3 +72,4 @@ promotion/
 space.txt
 *.log
 *.zip
+.cache/
