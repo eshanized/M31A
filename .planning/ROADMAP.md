@@ -126,9 +126,9 @@ Plans:
 
 Plans:
 
-- [ ] 05-fix-wiring-issues/05-01-PLAN.md — Batch 1: Critical (W01, W02)
-- [ ] 05-fix-wiring-issues/05-02-PLAN.md — Batch 2: High (W03-W15)
-- [ ] 05-fix-wiring-issues/05-03-PLAN.md — Batch 3: Medium (W16-W32)
-- [ ] 05-fix-wiring-issues/05-04-PLAN.md — Batch 4: Low (W33-W50)
+- [ ] 05-fix-wiring-issues/05-01-PLAN.md — Wave 1: Config merge (~30 fields) + Rollback SoftReset integration
+- [ ] 05-fix-wiring-issues/05-02-PLAN.md — Wave 2: InstructionsSource, metrics wiring, StreamChunkMsg, permissions, dead packages
+- [ ] 05-fix-wiring-issues/05-03-PLAN.md — Wave 2: WorkflowEvent methods, dead constants/errors, Zen parity, FallbackPriority, layout cleanup
+- [ ] 05-fix-wiring-issues/05-04-PLAN.md — Wave 3: Dead test utilities, production methods/interfaces, full CI verification
 
 **Canonical refs:** WIRING_ISSUES.md, 05-CONTEXT.md
