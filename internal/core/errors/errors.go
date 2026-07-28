@@ -42,16 +42,9 @@ var (
 	ErrFileTooLarge     = errors.New("file exceeds 5MB limit")
 
 	// Validation errors.
-	ErrInvalidInput   = errors.New("invalid input")
 	ErrInvalidTimeout = errors.New("invalid timeout: must be > 0 and <= 30m")
 
-	// Lookup errors.
-	ErrNotFound = errors.New("not found")
-
 	// State errors.
-	ErrAlreadyExists  = errors.New("already exists")
-	ErrCancelled      = errors.New("operation cancelled")
-	ErrInternal       = errors.New("internal error")
 	ErrNotImplemented = errors.New("not implemented")
 
 	// Network and security errors.
@@ -203,16 +196,6 @@ func UserMessage(e error) string {
 		return "Cannot access session — check file permissions"
 	case errors.Is(e, ErrGitNotInitialized):
 		return "Git not initialized — ensure you're in a git repository"
-	case errors.Is(e, ErrInvalidInput):
-		return "Invalid input — check your parameters"
-	case errors.Is(e, ErrNotFound):
-		return "Not found — check the resource or path"
-	case errors.Is(e, ErrAlreadyExists):
-		return "Already exists — the resource is already present"
-	case errors.Is(e, ErrCancelled):
-		return "Operation cancelled"
-	case errors.Is(e, ErrInternal):
-		return "Internal error — try again or check the logs"
 	case errors.Is(e, ErrNotImplemented):
 		return "Not implemented — this feature is not yet available"
 	}

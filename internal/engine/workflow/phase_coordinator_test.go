@@ -155,26 +155,6 @@ func (c *testConfig) GetBudgetLimit() float64 {
 	return c.budgetLimit
 }
 
-func TestPhaseCoordinator_ModelForPhase(t *testing.T) {
-	pc, _ := setupTestPhaseCoordinator(t)
-
-	// Should return empty string (placeholder implementation)
-	model := pc.ModelForPhase(m31types.PhaseExecute)
-	if model != "" {
-		t.Errorf("ModelForPhase should return empty string, got %q", model)
-	}
-}
-
-func TestPhaseCoordinator_ProviderForPhase(t *testing.T) {
-	pc, _ := setupTestPhaseCoordinator(t)
-
-	// Should return nil (placeholder implementation)
-	provider := pc.ProviderForPhase(m31types.PhaseExecute)
-	if provider != nil {
-		t.Error("ProviderForPhase should return nil")
-	}
-}
-
 func TestPhaseCoordinator_Emit(t *testing.T) {
 	pc, emitter := setupTestPhaseCoordinator(t)
 

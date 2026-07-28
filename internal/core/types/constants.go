@@ -12,7 +12,6 @@ const (
 	MaxToolOutputChars      = 10_000
 	MaxHealAttempts         = 2
 	MaxPlanRetries          = 3
-	MaxPlanRefinements      = 5
 	SessionIDLength         = 8
 	AutoDreamThreshold      = 0.60
 	ContextWarningThreshold = 0.80
@@ -75,17 +74,8 @@ const (
 	DefaultOutputMaxLines = 2000
 	DefaultOutputMaxBytes = 51200
 
-	// CompressCooldown is the cooldown between /compress commands
-	CompressCooldown = 60 * time.Second
-	// ChannelSendTimeout is the timeout for sending on tea.Cmd channels
-	ChannelSendTimeout = 500 * time.Millisecond
-	// ToastDuration is how long toast messages display
-	ToastDuration = 10 * time.Second
-
 	// FetchModelsTimeout is the timeout for fetching model catalogs
 	FetchModelsTimeout = 15 * time.Second
-	// HealthCheckRetryDelay is the delay before retrying a failed health check
-	HealthCheckRetryDelay = 5 * time.Second
 	// MaxRetryAfterWait is the maximum wait time for retry-after headers
 	MaxRetryAfterWait = 120 * time.Second
 
@@ -105,18 +95,6 @@ const (
 	// DefaultSessionCacheTTL is the default TTL for the session list cache.
 	DefaultSessionCacheTTL = 2 * time.Second
 
-	// DefaultVerifyTimeout is the default timeout for a single verify phase task.
-	DefaultVerifyTimeout = 5 * time.Minute
-
-	// DefaultFetchModelsTimeout is an alias for FetchModelsTimeout (M-32: removed duplicate constant).
-	DefaultFetchModelsTimeout = FetchModelsTimeout
-
-	// DefaultUserAgent is the default User-Agent header for API requests
-	DefaultUserAgent = "M31A/dev"
-	// DefaultXTitle is the default X-Title header for OpenRouter
-	DefaultXTitle = "M31A"
-	// DateFormat is the standard date format used across the application
-	DateFormat = "2006-01-02"
 	// DateTimeFormat is the date+time format used for file listings
 	DateTimeFormat = "2006-01-02 15:04"
 

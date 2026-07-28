@@ -187,27 +187,6 @@ func TestTruncateOutput(t *testing.T) {
 	}
 }
 
-func TestIsPlanComplete(t *testing.T) {
-	engine, _ := setupTestEngine(t)
-
-	// Empty plan
-	if engine.IsPlanComplete() {
-		t.Error("IsPlanComplete should return false with empty plan")
-	}
-
-	// Plan without headers
-	engine.state.planMarkdown = "Some plan content"
-	if engine.IsPlanComplete() {
-		t.Error("IsPlanComplete should return false without ## headers")
-	}
-
-	// Valid plan with headers
-	engine.state.planMarkdown = "# Plan\n## Task 1\nDo something"
-	if !engine.IsPlanComplete() {
-		t.Error("IsPlanComplete should return true with ## headers")
-	}
-}
-
 func TestFindRelevantFunction(t *testing.T) {
 	lines := []string{
 		"package main",

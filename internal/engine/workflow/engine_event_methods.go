@@ -257,3 +257,19 @@ func (m TaskDiffSummaryMsg) EventData() map[string]interface{} {
 		"deletions": deletions,
 	}
 }
+
+func (m AgentSwitchMsg) EventType() string { return "agent_switch" }
+func (m AgentSwitchMsg) EventData() map[string]interface{} {
+	return map[string]interface{}{
+		"from_agent": m.FromAgent,
+		"to_agent":   m.ToAgent,
+		"plan_path":  m.PlanPath,
+	}
+}
+
+func (m DecisionsSnapshotMsg) EventType() string { return "decisions_snapshot" }
+func (m DecisionsSnapshotMsg) EventData() map[string]interface{} {
+	return map[string]interface{}{
+		"decision_count": len(m.Decisions),
+	}
+}

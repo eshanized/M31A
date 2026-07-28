@@ -2933,29 +2933,6 @@ func TestWorkflowModeForComplexity(t *testing.T) {
 }
 
 // ============================================================================
-// agent_switch.go Tests (additional)
-// ============================================================================
-
-func TestTruncatePlan_V2(t *testing.T) {
-	plan := "## Task 1\nDo stuff\n## Task 2\nDo more\n"
-	result := truncatePlan(plan, 20)
-	if result == plan {
-		t.Error("expected truncated result")
-	}
-	if !strings.Contains(result, "[plan truncated") {
-		t.Error("expected truncation marker in result")
-	}
-}
-
-func TestTruncatePlan_Short_V2(t *testing.T) {
-	plan := "short"
-	result := truncatePlan(plan, 100)
-	if result != plan {
-		t.Errorf("expected unchanged, got %q", result)
-	}
-}
-
-// ============================================================================
 // diff_summary.go Tests (additional)
 // ============================================================================
 

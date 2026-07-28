@@ -9,7 +9,6 @@ import (
 	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/integrations/metrics"
-	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
 // PhaseCoordinator orchestrates phase execution lifecycle including
@@ -155,20 +154,6 @@ func (pc *PhaseCoordinator) CoordinateTransition(ctx context.Context, from, to m
 		Success: true,
 	})
 
-	return nil
-}
-
-// ModelForPhase returns the model ID for the given phase.
-// This is a placeholder that can be extended with per-phase model resolution.
-func (pc *PhaseCoordinator) ModelForPhase(phase m31types.WorkflowPhase) string {
-	// Default implementation - can be extended with per-phase model resolution
-	return ""
-}
-
-// ProviderForPhase returns the provider for the given phase.
-// This is a placeholder that can be extended with per-phase provider resolution.
-func (pc *PhaseCoordinator) ProviderForPhase(phase m31types.WorkflowPhase) provider.LLMProvider {
-	// Default implementation - can be extended with per-phase provider resolution
 	return nil
 }
 
