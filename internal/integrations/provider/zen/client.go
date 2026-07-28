@@ -123,6 +123,29 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 }
 
 func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
+	const maxRetries = 2
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		iter, err := c.doChatStream(ctx, req)
+		if err == nil {
+			return iter, nil
+		}
+
+		if attempt < maxRetries && provider.IsRetryable(err) {
+			delay := time.Duration(1<<uint(attempt)) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+				continue
+			}
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("max retries exceeded")
+}
+
+func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
 	body := provider.BuildChatBody(req)
 
 	jsonBody, err := json.Marshal(body)
@@ -155,7 +178,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 			}
 			return nil, m31errors.ErrInvalidKey
 		}
-		return nil, c.HandleChatHTTPError(resp, types.ProviderZen, nil)
+		return nil, c.HandleChatHTTPErrorWithCredits(resp, types.ProviderZen, nil)
 	}
 
 	sse := provider.NewSSEParserWithContext(resp, ctx)

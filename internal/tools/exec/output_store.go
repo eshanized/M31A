@@ -28,10 +28,10 @@ type OutputStore struct {
 // baseDir is the directory where truncated outputs are saved (e.g., ~/.m31a/tool-output/).
 func NewOutputStore(baseDir string, maxLines, maxBytes int) *OutputStore {
 	if maxLines <= 0 {
-		maxLines = DefaultOutputMaxLines
+		maxLines = types.DefaultOutputMaxLines
 	}
 	if maxBytes <= 0 {
-		maxBytes = DefaultOutputMaxBytes
+		maxBytes = types.DefaultOutputMaxBytes
 	}
 	return &OutputStore{
 		baseDir:  baseDir,

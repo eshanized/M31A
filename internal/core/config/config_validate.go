@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // ValidationError describes a single field-level config validation failure.
@@ -32,6 +34,22 @@ func validateConfig(cfg *Config) error {
 			ExpectedType: "non-empty string (when auto_fallback is true)",
 			ActualValue:  "",
 		})
+	}
+	if len(cfg.Provider.FallbackPriority) > 0 {
+		validProviders := map[string]bool{
+			m31types.ProviderOpenRouter: true,
+			m31types.ProviderZen:        true,
+			m31types.ProviderNvidia:     true,
+		}
+		for i, name := range cfg.Provider.FallbackPriority {
+			if !validProviders[name] {
+				errs = append(errs, ValidationError{
+					Field:        fmt.Sprintf("provider.fallback_priority[%d]", i),
+					ExpectedType: fmt.Sprintf("one of: %s, %s, %s", m31types.ProviderOpenRouter, m31types.ProviderZen, m31types.ProviderNvidia),
+					ActualValue:  name,
+				})
+			}
+		}
 	}
 
 	// Model
