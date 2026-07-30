@@ -14,6 +14,9 @@ GOFLAGS     := CGO_ENABLED=0
 GO          := go
 BUILDFLAGS  := -trimpath
 
+# Redirect Go temp/cache off /tmp (tmpfs is too small for large builds)
+export GOTMPDIR  := $(HOME)/.cache/gotmp
+
 # Directories
 CMD_DIR     := ./cmd/m31a
 DIST_DIR    := dist
