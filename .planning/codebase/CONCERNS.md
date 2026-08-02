@@ -1,230 +1,216 @@
-# Technical Concerns
+# Codebase Concerns
 
-**Last mapped:** 2026-08-02
-**Project:** M31 Autonomous (Terminal AI Coding Agent)
+**Analysis Date:** 2026-08-03
 
-## Known Bugs (BUG-XXXX References)
+## Tech Debt
 
-The codebase contains references to tracked bugs (BUG-01 through BUG-29). These indicate areas where specific issues were identified and fixed, but the fixes may be fragile or have edge cases.
+**Empty `pkg/` Directory:**
+- Issue: `docs/ARCHITECTURE.md` documents `pkg/` as containing 12+ public packages (autodream, arbitrage, bisect, etc.) but the directory is completely empty
+- Files: `pkg/` (empty), `docs/ARCHITECTURE.md` (lines 65-79, 88-93)
+- Impact: Documentation is misleading; dependency rule "pkg/ must NOT import internal/" is vacuous
+- Fix approach: Either populate `pkg/` with intended packages or update documentation to reflect current structure
 
-### Key Bug References
+**Documentation Drift (15+ items):**
+- Issue: Architecture documentation references old directory structure before package reorganization
+- Files: `docs/ARCHITECTURE.md` (lines 18-55), `docs/ONBOARDING.md` (line 131), `docs/KEYBINDINGS.md` (lines 131, 156-194)
+- Impact: Developers following docs will look in wrong locations; onboarding material is inaccurate
+- Fix approach: Regenerate all documentation from current codebase structure
 
-- **BUG-01:** Channel ordering issues in git status/numstat concurrent execution
-- **BUG-04:** Multiple framework indicators in project detection
-- **BUG-05:** Multiple lock files causing incorrect package manager detection
-- **BUG-06, BUG-07, BUG-19:** Data races from value-type replacement in sync.Map
-- **BUG-10:** Working tree clean state after AddAll in ship phase
-- **BUG-12:** Infinite oscillation between workflow phases
-- **BUG-15:** Numstat-based heuristic vs file classification
-- **BUG-17:** Race condition in provider cache
-- **BUG-18:** Silent message handling in config loader
-- **BUG-29:** Token estimation may exceed model window limits
+**Secret Detection Heuristic is Trivially Evadable:**
+- Issue: Ship preflight only checks for 5 prefix strings (sk-, ghp_, glpat-, xoxb-, AKIA) — easily evaded with base64, environment variables, or different key formats
+- Files: `internal/engine/workflow/ship_preflight.go` (lines 66-76)
+- Impact: Hardcoded secrets can slip through to production commits
+- Fix approach: Add regex patterns for PEM keys, JWT tokens, base64 blobs, and env-var references
 
-**Location:** Bug references scattered across codebase, primarily in:
-- `internal/engine/workflow/classify_test.go`
-- `internal/tools/exec/concurrency.go`
-- `internal/engine/tokens/estimator.go`
-- `internal/integrations/provider/cache.go`
+**Subagent Prompt Injection Defense is Single-Layer:**
+- Issue: Subagent prompt injection protection relies solely on system prompt instructions
+- Files: `internal/tools/subagent/loop.go` (lines 397-403)
+- Impact: Malicious tool outputs could potentially manipulate subagent behavior
+- Fix approach: Add output sanitization or delimiter-based trust zones
 
-## Security Concerns
+**Config Plaintext API Key Fallback:**
+- Issue: When OS keychain is unavailable, API keys fall back to plaintext config storage
+- Files: `internal/core/config/loader.go` (lines 516-534)
+- Impact: API keys stored in plaintext on disk in certain environments
+- Fix approach: Warn users when using plaintext fallback; document security implications
 
-### Hardcoded Secrets Detection
+## Known Bugs
 
-- **Location:** `internal/engine/workflow/ship_preflight.go`
-- **Pattern:** Regex-based detection of hardcoded passwords, secrets, API keys
-- **Issue:** Heuristic-based, may have false positives/negatives
-- **Mitigation:** Security gate in plan phase (`PlanSecurityGate` config)
+**WebSearch IP Check Bug (SEC-05):**
+- Symptoms: Private IP filtering in websearch checks `ips[0].IP` instead of loop variable `ip.IP`, only first IP is ever validated
+- Files: `internal/tools/search/websearch.go` (lines 79, 105)
+- Trigger: When DNS returns multiple IPs for a host, only the first is checked
+- Workaround: None — all IPs except the first bypass the filter
 
-### Bash Command Sandboxing
+**Router Initialization Race (BUG-30):**
+- Symptoms: Main content area not rendering for router-delegated screens
+- Files: `internal/ui/tui/router.go` (lines 46-58), `internal/ui/tui/app_screens.go`
+- Trigger: `SwitchTo` called before `Register` during Init() — `activeID` never updated
+- Workaround: ScreenREPL works (bypasses router); other screens affected
+- Status: Fix identified in ISSUES_1.md but verification needed
 
-- **Location:** `internal/tools/exec/bash_sandbox_*.go`
-- **Pattern:** Platform-specific sandboxing (Linux, macOS, Windows)
-- **Issue:** Defense-in-depth, not a security boundary
-- **Concern:** New attack vectors may not be covered
+## Security Considerations
 
-### Prompt Injection
+**Bash Sandbox: No Network Isolation (SEC-01/02):**
+- Risk: Bash tool can exfiltrate data via curl, wget, nc, python without network restrictions
+- Files: `internal/tools/exec/bash.go` (lines 303-344), `internal/tools/exec/bash_sandbox_linux.go`
+- Current mitigation: Dangerous command patterns block some network tools but not all
+- Recommendations: Add network namespace isolation (`unshare CLONE_NEWNET`) or block outbound network commands
 
-- **Location:** `internal/tools/subagent/loop.go`
-- **Pattern:** CRITICAL SECURITY INSTRUCTIONS in subagent prompts
-- **Issue:** LLM-based security, not cryptographically secure
-- **Mitigation:** Multiple layers of defense
+**WebFetch SSRF: No Redirect IP Re-check (SEC-03):**
+- Risk: SSRF attacks via redirects to internal/private IPs after initial validation passes
+- Files: `internal/tools/search/webfetch.go` (lines 65-70)
+- Current mitigation: Initial URL validation only
+- Recommendations: Re-check IPs on every redirect; add DNS pinning
 
-### API Key Storage
+**WebFetch: No DNS Pinning (SEC-04):**
+- Risk: DNS rebinding attacks where initial resolution returns public IP but subsequent requests resolve to private IP
+- Files: `internal/tools/search/webfetch.go` (lines 246-256)
+- Current mitigation: None
+- Recommendations: Add custom `DialContext` with DNS pinning (copy pattern from `websearch.go`)
 
-- **Location:** `pkg/keychain/`
-- **Pattern:** OS keychain integration (macOS Keychain, Windows Credential Vault, Linux Secret Service)
-- **Issue:** Platform-specific implementations may have vulnerabilities
-- **Mitigation:** Never written to disk in plaintext
+**`M31A_SKIP_LANDLOCK=1` Disables All Sandboxing (SEC-09):**
+- Risk: Any process can disable Landlock filesystem restrictions with single env var
+- Files: `internal/tools/exec/bash_sandbox_linux.go` (line 26)
+- Current mitigation: Only for testing purposes
+- Recommendations: Gate behind `debug` build tag or remove in production builds
 
-## Performance Concerns
+## Performance Bottlenecks
 
-### Token Estimation
+**Engine.go Complexity (1832 lines):**
+- Problem: Core workflow engine is extremely large with 50+ methods
+- Files: `internal/engine/workflow/engine.go`
+- Cause: Accumulated features without decomposition
+- Improvement path: Extract into smaller, focused components (e.g., separate pause/resume, cost tracking, context building)
 
-- **Location:** `internal/engine/tokens/estimator.go`
-- **Issue:** Token estimation may be inaccurate, leading to context window overflow
-- **Bug Reference:** BUG-29
-- **Mitigation:** Conservative estimates, but may reject valid requests
+**Token Estimation EMA Calibration:**
+- Problem: Token estimator uses exponential moving average that can drift with unusual usage patterns
+- Files: `internal/engine/tokens/estimator.go` (lines 289-415)
+- Cause: Dynamic calibration based on actual API responses
+- Improvement path: Already addressed with EMA clamping + overhead estimation; monitor for accuracy
 
-### Provider Cache Race Conditions
-
-- **Location:** `internal/integrations/provider/cache.go`
-- **Issue:** Race condition between cache refresh and waiters
-- **Bug Reference:** BUG-17
-- **Mitigation:** Mutex-guarded cache with typed assertions
-
-### Concurrent Tool Execution
-
-- **Location:** `internal/tools/exec/concurrency.go`
-- **Issue:** Data races from value-type replacement in sync.Map
-- **Bug References:** BUG-06, BUG-07, BUG-19
-- **Mitigation:** Typed mutex-guarded maps, comma-ok type assertions
-
-### UI Performance
-
-- **Location:** `internal/ui/tui/components/starfield.go`, `sparkline.go`
-- **Issue:** Large data sets can cause rendering lag
-- **Mitigation:** Caps on data points (100 points max)
-
-## Technical Debt
-
-### Hardcoded Values
-
-- **Location:** `internal/core/config/types.go`
-- **Issue:** Some values are hardcoded instead of configurable
-- **Example:** Default timeout of 10 seconds
-- **Mitigation:** Configuration options exist but not all are exposed
-
-### Platform-Specific Code
-
-- **Location:** `internal/tools/exec/bash_sandbox_*.go`
-- **Issue:** Four separate implementations for different platforms
-- **Mitigation:** Build tags for platform-specific compilation
-
-### Test Coverage Gaps
-
-- **Location:** Various test files
-- **Issue:** Some edge cases may not be covered
-- **Mitigation:** 75% overall coverage target, 90% for critical paths
-
-### Error Handling
-
-- **Location:** Throughout codebase
-- **Issue:** Some errors may be swallowed or not properly propagated
-- **Mitigation:** Custom error types, but not exhaustive
+**Large File Count (56+ tool files):**
+- Problem: Tool implementations spread across many files making discovery harder
+- Files: `internal/tools/` (56 non-test files)
+- Cause: 18 tools with subdirectories for different categories
+- Improvement path: Consider tool registry pattern with auto-discovery
 
 ## Fragile Areas
 
-### Workflow Phase Transitions
+**TUI Router Initialization:**
+- Files: `internal/ui/tui/router.go`, `internal/ui/tui/app.go`
+- Why fragile: Initialization order dependency between `SwitchTo` and `Register` calls
+- Safe modification: Always ensure `Register` is called before `SwitchTo`, or use explicit activation
+- Test coverage: Limited — router tests don't cover initialization race conditions
 
-- **Location:** `internal/engine/workflow/engine.go`
-- **Issue:** Complex state machine with mutex protection
-- **Concern:** Phase transitions may have edge cases
-- **Mitigation:** `transitionMu` mutex, but still complex
+**Provider Model Discovery:**
+- Files: `internal/integrations/provider/cache.go`, `internal/integrations/provider/capabilities.go`
+- Why fragile: Model lists are dynamic from APIs; hardcoded assumptions break with API changes
+- Safe modification: Never hardcode model names; always query API
+- Test coverage: Good — cache has singleflight + atomic protection
 
-### Provider Fallback Logic
+**Bash Command Detection:**
+- Files: `internal/tools/exec/bash.go` (lines 301-358)
+- Why fragile: Regex-based pattern matching can be bypassed with obfuscation
+- Safe modification: Add new patterns as discovered; consider allowlist approach
+- Test coverage: Moderate — test file exists but coverage gaps
 
-- **Location:** `internal/integrations/provider/fallback.go`
-- **Issue:** Multi-provider failover may have cascading failures
-- **Concern:** Error handling across providers
-- **Mitigation:** Configurable retry policies
+## Scaling Limits
 
-### Git Integration
+**Session Compaction:**
+- Current capacity: Automatic compaction when context window fills up
+- Limit: Very long sessions may still exceed context after compaction
+- Scaling path: Improve compaction algorithms; add manual `/compact` command
 
-- **Location:** `internal/integrations/git/git.go`
-- **Issue:** Git operations may fail in edge cases
-- **Concern:** Concurrent git operations, repository state
-- **Mitigation:** Error handling, but git is complex
+**Subagent Depth (2 levels):**
+- Current capacity: Subagents can spawn subagents up to depth 2
+- Limit: Deeply nested tasks may require more levels
+- Scaling path: Make depth configurable per task type
 
-### Context Window Management
+**Tool Concurrency (Dispatcher):**
+- Current capacity: Configurable concurrency limits per tool
+- Limit: Rate limits from providers may cause unexpected throttling
+- Scaling path: Add provider-specific rate limit awareness
 
-- **Location:** `internal/engine/compaction/compaction.go`
-- **Issue:** Message compaction may lose important context
-- **Concern:** Balancing context size vs information loss
-- **Mitigation:** Heuristic-based compaction
+## Dependencies at Risk
 
-## Configuration Issues
+**Go 1.25.12:**
+- Risk: Very recent Go version; may have compatibility issues with older systems
+- Impact: Build failures on systems without Go 1.25+
+- Migration plan: Consider building with Go 1.24 for wider compatibility
 
-### Security Gate
+**golang.org/x/sys:**
+- Risk: Platform-specific syscall usage (Landlock) may break on kernel updates
+- Impact: Sandbox may fail silently on unsupported kernels
+- Migration plan: Already handles graceful degradation; add more kernel version checks
 
-- **Location:** `internal/engine/workflow/plan.go`
-- **Issue:** Security gate may be too strict or too permissive
-- **Concern:** Balancing security vs usability
-- **Mitigation:** Configurable via `PlanSecurityGate`
+**Charmbracelet Libraries:**
+- Risk: TUI framework is actively developed; breaking changes possible
+- Impact: UI may break on upgrades
+- Migration plan: Pin versions; test thoroughly on upgrades
 
-### Provider Configuration
+## Missing Critical Features
 
-- **Location:** `internal/core/config/types.go`
-- **Issue:** Multiple providers with different configurations
-- **Concern:** Configuration complexity
-- **Mitigation:** Default values, but still complex
+**MCP (Model Context Protocol) Client:**
+- Problem: No support for third-party tool servers via MCP
+- Blocks: Cannot use ecosystem of MCP-based tools; competitive disadvantage
 
-## Testing Concerns
+**Hooks/Plugin System:**
+- Problem: No pre/post tool call hooks for user-defined automation
+- Blocks: Cannot wire custom workflows (lint on save, auto-format, etc.)
 
-### Integration Test Environment
+**Per-File Accept/Reject Review:**
+- Problem: Users want file-by-file control before changes land
+- Blocks: Trust/transparency for complex changes
 
-- **Location:** `tests/testutil/integration/`
-- **Issue:** Integration tests may not cover all scenarios
-- **Concern:** External dependencies (APIs, git)
-- **Mitigation:** Mock providers, but not exhaustive
+**Dry-Run/Preview Mode:**
+- Problem: No way to see what would happen before granting permission
+- Blocks: Safe experimentation with tool execution
 
-### E2E Test Reliability
+## Test Coverage Gaps
 
-- **Location:** `tests/e2e/e2e_test.go`
-- **Issue:** E2E tests may be flaky
-- **Concern:** Network dependencies, timing issues
-- **Mitigation:** Timeouts, retry logic
+**`internal/tools/search` (2.0% coverage):**
+- What's not tested: SSRF protection, webfetch redirect handling, websearch IP filtering
+- Files: `internal/tools/search/webfetch.go`, `internal/tools/search/websearch.go`
+- Risk: Security-critical code with minimal testing
+- Priority: HIGH
 
-## Dependency Concerns
+**`internal/tools/exec` (0.0% coverage):**
+- What's not tested: Bash sandbox, command detection, devserver lifecycle
+- Files: `internal/tools/exec/bash.go`, `internal/tools/exec/bash_sandbox_linux.go`
+- Risk: Core execution layer untested
+- Priority: HIGH
 
-### Go Version
+**`internal/tools/fileops` (0.0% coverage):**
+- What's not tested: File editing, writing, moving operations
+- Files: `internal/tools/fileops/edit.go`, `internal/tools/fileops/filewrite.go`
+- Risk: File modification operations untested
+- Priority: HIGH
 
-- **Location:** `go.mod`
-- **Issue:** Requires Go 1.25.12 (cutting edge)
-- **Concern:** Compatibility with older Go versions
-- **Mitigation:** None, forward-only compatibility
+**`internal/ui/tui` (32.4% coverage):**
+- What's not tested: Most screen renderers, input handling, streaming
+- Files: `internal/ui/tui/app.go`, `internal/ui/tui/app_screens.go`
+- Risk: UI layer has limited testing
+- Priority: MEDIUM
 
-### External Dependencies
+**`internal/engine/rollback` (53.8% coverage vs 90% target):**
+- What's not tested: Edge cases in commit-chain management
+- Files: `internal/engine/rollback/` (target is 90% for critical path)
+- Risk: Rollback is critical path but below target
+- Priority: HIGH
 
-- **Location:** `go.mod`
-- **Issue:** Multiple external dependencies
-- **Concern:** Supply chain security, maintenance burden
-- **Mitigation:** Minimal dependencies, but still present
+**`internal/tools/ai` (0.0% coverage):**
+- What's not tested: AskUserQuestion tool implementation
+- Files: `internal/tools/ai/question.go`
+- Risk: User interaction tool untested
+- Priority: MEDIUM
 
-## Operational Concerns
+**`internal/integrations/provider/nvidia` (0.0% coverage):**
+- What's not tested: Nvidia NIM provider implementation
+- Files: `internal/integrations/provider/nvidia/`
+- Risk: Provider integration untested
+- Priority: MEDIUM
 
-### Logging
+---
 
-- **Location:** `internal/integrations/log/`
-- **Issue:** Structured logging may be verbose
-- **Concern:** Log management in production
-- **Mitigation:** Configurable log levels
-
-### Metrics
-
-- **Location:** `internal/integrations/metrics/`
-- **Issue:** Metrics collection overhead
-- **Concern:** Performance impact
-- **Mitigation:** Lightweight metrics
-
-### Rollback Chain
-
-- **Location:** `internal/engine/rollback/`
-- **Issue:** Git rollback chain may become corrupted
-- **Concern:** Data loss, corruption
-- **Mitigation:** Validation, but not exhaustive
-
-## Recommendations
-
-### Short-Term
-
-1. **Review BUG-XXXX references** for known issues
-2. **Add more test coverage** for edge cases
-3. **Validate security gate** configuration
-4. **Monitor performance** in production
-
-### Long-Term
-
-1. **Refactor platform-specific code** to reduce duplication
-2. **Improve error handling** consistency
-3. **Add more configuration options** for hardcoded values
-4. **Enhance monitoring** and alerting
+*Concerns audit: 2026-08-03*

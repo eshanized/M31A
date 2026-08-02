@@ -1,409 +1,354 @@
-# Testing
+# Testing Patterns
 
-**Last mapped:** 2026-08-02
-**Project:** M31 Autonomous (Terminal AI Coding Agent)
+**Analysis Date:** 2026-08-03
 
 ## Test Framework
 
-### Go Standard Testing
+**Runner:**
+- Go standard `testing` package
+- Config: No external config file (uses `go test` flags)
 
-- **Package:** `testing` (standard library)
-- **Runner:** `go test`
-- **No external test frameworks** ( testify, gomock, etc.)
+**Assertion Library:**
+- Standard `testing` package assertions
+- Manual error checking with `t.Error()`, `t.Errorf()`, `t.Fatal()`, `t.Fatalf()`
+- No third-party assertion libraries
 
-## Test Types
+**Run Commands:**
+```bash
+make test           # Run all tests with race detector and coverage
+make test-fast      # Run tests without race detector
+make test-specific TEST=TestFoo   # Run specific test
+make cover          # Generate HTML coverage report
+make bench          # Run benchmarks
+```
 
-### Unit Tests
+## Test File Organization
 
-- **Location:** Same package as source (`*_test.go`)
-- **Purpose:** Test individual functions and methods
-- **Pattern:** Table-driven tests with parallel execution
+**Location:**
+- Co-located with source files in the same package
+- Test helpers in separate files: `test_helpers_test.go`, `testutil_test.go`
+- Shared mocks in `tests/testutil/mocks/`
 
-### Integration Tests
+**Naming:**
+- Test files: `*_test.go`
+- Benchmark files: `*_benchmark_test.go`
+- Test helpers: `*_helpers_test.go`
 
-- **Location:** `tests/testutil/integration/`
-- **Purpose:** Test component interactions
-- **Pattern:** Test helper utilities and mock dependencies
+**Structure:**
+```
+internal/
+├── tools/
+│   ├── dispatcher.go
+│   ├── dispatcher_test.go
+│   ├── permissions.go
+│   ├── permissions_test.go
+│   ├── testutil_test.go
+│   └── fileops/
+│       ├── edit.go
+│       ├── edit_test.go
+│       └── test_helpers.go
+├── ui/tui/
+│   ├── app.go
+│   ├── app_test.go
+│   └── test_helpers_test.go
+tests/
+├── e2e/
+│   └── e2e_test.go
+└── testutil/
+    └── mocks/
+        ├── tool.go
+        └── dispatcher.go
+```
 
-### End-to-End Tests
+## Test Structure
 
-- **Location:** `tests/testutil/e2e/`
-- **Purpose:** Test complete workflows
-- **Pattern:** Full application simulation
-
-## Test Organization
-
-### File Naming
-
-- **Standard:** `*_test.go` suffix
-- **Example:** `file_read.go` → `file_read_test.go`
-- **Location:** Same directory as source
-
-### Function Naming
-
-- **Pattern:** `TestFunctionName_Scenario`
-- **Examples:**
-  - `TestParseInput_ValidInput`
-  - `TestReadFile_NotFound`
-  - `TestWorkflowEngine_Execute`
-
-### Table-Driven Tests
-
+**Suite Organization:**
 ```go
-func TestParseInput(t *testing.T) {
-    t.Parallel()
-    
-    tests := []struct {
-        name    string
-        input   string
-        want    Result
-        wantErr bool
-    }{
-        {
-            name:    "valid input",
-            input:   "test",
-            want:    Result{Value: "test"},
-            wantErr: false,
+func TestFunctionName(t *testing.T) {
+    t.Parallel() // Use when safe
+
+    // Setup
+    dir := t.TempDir()
+    tool := NewTool(dir)
+
+    // Execute
+    result, err := tool.Execute(context.Background(), types.ToolInput{
+        Params: map[string]any{
+            "key": "value",
         },
-        {
-            name:    "empty input",
-            input:   "",
-            wantErr: true,
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            t.Parallel()
-            got, err := ParseInput(tt.input)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("ParseInput() error = %v, wantErr %v", err, tt.wantErr)
-                return
-            }
-            if got != tt.want {
-                t.Errorf("ParseInput() = %v, want %v", got, tt.want)
-            }
-        })
-    }
-}
-```
+    })
 
-## Test Execution
-
-### Basic Commands
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with race detector
-go test -race ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run specific test
-go test -run TestFunctionName ./...
-
-# Run verbose
-go test -v ./...
-```
-
-### Makefile Targets
-
-```bash
-# Run tests with race detector and coverage
-make test
-
-# Run tests without race detector (faster)
-make test-fast
-
-# Run specific test
-make test-specific TEST=TestFunctionName
-
-# Generate HTML coverage report
-make cover
-```
-
-### CI Integration
-
-- **Race detector:** Always enabled in CI
-- **Coverage threshold:** 75% overall, 90% for critical paths
-- **Linting:** golangci-lint with 5-minute timeout
-
-## Test Utilities
-
-### Test Helpers (`tests/testutil/`)
-
-- **`envtest.go`** - Environment variable testing utilities
-- **`mocks/`** - Mock implementations
-  - `dispatcher.go` - Tool dispatcher mock
-  - `tool.go` - Tool interface mock
-  - `provider.go` - Provider interface mock
-
-### Mocking Patterns
-
-#### Interface Mocks
-
-```go
-// Mock tool implementation
-type MockTool struct {
-    ExecuteFunc func(ctx context.Context, input []byte) ([]byte, error)
-}
-
-func (m *MockTool) Execute(ctx context.Context, input []byte) ([]byte, error) {
-    return m.ExecuteFunc(ctx, input)
-}
-```
-
-#### HTTP Mocking
-
-```go
-func TestWebFetch(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte("<html><body>Test content</body></html>"))
-    }))
-    defer server.Close()
-    
-    // Use server.URL in tests
-}
-```
-
-#### File System Mocking
-
-```go
-func TestReadFile(t *testing.T) {
-    tempDir := t.TempDir()
-    testFile := filepath.Join(tempDir, "test.txt")
-    
-    err := os.WriteFile(testFile, []byte("test content"), 0644)
-    if err != nil {
-        t.Fatal(err)
-    }
-    
-    // Test with testFile
-}
-```
-
-## Coverage
-
-### Configuration
-
-- **Overall target:** 75%
-- **Critical paths:** 90% (`pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`)
-- **Exclusions:** Test files, generated code
-
-### Commands
-
-```bash
-# Generate coverage profile
-go test -coverprofile=coverage.out ./...
-
-# Generate HTML report
-go tool cover -html=coverage.out -o coverage.html
-
-# View coverage in browser
-make cover
-```
-
-### Analysis
-
-```bash
-# View coverage by function
-go tool cover -func=coverage.out
-
-# View coverage by package
-go test -coverprofile=coverage.out ./... && \
-go tool cover -func=coverage.out | grep total
-```
-
-## Benchmark Tests
-
-### Location
-
-- **Pattern:** `BenchmarkFunctionName` functions
-- **Files:** `*_test.go` (same as unit tests)
-
-### Commands
-
-```bash
-# Run benchmarks
-go test -bench=. ./...
-
-# Run with memory allocation stats
-go test -bench=. -benchmem ./...
-
-# Run specific benchmark
-go test -bench=BenchmarkFunctionName ./...
-
-# Run verbose benchmarks
-go test -v -bench=. -benchmem ./...
-```
-
-### Example
-
-```go
-func BenchmarkParseInput(b *testing.B) {
-    input := "test input for benchmark"
-    
-    b.ResetTimer()
-    for i := 0; i < b.N; i++ {
-        ParseInput(input)
-    }
-}
-```
-
-## Race Conditions
-
-### Detection
-
-- **Tool:** Go race detector (`-race` flag)
-- **CI:** Always enabled in CI pipeline
-- **Local:** `make test` enables race detection
-
-### Common Issues
-
-1. **Goroutine data races:** Use mutexes or channels
-2. **Map concurrent access:** Use `sync.Map` or mutex
-3. **Channel close races:** Use proper synchronization
-
-### Debugging
-
-```bash
-# Run with race detector
-go test -race ./...
-
-# Run with verbose output
-go test -race -v ./...
-
-# Check for race conditions in specific test
-go test -race -run TestFunctionName ./...
-```
-
-## Test Data
-
-### Fixtures
-
-- **Location:** `tests/fixtures/`
-- **Purpose:** Test data files
-- **Pattern:** Loaded in tests, cleaned up after
-
-### Temporary Files
-
-- **Pattern:** `t.TempDir()` for automatic cleanup
-- **Example:**
-
-```go
-func TestWriteFile(t *testing.T) {
-    tempDir := t.TempDir()
-    testFile := filepath.Join(tempDir, "output.txt")
-    
-    // Test file operations
-}
-```
-
-## Mocking Strategies
-
-### Interface-Based Mocking
-
-- **Pattern:** Create structs that implement interfaces
-- **Location:** `tests/testutil/mocks/`
-- **Usage:** Inject mocks in tests
-
-### Table-Driven Mocks
-
-```go
-func TestToolExecution(t *testing.T) {
-    tests := []struct {
-        name     string
-        tool     Tool
-        input    []byte
-        expected []byte
-    }{
-        {
-            name: "successful execution",
-            tool: &MockTool{
-                ExecuteFunc: func(ctx context.Context, input []byte) ([]byte, error) {
-                    return []byte("success"), nil
-                },
-            },
-            input:    []byte("test"),
-            expected: []byte("success"),
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result, err := tt.tool.Execute(context.Background(), tt.input)
-            if err != nil {
-                t.Fatalf("unexpected error: %v", err)
-            }
-            if !reflect.DeepEqual(result, tt.expected) {
-                t.Errorf("got %v, want %v", result, tt.expected)
-            }
-        })
-    }
-}
-```
-
-## Test Helpers
-
-### Common Patterns
-
-```go
-// Assert no error
-func assertNoError(t *testing.T, err error) {
-    t.Helper()
+    // Assert
     if err != nil {
         t.Fatalf("unexpected error: %v", err)
     }
-}
-
-// Assert error
-func assertError(t *testing.T, err error) {
-    t.Helper()
-    if err == nil {
-        t.Fatal("expected error, got nil")
-    }
-}
-
-// Assert equal
-func assertEqual(t *testing.T, got, want interface{}) {
-    t.Helper()
-    if !reflect.DeepEqual(got, want) {
-        t.Errorf("got %v, want %v", got, want)
+    if result.Output == "" {
+        t.Error("expected non-empty output")
     }
 }
 ```
 
-### Test Context
+**Patterns:**
+- Use `t.Parallel()` for independent tests
+- Use `t.Helper()` for test helper functions
+- Use `t.TempDir()` for temporary directories
+- Use `t.Cleanup()` for cleanup functions
+- Use table-driven tests for parameterized cases
 
+## Mocking
+
+**Framework:**
+- Manual mocks (no third-party mocking library)
+
+**Patterns:**
 ```go
-func TestWithContext(t *testing.T) {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    
-    // Use ctx in tests
+// MockTool implements types.Tool for testing.
+type MockTool struct {
+    Name_        string
+    Description_ string
+    RiskLevel_   types.RiskLevel
+    ExecFunc     func(ctx context.Context, input types.ToolInput) (types.ToolResult, error)
+}
+
+func (m *MockTool) Name() string               { return m.Name_ }
+func (m *MockTool) Description() string        { return m.Description_ }
+func (m *MockTool) RiskLevel() types.RiskLevel { return m.RiskLevel_ }
+
+func (m *MockTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
+    if m.ExecFunc != nil {
+        return m.ExecFunc(ctx, input)
+    }
+    return types.ToolResult{Output: "ok"}, nil
 }
 ```
 
-## Continuous Integration
+**What to Mock:**
+- External API calls
+- File system operations (use `t.TempDir()`)
+- Network operations
+- Time-dependent operations
 
-### GitHub Actions
+**What NOT to Mock:**
+- Internal functions (test actual behavior)
+- Simple data structures
+- Standard library functions
 
-- **Workflow:** `.github/workflows/ci.yml`
-- **Triggers:** Push, pull request
-- **Steps:**
-  1. Checkout code
-  2. Setup Go
-  3. Run `make check` (fmt, tidy, vet, lint, test)
-  4. Run `make test` with race detector
-  5. Generate coverage report
+## Fixtures and Factories
 
-### Quality Gates
+**Test Data:**
+```go
+func testDispatcher(t *testing.T) *Dispatcher {
+    t.Helper()
+    d, _ := DefaultDispatcher("", "", "", nil, nil)
+    t.Cleanup(func() { d.Stop() })
+    return d
+}
 
-- **Linting:** golangci-lint with 5-minute timeout
-- **Testing:** All tests must pass
-- **Coverage:** Must meet thresholds
-- **Race detection:** No race conditions allowed
+func testDispatcherWithConfig(t *testing.T, cfg *config.PermissionsConfig) *Dispatcher {
+    t.Helper()
+    d, _ := DefaultDispatcher("", "", "", cfg, nil)
+    t.Cleanup(func() { d.Stop() })
+    return d
+}
+```
+
+**Location:**
+- Test helpers in `*_helpers_test.go` files
+- Shared mocks in `tests/testutil/mocks/`
+- Test utilities in `internal/testutil/`
+
+## Coverage
+
+**Requirements:**
+- **75%** overall
+- **90%** for `pkg/taskrunner`, `pkg/bisect`, `pkg/rollback`
+
+**View Coverage:**
+```bash
+make cover          # Generate HTML coverage report
+go tool cover -html=coverage.out -o coverage.html
+```
+
+## Test Types
+
+**Unit Tests:**
+- Scope: Individual functions and methods
+- Approach: Test inputs/outputs, edge cases, error conditions
+- Example: `TestDispatcher_RegisterAndExecute`, `TestBash_WorkdirValidation`
+
+**Integration Tests:**
+- Scope: Multiple components working together
+- Approach: Test real workflows, permission flows, session management
+- Example: `TestDispatcher_DangerousToolPermissionGranted`, `TestPermissionTimeout`
+
+**E2E Tests:**
+- Framework: Custom binary compilation and execution
+- Scope: Full application workflow
+- Example: `TestBinary_Version`, `TestBinary_Prompt_NoProvider`
+- Location: `tests/e2e/e2e_test.go`
+
+**Benchmarks:**
+- Scope: Performance-critical code
+- Approach: Measure execution time and allocations
+- Example: `BenchmarkCascadingReplace`, `BenchmarkCascadingReplace_Strategies`
+- Location: `*_benchmark_test.go`
+
+## Common Patterns
+
+**Async Testing:**
+```go
+func TestAsyncOperation(t *testing.T) {
+    t.Parallel()
+    ch := make(chan error, 1)
+    go func() {
+        _, err := operation()
+        ch <- err
+    }()
+
+    select {
+    case err := <-ch:
+        if err != nil {
+            t.Fatalf("unexpected error: %v", err)
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("timed out waiting for operation")
+    }
+}
+```
+
+**Error Testing:**
+```go
+func TestErrorCase(t *testing.T) {
+    t.Parallel()
+    _, err := operation()
+    if err == nil {
+        t.Fatal("expected error")
+    }
+    if !errors.Is(err, ExpectedError) {
+        t.Errorf("expected ErrExpected, got: %v", err)
+    }
+}
+```
+
+**Table-Driven Tests:**
+```go
+func TestTableDriven(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    string
+        expected string
+    }{
+        {"case1", "input1", "output1"},
+        {"case2", "input2", "output2"},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            result, err := function(tt.input)
+            if err != nil {
+                t.Fatalf("unexpected error: %v", err)
+            }
+            if result != tt.expected {
+                t.Errorf("got %q, want %q", result, tt.expected)
+            }
+        })
+    }
+}
+```
+
+**Concurrent Testing:**
+```go
+func TestConcurrentAccess(t *testing.T) {
+    t.Parallel()
+    var wg sync.WaitGroup
+    numGoroutines := 50
+
+    for i := 0; i < numGoroutines; i++ {
+        wg.Add(1)
+        go func(id int) {
+            defer wg.Done()
+            // Test concurrent access
+        }(i)
+    }
+
+    wg.Wait()
+}
+```
+
+## Security Testing
+
+**Command Injection:**
+- Test obfuscation bypass attempts (double spaces, tabs, mixed case)
+- Test variable expansion detection (`$VAR`, `${VAR}`, `$(cmd)`)
+- Test newline and special character handling
+- See `TestCheckDangerousCommand_Baseline` in `internal/tools/bash_security_test.go`
+
+**SSRF Protection:**
+- Test private IP blocking (loopback, RFC1918, link-local)
+- Test metadata endpoint blocking (169.254.169.254)
+- Test DNS pinning via shared cache
+- See `TestWebFetch_Blocks_PrivateIPv4` in `internal/tools/webfetch_security_test.go`
+
+**Type Safety:**
+- Test comma-ok type assertion guards on interface values
+- Test graceful handling of invalid types in concurrent maps
+- See `TestPermissions_InvalidType` in `internal/tools/permissions_test.go`
+
+## Race Testing
+
+**Required Race Tests:**
+- All concurrent data structures (WorkflowCache, DNSCache)
+- All goroutine lifecycle management
+- All shared mutable state access
+
+**Running Race Tests:**
+```bash
+make test           # Includes -race flag
+go test -race ./... # Explicit race detection
+```
+
+**High-Contention Tests:**
+- `TestWorkflowCache_ConcurrentDynamicContext` - 100 goroutines, 1000 iterations
+- `TestDNSCache_HighContention` - 50 goroutines, 1000 iterations
+- `TestDNSCache_ConcurrentEviction` - Low eviction threshold stress test
+
+## Test Utilities
+
+**CI Helpers:**
+```go
+// SkipIfCI skips the test if running in a CI environment
+func SkipIfCI(t *testing.T, reason string) {
+    t.Helper()
+    if IsCI() {
+        t.Skip(reason)
+    }
+}
+```
+
+**Environment Helpers:**
+```go
+// RequireAnyAPIKey skips the test unless at least one API key is set
+func RequireAnyAPIKey(t *testing.T, envVars ...string) string {
+    t.Helper()
+    for _, v := range envVars {
+        if val := os.Getenv(v); val != "" {
+            return val
+        }
+    }
+    t.Skipf("skipping: none of %v set in environment", envVars)
+    return ""
+}
+```
+
+**Test Data Helpers:**
+```go
+// contains checks if a string contains a substring
+func contains(s, substr string) bool {
+    return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
+}
+```
+
+---
+
+*Testing analysis: 2026-08-03*

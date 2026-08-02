@@ -1,87 +1,108 @@
 # Technology Stack
 
-**Last mapped:** 2026-08-02
-**Project:** M31 Autonomous (Terminal AI Coding Agent)
+**Analysis Date:** 2026-08-03
 
-## Language & Runtime
+## Languages
 
-- **Primary language:** Go 1.25.12 (from `go.mod`)
-- **Build system:** Go modules + Makefile
-- **Binary type:** Static binary (CGO_ENABLED=0)
-- **Cross-compilation:** linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/{amd64,arm64}
+**Primary:**
+- Go 1.25.12 - Entire codebase (100% Go, CGO_ENABLED=0 for static binaries)
 
-## Core Dependencies
+**Secondary:**
+- None
 
-### Direct Dependencies (from `go.mod`)
+## Runtime
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| `github.com/BurntSushi/toml` | v1.6.0 | TOML configuration parsing |
-| `github.com/bmatcuk/doublestar/v4` | v4.10.0 | Glob pattern matching |
-| `github.com/charmbracelet/bubbles` | v0.20.0 | Terminal UI components |
-| `github.com/charmbracelet/bubbletea` | v1.3.0 | Terminal UI framework (Elm architecture) |
-| `github.com/charmbracelet/glamour` | v0.6.0 | Markdown rendering |
-| `github.com/charmbracelet/lipgloss` | v1.1.0 | Terminal styling |
-| `github.com/godbus/dbus/v5` | v5.2.2 | D-Bus integration (Linux) |
-| `github.com/mattn/go-runewidth` | v0.0.19 | Unicode character width |
-| `github.com/pkoukk/tiktoken-go` | v0.1.8 | Token counting for LLM context |
-| `golang.org/x/sync` | v0.22.0 | Synchronization primitives (singleflight) |
+**Environment:**
+- Go 1.25.12 (pinned in `go.mod` and `.github/workflows/ci.yml`)
+- No CGO (hard constraint: `CGO_ENABLED=0` enforced in Makefile, CI, and goreleaser)
 
-### Indirect Dependencies
+**Package Manager:**
+- Go Modules (`go.mod` at root)
+- Lockfile: `go.sum` present and committed
 
-- `github.com/alecthomas/chroma` - Syntax highlighting
-- `github.com/odvcencio/gotreesitter` - Tree-sitter parsing
-- Various Charm libraries for terminal UI
+## Frameworks
 
-## Build Configuration
+**Core:**
+- Bubble Tea v1.3.0 (`github.com/charmbracelet/bubbletea`) - Terminal UI framework (Elm architecture)
+- Lipgloss v1.1.0 (`github.com/charmbracelet/lipgloss`) - Terminal styling and layout
+- Bubbles v0.20.0 (`github.com/charmbracelet/bubbles`) - Pre-built TUI components (spinners, text input, viewport, etc.)
+- Glamour v0.6.0 (`github.com/charmbracelet/glamour`) - Markdown rendering in terminal
 
-- **Makefile targets:** build, debug, test, lint, cross-compile, release
-- **Build flags:** `-trimpath`, `-ldflags "-s -w"` (strip debug info for release)
-- **Test framework:** Go standard testing with race detector
-- **Linting:** golangci-lint (govet, staticcheck, errcheck, ineffassign, unused)
-- **CI:** GitHub Actions (`.github/workflows/ci.yml`)
+**Testing:**
+- Go standard `testing` package (no external test framework)
+- Race detector (`-race` flag) enabled by default in `make test`
 
-## Project Structure
+**Build/Dev:**
+- Make (`Makefile` at root) - Build orchestration
+- GoReleaser v2 (`.goreleaser.yaml`) - Cross-compilation and release packaging
+- golangci-lint (`.golangci.yml`) - Static analysis (govet, staticcheck, errcheck, ineffassign, unused)
 
-```
-M31A/
-├── cmd/m31a/          # Main entry point
-├── internal/          # Private application code
-│   ├── engine/        # Workflow engine (7 phases)
-│   ├── provider/      # LLM provider integrations
-│   ├── tools/         # Built-in tools (18+)
-│   ├── ui/            # Terminal UI (Bubble Tea)
-│   └── types/         # Shared type definitions
-├── pkg/               # Public packages (keychain, etc.)
-├── tests/             # Test utilities and E2E tests
-├── scripts/           # Build and release scripts
-└── dist/              # Build output directory
-```
+## Key Dependencies
 
-## Configuration Files
+**Critical:**
+- `github.com/charmbracelet/bubbletea` v1.3.0 - TUI runtime; entire UI built on this Elm-architecture framework
+- `github.com/BurntSushi/toml` v1.6.0 - Configuration file parsing (TOML format)
+- `github.com/godbus/dbus/v5` v5.2.2 - D-Bus Secret Service for Linux keychain integration
+- `github.com/pkoukk/tiktoken-go` v0.1.8 - Token estimation for LLM context window management
+- `golang.org/x/sync` v0.22.0 - `singleflight` for deduplicating concurrent model fetches
 
-- `m31a.json` - Application metadata and version info
-- `go.mod` / `go.sum` - Go module dependencies
-- `Makefile` - Build automation
-- `.github/workflows/ci.yml` - CI/CD pipeline
+**Infrastructure:**
+- `github.com/fsnotify/fsnotify` v1.10.1 - Config file hot-reload via filesystem watcher
+- `github.com/bmatcuk/doublestar/v4` v4.10.0 - Glob pattern matching for file search tool
+- `github.com/odvcencio/gotreesitter` v0.20.5 - Tree-sitter code analysis for CodeMap/CodeComplexity tools
+- `github.com/alecthomas/chroma` v0.10.0 - Syntax highlighting (used by glamour)
+- `golang.org/x/sys` v0.47.0 - OS-level syscalls for keychain and file operations
 
-## Runtime Requirements
+**Indirect/Supporting:**
+- `github.com/mattn/go-runewidth` v0.0.19 - Unicode-aware string width for terminal rendering
+- `github.com/atotto/clipboard` v0.1.4 - Clipboard integration for TUI copy/paste
+- `github.com/yuin/goldmark` v1.8.4 - Markdown parsing (glamour dependency)
+- `github.com/olekukonko/tablewriter` v0.0.5 - Table rendering in terminal
+- `github.com/google/uuid` v1.3.0 - UUID generation for session IDs
 
-- POSIX shell (bash, zsh, fish)
-- Git (for version control integration)
-- API keys for LLM providers (OpenRouter, Zen, Nvidia)
-- OS keychain for secure credential storage
+## Configuration
 
-## Development Tools
+**Environment:**
+- Config file: `~/.m31a/config.toml` (global) or `m31a.toml` (project-level)
+- Environment variables: `M31A_*` prefix for overrides (`M31A_CONFIG`, `M31A_THEME`, `M31A_DEFAULT_MODEL`, etc.)
+- `.env` file auto-loaded from working directory (before logger init, goroutine-safe)
+- Config loading priority: Defaults -> Global TOML -> Env vars -> Project TOML -> Variable substitution
+- Config hot-reload via `fsnotify` with 50ms debounce (`internal/core/config/loader.go`)
 
-- **IDE:** Any Go-compatible IDE (VS Code, GoLand, etc.)
-- **Formatting:** `go fmt`, `goimports`
-- **Testing:** `go test -race ./...`
-- **Benchmarking:** `go test -bench=. -benchmem`
-- **Coverage:** `go tool cover -html=coverage.out`
+**Build:**
+- `Makefile` at root - All build targets (build, test, lint, cross-compile, release)
+- `.goreleaser.yaml` at root - Release automation (linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/{amd64})
+- `.golangci.yml` at root - Linter configuration
+- LDFLAGS inject Version, Commit, Date, GoVersion at build time
 
-## Platform Support
+**Key Config Files:**
+- `go.mod` / `go.sum` - Dependency management
+- `Makefile` - Build orchestration
+- `.goreleaser.yaml` - Release pipeline
+- `.golangci.yml` - Linter settings
+- `.env.example` - Environment variable template
 
-- **Primary:** Linux, macOS (darwin), Windows
-- **Architecture:** amd64, arm64
-- **Installation:** Homebrew (macOS), Scoop (Windows), native packages (Linux)
+## Platform Requirements
+
+**Development:**
+- Go 1.25+ (matching `go.mod` directive)
+- `CGO_ENABLED=0` (mandatory for static binary)
+- `golangci-lint` (for `make lint`)
+- `goimports` (optional, for `make fmt`)
+- `goreleaser` (for `make release`)
+
+**Production:**
+- Static binary (no runtime dependencies)
+- Cross-compiled: linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/amd64
+- Terminal with Unicode support (optional: ASCII fallback mode available)
+- D-Bus session bus or `pass` CLI (Linux keychain, optional)
+- macOS Keychain or Windows Credential Manager (platform-native, optional)
+
+**Supported Platforms:**
+- Linux amd64/arm64
+- macOS amd64/arm64 (Intel/Apple Silicon)
+- Windows amd64
+
+---
+
+*Stack analysis: 2026-08-03*

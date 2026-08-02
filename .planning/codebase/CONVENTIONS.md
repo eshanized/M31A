@@ -1,294 +1,164 @@
-# Code Conventions
+# Coding Conventions
 
-**Last mapped:** 2026-08-02
-**Project:** M31 Autonomous (Terminal AI Coding Agent)
+**Analysis Date:** 2026-08-03
 
-## Go Code Style
+## Naming Patterns
 
-### Formatting
+**Files:**
+- Snake_case for all Go files: `dispatcher.go`, `bash_test.go`, `edit_benchmark_test.go`
+- Test files use `_test.go` suffix: `permissions_test.go`, `webfetch_security_test.go`
+- Benchmark files use `_benchmark_test.go` suffix: `edit_benchmark_test.go`
+- Helper files use `_helpers.go` or `_helpers_test.go` suffix: `helpers.go`, `test_helpers.go`
 
-- **Tool:** `go fmt` (standard)
-- **Imports:** `goimports` for import grouping
-- **Line length:** No hard limit, but prefer readability
+**Functions:**
+- PascalCase for exported functions: `NewDispatcher()`, `DefaultDispatcher()`, `BuildToolDefs()`
+- camelCase for unexported functions: `testDispatcher()`, `grepToolInput()`, `extractFromParams()`
+- Test functions use `Test` prefix: `TestDispatcher_RegisterAndExecute()`, `TestBash_WorkdirValidation()`
+- Benchmark functions use `Benchmark` prefix: `BenchmarkCascadingReplace()`
+- Subtests use descriptive names: `t.Run("Permission request times out", func(t *testing.T) {...})`
 
-### Import Organization
+**Variables:**
+- PascalCase for exported variables: `ToolRateLimitBurst`, `MaxConcurrentTools`
+- camelCase for unexported variables: `skipDirsCache`, `permissionRequestID`
+- Constants use PascalCase: `RiskSafe`, `PhaseInitialize`, `MaxBackupsPerFile`
+- Boolean variables use `is`, `has`, or `should` prefix: `hasProvider`, `isChild`
 
-Standard Go import grouping:
+**Types:**
+- PascalCase for all types: `Dispatcher`, `PermissionRequest`, `ToolResult`
+- Interface suffix not used: `Tool` (not `ToolInterface`)
+- Struct field names use PascalCase: `ToolName`, `RiskLevel`, `RequestID`
 
+## Code Style
+
+**Formatting:**
+- Tool: `gofmt` + `goimports`
+- Key settings: Standard Go formatting
+- Run `make fmt` to format all files
+
+**Linting:**
+- Tool: `golangci-lint` (version 2)
+- Config: `.golangci.yml`
+- Enabled linters: govet (with shadow), staticcheck, errcheck, ineffassign, unused
+- Test files excluded from errcheck and unused
+
+**Import Organization:**
+1. Standard library
+2. Third-party packages
+3. Project packages (github.com/eshanized/M31A/...)
+
+Example:
 ```go
 import (
-    // Standard library
     "context"
     "fmt"
-    
-    // Third-party
-    tea "github.com/charmbracelet/bubbletea"
-    
-    // Internal
+    "testing"
+
+    "github.com/bmatcuk/doublestar/v4"
     "github.com/eshanized/M31A/internal/core/config"
+    m31errors "github.com/eshanized/M31A/internal/core/errors"
+    "github.com/eshanized/M31A/internal/core/types"
 )
 ```
 
-### Naming Conventions
+**Path Aliases:**
+- `m31errors` for `github.com/eshanized/M31A/internal/core/errors`
+- No other aliases used
 
-#### Packages
+## Error Handling
 
-- **Lowercase, single word:** `workflow`, `session`, `provider`
-- **Avoid abbreviations:** `fileoperations` not `fileops` (except where established)
-- **No underscores:** `codeanalysis` not `code_analysis`
+**Patterns:**
+- Return errors, never panic: `return nil, fmt.Errorf("%w", err)`
+- Use sentinel errors: `var ErrPermissionDenied = errors.New("permission denied")`
+- Wrap with context: `fmt.Errorf("tool %s: %w", toolName, err)`
+- Check errors immediately: `if err != nil { return err }`
+- Use `errors.Is()` for sentinel comparison: `errors.Is(err, ErrPermissionDenied)`
+- Use `errors.As()` for type assertion: `errors.As(err, &toolErr)`
 
-#### Files
+**Error Types:**
+- `ToolError`: Wraps tool execution errors with tool name and operation
+- `ProviderError`: Wraps API provider errors with HTTP status code
+- `ConfigError`: Wraps configuration errors with key context
 
-- **Snake case:** `file_read.go`, `bash_sandbox_linux.go`
-- **Test files:** `*_test.go` suffix
-- **Platform-specific:** `*_unix.go`, `*_windows.go`, `*_linux.go`, `*_darwin.go`
+**User Messages:**
+- Use `errors.UserMessage(err)` for user-facing error messages
+- Provides actionable guidance: "Provider unreachable — check your internet connection"
 
-#### Types
+## Comments
 
-- **PascalCase:** `WorkflowEngine`, `SessionManager`, `ProviderRegistry`
-- **Interfaces:** Verb-noun pattern: `Provider`, `Tool`, `Manager`
-- **Structs:** Noun pattern: `Config`, `Message`, `ToolCall`
+**When to Comment:**
+- Exported functions/types need doc comments
+- Complex algorithms need explanation
+- Security-critical code needs comments
+- TODO/FIXME for known issues
 
-#### Functions
+**JSDoc/TSDoc:**
+- Not applicable (Go project)
 
-- **PascalCase (exported):** `NewProvider()`, `LoadConfig()`, `ExecuteWorkflow()`
-- **camelCase (unexported):** `parseFlags()`, `validateInput()`
-- **Getters:** `BaseURL()`, `Version()`, `ActiveProvider()`
-- **Setters:** `SetTimeout()`, `UpdateConfig()`
-
-#### Constants
-
-- **PascalCase (exported):** `DefaultTimeout`, `MaxRetries`
-- **camelCase (unexported):** `maxBufferSize`, `defaultRetryDelay`
-- **SCREAMING_SNAKE:** Only for true constants: `CGO_ENABLED=0`
-
-### Error Handling
-
-- **Pattern:** Return errors, never panic
-- **Wrapping:** `fmt.Errorf("%w", err)` for error chains
-- **Types:** Custom error types in `internal/core/errors/`
-- **Sentinel errors:** `var ErrNotFound = errors.New("not found")`
-
-Example:
-
+**Comment Style:**
 ```go
-func readFile(path string) ([]byte, error) {
-    data, err := os.ReadFile(path)
-    if err != nil {
-        return nil, fmt.Errorf("reading file %s: %w", path, err)
-    }
-    return data, nil
-}
+// FunctionName does X and returns Y.
+// It handles edge cases Z and W.
+func FunctionName() {
 ```
 
-### Comments
+## Function Design
 
-- **Exported functions:** Always have doc comments
-- **Package comments:** `// Package X provides...`
-- **No obvious comments:** Don't comment what code does, explain why
-- **TODO format:** `// TODO(username): description`
+**Size:** Functions are generally short (50-200 lines). Complex functions are split into smaller helpers.
 
-Example:
+**Parameters:** 
+- Use struct for complex parameters: `types.ToolInput{Params: map[string]any{...}}`
+- Use context.Context as first parameter
+- Use options pattern for optional configuration
 
-```go
-// ExecuteWorkflow runs the seven-phase workflow for the given goal.
-// It returns an error if any phase fails or if the context is cancelled.
-func ExecuteWorkflow(ctx context.Context, goal string) error {
-    // ...
-}
-```
+**Return Values:**
+- Return `(result, error)` tuple
+- Return zero values on error
+- Use named return values sparingly
 
-## Project-Specific Conventions
+## Module Design
 
-### Bubble Tea (TUI)
+**Exports:**
+- Export only what's needed
+- Use unexported functions for internal logic
+- Provide constructors: `NewDispatcher()`, `NewBash()`
 
-- **Single-threaded:** Never mutate state from goroutines
-- **Message-based:** All state changes via `Update()` method
-- **Commands:** Return `tea.Cmd` for side effects
-- **Models:** Implement `tea.Model` interface
+**Barrel Files:**
+- Not used (Go doesn't have barrel files)
 
-### Workflow Engine
+## Key Patterns
 
-- **Phase transitions:** Use `transitionMu` mutex
-- **State mutations:** Only through `WorkflowState` methods
-- **LLM calls:** Always with timeout and retry
+**Interface Compliance:**
+- Compile-time checks: `var _ types.Tool = (*Edit)(nil)`
+- Ensures structs implement required interfaces
 
-### Provider Layer
+**Concurrency:**
+- Use `sync.RWMutex` for shared state: `Dispatcher.mu`
+- Use `sync.Map` for concurrent maps: `Dispatcher.pendingResponses`
+- Use channels for communication: `Dispatcher.requestCh`
+- Use atomic operations: `Dispatcher.pendingPermCount`
+- Never mutate shared state from goroutines without synchronization
 
-- **Interface-based:** All providers implement `Provider` interface
-- **Registry pattern:** Dynamic registration via `provider.Register()`
-- **Failover:** Automatic fallback between providers
+**Testing Helpers:**
+- `t.Helper()` for test helper functions
+- `t.TempDir()` for temporary directories
+- `t.Cleanup()` for cleanup functions
+- Table-driven tests for parameterized cases
 
-### Tool System
+**Constants:**
+- Define in `internal/core/types/constants.go` for cross-cutting constants
+- Define in package-specific `constants.go` for local constants
+- Use descriptive names: `ToolRateLimitBurst`, `MaxConcurrentTools`
 
-- **Dispatcher pattern:** All tools go through `dispatcher.go`
-- **Permission system:** Tools require user approval
-- **Sandboxing:** Bash commands are security-sandboxed
+## Documentation
 
-## Testing Conventions
+**AGENTS.md:**
+- Contains quick commands and architecture overview
+- Reference for AI agents working on the codebase
 
-### Test Organization
+**TESTING.md:**
+- Testing guide with commands and patterns
+- Reference for writing tests
 
-- **Parallel tests:** Use `t.Parallel()` for independent tests
-- **Table-driven:** Use table-driven tests for multiple cases
-- **Test files:** `*_test.go` in same package
-- **Test helpers:** In `tests/testutil/`
+---
 
-### Test Naming
-
-- **Function:** `TestFunctionName_Scenario`
-- **Table-driven:** `TestFunctionName` with subtests
-- **Benchmarks:** `BenchmarkFunctionName`
-
-### Test Patterns
-
-```go
-func TestParseInput(t *testing.T) {
-    t.Parallel()
-    
-    tests := []struct {
-        name    string
-        input   string
-        want    Result
-        wantErr bool
-    }{
-        {
-            name:    "valid input",
-            input:   "test",
-            want:    Result{Value: "test"},
-            wantErr: false,
-        },
-        {
-            name:    "empty input",
-            input:   "",
-            wantErr: true,
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            t.Parallel()
-            got, err := ParseInput(tt.input)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("ParseInput() error = %v, wantErr %v", err, tt.wantErr)
-                return
-            }
-            if got != tt.want {
-                t.Errorf("ParseInput() = %v, want %v", got, tt.want)
-            }
-        })
-    }
-}
-```
-
-### Mocking
-
-- **Interface-based:** Mock by implementing interfaces
-- **Test doubles:** In `tests/testutil/`
-- **HTTP mocking:** Use `httptest.NewServer`
-
-## Configuration Conventions
-
-### TOML Configuration
-
-- **File:** `m31a.toml`
-- **Sections:** `[provider]`, `[workflow]`, `[tools]`
-- **Defaults:** Always provide sensible defaults
-- **Validation:** Schema-based validation
-
-### Environment Variables
-
-- **Prefix:** `M31A_` for all env vars
-- **Examples:** `M31A_API_KEY`, `M31A_LOG_LEVEL`
-- **Priority:** Env vars override config file
-
-## Build Conventions
-
-### Makefile
-
-- **Targets:** Lowercase, hyphen-separated
-- **Comments:** `## target — description`
-- **Phony targets:** Explicit `.PHONY` declarations
-
-### Cross-Compilation
-
-- **Platforms:** linux, darwin, windows
-- **Architectures:** amd64, arm64
-- **Static binary:** `CGO_ENABLED=0`
-
-## Documentation Conventions
-
-### README Files
-
-- **Location:** Root and key directories
-- **Format:** Markdown with badges
-- **Content:** Overview, install, usage, examples
-
-### Code Comments
-
-- **Doc comments:** Always for exported symbols
-- **TODO format:** `// TODO(username): description`
-- **No obvious comments:** Don't comment what code does
-
-## Git Conventions
-
-### Commit Messages
-
-- **Format:** `<type>: <description>`
-- **Types:** feat, fix, docs, test, refactor, chore
-- **Examples:**
-  - `feat: add new tool for code analysis`
-  - `fix: handle nil pointer in parser`
-  - `docs: update README with examples`
-
-### Branch Naming
-
-- **Feature:** `feature/description`
-- **Fix:** `fix/description`
-- **Release:** `release/v1.2.0`
-
-## Security Conventions
-
-### API Keys
-
-- **Storage:** OS keychain only
-- **Never:** In config files, environment variables, or logs
-- **Retrieval:** `pkg/keychain/` package
-
-### Command Execution
-
-- **Sandboxing:** All bash commands are sandboxed
-- **Dangerous commands:** Blocked by security policy
-- **User approval:** Required for all tool execution
-
-## Performance Conventions
-
-### Caching
-
-- **Pattern:** `sync.Once` for lazy initialization
-- **Invalidation:** TTL-based or event-driven
-- **Storage:** In-memory with optional persistence
-
-### Concurrency
-
-- **Mutexes:** Use `sync.RWMutex` for read-heavy workloads
-- **Channels:** For inter-goroutine communication
-- **Context:** Always pass context for cancellation
-
-## Logging Conventions
-
-### Structured Logging
-
-- **Framework:** `log/slog`
-- **Levels:** Debug, Info, Warn, Error
-- **Fields:** Key-value pairs for context
-
-Example:
-
-```go
-slog.Info("workflow started",
-    "goal", goal,
-    "provider", provider,
-    "mode", mode,
-)
-```
+*Convention analysis: 2026-08-03*
