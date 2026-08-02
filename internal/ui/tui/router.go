@@ -47,8 +47,8 @@ func (r *Router) SwitchTo(id ScreenID) {
 	if id == 0 {
 		return
 	}
+	r.activeID = id
 	if s, ok := r.screens[id]; ok {
-		r.activeID = id
 		r.active = s
 		if r.active != nil {
 			r.active.SetDimensions(r.width, r.height)
