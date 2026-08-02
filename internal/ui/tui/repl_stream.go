@@ -72,7 +72,7 @@ func (m *ReplModel) handleStreamMsg(msg StreamMsg) []tea.Cmd {
 		}
 		return msg
 	}
-	// Append streaming tick to drive 10fps rendering
+	// Append streaming tick to drive 60fps rendering
 	return []tea.Cmd{nextCmd, StreamTickCmd()}
 }
 

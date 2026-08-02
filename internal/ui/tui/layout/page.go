@@ -147,8 +147,7 @@ func BuildHeader(info HeaderInfo, width int, bp Breakpoint, t theme.Theme, cache
 
 // BuildFooter renders the unified 1-line footer bar.
 //
-// Layout: ⌂ cwd ⎇ branch  ·  ⠹ responding...  ·  ctrl+p · ctrl+b
-// Simplified chrome: no cost, no context ring, no │ separators.
+// Layout: ⌂ cwd ⎇ branch  ·  ⠹ responding...  ·  [Tokens: 123] [Cost: $0.12]
 func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache *theme.StyleCache) string {
 	if width < 10 {
 		return strings.Repeat(" ", width)
@@ -195,16 +194,13 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 		}
 	}
 
-	// Right zone: keyboard hints only (no cost, no token count)
+	// Right zone: Tokens, Cost, Phase
 	var rightParts []string
-	if ShowFooterHints(width) {
-		hintStrs := make([]string, 0, len(info.KeyboardHints))
-		for _, hint := range info.KeyboardHints {
-			hintStrs = append(hintStrs, s.FooterHint.Render(hint))
-		}
-		if len(hintStrs) > 0 {
-			rightParts = append(rightParts, strings.Join(hintStrs, dotSep))
-		}
+	if info.ShowCost {
+		tokenStr := formatTokenCount(info.TokenCount)
+		costStr := "$" + formatCost(info.Cost)
+		rightParts = append(rightParts, s.Muted.Render("Tokens: ")+s.BrandText.Render(tokenStr))
+		rightParts = append(rightParts, s.Muted.Render("Cost: ")+s.BrandText.Render(costStr))
 	}
 	right := strings.Join(rightParts, "  ")
 

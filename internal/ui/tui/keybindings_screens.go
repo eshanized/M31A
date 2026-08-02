@@ -30,6 +30,7 @@ func (r *KeyRegistry) RegisterDefaultBindings() {
 
 	// REPL bindings
 	r.Register(CtxREPL, "ctrl+x b", "Toggle sidebar", emit("toggle_sidebar"))
+	r.Register(CtxREPL, "ctrl+z", "Toggle zen mode", emit("toggle_zen_mode"))
 	r.Register(CtxREPL, "ctrl+x n", "New session", emit("new_session"))
 	r.Register(CtxREPL, "ctrl+x r", "Session list", emit("session_list"))
 	r.Register(CtxREPL, "ctrl+x m", "Select model", emit("cycle_model"))

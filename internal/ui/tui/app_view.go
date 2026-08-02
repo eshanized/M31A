@@ -71,8 +71,14 @@ func (m *AppState) renderFrameForScreen(targetScreen Screen) string {
 		}
 	}
 
-	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
-	return m.applySidebar(main, sidebarStr, targetScreen)
+	var main string
+	if m.zenMode {
+		main = content
+		return main
+	} else {
+		main = layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
+		return m.applySidebar(main, sidebarStr, targetScreen)
+	}
 }
 
 // buildSidebarAndChrome computes sidebar state and returns the PageChrome dimensions.
@@ -297,9 +303,15 @@ func (m *AppState) renderFrameWithTheme(t theme.Theme) string {
 	}
 
 	// Compose the full page
-	main := layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
-
-	return m.applySidebar(main, sidebarStr, m.screen)
+	var main string
+	if m.zenMode {
+		// In zen mode, just render the content to fill everything
+		main = content
+		return main // no sidebar, no chrome
+	} else {
+		main = layout.RenderPage(chrome, content, headerInfo, footerInfo, t, m.themeManager.Cache())
+		return m.applySidebar(main, sidebarStr, m.screen)
+	}
 }
 
 // buildHeaderInfo constructs the unified header data from AppState.

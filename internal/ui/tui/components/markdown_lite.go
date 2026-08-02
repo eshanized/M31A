@@ -10,7 +10,7 @@ import (
 // LightweightMarkdown provides fast inline markdown rendering for streaming
 // content. Unlike Glamour, it does not re-parse the entire document on every
 // tick — it applies simple regex-free string scans for the most common
-// inline formatting primitives. This keeps streaming at 10fps without
+// inline formatting primitives. This keeps streaming at 60fps without
 // the O(n) cost of a full markdown pipeline.
 type LightweightMarkdown struct {
 	boldStyle     lipgloss.Style

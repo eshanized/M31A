@@ -56,7 +56,7 @@ type StreamErrorMsg struct {
 	ProviderName string
 }
 
-// TickMsg drives streaming render ticks at ~10fps.
+// TickMsg drives streaming render ticks at ~60fps.
 type TickMsg struct {
 	Time time.Time
 }
@@ -204,10 +204,10 @@ func StartStreamCmd(ctx context.Context, p provider.LLMProvider, req provider.Ch
 	return cmd, streamCh
 }
 
-// StreamTickCmd returns a tea.Cmd that emits a TickMsg at ~10fps.
+// StreamTickCmd returns a tea.Cmd that emits a TickMsg at ~60fps.
 // Used to drive streaming render updates.
 func StreamTickCmd() tea.Cmd {
-	return tea.Tick(time.Second/10, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Second/60, func(t time.Time) tea.Msg {
 		return TickMsg{Time: t}
 	})
 }

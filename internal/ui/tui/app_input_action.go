@@ -37,6 +37,16 @@ func (m *AppState) handleKeyAction(action string) tea.Cmd {
 			m.subagentsVisible = !m.subagentsVisible
 		}
 		return nil
+	case "toggle_zen_mode":
+		m.zenMode = !m.zenMode
+		if m.zenMode {
+			// Ensure sidebar is hidden in zen mode
+			if m.sidebarModel != nil && m.sidebarModel.IsVisible() {
+				m.sidebarModel.Toggle()
+			}
+		}
+		m.handleWindowResize(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		return nil
 	case "toggle_sidebar":
 		if m.sidebarModel != nil {
 			m.sidebarModel.Toggle()

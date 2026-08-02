@@ -85,7 +85,7 @@ func ansiPalette() Theme {
 }
 
 // M31A returns the single official M31A theme.
-// Apple-inspired: calm, elegant, premium, understated.
+// Everblush theme.
 func M31A() Theme {
 	t := Theme{
 		Mode:              ModeDark,

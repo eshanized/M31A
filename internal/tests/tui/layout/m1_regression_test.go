@@ -111,45 +111,6 @@ func TestM1_HeaderWidthExact(t *testing.T) {
 	}
 }
 
-// ─── M1 Footer Simplification Tests ────────────────────────────────────────────
-
-func TestM1_FooterNoCost(t *testing.T) {
-	t.Parallel()
-	tm := theme.Default()
-	cache := theme.NewStyleCache(tm)
-	info := layout.FooterInfo{
-		Cwd:           "project",
-		Cost:          0.05,
-		ShowCost:      true,
-		TokenCount:    5000,
-		KeyboardHints: []string{"ctrl+p cmds"},
-	}
-	footer := layout.BuildFooter(info, 80, layout.Full, tm, cache)
-
-	if strings.Contains(footer, "$") {
-		t.Error("Simplified footer should not contain cost")
-	}
-	if strings.Contains(footer, "ctx") {
-		t.Error("Simplified footer should not contain token count")
-	}
-}
-
-func TestM1_FooterNoContextRing(t *testing.T) {
-	t.Parallel()
-	tm := theme.Default()
-	cache := theme.NewStyleCache(tm)
-	info := layout.FooterInfo{
-		Cwd:        "project",
-		TokenCount: 5000,
-		ShowCost:   true,
-	}
-	footer := layout.BuildFooter(info, 80, layout.Full, tm, cache)
-
-	// Context ring uses █ and ░ characters
-	if strings.Contains(footer, "█") || strings.Contains(footer, "░") {
-		t.Error("Simplified footer should not contain context ring")
-	}
-}
 
 func TestM1_FooterShowsCwd(t *testing.T) {
 	t.Parallel()
@@ -175,20 +136,6 @@ func TestM1_FooterShowsGitBranch(t *testing.T) {
 	}
 }
 
-func TestM1_FooterShowsHints(t *testing.T) {
-	t.Parallel()
-	tm := theme.Default()
-	cache := theme.NewStyleCache(tm)
-	info := layout.FooterInfo{
-		Cwd:           "project",
-		KeyboardHints: []string{"ctrl+p cmds", "ctrl+b sidebar"},
-	}
-	footer := layout.BuildFooter(info, 80, layout.Full, tm, cache)
-
-	if !strings.Contains(footer, "ctrl+p") {
-		t.Error("Footer must contain keyboard hints")
-	}
-}
 
 func TestM1_FooterCompactNoHints(t *testing.T) {
 	t.Parallel()

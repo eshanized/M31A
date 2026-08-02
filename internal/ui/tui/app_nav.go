@@ -374,11 +374,15 @@ func (m *AppState) popScreen() tea.Cmd {
 // the unified chrome (header+footer) and the sidebar when visible.
 func (m *AppState) contentDimensions() (w, h int) {
 	w = m.width
-	h = m.height - layout.ChromeHeight
+	if m.zenMode {
+		h = m.height
+	} else {
+		h = m.height - layout.ChromeHeight
+	}
 	if h < 1 {
 		h = 1
 	}
-	if m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(m.width) {
+	if !m.zenMode && m.sidebarModel != nil && m.sidebarModel.IsVisible() && layout.ShowSidebar(m.width) {
 		sidebarW := m.sidebarModel.GetWidth()
 		if sidebarW > 0 && sidebarW < w {
 			w -= sidebarW
@@ -387,7 +391,7 @@ func (m *AppState) contentDimensions() (w, h int) {
 	if w < 1 {
 		w = 1
 	}
-	slog.Debug("contentDimensions", "terminalW", m.width, "terminalH", m.height, "contentW", w, "contentH", h, "sidebarVisible", m.sidebarModel != nil && m.sidebarModel.IsVisible(), "showSidebar", layout.ShowSidebar(m.width))
+	slog.Debug("contentDimensions", "terminalW", m.width, "terminalH", m.height, "contentW", w, "contentH", h, "sidebarVisible", m.sidebarModel != nil && m.sidebarModel.IsVisible(), "showSidebar", layout.ShowSidebar(m.width), "zenMode", m.zenMode)
 	return w, h
 }
 

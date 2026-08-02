@@ -70,6 +70,7 @@ var _ workflow.MsgEmitter = (*channelEmitter)(nil)
 // single-threaded access to the model, so no mutex is needed.
 type AppState struct {
 	// Layout
+	zenMode bool
 	width  int
 	height int
 

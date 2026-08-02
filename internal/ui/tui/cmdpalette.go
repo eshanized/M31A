@@ -61,6 +61,41 @@ func BuildPaletteEntries(registry *CommandRegistry) []PaletteEntry {
 
 	// Shortcut map for common key bindings — synced with actual registered
 	// keybindings in keybindings_screens.go (D-23 fix).
+	// Prepend some extra Omnibar functionalities to the registry for immediate access
+	entries = append(entries, PaletteEntry{
+		Cmd: CommandInfo{
+			Name:        "Find file",
+			Description: "Search and open a file from the repository",
+			Slash:       "/files",
+			Execute: func() tea.Cmd {
+				return func() tea.Msg { return SlashCommandMsg{Command: "/files"} }
+			},
+		},
+		Category: CatCore,
+	})
+	entries = append(entries, PaletteEntry{
+		Cmd: CommandInfo{
+			Name:        "Switch model",
+			Description: "Change the active model",
+			Slash:       "/model",
+			Execute: func() tea.Cmd {
+				return func() tea.Msg { return SlashCommandMsg{Command: "/model"} }
+			},
+		},
+		Category: CatAI,
+	})
+	entries = append(entries, PaletteEntry{
+		Cmd: CommandInfo{
+			Name:        "Jump to past session",
+			Description: "View and resume past sessions",
+			Slash:       "/sessions",
+			Execute: func() tea.Cmd {
+				return func() tea.Msg { return SlashCommandMsg{Command: "/sessions"} }
+			},
+		},
+		Category: CatSession,
+	})
+
 	shortcuts := map[string]string{
 		"help":           "?",
 		"model":          "ctrl+x m",
