@@ -82,7 +82,7 @@ func TestWebSearch_ExecuteQueryTooLong(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for query too long")
 	}
-if !contains(err.Error(), "query too long") {
+	if !contains(err.Error(), "query too long") {
 		t.Errorf("expected 'query too long' error, got %q", err.Error())
 	}
 }
@@ -95,10 +95,10 @@ func TestWebSearch_ExecuteMaxResultsBounds(t *testing.T) {
 		w.Write([]byte(`{"results": [{"title": "Test", "url": "https://example.com", "content": "content", "engine": "google"}]}`))
 	}))
 	defer server.Close()
-	
+
 	ws := NewWebSearch(server.URL)
 	ws.SetAllowPrivateIPs(true)
-	
+
 	// Test max_results < 1 (should clamp to 1)
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -112,7 +112,7 @@ func TestWebSearch_ExecuteMaxResultsBounds(t *testing.T) {
 	if result.Error != "" {
 		t.Errorf("unexpected error: %s", result.Error)
 	}
-	
+
 	// Test max_results > MaxSearchResults (should clamp to MaxSearchResults)
 	result, err = ws.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
@@ -133,7 +133,7 @@ func TestWebSearch_BaseURL(t *testing.T) {
 	if ws.BaseURL() != "https://custom.search.example" {
 		t.Errorf("expected 'https://custom.search.example', got %q", ws.BaseURL())
 	}
-	
+
 	// Test default
 	ws2 := NewWebSearch("")
 	if ws2.BaseURL() != DefaultSearchBaseURL {
@@ -143,7 +143,7 @@ func TestWebSearch_BaseURL(t *testing.T) {
 
 func TestWebSearch_BuildURL(t *testing.T) {
 	ws := NewWebSearch("https://search.example.com")
-	
+
 	urlStr, err := ws.BuildURL("test query", map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -161,7 +161,7 @@ func TestWebSearch_BuildURL(t *testing.T) {
 
 func TestWebSearch_BuildURLWithEngines(t *testing.T) {
 	ws := NewWebSearch("https://search.example.com")
-	
+
 	urlStr, err := ws.BuildURL("test query", map[string]any{
 		"engines": "google,bing",
 	})
@@ -207,10 +207,10 @@ func TestWebSearch_ExecuteWithMockServer(t *testing.T) {
 		w.Write([]byte(`{"results": [{"title": "Test Result", "url": "https://example.com", "content": "Test content", "engine": "google"}]}`))
 	}))
 	defer server.Close()
-	
+
 	ws := NewWebSearch(server.URL)
 	ws.SetAllowPrivateIPs(true)
-	
+
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"query": "test",
@@ -248,10 +248,10 @@ func TestWebSearch_ExecuteTruncatesResults(t *testing.T) {
 		w.Write([]byte(`{"results": ` + toJSON(results) + `}`))
 	}))
 	defer server.Close()
-	
+
 	ws := NewWebSearch(server.URL)
 	ws.SetAllowPrivateIPs(true)
-	
+
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"query":       "test",
@@ -277,10 +277,10 @@ func TestWebSearch_ExecuteNoResults(t *testing.T) {
 		w.Write([]byte(`{"results": []}`))
 	}))
 	defer server.Close()
-	
+
 	ws := NewWebSearch(server.URL)
 	ws.SetAllowPrivateIPs(true)
-	
+
 	result, err := ws.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"query": "test",
@@ -329,4 +329,3 @@ func toJSON(v any) string {
 	}
 	return "[]"
 }
-

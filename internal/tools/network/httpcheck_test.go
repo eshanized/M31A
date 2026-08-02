@@ -63,7 +63,7 @@ func TestHTTPCheck_ExecuteWrongStatus(t *testing.T) {
 
 	result, err := h.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
-			"url":            server.URL,
+			"url":             server.URL,
 			"expected_status": 200,
 		},
 	})

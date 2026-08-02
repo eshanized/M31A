@@ -53,7 +53,7 @@ func TestWebFetch_ExecuteInvalidURL(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid url")
 	}
-	// The error message might be "tool execution failed: only http/https URLs are supported" 
+	// The error message might be "tool execution failed: only http/https URLs are supported"
 	// or "invalid URL" depending on validation order
 	if !contains(err.Error(), "invalid URL") && !contains(err.Error(), "only http/https") {
 		t.Errorf("expected URL validation error, got %q", err.Error())
@@ -169,7 +169,7 @@ func TestIsPrivateIPFromHost(t *testing.T) {
 
 func TestWebFetch_ResolveAndCheck(t *testing.T) {
 	wf := NewWebFetch("", 30, nil)
-	
+
 	// Test with private IP
 	err := wf.ResolveAndCheck(context.Background(), "http://10.0.0.1")
 	if err == nil {
@@ -178,7 +178,7 @@ func TestWebFetch_ResolveAndCheck(t *testing.T) {
 	if !contains(err.Error(), "private IP not allowed") {
 		t.Errorf("expected 'private IP not allowed' error, got %q", err.Error())
 	}
-	
+
 	// Test with public domain (will fail DNS but should not block on private IP check)
 	err = wf.ResolveAndCheck(context.Background(), "http://example.com")
 	// This might fail due to DNS, but should not be a private IP error
@@ -190,7 +190,7 @@ func TestWebFetch_ResolveAndCheck(t *testing.T) {
 func TestWebFetch_DNSCache(t *testing.T) {
 	dnsCache := NewDNSCache(5*time.Minute, 64)
 	_ = NewWebFetch("", 30, dnsCache)
-	
+
 	// Test that DNSCache is properly initialized
 	if dnsCache == nil {
 		t.Error("expected DNSCache to be set")
@@ -200,12 +200,12 @@ func TestWebFetch_DNSCache(t *testing.T) {
 func TestWebFetch_ResolveAndCache(t *testing.T) {
 	dnsCache := NewDNSCache(5*time.Minute, 64)
 	wf := NewWebFetch("", 30, dnsCache)
-	
+
 	// Test resolveAndCache with a mock - we can't easily mock DNS resolution
 	// but we can verify the method exists and handles context cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Immediately cancel
-	
+
 	_, err := wf.ResolveAndCache(ctx, "example.com")
 	if err == nil {
 		t.Error("expected error for cancelled context")
@@ -215,13 +215,13 @@ func TestWebFetch_ResolveAndCache(t *testing.T) {
 func TestWebFetch_SetVersion(t *testing.T) {
 	// Reset version first
 	Version.Store("")
-	
+
 	SetVersion("test-1.0")
 	v := GetVersion()
 	if v != "test-1.0" {
 		t.Errorf("expected version 'test-1.0', got %q", v)
 	}
-	
+
 	// Reset
 	Version.Store("")
 }
@@ -229,10 +229,9 @@ func TestWebFetch_SetVersion(t *testing.T) {
 func TestWebFetch_GetVersionDefault(t *testing.T) {
 	// Reset version first
 	Version.Store("")
-	
+
 	v := GetVersion()
 	if v != "dev" {
 		t.Errorf("expected default version 'dev', got %q", v)
 	}
 }
-

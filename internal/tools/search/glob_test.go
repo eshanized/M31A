@@ -44,7 +44,7 @@ func TestGlob_ParameterSchema(t *testing.T) {
 func TestGlob_ExecuteMissingPattern(t *testing.T) {
 	workDir := t.TempDir()
 	g := NewGlob(workDir)
-	
+
 	_, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{},
 	})
@@ -63,9 +63,9 @@ func TestGlob_ExecuteSimplePattern(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(workDir, "file2.go"), []byte("content"), 0644)
 	_ = os.Mkdir(filepath.Join(workDir, "subdir"), 0755)
 	_ = os.WriteFile(filepath.Join(workDir, "subdir", "file3.txt"), []byte("content"), 0644)
-	
+
 	g := NewGlob(workDir)
-	
+
 	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "*.txt",
@@ -95,10 +95,10 @@ func TestGlob_ExecuteRecursivePattern(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(workDir, "a", "b", "c"), 0755)
 	_ = os.WriteFile(filepath.Join(workDir, "a", "b", "c", "deep.txt"), []byte("content"), 0644)
 	_ = os.WriteFile(filepath.Join(workDir, "a", "shallow.txt"), []byte("content"), 0644)
-	
+
 	g := NewGlob(workDir)
-	
-result, err := g.Execute(context.Background(), types.ToolInput{
+
+	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "**/*.txt",
 		},
@@ -122,11 +122,11 @@ func TestGlob_ExecuteWithPath(t *testing.T) {
 	subDir := filepath.Join(workDir, "subdir")
 	_ = os.Mkdir(subDir, 0755)
 	_ = os.WriteFile(filepath.Join(subDir, "test.txt"), []byte("content"), 0644)
-	
+
 	g := NewGlob(workDir)
-	
+
 	// Use recursive pattern to match files in subdirectories
-result, err := g.Execute(context.Background(), types.ToolInput{
+	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "**/*.txt",
 		},
@@ -146,9 +146,9 @@ func TestGlob_ExecuteTypeFilterFile(t *testing.T) {
 	workDir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(workDir, "file.txt"), []byte("content"), 0644)
 	_ = os.Mkdir(filepath.Join(workDir, "dir"), 0755)
-	
+
 	g := NewGlob(workDir)
-	
+
 	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "*",
@@ -173,9 +173,9 @@ func TestGlob_ExecuteTypeFilterDir(t *testing.T) {
 	workDir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(workDir, "file.txt"), []byte("content"), 0644)
 	_ = os.Mkdir(filepath.Join(workDir, "dir"), 0755)
-	
+
 	g := NewGlob(workDir)
-	
+
 	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "*",
@@ -199,7 +199,7 @@ func TestGlob_ExecuteTypeFilterDir(t *testing.T) {
 func TestGlob_ExecuteNoMatches(t *testing.T) {
 	workDir := t.TempDir()
 	g := NewGlob(workDir)
-	
+
 	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "*.nonexistent",
@@ -222,9 +222,9 @@ func TestGlob_ExecuteTruncation(t *testing.T) {
 	for i := 0; i < 1100; i++ {
 		_ = os.WriteFile(filepath.Join(workDir, fmt.Sprintf("file%d.txt", i)), []byte("content"), 0644)
 	}
-	
+
 	g := NewGlob(workDir)
-	
+
 	result, err := g.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"pattern": "*.txt",
@@ -240,4 +240,3 @@ func TestGlob_ExecuteTruncation(t *testing.T) {
 		t.Errorf("expected truncation message, got %q", result.Output)
 	}
 }
-

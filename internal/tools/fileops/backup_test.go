@@ -74,7 +74,7 @@ func TestPruneBackupsByPrefix_WrongPrefix(t *testing.T) {
 
 	PruneBackupsByPrefix(backupDir, prefix, 2)
 
-entries, _ := os.ReadDir(backupDir)
+	entries, _ := os.ReadDir(backupDir)
 	// Wrong prefix should not match, so no pruning
 	if len(entries) != 5 {
 		t.Errorf("expected 5 files (wrong prefix ignored), got %d: %v", len(entries), entries)
@@ -199,13 +199,13 @@ func TestToInt(t *testing.T) {
 
 func TestReplaceByLineRange(t *testing.T) {
 	tests := []struct {
-		name         string
-		content      string
-		startLine    int
-		endLine      int
-		newString    string
-		expected     string
-		expectError  bool
+		name        string
+		content     string
+		startLine   int
+		endLine     int
+		newString   string
+		expected    string
+		expectError bool
 	}{
 		{
 			name:      "replace middle lines",

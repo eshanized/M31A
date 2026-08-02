@@ -62,7 +62,7 @@ func TestIsReservedIP(t *testing.T) {
 		{"255.255.255.255", "255.255.255.255", true},
 		{"8.8.8.8", "8.8.8.8", false},
 		{"1.1.1.1", "1.1.1.1", false},
-		{"10.0.0.1", "10.0.0.1", false}, // Private, not reserved
+		{"10.0.0.1", "10.0.0.1", false},   // Private, not reserved
 		{"127.0.0.1", "127.0.0.1", false}, // Loopback, not reserved
 	}
 
