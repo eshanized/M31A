@@ -42,10 +42,12 @@ func TestBisectRollback_SoftResetIntegration(t *testing.T) {
 	}
 
 	// Create commit 3 (bad — the offender)
-	if err := writeAndCommit(g, dir, "bad.txt", "bad content\n", "commit 3: bad"); err != nil {
+	err = writeAndCommit(g, dir, "bad.txt", "bad content\n", "commit 3: bad")
+	if err != nil {
 		t.Fatalf("commit 3: %v", err)
 	}
-	hash3, err := g.HeadHash()
+	var hash3 string
+	hash3, err = g.HeadHash()
 	if err != nil {
 		t.Fatalf("head hash after commit 3: %v", err)
 	}
@@ -61,7 +63,8 @@ func TestBisectRollback_SoftResetIntegration(t *testing.T) {
 
 	// Call rollback.SoftReset with the bad commit (hash3)
 	// This does: git revert --no-commit <hash3> to undo commit 3's changes
-	if err := rollback.SoftReset(hash3, dir); err != nil {
+	err = rollback.SoftReset(hash3, dir)
+	if err != nil {
 		t.Fatalf("SoftReset failed: %v", err)
 	}
 
