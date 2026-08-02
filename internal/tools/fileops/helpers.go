@@ -8,7 +8,8 @@ import (
 )
 
 // pruneBackupsByPrefix removes the oldest backups matching the given prefix
-// when the count exceeds maxBackups.
+// when the count reaches maxBackups, to leave room for the new backup.
+// This ensures after adding the new backup, we have at most maxBackups total.
 func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -22,6 +23,7 @@ func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 		}
 	}
 
+	// Prune when we have maxBackups or more, to leave room for the new backup
 	if len(backups) < maxBackups {
 		return
 	}
@@ -36,8 +38,10 @@ func PruneBackupsByPrefix(backupDir, prefix string, maxBackups int) {
 		return iInfo.ModTime().Before(jInfo.ModTime())
 	})
 
-	// Remove oldest backups
-	for i := 0; i < len(backups)-maxBackups+1; i++ {
+	// Remove oldest backups to leave at most (maxBackups - 1) entries
+	// so that after adding the new backup we have at most maxBackups
+	keepCount := maxBackups - 1
+	for i := 0; i < len(backups)-keepCount; i++ {
 		_ = os.Remove(filepath.Join(backupDir, backups[i]))
 	}
 }
