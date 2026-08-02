@@ -125,10 +125,22 @@ Press and release the leader key, then press the chord key within 1 second.
 
 | Key | Action |
 |-----|--------|
-| `y` | Allow (this time) |
+| `y` | Allow once |
 | `a` | Allow for session |
+| `b` | Approve all |
 | `n` | Deny |
-| `e` | Exit |
+| `Enter` | Deny (safe default) |
+| `Esc` | Deny (safe default) |
+
+---
+
+## Execute Screen
+
+| Key | Action | Context |
+|-----|--------|---------|
+| `s` | Skip current task | Paused |
+| `c` | Cancel current task | Paused |
+| `x` | Cancel entire group | Paused |
 
 ---
 
