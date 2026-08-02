@@ -107,8 +107,8 @@ func TestEdit_ExecuteLineRange(t *testing.T) {
 	result, err := e.Execute(context.Background(), types.ToolInput{
 		Params: map[string]any{
 			"path":       "test.txt",
-			"start_line": 2,
-			"end_line":   3,
+			"start_line": float64(2),
+			"end_line":   float64(3),
 			"new_string": "replaced\nlines",
 		},
 	})
