@@ -171,6 +171,10 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 
 	// Line-level reading mode (offset is set)
 	if offset > 0 {
+		// Seek back to beginning for line-based reading
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return types.ToolResult{}, fmt.Errorf("%w: seek to start: %w", m31errors.ErrToolExecution, err)
+		}
 		return t.readLineRange(f, path, offset, maxLines, start)
 	}
 
