@@ -111,7 +111,6 @@ func TestM1_HeaderWidthExact(t *testing.T) {
 	}
 }
 
-
 func TestM1_FooterShowsCwd(t *testing.T) {
 	t.Parallel()
 	tm := theme.Default()
@@ -135,7 +134,6 @@ func TestM1_FooterShowsGitBranch(t *testing.T) {
 		t.Error("Footer must contain git branch")
 	}
 }
-
 
 func TestM1_FooterCompactNoHints(t *testing.T) {
 	t.Parallel()

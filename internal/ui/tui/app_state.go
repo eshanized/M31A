@@ -71,8 +71,8 @@ var _ workflow.MsgEmitter = (*channelEmitter)(nil)
 type AppState struct {
 	// Layout
 	zenMode bool
-	width  int
-	height int
+	width   int
+	height  int
 
 	// Screen routing
 	screen      Screen
