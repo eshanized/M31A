@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Released]
 
+## [1.7.1] - 2026-08-02
+
+### Added
+- **headless**: Implement `--goal` headless mode with full workflow execution
+- **bash**: Add process-level sandboxing to Bash tool execution
+- **git**: Implement dedicated Git tool with structured operations
+- **bash**: Add `workdir` parameter to Bash tool
+- **settings**: Add input validation to settings/config editors
+- **settings**: Unify settings systems with clear distinction
+- **execution**: Add pause/resume to execution loop
+- **workflow**: Add phase transition confirmation screens
+- **status**: Add running cost/time display
+- **permissions**: Implement persistent permission saving
+- **test**: Add regression tests for SwitchTo() timing fix
+
+### Fixed
+- **tui**: Fix SwitchTo() to set activeID unconditionally (routing fix)
+- **ci**: Resolve Windows build, security advisories, and disk quota
+- **ci**: Resolve all pre-existing test failures
+- **ci**: Resolve lint errors and test timeout
+- **ci**: Resolve deprecated APIs, test failures, and security vulnerability
+- **streaming**: Correct conditional block and message sending logic
+- **tui**: Fix decisions view to use cached snapshot via Update flow
+- **tokens**: Correct token estimation drift for non-OpenAI model families
+- **provider**: Eliminate sync.Map type assertion race in capability detection
+- **tui**: Move chatHistoryModel message setting from View to Update path
+- **build**: Fix installer URL construction to match goreleaser output
+- **bash**: Remove `$\(`, `${`, and backtick from bash obfuscation blocklist
+- **security**: Upgrade goldmark to v1.8.4 to resolve GO-2026-5320 XSS
+- **compat**: Replace deprecated os.SEEK_SET with io.SeekStart
+- **test**: Initialize session.Manager properly and cancel context in tests
+- **test**: Remove stale test references to deleted sentinel errors
+- **cleanup**: Remove dead exec constants, consolidate IP filter, Zen retry, FallbackPriority validation
+- **cleanup**: Add WorkflowEvent methods, remove dead constants/errors/placeholders
+- **config**: Fix permissions, config help, knownConfigKeys
+- **rollback**: Wire rollback.SoftReset into bisect failure path
+- **config**: Complete config merge for all missing fields
+
+### Changed
+- **refactor**: Remove unused branching_strategy config
+- **build**: Redirect Go temp files to user cache directory
+- **cleanup**: Remove .gitignore file for M31A session data
+- **refactor**: Remove dead production methods, interfaces, and constants (W44-W50)
+- **refactor**: Remove dead test utilities, mocks, fixtures, and re-exports (W33-W43)
+- **refactor**: Remove deprecated theme functions, buffer pool utils, unused re-exports
+- **tui**: Migrate Settings, Config, Discuss, Bisect, Dashboard, Plan, GoalInput, FileExplorer, GhostPicker, GhostOutput, PhaseModelPicker screens to Screenable interface and router
+- **router**: Finalize migration of several screens and remove ModelSelector router registration
+- **refactor**: Split large files — app_input.go, transition.go, helpers.go, firstrun_view.go, webfetch.go, execute.go, loader.go, app_view.go, sidebar_model.go
+- **arch**: Move pkg/* to internal/* and rewrite imports
+- **refactor**: Remove internal/types alias layer
+- **deps**: Bump golang.org/x/sys from 0.46.0 to 0.47.0
+- **deps**: Bump golang.org/x/sync from 0.21.0 to 0.22.0
+- **ci**: Update Go setup action to v7
+
+### Security
+- **xss**: Upgrade goldmark to v1.8.4 to resolve GO-2026-5320
+
 ## [1.7.0] - 2026-07-06
 
 ### Added
