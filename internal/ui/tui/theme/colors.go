@@ -11,6 +11,8 @@ import (
 type ColorProfile int
 
 const (
+	ProfileNone ColorProfile = -1 // NO_COLOR mode — no color output
+
 	ProfileTrueColor ColorProfile = iota
 	Profile256
 	Profile16
@@ -18,6 +20,11 @@ const (
 
 // DetectColorProfile determines terminal color capability from environment variables.
 func DetectColorProfile() ColorProfile {
+	// Respect NO_COLOR standard (https://no-color.org/)
+	if os.Getenv("NO_COLOR") != "" {
+		return ProfileNone
+	}
+
 	ct := os.Getenv("COLORTERM")
 	if ct == "truecolor" || ct == "24bit" {
 		return ProfileTrueColor

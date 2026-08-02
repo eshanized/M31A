@@ -177,7 +177,7 @@ func (m *Manager) resolve() {
 	base := M31A()
 
 	// Apply 16-color ANSI fallback if terminal doesn't support 256/truecolor
-	if m.profile == Profile16 {
+	if m.profile == Profile16 || m.profile == ProfileNone {
 		base = ansiPalette()
 		applyThemeStyles(&base)
 	}
