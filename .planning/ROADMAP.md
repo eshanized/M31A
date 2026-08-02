@@ -22,7 +22,9 @@ M31A has a solid Elm architecture foundation with Bubble Tea, but two critical w
   4. User can see error messages when they occur
   5. User sees a welcome screen when no messages exist
   6. User can see current model and provider in the status bar
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 01-01-PLAN.md — Fix Router.SwitchTo() timing bug + regression test
 **UI hint**: yes
 
 ### Phase 2: Dynamic Model Selection
@@ -42,5 +44,5 @@ M31A has a solid Elm architecture foundation with Bubble Tea, but two critical w
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Fix REPL Screen | 0/TBD | Not started | - |
+| 1. Fix REPL Screen | 0/1 | Not started | - |
 | 2. Dynamic Model Selection | 0/TBD | Not started | - |
