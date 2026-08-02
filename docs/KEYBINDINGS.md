@@ -204,6 +204,13 @@ Press and release the leader key, then press the chord key within 1 second.
 | `/getting-started` | Show getting-started guide |
 | `/quick` | Toggle quick mode for simple tasks |
 | `/skip` | Skip to a workflow phase |
+| `/refine` | Refine the current plan with feedback |
+| `/pending` | Show pending permission queue and batch approvals |
+| `/agent` | Spawn a parallel subagent (or list active) |
+| `/agent-cancel` | Cancel a running subagent |
+| `/complexity` | Show codebase complexity report |
+| `/decisions` | Show decision log for current session |
+| `/agent-mode` | Toggle autonomous agent mode |
 
 ---
 
