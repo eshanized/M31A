@@ -406,6 +406,18 @@ func (m *AppState) buildFooterInfo() layout.FooterInfo {
 		info.Operation = string(m.workflowPhase)
 	}
 
+	// Enriched status bar: workflow phase, active task, elapsed time
+	if m.workflowPhase != types.PhaseIdle && m.workflowPhase != "" {
+		info.WorkflowPhase = string(m.workflowPhase)
+	}
+	if m.executeModel != nil && m.executeModel.currentTask >= 0 &&
+		m.executeModel.currentTask < len(m.executeModel.tasks) {
+		info.ActiveTask = m.executeModel.tasks[m.executeModel.currentTask].Action
+	}
+	if m.executeModel != nil && !m.executeModel.startedAt.IsZero() {
+		info.ElapsedTime = time.Since(m.executeModel.startedAt)
+	}
+
 	// Leader key
 	if m.keyRegistry != nil && m.keyRegistry.IsLeaderActive() {
 		info.LeaderActive = true

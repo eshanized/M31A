@@ -2,6 +2,7 @@ package layout
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eshanized/M31A/internal/core/types"
@@ -21,15 +22,18 @@ type HeaderInfo struct {
 
 // FooterInfo carries the data needed to render the unified footer.
 type FooterInfo struct {
-	Cwd           string   // working directory basename
-	GitBranch     string   // current git branch
-	Operation     string   // "thinking...", "responding...", phase name
-	LeaderActive  bool     // leader key mode active
-	KeyboardHints []string // e.g. "ctrl+p commands"
-	TokenCount    int      // total tokens used
-	Cost          float64  // session cost
-	ShowCost      bool     // whether to display cost
-	SpinnerFrame  string   // animated spinner character
+	Cwd           string        // working directory basename
+	GitBranch     string        // current git branch
+	Operation     string        // "thinking...", "responding...", phase name
+	LeaderActive  bool          // leader key mode active
+	KeyboardHints []string      // e.g. "ctrl+p commands"
+	TokenCount    int           // total tokens used
+	Cost          float64       // session cost
+	ShowCost      bool          // whether to display cost
+	SpinnerFrame  string        // animated spinner character
+	WorkflowPhase string        // current workflow phase (e.g. "execute", "plan")
+	ActiveTask    string        // active task description during execution
+	ElapsedTime   time.Duration // elapsed time since current task started
 }
 
 // PageChrome holds the computed header and footer strings along with
@@ -180,6 +184,10 @@ func BuildFooter(info FooterInfo, width int, bp Breakpoint, t theme.Theme, cache
 		case info.LeaderActive:
 			center = s.FooterLeader.Render("LEADER") +
 				s.FooterOp.Render(" awaiting key")
+		case info.WorkflowPhase != "":
+			// Enriched status bar: "phase · task · elapsed"
+			opStr := buildStatusOpString(info)
+			center = s.FooterOp.Render(opStr)
 		case info.Operation != "":
 			spinner := info.SpinnerFrame
 			if spinner == "" {
@@ -378,4 +386,44 @@ func intToStr(n int) string {
 		return "-" + string(digits)
 	}
 	return string(digits)
+}
+
+// buildStatusOpString composes the enriched status bar string from phase, task, and elapsed.
+// Format: "phase · task · elapsed" when all three are present, or subsets thereof.
+func buildStatusOpString(info FooterInfo) string {
+	var parts []string
+	parts = append(parts, info.WorkflowPhase)
+	if info.ActiveTask != "" {
+		parts = append(parts, info.ActiveTask)
+	}
+	if info.ElapsedTime > 0 {
+		parts = append(parts, formatElapsed(info.ElapsedTime))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// formatElapsed formats a duration as a human-readable truncated string.
+// Examples: 0s → "0s", 65s → "1m 5s", 3725s → "1h 2m".
+func formatElapsed(d time.Duration) string {
+	totalSec := int(d.Seconds())
+	if totalSec < 60 {
+		return intToStr(totalSec) + "s"
+	}
+	hours := totalSec / 3600
+	minutes := (totalSec % 3600) / 60
+	seconds := totalSec % 60
+	if hours > 0 {
+		if seconds >= 30 {
+			minutes++
+			if minutes == 60 {
+				hours++
+				minutes = 0
+			}
+		}
+		return intToStr(hours) + "h " + intToStr(minutes) + "m"
+	}
+	if seconds > 0 {
+		return intToStr(minutes) + "m " + intToStr(seconds) + "s"
+	}
+	return intToStr(minutes) + "m"
 }
