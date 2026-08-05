@@ -293,6 +293,8 @@ Plans:
 
 Reduce maintenance cost while improving extensibility.
 
+**Requirements:** ARCH-01, API-01, DEBT-01, DEBT-02, DOC-01, DX-01, DX-02, DX-03
+
 ---
 
 ## Architecture
@@ -362,6 +364,17 @@ Improve:
 ## Exit Criteria
 
 New contributors can understand and modify the codebase confidently.
+
+---
+
+## Plans
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Engine.go split: decompose 1927-line file into 5 focused files by concern (pause, streaming, checkpoint, model, helpers)
+- [ ] 03-02-PLAN.md — Architecture documentation: update ARCHITECTURE.md, create CONVENTIONS.md, update CONCERNS.md
+- [ ] 03-03-PLAN.md — Developer experience: debug logging (slog), profiling (pprof), release automation (GoReleaser CI)
 
 ---
 
