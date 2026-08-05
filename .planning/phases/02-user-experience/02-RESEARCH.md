@@ -345,24 +345,24 @@ Verify the existing auto-approve logic matches D-12:
 
 > No claims tagged `[ASSUMED]` in this research. All findings were verified through direct codebase analysis.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should the status bar be the existing footer or a new element?**
+1. **Should the status bar be the existing footer or a new element?** (RESOLVED)
    - What we know: The footer already shows operation status in the center zone
    - What's unclear: Whether D-01 means extending the footer or adding a separate persistent bar
    - Recommendation: Extend the existing footer — it IS the bottom of the screen, and adding a second element would waste vertical space
 
-2. **How should collapsible sections interact with the viewport?**
+2. **How should collapsible sections interact with the viewport?** (RESOLVED)
    - What we know: `viewport.Model` tracks absolute line positions
    - What's unclear: Whether to reinitialize viewport on toggle or track section-relative offsets
    - Recommendation: Reinitialize viewport content on toggle (existing pattern in `PlanModel.initViewport()`)
 
-3. **Should batch approval apply across tasks or just within a task?**
+3. **Should batch approval apply across tasks or just within a task?** (RESOLVED)
    - What we know: `BatchApproval` struct has `ExpiresAt` for task-scoped expiry
    - What's unclear: Whether D-11 means per-task batch or cross-task batch
    - Recommendation: Per-task batch (existing behavior) — cross-task batch would reduce safety
 
-4. **Where does the tutorial appear in the screen flow?**
+4. **Where does the tutorial appear in the screen flow?** (RESOLVED)
    - What we know: `FirstRunCompleteMsg` transitions to REPL; `TourModel` component exists
    - What's unclear: Whether tutorial is a new screen or an overlay on the REPL
    - Recommendation: New screen (`ScreenTour`) that transitions to REPL on completion — keeps tutorial isolated and skippable
