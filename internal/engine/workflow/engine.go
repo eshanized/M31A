@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -565,7 +566,7 @@ func (e *Engine) Recover() error {
 
 	state, err := LoadRecoveryState(e.recoveryPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			// No recovery file — clean start, not an error
 			return nil
 		}

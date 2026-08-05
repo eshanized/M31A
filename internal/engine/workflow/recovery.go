@@ -28,7 +28,7 @@ type RecoveryState struct {
 
 // recoveryPath returns the path to the recovery file for the given session directory.
 func recoveryPath(sessionDir string) string {
-	return filepath.Join(sessionDir, ".m31a", "recovery.json")
+	return filepath.Join(sessionDir, "recovery.json")
 }
 
 // SaveRecoveryState snapshots the engine's workflow state and writes it atomically
@@ -55,6 +55,12 @@ func SaveRecoveryState(engine *Engine, path string) error {
 	data, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("marshal recovery state: %w", err)
+	}
+
+	// Ensure the parent directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create recovery directory: %w", err)
 	}
 
 	if err := fileutil.AtomicWrite(path, data); err != nil {
