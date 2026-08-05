@@ -1535,12 +1535,6 @@ func (e *Engine) buildSystemPrompt(extra ...string) string {
 	return e.contextBuilder.BuildSystemPrompt(string(e.stateMachine.CurrentPhase()), extra...)
 }
 
-// renderDynamicContext formats a context snapshot map into a prompt section.
-// Delegates to ContextBuilder.
-func (e *Engine) renderDynamicContext(snapshot map[string]string) string {
-	return e.contextBuilder.renderDynamicContext(snapshot)
-}
-
 // getCodeIntel lazily builds the codebase intelligence indexer.
 // Returns nil if building fails or the workDir is empty.
 // The caller's context is used for the build, so cancellation propagates.
