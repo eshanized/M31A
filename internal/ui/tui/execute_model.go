@@ -411,6 +411,12 @@ func (em *ExecuteModel) renderTasks() string {
 		}
 		num := lineStyle.Foreground(t.TextMuted).Render(fmt.Sprintf("%3d.", i+1))
 		action := lineStyle.Foreground(t.Text).Render(task.Action)
+
+		// Highlight the current executing task with distinct styling (D-07)
+		if em.currentTask >= 0 && em.tasks[i].ID == em.tasks[em.currentTask].ID && task.Status == types.StatusRunning {
+			action = lipgloss.NewStyle().Foreground(t.Brand).Bold(true).Render("▸ " + task.Action)
+		}
+
 		lines = append(lines, fmt.Sprintf("  %s %s %s%s", num, statusBadge, action, spinner))
 
 		// Show live output for the currently running task

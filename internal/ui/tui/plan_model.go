@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,6 +37,13 @@ type PlanModel struct {
 	confirmMode bool
 	refineMode  bool
 	refineInput *PlanRefineModel
+	// Collapsible wave sections
+	collapsed    map[int]bool // wave index → collapsed state
+	focusWave    int          // currently focused wave for keyboard nav
+	// Inline editing
+	editingTask int // index of task being edited (-1 = none)
+	// Time estimates per task
+	taskDurations []time.Duration
 }
 
 // NewPlanModel creates a PlanModel.
@@ -57,8 +65,12 @@ func NewPlanModel(
 		costEstimate: costEstimate,
 		width:        w,
 		height:       h,
+		collapsed:    make(map[int]bool),
+		focusWave:    0,
+		editingTask:  -1,
 	}
 	pm.computeWaves()
+	pm.computeTimeEstimates()
 	pm.initViewport()
 	return pm
 }
@@ -74,6 +86,65 @@ func (pm *PlanModel) SetPlanContent(markdown string) {
 // SetPlanVersion sets the plan version number for display.
 func (pm *PlanModel) SetPlanVersion(version int) {
 	pm.planVersion = version
+}
+
+// toggleCollapse toggles the collapsed state of a wave section.
+func (pm *PlanModel) toggleCollapse(waveIdx int) {
+	pm.collapsed[waveIdx] = !pm.collapsed[waveIdx]
+	pm.refreshContent()
+}
+
+// expandAll expands all wave sections.
+func (pm *PlanModel) expandAll() {
+	for k := range pm.collapsed {
+		pm.collapsed[k] = false
+	}
+	pm.refreshContent()
+}
+
+// collapseAll collapses all wave sections.
+func (pm *PlanModel) collapseAll() {
+	for k := range pm.collapsed {
+		pm.collapsed[k] = true
+	}
+	pm.refreshContent()
+}
+
+// refreshContent recomputes the viewport content from the current state.
+func (pm *PlanModel) refreshContent() {
+	if pm.planContent == "" {
+		pm.viewport.SetContent(pm.renderTasks())
+	}
+}
+
+// computeTimeEstimates calculates rough time estimates for each task.
+func (pm *PlanModel) computeTimeEstimates() {
+	pm.taskDurations = make([]time.Duration, len(pm.tasks))
+	for i, task := range pm.tasks {
+		pm.taskDurations[i] = computeTaskDuration(task)
+	}
+}
+
+// computeTaskDuration returns a rough time estimate based on task complexity.
+func computeTaskDuration(task types.Task) time.Duration {
+	depCount := len(task.Dependencies)
+	descLen := len(task.Description)
+	if depCount > 2 || descLen > 100 {
+		return 8 * time.Minute
+	}
+	if depCount >= 1 {
+		return 5 * time.Minute
+	}
+	return 2 * time.Minute
+}
+
+// formatDurationShort formats a duration as a short string like "~5 min".
+func formatDurationShort(d time.Duration) string {
+	mins := int(d.Minutes())
+	if mins == 0 {
+		return "~1 min"
+	}
+	return fmt.Sprintf("~%d min", mins)
 }
 
 // computeWaves groups tasks into topological layers for visual display.
@@ -156,12 +227,23 @@ func (pm *PlanModel) computeWaves() {
 		}
 		pm.waves[w] = append(pm.waves[w], t)
 	}
+
+	// Initialize collapsed state for new waves
+	if pm.collapsed == nil {
+		pm.collapsed = make(map[int]bool)
+	}
+	for i := range pm.waves {
+		if _, exists := pm.collapsed[i]; !exists {
+			pm.collapsed[i] = false
+		}
+	}
 }
 
 // UpdateTasks replaces the task list and recomputes waves.
 func (pm *PlanModel) UpdateTasks(tasks []types.Task) {
 	pm.tasks = tasks
 	pm.computeWaves()
+	pm.computeTimeEstimates()
 	if pm.planContent == "" {
 		pm.viewport.SetContent(pm.renderTasks())
 	}
@@ -226,6 +308,12 @@ func (pm *PlanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pm.viewport.LineDown(1)
 		case "k", "up":
 			pm.viewport.LineUp(1)
+		case "c":
+			pm.toggleCollapse(pm.focusWave)
+		case "C":
+			pm.collapseAll()
+		case "E":
+			pm.expandAll()
 		case "enter":
 			pm.confirmMode = true
 			return pm, nil
@@ -341,6 +429,28 @@ func (pm *PlanModel) renderTasks() string {
 		default:
 			badgeType = components.BadgeNeutral
 		}
+
+		// Compute total time for this wave
+		var totalDuration time.Duration
+		for _, task := range wave {
+			totalDuration += computeTaskDuration(task)
+		}
+		totalTimeStr := formatDurationShort(totalDuration)
+		taskCount := len(wave)
+
+		// Collapsed section: show summary header only
+		if pm.collapsed[waveIdx] {
+			summaryBadge := components.SimpleBadge{
+				Text:    fmt.Sprintf("▸ Wave %d — %s (%d tasks, %s total)", waveIdx+1, waveTitle(waveIdx), taskCount, totalTimeStr),
+				Type:    badgeType,
+				Compact: true,
+				Theme:   t,
+			}
+			lines = append(lines, "", "  "+summaryBadge.Render())
+			continue
+		}
+
+		// Expanded section
 		badge := components.SimpleBadge{
 			Text:    fmt.Sprintf("Wave %d — %s", waveIdx+1, waveTitle(waveIdx)),
 			Type:    badgeType,
@@ -350,10 +460,17 @@ func (pm *PlanModel) renderTasks() string {
 		sectionHeader := "  " + badge.Render()
 		lines = append(lines, "", sectionHeader)
 
-		for _, task := range wave {
+		for localIdx, task := range wave {
 			iconColor := color
 			icon := lipgloss.NewStyle().Foreground(iconColor).Render("○")
 			action := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(task.Action)
+
+			// Time estimate
+			taskIdx := pm.taskIndex(task)
+			timeEst := ""
+			if taskIdx >= 0 && taskIdx < len(pm.taskDurations) {
+				timeEst = " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(formatDurationShort(pm.taskDurations[taskIdx]))
+			}
 
 			desc := ""
 			if task.Description != "" {
@@ -374,12 +491,23 @@ func (pm *PlanModel) renderTasks() string {
 				depStr = " " + lipgloss.NewStyle().Foreground(t.TextMuted).Render("⇢ "+strings.Join(depIDs, ", "))
 			}
 
-			line := fmt.Sprintf("    %s %s%s%s", icon, action, desc, depStr)
+			line := fmt.Sprintf("    %s %s%s%s%s", icon, action, desc, depStr, timeEst)
+			_ = localIdx
 			lines = append(lines, line)
 		}
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// taskIndex returns the index of a task in pm.tasks by matching ID.
+func (pm *PlanModel) taskIndex(task types.Task) int {
+	for i, t := range pm.tasks {
+		if t.ID == task.ID {
+			return i
+		}
+	}
+	return -1
 }
 
 func waveTitle(idx int) string {
