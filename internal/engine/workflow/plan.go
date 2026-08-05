@@ -171,6 +171,9 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 		e.logger.Warn("save plan.md failed", "error", err)
 	}
 
+	// Persist recovery state after plan content is set for crash safety
+	e.persistRecovery()
+
 	// Prepare plan file for agent switching (plan mode → build mode)
 	if planPath, err := e.PreparePlanFile(planMarkdown); err == nil {
 		e.emit(AgentSwitchMsg{

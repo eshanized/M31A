@@ -111,6 +111,9 @@ type Engine struct {
 	ctx context.Context
 	// cancel cancels the running workflow context on shutdown.
 	cancel context.CancelFunc
+	// recoveryPath is the path to the recovery state file for this session.
+	// Set during initialization to sessionDir/.m31a/recovery.json.
+	recoveryPath string
 
 	// pause/resume support for execute phase
 	pauseMu       sync.Mutex
@@ -552,6 +555,65 @@ func (e *Engine) GetCheckpointData() *CheckpointData {
 	return e.state.CheckpointData()
 }
 
+// Recover attempts to restore engine state from a persisted recovery file.
+// Returns nil on successful recovery or if no recovery file exists (clean start).
+// Returns an error only when a recovery file exists but is corrupted or invalid.
+func (e *Engine) Recover() error {
+	if e.recoveryPath == "" {
+		return nil
+	}
+
+	state, err := LoadRecoveryState(e.recoveryPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No recovery file — clean start, not an error
+			return nil
+		}
+		return fmt.Errorf("load recovery state: %w", err)
+	}
+
+	// Restore engine state from recovery
+	e.state.SetPlanContent(state.PlanMarkdown)
+	e.state.SetPlanVersion(state.PlanVersion)
+	e.state.SetMessages(state.Messages)
+	e.state.SetCurrentGoal(state.Goal)
+	e.state.SetCheckpointData(state.Checkpoint)
+	e.stateMachine.SetPhase(state.CurrentPhase)
+
+	slog.Info("recovered from persisted state",
+		"phase", state.CurrentPhase,
+		"plan_version", state.PlanVersion,
+		"messages", len(state.Messages),
+		"timestamp", state.Timestamp,
+	)
+
+	return nil
+}
+
+// ClearRecovery removes the recovery file. Called after successful phase completion
+// to prevent stale recovery data from being loaded on the next session start.
+func (e *Engine) ClearRecovery() error {
+	if e.recoveryPath == "" {
+		return nil
+	}
+	if err := os.Remove(e.recoveryPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove recovery file: %w", err)
+	}
+	return nil
+}
+
+// persistRecovery saves the current engine state to the recovery file.
+// This is called at key persistence points (before phase transitions, after
+// plan content changes, after significant message batches).
+func (e *Engine) persistRecovery() {
+	if e.recoveryPath == "" {
+		return
+	}
+	if err := SaveRecoveryState(e, e.recoveryPath); err != nil {
+		slog.Warn("failed to persist recovery state", "error", err)
+	}
+}
+
 // ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
 // directory and stores the path for later injection into the plan/execute context.
 // Returns the path to the extracted template, or an error if extraction fails.
@@ -621,6 +683,9 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 	// long-running operations that use Engine.WithContext().
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Build recovery path from session directory
+	sessDir := filepath.Join(opts.WorkDir, ".m31a")
+
 	e := &Engine{
 		sessionID:     opts.SessionID,
 		workDir:       opts.WorkDir,
@@ -650,6 +715,7 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		done:         make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,
+		recoveryPath: recoveryPath(sessDir),
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},
@@ -857,6 +923,10 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	e.toolCallsSinceLastCompact = 0
 
 	from := e.stateMachine.CurrentPhase()
+
+	// Persist recovery state before phase transition for crash safety
+	e.persistRecovery()
+
 	if transitionErr := e.stateMachine.Transition(from, phase); transitionErr != nil {
 		return nil, fmt.Errorf("phase transition to %s: %w", phase, transitionErr)
 	}
@@ -888,6 +958,13 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 
 	// Delegate post-phase metrics to PhaseCoordinator
 	e.phaseCoordinator.PostPhaseExecution(phase, result, start)
+
+	// Clear recovery on successful phase completion
+	if result != nil && result.Success {
+		if err := e.ClearRecovery(); err != nil {
+			slog.Warn("failed to clear recovery state", "error", err)
+		}
+	}
 
 	return result, err
 }
