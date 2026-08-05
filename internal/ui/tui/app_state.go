@@ -142,6 +142,7 @@ type AppState struct {
 	resumeModel   *ResumeModel
 	msModel       *ModelSelector
 	firstRunModel *FirstRunModel
+	tourModel     *components.TourModel
 	goalInput     *GoalInputModel
 	ledgerModel   *LedgerModel
 	rollbackModel *RollbackModel
@@ -462,15 +463,10 @@ func (m *AppState) handleFirstRunComplete(msg FirstRunCompleteMsg) tea.Cmd {
 		}
 	}
 
-	// Sync REPL provider+model so chat works immediately
-	m.screen = ScreenREPL
-	m.ensureReplModel()
-	var cmds []tea.Cmd
-	if providerCmd := m.syncReplProvider(m.sessionID); providerCmd != nil {
-		cmds = append(cmds, providerCmd)
-	}
-	cmds = append(cmds, m.startNewSession())
-	return tea.Batch(cmds...)
+	// Transition to the feature tour instead of directly to REPL
+	m.tourModel = components.NewTourModel(m.themeManager.Current(), m.width, m.height)
+	m.screen = ScreenTour
+	return nil
 }
 
 // switchScreen updates the current screen and notifies the router (if using new interface).

@@ -358,6 +358,7 @@ const (
 	ScreenHome             Screen = 32   // landing screen with logo, prompt, and tips
 	ScreenDecisions        Screen = 33   // decision log browser
 	ScreenPhaseTransition  Screen = 34   // phase transition confirmation
+	ScreenTour             Screen = 35   // first-run feature tour
 )
 
 // Label returns a human-readable name for the screen.
@@ -429,6 +430,8 @@ func (s Screen) Label() string {
 		return "Home"
 	case ScreenDecisions:
 		return "Decisions"
+	case ScreenTour:
+		return "Tour"
 	default:
 		return "Unknown"
 	}
@@ -504,6 +507,8 @@ func (s Screen) Name() string {
 		return "permission"
 	case ScreenDecisions:
 		return "decisions"
+	case ScreenTour:
+		return "tour"
 	default:
 		return ""
 	}

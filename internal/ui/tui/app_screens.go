@@ -167,6 +167,14 @@ func (m *AppState) renderFirstRunContent(chrome layout.PageChrome) string {
 	return m.firstRunModel.View()
 }
 
+func (m *AppState) renderTourContent(chrome layout.PageChrome) string {
+	if m.tourModel == nil {
+		m.tourModel = components.NewTourModel(m.themeManager.Current(), chrome.ContentWidth(), chrome.ContentHeight())
+	}
+	m.tourModel.SetDimensions(chrome.ContentWidth(), chrome.ContentHeight())
+	return m.tourModel.Render()
+}
+
 func (m *AppState) renderLedgerContent(chrome layout.PageChrome) string {
 	// Ensure Ledger is registered with router
 	if m.ledgerModel == nil {

@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/workflow"
+	"github.com/eshanized/M31A/internal/ui/tui/components"
 )
 
 // app_routing.go — consolidated screen routing infrastructure.
@@ -469,6 +470,33 @@ func (m *AppState) initScreenUpdaters() {
 			m.homeModel = r
 		}
 		return cmd
+	}
+
+	// ScreenTour handles the first-run feature tour.
+	m.screenUpdaters[ScreenTour] = func(msg tea.Msg) tea.Cmd {
+		if m.tourModel == nil {
+			cw, ch := m.contentDimensions()
+			m.tourModel = components.NewTourModel(m.themeManager.Current(), cw, ch)
+		}
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "esc":
+				m.tourModel.Skip()
+			case "enter":
+				if m.tourModel.Next() {
+					// Tour completed — transition to REPL
+					m.screen = ScreenREPL
+					m.ensureReplModel()
+					var cmds []tea.Cmd
+					if providerCmd := m.syncReplProvider(m.sessionID); providerCmd != nil {
+						cmds = append(cmds, providerCmd)
+					}
+					cmds = append(cmds, m.startNewSession())
+					return tea.Batch(cmds...)
+				}
+			}
+		}
+		return nil
 	}
 
 	// ScreenDecisions uses a lightweight DecisionScreen wrapper for router registration.

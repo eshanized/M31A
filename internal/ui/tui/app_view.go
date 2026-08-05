@@ -180,6 +180,8 @@ func (m *AppState) renderScreenContent(screen Screen, chrome layout.PageChrome) 
 		return m.renderChatHistoryContent(chrome)
 	case ScreenCommandPalette:
 		return m.renderCommandPaletteContent(chrome)
+	case ScreenTour:
+		return m.renderTourContent(chrome)
 	case ScreenHome:
 		return m.renderHomeContent(chrome)
 	case ScreenDecisions:

@@ -33,18 +33,28 @@ func NewTourModel(t theme.Theme, w, h int) *TourModel {
 			Illustration: "◆  M 3 1 A",
 		},
 		{
-			Title:        "How it works",
-			Description:  "M31A follows a structured workflow:\n\n  Discuss  →  Plan  →  Execute  →  Verify  →  Ship\n\nEach step is automated. You review and approve key decisions.",
+			Title:        "Your Workflow",
+			Description:  "M31A follows a 7-phase pipeline:\n\n  Initialize → Discuss → Plan → Execute → Verify → Runtime → Ship\n\nEach phase is automated. You review and approve key decisions.",
 			Illustration: "",
 		},
 		{
-			Title:        "Quick start",
-			Description:  "Type a task description to begin:\n\n  \"Fix the failing tests\"\n  \"Add error handling to the API\"\n  \"Explain this codebase architecture\"\n\nM31A will discuss, plan, and execute it.",
+			Title:        "Progress Visibility",
+			Description:  "The footer shows your current status at a glance:\n\n  Phase    — which workflow phase is active\n  Task     — the current executing task\n  Elapsed  — time spent on the current operation\n\nYou always know what M31A is doing.",
+			Illustration: "",
+		},
+		{
+			Title:        "Permission Prompts",
+			Description:  "M31A asks before running tools that modify your system.\n\n  SAFE         — read-only, auto-approved\n  CAUTION      — reversible changes\n  DESTRUCTIVE  — requires confirmation\n  DANGER       — irreversible operations\n\nYou stay in control of every action.",
 			Illustration: "",
 		},
 		{
 			Title:        "Navigation",
 			Description:  "  Esc        Go back / close overlay\n  j / k      Scroll up / down\n  Enter      Confirm / submit\n  ?          Show help\n  ctrl+p     Command palette\n  ctrl+b     Toggle sidebar",
+			Illustration: "",
+		},
+		{
+			Title:        "Your API Keys",
+			Description:  "Your API keys are configured and ready.\nM31A supports multiple providers:\n\n  OpenRouter   — access to many models\n  Zen          — fast inference\n  Nvidia       — GPU-powered responses\n\nYou can switch providers anytime with ctrl+m.",
 			Illustration: "",
 		},
 		{
