@@ -614,6 +614,53 @@ func (e *Engine) persistRecovery() {
 	}
 }
 
+// RollbackCurrentPhase saves current state as a recovery checkpoint and
+// transitions the state machine back to the previous phase in history.
+// Restores plan and messages from recovery state.
+// Returns error if rollback is not possible (e.g., already at Idle).
+// Rollback is idempotent — calling twice does not corrupt state.
+func (e *Engine) RollbackCurrentPhase() error {
+	if e.recoveryPath == "" {
+		return fmt.Errorf("recovery path not configured")
+	}
+
+	state, err := LoadRecoveryState(e.recoveryPath)
+	if err != nil {
+		return fmt.Errorf("load recovery state for rollback: %w", err)
+	}
+
+	// Verify we have enough history to rollback
+	if len(state.PhaseHistory) < 2 {
+		return fmt.Errorf("cannot rollback: recovery history has only %d entries", len(state.PhaseHistory))
+	}
+
+	// Save current state before rolling back (idempotency: if we crash mid-rollback,
+	// the recovery file still has the pre-rollback state)
+	e.persistRecovery()
+
+	// The previous phase is the second-to-last in history
+	previousPhase := state.PhaseHistory[len(state.PhaseHistory)-2]
+
+	// Restore engine state from recovery
+	e.state.SetPlanContent(state.PlanMarkdown)
+	e.state.SetPlanVersion(state.PlanVersion)
+	e.state.SetMessages(state.Messages)
+	e.state.SetCurrentGoal(state.Goal)
+	e.state.SetCheckpointData(state.Checkpoint)
+
+	// Transition state machine to the previous phase
+	e.phaseCoordinator.PostPhaseExecution(state.CurrentPhase, nil, time.Now())
+	e.stateMachine.SetPhase(previousPhase)
+
+	slog.Info("rolled back to previous phase",
+		"from", state.CurrentPhase,
+		"to", previousPhase,
+		"goal", truncateForLog(state.Goal, 100),
+	)
+
+	return nil
+}
+
 // ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
 // directory and stores the path for later injection into the plan/execute context.
 // Returns the path to the extracted template, or an error if extraction fails.
@@ -961,8 +1008,8 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 
 	// Clear recovery on successful phase completion
 	if result != nil && result.Success {
-		if err := e.ClearRecovery(); err != nil {
-			slog.Warn("failed to clear recovery state", "error", err)
+		if clearErr := e.ClearRecovery(); clearErr != nil {
+			slog.Warn("failed to clear recovery state", "error", clearErr)
 		}
 	}
 

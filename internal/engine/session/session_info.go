@@ -18,5 +18,6 @@ type SessionInfo struct {
 	LastModified  time.Time           `json:"last_modified"`
 	MessageCount  int                 `json:"message_count"`
 	Corrupted     bool                `json:"corrupted"`
+	Recoverable   bool                `json:"recoverable"`
 	WorkflowPhase types.WorkflowPhase `json:"workflow_phase,omitempty"`
 }

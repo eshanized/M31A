@@ -405,6 +405,7 @@ func (m *Manager) ListSessions() ([]SessionInfo, error) {
 		MessageCount:  session.MessageCount,
 		WorkflowPhase: session.WorkflowPhase,
 		Label:         session.Label,
+		Recoverable:   m.RecoveryExists(),
 	}
 	if fi != nil {
 		info.LastModified = fi.ModTime()
@@ -707,4 +708,38 @@ func (m *Manager) IsFavorite(modelID string) bool {
 		return false
 	}
 	return data.Favorites[modelID]
+}
+
+// ── Recovery State (crash-safe persistence) ──────────────────────────────
+
+// recoveryPath returns the path to the recovery file for a session.
+func (m *Manager) recoveryPath() string {
+	return filepath.Join(m.projectDir(), "recovery.json")
+}
+
+// RecoveryExists checks if a recovery file exists for the current session.
+func (m *Manager) RecoveryExists() bool {
+	_, err := os.Stat(m.recoveryPath())
+	return err == nil
+}
+
+// LoadRecoveryBytes reads the raw recovery state JSON bytes from disk.
+// Returns the bytes and nil error on success, or an error if the file
+// does not exist or cannot be read.
+func (m *Manager) LoadRecoveryBytes() ([]byte, error) {
+	data, err := readFileLimited(m.recoveryPath(), types.MaxSessionFileSize)
+	if err != nil {
+		return nil, fmt.Errorf("read recovery file: %w", err)
+	}
+	return data, nil
+}
+
+// ClearRecovery removes the recovery file for the current session.
+// This is called after successful resume to prevent stale recovery data.
+func (m *Manager) ClearRecovery() error {
+	path := m.recoveryPath()
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove recovery file: %w", err)
+	}
+	return nil
 }
