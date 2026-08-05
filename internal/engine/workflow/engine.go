@@ -107,6 +107,8 @@ type Engine struct {
 	state *WorkflowState
 	// done is closed when the workflow completes or is shut down.
 	done chan struct{}
+	// ctx is the root context for the engine's lifecycle; cancelled via cancel.
+	ctx context.Context
 	// cancel cancels the running workflow context on shutdown.
 	cancel context.CancelFunc
 
@@ -464,6 +466,26 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 	}
 }
 
+// WithContext returns a derived context that is cancelled when the engine
+// shuts down. All long-running operations should use this context so
+// cancellation propagates through the engine's lifecycle.
+func (e *Engine) WithContext(ctx context.Context) context.Context {
+	if e.ctx != nil {
+		return e.ctx
+	}
+	return ctx
+}
+
+// Context returns the engine's root context. It is cancelled when Shutdown
+// is called. Returns context.Background() if the engine has no root context
+// (e.g., in tests).
+func (e *Engine) Context() context.Context {
+	if e.ctx != nil {
+		return e.ctx
+	}
+	return context.Background()
+}
+
 // Close flushes and shuts down the decision logger. Safe to call multiple times.
 func (e *Engine) Close() {
 	if e.state != nil {
@@ -479,7 +501,8 @@ func (e *Engine) Close() {
 // and cleans up resources. Returns an error if the shutdown timeout is
 // exceeded while a workflow is still running.
 func (e *Engine) Shutdown(ctx context.Context) error {
-	// Cancel current workflow if running.
+	// Cancel the engine's root context, propagating to all goroutines
+	// using Engine.WithContext().
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -593,6 +616,11 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		return nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 
+	// Create a root context for the engine's lifecycle. This context is
+	// cancelled when Shutdown is called, propagating cancellation to all
+	// long-running operations that use Engine.WithContext().
+	ctx, cancel := context.WithCancel(context.Background())
+
 	e := &Engine{
 		sessionID:     opts.SessionID,
 		workDir:       opts.WorkDir,
@@ -620,6 +648,8 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		stateMachine: NewStateMachine(),
 		cache:        NewWorkflowCache(),
 		done:         make(chan struct{}),
+		ctx:          ctx,
+		cancel:       cancel,
 		state: &WorkflowState{
 			decisionLog: decision.NewLogger(256),
 		},

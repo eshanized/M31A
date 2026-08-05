@@ -31,13 +31,23 @@ func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParse
 		_ = resp.Body.Close()
 	})
 
-	return &SSEParser{
+	p := &SSEParser{
 		scanner:  scanner,
 		resp:     resp,
 		ctx:      ctx,
 		cancel:   cancel,
 		watchdog: watchdog,
 	}
+
+	// Close the response body immediately when the context is cancelled.
+	// This unblocks any pending scanner.Scan() calls and ensures the
+	// HTTP connection is released promptly on cancellation.
+	go func() {
+		<-ctx.Done()
+		p.Close()
+	}()
+
+	return p
 }
 
 func (p *SSEParser) Next() (eventType string, data string, err error) {

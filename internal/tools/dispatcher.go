@@ -443,6 +443,13 @@ func (d *Dispatcher) Stop() {
 	})
 }
 
+// DrainChannels is exported for testing. It non-blockingly drains requestCh,
+// questionReqCh, and responseCh so that any goroutines blocked on sends
+// can unblock and exit.
+func (d *Dispatcher) DrainChannels() {
+	d.drainChannels()
+}
+
 // drainChannels non-blockingly drains requestCh, questionReqCh, and responseCh
 // so that any goroutines blocked on sends can unblock and exit.
 func (d *Dispatcher) drainChannels() {
