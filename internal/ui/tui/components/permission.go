@@ -25,6 +25,8 @@ type PermissionModal struct {
 	phase string
 	// goal is the current workflow goal
 	goal string
+	// batchAvailable indicates batch approval is available for this request
+	batchAvailable bool
 }
 
 func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout time.Duration) *PermissionModal {
@@ -43,6 +45,11 @@ func NewPermissionModal(request tools.PermissionRequest, t theme.Theme, timeout 
 func (m *PermissionModal) SetContext(phase, goal string) {
 	m.phase = phase
 	m.goal = goal
+}
+
+// SetBatchAvailable indicates that batch approval is available for this request.
+func (m *PermissionModal) SetBatchAvailable(available bool) {
+	m.batchAvailable = available
 }
 
 // Clear resets the modal to its inactive state.
@@ -79,6 +86,9 @@ func (m *PermissionModal) Render(width, height int) string {
 		actionText = "use a tool"
 	}
 	titleLine := s.PermTitle.Render(fmt.Sprintf("M31A wants to %s", actionText))
+
+	// ── Risk text label (D-10) ──────────────────────────────────────────
+	riskBadge := riskTextLabel(m.request.RiskLevel, s)
 
 	// ── Consequence explanation ───────────────────────────────────────────
 	var consequenceLine string
@@ -118,16 +128,37 @@ func (m *PermissionModal) Render(width, height int) string {
 			s.PermHint.Render(" Allow for session"),
 		),
 		lipgloss.JoinHorizontal(lipgloss.Top,
-			s.PermKey.Render("[B]"),
-			s.PermHint.Render(" Approve all       "),
 			s.PermKey.Render("[N]"),
-			s.PermHint.Render(" Deny"),
-		),
-		lipgloss.JoinHorizontal(lipgloss.Top,
+			s.PermHint.Render(" Deny              "),
 			s.PermKey.Render("[Esc]"),
 			s.PermHint.Render(" Deny (safe default)"),
 		),
 	)
+
+	// ── Batch approval keybinding (D-11) ─────────────────────────────────
+	if m.batchAvailable && m.request.QueueDepth > 0 {
+		batchLine := lipgloss.JoinHorizontal(lipgloss.Top,
+			s.PermKey.Render("[B]"),
+			s.PermHint.Render(fmt.Sprintf(" Approve all %d    ", m.request.QueueDepth+1)),
+		)
+		keys = lipgloss.JoinVertical(lipgloss.Top,
+			lipgloss.JoinVertical(lipgloss.Top,
+				lipgloss.JoinHorizontal(lipgloss.Top,
+					s.PermKey.Render("[Y]"),
+					s.PermHint.Render(" Allow once        "),
+					s.PermKey.Render("[A]"),
+					s.PermHint.Render(" Allow for session"),
+				),
+				batchLine,
+			),
+			lipgloss.JoinHorizontal(lipgloss.Top,
+				s.PermKey.Render("[N]"),
+				s.PermHint.Render(" Deny              "),
+				s.PermKey.Render("[Esc]"),
+				s.PermHint.Render(" Deny (safe default)"),
+			),
+		)
+	}
 
 	// ── Queue depth ────────────────────────────────────────────────────────
 	var queueInfo string
@@ -152,8 +183,16 @@ func (m *PermissionModal) Render(width, height int) string {
 	}
 
 	// ── Assemble ──────────────────────────────────────────────────────────
+	titleWithRisk := titleLine
+	if riskBadge != "" {
+		titleWithRisk = lipgloss.JoinHorizontal(lipgloss.Top,
+			titleLine,
+			"  ",
+			riskBadge,
+		)
+	}
 	modalContent := lipgloss.JoinVertical(lipgloss.Top,
-		titleLine,
+		titleWithRisk,
 	)
 	if consequenceLine != "" {
 		modalContent = lipgloss.JoinVertical(lipgloss.Top,
@@ -285,4 +324,20 @@ func highlightCommand(cmd string, s theme.SemanticStyles) string {
 func HighlightCommand(cmd string, t theme.Theme) string {
 	s := theme.BuildSemanticStyles(t)
 	return highlightCommand(cmd, s)
+}
+
+// riskTextLabel returns a styled risk badge for the given risk level.
+func riskTextLabel(risk types.RiskLevel, s theme.SemanticStyles) string {
+	switch risk {
+	case types.RiskSafe:
+		return s.PermRiskSafe.Render("SAFE")
+	case types.RiskMedium:
+		return s.PermRiskMedium.Render("CAUTION")
+	case types.RiskDestructive:
+		return s.PermRiskDestruct.Render("DESTRUCTIVE")
+	case types.RiskDangerous:
+		return s.PermRiskDanger.Render("DANGER")
+	default:
+		return ""
+	}
 }

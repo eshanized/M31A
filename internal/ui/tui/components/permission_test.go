@@ -176,3 +176,120 @@ func TestPermissionModal_AllowIsStateless(t *testing.T) {
 		t.Errorf("expected Allow() to return same value both times, got %v and %v", resp1, resp2)
 	}
 }
+
+func TestPermissionRiskLabel_Dangerous(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:    "Bash",
+		Command:     "rm -rf /",
+		RiskLevel:   types.RiskDangerous,
+		TimeoutSecs: 300,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if !containsText(result, "DANGER") {
+		t.Errorf("expected DANGER risk label in output, got %q", result)
+	}
+}
+
+func TestPermissionRiskLabel_Safe(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:  "FileRead",
+		Command:   "read /etc/hosts",
+		RiskLevel: types.RiskSafe,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if !containsText(result, "SAFE") {
+		t.Errorf("expected SAFE risk label in output, got %q", result)
+	}
+}
+
+func TestPermissionRiskLabel_Medium(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:  "Bash",
+		Command:   "npm install",
+		RiskLevel: types.RiskMedium,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if !containsText(result, "CAUTION") {
+		t.Errorf("expected CAUTION risk label in output, got %q", result)
+	}
+}
+
+func TestBatchApproval_ShowsKeybinding(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:    "Bash",
+		Command:     "rm -rf node_modules",
+		RiskLevel:   types.RiskDangerous,
+		QueueDepth:  2,
+		TimeoutSecs: 300,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	m.SetBatchAvailable(true)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if !containsText(result, "Approve all 3") {
+		t.Errorf("expected 'Approve all 3' in output, got %q", result)
+	}
+}
+
+func TestBatchApproval_HiddenWhenNoQueue(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:    "Bash",
+		Command:     "ls",
+		RiskLevel:   types.RiskSafe,
+		QueueDepth:  0,
+		TimeoutSecs: 300,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	m.SetBatchAvailable(true)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if containsText(result, "Approve all") {
+		t.Errorf("expected no batch keybinding when QueueDepth=0, got %q", result)
+	}
+}
+
+func TestBatchApproval_HiddenWhenNotAvailable(t *testing.T) {
+	req := tools.PermissionRequest{
+		ToolName:    "Bash",
+		Command:     "rm -rf node_modules",
+		RiskLevel:   types.RiskDangerous,
+		QueueDepth:  2,
+		TimeoutSecs: 300,
+	}
+	m := NewPermissionModal(req, theme.Dark(), 300*time.Second)
+	// batchAvailable not set (default false)
+	result := m.Render(80, 24)
+	if result == "" {
+		t.Fatal("expected non-empty render")
+	}
+	if containsText(result, "Approve all") {
+		t.Errorf("expected no batch keybinding when batchAvailable=false, got %q", result)
+	}
+}
+
+// containsText checks if the rendered output contains the given text.
+// Uses a simple byte search since lipgloss output is styled but text is visible.
+func containsText(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
