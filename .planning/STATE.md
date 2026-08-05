@@ -6,8 +6,8 @@
 
 **Phase:** 01 - Reliability First
 **Status:** In Progress
-**Current Plan:** 01-03 (complete) -> next: 01-04
-**Resume file:** `.planning/phases/01-reliability-first/01-04-PLAN.md`
+**Current Plan:** 01-04 (complete) -> next: 01-05 or phase complete
+**Resume file:** `None`
 
 ## Completed Plans
 
@@ -16,6 +16,7 @@
 | 01-01 | Extract WorkflowState | Complete | 16min | fceae004, 952ead12 |
 | 01-02 | Cancellation and Error Handling | Complete | 31min | c173ae57, ae29e830, a1b4cecd |
 | 01-03 | Testing Gap Fill | Complete | 13min | 73971fb9, a1d5763b, 06cfc20d |
+| 01-04 | Recovery | Complete | 16min | 6cada26c, da8f0ff4, 5480286a |
 
 ## Decisions
 
@@ -31,6 +32,9 @@
 - D-10: Log retry attempts at debug level; user sees clean output
 - D-11: User-facing errors provide actionable guidance
 - D-12: Close errors logged at debug level, not surfaced to users
+- D-13: Recovery state saved before each phase transition and after plan content changes
+- D-14: Recovery cleared after successful phase completion to prevent stale data
+- D-15: Session manager provides raw byte-level recovery methods to avoid circular dependency
 
 ## Performance Metrics
 
@@ -39,9 +43,10 @@
 | 01 | 01-01 | 16min | 3 | 3 |
 | 01 | 01-02 | 31min | 3 | 23 |
 | 01 | 01-03 | 13min | 3 | 6 |
+| 01 | 01-04 | 16min | 3 | 6 |
 
 ## Completed Phases
 
 | Phase | Status | Plans | Context |
 |-------|--------|-------|---------|
-| 01 - Reliability First | In Progress | 3/4 | `.planning/phases/01-reliability-first/01-CONTEXT.md` |
+| 01 - Reliability First | In Progress | 4/4 | `.planning/phases/01-reliability-first/01-CONTEXT.md` |
