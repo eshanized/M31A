@@ -170,7 +170,7 @@ Examples:
 
 Plans:
 - [x] 01-01-PLAN.md — Concurrency refactoring (extract WorkflowState, document lock ordering, stress tests) — Complete 2026-08-05
-- [ ] 01-02-PLAN.md — Cancellation and error handling (context propagation, process kill, error wrapping)
+- [x] 01-02-PLAN.md — Cancellation and error handling (context propagation, process kill, error wrapping) — Complete 2026-08-05
 - [ ] 01-03-PLAN.md — Testing confidence (delete coverage fluff, integration tests for gaps)
 - [ ] 01-04-PLAN.md — Recovery (crash-safe persistence, session resume, workflow rollback, recovery tests)
 
