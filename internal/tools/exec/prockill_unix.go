@@ -11,7 +11,9 @@ func getProcessGroup(pid int) (int, error) {
 	return syscall.Getpgid(pid)
 }
 
-// killProcessGroup sends SIGTERM to the given process group.
+// killProcessGroup sends SIGKILL to the given process group to ensure
+// immediate termination. Per D-07, cancellation uses SIGKILL (not SIGTERM)
+// to guarantee the process tree is killed promptly.
 func killProcessGroup(pgid int) error {
-	return syscall.Kill(-pgid, syscall.SIGTERM)
+	return syscall.Kill(-pgid, syscall.SIGKILL)
 }

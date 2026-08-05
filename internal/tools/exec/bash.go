@@ -220,6 +220,22 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 					terminationMsg = " (terminated by signal)"
 					termMu.Unlock()
 					_ = killProcessGroup(cmd.Process.Pid)
+					// After SIGKILL, give the process a short time to die.
+					// SIGKILL cannot be caught, so this is a safety net for
+					// edge cases (zombie processes, D-state).
+					go func() {
+						timer := time.NewTimer(BashKillGracePeriod)
+						defer timer.Stop()
+						select {
+						case <-timer.C:
+							// Process did not exit within grace period.
+							// Log at debug level — nothing more we can do.
+							slog.Debug("process did not exit after SIGKILL",
+								"pid", cmd.Process.Pid,
+								"grace_period", BashKillGracePeriod)
+						case <-cmdDone:
+						}
+					}()
 				})
 			}
 		case <-cmdDone:
