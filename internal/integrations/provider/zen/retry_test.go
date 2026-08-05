@@ -38,7 +38,11 @@ func TestChatCompletionStream_Retry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChatCompletionStream() error = %v", err)
 	}
-	defer iter.Close() //nolint:errcheck
+	defer func() {
+		if err := iter.Close(); err != nil {
+			t.Logf("close stream iterator: %v", err)
+		}
+	}()
 
 	// Consume the stream
 	for {

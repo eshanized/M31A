@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -263,7 +264,11 @@ func (l *loop) updateLastTool(name, status string) {
 // text content, thinking text, token usage, and any native tool calls
 // streamed by the provider.
 func (l *loop) consume(it *types.StreamIterator) (string, string, *types.Usage, []ToolCallInput, error) {
-	defer it.Close() //nolint:errcheck
+	defer func() {
+		if err := it.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "subagent.consume")
+		}
+	}()
 
 	var content, thinking strings.Builder
 	var lastUsage *types.Usage

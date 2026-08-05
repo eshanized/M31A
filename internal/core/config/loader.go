@@ -648,7 +648,11 @@ func WatchConfig(ctx context.Context, path string, ch chan<- ConfigReloadMsg) {
 		watchConfigPolling(ctx, path, ch)
 		return
 	}
-	defer watcher.Close() //nolint:errcheck
+	defer func() {
+		if err := watcher.Close(); err != nil {
+			slog.Debug("close file watcher", "error", err, "path", path)
+		}
+	}()
 
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)

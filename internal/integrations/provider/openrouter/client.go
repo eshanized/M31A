@@ -98,7 +98,11 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				slog.Debug("close response body", "error", err, "resource", "openrouter_models")
+			}
+		}()
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("models fetch returned status %d", resp.StatusCode)
 		}

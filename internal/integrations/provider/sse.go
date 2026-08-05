@@ -44,7 +44,7 @@ func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParse
 	// HTTP connection is released promptly on cancellation.
 	go func() {
 		<-ctx.Done()
-		p.Close()
+		_ = p.Close()
 	}()
 
 	return p

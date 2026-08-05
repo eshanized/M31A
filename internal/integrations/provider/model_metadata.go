@@ -98,7 +98,11 @@ func fetchOpenRouterMetadataUncached(ctx context.Context) (map[string]ModelMetad
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("close response body", "error", err, "resource", "model_metadata")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)

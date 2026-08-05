@@ -46,7 +46,9 @@ func NewFileWatcher(workDir string, events chan tea.Msg) (*FileWatcher, error) {
 	// Add the root working directory
 	if err := fw.watcher.Add(workDir); err != nil {
 		cancel()
-		w.Close() //nolint:errcheck
+		if closeErr := w.Close(); closeErr != nil {
+			slog.Debug("close watcher", "error", closeErr, "resource", "filewatcher_init")
+		}
 		return nil, err
 	}
 
@@ -146,7 +148,9 @@ func (fw *FileWatcher) Close() {
 	if fw.debounce != nil {
 		fw.debounce.Stop()
 	}
-	fw.watcher.Close() //nolint:errcheck
+	if err := fw.watcher.Close(); err != nil {
+		slog.Debug("close file watcher", "error", err, "resource", "filewatcher")
+	}
 }
 
 // isIgnoredDir returns true for directories that should not be watched.

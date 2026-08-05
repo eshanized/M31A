@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -159,7 +160,11 @@ func (b *BaseClient) HealthCheck(ctx context.Context, endpoint string) types.Hea
 	if err != nil {
 		return types.HealthStatus{Status: types.HealthStatusOffline, LatencyMs: latency, Error: err.Error()}
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("close response body", "error", err, "resource", "health_check")
+		}
+	}()
 	_, _ = ReadBodyLimited(resp, types.MaxLLMResponseBytes)
 
 	if resp.StatusCode != http.StatusOK {

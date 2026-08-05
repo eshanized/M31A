@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -197,7 +198,11 @@ func (t *WebSearch) Execute(ctx context.Context, input types.ToolInput) (types.T
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("search request failed: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Debug("close response body", "error", closeErr, "resource", "websearch")
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return types.ToolResult{}, fmt.Errorf("search returned HTTP %d: %s", resp.StatusCode, resp.Status)

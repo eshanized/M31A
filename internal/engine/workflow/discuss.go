@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,11 @@ func (e *Engine) runDiscuss(ctx context.Context, goal string) (*PhaseResult, err
 			Error:   err.Error(),
 		}, err
 	}
-	defer iterator.Close() //nolint:errcheck
+	defer func() {
+		if err := iterator.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "runDiscuss")
+		}
+	}()
 
 	// 3. Iterate chunks, accumulate content, emit chunks to TUI
 	var content strings.Builder

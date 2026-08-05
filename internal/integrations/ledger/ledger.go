@@ -3,6 +3,7 @@ package ledger
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -157,7 +158,11 @@ func (l *Ledger) appendEntry(entry LedgerEntry) error {
 	if err != nil {
 		return fmt.Errorf("append entry (open): %w", err)
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("close ledger file", "error", err, "path", l.path)
+		}
+	}()
 
 	w := bufio.NewWriter(f)
 	if _, err := fmt.Fprintln(w, formatEntry(entry)); err != nil {
@@ -421,7 +426,11 @@ func (l *Ledger) parseFile() error {
 	if err != nil {
 		return fmt.Errorf("open ledger for parse: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("close ledger file", "error", err, "path", l.path)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

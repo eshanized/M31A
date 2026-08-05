@@ -185,7 +185,11 @@ func (c *Compactor) generateSummary(ctx context.Context, headText string, p Prov
 	if err != nil {
 		return "", fmt.Errorf("compaction LLM call: %w", err)
 	}
-	defer iterator.Close() //nolint:errcheck
+	defer func() {
+		if err := iterator.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "compaction")
+		}
+	}()
 
 	var sb strings.Builder
 	for {

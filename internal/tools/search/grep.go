@@ -364,7 +364,11 @@ func (t *Grep) grepPureGo(ctx context.Context, pattern, searchPath, glob string,
 		if err != nil {
 			return nil
 		}
-		defer f.Close() //nolint:errcheck
+		defer func() {
+			if err := f.Close(); err != nil {
+				slog.Debug("close file", "error", err, "path", path)
+			}
+		}()
 
 		// Read first 512 bytes for binary detection
 		header := make([]byte, 512)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -78,7 +79,11 @@ func ClassifyIntent(ctx context.Context, p provider.LLMProvider, modelID string,
 // consumeClassifyStream reads all chunks from the classification iterator.
 func consumeClassifyStream(iterator *m31types.StreamIterator) (string, error) {
 	var sb strings.Builder
-	defer iterator.Close() //nolint:errcheck
+	defer func() {
+		if err := iterator.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "consumeClassifyStream")
+		}
+	}()
 
 	for {
 		chunk, err := iterator.Next()

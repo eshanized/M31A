@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -141,7 +142,11 @@ func (t *FileRead) Execute(ctx context.Context, input types.ToolInput) (types.To
 	if err != nil {
 		return types.ToolResult{}, fmt.Errorf("%w: cannot access %s: %w", m31errors.ErrToolExecution, path, err)
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("close file", "error", err, "path", resolved)
+		}
+	}()
 
 	// Read first 512 bytes for binary detection
 	header := make([]byte, 512)

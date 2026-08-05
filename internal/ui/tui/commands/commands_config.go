@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,7 +109,11 @@ func readTailLines(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			slog.Debug("close file", "error", closeErr, "path", path)
+		}
+	}()
 
 	stat, err := f.Stat()
 	if err != nil {

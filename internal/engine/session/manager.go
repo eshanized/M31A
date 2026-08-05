@@ -121,7 +121,11 @@ func readFileLimited(path string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			slog.Debug("close file", "error", closeErr, "path", path)
+		}
+	}()
 
 	fi, statErr := f.Stat()
 	var data []byte
@@ -582,7 +586,11 @@ func (m *Manager) ensureGitIgnore() {
 		slog.Warn("failed to update .gitignore", "error", err)
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			slog.Debug("close file", "error", closeErr, "path", gitignorePath)
+		}
+	}()
 
 	content := string(existing)
 	if !strings.HasSuffix(content, "\n") {

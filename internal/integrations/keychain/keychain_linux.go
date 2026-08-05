@@ -4,6 +4,7 @@ package keychain
 
 import (
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -61,7 +62,11 @@ func (k *linuxKeychain) dbusGet(service string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close() //nolint:errcheck
+	defer func() {
+		if err := conn.Close(); err != nil {
+			slog.Debug("close dbus connection", "error", err, "resource", "keychain")
+		}
+	}()
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service
@@ -158,7 +163,11 @@ func (k *linuxKeychain) dbusSet(service, value string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close() //nolint:errcheck
+	defer func() {
+		if err := conn.Close(); err != nil {
+			slog.Debug("close dbus connection", "error", err, "resource", "keychain")
+		}
+	}()
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service
@@ -246,7 +255,11 @@ func (k *linuxKeychain) dbusDelete(service string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close() //nolint:errcheck
+	defer func() {
+		if err := conn.Close(); err != nil {
+			slog.Debug("close dbus connection", "error", err, "resource", "keychain")
+		}
+	}()
 
 	obj := conn.Object(secretServiceName, secretServicePath)
 	servicePath := servicePrefix + service

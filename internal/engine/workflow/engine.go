@@ -1443,7 +1443,11 @@ func (e *Engine) getCodeIntel(ctx context.Context) *codeintel.Indexer {
 // Also captures usage data from the final chunk for token calibration.
 func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, *m31types.Usage, error) {
 	var sb strings.Builder
-	defer iterator.Close() //nolint:errcheck
+	defer func() {
+		if err := iterator.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "consumeStream")
+		}
+	}()
 
 	var lastUsage *m31types.Usage
 	for {
@@ -1492,7 +1496,11 @@ type toolCallBuilder struct {
 func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (string, []m31types.ToolCall, *m31types.Usage, error) {
 	var content strings.Builder
 	builders := map[int]*toolCallBuilder{}
-	defer iterator.Close() //nolint:errcheck
+	defer func() {
+		if err := iterator.Close(); err != nil {
+			slog.Debug("close stream iterator", "error", err, "resource", "consumeStreamWithTools")
+		}
+	}()
 
 	var lastUsage *m31types.Usage
 	for {

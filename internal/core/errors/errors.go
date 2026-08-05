@@ -2,6 +2,7 @@ package errors
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -133,6 +134,25 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// Wrap wraps an error with a descriptive message, preserving the error chain.
+// Returns nil if err is nil. Use this instead of fmt.Errorf("...: %w", err)
+// for consistent error wrapping across the codebase.
+func Wrap(err error, msg string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", msg, err)
+}
+
+// Wrapf wraps an error with a formatted message, preserving the error chain.
+// Returns nil if err is nil. Use this for error wrapping with dynamic context.
+func Wrapf(err error, format string, args ...any) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", fmt.Sprintf(format, args...), err)
 }
 
 // UserMessage returns a user-friendly, actionable message for common errors.
