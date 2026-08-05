@@ -280,10 +280,10 @@ Users consistently understand what M31A is doing without reading documentation.
 **Plans:** 4 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Progress display: persistent status bar showing phase, task, elapsed time
-- [ ] 02-02-PLAN.md — Permission prompts: risk labels, batch approval, auto-approve safe tools
-- [ ] 02-03-PLAN.md — Plan presentation: collapsible sections, inline editing, time estimates
-- [ ] 02-04-PLAN.md — First-run tutorial: interactive feature tour, skippable, post-setup
+- [x] 02-01-PLAN.md — Progress display: persistent status bar showing phase, task, elapsed time
+- [x] 02-02-PLAN.md — Permission prompts: risk labels, batch approval, auto-approve safe tools
+- [x] 02-03-PLAN.md — Plan presentation: collapsible sections, inline editing, time estimates
+- [x] 02-04-PLAN.md — First-run tutorial: interactive feature tour, skippable, post-setup
 
 ---
 
