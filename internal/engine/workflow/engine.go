@@ -38,59 +38,6 @@ import (
 //go:embed templates/website-nextjs/*
 var websiteTemplateFS embed.FS
 
-// WorkflowState groups mutable session state extracted from Engine.
-// This struct owns plan state, cached data, intent classification,
-// and v1.5 subsystems (decision log, knowledge, budget tracker).
-// The Engine retains phase dispatch, LLM streaming, and subsystem orchestration.
-type WorkflowState struct {
-	// transitionMu serializes phase transitions to prevent interleaved checkpoint saves.
-	transitionMu sync.Mutex
-
-	// planMu guards planMarkdown and planVersion to prevent races between
-	// workflow goroutine writes and TUI reads via PlanContent()/PlanVersion().
-	planMu sync.RWMutex
-
-	// messagesMu guards Messages to prevent races between workflow goroutine
-	// writes (via PrePhaseSetup) and any concurrent reads.
-	messagesMu sync.RWMutex
-
-	// Plan state
-	planMarkdown   string // current plan content for refinement context
-	planVersion    int    // current plan version (increments on refine)
-	refineFeedback string // pending refinement feedback from user
-	researchOutput string // pre-plan research results for injection into plan context
-	// Cached base prompt (built once, used by ContextBuilder)
-	cachedBasePrompt     string
-	cachedBasePromptOnce sync.Once
-
-	// Cached full system prompts per extras signature (used by ContextBuilder)
-	cachedFullPrompts   map[string]string
-	cachedFullPromptsMu sync.Mutex
-
-	// Conversation messages for the workflow (updated by /compress proactively)
-	Messages []m31types.Message
-
-	// Intent classification result from the LLM-based classifier.
-	// Set before the workflow starts; used to enrich discuss/research/plan context.
-	intentResult *m31types.IntentResult
-
-	// Dynamic context change detection (used by ContextBuilder)
-	contextSnapshot      map[string]string
-	cachedDynamicContext string
-
-	// v1.5: Decision logging
-	decisionLog *decision.Logger
-
-	// v1.5: Self-heal explanation
-	lastHealReport *m31types.HealReport
-
-	// v1.5: Checkpoint resume
-	checkpointData *CheckpointData
-
-	// currentGoal tracks the active workflow goal for checkpoint persistence.
-	currentGoal string
-}
-
 // CheckpointData holds data that can be saved/restored across checkpoints.
 type CheckpointData struct {
 	Phase       m31types.WorkflowPhase     `json:"phase"`
@@ -384,7 +331,7 @@ func (e *Engine) WorkflowMode() m31types.WorkflowMode {
 
 // SetIntentResult stores the LLM-classified intent result for downstream enrichment.
 func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
-	e.state.intentResult = ir
+	e.state.SetIntentResult(ir)
 	// Log intent classification decision
 	if ir != nil {
 		e.LogDecision(decision.DecisionReceipt{
@@ -397,15 +344,16 @@ func (e *Engine) SetIntentResult(ir *m31types.IntentResult) {
 
 // IntentResult returns the stored intent classification result, or nil if unset.
 func (e *Engine) IntentResult() *m31types.IntentResult {
-	return e.state.intentResult
+	return e.state.IntentResult()
 }
 
 // ScopeIncludes returns true if the intent result's scope contains the given term.
 func (e *Engine) ScopeIncludes(term string) bool {
-	if e.state.intentResult == nil {
+	ir := e.state.IntentResult()
+	if ir == nil {
 		return false
 	}
-	for _, s := range e.state.intentResult.Scope {
+	for _, s := range ir.Scope {
 		if strings.EqualFold(s, term) {
 			return true
 		}
@@ -415,8 +363,9 @@ func (e *Engine) ScopeIncludes(term string) bool {
 
 // LogDecision records a decision in the session log.
 func (e *Engine) LogDecision(r decision.DecisionReceipt) {
-	if e.state.decisionLog != nil {
-		e.state.decisionLog.Log(r)
+	dl := e.state.DecisionLog()
+	if dl != nil {
+		dl.Log(r)
 		e.emitDecisionsSnapshot()
 	}
 }
@@ -434,32 +383,32 @@ func (e *Engine) emitDecisionsSnapshot() {
 
 // FlushDecisions synchronously returns all logged decisions and resets the buffer.
 func (e *Engine) FlushDecisions() []decision.DecisionReceipt {
-	if e.state.decisionLog == nil {
+	dl := e.state.DecisionLog()
+	if dl == nil {
 		return nil
 	}
-	return e.state.decisionLog.Flush()
+	return dl.Flush()
 }
 
 // SnapshotDecisions returns a copy of buffered decisions without flushing.
 func (e *Engine) SnapshotDecisions() []decision.DecisionReceipt {
-	if e.state.decisionLog == nil {
+	dl := e.state.DecisionLog()
+	if dl == nil {
 		return nil
 	}
-	return e.state.decisionLog.Snapshot()
+	return dl.Snapshot()
 }
 
 // LastHealReport returns the most recent self-heal report, or nil if none.
 func (e *Engine) LastHealReport() *m31types.HealReport {
-	return e.state.lastHealReport
+	return e.state.LastHealReport()
 }
 
 // SaveCheckpointData saves current workflow state for checkpoint resume.
 // It persists to both in-memory state and disk via the session manager.
 func (e *Engine) SaveCheckpointData(goal string) {
 	decisions := e.SnapshotDecisions()
-	e.state.planMu.RLock()
-	planVersion := e.state.planVersion
-	e.state.planMu.RUnlock()
+	planVersion := e.state.PlanVersion()
 	cp := &CheckpointData{
 		Phase:       e.stateMachine.CurrentPhase(),
 		Goal:        goal,
@@ -467,9 +416,7 @@ func (e *Engine) SaveCheckpointData(goal string) {
 		Decisions:   decisions,
 		Timestamp:   time.Now(),
 	}
-	e.state.planMu.Lock()
-	e.state.checkpointData = cp
-	e.state.planMu.Unlock()
+	e.state.SetCheckpointData(cp)
 
 	// Persist to disk so checkpoint data survives process crashes.
 	sessCheckpoint := session.Checkpoint{
@@ -505,23 +452,25 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 			Timestamp:   cp.Timestamp,
 		}
 	}
-	e.state.planMu.Lock()
-	e.state.checkpointData = data
-	e.state.planVersion = data.PlanVersion
-	e.state.planMu.Unlock()
+	e.state.SetCheckpointData(data)
+	e.state.SetPlanVersion(data.PlanVersion)
 	e.stateMachine.SetPhase(data.Phase)
 	// Restore decisions to the log
-	if data.Decisions != nil && e.state.decisionLog != nil {
+	dl := e.state.DecisionLog()
+	if data.Decisions != nil && dl != nil {
 		for _, d := range data.Decisions {
-			e.state.decisionLog.Log(d)
+			dl.Log(d)
 		}
 	}
 }
 
 // Close flushes and shuts down the decision logger. Safe to call multiple times.
 func (e *Engine) Close() {
-	if e.state != nil && e.state.decisionLog != nil {
-		e.state.decisionLog.Close()
+	if e.state != nil {
+		dl := e.state.DecisionLog()
+		if dl != nil {
+			dl.Close()
+		}
 	}
 }
 
@@ -577,10 +526,7 @@ func (e *Engine) Complete() {
 
 // GetCheckpointData returns the current checkpoint data, or nil if none.
 func (e *Engine) GetCheckpointData() *CheckpointData {
-	e.state.planMu.RLock()
-	cp := e.state.checkpointData
-	e.state.planMu.RUnlock()
-	return cp
+	return e.state.CheckpointData()
 }
 
 // ExtractWebsiteTemplateTo extracts the bundled website template to a temporary
@@ -840,7 +786,7 @@ func (e *Engine) GetCostInfo() (totalCost float64, budgetLimit float64, budgetRe
 // RunPhase executes the given workflow phase and returns the result.
 func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
 	// Store current goal for checkpoint persistence (B14)
-	e.state.currentGoal = goal
+	e.state.SetCurrentGoal(goal)
 	// Budget guardrail: check cumulative cost before each phase.
 	// Kept inline because e.costTracker may be reassigned after construction
 	// (e.g., in tests), while PhaseCoordinator holds the original reference.
@@ -858,17 +804,17 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	start := time.Now()
 
 	// Delegate pre-phase setup to PhaseCoordinator
-	// messagesMu protects Messages from concurrent access during PrePhaseSetup
-	e.state.messagesMu.Lock()
+	// Accessor methods handle locking for Messages access
+	currentMessages := e.state.MessagesSnapshot()
 	var err error
-	e.state.Messages, err = e.phaseCoordinator.PrePhaseSetup(
+	newMessages, err := e.phaseCoordinator.PrePhaseSetup(
 		ctx,
 		phase,
 		&budgetConfigAdapter{cfg: e.cfg},
-		e.state.Messages,
+		currentMessages,
 		e.proactiveCompactCheck,
 	)
-	e.state.messagesMu.Unlock()
+	e.state.SetMessages(newMessages)
 	if err != nil {
 		return &PhaseResult{
 			Phase:   phase,
@@ -920,7 +866,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 // INTENDED FOR TEST USE ONLY — does not enforce phase ordering.
 // Production code MUST use RunPhase which validates transitions via stateMachine.Transition().
 func (e *Engine) RunPhaseDirect(ctx context.Context, phase m31types.WorkflowPhase, goal string) (*PhaseResult, error) {
-	e.state.currentGoal = goal
+	e.state.SetCurrentGoal(goal)
 
 	// Budget check (same as RunPhase)
 	if e.cfg != nil && e.cfg.Features.BudgetLimitUSD > 0 {
@@ -933,10 +879,10 @@ func (e *Engine) RunPhaseDirect(ctx context.Context, phase m31types.WorkflowPhas
 	start := time.Now()
 
 	// PrePhaseSetup (same as RunPhase)
-	e.state.messagesMu.Lock()
+	currentMessages := e.state.MessagesSnapshot()
 	var err error
-	e.state.Messages, err = e.phaseCoordinator.PrePhaseSetup(ctx, phase, &budgetConfigAdapter{cfg: e.cfg}, e.state.Messages, e.proactiveCompactCheck)
-	e.state.messagesMu.Unlock()
+	newMessages, err := e.phaseCoordinator.PrePhaseSetup(ctx, phase, &budgetConfigAdapter{cfg: e.cfg}, currentMessages, e.proactiveCompactCheck)
+	e.state.SetMessages(newMessages)
 	if err != nil {
 		return &PhaseResult{Phase: phase, Success: false, Error: err.Error()}, err
 	}
@@ -991,7 +937,9 @@ func (e *Engine) Transition(ctx context.Context, from, to m31types.WorkflowPhase
 	}
 
 	// Delegate transition side effects to PhaseCoordinator
-	return e.phaseCoordinator.CoordinateTransition(ctx, from, to, e.state.currentGoal, e.state.planVersion)
+	goal := e.state.CurrentGoal()
+	pv := e.state.PlanVersion()
+	return e.phaseCoordinator.CoordinateTransition(ctx, from, to, goal, pv)
 }
 
 // SetGit sets the git instance on the engine.
@@ -1359,12 +1307,10 @@ func (e *Engine) FinalizeDiscuss() error {
 // Duplicate feedback is ignored — only new feedback bumps the plan version.
 func (e *Engine) SetRefinementFeedback(feedback string) {
 	if feedback != "" {
-		e.state.planMu.Lock()
-		if feedback != e.state.refineFeedback {
-			e.state.refineFeedback = feedback
-			e.state.planVersion++
-			pv := e.state.planVersion
-			e.state.planMu.Unlock()
+		currentFB := e.state.RefineFeedback()
+		if feedback != currentFB {
+			e.state.SetRefineFeedback(feedback)
+			pv := e.state.IncrementPlanVersion()
 			// Log plan revision decision
 			e.LogDecision(decision.DecisionReceipt{
 				Decision:  fmt.Sprintf("plan revision requested (v%d)", pv),
@@ -1374,29 +1320,21 @@ func (e *Engine) SetRefinementFeedback(feedback string) {
 					Attempts: pv,
 				},
 			})
-		} else {
-			e.state.planMu.Unlock()
 		}
 	} else {
-		e.state.planMu.Lock()
-		e.state.refineFeedback = feedback
-		e.state.planMu.Unlock()
+		e.state.SetRefineFeedback(feedback)
 	}
 }
 
 // PlanContent returns the current plan markdown content.
 func (e *Engine) PlanContent() string {
-	e.state.planMu.RLock()
-	defer e.state.planMu.RUnlock()
-	return e.state.planMarkdown
+	return e.state.PlanContent()
 }
 
 // PlanVersion returns the current plan version number.
 // Version 1 is the initial plan; each refinement increments it.
 func (e *Engine) PlanVersion() int {
-	e.state.planMu.RLock()
-	defer e.state.planMu.RUnlock()
-	return e.state.planVersion
+	return e.state.PlanVersion()
 }
 
 // buildToolDefinitions returns the tool definitions for the LLM.
