@@ -661,9 +661,9 @@ M31A is dependable enough to become a developer's primary terminal coding assist
 
 Plans:
 
-- [ ] 05-01-PLAN.md — Metrics foundation: outcome recording, confidence scoring, cost tracking (Wave 1)
-- [ ] 05-02-PLAN.md — Task merging, re-plan from failure, complexity routing, outcome learning (Wave 2)
-- [ ] 05-03-PLAN.md — Compaction tuning, 90% success threshold (Wave 2)
+- [x] 05-01-PLAN.md — Metrics foundation: outcome recording, confidence scoring, cost tracking (Wave 1)
+- [x] 05-02-PLAN.md — Task merging, re-plan from failure, complexity routing, outcome learning (Wave 2)
+- [x] 05-03-PLAN.md — Compaction tuning, 90% success threshold (Wave 2)
 
 ---
 
