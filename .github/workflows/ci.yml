@@ -42,8 +42,16 @@ jobs:
           version: latest
           args: check
 
-  test:
-    runs-on: ubuntu-latest
+  test-tier1:
+    name: Test Tier 1 (Full -race)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: macos-latest
+            arch: amd64
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -53,104 +61,57 @@ jobs:
           cache: true
       - name: Create temp directory
         run: mkdir -p ${{ runner.workspace }}/tmp
-      - name: Run tests
+      - name: Run tests with race detector
         run: go test -race -timeout 30s -coverprofile=coverage.out -covermode=atomic ./...
         env:
           TMPDIR: ${{ runner.workspace }}/tmp
+          GOARCH: ${{ matrix.arch }}
       - name: Run go vet
         run: go vet ./...
+        env:
+          GOARCH: ${{ matrix.arch }}
       - name: Upload coverage on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-${{ matrix.os }}-${{ matrix.arch }}
           path: coverage.out
 
-  crash-capture:
-    runs-on: ubuntu-latest
-    needs: test
-    if: always()
+  test-tier2:
+    name: Test Tier 2 (Smoke)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: arm64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: amd64
     timeout-minutes: 10
-    permissions:
-      issues: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.25.12"
           cache: true
-      - name: Download test logs for crash detection
-        if: always()
+      - name: Smoke test - build binary
         run: |
-          echo "Checking test logs for CRASH markers..."
-          # Check if test job produced any crash output
-          if [ -n "${{ needs.test.result }}" ] && [ "${{ needs.test.result }}" != "success" ]; then
-            echo "Test job failed - checking for crash artifacts"
-            ls -la ${{ runner.workspace }}/tmp/ 2>/dev/null || true
-          fi
-      - name: Upload crash artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-reports
-          path: |
-            ${{ runner.workspace }}/tmp/crash-*.json
-            ~/.m31a/crashes/*.json
-      - name: Auto-file crash issue
-        if: failure() || always()
-        run: |
-          # Look for crash output in test logs
-          if [ -f "${{ runner.workspace }}/tmp/crash-*.json" ] 2>/dev/null || [ -f "~/.m31a/crashes/crash-*.json" ] 2>/dev/null; then
-            echo "Crash artifacts found, filing issue..."
-            CRASH_FILE=$(find ~/.m31a/crashes/ -name "crash-*.json" 2>/dev/null | head -1)
-            if [ -z "$CRASH_FILE" ]; then
-              CRASH_FILE=$(find ${{ runner.workspace }}/tmp/ -name "crash-*.json" 2>/dev/null | head -1)
-            fi
-            if [ -n "$CRASH_FILE" ]; then
-              STACK_TRACE=$(cat "$CRASH_FILE" | jq -r '.stack_trace // empty')
-              PANIC_VALUE=$(cat "$CRASH_FILE" | jq -r '.panic_value // empty')
-              VERSION=$(cat "$CRASH_FILE" | jq -r '.version // "unknown"')
-              if [ -n "$STACK_TRACE" ] && [ -n "$PANIC_VALUE" ]; then
-                gh issue create \
-                  --repo "${{ github.repository }}" \
-                  --title "[CRASH] $PANIC_VALUE in $VERSION" \
-                  --body-file - <<EOF
-## Crash Information
-
-**Version:** $VERSION
-**OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')
-**Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')
-
-## Stack Trace
-
-\`\`\`
-$STACK_TRACE
-\`\`\`
-
-## Steps to Reproduce
-
-1. Run the failing test suite
-2. Observe crash
-
-## Expected Behavior
-
-No panic should occur.
-
-## Additional Context
-
-Auto-filed from CI crash capture workflow.
-EOF
-              else
-                echo "No crash details to report"
-              fi
-            else
-              echo "No crash file found"
-            fi
-          else
-            echo "No crash artifacts detected"
-          fi
+          CGO_ENABLED=0 go build -o m31a ./cmd/m31a
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOARCH: ${{ matrix.arch }}
+      - name: Smoke test - binary runs (version)
+        run: |
+          ./m31a --version
+        env:
+          GOARCH: ${{ matrix.arch }}
+      - name: Smoke test - at least one test passes (short)
+        run: |
+          go test -short -timeout 30s ./...
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.arch }}
 
   security:
     runs-on: ubuntu-latest
@@ -277,8 +238,94 @@ EOF
         env:
           GOARCH: ${{ matrix.arch }}
 
+  crash-capture:
+    runs-on: ubuntu-latest
+    needs: test-tier1
+    if: always()
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Download test logs for crash detection
+        if: always()
+        run: |
+          echo "Checking test logs for CRASH markers..."
+          # Check if test job produced any crash output
+          if [ -n "${{ needs.test-tier1.result }}" ] && [ "${{ needs.test-tier1.result }}" != "success" ]; then
+            echo "Test job failed - checking for crash artifacts"
+            ls -la ${{ runner.workspace }}/tmp/ 2>/dev/null || true
+          fi
+      - name: Upload crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-reports
+          path: |
+            ${{ runner.workspace }}/tmp/crash-*.json
+            ~/.m31a/crashes/*.json
+      - name: Auto-file crash issue
+        if: failure() || always()
+        run: |
+          # Look for crash output in test logs
+          if [ -f "${{ runner.workspace }}/tmp/crash-*.json" ] 2>/dev/null || [ -f "~/.m31a/crashes/crash-*.json" ] 2>/dev/null; then
+            echo "Crash artifacts found, filing issue..."
+            CRASH_FILE=$(find ~/.m31a/crashes/ -name "crash-*.json" 2>/dev/null | head -1)
+            if [ -z "$CRASH_FILE" ]; then
+              CRASH_FILE=$(find ${{ runner.workspace }}/tmp/ -name "crash-*.json" 2>/dev/null | head -1)
+            fi
+            if [ -n "$CRASH_FILE" ]; then
+              STACK_TRACE=$(cat "$CRASH_FILE" | jq -r '.stack_trace // empty')
+              PANIC_VALUE=$(cat "$CRASH_FILE" | jq -r '.panic_value // empty')
+              VERSION=$(cat "$CRASH_FILE" | jq -r '.version // "unknown"')
+              if [ -n "$STACK_TRACE" ] && [ -n "$PANIC_VALUE" ]; then
+                gh issue create \
+                  --repo "${{ github.repository }}" \
+                  --title "[CRASH] $PANIC_VALUE in $VERSION" \
+                  --body-file - <<EOF
+## Crash Information
+
+**Version:** $VERSION
+**OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')
+**Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')
+
+## Stack Trace
+
+\`\`\`
+$STACK_TRACE
+\`\`\`
+
+## Steps to Reproduce
+
+1. Run the failing test suite
+2. Observe crash
+
+## Expected Behavior
+
+No panic should occur.
+
+## Additional Context
+
+Auto-filed from CI crash capture workflow.
+EOF
+              else
+                echo "No crash details to report"
+              fi
+            else
+              echo "No crash file found"
+            fi
+          else
+            echo "No crash artifacts detected"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release:
-    needs: [lint, test, security, crash-capture, build, benchmark]
+    needs: [lint, test-tier1, test-tier2, security, build, benchmark, crash-capture]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15

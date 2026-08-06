@@ -43,6 +43,60 @@ jobs:
           cd docs/examples/pre-commit-hook
           go build -o /tmp/pre-commit-hook .
 
+  compat-matrix:
+    name: Compatibility Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y nodejs npm rustc cargo python3
+      - name: Run compatibility matrix
+        run: bash scripts/compat-matrix.sh --output compat-results.json
+      - name: Validate JSON output
+        run: |
+          jq . compat-results.json > /dev/null
+          echo "JSON output is valid"
+      - name: Upload compat results
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-results
+          path: compat-results.json
+      - name: Create issue on low pass rate
+        if: failure()
+        run: |
+          PASS_RATE=$(jq -r '.pass_rate' compat-results.json)
+          echo "Compatibility matrix pass rate: $PASS_RATE% (below 80% threshold)"
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "[Nightly] Compatibility matrix pass rate below 80%" \
+            --body-file - <<EOF
+## Compatibility Matrix Alert
+
+The nightly compatibility matrix run detected a pass rate of **$PASS_RATE%**, which is below the 80% threshold.
+
+### Summary
+- Total projects tested: $(jq -r '.total' compat-results.json)
+- Passed: $(jq -r '.passed' compat-results.json)
+- Failed: $(jq -r '.failed' compat-results.json)
+- Pass rate: $PASS_RATE%
+
+### Failed Projects
+$(jq -r '.per_project[] | select(.status == "fail") | "- \(.name) (\(.language), \(.size)): \(.error)"' compat-results.json)
+
+### Per-Category Breakdown
+$(jq -r '.per_category[] | "- \(.language): \(.passed)/\(.total) (\(.pass_rate)%)"' compat-results.json)
+
+See the full compat-results.json artifact for details.
+EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -56,7 +110,7 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
 
   notify:
-    needs: [full-test, benchmarks, extension-compat, security]
+    needs: [full-test, benchmarks, extension-compat, compat-matrix, security]
     if: failure()
     runs-on: ubuntu-latest
     steps:
