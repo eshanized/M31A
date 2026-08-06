@@ -1,0 +1,201 @@
+# M31A Engineering Audit Report
+
+## 1. Executive Summary
+M31A is an ambitious, terminal-native AI coding agent featuring a robust seven-phase workflow and comprehensive Git rollback mechanisms. Its core architecture reflects significant investment in workflow orchestration, state management, and an impressive TUI built with Bubble Tea.
+
+**Overall Health:** The codebase is large (~180k lines of Go) and feature-rich. However, it shows signs of rapid expansion leading to high coupling, massive files, and testing technical debt.
+**Maturity:** Mid-to-late stage beta. The core execution loops work, but edge cases, recovery paths, and test reliability require stabilization before broader enterprise adoption.
+**Strengths:** Beautiful TUI, deterministic narrative engine, self-contained static binary, deep Git integration, zero telemetry.
+**Weaknesses:** God classes (particularly in `internal/engine/workflow`), extensive use of `context.Background()`, inconsistent test coverage (unit test suite has compilation failures), and highly coupled UI/engine layers.
+**Highest Risks:** `engine.go` and `execute.go` represent massive critical paths with high cyclomatic complexity. The testing infrastructure is currently failing.
+
+**Overall Engineering Score: 6.5/10**
+
+---
+
+## 2. Architecture Audit
+The architecture attempts a layered design (Core -> Infrastructure -> Integrations -> Tools -> Engine -> UI) but struggles with boundaries in practice.
+
+*   **Layering & Ownership:** The `internal/engine/workflow` package has become a god module, owning state, persistence, event emission, and business logic.
+*   **Coupling:** High coupling between the TUI and the workflow engine. `internal/ui/tui/app.go` and `internal/ui/tui/app_update.go` are tightly bound to specific workflow phases.
+*   **Abstractions:** Tool definitions (`internal/core/types/types.go`) and the Subprocess Manager (`pkg/extensions/protocol.go`) are well-defined. However, the LLM provider interface (`internal/integrations/provider/interface.go`) leaks implementation details across providers.
+
+**Recommendations:**
+*   Break apart `internal/engine/workflow` into distinct bounded contexts: `state`, `orchestration`, and `persistence`.
+*   Implement a stricter event bus between the Engine and the TUI.
+
+---
+
+## 3. Code Quality Audit
+The code quality is a tale of two cities: newer packages like `internal/engine/narrative` are pristine, while older core components are sprawling.
+
+*   **File Sizes:** Several files are unmanageably large:
+    *   `internal/engine/workflow/engine.go` (~17k lines including tests)
+    *   `internal/engine/workflow/execute.go` (32k lines)
+*   **Function Sizes:**
+    *   `executeTaskWithTools` (603 lines)
+    *   `BuildSemanticStyles` (509 lines)
+    *   `Update` (482 lines)
+*   **Technical Debt:** 94 `TODO`s and 4 `FIXME`s spread across the codebase.
+
+**Top Technical Debt List:**
+1.  **God Objects:** `engine.go` and `execute.go` must be refactored.
+2.  **Context Misuse:** 736 instances of `context.Background()` indicate poor context propagation and cancellation hygiene.
+3.  **Goroutine Management:** 159 manual goroutine spawns without a consistent lifecycle manager (e.g., errgroup).
+
+---
+
+## 4. Workflow Audit
+M31A's seven-phase workflow is its defining feature.
+
+*   **Execution:** Highly complex. The loop detection and self-healing mechanisms are innovative but brittle, relying on string matching and arbitrary retry counts.
+*   **Recovery:** The rollback chain (`internal/engine/rollback/rollback.go`) is solidly implemented, leveraging standard Git operations.
+*   **Cancellation:** Fragile due to the aforementioned context misuse. Canceling a deep tool execution or provider request often leaves orphaned goroutines.
+
+---
+
+## 5. Reliability Audit
+Reliability is hindered by state management complexity.
+
+*   **Race Conditions:** 42 manual `sync.Mutex` locks exist, many protecting complex state structs in `engine`.
+*   **Panics:** 5 explicit `panic()` calls remain in application code, which should be converted to proper error returns.
+*   **Confidence:** Moderate. The recovery mechanisms work well for external failures, but internal state inconsistencies can require a hard reset.
+
+---
+
+## 6. Performance Audit
+*   **Startup Cost:** Fast. Being a compiled Go binary, startup is nearly instantaneous.
+*   **Allocations:** Prompt building and token estimation (`tiktoken-go`) create significant garbage collection pressure during large context compactions.
+*   **Hotspots:** `internal/engine/compaction` and the diff parser in `internal/integrations/git` are CPU intensive on large repositories.
+
+---
+
+## 7. Security Audit
+*   **Shell Execution:** `internal/tools/exec/bash.go` relies heavily on `os/exec` (32 occurrences globally). Sandboxing is limited.
+*   **Credentials:** `internal/integrations/keychain` handles API keys competently using platform native stores via DBus/etc.
+*   **Risk:** The agent executes arbitrary bash commands generated by LLMs. While expected, the lack of a strict isolation layer (e.g., Docker/gVisor) makes it unsuitable for zero-trust environments.
+
+---
+
+## 8. Testing Audit
+**Current State: Failing**
+The test suite currently fails to compile due to mismatched types in `internal/engine/narrative/classifier_test.go`.
+
+*   **Coverage:** Engine components average 65-80%, UI components ~40%.
+*   **Value:** High volume of tests (318 files), but many are brittle implementation tests rather than behavioral tests.
+*   **Confidence:** Low, until the build failures and race conditions are resolved.
+
+---
+
+## 9. Documentation Audit
+*   **Strengths:** Excellent README.md, comprehensive AGENTS.md, and solid CLI help text.
+*   **Weaknesses:** Internal architecture documentation is missing. The `M31A.wiki` directory exists but lacks deep technical onboarding guides for new contributors.
+
+---
+
+## 10. User Experience Audit
+*   **Installation:** Flawless. Single binary distribution.
+*   **Workflow Clarity:** The TUI is stunning. Progress visibility via the narrative engine is top-tier.
+*   **Friction:** Error messages from LLM providers or git conflicts can occasionally overflow the TUI layout constraints.
+
+---
+
+## 11. Developer Experience Audit
+*   **Local Dev:** Good, standard Go tooling.
+*   **Debugging:** Difficult due to the TUI (Bubble Tea). Requires secondary log viewing tools to debug effectively.
+*   **Adding Features:** High friction. Adding a new workflow phase requires touching 5+ deeply coupled files.
+
+---
+
+## 12. Dependency Audit
+*   **Graph:** 194 dependencies.
+*   **Risks:** Heavy reliance on the Charm CLI ecosystem (`charmbracelet/bubbletea`, `lipgloss`, `bubbles`). While excellent, it locks the project into specific UI paradigms. `pkoukk/tiktoken-go` is unmaintained and should be replaced.
+
+---
+
+## 13. Technical Debt Audit
+
+1.  **Refactor `execute.go`**
+    *   *Impact:* High. *Severity:* High. *Difficulty:* Hard.
+    *   *Approach:* Extract tool dispatch, loop detection, and self-healing into separate domain services.
+2.  **Context Propagation Fixes**
+    *   *Impact:* High. *Severity:* Medium. *Difficulty:* Medium.
+    *   *Approach:* Audit and replace all 736 `context.Background()` calls with properly plumbed contexts to ensure robust cancellation.
+3.  **Fix Failing Test Suite**
+    *   *Impact:* Critical. *Severity:* Critical. *Difficulty:* Low.
+    *   *Approach:* Resolve the type mismatches in `internal/engine/narrative`.
+
+---
+
+## 14. Product Audit
+*   **Core Value:** The autonomous seven-phase workflow and the terminal-native UX.
+*   **Overengineered:** The narrative event classification system (`internal/engine/narrative`) is beautiful but highly complex for what amounts to log formatting.
+*   **Maintenance Burden:** Supporting multiple esoteric LLM providers natively instead of standardizing on an OpenAI-compatible interface.
+
+---
+
+## 15. Scalability Audit
+*   **Repository Size:** Will struggle with monolithic repositories due to in-memory context building and regex-based code parsing.
+*   **Concurrency:** Limited. The workflow is primarily sequential, and attempts at concurrent tool execution are bottlenecked by state locks.
+
+---
+
+## 16. Risk Assessment
+
+*   **Critical Risk:** `engine.go` god object. Mitigation: Aggressive modularization.
+*   **High Risk:** Context and Goroutine leaks. Mitigation: Implement strict lifecycle management and standard context plumbing.
+*   **Medium Risk:** Brittle test suite. Mitigation: Delete low-value brittle tests, focus on integration tests.
+*   **Low Risk:** UI layout bugs on obscure terminal emulators.
+
+---
+
+## 17. Engineering Scorecard
+
+*   **Architecture: 5/10** (God objects, high coupling)
+*   **Maintainability: 4/10** (Massive file and function sizes)
+*   **Reliability: 6/10** (Strong recovery, weak state management)
+*   **Performance: 8/10** (Fast, efficient memory usage outside of compactions)
+*   **Security: 6/10** (Good keychain, weak sandboxing)
+*   **Testing: 4/10** (Failing build, brittle tests)
+*   **Documentation: 7/10** (Great user docs, poor dev docs)
+*   **Developer Experience: 5/10** (High friction for core changes)
+*   **User Experience: 9/10** (Best-in-class TUI)
+*   **Scalability: 6/10** (Struggles with massive monorepos)
+*   **Code Quality: 5/10** (Inconsistent across packages)
+*   **Overall Engineering: 6.5/10**
+
+---
+
+## 18. Keep / Improve / Remove
+
+**KEEP**
+*   The TUI and Charm ecosystem integration.
+*   The seven-phase workflow model.
+*   The Git rollback and snapshotting mechanism.
+*   The Narrative engine (but simplify it).
+
+**IMPROVE**
+*   Engine state management and decoupling.
+*   Context cancellation and goroutine lifecycles.
+*   Testing infrastructure and reliability.
+*   Provider interface abstraction.
+
+**REMOVE**
+*   Massive god functions (e.g., `executeTaskWithTools`).
+*   Over-reliance on `context.Background()`.
+*   Unused or esoteric LLM provider native integrations.
+
+---
+
+## 19. Recommended Priorities
+
+1.  **Fix the Build/Tests:** A failing test suite masks all other regressions.
+2.  **Plumb Contexts Correctly:** Replace `context.Background()` to ensure safe, leak-free cancellation.
+3.  **Deconstruct `execute.go`:** Break the 32k line file into understandable, testable domain services.
+4.  **Extract State Management:** Move engine state out of the workflow orchestrator.
+5.  **Standardize Provider Interfaces:** Reduce maintenance by treating all LLMs as OpenAI-compatible endpoints where possible.
+6.  **Implement Structured Concurrency:** Replace bare `go func()` with `errgroup` for lifecycle management.
+7.  **Create Architecture Docs:** Document the intended boundaries to prevent further god object growth.
+8.  **Audit TUI Layouts:** Simplify `app_update.go` to reduce the 482-line `Update` function.
+9.  **Enhance Sandboxing:** Evaluate minimal isolation mechanisms for `os/exec`.
+10. **Refine Context Compaction:** Optimize token counting to reduce GC pressure on large repos.
