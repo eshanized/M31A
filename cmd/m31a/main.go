@@ -30,6 +30,7 @@ import (
 	"github.com/eshanized/M31A/internal/integrations/ledger"
 	"github.com/eshanized/M31A/internal/integrations/log"
 	"github.com/eshanized/M31A/internal/integrations/provider"
+	"github.com/eshanized/M31A/internal/observability"
 	"github.com/eshanized/M31A/internal/tools"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/ui/tui"
@@ -301,6 +302,8 @@ func main() {
 // run contains all application logic so that deferred cleanup functions
 // execute before os.Exit. Returns the exit code (0 for success, 1 for error).
 func run() int {
+	defer observability.RecoverAndCapture(Version, Commit)
+
 	// Build command registry for usage and TUI
 	cmdRegistry := tui.DefaultCommands()
 
@@ -638,7 +641,7 @@ func run() int {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("signal handler panic", "error", r)
+				observability.RecoverAndCapture(Version, Commit)
 			}
 		}()
 		for {
