@@ -1,0 +1,35 @@
+# M31A Code Owners
+# These users/groups will be requested for review when their owned files are modified.
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owners
+* @eshanized @maintainer-team
+
+# Engine (workflow orchestration, phases, state)
+/internal/engine/ @engine-maintainers @eshanized
+
+# Tools (dispatcher, built-in tools, external tool adapters)
+/internal/tools/ @tools-maintainers @eshanized
+
+# Providers (LLM provider registry, external provider adapters)
+/internal/integrations/provider/ @provider-maintainers @eshanized
+
+# TUI (Bubble Tea UI, screens, components, streaming)
+/internal/ui/tui/ @tui-maintainers @eshanized
+
+# Extensions (public pkg/extensions API, adapters, registry)
+/pkg/extensions/ @extensions-maintainers @eshanized
+
+# Extension Documentation
+/docs/extensions/ @docs-maintainers @eshanized
+/docs/examples/ @docs-maintainers @eshanized
+
+# CI/CD, GitHub Actions, Dependabot, GoReleaser
+/.github/ @infra-maintainers @eshanized
+
+# Configuration (loader, types, validation, merge)
+/internal/core/config/ @config-maintainers @eshanized
+
+# Documentation
+/docs/ @docs-maintainers @eshanized
+/*.md @docs-maintainers @eshanized

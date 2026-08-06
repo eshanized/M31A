@@ -1,0 +1,56 @@
+# GitHub Labeler Configuration
+# Auto-label PRs based on file paths
+# See https://github.com/actions/labeler
+
+bug:
+  - ".github/ISSUE_TEMPLATE/bug_report.yml"
+  - "**/*_test.go"  # Tests might reveal bugs
+
+enhancement:
+  - ".github/ISSUE_TEMPLATE/feature_request.yml"
+
+extension:
+  - "pkg/extensions/**"
+  - "docs/extensions/**"
+  - "docs/examples/**"
+
+engine:
+  - "internal/engine/**"
+
+tools:
+  - "internal/tools/**"
+
+providers:
+  - "internal/integrations/provider/**"
+
+tui:
+  - "internal/ui/tui/**"
+
+docs:
+  - "docs/**"
+  - "*.md"
+  - "*.mdx"
+
+ci:
+  - ".github/workflows/**"
+  - ".github/dependabot.yml"
+  - ".goreleaser.yaml"
+  - "Makefile"
+
+config:
+  - "internal/core/config/**"
+
+testing:
+  - "**/*_test.go"
+  - "tests/**"
+
+security:
+  - ".github/dependabot.yml"
+  - "go.mod"
+  - "go.sum"
+
+breaking-change:
+  - "pkg/extensions/types.go"
+  - "internal/core/config/types.go"
+  - "cmd/m31a/main.go"
+  - ".goreleaser.yaml"

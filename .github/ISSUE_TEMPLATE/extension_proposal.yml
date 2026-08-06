@@ -1,0 +1,108 @@
+name: Extension Proposal
+description: Propose a new M31A extension (tool, provider, or hook)
+title: "[Extension]: "
+labels: ["extension"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an extension! M31A's extension system lets you add custom tools, providers, and workflow hooks.
+        Please review the [Extension Authoring Guide](https://github.com/eshanized/M31A/blob/main/docs/extensions/authoring-guide.md) before submitting.
+  - type: dropdown
+    id: ext-type
+    attributes:
+      label: Extension Type
+      description: What kind of extension is this?
+      options:
+        - tool
+        - provider
+        - hook
+      validations:
+        required: true
+  - type: input
+    id: name
+    attributes:
+      label: Extension Name
+      description: Unique name (lowercase, hyphens only)
+      placeholder: my-custom-linter
+      validations:
+        required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What does this extension do?
+      placeholder: This extension...
+      validations:
+        required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Why is this useful? What problem does it solve?
+      placeholder: Users need...
+      validations:
+        required: true
+  - type: textarea
+    id: config-example
+    attributes:
+      label: Config Example
+      description: Sample m31a.json config snippet for this extension
+      placeholder: |
+        {
+          "extensions": {
+            "tools": {
+              "my-tool": {
+                "command": "/path/to/my-tool",
+                "args": [],
+                "timeout": "30s"
+              }
+            }
+          }
+        }
+      render: json
+      validations:
+        required: true
+  - type: dropdown
+    id: distribution
+    attributes:
+      label: Distribution Plan
+      description: How will users install this?
+      options:
+        - GitHub Releases (binary)
+        - Homebrew formula
+        - Scoop manifest
+        - Other (specify below)
+      validations:
+        required: true
+  - type: textarea
+    id: distribution-details
+    attributes:
+      label: Distribution Details
+      description: Additional details (e.g., Homebrew tap name, binary names)
+      placeholder: Homebrew: `brew install user/tap/my-tool`
+      validations:
+        required: false
+  - type: textarea
+    id: maintenance
+    attributes:
+      label: Maintenance Commitment
+      description: Are you committed to maintaining this extension? For how long?
+      placeholder: I plan to maintain this for...
+      validations:
+        required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read the Extension Authoring Guide
+          required: true
+        - label: The extension implements all required JSON-RPC methods
+          required: true
+        - label: The extension handles errors gracefully and logs to stderr
+          required: true
+        - label: The extension builds with CGO_ENABLED=0
+          required: true
+        - label: I will update the extension for M31A breaking changes
+          required: true

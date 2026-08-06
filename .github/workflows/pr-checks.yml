@@ -1,0 +1,137 @@
+name: PR Checks
+
+on:
+  pull_request:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Create temp directory
+        run: mkdir -p ${{ runner.workspace }}/tmp
+      - name: Run tests
+        run: go test -race -timeout 30s -coverprofile=coverage.out -covermode=atomic ./...
+        env:
+          TMPDIR: ${{ runner.workspace }}/tmp
+      - name: Run go vet
+        run: go vet ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [amd64, arm64]
+        go: ["1.25.12"]
+        exclude:
+          - os: windows-latest
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: Build
+        run: go build -o m31a ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.arch }}
+      - name: Vet
+        run: go vet ./...
+        env:
+          GOARCH: ${{ matrix.arch }}
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  benchmark:
+    name: Benchmark (optional)
+    if: contains(github.event.pull_request.labels.*.name, 'benchmark')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=10 -run=^$ ./... > new.txt
+      - name: Fetch baseline from main
+        run: |
+          git stash --include-untracked
+          git checkout main -- .
+          go test -bench=. -benchmem -count=10 -run=^$ ./... > old.txt || echo "No baseline available"
+          git checkout -- .
+          git stash pop || true
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+      - name: Check for regressions
+        run: |
+          if [ -f old.txt ] && grep -q "Benchmark" old.txt; then
+            benchstat -delta 50% old.txt new.txt | tee benchstat-output.txt
+            if grep -q "p=0.0" benchstat-output.txt; then
+              echo "::error::Performance regression detected (>50%)"
+              exit 1
+            fi
+          else
+            echo "No baseline available"
+          fi
