@@ -120,17 +120,24 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 				}
 			}
 
-			valErrs = validateTasks(tasks)
-			if len(valErrs) > 0 {
-				lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
-				e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
-				allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
-				rawResponse = content
-				tasks = nil
-				continue
-			}
+	valErrs = validateTasks(tasks)
+		if len(valErrs) > 0 {
+			lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
+			e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
+			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
+			rawResponse = content
+			tasks = nil
+			continue
+		}
 
-			break
+		// Post-validation: merge tasks with overlapping file sets
+		originalCount := len(tasks)
+		tasks = mergeRelatedTasks(tasks)
+		if merged := originalCount - len(tasks); merged > 0 {
+			e.logger.Info("merged tasks with overlapping files", "original", originalCount, "merged", len(tasks), "reduced", merged)
+		}
+
+		break
 		}
 	}
 
@@ -487,6 +494,26 @@ func (e *Engine) buildPlanContext(ctx context.Context, goal string, existingTask
 	// Inject pre-plan research output if available
 	if e.state.researchOutput != "" {
 		planCtx += "## Research Findings\n" + e.state.researchOutput + "\n\n"
+	}
+
+	// Inject outcome learning from recent plan outcomes
+	if e.collector != nil {
+		recentOutcomes := e.collector.RecentPlanOutcomes(10)
+		if len(recentOutcomes) > 0 {
+			planCtx += "## Lessons Learned from Previous Tasks\n"
+			for _, outcome := range recentOutcomes {
+				status := "SUCCESS"
+				if !outcome.Success {
+					status = "FAILED"
+				}
+				planCtx += fmt.Sprintf("- Task %d (%s): %s [%s]", outcome.TaskID, outcome.Action, outcome.Description, status)
+				if outcome.ErrorType != "" {
+					planCtx += fmt.Sprintf(" - Error: %s", outcome.ErrorType)
+				}
+				planCtx += "\n"
+			}
+			planCtx += "\n"
+		}
 	}
 
 	sessionDir := filepath.Dir(e.planningDir)
