@@ -39,12 +39,15 @@ func (m *mockExternalTool) Execute(ctx context.Context, input types.ToolInput) (
 type mockExternalProvider struct{}
 
 func (m *mockExternalProvider) Name() string                     { return "mock" }
-func (m *mockExternalProvider) FetchModels() ([]types.ModelInfo, error) { return nil, nil }
-func (m *mockExternalProvider) ChatCompletionStream(req types.ChatRequest) (types.StreamIterator, error) {
-	return types.StreamIterator{}, nil
+func (m *mockExternalProvider) APIKey() string                   { return "" }
+func (m *mockExternalProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) { return nil, nil }
+func (m *mockExternalProvider) CachedModels() []types.ModelInfo  { return nil }
+func (m *mockExternalProvider) ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error) {
+	return nil, nil
 }
-func (m *mockExternalProvider) EstimateCost(req types.ChatRequest) float64 { return 0 }
-func (m *mockExternalProvider) HealthCheck() error                   { return nil }
+func (m *mockExternalProvider) EstimateCost(modelID string, usage types.Usage) float64 { return 0 }
+func (m *mockExternalProvider) HealthCheck(ctx context.Context) types.HealthStatus { return types.HealthStatus{Status: "healthy"} }
+func (m *mockExternalProvider) GetModel(id string) (*types.ModelInfo, error) { return nil, nil }
 
 // mockPhaseHookHandler is a minimal implementation for compile-time checking.
 type mockPhaseHookHandler struct{}
