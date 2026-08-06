@@ -70,12 +70,12 @@ const (
 
 // MethodProviderName returns the provider's name.
 const (
-	MethodProviderName            = "provider.name"
-	MethodProviderFetchModels     = "provider.fetch_models"
-	MethodProviderChatCompletion  = "provider.chat_completion_stream"
-	MethodProviderEstimateCost    = "provider.estimate_cost"
-	MethodProviderHealthCheck     = "provider.health_check"
-	MethodProviderGetModel        = "provider.get_model"
+	MethodProviderName           = "provider.name"
+	MethodProviderFetchModels    = "provider.fetch_models"
+	MethodProviderChatCompletion = "provider.chat_completion_stream"
+	MethodProviderEstimateCost   = "provider.estimate_cost"
+	MethodProviderHealthCheck    = "provider.health_check"
+	MethodProviderGetModel       = "provider.get_model"
 )
 
 // Method constants for PhaseHookHandler

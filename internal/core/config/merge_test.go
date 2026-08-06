@@ -1225,10 +1225,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{"execute", "verify"},
-						"hook_types":  []string{"pre", "post"},
-						"timeout":     "30s",
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{"execute", "verify"},
+						"hook_types": []string{"pre", "post"},
+						"timeout":    "30s",
 					},
 				},
 			},
@@ -1252,10 +1252,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{"invalid-phase"},
-						"hook_types":  []string{"pre"},
-						"timeout":     "30s",
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{"invalid-phase"},
+						"hook_types": []string{"pre"},
+						"timeout":    "30s",
 					},
 				},
 			},
@@ -1267,10 +1267,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{"execute"},
-						"hook_types":  []string{"invalid"},
-						"timeout":     "30s",
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{"execute"},
+						"hook_types": []string{"invalid"},
+						"timeout":    "30s",
 					},
 				},
 			},
@@ -1282,10 +1282,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{"execute"},
-						"hook_types":  []string{"pre"},
-						"timeout":     "10m", // > 5min
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{"execute"},
+						"hook_types": []string{"pre"},
+						"timeout":    "10m", // > 5min
 					},
 				},
 			},
@@ -1297,10 +1297,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{},
-						"hook_types":  []string{"pre"},
-						"timeout":     "30s",
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{},
+						"hook_types": []string{"pre"},
+						"timeout":    "30s",
 					},
 				},
 			},
@@ -1312,10 +1312,10 @@ func TestExtensionsValidation(t *testing.T) {
 			extConfig: map[string]interface{}{
 				"hooks": map[string]interface{}{
 					"myhook": map[string]interface{}{
-						"command":     "/usr/bin/myhook",
-						"phases":      []string{"execute"},
-						"hook_types":  []string{},
-						"timeout":     "30s",
+						"command":    "/usr/bin/myhook",
+						"phases":     []string{"execute"},
+						"hook_types": []string{},
+						"timeout":    "30s",
 					},
 				},
 			},

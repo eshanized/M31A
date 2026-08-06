@@ -23,7 +23,7 @@ type ExternalToolAdapter struct {
 }
 
 var (
-	_ ExternalTool      = (*ExternalToolAdapter)(nil)
+	_ ExternalTool         = (*ExternalToolAdapter)(nil)
 	_ types.SchemaProvider = (*ExternalToolAdapter)(nil)
 )
 

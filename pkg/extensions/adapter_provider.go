@@ -143,8 +143,8 @@ func (a *ExternalProviderAdapter) EstimateCost(modelID string, usage types.Usage
 
 	// Create params with modelID and usage
 	params := struct {
-		ModelID string       `json:"model_id"`
-		Usage   types.Usage  `json:"usage"`
+		ModelID string      `json:"model_id"`
+		Usage   types.Usage `json:"usage"`
 	}{
 		ModelID: modelID,
 		Usage:   usage,

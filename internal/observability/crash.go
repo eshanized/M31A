@@ -12,14 +12,14 @@ import (
 
 // CrashReport captures all context about a panic for debugging and CI integration.
 type CrashReport struct {
-	Timestamp   string `json:"timestamp"`
-	Version     string `json:"version"`
-	Commit      string `json:"commit"`
-	GoVersion   string `json:"go_version"`
-	OS          string `json:"os"`
-	Arch        string `json:"arch"`
-	StackTrace  string `json:"stack_trace"`
-	PanicValue  any    `json:"panic_value"`
+	Timestamp  string `json:"timestamp"`
+	Version    string `json:"version"`
+	Commit     string `json:"commit"`
+	GoVersion  string `json:"go_version"`
+	OS         string `json:"os"`
+	Arch       string `json:"arch"`
+	StackTrace string `json:"stack_trace"`
+	PanicValue any    `json:"panic_value"`
 }
 
 // RecoverAndCapture recovers from a panic, captures a crash report, writes it to disk,

@@ -27,10 +27,10 @@ func TestPhaseHookHandlerInterfaceCompile(t *testing.T) {
 // mockExternalTool is a minimal implementation for compile-time checking.
 type mockExternalTool struct{}
 
-func (m *mockExternalTool) Name() string                { return "mock" }
-func (m *mockExternalTool) Description() string         { return "mock tool" }
-func (m *mockExternalTool) RiskLevel() types.RiskLevel  { return types.RiskSafe }
-func (m *mockExternalTool) ParameterSchema() string     { return "{}" }
+func (m *mockExternalTool) Name() string               { return "mock" }
+func (m *mockExternalTool) Description() string        { return "mock tool" }
+func (m *mockExternalTool) RiskLevel() types.RiskLevel { return types.RiskSafe }
+func (m *mockExternalTool) ParameterSchema() string    { return "{}" }
 func (m *mockExternalTool) Execute(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 	return types.ToolResult{Output: "ok"}, nil
 }
@@ -38,22 +38,30 @@ func (m *mockExternalTool) Execute(ctx context.Context, input types.ToolInput) (
 // mockExternalProvider is a minimal implementation for compile-time checking.
 type mockExternalProvider struct{}
 
-func (m *mockExternalProvider) Name() string                     { return "mock" }
-func (m *mockExternalProvider) APIKey() string                   { return "" }
-func (m *mockExternalProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) { return nil, nil }
-func (m *mockExternalProvider) CachedModels() []types.ModelInfo  { return nil }
+func (m *mockExternalProvider) Name() string   { return "mock" }
+func (m *mockExternalProvider) APIKey() string { return "" }
+func (m *mockExternalProvider) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
+	return nil, nil
+}
+func (m *mockExternalProvider) CachedModels() []types.ModelInfo { return nil }
 func (m *mockExternalProvider) ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error) {
 	return nil, nil
 }
 func (m *mockExternalProvider) EstimateCost(modelID string, usage types.Usage) float64 { return 0 }
-func (m *mockExternalProvider) HealthCheck(ctx context.Context) types.HealthStatus { return types.HealthStatus{Status: "healthy"} }
+func (m *mockExternalProvider) HealthCheck(ctx context.Context) types.HealthStatus {
+	return types.HealthStatus{Status: "healthy"}
+}
 func (m *mockExternalProvider) GetModel(id string) (*types.ModelInfo, error) { return nil, nil }
 
 // mockPhaseHookHandler is a minimal implementation for compile-time checking.
 type mockPhaseHookHandler struct{}
 
-func (m *mockPhaseHookHandler) PrePhase(ctx context.Context, payload PhaseHookPayload) error   { return nil }
-func (m *mockPhaseHookHandler) PostPhase(ctx context.Context, payload PhaseHookPayload, result *PhaseResult) error { return nil }
+func (m *mockPhaseHookHandler) PrePhase(ctx context.Context, payload PhaseHookPayload) error {
+	return nil
+}
+func (m *mockPhaseHookHandler) PostPhase(ctx context.Context, payload PhaseHookPayload, result *PhaseResult) error {
+	return nil
+}
 
 // TestPhaseHookPayloadSerialization tests JSON serialization of PhaseHookPayload.
 func TestPhaseHookPayloadSerialization(t *testing.T) {

@@ -292,10 +292,10 @@ func validateConfig(cfg *Config) error {
 		b.WriteString("Invalid configuration:\n")
 		for _, err := range errs {
 			b.WriteString("- ")
-b.WriteString(err.Error())
-		b.WriteString("\n")
-	}
-	return fmt.Errorf("%w\n%s", ErrValidation, b.String())
+			b.WriteString(err.Error())
+			b.WriteString("\n")
+		}
+		return fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
 	// Validate extensions configuration
 	if err := validateExtensionsConfig(cfg); err != nil {

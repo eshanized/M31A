@@ -11,24 +11,24 @@ import (
 const WorkspaceConfigPath = ".m31a/workspace.toml"
 
 type Config struct {
-	Provider           ProviderConfig           `toml:"provider"`
-	Model              ModelConfig              `toml:"model"`
-	UI                 UIConfig                 `toml:"ui"`
-	Permissions        PermissionsConfig        `toml:"permissions"`
-	Features           FeaturesConfig           `toml:"features"`
-	Ledger             LedgerConfig             `toml:"ledger"`
-	Tools              ToolsConfig              `toml:"tools"`
-	Agents             AgentsConfig             `toml:"agents"`
-	Git                GitConfig                `toml:"git"`
-	Verify             VerifyConfig             `toml:"verify"`
-	Compaction         CompactionConfig         `toml:"compaction"`
-	Instructions       InstructionsConfig       `toml:"instructions"`
-	Skills             SkillsConfig             `toml:"skills"`
-	ModelCapabilities  ModelCapabilitiesConfig  `toml:"model_capabilities"`
-	Prompts            PromptConfig             `toml:"prompts"`
-	Narrative          NarrativeConfig          `toml:"narrative"`
-	Templates          TemplateConfig           `toml:"templates"`
-	Extensions         ExtensionsConfig         `toml:"extensions" json:"extensions"`
+	Provider          ProviderConfig          `toml:"provider"`
+	Model             ModelConfig             `toml:"model"`
+	UI                UIConfig                `toml:"ui"`
+	Permissions       PermissionsConfig       `toml:"permissions"`
+	Features          FeaturesConfig          `toml:"features"`
+	Ledger            LedgerConfig            `toml:"ledger"`
+	Tools             ToolsConfig             `toml:"tools"`
+	Agents            AgentsConfig            `toml:"agents"`
+	Git               GitConfig               `toml:"git"`
+	Verify            VerifyConfig            `toml:"verify"`
+	Compaction        CompactionConfig        `toml:"compaction"`
+	Instructions      InstructionsConfig      `toml:"instructions"`
+	Skills            SkillsConfig            `toml:"skills"`
+	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
+	Prompts           PromptConfig            `toml:"prompts"`
+	Narrative         NarrativeConfig         `toml:"narrative"`
+	Templates         TemplateConfig          `toml:"templates"`
+	Extensions        ExtensionsConfig        `toml:"extensions" json:"extensions"`
 }
 
 // ExtensionsConfig holds all extension configuration sections.

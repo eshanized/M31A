@@ -18,29 +18,29 @@ import (
 // It communicates via JSON-RPC 2.0 over stdin/stdout.
 type SubprocessManager struct {
 	// Configuration
-	cmd       string
-	args      []string
-	env       map[string]string
-	timeout   time.Duration
-	workDir   string
+	cmd     string
+	args    []string
+	env     map[string]string
+	timeout time.Duration
+	workDir string
 
 	// Process management
-	process   *exec.Cmd
-	stdin     *os.File
-	stdout    *os.File
-	stderr    *os.File
+	process *exec.Cmd
+	stdin   *os.File
+	stdout  *os.File
+	stderr  *os.File
 
 	// Communication
-	requestID   atomic.Int64
-	pendingReq  sync.Map // map[int64]chan JSONRPCResponse
-	readerWG    sync.WaitGroup
-	stopOnce    sync.Once
-	stopped     atomic.Bool
-	started     atomic.Bool
-	mu          sync.Mutex
+	requestID  atomic.Int64
+	pendingReq sync.Map // map[int64]chan JSONRPCResponse
+	readerWG   sync.WaitGroup
+	stopOnce   sync.Once
+	stopped    atomic.Bool
+	started    atomic.Bool
+	mu         sync.Mutex
 
 	// Handshake
-	protocolVersion string
+	protocolVersion  string
 	supportedMethods []string
 }
 

@@ -38,7 +38,7 @@ var (
 			return NewRingBuffer(maxLogBytes)
 		},
 	}
-	totalDevServerBytes   atomic.Int64
+	totalDevServerBytes    atomic.Int64
 	maxTotalDevServerBytes int64 = 4 * 1024 * 1024 // 4MB total cap
 )
 

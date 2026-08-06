@@ -416,8 +416,8 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 
 	// Run post-phase hooks
 	if err := e.hookRegistry.RunPostHooks(ctx, phase, hookPayload, result); err != nil {
-slog.Error("post-phase hooks failed", "phase", phase, "error", err)
-	// Hooks are best-effort; continue execution
+		slog.Error("post-phase hooks failed", "phase", phase, "error", err)
+		// Hooks are best-effort; continue execution
 	}
 
 	// Delegate post-phase metrics and side effects to PhaseCoordinator

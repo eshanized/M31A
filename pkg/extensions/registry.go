@@ -20,12 +20,12 @@ type MsgEmitter interface {
 // It loads extensions from config, starts their subprocesses, and provides
 // lookup methods for tools, providers, and hooks.
 type ExtensionRegistry struct {
-	mu          sync.RWMutex
-	tools       map[string]ExternalTool
-	providers   map[string]ExternalProvider
-	preHooks    map[types.WorkflowPhase][]PhaseHookHandler
-	postHooks   map[types.WorkflowPhase][]PhaseHookHandler
-	processes   map[string]*SubprocessManager
+	mu              sync.RWMutex
+	tools           map[string]ExternalTool
+	providers       map[string]ExternalProvider
+	preHooks        map[types.WorkflowPhase][]PhaseHookHandler
+	postHooks       map[types.WorkflowPhase][]PhaseHookHandler
+	processes       map[string]*SubprocessManager
 	toolConfigs     map[string]ExternalToolConfig
 	providerConfigs map[string]ExternalProviderConfig
 	hookConfigs     map[string]PhaseHookConfig

@@ -69,22 +69,22 @@ type Dispatcher struct {
 // goroutine leaks from pending sends (e.g., during session restart or app shutdown).
 func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
-		tools:               make(map[string]types.Tool),
-		permissions:         make(map[string]bool),
-		requestCh:           make(chan PermissionRequest, PermissionChannelBuffer),
-		responseCh:          make(chan PermissionResponse, PermissionChannelBuffer),
-		questionReqCh:       make(chan types.QuestionRequest, QuestionChannelBuffer),
-		questionRespCh:      make(chan types.QuestionResponse, QuestionChannelBuffer),
-		rules:               []config.PermissionRule{},
-		originalRules:       []config.PermissionRule{},
-		agents:              make(map[string]config.PermissionsAgentConfig),
-		activeAgent:         DefaultAgentName,
-		permissionTimeout:   types.DefaultPermissionTimeout,
-		batchApprovals:      make(map[string]BatchApproval),
-		rateLimiter:         rate.NewLimiter(rate.Limit(ToolRateLimitPerSec), ToolRateLimitBurst),
-		dangerousLimiter:    rate.NewLimiter(rate.Limit(DangerousRateLimitPerSec), DangerousRateLimitBurst),
-		concurrencySem:      make(chan struct{}, MaxConcurrentTools),
-		persistentPerms:     NewPersistentPermissions(),
+		tools:             make(map[string]types.Tool),
+		permissions:       make(map[string]bool),
+		requestCh:         make(chan PermissionRequest, PermissionChannelBuffer),
+		responseCh:        make(chan PermissionResponse, PermissionChannelBuffer),
+		questionReqCh:     make(chan types.QuestionRequest, QuestionChannelBuffer),
+		questionRespCh:    make(chan types.QuestionResponse, QuestionChannelBuffer),
+		rules:             []config.PermissionRule{},
+		originalRules:     []config.PermissionRule{},
+		agents:            make(map[string]config.PermissionsAgentConfig),
+		activeAgent:       DefaultAgentName,
+		permissionTimeout: types.DefaultPermissionTimeout,
+		batchApprovals:    make(map[string]BatchApproval),
+		rateLimiter:       rate.NewLimiter(rate.Limit(ToolRateLimitPerSec), ToolRateLimitBurst),
+		dangerousLimiter:  rate.NewLimiter(rate.Limit(DangerousRateLimitPerSec), DangerousRateLimitBurst),
+		concurrencySem:    make(chan struct{}, MaxConcurrentTools),
+		persistentPerms:   NewPersistentPermissions(),
 	}
 	if cfg != nil {
 		if cfg.Rules != nil {

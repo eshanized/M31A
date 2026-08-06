@@ -3,8 +3,8 @@ package workflow
 import (
 	"testing"
 
-	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/core/config"
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 func TestReplanFromFailure_GeneratesTasks(t *testing.T) {

@@ -120,24 +120,24 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 				}
 			}
 
-	valErrs = validateTasks(tasks)
-		if len(valErrs) > 0 {
-			lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
-			e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
-			allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
-			rawResponse = content
-			tasks = nil
-			continue
-		}
+			valErrs = validateTasks(tasks)
+			if len(valErrs) > 0 {
+				lastErr = fmt.Errorf("validation errors: %s", strings.Join(valErrs, "; "))
+				e.logger.Warn("task validation errors", "attempt", attempt, "errors", valErrs)
+				allValErrs = append(allValErrs, fmt.Sprintf("attempt %d validation: %s", attempt+1, strings.Join(valErrs, "; ")))
+				rawResponse = content
+				tasks = nil
+				continue
+			}
 
-		// Post-validation: merge tasks with overlapping file sets
-		originalCount := len(tasks)
-		tasks = mergeRelatedTasks(tasks)
-		if merged := originalCount - len(tasks); merged > 0 {
-			e.logger.Info("merged tasks with overlapping files", "original", originalCount, "merged", len(tasks), "reduced", merged)
-		}
+			// Post-validation: merge tasks with overlapping file sets
+			originalCount := len(tasks)
+			tasks = mergeRelatedTasks(tasks)
+			if merged := originalCount - len(tasks); merged > 0 {
+				e.logger.Info("merged tasks with overlapping files", "original", originalCount, "merged", len(tasks), "reduced", merged)
+			}
 
-		break
+			break
 		}
 	}
 

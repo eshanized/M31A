@@ -92,11 +92,11 @@ type StartupMetric struct {
 
 // CompletionMetric captures phase completion metrics.
 type CompletionMetric struct {
-	Phase       m31types.WorkflowPhase `json:"phase"`
-	Success     bool                   `json:"success"`
-	Failure     bool                   `json:"failure"`
-	Timeout     bool                   `json:"timeout"`
-	Timestamp   time.Time              `json:"timestamp"`
+	Phase     m31types.WorkflowPhase `json:"phase"`
+	Success   bool                   `json:"success"`
+	Failure   bool                   `json:"failure"`
+	Timeout   bool                   `json:"timeout"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // CancellationMetric captures workflow cancellation events.
