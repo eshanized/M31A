@@ -652,6 +652,19 @@ Establish policies for:
 
 M31A is dependable enough to become a developer's primary terminal coding assistant.
 
+### Phase 5: 05 Intelligence
+
+**Goal:** Improve decision quality — not just model capability. Users trust M31A's decisions even on complex projects.
+**Requirements**: INT-01, INT-02, INT-03, INT-04, INT-05, INT-06, INT-07, INT-08
+**Depends on:** Phase 4
+**Plans:** 3 plans
+
+Plans:
+
+- [ ] 05-01-PLAN.md — Metrics foundation: outcome recording, confidence scoring, cost tracking (Wave 1)
+- [ ] 05-02-PLAN.md — Task merging, re-plan from failure, complexity routing, outcome learning (Wave 2)
+- [ ] 05-03-PLAN.md — Compaction tuning, 90% success threshold (Wave 2)
+
 ---
 
 # Guiding Principles
