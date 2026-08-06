@@ -37,6 +37,7 @@ import (
 	"github.com/eshanized/M31A/internal/integrations/metrics"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/pkg/extensions"
 )
 
 //go:embed templates/website-nextjs/*
@@ -96,6 +97,8 @@ type Engine struct {
 	toolCallsSinceLastCompact int
 	// phaseCoordinator delegates pre-phase setup, post-phase metrics, and transition side effects.
 	phaseCoordinator *PhaseCoordinator
+	// hookRegistry manages pre/post phase hooks for workflow extensibility.
+	hookRegistry *PhaseHookRegistry
 	// cacheMu protects cache from concurrent access during shutdown
 	cacheMu sync.RWMutex
 	// state groups mutable session state (plan, cache, intent, v1.5 subsystems).
@@ -177,6 +180,29 @@ func (e *Engine) Complete() {
 		// Already closed — safe to call multiple times.
 	default:
 		close(e.done)
+	}
+}
+
+// captureStateSnapshot returns a snapshot of the current workflow state for hooks.
+func (e *Engine) captureStateSnapshot() extensions.WorkflowStateSnapshot {
+	// MessagesSnapshot handles its own locking
+	messages := e.state.MessagesSnapshot()
+	// Truncate messages for payload size
+	if len(messages) > 50 {
+		messages = messages[len(messages)-50:]
+	}
+
+	// Tasks are managed by sessionMgr, not WorkflowState
+	// Return empty slice — hooks can load from session if needed
+	tasks := make([]m31types.Task, 0)
+
+	return extensions.WorkflowStateSnapshot{
+		CurrentPhase:   e.stateMachine.CurrentPhase(),
+		Goal:           e.state.CurrentGoal(),
+		Tasks:          tasks,
+		Messages:       messages,
+		SessionID:      e.sessionID,
+		BudgetSpentUSD: e.costTracker.TotalCost(),
 	}
 }
 
@@ -281,6 +307,9 @@ func NewEngineFromOptions(opts EngineOptions) (*Engine, error) {
 		e.emit,
 	)
 
+	// Initialize PhaseHookRegistry for workflow extensibility.
+	e.hookRegistry = NewPhaseHookRegistry()
+
 	// Create contextBuilder with a callback to Engine's modelForPhase.
 	// The callback captures the engine pointer, which is safe because
 	// contextBuilder is only used after the engine is fully initialized.
@@ -349,6 +378,17 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		return nil, fmt.Errorf("phase transition to %s: %w", phase, transitionErr)
 	}
 
+	// Run pre-phase hooks
+	hookPayload := extensions.PhaseHookPayload{
+		PhaseName:     phase,
+		WorkflowState: e.captureStateSnapshot(),
+		Context:       ctx,
+	}
+	if err := e.hookRegistry.RunPreHooks(ctx, phase, hookPayload); err != nil {
+		slog.Error("pre-phase hooks failed", "phase", phase, "error", err)
+		// Hooks are best-effort; continue execution
+	}
+
 	var result *PhaseResult
 
 	switch phase {
@@ -374,7 +414,13 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		result.WorkflowMode = e.WorkflowMode()
 	}
 
-	// Delegate post-phase metrics to PhaseCoordinator
+	// Run post-phase hooks
+	if err := e.hookRegistry.RunPostHooks(ctx, phase, hookPayload, result); err != nil {
+slog.Error("post-phase hooks failed", "phase", phase, "error", err)
+	// Hooks are best-effort; continue execution
+	}
+
+	// Delegate post-phase metrics and side effects to PhaseCoordinator
 	e.phaseCoordinator.PostPhaseExecution(phase, result, start)
 
 	// Clear recovery on successful phase completion

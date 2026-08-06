@@ -26,14 +26,20 @@ type ExternalTool interface {
 type ExternalProvider interface {
 	// Name returns the unique name of the provider.
 	Name() string
+	// APIKey returns the API key (empty for external providers).
+	APIKey() string
 	// FetchModels returns the list of models available from this provider.
-	FetchModels() ([]types.ModelInfo, error)
+	FetchModels(ctx context.Context) ([]types.ModelInfo, error)
+	// CachedModels returns the cached models without fetching.
+	CachedModels() []types.ModelInfo
 	// ChatCompletionStream performs a streaming chat completion request.
-	ChatCompletionStream(req types.ChatRequest) (types.StreamIterator, error)
+	ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error)
 	// EstimateCost estimates the cost of a request in USD.
-	EstimateCost(req types.ChatRequest) float64
+	EstimateCost(modelID string, usage types.Usage) float64
 	// HealthCheck verifies the provider is reachable and healthy.
-	HealthCheck() error
+	HealthCheck(ctx context.Context) types.HealthStatus
+	// GetModel returns a specific model by ID.
+	GetModel(id string) (*types.ModelInfo, error)
 }
 
 // PhaseHookHandler is the interface that workflow phase hook extensions must implement.

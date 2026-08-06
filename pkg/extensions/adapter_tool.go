@@ -17,17 +17,18 @@ type ExternalToolAdapter struct {
 	description string
 	riskLevel   types.RiskLevel
 	schema      string
-	procManager *SubprocessManager
+	procManager SubprocessManagerInterface
 	initialized bool
 	initMu      sync.Mutex
 }
 
 var (
-	_ ExternalTool = (*ExternalToolAdapter)(nil)
+	_ ExternalTool      = (*ExternalToolAdapter)(nil)
+	_ types.SchemaProvider = (*ExternalToolAdapter)(nil)
 )
 
 // NewExternalToolAdapter creates a new ExternalToolAdapter.
-func NewExternalToolAdapter(name string, proc *SubprocessManager) *ExternalToolAdapter {
+func NewExternalToolAdapter(name string, proc SubprocessManagerInterface) *ExternalToolAdapter {
 	return &ExternalToolAdapter{
 		name:        name,
 		procManager: proc,

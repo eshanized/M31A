@@ -1,7 +1,9 @@
 package extensions
 
 import (
+	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/eshanized/M31A/internal/core/types"
 )
@@ -66,18 +68,14 @@ const (
 	MethodToolExecute = "tool.execute"
 )
 
-// Method constants for ExternalProvider
+// MethodProviderName returns the provider's name.
 const (
-	// MethodProviderName returns the provider's name.
-	MethodProviderName = "provider.name"
-	// MethodProviderFetchModels returns the list of available models.
-	MethodProviderFetchModels = "provider.fetch_models"
-	// MethodProviderChatCompletion performs a streaming chat completion.
-	MethodProviderChatCompletion = "provider.chat_completion_stream"
-	// MethodProviderEstimateCost estimates the cost of a request.
-	MethodProviderEstimateCost = "provider.estimate_cost"
-	// MethodProviderHealthCheck checks provider health.
-	MethodProviderHealthCheck = "provider.health_check"
+	MethodProviderName            = "provider.name"
+	MethodProviderFetchModels     = "provider.fetch_models"
+	MethodProviderChatCompletion  = "provider.chat_completion_stream"
+	MethodProviderEstimateCost    = "provider.estimate_cost"
+	MethodProviderHealthCheck     = "provider.health_check"
+	MethodProviderGetModel        = "provider.get_model"
 )
 
 // Method constants for PhaseHookHandler
@@ -151,6 +149,14 @@ type ProviderHealthCheckResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// ProviderGetModelResult is the result of provider.get_model.
+type ProviderGetModelResult struct {
+	// Model is the model info if found.
+	Model *types.ModelInfo `json:"model,omitempty"`
+	// Error is any error message if not found.
+	Error string `json:"error,omitempty"`
+}
+
 // HookPrePhaseParams are the parameters for hook.pre_phase.
 type HookPrePhaseParams struct {
 	// Payload is the phase hook payload.
@@ -188,4 +194,17 @@ type ToolSchemaResult struct {
 // ProviderNameResult is the result of provider.name.
 type ProviderNameResult struct {
 	Name string `json:"name"`
+}
+
+// SubprocessManagerInterface defines the methods required by adapters.
+// This allows mocking in tests.
+type SubprocessManagerInterface interface {
+	Call(ctx context.Context, req JSONRPCRequest, timeout time.Duration) (JSONRPCResponse, error)
+	nextRequestID() json.RawMessage
+	Start(ctx context.Context) error
+	Stop() error
+	IsRunning() bool
+	ProtocolVersion() string
+	SupportedMethods() []string
+	SetWorkDir(dir string)
 }

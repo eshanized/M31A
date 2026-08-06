@@ -38,8 +38,13 @@ func (a *ExternalProviderAdapter) Name() string {
 	return a.name
 }
 
+// APIKey returns the API key (empty for external providers).
+func (a *ExternalProviderAdapter) APIKey() string {
+	return ""
+}
+
 // FetchModels returns the list of available models.
-func (a *ExternalProviderAdapter) FetchModels() ([]types.ModelInfo, error) {
+func (a *ExternalProviderAdapter) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 	a.modelsMu.RLock()
 	if a.models != nil {
 		models := make([]types.ModelInfo, len(a.models))
@@ -50,7 +55,7 @@ func (a *ExternalProviderAdapter) FetchModels() ([]types.ModelInfo, error) {
 	a.modelsMu.RUnlock()
 
 	// Fetch models if not cached
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	models, err := a.fetchModels(ctx)
@@ -67,11 +72,21 @@ func (a *ExternalProviderAdapter) FetchModels() ([]types.ModelInfo, error) {
 	return result, nil
 }
 
-// ChatCompletionStream performs a streaming chat completion.
-func (a *ExternalProviderAdapter) ChatCompletionStream(req types.ChatRequest) (types.StreamIterator, error) {
-	a.ensureInitialized()
+// CachedModels returns the cached models (without fetching).
+func (a *ExternalProviderAdapter) CachedModels() []types.ModelInfo {
+	a.modelsMu.RLock()
+	defer a.modelsMu.RUnlock()
+	if a.models == nil {
+		return nil
+	}
+	result := make([]types.ModelInfo, len(a.models))
+	copy(result, a.models)
+	return result
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
+// ChatCompletionStream performs a streaming chat completion.
+func (a *ExternalProviderAdapter) ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error) {
+	a.ensureInitialized()
 
 	reqMsg := JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -82,46 +97,41 @@ func (a *ExternalProviderAdapter) ChatCompletionStream(req types.ChatRequest) (t
 	params := ProviderChatCompletionParams{Request: req}
 	paramsData, err := json.Marshal(params)
 	if err != nil {
-		cancel()
-		return types.StreamIterator{}, fmt.Errorf("marshal params: %w", err)
+		return nil, fmt.Errorf("marshal params: %w", err)
 	}
 	reqMsg.Params = paramsData
 
 	resp, err := a.procManager.Call(ctx, reqMsg, 60*time.Second)
 	if err != nil {
-		cancel()
-		return types.StreamIterator{}, err
+		return nil, err
 	}
 
 	if resp.Error != nil {
-		cancel()
-		return types.StreamIterator{}, fmt.Errorf("chat_completion error: %s", resp.Error.Message)
+		return nil, fmt.Errorf("chat_completion error: %s", resp.Error.Message)
 	}
 
 	var result ProviderChatCompletionResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		cancel()
-		return types.StreamIterator{}, fmt.Errorf("unmarshal result: %w", err)
+		return nil, fmt.Errorf("unmarshal result: %w", err)
 	}
 
 	// Create a stream iterator that reads notifications from the subprocess
 	// For now, we'll implement a basic version that polls for notifications
 	// A full implementation would use a dedicated notification channel
-	return types.StreamIterator{
+	return &types.StreamIterator{
 		Next: func() (*types.StreamChunk, error) {
 			// This is a simplified implementation
 			// In a real implementation, we'd have a notification listener
 			return nil, context.Canceled
 		},
 		Close: func() error {
-			cancel()
 			return nil
 		},
 	}, nil
 }
 
 // EstimateCost estimates the cost of a request.
-func (a *ExternalProviderAdapter) EstimateCost(req types.ChatRequest) float64 {
+func (a *ExternalProviderAdapter) EstimateCost(modelID string, usage types.Usage) float64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -131,7 +141,15 @@ func (a *ExternalProviderAdapter) EstimateCost(req types.ChatRequest) float64 {
 		Method:  MethodProviderEstimateCost,
 	}
 
-	paramsData, err := json.Marshal(req)
+	// Create params with modelID and usage
+	params := struct {
+		ModelID string       `json:"model_id"`
+		Usage   types.Usage  `json:"usage"`
+	}{
+		ModelID: modelID,
+		Usage:   usage,
+	}
+	paramsData, err := json.Marshal(params)
 	if err != nil {
 		return 0
 	}
@@ -155,10 +173,7 @@ func (a *ExternalProviderAdapter) EstimateCost(req types.ChatRequest) float64 {
 }
 
 // HealthCheck checks provider health.
-func (a *ExternalProviderAdapter) HealthCheck() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
+func (a *ExternalProviderAdapter) HealthCheck(ctx context.Context) types.HealthStatus {
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      a.procManager.nextRequestID(),
@@ -167,23 +182,42 @@ func (a *ExternalProviderAdapter) HealthCheck() error {
 
 	resp, err := a.procManager.Call(ctx, req, 10*time.Second)
 	if err != nil {
-		return err
+		return types.HealthStatus{Status: "unhealthy", Error: err.Error()}
 	}
 
 	if resp.Error != nil {
-		return fmt.Errorf("health_check error: %s", resp.Error.Message)
+		return types.HealthStatus{Status: "unhealthy", Error: resp.Error.Message}
 	}
 
 	var result ProviderHealthCheckResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return err
+		return types.HealthStatus{Status: "unhealthy", Error: err.Error()}
 	}
 
 	if result.Status != "healthy" {
-		return fmt.Errorf("provider unhealthy: %s", result.Error)
+		return types.HealthStatus{Status: "unhealthy", Error: result.Error}
 	}
 
-	return nil
+	return types.HealthStatus{Status: "healthy", LatencyMs: result.LatencyMs}
+}
+
+// GetModel returns a specific model by ID.
+func (a *ExternalProviderAdapter) GetModel(id string) (*types.ModelInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := a.FetchModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, m := range models {
+		if m.ID == id {
+			return &m, nil
+		}
+	}
+
+	return nil, fmt.Errorf("model not found: %s", id)
 }
 
 // ensureInitialized fetches provider metadata on first access.
