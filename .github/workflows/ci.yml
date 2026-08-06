@@ -110,6 +110,36 @@ jobs:
           curl -sf http://localhost:6060/debug/pprof/ > /dev/null
           kill %1
 
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=5 -run=^$ ./internal/performance/ > new.txt
+      - name: Fetch baseline from main
+        run: |
+          git stash --include-untracked
+          git checkout main -- internal/performance/
+          go test -bench=. -benchmem -count=5 -run=^$ ./internal/performance/ > old.txt || echo "No baseline available"
+          git checkout -- .
+          git stash pop || true
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+      - name: Check for regressions
+        run: |
+          if [ -f old.txt ] && grep -q "Benchmark" old.txt; then
+            benchstat -delta 50% old.txt new.txt
+          else
+            echo "No baseline available, skipping regression check"
+          fi
+
   build:
     strategy:
       matrix:

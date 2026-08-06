@@ -120,6 +120,18 @@ bench-verbose:
 	@printf "\033[0;32m[bench]\033[0m Running benchmarks (verbose)...\n"
 	@$(GO) test -v -bench=. -benchmem -run=^$$ ./...
 
+## bench-compare     — Run benchmarks and compare against baseline
+bench-compare:
+	@printf "\033[0;32m[bench-compare]\033[0m Running benchmarks and comparing...\n"
+	@go test -bench=. -benchmem -count=5 -run=^$$ ./internal/performance/ > /tmp/new.txt
+	@benchstat /tmp/old.txt /tmp/new.txt 2>/dev/null || echo "No baseline found. Run 'make bench-save' first."
+
+## bench-save        — Save current benchmark results as baseline
+bench-save:
+	@printf "\033[0;32m[bench-save]\033[0m Saving benchmark baseline...\n"
+	@go test -bench=. -benchmem -count=5 -run=^$$ ./internal/performance/ > /tmp/old.txt
+	@printf "\033[0;32m[bench-save]\033[0m Baseline saved to /tmp/old.txt\n"
+
 ## cover             — Generate HTML coverage report
 cover: test
 	@printf "\033[0;32m[cover]\033[0m Generating HTML coverage report...\n"
@@ -326,7 +338,7 @@ version:
 
 .PHONY: build debug dev run-latest help \
         test test-fast test-verbose test-specific \
-        bench bench-verbose cover \
+        bench bench-verbose bench-compare bench-save cover \
         lint lint-full lint-fix vet fmt tidy check validate-release \
         cross $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(arch))) \
         release release-dry \
