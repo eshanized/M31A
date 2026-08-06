@@ -3,7 +3,10 @@ package workflow
 // Model selection and configuration for per-phase model routing.
 
 import (
+	"context"
+
 	m31types "github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/integrations/arbitrage"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 )
 
@@ -46,12 +49,24 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 		e.logger.Debug("model selected", "phase", phase, "model", override, "source", "agents config")
 		return override
 	}
-	// 3. Global agent default
+	// 3. AutoArbitrage layer (when enabled, for PhaseExecute only)
+	if e.cfg.Model.AutoArbitrage && phase == m31types.PhaseExecute && e.provider != nil {
+		if rec, err := e.arbitrageRecommend(context.Background()); err == nil && rec != nil {
+			e.logger.Debug("model selected via arbitrage",
+				"phase", phase,
+				"model", rec.RecommendedModel.ModelID,
+				"complexity", rec.Complexity,
+				"savings", rec.Savings,
+				"reason", rec.Reason)
+			return rec.RecommendedModel.ModelID
+		}
+	}
+	// 4. Global agent default
 	if e.cfg.Agents.Default != "" {
 		e.logger.Debug("model selected", "phase", phase, "model", e.cfg.Agents.Default, "source", "default")
 		return e.cfg.Agents.Default
 	}
-	// 4. Engine model ID
+	// 5. Engine model ID
 	return e.modelID
 }
 
@@ -98,4 +113,39 @@ func (e *Engine) providerAndModel() (provider.LLMProvider, string) {
 	e.modelIDMu.RLock()
 	defer e.modelIDMu.RUnlock()
 	return e.provider, e.modelID
+}
+
+// arbitrageRecommend fetches available models and calls arbitrage.Recommend
+// to find the best model for the current task context.
+func (e *Engine) arbitrageRecommend(ctx context.Context) (*arbitrage.ArbitrageRecommendation, error) {
+	if e.provider == nil {
+		return nil, nil
+	}
+
+	// Fetch available models from the provider
+	models, err := e.provider.FetchModels(ctx)
+	if err != nil {
+		e.logger.Debug("failed to fetch models for arbitrage", "error", err)
+		return nil, err
+	}
+
+	if len(models) == 0 {
+		return nil, nil
+	}
+
+	// Create a synthetic task for the current phase context
+	// This is a placeholder — in a real implementation, we'd pass the actual task
+	task := m31types.Task{
+		Action:      "execute",
+		Description: "current execution task",
+		Files:       []string{},
+	}
+
+	// Get threshold from config (default 0.1 = 10%)
+	threshold := e.cfg.Model.ArbitrageThreshold
+	if threshold <= 0 {
+		threshold = 0.1
+	}
+
+	return arbitrage.Recommend(models, task, threshold)
 }

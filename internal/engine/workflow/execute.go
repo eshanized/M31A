@@ -776,6 +776,49 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 		})
 	}
 
+	// Re-plan from failure: if tasks remain after this one, generate replacement tasks
+	var remainingTasks []m31types.Task
+	for _, t := range allTasks {
+		if t.ID > task.ID && t.Status == m31types.StatusPending {
+			remainingTasks = append(remainingTasks, t)
+		}
+	}
+	if len(remainingTasks) > 0 {
+		failureReason := fmt.Sprintf("max heal attempts exceeded (%d)", m31types.MaxHealAttempts)
+		newTasks, replanErr := e.replanFromFailure(ctx, *task, remainingTasks, failureReason, goal)
+		if replanErr != nil {
+			e.logger.Warn("re-plan from failure failed", "task", task.ID, "error", replanErr)
+		} else if len(newTasks) > 0 {
+			// Replace remaining tasks with re-planned tasks
+			e.logger.Info("re-planned tasks after failure", "task", task.ID, "new_task_count", len(newTasks))
+			// Update the allTasks slice: keep completed tasks, replace pending ones
+			var updatedTasks []m31types.Task
+			for _, t := range allTasks {
+				if t.ID <= task.ID || t.Status != m31types.StatusPending {
+					updatedTasks = append(updatedTasks, t)
+				}
+			}
+			// Add re-planned tasks with new IDs starting after the last completed task
+			maxID := task.ID
+			for _, t := range updatedTasks {
+				if t.ID > maxID {
+					maxID = t.ID
+				}
+			}
+			for i := range newTasks {
+				newTasks[i].ID = maxID + i + 1
+				newTasks[i].Status = m31types.StatusPending
+			}
+			updatedTasks = append(updatedTasks, newTasks...)
+			// Update the allTasks slice in place
+			allTasks = updatedTasks
+			// Save updated tasks
+			if saveErr := e.sessionMgr.SaveTasks(e.sessionID, allTasks); saveErr != nil {
+				e.logger.Warn("failed to save re-planned tasks", "error", saveErr)
+			}
+		}
+	}
+
 	return taskrunner.TaskResult{
 		Success: false,
 		Error:   fmt.Sprintf("max heal attempts exceeded (%d)", m31types.MaxHealAttempts),
