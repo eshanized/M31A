@@ -169,6 +169,7 @@ Examples:
 **Plans:** 4 plans
 
 Plans:
+
 - [x] 01-01-PLAN.md — Concurrency refactoring (extract WorkflowState, document lock ordering, stress tests) — Complete 2026-08-05
 - [x] 01-02-PLAN.md — Cancellation and error handling (context propagation, process kill, error wrapping) — Complete 2026-08-05
 - [x] 01-03-PLAN.md — Testing confidence (delete coverage fluff, integration tests for gaps) — Complete 2026-08-05
@@ -280,6 +281,7 @@ Users consistently understand what M31A is doing without reading documentation.
 **Plans:** 4 plans
 
 Plans:
+
 - [x] 02-01-PLAN.md — Progress display: persistent status bar showing phase, task, elapsed time
 - [x] 02-02-PLAN.md — Permission prompts: risk labels, batch approval, auto-approve safe tools
 - [x] 02-03-PLAN.md — Plan presentation: collapsible sections, inline editing, time estimates
@@ -372,6 +374,7 @@ New contributors can understand and modify the codebase confidently.
 **Plans:** 3 plans
 
 Plans:
+
 - [ ] 03-01-PLAN.md — Engine.go split: decompose 1927-line file into 5 focused files by concern (pause, streaming, checkpoint, model, helpers)
 - [ ] 03-02-PLAN.md — Architecture documentation: update ARCHITECTURE.md, create CONVENTIONS.md, update CONCERNS.md
 - [ ] 03-03-PLAN.md — Developer experience: debug logging (slog), profiling (pprof), release automation (GoReleaser CI)
