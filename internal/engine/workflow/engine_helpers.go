@@ -117,6 +117,7 @@ func (e *Engine) loadProjectCached() *m31types.ProjectState {
 	cache := e.cache
 	e.cacheMu.RUnlock()
 	if cached := cache.GetProjectShared(e.sessionID); cached != nil {
+		e.logger.Debug("project loaded from cache", "session_id", e.sessionID)
 		return cached
 	}
 	project, err := e.sessionMgr.LoadProject(e.sessionID)
@@ -125,6 +126,7 @@ func (e *Engine) loadProjectCached() *m31types.ProjectState {
 		return nil
 	}
 	cache.SetProjectShared(e.sessionID, project)
+	e.logger.Debug("project loaded from disk", "session_id", e.sessionID)
 	return project
 }
 

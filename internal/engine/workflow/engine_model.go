@@ -17,6 +17,7 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 	e.perPhaseModelsMu.RLock()
 	if id, ok := e.perPhaseModels[phase]; ok && id != "" {
 		e.perPhaseModelsMu.RUnlock()
+		e.logger.Debug("model selected", "phase", phase, "model", id, "source", "per-phase override")
 		return id
 	}
 	e.perPhaseModelsMu.RUnlock()
@@ -42,10 +43,12 @@ func (e *Engine) modelForPhase(phase m31types.WorkflowPhase) string {
 		override = e.cfg.Agents.Discuss
 	}
 	if override != "" {
+		e.logger.Debug("model selected", "phase", phase, "model", override, "source", "agents config")
 		return override
 	}
 	// 3. Global agent default
 	if e.cfg.Agents.Default != "" {
+		e.logger.Debug("model selected", "phase", phase, "model", e.cfg.Agents.Default, "source", "default")
 		return e.cfg.Agents.Default
 	}
 	// 4. Engine model ID

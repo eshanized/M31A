@@ -493,7 +493,7 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	// Clear recovery on successful phase completion
 	if result != nil && result.Success {
 		if clearErr := e.ClearRecovery(); clearErr != nil {
-			slog.Warn("failed to clear recovery state", "error", clearErr)
+			e.logger.Warn("failed to clear recovery state", "error", clearErr)
 		}
 	}
 
@@ -712,7 +712,7 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 
 	// Try auto-compaction before falling back to crude truncation
 	if e.compactor != nil && e.compactor.ShouldCompact(messages, contextLength) {
-		slog.Info("auto-compaction triggered", "estimated_tokens", estimated, "context_length", contextLength)
+		e.logger.Debug("auto-compaction triggered", "estimated_tokens", estimated, "context_length", contextLength)
 		compactCtx, compactCancel := context.WithTimeout(context.Background(), 60*time.Second)
 		cp, _ := e.providerAndModel()
 		result, compactErr := e.compactor.Compact(compactCtx, messages, cp, e.modelForPhase(e.stateMachine.CurrentPhase()))
@@ -732,7 +732,7 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 			// Compaction wasn't sufficient, fall through to truncation with compacted messages
 			msgs = compactedMsgs
 		} else if compactErr != nil {
-			slog.Warn("auto-compaction failed, falling back to truncation", "error", compactErr)
+			e.logger.Warn("auto-compaction failed, falling back to truncation", "error", compactErr)
 		}
 	}
 
@@ -811,7 +811,7 @@ func (e *Engine) preflightContextCheck(messages []m31types.Message) ([]m31types.
 	}
 
 	if estimated > threshold80 {
-		slog.Warn("context usage approaching limit after truncation", "estimated", estimated, "limit", contextLength)
+		e.logger.Warn("context usage approaching limit after truncation", "estimated", estimated, "limit", contextLength)
 	}
 	return msgs, nil
 }
@@ -851,7 +851,7 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 		return messages
 	}
 
-	slog.Info("proactive compaction triggered",
+	e.logger.Debug("proactive compaction triggered",
 		"phase", e.stateMachine.CurrentPhase(),
 		"estimated_tokens", estimated,
 		"context_length", contextLength,
@@ -863,7 +863,7 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 	compactCancel()
 
 	if compactErr != nil {
-		slog.Warn("proactive compaction failed", "error", compactErr)
+		e.logger.Warn("proactive compaction failed", "error", compactErr)
 		return messages
 	}
 	if !result.Compacted {
@@ -877,7 +877,7 @@ func (e *Engine) proactiveCompactCheck(messages []m31types.Message) []m31types.M
 	})
 
 	compacted := e.compactedMessages(messages, result.Summary)
-	slog.Info("proactive compaction complete",
+	e.logger.Debug("proactive compaction complete",
 		"tokens_before", result.TokensBefore,
 		"tokens_after", result.TokensAfter,
 		"messages_removed", result.MessagesRemoved)

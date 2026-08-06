@@ -28,7 +28,7 @@ func (e *Engine) consumeStream(iterator *m31types.StreamIterator) (string, *m31t
 	var sb strings.Builder
 	defer func() {
 		if err := iterator.Close(); err != nil {
-			slog.Debug("close stream iterator", "error", err, "resource", "consumeStream")
+			e.logger.Debug("close stream iterator", "error", err, "resource", "consumeStream")
 		}
 	}()
 
@@ -81,7 +81,7 @@ func (e *Engine) consumeStreamWithTools(iterator *m31types.StreamIterator) (stri
 	builders := map[int]*toolCallBuilder{}
 	defer func() {
 		if err := iterator.Close(); err != nil {
-			slog.Debug("close stream iterator", "error", err, "resource", "consumeStreamWithTools")
+			e.logger.Debug("close stream iterator", "error", err, "resource", "consumeStreamWithTools")
 		}
 	}()
 
@@ -303,7 +303,7 @@ func (e *Engine) retryChatStream(ctx context.Context, req provider.ChatRequest, 
 
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
 		delay := policy.Delay(attempt, nil)
-		slog.Info("retrying LLM request", "attempt", attempt, "max", policy.MaxAttempts, "delay", delay, "reason", reason)
+		e.logger.Debug("retrying stream", "attempt", attempt, "max", policy.MaxAttempts, "delay", delay, "reason", reason)
 
 		select {
 		case <-ctx.Done():

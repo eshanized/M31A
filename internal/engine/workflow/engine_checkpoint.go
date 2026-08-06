@@ -5,7 +5,6 @@ package workflow
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
@@ -36,6 +35,7 @@ func (e *Engine) SaveCheckpointData(goal string) {
 		Timestamp:   time.Now(),
 	}
 	e.state.SetCheckpointData(cp)
+	e.logger.Info("checkpoint saved", "phase", cp.Phase, "goal", truncateForLog(cp.Goal, 100))
 
 	// Persist to disk so checkpoint data survives process crashes.
 	sessCheckpoint := session.Checkpoint{
@@ -74,6 +74,7 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 	e.state.SetCheckpointData(data)
 	e.state.SetPlanVersion(data.PlanVersion)
 	e.stateMachine.SetPhase(data.Phase)
+	e.logger.Info("checkpoint loaded", "phase", data.Phase, "timestamp", data.Timestamp)
 	// Restore decisions to the log
 	dl := e.state.DecisionLog()
 	if data.Decisions != nil && dl != nil {
@@ -113,11 +114,9 @@ func (e *Engine) Recover() error {
 	e.state.SetCheckpointData(state.Checkpoint)
 	e.stateMachine.SetPhase(state.CurrentPhase)
 
-	slog.Info("recovered from persisted state",
+	e.logger.Info("recovery restored",
 		"phase", state.CurrentPhase,
-		"plan_version", state.PlanVersion,
 		"messages", len(state.Messages),
-		"timestamp", state.Timestamp,
 	)
 
 	return nil
@@ -143,7 +142,7 @@ func (e *Engine) persistRecovery() {
 		return
 	}
 	if err := SaveRecoveryState(e, e.recoveryPath); err != nil {
-		slog.Warn("failed to persist recovery state", "error", err)
+		e.logger.Warn("failed to persist recovery state", "error", err)
 	}
 }
 
@@ -185,10 +184,9 @@ func (e *Engine) RollbackCurrentPhase() error {
 	e.phaseCoordinator.PostPhaseExecution(state.CurrentPhase, nil, time.Now())
 	e.stateMachine.SetPhase(previousPhase)
 
-	slog.Info("rolled back to previous phase",
+	e.logger.Info("rolled back",
 		"from", state.CurrentPhase,
 		"to", previousPhase,
-		"goal", truncateForLog(state.Goal, 100),
 	)
 
 	return nil

@@ -17,6 +17,7 @@ func (e *Engine) PauseExecution() bool {
 	e.skipTaskCh = make(chan int, 1)
 	e.cancelTaskCh = make(chan int, 1)
 	e.cancelGroupCh = make(chan struct{})
+	e.logger.Debug("execution paused", "session_id", e.sessionID)
 	return true
 }
 
@@ -34,6 +35,7 @@ func (e *Engine) ResumeExecution() bool {
 	e.skipTaskCh = nil
 	e.cancelTaskCh = nil
 	e.cancelGroupCh = nil
+	e.logger.Debug("execution resumed", "session_id", e.sessionID)
 	return true
 }
 
@@ -51,6 +53,7 @@ func (e *Engine) SkipCurrentTask(taskID int) {
 	if e.skipTaskCh != nil {
 		select {
 		case e.skipTaskCh <- taskID:
+			e.logger.Debug("task skipped", "task_id", taskID)
 		default:
 		}
 	}
@@ -63,6 +66,7 @@ func (e *Engine) CancelCurrentTask(taskID int) {
 	if e.cancelTaskCh != nil {
 		select {
 		case e.cancelTaskCh <- taskID:
+			e.logger.Debug("task cancelled", "task_id", taskID)
 		default:
 		}
 	}
@@ -75,6 +79,7 @@ func (e *Engine) CancelGroup() {
 	if e.cancelGroupCh != nil {
 		close(e.cancelGroupCh)
 		e.cancelGroupCh = nil
+		e.logger.Debug("group cancelled", "session_id", e.sessionID)
 	}
 }
 
