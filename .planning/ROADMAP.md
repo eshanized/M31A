@@ -665,6 +665,30 @@ Plans:
 - [x] 05-02-PLAN.md — Task merging, re-plan from failure, complexity routing, outcome learning (Wave 2)
 - [x] 05-03-PLAN.md — Compaction tuning, 90% success threshold (Wave 2)
 
+### Phase 6: Ecosystem
+
+**Goal:** Make M31A a platform rather than a standalone application. External contributors can extend M31A without modifying core components through config-driven subprocess extensions, stable plugin APIs, layered configuration, workflow phase hooks, and automated CI/release infrastructure.
+**Requirements**: EXT-01, EXT-02, EXT-03, EXT-04, EXT-05, EXT-06, EXT-07, EXT-08
+**Plans:** 6 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — pkg/extensions core: interfaces, JSON-RPC protocol, subprocess manager, extension registry (Wave 1)
+- [ ] 06-02-PLAN.md — Config loader: workspace TOML + project JSON layers, 4-layer merge precedence, extensions validation (Wave 1)
+- [ ] 06-03-PLAN.md — Adapters: ExternalToolAdapter→Dispatcher, ExternalProviderAdapter→Registry, PhaseHookAdapter→Engine (Wave 2)
+- [ ] 06-04-PLAN.md — Documentation & samples: 6 docs + 3 working extensions (custom-linter, ollama-provider, pre-commit-hook) (Wave 3)
+- [ ] 06-05-PLAN.md — CI/Release/Benchmark automation: benchstat regression, nightly workflow, Dependabot, GoReleaser, gh-pages dashboard (Wave 3)
+- [ ] 06-06-PLAN.md — Contribution workflow: issue/PR templates, CODEOWNERS, labeler, pr-checks, contributing docs, release checklist, semver (Wave 2)
+
+### Phase 7: Production Readiness
+
+**Goal:** Reach a level suitable for daily professional use. M31A is dependable enough to become a developer's primary terminal coding assistant.
+**Requirements**: OBS-01, CRASH-01, VALID-01, RELEASE-01, LTS-01, COMPAT-01
+**Plans:** 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Crash handler and observability: panic recovery, crash reports, CI crash capture, production metrics (Wave 1)
+- [ ] 07-02-PLAN.md — Tiered validation, release quality gates, compatibility matrix, LTS policy (Wave 2)
+
 ---
 
 # Guiding Principles
