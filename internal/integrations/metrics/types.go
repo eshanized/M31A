@@ -53,6 +53,20 @@ type PhaseMetric struct {
 	Success            bool                   `json:"success"`
 }
 
+// PlanOutcome captures the result of executing a single task within a plan.
+type PlanOutcome struct {
+	TaskID      int       `json:"task_id"`
+	Action      string    `json:"action"`
+	Description string    `json:"description"`
+	Files       []string  `json:"files,omitempty"`
+	Success     bool      `json:"success"`
+	DurationMs  int64     `json:"duration_ms"`
+	HealsUsed   int       `json:"heals_used"`
+	ToolCalls   int       `json:"tool_calls"`
+	ErrorType   string    `json:"error_type,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
 // SessionMetrics is the top-level metrics container persisted per session.
 type SessionMetrics struct {
 	SessionID      string               `json:"session_id"`
@@ -62,4 +76,5 @@ type SessionMetrics struct {
 	EditStrategies []EditStrategyMetric `json:"edit_strategies,omitempty"`
 	LLMs           []LLMMetric          `json:"llms"`
 	Phases         []PhaseMetric        `json:"phases"`
+	PlanOutcomes   []PlanOutcome        `json:"plan_outcomes,omitempty"`
 }

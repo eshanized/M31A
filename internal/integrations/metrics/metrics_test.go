@@ -895,3 +895,151 @@ func TestCollector_HealQualityScenario(t *testing.T) {
 		t.Errorf("HealLoopCount = %d, want 1", p.HealLoopCount)
 	}
 }
+
+// --- RecordPlanOutcome tests ---
+
+func TestRecordPlanOutcome(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	outcome := PlanOutcome{
+		TaskID:      1,
+		Action:      "implement",
+		Description: "Add feature X",
+		Files:       []string{"a.go", "b.go"},
+		Success:     true,
+		DurationMs:  5000,
+		HealsUsed:   0,
+		ToolCalls:   3,
+		ErrorType:   "",
+		Timestamp:   time.Now(),
+	}
+	c.RecordPlanOutcome(outcome)
+
+	snap := c.Snapshot()
+	if len(snap.PlanOutcomes) != 1 {
+		t.Fatalf("expected 1 plan outcome, got %d", len(snap.PlanOutcomes))
+	}
+	o := snap.PlanOutcomes[0]
+	if o.TaskID != 1 {
+		t.Errorf("TaskID = %d, want 1", o.TaskID)
+	}
+	if o.Action != "implement" {
+		t.Errorf("Action = %q, want implement", o.Action)
+	}
+	if !o.Success {
+		t.Error("Success = false, want true")
+	}
+	if o.DurationMs != 5000 {
+		t.Errorf("DurationMs = %d, want 5000", o.DurationMs)
+	}
+}
+
+func TestRecordPlanOutcome_Accumulates(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	c.RecordPlanOutcome(PlanOutcome{TaskID: 1, Success: true, DurationMs: 1000})
+	c.RecordPlanOutcome(PlanOutcome{TaskID: 2, Success: false, DurationMs: 2000, ErrorType: "tool_error"})
+	c.RecordPlanOutcome(PlanOutcome{TaskID: 3, Success: true, DurationMs: 500})
+
+	snap := c.Snapshot()
+	if len(snap.PlanOutcomes) != 3 {
+		t.Fatalf("expected 3 plan outcomes, got %d", len(snap.PlanOutcomes))
+	}
+}
+
+func TestRecordPlanOutcome_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, false)
+
+	c.RecordPlanOutcome(PlanOutcome{TaskID: 1, Success: true})
+
+	snap := c.Snapshot()
+	if len(snap.PlanOutcomes) != 0 {
+		t.Errorf("expected 0 plan outcomes when disabled, got %d", len(snap.PlanOutcomes))
+	}
+}
+
+// --- CurrentSessionCost tests ---
+
+func TestCurrentSessionCost(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	usage := &m31types.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150}
+	c.RecordLLMInteraction(m31types.PhasePlan, usage, 0.05)
+	c.RecordLLMInteraction(m31types.PhaseExecute, usage, 0.03)
+
+	cost := c.CurrentSessionCost()
+	if cost < 0.079 || cost > 0.081 {
+		t.Errorf("CurrentSessionCost = %f, want ~0.08", cost)
+	}
+}
+
+func TestCurrentSessionCost_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, false)
+
+	cost := c.CurrentSessionCost()
+	if cost != 0 {
+		t.Errorf("CurrentSessionCost = %f, want 0 when disabled", cost)
+	}
+}
+
+func TestCurrentSessionCost_NoLLMs(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	cost := c.CurrentSessionCost()
+	if cost != 0 {
+		t.Errorf("CurrentSessionCost = %f, want 0 with no LLM entries", cost)
+	}
+}
+
+// --- RecentPlanOutcomes tests ---
+
+func TestRecentPlanOutcomes(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	for i := 0; i < 5; i++ {
+		c.RecordPlanOutcome(PlanOutcome{TaskID: i + 1, Success: true})
+	}
+
+	recent := c.RecentPlanOutcomes(3)
+	if len(recent) != 3 {
+		t.Fatalf("expected 3 recent outcomes, got %d", len(recent))
+	}
+	if recent[0].TaskID != 3 {
+		t.Errorf("first recent TaskID = %d, want 3", recent[0].TaskID)
+	}
+	if recent[2].TaskID != 5 {
+		t.Errorf("last recent TaskID = %d, want 5", recent[2].TaskID)
+	}
+}
+
+func TestRecentPlanOutcomes_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, false)
+
+	recent := c.RecentPlanOutcomes(5)
+	if recent != nil {
+		t.Errorf("expected nil for disabled collector, got %d outcomes", len(recent))
+	}
+}
+
+func TestRecentPlanOutcomes_DeepCopy(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCollector("session1", dir, true)
+
+	c.RecordPlanOutcome(PlanOutcome{TaskID: 1, Success: true, Action: "original"})
+
+	recent := c.RecentPlanOutcomes(1)
+	recent[0].Action = "modified"
+
+	snap := c.Snapshot()
+	if snap.PlanOutcomes[0].Action == "modified" {
+		t.Error("RecentPlanOutcomes did not return a deep copy")
+	}
+}

@@ -41,12 +41,13 @@ func NewCollector(sessionID, sessionsDir string, enabled bool) *Collector {
 	}
 	if enabled {
 		c.metrics = &SessionMetrics{
-			SessionID: sessionID,
-			StartedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			Tools:     []ToolMetric{},
-			LLMs:      []LLMMetric{},
-			Phases:    []PhaseMetric{},
+			SessionID:    sessionID,
+			StartedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			Tools:        []ToolMetric{},
+			LLMs:         []LLMMetric{},
+			Phases:       []PhaseMetric{},
+			PlanOutcomes: []PlanOutcome{},
 		}
 	}
 	return c
@@ -383,6 +384,49 @@ func (c *Collector) RecordBisectOutcome(phase types.WorkflowPhase, success bool)
 	c.metrics.UpdatedAt = time.Now()
 }
 
+// RecordPlanOutcome records a completed plan task execution outcome.
+func (c *Collector) RecordPlanOutcome(outcome PlanOutcome) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.metrics.PlanOutcomes = append(c.metrics.PlanOutcomes, outcome)
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// CurrentSessionCost returns the total LLM cost across all phases for this session.
+func (c *Collector) CurrentSessionCost() float64 {
+	if !c.enabled {
+		return 0
+	}
+	snap := c.Snapshot()
+	var total float64
+	for _, llm := range snap.LLMs {
+		total += llm.Cost
+	}
+	return total
+}
+
+// RecentPlanOutcomes returns the most recent n plan outcomes.
+func (c *Collector) RecentPlanOutcomes(n int) []PlanOutcome {
+	if !c.enabled {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	total := len(c.metrics.PlanOutcomes)
+	if n <= 0 || n > total {
+		n = total
+	}
+	start := total - n
+	result := make([]PlanOutcome, n)
+	copy(result, c.metrics.PlanOutcomes[start:])
+	return result
+}
+
 // Snapshot returns a deep copy of the current metrics state.
 // The returned copy is safe for concurrent reads without holding the lock.
 func (c *Collector) Snapshot() *SessionMetrics {
@@ -400,11 +444,13 @@ func (c *Collector) Snapshot() *SessionMetrics {
 		EditStrategies: make([]EditStrategyMetric, len(c.metrics.EditStrategies)),
 		LLMs:           make([]LLMMetric, len(c.metrics.LLMs)),
 		Phases:         make([]PhaseMetric, len(c.metrics.Phases)),
+		PlanOutcomes:   make([]PlanOutcome, len(c.metrics.PlanOutcomes)),
 	}
 	copy(clone.Tools, c.metrics.Tools)
 	copy(clone.EditStrategies, c.metrics.EditStrategies)
 	copy(clone.LLMs, c.metrics.LLMs)
 	copy(clone.Phases, c.metrics.Phases)
+	copy(clone.PlanOutcomes, c.metrics.PlanOutcomes)
 	return clone
 }
 
