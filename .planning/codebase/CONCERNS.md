@@ -1,16 +1,34 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-08-04
+**Analysis Date:** 2026-08-06
 
 ## Tech Debt
 
-**Engine Complexity (`internal/engine/workflow/engine.go`):**
-- Issue: 1832-line file with 10+ mutex fields (transitionMu, planMu, messagesMu, cachedFullPromptsMu, codeIntelMu, cacheMu, pauseMu, modelIDMu, workflowModeMu, perPhaseModelsMu)
-- Files: `internal/engine/workflow/engine.go`
-- Impact: Hard to reason about concurrency; high risk of deadlock or race conditions
-- Fix approach: Extract state management into smaller, focused structs with their own locking. Consider using channels for inter-component communication instead of mutexes.
-
 **Large Test Files (coverage_boost_test.go patterns):**
+- Issue: Multiple 1000+ line test files (`internal/tools/extra_test.go`: 4397 lines, `internal/engine/workflow/coverage_boost_test.go`: 3559 lines) appear to be auto-generated coverage boosts rather than meaningful tests
+- Files: `internal/tools/extra_test.go`, `internal/engine/workflow/coverage_boost_test.go`
+- Impact: Masks genuine test coverage gaps; tests may not reflect real usage patterns
+- Fix approach: Audit test files for meaningful assertions; remove auto-generated fluff; add integration tests that exercise real workflows
+
+**Deferred Error Handling (nolint:errcheck patterns):**
+- Issue: ~50+ instances of `defer x.Close() //nolint:errcheck` across the codebase, particularly in session management, provider clients, and git operations
+- Files: `internal/engine/session/manager.go:124`, `internal/integrations/provider/base_client.go:162`, `internal/integrations/git/git.go`
+- Impact: Silent failures when closing resources; potential resource leaks under error conditions
+- Fix approach: Log close errors at debug level; use explicit error checking for critical resources (database connections, file locks)
+
+**Hardcoded Ship Preflight Test TODO:**
+- Issue: `ship_preflight_test.go:20` contains `// TODO: fix this later` that was never addressed
+- Files: `internal/engine/workflow/ship_preflight_test.go`
+- Impact: Minor but indicates incomplete work; test may not be exercising the intended scenario
+- Fix approach: Complete the test implementation or remove the TODO comment
+
+## Resolved
+
+**Engine Complexity (`internal/engine/workflow/engine.go`) — RESOLVED (Phase 3, Plan 1):**
+- Was: 1832-line file with 10+ mutex fields
+- Now: Split into 7 focused files by concern (engine.go, engine_pause.go, engine_streaming.go, engine_checkpoint.go, engine_model.go, engine_helpers.go, engine_concurrency.go)
+- Largest file: engine.go at ~1040 lines (core orchestration)
+- Lock ordering documented in engine_concurrency.go as single authoritative source
 - Issue: Multiple 1000+ line test files (`internal/tools/extra_test.go`: 4397 lines, `internal/engine/workflow/coverage_boost_test.go`: 3559 lines) appear to be auto-generated coverage boosts rather than meaningful tests
 - Files: `internal/tools/extra_test.go`, `internal/engine/workflow/coverage_boost_test.go`
 - Impact: Masks genuine test coverage gaps; tests may not reflect real usage patterns

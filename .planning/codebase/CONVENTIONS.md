@@ -1,36 +1,13 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-08-04
-
-## Naming Patterns
-
-**Files:**
-- Snake_case for Go files: `engine.go`, `dispatcher_test.go`, `runner.go`
-- Test files use `_test.go` suffix: `engine_test.go`, `permissions_test.go`
-- Package directories use lowercase: `workflow/`, `taskrunner/`, `fileops/`
-
-**Functions:**
-- CamelCase for exported functions: `NewDispatcher()`, `BuildToolDefs()`, `RunPhase()`
-- camelCase for unexported functions: `ensurePermission()`, `extractCommandString()`
-- Test functions use `Test` prefix: `TestDispatcher_RegisterAndExecute()`
-- Benchmark functions use `Benchmark` prefix: `BenchmarkCascadingReplace()`
-
-**Variables:**
-- camelCase for local variables: `workDir`, `sessionMgr`, `dispatcher`
-- PascalCase for exported fields: `Name_`, `RiskLevel_`, `ExecFunc`
-- Constants in PascalCase: `MaxConcurrentTools`, `ToolRateLimitBurst`
-- Private fields with underscore suffix for mock fields: `Name_`, `Description_`
-
-**Types:**
-- PascalCase for exported types: `Dispatcher`, `Engine`, `TaskRunner`
-- Interface names describe capability: `Tool`, `SchemaProvider`, `LLMProvider`
-- Error types suffix with `Error`: `ToolError`, `ProviderError`, `ConfigError`
+**Analysis Date:** 2026-08-06
 
 ## Code Style
 
 **Formatting:**
-- `gofmt` for standard formatting
+- All code must be `gofmt`-clean
 - `goimports` for import organization (run via `make fmt`)
+- Imports: group stdlib / third-party / project
 - 4-space indentation (Go standard)
 - Max line length: ~120 characters (soft limit)
 
@@ -40,25 +17,91 @@
 - Test files excluded from `errcheck` and `unused`
 - Config: `golangci-lint run ./... --timeout=5m`
 
-## Import Organization
+**General Rules:**
+- Return errors, never panic. Wrap with `fmt.Errorf("%w", err)`
+- Exported functions/types need doc comments
+- No emojis in code or docs
 
-**Order:**
-1. Standard library (`context`, `fmt`, `os`, `sync`)
-2. Third-party packages (`github.com/charmbracelet/bubbletea`, `github.com/bmatcuk/doublestar/v4`)
-3. Project imports (`github.com/eshanized/M31A/internal/...`)
+## File Organization
 
-**Path Aliases:**
-- `m31errors` for `github.com/eshanized/M31A/internal/core/errors`
-- `m31types` for `github.com/eshanized/M31A/internal/core/types`
-- `toolsExec` for `github.com/eshanized/M31A/internal/tools/exec`
+**Engine Files (engine_<concern>.go pattern):**
+- Each file handles one concern within the `workflow` package
+- All engine files share the `Engine` receiver
+- No new packages for small amounts of code; prefer same-package splitting
+- Naming: `engine_<concern>.go` (e.g., `engine_pause.go`, `engine_streaming.go`)
+
+**General File Naming:**
+- Snake_case for Go files: `engine.go`, `dispatcher_test.go`, `runner.go`
+- Test files use `_test.go` suffix: `engine_test.go`, `permissions_test.go`
+- Package directories use lowercase: `workflow/`, `taskrunner/`, `fileops/`
+
+**Naming Patterns:**
+- CamelCase for exported functions: `NewDispatcher()`, `BuildToolDefs()`, `RunPhase()`
+- camelCase for unexported functions: `ensurePermission()`, `extractCommandString()`
+- PascalCase for exported types: `Dispatcher`, `Engine`, `TaskRunner`
+- Interface names describe capability: `Tool`, `SchemaProvider`, `LLMProvider`
+- Error types suffix with `Error`: `ToolError`, `ProviderError`, `ConfigError`
+
+## Concurrency
+
+**Lock Ordering (single authoritative source: `engine_concurrency.go`):**
+```
+transitionMu > planMu > messagesMu > intentResultMu > cachedFullPromptsMu > checkpointMu
+```
+- When acquiring multiple locks, always acquire in the documented order
+- Never acquire a lock that is earlier in the order while holding a later lock
+- Each accessor method in WorkflowState acquires exactly one lock
+- Code that needs multiple fields must acquire locks in order or use snapshot methods
+
+**Bubble Tea Contract:**
+- All state mutations go through `Update()` only
+- Goroutines communicate via `tea.Cmd` / `tea.Msg` channels
+- Never mutate `AppState` from a goroutine
+- Use `MsgEmitter` to bridge goroutine output to TUI
+
+**Pattern:**
+- Use `sync.RWMutex` for read-heavy data
+- Use `sync.Map` for concurrent maps
+- Use channels for goroutine communication
+- Use `sync.Once` for initialization
+
+## Logging
+
+**Structured Logging with slog:**
+- Use `log/slog` for all logging (stdlib, zero deps)
+- Structured fields with consistent naming (camelCase)
+- Component-specific loggers via `slog.Default().With("component", "name")`
+- Debug level for internal diagnostics, Info for significant events, Warn for recoverable errors, Error for failures
+
+**Field Naming Convention:**
+- Use camelCase for field names (Go convention)
+- Common fields: `phase`, `model`, `error`, `elapsed`, `session_id`, `component`
+- Never log API keys or secrets
+
+**Example:**
+```go
+logger := slog.Default().With("component", "workflow-engine")
+logger.Info("phase started", "phase", phase, "model", modelID)
+logger.Error("phase failed", "phase", phase, "error", err, "elapsed", time.Since(start))
+```
+
+## Interface Boundaries
+
+- Go module system for hard boundaries (`pkg/` must NOT import `internal/`)
+- Interfaces at consumer boundary for soft boundaries
+- Constructor injection via options structs (`EngineOptions` pattern)
+- No runtime DI containers (per D-06)
+- Small interfaces: "accept interfaces, return structs"
 
 ## Error Handling
 
 **Patterns:**
-- Always return errors, never panic
-- Wrap errors with `fmt.Errorf("%w", err)` for context
-- Use sentinel errors for known error conditions
-- Custom error types implement `Error()` and `Unwrap()` methods
+- Sentinel errors in `internal/core/errors/errors.go`
+- Typed wrappers with `Unwrap()` for `errors.Is`/`errors.As`
+- User-facing messages via `errors.UserMessage()`
+- All errors wrapped with context: `fmt.Errorf("context: %w", err)`
+- Workflow phases return `(*PhaseResult, error)`
+- Tool execution returns `ToolError` with tool name and operation context
 
 **Example:**
 ```go
@@ -82,68 +125,7 @@ func (e *ToolError) Error() string {
 func (e *ToolError) Unwrap() error { return e.Err }
 ```
 
-## Comments
-
-**When to Comment:**
-- Exported functions/types need doc comments
-- Complex algorithms or business logic
-- TODO/FIXME for known issues (use `TODO:` prefix)
-- Avoid obvious comments
-
-**JSDoc/TSDoc:**
-- Go doc comments for exported symbols
-- Format: `// FunctionName does X`
-
-## Function Design
-
-**Size:** Functions should be focused and small (typically <100 lines)
-
-**Parameters:**
-- Use struct types for >3 parameters
-- Context as first parameter for cancellable operations
-- Options pattern for complex configurations
-
-**Return Values:**
-- Multiple return values for error handling
-- Named return values for clarity in complex functions
-- Zero values for errors
-
-## Module Design
-
-**Exports:**
-- Export only what's needed by other packages
-- Use unexported types for internal implementation
-- Re-export from parent packages when needed
-
-**Barrel Files:**
-- `tools_reexport.go` re-exports tool constructors for backward compatibility
-- Provides clean API surface for consumers
-
-## Concurrency
-
-**Pattern:**
-- Use `sync.RWMutex` for read-heavy data
-- Use `sync.Map` for concurrent maps
-- Use channels for goroutine communication
-- Use `sync.Once` for initialization
-
-**Example:**
-```go
-type Dispatcher struct {
-    mu                sync.RWMutex
-    tools             map[string]types.Tool
-    pendingResponses  sync.Map
-    // ...
-}
-
-func (d *Dispatcher) List() []string {
-    d.mu.RLock()
-    defer d.mu.RUnlock()
-    // ...
-}
-```
-
-## Testing Conventions
+## Testing
 
 **Table-Driven Tests:**
 ```go
@@ -169,10 +151,53 @@ func TestSomething(t *testing.T) {
 }
 ```
 
+**Hand-Written Mocks:**
+- No mocking library — write mocks by hand
+- Use `t.Helper()` in test helper functions
+- Use `t.Cleanup()` for resource cleanup
+
+**Race Detector:**
+- Always test with `-race` flag (`make test`)
+- Quick smoke test: `make test-fast` (no race detector)
+
+**Integration Over Unit:**
+- Prefer integration tests for workflow logic
+- Unit tests for pure functions and edge cases
+
 **Parallel Testing:**
 - Use `t.Parallel()` for independent tests
 - Avoid for tests with shared mutable state
 - Use `t.TempDir()` for isolated test directories
+
+## Commit Messages
+
+**Conventional Commits:**
+- `feat:` — New feature, endpoint, component
+- `fix:` — Bug fix, error correction
+- `docs:` — Documentation only
+- `test:` — Test-only changes
+- `refactor:` — Code cleanup, no behavior change
+- `chore:` — Config, tooling, dependencies
+
+**Format:**
+```
+type(scope): concise description
+
+- Detail 1
+- Detail 2
+```
+
+## Import Organization
+
+**Order:**
+1. Standard library (`context`, `fmt`, `os`, `sync`)
+2. Third-party packages (`github.com/charmbracelet/bubbletea`, `github.com/bmatcuk/doublestar/v4`)
+3. Project imports (`github.com/eshanized/M31A/internal/...`)
+
+**Path Aliases:**
+- `m31errors` for `github.com/eshanized/M31A/internal/core/errors`
+- `m31types` for `github.com/eshanized/M31A/internal/core/types`
+- `toolsExec` for `github.com/eshanized/M31A/internal/tools/exec`
 
 ## Configuration
 
@@ -189,7 +214,8 @@ func TestSomething(t *testing.T) {
 - **Provider models:** Dynamic from APIs; never hardcode model names
 - **API keys:** Use OS keychain; never write to disk in plaintext
 - **Error wrapping:** Use `%w` verb for `errors.Is()`/`errors.As()` compatibility
+- **Engine splitting:** All engine split files remain in the same package (`workflow`)
 
 ---
 
-*Convention analysis: 2026-08-04*
+*Convention analysis: 2026-08-06*
