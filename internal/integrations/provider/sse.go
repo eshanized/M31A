@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// sseBufferPool pools SSE scanner buffers to reduce GC pressure.
+// Buffers are acquired on parser creation and returned on Close().
+var sseBufferPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 0, sseMaxLineLength)
+		return &buf
+	},
+}
+
 type SSEParser struct {
 	scanner   *bufio.Scanner
 	resp      *http.Response
@@ -18,12 +27,14 @@ type SSEParser struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	watchdog  *time.Timer
+	bufPtr    *[]byte
 }
 
 func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParser {
 	ctx, cancel := context.WithCancel(ctx)
+	bufPtr := sseBufferPool.Get().(*[]byte)
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, sseMaxLineLength), sseMaxLineLength)
+	scanner.Buffer(*bufPtr, sseMaxLineLength)
 
 	// C-2: Start a watchdog that closes the body if no data arrives
 	// within DefaultStreamTimeout. This prevents indefinite blocking.
@@ -37,6 +48,7 @@ func NewSSEParserWithContext(resp *http.Response, ctx context.Context) *SSEParse
 		ctx:      ctx,
 		cancel:   cancel,
 		watchdog: watchdog,
+		bufPtr:   bufPtr,
 	}
 
 	// Close the response body immediately when the context is cancelled.
@@ -121,8 +133,8 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 	}
 }
 
-// Close releases the underlying response body. Idempotent — safe to call
-// multiple times.
+// Close releases the underlying response body and returns the buffer to the pool.
+// Idempotent — safe to call multiple times.
 func (p *SSEParser) Close() error {
 	var closeErr error
 	p.closeOnce.Do(func() {
@@ -134,6 +146,10 @@ func (p *SSEParser) Close() error {
 		}
 		if p.resp != nil && p.resp.Body != nil {
 			closeErr = p.resp.Body.Close()
+		}
+		if p.bufPtr != nil {
+			sseBufferPool.Put(p.bufPtr)
+			p.bufPtr = nil
 		}
 	})
 	return closeErr
