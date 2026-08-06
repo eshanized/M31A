@@ -1,0 +1,65 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+  workflow_dispatch:
+
+jobs:
+  full-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Run full test suite with race detector
+        run: go test -race ./...
+
+  benchmarks:
+    uses: ./.github/workflows/benchmarks.yml
+
+  extension-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Build and test custom-linter
+        run: |
+          cd docs/examples/custom-linter
+          go build -o /tmp/custom-linter .
+      - name: Build and test ollama-provider
+        run: |
+          cd docs/examples/ollama-provider
+          go build -o /tmp/ollama-provider .
+      - name: Build and test pre-commit-hook
+        run: |
+          cd docs/examples/pre-commit-hook
+          go build -o /tmp/pre-commit-hook .
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Run govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+  notify:
+    needs: [full-test, benchmarks, extension-compat, security]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure notification
+        run: echo "Nightly workflow failed - check Actions tab"
+        # Add Slack/email notification here if configured

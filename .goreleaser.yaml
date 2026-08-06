@@ -24,6 +24,11 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+    hooks:
+      post:
+        - cd docs/examples/custom-linter && go build -o /tmp/custom-linter .
+        - cd docs/examples/ollama-provider && go build -o /tmp/ollama-provider .
+        - cd docs/examples/pre-commit-hook && go build -o /tmp/pre-commit-hook .
 
 archives:
   - name_template: >-
@@ -70,7 +75,33 @@ changelog:
       - "^build:"
       - Merge pull request
       - Merge branch
+  groups:
+    - title: "New Features"
+      regexp: "^feat:"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^fix:"
+      order: 1
+    - title: "Documentation"
+      regexp: "^docs:"
+      order: 2
+    - title: "Performance"
+      regexp: "^perf:"
+      order: 3
+    - title: "Refactoring"
+      regexp: "^refactor:"
+      order: 4
+    - title: "Tests"
+      regexp: "^test:"
+      order: 5
+    - title: "Other"
+      order: 999
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 
 release:
   draft: true
   prerelease: auto
+  name_template: "Release {{ .Version }}"
