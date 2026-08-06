@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	m31types "github.com/eshanized/M31A/internal/core/types"
 )
@@ -291,6 +292,132 @@ func validateConfig(cfg *Config) error {
 		b.WriteString("Invalid configuration:\n")
 		for _, err := range errs {
 			b.WriteString("- ")
+b.WriteString(err.Error())
+		b.WriteString("\n")
+	}
+	return fmt.Errorf("%w\n%s", ErrValidation, b.String())
+	}
+	// Validate extensions configuration
+	if err := validateExtensionsConfig(cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateExtensionsConfig validates the extensions configuration section.
+func validateExtensionsConfig(cfg *Config) error {
+	var errs []error
+
+	// Validate tool configurations
+	for name, tool := range cfg.Extensions.Tools {
+		if tool.Command == "" {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("extensions.tools.%s.command", name),
+				ExpectedType: "non-empty string (executable path)",
+				ActualValue:  "",
+			})
+		}
+		if tool.Timeout != "" {
+			if _, err := time.ParseDuration(tool.Timeout); err != nil {
+				errs = append(errs, ValidationError{
+					Field:        fmt.Sprintf("extensions.tools.%s.timeout", name),
+					ExpectedType: "valid duration (e.g., \"30s\", \"5m\")",
+					ActualValue:  tool.Timeout,
+				})
+			}
+		}
+		// Check if command is absolute or resolvable via PATH (basic check)
+		if tool.Command != "" && !strings.HasPrefix(tool.Command, "/") && !strings.Contains(tool.Command, "/") {
+			// Could be a command in PATH, that's acceptable
+		}
+	}
+
+	// Validate provider configurations
+	for name, provider := range cfg.Extensions.Providers {
+		if provider.Command == "" {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("extensions.providers.%s.command", name),
+				ExpectedType: "non-empty string (executable path)",
+				ActualValue:  "",
+			})
+		}
+		if provider.Timeout != "" {
+			if _, err := time.ParseDuration(provider.Timeout); err != nil {
+				errs = append(errs, ValidationError{
+					Field:        fmt.Sprintf("extensions.providers.%s.timeout", name),
+					ExpectedType: "valid duration (e.g., \"120s\", \"5m\")",
+					ActualValue:  provider.Timeout,
+				})
+			}
+		}
+	}
+
+	// Validate hook configurations
+	validPhases := map[string]bool{
+		"initialize": true, "discuss": true, "plan": true, "execute": true,
+		"verify": true, "runtime": true, "ship": true,
+	}
+	validHookTypes := map[string]bool{
+		"pre": true, "post": true,
+	}
+	for name, hook := range cfg.Extensions.Hooks {
+		if hook.Command == "" {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("extensions.hooks.%s.command", name),
+				ExpectedType: "non-empty string (executable path)",
+				ActualValue:  "",
+			})
+		}
+		if hook.Timeout != "" {
+			if _, err := time.ParseDuration(hook.Timeout); err != nil {
+				errs = append(errs, ValidationError{
+					Field:        fmt.Sprintf("extensions.hooks.%s.timeout", name),
+					ExpectedType: "valid duration (e.g., \"30s\", \"5m\")",
+					ActualValue:  hook.Timeout,
+				})
+			}
+		}
+		if len(hook.Phases) == 0 {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("extensions.hooks.%s.phases", name),
+				ExpectedType: "non-empty array of phase names",
+				ActualValue:  "empty",
+			})
+		} else {
+			for _, phase := range hook.Phases {
+				if !validPhases[phase] {
+					errs = append(errs, ValidationError{
+						Field:        fmt.Sprintf("extensions.hooks.%s.phases", name),
+						ExpectedType: "one of: initialize, discuss, plan, execute, verify, runtime, ship",
+						ActualValue:  phase,
+					})
+				}
+			}
+		}
+		if len(hook.HookTypes) == 0 {
+			errs = append(errs, ValidationError{
+				Field:        fmt.Sprintf("extensions.hooks.%s.hook_types", name),
+				ExpectedType: "non-empty array (\"pre\" and/or \"post\")",
+				ActualValue:  "empty",
+			})
+		} else {
+			for _, ht := range hook.HookTypes {
+				if !validHookTypes[ht] {
+					errs = append(errs, ValidationError{
+						Field:        fmt.Sprintf("extensions.hooks.%s.hook_types", name),
+						ExpectedType: "\"pre\" or \"post\"",
+						ActualValue:  ht,
+					})
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		var b strings.Builder
+		b.WriteString("Invalid extensions configuration:\n")
+		for _, err := range errs {
+			b.WriteString("- ")
 			b.WriteString(err.Error())
 			b.WriteString("\n")
 		}
@@ -314,6 +441,7 @@ func knownConfigKeys() map[string]bool {
 			"features": true, "tools": true, "git": true, "ledger": true,
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
+			"extensions": true,
 		}
 	})
 	return knownKeysMap
