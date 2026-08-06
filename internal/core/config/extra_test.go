@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,8 +19,8 @@ func TestLocalConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if filepath.Base(got) != "m31a.toml" {
-		t.Errorf("expected m31a.toml, got %s", filepath.Base(got))
+	if filepath.Base(got) != "m31a.json" {
+		t.Errorf("expected m31a.json, got %s", filepath.Base(got))
 	}
 }
 
@@ -29,7 +30,7 @@ func TestSaveProject_ClearsAPIKeys(t *testing.T) {
 	testutil.LoadTestDotEnv(t)
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "m31a.toml")
+	path := filepath.Join(dir, "m31a.json")
 
 	cfg := DefaultConfig()
 	orKey := os.Getenv("OPENROUTER_API_KEY")
@@ -48,16 +49,23 @@ func TestSaveProject_ClearsAPIKeys(t *testing.T) {
 		t.Fatalf("SaveProject failed: %v", err)
 	}
 
-	// Reload and verify keys are cleared
-	loaded, err := Load(path)
+	// Read and verify JSON directly (project config is JSON)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load failed: %v", err)
+		t.Fatalf("read project config failed: %v", err)
+	}
+	var loaded Config
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("unmarshal project config failed: %v", err)
 	}
 	if loaded.Provider.OpenRouter.APIKey != "" {
 		t.Errorf("expected OpenRouter API key to be cleared, got %q", loaded.Provider.OpenRouter.APIKey)
 	}
 	if loaded.Provider.Zen.APIKey != "" {
 		t.Errorf("expected Zen API key to be cleared, got %q", loaded.Provider.Zen.APIKey)
+	}
+	if loaded.Provider.Nvidia.APIKey != "" {
+		t.Errorf("expected Nvidia API key to be cleared, got %q", loaded.Provider.Nvidia.APIKey)
 	}
 	if loaded.Provider.Default != "openrouter" {
 		t.Errorf("expected provider 'openrouter', got %q", loaded.Provider.Default)
@@ -66,7 +74,7 @@ func TestSaveProject_ClearsAPIKeys(t *testing.T) {
 
 func TestSaveProject_PreservesSliceAndMapFields(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "m31a.toml")
+	path := filepath.Join(dir, "m31a.json")
 
 	cfg := DefaultConfig()
 	cfg.Tools.SkipDirs = []string{"node_modules", "vendor"}
@@ -81,9 +89,14 @@ func TestSaveProject_PreservesSliceAndMapFields(t *testing.T) {
 		t.Fatalf("SaveProject failed: %v", err)
 	}
 
-	loaded, err := Load(path)
+	// Read and verify JSON directly (project config is JSON)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load failed: %v", err)
+		t.Fatalf("read project config failed: %v", err)
+	}
+	var loaded Config
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("unmarshal project config failed: %v", err)
 	}
 	if len(loaded.Tools.SkipDirs) != 2 {
 		t.Errorf("expected 2 skip dirs, got %d", len(loaded.Tools.SkipDirs))

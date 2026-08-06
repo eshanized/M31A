@@ -434,12 +434,13 @@ func TestConfig_SaveCreatesParentDir(t *testing.T) {
 // ── Multi-Layer Config Tests ─────────────────────────────────────────────────
 
 func TestFindProjectConfig(t *testing.T) {
-	// Create a temp dir tree with m31a.toml at root
+	// Create a temp dir tree with m31a.json at root
 	dir := t.TempDir()
 
-	// Create root/m31a.toml
-	rootCfg := filepath.Join(dir, "m31a.toml")
-	if err := os.WriteFile(rootCfg, []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
+	// Create root/m31a.json
+	rootCfg := filepath.Join(dir, "m31a.json")
+	projectContent := `{"ui": {"theme": "dark"}}`
+	if err := os.WriteFile(rootCfg, []byte(projectContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +453,7 @@ func TestFindProjectConfig(t *testing.T) {
 		}
 	}
 
-	// Separate dir for no-config test (no m31a.toml in ancestry)
+	// Separate dir for no-config test (no m31a.json in ancestry)
 	noConfigDir := t.TempDir()
 	deepEmpty := filepath.Join(noConfigDir, "a", "b", "c")
 	if err := os.MkdirAll(deepEmpty, 0755); err != nil {
@@ -501,11 +502,8 @@ default = "gpt-4o"
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	projectCfg := filepath.Join(projectDir, "m31a.toml")
-	projectContent := `
-[model]
-default = "claude-3"
-`
+	projectCfg := filepath.Join(projectDir, "m31a.json")
+	projectContent := `{"model": {"default": "claude-3"}}`
 	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
 		t.Fatal(err)
 	}
