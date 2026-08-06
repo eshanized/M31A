@@ -64,7 +64,6 @@ func TestFileWrite_ExecuteMissingParams(t *testing.T) {
 	if err == nil && result.Error == "" {
 		t.Error("expected error for missing content")
 	}
-	errorMsg = ""
 	if err != nil {
 		errorMsg = err.Error()
 	} else {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/core/types"
@@ -508,8 +509,15 @@ func TestLoadGitignoreCached_CacheInvalidation(t *testing.T) {
 		t.Fatalf("expected 1 pattern, got %d", len(patterns1))
 	}
 
+	// Ensure the modification time changes (filesystems may have 1-second precision)
+	time.Sleep(10 * time.Millisecond)
+
 	// Modify .gitignore
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n*.tmp\n"), 0644)
+
+	// Force the modification time to be further in the future if filesystem precision is low
+	currentTime := time.Now().Add(2 * time.Second)
+	os.Chtimes(filepath.Join(dir, ".gitignore"), currentTime, currentTime)
 
 	patterns2 := search.LoadGitignoreCached(dir)
 	if len(patterns2) != 2 {

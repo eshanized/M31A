@@ -66,7 +66,6 @@ func TestFileMove_ExecuteMissingParams(t *testing.T) {
 	if err == nil && result.Error == "" {
 		t.Error("expected error for missing destination")
 	}
-	errorMsg = ""
 	if err != nil {
 		errorMsg = err.Error()
 	} else {
@@ -107,7 +106,7 @@ func TestFileMove_ExecuteMoveFile(t *testing.T) {
 	}
 
 	// Verify source is gone
-	if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
+	if _, statErr := os.Stat(srcPath); !os.IsNotExist(statErr) {
 		t.Error("expected source file to be moved (not exist)")
 	}
 
