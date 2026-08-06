@@ -47,7 +47,7 @@ func validRecoveryState() *RecoveryState {
 			{Role: "user", Content: "hello"},
 			{Role: "assistant", Content: "hi"},
 		},
-		Goal:  "test goal",
+		Goal:      "test goal",
 		Timestamp: time.Now(),
 	}
 }

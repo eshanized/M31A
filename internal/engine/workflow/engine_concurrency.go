@@ -39,12 +39,12 @@ package workflow
 //	VerifyLockOrder("messagesMu", "planMu")   // VIOLATION
 func VerifyLockOrder(first, second string) bool {
 	order := map[string]int{
-		"transitionMu":      0,
-		"planMu":            1,
-		"messagesMu":        2,
-		"intentResultMu":    3,
+		"transitionMu":        0,
+		"planMu":              1,
+		"messagesMu":          2,
+		"intentResultMu":      3,
 		"cachedFullPromptsMu": 4,
-		"checkpointMu":      5,
+		"checkpointMu":        5,
 	}
 	o1, ok1 := order[first]
 	o2, ok2 := order[second]

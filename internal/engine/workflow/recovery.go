@@ -15,15 +15,15 @@ import (
 // RecoveryState contains a snapshot of workflow state for crash recovery.
 // It captures all state needed to resume a workflow after a crash or forced exit.
 type RecoveryState struct {
-	SessionID    string                   `json:"session_id"`
-	CurrentPhase types.WorkflowPhase      `json:"current_phase"`
-	PhaseHistory []types.WorkflowPhase    `json:"phase_history"`
-	PlanMarkdown string                   `json:"plan_markdown"`
-	PlanVersion  int                      `json:"plan_version"`
-	Messages     []types.Message          `json:"messages"`
-	Checkpoint   *CheckpointData          `json:"checkpoint,omitempty"`
-	Goal         string                   `json:"goal"`
-	Timestamp    time.Time                `json:"timestamp"`
+	SessionID    string                `json:"session_id"`
+	CurrentPhase types.WorkflowPhase   `json:"current_phase"`
+	PhaseHistory []types.WorkflowPhase `json:"phase_history"`
+	PlanMarkdown string                `json:"plan_markdown"`
+	PlanVersion  int                   `json:"plan_version"`
+	Messages     []types.Message       `json:"messages"`
+	Checkpoint   *CheckpointData       `json:"checkpoint,omitempty"`
+	Goal         string                `json:"goal"`
+	Timestamp    time.Time             `json:"timestamp"`
 }
 
 // recoveryPath returns the path to the recovery file for the given session directory.

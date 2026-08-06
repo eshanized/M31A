@@ -38,8 +38,8 @@ type PlanModel struct {
 	refineMode  bool
 	refineInput *PlanRefineModel
 	// Collapsible wave sections
-	collapsed    map[int]bool // wave index → collapsed state
-	focusWave    int          // currently focused wave for keyboard nav
+	collapsed map[int]bool // wave index → collapsed state
+	focusWave int          // currently focused wave for keyboard nav
 	// Inline editing
 	editingTask int // index of task being edited (-1 = none)
 	// Time estimates per task

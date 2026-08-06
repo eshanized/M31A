@@ -158,8 +158,8 @@ func TestDispatcher_ContextCancellation_ConcurrentTools(t *testing.T) {
 
 	// Register a slow tool that respects context
 	d.Register(&mocks.MockTool{
-		Name_:        "slow_tool",
-		RiskLevel_:   types.RiskSafe,
+		Name_:      "slow_tool",
+		RiskLevel_: types.RiskSafe,
 		ExecFunc: func(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 			select {
 			case <-ctx.Done():
@@ -212,8 +212,8 @@ func TestDispatcher_RateLimit_Exhaustion(t *testing.T) {
 
 	// Register a fast tool
 	d.Register(&mocks.MockTool{
-		Name_:        "fast_tool",
-		RiskLevel_:   types.RiskSafe,
+		Name_:      "fast_tool",
+		RiskLevel_: types.RiskSafe,
 		ExecFunc: func(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 			return types.ToolResult{Output: "ok"}, nil
 		},
@@ -258,8 +258,8 @@ func TestDispatcher_ConcurrencySemaphore_Limit(t *testing.T) {
 	var currentConcurrent atomic.Int64
 
 	d.Register(&mocks.MockTool{
-		Name_:        "concurrent_tool",
-		RiskLevel_:   types.RiskSafe,
+		Name_:      "concurrent_tool",
+		RiskLevel_: types.RiskSafe,
 		ExecFunc: func(ctx context.Context, input types.ToolInput) (types.ToolResult, error) {
 			cur := currentConcurrent.Add(1)
 			// Update max concurrent

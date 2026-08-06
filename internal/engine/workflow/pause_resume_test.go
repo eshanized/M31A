@@ -137,18 +137,18 @@ func TestEngine_PauseResume_CancelGroup(t *testing.T) {
 
 	// Start goroutine that will consume the cancel group signal
 	resultCh := make(chan struct {
-		skipID        int
-		cancelID      int
+		skipID         int
+		cancelID       int
 		cancelledGroup bool
-		ok            bool
+		ok             bool
 	}, 1)
 	go func() {
 		skipID, cancelID, cancelledGroup, ok := engine.consumeSkipOrCancel(context.Background())
 		resultCh <- struct {
-			skipID        int
-			cancelID      int
+			skipID         int
+			cancelID       int
 			cancelledGroup bool
-			ok            bool
+			ok             bool
 		}{skipID, cancelID, cancelledGroup, ok}
 	}()
 
