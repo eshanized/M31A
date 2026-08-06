@@ -61,7 +61,7 @@ func (r *ExtensionRegistry) Start(ctx context.Context) error {
 	for name, cfg := range r.toolConfigs {
 		if err := r.startTool(ctx, name, cfg); err != nil {
 			// Clean up already started extensions
-			r.stopAllLocked()
+			_ = r.stopAllLocked()
 			return fmt.Errorf("start tool %s: %w", name, err)
 		}
 	}
@@ -69,7 +69,7 @@ func (r *ExtensionRegistry) Start(ctx context.Context) error {
 	// Start provider extensions
 	for name, cfg := range r.providerConfigs {
 		if err := r.startProvider(ctx, name, cfg); err != nil {
-			r.stopAllLocked()
+			_ = r.stopAllLocked()
 			return fmt.Errorf("start provider %s: %w", name, err)
 		}
 	}
@@ -77,7 +77,7 @@ func (r *ExtensionRegistry) Start(ctx context.Context) error {
 	// Start hook extensions
 	for name, cfg := range r.hookConfigs {
 		if err := r.startHook(ctx, name, cfg); err != nil {
-			r.stopAllLocked()
+			_ = r.stopAllLocked()
 			return fmt.Errorf("start hook %s: %w", name, err)
 		}
 	}

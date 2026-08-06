@@ -1086,9 +1086,7 @@ default = "workspace-model"
 
 	// Test 2: Global + Workspace
 	origWd, _ := os.Getwd()
-	if err := os.Chdir(workspaceDir); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.Chdir(workspaceDir)
 	cfg, err = Load(globalPath)
 	if err != nil {
 		t.Fatalf("Load global+workspace failed: %v", err)
@@ -1104,9 +1102,7 @@ default = "workspace-model"
 	}
 
 	// Test 3: Global + Workspace + Project
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.Chdir(projectDir)
 	cfg, err = Load(globalPath)
 	if err != nil {
 		t.Fatalf("Load global+workspace+project failed: %v", err)
@@ -1128,9 +1124,7 @@ default = "workspace-model"
 	// Test 4: Env vars override everything
 	t.Setenv("M31A_THEME", "light")
 	t.Setenv("M31A_DEFAULT_MODEL", "env-model")
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.Chdir(projectDir)
 	cfg, err = Load(globalPath)
 	if err != nil {
 		t.Fatalf("Load with env vars failed: %v", err)

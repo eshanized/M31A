@@ -51,8 +51,9 @@ func TestSubprocessManager(t *testing.T) {
 	}
 
 	var result ToolNameResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	unmarshalErr := json.Unmarshal(resp.Result, &result)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal failed: %v", unmarshalErr)
 	}
 
 	if result.Name != "test-tool" {
@@ -72,8 +73,9 @@ func TestSubprocessManager(t *testing.T) {
 	}
 
 	var descResult ToolDescriptionResult
-	if err := json.Unmarshal(resp.Result, &descResult); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	unmarshalErr = json.Unmarshal(resp.Result, &descResult)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal failed: %v", unmarshalErr)
 	}
 
 	if descResult.Description != "A test tool for unit testing" {
@@ -93,8 +95,9 @@ func TestSubprocessManager(t *testing.T) {
 	}
 
 	var riskResult ToolRiskLevelResult
-	if err := json.Unmarshal(resp.Result, &riskResult); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	unmarshalErr = json.Unmarshal(resp.Result, &riskResult)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal failed: %v", unmarshalErr)
 	}
 
 	if riskResult.RiskLevel != "safe" {
@@ -114,8 +117,9 @@ func TestSubprocessManager(t *testing.T) {
 	}
 
 	var schemaResult ToolSchemaResult
-	if err := json.Unmarshal(resp.Result, &schemaResult); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	unmarshalErr = json.Unmarshal(resp.Result, &schemaResult)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal failed: %v", unmarshalErr)
 	}
 
 	if schemaResult.Schema == "" {
@@ -301,8 +305,9 @@ func TestSubprocessManagerNotRunning(t *testing.T) {
 	}
 
 	// Start then stop, then call
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Start failed: %v", err)
+	startErr := proc.Start(ctx)
+	if startErr != nil {
+		t.Fatalf("Start failed: %v", startErr)
 	}
 	_ = proc.Stop()
 
@@ -498,8 +503,9 @@ func TestProtocol(t *testing.T) {
 	}
 
 	var decoded JSONRPCRequest
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal request: %v", err)
+	unmarshalErr := json.Unmarshal(data, &decoded)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal request: %v", unmarshalErr)
 	}
 
 	if decoded.Method != req.Method {
@@ -519,8 +525,9 @@ func TestProtocol(t *testing.T) {
 	}
 
 	var decodedResp JSONRPCResponse
-	if err := json.Unmarshal(data, &decodedResp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	unmarshalErr = json.Unmarshal(data, &decodedResp)
+	if unmarshalErr != nil {
+		t.Fatalf("unmarshal response: %v", unmarshalErr)
 	}
 
 	if decodedResp.Error != nil {
@@ -543,7 +550,8 @@ func TestProtocol(t *testing.T) {
 	}
 
 	var decodedErrResp JSONRPCResponse
-	if err := json.Unmarshal(data, &decodedErrResp); err != nil {
+	err = json.Unmarshal(data, &decodedErrResp)
+	if err != nil {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
 
@@ -566,7 +574,8 @@ func TestProtocol(t *testing.T) {
 	}
 
 	var decodedHandshake HandshakeResult
-	if err := json.Unmarshal(data, &decodedHandshake); err != nil {
+	err = json.Unmarshal(data, &decodedHandshake)
+	if err != nil {
 		t.Fatalf("unmarshal handshake: %v", err)
 	}
 

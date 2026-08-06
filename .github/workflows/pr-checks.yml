@@ -46,12 +46,8 @@ jobs:
         with:
           go-version: "1.26.5"
           cache: true
-      - name: Create temp directory
-        run: mkdir -p ${{ runner.workspace }}/tmp
       - name: Run tests
         run: go test -race -timeout 30s -coverprofile=coverage.out -covermode=atomic ./...
-        env:
-          TMPDIR: ${{ runner.workspace }}/tmp
       - name: Run go vet
         run: go vet ./...
 

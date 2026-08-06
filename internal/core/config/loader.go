@@ -268,9 +268,9 @@ func Load(path string) (*Config, error) {
 	} else {
 		if wsPath := findWorkspaceConfig(cwd); wsPath != "" {
 			var wsCfg Config
-			meta, err := toml.DecodeFile(wsPath, &wsCfg)
-			if err != nil {
-				slog.Warn("failed to decode workspace config", "path", wsPath, "error", err)
+			meta, wsErr := toml.DecodeFile(wsPath, &wsCfg)
+			if wsErr != nil {
+				slog.Warn("failed to decode workspace config", "path", wsPath, "error", wsErr)
 			} else {
 				defined := make(map[string]bool)
 				for _, key := range meta.Keys() {

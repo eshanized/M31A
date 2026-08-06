@@ -42,7 +42,7 @@ func TestTemplateResolverReadFile(t *testing.T) {
 		t.Error("Text should not be empty")
 	}
 	if narrative.Display != DisplaySidebar {
-		t.Errorf("Display = %q, want %q", narrative.Display, DisplaySidebar)
+		t.Errorf("Display = %d, want %d", narrative.Display, DisplaySidebar)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestTemplateResolverAgentStart(t *testing.T) {
 		t.Error("Text should not be empty")
 	}
 	if narrative.Display != DisplaySidebar {
-		t.Errorf("Display = %q, want %q", narrative.Display, DisplaySidebar)
+		t.Errorf("Display = %d, want %d", narrative.Display, DisplaySidebar)
 	}
 }
 

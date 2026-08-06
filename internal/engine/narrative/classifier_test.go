@@ -88,7 +88,7 @@ func TestClassifierToolReadFile(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("FileRead should be Grouped, got %q", result.Classification)
+		t.Errorf("FileRead should be Grouped, got %d", result.Classification)
 	}
 	if result.GroupKey != "tools" {
 		t.Errorf("FileRead group key = %q, want %q", result.GroupKey, "tools")
@@ -103,7 +103,7 @@ func TestClassifierToolWriteFile(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("FileWrite should be Grouped, got %q", result.Classification)
+		t.Errorf("FileWrite should be Grouped, got %d", result.Classification)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestClassifierToolComplete(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("ToolComplete should be Grouped, got %q", result.Classification)
+		t.Errorf("ToolComplete should be Grouped, got %d", result.Classification)
 	}
 }
 
@@ -131,7 +131,7 @@ func TestClassifierTaskDiff(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("TaskDiff should be Grouped, got %q", result.Classification)
+		t.Errorf("TaskDiff should be Grouped, got %d", result.Classification)
 	}
 	if result.GroupKey != "task_diff" {
 		t.Errorf("TaskDiff group key = %q, want %q", result.GroupKey, "task_diff")
@@ -148,7 +148,7 @@ func TestClassifierShipChangelog(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("ShipChangelog should be Grouped, got %q", result.Classification)
+		t.Errorf("ShipChangelog should be Grouped, got %d", result.Classification)
 	}
 	if result.GroupKey != "ship" {
 		t.Errorf("ShipChangelog group key = %q, want %q", result.GroupKey, "ship")
@@ -163,7 +163,7 @@ func TestClassifierUnknownEvent(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyHidden {
-		t.Errorf("Unknown event should be Hidden, got %q", result.Classification)
+		t.Errorf("Unknown event should be Hidden, got %d", result.Classification)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestClassifierNilData(t *testing.T) {
 	}
 	result := c.Classify(event)
 	if result.Classification != ClassifyGrouped {
-		t.Errorf("ToolStart with nil data should be Grouped, got %q", result.Classification)
+		t.Errorf("ToolStart with nil data should be Grouped, got %d", result.Classification)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestClassifierCustomRules(t *testing.T) {
 	event := RawEvent{Type: "custom_event"}
 	result := c.Classify(event)
 	if result.Classification != ClassifyNarrative {
-		t.Errorf("Custom rule should produce Narrative, got %q", result.Classification)
+		t.Errorf("Custom rule should produce Narrative, got %d", result.Classification)
 	}
 	if result.NarrativeType != NarrativeReadingProject {
 		t.Errorf("Custom rule type = %q, want %q", result.NarrativeType, NarrativeReadingProject)

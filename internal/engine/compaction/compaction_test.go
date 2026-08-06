@@ -5,8 +5,30 @@ import (
 	"testing"
 
 	"github.com/eshanized/M31A/internal/core/types"
-	"github.com/eshanized/M31A/internal/engine/tokens"
 )
+
+// mockEstimator implements TokenEstimator without network dependencies.
+type mockEstimator struct {
+	charsPerToken int
+}
+
+func (m *mockEstimator) Estimate(text string) int {
+	if m.charsPerToken <= 0 {
+		m.charsPerToken = 4
+	}
+	return (len(text) + m.charsPerToken - 1) / m.charsPerToken
+}
+
+func (m *mockEstimator) EstimateMessages(messages []types.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += m.Estimate(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			total += m.Estimate(string(tc.Input))
+		}
+	}
+	return total
+}
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
@@ -97,7 +119,7 @@ func TestCompactor_ShouldCompact(t *testing.T) {
 		KeepTokens: 10,
 	}
 
-	estimator := tokens.NewEstimator("gpt-4")
+	estimator := &mockEstimator{charsPerToken: 4}
 	c := New(cfg, estimator)
 
 	// Small message - should not compact
@@ -128,7 +150,7 @@ func TestCompactor_ShouldCompact_ZeroContextLength(t *testing.T) {
 		KeepTokens: 10,
 	}
 
-	estimator := tokens.NewEstimator("gpt-4")
+	estimator := &mockEstimator{charsPerToken: 4}
 	c := New(cfg, estimator)
 
 	messages := []types.Message{
@@ -148,7 +170,7 @@ func TestCompactor_ShouldCompact_NegativeThreshold(t *testing.T) {
 		KeepTokens: 10,
 	}
 
-	estimator := tokens.NewEstimator("gpt-4")
+	estimator := &mockEstimator{charsPerToken: 4}
 	c := New(cfg, estimator)
 
 	messages := []types.Message{

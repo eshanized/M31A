@@ -384,8 +384,9 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 		WorkflowState: e.captureStateSnapshot(),
 		Context:       ctx,
 	}
-	if err := e.hookRegistry.RunPreHooks(ctx, phase, hookPayload); err != nil {
-		slog.Error("pre-phase hooks failed", "phase", phase, "error", err)
+	hookErr := e.hookRegistry.RunPreHooks(ctx, phase, hookPayload)
+	if hookErr != nil {
+		slog.Error("pre-phase hooks failed", "phase", phase, "error", hookErr)
 		// Hooks are best-effort; continue execution
 	}
 
@@ -415,8 +416,9 @@ func (e *Engine) RunPhase(ctx context.Context, phase m31types.WorkflowPhase, goa
 	}
 
 	// Run post-phase hooks
-	if err := e.hookRegistry.RunPostHooks(ctx, phase, hookPayload, result); err != nil {
-		slog.Error("post-phase hooks failed", "phase", phase, "error", err)
+	hookErr = e.hookRegistry.RunPostHooks(ctx, phase, hookPayload, result)
+	if hookErr != nil {
+		slog.Error("post-phase hooks failed", "phase", phase, "error", hookErr)
 		// Hooks are best-effort; continue execution
 	}
 

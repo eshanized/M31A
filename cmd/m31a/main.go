@@ -258,14 +258,14 @@ func startPprofServer() func() {
 	http.HandleFunc("/debug/memstats", func(w http.ResponseWriter, r *http.Request) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		fmt.Fprintf(w, "Alloc: %d MB\n", m.Alloc/1024/1024)
-		fmt.Fprintf(w, "TotalAlloc: %d MB\n", m.TotalAlloc/1024/1024)
-		fmt.Fprintf(w, "Sys: %d MB\n", m.Sys/1024/1024)
-		fmt.Fprintf(w, "NumGC: %d\n", m.NumGC)
-		fmt.Fprintf(w, "HeapAlloc: %d MB\n", m.HeapAlloc/1024/1024)
-		fmt.Fprintf(w, "HeapSys: %d MB\n", m.HeapSys/1024/1024)
-		fmt.Fprintf(w, "HeapIdle: %d MB\n", m.HeapIdle/1024/1024)
-		fmt.Fprintf(w, "HeapInuse: %d MB\n", m.HeapInuse/1024/1024)
+		_, _ = fmt.Fprintf(w, "Alloc: %d MB\n", m.Alloc/1024/1024)
+		_, _ = fmt.Fprintf(w, "TotalAlloc: %d MB\n", m.TotalAlloc/1024/1024)
+		_, _ = fmt.Fprintf(w, "Sys: %d MB\n", m.Sys/1024/1024)
+		_, _ = fmt.Fprintf(w, "NumGC: %d\n", m.NumGC)
+		_, _ = fmt.Fprintf(w, "HeapAlloc: %d MB\n", m.HeapAlloc/1024/1024)
+		_, _ = fmt.Fprintf(w, "HeapSys: %d MB\n", m.HeapSys/1024/1024)
+		_, _ = fmt.Fprintf(w, "HeapIdle: %d MB\n", m.HeapIdle/1024/1024)
+		_, _ = fmt.Fprintf(w, "HeapInuse: %d MB\n", m.HeapInuse/1024/1024)
 	})
 
 	server := &http.Server{Handler: http.DefaultServeMux}

@@ -190,7 +190,7 @@ func (m *SubprocessManager) Call(ctx context.Context, req JSONRPCRequest, timeou
 	respCh := make(chan JSONRPCResponse, 1)
 	idStr := string(req.ID)
 	var id int64
-	fmt.Sscanf(idStr, "%d", &id)
+	_, _ = fmt.Sscanf(idStr, "%d", &id)
 	m.pendingReq.Store(id, respCh)
 
 	// Send request
@@ -244,7 +244,7 @@ func (m *SubprocessManager) readStdout() {
 		// Route response to waiting caller
 		idStr := string(resp.ID)
 		var id int64
-		fmt.Sscanf(idStr, "%d", &id)
+		_, _ = fmt.Sscanf(idStr, "%d", &id)
 
 		if ch, ok := m.pendingReq.Load(id); ok {
 			if respCh, ok := ch.(chan JSONRPCResponse); ok {

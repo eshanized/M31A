@@ -240,7 +240,6 @@ func TestDNSCache_MaxSizeEnforcement(t *testing.T) {
 
 	// Size should be capped
 	if dc.Size() > 3 {
-		// Note: Size() returns actual count, eviction happens on next insert
-		// This test just verifies the logic doesn't panic
+		t.Logf("Cache size %d exceeds expected max 3 (eviction happens on next insert)", dc.Size())
 	}
 }

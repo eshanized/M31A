@@ -15,8 +15,7 @@ func TestCrashReport_CaptureVerifiesFields(t *testing.T) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// We can't directly capture the report from here since it's written to file
-				// This test verifies the function doesn't deadlock and recovers properly
+				_ = r // panic recovered, test verifies function doesn't deadlock
 			}
 			close(done)
 		}()
@@ -79,8 +78,9 @@ func TestRecoverAndCapture_WritesCrashFile(t *testing.T) {
 	}
 
 	var report CrashReport
-	if err := json.Unmarshal(data, &report); err != nil {
-		t.Fatalf("Failed to unmarshal crash report: %v", err)
+	unmarshalErr := json.Unmarshal(data, &report)
+	if unmarshalErr != nil {
+		t.Fatalf("Failed to unmarshal crash report: %v", unmarshalErr)
 	}
 
 	// Verify fields

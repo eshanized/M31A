@@ -326,10 +326,6 @@ func validateExtensionsConfig(cfg *Config) error {
 				})
 			}
 		}
-		// Check if command is absolute or resolvable via PATH (basic check)
-		if tool.Command != "" && !strings.HasPrefix(tool.Command, "/") && !strings.Contains(tool.Command, "/") {
-			// Could be a command in PATH, that's acceptable
-		}
 	}
 
 	// Validate provider configurations
