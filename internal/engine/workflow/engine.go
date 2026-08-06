@@ -1,3 +1,13 @@
+// Package workflow implements the seven-phase M31A workflow engine.
+//
+// The engine is split across multiple files by concern:
+//   - engine.go: Core Engine struct, lifecycle, RunPhase, and orchestration
+//   - engine_pause.go: Pause/resume/skip/cancel for execute phase
+//   - engine_streaming.go: LLM streaming and token estimation
+//   - engine_checkpoint.go: Checkpoint save/load, recovery, and rollback
+//   - engine_model.go: Per-phase model selection and routing
+//   - engine_helpers.go: Config adapters, caching, template extraction
+//   - engine_concurrency.go: Lock ordering documentation
 package workflow
 
 import (
