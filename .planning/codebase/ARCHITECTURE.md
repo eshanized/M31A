@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-08-04 -->
+<!-- refreshed: 2026-08-06 -->
 # Architecture
 
-**Analysis Date:** 2026-08-04
+**Analysis Date:** 2026-08-06
 
 ## System Overview
 
@@ -63,7 +63,13 @@
 | Config | TOML config loading, validation, merge, hot-reload | `internal/core/config/loader.go`, `internal/core/config/types.go` |
 | Types | Shared vocabulary: phases, tasks, messages, models, tools | `internal/core/types/types.go` |
 | Errors | Sentinel errors, typed error wrappers, user-facing messages | `internal/core/errors/errors.go` |
-| Workflow Engine | Orchestrates 7-phase pipeline, LLM streaming, tool dispatch | `internal/engine/workflow/engine.go` |
+| Workflow Engine (core) | Core struct, constructor, RunPhase orchestration, lifecycle | `internal/engine/workflow/engine.go` |
+| Workflow Engine (pause) | Pause/resume/skip/cancel for execute phase | `internal/engine/workflow/engine_pause.go` |
+| Workflow Engine (streaming) | LLM streaming, tool call accumulation, retry logic, token calibration | `internal/engine/workflow/engine_streaming.go` |
+| Workflow Engine (checkpoint) | Checkpoint save/load, recovery, rollback | `internal/engine/workflow/engine_checkpoint.go` |
+| Workflow Engine (model) | Per-phase model selection and routing | `internal/engine/workflow/engine_model.go` |
+| Workflow Engine (helpers) | Config adapters, caching, template extraction | `internal/engine/workflow/engine_helpers.go` |
+| Workflow Engine (concurrency) | Lock ordering documentation and verification | `internal/engine/workflow/engine_concurrency.go` |
 | State Machine | Thread-safe phase transitions with oscillation guard | `internal/engine/workflow/state_machine.go` |
 | Phase Coordinator | Pre-phase setup, post-phase metrics, transition side effects | `internal/engine/workflow/phase_coordinator.go` |
 | Initialize | Project detection, git init, planning dir, deep analysis | `internal/engine/workflow/initialize.go` |
@@ -130,6 +136,7 @@
 - Tools are registered dynamically into a `Dispatcher` with permission policies, rate limiting, and concurrency semaphores
 - Session state is persisted to disk (JSON) and can be resumed via checkpoint mechanism
 - Subagent architecture uses git worktree isolation with independent dispatchers per child agent
+- Engine code is split by concern within the same package (workflow). Each file handles one responsibility. All files share the Engine receiver.
 
 ## Layers
 
@@ -259,6 +266,30 @@
 - Examples: `internal/tools/dispatcher.go`
 - Pattern: Mediator pattern — all tool calls go through the dispatcher
 
+**Engine (split by concern):**
+- Purpose: Core orchestration in engine.go, with focused files for pause/resume, streaming, checkpointing, model selection, and helpers
+- Examples: `internal/engine/workflow/engine.go`, `engine_pause.go`, `engine_streaming.go`, `engine_checkpoint.go`, `engine_model.go`, `engine_helpers.go`
+- Pattern: Same-package file splitting — all files share the Engine receiver, each handles one concern
+
+## Engine File Organization
+
+The workflow engine was decomposed from a single 1832-line `engine.go` into focused files within the `workflow` package. All files share the `Engine` receiver and are in the same package — no new packages are created.
+
+| File | Lines | Concern |
+|------|-------|---------|
+| `engine.go` | ~1040 | Core struct, constructor, RunPhase orchestration, lifecycle |
+| `engine_pause.go` | ~121 | PauseExecution, ResumeExecution, IsPaused, SkipCurrentTask, CancelCurrentTask |
+| `engine_streaming.go` | ~350 | consumeStream, streamLLM, streamLLMWithTools, retryChatStream, token calibration |
+| `engine_checkpoint.go` | ~195 | SaveCheckpointData, LoadCheckpointData, Recover, ClearRecovery, rollback |
+| `engine_model.go` | ~98 | modelForPhase, SetPhaseModel, SetModel, providerAndModel |
+| `engine_helpers.go` | ~187 | gitConfig, promptOrGet, truncateForLog, computePromptHash, emit |
+| `engine_concurrency.go` | ~55 | Lock ordering documentation and VerifyLockOrder helper |
+
+**Lock ordering hierarchy** (single authoritative source: `engine_concurrency.go`):
+```
+transitionMu > planMu > messagesMu > intentResultMu > cachedFullPromptsMu > checkpointMu
+```
+
 ## Entry Points
 
 **CLI Entry (`cmd/m31a/main.go`):**
@@ -294,6 +325,7 @@
 - **CGO_ENABLED=0:** Hard constraint — binary must be static. No C dependencies allowed. If any dependency requires CGO, the build breaks.
 - **`pkg/` must NOT import `internal/`:** Enforced by Go module system. Currently `pkg/` is empty.
 - **Provider models are dynamic:** Never hardcode model names — always fetch from provider APIs or use config defaults.
+- **Engine file splitting:** All engine split files remain in the same package (workflow). No new packages are created. Lock ordering hierarchy (`engine_concurrency.go`) applies across all files.
 
 ## Anti-Patterns
 
