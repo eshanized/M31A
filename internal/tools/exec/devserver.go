@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eshanized/M31A/internal/core/types"
@@ -23,6 +24,22 @@ const (
 	maxLogBytes    = 256 * 1024 // 256KB per server
 	logTrimBytes   = 64 * 1024  // trim 64KB when over limit
 	crashCheckSecs = 2
+)
+
+// devServerBufferPool pools ring buffers to reduce GC pressure across
+// multiple dev server instances. A global memory cap prevents unbounded growth.
+var (
+	devServerBufferPool = sync.Pool{
+		New: func() any {
+			if totalDevServerBytes.Load() >= maxTotalDevServerBytes {
+				return nil
+			}
+			totalDevServerBytes.Add(int64(maxLogBytes))
+			return NewRingBuffer(maxLogBytes)
+		},
+	}
+	totalDevServerBytes   atomic.Int64
+	maxTotalDevServerBytes int64 = 4 * 1024 * 1024 // 4MB total cap
 )
 
 type devServerEntry struct {
@@ -77,6 +94,14 @@ func (rb *ringBuffer) TruncatedLines() int {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	return rb.lines
+}
+
+// Reset clears the buffer content for reuse from the pool.
+func (rb *ringBuffer) Reset() {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	rb.buf = rb.buf[:0]
+	rb.lines = 0
 }
 
 type DevServer struct {
@@ -199,8 +224,13 @@ func (d *DevServer) startServer(ctx context.Context, input types.ToolInput, star
 	// Set environment variables
 	cmd.Env = mergeEnv(os.Environ(), env)
 
-	// Capture logs via ring buffer
-	logs := NewRingBuffer(maxLogBytes)
+	// Capture logs via pooled ring buffer
+	buf := devServerBufferPool.Get().(*ringBuffer)
+	if buf == nil {
+		// Fallback: memory cap reached, allocate smaller buffer
+		buf = NewRingBuffer(maxLogBytes / 4)
+	}
+	logs := buf
 	cmd.Stdout = logs
 	cmd.Stderr = logs
 
@@ -359,6 +389,14 @@ func (d *DevServer) stopByID(id int) error {
 		}
 		_ = entry.cmd.Wait()
 	}
+
+	// Return buffer to pool after reset
+	if entry.logs != nil {
+		entry.logs.Reset()
+		devServerBufferPool.Put(entry.logs)
+		totalDevServerBytes.Add(-int64(maxLogBytes))
+	}
+
 	return nil
 }
 
