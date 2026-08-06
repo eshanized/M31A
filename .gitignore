@@ -72,4 +72,4 @@ promotion/
 space.txt
 *.log
 *.zip
-.cache/
+.cache/VALIDATION_REPORT.md
