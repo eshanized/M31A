@@ -31,7 +31,7 @@ type Provider interface {
 type Config struct {
 	Auto                bool
 	Buffer              int    // tokens reserved before compaction triggers
-	KeepTokens          int    // tokens of recent history to preserve verbatim
+	KeepTokens          int    // tokens of recent history to preserve verbatim (default 8000)
 	SummaryTemplate     string // inline template override (takes precedence over file)
 	SummaryTemplateFile string // path to template file (used when SummaryTemplate is empty)
 }
@@ -66,7 +66,20 @@ type Result struct {
 }
 
 // New creates a Compactor with the given config and token estimator.
+// KeepTokens is clamped to the range [2000, 32000] if outside bounds.
 func New(cfg Config, tokenEst TokenEstimator) *Compactor {
+	// Clamp KeepTokens to reasonable bounds
+	const minKeepTokens = 2000
+	const maxKeepTokens = 32000
+	if cfg.KeepTokens < minKeepTokens {
+		slog.Warn("compaction KeepTokens too low, clamping to minimum",
+			"provided", cfg.KeepTokens, "clamped", minKeepTokens)
+		cfg.KeepTokens = minKeepTokens
+	} else if cfg.KeepTokens > maxKeepTokens {
+		slog.Warn("compaction KeepTokens too high, clamping to maximum",
+			"provided", cfg.KeepTokens, "clamped", maxKeepTokens)
+		cfg.KeepTokens = maxKeepTokens
+	}
 	return &Compactor{
 		cfg:      cfg,
 		tokenEst: tokenEst,
