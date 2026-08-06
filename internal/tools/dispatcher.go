@@ -19,6 +19,7 @@ import (
 	"github.com/eshanized/M31A/internal/tools/fileops"
 	"github.com/eshanized/M31A/internal/tools/subagent"
 	"github.com/eshanized/M31A/internal/tools/todo"
+	"golang.org/x/time/rate"
 )
 
 type Dispatcher struct {
@@ -47,14 +48,10 @@ type Dispatcher struct {
 	// pendingPermCount tracks how many permission requests are waiting in the
 	// queue for display in the permission modal ("3 tools behind this one").
 	pendingPermCount atomic.Int64
-	// Rate limiter: token bucket for tool execution (WP-S04).
-	rateTokens chan struct{}
-	rateTicker *time.Ticker
-	rateDone   chan struct{}
+	// Rate limiter: zero-goroutine token bucket via golang.org/x/time/rate (WP-S04).
+	rateLimiter *rate.Limiter
 	// Per-risk-level rate limiter for dangerous/destructive tools (M6).
-	dangerousRateTokens chan struct{}
-	dangerousRateTicker *time.Ticker
-	dangerousRateDone   chan struct{}
+	dangerousLimiter *rate.Limiter
 	// Concurrency limiter: semaphore limiting concurrent tool executions (M5).
 	concurrencySem chan struct{}
 	// C-12: sync.Once prevents TOCTOU race in Stop().
@@ -67,9 +64,9 @@ type Dispatcher struct {
 	persistentPerms *PersistentPermissions
 }
 
-// NewDispatcher creates a new Dispatcher with a background rate-limiter goroutine.
+// NewDispatcher creates a new Dispatcher with zero-goroutine rate limiting.
 // The caller MUST call Stop() when the Dispatcher is no longer needed to prevent
-// goroutine leaks (e.g., during session restart or app shutdown).
+// goroutine leaks from pending sends (e.g., during session restart or app shutdown).
 func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 	d := &Dispatcher{
 		tools:               make(map[string]types.Tool),
@@ -84,59 +81,11 @@ func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		activeAgent:         DefaultAgentName,
 		permissionTimeout:   types.DefaultPermissionTimeout,
 		batchApprovals:      make(map[string]BatchApproval),
-		rateTokens:          make(chan struct{}, ToolRateLimitBurst),
-		rateDone:            make(chan struct{}),
-		dangerousRateTokens: make(chan struct{}, DangerousRateLimitBurst),
-		dangerousRateDone:   make(chan struct{}),
+		rateLimiter:         rate.NewLimiter(rate.Limit(ToolRateLimitPerSec), ToolRateLimitBurst),
+		dangerousLimiter:    rate.NewLimiter(rate.Limit(DangerousRateLimitPerSec), DangerousRateLimitBurst),
 		concurrencySem:      make(chan struct{}, MaxConcurrentTools),
 		persistentPerms:     NewPersistentPermissions(),
 	}
-	// Initialize token bucket for rate limiting.
-	for i := 0; i < ToolRateLimitBurst; i++ {
-		d.rateTokens <- struct{}{}
-	}
-	d.rateTicker = time.NewTicker(time.Second / ToolRateLimitPerSec)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("rate limiter panic", "error", r)
-			}
-		}()
-		for {
-			select {
-			case <-d.rateDone:
-				return
-			case <-d.rateTicker.C:
-				select {
-				case d.rateTokens <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
-	// Initialize dangerous tool rate limiter (M6).
-	for i := 0; i < DangerousRateLimitBurst; i++ {
-		d.dangerousRateTokens <- struct{}{}
-	}
-	d.dangerousRateTicker = time.NewTicker(time.Second / DangerousRateLimitPerSec)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("dangerous rate limiter panic", "error", r)
-			}
-		}()
-		for {
-			select {
-			case <-d.dangerousRateDone:
-				return
-			case <-d.dangerousRateTicker.C:
-				select {
-				case d.dangerousRateTokens <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
 	if cfg != nil {
 		if cfg.Rules != nil {
 			d.rules = make([]config.PermissionRule, len(cfg.Rules))
@@ -241,9 +190,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 
 	// Rate limit tool execution to prevent resource exhaustion from
 	// malicious or buggy LLMs generating thousands of tool calls per second.
-	select {
-	case <-d.rateTokens:
-	case <-ctx.Done():
+	if err := d.rateLimiter.Wait(ctx); err != nil {
 		return types.ToolResult{}, ctx.Err()
 	}
 
@@ -261,9 +208,7 @@ func (d *Dispatcher) Execute(ctx context.Context, call types.ToolCall) (types.To
 	// Per-risk-level rate limiting (M6): dangerous/destructive tools get stricter limits.
 	risk := tool.RiskLevel()
 	if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
-		select {
-		case <-d.dangerousRateTokens:
-		case <-ctx.Done():
+		if err := d.dangerousLimiter.Wait(ctx); err != nil {
 			return types.ToolResult{}, ctx.Err()
 		}
 	}
@@ -434,11 +379,7 @@ func (d *Dispatcher) workDir() string {
 // C-12: Uses sync.Once to prevent TOCTOU race on concurrent calls.
 func (d *Dispatcher) Stop() {
 	d.stopOnce.Do(func() {
-		close(d.rateDone)
-		d.rateTicker.Stop()
-		close(d.dangerousRateDone)
-		d.dangerousRateTicker.Stop()
-		// Drain all channels to prevent goroutine leaks from pending sends.
+		// rate.Limiter has no goroutines to stop — drain pending channels only.
 		d.drainChannels()
 	})
 }
