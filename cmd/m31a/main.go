@@ -253,6 +253,20 @@ func startPprofServer() func() {
 		return nil
 	}
 
+	// Register /debug/memstats handler for memory statistics
+	http.HandleFunc("/debug/memstats", func(w http.ResponseWriter, r *http.Request) {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		fmt.Fprintf(w, "Alloc: %d MB\n", m.Alloc/1024/1024)
+		fmt.Fprintf(w, "TotalAlloc: %d MB\n", m.TotalAlloc/1024/1024)
+		fmt.Fprintf(w, "Sys: %d MB\n", m.Sys/1024/1024)
+		fmt.Fprintf(w, "NumGC: %d\n", m.NumGC)
+		fmt.Fprintf(w, "HeapAlloc: %d MB\n", m.HeapAlloc/1024/1024)
+		fmt.Fprintf(w, "HeapSys: %d MB\n", m.HeapSys/1024/1024)
+		fmt.Fprintf(w, "HeapIdle: %d MB\n", m.HeapIdle/1024/1024)
+		fmt.Fprintf(w, "HeapInuse: %d MB\n", m.HeapInuse/1024/1024)
+	})
+
 	server := &http.Server{Handler: http.DefaultServeMux}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -260,7 +274,19 @@ func startPprofServer() func() {
 		}
 	}()
 
-	slog.Info("pprof server started", "addr", "http://localhost:6060/debug/pprof/")
+	slog.Info("pprof server started",
+		"addr", "http://localhost:6060/debug/pprof/",
+		"endpoints", []string{
+			"profile (CPU, 30s)",
+			"heap",
+			"allocs",
+			"goroutine",
+			"threadcreate",
+			"block",
+			"mutex",
+			"memstats",
+		},
+	)
 	return func() {
 		if err := server.Close(); err != nil {
 			slog.Debug("pprof server close error", "error", err)

@@ -67,6 +67,47 @@ Test files are excluded from `errcheck` and `unused`.
 Targets: linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/amd64 (windows/arm64 excluded).
 Use `make cross` or goreleaser.
 
+## Profiling
+
+pprof is available when running with `--debug` or `M31A_DEBUG=1`.
+
+**Start the binary in debug mode:**
+```bash
+M31A_DEBUG=1 ./m31a
+# or
+./m31a --debug
+```
+
+**Available endpoints:**
+```
+http://localhost:6060/debug/pprof/           -- Index (all profiles)
+http://localhost:6060/debug/pprof/profile    -- CPU profile (30s)
+http://localhost:6060/debug/pprof/heap       -- Heap profile
+http://localhost:6060/debug/pprof/allocs     -- Allocation profile
+http://localhost:6060/debug/pprof/goroutine  -- Goroutine dump
+http://localhost:6060/debug/pprof/threadcreate -- Thread creation
+http://localhost:6060/debug/pprof/block      -- Block profile
+http://localhost:6060/debug/pprof/mutex      -- Mutex contention
+http://localhost:6060/debug/memstats         -- Memory stats summary
+```
+
+**Capture a profile:**
+```bash
+# CPU profile (30 seconds)
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Heap profile
+go tool pprof http://localhost:6060/debug/pprof/heap
+
+# Allocation profile
+go tool pprof http://localhost:6060/debug/pprof/allocs
+```
+
+**Quick profile via Makefile:**
+```bash
+make profile   # builds debug binary, starts, captures 30s CPU profile
+```
+
 ## Key gotchas
 
 - `go.mod` says `go 1.25.0` — verify this matches your Go version
