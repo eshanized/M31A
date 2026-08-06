@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -157,7 +156,7 @@ func finalizeToolCalls(builders map[int]*toolCallBuilder, e *Engine) []m31types.
 	sort.Ints(indices)
 
 	if len(indices) > m31types.MaxToolsPerCall {
-		slog.Warn("finalizeToolCalls: tool count exceeded cap, truncating",
+		e.logger.Warn("finalizeToolCalls: tool count exceeded cap, truncating",
 			"count", len(indices), "cap", m31types.MaxToolsPerCall)
 		indices = indices[:m31types.MaxToolsPerCall]
 	}
