@@ -3,7 +3,7 @@
 # See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # Global owners
-* @eshanized @maintainer-team
+* @eshanized
 
 # Engine (workflow orchestration, phases, state)
 /internal/engine/ @engine-maintainers @eshanized
