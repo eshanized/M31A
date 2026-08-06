@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -238,6 +241,33 @@ func runHeadless(prompt string, registry *provider.Registry, defaultModel string
 	return 0
 }
 
+// startPprofServer starts a pprof HTTP server on localhost:6060.
+// Only call this when debug mode is enabled (--debug or M31A_DEBUG=1).
+// Binds to localhost only to prevent external access.
+// Returns a cleanup function that shuts down the server.
+func startPprofServer() func() {
+	// The blank import of net/http/pprof registers handlers on DefaultServeMux.
+	listener, err := net.Listen("tcp", "localhost:6060")
+	if err != nil {
+		slog.Warn("failed to start pprof server", "error", err)
+		return nil
+	}
+
+	server := &http.Server{Handler: http.DefaultServeMux}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			slog.Error("pprof server error", "error", err)
+		}
+	}()
+
+	slog.Info("pprof server started", "addr", "http://localhost:6060/debug/pprof/")
+	return func() {
+		if err := server.Close(); err != nil {
+			slog.Debug("pprof server close error", "error", err)
+		}
+	}
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -254,6 +284,8 @@ func run() int {
 	promptFlag := flag.String("prompt", "", "Run in headless mode: send prompt to LLM and print response")
 	goalFlag := flag.String("goal", "", "Run in headless mode: execute full workflow with goal")
 	modelFlag := flag.String("model", "", "Model ID for headless mode (default: config model or first available)")
+	debugMode := flag.Bool("debug", false, "enable debug mode (pprof on localhost:6060, debug logging)")
+	logLevel := flag.String("log-level", "", "log level (debug, info, warn, error); overrides M31A_LOG_LEVEL env")
 	flag.Usage = func() {
 		printUsage(cmdRegistry)
 	}
@@ -287,6 +319,40 @@ func run() int {
 	}
 	defer cleanup()
 	slog.SetDefault(logger)
+
+	// Configure log level based on --debug flag, --log-level flag, or M31A_LOG_LEVEL env.
+	// Priority: --log-level flag > --debug flag > M31A_LOG_LEVEL env > default (info)
+	if *debugMode || os.Getenv("M31A_DEBUG") == "1" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		logger = slog.Default()
+	}
+	if *logLevel != "" {
+		var lvl slog.Level
+		switch strings.ToLower(*logLevel) {
+		case "debug":
+			lvl = slog.LevelDebug
+		case "info":
+			lvl = slog.LevelInfo
+		case "warn":
+			lvl = slog.LevelWarn
+		case "error":
+			lvl = slog.LevelError
+		default:
+			lvl = slog.LevelInfo
+		}
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
+		logger = slog.Default()
+	}
+
+	// Debug mode: pprof available at http://localhost:6060/debug/pprof/
+	// Gated behind --debug flag or M31A_DEBUG=1 to prevent production exposure.
+	var pprofCleanup func()
+	if *debugMode || os.Getenv("M31A_DEBUG") == "1" {
+		pprofCleanup = startPprofServer()
+	}
+	if pprofCleanup != nil {
+		defer pprofCleanup()
+	}
 
 	logger.Info("M31A starting",
 		"version", Version,
