@@ -89,7 +89,7 @@ func (m *ReplModel) SetDimensions(w, h int) {
 
 // SetProvider configures the active provider and returns a tea.Cmd that
 // asynchronously validates the model by fetching the provider's model catalog.
-func (m *ReplModel) SetProvider(ctx context.Context, registry *provider.Registry, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) tea.Cmd {
+func (m *ReplModel) SetProvider(ctx context.Context, registry provider.RegistryInterface, activeProvider string, model *types.ModelInfo, sessionID string, cfg *config.Config) tea.Cmd {
 	m.registry = registry
 	m.activeProvider = activeProvider
 	m.sessionID = sessionID

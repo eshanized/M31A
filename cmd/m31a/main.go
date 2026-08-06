@@ -57,7 +57,7 @@ func restoreTerminal() {
 
 // runHeadlessWorkflow executes a full workflow in headless mode (no TUI).
 // Runs the given goal through the workflow engine and returns exit code.
-func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *config.Config, model string, logger *slog.Logger, registry *provider.Registry) int {
+func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *config.Config, model string, logger *slog.Logger, registry provider.RegistryInterface) int {
 	// Working directory
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -183,7 +183,7 @@ func indexOf(phase types.WorkflowPhase, phases []types.WorkflowPhase) int {
 	return -1
 }
 
-func runHeadless(prompt string, registry *provider.Registry, defaultModel string, logger *slog.Logger) int {
+func runHeadless(prompt string, registry provider.RegistryInterface, defaultModel string, logger *slog.Logger) int {
 	p := registry.ActiveProvider()
 	if p == nil {
 		fmt.Fprintln(os.Stderr, "error: no active provider")
@@ -393,21 +393,7 @@ func run() int {
 		_ = os.Remove(sentinelPath)
 	}
 
-	// Keychain
-	kc, kcErr := keychain.New()
-	if kcErr != nil {
-		logger.Warn("keychain initialization failed", "error", kcErr)
-	}
-	// Wrap with availability caching so repeated SaveWithKeychain calls
-	// don't trigger repeated D-Bus/pass attempts and duplicate warnings.
-	kc = keychain.NewCached(kc)
-	if kc != nil {
-		if resolveErr := cfg.ResolveAPIKeys(kc); resolveErr != nil {
-			logger.Warn("failed to resolve API keys", "error", resolveErr)
-		}
-	}
-
-	// Provider registry
+	// Provider registry — lazy: provider registration deferred until first LLM call
 	tools.SetVersion(Version)
 
 	// Configure model capability detection from config (F-011, F-012)
@@ -418,31 +404,49 @@ func run() int {
 		cfg.ModelCapabilities.ExtraNonChatPatterns,
 	)
 
-	registry := provider.NewRegistry()
-
-	if cfg.Provider.OpenRouter.APIKey != "" {
-		if regErr := tui.RegisterProvider(registry, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey, Version); regErr != nil {
-			logger.Warn("failed to register OpenRouter provider", "error", regErr)
-		}
+	// Keychain — eager init (needed for TUI API key storage, lightweight)
+	kc, kcErr := keychain.New()
+	if kcErr != nil {
+		logger.Warn("keychain initialization failed", "error", kcErr)
 	}
+	kc = keychain.NewCached(kc)
 
-	if cfg.Provider.Zen.APIKey != "" {
-		if regErr := tui.RegisterProvider(registry, cfg, "zen", cfg.Provider.Zen.APIKey, Version); regErr != nil {
-			logger.Warn("failed to register Zen provider", "error", regErr)
+	registry := provider.NewLazyRegistry(func() *provider.Registry {
+		// Resolve API keys via keychain — deferred until first LLM call
+		if kc != nil {
+			if resolveErr := cfg.ResolveAPIKeys(kc); resolveErr != nil {
+				logger.Warn("failed to resolve API keys", "error", resolveErr)
+			}
 		}
-	}
 
-	if cfg.Provider.Nvidia.APIKey != "" {
-		if regErr := tui.RegisterProvider(registry, cfg, "nvidia", cfg.Provider.Nvidia.APIKey, Version); regErr != nil {
-			logger.Warn("failed to register NVIDIA provider", "error", regErr)
-		}
-	}
+		reg := provider.NewRegistry()
 
-	if cfg.Provider.Default != "" {
-		if setErr := registry.SetActive(cfg.Provider.Default); setErr != nil {
-			logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", setErr)
+		if cfg.Provider.OpenRouter.APIKey != "" {
+			if regErr := tui.RegisterProvider(reg, cfg, "openrouter", cfg.Provider.OpenRouter.APIKey, Version); regErr != nil {
+				logger.Warn("failed to register OpenRouter provider", "error", regErr)
+			}
 		}
-	}
+
+		if cfg.Provider.Zen.APIKey != "" {
+			if regErr := tui.RegisterProvider(reg, cfg, "zen", cfg.Provider.Zen.APIKey, Version); regErr != nil {
+				logger.Warn("failed to register Zen provider", "error", regErr)
+			}
+		}
+
+		if cfg.Provider.Nvidia.APIKey != "" {
+			if regErr := tui.RegisterProvider(reg, cfg, "nvidia", cfg.Provider.Nvidia.APIKey, Version); regErr != nil {
+				logger.Warn("failed to register NVIDIA provider", "error", regErr)
+			}
+		}
+
+		if cfg.Provider.Default != "" {
+			if setErr := reg.SetActive(cfg.Provider.Default); setErr != nil {
+				logger.Warn("configured default provider not registered", "default", cfg.Provider.Default, "error", setErr)
+			}
+		}
+
+		return reg
+	})
 
 	hasProvider := registry.Active() != ""
 	if !hasProvider {

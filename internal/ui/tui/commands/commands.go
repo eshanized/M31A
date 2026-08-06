@@ -56,7 +56,7 @@ type CommandHandler func(args []string, ctx CommandContext) CommandResult
 // CommandContext carries shared resources that command handlers need.
 type CommandContext struct {
 	Ctx             context.Context
-	Registry        *provider.Registry
+	Registry        provider.RegistryInterface
 	SessionManager  *session.Manager
 	SessionID       string
 	Config          *config.Config

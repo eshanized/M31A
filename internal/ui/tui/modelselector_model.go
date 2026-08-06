@@ -23,7 +23,7 @@ type modelSelectorLoadedMsg struct {
 // ModelSelector is a full-screen model/provider picker with search, scroll, and pricing.
 type ModelSelector struct {
 	ctx            context.Context
-	registry       *provider.Registry
+	registry       provider.RegistryInterface
 	sessionManager *session.Manager
 	theme          theme.Theme
 
@@ -49,7 +49,7 @@ type ModelSelector struct {
 }
 
 // NewModelSelector creates a ModelSelector backed by the given registry.
-func NewModelSelector(ctx context.Context, registry *provider.Registry, sessionManager *session.Manager, t theme.Theme) *ModelSelector {
+func NewModelSelector(ctx context.Context, registry provider.RegistryInterface, sessionManager *session.Manager, t theme.Theme) *ModelSelector {
 	ti := textinput.New()
 	ti.Placeholder = "Search models..."
 	ti.Focus()

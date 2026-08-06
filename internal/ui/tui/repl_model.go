@@ -65,7 +65,7 @@ type ReplModel struct {
 	toolCards         map[int]*components.ToolCard
 
 	// Provider state
-	registry       *provider.Registry
+	registry       provider.RegistryInterface
 	activeProvider string
 	activeModel    *types.ModelInfo
 	modelValid     bool

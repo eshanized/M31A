@@ -128,7 +128,7 @@ type firstRunKeyValidationMsg struct {
 // FirstRunModel is a multi-step setup wizard shown on first launch.
 type FirstRunModel struct {
 	theme    theme.Theme
-	registry *provider.Registry
+	registry provider.RegistryInterface
 	config   *config.Config
 	version  string
 	ctx      context.Context
@@ -173,7 +173,7 @@ type FirstRunModel struct {
 
 // NewFirstRunModel creates a FirstRunModel.
 // Accepts a context that is cancelled on app shutdown to prevent resource leaks.
-func NewFirstRunModel(t theme.Theme, registry *provider.Registry, cfg *config.Config, version string, ctx context.Context) *FirstRunModel {
+func NewFirstRunModel(t theme.Theme, registry provider.RegistryInterface, cfg *config.Config, version string, ctx context.Context) *FirstRunModel {
 	keyTI := textinput.New()
 	keyTI.Placeholder = "sk-or-..."
 	keyTI.EchoMode = textinput.EchoPassword

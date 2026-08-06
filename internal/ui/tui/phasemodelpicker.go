@@ -72,7 +72,7 @@ func (p *pickerPanel) clampScroll(visibleRows int) {
 // It shows two panels side-by-side: Planning Model (left) and Coding Model (right).
 type PhaseModelPickerModel struct {
 	ctx      context.Context
-	registry *provider.Registry
+	registry provider.RegistryInterface
 	theme    theme.Theme
 
 	panels [2]pickerPanel // 0 = planning, 1 = coding
@@ -93,7 +93,7 @@ const codingPanelLabel = "Coding Model"
 const codingPanelDesc = "Used for: Execute · Ship"
 
 // NewPhaseModelPickerModel creates a PhaseModelPickerModel.
-func NewPhaseModelPickerModel(ctx context.Context, registry *provider.Registry, t theme.Theme, w, h int) *PhaseModelPickerModel {
+func NewPhaseModelPickerModel(ctx context.Context, registry provider.RegistryInterface, t theme.Theme, w, h int) *PhaseModelPickerModel {
 	m := &PhaseModelPickerModel{
 		ctx:             ctx,
 		registry:        registry,

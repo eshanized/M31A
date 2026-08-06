@@ -130,7 +130,7 @@ func NextCacheRefreshTick(d time.Duration) tea.Cmd {
 }
 
 // CacheRefreshCmd runs FetchModels in a goroutine and emits CacheRefreshResultMsg.
-func CacheRefreshCmd(ctx context.Context, registry *provider.Registry, providerName string) tea.Cmd {
+func CacheRefreshCmd(ctx context.Context, registry provider.RegistryInterface, providerName string) tea.Cmd {
 	return func() tea.Msg {
 		if registry == nil {
 			return CacheRefreshResultMsg{ErrMsg: "no registry"}

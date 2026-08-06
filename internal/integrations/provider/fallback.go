@@ -24,7 +24,7 @@ const maxRetryAfter = types.MaxRetryAfterWait
 // when non-empty, candidates are checked in this order. When empty, falls
 // back to alphabetical sort (existing behavior). healthCheckTimeoutSecs
 // controls the per-provider health check deadline; 0 uses the default (10s).
-func FindFallbackProvider(registry *Registry, currentProvider string, fallbackPriority []string, healthCheckTimeoutSecs int) (string, *FallbackEvent, error) {
+func FindFallbackProvider(registry RegistryInterface, currentProvider string, fallbackPriority []string, healthCheckTimeoutSecs int) (string, *FallbackEvent, error) {
 	// Build candidate list in the requested order
 	type candidate struct {
 		name     string
@@ -194,7 +194,7 @@ type FallbackAfterWait struct {
 //
 // When the current provider returned a 429 with a Retry-After header,
 // Wait is capped at maxRetryAfter (120s).
-func FindFallbackWithRetryAfter(registry *Registry, currentProvider string, retryAfterHeader string, fallbackPriority []string, healthCheckTimeoutSecs int) FallbackAfterWait {
+func FindFallbackWithRetryAfter(registry RegistryInterface, currentProvider string, retryAfterHeader string, fallbackPriority []string, healthCheckTimeoutSecs int) FallbackAfterWait {
 	wait := time.Duration(0)
 	if retryAfterHeader != "" {
 		if seconds, err := strconv.Atoi(retryAfterHeader); err == nil && seconds > 0 {

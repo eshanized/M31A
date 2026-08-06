@@ -8,6 +8,20 @@ import (
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 )
 
+// RegistryInterface is the common interface for both Registry and LazyRegistry.
+// Callers should accept this interface instead of *Registry to support lazy initialization.
+type RegistryInterface interface {
+	Register(name string, p LLMProvider) error
+	Active() string
+	SetActive(name string) error
+	TrySetActive(name string) (LLMProvider, error)
+	RollbackActive(fromName, toName string) bool
+	Get(name string) (LLMProvider, error)
+	List() []string
+	ListAll() []string
+	ActiveProvider() LLMProvider
+}
+
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[string]LLMProvider
@@ -113,4 +127,69 @@ func (r *Registry) ActiveProvider() LLMProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.providers[r.active]
+}
+
+// LazyRegistry wraps a Registry and defers provider registration until first access.
+// The initFn closure is called exactly once via sync.Once on first method invocation.
+type LazyRegistry struct {
+	once   sync.Once
+	initFn func() *Registry
+	inner  *Registry
+}
+
+// NewLazyRegistry creates a LazyRegistry that will call initFn exactly once
+// when any method requiring the inner registry is first invoked.
+func NewLazyRegistry(initFn func() *Registry) *LazyRegistry {
+	return &LazyRegistry{initFn: initFn}
+}
+
+func (lr *LazyRegistry) init() {
+	lr.once.Do(func() {
+		lr.inner = lr.initFn()
+	})
+}
+
+func (lr *LazyRegistry) Register(name string, p LLMProvider) error {
+	lr.init()
+	return lr.inner.Register(name, p)
+}
+
+func (lr *LazyRegistry) Active() string {
+	lr.init()
+	return lr.inner.Active()
+}
+
+func (lr *LazyRegistry) SetActive(name string) error {
+	lr.init()
+	return lr.inner.SetActive(name)
+}
+
+func (lr *LazyRegistry) TrySetActive(name string) (LLMProvider, error) {
+	lr.init()
+	return lr.inner.TrySetActive(name)
+}
+
+func (lr *LazyRegistry) RollbackActive(fromName, toName string) bool {
+	lr.init()
+	return lr.inner.RollbackActive(fromName, toName)
+}
+
+func (lr *LazyRegistry) Get(name string) (LLMProvider, error) {
+	lr.init()
+	return lr.inner.Get(name)
+}
+
+func (lr *LazyRegistry) List() []string {
+	lr.init()
+	return lr.inner.List()
+}
+
+func (lr *LazyRegistry) ListAll() []string {
+	lr.init()
+	return lr.inner.ListAll()
+}
+
+func (lr *LazyRegistry) ActiveProvider() LLMProvider {
+	lr.init()
+	return lr.inner.ActiveProvider()
 }

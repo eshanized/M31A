@@ -94,7 +94,7 @@ type AppState struct {
 	sessionID      string
 
 	// Provider / model
-	registry       *provider.Registry
+	registry       provider.RegistryInterface
 	activeProvider string
 	activeModel    *types.ModelInfo
 	version        string
@@ -309,7 +309,7 @@ func (a *AppState) SetCwd(cwd string) {
 func NewApp(
 	cfg *config.Config,
 	configPath string,
-	registry *provider.Registry,
+	registry provider.RegistryInterface,
 	sessionManager *session.Manager,
 	dispatcher *tools.Dispatcher,
 	gitClient *git.Git,

@@ -51,7 +51,7 @@ type WorktreeOps interface {
 // Dependencies are shared resources the Manager needs.
 type Dependencies struct {
 	WorkDir       string
-	Registry      *provider.Registry
+	Registry      provider.RegistryInterface
 	ActiveModel   *types.ModelInfo
 	Logger        *slog.Logger
 	Worktrees     WorktreeOps                             // optional; nil = always use IsolationDefault

@@ -57,7 +57,7 @@ type settingsHealthMsg struct {
 type SettingsModel struct {
 	theme     theme.Theme
 	config    *config.Config
-	registry  *provider.Registry
+	registry  provider.RegistryInterface
 	keychain  keychain.Keychain
 	ctx       context.Context
 	activeTab SettingsTab
@@ -90,7 +90,7 @@ type SettingsModel struct {
 
 // NewSettingsModel creates a SettingsModel.
 // Accepts a context that is cancelled on app shutdown to prevent resource leaks.
-func NewSettingsModel(cfg *config.Config, registry *provider.Registry, t theme.Theme, configPath string, version string, kc keychain.Keychain, ctx context.Context) *SettingsModel {
+func NewSettingsModel(cfg *config.Config, registry provider.RegistryInterface, t theme.Theme, configPath string, version string, kc keychain.Keychain, ctx context.Context) *SettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 512
 	ti.Width = 40

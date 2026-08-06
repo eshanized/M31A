@@ -16,7 +16,7 @@ import (
 // RegisterProvider creates and registers a provider client in the registry
 // using the given API key and configuration. If the provider is already
 // registered, it is replaced with the new client.
-func RegisterProvider(registry *provider.Registry, cfg *config.Config, providerID, apiKey, version string) error {
+func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, providerID, apiKey, version string) error {
 	if registry == nil || apiKey == "" {
 		return nil
 	}
