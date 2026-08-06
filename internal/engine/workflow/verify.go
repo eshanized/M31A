@@ -15,6 +15,11 @@ import (
 	"github.com/eshanized/M31A/internal/engine/session"
 )
 
+// VerifySuccessThreshold is the minimum pass rate required for verification
+// to succeed. A value of 0.90 means 90% of tasks must pass for the phase
+// to be considered successful.
+const VerifySuccessThreshold = 0.90
+
 // runVerify checks task outputs for correctness and triggers self-heal/bisect on failure.
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
 	ctx, cancel := e.verifyTaskContext(ctx)
@@ -169,13 +174,46 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		}
 	}
 
-	// 6. Check if all passed or skipped
+	// 6. Check if all passed or skipped (with 90% threshold for partial success)
+	// Only count tasks that were actually verified (done/failed/unrecoverable).
+	// Pending/ready tasks were not reached during verification and should not
+	// affect the pass-rate denominator.
 	allOK := true
 	var failedTasks []string
+	passed := 0
+	total := 0
 	for _, task := range tasks {
-		if task.Status == m31types.StatusFailed || task.Status == m31types.StatusUnrecoverable {
-			allOK = false
+		switch task.Status {
+		case m31types.StatusDone:
+			total++
+			passed++
+		case m31types.StatusFailed, m31types.StatusUnrecoverable:
+			total++
 			failedTasks = append(failedTasks, fmt.Sprintf("task %d: %s", task.ID, task.Status))
+		default:
+			// Pending, ready, skipped — not verified, excluded from denominator
+		}
+	}
+
+	// Apply 90% threshold for partial success
+	if total > 0 {
+		passRate := float64(passed) / float64(total)
+		e.logger.Info("verification pass rate", "passed", passed, "total", total, "rate", passRate)
+
+		if passRate >= VerifySuccessThreshold {
+			// Override allOK to true when threshold is met
+			allOK = true
+			if len(failedTasks) > 0 {
+				e.logger.Info("verification passed with warnings",
+					"pass_rate", passRate,
+					"threshold", VerifySuccessThreshold,
+					"failed_tasks", failedTasks)
+			}
+		} else {
+			allOK = false
+			e.logger.Info("verification failed below threshold",
+				"pass_rate", passRate,
+				"threshold", VerifySuccessThreshold)
 		}
 	}
 

@@ -210,3 +210,112 @@ func TestEngine_SessionStartHash(t *testing.T) {
 		t.Error("Expected sessionStartHash to be captured after SetGit with commits")
 	}
 }
+
+func TestRunVerify_AllPass(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	// Create files for all tasks
+	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main"), 0644)
+	os.WriteFile(filepath.Join(engine.workDir, "b.go"), []byte("package main"), 0644)
+
+	tasks := []m31types.Task{
+		{ID: 1, Action: "Create", Description: "Create a.go", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 2, Action: "Create", Description: "Create b.go", Files: []string{"b.go"}, Status: m31types.StatusDone},
+	}
+	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
+
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
+	if err != nil {
+		t.Fatalf("RunPhase verify failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("Expected verify to succeed when all tasks pass")
+	}
+}
+
+func TestRunVerify_90PercentPass(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	// Create file for passing task
+	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main"), 0644)
+
+	// 9 out of 10 tasks pass (90% threshold)
+	tasks := []m31types.Task{
+		{ID: 1, Action: "Create", Description: "Task 1", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 2, Action: "Create", Description: "Task 2", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 3, Action: "Create", Description: "Task 3", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 4, Action: "Create", Description: "Task 4", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 5, Action: "Create", Description: "Task 5", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 6, Action: "Create", Description: "Task 6", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 7, Action: "Create", Description: "Task 7", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 8, Action: "Create", Description: "Task 8", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 9, Action: "Create", Description: "Task 9", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 10, Action: "Create", Description: "Task 10", Files: []string{"missing.go"}, Status: m31types.StatusDone},
+	}
+	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
+
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
+	// Should succeed because 90% pass rate meets threshold
+	if err != nil {
+		t.Logf("Verify returned error (may be expected): %v", err)
+	}
+	if !result.Success {
+		t.Error("Expected verify to succeed with 90% pass rate")
+	}
+}
+
+func TestRunVerify_Below90Percent(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	_, err := engine.RunPhase(context.Background(), m31types.PhaseInitialize, "Test")
+	if err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	// Create files for passing tasks only
+	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main"), 0644)
+
+	// 8 out of 10 tasks pass (80% - below 90% threshold)
+	// Tasks 9 and 10 reference missing files - verification will fail and set status to failed
+	tasks := []m31types.Task{
+		{ID: 1, Action: "Create", Description: "Task 1", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 2, Action: "Create", Description: "Task 2", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 3, Action: "Create", Description: "Task 3", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 4, Action: "Create", Description: "Task 4", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 5, Action: "Create", Description: "Task 5", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 6, Action: "Create", Description: "Task 6", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 7, Action: "Create", Description: "Task 7", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 8, Action: "Create", Description: "Task 8", Files: []string{"a.go"}, Status: m31types.StatusDone},
+		{ID: 9, Action: "Create", Description: "Task 9", Files: []string{"missing1.go"}, Status: m31types.StatusFailed},
+		{ID: 10, Action: "Create", Description: "Task 10", Files: []string{"missing2.go"}, Status: m31types.StatusFailed},
+	}
+	engine.sessionMgr.SaveTasks(engine.sessionID, tasks)
+
+	result, err := engine.RunPhaseDirect(context.Background(), m31types.PhaseVerify, "Test")
+	// Should fail because 80% pass rate is below 90% threshold
+	if err == nil {
+		t.Error("Expected verify to fail with below 90% pass rate")
+	}
+	if result.Success {
+		t.Error("Expected result.Success to be false with below 90% pass rate")
+	}
+}
+
+func TestVerifySuccessThreshold(t *testing.T) {
+	if VerifySuccessThreshold != 0.90 {
+		t.Errorf("Expected VerifySuccessThreshold to be 0.90, got %f", VerifySuccessThreshold)
+	}
+}

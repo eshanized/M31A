@@ -436,12 +436,9 @@ func TestCompaction_SummaryExcludesToolResults(t *testing.T) {
 		{Role: "assistant", Content: "response"},
 	}
 
-	result := SerializeMessages(messages)
-	if containsString(result, "sensitive tool output") {
-		// Tool output should be truncated in serialization
-		// This is expected behavior - tool outputs are truncated, not excluded
-	}
-	// The key test is that tool messages are preserved in SplitMessages
+	_ = SerializeMessages(messages)
+	// Tool output is truncated in serialization (not excluded).
+	// The key test is that tool messages are preserved in SplitMessages.
 }
 
 func TestTemplate(t *testing.T) {

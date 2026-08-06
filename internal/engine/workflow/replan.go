@@ -17,20 +17,20 @@ func (e *Engine) replanFromFailure(ctx context.Context, failedTask m31types.Task
 	// Build context for re-planning
 	var contextBuilder strings.Builder
 
-	contextBuilder.WriteString(fmt.Sprintf("Original Goal: %s\n\n", goal))
+	fmt.Fprintf(&contextBuilder, "Original Goal: %s\n\n", goal)
 
 	contextBuilder.WriteString("## Failed Task\n")
-	contextBuilder.WriteString(fmt.Sprintf("Task ID: %d\n", failedTask.ID))
-	contextBuilder.WriteString(fmt.Sprintf("Action: %s\n", failedTask.Action))
-	contextBuilder.WriteString(fmt.Sprintf("Description: %s\n", failedTask.Description))
-	contextBuilder.WriteString(fmt.Sprintf("Files: %s\n", strings.Join(failedTask.Files, ", ")))
-	contextBuilder.WriteString(fmt.Sprintf("Failure Reason: %s\n", failureReason))
-	contextBuilder.WriteString(fmt.Sprintf("Heals Attempted: %d\n\n", failedTask.HealsAttempted))
+	fmt.Fprintf(&contextBuilder, "Task ID: %d\n", failedTask.ID)
+	fmt.Fprintf(&contextBuilder, "Action: %s\n", failedTask.Action)
+	fmt.Fprintf(&contextBuilder, "Description: %s\n", failedTask.Description)
+	fmt.Fprintf(&contextBuilder, "Files: %s\n", strings.Join(failedTask.Files, ", "))
+	fmt.Fprintf(&contextBuilder, "Failure Reason: %s\n", failureReason)
+	fmt.Fprintf(&contextBuilder, "Heals Attempted: %d\n\n", failedTask.HealsAttempted)
 
 	if len(remainingTasks) > 0 {
 		contextBuilder.WriteString("## Remaining Tasks\n")
 		for _, task := range remainingTasks {
-			contextBuilder.WriteString(fmt.Sprintf("- Task %d: %s (%s)\n", task.ID, task.Description, task.Action))
+			fmt.Fprintf(&contextBuilder, "- Task %d: %s (%s)\n", task.ID, task.Description, task.Action)
 		}
 		contextBuilder.WriteString("\n")
 	}

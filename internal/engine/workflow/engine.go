@@ -443,5 +443,3 @@ func (e *Engine) HealTask(ctx context.Context, taskID int) (bool, error) {
 	}
 	return false, fmt.Errorf("task %d not found or not in failed state", taskID)
 }
-
-
