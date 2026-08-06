@@ -683,11 +683,12 @@ Plans:
 
 **Goal:** Reach a level suitable for daily professional use. M31A is dependable enough to become a developer's primary terminal coding assistant.
 **Requirements**: OBS-01, CRASH-01, VALID-01, RELEASE-01, LTS-01, COMPAT-01
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Crash handler and observability: panic recovery, crash reports, CI crash capture, production metrics (Wave 1)
-- [ ] 07-02-PLAN.md — Tiered validation, release quality gates, compatibility matrix, LTS policy (Wave 2)
+- [x] 07-01-PLAN.md — Crash handler, observability metrics collection, and benchstat dashboard (Wave 1)
+- [x] 07-02-PLAN.md — Tiered validation, release quality gates, compatibility matrix (Wave 2)
+- [x] 07-03-PLAN.md — LTS policy, versioning, deprecation, security reporting documentation (Wave 2)
 
 ---
 
