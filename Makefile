@@ -52,6 +52,19 @@ debug:
 	@CGO_ENABLED=0 $(GO) build -gcflags "all=-N -l" -o $(BINARY)-debug $(CMD_DIR)
 	@printf "\033[0;32m[debug]\033[0m Done: $(BINARY)-debug\n"
 
+## profile           — Capture a 30-second CPU profile (requires debug binary)
+profile: debug
+	@printf "\033[0;32m[profile]\033[0m Starting debug binary for profiling...\n"
+	@M31A_DEBUG=1 ./$(BINARY)-debug &
+	@sleep 2
+	@go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+	@kill %1 2>/dev/null || true
+
+## lint-full         — Run golangci-lint with all enabled linters
+lint-full:
+	@printf "\033[0;32m[lint-full]\033[0m Running golangci-lint (full)...\n"
+	@golangci-lint run --timeout 5m
+
 ## dev               — Build and run immediately
 dev: build
 	@printf "\033[0;32m[run]\033[0m Starting $(BINARY)...\n"
@@ -314,11 +327,11 @@ version:
 .PHONY: build debug dev run-latest help \
         test test-fast test-verbose test-specific \
         bench bench-verbose cover \
-        lint lint-fix vet fmt tidy check validate-release \
+        lint lint-full lint-fix vet fmt tidy check validate-release \
         cross $(foreach os,$(OS_TARGETS),$(foreach arch,$(ARCH_TARGETS),build-$(os)-$(arch))) \
         release release-dry \
         deps deps-verify size clean nuke install version \
         install-linux-amd64 install-linux-arm64 \
         install-darwin-amd64 install-darwin-arm64 \
         install-windows-amd64 install-windows-arm64 \
-        install-all uninstall
+        install-all uninstall profile

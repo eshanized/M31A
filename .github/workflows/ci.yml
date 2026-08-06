@@ -79,6 +79,37 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
+  debug-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Build debug binary
+        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+
+  pprof-smoke:
+    runs-on: ubuntu-latest
+    needs: debug-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.12"
+          cache: true
+      - name: Build debug binary
+        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+      - name: Verify pprof responds
+        run: |
+          M31A_DEBUG=1 ./bin/m31a-debug &
+          sleep 3
+          curl -sf http://localhost:6060/debug/pprof/ > /dev/null
+          kill %1
+
   build:
     strategy:
       matrix:
