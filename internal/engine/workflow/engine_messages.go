@@ -247,6 +247,7 @@ type VerificationResult struct {
 	SyntaxOK   bool
 	TestsOK    bool
 	LintOK     bool
+	Confidence float64  // 0.0 to 1.0, computed by computeConfidence
 	Errors     []string
 	Warnings   []string
 }

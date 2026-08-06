@@ -507,6 +507,48 @@ func (e *Engine) verifyTask(ctx context.Context, task m31types.Task) Verificatio
 	return result
 }
 
+// computeConfidence calculates a deterministic confidence score [0.0, 1.0]
+// based on verification results. Formula: start at 1.0, subtract for each
+// failed check, subtract for warnings and heal attempts, add bonus for
+// acceptance criteria pass.
+func computeConfidence(result VerificationResult, healsUsed int, criteriaPassed int, criteriaTotal int) float64 {
+	score := 1.0
+
+	// Deduct for failed checks (0.25 each)
+	if !result.FilesExist {
+		score -= 0.25
+	}
+	if !result.SyntaxOK {
+		score -= 0.25
+	}
+	if !result.TestsOK {
+		score -= 0.25
+	}
+	if !result.LintOK {
+		score -= 0.25
+	}
+
+	// Deduct for warnings (0.05 each)
+	score -= float64(len(result.Warnings)) * 0.05
+
+	// Deduct for heal attempts (0.1 each)
+	score -= float64(healsUsed) * 0.1
+
+	// Bonus for all acceptance criteria passing (+0.1)
+	if criteriaTotal > 0 && criteriaPassed >= criteriaTotal {
+		score += 0.1
+	}
+
+	// Clamp to [0.0, 1.0]
+	if score < 0.0 {
+		score = 0.0
+	}
+	if score > 1.0 {
+		score = 1.0
+	}
+	return score
+}
+
 // isConfigFile returns true for small config files where <50 bytes is normal.
 func isConfigFile(path string) bool {
 	base := filepath.Base(path)

@@ -16,6 +16,7 @@ import (
 	"github.com/eshanized/M31A/internal/engine/decision"
 	"github.com/eshanized/M31A/internal/engine/session"
 	"github.com/eshanized/M31A/internal/engine/taskrunner"
+	"github.com/eshanized/M31A/internal/integrations/metrics"
 )
 
 // runExecute executes tasks in dependency order with tool dispatch and self-heal.
@@ -278,6 +279,15 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 
 		// Build context
 		messages = e.buildExecuteContext(ctx, *task, allTasks, goal)
+
+		// Cost gate: block LLM calls when budget is exceeded
+		if e.costTracker != nil && e.costTracker.BudgetExceeded() {
+			return taskrunner.TaskResult{
+				Success:    false,
+				Error:      "session budget exceeded",
+				DurationMs: time.Since(start).Milliseconds(),
+			}
+		}
 
 		// Wave 2B: proactive compaction during Execute phase — run on every iteration
 		// so compacted messages are used for the immediate LLM call.
@@ -722,6 +732,21 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 			}
 		}
 
+		// Record successful plan outcome
+		if e.collector != nil {
+			e.collector.RecordPlanOutcome(metrics.PlanOutcome{
+				TaskID:      task.ID,
+				Action:      task.Action,
+				Description: task.Description,
+				Files:       task.Files,
+				Success:     true,
+				DurationMs:  time.Since(start).Milliseconds(),
+				HealsUsed:   task.HealsAttempted,
+				ToolCalls:   toolCallCount,
+				Timestamp:   time.Now(),
+			})
+		}
+
 		return taskrunner.TaskResult{
 			Success:    true,
 			Output:     content,
@@ -734,6 +759,21 @@ func (e *Engine) executeTaskWithTools(ctx context.Context, task *m31types.Task, 
 	// All heal attempts exhausted — record heal loop for metrics.
 	if e.collector != nil {
 		e.collector.RecordHealLoop(m31types.PhaseExecute)
+	}
+
+	// Record failed plan outcome
+	if e.collector != nil {
+		e.collector.RecordPlanOutcome(metrics.PlanOutcome{
+			TaskID:      task.ID,
+			Action:      task.Action,
+			Description: task.Description,
+			Files:       task.Files,
+			Success:     false,
+			DurationMs:  time.Since(start).Milliseconds(),
+			HealsUsed:   task.HealsAttempted,
+			ErrorType:   "heal_exhausted",
+			Timestamp:   time.Now(),
+		})
 	}
 
 	return taskrunner.TaskResult{
