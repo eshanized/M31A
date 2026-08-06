@@ -1,6 +1,10 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -804,4 +808,633 @@ func TestMergeConfig_VerifyLintCommand(t *testing.T) {
 	if base.Verify.BuildCommand != "go build" {
 		t.Errorf("expected 'go build' preserved, got %q", base.Verify.BuildCommand)
 	}
+}
+
+// ── Workspace Config Tests ────────────────────────────────────────────────────
+
+func TestLoadWorkspace(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create "global" config
+	globalPath := filepath.Join(dir, "config.toml")
+	globalContent := `
+[ui]
+theme = "dark"
+
+[model]
+default = "gpt-4o"
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create workspace config in subdirectory
+	workspaceDir := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".m31a"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceCfg := filepath.Join(workspaceDir, ".m31a", "workspace.toml")
+	workspaceContent := `
+[model]
+default = "workspace-model"
+`
+	if err := os.WriteFile(workspaceCfg, []byte(workspaceContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to workspace dir, load global config
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(workspaceDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Workspace should override global
+	if cfg.Model.Default != "workspace-model" {
+		t.Errorf("expected 'workspace-model' (workspace override), got %q", cfg.Model.Default)
+	}
+	// Global should be preserved for non-overridden fields
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("expected 'dark' (from global, not overridden), got %q", cfg.UI.Theme)
+	}
+}
+
+func TestFindWorkspaceConfig(t *testing.T) {
+	// Create a temp dir tree with .m31a/workspace.toml at root
+	dir := t.TempDir()
+
+	// Create root/.m31a/workspace.toml
+	workspaceDir := filepath.Join(dir, ".m31a")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rootCfg := filepath.Join(workspaceDir, "workspace.toml")
+	if err := os.WriteFile(rootCfg, []byte("[ui]\ntheme=\"workspace-dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create subdirectories
+	sub1 := filepath.Join(dir, "sub1")
+	sub2 := filepath.Join(dir, "sub1", "sub2")
+	for _, d := range []string{sub1, sub2} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Separate dir for no-config test
+	noConfigDir := t.TempDir()
+	deepEmpty := filepath.Join(noConfigDir, "a", "b", "c")
+	if err := os.MkdirAll(deepEmpty, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		cwd  string
+		want string
+	}{
+		{"same dir", dir, rootCfg},
+		{"1 level up", sub1, rootCfg},
+		{"2 levels up", sub2, rootCfg},
+		{"no config", deepEmpty, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findWorkspaceConfig(tc.cwd)
+			if got != tc.want {
+				t.Errorf("findWorkspaceConfig(%q) = %q, want %q", tc.cwd, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMissingWorkspaceConfigNotError(t *testing.T) {
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(globalPath, []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No workspace config exists
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed (missing workspace should not error): %v", err)
+	}
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("expected 'dark' from global, got %q", cfg.UI.Theme)
+	}
+}
+
+// ── Project JSON Config Tests ─────────────────────────────────────────────────
+
+func TestLoadProjectJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create "global" config
+	globalPath := filepath.Join(dir, "config.toml")
+	globalContent := `
+[ui]
+theme = "dark"
+
+[model]
+default = "gpt-4o"
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create project config in subdirectory
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfg := filepath.Join(projectDir, "m31a.json")
+	projectContent := `{"model": {"default": "project-model"}}`
+	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to project dir, load global config
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Project should override global
+	if cfg.Model.Default != "project-model" {
+		t.Errorf("expected 'project-model' (project override), got %q", cfg.Model.Default)
+	}
+	// Global should be preserved for non-overridden fields
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("expected 'dark' (from global, not overridden), got %q", cfg.UI.Theme)
+	}
+}
+
+func TestProjectConfigBoolFalseOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	globalPath := filepath.Join(dir, "config.toml")
+	globalContent := `
+[ui]
+theme = "dark"
+compact_mode = true
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfg := filepath.Join(projectDir, "m31a.json")
+	// Explicitly set compact_mode to false in JSON
+	projectContent := `{"ui": {"compact_mode": false}}`
+	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Project JSON explicitly sets compact_mode to false
+	if cfg.UI.CompactMode {
+		t.Error("expected CompactMode false (explicit override in project JSON)")
+	}
+}
+
+// ── 4-Layer Merge Precedence Tests ────────────────────────────────────────────
+
+func TestConfigMergePrecedence(t *testing.T) {
+	// Test full precedence chain: project (JSON) > workspace (TOML) > global (TOML) > env vars
+	dir := t.TempDir()
+
+	// Create global config
+	globalPath := filepath.Join(dir, "config.toml")
+	globalContent := `
+[ui]
+theme = "dark"
+compact_mode = false
+
+[model]
+default = "global-model"
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create workspace config
+	workspaceDir := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".m31a"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceCfg := filepath.Join(workspaceDir, ".m31a", "workspace.toml")
+	workspaceContent := `
+[ui]
+compact_mode = true
+
+[model]
+default = "workspace-model"
+`
+	if err := os.WriteFile(workspaceCfg, []byte(workspaceContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create project config
+	projectDir := filepath.Join(workspaceDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfg := filepath.Join(projectDir, "m31a.json")
+	projectContent := `{"model": {"default": "project-model"}}`
+	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test 1: Global only (no workspace/project)
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load global only failed: %v", err)
+	}
+	if cfg.Model.Default != "global-model" {
+		t.Errorf("global only: expected 'global-model', got %q", cfg.Model.Default)
+	}
+	if cfg.UI.CompactMode {
+		t.Errorf("global only: expected CompactMode false")
+	}
+
+	// Test 2: Global + Workspace
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(workspaceDir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load global+workspace failed: %v", err)
+	}
+	if cfg.Model.Default != "workspace-model" {
+		t.Errorf("global+workspace: expected 'workspace-model', got %q", cfg.Model.Default)
+	}
+	if !cfg.UI.CompactMode {
+		t.Errorf("global+workspace: expected CompactMode true (workspace override)")
+	}
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("global+workspace: expected 'dark' (from global)")
+	}
+
+	// Test 3: Global + Workspace + Project
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load global+workspace+project failed: %v", err)
+	}
+	// Project should win
+	if cfg.Model.Default != "project-model" {
+		t.Errorf("global+workspace+project: expected 'project-model', got %q", cfg.Model.Default)
+	}
+	// Workspace compact_mode should be preserved (project didn't override)
+	if !cfg.UI.CompactMode {
+		t.Errorf("global+workspace+project: expected CompactMode true (from workspace)")
+	}
+	// Global theme should be preserved
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("global+workspace+project: expected 'dark' (from global)")
+	}
+	os.Chdir(origWd)
+
+	// Test 4: Env vars override everything
+	t.Setenv("M31A_THEME", "light")
+	t.Setenv("M31A_DEFAULT_MODEL", "env-model")
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load with env vars failed: %v", err)
+	}
+	if cfg.Model.Default != "env-model" {
+		t.Errorf("with env: expected 'env-model', got %q", cfg.Model.Default)
+	}
+	if cfg.UI.Theme != "light" {
+		t.Errorf("with env: expected 'light', got %q", cfg.UI.Theme)
+	}
+	// But project compact_mode still wins (env doesn't override compact_mode)
+	if !cfg.UI.CompactMode {
+		t.Errorf("with env: expected CompactMode true (from workspace/project)")
+	}
+	os.Chdir(origWd)
+}
+
+// ── Extensions Validation Tests ───────────────────────────────────────────────
+
+func TestExtensionsValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		extConfig   map[string]interface{}
+		expectError bool
+		errorField  string
+	}{
+		{
+			name: "valid tool config",
+			extConfig: map[string]interface{}{
+				"tools": map[string]interface{}{
+					"mytool": map[string]interface{}{
+						"command": "/usr/bin/mytool",
+						"args":    []string{"--flag"},
+						"timeout": "30s",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "missing tool command",
+			extConfig: map[string]interface{}{
+				"tools": map[string]interface{}{
+					"mytool": map[string]interface{}{
+						"args":    []string{"--flag"},
+						"timeout": "30s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.tools.mytool.command",
+		},
+		{
+			name: "invalid tool timeout",
+			extConfig: map[string]interface{}{
+				"tools": map[string]interface{}{
+					"mytool": map[string]interface{}{
+						"command": "/usr/bin/mytool",
+						"timeout": "invalid",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.tools.mytool.timeout",
+		},
+		{
+			name: "valid provider config",
+			extConfig: map[string]interface{}{
+				"providers": map[string]interface{}{
+					"myprovider": map[string]interface{}{
+						"command": "/usr/bin/myprovider",
+						"timeout": "120s",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "missing provider command",
+			extConfig: map[string]interface{}{
+				"providers": map[string]interface{}{
+					"myprovider": map[string]interface{}{
+						"timeout": "120s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.providers.myprovider.command",
+		},
+		{
+			name: "valid hook config",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{"execute", "verify"},
+						"hook_types":  []string{"pre", "post"},
+						"timeout":     "30s",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "missing hook command",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"phases":     []string{"execute"},
+						"hook_types": []string{"pre"},
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.command",
+		},
+		{
+			name: "invalid hook phase",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{"invalid-phase"},
+						"hook_types":  []string{"pre"},
+						"timeout":     "30s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.phases",
+		},
+		{
+			name: "invalid hook type",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{"execute"},
+						"hook_types":  []string{"invalid"},
+						"timeout":     "30s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.hook_types",
+		},
+		{
+			name: "hook timeout too long",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{"execute"},
+						"hook_types":  []string{"pre"},
+						"timeout":     "10m", // > 5min
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.timeout",
+		},
+		{
+			name: "empty hook phases",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{},
+						"hook_types":  []string{"pre"},
+						"timeout":     "30s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.phases",
+		},
+		{
+			name: "empty hook types",
+			extConfig: map[string]interface{}{
+				"hooks": map[string]interface{}{
+					"myhook": map[string]interface{}{
+						"command":     "/usr/bin/myhook",
+						"phases":      []string{"execute"},
+						"hook_types":  []string{},
+						"timeout":     "30s",
+					},
+				},
+			},
+			expectError: true,
+			errorField:  "extensions.hooks.myhook.hook_types",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Build full config JSON
+			cfgData := map[string]interface{}{
+				"extensions": tc.extConfig,
+			}
+			data, _ := json.Marshal(cfgData)
+
+			// Create temp global config
+			dir := t.TempDir()
+			globalPath := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(globalPath, []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Create project config with extensions
+			projectDir := filepath.Join(dir, "project")
+			if err := os.MkdirAll(projectDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			projectCfg := filepath.Join(projectDir, "m31a.json")
+			if err := os.WriteFile(projectCfg, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			origWd, _ := os.Getwd()
+			if err := os.Chdir(projectDir); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, err := Load(globalPath)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected validation error for %s, got nil", tc.name)
+				}
+				if !strings.Contains(err.Error(), tc.errorField) {
+					t.Errorf("expected error to mention %q, got: %v", tc.errorField, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected validation error for %s: %v", tc.name, err)
+				}
+				if cfg == nil {
+					t.Fatal("config is nil")
+				}
+			}
+			os.Chdir(origWd)
+		})
+	}
+}
+
+func TestJSONConfigPrecedenceOverWorkspace(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create global config
+	globalPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(globalPath, []byte("[ui]\ntheme=\"dark\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create workspace config with extensions
+	workspaceDir := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".m31a"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceCfg := filepath.Join(workspaceDir, ".m31a", "workspace.toml")
+	workspaceContent := `
+[extensions]
+  [extensions.tools]
+    [extensions.tools.shared]
+    command = "/workspace/tool"
+    timeout = "10s"
+`
+	if err := os.WriteFile(workspaceCfg, []byte(workspaceContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create project config with same tool name but different command
+	projectDir := filepath.Join(workspaceDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfg := filepath.Join(projectDir, "m31a.json")
+	projectContent := `{"extensions": {"tools": {"shared": {"command": "/project/tool", "timeout": "20s"}}}}`
+	if err := os.WriteFile(projectCfg, []byte(projectContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(globalPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Project should override workspace for same tool
+	tool := cfg.Extensions.Tools["shared"]
+	if tool.Command != "/project/tool" {
+		t.Errorf("expected project tool command '/project/tool', got %q", tool.Command)
+	}
+	if tool.Timeout != "20s" {
+		t.Errorf("expected project tool timeout '20s', got %q", tool.Timeout)
+	}
+
+	// Workspace-only tool should not exist (project doesn't have it)
+	if _, ok := cfg.Extensions.Tools["shared"]; !ok {
+		t.Error("expected 'shared' tool to exist")
+	}
+
+	os.Chdir(origWd)
 }

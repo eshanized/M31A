@@ -6,6 +6,10 @@ import (
 	"github.com/eshanized/M31A/internal/core/types"
 )
 
+// WorkspaceConfigPath is the relative path for workspace config file.
+// Discovered by walking up from cwd (max 3 levels like project config).
+const WorkspaceConfigPath = ".m31a/workspace.toml"
+
 type Config struct {
 	Provider           ProviderConfig           `toml:"provider"`
 	Model              ModelConfig              `toml:"model"`

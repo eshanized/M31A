@@ -111,6 +111,7 @@ func MergeConfig(base, overlay *Config, defined map[string]bool) {
 	h.mergeModelCapabilitiesConfig(&base.ModelCapabilities, &overlay.ModelCapabilities, "model_capabilities")
 	h.mergePromptConfig(&base.Prompts, &overlay.Prompts, "prompts")
 	h.mergeTemplateConfig(&base.Templates, &overlay.Templates, "templates")
+	h.mergeExtensionsConfig(&base.Extensions, &overlay.Extensions, "extensions")
 }
 
 func (h mergeHelper) mergeProviderConfig(base, overlay *ProviderConfig, prefix string) {
@@ -472,5 +473,79 @@ func (h mergeHelper) mergeTemplateConfig(base, overlay *TemplateConfig, prefix s
 				base.CustomPalettes[paletteName][k] = v
 			}
 		}
+	}
+}
+
+func (h mergeHelper) mergeExtensionsConfig(base, overlay *ExtensionsConfig, prefix string) {
+	h.mergeToolConfigs(&base.Tools, &overlay.Tools, prefix+".tools")
+	h.mergeProviderConfigs(&base.Providers, &overlay.Providers, prefix+".providers")
+	h.mergeHookConfigs(&base.Hooks, &overlay.Hooks, prefix+".hooks")
+}
+
+func (h mergeHelper) mergeToolConfigs(base, overlay *map[string]ExternalToolConfig, prefix string) {
+	if overlay == nil || len(*overlay) == 0 {
+		return
+	}
+	if *base == nil {
+		*base = make(map[string]ExternalToolConfig)
+	}
+	for name, overlayTool := range *overlay {
+		baseTool, exists := (*base)[name]
+		if !exists {
+			(*base)[name] = overlayTool
+			continue
+		}
+		toolPrefix := prefix + "." + name
+		h.stringField(&baseTool.Command, &overlayTool.Command, toolPrefix+".command")
+		h.sliceField(&baseTool.Args, &overlayTool.Args, toolPrefix+".args")
+		h.stringMapField(&baseTool.Env, &overlayTool.Env, toolPrefix+".env")
+		h.stringField(&baseTool.Timeout, &overlayTool.Timeout, toolPrefix+".timeout")
+		(*base)[name] = baseTool
+	}
+}
+
+func (h mergeHelper) mergeProviderConfigs(base, overlay *map[string]ExternalProviderConfig, prefix string) {
+	if overlay == nil || len(*overlay) == 0 {
+		return
+	}
+	if *base == nil {
+		*base = make(map[string]ExternalProviderConfig)
+	}
+	for name, overlayProvider := range *overlay {
+		baseProvider, exists := (*base)[name]
+		if !exists {
+			(*base)[name] = overlayProvider
+			continue
+		}
+		providerPrefix := prefix + "." + name
+		h.stringField(&baseProvider.Command, &overlayProvider.Command, providerPrefix+".command")
+		h.sliceField(&baseProvider.Args, &overlayProvider.Args, providerPrefix+".args")
+		h.stringMapField(&baseProvider.Env, &overlayProvider.Env, providerPrefix+".env")
+		h.stringField(&baseProvider.Timeout, &overlayProvider.Timeout, providerPrefix+".timeout")
+		(*base)[name] = baseProvider
+	}
+}
+
+func (h mergeHelper) mergeHookConfigs(base, overlay *map[string]PhaseHookConfig, prefix string) {
+	if overlay == nil || len(*overlay) == 0 {
+		return
+	}
+	if *base == nil {
+		*base = make(map[string]PhaseHookConfig)
+	}
+	for name, overlayHook := range *overlay {
+		baseHook, exists := (*base)[name]
+		if !exists {
+			(*base)[name] = overlayHook
+			continue
+		}
+		hookPrefix := prefix + "." + name
+		h.stringField(&baseHook.Command, &overlayHook.Command, hookPrefix+".command")
+		h.sliceField(&baseHook.Args, &overlayHook.Args, hookPrefix+".args")
+		h.stringMapField(&baseHook.Env, &overlayHook.Env, hookPrefix+".env")
+		h.sliceField(&baseHook.Phases, &overlayHook.Phases, hookPrefix+".phases")
+		h.sliceField(&baseHook.HookTypes, &overlayHook.HookTypes, hookPrefix+".hook_types")
+		h.stringField(&baseHook.Timeout, &overlayHook.Timeout, hookPrefix+".timeout")
+		(*base)[name] = baseHook
 	}
 }

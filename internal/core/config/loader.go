@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -212,16 +213,17 @@ func DefaultConfig() *Config {
 }
 
 // Load reads a TOML config file from the given path, applies multi-layer
-// merging (global TOML → env vars → project m31a.toml), validation, and
+// merging (global TOML → workspace TOML → env vars → project JSON), validation, and
 // variable substitution, then returns the resulting Config.
 //
 // Config loading order (later overrides earlier):
 //  1. DefaultConfig() — zero-valued defaults
 //  2. Global TOML (~/.m31a/config.toml via path arg)
-//  3. Environment variable overrides (M31A_*)
-//  4. Project-level m31a.toml (walked up from cwd, max 3 levels)
-//  5. Variable substitution — ${VAR} → env value
-//  6. Validation — type/range checks on known fields
+//  3. Workspace TOML (.m31a/workspace.toml walked up from cwd, max 3 levels)
+//  4. Environment variable overrides (M31A_*)
+//  5. Project-level JSON (m31a.json walked up from cwd, max 3 levels)
+//  6. Variable substitution — ${VAR} → env value
+//  7. Validation — type/range checks on known fields
 //
 // Missing global config file is not an error — first-run flow handles creation.
 func Load(path string) (*Config, error) {
@@ -259,10 +261,49 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Step 3.5: Auto-load .env file from cwd (I1)
+	// Step 3.5: Layer 3 — Workspace config (.m31a/workspace.toml)
+	cwd, err := os.Getwd()
+	if err != nil {
+		slog.Warn("cannot determine working directory, skipping workspace config", "error", err)
+	} else {
+		if wsPath := findWorkspaceConfig(cwd); wsPath != "" {
+			var wsCfg Config
+			meta, err := toml.DecodeFile(wsPath, &wsCfg)
+			if err != nil {
+				slog.Warn("failed to decode workspace config", "path", wsPath, "error", err)
+			} else {
+				defined := make(map[string]bool)
+				for _, key := range meta.Keys() {
+					defined[key.String()] = true
+				}
+				mergeConfig(cfg, &wsCfg, defined)
+			}
+		}
+	}
+
+	// Step 4: Auto-load .env file from cwd (I1)
 	LoadDotEnv()
 
-	// Step 4: Layer 3 — Environment variable overrides (C2)
+	// Step 5: Layer 5 — Project-level config (m31a.json in cwd)
+	if err == nil {
+		if projectPath := findProjectConfig(cwd); projectPath != "" {
+			var projectCfg Config
+			data, err := os.ReadFile(projectPath)
+			if err != nil {
+				slog.Warn("failed to read project config", "path", projectPath, "error", err)
+			} else if err := json.Unmarshal(data, &projectCfg); err != nil {
+				slog.Warn("failed to decode project config", "path", projectPath, "error", err)
+			} else {
+				// Build set of explicitly defined keys to distinguish
+				// "not set" from "explicitly set to false" for bool fields.
+				defined := make(map[string]bool)
+				collectJSONKeys(data, "", defined)
+				mergeConfig(cfg, &projectCfg, defined)
+			}
+		}
+	}
+
+	// Step 6: Layer 6 — Environment variable overrides (C2) - highest precedence
 	if theme := os.Getenv("M31A_THEME"); theme != "" {
 		cfg.UI.Theme = theme
 	}
@@ -279,33 +320,11 @@ func Load(path string) (*Config, error) {
 		cfg.UI.CompactMode = true
 	}
 
-	// Step 5: Layer 4 — Project-level config (m31a.toml in cwd)
-	cwd, err := os.Getwd()
-	if err != nil {
-		slog.Warn("cannot determine working directory, skipping project config", "error", err)
-	} else {
-		if projectPath := findProjectConfig(cwd); projectPath != "" {
-			var projectCfg Config
-			meta, err := toml.DecodeFile(projectPath, &projectCfg)
-			if err != nil {
-				slog.Warn("failed to decode project config", "path", projectPath, "error", err)
-			} else {
-				// Build set of explicitly defined keys to distinguish
-				// "not set" from "explicitly set to false" for bool fields.
-				defined := make(map[string]bool)
-				for _, key := range meta.Keys() {
-					defined[key.String()] = true
-				}
-				mergeConfig(cfg, &projectCfg, defined)
-			}
-		}
-	}
-
-	// Step 6: Variable substitution (before validation so ${VAR} in
+	// Step 7: Variable substitution (before validation so ${VAR} in
 	// enum fields like theme or permissions.default_mode resolves first)
 	unresolvedVars := applyVarSubstitution(cfg)
 
-	// Step 7: Validation
+	// Step 8: Validation
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
@@ -324,13 +343,13 @@ func Load(path string) (*Config, error) {
 }
 
 // findProjectConfig walks up from cwd (max 3 parent directories) looking for
-// an m31a.toml file. Returns the path if found, or "" if none exists.
+// an m31a.json file. Returns the path if found, or "" if none exists.
 // Note: this may load config from a parent project directory when running
 // in a nested subdirectory of another project.
 func findProjectConfig(cwd string) string {
 	dir := cwd
 	for i := 0; i < types.MaxProjectConfigDepth; i++ {
-		candidate := filepath.Join(dir, "m31a.toml")
+		candidate := filepath.Join(dir, "m31a.json")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
@@ -343,23 +362,42 @@ func findProjectConfig(cwd string) string {
 	return ""
 }
 
-// LocalConfigPath returns the path where a new project-level m31a.toml should
-// be created (cwd/m31a.toml).
+// findWorkspaceConfig walks up from cwd (max 3 parent directories) looking for
+// a .m31a/workspace.toml file. Returns the path if found, or "" if none exists.
+func findWorkspaceConfig(cwd string) string {
+	dir := cwd
+	for i := 0; i < types.MaxProjectConfigDepth; i++ {
+		candidate := filepath.Join(dir, WorkspaceConfigPath)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// LocalConfigPath returns the path where a new project-level m31a.json should
+// be created (cwd/m31a.json).
 func LocalConfigPath() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cwd, "m31a.toml"), nil
+	return filepath.Join(cwd, "m31a.json"), nil
 }
 
-// SaveProject writes the config to a project-level m31a.toml in the working
+// SaveProject writes the config to a project-level m31a.json in the working
 // directory. API keys are always cleared from project config for security —
 // they belong in the global config or keychain.
 func (c *Config) SaveProject(path string) error {
 	cfgCopy := *c
 	cfgCopy.Provider.OpenRouter.APIKey = ""
 	cfgCopy.Provider.Zen.APIKey = ""
+	cfgCopy.Provider.Nvidia.APIKey = ""
 
 	if c.Permissions.Rules != nil {
 		rulesCopy := make([]PermissionRule, len(c.Permissions.Rules))
@@ -382,7 +420,7 @@ func (c *Config) SaveProject(path string) error {
 		cfgCopy.Tools.SkipDirs = skipDirsCopy
 	}
 
-	data, err := toml.Marshal(&cfgCopy)
+	data, err := json.MarshalIndent(&cfgCopy, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal project config: %w", err)
 	}
@@ -786,4 +824,29 @@ func LoadDotEnv() {
 			}
 		}
 	})
+}
+
+// collectJSONKeys recursively traverses a JSON object and populates the
+// defined map with fully-qualified dotted paths (e.g., "extensions.tools.mytool.command").
+// This enables bool fields in JSON config to be explicitly set to false.
+func collectJSONKeys(data []byte, prefix string, defined map[string]bool) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return
+	}
+	for k, v := range obj {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + "." + k
+		}
+		defined[fullKey] = true
+		switch val := v.(type) {
+		case map[string]interface{}:
+			nestedData, _ := json.Marshal(val)
+			collectJSONKeys(nestedData, fullKey, defined)
+		case []interface{}:
+			// For arrays, we don't track individual indices since mergeConfig
+			// replaces entire slices. Just mark the array key as defined.
+		}
+	}
 }

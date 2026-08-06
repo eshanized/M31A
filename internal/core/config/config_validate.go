@@ -369,10 +369,16 @@ func validateExtensionsConfig(cfg *Config) error {
 			})
 		}
 		if hook.Timeout != "" {
-			if _, err := time.ParseDuration(hook.Timeout); err != nil {
+			if d, err := time.ParseDuration(hook.Timeout); err != nil {
 				errs = append(errs, ValidationError{
 					Field:        fmt.Sprintf("extensions.hooks.%s.timeout", name),
 					ExpectedType: "valid duration (e.g., \"30s\", \"5m\")",
+					ActualValue:  hook.Timeout,
+				})
+			} else if d > 5*time.Minute {
+				errs = append(errs, ValidationError{
+					Field:        fmt.Sprintf("extensions.hooks.%s.timeout", name),
+					ExpectedType: "duration <= 5m",
 					ActualValue:  hook.Timeout,
 				})
 			}
