@@ -355,3 +355,39 @@ go 1.21
 	runtime.ReadMemStats(&m)
 	b.ReportMetric(float64(m.Alloc)/1024/1024, "MB_alloc")
 }
+
+func BenchmarkParseFilesSequential(b *testing.B) {
+	dir := b.TempDir()
+	paths := make([]string, 50)
+	for i := 0; i < 50; i++ {
+		paths[i] = fmt.Sprintf("pkg%d/file.go", i)
+		os.MkdirAll(filepath.Join(dir, fmt.Sprintf("pkg%d", i)), 0o755)
+		os.WriteFile(filepath.Join(dir, paths[i]), benchGoSrc, 0o644)
+	}
+
+	idx := &Indexer{workDir: dir, parsers: AllParsers()}
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		idx.parseFiles(ctx, paths)
+	}
+}
+
+func BenchmarkParseFilesParallel(b *testing.B) {
+	dir := b.TempDir()
+	paths := make([]string, 50)
+	for i := 0; i < 50; i++ {
+		paths[i] = fmt.Sprintf("pkg%d/file.go", i)
+		os.MkdirAll(filepath.Join(dir, fmt.Sprintf("pkg%d", i)), 0o755)
+		os.WriteFile(filepath.Join(dir, paths[i]), benchGoSrc, 0o644)
+	}
+
+	idx := &Indexer{workDir: dir, parsers: AllParsers()}
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		idx.parseFilesParallel(ctx, paths)
+	}
+}

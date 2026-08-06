@@ -2,9 +2,11 @@ package codeintel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -104,7 +106,14 @@ func (idx *Indexer) buildFromCache(ctx context.Context, cached *IndexCache) erro
 
 	// Parse changed/new files
 	if len(inc.Changed) > 0 {
-		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
+		var changedFiles []*FileInfo
+		var err error
+		// Use parallel parsing for larger file sets (>= 10 files)
+		if len(inc.Changed) >= 10 {
+			changedFiles, err = idx.parseFilesParallel(ctx, inc.Changed)
+		} else {
+			changedFiles, err = idx.parseFiles(ctx, inc.Changed)
+		}
 		if err != nil {
 			return fmt.Errorf("parse changed files: %w", err)
 		}
@@ -189,7 +198,14 @@ func (idx *Indexer) buildIncremental(ctx context.Context) error {
 
 	// Parse changed/new files
 	if len(inc.Changed) > 0 {
-		changedFiles, err := idx.parseFiles(ctx, inc.Changed)
+		var changedFiles []*FileInfo
+		var err error
+		// Use parallel parsing for larger file sets (>= 10 files)
+		if len(inc.Changed) >= 10 {
+			changedFiles, err = idx.parseFilesParallel(ctx, inc.Changed)
+		} else {
+			changedFiles, err = idx.parseFiles(ctx, inc.Changed)
+		}
 		if err != nil {
 			return fmt.Errorf("parse changed files: %w", err)
 		}
@@ -267,6 +283,70 @@ func (idx *Indexer) parseFiles(ctx context.Context, paths []string) ([]*FileInfo
 		results = append(results, info)
 	}
 	return results, nil
+}
+
+// parseFilesParallel parses files concurrently using goroutines bounded by
+// runtime.NumCPU(). Errors are collected and returned together (D-12).
+func (idx *Indexer) parseFilesParallel(ctx context.Context, paths []string) ([]*FileInfo, error) {
+	results := make([]*FileInfo, len(paths))
+	errs := make([]error, len(paths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.NumCPU())
+
+	for i, relPath := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, relPath string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := ctx.Err(); err != nil {
+				errs[i] = err
+				return
+			}
+			absPath := filepath.Join(idx.workDir, relPath)
+			p := ParserForFile(absPath, idx.parsers)
+			if p == nil {
+				return
+			}
+			content, err := os.ReadFile(absPath)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			const maxFileSize = 4096
+			if len(content) > maxFileSize {
+				content = content[:maxFileSize]
+			}
+			info, err := p.Parse(relPath, content)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			results[i] = info
+		}(i, relPath)
+	}
+	wg.Wait()
+
+	// Collect errors (D-12: report together)
+	var allErrors []error
+	for _, err := range errs {
+		if err != nil {
+			allErrors = append(allErrors, err)
+		}
+	}
+	if len(allErrors) > 0 {
+		return nil, fmt.Errorf("parse %d files: %w", len(allErrors), errors.Join(allErrors...))
+	}
+
+	// Filter nil results
+	var filtered []*FileInfo
+	for _, r := range results {
+		if r != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
 }
 
 // IsBuilt reports whether the indexer has been built.
