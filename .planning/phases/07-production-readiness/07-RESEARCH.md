@@ -166,7 +166,7 @@ internal/
 .github/
 ├── workflows/
 │   ├── ci.yml            # Extended with tiered validation
-│   ├── benchmarks.yml    # Extended with dashboard generation
+│   ├── benchmarks.yml    # Extended with JSON output and dashboard
 │   ├── nightly.yml       # Extended with compatibility matrix
 │   └── release.yml       # New: tag-triggered with manual approval
 └── ISSUE_TEMPLATE/
@@ -448,33 +448,27 @@ assignees: ''
 | A4 | 50% benchmark threshold is appropriate starting point | Common Pitfalls | May cause false positives/negatives |
 | A5 | GitHub Actions artifact upload is sufficient for crash capture | Crash Reporting | May need external crash service for production |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Which specific OSS projects to curate for compatibility matrix?**
-   - What we know: Need 10-20 projects covering Go, TS, Python, Rust; small/medium/large sizes
-   - What's unclear: Exact project list, build requirements, maintenance status
-   - Recommendation: Start with well-maintained projects from each language; validate build compatibility in research phase
+   - RESOLVED: The curated list is defined in `scripts/compat-matrix.sh` with 12 projects: kubernetes/kubernetes (Go, large, monorepo), golang/go (Go, large, monorepo), hashicorp/terraform (Go, medium, polyrepo), prometheus/prometheus (Go, medium, polyrepo), docker/compose (Go, medium, polyrepo), etcd-io/etcd (Go, medium, polyrepo), microsoft/vscode (TypeScript, large, polyrepo), facebook/react (TypeScript, large, polyrepo), rust-lang/rust (Rust, large, monorepo), python/cpython (Python, large, monorepo), astral-sh/ruff (Rust, medium, polyrepo), charmbracelet/bubbletea (Go, small, polyrepo). This covers 4 languages, 3 size categories, and both mono/polyrepo structures.
 
 2. **How to handle benchmark threshold tuning?**
-   - What we know: Start with 50% from Phase 4/6
-   - What's unclear: When to tune, what thresholds work for different benchmark types
-   - Recommendation: Analyze 2-3 nightly runs, then adjust per-benchmark thresholds
+   - RESOLVED: Start with 50% threshold from Phase 4/6. Analyze 2-3 nightly benchmark runs via benchstat JSON output on GitHub Pages dashboard. Then adjust per-benchmark thresholds based on observed variance. The dashboard provides historical trend data to inform tuning decisions.
 
 3. **Should crash handler write to disk or only to CI artifacts?**
-   - What we know: D-02 specifies CI crash capture with artifact upload
-   - What's unclear: Local crash reports for user debugging
-   - Recommendation: Write to both `~/.m31a/crashes/` (local) and CI artifacts (when in CI)
+   - RESOLVED: Write to both. Local crash reports go to `~/.m31a/crashes/` for user debugging (per D-02 foundation). CI captures stderr output ("CRASH:" prefix) and uploads artifacts. This provides dual visibility: users can debug locally, and CI auto-files GitHub issues with stack traces.
 
 ## Environment Availability
 
 | Dependency | Required By | Available | Version | Fallback |
 |------------|------------|-----------|---------|----------|
-| Go 1.25+ | All phases | ✓ | 1.25.12 | — |
-| GitHub Actions | CI/CD | ✓ | v7 | — |
-| GoReleaser | Release process | ✓ | v2 | — |
-| benchstat | Benchmark regression | ✓ | latest | Manual comparison |
-| `runtime/debug` | Stack trace capture | ✓ (stdlib) | — | — |
-| `log/slog` | Structured logging | ✓ (stdlib) | — | — |
+| Go 1.25+ | All phases | Yes | 1.25.12 | — |
+| GitHub Actions | CI/CD | Yes | v7 | — |
+| GoReleaser | Release process | Yes | v2 | — |
+| benchstat | Benchmark regression | Yes | latest | Manual comparison |
+| `runtime/debug` | Stack trace capture | Yes (stdlib) | — | — |
+| `log/slog` | Structured logging | Yes (stdlib) | — | — |
 
 **Missing dependencies with no fallback:**
 - None — all required tools are available
@@ -492,15 +486,15 @@ assignees: ''
 | Quick run command | `make test-fast` |
 | Full suite command | `make test` |
 
-### Phase Requirements → Test Map
+### Phase Requirements to Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| OBS-01 | Metrics collection | unit | `go test ./internal/integrations/metrics/...` | ✅ existing |
-| CRASH-01 | Crash handler | unit | `go test ./internal/observability/...` | ❌ Wave 0 |
-| VALID-01 | Tiered validation | integration | `make test` (full matrix) | ✅ existing |
-| RELEASE-01 | Release quality gates | integration | `goreleaser release --snapshot` | ✅ existing |
-| LTS-01 | Version enforcement | unit | `go test ./internal/core/...` | ✅ existing |
-| COMPAT-01 | Compatibility matrix | e2e | `scripts/compat-matrix.sh` | ❌ Wave 0 |
+| OBS-01 | Metrics collection | unit | `go test ./internal/integrations/metrics/...` | Yes (existing) |
+| CRASH-01 | Crash handler | unit | `go test ./internal/observability/...` | No (Wave 0) |
+| VALID-01 | Tiered validation | integration | `make test` (full matrix) | Yes (existing) |
+| RELEASE-01 | Release quality gates | integration | `goreleaser release --snapshot` | Yes (existing) |
+| LTS-01 | Version enforcement | unit | `go test ./internal/core/...` | Yes (existing) |
+| COMPAT-01 | Compatibility matrix | e2e | `scripts/compat-matrix.sh` | No (Wave 0) |
 
 ### Sampling Rate
 - **Per task commit:** `make test-fast`
@@ -508,10 +502,10 @@ assignees: ''
 - **Phase gate:** Full suite green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
-- [ ] `internal/observability/crash.go` — panic recovery handler
-- [ ] `internal/observability/crash_test.go` — crash handler tests
-- [ ] `scripts/compat-matrix.sh` — compatibility test runner
-- [ ] `.github/ISSUE_TEMPLATE/crash-report.md` — crash report template
+- `internal/observability/crash.go` — panic recovery handler
+- `internal/observability/crash_test.go` — crash handler tests
+- `scripts/compat-matrix.sh` — compatibility test runner
+- `.github/ISSUE_TEMPLATE/crash-report.md` — crash report template
 
 ## Security Domain
 
