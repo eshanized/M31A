@@ -14,7 +14,7 @@ make debug          # build with debug symbols (no strip)
 make clean          # remove build artifacts
 ```
 
-**Build requirements:** Go 1.25+, `CGO_ENABLED=0` (hard constraint — binary must be static).
+**Build requirements:** Go 1.26+, `CGO_ENABLED=0` (hard constraint — binary must be static).
 
 ## Build + verify order
 
@@ -110,7 +110,7 @@ make profile   # builds debug binary, starts, captures 30s CPU profile
 
 ## Key gotchas
 
-- `go.mod` says `go 1.25.0` — verify this matches your Go version
+- `go.mod` says `go 1.26.5` — verify this matches your Go version
 - No CGO anywhere — if any dependency requires it, the build breaks
 - Bubble Tea is strictly single-threaded — use channels, never shared mutable state from goroutines
 - Provider model lists are dynamic — never hardcode model names

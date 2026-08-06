@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Check gofmt
         run: |
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Create temp directory
         run: mkdir -p ${{ runner.workspace }}/tmp
@@ -94,7 +94,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Smoke test - build binary
         run: |
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Build debug binary
         run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
@@ -147,7 +147,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Build debug binary
         run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
@@ -167,7 +167,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Run benchmarks
         run: go test -bench=. -benchmem -count=10 -run=^$ ./... > new.txt
@@ -216,7 +216,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         arch: [amd64, arm64]
-        go: ["1.25.12"]
+        go: ["1.26.5"]
         exclude:
           - os: windows-latest
             arch: arm64
@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Download test logs for crash detection
         if: always()
@@ -286,32 +286,23 @@ jobs:
                 gh issue create \
                   --repo "${{ github.repository }}" \
                   --title "[CRASH] $PANIC_VALUE in $VERSION" \
-                  --body-file - <<EOF
-## Crash Information
-
-**Version:** $VERSION
-**OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')
-**Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')
-
-## Stack Trace
-
-\`\`\`
-$STACK_TRACE
-\`\`\`
-
-## Steps to Reproduce
-
-1. Run the failing test suite
-2. Observe crash
-
-## Expected Behavior
-
-No panic should occur.
-
-## Additional Context
-
-Auto-filed from CI crash capture workflow.
-EOF
+                  --body-file - <<CRASHEOF
+              ## Crash Information
+              **Version:** $VERSION
+              **OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')
+              **Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')
+              ## Stack Trace
+              \`\`\`
+              $STACK_TRACE
+              \`\`\`
+              ## Steps to Reproduce
+              1. Run the failing test suite
+              2. Observe crash
+              ## Expected Behavior
+              No panic should occur.
+              ## Additional Context
+              Auto-filed from CI crash capture workflow.
+              CRASHEOF
               else
                 echo "No crash details to report"
               fi
@@ -335,7 +326,7 @@ EOF
           fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

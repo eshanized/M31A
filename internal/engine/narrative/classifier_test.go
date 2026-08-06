@@ -15,7 +15,7 @@ func TestClassifierHiddenEvents(t *testing.T) {
 		event := RawEvent{Type: et}
 		result := c.Classify(event)
 		if result.Classification != ClassifyHidden {
-			t.Errorf("Event %q should be Hidden, got %q", et, result.Classification)
+			t.Errorf("Event %q should be Hidden, got %d", et, result.Classification)
 		}
 	}
 }
@@ -72,7 +72,7 @@ func TestClassifierNarrativeEvents(t *testing.T) {
 		}
 		result := c.Classify(event)
 		if result.Classification != ClassifyNarrative {
-			t.Errorf("Event %q should be Narrative, got %q", tc.eventType, result.Classification)
+			t.Errorf("Event %q should be Narrative, got %d", tc.eventType, result.Classification)
 		}
 		if result.NarrativeType != tc.expectedType {
 			t.Errorf("Event %q should produce type %q, got %q", tc.eventType, tc.expectedType, result.NarrativeType)

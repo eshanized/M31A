@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Run full test suite with race detector
         run: go test -race ./...
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Build and test custom-linter
         run: |
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Install build dependencies
         run: |
@@ -75,25 +75,20 @@ jobs:
           gh issue create \
             --repo "${{ github.repository }}" \
             --title "[Nightly] Compatibility matrix pass rate below 80%" \
-            --body-file - <<EOF
-## Compatibility Matrix Alert
-
-The nightly compatibility matrix run detected a pass rate of **$PASS_RATE%**, which is below the 80% threshold.
-
-### Summary
-- Total projects tested: $(jq -r '.total' compat-results.json)
-- Passed: $(jq -r '.passed' compat-results.json)
-- Failed: $(jq -r '.failed' compat-results.json)
-- Pass rate: $PASS_RATE%
-
-### Failed Projects
-$(jq -r '.per_project[] | select(.status == "fail") | "- \(.name) (\(.language), \(.size)): \(.error)"' compat-results.json)
-
-### Per-Category Breakdown
-$(jq -r '.per_category[] | "- \(.language): \(.passed)/\(.total) (\(.pass_rate)%)"' compat-results.json)
-
-See the full compat-results.json artifact for details.
-EOF
+            --body-file - <<ISSUEEOF
+              ## Compatibility Matrix Alert
+              The nightly compatibility matrix run detected a pass rate of **$PASS_RATE%**, which is below the 80% threshold.
+              ### Summary
+              - Total projects tested: $(jq -r '.total' compat-results.json)
+              - Passed: $(jq -r '.passed' compat-results.json)
+              - Failed: $(jq -r '.failed' compat-results.json)
+              - Pass rate: $PASS_RATE%
+              ### Failed Projects
+              $(jq -r '.per_project[] | select(.status == "fail") | "- \(.name) (\(.language), \(.size)): \(.error)"' compat-results.json)
+              ### Per-Category Breakdown
+              $(jq -r '.per_category[] | "- \(.language): \(.passed)/\(.total) (\(.pass_rate)%)"' compat-results.json)
+              See the full compat-results.json artifact for details.
+              ISSUEEOF
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -104,7 +99,7 @@ EOF
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.5"
           cache: true
       - name: Run govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
