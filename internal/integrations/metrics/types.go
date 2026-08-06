@@ -77,4 +77,31 @@ type SessionMetrics struct {
 	LLMs           []LLMMetric          `json:"llms"`
 	Phases         []PhaseMetric        `json:"phases"`
 	PlanOutcomes   []PlanOutcome        `json:"plan_outcomes,omitempty"`
+	Startup        *StartupMetric       `json:"startup,omitempty"`
+	Completions    []CompletionMetric   `json:"completions,omitempty"`
+	Cancellations  []CancellationMetric `json:"cancellations,omitempty"`
+}
+
+// StartupMetric captures startup timing breakdown.
+type StartupMetric struct {
+	DurationMs   int64 `json:"duration_ms"`
+	ConfigLoadMs int64 `json:"config_load_ms"`
+	ProviderMs   int64 `json:"provider_ms"`
+	TUIMs        int64 `json:"tui_ms"`
+}
+
+// CompletionMetric captures phase completion metrics.
+type CompletionMetric struct {
+	Phase       m31types.WorkflowPhase `json:"phase"`
+	Success     bool                   `json:"success"`
+	Failure     bool                   `json:"failure"`
+	Timeout     bool                   `json:"timeout"`
+	Timestamp   time.Time              `json:"timestamp"`
+}
+
+// CancellationMetric captures workflow cancellation events.
+type CancellationMetric struct {
+	Phase     m31types.WorkflowPhase `json:"phase"`
+	Reason    string                 `json:"reason"`
+	Timestamp time.Time              `json:"timestamp"`
 }

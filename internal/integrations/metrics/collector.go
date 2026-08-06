@@ -445,12 +445,17 @@ func (c *Collector) Snapshot() *SessionMetrics {
 		LLMs:           make([]LLMMetric, len(c.metrics.LLMs)),
 		Phases:         make([]PhaseMetric, len(c.metrics.Phases)),
 		PlanOutcomes:   make([]PlanOutcome, len(c.metrics.PlanOutcomes)),
+		Startup:        c.metrics.Startup,
+		Completions:    make([]CompletionMetric, len(c.metrics.Completions)),
+		Cancellations:  make([]CancellationMetric, len(c.metrics.Cancellations)),
 	}
 	copy(clone.Tools, c.metrics.Tools)
 	copy(clone.EditStrategies, c.metrics.EditStrategies)
 	copy(clone.LLMs, c.metrics.LLMs)
 	copy(clone.Phases, c.metrics.Phases)
 	copy(clone.PlanOutcomes, c.metrics.PlanOutcomes)
+	copy(clone.Completions, c.metrics.Completions)
+	copy(clone.Cancellations, c.metrics.Cancellations)
 	return clone
 }
 
@@ -528,4 +533,57 @@ func (c *Collector) Stop() {
 		"phases", len(snap.Phases),
 		"llm_interactions", len(snap.LLMs),
 	)
+}
+
+// RecordStartup records startup timing breakdown.
+func (c *Collector) RecordStartup(durationMs, configLoadMs, providerMs, tuiMs int64) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.metrics.Startup = &StartupMetric{
+		DurationMs:   durationMs,
+		ConfigLoadMs: configLoadMs,
+		ProviderMs:   providerMs,
+		TUIMs:        tuiMs,
+	}
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordCompletion records a phase completion event.
+func (c *Collector) RecordCompletion(phase types.WorkflowPhase, success bool, timeout bool) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cm := CompletionMetric{
+		Phase:     phase,
+		Success:   success,
+		Failure:   !success && !timeout,
+		Timeout:   timeout,
+		Timestamp: time.Now(),
+	}
+	c.metrics.Completions = append(c.metrics.Completions, cm)
+	c.metrics.UpdatedAt = time.Now()
+}
+
+// RecordCancellation records a workflow cancellation event.
+func (c *Collector) RecordCancellation(phase types.WorkflowPhase, reason string) {
+	if !c.enabled {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cm := CancellationMetric{
+		Phase:     phase,
+		Reason:    reason,
+		Timestamp: time.Now(),
+	}
+	c.metrics.Cancellations = append(c.metrics.Cancellations, cm)
+	c.metrics.UpdatedAt = time.Now()
 }
