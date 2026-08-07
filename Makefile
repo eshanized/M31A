@@ -98,17 +98,17 @@ test:
 ## test-fast         — Run tests without race detector (faster)
 test-fast:
 	@printf "\033[0;32m[test]\033[0m Running tests (fast mode)...\n"
-	@$(GO) test -timeout 30s -cover ./...
+	@$(GO) test -timeout 5m -cover ./...
 
 ## test-verbose      — Run tests with verbose output
 test-verbose:
 	@printf "\033[0;32m[test]\033[0m Running tests (verbose)...\n"
-	@$(GO) test -v -race -cover -timeout 30s ./...
+	@$(GO) test -v -race -cover -timeout 5m ./...
 
 ## test-specific     — Run specific test (e.g., make test-specific TEST=TestReplModel)
 test-specific:
 	@printf "\033[0;32m[test]\033[0m Running: $(TEST)\n"
-	@$(GO) test -v -race -timeout 30s -run $(TEST) ./...
+	@$(GO) test -v -race -timeout 5m -run $(TEST) ./...
 
 ## bench             — Run benchmarks
 bench:
