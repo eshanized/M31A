@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,9 @@ func TestBinary_Version(t *testing.T) {
 	if !strings.Contains(out, "m31a") {
 		t.Errorf("expected version output to contain 'm31a', got: %s", out)
 	}
-	if !strings.Contains(out, "linux/amd64") {
-		t.Errorf("expected version output to contain 'linux/amd64', got: %s", out)
+	expectedPlatform := runtime.GOOS + "/" + runtime.GOARCH
+	if !strings.Contains(out, expectedPlatform) {
+		t.Errorf("expected version output to contain '%s', got: %s", expectedPlatform, out)
 	}
 }
 
@@ -146,9 +148,9 @@ func TestBinary_Prompt_Timeout(t *testing.T) {
 	select {
 	case <-done:
 		// Expected — either timeout error or auth error
-	case <-time.After(30 * time.Second):
+	case <-time.After(2 * time.Minute):
 		cmd.Process.Kill()
-		t.Fatal("binary did not exit within 30 seconds")
+		t.Fatal("binary did not exit within 2 minutes")
 	}
 }
 

@@ -35,7 +35,7 @@ func buildBinary(b *testing.B) string {
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", binary, ".")
+	cmd := exec.Command("go", "build", "-o", binary, "./cmd/m31a")
 	cmd.Dir = filepath.Join("..", "..")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
