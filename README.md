@@ -204,7 +204,7 @@ flowchart LR
 
 ### Terminal UI
 
-- **33-screen Bubble Tea TUI** — M31A dark theme, Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
+- **33-screen Bubble Tea TUI** — Everblush single dark theme, Vim-style navigation, leader key shortcuts (`Ctrl+X`), command palette (`Ctrl+P`).
 - **Fuzzy model selector** — search with per-token cost comparison and live context-warning.
 - **Diff viewer** — browse git diffs inline with syntax highlighting.
 - **Rollback browser** — view commit chain, soft/hard reset with preview.
