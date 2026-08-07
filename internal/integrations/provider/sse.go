@@ -99,6 +99,9 @@ func (p *SSEParser) Next() (eventType string, data string, err error) {
 
 		// Check for scanner errors immediately after the scan loop ends
 		if scanErr := p.scanner.Err(); scanErr != nil {
+			if p.ctx != nil && p.ctx.Err() != nil {
+				return "", "", p.ctx.Err()
+			}
 			return "", "", scanErr
 		}
 

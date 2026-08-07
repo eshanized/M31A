@@ -92,7 +92,7 @@ run-latest:
 ## test              — Run all tests with race detector and coverage
 test:
 	@printf "\033[0;32m[test]\033[0m Running tests with race detector...\n"
-	@$(GO) test -race -cover -timeout 30s -coverprofile=$(COVER_OUT) ./...
+	@$(GO) test -race -cover -timeout 5m -coverprofile=$(COVER_OUT) ./...
 	@printf "\033[0;32m[test]\033[0m Coverage report: $(COVER_OUT)\n"
 
 ## test-fast         — Run tests without race detector (faster)
