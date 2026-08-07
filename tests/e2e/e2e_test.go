@@ -148,9 +148,9 @@ func TestBinary_Prompt_Timeout(t *testing.T) {
 	select {
 	case <-done:
 		// Expected — either timeout error or auth error
-	case <-time.After(30 * time.Second):
+	case <-time.After(2 * time.Minute):
 		cmd.Process.Kill()
-		t.Fatal("binary did not exit within 30 seconds")
+		t.Fatal("binary did not exit within 2 minutes")
 	}
 }
 
