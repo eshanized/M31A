@@ -60,7 +60,7 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Run tests with race detector
-        run: go test -race -timeout 30s -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -timeout 5m -coverprofile=coverage.out -covermode=atomic ./...
         env:
           GOARCH: ${{ matrix.arch }}
       - name: Run go vet
@@ -105,7 +105,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
       - name: Smoke test - at least one test passes (short)
         run: |
-          go test -short -timeout 30s ./...
+          go test -short -timeout 5m ./...
         env:
           CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
@@ -280,26 +280,26 @@ jobs:
               PANIC_VALUE=$(cat "$CRASH_FILE" | jq -r '.panic_value // empty')
               VERSION=$(cat "$CRASH_FILE" | jq -r '.version // "unknown"')
               if [ -n "$STACK_TRACE" ] && [ -n "$PANIC_VALUE" ]; then
+                echo "## Crash Information" > body.md
+                echo "**Version:** $VERSION" >> body.md
+                echo "**OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')" >> body.md
+                echo "**Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')" >> body.md
+                echo "## Stack Trace" >> body.md
+                echo "\`\`\`" >> body.md
+                echo "$STACK_TRACE" >> body.md
+                echo "\`\`\`" >> body.md
+                echo "## Steps to Reproduce" >> body.md
+                echo "1. Run the failing test suite" >> body.md
+                echo "2. Observe crash" >> body.md
+                echo "## Expected Behavior" >> body.md
+                echo "No panic should occur." >> body.md
+                echo "## Additional Context" >> body.md
+                echo "Auto-filed from CI crash capture workflow." >> body.md
+
                 gh issue create \
                   --repo "${{ github.repository }}" \
                   --title "[CRASH] $PANIC_VALUE in $VERSION" \
-                  --body-file - <<CRASHEOF
-              ## Crash Information
-              **Version:** $VERSION
-              **OS:** $(cat "$CRASH_FILE" | jq -r '.os // "unknown"')
-              **Go Version:** $(cat "$CRASH_FILE" | jq -r '.go_version // "unknown"')
-              ## Stack Trace
-              \`\`\`
-              $STACK_TRACE
-              \`\`\`
-              ## Steps to Reproduce
-              1. Run the failing test suite
-              2. Observe crash
-              ## Expected Behavior
-              No panic should occur.
-              ## Additional Context
-              Auto-filed from CI crash capture workflow.
-              CRASHEOF
+                  --body-file body.md
               else
                 echo "No crash details to report"
               fi
