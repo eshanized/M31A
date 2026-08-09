@@ -62,6 +62,7 @@ jobs:
       - name: Run tests with race detector
         run: go test -race -timeout 5m -coverprofile=coverage.out -covermode=atomic ./...
         env:
+          CGO_ENABLED: "1"
           GOARCH: ${{ matrix.arch }}
       - name: Run go vet
         run: go vet ./...
@@ -95,8 +96,9 @@ jobs:
           cache: true
       - name: Smoke test - build binary
         run: |
-          CGO_ENABLED=0 go build -o m31a ./cmd/m31a
+          go build -o m31a ./cmd/m31a
         env:
+          CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
       - name: Smoke test - binary runs (version)
         run: |
@@ -134,7 +136,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
 
   pprof-smoke:
     runs-on: ubuntu-latest
@@ -147,7 +151,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
       - name: Verify pprof responds
         run: |
           M31A_DEBUG=1 ./bin/m31a-debug &
@@ -168,6 +174,8 @@ jobs:
           cache: true
       - name: Run benchmarks
         run: go test -bench=. -benchmem -count=10 -run=^$ ./... > new.txt
+        env:
+          CGO_ENABLED: "0"
       - name: Fetch baseline from main
         run: |
           git stash --include-untracked
