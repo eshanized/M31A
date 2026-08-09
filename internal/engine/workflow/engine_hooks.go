@@ -60,7 +60,6 @@ func toExtensionsPhaseResult(r *PhaseResult) *extensions.PhaseResult {
 		Phase:   r.Phase,
 		Success: r.Success,
 		Error:   r.Error,
-		Output:  nil, // TODO: add output if needed
 	}
 }
 
