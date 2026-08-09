@@ -260,17 +260,21 @@ func TestPolicy_Retry_ContextCanceled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
 
 	err := p.Retry(ctx, func() error {
 		calls++
+		cancel() // Cancel deterministically during the attempt
 		return errors.New("connection error")
 	})
+
 	if err == nil {
-		t.Error("expected error, got nil")
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected error to wrap context.Canceled, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 call, got %d", calls)
 	}
 }
 
@@ -322,5 +326,71 @@ func TestParseRetryAfter_EmptyHeaders(t *testing.T) {
 	got = parseRetryAfter(nil)
 	if got != 0 {
 		t.Errorf("parseRetryAfter(nil) = %v, want 0", got)
+	}
+}
+
+func TestConfiguredPolicy(t *testing.T) {
+	tests := []struct {
+		name              string
+		maxAttempts       int
+		baseDelayMs       int
+		maxDelayMs        int
+		backoffMultiplier float64
+		wantMaxAttempts   int
+		wantInitialDelay  time.Duration
+		wantMaxDelay      time.Duration
+		wantBackoffFactor float64
+	}{
+		{
+			name:              "all zeroes falls back to defaults",
+			maxAttempts:       0,
+			baseDelayMs:       0,
+			maxDelayMs:        0,
+			backoffMultiplier: 0,
+			wantMaxAttempts:   3,
+			wantInitialDelay:  1 * time.Second,
+			wantMaxDelay:      30 * time.Second,
+			wantBackoffFactor: 2.0,
+		},
+		{
+			name:              "custom values are applied",
+			maxAttempts:       5,
+			baseDelayMs:       500,
+			maxDelayMs:        5000,
+			backoffMultiplier: 1.5,
+			wantMaxAttempts:   5,
+			wantInitialDelay:  500 * time.Millisecond,
+			wantMaxDelay:      5000 * time.Millisecond,
+			wantBackoffFactor: 1.5,
+		},
+		{
+			name:              "negative values ignored (defaults kept)",
+			maxAttempts:       -1,
+			baseDelayMs:       -100,
+			maxDelayMs:        -500,
+			backoffMultiplier: -1.0,
+			wantMaxAttempts:   3,
+			wantInitialDelay:  1 * time.Second,
+			wantMaxDelay:      30 * time.Second,
+			wantBackoffFactor: 2.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConfiguredPolicy(tt.maxAttempts, tt.baseDelayMs, tt.maxDelayMs, tt.backoffMultiplier)
+			if got.MaxAttempts != tt.wantMaxAttempts {
+				t.Errorf("MaxAttempts = %d, want %d", got.MaxAttempts, tt.wantMaxAttempts)
+			}
+			if got.InitialDelay != tt.wantInitialDelay {
+				t.Errorf("InitialDelay = %v, want %v", got.InitialDelay, tt.wantInitialDelay)
+			}
+			if got.MaxDelay != tt.wantMaxDelay {
+				t.Errorf("MaxDelay = %v, want %v", got.MaxDelay, tt.wantMaxDelay)
+			}
+			if got.BackoffFactor != tt.wantBackoffFactor {
+				t.Errorf("BackoffFactor = %f, want %f", got.BackoffFactor, tt.wantBackoffFactor)
+			}
+		})
 	}
 }
