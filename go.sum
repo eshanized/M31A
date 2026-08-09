@@ -73,8 +73,8 @@ github.com/muesli/reflow v0.3.0/go.mod h1:pbwTDkVPibjO2kyvBQRBxTWEEGDGq0FlB1BIKt
 github.com/muesli/termenv v0.13.0/go.mod h1:sP1+uffeLaEYpyOTb8pLCUctGcGLnoFjSn4YJK5e2bc=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/odvcencio/gotreesitter v0.20.5 h1:V/F/Xv3fld61IVLnlRAgdZXrwuPQba6VPDWyXTOfooc=
-github.com/odvcencio/gotreesitter v0.20.5/go.mod h1:hBVkghd0paaYAVwd2087vfwdeU984bQbMo9LvpE0moo=
+github.com/odvcencio/gotreesitter v0.48.1 h1:Pjd2GAf4I5G9K9t+DFDLvwXVsvRatqLox1p29nfTwF4=
+github.com/odvcencio/gotreesitter v0.48.1/go.mod h1:hBVkghd0paaYAVwd2087vfwdeU984bQbMo9LvpE0moo=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=
 github.com/olekukonko/tablewriter v0.0.5/go.mod h1:hPp6KlRPjbx+hW8ykQs1w3UBbZlj6HuIJcUGPhkA7kY=
 github.com/pkoukk/tiktoken-go v0.1.8 h1:85ENo+3FpWgAACBaEUVp+lctuTcYUO7BtmfhlN/QTRo=
