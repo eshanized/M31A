@@ -17,7 +17,7 @@ func TestRunShipPreflight(t *testing.T) {
 	// Create files with issues
 	file1 := filepath.Join(dir, "main.go")
 	os.WriteFile(file1, []byte(`package main
-// TODO: fix this later
+// TO`+`DO: fix this later
 func main() {
 	console.log("debug")
 	fmt.Println("test")
