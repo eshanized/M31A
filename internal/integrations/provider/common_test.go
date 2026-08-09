@@ -306,6 +306,18 @@ func TestGetModel_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetModel_EmptyCacheError(t *testing.T) {
+	t.Parallel()
+	cache := NewModelCache(5 * time.Minute) // Empty cache
+	_, err := GetModel("arbitrary-id", cache)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != m31errors.ErrModelNotFound {
+		t.Errorf("expected ErrModelNotFound, got %v", err)
+	}
+}
+
 func TestCachedModels(t *testing.T) {
 	t.Parallel()
 	cache := NewModelCache(5 * time.Minute)
