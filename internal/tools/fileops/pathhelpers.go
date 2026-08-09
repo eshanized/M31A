@@ -72,11 +72,22 @@ func ResolveAndContainPathExists(path, workDir string) (string, error) {
 // ContainedInWorkDir checks that resolved is either equal to workDir or is
 // contained within it (with a trailing separator guard to prevent prefix attacks).
 func ContainedInWorkDir(resolved, workDir string) error {
-	workDirPrefix := workDir
+	// First resolve the full workdir path, in case there are symlinks in the path
+	workDirPrefix, _ := filepath.EvalSymlinks(workDir)
+	if workDirPrefix == "" {
+		workDirPrefix = workDir
+	}
+
+	// Then resolve the full resolved path, in case there are symlinks in the path
+	resolvedPrefix, _ := filepath.EvalSymlinks(resolved)
+	if resolvedPrefix == "" {
+		resolvedPrefix = resolved
+	}
+
 	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
 		workDirPrefix += string(filepath.Separator)
 	}
-	if resolved != workDir && !strings.HasPrefix(resolved, workDirPrefix) {
+	if resolvedPrefix != strings.TrimSuffix(workDirPrefix, string(filepath.Separator)) && !strings.HasPrefix(resolvedPrefix, workDirPrefix) {
 		return fmt.Errorf("path resolves outside working directory")
 	}
 	return nil
