@@ -378,3 +378,44 @@ func TestScanDir_IgnoresNonMarkdown(t *testing.T) {
 		t.Errorf("scanDir returned %d skills, want 0", len(skills))
 	}
 }
+
+func TestDiscover_MissingSkillsSubdirectories(t *testing.T) {
+	dir := t.TempDir()
+
+	// Use valid directories but without the specific "skills" subdirectories
+	baseDir := filepath.Join(dir, "global")
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	skills := Discover(baseDir, projectDir)
+	if len(skills) != 0 {
+		t.Errorf("Discover with missing skills subdirectories returned %d skills, want 0", len(skills))
+	}
+}
+
+func TestDiscover_FileAsDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create files where Discover expects directories
+	baseFile := filepath.Join(dir, "global-file.txt")
+	if err := os.WriteFile(baseFile, []byte("not a dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectFile := filepath.Join(dir, "project-file.txt")
+	if err := os.WriteFile(projectFile, []byte("not a dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Discover should not panic when given file paths instead of directory paths
+	skills := Discover(baseFile, projectFile)
+	if len(skills) != 0 {
+		t.Errorf("Discover with files as dirs returned %d skills, want 0", len(skills))
+	}
+}
