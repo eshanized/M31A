@@ -102,7 +102,7 @@ jobs:
       - name: Smoke test - binary runs (version)
         run: |
           ./m31a --version
-        if: (matrix.arch == 'amd64' && runner.arch == 'X64') || (matrix.arch == 'arm64' && runner.arch == 'ARM64') || (runner.os == 'Windows' && matrix.arch == 'amd64' && runner.arch == 'X64')
+        if: (matrix.arch == 'amd64' && runner.arch == 'X64') || (matrix.arch == 'arm64' && runner.arch == 'ARM64')
       - name: Smoke test - at least one test passes (short)
         run: |
           go test -short -timeout 5m ./...
