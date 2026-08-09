@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
-	"runtime"
 
 	"github.com/eshanized/M31A/internal/core/types"
 )
