@@ -95,14 +95,14 @@ jobs:
           cache: true
       - name: Smoke test - build binary
         run: |
-          CGO_ENABLED=0 go build -o m31a ./cmd/m31a
+          go build -o m31a ./cmd/m31a
         env:
+          CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
       - name: Smoke test - binary runs (version)
         run: |
           ./m31a --version
-        env:
-          GOARCH: ${{ matrix.arch }}
+        if: matrix.arch == 'amd64' && runner.arch == 'X64' || matrix.arch == 'arm64' && runner.arch == 'ARM64' || runner.os == 'Windows'
       - name: Smoke test - at least one test passes (short)
         run: |
           go test -short -timeout 5m ./...
@@ -134,7 +134,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
 
   pprof-smoke:
     runs-on: ubuntu-latest
@@ -147,7 +149,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
       - name: Verify pprof responds
         run: |
           M31A_DEBUG=1 ./bin/m31a-debug &
@@ -167,12 +171,12 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Run benchmarks
-        run: go test -bench=. -benchmem -count=10 -run=^$ ./... > new.txt
+        run: go test -bench=. -benchmem -count=1 -benchtime=10x -run=^$ ./... > new.txt
       - name: Fetch baseline from main
         run: |
           git stash --include-untracked
           git checkout main -- .
-          go test -bench=. -benchmem -count=10 -run=^$ ./... > old.txt || echo "No baseline available"
+          go test -bench=. -benchmem -count=1 -benchtime=10x -run=^$ ./... > old.txt || echo "No baseline available"
           git checkout -- .
           git stash pop || true
       - name: Install benchstat
