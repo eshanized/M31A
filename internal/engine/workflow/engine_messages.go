@@ -96,6 +96,7 @@ type PhaseResult struct {
 	NeedsAnswers        bool
 	RequiresManualInput bool
 	WorkflowMode        m31types.WorkflowMode // mode to use for subsequent transitions
+	Output              any                   // structured output from the phase
 
 	// Execution metrics (populated by Execute/Ship phases)
 	Usage     *m31types.Usage  // token usage from LLM calls
