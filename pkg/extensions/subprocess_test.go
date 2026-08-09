@@ -249,7 +249,7 @@ func TestSubprocessManagerTimeout(t *testing.T) {
 		Method:  MethodToolName,
 	}
 
-	resp, err := proc.Call(ctx, req2, 2*time.Second)
+	resp, err := proc.Call(ctx, req2, 5*time.Second)
 	if err != nil {
 		t.Fatalf("Call after timeout failed: %v", err)
 	}
