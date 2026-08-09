@@ -95,8 +95,9 @@ jobs:
           cache: true
       - name: Smoke test - build binary
         run: |
-          CGO_ENABLED=0 go build -o m31a ./cmd/m31a
+          go build -o m31a ./cmd/m31a
         env:
+          CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
       - name: Smoke test - binary runs (version)
         run: |
@@ -134,7 +135,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
 
   pprof-smoke:
     runs-on: ubuntu-latest
@@ -147,7 +150,9 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Build debug binary
-        run: CGO_ENABLED=0 go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        run: go build -gcflags="all=-N -l" -o bin/m31a-debug ./cmd/m31a
+        env:
+          CGO_ENABLED: "0"
       - name: Verify pprof responds
         run: |
           M31A_DEBUG=1 ./bin/m31a-debug &
