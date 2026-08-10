@@ -11,6 +11,7 @@ func TestNewLogger_CreatesLogFile(t *testing.T) {
 	// Use a temp home dir
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	logger, cleanup, err := NewLogger("test")
 	if err != nil {
@@ -31,6 +32,7 @@ func TestNewLogger_CreatesLogFile(t *testing.T) {
 func TestNewLogger_JSONFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	t.Setenv("M31A_LOG_FORMAT", "json")
 
 	logger, cleanup, err := NewLogger("test")
@@ -60,6 +62,7 @@ func TestNewLogger_JSONFormat(t *testing.T) {
 func TestNewLogger_TextFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	t.Setenv("M31A_LOG_FORMAT", "text")
 
 	logger, cleanup, err := NewLogger("test")
@@ -89,6 +92,7 @@ func TestNewLogger_TextFormat(t *testing.T) {
 func TestNewLogger_DebugLevel(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	t.Setenv("M31A_LOG_LEVEL", "debug")
 
 	logger, cleanup, err := NewLogger("test")
@@ -115,6 +119,7 @@ func TestNewLogger_DebugLevel(t *testing.T) {
 func TestNewLogger_InfoLevel_Default(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	logger, cleanup, err := NewLogger("test")
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -20,8 +21,15 @@ func TestSubprocessManager(t *testing.T) {
 
 	ctx := context.Background()
 
+	cmd := scriptPath
+	args := []string{}
+	if runtime.GOOS == "windows" {
+		cmd = "bash"
+		args = []string{scriptPath}
+	}
+
 	// Create subprocess manager
-	proc := NewSubprocessManager(scriptPath, []string{}, nil, 10*time.Second)
+	proc := NewSubprocessManager(cmd, args, nil, 10*time.Second)
 	defer proc.Stop()
 
 	// Start the subprocess
@@ -168,7 +176,13 @@ func TestSubprocessManagerMultipleCalls(t *testing.T) {
 	defer os.Remove(scriptPath)
 
 	ctx := context.Background()
-	proc := NewSubprocessManager(scriptPath, []string{}, nil, 10*time.Second)
+	cmd := scriptPath
+	args := []string{}
+	if runtime.GOOS == "windows" {
+		cmd = "bash"
+		args = []string{scriptPath}
+	}
+	proc := NewSubprocessManager(cmd, args, nil, 10*time.Second)
 	defer proc.Stop()
 
 	if err := proc.Start(ctx); err != nil {
@@ -214,7 +228,13 @@ func TestSubprocessManagerTimeout(t *testing.T) {
 	defer os.Remove(scriptPath)
 
 	ctx := context.Background()
-	proc := NewSubprocessManager(scriptPath, []string{}, nil, 1*time.Second)
+	cmd := scriptPath
+	args := []string{}
+	if runtime.GOOS == "windows" {
+		cmd = "bash"
+		args = []string{scriptPath}
+	}
+	proc := NewSubprocessManager(cmd, args, nil, 1*time.Second)
 	defer proc.Stop()
 
 	if err := proc.Start(ctx); err != nil {
@@ -267,7 +287,13 @@ func TestSubprocessManagerStopIdempotent(t *testing.T) {
 	defer os.Remove(scriptPath)
 
 	ctx := context.Background()
-	proc := NewSubprocessManager(scriptPath, []string{}, nil, 10*time.Second)
+	cmd := scriptPath
+	args := []string{}
+	if runtime.GOOS == "windows" {
+		cmd = "bash"
+		args = []string{scriptPath}
+	}
+	proc := NewSubprocessManager(cmd, args, nil, 10*time.Second)
 
 	if err := proc.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -290,7 +316,13 @@ func TestSubprocessManagerNotRunning(t *testing.T) {
 	defer os.Remove(scriptPath)
 
 	ctx := context.Background()
-	proc := NewSubprocessManager(scriptPath, []string{}, nil, 10*time.Second)
+	cmd := scriptPath
+	args := []string{}
+	if runtime.GOOS == "windows" {
+		cmd = "bash"
+		args = []string{scriptPath}
+	}
+	proc := NewSubprocessManager(cmd, args, nil, 10*time.Second)
 
 	// Call without Start
 	req := JSONRPCRequest{

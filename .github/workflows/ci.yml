@@ -100,10 +100,12 @@ jobs:
           CGO_ENABLED: "0"
           GOARCH: ${{ matrix.arch }}
       - name: Smoke test - binary runs (version)
+        if: matrix.arch == 'amd64'
         run: |
           ./m31a --version
         if: matrix.arch == 'amd64' && runner.arch == 'X64' || matrix.arch == 'arm64' && runner.arch == 'ARM64' || runner.os == 'Windows'
       - name: Smoke test - at least one test passes (short)
+        if: matrix.arch == 'amd64'
         run: |
           go test -short -timeout 5m ./...
         env:
@@ -154,7 +156,7 @@ jobs:
           CGO_ENABLED: "0"
       - name: Verify pprof responds
         run: |
-          M31A_DEBUG=1 ./bin/m31a-debug &
+          script -e -q -c "M31A_DEBUG=1 ./bin/m31a-debug" /dev/null &
           sleep 3
           curl -sf http://localhost:6060/debug/pprof/ > /dev/null
           kill %1

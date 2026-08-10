@@ -157,7 +157,11 @@ func TestBinary_Prompt_Timeout(t *testing.T) {
 // buildBinary compiles the M31A binary and returns the path.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "m31a")
+	binName := "m31a"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), binName)
 	// Find project root by looking for go.mod
 	dir := mustGetwd(t)
 	for {
@@ -196,6 +200,7 @@ func cleanEnv() []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.TempDir(),
+		"USERPROFILE=" + os.TempDir(),
 		"M31A_CONFIG=" + filepath.Join(os.TempDir(), "m31a-test-config.toml"),
 	}
 }

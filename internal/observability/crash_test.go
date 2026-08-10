@@ -35,8 +35,13 @@ func TestRecoverAndCapture_WritesCrashFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Override home dir for test
 	oldHome := os.Getenv("HOME")
+	oldUserProfile := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", oldHome)
+		os.Setenv("USERPROFILE", oldUserProfile)
+	}()
 
 	// Run in a goroutine to catch the re-panic
 	done := make(chan struct{})

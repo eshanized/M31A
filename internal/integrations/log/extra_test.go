@@ -174,6 +174,7 @@ func TestRemoveOldRotatedFiles_ExactlyCutoff(t *testing.T) {
 func TestNewLogger_JSONFormat_Default(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	// Don't set M31A_LOG_FORMAT — should default to JSON
 
 	logger, cleanup, err := NewLogger("test")
@@ -199,6 +200,7 @@ func TestNewLogger_JSONFormat_Default(t *testing.T) {
 func TestNewLogger_WarnLevel(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	t.Setenv("M31A_LOG_LEVEL", "warn")
 
 	logger, cleanup, err := NewLogger("test")
@@ -227,6 +229,7 @@ func TestNewLogger_WarnLevel(t *testing.T) {
 func TestNewLogger_ErrorLevel(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	t.Setenv("M31A_LOG_LEVEL", "error")
 
 	logger, cleanup, err := NewLogger("test")
@@ -259,6 +262,7 @@ func TestNewLogger_ErrorLevel(t *testing.T) {
 func TestNewLogger_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	_, cleanup, err := NewLogger("test")
 	if err != nil {
@@ -279,6 +283,7 @@ func TestNewLogger_CreatesDirectory(t *testing.T) {
 func TestNewLogger_AppendsToExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	// First call
 	logger1, cleanup1, err := NewLogger("test")
