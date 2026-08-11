@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -83,7 +84,19 @@ func ContainedInWorkDir(resolved, workDir string) error {
 	if !strings.HasSuffix(workDirPrefix, string(filepath.Separator)) {
 		workDirPrefix += string(filepath.Separator)
 	}
-	if resolved != evalWorkDir && !strings.HasPrefix(resolved, workDirPrefix) {
+
+	// Support case-insensitive paths on windows
+	isPrefix := strings.HasPrefix(resolved, workDirPrefix)
+	if runtime.GOOS == "windows" {
+		isPrefix = strings.HasPrefix(strings.ToLower(resolved), strings.ToLower(workDirPrefix))
+	}
+
+	isEq := resolved == evalWorkDir
+	if runtime.GOOS == "windows" {
+		isEq = strings.EqualFold(resolved, evalWorkDir)
+	}
+
+	if !isEq && !isPrefix {
 		return fmt.Errorf("path resolves outside working directory")
 	}
 	return nil

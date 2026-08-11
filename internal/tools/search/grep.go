@@ -147,6 +147,14 @@ func (t *Grep) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 			if err != nil {
 				return types.ToolResult{}, fmt.Errorf("cannot resolve path: %w", err)
 			}
+			absResolvedEval, _ := filepath.EvalSymlinks(absResolved)
+			if absResolvedEval != "" {
+				absResolved = absResolvedEval
+			}
+			absWorkEval, _ := filepath.EvalSymlinks(absWork)
+			if absWorkEval != "" {
+				absWork = absWorkEval
+			}
 			if !strings.HasPrefix(absResolved+string(os.PathSeparator), absWork+string(os.PathSeparator)) && absResolved != absWork {
 				return types.ToolResult{}, fmt.Errorf("path escapes work directory")
 			}
