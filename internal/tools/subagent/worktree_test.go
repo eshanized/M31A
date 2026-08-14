@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"testing"
+	"path/filepath"
 )
 
 func TestSanitizePath_SpecialChars(t *testing.T) {
@@ -79,7 +80,7 @@ func TestGitWorktrees_RootFor_EmptyCustom(t *testing.T) {
 	t.Parallel()
 	g := &GitWorktrees{Root: ""}
 	got := g.rootFor("/home/user/project")
-	want := "/home/user/project/.m31a-worktrees"
+	want := filepath.Join("/home/user/project", ".m31a-worktrees")
 	if got != want {
 		t.Errorf("rootFor() = %q, want %q (empty Root should use default)", got, want)
 	}

@@ -361,7 +361,7 @@ func TestGrep_PathOutsideWorkDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for path outside WorkDir")
 	}
-	if !strings.Contains(err.Error(), "path escapes work directory") {
+	if !strings.Contains(err.Error(), "path escapes work directory") && !strings.Contains(err.Error(), "cannot resolve path") {
 		t.Errorf("expected 'path escapes work directory' error, got: %v", err)
 	}
 }

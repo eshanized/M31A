@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"path/filepath"
 	"time"
 
 	"github.com/eshanized/M31A/internal/core/types"
@@ -114,7 +115,7 @@ func TestGitWorktrees_RootFor_Empty(t *testing.T) {
 	t.Parallel()
 	g := &GitWorktrees{}
 	got := g.rootFor("/parent/dir")
-	want := "/parent/dir/.m31a-worktrees"
+	want := filepath.Join("/parent/dir", ".m31a-worktrees")
 	if got != want {
 		t.Errorf("rootFor = %q, want %q", got, want)
 	}
