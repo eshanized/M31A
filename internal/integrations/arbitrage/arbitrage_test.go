@@ -187,6 +187,31 @@ func TestCompareModels_MissingPricing(t *testing.T) {
 	}
 }
 
+func TestCompareModels_ZeroTokens(t *testing.T) {
+	models := []types.ModelInfo{
+		newTestModel("model-a", "provider-a", 5, 15, 128000),
+		newTestModel("model-b", "provider-b", 1, 3, 128000),
+	}
+
+	estimates := CompareModels(models, 0, 0)
+
+	if len(estimates) != 2 {
+		t.Fatalf("expected 2 estimates, got %d", len(estimates))
+	}
+
+	for _, est := range estimates {
+		if est.InputCost != 0 {
+			t.Errorf("expected 0 input cost, got %f", est.InputCost)
+		}
+		if est.OutputCost != 0 {
+			t.Errorf("expected 0 output cost, got %f", est.OutputCost)
+		}
+		if est.TotalCost != 0 {
+			t.Errorf("expected 0 total cost, got %f", est.TotalCost)
+		}
+	}
+}
+
 // Recommendation Tests
 
 func TestRecommend_SimpleTask(t *testing.T) {
