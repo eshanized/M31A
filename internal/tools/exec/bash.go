@@ -426,11 +426,16 @@ func CheckDangerousCommand(command string, additionalBlocked []string, additiona
 	return "", false
 }
 
+var (
+	removeCommentsRegex = regexp.MustCompile(`#[^\n]*`)
+	collapseSpaceRegex  = regexp.MustCompile(`\s+`)
+)
+
 func normalizeCommand(cmd string) string {
 	// Remove comments
-	cmd = regexp.MustCompile(`#[^\n]*`).ReplaceAllString(cmd, "")
+	cmd = removeCommentsRegex.ReplaceAllString(cmd, "")
 	// Collapse whitespace
-	cmd = regexp.MustCompile(`\s+`).ReplaceAllString(cmd, " ")
+	cmd = collapseSpaceRegex.ReplaceAllString(cmd, " ")
 	// Convert to lowercase for case-insensitive matching
 	return strings.ToLower(strings.TrimSpace(cmd))
 }
