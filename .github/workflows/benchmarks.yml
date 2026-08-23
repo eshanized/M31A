@@ -3,10 +3,8 @@ name: Benchmarks
 on:
   push:
     branches: [master]
-  pull_request:
-    branches: [master]
   schedule:
-    - cron: '0 2 * * *'  # Nightly at 2 AM UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
   workflow_call:
 

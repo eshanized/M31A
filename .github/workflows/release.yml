@@ -11,42 +11,7 @@ permissions:
 jobs:
   validate:
     name: Pre-release Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.26.5"
-          cache: true
-      - name: Run tests with race detector
-        run: go test -race -timeout 5m ./...
-      - name: Run lint
-        run: golangci-lint run ./... --timeout=5m
-      - name: Run benchmarks and check regressions
-        run: |
-          go test -bench=. -benchmem -count=5 -run=^$ ./internal/performance/ > /tmp/new.txt
-          benchstat /tmp/old.txt /tmp/new.txt 2>/dev/null || echo "No baseline available for comparison"
-      - name: Run security scan
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-      - name: Validate GoReleaser config
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: check
-      - name: Validate semantic version tag
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          if [[ ! $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
-            echo "::error::Tag '$TAG' does not follow semantic versioning (vMAJOR.MINOR.PATCH)"
-            exit 1
-          fi
-          echo "Tag $TAG is valid semver"
+    uses: ./.github/workflows/release-validation.yml
 
   release:
     name: Create Release
@@ -58,10 +23,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.26.5"
-          cache: true
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
