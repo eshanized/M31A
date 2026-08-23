@@ -249,7 +249,7 @@ func (e *Engine) runPlan(ctx context.Context, goal string) (*PhaseResult, error)
 func (e *Engine) runPlanChecker(ctx context.Context, tasks []m31types.Task, planMarkdown string, goal string) ([]m31types.Task, string) {
 	plan, parseErr := ParsePlan(planMarkdown)
 	if parseErr != nil || plan == nil {
-		plan = &m31types.Plan{Tasks: tasks, RawMarkdown: planMarkdown}
+		plan = &m31types.PlanDocument{Tasks: tasks, RawMarkdown: planMarkdown}
 	}
 
 	maxIter := e.maxPlanRevisions()
@@ -326,7 +326,7 @@ func (e *Engine) runPlanChecker(ctx context.Context, tasks []m31types.Task, plan
 func (e *Engine) runCoverageGates(ctx context.Context, tasks []m31types.Task, planMarkdown string, goal string) ([]m31types.Task, string) {
 	plan, parseErr := ParsePlan(planMarkdown)
 	if parseErr != nil || plan == nil {
-		plan = &m31types.Plan{Tasks: tasks, RawMarkdown: planMarkdown}
+		plan = &m31types.PlanDocument{Tasks: tasks, RawMarkdown: planMarkdown}
 	} else {
 		plan.Tasks = tasks
 	}

@@ -17,7 +17,7 @@ var securityKeywords = []string{
 }
 
 // granularityGate checks task granularity — always runs regardless of config.
-func granularityGate(plan *m31types.Plan) []PlanIssue {
+func granularityGate(plan *m31types.PlanDocument) []PlanIssue {
 	var issues []PlanIssue
 
 	for _, task := range plan.Tasks {
@@ -55,7 +55,7 @@ func granularityGate(plan *m31types.Plan) []PlanIssue {
 
 // securityGate checks that security-relevant work has explicit coverage.
 // Triggered by config flag or heuristic detection of security keywords.
-func securityGate(plan *m31types.Plan) []PlanIssue {
+func securityGate(plan *m31types.PlanDocument) []PlanIssue {
 	var issues []PlanIssue
 
 	securityFiles := findSecurityRelevantFiles(plan)
@@ -102,7 +102,7 @@ func securityGate(plan *m31types.Plan) []PlanIssue {
 }
 
 // gapAnalysisGate checks for structural coverage gaps in the plan.
-func gapAnalysisGate(plan *m31types.Plan, goal string) []PlanIssue {
+func gapAnalysisGate(plan *m31types.PlanDocument, goal string) []PlanIssue {
 	var issues []PlanIssue
 
 	// Check: every file in Proposed Changes has a task
@@ -158,7 +158,7 @@ func gapAnalysisGate(plan *m31types.Plan, goal string) []PlanIssue {
 }
 
 // requirementsCoverageGate checks that key goal concepts are covered by tasks.
-func requirementsCoverageGate(plan *m31types.Plan, goal string) []PlanIssue {
+func requirementsCoverageGate(plan *m31types.PlanDocument, goal string) []PlanIssue {
 	var issues []PlanIssue
 
 	phrases := extractKeyPhrases(goal)
@@ -184,7 +184,7 @@ func requirementsCoverageGate(plan *m31types.Plan, goal string) []PlanIssue {
 }
 
 // hasSecurityKeywords returns true when the plan contains security-relevant content.
-func hasSecurityKeywords(plan *m31types.Plan) bool {
+func hasSecurityKeywords(plan *m31types.PlanDocument) bool {
 	for _, task := range plan.Tasks {
 		lower := strings.ToLower(task.Description)
 		if containsAny(lower, securityKeywords) {
@@ -207,7 +207,7 @@ func hasSecurityKeywords(plan *m31types.Plan) bool {
 }
 
 // findSecurityRelevantFiles returns file paths that match security keywords.
-func findSecurityRelevantFiles(plan *m31types.Plan) []string {
+func findSecurityRelevantFiles(plan *m31types.PlanDocument) []string {
 	var files []string
 	seen := make(map[string]bool)
 

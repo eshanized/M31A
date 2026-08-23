@@ -28,16 +28,6 @@ const (
 	PhaseShip       WorkflowPhase = "ship"
 )
 
-// ComplexityLevel represents the estimated complexity of a user's goal.
-type ComplexityLevel string
-
-const (
-	ComplexityTrivial  ComplexityLevel = "trivial"
-	ComplexitySimple   ComplexityLevel = "simple"
-	ComplexityModerate ComplexityLevel = "moderate"
-	ComplexityComplex  ComplexityLevel = "complex"
-)
-
 // WorkflowMode controls how aggressively the workflow skips phases.
 type WorkflowMode string
 
@@ -46,19 +36,6 @@ const (
 	ModeFull   WorkflowMode = "full"   // all 7 active phases: Init->Discuss->Plan->Exec->Verify->Runtime->Ship
 	ModeFast   WorkflowMode = "fast"   // skip Plan: Init->Discuss->Exec->Verify->Ship
 	ModeDirect WorkflowMode = "direct" // skip Discuss, Plan, Verify: Init->Exec->Ship
-)
-
-// IntentType classifies the user's prompt intent for routing.
-type IntentType string
-
-const (
-	IntentFeature     IntentType = "feature"
-	IntentBugfix      IntentType = "bugfix"
-	IntentRefactor    IntentType = "refactor"
-	IntentQuestion    IntentType = "question"
-	IntentExplanation IntentType = "explanation"
-	IntentExploration IntentType = "exploration"
-	IntentChore       IntentType = "chore"
 )
 
 // IntentResult holds the outcome of LLM-based intent classification.
@@ -103,17 +80,6 @@ func (ir IntentResult) IsWorkflowWorthy() bool {
 		return false
 	}
 }
-
-type TaskStatus string
-
-const (
-	StatusPending       TaskStatus = "pending"
-	StatusRunning       TaskStatus = "running"
-	StatusDone          TaskStatus = "done"
-	StatusFailed        TaskStatus = "failed"
-	StatusSkipped       TaskStatus = "skipped"
-	StatusUnrecoverable TaskStatus = "unrecoverable"
-)
 
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -188,19 +154,6 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	return json.Marshal(msgAlias(m))
 }
 
-type ToolInput struct {
-	Name   string         `json:"name"`
-	Params map[string]any `json:"params"`
-}
-
-type ToolResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Output     string `json:"output"`
-	Error      string `json:"error,omitempty"`
-	DurationMs int64  `json:"duration_ms"`
-	Truncated  bool   `json:"truncated"`
-}
-
 // ToolError is a structured error type that carries both an error message
 // and a hint for LLM self-recovery. Tools should return this when they
 // want to provide actionable guidance alongside the error.
@@ -223,6 +176,21 @@ func (e *ToolError) Unwrap() error {
 // NewToolError creates a new ToolError with an error and hint.
 func NewToolError(err error, hint string) *ToolError {
 	return &ToolError{Err: err, Hint: hint}
+}
+
+// ToolInput represents the input to a tool execution.
+type ToolInput struct {
+	Name   string         `json:"name"`
+	Params map[string]any `json:"params"`
+}
+
+// ToolResult represents the result of a tool execution.
+type ToolResult struct {
+	ToolCallID string `json:"tool_call_id"`
+	Output     string `json:"output"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+	Truncated  bool   `json:"truncated"`
 }
 
 // HealReport records the outcome of a self-healing attempt.
@@ -251,42 +219,6 @@ type Tool interface {
 // definitions sent to the provider.
 type SchemaProvider interface {
 	ParameterSchema() string
-}
-
-type Task struct {
-	ID                 int        `json:"id"`
-	Description        string     `json:"description"`
-	Action             string     `json:"action"`
-	Category           string     `json:"category,omitempty"`
-	PlanSection        string     `json:"plan_section,omitempty"`
-	Dependencies       []int      `json:"dependencies"`
-	Files              []string   `json:"files"`
-	AcceptanceCriteria []string   `json:"acceptance_criteria"`
-	Status             TaskStatus `json:"status"`
-	HealsAttempted     int        `json:"heals_attempted"`
-	CommitHash         string     `json:"commit_hash,omitempty"`
-}
-
-type ProjectState struct {
-	Goal        string            `json:"goal"`
-	ProjectType string            `json:"project_type"`
-	Framework   string            `json:"framework"`
-	Answers     map[string]string `json:"answers"`
-	CreatedAt   time.Time         `json:"created_at"`
-}
-
-type Session struct {
-	ID            string        `json:"id"`
-	ParentID      string        `json:"parent_id,omitempty"`
-	ChildrenIDs   []string      `json:"children_ids,omitempty"`
-	Label         string        `json:"label,omitempty"`
-	Tags          []string      `json:"tags,omitempty"`
-	Model         string        `json:"model"`
-	Provider      string        `json:"provider"`
-	StartedAt     time.Time     `json:"started_at"`
-	MessageCount  int           `json:"message_count"`
-	WorkflowPhase WorkflowPhase `json:"workflow_phase"`
-	Project       *ProjectState `json:"project,omitempty"`
 }
 
 type StreamChunk struct {

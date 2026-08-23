@@ -739,27 +739,23 @@ func Load(workspaceRoot string) (*Config, error) {
 | A4 | All 118 requirements in .planning/REQUIREMENTS.md can be parsed into structured Requirement domain objects | Migration | Incomplete migration; fallback: manual mapping for unparsable entries |
 | A5 | Bubble Tea v1.3.x (not v2) is the correct version for this project | Architecture Patterns | TUI compile errors; verified: go.mod uses v1.3.0, latest v1 is v1.3.10 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Event payload versioning**
-   - What we know: Events are JSON with type-specific payloads.
-   - What's unclear: How to handle schema evolution of event payloads over time.
-   - Recommendation: Include `schema_version` in EventMetadata; use JSON with optional fields; projections handle missing fields gracefully.
+1. **Event payload versioning** — RESOLVED
+   - **Decision:** Include `schema_version` in `EventMetadata`; use JSON with optional fields; projections handle missing fields gracefully (graceful degradation per D-02).
+   - **Implementation:** `EventMetadata` struct in `internal/core/types/event.go` includes `SchemaVersion int`; projections use `UnmarshalEventPayload` with optional field handling.
 
-2. **Concurrent session isolation**
-   - What we know: EventStore has session_id column; multiple sessions can write concurrently.
-   - What's unclear: Whether SQLite WAL handles high contention from multiple M31A processes.
-   - Recommendation: Start with single-session assumption; add advisory locks or per-session databases if needed in Phase 5.
+2. **Concurrent session isolation** — RESOLVED
+   - **Decision:** Single-writer, multi-reader model using SQLite WAL mode; process-level lock on entire `.m31a/events.db` via SQLite's built-in WAL serialization; `busy_timeout=5000` in DSN handles contention (per D-05, D-07, D-08).
+   - **Implementation:** Rely on SQLite's built-in locking; no Go `flock` wrapper needed.
 
-3. **Projection rebuild performance**
-   - What we know: Projections rebuild by replaying all events.
-   - What's unclear: Replay time for 10k+ events; whether snapshot checkpoints are needed.
-   - Recommendation: Implement projection checkpoint table (in schema); rebuild from last checkpoint + incremental events.
+3. **Projection rebuild performance** — RESOLVED
+   - **Decision:** Implement projection checkpoint table (in schema); rebuild from last checkpoint + incremental events; checkpoints every N events (configurable, default 100) in same transaction as event append (D-13, D-15); keep last N checkpoints (default 10, D-16).
+   - **Implementation:** `projections` table in schema.sql; `ProjectionManager.Rebuild` loads checkpoint + replays incremental events.
 
-4. **Migration of .planning/graphs/**
-   - What we know: Graph is disabled in config.
-   - What's unclear: Whether to migrate graph data or regenerate.
-   - Recommendation: Skip graph migration; regenerate from events after Phase 3 (Code Intelligence).
+4. **Migration of .planning/graphs/** — RESOLVED
+   - **Decision:** Skip graph migration; regenerate from events after Phase 3 (Code Intelligence).
+   - **Implementation:** Migration engine (Plan 06) skips `.planning/graphs/` directory; `.gitignore` excludes `graphs/` (D-12, PERSIST-05).
 
 ## Environment Availability
 

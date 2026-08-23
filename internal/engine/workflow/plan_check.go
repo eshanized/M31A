@@ -32,7 +32,7 @@ func (e *Engine) maxPlanRevisions() int {
 }
 
 // checkPlan runs the plan checker — a separate LLM call that reviews plan quality.
-func (e *Engine) checkPlan(ctx context.Context, plan *m31types.Plan, goal string) (*PlanCheckResult, error) {
+func (e *Engine) checkPlan(ctx context.Context, plan *m31types.PlanDocument, goal string) (*PlanCheckResult, error) {
 	e.emit(IntermediateProgressMsg{
 		Phase:   "plan",
 		Message: "Checking plan quality...",
@@ -50,7 +50,7 @@ func (e *Engine) checkPlan(ctx context.Context, plan *m31types.Plan, goal string
 }
 
 // revisePlan re-invokes the planner with checker feedback for targeted fixes.
-func (e *Engine) revisePlan(ctx context.Context, plan *m31types.Plan, issues []PlanIssue, goal string) (*m31types.Plan, error) {
+func (e *Engine) revisePlan(ctx context.Context, plan *m31types.PlanDocument, issues []PlanIssue, goal string) (*m31types.PlanDocument, error) {
 	e.emit(IntermediateProgressMsg{
 		Phase:   "plan",
 		Message: fmt.Sprintf("Revising plan (%d issues)...", len(issues)),
@@ -70,7 +70,7 @@ func (e *Engine) revisePlan(ctx context.Context, plan *m31types.Plan, issues []P
 		if jsonErr != nil {
 			return nil, fmt.Errorf("revision parse failed: %w (json fallback: %v)", parseErr, jsonErr)
 		}
-		revised = &m31types.Plan{
+		revised = &m31types.PlanDocument{
 			RawMarkdown: content,
 			Tasks:       tasks,
 			Version:     plan.Version + 1,
@@ -83,7 +83,7 @@ func (e *Engine) revisePlan(ctx context.Context, plan *m31types.Plan, issues []P
 }
 
 // buildCheckContext assembles messages for the plan checker.
-func (e *Engine) buildCheckContext(plan *m31types.Plan, goal string) []m31types.Message {
+func (e *Engine) buildCheckContext(plan *m31types.PlanDocument, goal string) []m31types.Message {
 	var messages []m31types.Message
 
 	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-check"))
@@ -101,7 +101,7 @@ func (e *Engine) buildCheckContext(plan *m31types.Plan, goal string) []m31types.
 }
 
 // buildRevisionContext assembles messages for plan revision.
-func (e *Engine) buildRevisionContext(plan *m31types.Plan, issues []PlanIssue, goal string) []m31types.Message {
+func (e *Engine) buildRevisionContext(plan *m31types.PlanDocument, issues []PlanIssue, goal string) []m31types.Message {
 	var messages []m31types.Message
 
 	systemPrompt := e.buildSystemPrompt(e.promptOrGet("plan-check"), e.promptOrGet("plan-revise"))

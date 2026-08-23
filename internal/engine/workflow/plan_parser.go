@@ -53,11 +53,11 @@ func subsectionHeaderRe(name string) *regexp.Regexp {
 	return re
 }
 
-// ParsePlan extracts a structured Plan from rich markdown content.
+// ParsePlan extracts a structured PlanDocument from rich markdown content.
 // The markdown is expected to follow the format defined in plan-format.md.
 // Sections that cannot be parsed are left empty rather than causing an error.
-func ParsePlan(markdown string) (*m31types.Plan, error) {
-	plan := &m31types.Plan{
+func ParsePlan(markdown string) (*m31types.PlanDocument, error) {
+	plan := &m31types.PlanDocument{
 		RawMarkdown: markdown,
 		Version:     1,
 	}

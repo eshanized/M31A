@@ -64,7 +64,7 @@ func (e *Engine) replanFromFailure(ctx context.Context, failedTask m31types.Task
 		if jsonErr != nil {
 			return nil, fmt.Errorf("failed to parse re-plan output: %w (JSON fallback: %v)", parseErr, jsonErr)
 		}
-		plan = &m31types.Plan{Tasks: tasks}
+		plan = &m31types.PlanDocument{Tasks: tasks}
 	}
 
 	if len(plan.Tasks) == 0 {

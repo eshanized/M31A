@@ -55,6 +55,19 @@ var (
 	ErrBisectResetFailed = errors.New("bisect reset failed")
 	ErrBisectFailed      = errors.New("bisect failed")
 	ErrGitNotInitialized = errors.New("git not initialized")
+
+	// Event store errors.
+	ErrEventStoreUnavailable = errors.New("event store unavailable")
+	ErrEventNotFound         = errors.New("event not found")
+	ErrInvalidEventPayload   = errors.New("invalid event payload")
+	ErrMigrationFailed       = errors.New("migration failed")
+	ErrWriteConflict         = errors.New("write conflict: another process is writing")
+	ErrBackupFailed          = errors.New("backup failed")
+	ErrProjectionNotFound    = errors.New("projection not found")
+	ErrProjectionApplyFailed = errors.New("projection apply failed")
+	ErrArtifactParseFailed   = errors.New("artifact parse failed")
+	ErrKeyNotFound           = errors.New("key not found")
+	ErrKeychainUnavailable   = errors.New("keychain unavailable")
 )
 
 // ToolError wraps errors originating from tool execution with tool-specific context.

@@ -34,7 +34,7 @@ type WorkflowCache struct {
 	projectSharedID string
 
 	// Cached parsed plan for execute phase (H15 fix)
-	plan    *m31types.Plan
+	plan    *m31types.PlanDocument
 	planMD5 string // MD5 of planMarkdown for invalidation
 
 	// Dynamic context change detection (protected by dynamicMu)
@@ -120,7 +120,7 @@ func (wc *WorkflowCache) GetProjectShared(id string) *m31types.ProjectState {
 }
 
 // SetPlan caches parsed plan with MD5 for invalidation.
-func (wc *WorkflowCache) SetPlan(md5 string, plan *m31types.Plan) {
+func (wc *WorkflowCache) SetPlan(md5 string, plan *m31types.PlanDocument) {
 	wc.projectMu.Lock()
 	wc.plan = plan
 	wc.planMD5 = md5
@@ -128,7 +128,7 @@ func (wc *WorkflowCache) SetPlan(md5 string, plan *m31types.Plan) {
 }
 
 // GetPlan returns cached plan if the MD5 matches, nil otherwise.
-func (wc *WorkflowCache) GetPlan(md5 string) *m31types.Plan {
+func (wc *WorkflowCache) GetPlan(md5 string) *m31types.PlanDocument {
 	wc.projectMu.RLock()
 	defer wc.projectMu.RUnlock()
 	if wc.planMD5 == md5 && wc.plan != nil {
