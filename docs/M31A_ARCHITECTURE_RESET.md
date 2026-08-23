@@ -1,179 +1,562 @@
-# M31A Architecture Reset
+# M31A — Core Problem & Architecture Correction
 
-> **Status:** Authoritative architecture correction
+> **Status:** Authoritative problem diagnosis and architecture correction
 > **Date:** 2026-08-23
-> **Language:** Go
-> **Scope:** Product architecture, runtime, workflow, context, planning, execution, verification, persistence, security, TUI, extensions, and migration strategy
+> **Language:** Go (unchanged)
+> **Scope:** Existing M31A repository, runtime architecture, workflow, context, persistence, execution, verification, recovery, and TUI
 >
-> **Purpose:** Replace the previous architecture direction with a Go-native redesign. M31A is **not** being rewritten in Rust. The existing Go codebase remains the implementation base and behavioral reference.
+> **Important:** This document does **not** propose a language rewrite. M31A remains a Go project. The purpose is to identify why the existing Go implementation has become difficult to make reliable and how the existing codebase should be reorganized without losing its working capabilities.
 
 ---
 
-## 1. Executive Decision
+# 1. Executive Diagnosis
 
-M31A will remain a **Go application**.
+M31A's core problem is **not that the project is written in Go**.
 
-We will rework the architecture around the existing Go implementation rather than replacing the language or mechanically porting the current `workflow.Engine`.
+M31A's core problem is also **not simply that `workflow.Engine` is large**.
 
-The goal is not:
+The deeper problem is:
 
-```text
-Go → Rust
-```
+> **M31A has multiple partially overlapping sources of truth for the same engineering run, and the workflow engine continuously translates between them through shared mutable state, filesystem persistence, prompt state, task state, and UI state.**
 
-The goal is:
+That creates a chain of secondary problems:
 
 ```text
-Current Go architecture
-        ↓
-Explicit domain boundaries
-        ↓
-Independent runtime services
-        ↓
-Durable state + events
-        ↓
-First-class context system
-        ↓
-Reliable planning/execution/verification
-        ↓
-Autonomous engineering runtime
+No single authoritative run model
+            ↓
+Duplicated state
+            ↓
+Cross-component synchronization
+            ↓
+Mutexes / channels / file locks / caches
+            ↓
+State drift
+            ↓
+Context drift
+            ↓
+Workflow edge cases
+            ↓
+Recovery complexity
+            ↓
+Hard-to-test behavior
+            ↓
+Hard-to-predict agent behavior
 ```
 
-The current repository already contains substantial working behavior: workflow orchestration, model providers, streaming, tools, task scheduling, self-healing, Git integration, code intelligence, context management, session persistence, metrics, and a Bubble Tea TUI.
+This is the root issue to fix.
 
-The architectural problem is therefore **coupling**, not lack of implementation.
+The oversized `workflow.Engine` is a **symptom** of this problem because it has become the place where those different state representations are coordinated.
 
-We should preserve working behavior while changing ownership boundaries.
+Simply splitting `engine.go` into more files will improve readability but will not solve the architectural problem.
 
 ---
 
-# 2. What We Are Building
+# 2. Current Repository Reality
 
-M31A is an **autonomous terminal software engineer**.
+The current Go repository already contains significant functionality.
 
-Given a user request and a repository, M31A should be able to:
+The README describes a seven-phase system:
 
 ```text
-Understand
-   ↓
-Inspect
-   ↓
-Research when necessary
-   ↓
-Discuss ambiguity when necessary
-   ↓
-Plan
-   ↓
-Decompose
-   ↓
-Execute
-   ↓
-Verify
-   ↓
-Recover when necessary
-   ↓
-Review
-   ↓
-Ship
+Initialize
+→ Discuss
+→ Plan
+→ Execute
+→ Verify
+→ Runtime
+→ Ship
 ```
 
-The important distinction is that these are **capabilities of the runtime**, not seven giant states owned by one object.
+It includes model providers, streaming, task scheduling, tool calls, code intelligence, self-healing, context compaction, persistence, metrics, Git rollback, and a Bubble Tea TUI. citeturn0search1
 
-M31A must be able to choose the appropriate workflow for the request.
+The current workflow implementation is materially real, not merely scaffolding:
 
-A trivial request should not require the full planning pipeline.
+- `RunPhase` performs lifecycle setup and dispatches to concrete phase implementations.
+- `runInitialize` performs project detection, optional deep analysis, preflight, Git initialization, planning-state creation, and checkpoints.
+- `runDiscuss` constructs context, streams the model, parses questions, performs quality checks, and stores discussion state.
+- `runPlan` performs research, planning, validation, plan checking, revision, coverage gates, and task persistence.
+- `runExecute` schedules dependency groups, executes tasks with bounded parallelism, persists state, and performs self-healing.
 
-A dangerous architectural migration should receive substantially more research, planning, verification, and human confirmation.
+Those behaviors should be preserved as capabilities while their ownership is corrected.
 
 ---
 
-# 3. What We Learned From GSD Core
+# 3. The Real Architectural Problem
 
-GSD Core is valuable primarily as a **workflow design reference**, not as an implementation template.
+## 3.1 One engineering run exists in too many representations
 
-Its current command surface demonstrates a mature planning/execution lifecycle: project initialization, onboarding, discussion, research and planning, execution in waves, verification, progress/resume/pause, autonomous execution, configuration, and project management. citeturn0search0turn0search5
-
-Its documented core loop is:
+An M31A run currently has meaningful state in several places:
 
 ```text
-Discuss
-   ↓
-Plan
-   ↓
-Execute
-   ↓
-Verify
-   ↓
-Ship
+Engine fields
+WorkflowState
+StateMachine
+Session Manager
+session.json
+messages.json
+planning files
+Task files
+WorkflowCache
+ContextBuilder caches
+Context Registry snapshot
+Code-intel cache
+Recovery state
+Git state
+TUI state
 ```
 
-and the planning workflow explicitly performs research, decomposition, and plan verification before execution. citeturn0search5turn0search4
+This is visible directly in the current implementation.
 
-GSD's project tutorial also demonstrates the useful artifact lifecycle:
+`Engine` stores session identity, working directory, provider/model, state machine, dispatcher, token estimator, session manager, prompt builder, workflow mode, per-phase models, code-intelligence state, ledger, compactor, context registry, metrics, phase coordinator, hooks, mutable workflow state, lifecycle channels, and pause/cancel channels. fileciteturn13file0
 
-```text
-RESEARCH.md
-PLAN.md
-SUMMARY.md
-VERIFICATION.md
-```
+`WorkflowState` separately stores plan state, research output, cached prompts, conversation messages, intent results, dynamic context snapshots, decision logs, healing reports, checkpoint data, and the current goal, with multiple mutexes and an explicit lock-ordering contract. fileciteturn16file0
 
-with independent plans executed in waves and verification performed against phase goals. citeturn0search2
+The session manager separately persists project-local state into `.m31a/` files such as `session.json` and `messages.json`, while also serving as the persistence API used by workflow code. fileciteturn18file0
 
-M31A should adopt the **principles** behind this system while improving the runtime architecture around them.
-
-We should not copy GSD's command files, agent prompts, or implementation structure line-for-line.
-
-### Principles M31A adopts
-
-1. Planning is a first-class operation.
-2. Research happens before planning when uncertainty warrants it.
-3. Plans must be validated before execution.
-4. Independent work can execute concurrently.
-5. Execution receives focused context rather than an unbounded transcript.
-6. Verification is a separate step from implementation.
-7. Work must be resumable.
-8. Progress must be inspectable.
-9. Autonomous mode should compose the same reliable primitives rather than bypass them.
-10. Artifacts are useful evidence and handoffs, not merely logs.
+This means the same conceptual run is reconstructed from several representations instead of being owned by one authoritative runtime model.
 
 ---
 
-# 4. What We Are Correcting in M31A
+# 4. Why `workflow.Engine` Became So Large
 
-## 4.1 Do not keep growing `workflow.Engine`
+The engine is not intrinsically too large because Go cannot handle large systems.
 
-The existing `workflow.Engine` has become the implicit owner of too many concerns.
+It is large because every subsystem needs access to some part of the current run.
 
-The previous instinct was:
+The result is an object that acts as:
 
 ```text
-engine.go too large
+workflow coordinator
++
+state container
++
+provider holder
++
+model router
++
+context owner
++
+token tracker
++
+code-intel owner
++
+Git coordinator
++
+tool dispatcher owner
++
+session persistence adapter
++
+recovery controller
++
+pause controller
++
+cancellation root
++
+hook host
++
+metrics host
++
+TUI event source
+```
+
+That creates a **god object by dependency accumulation**, not by poor file organization.
+
+The correct response is therefore not:
+
+```text
+engine.go → engine_a.go + engine_b.go + engine_c.go
+```
+
+The correct response is:
+
+```text
+Engine responsibilities
         ↓
-split engine.go into more files
+explicit domain services
+        ↓
+explicit contracts
+        ↓
+explicit ownership
 ```
-
-That is insufficient.
-
-The new rule is:
-
-```text
-large object
-    ↓
-identify domain ownership
-    ↓
-extract services/components
-    ↓
-reduce shared mutable state
-```
-
-Splitting one object across ten files is not architectural decomposition.
 
 ---
 
-## 4.2 Workflow phase is not application state
+# 5. The Most Important Finding: State Is Split-Brained
 
-M31A can still expose:
+This is the core diagnosis.
+
+M31A has:
+
+```text
+Runtime state
+```
+
+and:
+
+```text
+Persistence state
+```
+
+and:
+
+```text
+Conversation/context state
+```
+
+and:
+
+```text
+UI state
+```
+
+and:
+
+```text
+Git state
+```
+
+and:
+
+```text
+derived cache state
+```
+
+but no single representation is the authoritative **engineering run**.
+
+Instead, components continually synchronize with each other.
+
+Example:
+
+```text
+Task status
+   ↓
+session.Manager
+   ↓
+taskrunner
+   ↓
+WorkflowState
+   ↓
+TODO.md
+   ↓
+TUI
+   ↓
+verification
+```
+
+Another:
+
+```text
+Conversation messages
+   ↓
+WorkflowState.Messages
+   ↓
+ContextBuilder
+   ↓
+Compactor
+   ↓
+Provider request
+   ↓
+TUI stream
+   ↓
+messages.json
+```
+
+Another:
+
+```text
+Current phase
+   ↓
+StateMachine
+   ↓
+Session JSON
+   ↓
+Recovery file
+   ↓
+TUI
+   ↓
+workflow callbacks
+```
+
+The architecture is therefore fundamentally synchronization-heavy.
+
+---
+
+# 6. Why This Produces So Many Bugs
+
+When multiple components can represent the same state, bugs increasingly become **state convergence bugs** rather than local code bugs.
+
+Examples of the failure class:
+
+```text
+TUI says executing
+but persisted session says planning.
+
+Task runner says done
+but persisted task state says pending.
+
+Git has a changed file
+but code-intel cache still describes the old tree.
+
+Context snapshot represents old source
+but repository has changed.
+
+Recovery says phase X
+but StateMachine is already at phase Y.
+
+Plan version in memory differs from plan artifact.
+```
+
+These bugs are harder to reproduce because the program can be locally correct while the combined state is inconsistent.
+
+---
+
+# 7. Context Is a Secondary Symptom of the Same Problem
+
+The current context architecture is not merely a token-budget problem.
+
+It currently has several layers:
+
+```text
+WorkflowState.Messages
+ContextBuilder
+ContextRegistry
+ContextSnapshot map
+cached dynamic context
+PromptBuilder
+Compactor
+TokenEstimator
+preflightContextCheck
+```
+
+`ContextBuilder` directly references workflow state, configuration, tokens, working directory, context registry, and a callback back into `Engine` for model selection. fileciteturn17file0
+
+The current context guard is primarily a **conversation-size management mechanism**:
+
+```text
+estimate tokens
+→ compact
+→ truncate tool output
+→ truncate old assistant messages
+→ remove older messages
+→ reject if still too large
+```
+
+That is useful, but it answers:
+
+> "How do we stop the prompt from getting too big?"
+
+rather than:
+
+> "What does the model need for this particular engineering decision?"
+
+Therefore the new Context Engine must be built on top of a canonical run/task model rather than being another layer of prompt manipulation.
+
+---
+
+# 8. The Core Correction
+
+We do **not** need to rewrite M31A in another language.
+
+We need to establish one authoritative runtime model for an engineering run.
+
+The target is:
+
+```text
+                         EngineeringRun
+                                │
+          ┌─────────────────────┼────────────────────┐
+          │                     │                    │
+          ▼                     ▼                    ▼
+        Plan                  Tasks               Context
+          │                     │                    │
+          │                     ▼                    │
+          │                  Agents                  │
+          │                     │                    │
+          └─────────────────────┼────────────────────┘
+                                │
+                                ▼
+                           Tool Calls
+                                │
+                                ▼
+                         File / Git Changes
+                                │
+                                ▼
+                           Verification
+                                │
+                         ┌──────┴──────┐
+                         ▼             ▼
+                      Recovery       Evidence
+                                │
+                                ▼
+                           Run Outcome
+```
+
+Everything related to that run must reference the same IDs and authoritative records.
+
+---
+
+# 9. EngineeringRun Becomes the Runtime Boundary
+
+Introduce a first-class run identity concept.
+
+Conceptually:
+
+```go
+type EngineeringRun struct {
+    ID         string
+    ProjectID  string
+    SessionID  string
+    Goal       string
+    Mode       WorkflowMode
+    Status     RunStatus
+    PlanID     string
+    CreatedAt  time.Time
+    UpdatedAt  time.Time
+}
+```
+
+The exact struct can evolve.
+
+The important property is that the run is the parent identity for everything else.
+
+Tasks reference the run.
+
+Agents reference the run and task.
+
+Context snapshots reference the run and task.
+
+Tool calls reference the run/task/agent.
+
+Verification references the run/task.
+
+Recovery references the run/task/attempt.
+
+UI state derives from the run.
+
+---
+
+# 10. The State Authority Rule
+
+M31A must establish a simple rule:
+
+> **Every stateful subsystem gets one authoritative owner. Everything else is a projection, cache, or observation.**
+
+For example:
+
+```text
+Run state
+→ Runtime/Storage
+
+Plan state
+→ Planning/Storage
+
+Task state
+→ Task store
+
+Agent state
+→ Agent runtime/store
+
+Context snapshot
+→ Context store
+
+Verification result
+→ Verification store
+
+Permission decision
+→ Permission store
+
+TUI
+→ projection
+
+Markdown
+→ projection/artifact
+
+Cache
+→ disposable
+```
+
+This dramatically reduces synchronization complexity.
+
+---
+
+# 11. Persistence Should Be Reworked, Not Merely Replaced
+
+The current session manager deliberately uses project-local flat files such as `session.json` and `messages.json`. It also maintains file locking and a coordinator for per-session concurrency. fileciteturn18file0
+
+That design contains useful engineering lessons:
+
+- atomic writes;
+- file-size limits;
+- corruption detection;
+- session locking;
+- concurrency coordination;
+- resumable state.
+
+The problem is that flat files are being used as the persistence boundary for a complex multi-entity runtime.
+
+They become cumbersome because a run contains relationships between:
+
+```text
+run
+plan
+plan version
+task
+task dependency
+agent
+attempt
+tool call
+verification
+evidence
+recovery
+checkpoint
+message
+context snapshot
+```
+
+These relationships are naturally relational.
+
+Therefore the Go system should move authoritative run-state persistence into SQLite while retaining Markdown/JSON projections where useful.
+
+This is a **persistence architecture correction**, not a language change.
+
+---
+
+# 12. Why SQLite Helps the Actual Problem
+
+SQLite is appropriate because M31A is a local-first application.
+
+It provides:
+
+- atomic transactions;
+- relational integrity;
+- indexed queries;
+- durable state;
+- simple backup;
+- predictable local operation;
+- better recovery semantics than coordinating many flat files.
+
+The design should not turn SQLite into a distributed event system.
+
+Use it as the authoritative local runtime store.
+
+Use explicit transactions for state changes such as:
+
+```text
+TaskStarted
+TaskCompleted
+VerificationPassed
+RecoveryStarted
+RunPaused
+RunCompleted
+```
+
+The UI and artifacts then become projections.
+
+---
+
+# 13. Workflow Phases Should Become Orchestration, Not Storage
+
+Keep the existing vocabulary:
 
 ```text
 Initialize
@@ -185,1708 +568,717 @@ Runtime
 Ship
 ```
 
-as user-facing workflow stages.
+It is useful and part of M31A's identity. fileciteturn6file0
 
-But internal state must distinguish:
+But phases should call domain services.
 
-```text
-RunState
-TaskState
-AgentState
-PermissionState
-VerificationState
-RecoveryState
-SessionState
-RepositoryState
-```
-
-A task can be executing while another task is verifying.
-
-A recovery attempt can occur after a verification failure without resetting the whole application state.
-
-The architecture must represent that explicitly.
-
----
-
-## 4.3 Context is not conversation history
-
-The current context implementation has useful token estimation and compaction behavior, but the new design must treat context as a dedicated system.
-
-The question is not:
-
-> "How much conversation can fit?"
-
-The question is:
-
-> "What information is required for this decision?"
-
-M31A should build task-specific context from repository facts, plan state, task requirements, evidence, memory, relevant files, Git state, tool output, and prior decisions.
-
----
-
-## 4.4 Persistence must have a clear source of truth
-
-Markdown and JSON remain valuable.
-
-They are not forbidden.
-
-But the runtime must have a clear authoritative representation of recoverable state.
-
-For M31A, that means **SQLite-backed state in Go**.
-
-Markdown artifacts become human-readable projections and planning artifacts.
-
----
-
-## 4.5 Execution must not claim success
-
-The model saying:
+Example:
 
 ```text
-"Done."
+Execute
+  ↓
+TaskScheduler
+  ↓
+AgentRuntime
+  ↓
+ContextEngine
+  ↓
+ModelGateway
+  ↓
+ToolRuntime
 ```
 
-is not verification.
-
-M31A must independently establish whether acceptance criteria were satisfied.
+The phase should not own every one of those systems.
 
 ---
 
-## 4.6 Security must be capability based
+# 14. What the Existing `WorkflowState` Is Telling Us
 
-Command-string blocklists remain useful defense-in-depth.
+`WorkflowState` is effectively a second mini-runtime.
 
-They must not be the primary security boundary.
-
-Tools need explicit capabilities, policy checks, permission decisions, resource limits, and cancellation semantics.
-
----
-
-# 5. Target Go Architecture
+It contains:
 
 ```text
-                         ┌─────────────────────┐
-                         │     Bubble Tea      │
-                         │        TUI          │
-                         └──────────┬──────────┘
-                                    │ commands/events
-                                    ▼
-                         ┌─────────────────────┐
-                         │ Application Layer   │
-                         │ CLI + orchestration │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                         ┌─────────────────────┐
-                         │       Runtime       │
-                         │ lifecycle + events  │
-                         └──────┬──────┬───────┘
-                                │      │
-                ┌───────────────┘      └────────────────┐
-                ▼                                        ▼
-        ┌────────────────┐                      ┌────────────────┐
-        │    Planning    │                      │   Execution    │
-        │ research/plan  │                      │ tasks/agents   │
-        └───────┬────────┘                      └───────┬────────┘
-                │                                       │
-                └────────────────┬──────────────────────┘
-                                 ▼
-                       ┌─────────────────────┐
-                       │   Context Engine    │
-                       │ retrieve/rank/build │
-                       └──────────┬──────────┘
-                                  │
-                                  ▼
-                       ┌─────────────────────┐
-                       │    Model Gateway    │
-                       │ providers + routing │
-                       └──────────┬──────────┘
-                                  │
-                                  ▼
-                       ┌─────────────────────┐
-                       │    Tool Runtime     │
-                       │ capability/policy   │
-                       └──────────┬──────────┘
-                                  │
-                                  ▼
-                       ┌─────────────────────┐
-                       │ Verification Engine  │
-                       │ checks + evidence    │
-                       └──────────┬──────────┘
-                                  │
-                         ┌────────┴────────┐
-                         ▼                 ▼
-                    Recovery             Git
-                         │                 │
-                         └────────┬────────┘
-                                  ▼
-                       ┌─────────────────────┐
-                       │ Persistence / Events│
-                       │      SQLite         │
-                       └─────────────────────┘
+transition lock
+plan state
+research output
+prompt caches
+messages
+intent result
+context snapshots
+cached dynamic context
+decision logger
+heal report
+checkpoint data
+current goal
 ```
 
-This architecture is deliberately implementable in Go without introducing unnecessary distributed-system machinery.
+and its own lock hierarchy. fileciteturn16file0
+
+This is an important clue.
+
+The team already recognized that `Engine` had too much mutable state and extracted `WorkflowState`.
+
+But that extraction solved the wrong problem.
+
+It reduced the number of fields on `Engine`.
+
+It did not eliminate the fact that workflow state, conversation state, context state, checkpoint state, and decision state are all being modeled as fields on one shared mutable object.
+
+The next step is therefore to split **state ownership**, not merely state location.
 
 ---
 
-# 6. Recommended Go Package Structure
+# 15. Current Context Architecture: What to Keep
 
-The exact package names can evolve, but ownership should look approximately like:
+Keep these ideas:
+
+- token estimation;
+- provider-specific context limits;
+- automatic compaction;
+- dynamic context sources;
+- protected information;
+- context thresholds;
+- tool-output limits;
+- model-specific prompt composition;
+- repository intelligence.
+
+These are good mechanisms.
+
+But move them behind the new context contract.
+
+---
+
+# 16. New Context Architecture
+
+The Context Engine should consume the authoritative run/task model.
 
 ```text
-cmd/
-  m31a/
-
-internal/
-  app/
-  runtime/
-  workflow/
-  planning/
-  execution/
-  tasks/
-  agents/
-  context/
-  model/
-  providers/
-  tools/
-  permissions/
-  policy/
-  verification/
-  recovery/
-  repository/
-  git/
-  storage/
-  session/
-  memory/
-  events/
-  metrics/
-  extensions/
-  config/
-  tui/
+ContextRequest
+   ↓
+Run
+   ↓
+Task
+   ↓
+Plan slice
+   ↓
+Repository intelligence
+   ↓
+Evidence
+   ↓
+Memory
+   ↓
+Git state
+   ↓
+Policy / permissions
+   ↓
+Relevance
+   ↓
+Budget
+   ↓
+ContextSnapshot
 ```
 
-The current `workflow` package should eventually become an orchestration layer rather than the home of every subsystem.
-
-A package may depend on another package's public contracts, but it must not reach into unrelated internal mutable state.
+The Context Engine should not need to inspect arbitrary fields on `WorkflowState`.
 
 ---
 
-# 7. Runtime
+# 17. ContextSnapshot
 
-The Runtime is the coordinator.
-
-It should own:
-
-- application lifecycle;
-- run lifecycle;
-- cancellation roots;
-- event publication;
-- service wiring;
-- workflow selection;
-- top-level recovery;
-- graceful shutdown.
-
-It should **not** own every domain's state.
+Every model decision gets a snapshot.
 
 Conceptually:
 
 ```go
-type Runtime struct {
-    store        *storage.Store
-    events       *events.Bus
-    planner      *planning.Service
-    executor     *execution.Service
-    context      *context.Engine
-    models       *model.Gateway
-    tools        *tools.Runtime
-    verifier     *verification.Service
-    recovery     *recovery.Service
-    repository   *repository.Service
-    git          *git.Service
-    sessions     *session.Service
+type ContextSnapshot struct {
+    ID          string
+    RunID       string
+    TaskID      string
+    AgentID     string
+    Decision    string
+    Model       string
+    TokenBudget int
+    TokenUsed   int
+    Sources     []ContextSource
+    Hash        string
+    CreatedAt   time.Time
 }
 ```
 
-The actual implementation should use interfaces where they provide real testing or substitution value. Do not create interfaces mechanically for every struct.
+The actual content can remain in a separate artifact if necessary.
 
----
-
-# 8. EngineeringRun
-
-The top-level runtime concept is an `EngineeringRun`.
-
-```text
-EngineeringRun
-├── Project
-├── Intent
-├── Workflow
-├── Plan
-├── Tasks
-├── Agents
-├── ContextSnapshots
-├── ToolCalls
-├── FileChanges
-├── VerificationRuns
-├── RecoveryAttempts
-├── PermissionRequests
-├── Events
-└── Evidence
-```
-
-Important distinctions:
-
-```text
-Run            ≠ Phase
-Task           ≠ Model Call
-Agent          ≠ Task
-Context        ≠ Conversation
-Event          ≠ Log Line
-Evidence       ≠ Model Claim
-Checkpoint     ≠ Git Commit
-```
-
-These distinctions should appear in the types and storage schema.
-
----
-
-# 9. Event Model
-
-Use explicit runtime events.
-
-Examples:
-
-```text
-RunCreated
-IntentClassified
-RepositoryInspected
-ResearchStarted
-ResearchCompleted
-DiscussionStarted
-DecisionRecorded
-PlanCreated
-PlanValidated
-PlanRevised
-TaskScheduled
-TaskStarted
-TaskCompleted
-AgentSpawned
-AgentCompleted
-ToolRequested
-PermissionRequested
-ToolStarted
-ToolCompleted
-FileChanged
-VerificationStarted
-VerificationPassed
-VerificationFailed
-RecoveryStarted
-RecoveryCompleted
-CheckpointCreated
-RunPaused
-RunResumed
-RunCancelled
-RunCompleted
-RunFailed
-```
-
-Events are durable facts about the runtime.
-
-Logs remain diagnostic output.
-
-A log line may disappear without invalidating state.
-
-A state transition that must survive restart should be represented in durable state/event records.
-
----
-
-# 10. SQLite State Model
-
-Use SQLite as the authoritative local runtime database.
-
-Likely tables include:
-
-```text
-projects
-runs
-run_events
-sessions
-plans
-plan_versions
-tasks
-task_dependencies
-agents
-agent_attempts
-tool_calls
-permission_requests
-verification_runs
-evidence
-recovery_attempts
-context_snapshots
-model_calls
-usage_records
-checkpoints
-file_changes
-workspaces
-```
-
-SQLite should be accessed through a dedicated storage package.
-
-No workflow package should construct SQL directly.
-
-Transactions should cover state changes that must be atomic.
-
-Use WAL mode and explicit connection/pooling rules appropriate for a local concurrent application. SQLite's WAL model supports concurrent readers with a writer, but long-lived readers and checkpoint behavior still need to be managed intentionally.
-
-### Authoritative rule
-
-```text
-SQLite
-   ↓
-authoritative runtime state
-
-Markdown / JSON
-   ↓
-projection / human artifact / compatibility artifact
-```
-
-If generated `STATE.md` disagrees with SQLite, regenerate it.
-
----
-
-# 11. Planning System
-
-Planning should be a domain service.
-
-```text
-User Intent
-    ↓
-Intent Assessment
-    ↓
-Repository Understanding
-    ↓
-Research (when warranted)
-    ↓
-Discussion (when ambiguity exists)
-    ↓
-Plan Draft
-    ↓
-Plan Checker
-    ↓
-Coverage / Risk / Security Review
-    ↓
-Plan Revision
-    ↓
-Task Graph
-```
-
-## Planning outputs
-
-```text
-PROJECT.md
-REQUIREMENTS.md
-ROADMAP.md
-STATE.md
-RESEARCH.md
-CONTEXT.md
-PLAN.md
-TASKS.md
-```
-
-Not every request requires every artifact.
-
-The runtime should create the minimum artifact set required for reliable work.
-
----
-
-# 12. Example: What `/planning` Does in M31A
-
-M31A should expose a human-friendly planning command such as:
-
-```text
-/planning
-```
-
-or a CLI equivalent.
-
-The command is an **entry point into the Planning Service**, not a magic prompt.
-
-Suppose the user says:
-
-```text
-/planning Add OAuth2 login with Google and GitHub.
-Users should be able to sign in, link accounts, and revoke sessions.
-```
-
-The runtime should do approximately:
-
-```text
-1. Parse intent
-2. Inspect repository
-3. Determine project architecture
-4. Identify authentication-related code
-5. Identify database/storage layer
-6. Identify existing session model
-7. Determine test/build commands
-8. Determine security-sensitive areas
-9. Decide whether external research is needed
-10. Gather research if required
-11. Produce implementation requirements
-12. Decompose into phases/tasks
-13. Validate dependencies
-14. Validate acceptance criteria
-15. Validate security coverage
-16. Persist plan
-17. Present plan to user
-```
-
-Example generated artifacts:
-
-```text
-.m31a/
-├── m31a.db
-├── PROJECT.md
-├── REQUIREMENTS.md
-├── ROADMAP.md
-├── STATE.md
-└── phases/
-    └── 01-authentication/
-        ├── CONTEXT.md
-        ├── RESEARCH.md
-        ├── PLAN.md
-        ├── TASKS.md
-        └── ACCEPTANCE.md
-```
-
-Example plan:
-
-```text
-Phase 1 — Authentication Foundation
-
-Task 1
-Create OAuth provider abstraction.
-Depends on: none
-Verify: unit tests + interface compilation
-
-Task 2
-Implement Google OAuth provider.
-Depends on: Task 1
-Verify: provider contract tests
-
-Task 3
-Implement GitHub OAuth provider.
-Depends on: Task 1
-Verify: provider contract tests
-
-Task 4
-Implement account linking.
-Depends on: Task 1
-Verify: integration tests
-
-Task 5
-Implement session revocation.
-Depends on: Task 4
-Verify: security/integration tests
-
-Task 6
-Add end-to-end authentication tests.
-Depends on: Tasks 2–5
-Verify: complete test suite
-```
-
-The planner should **not** modify production source code.
-
-It creates an executable plan.
-
----
-
-# 13. Research
-
-Research is an input to planning, not a mandatory ritual.
-
-Use research when:
-
-- the technology is unfamiliar;
-- external APIs/specifications matter;
-- security implications require authoritative information;
-- the repository contains uncertainty that local inspection cannot resolve;
-- a design decision has significant consequences.
-
-Skip or reduce research when:
-
-- the task is obvious;
-- the repository already contains authoritative information;
-- the change is a small local modification.
-
-Research should produce durable findings rather than merely adding text to the model context.
-
-```text
-Research Finding
-├── source
-├── claim
-├── relevance
-├── confidence
-├── timestamp
-└── applicability
-```
-
----
-
-# 14. Discussion
-
-Discussion exists to resolve uncertainty that planning cannot safely infer.
-
-For example:
-
-```text
-User:
-"Add notifications."
-
-M31A:
-"Which channels should be supported?
-1. Email
-2. In-app
-3. Web push
-4. All three"
-```
-
-After the user answers:
-
-```text
-DecisionRecorded
-```
-
-The answer becomes part of the durable project/run context.
-
-Discussion should not become an endless conversational loop.
-
-The runtime should stop asking when the information required for a safe plan is sufficient.
-
----
-
-# 15. Context Engine
-
-The Context Engine is one of the most important architectural changes.
-
-```text
-ContextRequest
-      ↓
-Source Discovery
-      ↓
-Retrieval
-      ↓
-Authority Resolution
-      ↓
-Freshness Check
-      ↓
-Relevance Ranking
-      ↓
-Token Budgeting
-      ↓
-Compression
-      ↓
-Assembly
-      ↓
-ContextSnapshot
-```
-
-Possible sources:
-
-```text
-System Rules
-User Intent
-Project Profile
-Requirements
-Plan
-Task
-Repository Structure
-Symbols
-Dependency Graph
-Relevant Files
-Git Diff
-Previous Decisions
-Memory
-Tool Results
-Verification Failures
-Prior Evidence
-Research
-```
-
-The Context Engine should answer:
-
-```text
-What does this agent need to know?
-Why does it need to know it?
-Where did the information come from?
-How authoritative is it?
-How fresh is it?
-How much context budget should it consume?
-```
-
-### Context snapshot
-
-Each important model call should be attributable to:
-
-```text
-ContextSnapshot
-├── run_id
-├── task_id
-├── agent_id
-├── sources
-├── source versions/hashes
-├── selected content
-├── token budget
-├── compression metadata
-└── context hash
-```
-
-This makes debugging and evaluation possible.
-
----
-
-# 16. Execution
-
-Execution consumes a validated task graph.
-
-```text
-Task Graph
-    ↓
-Dependency Scheduler
-    ↓
-Runnable Tasks
-    ↓
-Agent Runtime
-    ↓
-Task Context
-    ↓
-Model
-    ↓
-Tool Runtime
-    ↓
-Filesystem/Git
-    ↓
-Evidence
-```
-
-Independent tasks can run in parallel.
-
-Concurrency must be explicitly bounded.
-
-Each task should have:
-
-```text
-Task
-├── ID
-├── description
-├── dependencies
-├── acceptance criteria
-├── context requirements
-├── allowed capabilities
-├── timeout
-├── retry policy
-├── verification strategy
-└── state
-```
-
----
-
-# 17. Agent Runtime
-
-An agent is an execution actor with a bounded responsibility.
-
-```text
-Agent
-├── identity
-├── task
-├── context
-├── model
-├── capabilities
-├── cancellation
-├── attempt
-└── evidence
-```
-
-An agent should not have unrestricted access to the global Runtime object.
-
-Give it explicit dependencies:
-
-```go
-type AgentDeps struct {
-    Context  *context.Engine
-    Model    model.Client
-    Tools    tools.Executor
-    Store    storage.TaskStore
-    Events   events.Publisher
-}
-```
-
-This prevents hidden coupling and makes agent behavior testable.
-
----
-
-# 18. Tool Runtime
-
-Tools are capabilities.
-
-```text
-ToolRequest
-    ↓
-Capability Check
-    ↓
-Policy Check
-    ↓
-Permission
-    ↓
-Resource Limits
-    ↓
-Execution
-    ↓
-Evidence
-```
-
-Examples:
-
-```text
-filesystem.read
-filesystem.write
-process.execute
-process.spawn
-network.request
-git.read
-git.write
-browser.open
-mcp.invoke
-```
-
-Risk should be explicit.
-
-```text
-SAFE
-LOW
-MEDIUM
-HIGH
-CRITICAL
-```
-
-The permission system decides whether the capability can execute under the current policy.
-
----
-
-# 19. Cancellation and Concurrency
-
-This is a major area of the Go rework.
-
-Every long-running operation must accept a `context.Context`.
-
-```go
-func (s *Service) Execute(ctx context.Context, req Request) error
-```
-
-No subsystem should create an untracked goroutine.
-
-Every goroutine must have a clear owner and termination condition.
-
-Use:
-
-- `errgroup` for structured concurrent work;
-- context cancellation for lifecycle propagation;
-- bounded worker pools where appropriate;
-- channels for event/data flow, not as a substitute for state ownership;
-- mutexes only around clearly owned mutable state;
-- documented lock ordering where multiple locks are unavoidable.
-
-Avoid:
-
-```text
-shared global state
-unbounded goroutine spawning
-anonymous background goroutines
-channel ownership ambiguity
-mutex chains
-sleep-based synchronization
-```
-
-### Cancellation contract
-
-Cancelling a run must propagate to:
-
-```text
-Run
- ↓
-Agent
- ↓
-Model stream
- ↓
-Tool execution
- ↓
-Child process
- ↓
-Retries
- ↓
-Subagents
-```
-
-Then persist a recoverable terminal/intermediate state.
-
----
-
-# 20. Verification
-
-Verification is independent from execution.
-
-```text
-Task Completed
-      ↓
-Verification Strategy
-      ↓
-Build / Test / Static Analysis / Targeted Checks
-      ↓
-Evidence
-      ↓
-Verification Result
-```
-
-A verification result should contain:
-
-```text
-VerificationResult
-├── status
-├── checks
-├── evidence IDs
-├── failures
-├── timestamp
-└── verifier version
-```
-
-Verification should be capable of discovering that an apparently successful implementation is wrong.
-
----
-
-# 21. Recovery
-
-Recovery should classify failures rather than blindly retry.
-
-```text
-Failure
-  ↓
-Classify
-  ├── transient
-  ├── environment
-  ├── tool
-  ├── model
-  ├── implementation
-  ├── plan
-  └── permission
-  ↓
-Choose strategy
-  ├── retry
-  ├── repair
-  ├── re-contextualize
-  ├── re-plan
-  ├── rollback
-  └── ask user
-```
-
-Every recovery attempt must be bounded.
-
-A repeated identical failure should trigger strategy escalation rather than infinite retry.
-
----
-
-# 22. Git and Checkpoints
-
-Git is a source-control integration.
-
-It is not the runtime database.
-
-A checkpoint is a recovery boundary.
-
-A commit is a Git history object.
-
-They may coincide, but they are not conceptually identical.
+The critical point is attribution.
 
 M31A should be able to answer:
 
 ```text
-Which task changed this file?
-Which agent made the change?
-Which run produced it?
-Was it verified?
-Which checkpoint contains it?
-Which Git commit contains it?
-Can it be reverted safely?
+What did the model know?
+Why was it included?
+What task was active?
+What plan version was active?
+Which repository state was observed?
+What evidence was available?
 ```
 
 ---
 
-# 23. TUI
+# 18. Execution Must Consume a Task Graph
 
-Keep Bubble Tea for the Go implementation unless there is a demonstrated reason to replace it.
+The current executor already uses dependency ordering and bounded parallelism. That behavior should remain.
 
-The TUI must become a **client of application state**, not the owner of runtime state.
-
-Target model:
+The correction is to make the Task Graph authoritative.
 
 ```text
-Runtime Event Bus
-       ↓
-Application/UI Adapter
-       ↓
-Bubble Tea Model
-       ↓
-View
+TaskGraph
+├── Task
+├── Dependency
+├── State
+├── Attempt
+├── Acceptance
+└── Verification
 ```
 
-User input should produce commands sent to the application layer.
+The scheduler produces runnable tasks.
 
-The UI must not directly mutate planner, executor, provider, or storage internals.
+The agent runtime executes a task.
 
-The TUI should expose:
+The verification system decides whether it passed.
 
-```text
-Current Run
-Current Phase
-Current Task
-Task Graph
-Active Agents
-Tool Calls
-Permission Requests
-Verification
-Recovery
-Context Usage
-Model Usage
-Git Changes
-Errors
-```
+The scheduler never infers completion solely from model output.
 
 ---
 
-# 24. Example: Complete M31A Project Lifecycle
+# 19. Self-Healing Should Become Recovery
 
-Consider a new repository:
+The existing self-heal feature is useful.
 
-```text
-acme-api/
-```
+The problem is architectural coupling.
 
-The user starts:
+Today, the execute path can directly invoke healing, quality gates, verification, and commit logic.
 
-```text
-m31a
-```
-
-and asks:
+The target is:
 
 ```text
-Build a Go REST API for a SaaS billing system.
-Users need organizations, plans, subscriptions, invoices,
-and Stripe webhook handling.
-Use PostgreSQL and expose OpenAPI documentation.
+Executor
+  ↓
+Failure
+  ↓
+RecoveryService
+  ↓
+Repair attempt
+  ↓
+Verifier
+  ↓
+Pass / Fail
 ```
 
-## Step 1 — Initialize
+The executor does not decide how recovery works.
 
-M31A inspects:
+The recovery system does not decide whether the final task is verified.
 
-```text
-Go version
-module
-existing source
-existing tests
-Git state
-configuration
-project structure
-```
-
-It creates runtime state and project artifacts.
-
-```text
-.m31a/
-├── m31a.db
-├── PROJECT.md
-├── REQUIREMENTS.md
-├── ROADMAP.md
-└── STATE.md
-```
-
-## Step 2 — Understand
-
-Repository analysis discovers:
-
-```text
-cmd/api
-internal/http
-internal/db
-internal/auth
-```
-
-Suppose the repository is nearly empty.
-
-M31A records that fact rather than inventing architecture from assumptions.
-
-## Step 3 — Discuss
-
-M31A asks only decisions that materially affect implementation:
-
-```text
-Which Stripe integration model?
-1. Checkout + Customer Portal
-2. Direct subscription API
-3. Both
-```
-
-User selects `3`.
-
-The decision is persisted.
-
-## Step 4 — Research
-
-M31A researches current Stripe webhook requirements and relevant Go/PostgreSQL implementation concerns.
-
-Research findings are stored with sources and applicability.
-
-## Step 5 — Plan
-
-M31A creates:
-
-```text
-Phase 1 — Service foundation
-Phase 2 — Database/domain model
-Phase 3 — Authentication/organizations
-Phase 4 — Billing/subscriptions
-Phase 5 — Stripe webhooks
-Phase 6 — API/OpenAPI
-Phase 7 — Integration/verification
-```
-
-Each phase contains tasks with dependencies and acceptance criteria.
-
-## Step 6 — Execute
-
-Independent tasks run concurrently where safe.
-
-For example:
-
-```text
-Wave 1
-├── project structure
-├── configuration
-└── database foundation
-
-Wave 2
-├── organization model
-├── billing model
-└── API scaffolding
-
-Wave 3
-├── subscription service
-├── Stripe integration
-└── OpenAPI generation
-```
-
-Each agent receives only the context required for its task.
-
-## Step 7 — Verify
-
-M31A runs:
-
-```text
-go test ./...
-go vet ./...
-OpenAPI generation check
-migration checks
-integration tests
-Stripe webhook signature tests
-```
-
-The result becomes evidence.
-
-## Step 8 — Recover
-
-Suppose webhook integration tests fail because the generated event parser expects an outdated field.
-
-M31A does not blindly retry.
-
-It classifies the failure, updates context, inspects the relevant API contract, repairs the implementation, and reruns verification.
-
-## Step 9 — Ship
-
-After acceptance criteria pass:
-
-```text
-Git diff review
-verification summary
-commit
-final project state
-```
-
-M31A reports:
-
-```text
-7 phases
-42 tasks
-39 completed automatically
-3 required recovery attempts
-0 unresolved verification failures
-```
-
-The complete run remains recoverable from SQLite.
+The verifier remains authoritative for verification.
 
 ---
 
-# 25. Command Architecture
+# 20. The Same Principle Applies to Git
 
-Commands should be thin entry points into services.
+A Git commit is not proof of correctness.
 
-Example command surface:
+A successful model response is not proof of correctness.
 
-```text
-m31a
-m31a init
-m31a planning
-m31a discuss
-m31a plan
-m31a execute
-m31a verify
-m31a status
-m31a resume
-m31a pause
-m31a recover
-m31a ship
-m31a inspect
-m31a context
-m31a doctor
-```
+A successful tool call is not proof of correctness.
 
-Slash commands may exist inside the TUI:
+Only verification evidence can establish task completion.
+
+The runtime should therefore track:
 
 ```text
-/planning
-/execute
-/verify
-/status
-/resume
-/pause
-```
-
-But command spelling must not determine domain architecture.
-
-For example:
-
-```text
-/planning
-      ↓
-planning.Service
+Change
+→ Verification
+→ Evidence
+→ Commit
 ```
 
 not:
 
 ```text
-/planning
-      ↓
-TUI handler
-      ↓
-Engine mutation
-      ↓
-random helper functions
+Change
+→ Commit
+→ assume success
 ```
 
 ---
 
-# 26. Autonomous Mode
+# 21. The TUI Is Also a Projection
 
-Autonomous execution should compose normal services.
+The TUI should display runtime truth rather than maintain a second copy.
+
+For example:
 
 ```text
-AutonomousRun
-    ↓
-Determine next action
-    ↓
-Discuss if required
-    ↓
-Plan if required
-    ↓
+SQLite / Runtime
+      ↓
+Event Bus
+      ↓
+Bubble Tea Model
+      ↓
+View
+```
+
+The TUI can optimistically render transient state, but durable workflow status must come from runtime state/events.
+
+This reduces UI/runtime divergence.
+
+---
+
+# 22. The Current Seven-Phase System Should Not Be Deleted
+
+The seven-phase workflow is one of M31A's product differentiators. The README explicitly presents it as the core product loop. fileciteturn6file0
+
+Keep it.
+
+Improve what each phase owns.
+
+```text
+Initialize
+→ discover + prepare
+
+Discuss
+→ resolve ambiguity
+
+Plan
+→ produce validated task graph
+
 Execute
-    ↓
+→ perform bounded mutations
+
 Verify
-    ↓
-Recover if required
-    ↓
-Advance
+→ produce evidence
+
+Runtime
+→ optionally run deployed/local runtime checks
+
+Ship
+→ finalize verified changes
 ```
 
-Autonomous mode must not bypass verification, permission, cancellation, or persistence rules.
-
-This mirrors the useful GSD concept of chaining workflow operations while preserving each operation's safety gates. GSD's current `/gsd-autonomous` and `/gsd-progress --next --auto` are examples of this composition model. citeturn0search0
+The architecture should support skipping phases for simple tasks, as the current modes already do.
 
 ---
 
-# 27. Context and Artifact Lifecycle
+# 23. `/planning` In the Correct Architecture
 
-M31A should distinguish four kinds of information:
-
-### 27.1 Authoritative state
-
-Stored in SQLite.
-
-### 27.2 Planning artifacts
-
-Human-readable artifacts such as:
+Example request:
 
 ```text
-PROJECT.md
-REQUIREMENTS.md
-ROADMAP.md
-CONTEXT.md
-RESEARCH.md
-PLAN.md
-TASKS.md
-STATE.md
+/planning
+Add JWT authentication to the existing API while preserving current sessions for 30 days.
 ```
 
-### 27.3 Runtime evidence
-
-Structured verification/tool/recovery records.
-
-### 27.4 Diagnostic logs
-
-Operational information useful for debugging but not required to reconstruct the run.
-
-Do not mix these categories.
-
----
-
-# 28. Model Gateway
-
-Providers should be hidden behind a stable model contract.
-
-```go
-type Client interface {
-    Complete(ctx context.Context, req Request) (Response, error)
-    Stream(ctx context.Context, req Request) (Stream, error)
-}
-```
-
-Provider-specific features should be represented explicitly rather than leaking provider types into workflow packages.
-
-The gateway owns:
-
-- provider selection;
-- model selection;
-- fallback;
-- retry classification;
-- usage accounting;
-- streaming normalization;
-- capability discovery.
-
-It does not own task state.
-
----
-
-# 29. Configuration
-
-Configuration should be resolved once at the application boundary.
-
-Suggested precedence:
+Planning should produce:
 
 ```text
-built-in defaults
-    ↓
-user configuration
-    ↓
-workspace configuration
-    ↓
-project configuration
-    ↓
-run configuration
-    ↓
-explicit CLI flags
-```
-
-Resolved configuration should be immutable for a run unless a feature explicitly supports live changes.
-
-This prevents configuration reads from becoming hidden dependencies throughout the codebase.
-
----
-
-# 30. Memory
-
-Memory should be separated into:
-
-```text
-Project Memory
-Run Memory
-Task Memory
-Agent Findings
-Decision Records
+Intent
+Requirements
+Constraints
+Open Questions
 Research Findings
+Architecture Decision
+Task Graph
+Acceptance Criteria
+Verification Strategy
 ```
 
-Memory is not an unbounded transcript.
+Then persist the plan.
 
-Every memory item should have provenance and applicability.
-
-A stale memory item should not automatically outrank current repository evidence.
-
----
-
-# 31. Repository Intelligence
-
-The existing code-intelligence work should be preserved and moved behind a dedicated repository service.
-
-The repository service can provide:
+Example task graph:
 
 ```text
-ProjectProfile
-FileTree
-Symbols
-References
-DependencyGraph
-Tests
-BuildSystem
-LanguageProfile
-GitStatus
-RelevantFiles
+Task 1
+Inspect current auth/session model.
+
+Task 2
+Add JWT verification infrastructure.
+Depends on: 1
+
+Task 3
+Implement dual-auth compatibility layer.
+Depends on: 2
+
+Task 4
+Migrate protected route handling.
+Depends on: 3
+
+Task 5
+Add compatibility tests.
+Depends on: 4
+
+Task 6
+Run security and regression verification.
+Depends on: 5
 ```
 
-The Context Engine consumes these facts.
-
-Planning and execution should not each independently rediscover repository structure.
+This is the point where M31A should be substantially better than a generic coding agent.
 
 ---
 
-# 32. Extension Architecture
+# 24. Example End-to-End Run
 
-Extensions should be introduced only after core ownership is stable.
-
-Potential extension points:
+User:
 
 ```text
-Provider
-Tool
-Repository Analyzer
-Verifier
-Workflow Strategy
-Hook
-MCP Integration
-Notification
+Create a REST API for task management with Google OAuth,
+PostgreSQL, and Docker deployment.
 ```
 
-An extension must interact through explicit contracts.
+## Initialize
 
-Do not expose internal mutable structs as plugin APIs.
-
-The current roadmap already identifies providers, tools, workflows, integrations, and hooks as extension areas. fileciteturn3file0
-
----
-
-# 33. Testing Strategy
-
-The goal is behavioral confidence, not line coverage.
-
-## Unit tests
-
-Use for:
-
-- parsers;
-- state transitions;
-- dependency resolution;
-- context ranking;
-- token budgeting;
-- policy evaluation;
-- plan validation;
-- retry classification.
-
-## Integration tests
-
-Use for:
-
-- SQLite persistence;
-- provider adapters;
-- tool execution;
-- Git operations;
-- repository analysis;
-- planner/executor integration.
-
-## End-to-end tests
-
-Test complete workflows:
-
-```text
-request
-→ planning
-→ execution
-→ verification
-→ persistence
-```
-
-## Failure tests
-
-Explicitly test:
-
-- cancellation;
-- process death;
-- provider failure;
-- malformed tool call;
-- tool timeout;
-- permission denial;
-- database interruption;
-- verification failure;
-- repeated recovery failure;
-- concurrent tasks;
-- resumed sessions.
-
----
-
-# 34. Observability
-
-Every run should expose:
-
-```text
-run duration
-task duration
-model latency
-first-token latency
-tool latency
-verification duration
-retry count
-recovery count
-context size
-model tokens
-estimated cost
-parallelism
-cancellation reason
-completion status
-```
-
-Metrics should answer engineering questions rather than merely produce dashboards.
-
----
-
-# 35. Migration Strategy From Current Go Code
-
-This is an **in-place architectural rework**, not a greenfield language rewrite.
-
-## Stage 1 — Freeze architectural expansion
-
-Do not add major subsystems to the current giant engine boundary.
-
-Bug fixes are allowed.
-
-Critical reliability/security fixes take priority.
-
-## Stage 2 — Define contracts
-
-Create stable contracts for:
-
-```text
-ModelClient
-ToolExecutor
-ContextProvider
-Planner
-Executor
-Verifier
-RecoveryService
-RepositoryService
-Storage
-EventPublisher
-```
-
-## Stage 3 — Introduce SQLite
-
-Move authoritative session/run/task state into the storage layer.
-
-Keep existing Markdown/JSON files as projections during migration.
-
-## Stage 4 — Extract Context Engine
-
-Move context construction, retrieval, ranking, budgeting, and compaction out of workflow code.
-
-## Stage 5 — Extract Planning Service
-
-Move research, planning, validation, and task graph construction out of `Engine`.
-
-## Stage 6 — Extract Execution Service
-
-Move scheduling, agent execution, tool loops, and task state out of `Engine`.
-
-## Stage 7 — Extract Verification and Recovery
-
-Make them independent services with explicit contracts.
-
-## Stage 8 — Rework TUI boundary
-
-Bubble Tea becomes a consumer of runtime events and a producer of application commands.
-
-## Stage 9 — Delete obsolete engine state
-
-Only after all callers migrate should old shared state and compatibility helpers be removed.
-
----
-
-# 36. What We Keep From the Existing Go Project
-
-Preserve the proven behavior and ideas from the current implementation:
-
-```text
-provider abstraction
-streaming
-native tool calls
-permission model
-task dependencies
-bounded parallel execution
-plan validation
-research
-self-healing concepts
-Git integration
-code intelligence
-context compaction concepts
-metrics
-decision logging
-session/resume concepts
-Bubble Tea UI
-```
-
-These are valuable implementation knowledge.
-
----
-
-# 37. What We Do Not Preserve
-
-Do not preserve these as architectural constraints merely because they already exist:
-
-```text
-Engine as universal owner
-workflow package owning unrelated state
-TUI owning runtime state
-workflow code constructing all context
-file artifacts acting as hidden database
-unbounded shared mutable state
-implicit goroutine ownership
-provider-specific types leaking everywhere
-shell blocklists as primary security
-execution deciding its own verification result
-blind retry loops
-```
-
-Compatibility is not a reason to retain bad ownership.
-
----
-
-# 38. Non-Goals
-
-This architecture does **not** require:
-
-- rewriting M31A in Rust;
-- microservices;
-- remote/distributed orchestration;
-- a cloud control plane;
-- Kubernetes;
-- a custom database server;
-- replacing Bubble Tea without evidence;
-- rewriting every existing subsystem immediately;
-- copying GSD Core's implementation.
-
-M31A remains a local-first Go application.
-
----
-
-# 39. Architectural Rules
-
-These rules are mandatory for new code.
-
-### Rule 1
-No new feature should add another responsibility to `workflow.Engine` unless that responsibility is genuinely workflow orchestration.
-
-### Rule 2
-Every long-running operation accepts `context.Context`.
-
-### Rule 3
-Every goroutine has an owner and termination path.
-
-### Rule 4
-SQLite is authoritative for recoverable runtime state.
-
-### Rule 5
-Markdown/JSON are artifacts or projections unless explicitly designated otherwise.
-
-### Rule 6
-The model cannot declare implementation success without independent verification.
-
-### Rule 7
-Tools execute capabilities under explicit policy.
-
-### Rule 8
-The Context Engine owns model-context assembly.
-
-### Rule 9
-The TUI never becomes the source of truth for runtime state.
-
-### Rule 10
-Autonomous mode uses the same planning, execution, verification, permission, cancellation, and recovery primitives as interactive mode.
-
-### Rule 11
-Prefer composition over giant interfaces and giant state objects.
-
-### Rule 12
-Do not introduce an abstraction unless it solves an actual ownership, substitution, testing, or lifecycle problem.
-
----
-
-# 40. Definition of Architectural Success
-
-M31A is considered architecturally reworked when:
-
-- `workflow.Engine` is an orchestration boundary rather than a universal state container;
-- runtime state can be reconstructed from SQLite;
-- a run can be paused and resumed reliably;
-- cancellation propagates through every child operation;
-- planning is independently testable;
-- execution is independently testable;
-- verification is independent from model claims;
-- recovery is independently testable;
-- context construction is independently testable;
-- tools are governed by explicit capabilities and policies;
-- TUI and runtime can evolve independently;
-- provider implementations can change without rewriting workflow code;
-- concurrent task execution has explicit ownership and limits;
-- end-to-end workflows have deterministic state transitions;
-- important runtime decisions are observable and auditable.
-
----
-
-# 41. Final Architectural Position
-
-M31A does not need a new language.
-
-It needs a new **ownership model**.
-
-Go is capable of implementing the architecture we want. The failure mode to avoid is not Go itself; it is allowing one mutable workflow object to become the application's operating system.
-
-The new M31A should therefore be:
+M31A discovers:
 
 ```text
 Go
-│
-├── Runtime
-├── Planning
-├── Execution
-├── Context
-├── Model Gateway
-├── Tool Runtime
-├── Verification
-├── Recovery
-├── Repository Intelligence
-├── Git
-├── SQLite Storage
-├── Events
-└── Bubble Tea UI
+Gin
+PostgreSQL
+Docker
 ```
 
-with clear contracts between them.
+Creates:
 
-The central design principle is:
+```text
+run
+project
+repository profile
+```
 
-> **M31A is a Go-native autonomous engineering runtime composed of explicit services, durable state, focused context, verifiable execution, and recoverable workflows.**
+## Discuss
 
-That is the architecture we should implement from this point forward.
+M31A asks:
+
+```text
+Should tasks be private to each authenticated user?
+```
+
+User:
+
+```text
+Yes.
+```
+
+Decision becomes durable run state.
+
+## Plan
+
+M31A produces:
+
+```text
+Phase 1
+Database foundation
+
+Phase 2
+OAuth/session
+
+Phase 3
+Task API
+
+Phase 4
+Tests + Docker verification
+```
+
+## Execute
+
+Tasks run in dependency order.
+
+Each task gets a ContextSnapshot.
+
+## Verify
+
+Run:
+
+```text
+go test ./...
+go vet ./...
+docker build ...
+```
+
+## Recovery
+
+A test fails.
+
+M31A creates:
+
+```text
+FailureRecord
+RecoveryAttempt
+new ContextSnapshot
+```
+
+It repairs and verifies again.
+
+## Ship
+
+Only after required evidence passes:
+
+```text
+review
+commit
+summary
+ledger
+```
+
+This is the workflow we want, regardless of how many internal packages implement it.
+
+---
+
+# 25. Migration Plan Inside Go
+
+Do this incrementally.
+
+## Step 1 — Establish the run model
+
+Introduce authoritative IDs for:
+
+```text
+Run
+Plan
+Task
+Agent
+Attempt
+Verification
+Evidence
+```
+
+Do not change the TUI yet.
+
+## Step 2 — Introduce the storage abstraction
+
+Hide persistence behind interfaces/services.
+
+Keep the existing flat-file implementation temporarily if necessary.
+
+Then add SQLite as the authoritative backend.
+
+## Step 3 — Extract Context Engine
+
+Move context construction away from `WorkflowState` and `Engine`.
+
+## Step 4 — Extract Task/Execution Service
+
+Move scheduler and agent lifecycle away from the monolithic engine.
+
+## Step 5 — Extract Verification
+
+Make verification produce durable evidence.
+
+## Step 6 — Extract Recovery
+
+Move self-healing policy out of execute code.
+
+## Step 7 — Rework TUI as projection
+
+Make Bubble Tea consume runtime events/state instead of owning lifecycle logic.
+
+## Step 8 — Remove duplicate state
+
+After all consumers move, delete old fields, caches, and compatibility paths.
+
+---
+
+# 26. What Not To Do
+
+Do not:
+
+```text
+rewrite in Rust
+rewrite every package at once
+split engine.go without changing ownership
+add more features before fixing state authority
+add RAG before repository intelligence is correct
+add multi-agent complexity before one-agent runs are reliable
+add another cache to hide stale state
+add another JSON artifact as a new source of truth
+```
+
+Do:
+
+```text
+fix state authority
+fix ownership
+fix lifecycle
+fix context construction
+fix persistence
+fix evidence
+then expand capabilities
+```
+
+---
+
+# 27. The Core Problem in One Sentence
+
+> **M31A is suffering from distributed state ownership inside a single-process application: the same engineering run is represented and mutated by the workflow engine, workflow state, session files, context state, task runner, recovery state, Git state, and TUI, which forces synchronization and creates drift.**
+
+The oversized engine, lock complexity, context fragility, recovery complexity, and hard-to-test behavior are consequences of that problem.
+
+---
+
+# 28. The Correct Target
+
+The target is not:
+
+```text
+smaller Engine
+```
+
+It is:
+
+```text
+one authoritative run model
+        ↓
+explicit domain owners
+        ↓
+projections everywhere else
+```
+
+Conceptually:
+
+```text
+                    EngineeringRun
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+       Planning         Execution        Verification
+          │                │                │
+          └────────────────┼────────────────┘
+                           ▼
+                      Context Engine
+                           │
+                           ▼
+                      Model Gateway
+                           │
+                           ▼
+                      Tool Runtime
+                           │
+                           ▼
+                        Evidence
+                           │
+                           ▼
+                       Recovery
+                           │
+                           ▼
+                        Run State
+                           │
+                           ▼
+                       SQLite
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+          Bubble Tea               Markdown/JSON
+          projection               projections
+```
+
+---
+
+# 29. Architectural Invariants
+
+### Invariant 1
+There is one authoritative state for an EngineeringRun.
+
+### Invariant 2
+A projection cannot become authoritative merely because it is convenient.
+
+### Invariant 3
+Context is constructed for decisions, not merely for conversations.
+
+### Invariant 4
+Every model decision has attributable context.
+
+### Invariant 5
+Task state is not inferred from UI state.
+
+### Invariant 6
+Verification state is not inferred from model claims.
+
+### Invariant 7
+Recovery state is durable.
+
+### Invariant 8
+Every goroutine has an owner and cancellation path.
+
+### Invariant 9
+Every tool invocation passes through policy and capability checks.
+
+### Invariant 10
+Caches are disposable and never authoritative.
+
+### Invariant 11
+Current repository evidence outranks stale memory.
+
+### Invariant 12
+Autonomous mode uses the same reliable primitives as interactive mode.
+
+---
+
+# 30. Architectural Success Criteria
+
+The rework is successful when:
+
+- one run can be inspected as one coherent entity;
+- state can be reconstructed after restart without guessing between files;
+- context can be inspected and explained for every model decision;
+- task state cannot silently diverge between scheduler, persistence, and UI;
+- cancellation reaches all descendants;
+- verification produces durable evidence;
+- recovery is bounded and attributable;
+- TUI state is derived from runtime state/events;
+- new features do not require adding another responsibility to `workflow.Engine`;
+- the existing seven-phase product experience remains intact;
+- Go remains the implementation language.
+
+---
+
+# 31. Final Position
+
+M31A does not have a **language problem**.
+
+M31A does not primarily have a **feature problem**.
+
+M31A does not primarily have an **LLM problem**.
+
+M31A's core problem is **state authority and ownership**.
+
+The current architecture has grown by adding capabilities to a central workflow object and surrounding it with additional caches, persistence mechanisms, locks, callbacks, and projections.
+
+That growth has produced an application in which local components can be correct while the overall engineering run becomes inconsistent or difficult to reason about.
+
+The correction is therefore:
+
+```text
+Current M31A
+
+many representations
+        ↓
+many synchronization paths
+        ↓
+large central coordinator
+        ↓
+fragile emergent behavior
+
+                    ↓ REWORK ↓
+
+Target M31A
+
+one authoritative run model
+        ↓
+explicit ownership
+        ↓
+domain services
+        ↓
+context snapshots
+        ↓
+evidence-backed transitions
+        ↓
+projections
+        ↓
+predictable autonomous engineering
+```
+
+**Keep Go. Keep the seven-phase workflow. Keep the good parts already built. Rework the ownership model underneath them.**
