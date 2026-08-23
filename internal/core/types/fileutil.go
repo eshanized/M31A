@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -148,4 +149,35 @@ func AtomicWriteWithPerm(path string, data []byte, perm os.FileMode) error {
 	}
 
 	return nil
+}
+
+// ValidatePath validates that the given path is within the workspace root
+// to prevent symlink escape attacks. Returns true if the path is valid.
+func ValidatePath(path string) bool {
+	// Get the absolute path of the current working directory (workspace root)
+	workDir, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+
+	absWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return false
+	}
+
+	absPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// If the path doesn't exist yet, we can't validate it fully
+		// Just check if it's under the workspace root
+		absPath = path
+	}
+
+	// Check if the path is within the workspace root
+	relPath, err := filepath.Rel(absWorkDir, absPath)
+	if err != nil {
+		return false
+	}
+
+	// Path should not start with ".." (outside workspace)
+	return !strings.HasPrefix(relPath, "..") && relPath != ".."
 }
