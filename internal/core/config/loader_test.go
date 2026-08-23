@@ -45,15 +45,18 @@ func TestConfig_DefaultConfig(t *testing.T) {
 		t.Fatal("DefaultConfig() returned nil")
 	}
 
-	// Verify zero values
-	if cfg.Provider.Default != "" {
-		t.Errorf("expected empty Provider.Default, got %q", cfg.Provider.Default)
+	// Verify new defaults (Phase 1)
+	if cfg.Provider.Default != "nvidia" {
+		t.Errorf("expected Provider.Default='nvidia', got %q", cfg.Provider.Default)
 	}
-	if cfg.UI.Theme != "" {
-		t.Errorf("expected empty UI.Theme, got %q", cfg.UI.Theme)
+	if cfg.Model.Default != "nvidia/nemotron-3-ultra-550b-a55b" {
+		t.Errorf("expected Model.Default='nvidia/nemotron-3-ultra-550b-a55b', got %q", cfg.Model.Default)
 	}
-	if cfg.Model.Default != "" {
-		t.Errorf("expected empty Model.Default, got %q", cfg.Model.Default)
+	if cfg.Provider.NvidiaBaseURL != "https://integrate.api.nvidia.com/v1" {
+		t.Errorf("expected Provider.NvidiaBaseURL='https://integrate.api.nvidia.com/v1', got %q", cfg.Provider.NvidiaBaseURL)
+	}
+	if cfg.UI.Theme != "dark" {
+		t.Errorf("expected UI.Theme='dark', got %q", cfg.UI.Theme)
 	}
 	if cfg.Permissions.DefaultMode != "" {
 		t.Errorf("expected empty Permissions.DefaultMode, got %q", cfg.Permissions.DefaultMode)
@@ -123,9 +126,12 @@ func TestConfig_LoadMissingFile(t *testing.T) {
 		t.Fatal("Load on missing file returned nil config")
 	}
 
-	// Should be default config (zero values)
-	if cfg.Provider.Default != "" {
-		t.Errorf("expected empty provider on default config, got %q", cfg.Provider.Default)
+	// Should be default config with Phase 1 defaults
+	if cfg.Provider.Default != "nvidia" {
+		t.Errorf("expected provider 'nvidia' on default config, got %q", cfg.Provider.Default)
+	}
+	if cfg.Model.Default != "nvidia/nemotron-3-ultra-550b-a55b" {
+		t.Errorf("expected model 'nvidia/nemotron-3-ultra-550b-a55b' on default config, got %q", cfg.Model.Default)
 	}
 }
 
@@ -218,7 +224,7 @@ func TestConfig_SaveAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	cfg := &Config{}
+	cfg := DefaultConfig()
 	cfg.Provider.Default = "openrouter"
 	cfg.UI.Theme = "dark"
 	cfg.Model.Default = "gpt-4o"
@@ -410,7 +416,7 @@ func TestConfig_SaveCreatesParentDir(t *testing.T) {
 	// Save to a nested directory that doesn't exist yet
 	path := filepath.Join(dir, "subdir", "nested", "config.toml")
 
-	cfg := &Config{}
+	cfg := DefaultConfig()
 	cfg.UI.Theme = "dark"
 
 	if err := cfg.Save(path); err != nil {
@@ -565,26 +571,15 @@ func TestMergeConfig(t *testing.T) {
 // ── Validation Tests ─────────────────────────────────────────────────────────
 
 func TestValidateConfig_Valid(t *testing.T) {
-	cfg := &Config{
-		Provider: ProviderConfig{
-			Default: "openrouter",
-		},
-		Model: ModelConfig{
-			ContextWarningThreshold: 0.8,
-			ArbitrageThreshold:      0.5,
-		},
-		UI: UIConfig{
-			Theme:         "dark",
-			MaxIterations: 100,
-		},
-		Permissions: PermissionsConfig{
-			DefaultMode:    "prompt",
-			TimeoutSeconds: 300,
-		},
-		Ledger: LedgerConfig{
-			MaxEntries: 50,
-		},
-	}
+	cfg := DefaultConfig()
+	cfg.Provider.Default = "openrouter"
+	cfg.Model.ContextWarningThreshold = 0.8
+	cfg.Model.ArbitrageThreshold = 0.5
+	cfg.UI.Theme = "dark"
+	cfg.UI.MaxIterations = 100
+	cfg.Permissions.DefaultMode = "prompt"
+	cfg.Permissions.TimeoutSeconds = 300
+	cfg.Ledger.MaxEntries = 50
 
 	if err := validateConfig(cfg); err != nil {
 		t.Errorf("expected nil error for valid config, got: %v", err)

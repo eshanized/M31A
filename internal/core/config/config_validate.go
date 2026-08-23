@@ -29,6 +29,18 @@ func validateConfig(cfg *Config) error {
 	var errs []error
 
 	// Provider
+	validProviders := map[string]bool{
+		m31types.ProviderOpenRouter: true,
+		m31types.ProviderZen:        true,
+		m31types.ProviderNvidia:     true,
+	}
+	if cfg.Provider.Default != "" && !validProviders[cfg.Provider.Default] {
+		errs = append(errs, ValidationError{
+			Field:        "provider.default",
+			ExpectedType: fmt.Sprintf("one of: %s, %s, %s", m31types.ProviderOpenRouter, m31types.ProviderZen, m31types.ProviderNvidia),
+			ActualValue:  cfg.Provider.Default,
+		})
+	}
 	if cfg.Provider.AutoFallback && cfg.Provider.Default == "" {
 		errs = append(errs, ValidationError{
 			Field:        "provider.default",
@@ -37,11 +49,6 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 	if len(cfg.Provider.FallbackPriority) > 0 {
-		validProviders := map[string]bool{
-			m31types.ProviderOpenRouter: true,
-			m31types.ProviderZen:        true,
-			m31types.ProviderNvidia:     true,
-		}
 		for i, name := range cfg.Provider.FallbackPriority {
 			if !validProviders[name] {
 				errs = append(errs, ValidationError{
@@ -287,6 +294,52 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 
+	// EventStore
+	if cfg.EventStore.Path == "" {
+		errs = append(errs, ValidationError{
+			Field:        "eventstore.path",
+			ExpectedType: "non-empty string",
+			ActualValue:  "",
+		})
+	}
+	if cfg.EventStore.BusyTimeoutMs <= 0 {
+		errs = append(errs, ValidationError{
+			Field:        "eventstore.busy_timeout_ms",
+			ExpectedType: "positive integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.EventStore.BusyTimeoutMs),
+		})
+	}
+	if cfg.EventStore.BackupIntervalHours <= 0 {
+		errs = append(errs, ValidationError{
+			Field:        "eventstore.backup_interval_hours",
+			ExpectedType: "positive integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.EventStore.BackupIntervalHours),
+		})
+	}
+	if cfg.EventStore.CheckpointInterval <= 0 {
+		errs = append(errs, ValidationError{
+			Field:        "eventstore.checkpoint_interval",
+			ExpectedType: "positive integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.EventStore.CheckpointInterval),
+		})
+	}
+	if cfg.EventStore.CheckpointRetention <= 0 {
+		errs = append(errs, ValidationError{
+			Field:        "eventstore.checkpoint_retention",
+			ExpectedType: "positive integer",
+			ActualValue:  fmt.Sprintf("%d", cfg.EventStore.CheckpointRetention),
+		})
+	}
+
+	// Migration
+	if cfg.Migration.PlanningDir == "" {
+		errs = append(errs, ValidationError{
+			Field:        "migration.planning_dir",
+			ExpectedType: "non-empty string",
+			ActualValue:  "",
+		})
+	}
+
 	if len(errs) > 0 {
 		var b strings.Builder
 		b.WriteString("Invalid configuration:\n")
@@ -297,6 +350,7 @@ func validateConfig(cfg *Config) error {
 		}
 		return fmt.Errorf("%w\n%s", ErrValidation, b.String())
 	}
+
 	// Validate extensions configuration
 	if err := validateExtensionsConfig(cfg); err != nil {
 		return err
@@ -444,6 +498,7 @@ func knownConfigKeys() map[string]bool {
 			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
 			"extensions": true,
+			"eventstore": true, "migration": true,
 		}
 	})
 	return knownKeysMap

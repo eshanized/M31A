@@ -40,10 +40,10 @@
   4. User restarts `m31a` and previous session state (requirements, decisions, runs) is fully reconstructed from event log
   5. User configures NVIDIA API key via `m31a config set provider.key` and it is stored in OS keychain, never written to disk
 
-**Plans**: 0/6 plans executed
+**Plans**: 1/6 plans executed
 Plans:
 
-- [ ] 01-01-PLAN.md — Domain types (18 types), event envelope, EventStore interface, serialization
+- [x] 01-01-PLAN.md — Domain types (18 types), event envelope, EventStore interface, serialization
 - [ ] 01-02-PLAN.md — Config system: EventStore/Migration sections, layered loading, keychain integration
 - [ ] 01-03-PLAN.md — Event store core: schema, WAL mode, transactional append, range queries
 - [ ] 01-04-PLAN.md — Event subscription (TUI real-time), hot backup (non-blocking)
@@ -227,7 +227,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Domain Model & Event Store | 0/6 | Planned    |  |
+| 1. Foundation — Domain Model & Event Store | 1/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 0/0 | Not started | - |
 | 3. Code Intelligence Graph | 0/0 | Not started | - |
 | 4. Intelligence Features | 0/0 | Not started | - |

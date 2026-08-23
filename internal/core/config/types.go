@@ -11,24 +11,26 @@ import (
 const WorkspaceConfigPath = ".m31a/workspace.toml"
 
 type Config struct {
-	Provider          ProviderConfig          `toml:"provider"`
-	Model             ModelConfig             `toml:"model"`
-	UI                UIConfig                `toml:"ui"`
-	Permissions       PermissionsConfig       `toml:"permissions"`
-	Features          FeaturesConfig          `toml:"features"`
-	Ledger            LedgerConfig            `toml:"ledger"`
-	Tools             ToolsConfig             `toml:"tools"`
-	Agents            AgentsConfig            `toml:"agents"`
-	Git               GitConfig               `toml:"git"`
-	Verify            VerifyConfig            `toml:"verify"`
-	Compaction        CompactionConfig        `toml:"compaction"`
-	Instructions      InstructionsConfig      `toml:"instructions"`
-	Skills            SkillsConfig            `toml:"skills"`
-	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
-	Prompts           PromptConfig            `toml:"prompts"`
-	Narrative         NarrativeConfig         `toml:"narrative"`
-	Templates         TemplateConfig          `toml:"templates"`
-	Extensions        ExtensionsConfig        `toml:"extensions" json:"extensions"`
+	Provider           ProviderConfig           `toml:"provider"`
+	Model              ModelConfig              `toml:"model"`
+	UI                 UIConfig                 `toml:"ui"`
+	Permissions        PermissionsConfig        `toml:"permissions"`
+	Features           FeaturesConfig           `toml:"features"`
+	Ledger             LedgerConfig             `toml:"ledger"`
+	Tools              ToolsConfig              `toml:"tools"`
+	Agents             AgentsConfig             `toml:"agents"`
+	Git                GitConfig                `toml:"git"`
+	Verify             VerifyConfig             `toml:"verify"`
+	Compaction         CompactionConfig         `toml:"compaction"`
+	Instructions       InstructionsConfig       `toml:"instructions"`
+	Skills             SkillsConfig             `toml:"skills"`
+	ModelCapabilities  ModelCapabilitiesConfig  `toml:"model_capabilities"`
+	Prompts            PromptConfig             `toml:"prompts"`
+	Narrative          NarrativeConfig          `toml:"narrative"`
+	Templates          TemplateConfig           `toml:"templates"`
+	Extensions         ExtensionsConfig         `toml:"extensions" json:"extensions"`
+	EventStore         EventStoreConfig         `toml:"eventstore"`
+	Migration          MigrationConfig          `toml:"migration"`
 }
 
 // ExtensionsConfig holds all extension configuration sections.
@@ -192,6 +194,22 @@ type VerifyConfig struct {
 	BuildCommand string `toml:"build_command"`
 	TestCommand  string `toml:"test_command"`
 	LintCommand  string `toml:"lint_command"`
+}
+
+// EventStoreConfig holds event store configuration.
+type EventStoreConfig struct {
+	Path                string `toml:"path"`
+	WALMode             bool   `toml:"wal_mode"`
+	BusyTimeoutMs       int    `toml:"busy_timeout_ms"`
+	BackupIntervalHours int    `toml:"backup_interval_hours"`
+	CheckpointInterval  int    `toml:"checkpoint_interval"`
+	CheckpointRetention int    `toml:"checkpoint_retention"`
+}
+
+// MigrationConfig holds migration configuration.
+type MigrationConfig struct {
+	PlanningDir       string `toml:"planning_dir"`
+	ArchiveOnComplete bool   `toml:"archive_on_complete"`
 }
 
 type ProviderConfig struct {

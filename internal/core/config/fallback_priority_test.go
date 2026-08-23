@@ -50,7 +50,7 @@ func TestValidateConfig_FallbackPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
+			cfg := DefaultConfig()
 			cfg.Provider.FallbackPriority = tt.priority
 
 			err := validateConfig(cfg)

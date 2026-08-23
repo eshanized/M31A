@@ -27,11 +27,14 @@ var ErrValidation = errors.New("config validation")
 func DefaultConfig() *Config {
 	return &Config{
 		Provider: ProviderConfig{
+			Default:              types.ProviderNvidia,
 			FallbackPriority:       []string{types.ProviderNvidia, types.ProviderZen, types.ProviderOpenRouter},
 			HealthCheckTimeoutSecs: 10,
 			RegistrationOrder:      []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia},
+			NvidiaBaseURL:          "https://integrate.api.nvidia.com/v1",
 		},
 		UI: UIConfig{
+			Theme:            "dark",
 			SidebarWidthThreshold: 120,
 			MaxIterations:         100,
 			DiscussTimeout:        300,
@@ -76,6 +79,7 @@ func DefaultConfig() *Config {
 			ToastTypeOverrides: map[string]ToastTypeConfig{},
 		},
 		Model: ModelConfig{
+			Default:                 "nvidia/nemotron-3-ultra-550b-a55b",
 			ContextWarningThreshold: types.ContextWarningThreshold,
 			TokenEMAAlpha:           types.EMACorrectionAlpha,
 			DefaultContextLength:    types.DefaultContextLength,
@@ -208,6 +212,18 @@ func DefaultConfig() *Config {
 			ExternalDir:      "",
 			WebsiteFramework: "nextjs",
 			CustomPalettes:   map[string]map[string]string{},
+		},
+		EventStore: EventStoreConfig{
+			Path:                ".m31a/events.db",
+			WALMode:             true,
+			BusyTimeoutMs:       5000,
+			BackupIntervalHours: 24,
+			CheckpointInterval:  100,
+			CheckpointRetention: 10,
+		},
+		Migration: MigrationConfig{
+			PlanningDir:       ".planning",
+			ArchiveOnComplete: true,
 		},
 	}
 }
