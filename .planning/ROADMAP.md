@@ -37,7 +37,14 @@
   3. User creates a session, adds a requirement, makes a decision — all produce append-only events in `events.db` queryable by run/session/type
   4. User restarts `m31a` and previous session state (requirements, decisions, runs) is fully reconstructed from event log
   5. User configures NVIDIA API key via `m31a config set provider.key` and it is stored in OS keychain, never written to disk
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+- [ ] 01-01-PLAN.md — Domain types (18 types), event envelope, EventStore interface, serialization
+- [ ] 01-02-PLAN.md — Config system: EventStore/Migration sections, layered loading, keychain integration
+- [ ] 01-03-PLAN.md — Event store core: schema, WAL mode, transactional append, range queries
+- [ ] 01-04-PLAN.md — Event subscription (TUI real-time), hot backup (non-blocking)
+- [ ] 01-05-PLAN.md — Projection manager with checkpoints, artifact writers (project.md, decisions/, research/), .gitignore
+- [ ] 01-06-PLAN.md — Migration engine: parse .planning/, emit events, rebuild projections, archive .planning/, CLI command
 
 ### Phase 2: LLM Provider Abstraction
 **Goal**: Provider-agnostic interface with NVIDIA Build adapter supporting streaming, reasoning, and coding-agent kwargs; credentials never touch disk or logs.  
@@ -183,7 +190,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Domain Model & Event Store | 0/0 | Not started | - |
+| 1. Foundation — Domain Model & Event Store | 0/6 | Not started | - |
 | 2. LLM Provider Abstraction | 0/0 | Not started | - |
 | 3. Code Intelligence Graph | 0/0 | Not started | - |
 | 4. Intelligence Features | 0/0 | Not started | - |
