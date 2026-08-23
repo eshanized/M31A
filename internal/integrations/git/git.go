@@ -68,8 +68,10 @@ func (g *Git) Add(paths ...string) error {
 	return nil
 }
 
-// AddAll stages all changes including deletions.
-func (g *Git) AddAll() error {
+// addAll stages all changes including deletions.
+// Package-private to prevent production code from staging the entire worktree.
+// Use Add() with explicit paths for scoped staging.
+func (g *Git) addAll() error {
 	_, err := g.run("add", "-A")
 	if err != nil {
 		return fmt.Errorf("git add -A: %w", err)
@@ -135,12 +137,13 @@ func (g *Git) hasSensitiveFiles() ([]string, error) {
 	return suspicious, nil
 }
 
-// Commit stages all changes and creates a commit with the given message.
+// commit stages all changes and creates a commit with the given message.
 // WARNING: This stages the entire worktree. Use CommitWithFiles or
 // CommitStaged for scoped commits.
 // Refuses to commit if sensitive files (credentials, keys, .env) are staged.
-func (g *Git) Commit(message string) error {
-	if err := g.AddAll(); err != nil {
+// This is package-private to prevent production code from using the unsafe AddAll behavior.
+func (g *Git) commit(message string) error {
+	if err := g.addAll(); err != nil {
 		return fmt.Errorf("git add all: %w", err)
 	}
 	if suspicious, err := g.hasSensitiveFiles(); err == nil && len(suspicious) > 0 {

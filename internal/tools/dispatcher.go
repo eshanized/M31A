@@ -62,12 +62,15 @@ type Dispatcher struct {
 	collector *metrics.Collector
 	// persistentPerms handles saving permission rules to disk.
 	persistentPerms *PersistentPermissions
+	// permissionDecider defines how permission decisions are made.
+	// Allows different behaviors for TUI, headless, CI, etc.
+	permissionDecider PermissionDecider
 }
 
 // NewDispatcher creates a new Dispatcher with zero-goroutine rate limiting.
 // The caller MUST call Stop() when the Dispatcher is no longer needed to prevent
 // goroutine leaks from pending sends (e.g., during session restart or app shutdown).
-func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
+func newDispatcher(cfg *config.PermissionsConfig, policy PermissionDecider) *Dispatcher {
 	d := &Dispatcher{
 		tools:             make(map[string]types.Tool),
 		permissions:       make(map[string]bool),
@@ -85,6 +88,7 @@ func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		dangerousLimiter:  rate.NewLimiter(rate.Limit(DangerousRateLimitPerSec), DangerousRateLimitBurst),
 		concurrencySem:    make(chan struct{}, MaxConcurrentTools),
 		persistentPerms:   NewPersistentPermissions(),
+		permissionDecider: policy,
 	}
 	if cfg != nil {
 		if cfg.Rules != nil {
@@ -103,6 +107,10 @@ func newDispatcher(cfg *config.PermissionsConfig) *Dispatcher {
 		if cfg.TimeoutSeconds > 0 {
 			d.permissionTimeout = cfg.TimeoutSeconds
 		}
+	}
+	// Default to headless deny policy if no policy provided
+	if !d.HasPermissionDecider() {
+		d.permissionDecider = NewHeadlessDenyDecider()
 	}
 	return d
 }
@@ -168,6 +176,22 @@ func (d *Dispatcher) Unregister(name string) {
 // UnregisterTool is an alias for Unregister to satisfy ai.ToolDispatcher interface.
 func (d *Dispatcher) UnregisterTool(name string) {
 	d.Unregister(name)
+}
+
+// SetPermissionDecider updates the permission decider used by the dispatcher.
+// This allows switching between different policies (e.g., headless deny, interactive, CI).
+func (d *Dispatcher) SetPermissionDecider(policy PermissionDecider) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.permissionDecider = policy
+	if d.permissionDecider == nil {
+		d.permissionDecider = NewHeadlessDenyDecider()
+	}
+}
+
+// HasPermissionDecider returns true if a permission decider is set.
+func (d *Dispatcher) HasPermissionDecider() bool {
+	return d.permissionDecider != nil
 }
 
 // SetPermission sets the permission for a tool (always allow/deny).
@@ -329,6 +353,14 @@ func (d *Dispatcher) RequestCh() chan PermissionRequest {
 	return d.requestCh
 }
 
+func (d *Dispatcher) ResponseCh() chan PermissionResponse {
+	return d.responseCh
+}
+
+func (d *Dispatcher) PermissionTimeout() int {
+	return d.permissionTimeout
+}
+
 func (d *Dispatcher) QuestionRequestCh() chan types.QuestionRequest {
 	return d.questionReqCh
 }
@@ -437,15 +469,24 @@ func (d *Dispatcher) ensurePermission(ctx context.Context, call types.ToolCall, 
 		return nil
 	}
 
-	if pctx != nil && pctx.Source == "rule" && pctx.RuleAction == "ask" {
-		return d.askPermission(ctx, call, risk, pctx)
+	// If rules explicitly say "ask", use the permission policy to decide
+	if pctx != nil && (pctx.Source == "rule" || pctx.Source == "agent_default") && pctx.RuleAction == "ask" {
+		decision := d.permissionDecider.Decide(ctx, call.Name, risk, input)
+		if !decision.Allowed {
+			return toolResultError{result: types.ToolResult{Error: decision.ErrorMsg}}
+		}
+		return nil
 	}
-	if pctx != nil && pctx.Source == "agent_default" && pctx.RuleAction == "ask" {
-		return d.askPermissionWithAgentDefault(ctx, call, risk)
-	}
+
+	// For dangerous tools without explicit rule, use permission policy
 	if riskLevelValue(risk) >= riskLevelValue(types.RiskDangerous) {
-		return d.askPermissionFallback(ctx, call, risk)
+		decision := d.permissionDecider.Decide(ctx, call.Name, risk, input)
+		if !decision.Allowed {
+			return toolResultError{result: types.ToolResult{Error: decision.ErrorMsg}}
+		}
+		return nil
 	}
+
 	return nil
 }
 

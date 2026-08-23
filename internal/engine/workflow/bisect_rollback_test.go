@@ -106,14 +106,13 @@ func TestBisectRollback_SoftResetIntegration(t *testing.T) {
 	_ = hash2 // used for reference in comments
 }
 
-// writeAndCommit writes a file and creates a commit.
+// writeAndCommit writes a file and creates a commit using CommitWithFiles.
 func writeAndCommit(g *git.Git, dir, filename, content, message string) error {
 	path := filepath.Join(dir, filename)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return err
 	}
-	if err := g.Add(filename); err != nil {
-		return err
-	}
-	return g.Commit(message)
+	// Use CommitWithFiles to commit only the specified file
+	_, err := g.CommitWithFiles(message, filename)
+	return err
 }

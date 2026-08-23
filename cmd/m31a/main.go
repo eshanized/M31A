@@ -77,9 +77,9 @@ func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *con
 		CoordinatorTimeoutSecs: cfg.Features.CoordinatorTimeoutSecs,
 	})
 
-	// Tools dispatcher
+	// Tools dispatcher (headless mode uses deny policy for safety)
 	backupDir := filepath.Join(workDir, ".m31a", "backups")
-	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools)
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools, tools.NewHeadlessDenyDecider())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: failed to create tools dispatcher: %v\n", err)
 		return 1
@@ -526,9 +526,9 @@ func run() int {
 		CoordinatorTimeoutSecs: cfg.Features.CoordinatorTimeoutSecs,
 	})
 
-	// Tools dispatcher — fail fast on permission config errors (WP-C04)
+	// Tools dispatcher — use nil policy initially, will set interactive policy after AppState creation
 	backupDir := filepath.Join(workDir, ".m31a", "backups")
-	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools)
+	dispatcher, err := tools.DefaultDispatcher(workDir, backupDir, backupDir, &cfg.Permissions, &cfg.Tools, nil)
 	if err != nil {
 		logger.Error("failed to create tools dispatcher — permission configuration is invalid", "error", err)
 		return 1

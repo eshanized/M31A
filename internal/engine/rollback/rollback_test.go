@@ -26,14 +26,14 @@ func setupRollback(t *testing.T) (*Rollback, *git.Git) {
 	return New(g), g
 }
 
-// createCommits creates n sequential commits in the given git repo.
+// createCommits creates n sequential commits in the given git repo using CommitWithFiles.
 func createCommits(g *git.Git, n int) {
 	for i := 0; i < n; i++ {
 		f := filepath.Join(g.WorkDir(), fmt.Sprintf("f%d.txt", i))
 		if err := os.WriteFile(f, []byte(fmt.Sprintf("content %d", i)), 0644); err != nil {
 			panic(fmt.Sprintf("WriteFile failed: %v", err))
 		}
-		if err := g.Commit(fmt.Sprintf("commit %d", i)); err != nil {
+		if _, err := g.CommitWithFiles(fmt.Sprintf("commit %d", i), fmt.Sprintf("f%d.txt", i)); err != nil {
 			panic(fmt.Sprintf("Commit %d failed: %v", i, err))
 		}
 	}
@@ -123,8 +123,8 @@ func TestPreview(t *testing.T) {
 	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
-	if err := g.Commit("v1"); err != nil {
-		t.Fatalf("Commit failed: %v", err)
+	if _, err := g.CommitWithFiles("v1", "a.txt"); err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
 	}
 	hash1, err := g.HeadHash()
 	if err != nil {
@@ -135,8 +135,8 @@ func TestPreview(t *testing.T) {
 	if writeErr := os.WriteFile(f, []byte("v2"), 0644); writeErr != nil {
 		t.Fatalf("WriteFile failed: %v", writeErr)
 	}
-	if commitErr := g.Commit("v2"); commitErr != nil {
-		t.Fatalf("Commit failed: %v", commitErr)
+	if _, commitErr := g.CommitWithFiles("v2", "a.txt"); commitErr != nil {
+		t.Fatalf("CommitWithFiles failed: %v", commitErr)
 	}
 
 	r := New(g)
@@ -174,8 +174,8 @@ func TestPreview_Truncation(t *testing.T) {
 	if err := os.WriteFile(f, largeContent, 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
-	if err := g.Commit("big file"); err != nil {
-		t.Fatalf("Commit failed: %v", err)
+	if _, err := g.CommitWithFiles("big file", "big.txt"); err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
 	}
 	hash1, _ := g.HeadHash()
 
@@ -183,8 +183,8 @@ func TestPreview_Truncation(t *testing.T) {
 	if err := os.WriteFile(f, []byte("cleaned"), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
-	if err := g.Commit("clean"); err != nil {
-		t.Fatalf("Commit failed: %v", err)
+	if _, err := g.CommitWithFiles("clean", "big.txt"); err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
 	}
 
 	r := New(g)

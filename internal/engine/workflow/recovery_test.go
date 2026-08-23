@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
-	m31types "github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/engine/session"
+	"github.com/eshanized/M31A/internal/engine/tokens"
+	"github.com/eshanized/M31A/internal/integrations/git"
+	"github.com/eshanized/M31A/internal/tools"
+	"github.com/eshanized/M31A/tests/testutil/mocks"
+
+	m31types "github.com/eshanized/M31A/internal/core/types"
 )
 
 // helper to set up an engine with a known recovery path
@@ -75,7 +80,7 @@ func TestRecovery_CrashDuringPhaseTransition(t *testing.T) {
 	}
 
 	// Verify recovery state was written
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -117,7 +122,7 @@ func TestRecovery_CrashDuringPlanExecution(t *testing.T) {
 	}
 
 	// Load and verify
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -147,7 +152,7 @@ func TestRecovery_CorruptedRecoveryFile(t *testing.T) {
 	}
 
 	// Attempt to load — should fail
-	_, err := LoadRecoveryState(recoveryFile)
+	_, err := LoadRecoveryState(recoveryFile, "")
 	if err == nil {
 		t.Fatal("expected error loading corrupted recovery file, got nil")
 	}
@@ -158,7 +163,7 @@ func TestRecovery_CorruptedRecoveryFile(t *testing.T) {
 func TestRecovery_MissingRecoveryFile(t *testing.T) {
 	nonExistent := filepath.Join(t.TempDir(), "nonexistent", "recovery.json")
 
-	_, err := LoadRecoveryState(nonExistent)
+	_, err := LoadRecoveryState(nonExistent, "")
 	if err == nil {
 		t.Fatal("expected error for missing recovery file, got nil")
 	}
@@ -175,7 +180,7 @@ func TestRecovery_AtomicWriteGuarantee(t *testing.T) {
 	writeRecoveryJSON(t, recoveryFile, state1)
 
 	// Verify initial state is valid
-	loaded, err := LoadRecoveryState(recoveryFile)
+	loaded, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -192,7 +197,7 @@ func TestRecovery_AtomicWriteGuarantee(t *testing.T) {
 	}
 
 	// Verify new state is valid (no corruption)
-	loaded2, err := LoadRecoveryState(recoveryFile)
+	loaded2, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState after overwrite failed: %v", err)
 	}
@@ -224,7 +229,7 @@ func TestRecovery_ForcedExitDuringToolExecution(t *testing.T) {
 	}
 
 	// Verify recovery state is consistent
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -256,7 +261,7 @@ func TestRecovery_ForcedExitDuringLLMStreaming(t *testing.T) {
 	}
 
 	// Verify
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -288,9 +293,35 @@ func TestRecovery_SessionResume_WithRecovery(t *testing.T) {
 		t.Fatalf("SaveRecoveryState failed: %v", err)
 	}
 
-	// Create a fresh engine with the same recovery path
-	engine2, _ := setupRecoveryEngine(t)
-	// Override the recovery path to point to our recovery file
+	// Create a fresh engine with the SAME session ID and recovery path
+	sessionID := engine.sessionID
+	dir := engine.workDir
+	g := git.New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	g.ConfigUser("Test", "test@test.com")
+
+	// Create session manager with same session base dir
+	sessionBaseDir := filepath.Join(dir, ".m31a")
+	mgr := session.NewManager(sessionBaseDir, sessionBaseDir, session.ManagerOpts{})
+
+	// Create session with the same session ID
+	_ = session.NewSession(sessionID, "test-model", "test-provider")
+
+	planningDir := filepath.Join(dir, ".m31a", "planning")
+	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), dir, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("DefaultDispatcher failed: %v", err)
+	}
+	defer dispatcher.Stop()
+
+	est := tokens.NewEstimator("test-model")
+	mockP := mocks.NewMockProvider("mock")
+
+	engine2, _ := NewEngine(sessionID, dir, filepath.Join(dir, "backups"), planningDir,
+		mockP, "test-model", dispatcher, est, mgr, nil)
+	engine2.SetGit(g)
 	engine2.recoveryPath = recoveryFile
 
 	// Recover
@@ -383,7 +414,7 @@ func TestRecovery_WorkflowFailure_PhaseRollback(t *testing.T) {
 	}
 
 	// Verify the recovery state has the expected history
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -424,7 +455,7 @@ func TestRecovery_WorkflowFailure_PreservesMessages(t *testing.T) {
 	}
 
 	// Load and verify messages are preserved
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("LoadRecoveryState failed: %v", err)
 	}
@@ -508,7 +539,7 @@ func TestRecovery_ConcurrentSaveAndLoad(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				state, err := LoadRecoveryState(recoveryFile)
+				state, err := LoadRecoveryState(recoveryFile, "")
 				if err != nil {
 					// File may not exist yet or be mid-write — that's OK
 					continue
@@ -524,7 +555,7 @@ func TestRecovery_ConcurrentSaveAndLoad(t *testing.T) {
 	wg.Wait()
 
 	// Final state should be valid
-	state, err := LoadRecoveryState(recoveryFile)
+	state, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("final LoadRecoveryState failed: %v", err)
 	}
@@ -543,7 +574,7 @@ func TestRecovery_SaveAndCrash_Race(t *testing.T) {
 	writeRecoveryJSON(t, recoveryFile, state1)
 
 	// Verify initial state is valid
-	loaded, err := LoadRecoveryState(recoveryFile)
+	loaded, err := LoadRecoveryState(recoveryFile, "")
 	if err != nil {
 		t.Fatalf("initial load failed: %v", err)
 	}
@@ -590,14 +621,14 @@ func TestRecovery_SaveAndCrash_Race(t *testing.T) {
 // passes validation.
 func TestRecovery_ValidateState_Valid(t *testing.T) {
 	state := validRecoveryState()
-	if err := ValidateRecoveryState(state); err != nil {
+	if err := ValidateRecoveryState(state, ""); err != nil {
 		t.Errorf("expected valid state, got error: %v", err)
 	}
 }
 
 // TestRecovery_ValidateState_Nil verifies that nil state fails validation.
 func TestRecovery_ValidateState_Nil(t *testing.T) {
-	if err := ValidateRecoveryState(nil); err == nil {
+	if err := ValidateRecoveryState(nil, ""); err == nil {
 		t.Error("expected error for nil state")
 	}
 }
@@ -607,7 +638,7 @@ func TestRecovery_ValidateState_Nil(t *testing.T) {
 func TestRecovery_ValidateState_InvalidPhase(t *testing.T) {
 	state := validRecoveryState()
 	state.CurrentPhase = "InvalidPhase"
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for invalid phase")
 	}
 }
@@ -617,7 +648,7 @@ func TestRecovery_ValidateState_InvalidPhase(t *testing.T) {
 func TestRecovery_ValidateState_EmptyHistory(t *testing.T) {
 	state := validRecoveryState()
 	state.PhaseHistory = []m31types.WorkflowPhase{}
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for empty history")
 	}
 }
@@ -627,7 +658,7 @@ func TestRecovery_ValidateState_EmptyHistory(t *testing.T) {
 func TestRecovery_ValidateState_HistoryNotStartingWithIdle(t *testing.T) {
 	state := validRecoveryState()
 	state.PhaseHistory = []m31types.WorkflowPhase{m31types.PhaseInitialize, m31types.PhasePlan}
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for history not starting with Idle")
 	}
 }
@@ -637,7 +668,7 @@ func TestRecovery_ValidateState_HistoryNotStartingWithIdle(t *testing.T) {
 func TestRecovery_ValidateState_FutureTimestamp(t *testing.T) {
 	state := validRecoveryState()
 	state.Timestamp = time.Now().Add(30 * 24 * time.Hour) // 30 days in future
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for future timestamp")
 	}
 }
@@ -647,7 +678,7 @@ func TestRecovery_ValidateState_FutureTimestamp(t *testing.T) {
 func TestRecovery_ValidateState_OldTimestamp(t *testing.T) {
 	state := validRecoveryState()
 	state.Timestamp = time.Now().Add(-30 * 24 * time.Hour) // 30 days in past
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for old timestamp")
 	}
 }
@@ -657,7 +688,7 @@ func TestRecovery_ValidateState_OldTimestamp(t *testing.T) {
 func TestRecovery_ValidateState_MissingSessionID(t *testing.T) {
 	state := validRecoveryState()
 	state.SessionID = ""
-	if err := ValidateRecoveryState(state); err == nil {
+	if err := ValidateRecoveryState(state, ""); err == nil {
 		t.Error("expected error for missing session ID")
 	}
 }

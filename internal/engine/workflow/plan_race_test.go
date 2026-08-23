@@ -64,7 +64,7 @@ func setupRaceTestEngine(t *testing.T) *Engine {
 
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
-	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), sessionBaseDir, nil, nil)
+	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), sessionBaseDir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}

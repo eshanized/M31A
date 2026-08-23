@@ -72,7 +72,8 @@ func SaveRecoveryState(engine *Engine, path string) error {
 
 // LoadRecoveryState reads and deserializes a recovery state file.
 // Returns an error if the file is missing, corrupted, or fails validation.
-func LoadRecoveryState(path string) (*RecoveryState, error) {
+// If expectedSessionID is non-empty, it validates the session ID matches.
+func LoadRecoveryState(path string, expectedSessionID string) (*RecoveryState, error) {
 	if path == "" {
 		return nil, fmt.Errorf("recovery path is empty: %w", os.ErrInvalid)
 	}
@@ -90,7 +91,7 @@ func LoadRecoveryState(path string) (*RecoveryState, error) {
 		return nil, fmt.Errorf("unmarshal recovery state: %w", err)
 	}
 
-	if err := ValidateRecoveryState(&state); err != nil {
+	if err := ValidateRecoveryState(&state, expectedSessionID); err != nil {
 		return nil, fmt.Errorf("validate recovery state: %w", err)
 	}
 
@@ -100,13 +101,19 @@ func LoadRecoveryState(path string) (*RecoveryState, error) {
 // ValidateRecoveryState checks that a recovery state is internally consistent.
 // It verifies the phase is valid, history is non-empty and starts with Idle,
 // and the timestamp is within reasonable bounds.
-func ValidateRecoveryState(state *RecoveryState) error {
+// If expectedSessionID is non-empty, it also validates the session ID matches.
+func ValidateRecoveryState(state *RecoveryState, expectedSessionID string) error {
 	if state == nil {
 		return fmt.Errorf("recovery state is nil")
 	}
 
 	if state.SessionID == "" {
 		return fmt.Errorf("recovery state missing session ID")
+	}
+
+	// Validate session ID if provided
+	if expectedSessionID != "" && state.SessionID != expectedSessionID {
+		return fmt.Errorf("recovery state session ID mismatch: expected %q, got %q", expectedSessionID, state.SessionID)
 	}
 
 	// Verify CurrentPhase is a valid phase
@@ -153,7 +160,7 @@ func RollbackToLastCheckpoint(engine *Engine) error {
 		return fmt.Errorf("recovery path not configured")
 	}
 
-	state, err := LoadRecoveryState(engine.recoveryPath)
+	state, err := LoadRecoveryState(engine.recoveryPath, engine.sessionID)
 	if err != nil {
 		return fmt.Errorf("load recovery state for rollback: %w", err)
 	}
@@ -174,7 +181,9 @@ func RollbackToLastCheckpoint(engine *Engine) error {
 	engine.state.SetCheckpointData(state.Checkpoint)
 
 	// Transition state machine to the recovered phase
-	engine.stateMachine.SetPhase(state.CurrentPhase)
+	if err := engine.stateMachine.RestorePhase(state.CurrentPhase); err != nil {
+		return fmt.Errorf("failed to restore phase during rollback: %w", err)
+	}
 
 	slog.Info("rolled back to last checkpoint",
 		"phase", state.CurrentPhase,

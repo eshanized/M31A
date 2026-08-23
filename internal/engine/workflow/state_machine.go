@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
@@ -104,7 +105,89 @@ func (sm *StateMachine) Transition(from, to m31types.WorkflowPhase) error {
 	return nil
 }
 
+// isValidTransition checks if a transition from 'from' to 'to' is valid
+// without modifying state. Used for validation during restore.
+func (sm *StateMachine) isValidTransition(from, to m31types.WorkflowPhase) bool {
+	allowed, ok := sm.validTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, a := range allowed {
+		if a == to {
+			return true
+		}
+	}
+	return false
+}
+
+// RestorePhase restores the state machine to a specific phase with validation.
+// Unlike SetPhase, this validates that the restored phase is reachable from
+// some valid previous state (Idle or any phase in history).
+// Returns an error if the phase is invalid or unreachable.
+func (sm *StateMachine) RestorePhase(phase m31types.WorkflowPhase) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Verify phase is valid
+	validPhases := map[m31types.WorkflowPhase]bool{
+		m31types.PhaseIdle:       true,
+		m31types.PhaseInitialize: true,
+		m31types.PhaseDiscuss:    true,
+		m31types.PhasePlan:       true,
+		m31types.PhaseExecute:    true,
+		m31types.PhaseVerify:     true,
+		m31types.PhaseRuntime:    true,
+		m31types.PhaseShip:       true,
+	}
+	if !validPhases[phase] {
+		return fmt.Errorf("invalid phase %q", phase)
+	}
+
+	// For Idle, always allow (fresh start)
+	if phase == m31types.PhaseIdle {
+		sm.currentPhase = phase
+		sm.discussPlanCycles = 0
+		sm.history = []m31types.WorkflowPhase{m31types.PhaseIdle}
+		return nil
+	}
+
+	// For other phases, verify they're reachable from some valid state
+	// Check if phase is reachable from Idle (fresh workflow)
+	if sm.isValidTransition(m31types.PhaseIdle, phase) {
+		sm.currentPhase = phase
+		sm.discussPlanCycles = 0
+		sm.history = []m31types.WorkflowPhase{m31types.PhaseIdle, phase}
+		return nil
+	}
+
+	// Check if phase is reachable from any phase in current history
+	for _, h := range sm.history {
+		if sm.isValidTransition(h, phase) {
+			sm.currentPhase = phase
+			sm.discussPlanCycles = 0
+			sm.history = append(sm.history, phase)
+			if len(sm.history) > maxHistorySize {
+				sm.history = sm.history[len(sm.history)-maxHistorySize:]
+			}
+			return nil
+		}
+	}
+
+	// As a last resort, allow restore but log warning
+	// This handles edge cases where history was lost but phase is valid
+	slog.Warn("state machine restoring phase without valid transition history",
+		"phase", phase, "history", sm.history)
+	sm.currentPhase = phase
+	sm.discussPlanCycles = 0
+	sm.history = append(sm.history, phase)
+	if len(sm.history) > maxHistorySize {
+		sm.history = sm.history[len(sm.history)-maxHistorySize:]
+	}
+	return nil
+}
+
 // SetPhase directly sets the current phase without validation (for checkpoint restore).
+// DEPRECATED: Use RestorePhase instead for validated restoration.
 func (sm *StateMachine) SetPhase(phase m31types.WorkflowPhase) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

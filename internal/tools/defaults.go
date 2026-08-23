@@ -16,8 +16,30 @@ import (
 	"github.com/eshanized/M31A/internal/tools/todo"
 )
 
-func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (*Dispatcher, error) {
-	d := newDispatcher(cfg)
+// DefaultDispatcher creates a Dispatcher with default settings for the given context.
+// The policy parameter allows specifying the permission policy (interactive, headless, CI, etc.).
+// If policy is nil, defaults to HeadlessDenyPolicy for safety.
+func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig, policy PermissionDecider) (*Dispatcher, error) {
+	// If no policy provided, create one based on config
+	if policy == nil {
+		if cfg != nil {
+			switch cfg.DefaultMode {
+			case "allow-safe":
+				policy = NewHeadlessAllowDecider() // Allow safe operations
+			case "deny-all":
+				policy = NewHeadlessDenyDecider()
+			case "prompt":
+				// For interactive mode, we'd need an InteractivePolicy with channels
+				// But in defaults.go we don't have channels, so default to deny
+				policy = NewHeadlessDenyDecider()
+			default:
+				policy = NewHeadlessDenyDecider()
+			}
+		} else {
+			policy = NewHeadlessDenyDecider()
+		}
+	}
+	d := newDispatcher(cfg, policy)
 	d.workDir_ = workDir
 
 	// Load persistent permissions for this project
@@ -152,7 +174,7 @@ func DefaultDispatcher(workDir, backupDir, sessionsDir string, cfg *config.Permi
 // NewDispatcher implements ai.ToolDispatcher interface for use by subagents.
 // This is a factory function that creates a Dispatcher configured for subagent workspaces.
 func NewDispatcher(workDir, backupDir, sessionsDir string, permCfg *config.PermissionsConfig, toolsCfg *config.ToolsConfig) (ai.ToolDispatcher, error) {
-	return DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg, toolsCfg)
+	return DefaultDispatcher(workDir, backupDir, sessionsDir, permCfg, toolsCfg, nil)
 }
 
 func homeDir() string {

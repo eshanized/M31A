@@ -184,7 +184,9 @@ func TestEngine_SessionStartHash(t *testing.T) {
 	// setupTestEngine creates a git repo and calls SetGit
 	// which should capture the HEAD hash (even if no commits yet, it should be empty)
 	// After first commit, sessionStartHash should be set
-	engine.git.Commit("initial commit")
+	os.WriteFile(filepath.Join(engine.workDir, "dummy.go"), []byte("package main"), 0644)
+	engine.git.Add("dummy.go")
+	_, _ = engine.git.CommitWithFiles("initial commit", "dummy.go")
 
 	// Create a new engine to test hash capture
 	dir := engine.workDir
@@ -197,7 +199,7 @@ func TestEngine_SessionStartHash(t *testing.T) {
 	}
 
 	planningDir := engine.planningDir
-	d, derr := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), dir, nil, nil)
+	d, derr := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), dir, nil, nil, nil)
 	if derr != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", derr)
 	}
@@ -315,7 +317,9 @@ func TestRunVerify_Below90Percent(t *testing.T) {
 }
 
 func TestVerifySuccessThreshold(t *testing.T) {
-	if VerifySuccessThreshold != 0.90 {
-		t.Errorf("Expected VerifySuccessThreshold to be 0.90, got %f", VerifySuccessThreshold)
+	// Threshold is now 1.0 (all-or-nothing by default)
+	// The 0.90 threshold is only used when VerifyAllowPartial is enabled
+	if VerifySuccessThreshold != 1.0 {
+		t.Errorf("Expected VerifySuccessThreshold to be 1.0 (all-or-nothing), got %f", VerifySuccessThreshold)
 	}
 }

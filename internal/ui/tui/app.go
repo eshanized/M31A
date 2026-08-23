@@ -64,6 +64,15 @@ func (m *AppState) Init() tea.Cmd {
 			}
 		}
 
+		// Set interactive permission policy for TUI mode
+		if m.dispatcher != nil {
+			m.dispatcher.SetPermissionDecider(tools.NewInteractiveDecider(
+				m.dispatcher.RequestCh(),
+				m.dispatcher.ResponseCh(),
+				m.dispatcher.PermissionTimeout(),
+			))
+		}
+
 		baseCmds := []tea.Cmd{
 			m.routeToScreen(),
 			NextHealthTick(m.shutdownCtx, types.HealthCheckInterval),

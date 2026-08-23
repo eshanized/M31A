@@ -1303,12 +1303,12 @@ func TestCollectDiffStats_WithData(t *testing.T) {
 	// Create a commit so there's a diff baseline
 	os.WriteFile(filepath.Join(engine.workDir, "initial.go"), []byte("package main"), 0644)
 	engine.git.Add("initial.go")
-	engine.git.Commit("initial commit")
+	_, _ = engine.git.CommitWithFiles("initial commit", "initial.go")
 
 	// Now create a new file
 	os.WriteFile(filepath.Join(engine.workDir, "new.go"), []byte("package new"), 0644)
 	engine.git.Add("new.go")
-	engine.git.Commit("add new.go")
+	_, _ = engine.git.CommitWithFiles("add new.go", "new.go")
 
 	stats := engine.collectDiffStats()
 	// Should have at least some stats from the diff
@@ -2042,7 +2042,7 @@ func TestCollectDiffStats_WithCommitAndNewFile(t *testing.T) {
 	// Create initial commit
 	os.WriteFile(filepath.Join(engine.workDir, "init.go"), []byte("package main"), 0644)
 	engine.git.Add("init.go")
-	engine.git.Commit("initial")
+	_, _ = engine.git.CommitWithFiles("initial", "init.go")
 
 	// Create uncommitted new file (not staged)
 	os.WriteFile(filepath.Join(engine.workDir, "new.go"), []byte("package new"), 0644)
@@ -2058,7 +2058,7 @@ func TestCollectDiffStats_WithModification(t *testing.T) {
 	// Initial commit
 	os.WriteFile(filepath.Join(engine.workDir, "mod.go"), []byte("package main"), 0644)
 	engine.git.Add("mod.go")
-	engine.git.Commit("initial")
+	_, _ = engine.git.CommitWithFiles("initial", "mod.go")
 
 	// Modify file without committing
 	os.WriteFile(filepath.Join(engine.workDir, "mod.go"), []byte("package main\n// modified"), 0644)
@@ -2364,7 +2364,7 @@ func TestRunShip_WithDoneTasks(t *testing.T) {
 	// Create file and commit
 	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main"), 0644)
 	engine.git.Add("main.go")
-	engine.git.Commit("add main.go")
+	_, _ = engine.git.CommitWithFiles("add main.go", "main.go")
 
 	tasks := []m31types.Task{
 		{ID: 1, Action: "Create", Description: "main.go", Files: []string{"main.go"}, Status: m31types.StatusDone},
@@ -2548,7 +2548,7 @@ func TestRunShip_WithPlanMarkdown(t *testing.T) {
 	// Create commit
 	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main"), 0644)
 	engine.git.Add("main.go")
-	engine.git.Commit("add main.go")
+	_, _ = engine.git.CommitWithFiles("add main.go", "main.go")
 
 	tasks := []m31types.Task{
 		{ID: 1, Action: "Create", Description: "main.go", Files: []string{"main.go"}, Status: m31types.StatusDone},
@@ -2879,7 +2879,7 @@ func TestCollectDiffStats_ComplexDiff(t *testing.T) {
 	// Initial commit
 	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main\nfunc A() {}"), 0644)
 	engine.git.Add("a.go")
-	engine.git.Commit("initial")
+	_, _ = engine.git.CommitWithFiles("initial", "a.go")
 
 	// Modify a.go and add b.go (uncommitted)
 	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main\nfunc A() {}\nfunc B() {}"), 0644)
@@ -2955,7 +2955,7 @@ func TestFindRootCommit_Success(t *testing.T) {
 	engine, _ := setupTestEngine(t)
 	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main"), 0644)
 	engine.git.Add("a.go")
-	engine.git.Commit("init")
+	_, _ = engine.git.CommitWithFiles("init", "a.go")
 
 	hash, err := engine.findRootCommit()
 	if err != nil {
@@ -2980,7 +2980,7 @@ func TestFindRootCommit_MultipleRootCommits(t *testing.T) {
 	// Orphan branch creates a repo with multiple roots after merge
 	os.WriteFile(filepath.Join(engine.workDir, "a.go"), []byte("package main"), 0644)
 	engine.git.Add("a.go")
-	engine.git.Commit("init")
+	_, _ = engine.git.CommitWithFiles("init", "a.go")
 
 	hash, err := engine.findRootCommit()
 	if err != nil {
@@ -2998,7 +2998,7 @@ func TestCollectDiffStats_BinaryFiles(t *testing.T) {
 	data := []byte{0x00, 0x01, 0x02, 0x03}
 	os.WriteFile(filepath.Join(engine.workDir, "data.bin"), data, 0644)
 	engine.git.Add("data.bin")
-	engine.git.Commit("add binary")
+	_, _ = engine.git.CommitWithFiles("add binary", "data.bin")
 
 	// Modify binary and add text file
 	data2 := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05}
@@ -3073,7 +3073,7 @@ func TestRunShip_DirtyUnrelatedFiles(t *testing.T) {
 	// Create a committed file tracked by a task
 	os.WriteFile(filepath.Join(engine.workDir, "main.go"), []byte("package main"), 0644)
 	engine.git.Add("main.go")
-	engine.git.Commit("init")
+	_, _ = engine.git.CommitWithFiles("init", "main.go")
 
 	// Create unrelated dirty file (not tracked by any task)
 	os.WriteFile(filepath.Join(engine.workDir, "unrelated.txt"), []byte("dirty"), 0644)

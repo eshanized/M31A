@@ -104,25 +104,15 @@ func (e *Engine) runShip(ctx context.Context, goal string) (*PhaseResult, error)
 
 		if len(taskFiles) > 0 {
 			if addErr := e.git.Add(taskFiles...); addErr != nil {
-				e.logger.Warn("git add task files failed, falling back to add all", "error", addErr)
-				if addAllErr := e.git.AddAll(); addAllErr != nil {
-					e.logger.Warn("git add all before ship commit failed", "error", addAllErr)
-				}
+				e.logger.Error("git add task files failed — refusing to commit unrelated changes", "error", addErr, "taskFiles", taskFiles)
+				return nil, fmt.Errorf("ship: failed to stage task files: %w", addErr)
+			}
+			// Commit only the task files that were successfully staged
+			if _, commitErr := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); commitErr != nil {
+				return nil, fmt.Errorf("ship commit: %w", commitErr)
 			}
 		} else {
 			e.logger.Warn("ship: no task-to-file mapping found — skipping commit to avoid committing unrelated files")
-		}
-
-		// Guard: skip the commit when nothing is staged. DiffStaged checks
-		// the index against HEAD, which correctly detects staged changes even
-		// when the working tree is clean after AddAll (BUG-10).
-		staged, stagedErr := e.git.DiffStaged()
-		if stagedErr != nil {
-			e.logger.Warn("ship: failed to check staged changes, attempting commit anyway", "error", stagedErr)
-		} else if strings.TrimSpace(staged) == "" {
-			e.logger.Info("ship: no staged changes — skipping commit")
-		} else if _, commitErr := e.git.CommitStaged(fmt.Sprintf("%s: ship %s", e.gitConfig().ShipPrefix, e.sessionID)); commitErr != nil {
-			return nil, fmt.Errorf("ship commit: %w", commitErr)
 		}
 	}
 

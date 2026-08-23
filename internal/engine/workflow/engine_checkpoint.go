@@ -73,7 +73,10 @@ func (e *Engine) LoadCheckpointData(data *CheckpointData) {
 	}
 	e.state.SetCheckpointData(data)
 	e.state.SetPlanVersion(data.PlanVersion)
-	e.stateMachine.SetPhase(data.Phase)
+	if err := e.stateMachine.RestorePhase(data.Phase); err != nil {
+		e.logger.Error("failed to restore phase from checkpoint", "error", err, "phase", data.Phase)
+		return
+	}
 	e.logger.Info("checkpoint loaded", "phase", data.Phase, "timestamp", data.Timestamp)
 	// Restore decisions to the log
 	dl := e.state.DecisionLog()
@@ -97,7 +100,7 @@ func (e *Engine) Recover() error {
 		return nil
 	}
 
-	state, err := LoadRecoveryState(e.recoveryPath)
+	state, err := LoadRecoveryState(e.recoveryPath, e.sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// No recovery file — clean start, not an error
@@ -112,7 +115,10 @@ func (e *Engine) Recover() error {
 	e.state.SetMessages(state.Messages)
 	e.state.SetCurrentGoal(state.Goal)
 	e.state.SetCheckpointData(state.Checkpoint)
-	e.stateMachine.SetPhase(state.CurrentPhase)
+	if err := e.stateMachine.RestorePhase(state.CurrentPhase); err != nil {
+		e.logger.Error("failed to restore phase from recovery", "error", err, "phase", state.CurrentPhase)
+		return fmt.Errorf("failed to restore phase: %w", err)
+	}
 
 	e.logger.Info("recovery restored",
 		"phase", state.CurrentPhase,
@@ -156,7 +162,7 @@ func (e *Engine) RollbackCurrentPhase() error {
 		return fmt.Errorf("recovery path not configured")
 	}
 
-	state, err := LoadRecoveryState(e.recoveryPath)
+	state, err := LoadRecoveryState(e.recoveryPath, e.sessionID)
 	if err != nil {
 		return fmt.Errorf("load recovery state for rollback: %w", err)
 	}
@@ -182,7 +188,10 @@ func (e *Engine) RollbackCurrentPhase() error {
 
 	// Transition state machine to the previous phase
 	e.phaseCoordinator.PostPhaseExecution(state.CurrentPhase, nil, time.Now())
-	e.stateMachine.SetPhase(previousPhase)
+	if err := e.stateMachine.RestorePhase(previousPhase); err != nil {
+		e.logger.Error("failed to restore phase during rollback", "error", err, "phase", previousPhase)
+		return fmt.Errorf("failed to restore phase during rollback: %w", err)
+	}
 
 	e.logger.Info("rolled back",
 		"from", state.CurrentPhase,

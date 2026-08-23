@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -439,5 +440,67 @@ func TestLimitWriter(t *testing.T) {
 	}
 	if buf.String() != "helloworld" {
 		t.Errorf("expected 'helloworld' (no change), got %q", buf.String())
+	}
+}
+
+// TestBash_WorkDir_SymlinkTraversal verifies that a symlink pointing outside
+// the workspace is rejected by the workdir containment check. Regression test
+// for M31A-AUDIT-006 (R5.3).
+func TestBash_WorkDir_SymlinkTraversal(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create a symlink inside workDir that points outside
+	symlinkPath := filepath.Join(workDir, "escape")
+	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	b := NewBash(workDir, 60, nil, nil)
+
+	_, err := b.Execute(context.Background(), types.ToolInput{
+		Params: map[string]any{
+			"command": "pwd",
+			"workdir": symlinkPath,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for symlink escaping workspace, got nil")
+	}
+	if !strings.Contains(err.Error(), "within the project directory") {
+		t.Errorf("expected containment error, got: %v", err)
+	}
+}
+
+// TestBash_WorkDir_SymlinkInsideWorkspace verifies that a symlink pointing to
+// a directory within the workspace is allowed. Regression test for R5.3.
+func TestBash_WorkDir_SymlinkInsideWorkspace(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	targetDir := filepath.Join(workDir, "real-subdir")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+
+	symlinkPath := filepath.Join(workDir, "link-to-subdir")
+	if err := os.Symlink(targetDir, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	b := NewBash(workDir, 60, nil, nil)
+
+	result, err := b.Execute(context.Background(), types.ToolInput{
+		Params: map[string]any{
+			"command": "pwd",
+			"workdir": symlinkPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for symlink inside workspace: %v", err)
+	}
+	// Should resolve to the real path (within workspace)
+	if !strings.Contains(result.Output, "real-subdir") {
+		t.Errorf("expected resolved path containing 'real-subdir', got %q", result.Output)
 	}
 }

@@ -16,9 +16,10 @@ import (
 )
 
 // VerifySuccessThreshold is the minimum pass rate required for verification
-// to succeed. A value of 0.90 means 90% of tasks must pass for the phase
-// to be considered successful.
-const VerifySuccessThreshold = 0.90
+// to succeed. A value of 1.0 means all tasks must pass for the phase
+// to be considered successful (all-or-nothing verification).
+// This can be overridden by config if partial completion is explicitly allowed.
+const VerifySuccessThreshold = 1.0
 
 // runVerify checks task outputs for correctness and triggers self-heal/bisect on failure.
 func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, error) {
@@ -195,25 +196,37 @@ func (e *Engine) runVerify(ctx context.Context, goal string) (*PhaseResult, erro
 		}
 	}
 
-	// Apply 90% threshold for partial success
+	// Apply verification threshold - all-or-nothing by default
 	if total > 0 {
 		passRate := float64(passed) / float64(total)
 		e.logger.Info("verification pass rate", "passed", passed, "total", total, "rate", passRate)
 
-		if passRate >= VerifySuccessThreshold {
-			// Override allOK to true when threshold is met
+		// Check if partial verification is allowed via config
+		allowPartial := e.cfg != nil && e.cfg.Features.VerifyAllowPartial
+		threshold := VerifySuccessThreshold
+		if !allowPartial {
+			threshold = 1.0 // All-or-nothing by default
+		}
+
+		if passRate >= threshold {
 			allOK = true
 			if len(failedTasks) > 0 {
-				e.logger.Info("verification passed with warnings",
-					"pass_rate", passRate,
-					"threshold", VerifySuccessThreshold,
-					"failed_tasks", failedTasks)
+				if allowPartial {
+					e.logger.Info("verification passed with warnings (partial allowed)",
+						"pass_rate", passRate,
+						"threshold", threshold,
+						"failed_tasks", failedTasks)
+				} else {
+					// This should not happen with threshold=1.0, but safeguard
+					e.logger.Warn("unexpected failed tasks with all-or-nothing verification",
+						"failed_tasks", failedTasks)
+				}
 			}
 		} else {
 			allOK = false
 			e.logger.Info("verification failed below threshold",
 				"pass_rate", passRate,
-				"threshold", VerifySuccessThreshold)
+				"threshold", threshold)
 		}
 	}
 

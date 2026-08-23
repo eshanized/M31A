@@ -156,7 +156,7 @@ func TestDispatcher_RememberedPermission(t *testing.T) {
 
 func TestDispatcher_List(t *testing.T) {
 	t.Parallel()
-	d := newDispatcher(nil)
+	d := newDispatcher(nil, nil)
 	t.Cleanup(func() { d.Stop() })
 	d.Register(&mocks.MockTool{Name_: "zzz", RiskLevel_: types.RiskSafe})
 	d.Register(&mocks.MockTool{Name_: "aaa", RiskLevel_: types.RiskSafe})
@@ -193,7 +193,7 @@ func TestDispatcher_GetTool(t *testing.T) {
 func TestDispatcher_DefaultDispatcher(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	d, err := DefaultDispatcher(dir, dir, dir, nil, nil)
+	d, err := DefaultDispatcher(dir, dir, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
@@ -1029,5 +1029,31 @@ func TestStop_DrainsChannels(t *testing.T) {
 	case <-d.responseCh:
 		t.Error("responseCh should be empty after Stop")
 	default:
+	}
+}
+
+func TestCommandExtractionInDispatcher(t *testing.T) {
+	d := testDispatcher(t)
+	d.Register(&mocks.MockTool{Name_: "bash", RiskLevel_: types.RiskDangerous})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.Execute(context.Background(), types.ToolCall{
+			ID:    "call1",
+			Name:  "bash",
+			Input: []byte(`{"name": "bash", "params": {"command": "echo hello"}}`),
+		})
+		errCh <- err
+	}()
+
+	req := <-d.RequestCh()
+	t.Logf("req.Command = %q", req.Command)
+	if req.Command != "echo hello" {
+		t.Errorf("expected Command 'echo hello', got %q", req.Command)
+	}
+	d.ApprovePermission(req.ID, true, false)
+
+	if err := <-errCh; err != nil {
+		t.Errorf("expected nil error after approval, got: %v", err)
 	}
 }

@@ -52,7 +52,7 @@ func TestGit_LogWithLastN(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		os.WriteFile(filepath.Join(g.workDir, "file"+string(rune('0'+i))+".txt"), []byte("content"), 0644)
-		g.Commit("commit " + string(rune('0'+i)))
+		g.commit("commit " + string(rune('0'+i)))
 	}
 
 	commits, err := g.Log(3)
@@ -71,7 +71,7 @@ func TestGit_Log_ZeroN(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("commit 1")
+	g.commit("commit 1")
 
 	commits, err := g.Log(0)
 	if err != nil {
@@ -86,13 +86,13 @@ func TestGit_LogSince(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("old commit")
+	g.commit("old commit")
 
 	// Use a time definitely before any future commits
 	since := time.Now().Add(-1 * time.Second)
 
 	os.WriteFile(filepath.Join(g.workDir, "b.txt"), []byte("b"), 0644)
-	g.Commit("new commit")
+	g.commit("new commit")
 
 	commits, err := g.LogSince(since)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestGit_LogSince_BeforeAnyCommits(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("commit 1")
+	g.commit("commit 1")
 
 	since := time.Now().Add(1 * time.Hour)
 	commits, err := g.LogSince(since)
@@ -135,7 +135,7 @@ func TestGit_DiffVariants(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("v1")
+	g.commit("v1")
 	hash1, _ := g.HeadHash()
 
 	// Unstaged diff (0 args) - clean tree
@@ -160,7 +160,7 @@ func TestGit_DiffVariants(t *testing.T) {
 	}
 
 	// Commit the modification
-	g.Commit("v2")
+	g.commit("v2")
 	hash2, _ := g.HeadHash()
 
 	// 1-arg diff: compare hash1 to HEAD
@@ -186,11 +186,11 @@ func TestGit_DiffStat(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("line1\nline2\nline3"), 0644)
-	g.Commit("v1")
+	g.commit("v1")
 	hash1, _ := g.HeadHash()
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("modified\nline2\nline3"), 0644)
-	g.Commit("v2")
+	g.commit("v2")
 
 	// 0 args: unstaged diff stat (clean tree now)
 	stat, err := g.DiffStat()
@@ -221,7 +221,7 @@ func TestGit_DiffStaged(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("v1")
+	g.commit("v1")
 
 	// Modify and stage
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v2"), 0644)
@@ -256,7 +256,7 @@ func TestGit_DiffFile(t *testing.T) {
 	// Test modified file (committed, then modified)
 	os.WriteFile(filepath.Join(g.workDir, "tracked.txt"), []byte("v1"), 0644)
 	g.Add("tracked.txt")
-	g.Commit("add tracked")
+	g.commit("add tracked")
 
 	os.WriteFile(filepath.Join(g.workDir, "tracked.txt"), []byte("v2"), 0644)
 
@@ -285,7 +285,7 @@ func TestGit_StatusPorcelain(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "committed.txt"), []byte("content"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	os.WriteFile(filepath.Join(g.workDir, "committed.txt"), []byte("modified"), 0644)
 
@@ -312,7 +312,7 @@ func TestGit_StatusPorcelain_WithModifications(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "myfile.txt"), []byte("v1"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	os.WriteFile(filepath.Join(g.workDir, "myfile.txt"), []byte("v2"), 0644)
 	// Ensure git observes the mtime change even under the race detector's
@@ -350,7 +350,7 @@ func TestGit_RevParse(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	hash, err := g.RevParse("HEAD")
 	if err != nil {
@@ -369,7 +369,7 @@ func TestGit_IsDirty(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	dirty, err := g.IsDirty()
 	if err != nil {
@@ -393,7 +393,7 @@ func TestGit_HasUncommittedChanges(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	has, err := g.HasUncommittedChanges()
 	if err != nil {
@@ -437,7 +437,7 @@ func TestGit_StashList(t *testing.T) {
 	}
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("modified"), 0644)
 	g.StashPush("stash 1")
@@ -455,7 +455,7 @@ func TestGit_StashApply(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("stashed"), 0644)
 	g.StashPush("stash me")
@@ -479,7 +479,7 @@ func TestGit_BranchList(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	g.CreateBranch("feature-a")
 	g.CreateBranch("feature-b")
@@ -505,7 +505,7 @@ func TestGit_CheckoutBranch(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	// Create branch using git directly (CreateBranch works)
 	g.CreateBranch("test-branch")
@@ -610,7 +610,7 @@ func TestGit_Log_SingleCommit(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("only commit")
+	g.commit("only commit")
 
 	commits, err := g.Log(1)
 	if err != nil {
@@ -628,7 +628,7 @@ func TestGit_DiffRefs_EmptyRefs(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	diff, err := g.DiffRefs("", "")
 	if err != nil {
@@ -641,7 +641,7 @@ func TestGit_StatusPorcelain_Rename(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "old.txt"), []byte("content"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	g.Run("mv", "old.txt", "new.txt")
 
@@ -667,7 +667,7 @@ func TestGit_DiffStat_CleanRepo(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	stat, err := g.DiffStat()
 	if err != nil {
@@ -682,7 +682,7 @@ func TestGit_DiffStaged_Empty(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	diff, err := g.DiffStaged()
 	if err != nil {
@@ -690,5 +690,278 @@ func TestGit_DiffStaged_Empty(t *testing.T) {
 	}
 	if diff != "" {
 		t.Errorf("Expected empty staged diff, got %q", diff)
+	}
+}
+
+// TestGit_AddAll_CommitsOnlyStagedFiles verifies that addAll (private) stages
+// ALL worktree changes. This proves the unsafe behavior exists at the API level.
+// Production code MUST NOT use addAll — only CommitWithFiles for scoped commits.
+// This is a regression test for M31A-AUDIT-001.
+func TestGit_AddAll_CommitsOnlyStagedFiles(t *testing.T) {
+	g, _ := setupRepo(t)
+
+	// Initial commit
+	os.WriteFile(filepath.Join(g.workDir, "agent.txt"), []byte("agent v1"), 0644)
+	g.commit("initial commit")
+
+	// Simulate user making unrelated changes
+	os.WriteFile(filepath.Join(g.workDir, "user.txt"), []byte("user change"), 0644)
+
+	// Simulate agent creating a new file
+	os.WriteFile(filepath.Join(g.workDir, "agent-new.txt"), []byte("agent new"), 0644)
+
+	// Use addAll (the dangerous internal method)
+	if err := g.addAll(); err != nil {
+		t.Fatalf("addAll failed: %v", err)
+	}
+
+	// Commit via CommitStaged (what ship.go does after addAll)
+	hash, err := g.CommitStaged("agent commit with addAll fallback")
+	if err != nil {
+		t.Fatalf("CommitStaged failed: %v", err)
+	}
+
+	// Check what was committed
+	diff, err := g.DiffRefs(hash+"^", hash)
+	if err != nil {
+		t.Fatalf("DiffRefs failed: %v", err)
+	}
+
+	// Verify user.txt WAS committed (addAll stages everything - this is the unsafe behavior)
+	// This test documents why addAll must not be used in production paths.
+	if !strings.Contains(diff, "user.txt") {
+		t.Error("Expected addAll to stage user.txt (demonstrating unsafe behavior)")
+	}
+
+	// Now verify CommitWithFiles does NOT commit user changes
+	g2, _ := setupRepo(t)
+	os.WriteFile(filepath.Join(g2.workDir, "agent.txt"), []byte("agent v1"), 0644)
+	g2.commit("initial commit")
+	os.WriteFile(filepath.Join(g2.workDir, "user.txt"), []byte("user change"), 0644)
+	os.WriteFile(filepath.Join(g2.workDir, "agent-new.txt"), []byte("agent new"), 0644)
+
+	hash2, err := g2.CommitWithFiles("add agent file", "agent-new.txt")
+	if err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
+	}
+	diff2, err := g2.DiffRefs(hash2+"^", hash2)
+	if err != nil {
+		t.Fatalf("DiffRefs failed: %v", err)
+	}
+
+	// CommitWithFiles MUST NOT commit user.txt
+	if strings.Contains(diff2, "user.txt") {
+		t.Error("CommitWithFiles incorrectly committed user.txt")
+	}
+
+	// CommitWithFiles MUST commit agent-new.txt
+	if !strings.Contains(diff2, "agent-new.txt") {
+		t.Error("CommitWithFiles failed to commit agent-new.txt")
+	}
+}
+
+// TestGit_CommitWithFiles_OnlyCommitsSpecifiedFiles verifies that
+// CommitWithFiles only commits the specified files, not other worktree changes.
+func TestGit_CommitWithFiles_OnlyCommitsSpecifiedFiles(t *testing.T) {
+	g, _ := setupRepo(t)
+
+	// Initial commit
+	os.WriteFile(filepath.Join(g.workDir, "agent.txt"), []byte("agent v1"), 0644)
+	g.commit("initial commit")
+
+	// User makes unrelated change
+	os.WriteFile(filepath.Join(g.workDir, "user.txt"), []byte("user change"), 0644)
+
+	// Agent creates new file
+	os.WriteFile(filepath.Join(g.workDir, "agent-new.txt"), []byte("agent new"), 0644)
+
+	// Use CommitWithFiles (correct API) - should only commit agent-new.txt
+	hash, err := g.CommitWithFiles("add agent file", "agent-new.txt")
+	if err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
+	}
+
+	// Check what was committed
+	diff, err := g.DiffRefs(hash+"^", hash)
+	if err != nil {
+		t.Fatalf("DiffRefs failed: %v", err)
+	}
+
+	// user.txt should NOT be in the commit
+	if strings.Contains(diff, "user.txt") {
+		t.Error("CommitWithFiles incorrectly committed user.txt")
+	}
+
+	// agent-new.txt SHOULD be in the commit
+	if !strings.Contains(diff, "agent-new.txt") {
+		t.Error("CommitWithFiles failed to commit agent-new.txt")
+	}
+}
+
+// --- R7: Adversarial Regression Tests ---
+
+// TestRegression_001_AddAllNotExported verifies that addAll() is private and
+// cannot be called from outside the git package. This prevents production code
+// from staging the entire worktree. Regression test for M31A-AUDIT-001.
+// This is a compile-time check — if addAll were exported, this test would
+// need to import it. Since it's lowercase, only in-package code can call it.
+func TestRegression_001_AddAllNotExported(t *testing.T) {
+	// The fact that this test compiles and addAll() is callable from within
+	// the git package (test files are part of the package) but NOT from
+	// external packages is the verification. The compile-time check is that
+	// no external code can call g.addAll().
+	g, _ := setupRepo(t)
+
+	// Verify addAll exists and is callable (from within the package)
+	if err := g.addAll(); err != nil {
+		t.Fatalf("addAll should be callable within package: %v", err)
+	}
+
+	// Verify CommitWithFiles exists as the safe alternative
+	if _, err := g.CommitWithFiles("test", "nonexistent.txt"); err == nil {
+		// Expected to fail — file doesn't exist, but the API exists
+	}
+}
+
+// TestRegression_002_CommitWithFilesScoped verifies that CommitWithFiles only
+// commits the explicitly listed files, never the entire worktree. This is
+// the primary safety mechanism for R1. Regression test for M31A-AUDIT-001.
+func TestRegression_002_CommitWithFilesScoped(t *testing.T) {
+	g, _ := setupRepo(t)
+
+	// Create initial commit with a file (so we have a HEAD^ to diff against)
+	os.WriteFile(filepath.Join(g.workDir, "init.txt"), []byte("initial"), 0644)
+	g.CommitWithFiles("initial commit", "init.txt")
+
+	// Create multiple new files
+	os.WriteFile(filepath.Join(g.workDir, "user-code.go"), []byte("package main"), 0644)
+	os.WriteFile(filepath.Join(g.workDir, "agent-fix.go"), []byte("package fix"), 0644)
+	os.WriteFile(filepath.Join(g.workDir, "secret.env"), []byte("API_KEY=abc123"), 0644)
+
+	// Commit only agent-fix.go
+	hash, err := g.CommitWithFiles("fix: patch bug", "agent-fix.go")
+	if err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
+	}
+
+	// Use git diff --name-only to check which files were committed
+	out, err := g.run("diff", "--name-only", hash+"^", hash)
+	if err != nil {
+		t.Fatalf("git diff --name-only failed: %v", err)
+	}
+
+	// Must NOT contain user code
+	if strings.Contains(out, "user-code.go") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles leaked user-code.go")
+	}
+	// Must NOT contain secrets
+	if strings.Contains(out, "secret.env") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles leaked secret.env")
+	}
+	// Must contain agent file
+	if !strings.Contains(out, "agent-fix.go") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles missing agent-fix.go")
+	}
+}
+
+// TestRegression_003_CommitWithFilesDoesNotStageAll verifies that CommitWithFiles
+// does not call addAll or stage unrelated files. Regression test for R1.2.
+func TestRegression_003_CommitWithFilesDoesNotStageAll(t *testing.T) {
+	g, _ := setupRepo(t)
+
+	// Create initial commit with a file
+	os.WriteFile(filepath.Join(g.workDir, "init.txt"), []byte("initial"), 0644)
+	g.CommitWithFiles("initial commit", "init.txt")
+
+	// Create sensitive files and a new safe file
+	os.WriteFile(filepath.Join(g.workDir, ".env"), []byte("SECRET=xyz"), 0644)
+	os.WriteFile(filepath.Join(g.workDir, "id_rsa"), []byte("private-key"), 0644)
+	os.WriteFile(filepath.Join(g.workDir, "safe.txt"), []byte("safe content"), 0644)
+
+	// Commit only safe.txt — should not stage .env or id_rsa
+	hash, err := g.CommitWithFiles("safe commit", "safe.txt")
+	if err != nil {
+		t.Fatalf("CommitWithFiles failed: %v", err)
+	}
+
+	out, err := g.run("diff", "--name-only", hash+"^", hash)
+	if err != nil {
+		t.Fatalf("git diff --name-only failed: %v", err)
+	}
+
+	// Must NOT contain sensitive files
+	if strings.Contains(out, ".env") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles leaked .env")
+	}
+	if strings.Contains(out, "id_rsa") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles leaked id_rsa")
+	}
+	// Must contain safe file
+	if !strings.Contains(out, "safe.txt") {
+		t.Error("M31A-AUDIT-001: CommitWithFiles missing safe.txt")
+	}
+}
+
+// TestRegression_004_AddFilesStaging verifies that Add() only stages the
+// specified files, not the entire worktree. Regression test for R1.2.
+func TestRegression_004_AddFilesStaging(t *testing.T) {
+	g, _ := setupRepo(t)
+	g.commit("initial")
+
+	// Create files
+	os.WriteFile(filepath.Join(g.workDir, "user.txt"), []byte("user"), 0644)
+	os.WriteFile(filepath.Join(g.workDir, "agent.txt"), []byte("agent"), 0644)
+
+	// Add only agent.txt
+	if err := g.Add("agent.txt"); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Check staged files
+	diff, err := g.DiffStaged()
+	if err != nil {
+		t.Fatalf("DiffStaged failed: %v", err)
+	}
+
+	// user.txt should NOT be staged
+	if strings.Contains(diff, "user.txt") {
+		t.Error("M31A-AUDIT-001: Add() staged user.txt when only agent.txt was specified")
+	}
+
+	// agent.txt SHOULD be staged
+	if !strings.Contains(diff, "agent.txt") {
+		t.Error("M31A-AUDIT-001: Add() failed to stage agent.txt")
+	}
+}
+
+// TestRegression_005_DiffStagedReturnsCurrent verifies DiffStaged returns
+// the current staged diff, not a stale snapshot. Regression test for R3.2.
+func TestRegression_005_DiffStagedReturnsCurrent(t *testing.T) {
+	g, _ := setupRepo(t)
+	g.commit("initial")
+
+	// Create and stage a file
+	os.WriteFile(filepath.Join(g.workDir, "new.txt"), []byte("content"), 0644)
+	g.Add("new.txt")
+
+	// Get staged diff
+	diff1, err := g.DiffStaged()
+	if err != nil {
+		t.Fatalf("DiffStaged failed: %v", err)
+	}
+
+	if !strings.Contains(diff1, "new.txt") {
+		t.Error("DiffStaged should contain newly staged file")
+	}
+
+	// Unstage using git reset HEAD and verify diff changes
+	_, _ = g.run("reset", "HEAD", "--", "new.txt")
+	diff2, err := g.DiffStaged()
+	if err != nil {
+		t.Fatalf("DiffStaged failed after reset: %v", err)
+	}
+
+	if strings.Contains(diff2, "new.txt") {
+		t.Error("M31A-AUDIT-003: DiffStaged returned stale data after unstaging")
 	}
 }

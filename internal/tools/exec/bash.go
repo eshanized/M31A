@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
+	"github.com/eshanized/M31A/internal/tools/fileops"
 )
 
 // Compile-time interface check
@@ -136,21 +136,9 @@ func (t *Bash) Execute(ctx context.Context, input types.ToolInput) (types.ToolRe
 	// Determine working directory: explicit workdir parameter overrides default
 	cmd.Dir = t.workDir
 	if workdirRaw, ok := input.Params["workdir"].(string); ok && workdirRaw != "" {
-		// Validate and clean the workdir path
-		cleaned := filepath.Clean(workdirRaw)
-
-		// If relative, resolve against t.workDir
-		var absWorkdir string
-		if filepath.IsAbs(cleaned) {
-			absWorkdir = cleaned
-		} else {
-			absWorkdir = filepath.Join(t.workDir, cleaned)
-		}
-
-		// Ensure the path is within the project directory
-		cleanTWorkDir := filepath.Clean(t.workDir)
-		rel, err := filepath.Rel(cleanTWorkDir, absWorkdir)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		// Use centralized symlink-aware path containment check
+		absWorkdir, err := fileops.ResolveAndContainPath(workdirRaw, t.workDir)
+		if err != nil {
 			return types.ToolResult{}, fmt.Errorf("workdir must be within the project directory: %w", m31errors.ErrToolExecution)
 		}
 

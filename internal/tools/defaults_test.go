@@ -12,7 +12,7 @@ func TestDefaultDispatcher_CreatesAllTools(t *testing.T) {
 	backupDir := t.TempDir()
 	sessionsDir := t.TempDir()
 
-	d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, nil, nil)
+	d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestDefaultDispatcher_WithPermissions(t *testing.T) {
 	cfg := &config.PermissionsConfig{
 		DefaultMode: "allow",
 	}
-	d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, cfg, nil)
+	d, err := DefaultDispatcher(workDir, backupDir, sessionsDir, cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

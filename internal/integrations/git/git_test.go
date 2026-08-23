@@ -58,7 +58,7 @@ func TestGit_AddAndCommit(t *testing.T) {
 	}
 
 	// Commit
-	if err := g.Commit("initial commit"); err != nil {
+	if err := g.commit("initial commit"); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestGit_Log(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		f := filepath.Join(g.workDir, "file"+string(rune('0'+i))+".txt")
 		os.WriteFile(f, []byte("content"), 0644)
-		if err := g.Commit("commit " + string(rune('0'+i))); err != nil {
+		if err := g.commit("commit " + string(rune('0'+i))); err != nil {
 			t.Fatalf("Commit %d failed: %v", i, err)
 		}
 	}
@@ -143,12 +143,12 @@ func TestGit_Diff(t *testing.T) {
 
 	// First commit
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("v1")
+	g.commit("v1")
 	hash1, _ := g.HeadHash()
 
 	// Second commit modifies
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v2"), 0644)
-	g.Commit("v2")
+	g.commit("v2")
 	hash2, _ := g.HeadHash()
 
 	diff, err := g.DiffRefs(hash1, hash2)
@@ -164,7 +164,7 @@ func TestGit_HeadHash(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "x.txt"), []byte("x"), 0644)
-	g.Commit("test")
+	g.commit("test")
 
 	hash, err := g.HeadHash()
 	if err != nil {
@@ -179,7 +179,7 @@ func TestGit_CreateBranch(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "x.txt"), []byte("x"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	if err := g.CreateBranch("feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
@@ -194,7 +194,7 @@ func TestGit_CurrentBranch(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "x.txt"), []byte("x"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	branch, err := g.CurrentBranch()
 	if err != nil {
@@ -223,11 +223,11 @@ func TestGit_ResetSoft(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("commit 1")
+	g.commit("commit 1")
 	hash1, _ := g.HeadHash()
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v2"), 0644)
-	g.Commit("commit 2")
+	g.commit("commit 2")
 
 	if err := g.ResetSoft(hash1); err != nil {
 		t.Fatalf("ResetSoft failed: %v", err)
@@ -243,11 +243,11 @@ func TestGit_ResetHard(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("commit 1")
+	g.commit("commit 1")
 	hash1, _ := g.HeadHash()
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v2"), 0644)
-	g.Commit("commit 2")
+	g.commit("commit 2")
 
 	if err := g.ResetHard(hash1); err != nil {
 		t.Fatalf("ResetHard failed: %v", err)
@@ -269,7 +269,7 @@ func TestGit_Stash(t *testing.T) {
 	g, _ := setupRepo(t)
 
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("v1"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	// Modify file
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("modified"), 0644)
@@ -300,13 +300,13 @@ func TestGit_AddAll(t *testing.T) {
 	// Create and delete a file
 	os.WriteFile(filepath.Join(g.workDir, "a.txt"), []byte("a"), 0644)
 	os.WriteFile(filepath.Join(g.workDir, "b.txt"), []byte("b"), 0644)
-	g.Commit("initial")
+	g.commit("initial")
 
 	os.Remove(filepath.Join(g.workDir, "a.txt"))
 	os.WriteFile(filepath.Join(g.workDir, "c.txt"), []byte("c"), 0644)
 
-	if err := g.AddAll(); err != nil {
-		t.Fatalf("AddAll failed: %v", err)
+	if err := g.addAll(); err != nil {
+		t.Fatalf("addAll failed: %v", err)
 	}
 }
 

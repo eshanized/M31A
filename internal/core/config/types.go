@@ -468,10 +468,11 @@ type FeaturesConfig struct {
 	ExecuteLoopDetect  bool `toml:"execute_loop_detect"`  // Tool call loop detection
 
 	// Verify + Ship phase enhancements
-	VerifyReport   bool `toml:"verify_report"`   // Generate verification report
-	VerifySecurity bool `toml:"verify_security"` // Security file scanning
-	ShipPreflight  bool `toml:"ship_preflight"`  // Pre-ship checklist
-	ShipChangelog  bool `toml:"ship_changelog"`  // Changelog generation
+	VerifyReport           bool `toml:"verify_report"`             // Generate verification report
+	VerifySecurity         bool `toml:"verify_security"`          // Security file scanning
+	VerifyAllowPartial     bool `toml:"verify_allow_partial"`     // Allow partial verification (default false)
+	ShipPreflight          bool `toml:"ship_preflight"`           // Pre-ship checklist
+	ShipChangelog          bool `toml:"ship_changelog"`           // Changelog generation
 
 	// Initialize phase enhancements
 	InitDeepAnalysis bool `toml:"init_deep_analysis"` // Deep project analysis

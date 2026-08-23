@@ -42,7 +42,7 @@ func setupTestEngine(t *testing.T) (*Engine, func()) {
 	planningDir := filepath.Join(sessionBaseDir, s.ID, "planning")
 
 	// Create dispatcher with tools
-	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), sessionBaseDir, nil, nil)
+	dispatcher, err := tools.DefaultDispatcher(dir, filepath.Join(dir, "backups"), sessionBaseDir, nil, nil, &tools.HeadlessAllowDecider{})
 	if err != nil {
 		t.Fatalf("DefaultDispatcher failed: %v", err)
 	}
