@@ -295,7 +295,121 @@ func startPprofServer() func() {
 	}
 }
 
-func main() {
+// runMigrate handles the migrate command
+func runMigrate(args []string, workDir string, logger *slog.Logger) int {
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "Parse artifacts and show counts without writing")
+	replay := fs.Bool("replay", false, "Replay events to rebuild projections from existing .m31a/events.db")
+	force := fs.Bool("force", false, "Skip ONE_WAY_DOOR confirmation prompt")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: m31a migrate [--dry-run] [--replay] [--force]")
+		fmt.Fprintln(os.Stderr, "  --dry-run    Parse artifacts and show counts without writing")
+		fmt.Fprintln(os.Stderr, "  --replay     Replay events to rebuild projections (no parsing)")
+		fmt.Fprintln(os.Stderr, "  --force      Skip ONE_WAY_DOOR confirmation prompt")
+	}
+	fs.Parse(args)
+
+	planningDir := filepath.Join(workDir, ".planning")
+	m31aDir := filepath.Join(workDir, ".m31a")
+
+	if *replay {
+		// Replay mode: rebuild projections from existing events
+		return runMigrateReplay(m31aDir)
+	}
+
+	// Check if .planning/ exists
+	if _, err := os.Stat(filepath.Join(workDir, ".planning")); os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "error: .planning/ directory not found")
+		return 1
+	}
+
+	// Check if already migrated
+	eventsDB := filepath.Join(workDir, ".m31a", "events.db")
+	if _, err := os.Stat(eventsDB); err == nil && !*force {
+		fmt.Fprintln(os.Stderr, "error: .m31a/events.db already exists. Use --force to re-migrate.")
+		return 1
+	}
+
+	// ONE_WAY_DOOR confirmation
+	if !*force && !*dryRun {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "⚠️  WARNING: This is a ONE_WAY_DOOR operation (D-09).")
+		fmt.Fprintln(os.Stderr, "   It will archive .planning/ and make .m31a/events.db the authoritative source.")
+		fmt.Fprintln(os.Stderr, "   There is no automatic rollback — the archive is your backup.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprint(os.Stderr, "Continue? [y/N] ")
+
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(strings.TrimSpace(response)) != "y" {
+			fmt.Fprintln(os.Stderr, "Migration cancelled.")
+			return 0
+		}
+	}
+
+	ctx := context.Background()
+	planningDir := ".planning"
+	m31aDir := ".m31a"
+
+	if *dryRun {
+		fmt.Fprintln(os.Stderr, "=== DRY RUN MODE ===")
+	}
+
+	counts, err := Migrate(ctx, planningDir, m31aDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: migration failed: %v\n", err)
+		return 1
+	}
+
+	if *dryRun {
+		fmt.Fprintln(os.Stderr, "=== DRY RUN COMPLETE ===")
+		fmt.Fprintf(os.Stderr, "Would migrate: %d requirements, %d phases, %d decisions, %d research, %d codebase maps\n",
+			counts.Requirements, counts.Phases, counts.Decisions, counts.Research, counts.CodebaseMaps)
+		fmt.Fprintln(os.Stderr, "No files were written.")
+		return 0
+	}
+
+	fmt.Fprintf(os.Stderr, "Migrated: %d requirements, %d phases, %d decisions, %d research, %d codebase maps\n",
+		counts.Requirements, counts.Phases, counts.Decisions, counts.Research, counts.CodebaseMaps)
+	fmt.Fprintf(os.Stderr, "Archived .planning/ to .planning.archived.<timestamp>/\n")
+	fmt.Fprintln(os.Stderr, "Migration completed successfully.")
+	return 0
+}
+
+func runMigrateReplay(m31aDir string) int {
+	eventsDB := filepath.Join(m31aDir, "events.db")
+	if _, err := os.Stat(eventsDB); os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "error: events.db not found. Run migration first.")
+		return 1
+	}
+
+	store, err := NewEventStore(filepath.Join(m31aDir, "events.db"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to open event store: %v\n", err)
+		return 1
+	}
+	defer store.Close()
+
+	pm := NewProjectionManager(store)
+	pm.Register(NewProjectProjection())
+	pm.Register(NewRequirementsProjection())
+	pm.Register(NewDecisionsProjection())
+	pm.Register(NewResearchProjection())
+	pm.Register(NewRunProjection())
+
+	ctx := context.Background()
+	for _, name := range []string{"project", "requirements", "decisions", "research", "runs"} {
+		fmt.Fprintf(os.Stderr, "Rebuilding projection: %s... ", name)
+		if err := pm.Rebuild(ctx, name); err != nil {
+			fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "OK")
+	}
+
+	fmt.Fprintln(os.Stderr, "All projections rebuilt successfully.")
+	return 0
+}
 	os.Exit(run())
 }
 
@@ -511,6 +625,11 @@ func run() int {
 			return 1
 		}
 		return runHeadlessWorkflow(*goalFlag, cmdRegistry, cfg, model, logger, registry)
+	}
+
+	// Migration command: migrate .planning/ to .m31a/
+	if flag.Arg(0) == "migrate" {
+		return runMigrate(flag.Args()[1:], workDir, logger)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)
