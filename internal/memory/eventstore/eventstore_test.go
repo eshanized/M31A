@@ -3,7 +3,11 @@ package eventstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/google/uuid"
@@ -418,4 +422,314 @@ func TestQueryByRun(t *testing.T) {
 	result, err := store.QueryByRun(ctx, runID, 0, 2)
 	require.NoError(t, err)
 	assert.Len(t, result, 2)
+}
+
+func TestSubscribeAfterSeq(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	events := []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+		{Type: types.EventSessionCreated, Payload: mustMarshal(map[string]int{"n": 2})},
+		{Type: types.EventRunCreated, Payload: mustMarshal(map[string]int{"n": 3})},
+	}
+	store.AppendEvents(ctx, events)
+
+	ch, err := store.Subscribe(ctx, 1)
+	require.NoError(t, err)
+
+	// Should receive events with seq > 1 (i.e., 2 and 3)
+	evt1 := <-ch
+	assert.Equal(t, int64(2), evt1.Seq)
+	evt2 := <-ch
+	assert.Equal(t, int64(3), evt2.Seq)
+
+	// Channel should not have more (context not cancelled yet, but no more events)
+	select {
+	case <-ch:
+		t.Fatal("channel should not have more events")
+	case <-time.After(200 * time.Millisecond):
+		// Expected timeout
+	}
+}
+
+func TestSubscribeRealTime(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	// Start with one event
+	store.AppendEvents(ctx, []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+	})
+
+	ch, err := store.Subscribe(ctx, 1)
+	require.NoError(t, err)
+
+	// Append new event
+	store.AppendEvents(ctx, []types.Event{
+		{Type: types.EventSessionCreated, Payload: mustMarshal(map[string]int{"n": 2})},
+	})
+
+	// Should receive the new event
+	evt := <-ch
+	assert.Equal(t, int64(2), evt.Seq)
+	assert.Equal(t, types.EventSessionCreated, evt.Type)
+}
+
+func TestSubscribeContextCancel(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := store.Subscribe(ctx, 0)
+	require.NoError(t, err)
+
+	// Cancel context
+	cancel()
+
+	// Channel should close
+	_, ok := <-ch
+	assert.False(t, ok, "channel should be closed after context cancellation")
+}
+
+func TestSubscribeNoDuplicates(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	events := []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+		{Type: types.EventSessionCreated, Payload: mustMarshal(map[string]int{"n": 2})},
+	}
+	store.AppendEvents(ctx, events)
+
+	ch, err := store.Subscribe(ctx, 0)
+	require.NoError(t, err)
+
+	// Collect all events
+	var received []int64
+	for i := 0; i < 2; i++ {
+		evt := <-ch
+		received = append(received, evt.Seq)
+	}
+
+	// Should receive each event exactly once in order
+	assert.Equal(t, []int64{1, 2}, received)
+
+	// No more events
+	select {
+	case <-ch:
+		t.Fatal("should not receive duplicate events")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestSubscribeBackpressure(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	const numEvents = 150
+	events := make([]types.Event, numEvents)
+	for i := 0; i < numEvents; i++ {
+		events[i] = types.Event{
+			Type:    types.EventTaskCreated,
+			Payload: mustMarshal(map[string]int{"idx": i}),
+		}
+	}
+	store.AppendEvents(ctx, events)
+
+	ch, err := store.Subscribe(ctx, 0)
+	require.NoError(t, err)
+
+	// Channel buffer is 100, should handle burst
+	count := 0
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case <-ch:
+			count++
+			if count >= numEvents {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for events, got %d/%d", count, numEvents)
+		}
+	}
+}
+
+func TestSubscribeMultiple(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store.AppendEvents(ctx, []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+	})
+
+	ch1, err := store.Subscribe(ctx, 0)
+	require.NoError(t, err)
+	ch2, err := store.Subscribe(ctx, 0)
+	require.NoError(t, err)
+
+	// Both should receive the event
+	evt1 := <-ch1
+	evt2 := <-ch2
+	assert.Equal(t, int64(1), evt1.Seq)
+	assert.Equal(t, int64(1), evt2.Seq)
+}
+
+func TestBackupCreatesValidDB(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	events := []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+		{Type: types.EventSessionCreated, Payload: mustMarshal(map[string]int{"n": 2})},
+		{Type: types.EventRunCreated, Payload: mustMarshal(map[string]int{"n": 3})},
+	}
+	store.AppendEvents(ctx, events)
+
+	dir := t.TempDir()
+	dstPath := filepath.Join(dir, "backup.db")
+
+	err := store.Backup(ctx, dstPath)
+	require.NoError(t, err)
+
+	// Verify backup file exists and is valid SQLite
+	backupStore, err := NewEventStore(dstPath)
+	require.NoError(t, err)
+	defer backupStore.Close()
+
+	// Verify event count matches
+	var count int
+	err = backupStore.DB().QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 3, count)
+
+	// Verify events match
+	originalEvents, err := store.Query(ctx, types.Query{})
+	require.NoError(t, err)
+	backupEvents, err := backupStore.Query(ctx, types.Query{})
+	require.NoError(t, err)
+	assert.Equal(t, len(originalEvents), len(backupEvents))
+	for i := range originalEvents {
+		assert.Equal(t, originalEvents[i].Seq, backupEvents[i].Seq)
+		assert.Equal(t, originalEvents[i].Type, backupEvents[i].Type)
+	}
+}
+
+func TestBackupNonBlocking(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	// Add initial events
+	store.AppendEvents(ctx, []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+	})
+
+	dir := t.TempDir()
+	dstPath := filepath.Join(dir, "backup.db")
+
+	// Start backup in background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.Backup(ctx, dstPath)
+	}()
+
+	// Try concurrent appends during backup
+	for i := 0; i < 10; i++ {
+		evt := types.Event{
+			Type:    types.EventTaskCreated,
+			Payload: mustMarshal(map[string]int{"idx": i}),
+		}
+		err := store.Append(ctx, evt)
+		require.NoError(t, err, "append should not block during backup")
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Backup should complete successfully
+	err := <-errCh
+	require.NoError(t, err)
+
+	// Verify all events persisted
+	var count int
+	err = store.DB().QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 11, count) // 1 initial + 10 concurrent
+}
+
+func TestBackupIncremental(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	// Add many events
+	events := make([]types.Event, 100)
+	for i := 0; i < 100; i++ {
+		events[i] = types.Event{
+			Type:    types.EventTaskCreated,
+			Payload: mustMarshal(map[string]int{"idx": i}),
+		}
+	}
+	store.AppendEvents(ctx, events)
+
+	dir := t.TempDir()
+	dstPath := filepath.Join(dir, "backup.db")
+
+	err := store.Backup(ctx, dstPath)
+	require.NoError(t, err)
+
+	// Verify backup is valid
+	backupStore, err := NewEventStore(dstPath)
+	require.NoError(t, err)
+	defer backupStore.Close()
+
+	var count int
+	err = backupStore.DB().QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 100, count)
+}
+
+func TestBackupContextCancel(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	dstPath := filepath.Join(dir, "backup.db")
+
+	// Cancel immediately
+	cancel()
+
+	err := store.Backup(ctx, dstPath)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "error should be context.Canceled, got: %v", err)
+}
+
+func TestBackupDestination(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store.AppendEvents(ctx, []types.Event{
+		{Type: types.EventProjectInitialized, Payload: mustMarshal(map[string]int{"n": 1})},
+	})
+
+	dir := t.TempDir()
+	// Nested directory that doesn't exist
+	dstPath := filepath.Join(dir, "nested", "subdir", "backup.db")
+
+	err := store.Backup(ctx, dstPath)
+	require.NoError(t, err)
+
+	// Verify file was created
+	_, err = os.Stat(dstPath)
+	require.NoError(t, err)
 }

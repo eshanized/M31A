@@ -66,7 +66,7 @@ var (
 	ErrProjectionNotFound    = errors.New("projection not found")
 	ErrProjectionApplyFailed = errors.New("projection apply failed")
 	ErrArtifactParseFailed   = errors.New("artifact parse failed")
-	ErrKeyNotFound           = errors.New("key not found")
+ErrKeyNotFound           = errors.New("key not found")
 	ErrKeychainUnavailable   = errors.New("keychain unavailable")
 )
 

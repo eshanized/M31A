@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	coreerrors "github.com/eshanized/M31A/internal/core/errors"
-	"github.com/eshanized/M31A/internal/core/types"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,15 +71,6 @@ func (s *SQLiteEventStore) Close() error {
 
 func (s *SQLiteEventStore) DB() *sql.DB {
 	return s.db
-}
-
-func (s *SQLiteEventStore) Subscribe(ctx context.Context, afterSeq int64) (<-chan types.Event, error) {
-	ch := make(chan types.Event, 100)
-	return ch, nil
-}
-
-func (s *SQLiteEventStore) Backup(ctx context.Context, dstPath string) error {
-	return coreerrors.ErrNotImplemented
 }
 
 func nullString(s string) any {
