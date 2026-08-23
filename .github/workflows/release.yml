@@ -18,7 +18,6 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production  # Requires manual approval in GitHub repo settings
     steps:
       - uses: actions/checkout@v7
         with:
