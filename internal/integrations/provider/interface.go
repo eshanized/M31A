@@ -17,7 +17,9 @@ type LLMProvider interface {
 	APIKey() string
 	FetchModels(ctx context.Context) ([]types.ModelInfo, error)
 	CachedModels() []types.ModelInfo
+	ChatCompletion(ctx context.Context, req ChatRequest) (*types.ChatResponse, error)
 	ChatCompletionStream(ctx context.Context, req ChatRequest) (*types.StreamIterator, error)
+	ListModels(ctx context.Context) ([]types.ModelInfo, error)
 	EstimateCost(modelID string, usage types.Usage) float64
 	HealthCheck(ctx context.Context) types.HealthStatus
 	GetModel(id string) (*types.ModelInfo, error)

@@ -266,3 +266,61 @@ func (c *Client) doChatStream(ctx context.Context, req provider.ChatRequest) (*t
 func (c *Client) HealthCheck(ctx context.Context) types.HealthStatus {
 	return c.BaseClient.HealthCheck(ctx, "/models")
 }
+
+// ChatCompletion implements the non-streaming chat completion by collecting
+// chunks from ChatCompletionStream internally (per D-04).
+func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (*types.ChatResponse, error) {
+	stream, err := c.ChatCompletionStream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			slog.Debug("close stream iterator", "error", closeErr, "resource", "chat_completion")
+		}
+	}()
+
+	var content strings.Builder
+	var finalUsage *types.Usage
+	var finishReason string
+
+	for {
+		chunk, chunkErr := stream.Next()
+		if chunkErr != nil {
+			return nil, chunkErr
+		}
+		if chunk == nil {
+			break
+		}
+		if chunk.Type == "content" || chunk.Type == "thinking" {
+			content.WriteString(chunk.Delta)
+		}
+		if chunk.Usage != nil {
+			finalUsage = chunk.Usage
+		}
+		if chunk.Type == "done" {
+			finishReason = "stop"
+		}
+	}
+
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
+	return &types.ChatResponse{
+		Content:      content.String(),
+		Usage:        finalUsage,
+		Model:        req.Model,
+		FinishReason: finishReason,
+	}, nil
+}
+
+// ListModels returns the list of available models, delegating to FetchModels.
+func (c *Client) ListModels(ctx context.Context) ([]types.ModelInfo, error) {
+	return c.FetchModels(ctx)
+}
+
+// BuildNvidiaBodyForTest exposes buildNvidiaBody for testing.
+func (c *Client) BuildNvidiaBodyForTest(req provider.ChatRequest) map[string]any {
+	return c.buildNvidiaBody(req)
+}

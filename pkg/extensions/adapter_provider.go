@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -218,6 +219,59 @@ func (a *ExternalProviderAdapter) GetModel(id string) (*types.ModelInfo, error) 
 	}
 
 	return nil, fmt.Errorf("model not found: %s", id)
+}
+
+// ChatCompletion performs a non-streaming chat completion by collecting
+// chunks from ChatCompletionStream internally.
+func (a *ExternalProviderAdapter) ChatCompletion(ctx context.Context, req types.ChatRequest) (*types.ChatResponse, error) {
+	stream, err := a.ChatCompletionStream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			slog.Debug("close stream iterator", "error", closeErr, "resource", "chat_completion")
+		}
+	}()
+
+	var content strings.Builder
+	var finalUsage *types.Usage
+	var finishReason string
+
+	for {
+		chunk, chunkErr := stream.Next()
+		if chunkErr != nil {
+			return nil, chunkErr
+		}
+		if chunk == nil {
+			break
+		}
+		if chunk.Type == "content" || chunk.Type == "thinking" {
+			content.WriteString(chunk.Delta)
+		}
+		if chunk.Usage != nil {
+			finalUsage = chunk.Usage
+		}
+		if chunk.Type == "done" {
+			finishReason = "stop"
+		}
+	}
+
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
+	return &types.ChatResponse{
+		Content:      content.String(),
+		Usage:        finalUsage,
+		Model:        req.Model,
+		FinishReason: finishReason,
+	}, nil
+}
+
+// ListModels returns the list of available models, delegating to FetchModels.
+func (a *ExternalProviderAdapter) ListModels(ctx context.Context) ([]types.ModelInfo, error) {
+	return a.FetchModels(ctx)
 }
 
 // ensureInitialized fetches provider metadata on first access.

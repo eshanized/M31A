@@ -104,16 +104,20 @@ type ArchInfo struct {
 }
 
 type ModelInfo struct {
-	ID            string   `json:"id"`
-	Provider      string   `json:"provider"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	ContextLength int64    `json:"context_length"`
-	Pricing       Pricing  `json:"pricing"`
-	Architecture  ArchInfo `json:"architecture"`
-	TopProvider   string   `json:"top_provider"`
-	Capabilities  CapFlags `json:"capabilities"`
-	Variant       *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
+	ID                string   `json:"id"`
+	Provider          string   `json:"provider"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	ContextLength     int64    `json:"context_length"`
+	MaxOutputTokens   int64    `json:"max_output_tokens"`
+	Pricing           Pricing  `json:"pricing"`
+	Architecture      ArchInfo `json:"architecture"`
+	TopProvider       string   `json:"top_provider"`
+	Capabilities      CapFlags `json:"capabilities"`
+	SupportedParameters []string `json:"supported_parameters"`
+	InputModalities   []string `json:"input_modalities"`
+	OutputModalities  []string `json:"output_modalities"`
+	Variant           *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
 }
 
 type MessageSegment struct {
@@ -274,6 +278,15 @@ type ChatRequest struct {
 	MaxTokens        int              `json:"max_tokens,omitempty"`
 	Tools            []ToolDefinition `json:"tools,omitempty"`
 	ReasoningEnabled bool             `json:"reasoning_enabled,omitempty"`
+}
+
+// ChatResponse is a non-streaming chat completion response.
+// Returned by LLMProvider.ChatCompletion (which collects stream chunks internally).
+type ChatResponse struct {
+	Content      string  `json:"content"`
+	Usage        *Usage  `json:"usage,omitempty"`
+	Model        string  `json:"model"`
+	FinishReason string  `json:"finish_reason"`
 }
 
 // ToolDefinition describes a tool available to the LLM.

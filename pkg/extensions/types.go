@@ -32,8 +32,12 @@ type ExternalProvider interface {
 	FetchModels(ctx context.Context) ([]types.ModelInfo, error)
 	// CachedModels returns the cached models without fetching.
 	CachedModels() []types.ModelInfo
+	// ChatCompletion performs a non-streaming chat completion request.
+	ChatCompletion(ctx context.Context, req types.ChatRequest) (*types.ChatResponse, error)
 	// ChatCompletionStream performs a streaming chat completion request.
 	ChatCompletionStream(ctx context.Context, req types.ChatRequest) (*types.StreamIterator, error)
+	// ListModels returns the list of models available from this provider.
+	ListModels(ctx context.Context) ([]types.ModelInfo, error)
 	// EstimateCost estimates the cost of a request in USD.
 	EstimateCost(modelID string, usage types.Usage) float64
 	// HealthCheck verifies the provider is reachable and healthy.

@@ -48,6 +48,18 @@ var reasoningParamMap = map[string]ReasoningConfig{
 		RequestParams: map[string]any{},
 		SSEField:      "choices.0.delta.reasoning_content",
 	},
+	"nvidia/nemotron-3-ultra-550b-a55b": {
+		ModelFamily:   "nvidia",
+		RequestParams: map[string]any{},
+		ExtraBodyParams: map[string]any{
+			"reasoning_budget": 32768,
+			"chat_template_kwargs": map[string]any{
+				"enable_thinking":       true,
+				"force_nonempty_content": true,
+			},
+		},
+		SSEField: "choices.0.delta.reasoning_content",
+	},
 	"nvidia/nemotron-3-nano-omni": {
 		ModelFamily:   "nvidia",
 		RequestParams: map[string]any{},
