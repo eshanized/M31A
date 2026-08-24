@@ -102,18 +102,39 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		}
 		models := make([]types.ModelInfo, 0, len(apiResp.Data))
 		for _, m := range apiResp.Data {
+			// Get reasoning config for capability enrichment
+			cfg, hasCfg := provider.GetReasoningConfig(m.ID)
+
+			// Determine modalities - Zen models are typically text-only unless specified
+			inputModalities := []string{"text"}
+
+			// Build supported parameters
+			supportedParams := []string{"temperature", "top_p", "max_tokens"}
+			if hasCfg && len(cfg.ExtraBodyParams) > 0 {
+				for k := range cfg.ExtraBodyParams {
+					supportedParams = append(supportedParams, k)
+				}
+			}
+
+			// MaxOutputTokens - use default
+			maxOutputTokens := int64(16384)
+
 			info := types.ModelInfo{
-				ID:            m.ID,
-				Name:          m.ID,
-				Description:   m.OwnedBy,
-				ContextLength: c.defaultContextLen,
+				ID:                m.ID,
+				Name:              m.ID,
+				Description:       m.OwnedBy,
+				ContextLength:     c.defaultContextLen,
+				MaxOutputTokens:   maxOutputTokens,
 				Pricing: types.Pricing{
 					InputPerMToken:  0,
 					OutputPerMToken: 0,
 				},
-				Provider:     types.ProviderZen,
-				TopProvider:  types.ProviderZen,
-				Capabilities: provider.ParseModelCapabilities(m.ID, "-r1"),
+				Provider:            types.ProviderZen,
+				TopProvider:         types.ProviderZen,
+				Capabilities:        provider.ParseModelCapabilities(m.ID, "-r1"),
+				SupportedParameters: supportedParams,
+				InputModalities:     inputModalities,
+				OutputModalities:    []string{"text"},
 			}
 			models = append(models, info)
 		}

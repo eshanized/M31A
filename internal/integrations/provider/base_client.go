@@ -347,6 +347,8 @@ func applyProfile(req types.ChatRequest, profile types.ModelProfile) types.ChatR
 
 // isInitialConnectionError checks if an error indicates a failure during
 // initial connection establishment (before any stream chunks are received).
+// This includes network errors, context cancellation, and retryable HTTP errors
+// (gateway errors, server errors, etc.) that occur on the initial request.
 func isInitialConnectionError(err error) bool {
 	if err == nil {
 		return false
@@ -358,6 +360,10 @@ func isInitialConnectionError(err error) bool {
 	// Network-level errors
 	var netErr net.Error
 	if errors.As(err, &netErr) {
+		return true
+	}
+	// Retryable HTTP errors (includes gateway errors, server errors, etc.)
+	if IsRetryable(err) {
 		return true
 	}
 	// HTTP transport errors

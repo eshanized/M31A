@@ -116,18 +116,45 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 		}
 		models := make([]types.ModelInfo, 0, len(apiResp.Data))
 		for _, m := range apiResp.Data {
+			// Get reasoning config for capability enrichment
+			cfg, hasCfg := provider.GetReasoningConfig(m.ID)
+
+			// Determine modalities from architecture
+			inputModalities := []string{"text"}
+			if m.Architecture.Modality != "" && (m.Architecture.Modality == "multimodal" || m.Architecture.Modality == "image") {
+				inputModalities = []string{"text", "image"}
+			}
+
+			// Build supported parameters
+			supportedParams := []string{"temperature", "top_p", "max_tokens"}
+			if hasCfg && len(cfg.ExtraBodyParams) > 0 {
+				for k := range cfg.ExtraBodyParams {
+					supportedParams = append(supportedParams, k)
+				}
+			}
+
+			// MaxOutputTokens - use a reasonable default based on context length
+			maxOutputTokens := int64(16384)
+			if m.ContextLen > 0 && m.ContextLen < 16384 {
+				maxOutputTokens = m.ContextLen / 4 // rough heuristic
+			}
+
 			info := types.ModelInfo{
-				ID:            m.ID,
-				Name:          m.Name,
-				Description:   m.Description,
-				ContextLength: m.ContextLen,
+				ID:                m.ID,
+				Name:              m.Name,
+				Description:       m.Description,
+				ContextLength:     m.ContextLen,
+				MaxOutputTokens:   maxOutputTokens,
 				Pricing: types.Pricing{
 					InputPerMToken:  m.Pricing.PromptToken * 1_000_000,
 					OutputPerMToken: m.Pricing.CompletionToken * 1_000_000,
 				},
-				Provider:     types.ProviderOpenRouter,
-				TopProvider:  m.TopProvider,
-				Capabilities: provider.ParseModelCapabilities(m.ID),
+				Provider:            types.ProviderOpenRouter,
+				TopProvider:         m.TopProvider,
+				Capabilities:        provider.ParseModelCapabilities(m.ID),
+				SupportedParameters: supportedParams,
+				InputModalities:     inputModalities,
+				OutputModalities:    []string{"text"},
 			}
 			models = append(models, info)
 		}

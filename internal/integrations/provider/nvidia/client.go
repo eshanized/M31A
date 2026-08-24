@@ -106,18 +106,41 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			if provider.IsLikelyBrokenOnNvidia(m.ID) {
 				continue
 			}
+
+			// Get reasoning config for capability enrichment
+			cfg, hasCfg := provider.GetReasoningConfig(m.ID)
+
+			// Determine modalities
+			isMultimodal := isMultimodalModel(m.ID)
+			inputModalities := []string{"text"}
+			if isMultimodal {
+				inputModalities = []string{"text", "image"}
+			}
+
+			// Build supported parameters from reasoning config and standard params
+			supportedParams := []string{"temperature", "top_p", "max_tokens"}
+			if hasCfg && len(cfg.ExtraBodyParams) > 0 {
+				for k := range cfg.ExtraBodyParams {
+					supportedParams = append(supportedParams, k)
+				}
+			}
+
 			info := types.ModelInfo{
-				ID:            m.ID,
-				Name:          m.ID,
-				Description:   m.OwnedBy,
-				ContextLength: c.defaultContextLen,
+				ID:                m.ID,
+				Name:              m.ID,
+				Description:       m.OwnedBy,
+				ContextLength:     c.defaultContextLen,
+				MaxOutputTokens:   16384, // NVIDIA default max output tokens
 				Pricing: types.Pricing{
 					InputPerMToken:  0,
 					OutputPerMToken: 0,
 				},
-				Provider:     types.ProviderNvidia,
-				TopProvider:  types.ProviderNvidia,
-				Capabilities: provider.ParseModelCapabilities(m.ID),
+				Provider:            types.ProviderNvidia,
+				TopProvider:         types.ProviderNvidia,
+				Capabilities:        provider.ParseModelCapabilities(m.ID),
+				SupportedParameters: supportedParams,
+				InputModalities:     inputModalities,
+				OutputModalities:    []string{"text"},
 			}
 			if !info.Capabilities.Chat {
 				continue
