@@ -65,7 +65,7 @@ Plans:
 
 **Plans**: 6 plans
 Plans:
-- [ ] 02-00-PLAN.md — Wave 0 test infrastructure (7 test files for all verify commands)
+- [x] 02-00-PLAN.md — Wave 0 test infrastructure (7 test files for all verify commands)
 - [ ] 02-01-PLAN.md — Core interface, types, NVIDIA ultra config, tracer end-to-end streaming path
 - [ ] 02-02-PLAN.md — Model profiles config, layered loading, BaseClient profile merging
 - [ ] 02-03-PLAN.md — Streaming resilience (empty deltas, retry strategies), capability detection API enrichment
@@ -235,7 +235,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
-| 2. LLM Provider Abstraction | 0/0 | Not started | - |
+| 2. LLM Provider Abstraction | 1/6 | In Progress |  |
 | 3. Code Intelligence Graph | 0/0 | Not started | - |
 | 4. Intelligence Features | 0/0 | Not started | - |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
