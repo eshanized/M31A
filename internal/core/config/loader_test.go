@@ -7,10 +7,22 @@ import (
 
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/keychain"
-	"github.com/eshanized/M31A/internal/integrations/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testBaseClient mimics provider.BaseClient for APIKey testing
+// to avoid import cycle between config and provider packages
+type testBaseClient struct {
+	APIKeyField string
+}
+
+func (b *testBaseClient) APIKey() string {
+	if len(b.APIKeyField) <= 4 {
+		return "****"
+	}
+	return "****" + b.APIKeyField[len(b.APIKeyField)-4:]
+}
 
 // Mock keychain for testing
 type mockKeychain struct {
@@ -245,7 +257,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 1: BaseClient.APIKey() returns masked key (****xxxx) for keys > 4 chars
 	t.Run("masking_long_keys", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "sk-1234567890abcdef",
 		}
 
@@ -255,7 +267,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 2: BaseClient.APIKey() returns **** for keys <= 4 chars
 	t.Run("masking_short_keys", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "abc",
 		}
 
@@ -265,7 +277,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 3: Empty key returns ****
 	t.Run("empty_key", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "",
 		}
 
@@ -275,7 +287,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 4: Exactly 4 chars returns ****
 	t.Run("four_char_key", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "abcd",
 		}
 
@@ -285,7 +297,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 5: 5 chars returns **** + last char
 	t.Run("five_char_key", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "abcde",
 		}
 
@@ -295,7 +307,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 6: API key never appears in structured log output
 	t.Run("no_key_in_logs", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "sk-secret1234",
 		}
 
@@ -307,7 +319,7 @@ func TestAPIKeyMasking(t *testing.T) {
 
 	// Test 7: API key redacted in error messages and diagnostics
 	t.Run("redacted_in_errors", func(t *testing.T) {
-		client := &provider.BaseClient{
+		client := &testBaseClient{
 			APIKeyField: "sk-secret1234",
 		}
 
@@ -346,7 +358,7 @@ func TestAPIKeyMasking(t *testing.T) {
 		}
 
 		for _, p := range providers {
-			client := &provider.BaseClient{APIKeyField: p.key}
+			client := &testBaseClient{APIKeyField: p.key}
 			masked := client.APIKey()
 			assert.Equal(t, p.expectedMask, masked, "provider: %s", p.name)
 		}

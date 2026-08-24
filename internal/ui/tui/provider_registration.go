@@ -52,6 +52,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			HealthCheckLiveMs: int64(healthLiveMs),
 			HealthCheckSlowMs: int64(healthSlowMs),
 			Version:           version,
+			Profiles:          &cfg.ModelProfiles,
 		})
 		if err != nil {
 			return fmt.Errorf("create OpenRouter client: %w", err)
@@ -79,6 +80,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			HealthCheckSlowMs: int64(healthSlowMs),
 			DefaultContextLen: int64(defaultCtxLen),
 			Version:           version,
+			Profiles:          &cfg.ModelProfiles,
 		})
 		if err != nil {
 			return fmt.Errorf("create Zen client: %w", err)
@@ -106,6 +108,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			HealthCheckSlowMs: int64(healthSlowMs),
 			DefaultContextLen: int64(defaultCtxLen),
 			Version:           version,
+			Profiles:          &cfg.ModelProfiles,
 		})
 		if err != nil {
 			return fmt.Errorf("create NVIDIA client: %w", err)

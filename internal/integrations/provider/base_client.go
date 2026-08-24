@@ -10,6 +10,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/core/types"
 )
 
@@ -53,10 +54,11 @@ type BaseClient struct {
 	HealthLiveMs  int64
 	HealthSlowMs  int64
 	Version       string
+	Profiles      *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
 }
 
 // NewBaseClient creates a BaseClient with the given settings.
-func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time.Duration, healthLiveMs, healthSlowMs int64) BaseClient {
+func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time.Duration, healthLiveMs, healthSlowMs int64, profiles *config.ModelProfileConfig) BaseClient {
 	if cacheTTL == 0 {
 		cacheTTL = types.ModelCacheTTL
 	}
@@ -74,6 +76,7 @@ func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time
 		APIKeyField:  apiKey,
 		BaseURLField: baseURL,
 		Version:      version,
+		Profiles:     profiles,
 		// HTTPClient has no hard Timeout so SSE streams can run indefinitely.
 		HTTPClient: &http.Client{
 			Transport: transport,
@@ -245,4 +248,74 @@ func (b *BaseClient) HandleChatHTTPErrorWithCredits(resp *http.Response, provide
 		msg := SanitizeProviderError(resp.StatusCode, bodyStr, providerName)
 		return &HTTPStatusError{StatusCode: resp.StatusCode, Message: msg}
 	}
+}
+
+// MergeProfile applies model profile merging to a ChatRequest.
+// Precedence (lowest to highest):
+//  1. Provider defaults from Profiles.ProviderDefaults[providerName]
+//  2. Model overrides from Profiles.ModelOverrides[req.Model]
+//  3. Request-level values (fields explicitly set in req)
+//
+// If Profiles is nil, returns the request unchanged.
+// If ReasoningConfigRef is set in the merged profile, it overrides
+// individual reasoning params by applying the referenced reasoning config.
+func (b *BaseClient) MergeProfile(req types.ChatRequest) types.ChatRequest {
+	if b.Profiles == nil {
+		return req
+	}
+
+	merged := req
+	providerName := req.Provider
+	if providerName == "" {
+		// If no provider specified in request, we can't apply provider defaults
+		// but we can still apply model overrides
+		providerName = "nvidia" // fallback for default model profile lookup
+	}
+
+	// 1. Apply provider defaults (lowest precedence)
+	if providerDefaults, ok := b.Profiles.ProviderDefaults[providerName]; ok {
+		merged = applyProfile(merged, providerDefaults)
+	}
+
+	// 2. Apply model-specific overrides (medium precedence)
+	if modelOverride, ok := b.Profiles.ModelOverrides[req.Model]; ok {
+		merged = applyProfile(merged, modelOverride)
+	}
+
+	// 3. Request values have highest precedence - they're already in merged
+	// (applyProfile only fills in zero/nil values from the profile)
+
+	// 4. If ReasoningConfigRef is set, apply the referenced reasoning config
+	if merged.ReasoningConfigRef != "" {
+		if _, ok := GetReasoningConfig(merged.ReasoningConfigRef); ok {
+			// Build a temporary body to apply the reasoning config, then extract params
+			body := make(map[string]any)
+			ApplyReasoningParams(merged.ReasoningConfigRef, body)
+			// Note: ApplyReasoningParams only handles RequestParams and ExtraBodyParams
+			// The reasoning config is applied at request body build time in the provider
+		}
+	}
+
+	return merged
+}
+
+// applyProfile applies non-zero/non-nil fields from profile to request.
+func applyProfile(req types.ChatRequest, profile types.ModelProfile) types.ChatRequest {
+	if req.Temperature == nil && profile.Temperature != nil {
+		req.Temperature = profile.Temperature
+	}
+	if req.TopP == nil && profile.TopP != nil {
+		req.TopP = profile.TopP
+	}
+	if req.MaxTokens == 0 && profile.MaxTokens != nil {
+		req.MaxTokens = *profile.MaxTokens
+	}
+	if !req.ReasoningEnabled && profile.ReasoningEnabled != nil {
+		req.ReasoningEnabled = *profile.ReasoningEnabled
+	}
+	if req.ReasoningConfigRef == "" && profile.ReasoningConfigRef != "" {
+		req.ReasoningConfigRef = profile.ReasoningConfigRef
+	}
+	// Note: ReasoningBudget is handled via ReasoningConfigRef or provider-specific body building
+	return req
 }

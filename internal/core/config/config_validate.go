@@ -499,6 +499,7 @@ func knownConfigKeys() map[string]bool {
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
 			"extensions": true,
 			"eventstore": true, "migration": true,
+			"model_profiles": true,
 		}
 	})
 	return knownKeysMap

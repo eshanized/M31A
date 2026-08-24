@@ -11,6 +11,7 @@ import (
 	"time"
 
 	m31errors "github.com/eshanized/M31A/internal/core/errors"
+	"github.com/eshanized/M31A/internal/core/config"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 )
@@ -34,6 +35,7 @@ type Options struct {
 	HealthCheckLiveMs int64
 	HealthCheckSlowMs int64
 	Version           string
+	Profiles          *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -54,7 +56,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 	}
 
 	return &Client{
-		BaseClient: provider.NewBaseClient(apiKey, opts.BaseURL, opts.Version, opts.CacheTTL, opts.CacheStaleTTL, opts.HealthCheckLiveMs, opts.HealthCheckSlowMs),
+		BaseClient: provider.NewBaseClient(apiKey, opts.BaseURL, opts.Version, opts.CacheTTL, opts.CacheStaleTTL, opts.HealthCheckLiveMs, opts.HealthCheckSlowMs, opts.Profiles),
 		referer:    opts.Referer,
 		title:      opts.Title,
 	}, nil
@@ -138,6 +140,9 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 }
 
 func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequest) (*types.StreamIterator, error) {
+	// Apply model profile merging (D-09/D-10/D-11)
+	req = c.MergeProfile(req)
+
 	const maxRetries = 2
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {

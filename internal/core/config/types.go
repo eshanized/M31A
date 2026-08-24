@@ -31,6 +31,7 @@ type Config struct {
 	Extensions         ExtensionsConfig         `toml:"extensions" json:"extensions"`
 	EventStore         EventStoreConfig         `toml:"eventstore"`
 	Migration          MigrationConfig          `toml:"migration"`
+	ModelProfiles      ModelProfileConfig       `toml:"model_profiles"`
 }
 
 // ExtensionsConfig holds all extension configuration sections.
@@ -637,6 +638,14 @@ type ModelCapabilitiesConfig struct {
 	// Known model capability overrides merged with the built-in map (F-012).
 	// Key: model ID pattern, Value: capability settings.
 	KnownCapabilities map[string]ModelCapabilityOverride `toml:"known_capabilities"`
+}
+
+// ModelProfileConfig holds model profile configuration for merging with requests.
+// Per D-09/D-10/D-11: provider defaults + model overrides, loaded from config.toml
+// with layered merge (global → workspace → project → env).
+type ModelProfileConfig struct {
+	ProviderDefaults map[string]types.ModelProfile `toml:"provider_defaults"`
+	ModelOverrides   map[string]types.ModelProfile `toml:"model_overrides"`
 }
 
 // ModelCapabilityOverride defines a single model capability entry that overrides

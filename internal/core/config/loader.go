@@ -225,6 +225,10 @@ func DefaultConfig() *Config {
 			PlanningDir:       ".planning",
 			ArchiveOnComplete: true,
 		},
+		ModelProfiles: ModelProfileConfig{
+			ProviderDefaults: make(map[string]types.ModelProfile),
+			ModelOverrides:   make(map[string]types.ModelProfile),
+		},
 	}
 }
 
