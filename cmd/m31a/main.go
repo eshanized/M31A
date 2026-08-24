@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -95,17 +96,30 @@ func runHeadlessWorkflow(goal string, cmdRegistry *tui.CommandRegistry, cfg *con
 	// Token estimator
 	tokenEst := tokens.NewEstimator(model)
 
-	// Create session
-	sess, err := sessionMgr.NewSession(model, registry.Active())
+	// Create a ChatRequest to get provider selection with fallback
+	req := provider.ChatRequest{
+		Model: model,
+	}
+
+	// Get provider with selection logic and fallback
+	fallbackMode := cfg.Provider.FallbackMode
+	if fallbackMode == "" {
+		fallbackMode = "manual" // default per D-26
+	}
+	p, providerName, err := registry.GetProviderForRequest(req, fallbackMode, cfg.Provider.FallbackPriority, cfg.Provider.HealthCheckTimeoutSecs)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to create session: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: failed to select provider: %v\n", err)
+		return 1
+	}
+	if p == nil {
+		fmt.Fprintln(os.Stderr, "error: no active provider")
 		return 1
 	}
 
-	// Get active provider
-	p := registry.ActiveProvider()
-	if p == nil {
-		fmt.Fprintln(os.Stderr, "error: no active provider")
+	// Create session
+	sess, err := sessionMgr.NewSession(model, providerName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to create session: %v\n", err)
 		return 1
 	}
 
@@ -185,39 +199,72 @@ func indexOf(phase types.WorkflowPhase, phases []types.WorkflowPhase) int {
 }
 
 func runHeadless(prompt string, registry provider.RegistryInterface, defaultModel string, logger *slog.Logger) int {
-	p := registry.ActiveProvider()
-	if p == nil {
-		fmt.Fprintln(os.Stderr, "error: no active provider")
-		return 1
+	// We need config for fallback settings; load minimal config
+	configPath := os.Getenv("M31A_CONFIG")
+	if configPath == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot determine home directory: %v\n", homeErr)
+			return 1
+		}
+		configPath = filepath.Join(home, ".m31a", "config.toml")
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		// Config not found or invalid; use defaults
+		cfg = config.DefaultConfig()
 	}
 
 	modelID := defaultModel
 	if modelID == "" {
-		// Try to auto-detect: fetch models and use the first one
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		models, err := p.FetchModels(ctx)
-		cancel()
-		if err == nil && len(models) > 0 {
-			modelID = models[0].ID
-		} else {
-			modelID = "default"
-		}
+		modelID = cfg.Model.Default
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	req := provider.ChatRequest{
-		Model: modelID,
-		Messages: []types.Message{
-			{Role: "user", Content: prompt},
-		},
+		Model:    modelID,
+		Messages: []types.Message{{Role: "user", Content: prompt}},
+	}
+
+	// Get provider with selection logic and fallback
+	fallbackMode := cfg.Provider.FallbackMode
+	if fallbackMode == "" {
+		fallbackMode = "manual" // default per D-26
+	}
+	p, _, err := registry.GetProviderForRequest(req, fallbackMode, cfg.Provider.FallbackPriority, cfg.Provider.HealthCheckTimeoutSecs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to select provider: %v\n", err)
+		return 1
+	}
+	if p == nil {
+		fmt.Fprintln(os.Stderr, "error: no active provider")
+		return 1
 	}
 
 	stream, err := p.ChatCompletionStream(ctx, req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: chat completion failed: %v\n", err)
-		return 1
+		// Handle fallback for sentinel errors in headless mode
+		if fallbackMode == "prompt" {
+			// In headless mode, treat "prompt" as "manual" per D-26
+			fallbackMode = "manual"
+		}
+		if fallbackMode == "auto" {
+			// Try fallback
+			fallbackName, event, fallbackErr := provider.FindFallbackProvider(registry, registry.Active(), cfg.Provider.FallbackPriority, cfg.Provider.HealthCheckTimeoutSecs)
+			if fallbackErr == nil && event != nil {
+				p, _ = registry.Get(fallbackName)
+				if p != nil {
+					stream, err = p.ChatCompletionStream(ctx, req)
+				}
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: chat completion failed: %v\n", err)
+			return 1
+		}
 	}
 	defer func() {
 		if err := stream.Close(); err != nil {
@@ -409,6 +456,135 @@ func runMigrateReplay(m31aDir string) int {
 
 	fmt.Fprintln(os.Stderr, "All projections rebuilt successfully.")
 	return 0
+}
+
+// runModelsList handles the "m31a models list" command
+func runModelsList(args []string, cfg *config.Config, logger *slog.Logger, registry provider.RegistryInterface) int {
+	fs := flag.NewFlagSet("models list", flag.ExitOnError)
+	providerFilter := fs.String("provider", "", "Filter models by provider name")
+	jsonOutput := fs.Bool("json", false, "Output as JSON instead of table")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: m31a models list [--provider <name>] [--json]")
+		fmt.Fprintln(os.Stderr, "  --provider <name>  Filter models by provider (openrouter, zen, nvidia)")
+		fmt.Fprintln(os.Stderr, "  --json             Output full ModelInfo as JSON")
+	}
+	fs.Parse(args)
+
+	// Initialize registry (triggers lazy provider registration)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var allModels []types.ModelInfo
+	providerNames := registry.ListAll()
+
+	if *providerFilter != "" {
+		// Validate provider exists
+		found := false
+		for _, name := range providerNames {
+			if name == *providerFilter {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Fprintf(os.Stderr, "error: provider %q not found\n", *providerFilter)
+			return 1
+		}
+		providerNames = []string{*providerFilter}
+	}
+
+	// Fetch models from each provider
+	for _, name := range providerNames {
+		p, err := registry.Get(name)
+		if err != nil {
+			logger.Warn("failed to get provider", "provider", name, "error", err)
+			continue
+		}
+		models, err := p.FetchModels(ctx)
+		if err != nil {
+			logger.Warn("failed to fetch models", "provider", name, "error", err)
+			fmt.Fprintf(os.Stderr, "warning: failed to fetch models from %s: %v\n", name, err)
+			continue
+		}
+		allModels = append(allModels, models...)
+	}
+
+	if len(allModels) == 0 {
+		fmt.Fprintln(os.Stderr, "No models found")
+		return 0
+	}
+
+	if *jsonOutput {
+		// JSON output with full ModelInfo
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(allModels); err != nil {
+			fmt.Fprintf(os.Stderr, "error: failed to encode JSON: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	// Table output using simple text table (no lipgloss/bubbles dependency for headless)
+	printModelsTable(allModels)
+	return 0
+}
+
+// printModelsTable prints a simple text table of models
+func printModelsTable(models []types.ModelInfo) {
+	// Column widths
+	idWidth := 50
+	providerWidth := 12
+	contextWidth := 10
+	toolsWidth := 6
+	reasoningWidth := 10
+	visionWidth := 6
+
+	// Print header
+	fmt.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
+		idWidth, "ID",
+		providerWidth, "Provider",
+		contextWidth, "ContextLen",
+		toolsWidth, "Tools",
+		reasoningWidth, "Reasoning",
+		visionWidth, "Vision")
+	fmt.Printf("%s %s %s %s %s %s\n",
+		strings.Repeat("-", idWidth),
+		strings.Repeat("-", providerWidth),
+		strings.Repeat("-", contextWidth),
+		strings.Repeat("-", toolsWidth),
+		strings.Repeat("-", reasoningWidth),
+		strings.Repeat("-", visionWidth))
+
+	// Print rows
+	for _, m := range models {
+		contextStr := fmt.Sprintf("%dk", m.ContextLength/1000)
+		toolsStr := boolStr(m.Capabilities.Tools)
+		reasoningStr := boolStr(m.Capabilities.Reasoning)
+		visionStr := boolStr(m.Capabilities.Vision)
+
+		fmt.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
+			idWidth, truncate(m.ID, idWidth),
+			providerWidth, m.Provider,
+			contextWidth, contextStr,
+			toolsWidth, toolsStr,
+			reasoningWidth, reasoningStr,
+			visionWidth, visionStr)
+	}
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 	os.Exit(run())
 }
@@ -630,6 +806,11 @@ func run() int {
 	// Migration command: migrate .planning/ to .m31a/
 	if flag.Arg(0) == "migrate" {
 		return runMigrate(flag.Args()[1:], workDir, logger)
+	}
+
+	// Models list command: m31a models list [--provider <name>] [--json]
+	if flag.Arg(0) == "models" && flag.Arg(1) == "list" {
+		return runModelsList(flag.Args()[2:], cfg, logger, registry)
 	}
 
 	// Working directory — fail fast if Getwd fails (WP-C03)
