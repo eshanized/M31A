@@ -286,14 +286,15 @@ type ModelProfile struct {
 // ChatRequest is a chat completion request. Moved here from internal/provider
 // to allow pkg/ packages to reference it without importing internal/.
 type ChatRequest struct {
-	Model            string           `json:"model"`
-	Messages         []Message        `json:"messages"`
-	MaxTokens        int              `json:"max_tokens,omitempty"`
-	Tools            []ToolDefinition `json:"tools,omitempty"`
-	ReasoningEnabled bool             `json:"reasoning_enabled,omitempty"`
-	Provider         string           `json:"provider,omitempty"` // per-request provider override (D-25)
-	Temperature      *float64         `json:"temperature,omitempty"`
-	TopP             *float64         `json:"top_p,omitempty"`
+	Model              string           `json:"model"`
+	Messages           []Message        `json:"messages"`
+	MaxTokens          int              `json:"max_tokens,omitempty"`
+	Tools              []ToolDefinition `json:"tools,omitempty"`
+	ReasoningEnabled   bool             `json:"reasoning_enabled,omitempty"`
+	Provider           string           `json:"provider,omitempty"`            // per-request provider override (D-25)
+	Temperature        *float64         `json:"temperature,omitempty"`
+	TopP               *float64         `json:"top_p,omitempty"`
+	ReasoningConfigRef string           `json:"reasoning_config_ref,omitempty"` // optional reference to named reasoning config in reasoningParamMap
 }
 
 // HasTemperature returns true if Temperature was explicitly set in the request.
@@ -319,6 +320,11 @@ func (r ChatRequest) HasReasoningEnabled() bool {
 // HasProvider returns true if Provider was explicitly set in the request.
 func (r ChatRequest) HasProvider() bool {
 	return r.Provider != ""
+}
+
+// HasReasoningConfigRef returns true if ReasoningConfigRef was explicitly set in the request.
+func (r ChatRequest) HasReasoningConfigRef() bool {
+	return r.ReasoningConfigRef != ""
 }
 
 // ChatResponse is a non-streaming chat completion response.

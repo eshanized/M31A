@@ -30,6 +30,18 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 		cacheStaleTTL = time.Duration(cfg.Features.ModelCacheStaleHours) * time.Hour
 	}
 
+	// Build retry config from config (D-13/D-16)
+	var retryConfig provider.StreamRetryConfig
+	if cfg != nil && cfg.Features.StreamRetry.Mode != "" {
+		retryConfig.Mode = cfg.Features.StreamRetry.Mode
+	}
+	if cfg != nil && cfg.Features.StreamRetry.MaxAttempts > 0 {
+		retryConfig.MaxAttempts = cfg.Features.StreamRetry.MaxAttempts
+	}
+	if cfg != nil && cfg.Features.StreamRetry.BaseDelayMs > 0 {
+		retryConfig.BaseDelay = time.Duration(cfg.Features.StreamRetry.BaseDelayMs) * time.Millisecond
+	}
+
 	switch providerID {
 	case types.ProviderOpenRouter:
 		baseURL := ""
@@ -53,6 +65,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			HealthCheckSlowMs: int64(healthSlowMs),
 			Version:           version,
 			Profiles:          &cfg.ModelProfiles,
+			RetryConfig:       retryConfig,
 		})
 		if err != nil {
 			return fmt.Errorf("create OpenRouter client: %w", err)
@@ -81,6 +94,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			DefaultContextLen: int64(defaultCtxLen),
 			Version:           version,
 			Profiles:          &cfg.ModelProfiles,
+			RetryConfig:       retryConfig,
 		})
 		if err != nil {
 			return fmt.Errorf("create Zen client: %w", err)
@@ -109,6 +123,7 @@ func RegisterProvider(registry provider.RegistryInterface, cfg *config.Config, p
 			DefaultContextLen: int64(defaultCtxLen),
 			Version:           version,
 			Profiles:          &cfg.ModelProfiles,
+			RetryConfig:       retryConfig,
 		})
 		if err != nil {
 			return fmt.Errorf("create NVIDIA client: %w", err)

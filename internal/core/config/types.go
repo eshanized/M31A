@@ -522,6 +522,9 @@ type FeaturesConfig struct {
 
 	// Coordinator (F-078)
 	CoordinatorTimeoutSecs int `toml:"coordinator_timeout_secs"`
+
+	// Streaming retry (D-13/D-16)
+	StreamRetry StreamRetryConfig `toml:"stream_retry"`
 }
 
 type LedgerConfig struct {
@@ -646,6 +649,14 @@ type ModelCapabilitiesConfig struct {
 type ModelProfileConfig struct {
 	ProviderDefaults map[string]types.ModelProfile `toml:"provider_defaults"`
 	ModelOverrides   map[string]types.ModelProfile `toml:"model_overrides"`
+}
+
+// StreamRetryConfig holds streaming retry configuration (D-13/D-16).
+// Matches provider.StreamRetryConfig but uses TOML-friendly types.
+type StreamRetryConfig struct {
+	Mode        string `toml:"mode"`         // "none" | "initial_only" | "full_resume" (default "initial_only")
+	MaxAttempts int    `toml:"max_attempts"` // default 3
+	BaseDelayMs int    `toml:"base_delay_ms"` // default 1000
 }
 
 // ModelCapabilityOverride defines a single model capability entry that overrides

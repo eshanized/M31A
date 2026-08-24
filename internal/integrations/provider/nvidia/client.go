@@ -31,7 +31,8 @@ type Options struct {
 	HealthCheckSlowMs int64
 	DefaultContextLen int64
 	Version           string
-	Profiles          *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
+	Profiles          *config.ModelProfileConfig      // model profiles for parameter merging (D-09/D-10/D-11)
+	RetryConfig       provider.StreamRetryConfig      // streaming retry configuration (D-13/D-16)
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -49,7 +50,7 @@ func New(apiKey string, opts Options) (*Client, error) {
 	}
 
 	return &Client{
-		BaseClient: provider.NewBaseClient(apiKey, opts.BaseURL, opts.Version, opts.CacheTTL, opts.CacheStaleTTL, opts.HealthCheckLiveMs, opts.HealthCheckSlowMs, opts.Profiles),
+		BaseClient: provider.NewBaseClient(apiKey, opts.BaseURL, opts.Version, opts.CacheTTL, opts.CacheStaleTTL, opts.HealthCheckLiveMs, opts.HealthCheckSlowMs, opts.Profiles, opts.RetryConfig),
 		defaultContextLen: opts.DefaultContextLen,
 	}, nil
 }
@@ -137,26 +138,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, req provider.ChatRequ
 	// Apply model profile merging (D-09/D-10/D-11)
 	req = c.MergeProfile(req)
 
-	const maxRetries = 2
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		iter, err := c.doChatStream(ctx, req)
-		if err == nil {
-			return iter, nil
-		}
-
-		if attempt < maxRetries && provider.IsRetryable(err) {
-			delay := time.Duration(1<<uint(attempt)) * time.Second
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-				continue
-			}
-		}
-		return nil, err
-	}
-	return nil, fmt.Errorf("max retries exceeded")
+	// Use BaseClient's RetryStream with configured retry strategy (D-13/D-16)
+	return c.RetryStream(ctx, req, c.doChatStream)
 }
 
 // isMultimodalModel checks whether a model ID indicates multimodal capabilities

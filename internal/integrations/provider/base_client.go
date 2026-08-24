@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,17 @@ func getSharedTransport() *http.Transport {
 	return sharedTransport
 }
 
+// StreamRetryConfig holds configuration for streaming retry behavior.
+// Mode controls when retries are attempted:
+//   - "none": no retry, return error immediately
+//   - "initial_only": retry only on initial connection failure (default)
+//   - "full_resume": retry on any stream failure, restart request with exponential backoff
+type StreamRetryConfig struct {
+	Mode        string        // "none" | "initial_only" | "full_resume" (default "initial_only")
+	MaxAttempts int           // default 3
+	BaseDelay   time.Duration // default 1s
+}
+
 // BaseClient holds fields and methods shared by all provider implementations.
 // Provider-specific clients embed BaseClient and override only Name(),
 // FetchModels(), ChatCompletionStream(), and HealthCheck().
@@ -54,11 +67,12 @@ type BaseClient struct {
 	HealthLiveMs  int64
 	HealthSlowMs  int64
 	Version       string
-	Profiles      *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
+	Profiles      *config.ModelProfileConfig     // model profiles for parameter merging (D-09/D-10/D-11)
+	RetryConfig   StreamRetryConfig              // streaming retry configuration (D-13/D-16)
 }
 
 // NewBaseClient creates a BaseClient with the given settings.
-func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time.Duration, healthLiveMs, healthSlowMs int64, profiles *config.ModelProfileConfig) BaseClient {
+func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time.Duration, healthLiveMs, healthSlowMs int64, profiles *config.ModelProfileConfig, retryConfig StreamRetryConfig) BaseClient {
 	if cacheTTL == 0 {
 		cacheTTL = types.ModelCacheTTL
 	}
@@ -71,12 +85,23 @@ func NewBaseClient(apiKey, baseURL, version string, cacheTTL, cacheStaleTTL time
 	if healthSlowMs == 0 {
 		healthSlowMs = types.DefaultHealthSlowMs
 	}
+	// Default retry config: initial_only with 3 attempts, 1s base delay
+	if retryConfig.Mode == "" {
+		retryConfig.Mode = "initial_only"
+	}
+	if retryConfig.MaxAttempts == 0 {
+		retryConfig.MaxAttempts = 3
+	}
+	if retryConfig.BaseDelay == 0 {
+		retryConfig.BaseDelay = time.Second
+	}
 	transport := getSharedTransport()
 	return BaseClient{
 		APIKeyField:  apiKey,
 		BaseURLField: baseURL,
 		Version:      version,
 		Profiles:     profiles,
+		RetryConfig:  retryConfig,
 		// HTTPClient has no hard Timeout so SSE streams can run indefinitely.
 		HTTPClient: &http.Client{
 			Transport: transport,
@@ -318,4 +343,77 @@ func applyProfile(req types.ChatRequest, profile types.ModelProfile) types.ChatR
 	}
 	// Note: ReasoningBudget is handled via ReasoningConfigRef or provider-specific body building
 	return req
+}
+
+// isInitialConnectionError checks if an error indicates a failure during
+// initial connection establishment (before any stream chunks are received).
+func isInitialConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Context cancellation/timeout
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Network-level errors
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// HTTP transport errors
+	if strings.Contains(err.Error(), "connection") ||
+		strings.Contains(err.Error(), "dial") ||
+		strings.Contains(err.Error(), "timeout") ||
+		strings.Contains(err.Error(), "EOF") {
+		return true
+	}
+	return false
+}
+
+// RetryStream executes a streaming request with retry logic based on StreamRetryConfig.
+// doStreamFunc is called to perform the actual streaming request.
+// For "initial_only" mode: retries only on initial connection errors.
+// For "full_resume" mode: retries on any error (restarts entire request with exponential backoff).
+// For "none" mode: no retries, returns error immediately.
+func (b *BaseClient) RetryStream(ctx context.Context, req types.ChatRequest, doStreamFunc func(context.Context, types.ChatRequest) (*types.StreamIterator, error)) (*types.StreamIterator, error) {
+	// "none" mode: no retry
+	if b.RetryConfig.Mode == "none" {
+		return doStreamFunc(ctx, req)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < b.RetryConfig.MaxAttempts; attempt++ {
+		iter, err := doStreamFunc(ctx, req)
+		if err == nil {
+			return iter, nil
+		}
+
+		lastErr = err
+
+		// Check if we should retry
+		shouldRetry := false
+		switch b.RetryConfig.Mode {
+		case "initial_only":
+			// Only retry on initial connection errors
+			shouldRetry = isInitialConnectionError(err)
+		case "full_resume":
+			// Retry on any error (restart entire request)
+			shouldRetry = true
+		}
+
+		if !shouldRetry || attempt >= b.RetryConfig.MaxAttempts-1 {
+			break
+		}
+
+		// Exponential backoff
+		delay := b.RetryConfig.BaseDelay * time.Duration(1<<uint(attempt))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+			continue
+		}
+	}
+
+	return nil, lastErr
 }
