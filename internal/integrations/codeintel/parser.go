@@ -42,12 +42,13 @@ type TypeInfo struct {
 
 // FileInfo is the parsed representation of a single source file.
 type FileInfo struct {
-	Path     string
-	Language string
-	Imports  []ImportInfo
-	Exports  []SymbolInfo
-	Funcs    []FuncSignature
-	Types    []TypeInfo
+	Path      string
+	Language  string
+	Imports   []ImportInfo
+	Exports   []SymbolInfo
+	Funcs     []FuncSignature
+	Types     []TypeInfo
+	CallSites []CallSiteInfo // extracted call expressions for call graph
 }
 
 // Parser extracts structured information from a source file.
@@ -169,10 +170,12 @@ func walkAST(node *gotreesitter.Node, content []byte, lang *gotreesitter.Languag
 	case "class_definition":
 		extractPythonClass(node, content, lang, langName, info)
 	case "decorated_definition":
-		for i := 0; i < int(node.ChildCount()); i++ {
-			walkAST(node.Child(i), content, lang, langName, info)
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			walkAST(node.NamedChild(i), content, lang, langName, info)
 		}
 		return
+	case "call_expression", "function_call", "method_invocation":
+		extractCallSite(node, content, lang, langName, info)
 	}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -181,6 +184,82 @@ func walkAST(node *gotreesitter.Node, content []byte, lang *gotreesitter.Languag
 			walkAST(child, content, lang, langName, info)
 		}
 	}
+}
+
+// extractCallSite extracts call site information from call expressions.
+func extractCallSite(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language, langName string, info *FileInfo) {
+	// Find the enclosing function to get the caller name
+	callerName := findEnclosingFunction(node, content, lang)
+
+	// Extract the callee name from the call expression
+	calleeName := extractCalleeName(node, content, lang)
+
+	if callerName != "" && calleeName != "" {
+		// Get the line number
+		line := int(node.StartPoint().Row) + 1 // 1-indexed
+
+		info.CallSites = append(info.CallSites, CallSiteInfo{
+			CallerName: callerName,
+			CalleeName: calleeName,
+			Line:       line,
+		})
+	}
+}
+
+// findEnclosingFunction walks up the AST to find the enclosing function declaration.
+func findEnclosingFunction(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language) string {
+	current := node.Parent()
+	for current != nil {
+		nodeType := current.Type(lang)
+		if nodeType == "function_declaration" || nodeType == "method_declaration" ||
+			nodeType == "function" || nodeType == "function_definition" ||
+			nodeType == "async_function_definition" {
+			if nameNode := current.ChildByFieldName("name", lang); nameNode != nil {
+				return nameNode.Text(content)
+			}
+			return childByName(current, content, lang, "identifier", "property_identifier", "name")
+		}
+		current = current.Parent()
+	}
+	return ""
+}
+
+// extractCalleeName extracts the callee name from a call expression node.
+func extractCalleeName(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language) string {
+	// Try to get the function being called - could be a field "function" or "method" or direct child
+	if fn := node.ChildByFieldName("function", lang); fn != nil {
+		return extractFunctionName(fn, content, lang)
+	}
+	if method := node.ChildByFieldName("method", lang); method != nil {
+		return method.Text(content)
+	}
+	// For some languages, the first named child is the function
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child != nil {
+			return extractFunctionName(child, content, lang)
+		}
+	}
+	return ""
+}
+
+// extractFunctionName extracts a function name from various node types.
+func extractFunctionName(node *gotreesitter.Node, content []byte, lang *gotreesitter.Language) string {
+	nodeType := node.Type(lang)
+	switch nodeType {
+	case "identifier", "property_identifier", "field_identifier", "member_expression":
+		return node.Text(content)
+	case "call_expression", "function_call", "method_invocation":
+		// Nested call - get the function of the nested call
+		if fn := node.ChildByFieldName("function", lang); fn != nil {
+			return extractFunctionName(fn, content, lang)
+		}
+	}
+	// Try to get name field
+	if nameNode := node.ChildByFieldName("name", lang); nameNode != nil {
+		return nameNode.Text(content)
+	}
+	return childByName(node, content, lang, "identifier", "property_identifier", "name")
 }
 
 // extractImport handles Go/TS/JS import declarations.

@@ -210,7 +210,7 @@ func BenchmarkBuildIndexFromFiles(b *testing.B) {
 }
 
 func BenchmarkRelevanceScore(b *testing.B) {
-	graph := NewImportGraph()
+	graph := NewCodeGraph()
 	for i := 0; i < 50; i++ {
 		var imports []string
 		if i > 0 {
@@ -299,7 +299,7 @@ go 1.21
 }
 
 func BenchmarkFormatContext(b *testing.B) {
-	graph := NewImportGraph()
+	graph := NewCodeGraph()
 	for i := 0; i < 20; i++ {
 		var imports []string
 		if i > 0 {

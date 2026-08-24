@@ -177,6 +177,109 @@ func (g *ImportGraph) AllPaths() []string {
 	return paths
 }
 
+// CallEdge represents a call relationship between functions.
+type CallEdge struct {
+	CallerFile  string
+	CallerLine  int
+	CallerName  string
+	CalleeFile  string
+	CalleeLine  int
+	CalleeName  string
+}
+
+// InheritanceEdge represents an inheritance relationship (extends/implements).
+type InheritanceEdge struct {
+	Child      string
+	Parent     string
+	ChildFile  string
+	ParentFile string
+	Kind       string // "extends" or "implements"
+}
+
+// TypeHierarchyEdge represents a type hierarchy relationship (subtype/supertype).
+type TypeHierarchyEdge struct {
+	Subtype       string
+	Supertype     string
+	SubtypeFile   string
+	SupertypeFile string
+}
+
+// CodeGraph extends ImportGraph with call edges, inheritance edges, and type hierarchy edges.
+type CodeGraph struct {
+	*ImportGraph
+
+	callEdges           []CallEdge
+	callIndex           map[string][]CallEdge // callee name -> edges where it is called
+	callReverse         map[string][]CallEdge // caller name -> edges where it calls
+	inheritanceEdges    []InheritanceEdge
+	inheritanceIndex    map[string][]InheritanceEdge // child -> edges
+	typeHierarchyEdges  []TypeHierarchyEdge
+}
+
+// NewCodeGraph creates a new code graph.
+func NewCodeGraph() *CodeGraph {
+	return &CodeGraph{
+		ImportGraph:        NewImportGraph(),
+		callIndex:          make(map[string][]CallEdge),
+		callReverse:        make(map[string][]CallEdge),
+		inheritanceIndex:   make(map[string][]InheritanceEdge),
+	}
+}
+
+// AddCallEdge adds a call edge to the graph and updates indexes.
+func (g *CodeGraph) AddCallEdge(edge CallEdge) {
+	g.callEdges = append(g.callEdges, edge)
+	g.callIndex[edge.CalleeName] = append(g.callIndex[edge.CalleeName], edge)
+	g.callReverse[edge.CallerName] = append(g.callReverse[edge.CallerName], edge)
+}
+
+// AddInheritanceEdge adds an inheritance edge to the graph and updates indexes.
+func (g *CodeGraph) AddInheritanceEdge(edge InheritanceEdge) {
+	g.inheritanceEdges = append(g.inheritanceEdges, edge)
+	g.inheritanceIndex[edge.Child] = append(g.inheritanceIndex[edge.Child], edge)
+}
+
+// AddTypeHierarchyEdge adds a type hierarchy edge to the graph.
+func (g *CodeGraph) AddTypeHierarchyEdge(edge TypeHierarchyEdge) {
+	g.typeHierarchyEdges = append(g.typeHierarchyEdges, edge)
+}
+
+// Callers returns all call edges where the given symbol is the callee.
+func (g *CodeGraph) Callers(name string) []CallEdge {
+	return g.callIndex[name]
+}
+
+// Callees returns all call edges where the given symbol is the caller.
+func (g *CodeGraph) Callees(name string) []CallEdge {
+	return g.callReverse[name]
+}
+
+// Inheritance returns all inheritance edges for the given child.
+func (g *CodeGraph) Inheritance(child string) []InheritanceEdge {
+	return g.inheritanceIndex[child]
+}
+
+// TypeHierarchy returns all type hierarchy edges for the given subtype.
+func (g *CodeGraph) TypeHierarchy(subtype string) []TypeHierarchyEdge {
+	var result []TypeHierarchyEdge
+	for _, edge := range g.typeHierarchyEdges {
+		if edge.Subtype == subtype {
+			result = append(result, edge)
+		}
+	}
+	return result
+}
+
+// AllCallEdges returns all call edges in the graph.
+func (g *CodeGraph) AllCallEdges() []CallEdge {
+	return g.callEdges
+}
+
+// AllInheritanceEdges returns all inheritance edges in the graph.
+func (g *CodeGraph) AllInheritanceEdges() []InheritanceEdge {
+	return g.inheritanceEdges
+}
+
 // fileJob holds a file to be parsed by a worker goroutine.
 type fileJob struct {
 	relPath string
@@ -187,8 +290,8 @@ type fileJob struct {
 // BuildGraph parses all source files in workDir and builds the import graph.
 // It resolves local imports to relative file paths where possible.
 // Uses a worker pool parallelized across available CPUs for faster indexing.
-func BuildGraph(workDir string, parsers []Parser) (*ImportGraph, []*FileInfo, error) {
-	graph := NewImportGraph()
+func BuildGraph(workDir string, parsers []Parser) (*CodeGraph, []*FileInfo, error) {
+	graph := NewCodeGraph()
 	var allFiles []*FileInfo
 
 	skipDirs := map[string]bool{

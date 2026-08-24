@@ -21,7 +21,7 @@ type Indexer struct {
 	parsers []Parser
 
 	mu      sync.RWMutex
-	graph   *ImportGraph
+	graph   *CodeGraph
 	index   *SymbolIndex
 	scorer  *RelevanceScorer
 	builtAt time.Time
@@ -89,7 +89,7 @@ func (idx *Indexer) buildFull(ctx context.Context) error {
 func (idx *Indexer) buildFromCache(ctx context.Context, cached *IndexCache) error {
 	inc := CheckIncremental(idx.workDir, idx.parsers, cached.Files)
 
-	graph := NewImportGraph()
+	graph := NewCodeGraph()
 	var allFiles []*FileInfo
 
 	// Add unchanged files from cache

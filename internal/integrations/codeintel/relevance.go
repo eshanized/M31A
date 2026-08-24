@@ -15,12 +15,12 @@ type ScoredFile struct {
 
 // RelevanceScorer ranks files by how relevant they are to a given task.
 type RelevanceScorer struct {
-	graph *ImportGraph
+	graph *CodeGraph
 	index *SymbolIndex
 }
 
 // NewRelevanceScorer creates a scorer backed by the given graph and index.
-func NewRelevanceScorer(graph *ImportGraph, index *SymbolIndex) *RelevanceScorer {
+func NewRelevanceScorer(graph *CodeGraph, index *SymbolIndex) *RelevanceScorer {
 	return &RelevanceScorer{graph: graph, index: index}
 }
 

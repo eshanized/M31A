@@ -5,7 +5,7 @@ import (
 )
 
 func buildTestScorer() *RelevanceScorer {
-	graph := NewImportGraph()
+	graph := NewCodeGraph()
 	graph.AddNode("engine.go", []string{"types.go"}, "go")
 	graph.AddNode("types.go", nil, "go")
 	graph.AddNode("handler.go", []string{"engine.go", "types.go"}, "go")
