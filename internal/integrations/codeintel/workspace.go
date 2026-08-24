@@ -225,6 +225,8 @@ func (w *Workspace) ResolveCrossRepoImport(importPath string, fromRepo string) (
 			if _, err := os.Stat(candidate + ".go"); err == nil {
 				return repoPath, filepath.ToSlash(relPath + ".go")
 			}
+			// Return the relative path even if file doesn't exist (for resolution purposes)
+			return repoPath, filepath.ToSlash(relPath)
 		}
 	}
 	return "", ""

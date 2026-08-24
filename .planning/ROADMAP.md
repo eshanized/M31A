@@ -12,7 +12,7 @@
 
 - [ ] **Phase 1: Foundation — Domain Model & Event Store** - Canonical domain types and SQLite event store as single source of truth
 - [x] **Phase 2: LLM Provider Abstraction** - Provider-agnostic interface with NVIDIA Build adapter, streaming, and reasoning support (completed 2026-08-24)
-- [ ] **Phase 3: Code Intelligence Graph** - Language-agnostic symbol graph via Tree-sitter + LSP with incremental indexing
+- [x] **Phase 3: Code Intelligence Graph** - Language-agnostic symbol graph via Tree-sitter + LSP with incremental indexing (completed 2026-08-25)
 - [ ] **Phase 4: Intelligence Features** - Explain/archaeology, regression intelligence, dependency intelligence
 - [ ] **Phase 5: TaskGraph IR & Execution Engine** - Executable plan IR with state machine, Kahn's scheduling, wave execution
 - [ ] **Phase 6: Agent Contracts & Runtime** - 12 specialized agents with explicit contracts and fresh-context handoffs
@@ -86,20 +86,20 @@ Plans:
   4. User runs `m31a arch check` and architecture violations are reported: forbidden imports, layer boundary crossings, circular dependencies, public API changes
   5. User opens a multi-repo workspace and `m31a index` produces per-repo indexes with cross-repo import tracking and unified query API
 
-**Plans**: 4 plans
+**Plans**: 4/4 plans complete
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Core tracer: EventStore events, CodeGraph edges, projection rebuild
+- [x] 03-01-PLAN.md — Core tracer: EventStore events, CodeGraph edges, projection rebuild
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — LSP client infrastructure: JSON-RPC, connection pool, lifecycle manager
-- [ ] 03-03-PLAN.md — Impact analysis and incremental file watching
+- [x] 03-02-PLAN.md — LSP client infrastructure: JSON-RPC, connection pool, lifecycle manager
+- [x] 03-03-PLAN.md — Impact analysis and incremental file watching
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-04-PLAN.md — Architecture violation detection, multi-repo workspace, CLI commands
+- [x] 03-04-PLAN.md — Architecture violation detection, multi-repo workspace, CLI commands
 
 ### Phase 4: Intelligence Features
 
@@ -250,7 +250,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
-| 3. Code Intelligence Graph | 0/4 | Not started | - |
+| 3. Code Intelligence Graph | 4/4 | Complete   | 2026-08-25 |
 | 4. Intelligence Features | 0/0 | Not started | - |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
