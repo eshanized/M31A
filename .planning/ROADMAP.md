@@ -86,7 +86,13 @@ Plans:
   4. User runs `m31a arch check` and architecture violations are reported: forbidden imports, layer boundary crossings, circular dependencies, public API changes
   5. User opens a multi-repo workspace and `m31a index` produces per-repo indexes with cross-repo import tracking and unified query API
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+
+- [ ] 03-01-PLAN.md — Core tracer: EventStore events, CodeGraph edges, projection rebuild
+- [ ] 03-02-PLAN.md — LSP client infrastructure: JSON-RPC, connection pool, lifecycle manager
+- [ ] 03-03-PLAN.md — Impact analysis and incremental file watching
+- [ ] 03-04-PLAN.md — Architecture violation detection, multi-repo workspace, CLI commands
 
 ### Phase 4: Intelligence Features
 
@@ -237,7 +243,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
-| 3. Code Intelligence Graph | 0/0 | Not started | - |
+| 3. Code Intelligence Graph | 0/4 | Not started | - |
 | 4. Intelligence Features | 0/0 | Not started | - |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
