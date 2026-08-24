@@ -46,8 +46,15 @@ created: 2026-08-24
 | 02-04-01 | 01 | 1 | LLM-04 | V7 | Streaming handles empty deltas, reasoning chunks, retry policy | unit | `go test ./internal/integrations/provider/... -run TestStreamingResilience` | ❌ W0 | ⬜ pending |
 | 02-05-01 | 01 | 1 | LLM-05 | V2, V8, V13 | API keys from env/keychain; never in logs; redacted in diagnostics | unit | `go test ./internal/core/config/... -run TestCredentialResolution` | ❌ W0 | ⬜ pending |
 | 02-06-01 | 01 | 1 | LLM-06 | V11 | FetchModels enriches ModelInfo with API metadata (context, tools, reasoning) | integration | `go test ./internal/integrations/provider/... -run TestCapabilityDetection` | ❌ W0 | ⬜ pending |
-| 02-07-01 | 02 | 2 | LLM-02 | — | CLI `models list` command with table/JSON output | unit | `go test ./cmd/m31a/... -run TestModelsListCommand` | ❌ W0 | ⬜ pending |
-| 02-08-01 | 02 | 2 | LLM-01 | V11 | Provider selection with --provider flag, ChatRequest override, config default, FallbackMode | unit | `go test ./internal/integrations/provider/... -run TestProviderSelection` | ❌ W0 | ⬜ pending |
+| 02-07-01 | 01 | 1 | LLM-03 | V11 | Reasoning config applied for NVIDIA ultra model | unit | `go test ./internal/integrations/provider/... -run TestReasoningConfig` | ❌ W0 | ⬜ pending |
+| 02-08-01 | 02 | 2 | LLM-03 | V11 | Model profiles config, layered loading, BaseClient profile merging | unit | `go test ./internal/integrations/provider/... -run TestProfileMerging` | ❌ W0 | ⬜ pending |
+| 02-09-01 | 03 | 3 | LLM-04 | V7 | Streaming handles empty deltas, reasoning chunks, retry policy | unit | `go test ./internal/integrations/provider/... -run TestStreamingResilience` | ❌ W0 | ⬜ pending |
+| 02-10-01 | 03 | 3 | LLM-04 | V7 | BaseClient streaming retry strategies (none/initial_only/full_resume) | unit | `go test ./internal/integrations/provider/... -run TestStreamRetry` | ❌ W0 | ⬜ pending |
+| 02-11-01 | 03 | 3 | LLM-06 | V11 | FetchModels enriches ModelInfo with API metadata (context, tools, reasoning) | integration | `go test ./internal/integrations/provider/... -run TestCapabilityDetection` | ❌ W0 | ⬜ pending |
+| 02-12-01 | 04 | 3 | LLM-01 | V11 | Provider selection with --provider flag, ChatRequest override, config default, FallbackMode | unit | `go test ./internal/integrations/provider/... -run TestProviderSelection` | ❌ W0 | ⬜ pending |
+| 02-13-01 | 04 | 3 | LLM-02 | — | CLI `models list` command with table/JSON output | unit | `go test ./cmd/m31a/... -run TestModelsListCommand` | ❌ W0 | ⬜ pending |
+| 02-14-01 | 05 | 4 | LLM-05 | V2, V8, V13 | API keys from env/keychain; never in logs; redacted in diagnostics | unit | `go test ./internal/core/config/... -run TestCredentialResolution` | ❌ W0 | ⬜ pending |
+| 02-15-01 | 05 | 4 | LLM-05 | V8, V13 | BaseClient.APIKey() masks key in logs (****xxxx) | unit | `go test ./internal/integrations/provider/... -run TestAPIKeyMasking` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -55,12 +62,15 @@ created: 2026-08-24
 
 ## Wave 0 Requirements
 
-- [ ] `internal/integrations/provider/interface_test.go` — stubs for LLM-01
-- [ ] `internal/integrations/provider/nvidia/client_test.go` — stubs for LLM-02
-- [ ] `internal/integrations/provider/base_client_test.go` — stubs for LLM-03 (profile merging)
-- [ ] `internal/integrations/provider/sse_test.go` — stubs for LLM-04 (streaming resilience)
-- [ ] `internal/core/config/loader_test.go` — stubs for LLM-05 (credential resolution)
-- [ ] `internal/integrations/provider/capabilities_test.go` — stubs for LLM-06 (capability detection)
+- [ ] `internal/integrations/provider/interface_test.go` — stubs for LLM-01 (TestLLMProviderInterface)
+- [ ] `internal/integrations/provider/nvidia/client_test.go` — stubs for LLM-02 (TestNVIDIAClient)
+- [ ] `internal/integrations/provider/base_client_test.go` — stubs for LLM-03 (TestProfileMerging, TestStreamRetry)
+- [ ] `internal/integrations/provider/sse_test.go` — stubs for LLM-04 (TestStreamingResilience)
+- [ ] `internal/core/config/loader_test.go` — stubs for LLM-05 (TestCredentialResolution)
+- [ ] `internal/integrations/provider/capabilities_test.go` — stubs for LLM-06 (TestCapabilityDetection)
+- [ ] `internal/integrations/provider/reasoning_test.go` — stubs for LLM-03 (TestReasoningConfig)
+- [ ] `internal/integrations/provider/base_client_test.go` — stubs for LLM-04 (TestStreamRetry)
+- [ ] `internal/core/config/loader_test.go` — stubs for LLM-05 (TestAPIKeyMasking)
 - [ ] `internal/core/types/types_test.go` — ChatResponse, ModelInfo extensions
 
 ---

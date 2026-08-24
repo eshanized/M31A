@@ -63,7 +63,14 @@ Plans:
   4. Network interruption during streaming triggers automatic retry with exponential backoff and resumes from last chunk
   5. User runs `m31a models list` and sees dynamically discovered models from NVIDIA API with capability metadata (context length, tool calling, reasoning)
 
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+- [ ] 02-00-PLAN.md — Wave 0 test infrastructure (7 test files for all verify commands)
+- [ ] 02-01-PLAN.md — Core interface, types, NVIDIA ultra config, tracer end-to-end streaming path
+- [ ] 02-02-PLAN.md — Model profiles config, layered loading, BaseClient profile merging
+- [ ] 02-03-PLAN.md — Streaming resilience (empty deltas, retry strategies), capability detection API enrichment
+- [ ] 02-04-PLAN.md — Provider selection (GetProviderForRequest, FallbackMode), CLI models list command
+- [ ] 02-05-PLAN.md — Credential security verification, Wave 0 test infrastructure
 
 ### Phase 3: Code Intelligence Graph
 
