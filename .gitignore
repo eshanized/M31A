@@ -74,3 +74,4 @@ space.txt
 *.zip
 .cache/VALIDATION_REPORT.md
 VALIDATION_REPORT.md
+.cache/
