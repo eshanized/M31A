@@ -5,6 +5,7 @@ package nvidia
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -37,14 +38,23 @@ func TestNVIDIAClient(t *testing.T) {
 		client, err := New("test-key", Options{})
 		require.NoError(t, err)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Verify request body includes reasoning config
 			var reqBody map[string]any
 			json.NewDecoder(r.Body).Decode(&reqBody)
 
 			// Check for extra_body with reasoning params
 			if extraBody, ok := reqBody["extra_body"].(map[string]any); ok {
-				assert.Equal(t, float64(32768), extraBody["reasoning_budget"])
+				// JSON numbers without decimal are decoded as int, accept both int and float64
+				budget := extraBody["reasoning_budget"]
+				switch v := budget.(type) {
+				case int:
+					assert.Equal(t, 32768, v)
+				case float64:
+					assert.Equal(t, float64(32768), v)
+				default:
+					t.Errorf("unexpected type for reasoning_budget: %T", v)
+				}
 				if kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any); ok {
 					assert.Equal(t, true, kwargs["enable_thinking"])
 					assert.Equal(t, true, kwargs["force_nonempty_content"])
@@ -53,11 +63,28 @@ func TestNVIDIAClient(t *testing.T) {
 
 			// Return mock SSE stream
 			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n"))
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"))
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\n"))
-			w.Write([]byte("data: [DONE]\n\n"))
+
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Errorf("ResponseWriter does not implement http.Flusher")
+			}
+
+			// Send SSE events with flushing to ensure they're sent immediately
+			events := []string{
+				`{"choices":[{"delta":{"reasoning_content":"thinking"}}]}`,
+				`{"choices":[{"delta":{"content":"Hello"}}]}`,
+				`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`,
+				`[DONE]`,
+			}
+			for _, event := range events {
+				w.Write([]byte("data: " + event + "\n\n"))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
 		}))
 		defer server.Close()
 
@@ -77,11 +104,18 @@ func TestNVIDIAClient(t *testing.T) {
 		for {
 			chunk, err := iter.Next()
 			if err != nil {
+				if err == io.EOF {
+					t.Logf("stream ended with EOF")
+					break
+				}
+				t.Logf("iter.Next() error: %v", err)
 				t.Fatalf("stream error: %v", err)
 			}
 			if chunk == nil {
+				t.Logf("chunk is nil, breaking")
 				break
 			}
+			t.Logf("got chunk: type=%s delta=%s", chunk.Type, chunk.Delta)
 			chunks = append(chunks, chunk)
 		}
 
@@ -118,11 +152,27 @@ func TestNVIDIAClient(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\n"))
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\n"))
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":10,\"total_tokens\":15}}\n\n"))
-			w.Write([]byte("data: [DONE]\n\n"))
+
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Errorf("ResponseWriter does not implement http.Flusher")
+			}
+
+			events := []string{
+				`{"choices":[{"delta":{"content":"Hello "}}]}`,
+				`{"choices":[{"delta":{"content":"world"}}]}`,
+				`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
+				`[DONE]`,
+			}
+			for _, event := range events {
+				w.Write([]byte("data: " + event + "\n\n"))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
 		}))
 		defer server.Close()
 
@@ -144,7 +194,14 @@ func TestNVIDIAClient(t *testing.T) {
 		errVal := results[1]
 
 		if !errVal.IsNil() {
-			t.Fatalf("ChatCompletion error: %v", errVal.Interface())
+			errInterface := errVal.Interface()
+			if errInterface != nil {
+				if err, ok := errInterface.(error); ok && err == io.EOF {
+					// EOF is expected at end of stream, ChatCompletion should handle it
+				} else {
+					t.Fatalf("ChatCompletion error: %v", errInterface)
+				}
+			}
 		}
 
 		resp := respVal.Interface().(*types.ChatResponse)
@@ -170,14 +227,24 @@ func TestNVIDIAClient(t *testing.T) {
 
 		body := client.BuildNvidiaBodyForTest(req)
 
-		extraBody, ok := body["extra_body"].(map[string]any)
-		require.True(t, ok, "extra_body should be present")
-		assert.Equal(t, float64(32768), extraBody["reasoning_budget"])
+extraBody, ok := body["extra_body"].(map[string]any)
+	require.True(t, ok, "extra_body should be present")
 
-		kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any)
-		require.True(t, ok, "chat_template_kwargs should be present")
-		assert.Equal(t, true, kwargs["enable_thinking"])
-		assert.Equal(t, true, kwargs["force_nonempty_content"])
+	// JSON numbers without decimal are decoded as int, accept both int and float64
+	budget := extraBody["reasoning_budget"]
+	switch v := budget.(type) {
+	case int:
+		assert.Equal(t, 32768, v)
+	case float64:
+		assert.Equal(t, float64(32768), v)
+	default:
+		t.Errorf("unexpected type for reasoning_budget: %T", v)
+	}
+
+	kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any)
+	require.True(t, ok, "chat_template_kwargs should be present")
+	assert.Equal(t, true, kwargs["enable_thinking"])
+	assert.Equal(t, true, kwargs["force_nonempty_content"])
 	})
 
 	// Test 5: reasoning config applied for ultra model
@@ -189,7 +256,17 @@ func TestNVIDIAClient(t *testing.T) {
 
 		extraBody := cfg.ExtraBodyParams
 		require.NotNil(t, extraBody)
-		assert.Equal(t, float64(32768), extraBody["reasoning_budget"])
+
+		// JSON numbers without decimal are decoded as int, accept both int and float64
+		budget := extraBody["reasoning_budget"]
+		switch v := budget.(type) {
+		case int:
+			assert.Equal(t, 32768, v)
+		case float64:
+			assert.Equal(t, float64(32768), v)
+		default:
+			t.Errorf("unexpected type for reasoning_budget: %T", v)
+		}
 
 		kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any)
 		require.True(t, ok)

@@ -367,12 +367,25 @@ func TestAPIKeyMasking(t *testing.T) {
 
 // Test for credential resolution with unexpected keychain errors
 func TestCredentialResolution_UnexpectedKeychainError(t *testing.T) {
-	t.Parallel()
+	// Save original env vars
+	origM31A := os.Getenv("M31A_NVIDIA_API_KEY")
+	origNVIDIA := os.Getenv("NVIDIA_API_KEY")
+	defer func() {
+		if origM31A != "" {
+			os.Setenv("M31A_NVIDIA_API_KEY", origM31A)
+		} else {
+			os.Unsetenv("M31A_NVIDIA_API_KEY")
+		}
+		if origNVIDIA != "" {
+			os.Setenv("NVIDIA_API_KEY", origNVIDIA)
+		} else {
+			os.Unsetenv("NVIDIA_API_KEY")
+		}
+	}()
 
 	// Unset env vars to test fallback to config
 	os.Unsetenv("M31A_NVIDIA_API_KEY")
 	os.Unsetenv("NVIDIA_API_KEY")
-	defer os.Setenv("NVIDIA_API_KEY", "") // Restore after test
 
 	cfg := DefaultConfig()
 	mockKC := &mockKeychain{err: errors.New("unexpected error")}

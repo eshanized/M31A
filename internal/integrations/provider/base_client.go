@@ -297,20 +297,59 @@ func (b *BaseClient) MergeProfile(req types.ChatRequest) types.ChatRequest {
 		providerName = "nvidia" // fallback for default model profile lookup
 	}
 
-	// 1. Apply provider defaults (lowest precedence)
-	if providerDefaults, ok := b.Profiles.ProviderDefaults[providerName]; ok {
-		merged = applyProfile(merged, providerDefaults)
+	// Build merged profile by applying in precedence order
+	var providerDefaults, modelOverride *types.ModelProfile
+	if b.Profiles != nil {
+		if pd, ok := b.Profiles.ProviderDefaults[providerName]; ok {
+			providerDefaults = &pd
+		}
+		if mo, ok := b.Profiles.ModelOverrides[req.Model]; ok {
+			modelOverride = &mo
+		}
 	}
 
-	// 2. Apply model-specific overrides (medium precedence)
-	if modelOverride, ok := b.Profiles.ModelOverrides[req.Model]; ok {
-		merged = applyProfile(merged, modelOverride)
+	// Apply provider defaults (lowest precedence)
+	if providerDefaults != nil {
+		merged = applyProfile(merged, *providerDefaults)
 	}
 
-	// 3. Request values have highest precedence - they're already in merged
-	// (applyProfile only fills in zero/nil values from the profile)
+	// Apply model overrides (medium precedence) - explicitly override fields
+	if modelOverride != nil {
+		if modelOverride.Temperature != nil {
+			merged.Temperature = modelOverride.Temperature
+		}
+		if modelOverride.TopP != nil {
+			merged.TopP = modelOverride.TopP
+		}
+		if modelOverride.MaxTokens != nil {
+			merged.MaxTokens = *modelOverride.MaxTokens
+		}
+		if modelOverride.ReasoningEnabled != nil {
+			merged.ReasoningEnabled = *modelOverride.ReasoningEnabled
+		}
+		if modelOverride.ReasoningConfigRef != "" {
+			merged.ReasoningConfigRef = modelOverride.ReasoningConfigRef
+		}
+	}
 
-	// 4. If ReasoningConfigRef is set, apply the referenced reasoning config
+	// Request values have highest precedence - overlay explicitly set values
+	if req.HasTemperature() {
+		merged.Temperature = req.Temperature
+	}
+	if req.HasTopP() {
+		merged.TopP = req.TopP
+	}
+	if req.HasMaxTokens() {
+		merged.MaxTokens = req.MaxTokens
+	}
+	if req.HasReasoningEnabled() {
+		merged.ReasoningEnabled = req.ReasoningEnabled
+	}
+	if req.HasReasoningConfigRef() {
+		merged.ReasoningConfigRef = req.ReasoningConfigRef
+	}
+
+	// If ReasoningConfigRef is set, apply the referenced reasoning config
 	if merged.ReasoningConfigRef != "" {
 		if _, ok := GetReasoningConfig(merged.ReasoningConfigRef); ok {
 			// Build a temporary body to apply the reasoning config, then extract params

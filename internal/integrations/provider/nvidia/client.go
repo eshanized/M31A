@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -298,6 +299,9 @@ func (c *Client) ChatCompletion(ctx context.Context, req provider.ChatRequest) (
 	for {
 		chunk, chunkErr := stream.Next()
 		if chunkErr != nil {
+			if chunkErr == io.EOF {
+				break // Normal stream termination
+			}
 			return nil, chunkErr
 		}
 		if chunk == nil {
