@@ -171,9 +171,9 @@ func TestCredentialResolution(t *testing.T) {
 
 		cfg := DefaultConfig()
 		mockKC := &mockKeychain{store: map[string]string{
-			types.ProviderNvidia:      "nvidia-keychain",
-			types.ProviderOpenRouter:  "openrouter-keychain",
-			types.ProviderZen:         "zen-keychain",
+			types.ProviderNvidia:     "nvidia-keychain",
+			types.ProviderOpenRouter: "openrouter-keychain",
+			types.ProviderZen:        "zen-keychain",
 		}}
 
 		err := cfg.ResolveAPIKeys(mockKC)
@@ -348,8 +348,8 @@ func TestAPIKeyMasking(t *testing.T) {
 	// Test 9: All three providers use same masking
 	t.Run("all_providers_same_masking", func(t *testing.T) {
 		providers := []struct {
-			name       string
-			key        string
+			name         string
+			key          string
 			expectedMask string
 		}{
 			{"nvidia", "nvidia-secret-key-1234", "****1234"},

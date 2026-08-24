@@ -66,16 +66,16 @@ func TestModelInfoExtensions(t *testing.T) {
 
 	// Test ModelInfo with extended fields
 	model := ModelInfo{
-		ID:                "test/model",
-		Provider:          "test",
-		Name:              "Test Model",
-		ContextLength:     8192,
-		MaxOutputTokens:   4096,
+		ID:                  "test/model",
+		Provider:            "test",
+		Name:                "Test Model",
+		ContextLength:       8192,
+		MaxOutputTokens:     4096,
 		SupportedParameters: []string{"temperature", "top_p", "max_tokens"},
-		InputModalities:   []string{"text"},
-		OutputModalities:  []string{"text"},
-		Capabilities:      CapFlags{Chat: true, Tools: true},
-		Variant:           nil,
+		InputModalities:     []string{"text"},
+		OutputModalities:    []string{"text"},
+		Capabilities:        CapFlags{Chat: true, Tools: true},
+		Variant:             nil,
 	}
 
 	assert.Equal(t, int64(4096), model.MaxOutputTokens)
@@ -140,13 +140,13 @@ func TestModelProfileStructure(t *testing.T) {
 
 	// Test ModelProfile with pointer fields for optional params
 	profile := ModelProfile{
-		ModelID:             "test/model",
-		Temperature:         float64Ptr(0.7),
-		TopP:                float64Ptr(0.9),
-		MaxTokens:           intPtr(4096),
-		ReasoningEnabled:    boolPtr(true),
-		ReasoningBudget:     intPtr(32768),
-		ReasoningConfigRef:  "nvidia/nemotron-3-ultra-550b-a55b",
+		ModelID:            "test/model",
+		Temperature:        float64Ptr(0.7),
+		TopP:               float64Ptr(0.9),
+		MaxTokens:          intPtr(4096),
+		ReasoningEnabled:   boolPtr(true),
+		ReasoningBudget:    intPtr(32768),
+		ReasoningConfigRef: "nvidia/nemotron-3-ultra-550b-a55b",
 	}
 
 	assert.Equal(t, "test/model", profile.ModelID)

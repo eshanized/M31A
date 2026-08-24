@@ -71,13 +71,13 @@ func TestDomainTypes(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, decision.ID)
 
 	plan := Plan{
-		ID:           uuid.New(),
-		Title:        "Test Plan",
-		Objective:    "Test objective",
-		RiskLevel:    RiskSafe,
-		Status:       PlanStatusDraft,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:        uuid.New(),
+		Title:     "Test Plan",
+		Objective: "Test objective",
+		RiskLevel: RiskSafe,
+		Status:    PlanStatusDraft,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	assert.NotEqual(t, uuid.Nil, plan.ID)
 
@@ -116,26 +116,26 @@ func TestDomainTypes(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, agent.ID)
 
 	toolSpec := ToolSpec{
-		Name:         "test_tool",
-		Description:  "Test tool",
-		RiskLevel:    RiskSafe,
+		Name:          "test_tool",
+		Description:   "Test tool",
+		RiskLevel:     RiskSafe,
 		ResourceScope: ResourceScopeWorkspace,
 	}
 	assert.Equal(t, "test_tool", toolSpec.Name)
 
 	artifact := Artifact{
-		ID:          uuid.New(),
-		Name:        "test.md",
-		Type:        ArtifactTypeDocument,
-		Path:        "/test/test.md",
-		CreatedAt:   time.Now(),
-		CreatedBy:   uuid.New(),
+		ID:        uuid.New(),
+		Name:      "test.md",
+		Type:      ArtifactTypeDocument,
+		Path:      "/test/test.md",
+		CreatedAt: time.Now(),
+		CreatedBy: uuid.New(),
 	}
 	assert.NotEqual(t, uuid.Nil, artifact.ID)
 
 	verification := Verification{
-		ID:     uuid.New(),
-		Level:  VerificationLevelUnit,
+		ID:      uuid.New(),
+		Level:   VerificationLevelUnit,
 		Verdict: VerificationVerdictPending,
 	}
 	assert.NotEqual(t, uuid.Nil, verification.ID)
@@ -409,12 +409,12 @@ func TestSerialization(t *testing.T) {
 
 	// Artifact
 	art := Artifact{
-		ID:          uuid.New(),
-		Name:        "test.md",
-		Type:        ArtifactTypeCode,
-		Path:        "/test/test.md",
-		CreatedAt:   time.Now(),
-		CreatedBy:   uuid.New(),
+		ID:        uuid.New(),
+		Name:      "test.md",
+		Type:      ArtifactTypeCode,
+		Path:      "/test/test.md",
+		CreatedAt: time.Now(),
+		CreatedBy: uuid.New(),
 	}
 	data, err = json.Marshal(art)
 	require.NoError(t, err)

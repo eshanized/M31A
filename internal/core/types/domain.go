@@ -8,14 +8,14 @@ import (
 )
 
 type Project struct {
-	ID           uuid.UUID       `json:"id"`
-	RootPath     string          `json:"root_path"`
-	Name         string          `json:"name"`
-	Repositories []Repository    `json:"repositories"`
-	Stack        DetectedStack   `json:"stack"`
-	Config       ProjectConfig   `json:"config"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID           uuid.UUID     `json:"id"`
+	RootPath     string        `json:"root_path"`
+	Name         string        `json:"name"`
+	Repositories []Repository  `json:"repositories"`
+	Stack        DetectedStack `json:"stack"`
+	Config       ProjectConfig `json:"config"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
 }
 
 type Repository struct {
@@ -31,30 +31,30 @@ type Remote struct {
 }
 
 type DetectedStack struct {
-	Language    string   `json:"language"`
-	Framework   string   `json:"framework"`
-	BuildTool   string   `json:"build_tool"`
-	TestRunner  string   `json:"test_runner"`
-	PackageMgr  string   `json:"package_manager"`
-	Files       []string `json:"files"`
+	Language   string   `json:"language"`
+	Framework  string   `json:"framework"`
+	BuildTool  string   `json:"build_tool"`
+	TestRunner string   `json:"test_runner"`
+	PackageMgr string   `json:"package_manager"`
+	Files      []string `json:"files"`
 }
 
 type ProjectConfig struct {
-	Provider      string   `json:"provider"`
-	Model         string   `json:"model"`
-	MaxParallel   int      `json:"max_parallel"`
-	Permission    string   `json:"permission"`
-	FeatureFlags  []string `json:"feature_flags"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	MaxParallel  int      `json:"max_parallel"`
+	Permission   string   `json:"permission"`
+	FeatureFlags []string `json:"feature_flags"`
 }
 
 type Workspace struct {
-	ID          uuid.UUID     `json:"id"`
-	ProjectID   uuid.UUID     `json:"project_id"`
-	Name        string        `json:"name"`
-	RootPath    string        `json:"root_path"`
+	ID           uuid.UUID    `json:"id"`
+	ProjectID    uuid.UUID    `json:"project_id"`
+	Name         string       `json:"name"`
+	RootPath     string       `json:"root_path"`
 	Repositories []Repository `json:"repositories"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 type Session struct {
@@ -70,14 +70,14 @@ type Session struct {
 }
 
 type Run struct {
-	ID          uuid.UUID     `json:"id"`
-	SessionID   uuid.UUID     `json:"session_id"`
-	Intent      Intent        `json:"intent"`
-	PlanID      *uuid.UUID    `json:"plan_id,omitempty"`
-	TaskGraphID *uuid.UUID    `json:"task_graph_id,omitempty"`
-	Status      RunStatus     `json:"status"`
-	StartedAt   time.Time     `json:"started_at"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty"`
+	ID          uuid.UUID  `json:"id"`
+	SessionID   uuid.UUID  `json:"session_id"`
+	Intent      Intent     `json:"intent"`
+	PlanID      *uuid.UUID `json:"plan_id,omitempty"`
+	TaskGraphID *uuid.UUID `json:"task_graph_id,omitempty"`
+	Status      RunStatus  `json:"status"`
+	StartedAt   time.Time  `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 type RunStatus string

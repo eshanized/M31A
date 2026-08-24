@@ -104,20 +104,20 @@ type ArchInfo struct {
 }
 
 type ModelInfo struct {
-	ID                string   `json:"id"`
-	Provider          string   `json:"provider"`
-	Name              string   `json:"name"`
-	Description       string   `json:"description"`
-	ContextLength     int64    `json:"context_length"`
-	MaxOutputTokens   int64    `json:"max_output_tokens"`
-	Pricing           Pricing  `json:"pricing"`
-	Architecture      ArchInfo `json:"architecture"`
-	TopProvider       string   `json:"top_provider"`
-	Capabilities      CapFlags `json:"capabilities"`
+	ID                  string   `json:"id"`
+	Provider            string   `json:"provider"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	ContextLength       int64    `json:"context_length"`
+	MaxOutputTokens     int64    `json:"max_output_tokens"`
+	Pricing             Pricing  `json:"pricing"`
+	Architecture        ArchInfo `json:"architecture"`
+	TopProvider         string   `json:"top_provider"`
+	Capabilities        CapFlags `json:"capabilities"`
 	SupportedParameters []string `json:"supported_parameters"`
-	InputModalities   []string `json:"input_modalities"`
-	OutputModalities  []string `json:"output_modalities"`
-	Variant           *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
+	InputModalities     []string `json:"input_modalities"`
+	OutputModalities    []string `json:"output_modalities"`
+	Variant             *string  `json:"variant,omitempty"` // nil by default; "thinking", "fast", "extended", "vision"
 }
 
 type MessageSegment struct {
@@ -274,13 +274,13 @@ type FileDiff struct {
 // Pointer types for numeric/bool fields allow distinguishing "not set" from
 // "explicitly set to zero/false" during merging.
 type ModelProfile struct {
-	ModelID             string   `json:"model_id"`
-	Temperature         *float64 `json:"temperature,omitempty"`
-	TopP                *float64 `json:"top_p,omitempty"`
-	MaxTokens           *int     `json:"max_tokens,omitempty"`
-	ReasoningEnabled    *bool    `json:"reasoning_enabled,omitempty"`
-	ReasoningBudget     *int     `json:"reasoning_budget,omitempty"`
-	ReasoningConfigRef  string   `json:"reasoning_config_ref,omitempty"` // optional reference to named reasoning config in reasoningParamMap
+	ModelID            string   `json:"model_id"`
+	Temperature        *float64 `json:"temperature,omitempty"`
+	TopP               *float64 `json:"top_p,omitempty"`
+	MaxTokens          *int     `json:"max_tokens,omitempty"`
+	ReasoningEnabled   *bool    `json:"reasoning_enabled,omitempty"`
+	ReasoningBudget    *int     `json:"reasoning_budget,omitempty"`
+	ReasoningConfigRef string   `json:"reasoning_config_ref,omitempty"` // optional reference to named reasoning config in reasoningParamMap
 }
 
 // ChatRequest is a chat completion request. Moved here from internal/provider
@@ -291,7 +291,7 @@ type ChatRequest struct {
 	MaxTokens          int              `json:"max_tokens,omitempty"`
 	Tools              []ToolDefinition `json:"tools,omitempty"`
 	ReasoningEnabled   bool             `json:"reasoning_enabled,omitempty"`
-	Provider           string           `json:"provider,omitempty"`            // per-request provider override (D-25)
+	Provider           string           `json:"provider,omitempty"` // per-request provider override (D-25)
 	Temperature        *float64         `json:"temperature,omitempty"`
 	TopP               *float64         `json:"top_p,omitempty"`
 	ReasoningConfigRef string           `json:"reasoning_config_ref,omitempty"` // optional reference to named reasoning config in reasoningParamMap
@@ -330,10 +330,10 @@ func (r ChatRequest) HasReasoningConfigRef() bool {
 // ChatResponse is a non-streaming chat completion response.
 // Returned by LLMProvider.ChatCompletion (which collects stream chunks internally).
 type ChatResponse struct {
-	Content      string  `json:"content"`
-	Usage        *Usage  `json:"usage,omitempty"`
-	Model        string  `json:"model"`
-	FinishReason string  `json:"finish_reason"`
+	Content      string `json:"content"`
+	Usage        *Usage `json:"usage,omitempty"`
+	Model        string `json:"model"`
+	FinishReason string `json:"finish_reason"`
 }
 
 // ToolDefinition describes a tool available to the LLM.

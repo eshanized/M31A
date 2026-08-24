@@ -10,14 +10,14 @@ import (
 type ArtifactType string
 
 const (
-	ArtifactTypeDocument   ArtifactType = "document"
-	ArtifactTypeCode       ArtifactType = "code"
-	ArtifactTypeTest       ArtifactType = "test"
-	ArtifactTypeConfig     ArtifactType = "config"
-	ArtifactTypeBinary     ArtifactType = "binary"
-	ArtifactTypeLog        ArtifactType = "log"
-	ArtifactTypeReport     ArtifactType = "report"
-	ArtifactTypeDiagram    ArtifactType = "diagram"
+	ArtifactTypeDocument ArtifactType = "document"
+	ArtifactTypeCode     ArtifactType = "code"
+	ArtifactTypeTest     ArtifactType = "test"
+	ArtifactTypeConfig   ArtifactType = "config"
+	ArtifactTypeBinary   ArtifactType = "binary"
+	ArtifactTypeLog      ArtifactType = "log"
+	ArtifactTypeReport   ArtifactType = "report"
+	ArtifactTypeDiagram  ArtifactType = "diagram"
 )
 
 type Artifact struct {
@@ -34,21 +34,21 @@ type Artifact struct {
 type VerificationLevel string
 
 const (
-	VerificationLevelStructural VerificationLevel = "structural"
-	VerificationLevelUnit       VerificationLevel = "unit"
-	VerificationLevelIntegration VerificationLevel = "integration"
-	VerificationLevelBehavioral  VerificationLevel = "behavioral"
+	VerificationLevelStructural    VerificationLevel = "structural"
+	VerificationLevelUnit          VerificationLevel = "unit"
+	VerificationLevelIntegration   VerificationLevel = "integration"
+	VerificationLevelBehavioral    VerificationLevel = "behavioral"
 	VerificationLevelArchitectural VerificationLevel = "architectural"
 )
 
 type Verification struct {
-	ID              uuid.UUID           `json:"id"`
-	Level           VerificationLevel   `json:"level"`
-	Criteria        []VerificationCriterion `json:"criteria"`
-	Evidence        []Evidence          `json:"evidence"`
-	Verdict         VerificationVerdict `json:"verdict"`
-	VerifiedAt      *time.Time          `json:"verified_at,omitempty"`
-	VerifiedBy      uuid.UUID           `json:"verified_by"`
+	ID         uuid.UUID               `json:"id"`
+	Level      VerificationLevel       `json:"level"`
+	Criteria   []VerificationCriterion `json:"criteria"`
+	Evidence   []Evidence              `json:"evidence"`
+	Verdict    VerificationVerdict     `json:"verdict"`
+	VerifiedAt *time.Time              `json:"verified_at,omitempty"`
+	VerifiedBy uuid.UUID               `json:"verified_by"`
 }
 
 type VerificationCriterion struct {
@@ -78,24 +78,24 @@ const (
 type CheckpointType string
 
 const (
-	CheckpointTypeHumanVerify  CheckpointType = "human_verify"
-	CheckpointTypeDecision     CheckpointType = "decision"
-	CheckpointTypeHumanAction  CheckpointType = "human_action"
+	CheckpointTypeHumanVerify   CheckpointType = "human_verify"
+	CheckpointTypeDecision      CheckpointType = "decision"
+	CheckpointTypeHumanAction   CheckpointType = "human_action"
 	CheckpointTypeBlockingHuman CheckpointType = "blocking_human"
 )
 
 type Checkpoint struct {
-	ID          uuid.UUID      `json:"id"`
-	Type        CheckpointType `json:"type"`
-	Description string         `json:"description"`
-	Risk        string         `json:"risk"`
-	Reversible  bool           `json:"reversible"`
+	ID          uuid.UUID          `json:"id"`
+	Type        CheckpointType     `json:"type"`
+	Description string             `json:"description"`
+	Risk        string             `json:"risk"`
+	Reversible  bool               `json:"reversible"`
 	Options     []CheckpointOption `json:"options,omitempty"`
-	Status      CheckpointStatus `json:"status"`
-	CreatedAt   time.Time      `json:"created_at"`
-	ResolvedAt  *time.Time     `json:"resolved_at,omitempty"`
-	ResolvedBy  *uuid.UUID     `json:"resolved_by,omitempty"`
-	Resolution  string         `json:"resolution,omitempty"`
+	Status      CheckpointStatus   `json:"status"`
+	CreatedAt   time.Time          `json:"created_at"`
+	ResolvedAt  *time.Time         `json:"resolved_at,omitempty"`
+	ResolvedBy  *uuid.UUID         `json:"resolved_by,omitempty"`
+	Resolution  string             `json:"resolution,omitempty"`
 }
 
 type CheckpointOption struct {
@@ -108,20 +108,20 @@ type CheckpointOption struct {
 type CheckpointStatus string
 
 const (
-	CheckpointStatusPending   CheckpointStatus = "pending"
-	CheckpointStatusActive    CheckpointStatus = "active"
-	CheckpointStatusResolved  CheckpointStatus = "resolved"
-	CheckpointStatusSkipped   CheckpointStatus = "skipped"
+	CheckpointStatusPending  CheckpointStatus = "pending"
+	CheckpointStatusActive   CheckpointStatus = "active"
+	CheckpointStatusResolved CheckpointStatus = "resolved"
+	CheckpointStatusSkipped  CheckpointStatus = "skipped"
 )
 
 type Research struct {
-	ID          uuid.UUID `json:"id"`
-	Question    string    `json:"question"`
-	Findings    string    `json:"findings"`
-	Confidence  float64   `json:"confidence"`
-	Sources     []string  `json:"sources"`
-	CreatedAt   time.Time `json:"created_at"`
-	CreatedBy   uuid.UUID `json:"created_by"`
+	ID         uuid.UUID `json:"id"`
+	Question   string    `json:"question"`
+	Findings   string    `json:"findings"`
+	Confidence float64   `json:"confidence"`
+	Sources    []string  `json:"sources"`
+	CreatedAt  time.Time `json:"created_at"`
+	CreatedBy  uuid.UUID `json:"created_by"`
 }
 
 func (a Artifact) MarshalJSON() ([]byte, error) {

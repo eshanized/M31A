@@ -27,7 +27,7 @@ var ErrValidation = errors.New("config validation")
 func DefaultConfig() *Config {
 	return &Config{
 		Provider: ProviderConfig{
-			Default:              types.ProviderNvidia,
+			Default:                types.ProviderNvidia,
 			FallbackPriority:       []string{types.ProviderNvidia, types.ProviderZen, types.ProviderOpenRouter},
 			HealthCheckTimeoutSecs: 10,
 			RegistrationOrder:      []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia},
@@ -35,7 +35,7 @@ func DefaultConfig() *Config {
 			FallbackMode:           "manual", // default per D-26
 		},
 		UI: UIConfig{
-			Theme:            "dark",
+			Theme:                 "dark",
 			SidebarWidthThreshold: 120,
 			MaxIterations:         100,
 			DiscussTimeout:        300,

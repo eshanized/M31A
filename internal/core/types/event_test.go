@@ -141,11 +141,13 @@ func TestEventStoreInterface(t *testing.T) {
 
 type mockEventStore struct{}
 
-func (m *mockEventStore) Append(ctx context.Context, events ...Event) error          { return nil }
-func (m *mockEventStore) Query(ctx context.Context, q Query) ([]Event, error)       { return nil, nil }
-func (m *mockEventStore) Subscribe(ctx context.Context, afterSeq int64) (<-chan Event, error) { return nil, nil }
-func (m *mockEventStore) Backup(ctx context.Context, dstPath string) error          { return nil }
-func (m *mockEventStore) Close() error                                             { return nil }
+func (m *mockEventStore) Append(ctx context.Context, events ...Event) error   { return nil }
+func (m *mockEventStore) Query(ctx context.Context, q Query) ([]Event, error) { return nil, nil }
+func (m *mockEventStore) Subscribe(ctx context.Context, afterSeq int64) (<-chan Event, error) {
+	return nil, nil
+}
+func (m *mockEventStore) Backup(ctx context.Context, dstPath string) error { return nil }
+func (m *mockEventStore) Close() error                                     { return nil }
 
 func TestEventSerialization(t *testing.T) {
 	// Test MarshalEventPayload/UnmarshalEventPayload round-trip

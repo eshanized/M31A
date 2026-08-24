@@ -139,9 +139,9 @@ func (r *Registry) ActiveProvider() LLMProvider {
 //
 // If selected provider returns sentinel error (ErrInvalidKey, ErrRateLimited, ErrModelNotFound, ErrProviderUnreachable),
 // apply FallbackMode:
-//  - "manual": return error immediately with provider-specific message
-//  - "auto": call FindFallbackProvider with config.FallbackPriority
-//  - "prompt": return error with special type indicating TUI should prompt (headless: treat as manual)
+//   - "manual": return error immediately with provider-specific message
+//   - "auto": call FindFallbackProvider with config.FallbackPriority
+//   - "prompt": return error with special type indicating TUI should prompt (headless: treat as manual)
 func (r *Registry) GetProviderForRequest(req ChatRequest, fallbackMode string, fallbackPriority []string, healthCheckTimeoutSecs int) (LLMProvider, string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

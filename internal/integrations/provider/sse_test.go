@@ -166,9 +166,9 @@ func TestStreamingResilience(t *testing.T) {
 			wantType string
 			wantErr  bool
 		}{
-			{"empty_data", `{"choices":[{"delta":{}}]}`, "", false},       // No content, skips silently (nil, nil)
-			{"malformed_json", `not json`, "", true},                     // Parse error
-			{"empty_choices", `{"choices":[]}`, "", false},               // Empty choices, skips silently (nil, nil)
+			{"empty_data", `{"choices":[{"delta":{}}]}`, "", false}, // No content, skips silently (nil, nil)
+			{"malformed_json", `not json`, "", true},                // Parse error
+			{"empty_choices", `{"choices":[]}`, "", false},          // Empty choices, skips silently (nil, nil)
 			{"usage_only", `{"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`, "usage", false},
 		}
 

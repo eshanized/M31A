@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/config"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
 )
 
@@ -67,8 +67,8 @@ type BaseClient struct {
 	HealthLiveMs  int64
 	HealthSlowMs  int64
 	Version       string
-	Profiles      *config.ModelProfileConfig     // model profiles for parameter merging (D-09/D-10/D-11)
-	RetryConfig   StreamRetryConfig              // streaming retry configuration (D-13/D-16)
+	Profiles      *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
+	RetryConfig   StreamRetryConfig          // streaming retry configuration (D-13/D-16)
 }
 
 // NewBaseClient creates a BaseClient with the given settings.

@@ -11,27 +11,27 @@ import (
 const WorkspaceConfigPath = ".m31a/workspace.toml"
 
 type Config struct {
-	Provider           ProviderConfig           `toml:"provider"`
-	Model              ModelConfig              `toml:"model"`
-	UI                 UIConfig                 `toml:"ui"`
-	Permissions        PermissionsConfig        `toml:"permissions"`
-	Features           FeaturesConfig           `toml:"features"`
-	Ledger             LedgerConfig             `toml:"ledger"`
-	Tools              ToolsConfig              `toml:"tools"`
-	Agents             AgentsConfig             `toml:"agents"`
-	Git                GitConfig                `toml:"git"`
-	Verify             VerifyConfig             `toml:"verify"`
-	Compaction         CompactionConfig         `toml:"compaction"`
-	Instructions       InstructionsConfig       `toml:"instructions"`
-	Skills             SkillsConfig             `toml:"skills"`
-	ModelCapabilities  ModelCapabilitiesConfig  `toml:"model_capabilities"`
-	Prompts            PromptConfig             `toml:"prompts"`
-	Narrative          NarrativeConfig          `toml:"narrative"`
-	Templates          TemplateConfig           `toml:"templates"`
-	Extensions         ExtensionsConfig         `toml:"extensions" json:"extensions"`
-	EventStore         EventStoreConfig         `toml:"eventstore"`
-	Migration          MigrationConfig          `toml:"migration"`
-	ModelProfiles      ModelProfileConfig       `toml:"model_profiles"`
+	Provider          ProviderConfig          `toml:"provider"`
+	Model             ModelConfig             `toml:"model"`
+	UI                UIConfig                `toml:"ui"`
+	Permissions       PermissionsConfig       `toml:"permissions"`
+	Features          FeaturesConfig          `toml:"features"`
+	Ledger            LedgerConfig            `toml:"ledger"`
+	Tools             ToolsConfig             `toml:"tools"`
+	Agents            AgentsConfig            `toml:"agents"`
+	Git               GitConfig               `toml:"git"`
+	Verify            VerifyConfig            `toml:"verify"`
+	Compaction        CompactionConfig        `toml:"compaction"`
+	Instructions      InstructionsConfig      `toml:"instructions"`
+	Skills            SkillsConfig            `toml:"skills"`
+	ModelCapabilities ModelCapabilitiesConfig `toml:"model_capabilities"`
+	Prompts           PromptConfig            `toml:"prompts"`
+	Narrative         NarrativeConfig         `toml:"narrative"`
+	Templates         TemplateConfig          `toml:"templates"`
+	Extensions        ExtensionsConfig        `toml:"extensions" json:"extensions"`
+	EventStore        EventStoreConfig        `toml:"eventstore"`
+	Migration         MigrationConfig         `toml:"migration"`
+	ModelProfiles     ModelProfileConfig      `toml:"model_profiles"`
 }
 
 // ExtensionsConfig holds all extension configuration sections.
@@ -493,11 +493,11 @@ type FeaturesConfig struct {
 	ExecuteLoopDetect  bool `toml:"execute_loop_detect"`  // Tool call loop detection
 
 	// Verify + Ship phase enhancements
-	VerifyReport           bool `toml:"verify_report"`             // Generate verification report
-	VerifySecurity         bool `toml:"verify_security"`          // Security file scanning
-	VerifyAllowPartial     bool `toml:"verify_allow_partial"`     // Allow partial verification (default false)
-	ShipPreflight          bool `toml:"ship_preflight"`           // Pre-ship checklist
-	ShipChangelog          bool `toml:"ship_changelog"`           // Changelog generation
+	VerifyReport       bool `toml:"verify_report"`        // Generate verification report
+	VerifySecurity     bool `toml:"verify_security"`      // Security file scanning
+	VerifyAllowPartial bool `toml:"verify_allow_partial"` // Allow partial verification (default false)
+	ShipPreflight      bool `toml:"ship_preflight"`       // Pre-ship checklist
+	ShipChangelog      bool `toml:"ship_changelog"`       // Changelog generation
 
 	// Initialize phase enhancements
 	InitDeepAnalysis bool `toml:"init_deep_analysis"` // Deep project analysis
@@ -660,8 +660,8 @@ type ModelProfileConfig struct {
 // StreamRetryConfig holds streaming retry configuration (D-13/D-16).
 // Matches provider.StreamRetryConfig but uses TOML-friendly types.
 type StreamRetryConfig struct {
-	Mode        string `toml:"mode"`         // "none" | "initial_only" | "full_resume" (default "initial_only")
-	MaxAttempts int    `toml:"max_attempts"` // default 3
+	Mode        string `toml:"mode"`          // "none" | "initial_only" | "full_resume" (default "initial_only")
+	MaxAttempts int    `toml:"max_attempts"`  // default 3
 	BaseDelayMs int    `toml:"base_delay_ms"` // default 1000
 }
 

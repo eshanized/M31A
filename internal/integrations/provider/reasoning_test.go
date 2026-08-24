@@ -35,9 +35,9 @@ func TestReasoningConfig(t *testing.T) {
 	// Test 2: GetReasoningConfig matches model ID prefixes correctly (sorted keys handle specificity)
 	t.Run("prefix_matching_specificity", func(t *testing.T) {
 		tests := []struct {
-			modelID      string
-			expectedKey  string
-			shouldMatch  bool
+			modelID     string
+			expectedKey string
+			shouldMatch bool
 		}{
 			// Exact matches (most specific)
 			{"nvidia/nemotron-3-nano-omni", "nvidia/nemotron-3-nano-omni", true},
@@ -169,11 +169,11 @@ func TestReasoningConfig(t *testing.T) {
 	t.Run("nvidia_extra_body_params", func(t *testing.T) {
 		t.Skip("ExtraBodyParams are applied by provider-specific code (buildNvidiaBody), not ApplyReasoningParams")
 		tests := []struct {
-			modelID           string
-			expectExtraBody   bool
-			reasoningBudget   float64
-			enableThinking    bool
-			forceNonEmpty     bool
+			modelID         string
+			expectExtraBody bool
+			reasoningBudget float64
+			enableThinking  bool
+			forceNonEmpty   bool
 		}{
 			{"nvidia/nemotron-3-nano-omni", true, 16384, true, false},
 			{"nvidia/some-other-model", false, 0, false, false},

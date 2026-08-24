@@ -54,7 +54,7 @@ var reasoningParamMap = map[string]ReasoningConfig{
 		ExtraBodyParams: map[string]any{
 			"reasoning_budget": 32768,
 			"chat_template_kwargs": map[string]any{
-				"enable_thinking":       true,
+				"enable_thinking":        true,
 				"force_nonempty_content": true,
 			},
 		},

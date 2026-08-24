@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/config"
+	m31errors "github.com/eshanized/M31A/internal/core/errors"
 	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/integrations/provider"
 )
@@ -33,8 +33,8 @@ type Options struct {
 	HealthCheckSlowMs int64
 	DefaultContextLen int64
 	Version           string
-	Profiles          *config.ModelProfileConfig         // model profiles for parameter merging (D-09/D-10/D-11)
-	RetryConfig       provider.StreamRetryConfig         // streaming retry configuration (D-13/D-16)
+	Profiles          *config.ModelProfileConfig // model profiles for parameter merging (D-09/D-10/D-11)
+	RetryConfig       provider.StreamRetryConfig // streaming retry configuration (D-13/D-16)
 }
 
 func New(apiKey string, opts Options) (*Client, error) {
@@ -120,11 +120,11 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.ModelInfo, error) {
 			maxOutputTokens := int64(16384)
 
 			info := types.ModelInfo{
-				ID:                m.ID,
-				Name:              m.ID,
-				Description:       m.OwnedBy,
-				ContextLength:     c.defaultContextLen,
-				MaxOutputTokens:   maxOutputTokens,
+				ID:              m.ID,
+				Name:            m.ID,
+				Description:     m.OwnedBy,
+				ContextLength:   c.defaultContextLen,
+				MaxOutputTokens: maxOutputTokens,
 				Pricing: types.Pricing{
 					InputPerMToken:  0,
 					OutputPerMToken: 0,

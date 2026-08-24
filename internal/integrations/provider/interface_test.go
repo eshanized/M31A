@@ -1,5 +1,3 @@
-
-
 package provider
 
 import (
@@ -22,8 +20,8 @@ func TestLLMProviderInterface(t *testing.T) {
 		"FetchModels",
 		"CachedModels",
 		"ChatCompletionStream",
-		"ChatCompletion",   // Will be added in Wave 1
-		"ListModels",       // Will be added in Wave 1
+		"ChatCompletion", // Will be added in Wave 1
+		"ListModels",     // Will be added in Wave 1
 		"EstimateCost",
 		"HealthCheck",
 		"GetModel",
@@ -51,9 +49,9 @@ func TestLLMProviderInterface(t *testing.T) {
 		"MaxTokens",
 		"Tools",
 		"ReasoningEnabled",
-		"Provider",       // Will be added in Wave 2
-		"Temperature",    // Will be added in Wave 2
-		"TopP",           // Will be added in Wave 2
+		"Provider",    // Will be added in Wave 2
+		"Temperature", // Will be added in Wave 2
+		"TopP",        // Will be added in Wave 2
 	}
 	for _, fieldName := range expectedChatRequestFields {
 		_, found := chatRequestType.FieldByName(fieldName)

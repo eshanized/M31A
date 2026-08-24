@@ -29,22 +29,22 @@ const (
 )
 
 type Intent struct {
-	Type       IntentType     `json:"type"`
+	Type       IntentType      `json:"type"`
 	Complexity ComplexityLevel `json:"complexity"`
-	Summary    string         `json:"summary"`
-	RawPrompt  string         `json:"raw_prompt"`
-	Confidence float64        `json:"confidence"`
+	Summary    string          `json:"summary"`
+	RawPrompt  string          `json:"raw_prompt"`
+	Confidence float64         `json:"confidence"`
 }
 
 type Requirement struct {
-	ID            uuid.UUID `json:"id"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Phase         int       `json:"phase"`
-	Status        RequirementStatus `json:"status"`
-	Traceability  []string  `json:"traceability"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID           uuid.UUID         `json:"id"`
+	Title        string            `json:"title"`
+	Description  string            `json:"description"`
+	Phase        int               `json:"phase"`
+	Status       RequirementStatus `json:"status"`
+	Traceability []string          `json:"traceability"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
 type RequirementStatus string
@@ -58,12 +58,12 @@ const (
 )
 
 type Decision struct {
-	ID           uuid.UUID       `json:"id"`
-	Title        string          `json:"title"`
-	Status       DecisionStatus  `json:"status"`
-	Rationale    string          `json:"rationale"`
-	Alternatives []Alternative   `json:"alternatives,omitempty"`
-	Timestamp    time.Time       `json:"timestamp"`
+	ID           uuid.UUID      `json:"id"`
+	Title        string         `json:"title"`
+	Status       DecisionStatus `json:"status"`
+	Rationale    string         `json:"rationale"`
+	Alternatives []Alternative  `json:"alternatives,omitempty"`
+	Timestamp    time.Time      `json:"timestamp"`
 }
 
 type DecisionStatus string
@@ -82,15 +82,15 @@ type Alternative struct {
 }
 
 type Plan struct {
-	ID              uuid.UUID     `json:"id"`
-	Title           string        `json:"title"`
-	Objective       string        `json:"objective"`
-	Requirements    []uuid.UUID   `json:"requirements"`
-	Tasks           []Task        `json:"tasks"`
-	RiskLevel       RiskLevel     `json:"risk_level"`
-	Status          PlanStatus    `json:"status"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	ID           uuid.UUID   `json:"id"`
+	Title        string      `json:"title"`
+	Objective    string      `json:"objective"`
+	Requirements []uuid.UUID `json:"requirements"`
+	Tasks        []Task      `json:"tasks"`
+	RiskLevel    RiskLevel   `json:"risk_level"`
+	Status       PlanStatus  `json:"status"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 type PlanStatus string
@@ -129,12 +129,12 @@ const (
 )
 
 type TaskGraph struct {
-	ID          uuid.UUID `json:"id"`
-	PlanID      uuid.UUID `json:"plan_id"`
-	Tasks       []Task    `json:"tasks"`
-	Status      TaskGraphStatus `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID        uuid.UUID       `json:"id"`
+	PlanID    uuid.UUID       `json:"plan_id"`
+	Tasks     []Task          `json:"tasks"`
+	Status    TaskGraphStatus `json:"status"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 type TaskGraphStatus string

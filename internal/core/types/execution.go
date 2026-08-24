@@ -10,19 +10,19 @@ import (
 type AgentRole string
 
 const (
-	AgentRoleSupervisor       AgentRole = "supervisor"
-	AgentRoleExplorer         AgentRole = "explorer"
-	AgentRoleResearcher       AgentRole = "researcher"
-	AgentRoleArchitect        AgentRole = "architect"
-	AgentRolePlanner          AgentRole = "planner"
-	AgentRoleImplementer      AgentRole = "implementer"
-	AgentRoleTester           AgentRole = "tester"
-	AgentRoleDebugger         AgentRole = "debugger"
-	AgentRoleVerifier         AgentRole = "verifier"
-	AgentRoleReviewer         AgentRole = "reviewer"
-	AgentRoleSecurityAuditor  AgentRole = "security_auditor"
-	AgentRoleGitSpecialist    AgentRole = "git_specialist"
-	AgentRoleReleaseEngineer  AgentRole = "release_engineer"
+	AgentRoleSupervisor      AgentRole = "supervisor"
+	AgentRoleExplorer        AgentRole = "explorer"
+	AgentRoleResearcher      AgentRole = "researcher"
+	AgentRoleArchitect       AgentRole = "architect"
+	AgentRolePlanner         AgentRole = "planner"
+	AgentRoleImplementer     AgentRole = "implementer"
+	AgentRoleTester          AgentRole = "tester"
+	AgentRoleDebugger        AgentRole = "debugger"
+	AgentRoleVerifier        AgentRole = "verifier"
+	AgentRoleReviewer        AgentRole = "reviewer"
+	AgentRoleSecurityAuditor AgentRole = "security_auditor"
+	AgentRoleGitSpecialist   AgentRole = "git_specialist"
+	AgentRoleReleaseEngineer AgentRole = "release_engineer"
 )
 
 type Agent struct {
@@ -86,16 +86,16 @@ const (
 // ToolSpec represents a tool definition in the domain model (Execution plane).
 // This is distinct from the Tool interface in types.go which is for execution.
 type ToolSpec struct {
-	Name           string        `json:"name"`
-	Description    string        `json:"description"`
-	InputSchema    string        `json:"input_schema"`
-	OutputSchema   string        `json:"output_schema"`
-	Capabilities   []Capability  `json:"capabilities"`
-	RiskLevel      RiskLevel     `json:"risk_level"`
-	ResourceScope  ResourceScope `json:"resource_scope"`
-	MutationClass  MutationClass `json:"mutation_class"`
-	SideEffects    []string      `json:"side_effects"`
-	Idempotent     bool          `json:"idempotent"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	InputSchema   string        `json:"input_schema"`
+	OutputSchema  string        `json:"output_schema"`
+	Capabilities  []Capability  `json:"capabilities"`
+	RiskLevel     RiskLevel     `json:"risk_level"`
+	ResourceScope ResourceScope `json:"resource_scope"`
+	MutationClass MutationClass `json:"mutation_class"`
+	SideEffects   []string      `json:"side_effects"`
+	Idempotent    bool          `json:"idempotent"`
 }
 
 func (a Agent) MarshalJSON() ([]byte, error) {

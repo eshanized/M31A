@@ -17,8 +17,8 @@ func TestConfigValidation(t *testing.T) {
 		errorContains string
 	}{
 		{
-			name: "valid config with defaults",
-			cfg:  DefaultConfig(),
+			name:        "valid config with defaults",
+			cfg:         DefaultConfig(),
 			expectError: false,
 		},
 		{
@@ -139,13 +139,13 @@ func TestLayeredConfig(t *testing.T) {
 	assert.Equal(t, ".planning", cfg.Migration.PlanningDir)
 	assert.True(t, cfg.Migration.ArchiveOnComplete)
 
-// Test provider defaults
-		assert.Equal(t, "nvidia", cfg.Provider.Default)
-		assert.Equal(t, "nvidia/nemotron-3-ultra-550b-a55b", cfg.Model.Default)
-		assert.Equal(t, "https://integrate.api.nvidia.com/v1", cfg.Provider.NvidiaBaseURL)
-		assert.Empty(t, cfg.Provider.OpenRouter.APIKey)
-		assert.Empty(t, cfg.Provider.Zen.APIKey)
-		assert.Empty(t, cfg.Provider.Nvidia.APIKey)
+	// Test provider defaults
+	assert.Equal(t, "nvidia", cfg.Provider.Default)
+	assert.Equal(t, "nvidia/nemotron-3-ultra-550b-a55b", cfg.Model.Default)
+	assert.Equal(t, "https://integrate.api.nvidia.com/v1", cfg.Provider.NvidiaBaseURL)
+	assert.Empty(t, cfg.Provider.OpenRouter.APIKey)
+	assert.Empty(t, cfg.Provider.Zen.APIKey)
+	assert.Empty(t, cfg.Provider.Nvidia.APIKey)
 }
 
 func TestKeychainResolution(t *testing.T) {

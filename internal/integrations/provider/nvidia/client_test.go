@@ -1,5 +1,3 @@
-
-
 package nvidia
 
 import (
@@ -38,7 +36,7 @@ func TestNVIDIAClient(t *testing.T) {
 		client, err := New("test-key", Options{})
 		require.NoError(t, err)
 
-server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Verify request body includes reasoning config
 			var reqBody map[string]any
 			json.NewDecoder(r.Body).Decode(&reqBody)
@@ -227,24 +225,24 @@ server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *htt
 
 		body := client.BuildNvidiaBodyForTest(req)
 
-extraBody, ok := body["extra_body"].(map[string]any)
-	require.True(t, ok, "extra_body should be present")
+		extraBody, ok := body["extra_body"].(map[string]any)
+		require.True(t, ok, "extra_body should be present")
 
-	// JSON numbers without decimal are decoded as int, accept both int and float64
-	budget := extraBody["reasoning_budget"]
-	switch v := budget.(type) {
-	case int:
-		assert.Equal(t, 32768, v)
-	case float64:
-		assert.Equal(t, float64(32768), v)
-	default:
-		t.Errorf("unexpected type for reasoning_budget: %T", v)
-	}
+		// JSON numbers without decimal are decoded as int, accept both int and float64
+		budget := extraBody["reasoning_budget"]
+		switch v := budget.(type) {
+		case int:
+			assert.Equal(t, 32768, v)
+		case float64:
+			assert.Equal(t, float64(32768), v)
+		default:
+			t.Errorf("unexpected type for reasoning_budget: %T", v)
+		}
 
-	kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any)
-	require.True(t, ok, "chat_template_kwargs should be present")
-	assert.Equal(t, true, kwargs["enable_thinking"])
-	assert.Equal(t, true, kwargs["force_nonempty_content"])
+		kwargs, ok := extraBody["chat_template_kwargs"].(map[string]any)
+		require.True(t, ok, "chat_template_kwargs should be present")
+		assert.Equal(t, true, kwargs["enable_thinking"])
+		assert.Equal(t, true, kwargs["force_nonempty_content"])
 	})
 
 	// Test 5: reasoning config applied for ultra model
@@ -277,9 +275,9 @@ extraBody, ok := body["extra_body"].(map[string]any)
 	// Test 6: Table-driven tests for different model configs
 	t.Run("model_configs", func(t *testing.T) {
 		tests := []struct {
-			modelID          string
-			hasReasoning     bool
-			expectThinking   bool
+			modelID             string
+			hasReasoning        bool
+			expectThinking      bool
 			expectForceNonEmpty bool
 		}{
 			{"nvidia/nemotron-3-ultra-550b-a55b", true, true, true},
