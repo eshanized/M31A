@@ -241,6 +241,12 @@ type ProviderConfig struct {
 	// If set, providers are registered in this order.
 	// Default: ["openrouter", "zen", "nvidia"] (current behavior).
 	RegistrationOrder []string `toml:"registration_order"`
+
+	// FallbackMode controls behavior when a provider fails with a sentinel error.
+	// "manual": return error immediately with provider-specific message (default)
+	// "auto": call FindFallbackProvider with config.FallbackPriority
+	// "prompt": return error with special type indicating TUI should prompt (headless: treat as manual)
+	FallbackMode string `toml:"fallback_mode"`
 }
 
 type ProviderCredentialConfig struct {

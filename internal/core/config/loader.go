@@ -32,6 +32,7 @@ func DefaultConfig() *Config {
 			HealthCheckTimeoutSecs: 10,
 			RegistrationOrder:      []string{types.ProviderOpenRouter, types.ProviderZen, types.ProviderNvidia},
 			NvidiaBaseURL:          "https://integrate.api.nvidia.com/v1",
+			FallbackMode:           "manual", // default per D-26
 		},
 		UI: UIConfig{
 			Theme:            "dark",
