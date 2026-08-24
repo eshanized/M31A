@@ -2,6 +2,7 @@ package codeintel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eshanized/M31A/internal/core/types"
 	"github.com/eshanized/M31A/internal/infrastructure/fileutil"
 )
 
@@ -19,6 +21,7 @@ import (
 type Indexer struct {
 	workDir string
 	parsers []Parser
+	store   types.EventStore
 
 	mu      sync.RWMutex
 	graph   *CodeGraph
@@ -31,9 +34,16 @@ type Indexer struct {
 // NewIndexer creates a new codebase indexer for the given working directory.
 // The indexer is lazy — call Build() before using query methods.
 func NewIndexer(workDir string) *Indexer {
+	return NewIndexerWithStore(workDir, nil)
+}
+
+// NewIndexerWithStore creates a new codebase indexer with an optional EventStore.
+// If store is nil, events are not emitted (backward compatible).
+func NewIndexerWithStore(workDir string, store types.EventStore) *Indexer {
 	return &Indexer{
 		workDir: workDir,
 		parsers: AllParsers(),
+		store:   store,
 	}
 }
 
@@ -77,10 +87,117 @@ func (idx *Indexer) buildFull(ctx context.Context) error {
 	idx.files = files
 	idx.builtAt = time.Now()
 
+	// Emit code intelligence events to EventStore
+	if idx.store != nil {
+		if err := idx.emitBuildEvents(ctx, files, graph); err != nil {
+			return fmt.Errorf("emit build events: %w", err)
+		}
+	}
+
 	// Save cache
 	fileCaches := BuildCacheFromFiles(idx.workDir, files, nil)
 	cache := &IndexCache{Files: fileCaches}
 	_ = SaveCache(idx.workDir, cache)
+
+	return nil
+}
+
+// emitBuildEvents emits code intelligence events for all files, symbols, imports, call edges, and inheritance edges.
+func (idx *Indexer) emitBuildEvents(ctx context.Context, files []*FileInfo, graph *CodeGraph) error {
+	// Emit FileIndexed and SymbolDefined events for each file
+	for _, f := range files {
+		// FileIndexed event
+		hash := [32]byte{} // Would be computed from file content in practice
+		info, _ := os.Stat(filepath.Join(idx.workDir, f.Path))
+		var modTime time.Time
+		if info != nil {
+			modTime = info.ModTime()
+		}
+		filePayload := FileIndexedPayload{
+			Path:     f.Path,
+			Language: f.Language,
+			Symbols:  f.Exports,
+			Imports:  f.Imports,
+			Hash:     hash,
+			ModTime:  modTime,
+		}
+		if err := EmitFileIndexed(ctx, idx.store, filePayload); err != nil {
+			return err
+		}
+
+		// SymbolDefined events for each exported symbol
+		for _, sym := range f.Exports {
+			symPayload := SymbolDefinedPayload{
+				Name:     sym.Name,
+				Kind:     sym.Kind,
+				File:     f.Path,
+				Line:     0, // Line not tracked in SymbolInfo
+				Exported: sym.Exported,
+			}
+			if err := EmitSymbolDefined(ctx, idx.store, symPayload); err != nil {
+				return err
+			}
+		}
+
+		// ImportResolved events for resolved imports
+		for _, imp := range f.Imports {
+			if imp.ResolvedTo != "" {
+				impPayload := ImportResolvedPayload{
+					From:         f.Path,
+					To:           imp.ResolvedTo,
+					ImportPath:   imp.Path,
+					ResolvedPath: imp.ResolvedTo,
+				}
+				if err := EmitImportResolved(ctx, idx.store, impPayload); err != nil {
+					return err
+				}
+			}
+		}
+
+		// CallEdgeAdded events from call sites
+		for _, cs := range f.CallSites {
+			callPayload := CallEdgeAddedPayload{
+				CallerFile: f.Path,
+				CallerLine: cs.Line,
+				CallerName: cs.CallerName,
+				CalleeFile: "", // Callee file not directly tracked in CallSiteInfo
+				CalleeLine: 0,
+				CalleeName: cs.CalleeName,
+			}
+			if err := EmitCallEdgeAdded(ctx, idx.store, callPayload); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Emit CallEdgeAdded for all call edges in the graph
+	for _, edge := range graph.AllCallEdges() {
+		callPayload := CallEdgeAddedPayload{
+			CallerFile: edge.CallerFile,
+			CallerLine: edge.CallerLine,
+			CallerName: edge.CallerName,
+			CalleeFile: edge.CalleeFile,
+			CalleeLine: edge.CalleeLine,
+			CalleeName: edge.CalleeName,
+		}
+		if err := EmitCallEdgeAdded(ctx, idx.store, callPayload); err != nil {
+			return err
+		}
+	}
+
+	// Emit InheritanceEdgeAdded for all inheritance edges
+	for _, edge := range graph.AllInheritanceEdges() {
+		inhPayload := InheritanceEdgeAddedPayload{
+			Child:      edge.Child,
+			Parent:     edge.Parent,
+			ChildFile:  edge.ChildFile,
+			ParentFile: edge.ParentFile,
+			Kind:       edge.Kind,
+		}
+		if err := EmitInheritanceEdgeAdded(ctx, idx.store, inhPayload); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -188,6 +305,18 @@ func (idx *Indexer) buildIncremental(ctx context.Context) error {
 
 	inc := CheckIncremental(idx.workDir, idx.parsers, currentCache)
 
+	// Emit events for deleted files
+	if idx.store != nil && len(inc.Deleted) > 0 {
+		for _, path := range inc.Deleted {
+			delPayload := FileDeletedPayload{Path: path, WasIndexed: true}
+			if err := EmitFileDeleted(ctx, idx.store, delPayload); err != nil {
+				return err
+			}
+			// Emit SymbolRemoved for symbols in deleted files (simplified)
+			// In practice, we'd track which symbols were in the deleted file
+		}
+	}
+
 	// Remove deleted files from graph and index
 	if len(inc.Deleted) > 0 {
 		for _, path := range inc.Deleted {
@@ -241,6 +370,58 @@ func (idx *Indexer) buildIncremental(ctx context.Context) error {
 			}
 			if !found {
 				idx.files = append(idx.files, f)
+			}
+		}
+
+		// Emit events for changed/new files
+		if idx.store != nil {
+			for _, f := range changedFiles {
+				hash := [32]byte{}
+				info, _ := os.Stat(filepath.Join(idx.workDir, f.Path))
+				var modTime time.Time
+				if info != nil {
+					modTime = info.ModTime()
+				}
+				filePayload := FileIndexedPayload{
+					Path:     f.Path,
+					Language: f.Language,
+					Symbols:  f.Exports,
+					Imports:  f.Imports,
+					Hash:     hash,
+					ModTime:  modTime,
+				}
+				if err := EmitFileIndexed(ctx, idx.store, filePayload); err != nil {
+					return err
+				}
+				for _, sym := range f.Exports {
+					symPayload := SymbolDefinedPayload{
+						Name:     sym.Name, Kind: sym.Kind, File: f.Path,
+						Line: 0, Exported: sym.Exported,
+					}
+					if err := EmitSymbolDefined(ctx, idx.store, symPayload); err != nil {
+						return err
+					}
+				}
+				for _, imp := range f.Imports {
+					if imp.ResolvedTo != "" {
+						impPayload := ImportResolvedPayload{
+							From: f.Path, To: imp.ResolvedTo, ImportPath: imp.Path,
+							ResolvedPath: imp.ResolvedTo,
+						}
+						if err := EmitImportResolved(ctx, idx.store, impPayload); err != nil {
+							return err
+						}
+					}
+				}
+				for _, cs := range f.CallSites {
+					callPayload := CallEdgeAddedPayload{
+						CallerFile: f.Path, CallerLine: cs.Line, CallerName: cs.CallerName,
+						CalleeFile: "", CalleeLine: 0, CalleeName: cs.CalleeName,
+					}
+					if err := EmitCallEdgeAdded(ctx, idx.store, callPayload); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
@@ -581,4 +762,196 @@ func isExportedSymbol(name string) bool {
 	}
 	r := rune(name[0])
 	return r >= 'A' && r <= 'Z'
+}
+
+// CodeIntelProjection rebuilds an in-memory graph from EventStore events.
+// It provides a queryable view of the code intelligence graph.
+type CodeIntelProjection struct {
+	mu       sync.RWMutex
+	graph    *CodeGraph
+	files    map[string]*FileInfo
+	symbols  map[string][]SymbolLocation
+}
+
+// NewCodeIntelProjection creates a new projection.
+func NewCodeIntelProjection() *CodeIntelProjection {
+	return &CodeIntelProjection{
+		graph:   NewCodeGraph(),
+		files:   make(map[string]*FileInfo),
+		symbols: make(map[string][]SymbolLocation),
+	}
+}
+
+// RebuildFromEvents replays all codeintel events from the EventStore to rebuild the in-memory graph.
+func (p *CodeIntelProjection) RebuildFromEvents(ctx context.Context, store types.EventStore) error {
+	if store == nil {
+		return nil
+	}
+
+	// Query all codeintel events
+	q := types.Query{
+		Type:   nil, // Get all types
+		Limit:  10000,
+		Offset: 0,
+	}
+	events, err := store.Query(ctx, q)
+	if err != nil {
+		return fmt.Errorf("query events: %w", err)
+	}
+
+	// Filter for codeintel events (source == "codeintel")
+	var codeintelEvents []types.Event
+	for _, evt := range events {
+		if evt.Metadata.Source == "codeintel" {
+			codeintelEvents = append(codeintelEvents, evt)
+		}
+	}
+
+	// Replay events
+	for _, evt := range codeintelEvents {
+		if err := p.ApplyEvent(ctx, evt); err != nil {
+			return fmt.Errorf("apply event %s: %w", evt.Type, err)
+		}
+	}
+
+	return nil
+}
+
+// ApplyEvent applies a single event to the in-memory state.
+func (p *CodeIntelProjection) ApplyEvent(ctx context.Context, evt types.Event) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	switch evt.Type {
+	case types.EventFileIndexed:
+		var payload FileIndexedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.files[payload.Path] = &FileInfo{
+			Path:     payload.Path,
+			Language: payload.Language,
+			Imports:  payload.Imports,
+			Exports:  payload.Symbols,
+		}
+		for _, sym := range payload.Symbols {
+			p.symbols[sym.Name] = append(p.symbols[sym.Name], SymbolLocation{
+				File: payload.Path, Kind: sym.Kind,
+			})
+			p.graph.AddNode(payload.Path, nil, payload.Language)
+		}
+		for _, imp := range payload.Imports {
+			if imp.ResolvedTo != "" {
+				p.graph.AddNode(payload.Path, []string{imp.ResolvedTo}, payload.Language)
+			}
+		}
+
+	case types.EventSymbolDefined:
+		var payload SymbolDefinedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.symbols[payload.Name] = append(p.symbols[payload.Name], SymbolLocation{
+			File: payload.File, Kind: payload.Kind,
+		})
+
+	case types.EventImportResolved:
+		var payload ImportResolvedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.graph.AddNode(payload.From, []string{payload.To}, "")
+
+	case types.EventCallEdgeAdded:
+		var payload CallEdgeAddedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.graph.AddCallEdge(CallEdge{
+			CallerFile: payload.CallerFile, CallerLine: payload.CallerLine,
+			CallerName: payload.CallerName, CalleeFile: payload.CalleeFile,
+			CalleeLine: payload.CalleeLine, CalleeName: payload.CalleeName,
+		})
+
+	case types.EventInheritanceEdgeAdded:
+		var payload InheritanceEdgeAddedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.graph.AddInheritanceEdge(InheritanceEdge{
+			Child: payload.Child, Parent: payload.Parent,
+			ChildFile: payload.ChildFile, ParentFile: payload.ParentFile,
+			Kind: payload.Kind,
+		})
+
+	case types.EventTypeHierarchyEdgeAdded:
+		var payload TypeHierarchyEdgeAddedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		p.graph.AddTypeHierarchyEdge(TypeHierarchyEdge{
+			Subtype: payload.Subtype, Supertype: payload.Supertype,
+			SubtypeFile: payload.SubtypeFile, SupertypeFile: payload.SupertypeFile,
+		})
+
+	case types.EventFileDeleted:
+		var payload FileDeletedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		delete(p.files, payload.Path)
+		p.graph.RemoveNode(payload.Path)
+
+	case types.EventSymbolRemoved:
+		var payload SymbolRemovedPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return err
+		}
+		// Remove symbol from index
+		locs := p.symbols[payload.Name]
+		for i := len(locs) - 1; i >= 0; i-- {
+			if locs[i].File == payload.File {
+				p.symbols[payload.Name] = append(locs[:i], locs[i+1:]...)
+			}
+		}
+		if len(p.symbols[payload.Name]) == 0 {
+			delete(p.symbols, payload.Name)
+		}
+	}
+
+	return nil
+}
+
+// Graph returns the in-memory code graph (thread-safe read).
+func (p *CodeIntelProjection) Graph() *CodeGraph {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.graph
+}
+
+// Files returns the file map (thread-safe read).
+func (p *CodeIntelProjection) Files() map[string]*FileInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	result := make(map[string]*FileInfo, len(p.files))
+	for k, v := range p.files {
+		result[k] = v
+	}
+	return result
+}
+
+// Symbols returns the symbol index (thread-safe read).
+func (p *CodeIntelProjection) Symbols() map[string][]SymbolLocation {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	result := make(map[string][]SymbolLocation, len(p.symbols))
+	for k, v := range p.symbols {
+		result[k] = v
+	}
+	return result
+}
+
+// Projection returns a new CodeIntelProjection for querying.
+func (idx *Indexer) Projection() *CodeIntelProjection {
+	return NewCodeIntelProjection()
 }
