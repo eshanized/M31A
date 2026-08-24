@@ -46,6 +46,14 @@ func (m *mockProvider) CachedModels() []types.ModelInfo {
 	return nil
 }
 
+func (m *mockProvider) ChatCompletion(ctx context.Context, req ChatRequest) (*types.ChatResponse, error) {
+	return &types.ChatResponse{Content: "mock response", Model: req.Model, FinishReason: "stop"}, nil
+}
+
+func (m *mockProvider) ListModels(ctx context.Context) ([]types.ModelInfo, error) {
+	return nil, nil
+}
+
 func TestRegistry_RegisterAndActive(t *testing.T) {
 	r := NewRegistry()
 	r.Register("test", &mockProvider{name: "test"})

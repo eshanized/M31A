@@ -1,4 +1,4 @@
-//go:build ignore
+
 
 package nvidia
 
@@ -230,9 +230,4 @@ func TestNVIDIAClient(t *testing.T) {
 			})
 		}
 	})
-}
-
-// BuildNvidiaBodyForTest exposes buildNvidiaBody for testing
-func (c *Client) BuildNvidiaBodyForTest(req provider.ChatRequest) map[string]any {
-	return c.buildNvidiaBody(req)
 }

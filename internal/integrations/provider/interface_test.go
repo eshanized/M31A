@@ -1,4 +1,4 @@
-//go:build ignore
+
 
 package provider
 
@@ -117,7 +117,7 @@ func TestChatResponseFields(t *testing.T) {
 
 	response := types.ChatResponse{
 		Content:      "test content",
-		Usage:        types.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+		Usage:        &types.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		Model:        "test-model",
 		FinishReason: "stop",
 	}
