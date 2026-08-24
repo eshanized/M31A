@@ -59,6 +59,16 @@ const (
 	EventResearchCompleted     EventType = "ResearchCompleted"
 	EventProjectionRebuilt     EventType = "ProjectionRebuilt"
 	EventBackupCompleted       EventType = "BackupCompleted"
+
+	// Code Intelligence events (Phase 03)
+	EventFileIndexed           EventType = "FileIndexed"
+	EventSymbolDefined         EventType = "SymbolDefined"
+	EventImportResolved        EventType = "ImportResolved"
+	EventCallEdgeAdded         EventType = "CallEdgeAdded"
+	EventInheritanceEdgeAdded  EventType = "InheritanceEdgeAdded"
+	EventTypeHierarchyEdgeAdded EventType = "TypeHierarchyEdgeAdded"
+	EventFileDeleted           EventType = "FileDeleted"
+	EventSymbolRemoved         EventType = "SymbolRemoved"
 )
 
 type EventMetadata struct {
