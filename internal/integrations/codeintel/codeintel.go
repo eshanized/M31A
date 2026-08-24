@@ -797,6 +797,14 @@ func (idx *Indexer) SymbolCount() int {
 	return idx.index.SymbolCount()
 }
 
+// SymbolIndex returns the symbol index for direct access.
+// Note: The returned index should not be modified externally.
+func (idx *Indexer) SymbolIndex() *SymbolIndex {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.index
+}
+
 // Upstream returns files that the given path depends on, up to depth levels.
 func (idx *Indexer) Upstream(path string, depth int) []string {
 	idx.mu.RLock()

@@ -813,6 +813,21 @@ func run() int {
 		return runModelsList(flag.Args()[2:], cfg, logger, registry)
 	}
 
+	// Index command: m31a index [--incremental] [--progress]
+	if flag.Arg(0) == "index" {
+		return runIndex(flag.Args()[1:], workDir, logger)
+	}
+
+	// Impact command: m31a impact <symbol> [--depth N] [--format table|json|graphviz]
+	if flag.Arg(0) == "impact" {
+		return runImpact(flag.Args()[1:], workDir, logger)
+	}
+
+	// Arch check command: m31a arch check [--config arch.toml]
+	if flag.Arg(0) == "arch" && flag.Arg(1) == "check" {
+		return runArchCheck(flag.Args()[2:], workDir, logger)
+	}
+
 	// Working directory — fail fast if Getwd fails (WP-C03)
 	workDir, err := os.Getwd()
 	if err != nil {
