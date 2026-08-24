@@ -270,6 +270,19 @@ type FileDiff struct {
 	Deletions int    `json:"deletions"`
 }
 
+// ModelProfile holds per-model parameter overrides.
+// Pointer types for numeric/bool fields allow distinguishing "not set" from
+// "explicitly set to zero/false" during merging.
+type ModelProfile struct {
+	ModelID             string   `json:"model_id"`
+	Temperature         *float64 `json:"temperature,omitempty"`
+	TopP                *float64 `json:"top_p,omitempty"`
+	MaxTokens           *int     `json:"max_tokens,omitempty"`
+	ReasoningEnabled    *bool    `json:"reasoning_enabled,omitempty"`
+	ReasoningBudget     *int     `json:"reasoning_budget,omitempty"`
+	ReasoningConfigRef  string   `json:"reasoning_config_ref,omitempty"` // optional reference to named reasoning config in reasoningParamMap
+}
+
 // ChatRequest is a chat completion request. Moved here from internal/provider
 // to allow pkg/ packages to reference it without importing internal/.
 type ChatRequest struct {
@@ -278,6 +291,34 @@ type ChatRequest struct {
 	MaxTokens        int              `json:"max_tokens,omitempty"`
 	Tools            []ToolDefinition `json:"tools,omitempty"`
 	ReasoningEnabled bool             `json:"reasoning_enabled,omitempty"`
+	Provider         string           `json:"provider,omitempty"` // per-request provider override (D-25)
+	Temperature      *float64         `json:"temperature,omitempty"`
+	TopP             *float64         `json:"top_p,omitempty"`
+}
+
+// HasTemperature returns true if Temperature was explicitly set in the request.
+func (r ChatRequest) HasTemperature() bool {
+	return r.Temperature != nil
+}
+
+// HasTopP returns true if TopP was explicitly set in the request.
+func (r ChatRequest) HasTopP() bool {
+	return r.TopP != nil
+}
+
+// HasMaxTokens returns true if MaxTokens was explicitly set in the request.
+func (r ChatRequest) HasMaxTokens() bool {
+	return r.MaxTokens != 0
+}
+
+// HasReasoningEnabled returns true if ReasoningEnabled was explicitly set in the request.
+func (r ChatRequest) HasReasoningEnabled() bool {
+	return r.ReasoningEnabled
+}
+
+// HasProvider returns true if Provider was explicitly set in the request.
+func (r ChatRequest) HasProvider() bool {
+	return r.Provider != ""
 }
 
 // ChatResponse is a non-streaming chat completion response.
