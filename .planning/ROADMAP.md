@@ -11,7 +11,7 @@
 ## Phases
 
 - [ ] **Phase 1: Foundation — Domain Model & Event Store** - Canonical domain types and SQLite event store as single source of truth
-- [ ] **Phase 2: LLM Provider Abstraction** - Provider-agnostic interface with NVIDIA Build adapter, streaming, and reasoning support
+- [x] **Phase 2: LLM Provider Abstraction** - Provider-agnostic interface with NVIDIA Build adapter, streaming, and reasoning support (completed 2026-08-24)
 - [ ] **Phase 3: Code Intelligence Graph** - Language-agnostic symbol graph via Tree-sitter + LSP with incremental indexing
 - [ ] **Phase 4: Intelligence Features** - Explain/archaeology, regression intelligence, dependency intelligence
 - [ ] **Phase 5: TaskGraph IR & Execution Engine** - Executable plan IR with state machine, Kahn's scheduling, wave execution
@@ -65,12 +65,13 @@ Plans:
 
 **Plans**: 6 plans
 Plans:
+
 - [x] 02-00-PLAN.md — Wave 0 test infrastructure (7 test files for all verify commands)
-- [ ] 02-01-PLAN.md — Core interface, types, NVIDIA ultra config, tracer end-to-end streaming path
-- [ ] 02-02-PLAN.md — Model profiles config, layered loading, BaseClient profile merging
-- [ ] 02-03-PLAN.md — Streaming resilience (empty deltas, retry strategies), capability detection API enrichment
-- [ ] 02-04-PLAN.md — Provider selection (GetProviderForRequest, FallbackMode), CLI models list command
-- [ ] 02-05-PLAN.md — Credential security verification, Wave 0 test infrastructure
+- [x] 02-01-PLAN.md — Core interface, types, NVIDIA ultra config, tracer end-to-end streaming path
+- [x] 02-02-PLAN.md — Model profiles config, layered loading, BaseClient profile merging
+- [x] 02-03-PLAN.md — Streaming resilience (empty deltas, retry strategies), capability detection API enrichment
+- [x] 02-04-PLAN.md — Provider selection (GetProviderForRequest, FallbackMode), CLI models list command
+- [x] 02-05-PLAN.md — Credential security verification, Wave 0 test infrastructure
 
 ### Phase 3: Code Intelligence Graph
 
@@ -235,7 +236,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
-| 2. LLM Provider Abstraction | 1/6 | In Progress |  |
+| 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
 | 3. Code Intelligence Graph | 0/0 | Not started | - |
 | 4. Intelligence Features | 0/0 | Not started | - |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |

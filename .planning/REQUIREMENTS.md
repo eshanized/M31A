@@ -26,12 +26,12 @@ Requirements for initial architectural foundation. Each maps to roadmap phases.
 
 ### LLM Provider Abstraction
 
-- [ ] **LLM-01**: Provider-agnostic interface with `ChatCompletion`, `StreamChatCompletion`, `ListModels` methods
-- [ ] **LLM-02**: NVIDIA Build adapter implements interface with `nvidia/nemotron-3-ultra-550b-a55b`, streaming, reasoning (`enable_thinking`), coding-agent kwargs (`force_nonempty_content`)
-- [ ] **LLM-03**: Request options (temperature, top_p, max_tokens, reasoning) configurable per provider/model profile
-- [ ] **LLM-04**: Streaming handles empty deltas, reasoning-only chunks, content-only chunks, tool-call deltas, mixed transitions, connection recovery with retry policy
-- [ ] **LLM-05**: Provider credentials from environment (`NVIDIA_API_KEY`) never written to disk, never in logs, redacted in diagnostics
-- [ ] **LLM-06**: Model capability detection from API metadata (context length, tool calling, reasoning, streaming)
+- [x] **LLM-01**: Provider-agnostic interface with `ChatCompletion`, `StreamChatCompletion`, `ListModels` methods
+- [x] **LLM-02**: NVIDIA Build adapter implements interface with `nvidia/nemotron-3-ultra-550b-a55b`, streaming, reasoning (`enable_thinking`), coding-agent kwargs (`force_nonempty_content`)
+- [x] **LLM-03**: Request options (temperature, top_p, max_tokens, reasoning) configurable per provider/model profile
+- [x] **LLM-04**: Streaming handles empty deltas, reasoning-only chunks, content-only chunks, tool-call deltas, mixed transitions, connection recovery with retry policy
+- [x] **LLM-05**: Provider credentials from environment (`NVIDIA_API_KEY`) never written to disk, never in logs, redacted in diagnostics
+- [x] **LLM-06**: Model capability detection from API metadata (context length, tool calling, reasoning, streaming)
 
 ### Code Intelligence Graph
 
@@ -246,12 +246,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERSIST-05 | Phase 1 | Pending |
 | PERSIST-06 | Phase 1 | Pending |
 | PERSIST-07 | Phase 1 | Pending |
-| LLM-01 | Phase 2 | Pending |
-| LLM-02 | Phase 2 | Pending |
-| LLM-03 | Phase 2 | Pending |
-| LLM-04 | Phase 2 | Pending |
-| LLM-05 | Phase 2 | Pending |
-| LLM-06 | Phase 2 | Pending |
+| LLM-01 | Phase 2 | Complete |
+| LLM-02 | Phase 2 | Complete |
+| LLM-03 | Phase 2 | Complete |
+| LLM-04 | Phase 2 | Complete |
+| LLM-05 | Phase 2 | Complete |
+| LLM-06 | Phase 2 | Complete |
 | CODE-01 | Phase 3 | Pending |
 | CODE-02 | Phase 3 | Pending |
 | CODE-03 | Phase 3 | Pending |
@@ -361,6 +361,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TUISCRN-36 | Phase 11 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 124 total
 - Mapped to phases: 124
 - Unmapped: 0 ✓
