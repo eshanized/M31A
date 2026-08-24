@@ -88,10 +88,17 @@ Plans:
 
 **Plans**: 4 plans
 Plans:
+**Wave 1**
 
 - [ ] 03-01-PLAN.md — Core tracer: EventStore events, CodeGraph edges, projection rebuild
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02-PLAN.md — LSP client infrastructure: JSON-RPC, connection pool, lifecycle manager
 - [ ] 03-03-PLAN.md — Impact analysis and incremental file watching
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-04-PLAN.md — Architecture violation detection, multi-repo workspace, CLI commands
 
 ### Phase 4: Intelligence Features
