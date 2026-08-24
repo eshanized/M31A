@@ -45,6 +45,7 @@ type FileWatcher struct {
 // NewFileWatcher creates a new file watcher for the given working directory.
 // It watches the workDir and all immediate subdirectories (recursively).
 // Events are debounced with a 500ms delay.
+// The watcher is not started until Start() is called.
 func NewFileWatcher(workDir string, parsers []Parser, logger *slog.Logger) (*FileWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -70,12 +71,20 @@ func NewFileWatcher(workDir string, parsers []Parser, logger *slog.Logger) (*Fil
 	}
 
 	// Walk subdirectories and add them (skip common ignored dirs)
-	go fw.walkAndAdd()
-
-	// Start the event loop
-	go fw.loop()
+	fw.walkAndAdd()
 
 	return fw, nil
+}
+
+// Start starts the file watcher event loop with the given context.
+// The provided context controls the lifetime of the watcher.
+func (fw *FileWatcher) Start(ctx context.Context) {
+	// Replace the internal context with the provided one
+	fw.mu.Lock()
+	fw.ctx = ctx
+	fw.cancel = func() {} // no-op cancel since context is externally controlled
+	fw.mu.Unlock()
+	go fw.loop()
 }
 
 // walkAndAdd recursively adds directories to the watcher, skipping
@@ -197,7 +206,6 @@ func (fw *FileWatcher) Events() <-chan WatcherEvent {
 
 // Stop stops the file watcher and cleans up resources.
 func (fw *FileWatcher) Stop() {
-	fw.cancel()
 	fw.mu.Lock()
 	if fw.debounce != nil {
 		fw.debounce.Stop()

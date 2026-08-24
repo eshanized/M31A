@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,12 +24,15 @@ type Indexer struct {
 	parsers []Parser
 	store   types.EventStore
 
-	mu      sync.RWMutex
-	graph   *CodeGraph
-	index   *SymbolIndex
-	scorer  *RelevanceScorer
-	builtAt time.Time
-	files   []*FileInfo
+	mu          sync.RWMutex
+	graph       *CodeGraph
+	index       *SymbolIndex
+	scorer      *RelevanceScorer
+	builtAt     time.Time
+	files       []*FileInfo
+	watcher     *FileWatcher
+	watchCtx    context.Context
+	watchCancel context.CancelFunc
 }
 
 // NewIndexer creates a new codebase indexer for the given working directory.
@@ -45,6 +49,22 @@ func NewIndexerWithStore(workDir string, store types.EventStore) *Indexer {
 		parsers: AllParsers(),
 		store:   store,
 	}
+}
+
+// NewIndexerWithWatcher creates a new codebase indexer with an integrated FileWatcher.
+// The watcher is created but not started — call StartWatching to begin watching.
+func NewIndexerWithWatcher(workDir string, store types.EventStore, logger *slog.Logger) (*Indexer, error) {
+	idx := &Indexer{
+		workDir: workDir,
+		parsers: AllParsers(),
+		store:   store,
+	}
+	watcher, err := NewFileWatcher(workDir, idx.parsers, logger)
+	if err != nil {
+		return nil, err
+	}
+	idx.watcher = watcher
+	return idx, nil
 }
 
 // Build parses all source files in the working directory and builds the
@@ -70,6 +90,219 @@ func (idx *Indexer) Build(ctx context.Context) error {
 
 	// Full build
 	return idx.buildFull(ctx)
+}
+
+// StartWatching starts the file watcher and launches a background goroutine
+// that consumes watch events and applies incremental updates.
+// The context controls the lifetime of the watching goroutine.
+func (idx *Indexer) StartWatching(ctx context.Context) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.watcher == nil {
+		return fmt.Errorf("watcher not initialized — use NewIndexerWithWatcher")
+	}
+	if idx.watchCancel != nil {
+		return fmt.Errorf("watcher already started")
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	idx.watchCtx = watchCtx
+	idx.watchCancel = cancel
+
+	idx.watcher.Start(watchCtx)
+
+	// Launch goroutine to handle watch events
+	go func() {
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case event, ok := <-idx.watcher.Events():
+				if !ok {
+					return
+				}
+				if err := idx.handleWatchEvent(watchCtx, event); err != nil {
+					idx.watcher.logger.Error("handle watch event", "error", err, "path", event.Path, "type", event.EventType)
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+// StopWatching stops the file watcher and cleans up resources.
+func (idx *Indexer) StopWatching() {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.watchCancel != nil {
+		idx.watchCancel()
+		idx.watchCancel = nil
+		idx.watchCtx = nil
+	}
+	if idx.watcher != nil {
+		idx.watcher.Stop()
+	}
+}
+
+// handleWatchEvent processes a single file watcher event and updates the index incrementally.
+func (idx *Indexer) handleWatchEvent(ctx context.Context, event WatcherEvent) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	relPath, err := filepath.Rel(idx.workDir, event.Path)
+	if err != nil {
+		return err
+	}
+
+	// Skip if not a parseable file
+	p := ParserForFile(event.Path, idx.parsers)
+	if p == nil {
+		return nil
+	}
+
+	switch event.EventType {
+	case WatcherModified, WatcherCreated:
+		// Parse the file
+		content, err := os.ReadFile(event.Path)
+		if err != nil {
+			return err
+		}
+		const maxFileSize = 4096
+		if len(content) > maxFileSize {
+			content = content[:maxFileSize]
+		}
+		info, err := p.Parse(relPath, content)
+		if err != nil {
+			return err
+		}
+
+		// Remove old entries if file was previously indexed
+		idx.graph.RemoveNode(relPath)
+		idx.index.RemoveFile(relPath)
+
+		// Resolve imports
+		var resolvedImports []string
+		for _, imp := range info.Imports {
+			resolved := resolveImport(idx.workDir, relPath, imp.Path, p.Language())
+			if resolved != "" {
+				resolvedImports = append(resolvedImports, resolved)
+			}
+		}
+
+		// Add to graph and index
+		idx.graph.AddNode(relPath, resolvedImports, info.Language)
+		idx.index.AddFile(info)
+
+		// Update files list
+		found := false
+		for i, existing := range idx.files {
+			if existing.Path == relPath {
+				idx.files[i] = info
+				found = true
+				break
+			}
+		}
+		if !found {
+			idx.files = append(idx.files, info)
+		}
+
+		// Emit events if store is available
+		if idx.store != nil {
+			hash := [32]byte{}
+			fileInfo, _ := os.Stat(event.Path)
+			var modTime time.Time
+			if fileInfo != nil {
+				modTime = fileInfo.ModTime()
+			}
+			filePayload := FileIndexedPayload{
+				Path:     relPath,
+				Language: info.Language,
+				Symbols:  info.Exports,
+				Imports:  info.Imports,
+				Hash:     hash,
+				ModTime:  modTime,
+			}
+			if err := EmitFileIndexed(ctx, idx.store, filePayload); err != nil {
+				return err
+			}
+			for _, sym := range info.Exports {
+				symPayload := SymbolDefinedPayload{
+					Name:     sym.Name, Kind: sym.Kind, File: relPath,
+					Line: 0, Exported: sym.Exported,
+				}
+				if err := EmitSymbolDefined(ctx, idx.store, symPayload); err != nil {
+					return err
+				}
+			}
+			for _, imp := range info.Imports {
+				if imp.ResolvedTo != "" {
+					impPayload := ImportResolvedPayload{
+						From: relPath, To: imp.ResolvedTo, ImportPath: imp.Path,
+						ResolvedPath: imp.ResolvedTo,
+					}
+					if err := EmitImportResolved(ctx, idx.store, impPayload); err != nil {
+						return err
+					}
+				}
+			}
+			for _, cs := range info.CallSites {
+				callPayload := CallEdgeAddedPayload{
+					CallerFile: relPath, CallerLine: cs.Line, CallerName: cs.CallerName,
+					CalleeFile: "", CalleeLine: 0, CalleeName: cs.CalleeName,
+				}
+				if err := EmitCallEdgeAdded(ctx, idx.store, callPayload); err != nil {
+					return err
+				}
+			}
+		}
+
+	case WatcherDeleted:
+		// Remove from graph and index
+		idx.graph.RemoveNode(relPath)
+		idx.index.RemoveFile(relPath)
+
+		// Remove from files list
+		newFiles := make([]*FileInfo, 0, len(idx.files))
+		for _, f := range idx.files {
+			if f.Path != relPath {
+				newFiles = append(newFiles, f)
+			}
+		}
+		idx.files = newFiles
+
+		// Emit events if store is available
+		if idx.store != nil {
+			delPayload := FileDeletedPayload{Path: relPath, WasIndexed: true}
+			if err := EmitFileDeleted(ctx, idx.store, delPayload); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Update scorer and save cache
+	idx.scorer = NewRelevanceScorer(idx.graph, idx.index)
+	idx.builtAt = time.Now()
+
+	fileCaches := BuildCacheFromFiles(idx.workDir, idx.files, nil)
+	cache := &IndexCache{Files: fileCaches}
+	_ = SaveCache(idx.workDir, cache)
+
+	return nil
+}
+
+// BuildIncremental triggers an incremental rebuild of the index.
+// This is the public method for manual incremental rebuilds (e.g., via `m31a index --incremental`).
+func (idx *Indexer) BuildIncremental(ctx context.Context) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.graph == nil {
+		return idx.buildFull(ctx)
+	}
+	return idx.buildIncremental(ctx)
 }
 
 // buildFull performs a full index build from scratch.

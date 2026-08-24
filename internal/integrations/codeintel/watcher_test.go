@@ -17,6 +17,7 @@ func TestFileWatcher_DetectsCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileWatcher failed: %v", err)
 	}
+	fw.Start(context.Background())
 	defer fw.Stop()
 
 	// Create a test file
@@ -52,6 +53,7 @@ func TestFileWatcher_DetectsModify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileWatcher failed: %v", err)
 	}
+	fw.Start(context.Background())
 	defer fw.Stop()
 
 	// Create initial file
@@ -98,6 +100,7 @@ func TestFileWatcher_DetectsDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileWatcher failed: %v", err)
 	}
+	fw.Start(context.Background())
 	defer fw.Stop()
 
 	// Create initial file
@@ -143,6 +146,7 @@ func TestFileWatcher_Debounce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileWatcher failed: %v", err)
 	}
+	fw.Start(context.Background())
 	defer fw.Stop()
 
 	// Create 5 files rapidly
@@ -190,6 +194,7 @@ func TestFileWatcher_Stop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileWatcher failed: %v", err)
 	}
+	fw.Start(context.Background())
 
 	// Stop should not panic
 	fw.Stop()
