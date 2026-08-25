@@ -331,6 +331,30 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 
+	// Intelligence (T-04-01): range checks prevent zero-value DoS and
+	// negative-window misbehavior from config tampering.
+	if cfg.Intelligence.BisectMaxCommits < 1 {
+		errs = append(errs, ValidationError{
+			Field:        "intelligence.bisect_max_commits",
+			ExpectedType: "integer >= 1",
+			ActualValue:  fmt.Sprintf("%d", cfg.Intelligence.BisectMaxCommits),
+		})
+	}
+	if cfg.Intelligence.DepsRisk.StaleMonths < 1 {
+		errs = append(errs, ValidationError{
+			Field:        "intelligence.deps_risk.stale_months",
+			ExpectedType: "integer >= 1",
+			ActualValue:  fmt.Sprintf("%d", cfg.Intelligence.DepsRisk.StaleMonths),
+		})
+	}
+	if cfg.Intelligence.DepsRisk.YoungMonths < 1 {
+		errs = append(errs, ValidationError{
+			Field:        "intelligence.deps_risk.young_months",
+			ExpectedType: "integer >= 1",
+			ActualValue:  fmt.Sprintf("%d", cfg.Intelligence.DepsRisk.YoungMonths),
+		})
+	}
+
 	// Migration
 	if cfg.Migration.PlanningDir == "" {
 		errs = append(errs, ValidationError{
@@ -495,7 +519,8 @@ func knownConfigKeys() map[string]bool {
 		knownKeysMap = map[string]bool{
 			"provider": true, "model": true, "ui": true, "permissions": true,
 			"features": true, "tools": true, "git": true, "ledger": true,
-			"agents": true, "verify": true, "compaction": true, "instructions": true, "skills": true,
+			"agents": true, "verify": true, "intelligence": true,
+			"compaction": true, "instructions": true, "skills": true,
 			"model_capabilities": true, "prompts": true, "narrative": true, "templates": true,
 			"extensions": true,
 			"eventstore": true, "migration": true,

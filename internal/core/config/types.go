@@ -21,6 +21,7 @@ type Config struct {
 	Agents            AgentsConfig            `toml:"agents"`
 	Git               GitConfig               `toml:"git"`
 	Verify            VerifyConfig            `toml:"verify"`
+	Intelligence      IntelligenceConfig      `toml:"intelligence"`
 	Compaction        CompactionConfig        `toml:"compaction"`
 	Instructions      InstructionsConfig      `toml:"instructions"`
 	Skills            SkillsConfig            `toml:"skills"`
@@ -195,6 +196,50 @@ type VerifyConfig struct {
 	BuildCommand string `toml:"build_command"`
 	TestCommand  string `toml:"test_command"`
 	LintCommand  string `toml:"lint_command"`
+}
+
+// IntelligenceConfig holds Phase 4 intelligence command configuration
+// (explain, investigate, deps). Zero values are normalized to safe defaults
+// after the layered merge (see loader.go normalizeIntelligence) so TOML
+// absence and explicit zeros are indistinguishable post-load (Pitfall 10).
+type IntelligenceConfig struct {
+	// ReproCommand overrides repro auto-detection for investigate (D-09).
+	// Empty means --repro flag > this value is skipped and per-language
+	// auto-detection applies.
+	ReproCommand string `toml:"repro_command"`
+	// BisectMaxCommits bounds the default bisect window (D-11).
+	// Normalized to 50 when <= 0.
+	BisectMaxCommits int `toml:"bisect_max_commits"`
+	// DepsRisk holds risk-classification thresholds per D-16.
+	DepsRisk DepsRiskConfig `toml:"deps_risk"`
+	// DepsPolicy holds dependency verdict policy. The policy hash used for
+	// cache invalidation (D-15) is computed over this struct's serialized
+	// form — keep fields flat and stable.
+	DepsPolicy DepsPolicyConfig `toml:"deps_policy"`
+}
+
+// DepsRiskConfig holds config-driven dependency risk thresholds (D-16).
+type DepsRiskConfig struct {
+	// StaleMonths is the no-release age after which a module is high risk.
+	// Normalized to 12 when 0.
+	StaleMonths int `toml:"stale_months"`
+	// LicenseAllowlist lists licenses considered acceptable. A nil list is
+	// normalized to the safe default set (MIT, Apache-2.0, BSD-2-Clause,
+	// BSD-3-Clause, ISC, MPL-2.0); licenses outside the list are high risk.
+	LicenseAllowlist []string `toml:"license_allowlist"`
+	// YoungMonths bounds "young package" age for the low-popularity rule.
+	// Normalized to 6 when 0.
+	YoungMonths int `toml:"young_months"`
+}
+
+// DepsPolicyConfig holds dependency verdict policy settings. Keep flat and
+// stable: the serialized form is hashed for verdict-cache invalidation (D-15).
+type DepsPolicyConfig struct {
+	// RequireApprovalHighRisk gates high-risk findings behind a human
+	// checkpoint (D-14). Defaults to true — zero-value semantics are
+	// safe-by-default because DefaultConfig sets true and layered merges
+	// only override bools on explicitly-defined keys or true.
+	RequireApprovalHighRisk bool `toml:"require_approval_high_risk"`
 }
 
 // EventStoreConfig holds event store configuration.

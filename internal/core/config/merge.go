@@ -104,6 +104,7 @@ func MergeConfig(base, overlay *Config, defined map[string]bool) {
 	h.mergeAgentsConfig(&base.Agents, &overlay.Agents, "agents")
 	h.mergeGitConfig(&base.Git, &overlay.Git, "git")
 	h.mergeVerifyConfig(&base.Verify, &overlay.Verify, "verify")
+	h.mergeIntelligenceConfig(&base.Intelligence, &overlay.Intelligence, "intelligence")
 	h.mergeCompactionConfig(&base.Compaction, &overlay.Compaction, "compaction")
 	h.mergeInstructionsConfig(&base.Instructions, &overlay.Instructions, "instructions")
 	h.mergeSkillsConfig(&base.Skills, &overlay.Skills, "skills")
@@ -406,6 +407,23 @@ func (h mergeHelper) mergeVerifyConfig(base, overlay *VerifyConfig, prefix strin
 	h.stringField(&base.BuildCommand, &overlay.BuildCommand, prefix+".build_command")
 	h.stringField(&base.TestCommand, &overlay.TestCommand, prefix+".test_command")
 	h.stringField(&base.LintCommand, &overlay.LintCommand, prefix+".lint_command")
+}
+
+func (h mergeHelper) mergeIntelligenceConfig(base, overlay *IntelligenceConfig, prefix string) {
+	h.stringField(&base.ReproCommand, &overlay.ReproCommand, prefix+".repro_command")
+	h.intField(&base.BisectMaxCommits, &overlay.BisectMaxCommits, prefix+".bisect_max_commits")
+	h.mergeDepsRiskConfig(&base.DepsRisk, &overlay.DepsRisk, prefix+".deps_risk")
+	h.mergeDepsPolicyConfig(&base.DepsPolicy, &overlay.DepsPolicy, prefix+".deps_policy")
+}
+
+func (h mergeHelper) mergeDepsRiskConfig(base, overlay *DepsRiskConfig, prefix string) {
+	h.intField(&base.StaleMonths, &overlay.StaleMonths, prefix+".stale_months")
+	h.sliceField(&base.LicenseAllowlist, &overlay.LicenseAllowlist, prefix+".license_allowlist")
+	h.intField(&base.YoungMonths, &overlay.YoungMonths, prefix+".young_months")
+}
+
+func (h mergeHelper) mergeDepsPolicyConfig(base, overlay *DepsPolicyConfig, prefix string) {
+	h.boolField(&base.RequireApprovalHighRisk, &overlay.RequireApprovalHighRisk, prefix+".require_approval_high_risk")
 }
 
 func (h mergeHelper) mergeCompactionConfig(base, overlay *CompactionConfig, prefix string) {

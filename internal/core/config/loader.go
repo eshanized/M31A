@@ -178,6 +178,18 @@ func DefaultConfig() *Config {
 			UserName:     "M31A",
 			UserEmail:    "m31a@local",
 		},
+		Intelligence: IntelligenceConfig{
+			ReproCommand:     "",
+			BisectMaxCommits: 50,
+			DepsRisk: DepsRiskConfig{
+				StaleMonths:      12,
+				YoungMonths:      6,
+				LicenseAllowlist: DefaultLicenseAllowlist(),
+			},
+			DepsPolicy: DepsPolicyConfig{
+				RequireApprovalHighRisk: true,
+			},
+		},
 		Compaction: CompactionConfig{
 			Auto:                true,
 			Buffer:              20000,
@@ -341,6 +353,10 @@ func Load(path string) (*Config, error) {
 		cfg.UI.CompactMode = true
 	}
 
+	// Step 6.5: Zero-value normalization for [intelligence] (Pitfall 10) —
+	// TOML absence and explicit zeros both end up safe after the layered merge.
+	normalizeIntelligence(&cfg.Intelligence)
+
 	// Step 7: Variable substitution (before validation so ${VAR} in
 	// enum fields like theme or permissions.default_mode resolves first)
 	unresolvedVars := applyVarSubstitution(cfg)
@@ -361,6 +377,34 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// DefaultLicenseAllowlist returns the safe default set of acceptable
+// dependency licenses (D-16). Licenses outside the list classify as high risk.
+func DefaultLicenseAllowlist() []string {
+	return []string{"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0"}
+}
+
+// normalizeIntelligence applies zero-value normalization to the [intelligence]
+// section after the layered merge (RESEARCH Pitfall 10): TOML absence and
+// explicit zero values are indistinguishable post-decode, so both normalize
+// to the safe defaults. Runs before validation so normalized values satisfy
+// the >= 1 range checks; negative values also normalize here, keeping load
+// safe-by-default while validateConfig still rejects them for callers that
+// skip normalization.
+func normalizeIntelligence(cfg *IntelligenceConfig) {
+	if cfg.BisectMaxCommits <= 0 {
+		cfg.BisectMaxCommits = 50
+	}
+	if cfg.DepsRisk.StaleMonths <= 0 {
+		cfg.DepsRisk.StaleMonths = 12
+	}
+	if cfg.DepsRisk.YoungMonths <= 0 {
+		cfg.DepsRisk.YoungMonths = 6
+	}
+	if cfg.DepsRisk.LicenseAllowlist == nil {
+		cfg.DepsRisk.LicenseAllowlist = DefaultLicenseAllowlist()
+	}
 }
 
 // findProjectConfig walks up from cwd (max 3 parent directories) looking for
