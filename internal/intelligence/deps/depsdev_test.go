@@ -261,7 +261,7 @@ func TestDepsDevGetVersionHappyPath(t *testing.T) {
 	if len(got.AdvisoryKeys) != 1 || got.AdvisoryKeys[0].ID != "GHSA-dddd-eeee-ffff" {
 		t.Errorf("advisoryKeys = %v", got.AdvisoryKeys)
 	}
-	if !got.PublishedAt.Location().Equals(time.UTC) && got.PublishedAt.Location() != time.UTC {
+	if got.PublishedAt.Location() != time.UTC {
 		t.Errorf("publishedAt not normalized to UTC: %v", got.PublishedAt.Location())
 	}
 }
