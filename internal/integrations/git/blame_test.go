@@ -146,13 +146,13 @@ func TestParseBlamePorcelain_FixtureTwoHunks(t *testing.T) {
 }
 
 func TestParseBlamePorcelain_ToleratesBoundaryAndUnknownTags(t *testing.T) {
-	fixture := "aaaaaaaaaabbbbbbbbbbcccccccccdddddddddd 1 1 2\n" +
+	fixture := "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd 1 1 2\n" +
 		"author Ann\n" +
 		"invented-future-tag some value parsers never heard of\n" +
 		"another-unknown 42\n" +
 		"boundary\n" +
 		"\tfirst\n" +
-		"aaaaaaaaaabbbbbbbbbbcccccccccdddddddddd 2 2\n" +
+		"aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd 2 2\n" +
 		"\tsecond\n"
 
 	blames, commits, err := parseBlamePorcelain(fixture)
@@ -277,9 +277,11 @@ func TestBlamePorcelain_RealRepoSuppressedMetadata(t *testing.T) {
 			t.Errorf("final line %d: unexpected author %q", bl.FinalLine, bl.Author)
 		}
 	}
-	// Alice owns alpha,beta,delta,epsilon (two separated groups); Bob owns GAMMA,gamma.
-	if aliceRows != 4 || bobRows != 2 {
-		t.Errorf("author split alice=%d bob=%d, want 4/2 (suppressed metadata lost attribution?)", aliceRows, bobRows)
+	// Alice owns alpha,beta and then gamma,delta,epsilon — two groups split
+	// by Bob's inserted GAMMA line, so the second group relies on the
+	// SHA-keyed cache for suppressed metadata. Bob owns only GAMMA.
+	if aliceRows != 5 || bobRows != 1 {
+		t.Errorf("author split alice=%d bob=%d, want 5/1 (suppressed metadata lost attribution?)", aliceRows, bobRows)
 	}
 	if len(commits) != 2 {
 		t.Errorf("expected 2 commits, got %d", len(commits))
