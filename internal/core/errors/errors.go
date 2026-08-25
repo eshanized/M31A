@@ -56,6 +56,11 @@ var (
 	ErrBisectFailed      = errors.New("bisect failed")
 	ErrGitNotInitialized = errors.New("git not initialized")
 
+	// Intelligence errors (Phase 04).
+	ErrSourceUnreachable       = errors.New("intelligence source unreachable")
+	ErrCheckpointPending       = errors.New("dependency checkpoint pending approval")
+	ErrNotReproducibleInWindow = errors.New("symptom not reproducible in bisect window")
+
 	// Event store errors.
 	ErrEventStoreUnavailable = errors.New("event store unavailable")
 	ErrEventNotFound         = errors.New("event not found")
@@ -66,7 +71,7 @@ var (
 	ErrProjectionNotFound    = errors.New("projection not found")
 	ErrProjectionApplyFailed = errors.New("projection apply failed")
 	ErrArtifactParseFailed   = errors.New("artifact parse failed")
-ErrKeyNotFound           = errors.New("key not found")
+	ErrKeyNotFound           = errors.New("key not found")
 	ErrKeychainUnavailable   = errors.New("keychain unavailable")
 )
 

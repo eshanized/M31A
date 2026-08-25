@@ -45,7 +45,7 @@ type Verification struct {
 	ID         uuid.UUID               `json:"id"`
 	Level      VerificationLevel       `json:"level"`
 	Criteria   []VerificationCriterion `json:"criteria"`
-	Evidence   []Evidence              `json:"evidence"`
+	Evidence   []VerificationEvidence  `json:"evidence"`
 	Verdict    VerificationVerdict     `json:"verdict"`
 	VerifiedAt *time.Time              `json:"verified_at,omitempty"`
 	VerifiedBy uuid.UUID               `json:"verified_by"`
@@ -59,7 +59,10 @@ type VerificationCriterion struct {
 	Passed      bool   `json:"passed"`
 }
 
-type Evidence struct {
+// VerificationEvidence is a single evidence entry attached to a Verification.
+// Renamed from Evidence in Phase 04 so the intelligence evidence-pack type
+// (evidence.go) can own the shared `Evidence` name; JSON shape is unchanged.
+type VerificationEvidence struct {
 	Source    string `json:"source"`
 	Type      string `json:"type"`
 	Reference string `json:"reference"`
@@ -134,7 +137,7 @@ func (v Verification) MarshalJSON() ([]byte, error) {
 		v.Criteria = []VerificationCriterion{}
 	}
 	if v.Evidence == nil {
-		v.Evidence = []Evidence{}
+		v.Evidence = []VerificationEvidence{}
 	}
 	type verificationAlias Verification
 	return json.Marshal(verificationAlias(v))
