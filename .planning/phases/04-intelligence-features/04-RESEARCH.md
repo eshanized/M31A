@@ -451,22 +451,25 @@ New constants to add adjacent to the Phase 03 block (event.go:63-71), payloads m
 | A5 | Manual binary search over rev-list preferred over driving `git bisect` inside the temp worktree | Alternatives Considered | More own-code (~60 lines) but fully controllable logging/events; if abandoned, git-bisect-in-worktree is the fallback |
 | A6 | GITHUB_TOKEN via plain env var (not keychain) for rate-limit lift | Runtime State Inventory | Minor secret-handling inconsistency; token is optional and low-sensitivity (public-data read scope) |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where does the shared Confidence enum live?**
    - What we know: D-07 says shared across three commands + future TUI; `internal/core/types` is the designated shared vocabulary home (AGENTS.md).
    - What's unclear: whether to colocate with domain.go or new file.
    - Recommendation: new `internal/core/types/confidence.go`; trivial either way.
+   - RESOLVED: New file `internal/core/types/confidence.go`, exactly as recommended — created by plan 04-01 Task 1 alongside evidence.go (see 04-01-PLAN.md Task 1 `<files>`).
 
 2. **Explain target disambiguation order**
    - What we know: D-01 routes topics/symbols/files into one command; index has Define() for symbol lookup.
    - What's unclear: precedence when input could be both (rare).
    - Recommendation: file-exists → file mode; exact symbol in SymbolIndex → symbol mode; else topic mode. Document in help text.
+   - RESOLVED: Adopted the recommended precedence — file-exists first, exact SymbolIndex hit second, topic fallback third, documented in help text. Implemented by ResolveMode in plan 04-03 Task 2 and surfaced in CLI help by plan 04-03 Task 3.
 
 3. **Does `deps check --approve <module>` need the original verdict replay?**
    - What we know: D-14 says pending record resolvable via --approve; event trail preserved.
    - What's unclear: whether approval re-fetches fresh data or trusts cached pending verdict.
    - Recommendation: trust the persisted verdict (checkpoint approves THAT evidence); fresh re-run available by clearing cache via policy-hash change.
+   - RESOLVED: Approval trusts the persisted verdict snapshot — the checkpoint approves THAT evidence; no refetch on the approve path; fresh re-evaluation remains available via a policy-hash cache invalidation. This resolution is load-bearing for D-14 semantics and is enforced mechanically by plan 04-07 Task 2 (ApprovePending behavior: "Approval trusts the persisted verdict snapshot — no refetch on approve path").
 
 ## Environment Availability
 

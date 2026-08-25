@@ -122,15 +122,18 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [ ] 04-02-PLAN.md — Tracer: git blame porcelain parser + explain symbol-mode end-to-end (collector, single LLM synthesis, marker validation, render, CLI)
-- [ ] 04-04-PLAN.md — Investigate engine core: temp-worktree isolation (D-10), repro resolution chain (D-09), window-bounded bisect (D-11)
 - [ ] 04-06-PLAN.md — Deps registry clients (deps.dev/OSV/GitHub) + config-driven risk classification (D-13, D-16)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [ ] 04-03-PLAN.md — Explain expansion: file/topic modes, rationale-validity signals (D-08), ADR scanning, disambiguation
-- [ ] 04-05-PLAN.md — Investigate attribution + two-tier report (D-12) + events + CLI wiring
+- [ ] 04-04-PLAN.md — Investigate engine core: temp-worktree isolation (D-10), repro resolution chain (D-09), window-bounded bisect (D-11)
 
 **Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-05-PLAN.md — Investigate attribution + two-tier report (D-12) + events + CLI wiring
+
+**Wave 5** *(blocked on Wave 4 completion)*
 
 - [ ] 04-07-PLAN.md — Deps verdict assembly, event-backed cache (D-15), human checkpoint gate (D-14), CLI wiring
 
