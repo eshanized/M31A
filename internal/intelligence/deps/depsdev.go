@@ -83,6 +83,10 @@ type registryClient struct {
 	maxAttempts int
 	baseDelay   time.Duration
 	sleep       sleepFunc
+	// onStatus, when set, inspects every non-nil response before generic
+	// status mapping and may return a typed error that short-circuits
+	// retry handling (used for GitHub's rate-limit signature).
+	onStatus func(resp *http.Response) error
 }
 
 func newRegistryClient(baseURL string, httpClient *http.Client) *registryClient {
@@ -155,6 +159,14 @@ func (r *registryClient) do(ctx context.Context, method, path string, body []byt
 				return nil, waitErr
 			}
 			continue
+		}
+
+		if r.onStatus != nil {
+			if herr := r.onStatus(resp); herr != nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+				_ = resp.Body.Close()
+				return nil, herr
+			}
 		}
 
 		switch resp.StatusCode {
