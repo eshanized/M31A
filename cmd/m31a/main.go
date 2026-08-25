@@ -586,6 +586,8 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen-3] + "..."
 }
+
+func main() {
 	os.Exit(run())
 }
 
@@ -821,6 +823,11 @@ func run() int {
 	// Impact command: m31a impact <symbol> [--depth N] [--format table|json|graphviz]
 	if flag.Arg(0) == "impact" {
 		return runImpact(flag.Args()[1:], workDir, logger)
+	}
+
+	// Explain command: m31a explain SYMBOL [--format table|json]
+	if flag.Arg(0) == "explain" {
+		return runExplain(flag.Args()[1:], workDir, cfg, logger, registry)
 	}
 
 	// Arch check command: m31a arch check [--config arch.toml]

@@ -64,12 +64,24 @@ func seedRepo(t *testing.T) string {
 
 // buildDeps builds a code graph and symbol index over the seeded repo and
 // returns ready collector deps (injected integrations per AnalyzeImpact
-// orchestration discipline).
+// orchestration discipline). BuildGraph fills only the import graph; call
+// edges are assembled here from parsed call sites, mirroring how the
+// production event-replay projection feeds AddCallEdge.
 func buildDeps(t *testing.T, dir string, maxTotalTokens int) CollectorDeps {
 	t.Helper()
 	graph, files, err := codeintel.BuildGraph(dir, codeintel.AllParsers())
 	if err != nil {
 		t.Fatalf("build graph: %v", err)
+	}
+	for _, f := range files {
+		for _, cs := range f.CallSites {
+			graph.AddCallEdge(codeintel.CallEdge{
+				CallerFile: f.Path,
+				CallerLine: cs.Line,
+				CallerName: cs.CallerName,
+				CalleeName: cs.CalleeName,
+			})
+		}
 	}
 	return CollectorDeps{
 		Graph:          graph,
