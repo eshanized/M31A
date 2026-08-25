@@ -113,7 +113,26 @@ Plans:
   4. User runs `m31a investigate "panic after commit abc123"` and system bisects candidates, inspects causal changes, constructs hypothesis, runs verification, reports root cause with confidence labeling ("likely cause" vs "verified cause")
   5. User runs `m31a deps check github.com/new/dep` and receives registry existence, project age, releases, maintenance, license, vulnerabilities, transitive impact, API stability, popularity — with human checkpoint required for high-risk findings
 
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Shared vocabulary: Confidence enum, EvidencePack/Citation types, intelligence events, [intelligence] config with defaults
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — Tracer: git blame porcelain parser + explain symbol-mode end-to-end (collector, single LLM synthesis, marker validation, render, CLI)
+- [ ] 04-04-PLAN.md — Investigate engine core: temp-worktree isolation (D-10), repro resolution chain (D-09), window-bounded bisect (D-11)
+- [ ] 04-06-PLAN.md — Deps registry clients (deps.dev/OSV/GitHub) + config-driven risk classification (D-13, D-16)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-03-PLAN.md — Explain expansion: file/topic modes, rationale-validity signals (D-08), ADR scanning, disambiguation
+- [ ] 04-05-PLAN.md — Investigate attribution + two-tier report (D-12) + events + CLI wiring
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-07-PLAN.md — Deps verdict assembly, event-backed cache (D-15), human checkpoint gate (D-14), CLI wiring
 
 ### Phase 5: TaskGraph IR & Execution Engine
 
@@ -251,7 +270,7 @@ Plans:
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
 | 3. Code Intelligence Graph | 4/4 | Complete   | 2026-08-25 |
-| 4. Intelligence Features | 0/0 | Not started | - |
+| 4. Intelligence Features | 0/7 | Not started | - |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
 | 7. Tool Registry & Permissions | 0/0 | Not started | - |
