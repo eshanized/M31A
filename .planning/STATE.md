@@ -1,16 +1,15 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-25T09:47:59.143Z"
-state_head: 0ab2fc2bb06dcfebddbacd81f3bcdcb09d86b38a
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-25T10:45:57.618Z"
+state_head: 9f33753633e337af7f9b5bc2c6e31af4531de5b0
 progress:
   total_phases: 12
-  completed_phases: 3
+  completed_phases: 2
   total_plans: 23
-  completed_plans: 17
-  percent: 74
-current_phase_name: Intelligence Features
+  completed_plans: 18
+  percent: 78
 current_phase: 4
 current_phase_name: Intelligence Features
 ---
@@ -42,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-02 (Explain evidence collector + synthesis) |
-| **Phase Status** | In progress (1/7 plans complete) |
-| **Progress** | ███████▌░░ 74% (17/23 plans) |
+| **Current Plan** | 04-03 (Explain file/topic modes) |
+| **Phase Status** | In progress (2/7 plans complete) |
+| **Progress** | ████████░░ 78% (18/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 0ab2fc2b |
+| **Last Commit** | 9f337536 |
 
 ---
 
@@ -69,6 +68,7 @@ current_phase_name: Intelligence Features
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04 P01 | 30 min | 2 tasks | 12 files |
+| Phase 04 P02 | 48 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -118,7 +118,7 @@ None
 ## Session Continuity
 
 **Last session:** 2026-08-25T09:47:35.133Z
-**Stopped at:** Completed 04-01-PLAN.md
+**Stopped at:** Completed 04-02-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
@@ -147,3 +147,7 @@ Initialized project with `/gsd-new-project`. Created PROJECT.md, REQUIREMENTS.md
 ## Decisions
 
 - [Phase 04]: Shared intelligence type vocabulary: 3-level Confidence enum per D-07 — Single authoritative citation/confidence contract for EXPLAIN-02 compliance across plans 04-02..04-07
+- [Phase 04]: Blame collapses to ONE last-touch citation (max author-time SHA) per explain query — keeps packs in budget while preserving archaeology value
+- [Phase 04]: Structural citation validation demotes unknown-marker sentences wholesale to Inference; marker-less sentences stay in prose — paragraph-level grounding invariant without gutting natural prose
+- [Phase 04]: runExplain collects evidence BEFORE provider selection so not-found targets fail fast without API keys
+- [Phase 04]: Restored corrupted func main() in cmd/m31a/main.go (pre-existing syntax breakage blocked all package-main compiles)
