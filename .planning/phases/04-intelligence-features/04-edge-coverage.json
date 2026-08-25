@@ -1,0 +1,355 @@
+{
+  "items": [
+    {
+      "requirement_id": "EXPLAIN-01",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Duplicate evidence items for the same file:line collapse into one citation entry",
+      "reason": null,
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "EXPLAIN-01",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "No matching topic/symbol/file returns structured not-found result listing search scope, non-zero exit",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "EXPLAIN-01",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Evidence list order is deterministic (source-class then position) and stable across identical runs",
+      "reason": null,
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "EXPLAIN-01",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Interrupted explain leaves no partial durable state; safe immediate re-run",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "EXPLAIN-02",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Zero collectable evidence produces explicit no-evidence output, never an empty report",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "EXPLAIN-02",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Citation paths pass through verbatim without unicode/normalization transformation",
+      "reason": null,
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "EXPLAIN-03",
+      "category": "boundary",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "verified requires direct machine-checked support; anything weaker maps to likely or speculative exactly",
+      "reason": null,
+      "probe": "What happens exactly at each min/max/threshold — and one step either side?"
+    },
+    {
+      "requirement_id": "EXPLAIN-03",
+      "category": "precision",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Confidence is closed 3-value enum; no numeric scores leak into any output field",
+      "reason": null,
+      "probe": "Where can precision loss, overflow, or rounding/tie-breaking occur — and what is the exact contract (e.g. half-up vs half-to-even, ceil/floor/truncate)?"
+    },
+    {
+      "requirement_id": "EXPLAIN-03",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Same inputs produce identical computed-signal verdict class regardless of LLM narrative variance",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "EXPLAIN-03",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Parallel explain runs perform read-only graph/eventstore queries; no shared-state corruption",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "EXPLAIN-04",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "File archaeology is read-only; two runs yield identical introduction commit/consumers/removal impact data",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "EXPLAIN-04",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Archaeology reads only committed projections; no torn reads during concurrent indexing",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "REGRESS-01",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Baseline commit treated as good boundary; culprit is first failing commit whose parent passes repro",
+      "reason": null,
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "REGRESS-01",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Symptom not reproducing at window start yields not-reproducible report with evidence and distinct exit code",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "REGRESS-01",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Culprit attribution deterministic given identical repo state and repro command",
+      "reason": null,
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "REGRESS-01",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Second identical investigate run attributes the same culprit commit",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "REGRESS-01",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "SIGINT/SIGTERM during bisect removes temp worktree; startup prune sweeps orphans",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "REGRESS-02",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Unattributable regression reports confidence speculative explicitly; fabricated attribution forbidden",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "REGRESS-02",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "JSON confidence fields contain exactly the enum strings verified/likely/speculative",
+      "reason": null,
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "REGRESS-03",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Affected components list deduplicates entries reachable via multiple transitive paths",
+      "reason": null,
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "REGRESS-03",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Leaf-change culprits report empty affected-components list honestly",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "REGRESS-03",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Affected components ordered deterministically (dependency depth then name)",
+      "reason": null,
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "boundary",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Staleness threshold fires exactly at configured bound: release age == stale_months classifies high",
+      "reason": null,
+      "probe": "What happens exactly at each min/max/threshold — and one step either side?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Versions differing only by build metadata resolve as distinct lookups",
+      "reason": null,
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Registry 404 yields exists=false verdict with cited sources, not an error crash",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Vulnerability list ordered severity-descending then advisory ID",
+      "reason": null,
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "precision",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Age/release math uses UTC dates; month-boundary off-by-one impossible",
+      "reason": null,
+      "probe": "Where can precision loss, overflow, or rounding/tie-breaking occur — and what is the exact contract (e.g. half-up vs half-to-even, ceil/floor/truncate)?"
+    },
+    {
+      "requirement_id": "DEPEND-01",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Partial source failure degrades per-source; remaining sources still produce verdict labeled with missing source",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "DEPEND-02",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Model-memory suggestion without registry query renders unverified marker and never initiates install",
+      "reason": null,
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "DEPEND-02",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Module name matching follows ecosystem case rules exactly",
+      "reason": null,
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "DEPEND-02",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Repeat check of same module+version within validity serves cached verdict without network fetch",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "DEPEND-02",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Simultaneous checks serialize through single-writer EventStore; no lost verdict events",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "DEPEND-03",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Double approval resolves the pending checkpoint once; second approve is a no-op without duplicate event",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "DEPEND-03",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Pending checkpoint record persists before headless block exits; survives process kill",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "DEPEND-04",
+      "category": "boundary",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Cache invalidates on version change OR policy-hash change; identical pair always serves cache",
+      "reason": null,
+      "probe": "What happens exactly at each min/max/threshold — and one step either side?"
+    },
+    {
+      "requirement_id": "DEPEND-04",
+      "category": "precision",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Verdict timestamps stored RFC3339 UTC; comparisons ignore sub-second jitter",
+      "reason": null,
+      "probe": "Where can precision loss, overflow, or rounding/tie-breaking occur — and what is the exact contract (e.g. half-up vs half-to-even, ceil/floor/truncate)?"
+    },
+    {
+      "requirement_id": "DEPEND-04",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Unchanged version and policy hash produce no new DependencyChecked event on recheck",
+      "reason": null,
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "DEPEND-04",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Cache read during concurrent verdict write returns last committed event",
+      "reason": null,
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    }
+  ],
+  "coverage": {
+    "applicable": 38,
+    "resolved": 38,
+    "unresolved": 0,
+    "byVerification": {
+      "explicit": 27,
+      "backstop": 11
+    }
+  }
+}
