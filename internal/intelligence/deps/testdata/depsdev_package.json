@@ -1,0 +1,20 @@
+{
+  "versions": [
+    {
+      "versionKey": { "system": "GO", "name": "github.com/owner/repo", "version": "v1.2.3" },
+      "publishedAt": "2024-03-01T12:00:00Z",
+      "isDefault": true,
+      "isDeprecated": false,
+      "licenses": ["MIT"],
+      "advisoryKeys": []
+    },
+    {
+      "versionKey": { "system": "GO", "name": "github.com/owner/repo", "version": "v1.1.0" },
+      "publishedAt": "2023-11-15T08:30:00Z",
+      "isDefault": false,
+      "isDeprecated": true,
+      "deprecatedReason": "superseded by v1.2.3",
+      "advisoryKeys": [{ "id": "GHSA-aaaa-bbbb-cccc" }]
+    }
+  ]
+}

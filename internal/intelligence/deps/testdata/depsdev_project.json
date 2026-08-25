@@ -1,0 +1,10 @@
+{
+  "projectKey": { "id": "github.com/owner/repo" },
+  "openIssuesCount": 12,
+  "starsCount": 3400,
+  "forksCount": 210,
+  "license": "MIT",
+  "description": "example module",
+  "homepage": "https://example.com",
+  "scorecard": { "overallScore": 7.5 }
+}
