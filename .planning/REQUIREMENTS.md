@@ -52,9 +52,9 @@ Requirements for initial architectural foundation. Each maps to roadmap phases.
 
 ### Regression Intelligence
 
-- [ ] **REGRESS-01**: `m31a investigate "symptom after commit X"` identifies failing behavior, bisects candidate commits, inspects causal changes, constructs hypothesis, runs verification, reports root cause
-- [ ] **REGRESS-02**: Distinguishes "likely cause" from "verified cause" with explicit confidence labeling
-- [ ] **REGRESS-03**: Output includes regression-introducing commit, likely mechanism, affected components, recommended fix
+- [x] **REGRESS-01**: `m31a investigate "symptom after commit X"` identifies failing behavior, bisects candidate commits, inspects causal changes, constructs hypothesis, runs verification, reports root cause
+- [x] **REGRESS-02**: Distinguishes "likely cause" from "verified cause" with explicit confidence labeling
+- [x] **REGRESS-03**: Output includes regression-introducing commit, likely mechanism, affected components, recommended fix
 
 ### Dependency Intelligence
 
@@ -263,9 +263,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPLAIN-02 | Phase 4 | Complete |
 | EXPLAIN-03 | Phase 4 | Complete |
 | EXPLAIN-04 | Phase 4 | Complete |
-| REGRESS-01 | Phase 4 | Pending |
-| REGRESS-02 | Phase 4 | Pending |
-| REGRESS-03 | Phase 4 | Pending |
+| REGRESS-01 | Phase 4 | Complete |
+| REGRESS-02 | Phase 4 | Complete |
+| REGRESS-03 | Phase 4 | Complete |
 | DEPEND-01 | Phase 4 | Pending |
 | DEPEND-02 | Phase 4 | Pending |
 | DEPEND-03 | Phase 4 | Pending |

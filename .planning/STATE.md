@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-09-04T20:41:27.765Z"
-state_head: 3178929e5f140f35aabaa7d2e0e8207a158f4005
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-09-04T22:18:15.527Z"
+state_head: 40fd96f52bf7f9de7e20bf422e2490cb3f82dbe5
 progress:
   total_phases: 12
   completed_phases: 2
   total_plans: 23
-  completed_plans: 21
-  percent: 91
+  completed_plans: 22
+  percent: 17
 current_phase: 4
 current_phase_name: Intelligence Features
 ---
@@ -41,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-05 (Investigate bisect + report) |
-| **Phase Status** | In progress (5/7 plans complete) |
-| **Progress** | ██████████ 91% (21/23 plans) |
+| **Current Plan** | 04-06 (Deps clients) |
+| **Phase Status** | In progress (6/7 plans complete) |
+| **Progress** | ██████████ 96% (22/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 3178929e |
+| **Last Commit** | 40fd96f5 |
 
 ---
 
@@ -55,7 +55,7 @@ current_phase_name: Intelligence Features
 | Metric | Value |
 |--------|-------|
 | **Phases Completed** | 0/12 |
-| **Plans Executed** | 1 |
+| **Plans Executed** | 2 |
 | **Tests Passing** | ✓ |
 | **Coverage** | - |
 | **Verification Verdicts** | - |
@@ -71,8 +71,9 @@ current_phase_name: Intelligence Features
 | Phase 04 P02 | 48 min | 3 tasks | 9 files |
 | Phase 04 P03 | 90 min | 3 tasks | 8 files |
 | Phase 04 P04 | 55 min | 3 tasks | 6 files |
+| Phase 04 P05 | 95 min | 3 tasks | 4 files |
 | Phase 04 P06 | 15 min | 3 tasks | 12 files |
-| Phase 4 P04 | 55 | 3 tasks | 6 files |
+| Phase 4 P5 | 95 | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,11 @@ current_phase_name: Intelligence Features
 | D-024 | ADR scanning with silent degradation | ScanADRs returns CandidateADR[] from .m31a/decisions/; token overlap filter; returns nil (not error) when directory absent | 04-03 |
 | D-025 | ResolveMode precedence: file → symbol → topic | File existence checked first via workDir; then exact Index.Define hit; else topic fallback | 04-03 |
 | D-026 | Rationale Validity section in all explain outputs | RenderText: "Rationale Validity:" with verdict + signal flags; RenderJSON: rationale object with verdict + boolean/count signals; no floats | 04-03 |
+| D-027 | Confirmation-run attribution: verified only after dual observation | CulpritConfidence=Verified only after culprit=fail AND parent=pass; MechanismConfidence≤Likely by construction | 04-05 |
+| D-028 | Mechanism confidence ceiling at Likely | Even if synthesis returns Verified, MechanismConfidence capped at Likely; nil synth→Speculative | 04-05 |
+| D-029 | Not-reproducible-in-window with sentinel evidence | Returns checked SHA, observed result, window size; Speculative overall confidence; no fabricated attribution | 04-05 |
+| D-030 | Affected components dedup by name with minimal depth | Multi-path reachable components appear once at minimal depth; ordered depth-then-name | 04-05 |
+| D-031 | Manual flag parsing for flags-after-positional | Stdlib flag stops at first positional; manual split supports both argument orders like explain.go | 04-05 |
 
 ### Active Todos
 
@@ -133,20 +139,19 @@ None
 
 ## Session Continuity
 
-**Last session:** 2026-09-04T20:41:18.145Z
-**Stopped at:** Completed 04-04-PLAN.md
+**Last session:** 2026-09-04T22:18:08.057Z
+**Stopped at:** Completed 04-05-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
 
-Executed Plan 04-04 (Investigate Engine Core): Built signal-safe temp-worktree bisect engine (D-10) with WorktreeManager lifecycle (create/checkout/remove/prune), deterministic repro resolution chain (D-09) with flag>config>auto-detect precedence and exec.CommandContext execution (no shell), and window-bounded binary search over rev-list candidates (D-11) with honest not-reproducible semantics and confirmation pass. All 3 TDD tasks completed: 5 commits, 6 files created, 19 tests passing.
+Executed Plan 04-05 (Investigate Bisect + Report): Completed confirmation-run attribution semantics (D-12) with two-tier root-cause report (REGRESS-02/03), durable InvestigationStarted/Completed events, and CLI wiring with --baseline/--repro flags (D-02). All 3 tasks completed (1 TDD, 1 rendering, 1 TRACER): 3 commits, 4 files created/modified, 29 tests passing.
 
 ### Next Actions
 
-1. **Immediate**: Execute Phase 4 Plan 04-05 (Investigate bisect + report)
-2. **Then**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
-3. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
-4. **Verify**: Run `/gsd-verify-work 4` after phase completes
+1. **Immediate**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
+2. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
+3. **Verify**: Run `/gsd-verify-work 4` after phase completes
 
 ### Context for Resume
 
@@ -181,3 +186,8 @@ Executed Plan 04-04 (Investigate Engine Core): Built signal-safe temp-worktree b
 - [Phase 4]: ExecuteRepro uses exec.CommandContext with strings.Fields arg-splitting — no shell, no metacharacter interpretation; 64KB output cap
 - [Phase 4]: FindCulprit pre-checks mandatory: symptom must FAIL at window end and PASS at window start; violation returns NotReproducibleInWindowError with evidence — window never silently widened
 - [Phase 4]: Confirmation pass requires culprit fails AND parent passes (two independent observations) before verified attribution (D-12)
+- [Phase 4]: Confirmation-run attribution: verified only after dual observation (D-27)
+- [Phase 4]: Mechanism confidence ceiling at Likely (D-28)
+- [Phase 4]: Not-reproducible-in-window with sentinel evidence (D-29)
+- [Phase 4]: Affected components dedup by name with minimal depth (D-30)
+- [Phase 4]: Manual flag parsing for flags-after-positional (D-31)
