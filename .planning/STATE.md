@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-09-04T22:18:15.527Z"
-state_head: 40fd96f52bf7f9de7e20bf422e2490cb3f82dbe5
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-09-05T04:30:00.000Z"
+state_head: 70552f00
 progress:
   total_phases: 12
   completed_phases: 2
   total_plans: 23
-  completed_plans: 22
+  completed_plans: 23
   percent: 17
 current_phase: 4
 current_phase_name: Intelligence Features
@@ -19,7 +19,7 @@ current_phase_name: Intelligence Features
 **Project:** M31A  
 **Core Value:** A persistent software-engineering agent runtime that turns natural-language intent into verified, resumable engineering work.  
 **Milestone:** 1 (Architectural Foundation)  
-**Last Updated:** 2026-08-24  
+**Last Updated:** 2026-09-05
 
 ---
 
@@ -28,7 +28,7 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Core Value** | Persistent software-engineering agent runtime turning natural-language intent into verified, resumable engineering work |
-| **Current Focus** | Phase 1: Foundation — Domain Model & Event Store |
+| **Current Focus** | Phase 4: Intelligence Features (COMPLETE) |
 | **Mode** | yolo (auto-approve) |
 | **Granularity** | fine (12 phases) |
 | **Parallelization** | enabled |
@@ -41,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-06 (Deps clients) |
-| **Phase Status** | In progress (6/7 plans complete) |
-| **Progress** | ██████████ 96% (22/23 plans) |
+| **Current Plan** | 04-07 (Deps verdict cache + checkpoint) - COMPLETE |
+| **Phase Status** | Complete (7/7 plans) |
+| **Progress** | ██████████ 100% (23/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 40fd96f5 |
+| **Last Commit** | 70552f00 |
 
 ---
 
@@ -54,8 +54,8 @@ current_phase_name: Intelligence Features
 
 | Metric | Value |
 |--------|-------|
-| **Phases Completed** | 0/12 |
-| **Plans Executed** | 2 |
+| **Phases Completed** | 4/12 |
+| **Plans Executed** | 7 |
 | **Tests Passing** | ✓ |
 | **Coverage** | - |
 | **Verification Verdicts** | - |
@@ -73,7 +73,7 @@ current_phase_name: Intelligence Features
 | Phase 04 P04 | 55 min | 3 tasks | 6 files |
 | Phase 04 P05 | 95 min | 3 tasks | 4 files |
 | Phase 04 P06 | 15 min | 3 tasks | 12 files |
-| Phase 4 P5 | 95 | 3 tasks | 4 files |
+| Phase 04 P07 | 180 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -112,6 +112,13 @@ current_phase_name: Intelligence Features
 | D-029 | Not-reproducible-in-window with sentinel evidence | Returns checked SHA, observed result, window size; Speculative overall confidence; no fabricated attribution | 04-05 |
 | D-030 | Affected components dedup by name with minimal depth | Multi-path reachable components appear once at minimal depth; ordered depth-then-name | 04-05 |
 | D-031 | Manual flag parsing for flags-after-positional | Stdlib flag stops at first positional; manual split supports both argument orders like explain.go | 04-05 |
+| D-032 | Verdict confidence capped at Speculative when any source fails | DEPEND-01 concurrency edge: partial source failure degrades per-source, overall confidence capped | 04-07 |
+| D-033 | Cache key includes policyHash for invalidation | Version change OR policy-hash change both invalidate; identical pair hits | 04-07 |
+| D-034 | Checkpoint approval trusts persisted verdict | No refetch on approve path per Open Question 3 resolution | 04-07 |
+| D-035 | Double approval is no-op | Second ApprovePending emits zero CheckpointResolved events | 04-07 |
+| D-036 | WritePending persists before blocking | Pending record immediately queryable after WritePending returns | 04-07 |
+| D-037 | TransitiveImpact from Graph.Downstream when index available | Nil graph omits honestly with no error | 04-07 |
+| D-038 | Policy hash = SHA256 over canonical JSON of DepsRisk + DepsPolicy | Computed at CLI level, passed to cache | 04-07 |
 
 ### Active Todos
 
@@ -139,19 +146,18 @@ None
 
 ## Session Continuity
 
-**Last session:** 2026-09-04T22:18:08.057Z
-**Stopped at:** Completed 04-05-PLAN.md
+**Last session:** 2026-09-05T04:30:00.000Z
+**Stopped at:** Completed 04-07-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
 
-Executed Plan 04-05 (Investigate Bisect + Report): Completed confirmation-run attribution semantics (D-12) with two-tier root-cause report (REGRESS-02/03), durable InvestigationStarted/Completed events, and CLI wiring with --baseline/--repro flags (D-02). All 3 tasks completed (1 TDD, 1 rendering, 1 TRACER): 3 commits, 4 files created/modified, 29 tests passing.
+Executed Plan 04-07 (Deps verdict cache + checkpoint): Completed verdict assembly with per-source degradation, event-backed VerdictCache keyed on module+version+policyHash (D-15), human checkpoint gate with TTY prompt/headless block/--approve resolution (D-14), and CLI wiring for m31a deps check end-to-end. All 3 tasks completed (2 TDD, 1 TRACER): 5 commits, 11 files created/modified, 32 tests passing. Phase 4 Intelligence Features now complete (7/7 plans).
 
 ### Next Actions
 
-1. **Immediate**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
-2. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
-3. **Verify**: Run `/gsd-verify-work 4` after phase completes
+1. **Verify**: Run `/gsd-verify-work 4` after phase completes
+2. **Then**: Proceed to Phase 5
 
 ### Context for Resume
 
@@ -191,3 +197,12 @@ Executed Plan 04-05 (Investigate Bisect + Report): Completed confirmation-run at
 - [Phase 4]: Not-reproducible-in-window with sentinel evidence (D-29)
 - [Phase 4]: Affected components dedup by name with minimal depth (D-30)
 - [Phase 4]: Manual flag parsing for flags-after-positional (D-31)
+- [Phase 04 P07]: Verdict confidence capped at Speculative when any queried source fails; Verified when all succeed AND zero risk rules (D-32)
+- [Phase 04 P07]: Cache key includes policyHash; version change OR policy-hash change invalidates (D-33)
+- [Phase 04 P07]: Checkpoint approval trusts persisted verdict snapshot; no refetch (D-34)
+- [Phase 04 P07]: Double approval is no-op; second call emits zero events (D-35)
+- [Phase 04 P07]: WritePending persists before blocking; immediate visibility (D-36)
+- [Phase 04 P07]: TransitiveImpact from Graph.Downstream when index available; nil graph omits honestly (D-37)
+- [Phase 04 P07]: Policy hash = SHA256 over canonical JSON of DepsRisk + DepsPolicy (D-38)
+
+EOF

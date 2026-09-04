@@ -58,10 +58,10 @@ Requirements for initial architectural foundation. Each maps to roadmap phases.
 
 ### Dependency Intelligence
 
-- [ ] **DEPEND-01**: Before adding dependency, investigates registry existence, project age, recent releases, maintenance activity, source repo, license, known vulnerabilities, transitive impact, API stability, popularity
-- [ ] **DEPEND-02**: Package suggestions from model memory marked as unverified; authoritative registry queries required before install
-- [ ] **DEPEND-03**: Human checkpoint required for high-risk/ambiguous dependencies (vulnerabilities, unmaintained, license issues)
-- [ ] **DEPEND-04**: Dependency verdicts cached with timestamp; re-evaluated on version change or policy update
+- [x] **DEPEND-01**: Before adding dependency, investigates registry existence, project age, recent releases, maintenance activity, source repo, license, known vulnerabilities, transitive impact, API stability, popularity
+- [x] **DEPEND-02**: Package suggestions from model memory marked as unverified; authoritative registry queries required before install
+- [x] **DEPEND-03**: Human checkpoint required for high-risk/ambiguous dependencies (vulnerabilities, unmaintained, license issues)
+- [x] **DEPEND-04**: Dependency verdicts cached with timestamp; re-evaluated on version change or policy update
 
 ### TaskGraph IR & Execution Engine
 
@@ -266,10 +266,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REGRESS-01 | Phase 4 | Complete |
 | REGRESS-02 | Phase 4 | Complete |
 | REGRESS-03 | Phase 4 | Complete |
-| DEPEND-01 | Phase 4 | Pending |
-| DEPEND-02 | Phase 4 | Pending |
-| DEPEND-03 | Phase 4 | Pending |
-| DEPEND-04 | Phase 4 | Pending |
+| DEPEND-01 | Phase 4 | Complete |
+| DEPEND-02 | Phase 4 | Complete |
+| DEPEND-03 | Phase 4 | Complete |
+| DEPEND-04 | Phase 4 | Complete |
 | TASKGRAPH-01 | Phase 5 | Pending |
 | TASKGRAPH-02 | Phase 5 | Pending |
 | TASKGRAPH-03 | Phase 5 | Pending |
