@@ -234,6 +234,97 @@ func TestRenderJSON_Fields(t *testing.T) {
 			t.Errorf("citation JSON missing snake_case key %q", key)
 		}
 	}
+	// rationale should be absent when no signals provided
+	if _, ok := decoded["rationale"]; ok {
+		t.Errorf("rationale should be absent when no signals provided")
+	}
+}
+
+func TestRenderText_RationaleValiditySection(t *testing.T) {
+	var buf bytes.Buffer
+	signals := &RationaleSignals{
+		ConsumerCount:         3,
+		LastTouchAgeDays:      30,
+		HasDeprecationMarkers: false,
+		HasTestCoverage:       true,
+		ADRStale:              false,
+		ADRCount:              1,
+	}
+	ans := &ExplainAnswer{
+		Query:            "Bar",
+		Prose:            "Bar is a function.",
+		Citations:        []types.Citation{},
+		Inference:        []string{},
+		Confidence:       types.ConfidenceVerified,
+		RationaleSignals: signals,
+	}
+	// Provide a pack with at least one section to avoid the no-evidence early return
+	pack := types.NewEvidencePack("Bar")
+	pack.Add(types.EvidenceSource, "bar.go:1", "func Bar() {}")
+	if err := RenderText(&buf, ans, pack); err != nil {
+		t.Fatalf("RenderText failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Rationale Validity:", "Verdict: verified", "consumers=3", "last_touch_age_days=30", "deprecation_markers=false", "test_coverage=true", "adr_stale=false", "adr_count=1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderJSON_RationaleObject(t *testing.T) {
+	var buf bytes.Buffer
+	signals := &RationaleSignals{
+		ConsumerCount:         2,
+		LastTouchAgeDays:      100,
+		HasDeprecationMarkers: true,
+		HasTestCoverage:       false,
+		ADRStale:              true,
+		ADRCount:              2,
+	}
+	ans := &ExplainAnswer{
+		Query:            "Bar",
+		Prose:            "Bar is a function.",
+		Citations:        []types.Citation{},
+		Inference:        []string{},
+		Confidence:       types.ConfidenceLikely,
+		RationaleSignals: signals,
+	}
+	if err := RenderJSON(&buf, ans); err != nil {
+		t.Fatalf("RenderJSON failed: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+
+	rationale, ok := decoded["rationale"].(map[string]any)
+	if !ok {
+		t.Fatal("rationale object missing from JSON output")
+	}
+
+	expected := map[string]any{
+		"verdict":                   "likely",
+		"consumer_count":            float64(2),
+		"last_touch_age_days":       float64(100),
+		"has_deprecation_markers":   true,
+		"has_test_coverage":         false,
+		"adr_stale":                 true,
+		"adr_count":                 float64(2),
+	}
+	for key, want := range expected {
+		got := rationale[key]
+		if got != want {
+			t.Errorf("rationale.%s = %v, want %v", key, got, want)
+		}
+	}
+
+	// Ensure no float confidence scores in output
+	confidence := decoded["confidence"]
+	if _, ok := confidence.(string); !ok {
+		t.Errorf("confidence should be string enum, got %T: %v", confidence, confidence)
+	}
 }
 
 // TestExplainEndToEnd_MockPipeline runs collector → pack → single mock

@@ -17,6 +17,8 @@ const noEvidenceScopes = "Searched scopes: indexed workspace symbols; source fil
 // CLI conventions: aligned Evidence listing plus an explicit Inference
 // heading whenever demoted statements exist (D-06). A zero-evidence pack
 // produces an explicit no-evidence report naming the searched scopes.
+// Includes a Rationale Validity section showing the verdict class and
+// deterministic signal flags used (EXPLAIN-03).
 func RenderText(w io.Writer, ans *ExplainAnswer, pack *types.EvidencePack) error {
 	if pack == nil || len(pack.Sections) == 0 {
 		fmt.Fprintln(w, fmt.Sprintf("No evidence found for query %q.", ans.Query))
@@ -44,6 +46,15 @@ func RenderText(w io.Writer, ans *ExplainAnswer, pack *types.EvidencePack) error
 		}
 	}
 
+	// Rationale Validity section (EXPLAIN-03 / D-08)
+	if ans.RationaleSignals != nil {
+		fmt.Fprintf(w, "\nRationale Validity:\n")
+		fmt.Fprintf(w, "  Verdict: %s\n", ans.Confidence)
+		s := ans.RationaleSignals
+		fmt.Fprintf(w, "  Signals: consumers=%d last_touch_age_days=%d deprecation_markers=%v test_coverage=%v adr_stale=%v adr_count=%d\n",
+			s.ConsumerCount, s.LastTouchAgeDays, s.HasDeprecationMarkers, s.HasTestCoverage, s.ADRStale, s.ADRCount)
+	}
+
 	fmt.Fprintf(w, "\nConfidence: %s\n", ans.Confidence)
 	return nil
 }
@@ -52,22 +63,50 @@ func RenderText(w io.Writer, ans *ExplainAnswer, pack *types.EvidencePack) error
 // and snake_case keys follow the D-04 structured-output convention shared
 // by all intelligence commands.
 type explainAnswerJSON struct {
-	Query      string           `json:"query"`
-	Prose      string           `json:"prose"`
-	Citations  []types.Citation `json:"citations"`
-	Inference  []string         `json:"inference"`
-	Confidence types.Confidence `json:"confidence"`
+	Query            string           `json:"query"`
+	Prose            string           `json:"prose"`
+	Citations        []types.Citation `json:"citations"`
+	Inference        []string         `json:"inference"`
+	Confidence       types.Confidence `json:"confidence"`
+	Rationale        *rationaleJSON   `json:"rationale,omitempty"`
+}
+
+// rationaleJSON carries the rationale validity verdict and signal flags
+// for JSON output. No numeric scores — only enum verdict and boolean/count signals.
+type rationaleJSON struct {
+	Verdict             string `json:"verdict"`
+	ConsumerCount       int    `json:"consumer_count"`
+	LastTouchAgeDays    int    `json:"last_touch_age_days"`
+	HasDeprecationMarkers bool `json:"has_deprecation_markers"`
+	HasTestCoverage     bool   `json:"has_test_coverage"`
+	ADRStale            bool   `json:"adr_stale"`
+	ADRCount            int    `json:"adr_count"`
 }
 
 // RenderJSON writes the answer as an indented JSON object carrying query,
-// prose, citations[], inference[], and confidence per D-04.
+// prose, citations[], inference[], confidence, and rationale per D-04/D-08.
 func RenderJSON(w io.Writer, ans *ExplainAnswer) error {
+	var rationale *rationaleJSON
+	if ans.RationaleSignals != nil {
+		s := ans.RationaleSignals
+		rationale = &rationaleJSON{
+			Verdict:              string(ans.Confidence),
+			ConsumerCount:        s.ConsumerCount,
+			LastTouchAgeDays:     s.LastTouchAgeDays,
+			HasDeprecationMarkers: s.HasDeprecationMarkers,
+			HasTestCoverage:      s.HasTestCoverage,
+			ADRStale:             s.ADRStale,
+			ADRCount:             s.ADRCount,
+		}
+	}
+
 	out := explainAnswerJSON{
 		Query:      ans.Query,
 		Prose:      ans.Prose,
 		Citations:  ans.Citations,
 		Inference:  ans.Inference,
 		Confidence: ans.Confidence,
+		Rationale:  rationale,
 	}
 	if out.Citations == nil {
 		out.Citations = []types.Citation{}
