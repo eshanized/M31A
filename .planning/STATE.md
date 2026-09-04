@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-09-05T12:00:00.000Z"
-state_head: 4c0d2340
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-09-04T20:41:27.765Z"
+state_head: 3178929e5f140f35aabaa7d2e0e8207a158f4005
 progress:
   total_phases: 12
   completed_phases: 2
   total_plans: 23
-  completed_plans: 20
-  percent: 87
+  completed_plans: 21
+  percent: 91
 current_phase: 4
 current_phase_name: Intelligence Features
 ---
@@ -41,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-07 (Deps verdict cache + checkpoint) |
-| **Phase Status** | In progress (4/7 plans complete) |
-| **Progress** | ██████████ 87% (20/23 plans) |
+| **Current Plan** | 04-05 (Investigate bisect + report) |
+| **Phase Status** | In progress (5/7 plans complete) |
+| **Progress** | ██████████ 91% (21/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 4c0d2340 |
+| **Last Commit** | 3178929e |
 
 ---
 
@@ -70,7 +70,9 @@ current_phase_name: Intelligence Features
 | Phase 04 P01 | 30 min | 2 tasks | 12 files |
 | Phase 04 P02 | 48 min | 3 tasks | 9 files |
 | Phase 04 P03 | 90 min | 3 tasks | 8 files |
+| Phase 04 P04 | 55 min | 3 tasks | 6 files |
 | Phase 04 P06 | 15 min | 3 tasks | 12 files |
+| Phase 4 P04 | 55 | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -131,21 +133,20 @@ None
 
 ## Session Continuity
 
-**Last session:** 2026-09-04T19:02:27.565Z
-**Stopped at:** Completed 04-06-PLAN.md
+**Last session:** 2026-09-04T20:41:18.145Z
+**Stopped at:** Completed 04-04-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
 
-Executed Plan 04-03 (Explain Full Surface): Implemented rationale-validity signal engine (D-08) with ComputeRationaleSignals/VerdictClassFromSignals, file archaeology mode (EXPLAIN-04) with introduction commit/consumers/removal impact, topic mode for free-text queries, ADR scanning with silent degradation, and rationale verdict rendering in text/JSON outputs. All 3 TDD tasks completed: 3 commits, 8 files modified, 29 tests passing. CLI disambiguation documented (file→symbol→topic).
+Executed Plan 04-04 (Investigate Engine Core): Built signal-safe temp-worktree bisect engine (D-10) with WorktreeManager lifecycle (create/checkout/remove/prune), deterministic repro resolution chain (D-09) with flag>config>auto-detect precedence and exec.CommandContext execution (no shell), and window-bounded binary search over rev-list candidates (D-11) with honest not-reproducible semantics and confirmation pass. All 3 TDD tasks completed: 5 commits, 6 files created, 19 tests passing.
 
 ### Next Actions
 
-1. **Immediate**: Execute Phase 4 Plan 04-04 (Investigate worktree + repro)
-2. **Then**: Execute Phase 4 Plan 04-05 (Investigate bisect + report)
-3. **Then**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
-4. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
-5. **Verify**: Run `/gsd-verify-work 4` after phase completes
+1. **Immediate**: Execute Phase 4 Plan 04-05 (Investigate bisect + report)
+2. **Then**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
+3. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
+4. **Verify**: Run `/gsd-verify-work 4` after phase completes
 
 ### Context for Resume
 
@@ -170,3 +171,13 @@ Executed Plan 04-03 (Explain Full Surface): Implemented rationale-validity signa
 - [Phase 04 P06]: Risk classification every TriggeredRule carries Source provenance (osv|depsdev|github) per DEPEND-02
 - [Phase 04 P06]: Release age boundary: >= stale_months classifies high (greater-or-equal convention)
 - [Phase 04 P06]: Case-exact SPDX license allowlist matching — "MIT" matches only "MIT", not "mit"
+- [Phase 04 P04]: Worktree temp dir uses pid+nanosecond timestamp (m31a-investigate-<pid>-<ts>) under os.TempDir() — unique per run, enables orphan detection
+- [Phase 04 P04]: ValidateRef exported from investigate package — all ref-taking git calls gated through it pre-exec
+- [Phase 04 P04]: ExecuteRepro uses exec.CommandContext with strings.Fields arg-splitting — no shell, no metacharacter interpretation; 64KB output cap
+- [Phase 04 P04]: FindCulprit pre-checks mandatory: symptom must FAIL at window end and PASS at window start; violation returns NotReproducibleInWindowError with evidence — window never silently widened
+- [Phase 04 P04]: Confirmation pass requires culprit fails AND parent passes (two independent observations) before verified attribution (D-12)
+- [Phase 4]: Worktree temp dir uses pid+nanosecond timestamp (m31a-investigate-<pid>-<ts>) under os.TempDir() — unique per run, enables orphan detection
+- [Phase 4]: ValidateRef exported from investigate package — all ref-taking git calls gated through it pre-exec
+- [Phase 4]: ExecuteRepro uses exec.CommandContext with strings.Fields arg-splitting — no shell, no metacharacter interpretation; 64KB output cap
+- [Phase 4]: FindCulprit pre-checks mandatory: symptom must FAIL at window end and PASS at window start; violation returns NotReproducibleInWindowError with evidence — window never silently widened
+- [Phase 4]: Confirmation pass requires culprit fails AND parent passes (two independent observations) before verified attribution (D-12)
