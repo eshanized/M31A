@@ -830,6 +830,11 @@ func run() int {
 		return runExplain(flag.Args()[1:], workDir, cfg, logger, registry)
 	}
 
+	// Investigate command: m31a investigate SYMPTOM [--baseline <ref>] [--repro <cmd>] [--format table|json]
+	if flag.Arg(0) == "investigate" {
+		return runInvestigate(flag.Args()[1:], workDir, cfg, logger, registry)
+	}
+
 	// Arch check command: m31a arch check [--config arch.toml]
 	if flag.Arg(0) == "arch" && flag.Arg(1) == "check" {
 		return runArchCheck(flag.Args()[2:], workDir, logger)
