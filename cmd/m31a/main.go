@@ -840,6 +840,11 @@ func run() int {
 		return runArchCheck(flag.Args()[2:], workDir, logger)
 	}
 
+	// Deps check command: m31a deps check <module> [--format table|json] [--approve <module>]
+	if flag.Arg(0) == "deps" && flag.Arg(1) == "check" {
+		return runDepsCheck(flag.Args()[2:], workDir, cfg, logger)
+	}
+
 	// Working directory — fail fast if Getwd fails (WP-C03)
 	workDir, err := os.Getwd()
 	if err != nil {
