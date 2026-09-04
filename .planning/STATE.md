@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-09-04T19:02:27.647Z"
-state_head: d4c773e412714ccd51153b08441752ae46178a21
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-05T12:00:00.000Z"
+state_head: 4c0d2340
 progress:
   total_phases: 12
   completed_phases: 2
   total_plans: 23
-  completed_plans: 19
-  percent: 82
+  completed_plans: 20
+  percent: 87
 current_phase: 4
 current_phase_name: Intelligence Features
 ---
@@ -42,11 +42,11 @@ current_phase_name: Intelligence Features
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
 | **Current Plan** | 04-07 (Deps verdict cache + checkpoint) |
-| **Phase Status** | In progress (3/7 plans complete) |
-| **Progress** | █████████░ 82% (19/23 plans) |
+| **Phase Status** | In progress (4/7 plans complete) |
+| **Progress** | ██████████ 87% (20/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | d4c773e4 |
+| **Last Commit** | 4c0d2340 |
 
 ---
 
@@ -69,6 +69,7 @@ current_phase_name: Intelligence Features
 |------|----------|-------|-------|
 | Phase 04 P01 | 30 min | 2 tasks | 12 files |
 | Phase 04 P02 | 48 min | 3 tasks | 9 files |
+| Phase 04 P03 | 90 min | 3 tasks | 8 files |
 | Phase 04 P06 | 15 min | 3 tasks | 12 files |
 
 ## Accumulated Context
@@ -97,6 +98,12 @@ current_phase_name: Intelligence Features
 | D-018 | Risk classification Source provenance on every rule | DEPEND-02 requires citing which snapshot (osv|depsdev|github) fired each rule | 04-06 |
 | D-019 | Release age >= stale_months boundary is high | D-16 greater-or-equal convention; age exactly equal to threshold classifies high | 04-06 |
 | D-020 | Case-exact SPDX license allowlist matching | Ecosystem case rules (Go module paths case-sensitive) — "MIT" matches only "MIT" | 04-06 |
+| D-021 | Rationale-validity verdict from deterministic signals | VerdictClassFromSignals maps ConsumerCount/LastTouchAgeDays/HasDeprecationMarkers/HasTestCoverage/ADRStale to verified/likely/speculative; LLM narrates only | 04-03 |
+| D-022 | File mode archaeology via git log --diff-filter=A | Introduction commit SHA + subject from first commit adding the file; consumers from graph.Callers; removal impact from AnalyzeImpact | 04-03 |
+| D-023 | Topic mode via token-ranked source excerpts | Query tokenized; files scored by token occurrences in filename + content (first 200 lines); top 3 with excerpts, symbol hits, recent commits | 04-03 |
+| D-024 | ADR scanning with silent degradation | ScanADRs returns CandidateADR[] from .m31a/decisions/; token overlap filter; returns nil (not error) when directory absent | 04-03 |
+| D-025 | ResolveMode precedence: file → symbol → topic | File existence checked first via workDir; then exact Index.Define hit; else topic fallback | 04-03 |
+| D-026 | Rationale Validity section in all explain outputs | RenderText: "Rationale Validity:" with verdict + signal flags; RenderJSON: rationale object with verdict + boolean/count signals; no floats | 04-03 |
 
 ### Active Todos
 
@@ -130,14 +137,14 @@ None
 
 ### Last Session Summary
 
-Executed Plan 04-06 (Dependency Intelligence Data Layer): Built deps.dev v3, OSV.dev, and GitHub enrichment clients with Phase 2 resilience semantics (hard timeout, initial_only retry 3/1s, Retry-After, 2MB LimitReader, typed error sentinels), plus config-driven D-16 risk classification engine. All 3 TDD tasks completed (RED→GREEN pairs): 6 commits, 12 files created, 27 tests passing. Zero-network httptest fixtures with recorded JSON. Registry data layer produces cited, ordered, honestly-degraded source snapshots feeding verdict assembly in plan 04-07.
+Executed Plan 04-03 (Explain Full Surface): Implemented rationale-validity signal engine (D-08) with ComputeRationaleSignals/VerdictClassFromSignals, file archaeology mode (EXPLAIN-04) with introduction commit/consumers/removal impact, topic mode for free-text queries, ADR scanning with silent degradation, and rationale verdict rendering in text/JSON outputs. All 3 TDD tasks completed: 3 commits, 8 files modified, 29 tests passing. CLI disambiguation documented (file→symbol→topic).
 
 ### Next Actions
 
-1. **Immediate**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
-2. **Then**: Execute Phase 4 Plan 04-08 (Explain symbol mode)
-3. **Then**: Execute Phase 4 Plan 04-09 (Investigate worktree + repro)
-4. **Then**: Execute Phase 4 Plan 04-10 (Investigate bisect + report)
+1. **Immediate**: Execute Phase 4 Plan 04-04 (Investigate worktree + repro)
+2. **Then**: Execute Phase 4 Plan 04-05 (Investigate bisect + report)
+3. **Then**: Execute Phase 4 Plan 04-06 (Deps clients) - DONE
+4. **Then**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
 5. **Verify**: Run `/gsd-verify-work 4` after phase completes
 
 ### Context for Resume

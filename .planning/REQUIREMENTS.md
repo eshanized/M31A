@@ -45,10 +45,10 @@ Requirements for initial architectural foundation. Each maps to roadmap phases.
 
 ### Explain / Archaeology
 
-- [ ] **EXPLAIN-01**: `m31a explain "topic"` combines source, call graph, Git blame, commit history, ADRs, tests to answer why code exists
+- [x] **EXPLAIN-01**: `m31a explain "topic"` combines source, call graph, Git blame, commit history, ADRs, tests to answer why code exists
 - [x] **EXPLAIN-02**: Output distinguishes evidence (citations with file:line, commit SHA) from inference (marked as inferred)
-- [ ] **EXPLAIN-03**: Assesses current rationale validity: "rationale still appears valid" / "likely obsolete" with confidence
-- [ ] **EXPLAIN-04**: `m31a investigate "why file exists"` shows introduction commit, original purpose, current consumers, removal impact
+- [x] **EXPLAIN-03**: Assesses current rationale validity: "rationale still appears valid" / "likely obsolete" with confidence
+- [x] **EXPLAIN-04**: `m31a investigate "why file exists"` shows introduction commit, original purpose, current consumers, removal impact
 
 ### Regression Intelligence
 
@@ -259,10 +259,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CODE-05 | Phase 3 | Pending |
 | CODE-06 | Phase 3 | Pending |
 | CODE-07 | Phase 3 | Pending |
-| EXPLAIN-01 | Phase 4 | Pending |
+| EXPLAIN-01 | Phase 4 | Complete |
 | EXPLAIN-02 | Phase 4 | Complete |
-| EXPLAIN-03 | Phase 4 | Pending |
-| EXPLAIN-04 | Phase 4 | Pending |
+| EXPLAIN-03 | Phase 4 | Complete |
+| EXPLAIN-04 | Phase 4 | Complete |
 | REGRESS-01 | Phase 4 | Pending |
 | REGRESS-02 | Phase 4 | Pending |
 | REGRESS-03 | Phase 4 | Pending |
