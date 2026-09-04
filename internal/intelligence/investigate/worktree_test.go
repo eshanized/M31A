@@ -143,6 +143,8 @@ func TestWorktreeManager_ParentRepoHEADUnchanged(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Test helper functions
+
 // seedRepoWithHistory creates a test repo with a known commit history:
 // good1 -> good2 -> culprit -> good3 (HEAD)
 func seedRepoWithHistory(t *testing.T) string {

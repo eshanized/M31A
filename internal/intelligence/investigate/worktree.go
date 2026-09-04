@@ -109,6 +109,11 @@ func (m *WorktreeManager) Remove() error {
 	return nil
 }
 
+// WorktreeDir returns the current worktree directory path.
+func (m *WorktreeManager) WorktreeDir() string {
+	return m.wtDir
+}
+
 // PruneOrphans sweeps stale worktree registrations matching our prefix.
 func (m *WorktreeManager) PruneOrphans() {
 	// List worktrees and look for ones with our prefix
@@ -240,4 +245,9 @@ func (g *GitRunner) Run(args ...string) (string, error) {
 		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, string(out))
 	}
 	return string(out), nil
+}
+
+// WorkDir returns the working directory path.
+func (g *GitRunner) WorkDir() string {
+	return g.workDir
 }
