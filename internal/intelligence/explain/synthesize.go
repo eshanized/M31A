@@ -23,12 +23,14 @@ type Synthesizer interface {
 // markers that resolve to real pack items; every statement not backed by a
 // marker-bearing sentence lands under Inference (D-06). Citations mirror
 // the pack entries the surviving markers point at.
+// RationaleSignals carries the deterministic signals used for the verdict.
 type ExplainAnswer struct {
-	Query      string           `json:"query"`
-	Prose      string           `json:"prose"`
-	Citations  []types.Citation `json:"citations"`
-	Inference  []string         `json:"inference"`
-	Confidence types.Confidence `json:"confidence"`
+	Query            string           `json:"query"`
+	Prose            string           `json:"prose"`
+	Citations        []types.Citation `json:"citations"`
+	Inference        []string         `json:"inference"`
+	Confidence       types.Confidence `json:"confidence"`
+	RationaleSignals *RationaleSignals `json:"rationale_signals,omitempty"`
 }
 
 // synthesisTemperature keeps narration grounded; low temperature bounds
@@ -50,7 +52,8 @@ claim, state it as uncertain instead of asserting it.`
 // whose markers all exist in the pack keep them and gain Citation entries;
 // sentences carrying any unknown marker are demoted wholesale under
 // Inference with the unknown markers stripped (EXPLAIN-02 / D-06).
-func Synthesize(ctx context.Context, pack *types.EvidencePack, s Synthesizer, modelID string) (*ExplainAnswer, error) {
+// If signals are provided, they are attached to the answer for rendering.
+func Synthesize(ctx context.Context, pack *types.EvidencePack, s Synthesizer, modelID string, signals *RationaleSignals) (*ExplainAnswer, error) {
 	if pack == nil {
 		return nil, fmt.Errorf("explain: nil evidence pack")
 	}
@@ -86,11 +89,12 @@ func Synthesize(ctx context.Context, pack *types.EvidencePack, s Synthesizer, mo
 	}
 
 	ans := &ExplainAnswer{
-		Query:      pack.Query,
-		Prose:      cleaned,
-		Citations:  citations,
-		Inference:  inference,
-		Confidence: confidence,
+		Query:            pack.Query,
+		Prose:            cleaned,
+		Citations:        citations,
+		Inference:        inference,
+		Confidence:       confidence,
+		RationaleSignals: signals,
 	}
 	if ans.Citations == nil {
 		ans.Citations = []types.Citation{}

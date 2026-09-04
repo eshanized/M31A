@@ -31,8 +31,7 @@ var ErrTargetNotFound = errors.New("explain: target not found")
 // when CollectorDeps.MaxTotalTokens is zero (discretion area per D-05).
 const DefaultMaxTotalTokens = 6000
 
-// ExplainMode selects which collector strategy resolves a query. Only
-// ModeSymbol is implemented in this plan; file/topic modes land in plan 04-03.
+// ExplainMode selects which collector strategy resolves a query.
 type ExplainMode string
 
 const (
@@ -54,6 +53,13 @@ type CollectorDeps struct {
 	GitClient      *git.Git
 	WorkDir        string
 	MaxTotalTokens int
+}
+
+// CandidateADR represents a matching ADR file found by ScanADRs.
+type CandidateADR struct {
+	Title   string // first heading
+	Path    string // relative path from workDir
+	Snippet string // first heading + first paragraph, capped
 }
 
 // kindPriority orders sections for deterministic output and budget
@@ -79,11 +85,162 @@ func Collect(ctx context.Context, deps CollectorDeps, query string, mode Explain
 	switch mode {
 	case ModeSymbol:
 		return collectSymbol(ctx, deps, query, modelID, pack)
-	case ModeFile, ModeTopic:
-		return nil, fmt.Errorf("explain: mode %q not implemented yet", mode)
+	case ModeFile:
+		return collectFile(ctx, deps, query, modelID, pack)
+	case ModeTopic:
+		return collectTopic(ctx, deps, query, modelID, pack)
 	default:
 		return nil, fmt.Errorf("explain: unknown mode %q", mode)
 	}
+}
+
+// ResolveMode implements the documented disambiguation precedence:
+// 1. File mode if path exists relative to workDir
+// 2. Symbol mode if exact match in Index.Define
+// 3. Topic mode as fallback
+func ResolveMode(query, workDir string, index *codeintel.SymbolIndex) ExplainMode {
+	// Check if file exists relative to workDir
+	if workDir != "" {
+		absPath := filepath.Join(workDir, query)
+		if _, err := os.Stat(absPath); err == nil {
+			return ModeFile
+		}
+	}
+
+	// Check for exact symbol match
+	if index != nil {
+		locs := index.Define(query)
+		if len(locs) > 0 {
+			return ModeSymbol
+		}
+	}
+
+	// Default to topic mode for free-text queries
+	return ModeTopic
+}
+
+// ScanADRs scans the .m31a/decisions/ directory for ADR files matching the query.
+// Returns title/path/snippet triples filtered by token overlap.
+// Degrades silently when the decisions directory is absent (A1 contract).
+func ScanADRs(workDir, query string) []CandidateADR {
+	decisionsDir := filepath.Join(workDir, ".m31a", "decisions")
+	entries, err := os.ReadDir(decisionsDir)
+	if err != nil {
+		// Degrade silently - no ADR directory or not readable
+		return nil
+	}
+
+	queryTokens := tokenizeQuery(query)
+	var adrs []CandidateADR
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		adrPath := filepath.Join(decisionsDir, entry.Name())
+		content, err := os.ReadFile(adrPath)
+		if err != nil {
+			continue // skip unreadable files
+		}
+
+		// Check token overlap
+		if !hasTokenOverlap(string(content), queryTokens) {
+			continue
+		}
+
+		// Extract title (first heading) and snippet (first heading + first paragraph)
+		title, snippet := extractADRContent(string(content))
+		if title == "" {
+			title = strings.TrimSuffix(entry.Name(), ".md")
+		}
+
+		adrs = append(adrs, CandidateADR{
+			Title:   title,
+			Path:    filepath.Join(".m31a", "decisions", entry.Name()),
+			Snippet: snippet,
+		})
+	}
+
+	return adrs
+}
+
+// tokenizeQuery splits query into lowercase tokens for matching.
+func tokenizeQuery(query string) []string {
+	query = strings.ToLower(query)
+	// Simple tokenization: split on non-alphanumeric
+	var tokens []string
+	var current strings.Builder
+	for _, r := range query {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			current.WriteRune(r)
+		} else {
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
+
+// hasTokenOverlap checks if any query token appears in the content.
+func hasTokenOverlap(content string, queryTokens []string) bool {
+	lower := strings.ToLower(content)
+	for _, token := range queryTokens {
+		if len(token) >= 3 && strings.Contains(lower, token) { // minimum token length 3
+			return true
+		}
+	}
+	return false
+}
+
+// extractADRContent extracts the first heading and first paragraph from ADR content.
+// Returns (title, snippet) where snippet is capped at heading + first paragraph.
+func extractADRContent(content string) (string, string) {
+	lines := strings.Split(content, "\n")
+	var title string
+	var snippetLines []string
+	inFirstParagraph := false
+	paragraphStarted := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Find first heading
+		if title == "" && strings.HasPrefix(trimmed, "#") {
+			title = strings.TrimLeft(trimmed, "# ")
+			snippetLines = append(snippetLines, trimmed)
+			inFirstParagraph = true
+			continue
+		}
+
+		if inFirstParagraph {
+			if trimmed == "" {
+				if paragraphStarted {
+					// End of first paragraph
+					break
+				}
+				continue
+			}
+			paragraphStarted = true
+			snippetLines = append(snippetLines, trimmed)
+
+			// Cap at reasonable length (heading + ~3 lines)
+			if len(snippetLines) > 5 {
+				break
+			}
+		}
+	}
+
+	snippet := strings.Join(snippetLines, "\n")
+	return title, snippet
 }
 
 // collectSymbol runs the symbol-mode stages in numbered order, mirroring
@@ -135,14 +292,314 @@ func collectSymbol(ctx context.Context, deps CollectorDeps, symbol string, model
 		pack.Add(types.EvidenceTest, tf, fmt.Sprintf("test file related to %s", symbol))
 	}
 
-	// Stage 6: collapse duplicate kind+ref pairs (first wins) and renumber.
+	// Stage 6: ADR scanning for symbol mode
+	if deps.WorkDir != "" {
+		adrs := ScanADRs(deps.WorkDir, symbol)
+		for _, adr := range adrs {
+			pack.Add(types.EvidenceADR, adr.Path, adr.Snippet)
+		}
+	}
+
+	// Stage 7: collapse duplicate kind+ref pairs (first wins) and renumber.
 	pack.Sections = dedupeSections(pack.Sections)
 
-	// Stage 7: enforce the token budget by dropping whole lowest-priority
+	// Stage 8: enforce the token budget by dropping whole lowest-priority
 	// sections; snippets are never mid-truncated.
 	budgetTrim(pack, deps.MaxTotalTokens, modelID)
 
 	return pack, nil
+}
+
+// collectFile implements file-existence archaeology mode (EXPLAIN-04).
+// Returns pack containing: introduction commit, source excerpt, consumers,
+// removal impact (affected tests + downstream dependents).
+func collectFile(ctx context.Context, deps CollectorDeps, filePath string, modelID string, pack *types.EvidencePack) (*types.EvidencePack, error) {
+	if err := ctx.Err(); err != nil {
+		return pack, fmt.Errorf("explain: %w", err)
+	}
+
+	// Verify file exists
+	absPath := filepath.Join(deps.WorkDir, filePath)
+	if _, err := os.Stat(absPath); err != nil {
+		return pack, fmt.Errorf("explain: file %q not found: %w", filePath, ErrTargetNotFound)
+	}
+
+	// Stage 1: Introduction commit via git log --diff-filter=A
+	introCommit, introSubject, err := introductionCommit(deps.GitClient, filePath)
+	if err == nil && introCommit != "" {
+		pack.Add(types.EvidenceCommit, introCommit,
+			fmt.Sprintf("introduction commit: %s", introSubject))
+	}
+
+	// Stage 2: Source excerpt (whole file or key sections)
+	if snippet, _, err := readExcerpt(deps.WorkDir, filePath, ""); err == nil {
+		pack.Add(types.EvidenceSource, filePath+":1", snippet)
+	}
+
+	// Stage 3: Consumers - find primary symbol in file and get callers
+	primarySymbol := primarySymbolInFile(deps.Index, filePath)
+	if primarySymbol != "" {
+		for _, edge := range deps.Graph.Callers(primarySymbol) {
+			pack.Add(types.EvidenceCallers,
+				fmt.Sprintf("%s:%d", edge.CallerFile, edge.CallerLine),
+				fmt.Sprintf("%s calls %s", edge.CallerName, primarySymbol))
+		}
+	} else {
+		// Fallback: use graph Downstream on the file node
+		downstream := deps.Graph.Downstream(filePath, 1)
+		for _, dep := range downstream {
+			pack.Add(types.EvidenceCallers, dep, fmt.Sprintf("file depends on %s", filePath))
+		}
+	}
+
+	// Stage 4: Removal impact - affected tests from impact analysis
+	if primarySymbol != "" {
+		impact := codeintel.AnalyzeImpact(deps.Graph, deps.Index, primarySymbol, 1)
+		tests := append([]string{}, impact.AffectedTests...)
+		sort.Strings(tests)
+		for _, tf := range tests {
+			pack.Add(types.EvidenceTest, tf, fmt.Sprintf("test affected by removal of %s", filePath))
+		}
+	}
+
+	// Stage 5: ADR scanning for file mode
+	if deps.WorkDir != "" {
+		adrs := ScanADRs(deps.WorkDir, filePath)
+		for _, adr := range adrs {
+			pack.Add(types.EvidenceADR, adr.Path, adr.Snippet)
+		}
+	}
+
+	// Stage 6: collapse duplicate kind+ref pairs (first wins) and renumber.
+	pack.Sections = dedupeSections(pack.Sections)
+
+	// Stage 7: enforce the token budget
+	budgetTrim(pack, deps.MaxTotalTokens, modelID)
+
+	return pack, nil
+}
+
+// collectTopic implements free-text topic mode.
+// Produces pack with source excerpts ranked by term-match count,
+// symbol hits, and up to 5 recent commits per matched file.
+func collectTopic(ctx context.Context, deps CollectorDeps, query string, modelID string, pack *types.EvidencePack) (*types.EvidencePack, error) {
+	if err := ctx.Err(); err != nil {
+		return pack, fmt.Errorf("explain: %w", err)
+	}
+
+	queryTokens := tokenizeQuery(query)
+	if len(queryTokens) == 0 {
+		return pack, fmt.Errorf("explain: empty topic query: %w", ErrTargetNotFound)
+	}
+
+	// Get all tracked files from the graph
+	allFiles := deps.Graph.AllPaths()
+	if len(allFiles) == 0 {
+		return pack, fmt.Errorf("explain: no indexed files for topic search: %w", ErrTargetNotFound)
+	}
+
+	// Score files by token occurrences in filename + content
+	type scoredFile struct {
+		path  string
+		score int
+	}
+	var scored []scoredFile
+
+	for _, file := range allFiles {
+		score := scoreFile(file, queryTokens, deps.WorkDir)
+		if score > 0 {
+			scored = append(scored, scoredFile{path: file, score: score})
+		}
+	}
+
+	// Sort by score descending
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Take top 3 files
+	topFiles := scored
+	if len(topFiles) > 3 {
+		topFiles = topFiles[:3]
+	}
+
+	// For each top file: excerpt around matches, symbol hits, recent commits
+	for _, sf := range topFiles {
+		// Source excerpt around first match
+		if snippet, line, err := readExcerptAroundMatches(deps.WorkDir, sf.path, queryTokens); err == nil {
+			pack.Add(types.EvidenceSource,
+				fmt.Sprintf("%s:%d", sf.path, line),
+				snippet)
+		}
+
+		// Symbol hits from index prefix lookup
+		// Find symbols defined in this file that match query tokens
+		fileSymbols := deps.Index.FileSymbols(sf.path)
+		for _, sym := range fileSymbols {
+			for _, token := range queryTokens {
+				if len(token) >= 3 && strings.Contains(strings.ToLower(sym.Name), token) {
+					pack.Add(types.EvidenceSource,
+						fmt.Sprintf("%s:%s", sf.path, sym.Name),
+						fmt.Sprintf("symbol %s matches topic", sym.Name))
+					break
+				}
+			}
+		}
+
+		// Recent commits (up to 5) touching this file
+		if deps.GitClient != nil {
+			commits, err := recentCommitsForFile(deps.GitClient, sf.path, 5)
+			if err == nil {
+				for _, c := range commits {
+					pack.Add(types.EvidenceCommit, c.SHA,
+						fmt.Sprintf("%s on %s: %s",
+							c.Author,
+							c.AuthorTime.Format("2006-01-02"),
+							c.Summary))
+				}
+			}
+		}
+	}
+
+	// ADR scanning for topic mode
+	if deps.WorkDir != "" {
+		adrs := ScanADRs(deps.WorkDir, query)
+		for _, adr := range adrs {
+			pack.Add(types.EvidenceADR, adr.Path, adr.Snippet)
+		}
+	}
+
+	// Dedupe and budget trim
+	pack.Sections = dedupeSections(pack.Sections)
+	budgetTrim(pack, deps.MaxTotalTokens, modelID)
+
+	return pack, nil
+}
+
+// introductionCommit finds the first commit that added the file using
+// git log --diff-filter=A --format=%H%x00%s -1 -- path
+func introductionCommit(g *git.Git, filePath string) (string, string, error) {
+	out, err := g.Run("log", "--diff-filter=A", "--format=%H%x00%s", "-1", "--", filePath)
+	if err != nil {
+		return "", "", err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "", "", nil
+	}
+	parts := strings.SplitN(out, "\x00", 2)
+	if len(parts) < 2 {
+		return parts[0], "", nil
+	}
+	return parts[0], parts[1], nil
+}
+
+// primarySymbolInFile finds the "main" symbol defined in a file.
+// Returns the first exported function/type, or empty string.
+func primarySymbolInFile(index *codeintel.SymbolIndex, filePath string) string {
+	symbols := index.FileSymbols(filePath)
+	for _, s := range symbols {
+		if s.Exported && (s.Kind == "func" || s.Kind == "type" || s.Kind == "struct" || s.Kind == "interface") {
+			return s.Name
+		}
+	}
+	// Fallback: first symbol
+	if len(symbols) > 0 {
+		return symbols[0].Name
+	}
+	return ""
+}
+
+// scoreFile scores a file by token occurrences in filename and content.
+func scoreFile(filePath string, queryTokens []string, workDir string) int {
+	score := 0
+	lowerPath := strings.ToLower(filePath)
+
+	// Filename matches
+	for _, token := range queryTokens {
+		if strings.Contains(lowerPath, token) {
+			score += 10
+		}
+	}
+
+	// Content scan (cheap - read first 200 lines)
+	absPath := filepath.Join(workDir, filePath)
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return score
+	}
+	lines := strings.Split(string(content), "\n")
+	if len(lines) > 200 {
+		lines = lines[:200]
+	}
+	lowerContent := strings.ToLower(string(content))
+	for _, token := range queryTokens {
+		if len(token) >= 3 {
+			// Count occurrences
+			count := strings.Count(lowerContent, token)
+			score += count
+		}
+	}
+
+	return score
+}
+
+// readExcerptAroundMatches returns an excerpt around the first line matching any query token.
+func readExcerptAroundMatches(workDir, filePath string, queryTokens []string) (string, int, error) {
+	data, err := os.ReadFile(filepath.Join(workDir, filePath))
+	if err != nil {
+		return "", 0, err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 0 {
+		return "", 0, fmt.Errorf("empty file")
+	}
+
+	anchor := 1
+	for i, ln := range lines {
+		lower := strings.ToLower(ln)
+		for _, token := range queryTokens {
+			if len(token) >= 3 && strings.Contains(lower, token) {
+				anchor = i + 1
+				goto found
+			}
+		}
+	}
+found:
+
+	const ctxLines = 6
+	start := anchor - ctxLines
+	if start < 1 {
+		start = 1
+	}
+	end := anchor + ctxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var sb strings.Builder
+	for i := start; i <= end; i++ {
+		fmt.Fprintf(&sb, "%4d | %s\n", i, lines[i-1])
+	}
+	return strings.TrimRight(sb.String(), "\n"), anchor, nil
+}
+
+// recentCommitsForFile returns up to N recent commits touching the file.
+func recentCommitsForFile(g *git.Git, filePath string, limit int) ([]git.CommitMeta, error) {
+	commits, err := g.Log(limit)
+	if err != nil {
+		return nil, err
+	}
+	var metas []git.CommitMeta
+	for _, c := range commits {
+		metas = append(metas, git.CommitMeta{
+			SHA:        c.Hash,
+			Author:     c.Author,
+			Summary:    c.Message,
+			AuthorTime: c.Timestamp,
+		})
+	}
+	return metas, nil
 }
 
 // readExcerpt returns a line-numbered excerpt of relFile centered on the
@@ -158,10 +615,12 @@ func readExcerpt(workDir, relFile, symbol string) (string, int, error) {
 	}
 
 	anchor := 1
-	for i, ln := range lines {
-		if strings.Contains(ln, symbol) {
-			anchor = i + 1
-			break
+	if symbol != "" {
+		for i, ln := range lines {
+			if strings.Contains(ln, symbol) {
+				anchor = i + 1
+				break
+			}
 		}
 	}
 

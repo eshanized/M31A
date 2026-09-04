@@ -41,7 +41,7 @@ func TestSynthesize_SingleCallValidMarkers(t *testing.T) {
 		Content: "Bar is defined in bar.go [1]. It is called from CallBar [2].",
 	}}
 
-	ans, err := Synthesize(context.Background(), threeItemPack(t), mock, "test-model")
+	ans, err := Synthesize(context.Background(), threeItemPack(t), mock, "test-model", nil)
 	if err != nil {
 		t.Fatalf("Synthesize failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestSynthesize_RequestShape(t *testing.T) {
 	var captured types.ChatRequest
 	mock := &capturingMock{capture: &captured, resp: &types.ChatResponse{Content: "x [1]."}}
 
-	if _, err := Synthesize(context.Background(), threeItemPack(t), mock, "test-model"); err != nil {
+	if _, err := Synthesize(context.Background(), threeItemPack(t), mock, "test-model", nil); err != nil {
 		t.Fatalf("Synthesize failed: %v", err)
 	}
 	if len(captured.Messages) < 2 {
@@ -255,7 +255,7 @@ func TestExplainEndToEnd_MockPipeline(t *testing.T) {
 		pack.Sections[0].ID, pack.Sections[len(pack.Sections)-1].ID)
 	mock := &mockSynthesizer{resp: &types.ChatResponse{Content: prose}}
 
-	answer, err := Synthesize(context.Background(), pack, mock, "test-model")
+	answer, err := Synthesize(context.Background(), pack, mock, "test-model", nil)
 	if err != nil {
 		t.Fatalf("Synthesize failed: %v", err)
 	}
