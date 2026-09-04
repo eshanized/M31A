@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-25T10:45:57.618Z"
-state_head: 9f33753633e337af7f9b5bc2c6e31af4531de5b0
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-09-04T19:02:27.647Z"
+state_head: d4c773e412714ccd51153b08441752ae46178a21
 progress:
   total_phases: 12
   completed_phases: 2
   total_plans: 23
-  completed_plans: 18
-  percent: 78
+  completed_plans: 19
+  percent: 82
 current_phase: 4
 current_phase_name: Intelligence Features
 ---
@@ -41,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-03 (Explain file/topic modes) |
-| **Phase Status** | In progress (2/7 plans complete) |
-| **Progress** | ████████░░ 78% (18/23 plans) |
+| **Current Plan** | 04-07 (Deps verdict cache + checkpoint) |
+| **Phase Status** | In progress (3/7 plans complete) |
+| **Progress** | █████████░ 82% (19/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 9f337536 |
+| **Last Commit** | d4c773e4 |
 
 ---
 
@@ -69,6 +69,7 @@ current_phase_name: Intelligence Features
 |------|----------|-------|-------|
 | Phase 04 P01 | 30 min | 2 tasks | 12 files |
 | Phase 04 P02 | 48 min | 3 tasks | 9 files |
+| Phase 04 P06 | 15 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,12 @@ current_phase_name: Intelligence Features
 | D-012 | SQLite for durable state | Embedded, no separate server, ACID, good for event sourcing | Pre-milestone |
 | D-013 | Event-driven architecture | Append-only events enable recovery, replay, audit, debugging | Pre-milestone |
 | D-014 | Six-plane architecture | Interaction, Intelligence, Engineering, Execution, Assurance, Memory — clear separation | Pre-milestone |
+| D-015 | deps.dev v3 PathEscape for module paths | Preserves nested paths and /v2 major suffixes exactly as API expects (uppercase GO system enum) | 04-06 |
+| D-016 | OSV leading-v normalization with build-metadata preservation | Go ecosystem requires v-prefix; build metadata makes v1.0.0+build distinct from v1.0.0 | 04-06 |
+| D-017 | GitHub OpenIssuesAndPRs field naming | open_issues_count includes PRs per Pitfall 6; struct name reflects true semantics | 04-06 |
+| D-018 | Risk classification Source provenance on every rule | DEPEND-02 requires citing which snapshot (osv|depsdev|github) fired each rule | 04-06 |
+| D-019 | Release age >= stale_months boundary is high | D-16 greater-or-equal convention; age exactly equal to threshold classifies high | 04-06 |
+| D-020 | Case-exact SPDX license allowlist matching | Ecosystem case rules (Go module paths case-sensitive) — "MIT" matches only "MIT" | 04-06 |
 
 ### Active Todos
 
@@ -117,22 +124,21 @@ None
 
 ## Session Continuity
 
-**Last session:** 2026-08-25T09:47:35.133Z
-**Stopped at:** Completed 04-02-PLAN.md
+**Last session:** 2026-09-04T19:02:27.565Z
+**Stopped at:** Completed 04-06-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
 
-Initialized project with `/gsd-new-project`. Created PROJECT.md, REQUIREMENTS.md (118 v1 requirements), research/SUMMARY.md, config.json. Roadmap created with 12 phases derived from requirements using fine granularity. All requirements mapped with 100% coverage validated. Executed Plan 01-01: Created 18 canonical domain types in six-plane organized files (domain.go, planning.go, execution.go, assurance.go), event envelope with monotonic SEQ, EventStore interface, JSON serialization helpers. All unit tests pass for DOMAIN-01..04.
+Executed Plan 04-06 (Dependency Intelligence Data Layer): Built deps.dev v3, OSV.dev, and GitHub enrichment clients with Phase 2 resilience semantics (hard timeout, initial_only retry 3/1s, Retry-After, 2MB LimitReader, typed error sentinels), plus config-driven D-16 risk classification engine. All 3 TDD tasks completed (RED→GREEN pairs): 6 commits, 12 files created, 27 tests passing. Zero-network httptest fixtures with recorded JSON. Registry data layer produces cited, ordered, honestly-degraded source snapshots feeding verdict assembly in plan 04-07.
 
 ### Next Actions
 
-1. **Immediate**: Execute Phase 1 Plan 01-02 (Config system)
-2. **Then**: Execute Phase 1 Plan 01-03 (Event store core)
-3. **Then**: Execute Phase 1 Plan 01-04 (Subscription & backup)
-4. **Then**: Execute Phase 1 Plan 01-05 (Projections & artifacts)
-5. **Then**: Execute Phase 1 Plan 01-06 (Migration engine)
-6. **Verify**: Run `/gsd-verify-work 1` after execution completes
+1. **Immediate**: Execute Phase 4 Plan 04-07 (Deps verdict cache + checkpoint)
+2. **Then**: Execute Phase 4 Plan 04-08 (Explain symbol mode)
+3. **Then**: Execute Phase 4 Plan 04-09 (Investigate worktree + repro)
+4. **Then**: Execute Phase 4 Plan 04-10 (Investigate bisect + report)
+5. **Verify**: Run `/gsd-verify-work 4` after phase completes
 
 ### Context for Resume
 
@@ -151,3 +157,9 @@ Initialized project with `/gsd-new-project`. Created PROJECT.md, REQUIREMENTS.md
 - [Phase 04]: Structural citation validation demotes unknown-marker sentences wholesale to Inference; marker-less sentences stay in prose — paragraph-level grounding invariant without gutting natural prose
 - [Phase 04]: runExplain collects evidence BEFORE provider selection so not-found targets fail fast without API keys
 - [Phase 04]: Restored corrupted func main() in cmd/m31a/main.go (pre-existing syntax breakage blocked all package-main compiles)
+- [Phase 04 P06]: deps.dev v3 module paths use url.PathEscape preserving nested paths and /v2 suffixes exactly (uppercase GO system enum)
+- [Phase 04 P06]: OSV version normalization adds leading 'v' for Go ecosystem; build-metadata suffix preserved verbatim making distinct queries
+- [Phase 04 P06]: GitHub open_issues_count labeled OpenIssuesAndPRs — includes PRs per Pitfall 6
+- [Phase 04 P06]: Risk classification every TriggeredRule carries Source provenance (osv|depsdev|github) per DEPEND-02
+- [Phase 04 P06]: Release age boundary: >= stale_months classifies high (greater-or-equal convention)
+- [Phase 04 P06]: Case-exact SPDX license allowlist matching — "MIT" matches only "MIT", not "mit"
