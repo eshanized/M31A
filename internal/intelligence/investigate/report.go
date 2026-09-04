@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -391,4 +392,77 @@ func EmitInvestigationCompleted(ctx context.Context, store types.EventStore, pay
 		},
 	}
 	return store.Append(ctx, evt)
+}
+
+// RenderInvestigationText prints the investigation report in human-readable format.
+func RenderInvestigationText(w io.Writer, r *RootCauseReport) error {
+	fmt.Fprintf(w, "Symptom: %s\n\n", r.Symptom)
+
+	fmt.Fprintf(w, "Bisect Range: %s..%s (window: %d commits)\n", r.Baseline, r.Head, r.WindowSize)
+	if len(r.Steps) > 0 {
+		fmt.Fprintln(w, "\nBisect Steps:")
+		fmt.Fprintln(w, "  SHA                                    EXIT  VERDICT")
+		for _, step := range r.Steps {
+			shortSHA := step.SHA
+			if len(shortSHA) > 12 {
+				shortSHA = shortSHA[:12]
+			}
+			fmt.Fprintf(w, "  %-40s %-5d %s\n", shortSHA, step.ExitCode, step.Verdict)
+		}
+	}
+
+	if r.Outcome == "not-reproducible-in-window" {
+		fmt.Fprintln(w, "\nOutcome: not-reproducible-in-window")
+		fmt.Fprintln(w, "The symptom did not reproduce at the window boundaries.")
+		for _, e := range r.Evidence {
+			if strings.HasPrefix(e, "sentinel:") {
+				fmt.Fprintf(w, "  Evidence: %s\n", e)
+			}
+		}
+		return nil
+	}
+
+	if r.Outcome == "attributed" {
+		culpritShort := r.CulpritSHA
+		if len(culpritShort) > 12 {
+			culpritShort = culpritShort[:12]
+		}
+		fmt.Fprintf(w, "\nCulprit: %s [%s]\n", culpritShort, r.CulpritConfidence)
+		if r.CulpritSubject != "" {
+			fmt.Fprintf(w, "Subject: %s\n", r.CulpritSubject)
+		}
+	}
+
+	if r.Mechanism != "" {
+		fmt.Fprintf(w, "\nMechanism [%s]:\n%s\n", r.MechanismConfidence, r.Mechanism)
+	}
+
+	if len(r.AffectedComponents) > 0 {
+		fmt.Fprintln(w, "\nAffected Components:")
+		for _, comp := range r.AffectedComponents {
+			fmt.Fprintf(w, "  %s (depth %d)\n", comp.Name, comp.Depth)
+		}
+	} else {
+		fmt.Fprintln(w, "\nAffected Components: none")
+	}
+
+	if r.FixDirection != "" {
+		fmt.Fprintf(w, "\nRecommended Fix Direction:\n%s\n", r.FixDirection)
+	}
+
+	if len(r.Evidence) > 0 {
+		fmt.Fprintln(w, "\nEvidence:")
+		for _, e := range r.Evidence {
+			fmt.Fprintf(w, "  - %s\n", e)
+		}
+	}
+
+	return nil
+}
+
+// RenderInvestigationJSON marshals the report as JSON.
+func RenderInvestigationJSON(w io.Writer, r *RootCauseReport) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r)
 }

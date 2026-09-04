@@ -571,3 +571,246 @@ func TestEmitInvestigationEvents_NilStore(t *testing.T) {
 		t.Errorf("EmitInvestigationCompleted with nil store should not error: %v", err)
 	}
 }
+
+// TestRenderInvestigationText tests the text renderer output.
+func TestRenderInvestigationText(t *testing.T) {
+	testCases := []struct {
+		name          string
+		report        *RootCauseReport
+		expectStrings []string
+		notExpect     []string
+	}{
+		{
+			name: "attributed with all sections",
+			report: &RootCauseReport{
+				Symptom:            "Test symptom",
+				Baseline:           "abc123",
+				Head:               "def456",
+				WindowSize:         10,
+				Steps: []BisectStep{
+					{SHA: "aaa111", ExitCode: 0, Verdict: "good"},
+					{SHA: "bbb222", ExitCode: 1, Verdict: "bad"},
+				},
+				Outcome:             "attributed",
+				CulpritSHA:          "bbb222",
+				CulpritConfidence:   types.ConfidenceVerified,
+				CulpritSubject:      "BREAK: something broke",
+				Mechanism:           "The culprit changed the logic.",
+				MechanismConfidence: types.ConfidenceLikely,
+				AffectedComponents: []AffectedComponent{
+					{Name: "file1.go", Depth: 1},
+					{Name: "file2.go", Depth: 0},
+				},
+				FixDirection: "Revert the change.",
+				Evidence:     []string{"evidence 1", "evidence 2"},
+			},
+			expectStrings: []string{
+				"Symptom: Test symptom",
+				"Bisect Range: abc123..def456",
+				"Bisect Steps:",
+				"aaa111",
+				"bbb222",
+				"Culprit: bbb222 [verified]",
+				"Subject: BREAK: something broke",
+				"Mechanism [likely]:",
+				"The culprit changed the logic",
+				"Affected Components:",
+				"file1.go (depth 1)",
+				"file2.go (depth 0)",
+				"Recommended Fix Direction:",
+				"Revert the change",
+				"Evidence:",
+				"evidence 1",
+				"evidence 2",
+			},
+		},
+		{
+			name: "not-reproducible-in-window",
+			report: &RootCauseReport{
+				Symptom:    "Test symptom",
+				Baseline:   "abc123",
+				Head:       "def456",
+				WindowSize: 10,
+				Outcome:    "not-reproducible-in-window",
+				Evidence:   []string{"sentinel: checked abc123, observed pass (window size 10)"},
+			},
+			expectStrings: []string{
+				"Symptom: Test symptom",
+				"Bisect Range: abc123..def456",
+				"Outcome: not-reproducible-in-window",
+				"The symptom did not reproduce at the window boundaries",
+				"sentinel: checked abc123, observed pass",
+			},
+			notExpect: []string{
+				"Culprit:",
+				"Mechanism",
+				"Affected Components",
+			},
+		},
+		{
+			name: "attributed with empty affected components",
+			report: &RootCauseReport{
+				Symptom:             "Test symptom",
+				Baseline:            "abc123",
+				Head:                "def456",
+				WindowSize:          10,
+				Outcome:             "attributed",
+				CulpritSHA:          "def456",
+				CulpritConfidence:   types.ConfidenceVerified,
+				MechanismConfidence: types.ConfidenceLikely,
+				AffectedComponents:  []AffectedComponent{},
+				FixDirection:        "Fix it.",
+			},
+			expectStrings: []string{
+				"Affected Components: none",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			err := RenderInvestigationText(&buf, tc.report)
+			if err != nil {
+				t.Fatalf("RenderInvestigationText failed: %v", err)
+			}
+			output := buf.String()
+
+			for _, s := range tc.expectStrings {
+				if !strings.Contains(output, s) {
+					t.Errorf("expected output to contain %q\nGot:\n%s", s, output)
+				}
+			}
+			for _, s := range tc.notExpect {
+				if strings.Contains(output, s) {
+					t.Errorf("expected output to NOT contain %q\nGot:\n%s", s, output)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderInvestigationJSON tests the JSON renderer and round-trip.
+func TestRenderInvestigationJSON(t *testing.T) {
+	report := &RootCauseReport{
+		Symptom:             "Test symptom",
+		Baseline:            "abc123",
+		Head:                "def456",
+		WindowSize:          10,
+		Steps: []BisectStep{
+			{SHA: "aaa111", ExitCode: 0, Verdict: "good"},
+			{SHA: "bbb222", ExitCode: 1, Verdict: "bad"},
+		},
+		Outcome:             "attributed",
+		CulpritSHA:          "bbb222",
+		CulpritConfidence:   types.ConfidenceVerified,
+		CulpritSubject:      "BREAK: something broke",
+		Mechanism:           "The culprit changed the logic.",
+		MechanismConfidence: types.ConfidenceLikely,
+		AffectedComponents: []AffectedComponent{
+			{Name: "file1.go", Depth: 1},
+			{Name: "file2.go", Depth: 0},
+		},
+		FixDirection: "Revert the change.",
+		Evidence:     []string{"evidence 1", "evidence 2"},
+	}
+
+	var buf strings.Builder
+	err := RenderInvestigationJSON(&buf, report)
+	if err != nil {
+		t.Fatalf("RenderInvestigationJSON failed: %v", err)
+	}
+
+	// Round-trip: unmarshal back
+	var parsed RootCauseReport
+	if err := json.Unmarshal([]byte(buf.String()), &parsed); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	// Verify all fields preserved
+	if parsed.Symptom != report.Symptom {
+		t.Errorf("Symptom: expected %q, got %q", report.Symptom, parsed.Symptom)
+	}
+	if parsed.Baseline != report.Baseline {
+		t.Errorf("Baseline: expected %q, got %q", report.Baseline, parsed.Baseline)
+	}
+	if parsed.Head != report.Head {
+		t.Errorf("Head: expected %q, got %q", report.Head, parsed.Head)
+	}
+	if parsed.WindowSize != report.WindowSize {
+		t.Errorf("WindowSize: expected %d, got %d", report.WindowSize, parsed.WindowSize)
+	}
+	if parsed.Outcome != report.Outcome {
+		t.Errorf("Outcome: expected %q, got %q", report.Outcome, parsed.Outcome)
+	}
+	if parsed.CulpritSHA != report.CulpritSHA {
+		t.Errorf("CulpritSHA: expected %q, got %q", report.CulpritSHA, parsed.CulpritSHA)
+	}
+	if parsed.CulpritConfidence != report.CulpritConfidence {
+		t.Errorf("CulpritConfidence: expected %q, got %q", report.CulpritConfidence, parsed.CulpritConfidence)
+	}
+	if parsed.CulpritSubject != report.CulpritSubject {
+		t.Errorf("CulpritSubject: expected %q, got %q", report.CulpritSubject, parsed.CulpritSubject)
+	}
+	if parsed.Mechanism != report.Mechanism {
+		t.Errorf("Mechanism: expected %q, got %q", report.Mechanism, parsed.Mechanism)
+	}
+	if parsed.MechanismConfidence != report.MechanismConfidence {
+		t.Errorf("MechanismConfidence: expected %q, got %q", report.MechanismConfidence, parsed.MechanismConfidence)
+	}
+	if parsed.FixDirection != report.FixDirection {
+		t.Errorf("FixDirection: expected %q, got %q", report.FixDirection, parsed.FixDirection)
+	}
+	if len(parsed.AffectedComponents) != len(report.AffectedComponents) {
+		t.Errorf("AffectedComponents length: expected %d, got %d", len(report.AffectedComponents), len(parsed.AffectedComponents))
+	}
+	for i := range report.AffectedComponents {
+		if parsed.AffectedComponents[i].Name != report.AffectedComponents[i].Name {
+			t.Errorf("AffectedComponents[%d].Name: expected %q, got %q", i, report.AffectedComponents[i].Name, parsed.AffectedComponents[i].Name)
+		}
+		if parsed.AffectedComponents[i].Depth != report.AffectedComponents[i].Depth {
+			t.Errorf("AffectedComponents[%d].Depth: expected %d, got %d", i, report.AffectedComponents[i].Depth, parsed.AffectedComponents[i].Depth)
+		}
+	}
+	if len(parsed.Evidence) != len(report.Evidence) {
+		t.Errorf("Evidence length: expected %d, got %d", len(report.Evidence), len(parsed.Evidence))
+	}
+	for i := range report.Evidence {
+		if parsed.Evidence[i] != report.Evidence[i] {
+			t.Errorf("Evidence[%d]: expected %q, got %q", i, report.Evidence[i], parsed.Evidence[i])
+		}
+	}
+}
+
+// TestRenderInvestigationText_NotReproducibleOmitCulprit tests that not-reproducible
+// output omits culprit and mechanism sections entirely.
+func TestRenderInvestigationText_NotReproducibleOmitCulprit(t *testing.T) {
+	report := &RootCauseReport{
+		Symptom:    "Test symptom",
+		Baseline:   "abc123",
+		Head:       "def456",
+		WindowSize: 10,
+		Outcome:    "not-reproducible-in-window",
+		CulpritSHA: "should-not-appear",
+		Mechanism:  "should-not-appear",
+		Evidence:   []string{"sentinel: checked abc123, observed pass (window size 10)"},
+	}
+
+	var buf strings.Builder
+	err := RenderInvestigationText(&buf, report)
+	if err != nil {
+		t.Fatalf("RenderInvestigationText failed: %v", err)
+	}
+	output := buf.String()
+
+	// Should not contain culprit or mechanism sections
+	if strings.Contains(output, "Culprit:") {
+		t.Error("not-reproducible output should not contain Culprit section")
+	}
+	if strings.Contains(output, "Mechanism") {
+		t.Error("not-reproducible output should not contain Mechanism section")
+	}
+	if strings.Contains(output, "should-not-appear") {
+		t.Error("not-reproducible output should not contain culprit/mechanism data")
+	}
+}
