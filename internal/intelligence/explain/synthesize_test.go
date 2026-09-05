@@ -327,6 +327,87 @@ func TestRenderJSON_RationaleObject(t *testing.T) {
 	}
 }
 
+// TestRationaleVerdictFromSignals verifies that the rationale verdict is
+// computed from deterministic signals independently of ans.Confidence (which
+// reflects LLM synthesis quality). The signals produce "verified" while
+// ans.Confidence is "likely" — rationale should show "verified" while
+// overall confidence remains "likely".
+func TestRationaleVerdictFromSignals(t *testing.T) {
+	// Signals that produce "verified" per VerdictClassFromSignals:
+	// ConsumerCount >= 1 AND HasTestCoverage == true AND HasDeprecationMarkers == false
+	signals := &RationaleSignals{
+		ConsumerCount:         3,
+		LastTouchAgeDays:      30,
+		HasDeprecationMarkers: false,
+		HasTestCoverage:       true,
+		ADRStale:              false,
+		ADRCount:              1,
+	}
+
+	// ans.Confidence is "likely" (simulating few citations / some inference)
+	// but signals produce "verified"
+	ans := &ExplainAnswer{
+		Query:            "Bar",
+		Prose:            "Bar is a function with some inference.",
+		Citations:        []types.Citation{{Marker: 1, Kind: types.EvidenceSource, Ref: "bar.go:1", Note: "func Bar"}},
+		Inference:        []string{"Bar might be used elsewhere."},
+		Confidence:       types.ConfidenceLikely, // synthesis confidence (few citations, has inference)
+		RationaleSignals: signals,
+	}
+
+	pack := types.NewEvidencePack("Bar")
+	pack.Add(types.EvidenceSource, "bar.go:1", "func Bar() {}")
+
+	// Test text renderer: rationale verdict should be "verified" (from signals)
+	// while overall Confidence should be "likely" (from ans.Confidence)
+	var textBuf bytes.Buffer
+	if err := RenderText(&textBuf, ans, pack); err != nil {
+		t.Fatalf("RenderText failed: %v", err)
+	}
+	textOut := textBuf.String()
+	if !strings.Contains(textOut, "Verdict: verified") {
+		t.Errorf("text rationale verdict should be 'verified' from signals, got:\n%s", textOut)
+	}
+	if !strings.Contains(textOut, "Confidence: likely") {
+		t.Errorf("overall confidence should be 'likely' from ans.Confidence, got:\n%s", textOut)
+	}
+
+	// Test JSON renderer: rationale.verdict should be "verified" (from signals)
+	// while top-level confidence should be "likely" (from ans.Confidence)
+	var jsonBuf bytes.Buffer
+	if err := RenderJSON(&jsonBuf, ans); err != nil {
+		t.Fatalf("RenderJSON failed: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, jsonBuf.String())
+	}
+
+	rationale, ok := decoded["rationale"].(map[string]any)
+	if !ok {
+		t.Fatal("rationale object missing from JSON output")
+	}
+
+	if rationale["verdict"] != "verified" {
+		t.Errorf("JSON rationale.verdict = %v, want 'verified' (from signals)", rationale["verdict"])
+	}
+	if decoded["confidence"] != "likely" {
+		t.Errorf("JSON top-level confidence = %v, want 'likely' (from ans.Confidence)", decoded["confidence"])
+	}
+
+	// Verify signal fields are still present
+	if rationale["consumer_count"] != float64(3) {
+		t.Errorf("consumer_count = %v, want 3", rationale["consumer_count"])
+	}
+	if rationale["has_test_coverage"] != true {
+		t.Errorf("has_test_coverage = %v, want true", rationale["has_test_coverage"])
+	}
+	if rationale["has_deprecation_markers"] != false {
+		t.Errorf("has_deprecation_markers = %v, want false", rationale["has_deprecation_markers"])
+	}
+}
+
 // TestExplainEndToEnd_MockPipeline runs collector → pack → single mock
 // synthesis → text render over the seeded repo, asserting the Evidence
 // section, marker presence in prose, and exactly-one call count.
