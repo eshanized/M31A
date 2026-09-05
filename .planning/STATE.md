@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 status: unknown
-stopped_at: Completed 04-07-PLAN.md
-last_updated: "2026-09-05T04:30:00.000Z"
-state_head: 70552f00
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-09-05T06:16:15.710Z"
+state_head: fd1b816a58e428906e73f6897c5996ce8085355c
 progress:
   total_phases: 12
   completed_phases: 2
-  total_plans: 23
-  completed_plans: 23
+  total_plans: 24
+  completed_plans: 24
   percent: 17
 current_phase: 4
 current_phase_name: Intelligence Features
@@ -41,12 +41,12 @@ current_phase_name: Intelligence Features
 | Field | Value |
 |-------|-------|
 | **Current Phase** | 4 — Intelligence Features |
-| **Current Plan** | 04-07 (Deps verdict cache + checkpoint) - COMPLETE |
-| **Phase Status** | Complete (7/7 plans) |
+| **Current Plan** | 04-08 (EXPLAIN-03 rationale verdict gap closure) - COMPLETE |
+| **Phase Status** | Complete (8/8 plans) |
 | **Progress** | ██████████ 100% (23/23 plans) |
 | **Active Workstream** | main |
 | **Git Branch** | main |
-| **Last Commit** | 70552f00 |
+| **Last Commit** | fd1b816a |
 
 ---
 
@@ -74,6 +74,8 @@ current_phase_name: Intelligence Features
 | Phase 04 P05 | 95 min | 3 tasks | 4 files |
 | Phase 04 P06 | 15 min | 3 tasks | 12 files |
 | Phase 04 P07 | 180 min | 3 tasks | 11 files |
+| Phase 04 P08 | 15 min | 2 tasks | 2 files |
+| Phase 04-intelligence-features P08 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -119,6 +121,7 @@ current_phase_name: Intelligence Features
 | D-036 | WritePending persists before blocking | Pending record immediately queryable after WritePending returns | 04-07 |
 | D-037 | TransitiveImpact from Graph.Downstream when index available | Nil graph omits honestly with no error | 04-07 |
 | D-038 | Policy hash = SHA256 over canonical JSON of DepsRisk + DepsPolicy | Computed at CLI level, passed to cache | 04-07 |
+| D-039 | Rationale verdict from signals, confidence from synthesis | VerdictClassFromSignals called in renderers for rationale; ans.Confidence (LLM synthesis quality) preserved as overall explanation confidence | 04-08 |
 
 ### Active Todos
 
@@ -146,13 +149,13 @@ None
 
 ## Session Continuity
 
-**Last session:** 2026-09-05T04:30:00.000Z
-**Stopped at:** Completed 04-07-PLAN.md
+**Last session:** 2026-09-05T06:16:15.616Z
+**Stopped at:** Completed 04-08-PLAN.md
 **Resume file:** None
 
 ### Last Session Summary
 
-Executed Plan 04-07 (Deps verdict cache + checkpoint): Completed verdict assembly with per-source degradation, event-backed VerdictCache keyed on module+version+policyHash (D-15), human checkpoint gate with TTY prompt/headless block/--approve resolution (D-14), and CLI wiring for m31a deps check end-to-end. All 3 tasks completed (2 TDD, 1 TRACER): 5 commits, 11 files created/modified, 32 tests passing. Phase 4 Intelligence Features now complete (7/7 plans).
+Executed Plan 04-08 (EXPLAIN-03 rationale verdict gap closure): Fixed critical gap where Rationale Validity verdict used LLM synthesis confidence instead of deterministic signals verdict from VerdictClassFromSignals. Both RenderText and RenderJSON now call VerdictClassFromSignals for rationale verdict; overall explanation confidence (ans.Confidence) remains LLM synthesis confidence. Added test verifying rationale verdict independence from synthesis confidence. All explain tests pass. Phase 4 Intelligence Features now complete (8/8 plans).
 
 ### Next Actions
 
@@ -204,5 +207,8 @@ Executed Plan 04-07 (Deps verdict cache + checkpoint): Completed verdict assembl
 - [Phase 04 P07]: WritePending persists before blocking; immediate visibility (D-36)
 - [Phase 04 P07]: TransitiveImpact from Graph.Downstream when index available; nil graph omits honestly (D-37)
 - [Phase 04 P07]: Policy hash = SHA256 over canonical JSON of DepsRisk + DepsPolicy (D-38)
+- [Phase 04 P08]: Rationale verdict from signals via VerdictClassFromSignals in renderers; overall confidence remains LLM synthesis confidence (D-39) — closes EXPLAIN-03 gap
 
 EOF
+
+- [Phase 4]: Rationale verdict from signals via VerdictClassFromSignals in renderers; overall confidence remains LLM synthesis confidence (D-39) — closes EXPLAIN-03 gap

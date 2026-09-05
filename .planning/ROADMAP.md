@@ -113,8 +113,11 @@ Plans:
   4. User runs `m31a investigate "panic after commit abc123"` and system bisects candidates, inspects causal changes, constructs hypothesis, runs verification, reports root cause with confidence labeling ("likely cause" vs "verified cause")
   5. User runs `m31a deps check github.com/new/dep` and receives registry existence, project age, releases, maintenance, license, vulnerabilities, transitive impact, API stability, popularity — with human checkpoint required for high-risk findings
 
-**Plans**: 7/7 plans executed
+**Plans**: 8/8 plans executed
 Plans:
+
+- [x] 04-08-PLAN.md
+
 **Wave 1**
 
 - [x] 04-01-PLAN.md — Shared vocabulary: Confidence enum, EvidencePack/Citation types, intelligence events, [intelligence] config with defaults
@@ -273,7 +276,7 @@ Plans:
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
 | 3. Code Intelligence Graph | 4/4 | Complete   | 2026-08-25 |
-| 4. Intelligence Features | 7/7 | In Progress|  |
+| 4. Intelligence Features | 8/8 | In Progress|  |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
 | 7. Tool Registry & Permissions | 0/0 | Not started | - |
