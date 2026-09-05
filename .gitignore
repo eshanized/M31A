@@ -76,4 +76,6 @@ space.txt
 VALIDATION_REPORT.md
 .cache/
 tmp/
+.tmp/
 .gsd/
+.go-build*
