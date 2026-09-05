@@ -46,14 +46,15 @@ func RenderText(w io.Writer, ans *ExplainAnswer, pack *types.EvidencePack) error
 		}
 	}
 
-	// Rationale Validity section (EXPLAIN-03 / D-08)
-	if ans.RationaleSignals != nil {
-		fmt.Fprintf(w, "\nRationale Validity:\n")
-		fmt.Fprintf(w, "  Verdict: %s\n", ans.Confidence)
-		s := ans.RationaleSignals
-		fmt.Fprintf(w, "  Signals: consumers=%d last_touch_age_days=%d deprecation_markers=%v test_coverage=%v adr_stale=%v adr_count=%d\n",
-			s.ConsumerCount, s.LastTouchAgeDays, s.HasDeprecationMarkers, s.HasTestCoverage, s.ADRStale, s.ADRCount)
-	}
+// Rationale Validity section (EXPLAIN-03 / D-08)
+  if ans.RationaleSignals != nil {
+      fmt.Fprintf(w, "\nRationale Validity:\n")
+      verdict := VerdictClassFromSignals(*ans.RationaleSignals)
+      fmt.Fprintf(w, "  Verdict: %s\n", verdict)
+      s := ans.RationaleSignals
+      fmt.Fprintf(w, "  Signals: consumers=%d last_touch_age_days=%d deprecation_markers=%v test_coverage=%v adr_stale=%v adr_count=%d\n",
+          s.ConsumerCount, s.LastTouchAgeDays, s.HasDeprecationMarkers, s.HasTestCoverage, s.ADRStale, s.ADRCount)
+  }
 
 	fmt.Fprintf(w, "\nConfidence: %s\n", ans.Confidence)
 	return nil
@@ -84,21 +85,22 @@ type rationaleJSON struct {
 }
 
 // RenderJSON writes the answer as an indented JSON object carrying query,
-// prose, citations[], inference[], confidence, and rationale per D-04/D-08.
-func RenderJSON(w io.Writer, ans *ExplainAnswer) error {
-	var rationale *rationaleJSON
-	if ans.RationaleSignals != nil {
-		s := ans.RationaleSignals
-		rationale = &rationaleJSON{
-			Verdict:              string(ans.Confidence),
-			ConsumerCount:        s.ConsumerCount,
-			LastTouchAgeDays:     s.LastTouchAgeDays,
-			HasDeprecationMarkers: s.HasDeprecationMarkers,
-			HasTestCoverage:      s.HasTestCoverage,
-			ADRStale:             s.ADRStale,
-			ADRCount:             s.ADRCount,
-		}
-	}
+ // prose, citations[], inference[], confidence, and rationale per D-04/D-08.
+ func RenderJSON(w io.Writer, ans *ExplainAnswer) error {
+ 	var rationale *rationaleJSON
+ 	if ans.RationaleSignals != nil {
+ 		s := ans.RationaleSignals
+ 		verdict := VerdictClassFromSignals(*ans.RationaleSignals)
+ 		rationale = &rationaleJSON{
+ 			Verdict:              string(verdict),
+ 			ConsumerCount:        s.ConsumerCount,
+ 			LastTouchAgeDays:     s.LastTouchAgeDays,
+ 			HasDeprecationMarkers: s.HasDeprecationMarkers,
+ 			HasTestCoverage:      s.HasTestCoverage,
+ 			ADRStale:             s.ADRStale,
+ 			ADRCount:             s.ADRCount,
+ 		}
+ 	}
 
 	out := explainAnswerJSON{
 		Query:      ans.Query,
