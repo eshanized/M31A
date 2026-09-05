@@ -13,7 +13,7 @@
 - [ ] **Phase 1: Foundation — Domain Model & Event Store** - Canonical domain types and SQLite event store as single source of truth
 - [x] **Phase 2: LLM Provider Abstraction** - Provider-agnostic interface with NVIDIA Build adapter, streaming, and reasoning support (completed 2026-08-24)
 - [x] **Phase 3: Code Intelligence Graph** - Language-agnostic symbol graph via Tree-sitter + LSP with incremental indexing (completed 2026-08-25)
-- [ ] **Phase 4: Intelligence Features** - Explain/archaeology, regression intelligence, dependency intelligence
+- [x] **Phase 4: Intelligence Features** - Explain/archaeology, regression intelligence, dependency intelligence (completed 2026-09-05)
 - [ ] **Phase 5: TaskGraph IR & Execution Engine** - Executable plan IR with state machine, Kahn's scheduling, wave execution
 - [ ] **Phase 6: Agent Contracts & Runtime** - 12 specialized agents with explicit contracts and fresh-context handoffs
 - [ ] **Phase 7: Tool Registry & Permissions** - 18 typed tools, capability-based permissions, execution-time evaluation
@@ -276,7 +276,7 @@ Plans:
 | 1. Foundation — Domain Model & Event Store | 5/6 | In Progress|  |
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
 | 3. Code Intelligence Graph | 4/4 | Complete   | 2026-08-25 |
-| 4. Intelligence Features | 8/8 | In Progress|  |
+| 4. Intelligence Features | 8/8 | Complete    | 2026-09-05 |
 | 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
 | 7. Tool Registry & Permissions | 0/0 | Not started | - |
