@@ -153,7 +153,13 @@ Plans:
   4. User runs parallel execution and independent tasks in same wave execute concurrently with correct dependency ordering
   5. User hits a ONE_WAY_DOOR checkpoint and execution blocks until explicit human approval via TUI; checkpoint gate records decision in event log
 
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 05-01-PLAN.md — Tracer: TaskGraphIR, ExecutionState, CompileToIR, Event types, State machine validation
+- [ ] 05-02-PLAN.md — Recovery strategies: RETRY, REPAIR (LLM patch), REPLAN, ESCALATE with provider integration
+- [ ] 05-03-PLAN.md — Scheduler & Runner core: Kahn's algorithm, wave execution, parallelism, lock serialization
+- [ ] 05-04-PLAN.md — Checkpoint gates & TUI messages: EventStore+channel approval, S13/S16 message types
+- [ ] 05-05-PLAN.md — Projection & Resume: TaskGraphExecutionProjection, checkpoint replay, crash recovery
 
 ### Phase 6: Agent Contracts & Runtime
 
@@ -277,7 +283,7 @@ Plans:
 | 2. LLM Provider Abstraction | 6/6 | Complete    | 2026-08-24 |
 | 3. Code Intelligence Graph | 4/4 | Complete   | 2026-08-25 |
 | 4. Intelligence Features | 8/8 | Complete    | 2026-09-05 |
-| 5. TaskGraph IR & Execution Engine | 0/0 | Not started | - |
+| 5. TaskGraph IR & Execution Engine | 0/5 | Planned | - |
 | 6. Agent Contracts & Runtime | 0/0 | Not started | - |
 | 7. Tool Registry & Permissions | 0/0 | Not started | - |
 | 8. Worktree & Git Safety | 0/0 | Not started | - |
