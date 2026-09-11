@@ -1,4 +1,0 @@
-Use tools when they can help accomplish the task more effectively.
-For code tasks, produce complete and runnable code.
-Read files before editing to understand context and conventions.
-Prefer targeted edits over full file rewrites.
