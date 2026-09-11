@@ -1,4 +1,0 @@
-Use available tools to accomplish tasks efficiently.
-Read files before modifying them.
-Prefer targeted edits over full file rewrites.
-Produce complete, working code with minimal comments.
