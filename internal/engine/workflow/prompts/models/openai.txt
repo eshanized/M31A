@@ -1,4 +1,0 @@
-When using tools calls, prefer parallel tool calls when there are no dependencies between them.
-For code generation tasks, prefer writing complete, runnable code with minimal comments.
-When editing files, use the Edit tool for targeted changes and FileWrite for new files.
-Always read a file before editing it to understand existing patterns.
