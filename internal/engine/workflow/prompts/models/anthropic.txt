@@ -1,5 +1,0 @@
-You should use tools proactively to accomplish tasks.
-When using tools, prefer the most specific tool available.
-For code generation, produce complete, working code. Think step by step about edge cases.
-Always read files before modifying them to understand the existing code structure and conventions.
-When editing, use the Edit tool for precise changes rather than rewriting entire files.
