@@ -1,8 +1,0 @@
-{
-  "versionKey": { "system": "GO", "name": "github.com/owner/repo", "version": "v1.2.3" },
-  "publishedAt": "2024-03-01T12:00:00Z",
-  "isDefault": true,
-  "isDeprecated": false,
-  "licenses": ["Apache-2.0"],
-  "advisoryKeys": [{ "id": "GHSA-dddd-eeee-ffff" }]
-}
