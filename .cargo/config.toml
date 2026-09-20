@@ -1,0 +1,17 @@
+# Cargo configuration for resource-constrained environments (minimal CPU & RAM)
+
+[build]
+# Restrict parallel rustc compilation jobs to 2 to prevent out-of-memory errors
+# and CPU starvation across 100+ integration test crates.
+jobs = 2
+
+[env]
+# Restrict test runner execution concurrency to 2 threads across all test binaries.
+RUST_TEST_THREADS = "2"
+CARGO_BUILD_JOBS = "2"
+
+[alias]
+# Convenient aliases for minimal resource test execution
+test-min = "test --lib"
+test-minimal = "test --lib -j 2 -- --test-threads 2"
+test-all-min = "test -j 2 -- --test-threads 2"
