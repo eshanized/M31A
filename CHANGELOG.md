@@ -1,331 +1,125 @@
 # Changelog
 
-All notable changes to M31 Autonomous will be documented in this file.
+All notable changes to M31A (M31 Autonomous) are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Released]
+---
 
-## [1.7.1] - 2026-08-02
+## [Unreleased]
+
+---
+
+## [0.1.0] — 2026-09-25
 
 ### Added
-- **headless**: Implement `--goal` headless mode with full workflow execution
-- **bash**: Add process-level sandboxing to Bash tool execution
-- **git**: Implement dedicated Git tool with structured operations
-- **bash**: Add `workdir` parameter to Bash tool
-- **settings**: Add input validation to settings/config editors
-- **settings**: Unify settings systems with clear distinction
-- **execution**: Add pause/resume to execution loop
-- **workflow**: Add phase transition confirmation screens
-- **status**: Add running cost/time display
-- **permissions**: Implement persistent permission saving
-- **test**: Add regression tests for SwitchTo() timing fix
 
-### Fixed
-- **tui**: Fix SwitchTo() to set activeID unconditionally (routing fix)
-- **ci**: Resolve Windows build, security advisories, and disk quota
-- **ci**: Resolve all pre-existing test failures
-- **ci**: Resolve lint errors and test timeout
-- **ci**: Resolve deprecated APIs, test failures, and security vulnerability
-- **streaming**: Correct conditional block and message sending logic
-- **tui**: Fix decisions view to use cached snapshot via Update flow
-- **tokens**: Correct token estimation drift for non-OpenAI model families
-- **provider**: Eliminate sync.Map type assertion race in capability detection
-- **tui**: Move chatHistoryModel message setting from View to Update path
-- **build**: Fix installer URL construction to match goreleaser output
-- **bash**: Remove `$\(`, `${`, and backtick from bash obfuscation blocklist
-- **security**: Upgrade goldmark to v1.8.4 to resolve GO-2026-5320 XSS
-- **compat**: Replace deprecated os.SEEK_SET with io.SeekStart
-- **test**: Initialize session.Manager properly and cancel context in tests
-- **test**: Remove stale test references to deleted sentinel errors
-- **cleanup**: Remove dead exec constants, consolidate IP filter, Zen retry, FallbackPriority validation
-- **cleanup**: Add WorkflowEvent methods, remove dead constants/errors/placeholders
-- **config**: Fix permissions, config help, knownConfigKeys
-- **rollback**: Wire rollback.SoftReset into bisect failure path
-- **config**: Complete config merge for all missing fields
+**Runtime Kernel (L0–L2)**
+- Single-crate Rust-native autonomous runtime with zero foreign runtime dependencies
+- Domain-typed kernel IDs (`MissionId`, `TaskId`, `SessionId`, `AgentId`, `CheckpointId`, `ArtifactId`)
+- Bounded retry policy (no infinite retry loops)
+- Broadcast event bus with typed `EventEnvelope` and filter-based subscriptions
+- Immutable content-addressed artifact store with SHA-256 integrity verification
+- SQLite-backed durable persistence with 19 incremental migration files
+- Two-phase atomic checkpoints with `CheckpointIntegrityValidator` (SHA-256 manifest verification)
+- Startup crash scanner and automatic recovery classification
+- `StreamingQuotaWriter` artifact quota enforcement (per-artifact and cumulative)
 
-### Changed
-- **refactor**: Remove unused branching_strategy config
-- **build**: Redirect Go temp files to user cache directory
-- **cleanup**: Remove .gitignore file for M31A session data
-- **refactor**: Remove dead production methods, interfaces, and constants (W44-W50)
-- **refactor**: Remove dead test utilities, mocks, fixtures, and re-exports (W33-W43)
-- **refactor**: Remove deprecated theme functions, buffer pool utils, unused re-exports
-- **tui**: Migrate Settings, Config, Discuss, Bisect, Dashboard, Plan, GoalInput, FileExplorer, GhostPicker, GhostOutput, PhaseModelPicker screens to Screenable interface and router
-- **router**: Finalize migration of several screens and remove ModelSelector router registration
-- **refactor**: Split large files — app_input.go, transition.go, helpers.go, firstrun_view.go, webfetch.go, execute.go, loader.go, app_view.go, sidebar_model.go
-- **arch**: Move pkg/* to internal/* and rewrite imports
-- **refactor**: Remove internal/types alias layer
-- **deps**: Bump golang.org/x/sys from 0.46.0 to 0.47.0
-- **deps**: Bump golang.org/x/sync from 0.21.0 to 0.22.0
-- **ci**: Update Go setup action to v7
+**Security / Policy (L1)**
+- 11-stage policy gate with `ALLOW` / `DENY` / `ASK` / `ESCALATE` decision matrix
+- 9-layer precedence model for policy resolution
+- `SecretRedactor` with 4-tier deterministic scrubbing pipeline (API keys, JWTs, private keys, AWS credentials, generic patterns `ghp_*`, `sk-*`, `nvapi-*`)
+- `TrustEnvelope::wrap_untrusted` with SHA-256 integrity digest for prompt injection defense
+- `ApprovalCoordinator` fail-closed ASK semantics (non-interactive auto-deny)
+- Path canonicalization with symlink escape prevention
+- `PluginToolAdapter` policy subordination for all plugin tool dispatches
+- Terminal escape sanitization (`sanitize_terminal_text`) before UI render
+- `ProcessTreeController` with isolated process groups and `SIGTERM → SIGKILL` escalation
+- Multi-tier process confinement: cgroups v2 (when available), POSIX rlimits, watchdog supervision
+- ASVS L1 coverage for all 11 documented threat vectors
+
+**Capabilities / Tools (L2)**
+- 28 core tools with typed parameter schemas and execution risk classification
+- `LocalFileSystemProvider` with workspace-root-enforced access control
+- Direct `execve`-based subprocess spawning (no shell interpolation)
+- `EnvironmentBuilder` stripping dangerous loader hooks and credential variables
+- Process group isolation (`setpgid`) for clean cancellation
+
+**Intelligence / Context (L3)**
+- NVIDIA NIM provider integration with SSE streaming
+- `SecretRedactor` applied before all model-boundary data persistence
+- 7-layer prompt composition with MiniJinja template engine
+- Token-counted context window management with tiktoken-rs
+- Task-aware memory retrieval (Phase 25 engineering memory types)
+
+**Agent Coordination (L4)**
+- 8 canonical agent roles: `planner`, `researcher`, `architect`, `implementer`, `reviewer`, `verifier`, `diagnostician`, `integrator`
+- Role-specific agent state machines with bounded step budget enforcement
+- Anti-fake-diff review: detects `todo!()` / `unimplemented!()` patterns in changes
+- Premature-completion rejection enforced before task state transitions
+
+**Planning / DAG (L5)**
+- Directed acyclic task graph with petgraph-backed dependency resolution
+- Candidate plan generation with `PlanQualityMetrics`
+- Differential DAG replanner on crash recovery
+- `WorkflowEngine` with full genesis discovery/research/planning/synthesis pipeline
+
+**Verification / Recovery (L7)**
+- Multi-tier verification evidence requirement before mission completion
+- 15 failure classification categories for structured recovery routing
+- Closed-loop recovery with scored recovery strategies (Phase 24)
+- `CheckpointIntegrityValidator`: `Healthy`, `Corrupt`, `Ambiguous`, `Missing` states
+
+**Autonomy / Mission Controller (L8)**
+- 5 autonomy modes with sliding-window loop detector
+- 10-dimensional hard resource budget model
+- Two-phase budget reservation per tool action
+- Mission state machine: `Pending → Running → [Paused | Completing | Failed | Cancelled]`
+
+**CLI / TUI (L9)**
+- Full `clap`-derive CLI with machine-readable `--output json` and `--output stream-json` modes
+- All subcommands: `session`, `mission`, `task`, `agent`, `capability`, `policy`, `checkpoint`, `artifact`, `doctor`, `telemetry`, `config`, `eval`, `tui`, `version`
+- Standardized exit codes: 0 success, 1 verification failure, 2 policy violation, 3 budget exhaustion, 4 crash/infrastructure, 5 configuration error
+- TUI cockpit with Ratatui 0.30: conversation timeline, mission overview, task DAG, agent swarm, git attribution, verification surface, tool execution view, approval modal, command palette, replay controller
+- `TerminalGuard` RAII: guaranteed terminal raw-mode and alternate-screen restoration on all exit paths (normal, error, Ctrl+C, SIGTERM)
+- First-run setup wizard with workspace onboarding
+- Interactive session runner (`m31a session new`)
+
+**Observability**
+- SQLite compact event index + append-only NDJSON execution stream
+- Structured telemetry with `TelemetryCollector`, correlation IDs, and secret redaction before persistence
+- Doctor command with structured health-check probes and JSON output mode
+
+**Repository Intelligence**
+- Repository scanner with change authority tracking (Phase 23)
+- Context engine with adaptive indexing
+- Engineering memory with task-aware retrieval (Phase 25)
+
+**Testing**
+- Unit tests for all stateful subsystems
+- Integration tests: golden workflow, configuration, interactive session, genesis pipeline, TUI scenarios
+- Security hardening suite (`tests/phase_12_security_hardening.rs`): all 11 threat vectors
+- Property-based tests for policy and budget enforcement
+- Architecture contract tests
+- SQLite migration regression tests
+- Workflow persistence tests
+- Prompt contract deterministic hash tests
 
 ### Security
-- **xss**: Upgrade goldmark to v1.8.4 to resolve GO-2026-5320
 
-## [1.7.0] - 2026-07-06
+- ASVS L1 compliance across all 11 threat vectors
+- Zero secrets committed: `.env` and `.m31a/credentials.json` gitignored from initial commit
+- `SecretRedactor` pattern coverage: `nvapi-*`, `ghp_*`, `sk-*`, `AKIA*`, Bearer JWTs, RSA private keys
+- Fail-closed ASK semantics in non-interactive contexts
+- All tool execution subordinate to policy gate (no bypass paths)
 
-### Added
-- **engine**: Extract PhaseCoordinator, StateMachine, WorkflowCache, ContextBuilder, CostTracker, and PromptBuilder from monolithic Engine for cleaner separation of concerns
-- **retry**: Centralized retry logic with `RetryWithBackoff` and `RetryWithResult` utilities
-- **helpers**: Performance optimization, concurrency review, and memory optimization helpers
-- **logging**: Audit logging and standardized error handling across the codebase
-- **tui**: Show sidebar by default on wide terminals, wire breadcrumb navigation, and standardize keyboard behavior
-- **a11y**: Visible focus indicators, text-based health status, ANSI SGR fallbacks, and expanded screen reader announcements
-- **streaming**: Lightweight streaming markdown parser, viewport virtualization, resize debounce, and increased render rate to 10fps
-- **ux**: Quick mode, `/help getting-started`, `/skip` commands, and getting-started tour for first-time users
-- **toast**: Improved toast system with visual consistency, permission modal UX, and diff viewer improvements
-- **status**: Workflow phase progress indicator in status bar
-- **keyboard**: Keyboard-accessible empty states, help screen and command palette sync with actual keybindings
-- **config**: Extend config structs with hardcoded refactoring fields, threat model validations, and wire config values into consumer code with constant fallbacks
-- **provider**: Configurable fallback priority, health check timeout, registration order, and model capability config overrides
-- **prompts**: Prompt loader with 4-level override mechanism and dynamic limit injection
-- **tools**: Config-based dangerous command extensions, subagent profile support, narrative template overrides, and compaction template config
-- **ui**: UI externalization — logo, welcome, symbols, theme config, and website template config
-- **tokens**: Multi-provider token estimation and runtime capability detection
-- **components**: Empty state templates, permission descriptions, and narrative engine for TUI storytelling
+---
 
-### Fixed
-- **safety**: Use safe comma-ok type assertions on sync.Map values and add length checks before indexing DNS resolution results
-- **race**: Fix DNS cache TOCTOU, permissions double decrement, SetCollector data race, and restartServer TOCTOU race
-- **errors**: Capture `TruncateMessagesForLLM` truncation indicator and check errors from `git diff` and `json.MarshalIndent`
-- **ssrf**: Add SSRF protection to HTTPCheck and safe comma-ok type assertions in DNS cache
-- **concurrency**: Prevent goroutine leak in `Coordinator.awaitDone`, add mutex protection to WorkflowCache dynamic context operations, and use safe type assertions in `findFreePort`, `WebFetch`, and `ApprovePermission`
-- **shutdown**: Add graceful shutdown to workflow engine, ensure AgentLoop goroutines terminate cleanly on cancellation, and add bounded timeout to SubagentManager shutdown
-- **security**: Add `sanitizeService` for keychain path traversal prevention and harden bash command injection detection with normalization
-- **perf**: Bound gitignore cache size with LRU eviction and replace O(n²) bubble sort with `sort.Slice` in DNS cache eviction
-- **websearch**: Correct IP filtering logic for private and reserved IPs
-- **config**: Apply defaults before overlaying toast config overrides and remove unused constants
-
-### Changed
-- **refactor**: Rewrite `Update()` as thin dispatcher with extracted helper methods
-- **refactor**: Wire PhaseCoordinator into Engine lifecycle and extract 30 helper methods from `app_update.go` into 5 files
-- **refactor**: Remove dead code, fix CJK character width, split config model, and remove deprecated theme modes
-- **refactor**: Remove reflection-based config merge, simplify slice merge logic, and clean up unused map merge functions
-- **refactor**: Simplify cascading strategies in edit with confidence scoring
-- **refactor**: Unify intent classification with retry utility
-- **tui**: Simplify and clean internal TUI code, enhance components and screens
-- **core**: Remove dead code and unused components
-
-### Security
-- **ssrf**: Add SSRF protection to HTTPCheck (H10)
-- **path**: Add `sanitizeService` for keychain path traversal prevention
-- **injection**: Harden bash command injection detection with normalization
-
-### Testing
-- Add tests for WebFetch TLS connection, permissions invalid type assertion, DNS cache high-contention, bash obfuscation detection, and WorkflowCache concurrent dynamic context
-- Add TUI test coverage (commands, a11y, components, layout, streaming, theme, tuitypes)
-- Add tools and workflow coverage boost tests to reach 75%
-- Add tests for extracted helper methods and integration tests for PhaseCoordinator wiring
-
-## [1.6.1] - 2026-06-30
+## [0.0.0] — 2024-09
 
 ### Added
-- **config**: `intent_classify_timeout_secs` option to configure intent classification timeout per provider (default 25s)
+- Initial project genesis: single-crate architecture, kernel, and phase planning
 
-### Fixed
-- **workflow**: Intent classification timeout with NVIDIA NIM increased from 10s to 25s and made configurable
-- **workflow**: Added retry with exponential backoff (3 attempts, 2s/4s delays) for intent classification LLM calls
-- **keychain**: Cached keychain availability to suppress repeated fallback warnings on every provider initialization
-
-## [1.6.0] - 2026-06-30
-
-### Added
-- **build**: Embed `Commit`, `Date`, and `GoVersion` in release binaries via ldflags for debuggable release artifacts
-- **build**: `-trimpath` flag for reproducible builds (strips absolute source paths from binaries)
-- **changelog**: Explicit changelog filter in GoReleaser config excluding docs, test, chore, ci, build, and merge commits
-
-### Changed
-- **build**: `m31a --version` now outputs full metadata: `m31a v1.6.0 (commit, date) os/arch (Go version)`
-- **build**: Makefile uses dedicated `BUILDFLAGS` variable for compiler flags separate from linker flags
-
-## [1.5.0] - 2026-06-29
-
-### Added
-- **Decision transparency**: In-memory decision logger with channel-backed buffered writes, ring buffer overflow, and redaction of sensitive patterns (API keys, emails, IPs)
-- **Project knowledge**: In-memory knowledge store tracking conventions, patterns, facts, and per-file intelligence with growth caps and LLM context injection via DynamicContextRegistry
-- **Checkpoint resume**: Basic checkpoint data persistence (phase, goal, plan version, decisions) with disk-backed session checkpoints
-- **Self-heal explanation**: HealReport struct recording error type, strategy, files used, and duration for each self-healing attempt
-- **File-level selective rollback**: ChangedFiles, FileDiff, and RevertFiles for reverting individual files to a previous commit state
-- **Decision log browser**: /decisions screen for browsing the in-memory decision log
-
-### Fixed
-- **provider**: Context-exceeded detection for "input...exceeds" provider error patterns (was using literal substring match on regex-like pattern)
-- **workflow**: Data race in concurrent task tool call counting (totalToolCalls/groupToolCalls modified without synchronization)
-- **workflow**: Phase Transition() now protected by mutex to prevent interleaved checkpoint saves
-- **session**: UpdateWorkflowState and RenameSession now acquire file lock to prevent concurrent write corruption
-- **ledger**: Cross-process file locking via flock to prevent LEDGER.md corruption from multiple M31A instances
-- **ledger**: New() now returns nil on directory creation failure instead of silently producing a broken ledger
-- **workflow**: findFreePort TOCTOU race mitigated with retry-and-verify loop
-
-### Changed
-- PhaseRuntime uses Verify model config slot (was shared without explicit mapping)
-- WorkflowState struct extracted from Engine to group mutable session state
-
-## [1.4.0] - 2026-06-26
-
-### Added
-- **TODO cancelled status**: New `cancelled` state for TODO items with refactored file writing
-- **TODO sync**: Auto-sync TODO.md from task runner state
-- **NVIDIA provider**: NVIDIA NIM provider support in TUI command registry
-- **CITATION.cff**: Citation file, instructions, and arXiv paper link
-- **Security policy**: GitHub community health security policy
-
-### Fixed
-- **security**: Enhanced input validation and resource usage limits
-- **workflow**: Enforce FileWrite tool to prevent code-as-text output
-- **main**: Improved signal handling and config checks
-
-### Changed
-- **provider**: Centralized health check and error handling in BaseClient
-- **tui**: Unified UI components and improved dashboard metrics display
-- **tui**: Updated screen navigation order and improved REPL screen switch
-- **website**: Updated Next.js build instructions and UI components
-- **docs(joss)**: Added required sections for JOSS submission
-- **test**: Added extensive unit tests for codeintel, config, and context packages
-- **chore**: Updated wiki submodule reference, removed obsolete files
-
-## [1.3.0] - 2026-06-24
-
-### Added
-- **EFIE backend**: Enhanced File Intelligence Engine with graph analysis, bloom filters, centrality scoring, community detection, and polyglot parsers
-- **EFIE integration**: `USE_EFIE` environment toggle for code intelligence backend selection
-- **Runtime verification phase**: Dev server lifecycle management with smoke tests and HTTP endpoint validation
-- **Home screen**: New UI with logo, prompt input, and shortcut tips
-- **Subagent profiles**: Built-in agent profiles with profile resolution, allowlist/denylist filtering, and native streaming tool calls
-- **Session coordinator**: Concurrent session control with file locking to prevent corruption
-- **Session compaction**: Automatic context compaction with serialization and template-based summarization
-- **Dynamic context registry**: Environment and git sources for context injection
-- **Retry policy**: Exponential backoff with error classification
-- **Skill discovery**: Package for loading and registering skills as slash commands
-- **Persistent permissions**: Last-match-wins rule evaluation for tool permissions
-- **Output store**: Bounding tool output size to prevent context overflow
-- **DevServer tool**: Managing dev servers with process group cleanup (Unix/Windows)
-- **HTTPCheck tool**: Validating HTTP endpoints during runtime phase
-- **Diff summaries**: Workflow integration for change summarization
-- **Agent switching**: Dynamic agent profile switching during workflow execution
-- **Compaction config**: Instructions, skills, and compaction configuration sections
-- **Website template**: Embedded Next.js website template with shadcn/ui components
-- **Post-ship validation**: Content validation, placeholder detection, and HTML checks
-- **Model prompt templates**: Per-provider prompt customization
-- **Runtime UI**: RuntimeModel, runtime view renderer, and sidebar pipeline phase
-
-### Fixed
-- **errcheck**: Wrap `os.RemoveAll` return value in `engine.go`
-- **unused**: Remove `nCommunities`, `maxCentrality` fields, `min` function, and `walkDir` function
-- **layout**: Fix modal overlay ANSI code corruption in `RenderModalOverlay`
-- **workflow**: Fix intent classify stream EOF handling
-- **workflow**: Optimize code intel invalidation and add quality gate re-check after heal
-- **workflow**: Reset heal counter for verify phase and clean bisect state
-- **config**: Warn on unknown top-level config keys
-- **provider**: Add model-not-found detection for unavailable/deprecated models
-- **tui**: Update dimension handling and permission tick logic
-
-### Changed
-- **perf**: Parallelize `BuildGraph` file parsing with worker pool
-- **refactor**: Unify shell command execution across platforms
-- **refactor**: Clean up code and fix error handling in codeintel
-- **config**: Enable all quality features by default
-- **workflow**: Improve greenfield project complexity classification and project type detection
-- **ci**: Bump `actions/checkout` from v4 to v7
-
-## [1.2.0] - 2026-06-21
-
-### Added
-- LLM-based intent classification for REPL input routing
-- Comprehensive session observability pipeline (metrics)
-- Chunked plan generation with outline and wave expansion
-- Pre-plan research step and pre-ship checklist with memory flock
-- Deep project analysis and environment preflight
-- Execute preflight, quality gates, and loop detection
-- Discuss quality checking and completeness scoring
-- Plan checker with revision loop and coverage gates
-- Structured verification report generation
-- Prompt templates and extended PromptRegistry
-- Workflow enhancement feature flags and event message types
-- Auto-compression for context window overflow
-- Context overflow detection patterns for providers
-- Context usage sparkline in header context meter
-- Visual screen transitions with slide-left/right and cross-fade effects
-- Improved toast notification styling with rounded cards and depth-based shadows
-- Incremental render diff engine using ANSI cursor positioning
-- Flex box model with row/column solver, card renderer, modal overlay, and Z-order stack compositing
-- Base Context/Component interface, fuzzy search, focus ring, empty state, shortcut tips, and virtual viewport
-- High-contrast accessibility theme and StyleCache for pre-computed lipgloss styles
-- Screen reader announcement helpers using iTerm2 protocol
-- `reduced_motion` accessibility option in UIConfig
-- Subagent depth limit (`MaxAgentDepth=2`)
-- Subagent token budget enforcement and workspace context in system prompt
-- Subagent orphaned worktree directory cleanup
-- Dispatcher concurrency limit and per-risk-level rate limits
-- `ToolError` type for structured error returns with hints
-- FileMove context cancellation check
-- FileList sorting control
-- Glob file type filtering
-- Grep context lines and fixed-string search
-- FileRead line-level offset/limit for efficient partial reads
-- Edit 7-strategy cascade, replace-all, and collision-safe backups
-- Bash dangerous command blocklist for defense-in-depth
-- WebSearch DNS cache to prevent TOCTOU rebinding
-- CodeComplexity polyglot support (multiple languages)
-
-### Fixed
-- Drain stale responses from channels on dispatcher stop
-- Short-circuit fallback search on first live provider
-- Use staleTTL for cache expiry check
-- Recursively skip empty SSE events
-- Fix `/flush` to use `tea.ClearScreen` instead of screen switch
-- Log subagent cleanup errors and fix transition tick to use configurable FPS
-
-### Changed
-- Unified file locking abstraction for cross-platform support
-- Optimize import graph and symbol indexing
-- Replace `WriteString` with `fmt.Fprintf` in metrics and workflow
-- Auto-truncation to preflight context check
-- Remove redundant agent tool progress tracking from sidebar
-- Extract `forwardMsgToScreen` helper
-- Consolidate subagent budget exhaustion messages
-- Update README workflow, features, and docs for major enhancements
-
-## [1.1.0] - 2026-06-18
-
-### Fixed
-- **errcheck**: Wrap `f.Close()` return value in `codecomplexity.go`
-- **govet**: Resolve variable shadowing in `execute.go` (renamed inner `err` to `unmarshalErr`)
-- **ineffassign**: Remove dead `w` assignment in `chathistory_view.go`
-- **ineffassign**: Remove dead `w` assignment in `helpers.go`
-- **staticcheck**: Simplify redundant type assertion in `interface_test.go`
-- **staticcheck**: Simplify redundant type assertion in `tooldefs_test.go` and remove unused import
-- **staticcheck**: Fill empty branch with assertion in `commands_all_test.go`
-- **staticcheck**: Simplify redundant type assertion in `git_test.go`
-
-### Removed
-- Remove unused `renderPlaceholder` function from `helpers.go`
-- Remove unused `renderContextMeter` duplicate from `repl_view.go`
-- Remove unused `phaseElapsed` field from `SidebarModel`
-
-### Added
-- **WP-A03**: GitClient interface in internal/types/ for testability
-- **WP-D02**: Package-level doc.go files for all 7 public packages
-- **WP-D03**: This CHANGELOG.md
-- **WP-M08**: Documented all unsafe.Pointer usages in Windows keychain
-- **WP-P02**: Configurable session list cache TTL via ManagerOpts
-- **WP-S01**: Comprehensive test suite for API key redaction (14 subtests)
-- **WP-S03**: Expanded pass CLI regex to allow digits and hyphens
-- **WP-L02**: Centralized timeout constants (DefaultSessionCacheTTL, DefaultVerifyTimeout, DefaultFetchModelsTimeout)
-- **WP-L08**: Added documentation to firstrunpreview dev tool
-- NVIDIA NIM provider integration
-- Command palette with fuzzy search
-- Chat history model
-- Code complexity analysis tool (`/complexity`)
-- Sidebar todo mode, phase pipeline, and metrics tracking
-- Mouse wheel support across all viewports
-- Factory reset flow via `/reset` command
-- New slash commands (exit, chat, flush, search, about, keychain, dream)
-- Panic recovery across all goroutines
-- Thread-safety fixes for caches and maps
-- Provider error detection for NVIDIA/OpenAI-compatible streams
-- Agent progress tracking and TTL-based file watcher
-
-### Changed
-- **WP-D01**: Updated AGENTS.md package layout to reflect main.go reality
+[Unreleased]: https://github.com/TIVerse/M31A/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/TIVerse/M31A/releases/tag/v0.1.0
