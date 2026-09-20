@@ -1,0 +1,70 @@
+[package]
+name = "m31a"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TIVerse/M31A"
+readme = "README.md"
+keywords = ["autonomous", "agent", "cli", "tui", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+uuid = { version = "1.26.0", features = ["v7", "serde"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "migrate", "uuid"] }
+tokio = { version = "1.51", features = ["full"] }
+tokio-util = { version = "0.7.19", features = ["rt"] }
+thiserror = "2"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "6"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+futures = "0.3"
+schemars = { version = "1.2", features = ["uuid1", "chrono04"] }
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+eventsource-stream = "0.2.3"
+syn = { version = "2.0", features = ["full", "visit"] }
+petgraph = { version = "0.8", features = ["serde-1"] }
+toml = "0.8"
+regex = "1.11"
+tiktoken-rs = "0.6"
+tracing = "0.1"
+libc = "0.2"
+tempfile = "3"
+clap = { version = "4.5", features = ["derive", "env"] }
+ratatui = "0.30"
+crossterm = "0.29"
+fuzzy-matcher = "0.3.7"
+strip-ansi-escapes = "0.2.1"
+semver = { version = "1", features = ["serde"] }
+minijinja = { version = "2", default-features = false, features = ["serde"] }
+
+[dev-dependencies]
+
+[features]
+default = []
+live-model-tests = []
+
+[[test]]
+name = "live_model_e2e"
+required-features = ["live-model-tests"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+
+[profile.test]
+opt-level = 0
+# Line tables only: slashes debug symbol footprint by ~85-90% to avoid memory bloat across 100+ test binaries
+debug = 1
+# Disable incremental compilation to eliminate disk I/O thrashing and memory overhead
+incremental = false
