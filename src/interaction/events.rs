@@ -1,0 +1,243 @@
+//! User-facing event stream abstraction decoupling CLI/TUI from internal scheduling (PRD §01, CLI-02).
+//!
+//! Maps internal domain events and model/tool executions into structured, human- and machine-readable
+//! interaction events without scheduler coupling.
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{MissionId, SessionId};
+
+/// User-facing interaction event stream item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InteractionEvent {
+    /// Interactive session initialized or attached.
+    SessionStarted { session_id: SessionId },
+
+    /// Session resumed from disk.
+    SessionResumed { session_id: SessionId },
+
+    /// Natural-language model reasoning or activity indicator.
+    ModelActivity { text: String },
+
+    /// An autonomous agent initiated a tool execution.
+    ToolStarted {
+        call_id: String,
+        tool_name: String,
+        parameters: serde_json::Value,
+    },
+
+    /// An autonomous tool execution concluded with output.
+    ToolCompleted {
+        call_id: String,
+        tool_name: String,
+        success: bool,
+        output_preview: String,
+    },
+
+    /// Model streaming assistant output text to the user.
+    AssistantOutput { text: String },
+
+    /// Independent verification gate passed successfully.
+    VerificationPassed { summary: String },
+
+    /// Independent verification gate failed.
+    VerificationFailed { summary: String },
+
+    /// Operator approval requested due to policy evaluation.
+    ApprovalRequested {
+        request_id: String,
+        tool_name: String,
+        details: String,
+    },
+
+    /// Operator approval resolved.
+    ApprovalResolved { request_id: String, approved: bool },
+
+    /// Mission status changed (e.g. Started, Paused, Completed, Failed).
+    MissionStateChanged {
+        mission_id: MissionId,
+        status: String,
+    },
+
+    /// Informational output or command result text.
+    CommandOutput { text: String },
+
+    /// An error occurred during interaction or execution.
+    Error { message: String },
+
+    /// Autonomous task or mission reached truthful verified completion.
+    Completion { summary: String },
+
+    /// Governed lifecycle needs discovery answers before planning.
+    DiscoveryRequired {
+        session_id: String,
+        questions: Vec<String>,
+    },
+
+    /// Candidate plan revision ready for explicit operator review.
+    PlanForReview {
+        session_id: String,
+        revision: u32,
+        plan_id: String,
+        objective: String,
+        task_count: usize,
+        content_hash: Option<String>,
+    },
+
+    /// Candidate task set ready for explicit operator review.
+    TasksForReview {
+        session_id: String,
+        plan_revision: u32,
+        task_revision: u32,
+        task_count: usize,
+        content_hash: Option<String>,
+    },
+
+    /// Plan and tasks accepted; explicit execution authorization requested.
+    AuthorizationRequired {
+        session_id: String,
+        plan_revision: u32,
+        task_revision: u32,
+        message: String,
+    },
+
+    /// Operator authorized execution of exact artifact revisions.
+    ExecutionReady {
+        session_id: String,
+        authorization_id: String,
+        plan_revision: u32,
+        task_revision: u32,
+    },
+
+    /// Governed lifecycle reached a terminal stage.
+    LifecycleTerminated {
+        session_id: String,
+        stage: String,
+        reason: String,
+    },
+}
+
+impl InteractionEvent {
+    /// Format event for clean human-readable CLI display.
+    pub fn format_human(&self) -> String {
+        match self {
+            Self::SessionStarted { session_id } => {
+                format!("● Session started: {session_id}")
+            }
+            Self::SessionResumed { session_id } => {
+                format!("● Session resumed: {session_id}")
+            }
+            Self::ModelActivity { text } => {
+                format!("⋯ Model: {text}")
+            }
+            Self::ToolStarted {
+                tool_name,
+                parameters,
+                ..
+            } => {
+                let params_str = serde_json::to_string(parameters).unwrap_or_default();
+                let preview = if params_str.len() > 100 {
+                    format!("{}...", &params_str[..100])
+                } else {
+                    params_str
+                };
+                format!("⚙ Running tool `{tool_name}`: {preview}")
+            }
+            Self::ToolCompleted {
+                tool_name,
+                success,
+                output_preview,
+                ..
+            } => {
+                let status_icon = if *success { "✔" } else { "✘" };
+                let preview = if output_preview.len() > 140 {
+                    format!("{}...", &output_preview[..140])
+                } else {
+                    output_preview.clone()
+                };
+                format!("{status_icon} Tool `{tool_name}` finished: {preview}")
+            }
+            Self::AssistantOutput { text } => text.clone(),
+            Self::VerificationPassed { summary } => {
+                format!("✔ Verification passed: {summary}")
+            }
+            Self::VerificationFailed { summary } => {
+                format!("✘ Verification failed: {summary}")
+            }
+            Self::ApprovalRequested {
+                tool_name, details, ..
+            } => {
+                format!("⚠ Policy check required for `{tool_name}`: {details}")
+            }
+            Self::ApprovalResolved { approved, .. } => {
+                if *approved {
+                    "✔ Action approved by operator".to_string()
+                } else {
+                    "✘ Action denied by operator".to_string()
+                }
+            }
+            Self::MissionStateChanged { status, .. } => {
+                format!("◆ Mission state: {status}")
+            }
+            Self::CommandOutput { text } => text.clone(),
+            Self::Error { message } => {
+                format!("✘ Error: {message}")
+            }
+            Self::Completion { summary } => {
+                format!("🎉 Mission completed: {summary}")
+            }
+            Self::DiscoveryRequired {
+                session_id,
+                questions,
+            } => {
+                format!(
+                    "◆ Discovery required (session {session_id}): {} question(s): {}",
+                    questions.len(),
+                    questions.join("; ")
+                )
+            }
+            Self::PlanForReview {
+                revision,
+                plan_id,
+                objective,
+                ..
+            } => {
+                format!("[PLAN REVIEW] Revision {revision} (Plan ID: {plan_id}): {objective}")
+            }
+            Self::TasksForReview {
+                plan_revision,
+                task_revision,
+                task_count,
+                ..
+            } => {
+                format!(
+                    "[TASK REVIEW] Plan rev {plan_revision}, task rev {task_revision}: {task_count} tasks"
+                )
+            }
+            Self::AuthorizationRequired {
+                plan_revision,
+                task_revision,
+                message,
+                ..
+            } => {
+                format!(
+                    "[EXECUTION AUTHORIZATION REQUIRED] Plan rev {plan_revision}, task rev {task_revision}: {message}"
+                )
+            }
+            Self::ExecutionReady {
+                authorization_id,
+                plan_revision,
+                task_revision,
+                ..
+            } => {
+                format!(
+                    "[AUTHORIZED — NOT YET EXECUTING] auth {authorization_id}, plan rev {plan_revision}, task rev {task_revision}"
+                )
+            }
+            Self::LifecycleTerminated { stage, reason, .. } => {
+                format!("[Lifecycle terminated] stage '{stage}': {reason}")
+            }
+        }
+    }
+}
